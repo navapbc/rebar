@@ -1,20 +1,8 @@
-"""Idempotent ``--caused-by`` on a bug close (bug 10d0 / ruling-magnific-bats).
+"""Close-path tests for idempotent ``caused_by`` attribution.
 
-The ``/rebar-debug`` protocol prescribes BOTH halves of the trigger: record the origin
-early with ``rebar link <bug> <origin> caused_by``, then always pass ``--caused-by`` on
-the close. Following it faithfully produced two ``caused_by`` edges to the SAME target
-(distinct ``link_uuid``s), because the close path writes through the lower-level
-``_write_link_event`` — which deliberately bypasses ``add_dependency``'s closed-source
-and cycle guards, and with them its ``_is_active_link`` idempotency check.
-
-Pinned here:
-
-* an explicit flag naming the ALREADY-linked origin is a no-op (one edge, not two);
-* an explicit flag naming a DIFFERENT origin REPLACES the recorded one (a corrected
-  attribution is never silently dropped) — the AC3 decision;
-* an EMPTY flag does not let blame add a competing GUESSED edge beside a proven one;
-* an EMPTY flag with no existing edge still runs blame — the protection the
-  ``/rebar-debug`` guidance exists for must survive this fix.
+A matching explicit origin preserves the existing link. A different explicit origin
+replaces it. An empty flag preserves a recorded origin or derives one through blame when none
+exists.
 """
 
 from __future__ import annotations

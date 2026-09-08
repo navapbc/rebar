@@ -1,20 +1,8 @@
-"""Characterization tests for the canonical-JSON/hash consolidation (epic civil-marlin-flare).
+"""Characterization tests for canonical JSON serialization and content hashing.
 
-After consolidating six inline "sorted-key compact JSON (+ sha256)" reimplementations onto the
-single seam ``rebar._store.canonical`` (``canonical_str`` / ``canonical_bytes`` / ``content_hash``),
-this module is the byte-for-byte safety net proving the migration was **behavior-preserving**.
-
-The expected values below are **golden constants captured from the PRE-refactor code
-paths** (literal strings/digests, NOT re-derived from the new seam) — so a regression that
-changes any migrated caller's output is caught rather than masked. Each migrated caller is
-exercised by name: ``signing._canonical_payload``, ``schema.canonical_json`` /
-``schema.content_hash``, ``mutation.serialize_manifest``, ``conflict_resolver._hash_value``.
-
-Two encoding axes are pinned because they were the actual drift between the inline copies:
-``ascii_only`` (``ensure_ascii``) and ``default`` (the ``json.dumps`` fallback). The
-reconciler manifest + provenance ledger relied on the stdlib ``ensure_ascii=True`` default,
-so they migrate with ``ascii_only=True``; the workflow + signing forms used
-``ensure_ascii=False`` (the seam default).
+The golden constants cover nested values, non-ASCII keys and values, custom serialization,
+and both ASCII policies. Each migrated caller must continue producing the recorded bytes and
+digests through the shared canonical helpers.
 """
 
 from __future__ import annotations

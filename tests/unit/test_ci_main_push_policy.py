@@ -1,32 +1,9 @@
-"""Main-branch CI is SCHEDULED, not push-triggered (ticket 03ef-6fb5-158b-4abd).
+"""Policy tests for continuous integration on ``main``.
 
-Gerrit's ``Verified`` label is the real merge gate: it runs the shared reusables against the
-exact patchset BEFORE a change can land. The GitHub mirror's `main` CI is a post-merge safety
-net whose value is "is `main` healthy NOW", not "was every commit green".
-
-Running that safety net on every push to `main` had a concrete cost: ``test.yml`` (and
-``prompt-eval.yml``, and ``codeql.yml``) declare ``cancel-in-progress: true`` with a
-``github.ref``-keyed concurrency group, and on `main` that ref is the CONSTANT
-``refs/heads/main`` — so every push lands in one group and CANCELS its predecessor. GitHub
-renders a cancelled run as a red X and offers no native way to suppress that, so a perfectly
-healthy `main` grew a trail of red X's.
-
-The policy these tests pin:
-
-* **No workflow runs on a push to ``refs/heads/main``.** The four ``branches-ignore``
-  workflows list ``main`` next to ``feature/**``; the two ``branches: [main]`` workflows drop
-  their ``push`` key outright.
-* **Push CI for other branches is preserved** — only `main` (and the already-excluded
-  S3-replicated ``feature/**``) is dropped.
-* **A 6-hourly schedule at a distinct off-the-hour minute** carries the branch-health signal
-  for the cheap always-on lanes, and ``workflow_dispatch`` answers "is main healthy?" on
-  demand. CodeQL joined that tick in ticket 34b5-ad7d-b983-47f9 — see
-  :func:`test_codeql_joined_the_six_hourly_branch_health_tick` for why.
-* **Deliberately-paced lanes keep their own cadence** — the live-LLM prompt-eval tier stays
-  weekly and terraform-drift stays daily, because for those two the frequency really is a
-  cost/coverage tradeoff (billable model calls; a cloud drift sweep).
-* **The separate mechanisms are untouched** — the Gerrit ``Verified`` lane, the reconcilers,
-  the mirror guard, and the weekly external-integration tier.
+Gerrit verifies each patch set before merge. GitHub workflows preserve push checks on other
+branches, use distinct six-hour schedules and manual dispatch for branch health, and retain
+the slower provider and infrastructure cadences. The mirror, reconciliation, and integration
+mechanisms remain unchanged.
 """
 
 from __future__ import annotations
@@ -182,15 +159,7 @@ def test_six_hourly_lanes_are_staggered_on_distinct_minutes() -> None:
 
 
 def test_codeql_joined_the_six_hourly_branch_health_tick() -> None:
-    """CodeQL moved off its weekly cron onto the shared tick (ticket 34b5-ad7d-b983-47f9).
-
-    03ef removed CodeQL's push-to-`main` trigger, which had been its primary scan of newly
-    landed code, and left only the weekly cron behind — silently stretching worst-case
-    exposure for a newly-introduced SAST finding from "next push" to seven days. The 6-hourly
-    tick is the specified replacement for push-on-`main`, and the frequency is not a billing
-    question here: navapbc/rebar is a PUBLIC repository, where both CodeQL and Actions minutes
-    are free.
-    """
+    """Run CodeQL on the six-hour branch-health schedule without a ``main`` push trigger."""
     crons = _crons("codeql.yml")
     assert crons == ["35 */6 * * *"], (
         "codeql.yml must schedule exactly the 6-hourly branch-health tick; the weekly "

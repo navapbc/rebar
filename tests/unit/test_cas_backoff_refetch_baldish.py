@@ -1,13 +1,8 @@
-"""Bug baldish-regainable-steed (e4a6-545b-36af-456d): the CAS backoff must sleep BEFORE
-re-fetching (so each retry is made against a fresher view, not a staler one) and must be
-JITTERED (so writers that collide once do not wake in lockstep and re-collide).
+"""CAS retry oracles for backoff ordering and jitter.
 
-Proven mechanism (Phase 1, runtime-confirmed): `_recover_non_fast_forward` sleeps AFTER the
-merge and the outer loop re-pushes with no intervening fetch, so every retry pushes state
-captured before the sleep; and `_CAS_BACKOFF_SECONDS` is a fixed unjittered schedule.
-
-These oracles are held out from the fixer. They assert observable ordering/behaviour, never
-private names, so they do not double as change-detectors.
+Each rejected push must back off before fetching a fresh view, then merge and push without
+another delay. Repeated retries use bounded jitter and preserve best-effort exhaustion
+behavior.
 """
 
 from __future__ import annotations

@@ -1,34 +1,9 @@
-"""Self-tests for the caplog coverage-integrity guard (tests/conftest.py + tests/_log_integrity.py).
+"""Coverage checks for logging assertions that use ``caplog``.
 
-The guard exists because an unreachable ``caplog`` assertion FAILS OPEN: once something
-sets ``logging.getLogger("rebar").propagate = False`` — a process-global mutation that is
-never restored — no ``rebar.*`` record reaches ``caplog`` again, and every later negative
-log assertion passes VACUOUSLY while verifying nothing (bug 9ac2). Nothing in the run
-output distinguishes that from a real verification, so the defect can only be caught by a
-guard, not by reading a test result.
-
-These tests prove the guard actually fires, and prove it in BOTH directions:
-
-* the detection primitive is silent while propagation is healthy and, once it is off,
-  returns a message that names the offending test;
-* end-to-end via ``pytester``, on one and the same poisoned test file:
-  - WITHOUT the guard the void negative assertion PASSES (the fail-open, reproduced);
-  - WITH the guard the poisoner is blamed by name and the previously-green assertion
-    goes RED, because propagation was restored and the record it forbids now arrives.
-
-The second pair is the discriminating evidence: the only difference between the runs is
-the guard, and it flips a green no-op into a red failure.
-
-The same pytester pairing covers the LEVEL vector — a shared logger pinned to WARNING drops
-INFO records at the source, which ``caplog.at_level(INFO)`` cannot undo — where the guard's
-job is containment rather than blame, since raising the level is a legitimate side effect of
-running a real entrypoint in-process.
-
-Both vectors are exercised on BOTH shared roots. ``rebar_reconciler`` is a sibling of
-``rebar``, not a child (the reconciler's modules are imported top-level), so guarding only
-``rebar`` left every ``rebar_reconciler.*`` log assertion unprotected — which is what made the
-a4bd inbound-removal decline-count assertion order-dependent under ``-n 3 --dist worksteal``
-(bug 9151-907b-471d-4a38).
+The guard restores propagation and logger levels on both ``rebar`` and
+``rebar_reconciler``. The subprocess cases prove that teardown makes a guarded run red even
+when a negative assertion passed vacuously, and that leaked logger levels cannot affect later
+tests.
 """
 
 from __future__ import annotations
@@ -99,18 +74,8 @@ def test_restore_propagation_reenables_every_shared_root() -> None:
         assert logging.getLogger(name).propagate is True
 
 
-# ── end-to-end wiring (pytester): the same poisoned file, with and without the guard ──
-
-# A test that kills propagation the way production code did (bug b718) and then makes a
-# NEGATIVE caplog assertion — the shape that passes vacuously when records never arrive.
-#
-# The kill has to happen INSIDE the capture window to void anything on pytest >= 8.4:
-# `_pytest.logging.catching_logs.__enter__` attaches the capture handler to every logger
-# that is ALREADY non-propagating, so a logger poisoned before the phase started is still
-# captured. Its own comment records the remaining hole — "will miss loggers that *become*
-# non-propagating after the `__enter__`" — and that hole is exactly what production code
-# calling `configure_logging()` mid-test falls into. The window is one test phase wide
-# rather than process-wide, and inside it the assertion is silently void.
+# Pytest attaches handlers to loggers that are already non-propagating. Change propagation
+# after capture begins so this negative assertion would pass without the guard.
 _POISONED_TESTS = """
 import logging
 
@@ -151,13 +116,8 @@ def _rebar_log_propagation_guard(request) -> Iterator[None]:
         pytest.fail(problem, pytrace=False)
 """
 
-# The second vector: the level, not propagation. An INFO record is dropped at the
-# originating logger when a shared root is pinned to WARNING, and caplog.at_level(INFO) with
-# no `logger=` argument cannot rescue it because it raises the ROOT level. This is what
-# `rebar._logging.install_stderr_handler` leaks today: every in-process `rebar._cli.main(...)`
-# call pins `rebar`, and every in-process `rebar_reconciler.__main__.main(...)` call pins the
-# sibling `rebar_reconciler` — the latter is what made the a4bd decline-count assertion
-# order-dependent (bug 9151), because the guard used to cover only `rebar`.
+# A logger fixed at WARNING drops INFO before caplog's root-level override can capture it.
+# Both shared logger roots must be reset after each test.
 _LEVEL_POISONED_TESTS = """
 import logging
 

@@ -1,17 +1,8 @@
-"""Held-out oracle for scripts/check_build_env_locked.py (story 08a8).
+"""Tests for the locked build-environment checker.
 
-The guard closes the ambient-package hole under `--no-isolation --no-deps`: it parses the
-installed set (from `pip freeze`, lowercased name->version) and the lock's `name==version`
-entries (skipping `--hash`/comment lines), and FAILS (non-zero) if any installed package is
-absent from the lock OR version-mismatched — modulo a documented base allowlist
-({pip, setuptools, wheel}). A raw text diff of the two file formats would be meaningless;
-this is a parsed comparison.
-
-Interface (contract): `python scripts/check_build_env_locked.py --lock <lock> --freeze <freeze>`
-exits 0 when the installed set is lock-consistent (allowlist aside), non-zero otherwise, and
-prints the offending package(s) to stderr.
-
-Tests assert OBSERVABLE behaviour: process exit code + stderr — never internals.
+The checker compares normalized installed package names and versions with the lock file,
+excluding the documented base packages. Its command exits nonzero and names each missing or
+mismatched package.
 """
 
 from __future__ import annotations
@@ -96,13 +87,8 @@ def test_case_insensitive_name_match(tmp_path: Path) -> None:
     assert cp.returncode == 0, f"name match must be case-insensitive: {cp.stderr}"
 
 
-# ── PEP 503 name normalization (bug caressive-noteworthy-goldfish) ────────────
-# `pip freeze` reports a distribution by its metadata name, which may use `.`/`_`
-# (`jaraco.classes`, `readme_renderer`, `pyproject_hooks`) while the pip-compile lock
-# pins the PEP 503-normalized name with `-` (`jaraco-classes`, `readme-renderer`).
-# Per PEP 503 these are the SAME package (runs of `-_.` collapse to a single `-`), so
-# the guard must not report a lock-pinned dep as "absent" just because the spelling
-# differs. This blocked the first real release through the pinned build-once pipeline.
+# PEP 503 treats runs of hyphens, periods, and underscores as equivalent. Normalize both
+# freeze and lock names before comparing them.
 _NORM_LOCK = (
     "jaraco-classes==3.4.0 \\\n    --hash=sha256:aaaa\n"
     "readme-renderer==45.0 \\\n    --hash=sha256:bbbb\n"

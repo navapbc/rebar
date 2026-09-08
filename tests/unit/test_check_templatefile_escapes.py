@@ -1,17 +1,8 @@
-"""Guard for the ``templatefile()`` escape gate [rebar:dd30-f10d-69f3-4c36].
+"""Tests for the Terraform template escape checker.
 
-Commit ``ef1a7e66a65d`` added explanatory COMMENTS to ``infra/terraform/user_data.sh`` that
-escaped the first mention of a bash brace expansion as ``$${...}`` and left the "reduces to"
-half unescaped. ``templatefile()`` interpolates the whole file regardless of shell comment
-syntax, so terraform parsed ``!PARAMS[@]`` as HCL and **every** terraform operation on the repo
-failed -- ``-target`` included, because terraform evaluates the whole configuration first.
-
-ShellCheck cannot catch this: the file is valid bash and the breakage is in another consumer.
-Hence a dedicated gate, and hence these tests.
-
-The central invariant is that the gate is **declared-variable-aware**. ``user_data.sh`` legitimately
-contains four unescaped ``${data_volume_id}`` references -- the one variable ``main.tf`` passes --
-so a blanket ban on ``${`` would reject the feature along with the defect.
+The checker rejects shell parameter expansions that Terraform would interpret while allowing
+variables declared by the matching ``templatefile`` call. The cases cover unsafe expansions,
+valid escapes, and the configured deployment template.
 """
 
 from __future__ import annotations

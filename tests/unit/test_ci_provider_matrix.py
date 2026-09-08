@@ -1,39 +1,9 @@
-"""CI guard: the external suite's live-LLM lane is a real, correctly-wired PROVIDER MATRIX.
+"""Policy tests for the external provider matrix.
 
-Story f124. Workflow YAML is otherwise unverifiable until it runs in CI — and this lane runs
-weekly, on real money, so "we'll find out on the next schedule" is a month-long feedback loop on
-a job whose failure mode is reporting GREEN. These tests read the committed workflow and the
-committed overlay files and assert the properties the story's acceptance criteria name, plus one
-behavioural test that runs the overlays through rebar's REAL config layering rather than
-re-asserting the YAML back at itself.
-
-What each group protects, and the specific way the matrix could be silently broken without it:
-
-* **provider is an explicit matrix dimension** — otherwise the lane reverts to "whichever key
-  happens to be set", which is the ambient default this story removes.
-* **selection goes through REBAR_LLM_CONFIG_FILE, never the deprecated bare REBAR_LLM_MODEL** —
-  the latter cannot express a per-class model, so it cannot repoint all three classes.
-* **each overlay sets ONLY the two model-selection keys, `[llm] model` and
-  [llm.model_classes]** — an overlay that also set, say, `max_steps` would make one arm differ
-  from its siblings in more than the provider, and any difference found would be unattributable.
-  BOTH selection keys are required, and an earlier version of this file asserted `model_classes`
-  ALONE, which actively enforced a real leak: `cfg.model` is a second resolution path the class
-  table cannot reach, so any op reading it called direct Anthropic on every arm (the f124
-  incident). A test that pins the wrong surface is worse than no test, because it certifies
-  the gap.
-* **the overlay LAYERS rather than replaces** — the criterion `dict.update` cannot satisfy: an
-  arm must override provider/model and leave the rest of the discovered config intact.
-* **no arm holds a foreign provider's credential** — a Bedrock arm that also saw
-  `ANTHROPIC_API_KEY` could fall back to direct Anthropic and the fallback would look like a
-  pass.
-* **the Bedrock arm names a mechanism that WORKS on a GitHub-hosted runner** — the S7 EC2
-  instance-role/IMDS path is not reachable from `ubuntu-latest`, so OIDC role assumption must be
-  present and must not have been quietly replaced by static keys.
-* **the Bedrock arm sets BOTH region variables** — measured on ticket a574: IMDS supplies no
-  region and rebar's own knob alone was insufficient.
-* **an absent credential fails, loudly** — never a silent skip that renders as green.
-* **the split preserves coverage** — the LLM lane and the services lane must partition the
-  tier, not overlap it or drop part of it.
+Each matrix arm selects a provider through a minimal overlay, receives only that provider's
+credentials, resolves a region, and reports its expected provider family. The overlays
+preserve unrelated configuration, and the workflow partitions provider-backed tests from
+service tests.
 """
 
 from __future__ import annotations
@@ -158,13 +128,7 @@ def test_the_deprecated_bare_model_variable_is_never_set() -> None:
 
 
 def test_each_overlay_sets_only_the_model_selection_keys() -> None:
-    """An overlay sets BOTH selection keys and nothing else.
-
-    `model_classes` alone is NOT sufficient, and asserting only it is what let a real leak ship:
-    `cfg.model` is a separate resolution path that falls back to the bare literal DEFAULT_MODEL and
-    therefore infers provider `anthropic`, so every op reading it called direct Anthropic on all
-    three arms while this file's class assertion passed (the f124 incident). Both keys are pinned
-    here; unrelated keys are still forbidden, which is the original and still-valid intent."""
+    """Set the default model and every model class without introducing unrelated keys."""
     for arm in _arms():
         data = tomllib.loads((_ROOT / arm["config_file"]).read_text(encoding="utf-8"))
         assert set(data) == {"llm"}, (
@@ -349,14 +313,7 @@ def test_the_bedrock_arm_sets_both_region_variables() -> None:
 
 
 def test_every_arm_resolves_a_region_not_only_the_bedrock_arm() -> None:
-    """Bug 79d6. A live-LLM module may pin a `bedrock:` model whichever arm runs it —
-    tests/external/test_completion_banking_behavior_0707.py pins
-    `bedrock:us.anthropic.claude-sonnet-4-6`. While both region vars were guarded on
-    `matrix.provider == 'bedrock'` they evaluated to the empty string on the anthropic and
-    openai arms, and every such cell failed identically on region resolution (run
-    31587452003). A region is a repository VARIABLE, not a credential, so the guard bought
-    no credential isolation — and a fallback keeps the arms working when the variable is
-    unset."""
+    """Give every arm a region because a module may pin a Bedrock model independently."""
     env = _suite_step()["env"]
     for name in ("AWS_DEFAULT_REGION", "REBAR_LLM_BEDROCK_REGION"):
         expr = str(env[name])
@@ -456,12 +413,7 @@ def _live_llm_module():
 def test_a_pinned_provider_module_is_not_ready_on_a_mismatched_arm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Bug 4f74. `test_completion_banking_behavior_0707.py` pins
-    `bedrock:us.anthropic.claude-sonnet-4-6`, so it calls Bedrock on EVERY arm — but the OIDC
-    credential step is gated to the bedrock arm. While its sentinel asked the plain probe
-    ('is the ARM's credential present'), the anthropic arm reported READY and then ran cells
-    against a provider it holds no credential for. Readiness must be asked about the pinned
-    provider, and the skip must NAME the mismatch rather than vanish silently."""
+    """Report not ready when a pinned module targets a provider other than the active arm."""
     mod = _live_llm_module()
     monkeypatch.setattr(mod, "agents_extra_installed", lambda: True)
     monkeypatch.setattr(mod, "configured_provider", lambda repo_root=None: "anthropic")
@@ -498,12 +450,7 @@ def test_a_pinned_provider_module_is_ready_on_its_own_arm(
 
 
 def test_a_module_pinning_a_provider_asks_the_probe_about_that_provider() -> None:
-    """The invariant that failed in bug 4f74, pinned structurally so the NEXT module to pin a
-    model cannot reintroduce it.
-
-    A module whose source hard-codes a `<provider>:` model string does not follow the arm's
-    `standard` model class, so a bare `live_llm_ready()` — which reports the ARM's credential —
-    answers a question that module never asked. It must pass the provider it pins."""
+    """Pass a module's pinned provider to the readiness probe."""
     known = ("bedrock", "anthropic", "openai")
     offenders = []
     for path in sorted(_EXTERNAL_TESTS.glob("test_*.py")):
@@ -537,12 +484,7 @@ def test_every_arm_reports_its_declared_provider_family(
     monkeypatch: pytest.MonkeyPatch,
     _clean_config_env: None,
 ) -> None:
-    """Bug cb46: ticket 1d22 renamed the openai model qualifier to `openai-chat` and updated
-    THIS module's `_MODEL_QUALIFIER_BY_PROVIDER`, but not the live tier — so on the openai arm
-    `configured_provider()` reported the QUALIFIER, the credential map missed, every llm_live
-    test skipped, and the arm-equality guard in `test_provider_matrix_live.py` false-positived.
-    The workflow declares the FAMILY (`matrix.provider` -> REBAR_EXPECTED_LLM_PROVIDER), so the
-    live tier's reported provider must be the family name for EVERY arm."""
+    """Report the matrix provider family despite protocol-specific model qualifiers."""
     mod = _live_llm_module()
     monkeypatch.setenv("REBAR_LLM_CONFIG_FILE", str(_ROOT / arm["config_file"]))
     root_cfg.reset_config_cache()
@@ -560,10 +502,7 @@ def test_the_openai_arm_is_live_ready_with_its_own_credential(
     monkeypatch: pytest.MonkeyPatch,
     _clean_config_env: None,
 ) -> None:
-    """The user-visible half of bug cb46: with the openai overlay active and OPENAI_API_KEY
-    present, the readiness probe must say READY. While `configured_provider()` returned
-    `openai-chat`, `credential_present()` looked up a key that env var name doesn't exist
-    under, `live_llm_ready()` was False, and the live openai arm silently skipped everything."""
+    """Report the OpenAI arm ready when its own API key is present."""
     mod = _live_llm_module()
     monkeypatch.setenv("REBAR_LLM_CONFIG_FILE", str(_ROOT / ".github/llm-providers/openai.toml"))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-used-for-any-call")

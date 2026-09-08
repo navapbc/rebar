@@ -1,15 +1,8 @@
-"""Held-out oracle for story 5169 (modern-loathful-snake): run a criterion's fixtures
-when its rubric changes, keeping them off the weekly live sweep.
+"""CLI selection tests for criterion rubrics changed since a Git reference.
 
-Observable-behaviour tests only — the CLI's stdout selection, stderr warnings, exit codes,
-and the resolved weekly-sweep spec list on disk. Nothing here asserts a private name or
-internal structure, so a behaviour-preserving refactor of the engine cannot break them.
-
-`rebar criteria eval --changed-since <ref>` is SELECTION-ONLY offline: it prints the
-registry criterion ids whose rubric file changed in the range (sorted, one per line),
-warns on stderr for a changed rubric-shaped path that maps to no registry criterion, and
-exits 0 without a model call. (The workflow job supplies credentials and runs each selected
-criterion live; that live path needs a model and is out of this offline oracle's scope.)
+Offline selection prints sorted registry IDs, warns about unmapped rubric paths, and does
+not invoke a model. The weekly workflow performs the selected provider-backed evaluations
+separately.
 """
 
 from __future__ import annotations
@@ -221,12 +214,8 @@ def test_prompt_eval_workflow_passes_actionlint() -> None:
 
 
 # --- Gate-finding regression tests (LLM-Review round 1 on Gerrit change 2610) ----------
-#
-# Each of these targets a finding the code review raised against patch set 1: a blocking
-# error-handling gap (a misconfigured live CI run must not exit 0 silently) and five
-# coverage/robustness advisories. The behavioural findings (require-live, zero-SHA,
-# stdout stream purity) are RED before their fix; the pure coverage ones exercise
-# already-correct behaviour that had no test.
+# These cases cover configuration failures, zero SHAs, and stdout isolation in the
+# provider-backed execution path.
 
 from types import SimpleNamespace  # noqa: E402
 

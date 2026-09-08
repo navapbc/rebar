@@ -1,52 +1,8 @@
-"""Absent-string child oracles must not fail OPEN on a signal-killed child.
+"""Signal-safety tests for child-process output assertions.
 
-Bug 1241-b83c-f8c7-40bf. Sibling of f0fb-de7a-b315-4508 (``tests/e2e``) and
-0e1d-c698-c38d-4c3e (the live-DC tier), which fixed the same construct class elsewhere.
-
-A test whose verdict is *the absence of a string in a child's output* is only as trustworthy
-as its assumption that the child ran. A child killed by a signal is torn down by the kernel
-before it writes, so ``stdout == stderr == ""``, the bad string is trivially absent, and the
-oracle reports GREEN for a run that never executed. That is the dangerous direction: a
-spuriously red test costs an hour, a spuriously green one destroys the evidence someone is
-relying on it to produce.
-
-WHY THESE TESTS DRIVE THE REAL TEST BODIES rather than the shared helper. The helper
-(``tests/_child_diag.py``) already has its own coverage in ``test_live_dc_pass_health.py``.
-A helper test cannot see a *call site that forgot to call it* — and the defect here is
-exactly an absent call, at five independent sites. So each test below forces the real
-site's real child to die on a signal, through that site's own seam, and invokes the shipped
-test function. Both sides of the assertion therefore come from different places: the kill is
-arranged by this file, the verdict is produced by the site under test.
-
-WHAT IS COVERED, AND WHAT IS NOT. These cover a child **terminated by a signal**, which
-CPython surfaces as a NEGATIVE ``returncode`` (``-signal.SIGKILL``). SIGKILL is used because
-it is the one signal a process cannot trap, so the empty output is guaranteed rather than
-incidental; the guard keys on the SIGN of the returncode, so any signal behaves the same.
-
-A positive ``128 + N`` (e.g. 137) is deliberately NOT rejected, and the reason is measured
-rather than assumed. None of the five sites uses ``shell=True``; each execs the real program
-directly (``bash``, ``python``, ``bash``, ``pandoc``, ``make``), so killing the process Python
-spawned yields ``-9`` at ALL FIVE. ``128 + N`` arises only when a GRANDCHILD dies and the
-direct child survives to report it -- and a survivor writes its own diagnostic, so the capture
-is NOT empty. Measured on each site's real spawn path:
-
-    site1  bash killed            rc=-9    output_empty=True
-    site1  grandchild killed      rc=-9    output_empty=True    (bash execs into it)
-    site3  bash killed            rc=-9    output_empty=True
-    site3  grandchild killed      rc=137   output_empty=False
-    site5  make killed            rc=-9    output_empty=True
-    site5  recipe child killed    rc=2     output_empty=False
-    site2/4 direct child killed   rc=-9    output_empty=True    (no grandchild at all)
-
-EMPTY output and a POSITIVE returncode never co-occur. That is what makes the boundary safe:
-the fail-open needs an empty capture, and an empty capture at these sites only ever comes with
-a negative returncode. When the code IS positive the oracle has real output to inspect, so it
-is doing its job -- and rejecting 137 there would be a new claim about which exit codes each
-site may legitimately produce, which is a widening rather than a restoration.
-
-Also not covered: a child that exits normally with empty output for some other reason. The
-sites that can pin a specific exit code do so; the ones that cannot only assert the child was
-not killed.
+Each covered call site rejects a negative subprocess return code before treating absent output
+as evidence. The fixtures use self-inflicted ``SIGKILL`` to prove the guard; shell and make
+wrapper cases also confirm that termination still surfaces as a negative code with empty output.
 """
 
 from __future__ import annotations
@@ -93,24 +49,14 @@ def _load(module_name: str, relative_path: str) -> types.ModuleType:
 
 
 def _assert_names_the_signal(excinfo: pytest.ExceptionInfo[AssertionError], what: str) -> None:
-    """The failure must say a signal killed the child, not merely that something failed.
-
-    A bare "the check failed" sends the reader hunting for a product regression. Naming
-    SIGKILL tells them an external process reaped it -- the reason f0fb-de7a-b315-4508
-    built ``child_failure_detail`` in the first place.
-    """
+    """Require the diagnostic to name the terminating signal."""
     message = str(excinfo.value)
     assert "SIGKILL" in message, f"the failure does not name the signal; got: {message!r}"
     assert what in message, f"the failure does not say WHAT did not complete; got: {message!r}"
 
 
 def test_the_suicide_shim_really_produces_a_signal_killed_child(tmp_path: Path) -> None:
-    """Negative control: prove the fixture, so a green below cannot be a broken kill.
-
-    Every test in this file rests on the claim that its child really died on a signal and
-    really wrote nothing. Assert that claim once, directly, instead of trusting it five
-    times implicitly.
-    """
+    """Confirm that the fixture exits through ``SIGKILL`` with no captured output."""
     shim = _suicide_shim(tmp_path / "bin", "victim")
 
     proc = subprocess.run([str(shim)], capture_output=True, text=True, check=False)
@@ -234,26 +180,8 @@ def test_actionlint_fail_fast_oracle_rejects_a_signal_killed_child(
     _assert_names_the_signal(excinfo, "the actionlint-bin recipe")
 
 
-# ── the invariant the guard's sufficiency rests on ───────────────────────────
-#
-# The guard above rejects only a NEGATIVE returncode. That is sufficient ONLY BECAUSE an
-# empty capture and a positive returncode never co-occur at these sites: the fail-open needs
-# an empty capture, and whatever survives to report a positive `128 + N` writes a diagnostic
-# first. That is a load-bearing premise, not a background fact -- if it stops holding, the
-# guard silently narrows and the fail-open returns while the docstring above still says it was
-# measured. So it is asserted, not merely recorded.
-#
-# Scoped to the three sites where it is NON-OBVIOUS -- the ones whose child has grandchildren
-# of its own (bash runs commands; make runs `sh`/`curl`), so a signal could in principle
-# surface as `137` from a surviving intermediate. Sites 2 and 4 are excluded deliberately:
-# they exec the working process directly with nothing in between, so a negative returncode is
-# CPython's documented `subprocess` behaviour and asserting it would be testing the standard
-# library.
-#
-# DETERMINISM: every kill here is SELF-inflicted (`kill -9 $$` inside the child). There is no
-# external killer to race, no sleep, and no wall-clock assertion -- the child cannot be killed
-# before it exists, because it is the thing doing the killing. A test that kills a process it
-# spawned is exactly how a flaky test gets written; this shape has no timing component at all.
+# Shell and make grandchildren can obscure a child's signal. These self-terminating cases prove
+# that the tested wrapper paths still report a negative code with empty capture.
 
 
 def _site1_killed_child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -275,13 +203,7 @@ def _site3_killed_child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def _site5_killed_child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Drive site 5's REAL spawn, capturing the process it produced.
-
-    Site 5 is the one site whose ``subprocess.run`` is inline in the test body rather than
-    factored into a helper, so there is no seam that hands back the ``CompletedProcess``. A
-    pass-through recorder around the module's ``subprocess.run`` observes the real spawn --
-    real argv, real env, real ``make`` resolution -- without changing what runs.
-    """
+    """Run site five through a pass-through recorder that returns its ``CompletedProcess``."""
     module = _load("_inv_actionlint", "tests/unit/test_ci_actionlint_install.py")
     _suicide_shim(tmp_path / "bin", "make")
     monkeypatch.setattr(module, "_SANE_PATH", str(tmp_path / "bin"))

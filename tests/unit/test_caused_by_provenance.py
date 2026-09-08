@@ -1,21 +1,8 @@
-"""Provenance marker on ``caused_by`` LINK events (ticket 6536-367c).
+"""Provenance tests for ``caused_by`` links.
 
-Measurement 50e3-6d2a found the recorded ``caused_by`` edges could not be partitioned
-into blame-derived guesses vs explicitly supplied attributions — both origins wrote
-through ``_write_link_event`` with no provenance field, so on read a guessed edge was
-indistinguishable from a proven one and the escaped-defect lenses weighted them
-identically.
-
-Pinned here:
-
-* a bug close with an EMPTY ``--caused-by`` whose edge comes from blame auto-derivation
-  marks the LINK event ``provenance="derived"``;
-* a close with an explicit ``--caused-by`` marks ``provenance="explicit"``;
-* ``rebar link <bug> <origin> caused_by`` marks ``provenance="explicit"`` (a linked
-  attribution is supplied by the caller, never blame-derived);
-* other relations carry NO provenance field — the marker is caused_by-scoped;
-* replay of a pre-marker LINK event (no field) reduces to a dep entry WITHOUT a
-  provenance key: the legacy cohort reads as unknown, shape unchanged.
+Blame-derived links record ``derived``, while caller-supplied close and link operations
+record ``explicit``. Other relations omit provenance, and legacy unmarked events retain their
+prior reduced shape.
 """
 
 from __future__ import annotations
