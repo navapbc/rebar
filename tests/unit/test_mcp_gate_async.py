@@ -136,7 +136,7 @@ def test_gate_status_running_then_terminal_from_the_index(store):
     assert out["findings"]["reason"] == "review-result-generation-unknown"
 
 
-def test_gate_status_stale_running_when_daemon_gone_and_index_still_running(store):
+def test_gate_status_failed_diagnostic_when_daemon_gone_and_index_still_running(store):
     inflight.reset_registry()
     gate_runs.record_gate_run(
         {
@@ -147,7 +147,34 @@ def test_gate_status_stale_running_when_daemon_gone_and_index_still_running(stor
             "started_at": time.time() - (gate_runs._STALE_GRACE_SECONDS + 1.0),
         }
     )
-    assert gate_runs.gate_run_status("wedged-job")["status"] == "stale-running"
+    out = gate_runs.gate_run_status("wedged-job")
+    assert out["status"] == "failed"
+    assert out["error"] == "async gate daemon stopped before recording a terminal result"
+    assert out["findings"]["reason"] == "run-failed"
+
+
+def test_gate_status_materializes_stale_running_as_failed_diagnostic(store):
+    inflight.reset_registry()
+    gate_runs.record_gate_run(
+        {
+            "job_id": "wedged-diagnostic-job",
+            "ticket_id": "d80d",
+            "gate_type": "plan_review",
+            "status": "running",
+            "started_at": time.time() - (gate_runs._STALE_GRACE_SECONDS + 1.0),
+        }
+    )
+
+    out = gate_runs.gate_run_status("wedged-diagnostic-job")
+
+    assert out["status"] == "failed"
+    assert out["error"] == "async gate daemon stopped before recording a terminal result"
+    assert out["findings"]["reason"] == "run-failed"
+    assert out["findings"]["readable"] is False
+    persisted = gate_runs.read_gate_run("wedged-diagnostic-job")
+    assert persisted is not None
+    assert persisted["status"] == "failed"
+    assert persisted["error"] == out["error"]
 
 
 def test_gate_status_fresh_registry_resolves_the_durable_verdict(store):

@@ -218,8 +218,8 @@ def _register_plan_review_tools(mcp, annotations) -> None:
         Reads the durable run handle via replay of the local `.rebar/gate_runs` index
         (no LLM, no execution) -> {job_id, status, ticket_id, gate_type, verdict?,
         error?, durable?, findings?}. `status` is 'running' while the background gate is in flight,
-        then 'passed' / 'failed'; 'stale-running' if the run's daemon died before
-        recording a terminal status; 'attaching' if a duplicate start attached to an
+        then 'passed' / 'failed'; a stale running handle is settled to 'failed' with
+        a diagnostic error; 'attaching' if a duplicate start attached to an
         in-flight run whose index record has not landed yet (keep polling); 'unknown' if
         the job_id is unrecognised. For a plan-review or completion job `durable` carries
         the gate's own signed-attestation currency (the same answer plan_review_status /

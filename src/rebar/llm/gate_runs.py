@@ -42,14 +42,15 @@ from rebar import _mcp_inflight as _inflight
 logger = logging.getLogger(__name__)
 
 # A run whose index still reads ``running`` but whose daemon is no longer active in
-# this process is only treated as crashed (``stale-running``) after this grace period,
-# so a status poll that races the daemon's very first index write does not misreport.
+# this process is only treated as crashed after this grace period, so a status poll
+# that races the daemon's very first index write does not misreport.
 _STALE_GRACE_SECONDS: float = 5.0
 
 _PLAN_REVIEW = "plan_review"
 _VERIFY_COMPLETION = "verify_completion"
 _TERMINAL_STATUSES = {"passed", "failed"}
 _REVIEW_RESULT = "REVIEW_RESULT"
+_STALE_RUNNING_ERROR = "async gate daemon stopped before recording a terminal result"
 
 
 def _repo_root(repo_root: str | None) -> Path:
@@ -238,7 +239,8 @@ def _resolve_status(rec: dict[str, Any]) -> str:
 
     ``running`` while the daemon is alive; the recorded terminal status once it settles;
     ``stale-running`` when the index still reads ``running`` but no daemon owns the job
-    (a crashed leader) past the grace window."""
+    (a crashed leader) past the grace window. The public poll path immediately
+    materializes that internal status as a failed diagnostic record."""
     recorded = str(rec.get("status") or "running")
     job_id = str(rec.get("job_id") or "")
     if recorded != "running":
@@ -251,12 +253,29 @@ def _resolve_status(rec: dict[str, Any]) -> str:
     return "stale-running"
 
 
+def _materialize_stale_running(
+    rec: dict[str, Any], *, repo_root: str | None = None
+) -> dict[str, Any]:
+    settled = dict(rec)
+    settled.update(
+        {
+            "status": "failed",
+            "verdict": "daemon-stopped",
+            "error": _STALE_RUNNING_ERROR,
+            "finished_at": time.time(),
+        }
+    )
+    record_gate_run(settled, repo_root=repo_root)
+    return settled
+
+
 def gate_run_status(job_id: str, *, repo_root: str | None = None) -> dict[str, Any]:
     """Resolve a ``*_start`` handle to a poll record (no LLM, no execution).
 
     Returns ``{job_id, status, ticket_id?, gate_type?, verdict?, error?, durable?,
     findings?}`` where ``status`` is ``running`` / ``passed`` / ``failed`` /
-    ``stale-running`` / ``attaching`` / ``unknown``. ``attaching`` means the job is in
+    ``attaching`` / ``unknown``. A stale ``running`` record is first materialized as
+    ``failed`` with a diagnostic error. ``attaching`` means the job is in
     flight in the live registry but has no
     index record yet — a follower ``*_start`` shares the leader's ``job_id`` and writes no
     index entry, so a poll in the window before the leader's own ``running`` write lands
@@ -275,6 +294,9 @@ def gate_run_status(job_id: str, *, repo_root: str | None = None) -> dict[str, A
             return {"job_id": job_id, "status": "attaching"}
         return {"job_id": job_id, "status": "unknown"}
     status = _resolve_status(rec)
+    if status == "stale-running":
+        rec = _materialize_stale_running(rec, repo_root=repo_root)
+        status = "failed"
     out: dict[str, Any] = {
         "job_id": job_id,
         "status": status,

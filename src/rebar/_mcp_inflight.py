@@ -172,7 +172,7 @@ def is_job_active(job_id: str) -> bool:
 
     The Phase-2 handle poll (``gate_status``) uses it to tell a live run from one
     whose daemon already settled: an inactive job whose durable index still reads
-    ``running`` is a crashed leader (surfaced as ``stale-running``)."""
+    ``running`` is a crashed leader (settled to a failed diagnostic by ``gate_status``)."""
     with _lock:
         return any(e.job_id == job_id and not e.done for e in _registry.values())
 
