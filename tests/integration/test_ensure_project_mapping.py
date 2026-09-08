@@ -1,19 +1,9 @@
-"""Held-out oracle for the legacy-store projects-mapping migration (ticket 462d).
+"""Verify legacy stores converge on many-to-many project mappings without ticket events.
 
-Two ensure units converge an existing store onto the many-to-many projects model
-WITHOUT writing per-ticket events:
-
-- **seed** — a store with no ``.bridge_state/projects.json`` gains one whose
-  ``legacy_default`` is the backend's effective project, so every absent-field
-  ticket resolves to it (one small write migrates the whole store).
-- **stamp** — a *convergence backstop* that adds the ``multi-project-bridge``
-  compat capability ONLY when the mapping already holds more than one project (the
-  authoritative write-time stamp is the set/remove write path's job; this unit just
-  repairs residual divergence). A single-project store is never stamped.
-
-Everything here asserts OBSERVABLE state — committed tickets-branch blobs, the
-event-file set, the tickets tip SHA, and the compat gate's raise/no-raise — never
-private names, so a behaviour-preserving refactor of the units leaves it green.
+The seed ensure writes a missing mapping whose ``legacy_default`` is the effective backend
+project. The stamp backstop adds ``multi-project-bridge`` only when multiple projects are
+already mapped. Single-project stores remain unstamped. Assertions cover committed blobs,
+event files, branch tips, and compatibility behavior rather than implementation details.
 """
 
 from __future__ import annotations

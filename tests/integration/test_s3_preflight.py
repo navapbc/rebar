@@ -1,16 +1,8 @@
-"""Fail-closed preflight when an s3:// ticket remote lacks a git-remote-s3 helper (story 8970).
+"""Fail closed when an S3 ticket remote lacks a lock-capable git-remote-s3 helper.
 
-An `s3://` (or `s3+zip://`) ticket-store remote is only safe with a `git-remote-s3` helper
-carrying the `IfNoneMatch` per-ref lock; without it the store silently corrupts. This story
-wires `rebar._optional.require_s3_helper()` into the store's push path and into init/mount so a
-missing/too-old helper fails closed **at the point of misconfiguration** with the actionable
-`pip install 'nava-rebar[s3]'` message, instead of later as unclonable corruption.
-
-The guard is a deliberate fail-closed exception to `push_tickets_branch`'s best-effort contract:
-it raises `OptionalDependencyError` unconditionally (independent of `strict`), because a
-misconfigured S3 remote must halt loudly rather than be swallowed. These oracles drive the real
-`require_s3_helper()` by monkeypatching the two seams it reads (`shutil.which`,
-`importlib.metadata.version`) — proving the wiring, not a mock of it.
+Push, init, and mount require a helper version that provides the per-ref ``IfNoneMatch``
+lock. Otherwise they raise ``OptionalDependencyError`` with installation guidance even when
+push is non-strict. Tests exercise the preflight through its executable and version probes.
 """
 
 from __future__ import annotations

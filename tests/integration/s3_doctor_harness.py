@@ -1,23 +1,9 @@
-"""Shared harness for the S3 auto-doctor oracle (story 0289).
+"""Exercise the S3 auto-doctor with Git bundles in a local object store.
 
-The doctor heals the git-remote-s3 "multiple bundles for one ref" state losslessly. Its only
-S3-specific surface is routed through git-remote-s3's own ``S3Remote`` object; the heal is
-injected with an ``s3remote_factory`` so the oracle can drive it against a **real** object store
-modelled as a local directory of **real** ``git bundle`` files — no AWS, no new hard test dep.
-
-``FakeS3Remote`` implements exactly the surface ``heal_multi_bundle`` binds:
-
-* ``bucket`` / ``prefix`` attributes and a ``.s3`` client exposing ``put_object`` /
-  ``delete_object`` / ``download_file`` / ``list_objects_v2`` over ``objdir``;
-* ``get_bundles_for_ref(ref)`` -> ``[{"Key": ...}]`` (bundles only, mirroring the helper's
-  PROTECTED/.zip/.lock exclusions);
-* ``acquire_lock(ref)`` -> lock key or ``None`` (atomic ``O_EXCL`` create, TTL steal), and
-  ``release_lock(ref, key)`` — the helper's own ``IfNoneMatch`` semantics, filesystem-modelled
-  so the multi-process race test is real;
-* ``init_remote_head(ref)`` — idempotent HEAD marker.
-
-Object keys mirror the helper's layout: ``<prefix>/<ref>/<sha>.bundle``,
-``<prefix>/<ref>/LOCK#.lock``, ``<prefix>/HEAD``.
+``FakeS3Remote`` provides bucket and prefix attributes, object operations, protected artifact
+filtering, an atomic TTL-stealable ref lock, and idempotent remote-HEAD initialization. Its
+git-remote-s3 key layout lets lossless folds and multi-process lock races run without AWS or
+another test dependency.
 """
 
 from __future__ import annotations

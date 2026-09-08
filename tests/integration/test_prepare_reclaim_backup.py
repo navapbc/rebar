@@ -636,23 +636,12 @@ def test_refuses_empty_and_ticketsless_origins(
 def test_backup_fixture_remote_leaves_no_detached_upkeep(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A push into this module's own remote must leave nothing writing to it.
+    """Prove a push leaves this module's copied bare remote free of detached upkeep.
 
-    ``backup_fixture`` copies the whole topology — ``source.git`` included — with
-    ``clone_topology_template``, once per test in this module. That is only sound while
-    nothing is still rewriting the object database the copy walks. At git's defaults a
-    bare remote's ``receive-pack`` leaves a detached ``git maintenance run`` behind every
-    push, so the copy races a concurrent repack (bug b394-6198-6010-42f7).
-
-    Asserting the copy "works" cannot prove the mutator is gone — the race is a coin
-    flip, so a green copy is consistent with it still existing. Assert its ABSENCE
-    directly instead, from git's own process trace, driving a push into the remote THIS
-    MODULE'S OWN builder produced, so the guard fails if the builder stops pinning it.
-
-    The trace covers only the probe push. A trace spanning the whole build would also
-    record upkeep from ``seed`` — a non-bare repository outside the copied topology,
-    which nothing copies — and trace2 reports no worktree for a bare repository, so the
-    two cannot be told apart after the fact.
+    A successful topology copy cannot disprove a concurrent repack, so Git's process trace
+    must show the mutator is absent after a push through this module's own builder. The trace
+    covers only that probe. Including setup would mix in maintenance from the uncopied seed
+    repository, which trace2 cannot distinguish from bare-remote upkeep afterward.
     """
     workspace = tmp_path / "workspace"
     workspace.mkdir()

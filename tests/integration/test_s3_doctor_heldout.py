@@ -1,23 +1,12 @@
-"""HELD-OUT oracle for the S3 auto-doctor (story 0289) — edge / E2E / crash / race / conflict.
+"""Hold out the S3 doctor's edge, crash, race, conflict, and push-path contracts.
 
-These tests are withheld from the implementation subagent. They pin the behaviours the happy
-path cannot: N>=3 lossless fold, unrelated-history union, conflict-abort-without-delete,
-crash-then-reheal idempotency, the write-then-delete ordering, lock-contention back-off, the
-multi-process repair storm, the push-path single-invocation wiring, and the git_remote_s3 API
-surface contract.
-
-Additional contract points pinned here (implementer implements to them):
-
-* ``heal_multi_bundle`` writes the merged tip as a NEW bundle BEFORE deleting any original and
-  never deletes the merged tip (crash-safe: >=1 lossless bundle always remains).
-* On an unresolved conflict in a non-derived file it raises ``s3_doctor.S3DoctorConflict``
-  (``.hint`` mentions ``fsck-recover``) and deletes NOTHING remotely.
-* On lock contention (``acquire_lock`` returns ``None`` or raises the helper's ClientError) it
-  returns ``{"healed": False, "reason": "locked"}`` without merging or deleting.
-* At entry, <=1 bundle -> ``{"healed": False}`` (no-op).
-* The local fold runs under ``rebar._store.lock.write_lock(base_path)``.
-* ``push._is_multi_bundle(stderr)`` detects both signatures; the push loop invokes the heal at
-  most once (``healed_once`` guard) and converges.
+The suite covers lossless multi-bundle union, write-before-delete crash safety, idempotent
+recovery, and multi-process repair. An unresolved conflict raises ``S3DoctorConflict`` with
+``fsck-recover`` guidance and deletes nothing. Lock contention returns
+``{"healed": False, "reason": "locked"}``. Healing is an unhealed no-op when its under-lock
+enumeration finds at most one bundle. Folding holds the store write lock. Push wiring detects
+both multi-bundle signatures and invokes healing no more than once before retry. A separate
+API-surface check requires the git-remote-s3 attributes used by healing.
 """
 
 from __future__ import annotations

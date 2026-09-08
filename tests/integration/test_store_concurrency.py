@@ -1,22 +1,9 @@
-"""Write-core concurrency gates (docs/bash-migration.md §6).
+"""Gate the permanent dual-leg write lock under concurrent CLI writes.
 
-The headline gate is the **stiff-mop-lane** writer storm: N concurrent writers on
-ONE clone, all taking the unified fcntl + mkdir lock. The motivating regression (now
-historical — the bash write core has been retired) was a mixed-impl storm on a
-flock(1)-less host: a bash-mkdir writer and a python-fcntl writer did NOT mutually
-exclude, so their concurrent ``git add``/``commit`` could collide on ``index.lock``
-and lose events. With the unified lock every writer takes BOTH mechanisms, so all N
-events must land and ``fsck`` stays clean. Only the Python core remains, so these
-tests no longer select an impl (the former ``REBAR_WRITE_CORE`` switch is gone).
-
-The dual fcntl+mkdir acquisition is now the **permanent** write-lock contract (see
-``rebar._store.lock`` and ``docs/concurrency.md`` I5), not migration residue: the
-mkdir leg is deliberately retained as the portable second window (atomic on POSIX /
-no-flock hosts), and this gate depends on it always being taken.
-
-These drive the live editable ``rebar`` (the published-vs-working-tree note: the
-suite is skipped unless an on-PATH ``rebar`` resolves the working tree's
-``rebar._store``)."""
+Every writer must take both fcntl and portable atomic-mkdir locks, preventing index-lock
+collisions and event loss even without flock. The storm requires every event to land and
+fsck to remain clean through the editable on-PATH ``rebar`` store core.
+"""
 
 from __future__ import annotations
 
@@ -128,11 +115,7 @@ def _count_events(repo: Path, ticket_id: str, suffix: str) -> int:
     strict=False,
 )
 def test_concurrent_writer_storm_no_loss(clone: Path):
-    """N concurrent comments on one ticket land with ZERO loss and a clean fsck —
-    the unified dual-leg (fcntl+mkdir) lock serialises every writer correctly under
-    contention. (Tier D retired the bash core, so this is the durable single-impl
-    descendant of the stiff-mop-lane mixed-impl gate: the mkdir leg is always taken,
-    which is exactly what closed the gap.)"""
+    """Land every concurrent comment and keep fsck clean through the dual-leg lock."""
     tid = _create(clone, "task", "storm target", {})
     n = 16
 

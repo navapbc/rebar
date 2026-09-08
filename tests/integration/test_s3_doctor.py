@@ -1,17 +1,8 @@
-"""Happy-path oracle for the S3 auto-doctor (story 0289).
+"""Specify the S3 doctor's lossless happy path.
 
-The minimal specification of the heal's core contract: given a ref with two divergent bundles
-(each carrying a unique commit above a shared ancestor), ``heal_multi_bundle`` collapses them to
-exactly one bundle whose tip reaches **every** commit from **both** heads — nothing discarded.
-
-Contract pinned here (the implementer implements to it):
-
-    from rebar._store.s3_doctor import heal_multi_bundle
-    result = heal_multi_bundle(base_path, remote_name, ref, *, s3remote_factory=<url -> S3Remote>)
-
-``s3remote_factory`` is the single injection seam: it maps the configured remote URL to an
-``S3Remote``-like object (default: the real git_remote_s3 helper). ``result`` reports at least
-``{"healed": bool, "ref": str, "merged_sha": str, "deleted_keys": list[str]}`` for logging.
+``heal_multi_bundle`` receives its remote through ``s3remote_factory`` and collapses two
+divergent bundles to one tip that reaches every commit from both heads. Its result reports
+whether healing occurred, the ref and merged SHA, and deleted bundle keys.
 """
 
 from __future__ import annotations
@@ -59,7 +50,7 @@ def _install_git_shim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
         '        sys.stderr.write("fatal: Refusing to create empty bundle.\\n")\n'
         "        sys.exit(128)\n"
         '    if MODE == "transient-always" or n == 1:\n'
-        # The exact stderr recorded on CI runs 31340000912 / 31349549323 / 31558315198.
+        # Match the transient CI failure's stderr exactly.
         '        sys.stderr.write("fatal: bad object HEAD\\n")\n'
         "        sys.exit(128)\n"
         "os.execv(REAL, [REAL, *argv])\n"
@@ -128,14 +119,10 @@ def test_heal_collapses_two_bundles_losslessly(tmp_path: Path) -> None:
 def test_heal_rides_out_a_transient_bad_object_from_the_bundle_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A transient object-DB read fault on the bundle step self-heals on retry.
+    """Retry a transient ``fatal: bad object HEAD`` read and complete the lossless heal.
 
-    Bug wrongful-chemic-squeaker: three CI runs failed the heal with ``fatal: bad object
-    HEAD`` while bundling a merged tip whose sha git had just printed — git resolved the
-    name to an OID but could not READ the object at that instant. The doctor's git helper
-    sat outside rebar's self-healing seam, so a blip that every other store write rides out
-    aborted the heal. The first bundle attempt here fails with the exact CI stderr; the
-    identical retry succeeds, exactly as the seam's idempotency precondition allows.
+    The first bundle attempt reproduces the observed object-database fault. The identical,
+    idempotent retry succeeds.
     """
     remote, base_path, _sha_base, sha_a, sha_b = _seed_two_divergent_bundles(tmp_path)
     attempts = _install_git_shim(tmp_path, monkeypatch, "transient-once")
@@ -200,13 +187,8 @@ def test_persistent_bad_object_reports_an_object_read_failure_not_a_heads_confli
     assert "object" in hint.lower()
 
 
-# ── the fold targets the PUBLISHED ref, not the worktree HEAD (envious-metal-budgie) ─────
-#
-# Bug gnarled-acardiac-bettong proved the old fold merged into whatever branch the tracker had
-# checked out, so a side branch's commits reached the ticket history; it shipped a blanket
-# refusal for every tracker not sitting on the published ref. The fold now merges into
-# refs/heads/<ref> itself, so those trackers HEAL. These tests replace that refusal, and pin the
-# property the refusal was protecting: nothing from the checked-out branch reaches the ref.
+# The fold targets the published ref rather than the checked-out branch, allowing side-branch
+# trackers to heal without admitting their unrelated commits into ticket history.
 
 
 def _bundle_contains(remote, ref: str, sha: str, scratch: Path) -> bool:

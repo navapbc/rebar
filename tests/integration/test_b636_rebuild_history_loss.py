@@ -1,14 +1,8 @@
-"""b636: a snapshot rebuild must never silently discard state that exists ONLY inside a
-prior SNAPSHOT's ``compiled_state``.
+"""Prevent snapshot rebuilds from discarding legacy compacted state.
 
-Legacy compaction (before the I1 non-destructive rename, story tricolour-head-ratfish) DELETED
-its folded source events. For such a ticket the raw log on disk is INCOMPLETE: the prior
-SNAPSHOT cites ``source_event_uuids`` with no corresponding file. ``include_retired=True``
-replay therefore reconstructs from a partial history and the newest SURVIVING status wins —
-silently reverting closed tickets to their claim state. This regressed 214 live tickets.
-
-The rebuild must fail closed on that shape (surface for human triage) rather than write a
-lossy snapshot.
+Legacy compaction deleted folded sources, leaving logs whose snapshot references missing
+events. Replaying that partial history can make a surviving claim outrank the prior closed
+state. Rebuilds must fail closed for human triage instead of writing a lossy snapshot.
 """
 
 from __future__ import annotations
@@ -276,10 +270,7 @@ def test_restore_takes_the_newest_pre_image_when_deleted_twice(two_clones):  # n
 
 
 def test_restore_falls_back_to_per_uuid_lookup(two_clones, monkeypatch):  # noqa: F811
-    """bug 85fa: the directory-scoped history walk can MISS a deletion that a path-scoped walk
-    reports (observed on live ticket f130, whose lost EDIT was invisible to
-    ``git log --diff-filter=D -- <tid>/`` but found by ``-- <tid>/*<uuid>*``). When the cheap
-    pass comes back empty, the per-uuid fallback must still recover the event."""
+    """Use per-UUID history when the directory-scoped deletion walk misses an event."""
     from rebar._commands import fsck_restore
     from rebar._commands.fsck_repair import snapshot_missing_sources
 

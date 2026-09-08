@@ -1,73 +1,17 @@
-"""Held-out oracle for bare-repository fixture portability, and the sweep it runs.
+"""Sweep tests for bare-repository access that fails under strict Git policy.
 
-Policy [rebar:3476-4472-3407-4246, rebar:740d-187c-53a2-4b7d]: git refuses to
-*discover* a bare repository through ``-C``/cwd when a developer's config sets
-``safe.bareRepository = explicit`` (git 2.38.0+). It accepts the same repository
-named by a top-level ``--git-dir``. A fixture that reads a bare remote with
-``git -C <bare>`` therefore dies with exit 128 -- a refusal to open the
-repository at all, *before* any ref lookup -- for every such developer, while CI
-(which uses the ``all`` default) stays green. The supported test suite must run
-both locally and in CI, so this is a defect in the test, not environmental
-noise.
+With ``safe.bareRepository=explicit``, Git refuses to discover a bare repository via
+``-C`` but accepts an explicit top-level ``--git-dir``. The guard scans every
+``tests/**/*.py`` module except its own intentional violation. New fixtures therefore enter
+the sweep without a maintained file list. The guard stays in this existing test rather than
+adding a ``scripts/check_*.py`` CI mechanism.
 
-**Why the coverage is a tree sweep and not a list.** Ticket 3476 fixed 13 files
-and left this file behind as the guard, pinning a HAND-MAINTAINED allowlist of
-three test node ids that it re-ran under a strict git config. Four days later
-``tests/interfaces/lifecycle/test_atomic_completion_close.py`` landed,
-reintroduced the construct at eight sites, and nothing failed: the allowlist
-named three files that were ALREADY FIXED. Coverage that must be hand-registered
-is coverage a new file escapes by default. So the allowlist is gone and
-:func:`sweep_tests_tree` derives the covered set from the tree instead -- every
-``tests/**/*.py`` module, with a new bare-repository fixture in scope the moment
-it is written.
-
-**Why the sweep lives HERE and not in a ``scripts/check_*.py``.** That is this
-repository's usual shape for a static sweep, and it was the intended home. It
-cannot be: ``scripts/_mechanism_delta/detect_ci.py`` names every
-``scripts/check_*.py`` as a ``ci_gate`` BY ITS PATH, so any new gate script is a
-new mechanism -- and while an inline ``# mechanism-ok:`` marker admits one at
-``check_mechanism_delta.py --check``, ``tests/unit/test_mechanism_delta.py``
-additionally asserts ``new=0`` and ``set(baseline) == live`` REGARDLESS of
-markers, which only an operator running ``--lock`` can satisfy. Repairing the
-guard that already failed, in place, adds no mechanism at all, and is the
-narrower change besides: this file exists to enforce exactly this rule, and the
-suite CI runs is a portable trigger that needs no CI provider of its own.
-
-Detection, per module, using only that module's own AST.
-
-**Bare names** -- an identifier a ``--bare`` invocation binds:
-
-- the last path operand after the flag. ``git init --bare <dir>`` and
-  ``git clone --bare <src> <dst>`` both bind the repository they CREATE, never
-  an earlier source;
-- the directory the call runs in when the flag takes no operand, the
-  ``_git(remote, "init", "-q", "--bare")`` shape the already-fixed integration
-  fixtures use;
-- a name bound by a bare-repository FACTORY: a ``bare``-named creator taking
-  only paths (``init_bare_remote(remote)``), or a same-module helper that
-  creates a bare repository AND RETURNS IT. Returning it is the load-bearing
-  half -- a fixture helper that creates a bare remote and returns the WORKTREE
-  that pushes to it is the common shape, and marking its result bare would be
-  plainly wrong. The return is read POSITIONALLY (``return remote, writer``
-  marks only the first element) and the mark lands on the CALLER's binding, so
-  a rename (``origin, scribe = _ticket_remote(...)``) is still covered;
-- the argument passed at a PARAMETER POSITION the callee marks bare in its own
-  body, which covers ``_publish_ticket_store(repo, remote)`` by dataflow rather
-  than by the caller happening to spell the name the same way.
-
-Marking is otherwise module-scoped by identifier, which covers the same flows a
-second way when the caller reuses the helper's own name.
-
-**Discovery helpers** -- a function that forwards its first parameter to a
-``-C`` flag, the shape every one of these test modules uses:
-``def _git(repo, *args): subprocess.run(["git", "-C", str(repo), *args])``.
-
-**Violation** -- a ``-C`` flag applied to a bare name, directly or through a
-discovery helper. Two calls are exempt: one carrying an inline
-``-c safe.bareRepository=all``, the deliberate opt-in ticket 3476 preserved in
-``tests/scripts/test_reconcile_bridge_push_retry.py``; and the CREATING call,
-since ``git -C <dir> init --bare`` runs before ``<dir>`` is a repository and so
-has nothing for git to refuse to discover.
+Within each module, the AST tracks bare repositories from a ``--bare`` command's final
+path operand or cwd, from path-only bare factories and positional returned values, and
+through parameters used as bare inside callees. It also recognizes helpers that forward
+their first parameter to ``git -C``. Applying ``-C`` to any tracked bare name, directly
+or through such a helper, is a violation. Explicit ``safe.bareRepository=all`` opt-ins
+and the command that is still creating the bare repository are exempt.
 """
 
 from __future__ import annotations
@@ -91,11 +35,8 @@ _UNWRAPPERS = frozenset({"str", "Path", "PurePath", "fspath"})
 _CREATION_VERBS = ("init", "create", "make", "new", "build")
 _ESCAPE = "safe.bareRepository=all"
 
-# This module's own git-behaviour pin deliberately runs ``git -C <bare>`` to
-# PROVE git refuses it, so its fixture corpus is a live instance of the banned
-# construct. It is excluded structurally -- the check_wall_clock_asserts.py /
-# check_comment_hygiene.py idiom -- rather than by a marker the rule would then
-# have to define.
+# This module deliberately exercises the banned ``git -C <bare>`` behavior, so exclude
+# it structurally rather than introducing a marker that the rule must interpret.
 EXCLUDED_FILES = (Path(__file__).resolve().relative_to(_REPO_ROOT),)
 
 _TEACHING = """\
