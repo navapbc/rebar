@@ -239,9 +239,8 @@ touch "$GATE_SCRATCH_MOUNT/.gate-scratch-mounted"
 echo "Gate scratch mounted at $GATE_SCRATCH_MOUNT and marked"
 
 # ---------------------------------------------------------------------------
-# 3) Fetch the SecureString secrets from SSM (instance role grants read on
-#    /rebar/prod/*) and write /etc/rebar/.env (0600). FAIL FAST on the CHANGEME
-#    sentinel — never write a half-configured env that silently misbehaves.
+# 3) Fetch required /rebar/prod SecureStrings into /etc/rebar/.env (0600).
+#    A CHANGEME sentinel is boot-fatal.
 # ---------------------------------------------------------------------------
 TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')
 REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region \
@@ -273,12 +272,9 @@ declare -A PARAMS=(
   ["/rebar/prod/anthropic-api-key"]="ANTHROPIC_API_KEY"
   ["/rebar/prod/alert-endpoint"]="ALERT_ENDPOINT"
   ["/rebar/prod/gerrit-bot-token"]="GERRIT_BOT_TOKEN"
-  # NOTE: the GitHub OAuth App creds (b744/WS8) are deliberately NOT fetched here.
-  # This cloud-init .env (/etc/rebar/.env) has no consumer of them; the containers
-  # read the OAuth creds from infra/compose/.env (written by fetch-secrets.sh at
-  # compose-up), and they are only required under auth.type = OAUTH. Adding them to
-  # this unconditional CHANGEME-fail-fast map would make a fresh boot die on the
-  # OAuth params before OAuth is even in use.
+  # OAuth credentials are intentionally excluded. `compose-up.sh` materializes them from the
+  # compose environment only when OAUTH is enabled. Fetching them here would make unused
+  # placeholders boot-fatal.
 )
 
 # "$${!PARAMS[@]}" renders to a real bash key expansion: one word PER KEY, not one word

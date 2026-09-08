@@ -33,9 +33,10 @@ locals {
     # A tickets-only contents:write PAT lets reviewbot push code_review events through its
     # URL-scoped credential helper (REVIEWBOT_TICKETS_PAT). The operator supplies it.
     "/rebar/prod/reviewbot-tickets-pat",
-    # The operator-supplied Rebar Bot Ed25519 key becomes a 0600 identity.signing_key file for
-    # review-bot/auto-lander, not an environment value. GitHub stores the same key as
-    # REBAR_BOT_SIGNING_KEY for reconcile-bridge and canary workflows.
+    # The operator-supplied Rebar Bot Ed25519 key becomes a 0600 `identity.signing_key` file for
+    # review-bot, not an environment value. GitHub stores the same key as
+    # `REBAR_BOT_SIGNING_KEY` for reconcile-bridge and canary workflows. ADR 0047 retired the
+    # separate auto-lander.
     "/rebar/prod/rebar-bot-signing-key",
     # Optional per-client PATs authenticate the nginx `/mcp/` edge through the static verifier.
     # Blank slots are omitted. Nonblank values become MCP_CLIENT_PAT_* entries in a 0600,
@@ -44,9 +45,10 @@ locals {
     "/rebar/prod/mcp-client-pat-copilot",
     "/rebar/prod/mcp-client-pat-codex",
     "/rebar/prod/mcp-client-pat-claude",
-    # The optional tickets-only contents:write PAT lets MCP's URL-scoped helper
-    # (MCP_TICKETS_PAT) clone `tickets` into REBAR_TRACKER_DIR and push events. A blank slot
-    # defers the clone without failing the container. The operator supplies the value.
+    # The optional tickets-only `contents:write` PAT lets MCP's URL-scoped helper
+    # (`MCP_TICKETS_PAT`) clone `tickets` into `REBAR_TRACKER_DIR` and push events.
+    # `fetch-secrets.sh` falls back to `REVIEWBOT_TICKETS_PAT` when this slot is blank.
+    # A blank dedicated slot defers cloning only when the fallback is also empty.
     "/rebar/prod/mcp-tickets-pat",
     # JIRA_API_TOKEN is the bridge's only secret. URL, user, and project remain non-secret
     # workflow variables. It is optional at the container boundary. A blank token makes bridge

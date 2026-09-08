@@ -3,7 +3,7 @@
 # Verify the op-cert edge with self-failing `jq -e` assertions against one
 # `terraform show -json` plan. Any violation exits non-zero for deploy/CI gating.
 #
-# Requires AWS credentials. test_opcert_deploy_infra.py covers the source offline.
+# This script requires AWS credentials. `test_opcert_deploy_infra.py` covers the source offline.
 #
 # Run it post-apply against a no-change re-plan. The integration's generated
 # `X-Opcert-Guard` value and the API execution ARN are unknown on a fresh plan. Those unknowns
