@@ -42,6 +42,14 @@ _REUSABLE_OPTIONALITY = "./.github/workflows/_optionality.yml"
 # in BOTH caller files is what makes the two lanes share one definition — no drift by construction.
 _REUSABLE_BAT = "./.github/workflows/_build-and-test.yml"
 _REUSABLE_MUTATION = "./.github/workflows/_mutation.yml"
+_BAT_TEST_INSTALL_STEP = "Install rebar from the committed lock (dev + reviewbot + ui extras)"
+_SWEEP_INSTALL_STEP = "Create the interpreter venv and install"
+_INTENTIONAL_SWEEP_EXTRA_DIVERGENCES = {
+    "grounding-terraform": (
+        "The interpreter sweep is intentionally lean; the grounding-terraform "
+        "extra is covered by the Verified gate and optionality lane."
+    )
+}
 
 # Pre-commit hooks whose PASS/FAIL depends on the current git branch / HEAD state rather
 # than on file content. `pre-commit run --all-files` therefore behaves DIFFERENTLY between
@@ -159,6 +167,60 @@ def _read(path: Path) -> str:
     return path.read_text()
 
 
+def _extras_from_install_run(run: str) -> set[str]:
+    """Extract Python extras from the uv install spellings used by CI."""
+    extras = set(re.findall(r"--extra\s+([A-Za-z0-9_-]+)", run))
+    for bracketed in re.findall(r"\.\[([A-Za-z0-9_, -]+)\]", run):
+        extras.update(part.strip() for part in bracketed.split(",") if part.strip())
+    return extras
+
+
+def _step_run(workflow_text: str, job_name: str, step_name: str) -> str:
+    import yaml
+
+    workflow = yaml.safe_load(workflow_text)
+    job = (workflow.get("jobs") or {}).get(job_name)
+    assert job, f"workflow is missing job {job_name!r}"
+    matches = [
+        str(step.get("run") or "")
+        for step in (job.get("steps") or [])
+        if step.get("name") == step_name
+    ]
+    assert len(matches) == 1, (
+        f"expected exactly one {step_name!r} step in job {job_name!r}; found {len(matches)}"
+    )
+    return matches[0]
+
+
+def _assert_sweep_extra_parity(
+    build_and_test_yml: str,
+    test_yml: str,
+    *,
+    intentional_gating_only: dict[str, str],
+) -> None:
+    gating = _extras_from_install_run(_step_run(build_and_test_yml, "test", _BAT_TEST_INSTALL_STEP))
+    sweep = _extras_from_install_run(_step_run(test_yml, "sweep-interpreters", _SWEEP_INSTALL_STEP))
+    allowed = set(intentional_gating_only)
+    unexpected_gating_only = sorted((gating - sweep) - allowed)
+    stale_declarations = sorted(allowed - (gating - sweep))
+    sweep_only = sorted(sweep - gating)
+    problems = []
+    if unexpected_gating_only:
+        problems.append(
+            "gating-only extra(s) missing from sweep-interpreters and not declared intentional: "
+            + ", ".join(unexpected_gating_only)
+        )
+    if sweep_only:
+        problems.append(
+            "sweep-only extra(s) absent from the Verified gating lane: " + ", ".join(sweep_only)
+        )
+    if stale_declarations:
+        problems.append(
+            "stale intentional gating-only declaration(s): " + ", ".join(stale_declarations)
+        )
+    assert not problems, "; ".join(problems)
+
+
 def test_both_lanes_delegate_to_the_shared_gate_workflow() -> None:
     """The anti-drift invariant: both the branch-head lane (test.yml) and the Verified lane
     (gerrit-verify.yaml) run the gate+suite by invoking the SAME reusable workflow, so their
@@ -173,6 +235,60 @@ def test_both_lanes_delegate_to_the_shared_gate_workflow() -> None:
         f"gerrit-verify.yaml no longer delegates to the shared gate workflow ({_REUSABLE_BAT}) — "
         "the Verified gate would drift from branch CI. Call the reusable, don't inline the gates."
     )
+
+
+def test_sweep_install_extra_drift_is_declared_and_actionable() -> None:
+    """Sweep-lane extra drift must be intentional and named."""
+    _assert_sweep_extra_parity(
+        _read(_BAT_YML),
+        _read(_TEST_YML),
+        intentional_gating_only=_INTENTIONAL_SWEEP_EXTRA_DIVERGENCES,
+    )
+
+    divergent_bat = _read(_BAT_YML).replace(
+        "--extra dev --extra reviewbot --extra ui",
+        "--extra dev --extra reviewbot --extra ui --extra example",
+    )
+    try:
+        _assert_sweep_extra_parity(divergent_bat, _read(_TEST_YML), intentional_gating_only={})
+    except AssertionError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("undeclared gating-only extra did not fail")
+    assert "example" in message
+    assert "gating-only" in message
+    assert "sweep-interpreters" in message
+
+
+def test_sweep_extra_parity_would_have_caught_c57057f41() -> None:
+    """The known historical workflow drift fails without an in-tree declaration."""
+    historical_bat = subprocess.run(
+        ["git", "show", "c57057f41:.github/workflows/_build-and-test.yml"],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    historical_test = subprocess.run(
+        ["git", "show", "c57057f41:.github/workflows/test.yml"],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+    try:
+        _assert_sweep_extra_parity(
+            historical_bat,
+            historical_test,
+            intentional_gating_only={},
+        )
+    except AssertionError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("c57057f41's undeclared extra drift did not fail")
+    assert "grounding-terraform" in message
+    assert "gating-only" in message
 
 
 def test_matrix_keeps_every_test_tier_but_collects_coverage_once() -> None:
