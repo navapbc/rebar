@@ -1,21 +1,9 @@
-"""RP-04 S4 (bbdc) HAPPY-PATH oracle — provider-native LLM auth injection.
+"""Expose the RP-04 S4 provider-native authentication happy path.
 
-Visible to the implementer. Pins the ``rebar.llm.auth.LLMRuntime`` contract and
-proves the native pre-client capability reaches EXACTLY the existing per-provider
-``ProviderSession`` builder — observable through the client/provider each builder
-constructs, not private structure. Edge/fail-closed/secret-canary cases are held
-out (see the withheld oracle).
-
-Contract (the new seam):
-    rebar.llm.auth.LLMRuntime(anthropic=..., bedrock=..., openai=...)
-      - AnthropicAuth(api_key=..., auth_token=...)
-      - BedrockAuth(session=<boto3.Session>)
-      - OpenAIAuth(api_key=<str | callable>)
-    ProviderSession(cfg, *, runtime=None)         # threads the runtime
-    PydanticAIRunner(config, *, model_override=None, runtime=None)
-    get_runner(config, *, runtime=None, override=None)
-      - runtime=None  -> byte-identical RP-01 ambient construction (compat)
-      - only the SELECTED provider's carrier is consumed
+``LLMRuntime`` carries provider-specific credentials outside ``LLMConfig``.
+``ProviderSession``, ``PydanticAIRunner``, and ``get_runner`` thread the optional
+carrier to the existing provider builder. A missing runtime preserves ambient
+construction, and only the selected provider is consumed.
 """
 
 from __future__ import annotations

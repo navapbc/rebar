@@ -1,24 +1,9 @@
-"""Contract tests for the review-bot's Bedrock cutover wiring (story eb6e).
+"""Verify the review bot's Bedrock wiring without network or container access.
 
-Hermetic: no AWS, no network, no container. These pin the four things that must not drift
-apart once the production review bot resolves its model classes to Bedrock inference profiles:
-
-1. the compose class-slot VALUES against `.github/llm-providers/bedrock.toml`, so the
-   production bot and the CI provider matrix name the same ids from one authoritative place;
-2. the ABSENCE of `REBAR_LLM_MODEL` on that service, because its deprecation shim fans one
-   value out to all three classes and would silently collapse the frontier/standard split the
-   gates depend on;
-3. the CloudWatch alarm's `ModelId` dimensions against those same ids — an AWS-published
-   metric is dimensioned by AWS, so an alarm naming ids that no longer receive traffic reports
-   healthy forever instead of failing loudly;
-4. that `REBAR_USAGE_LOG` is set, and set to a path under a mounted volume — the per-call
-   provider oracle is opt-in and a no-op when unset, and an auto-deploy recreates this
-   container, so an unset var or an in-image path silently destroys the evidence.
-
-Each assertion is deliberately two-sided (exact set equality, byte-equal values) so that
-editing EITHER side alone fails, which is the property the story's acceptance criterion asks
-for. A one-sided "compose value is in the toml" check would pass while the toml grew an id the
-bot never uses.
+The tests keep compose model-class slots equal to the provider overlay, forbid the
+deprecated ``REBAR_LLM_MODEL``, match CloudWatch dimensions to invoked profiles, and
+require the usage log under a persistent volume. Exact comparisons expose drift on
+either side.
 """
 
 from __future__ import annotations
@@ -93,14 +78,7 @@ def test_compose_class_slots_are_byte_equal_to_the_bedrock_provider_overlay() ->
 
 
 def test_compose_review_bot_sets_no_deprecated_bare_model_var() -> None:
-    """`REBAR_LLM_MODEL` must not appear on this service.
-
-    It is deprecated, and its compatibility shim fans a single value out to ALL THREE classes,
-    collapsing the frontier/standard split: sonnet-everywhere downgrades the Pass-1 finder,
-    opus-everywhere loses the Pass-2 cost downgrade and makes code-review.yaml's
-    `temperature: 0` greedy pin inoperative (Bedrock opus accepts only the default
-    temperature). The class slots above are the only sanctioned instrument.
-    """
+    """The service omits the variable that would collapse the model-class split."""
     assert "REBAR_LLM_MODEL" not in _review_bot_environment(), (
         "the review-bot service sets REBAR_LLM_MODEL, which collapses the per-pass model-class "
         "split. Use the three REBAR_LLM_<CLASS>_MODEL slots instead."
@@ -108,13 +86,7 @@ def test_compose_review_bot_sets_no_deprecated_bare_model_var() -> None:
 
 
 def test_bedrock_alarm_watches_exactly_the_model_ids_the_bot_invokes() -> None:
-    """The alarm's `ModelId` dimensions cover exactly the bot's three ids.
-
-    `AWS/Bedrock` is an AWS-published namespace whose metrics are dimensioned by `ModelId`,
-    and an alarm's dimensions cannot be wildcarded. So if the class slots are re-pointed and
-    the alarm is not, it keeps watching ids that receive no traffic and sits healthy forever —
-    a silent monitoring failure rather than a loud one. This test is that coupling.
-    """
+    """CloudWatch watches exactly the three provider profiles invoked by the bot."""
     sources = [p for p in sorted(_TERRAFORM.glob("*.tf")) if _ALARM_NAME in p.read_text()]
     assert len(sources) == 1, (
         f"expected exactly one .tf file declaring the {_ALARM_NAME} alarm, found "
@@ -138,18 +110,7 @@ def test_bedrock_alarm_watches_exactly_the_model_ids_the_bot_invokes() -> None:
 
 
 def test_usage_log_is_enabled_and_survives_container_recreation() -> None:
-    """The per-call provider oracle is ON, and written where a redeploy cannot erase it.
-
-    `usage_log.record()` is a NO-OP unless `REBAR_USAGE_LOG` names a path, so an unset var
-    silently removes the only evidence that distinguishes "every call went to Bedrock" from
-    "most calls went to Bedrock". That distinction is the point of the cutover:
-    `ANTHROPIC_API_KEY` deliberately remains in this container so the kill switch has a working
-    credential, which means "the Anthropic path is unused" must be MEASURED, not inferred from
-    the key being absent.
-
-    The path must also sit under a mounted volume: auto-deploy recreates this container on
-    every deploy, so a path inside the image would lose the evidence exactly when it matters.
-    """
+    """Provider usage is enabled beneath a mount that survives container replacement."""
     env = _review_bot_environment()
     log_path = env.get("REBAR_USAGE_LOG")
     assert log_path, (

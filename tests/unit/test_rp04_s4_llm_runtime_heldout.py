@@ -1,11 +1,8 @@
-"""RP-04 S4 (bbdc) HELD-OUT oracle — provider-native LLM auth injection.
+"""Hold out RP-04 S4 authentication edge contracts for ``LLMRuntime``.
 
-Withheld from the implementer. Asserts the edge/fail-closed/secret contracts of
-``rebar.llm.auth.LLMRuntime`` as OBSERVABLE behavior — a supplied-but-conflicting
-carrier fails BEFORE any client/model request, secret sentinels never appear on any
-named boundary, and exactly the selected provider's carrier is consumed with no
-ambient/alternate-principal fallback. Structural guard: auth injection adds no second
-client owner, Agent route, ``_pai_structured`` caller, or bespoke retry scheduler.
+Explicit empty or conflicting credentials fail before client construction. Only the
+selected provider consumes its carrier, secret material stays out of representations
+and errors, and AST checks prevent duplicate client, agent, or structured-operation owners.
 """
 
 from __future__ import annotations

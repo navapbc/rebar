@@ -1,22 +1,8 @@
-"""The shared Ruff-config quality-ratchet contract (story 28cd).
+"""Protect the shared Ruff configuration and test-hygiene ratchets.
 
-This file OWNS the assertions that keep the ASYNC/DTZ ratchet — and the surrounding
-"no security-scanner sprawl" and "py310-safe UTC spelling" invariants — from silently
-regressing. Each assertion is INDEPENDENT (no bundling with ``and``) so a failure names
-exactly one violated invariant:
-
-- ``[tool.ruff.lint].select`` enables the ``ASYNC`` family.
-- ``[tool.ruff.lint].select`` enables the ``DTZ`` family.
-- ``[tool.ruff.lint].select`` enables the ``RUF`` family, with the ambiguous-unicode
-  families ``RUF001``/``RUF002``/``RUF003`` deferred in exactly ``[tool.ruff.lint].ignore``
-  (no ``extend-ignore``, and no ``per-file-ignores`` entry selecting ``RUF``) — story 125d.
-- the ``S`` (flake8-bandit security) selector is NOT enabled — security scanning is
-  handled by the dedicated grounding detectors, not Ruff's ``S`` family.
-- no root-level semgrep config artifact (``.semgrep.yml`` / ``.semgrep.yaml`` /
-  ``.semgrep/``) exists — same "one security surface" invariant.
-- no ``src/rebar`` source spells the literal token ``datetime.UTC``: Ruff
-  ``target-version`` stays ``py310``, on which ``datetime.UTC`` does not exist, so aware
-  UTC must be spelled ``datetime.timezone.utc`` / ``timezone.utc``.
+Independent assertions require ASYNC, DTZ, and RUF selection. They constrain Unicode
+deferrals, reject Bandit and Semgrep policy sprawl, and preserve Python 3.10 compatible
+UTC spelling. This file also pins exact PLW1510 and flake8-pytest-style membership.
 """
 
 from __future__ import annotations
@@ -143,7 +129,7 @@ def test_no_src_uses_datetime_UTC_token() -> None:
 # --------------------------------------------------------------------------------------
 # Test-hygiene gate membership (story bold-abeyant-indri)
 # --------------------------------------------------------------------------------------
-#: The PT codes the test-hygiene gate adopts, per code, exactly as SIM115 is taken.
+#: Exact flake8-pytest-style codes enforced by the test-hygiene gate.
 _ADOPTED_PT = frozenset(
     {
         "PT001",
@@ -159,29 +145,17 @@ _ADOPTED_PT = frozenset(
     }
 )
 
-#: Deliberately deferred: ~1666 findings on this tree whose remediation is a
-#: behaviour-touching sweep, not a hygiene fix. Deferring them is a DECISION.
+#: These behavior-changing rules remain deferred to dedicated changes.
 _DEFERRED_PT = frozenset({"PT011", "PT018", "PT019"})
 
 
 def test_the_test_hygiene_gate_selects_plw1510() -> None:
-    """`PLW1510` is what forces every `subprocess.run` to state its return-code policy.
-
-    The absent-string subprocess oracle (bugs 0e1d-c698-c38d-4c3e, 1241-b83c-f8c7-40bf) is a
-    test that cannot fail; an explicit `check=` makes the author say which it is. Dropping the
-    code would silently reopen that class.
-    """
+    """PLW1510 requires each ``subprocess.run`` call to state its return-code policy."""
     assert "PLW1510" in _ruff_select()
 
 
 def test_the_adopted_pt_subset_is_exactly_the_named_codes() -> None:
-    """The gate's headline decision, asserted rather than described.
-
-    Which PT codes are in and which are out was reasoned about once, in the `[tool.ruff.lint]`
-    prose, and until now nothing checked that the `select` list still matched it — a decision
-    guarded only by a comment is exactly what this epic exists to end. Membership is pinned in
-    BOTH directions so neither a quiet drop nor a quiet addition passes unnoticed.
-    """
+    """The selected PT codes match the reviewed allowlist in both directions."""
     selected_pt = {code for code in _ruff_select() if code.startswith("PT")}
     assert selected_pt == _ADOPTED_PT, (
         "the adopted flake8-pytest-style subset drifted from the documented decision; "
@@ -192,12 +166,7 @@ def test_the_adopted_pt_subset_is_exactly_the_named_codes() -> None:
 
 
 def test_the_deferred_pt_codes_stay_deferred_and_the_group_is_never_taken_whole() -> None:
-    """The other half of the decision: PT011/PT018/PT019 are OUT, on purpose.
-
-    A bare `PT` group selector is the silent way to adopt them — it would enable all three
-    without any code being named, turning a deliberate deferral into an accidental
-    behaviour-touching sweep. Both spellings are rejected here.
-    """
+    """The PT group and three deferred codes remain excluded from this hygiene change."""
     select = _ruff_select()
     assert "PT" not in select, (
         "the whole flake8-pytest-style group must never be selected: it would adopt "

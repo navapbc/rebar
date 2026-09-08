@@ -1,14 +1,8 @@
-"""8772 (root span per gate run): one gate run is one trace.
+"""Verify one root span per gate run.
 
-rebar opened no span at the gate run boundary, so `tracing.py`'s per-candidate spans were
-each their own trace root and a fanned-out plan-review appeared in Langfuse as many traces.
-`run_identity.mint_run_identity` already prefers an active recording span's trace id over
-minting; this gives it something to read.
-
-The OTel SDK ships in the optional `[tracing]` extra and is absent here — the API alone only
-ever returns non-recording spans — so the tracer is stubbed. That exercises rebar's own
-branch (is_recording -> get_span_context -> 032x -> contextvar propagation), which is what
-this ticket owns; OTel's parentage is OTel's to test.
+The run span gives ``mint_run_identity`` a recording trace identity before gate
+configuration is created, including work submitted through context-aware pools. Tracer
+failures remain nonfatal. Stub tracers exercise rebar without the optional SDK.
 """
 
 from __future__ import annotations

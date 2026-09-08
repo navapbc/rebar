@@ -1,13 +1,7 @@
-"""Happy-path oracle for RP-04 S3 DIG-default elimination (ticket 6e3b).
+"""Verify that explicitly configured Jira project scopes pass through unchanged.
 
-AC2: no request (write OR live probe) uses the implicit ``"DIG"`` Jira project unless
-``JIRA_PROJECT`` / ``jira.project`` is EXPLICITLY ``"DIG"``. This file pins the positive
-half of that invariant — an explicitly-configured project is used verbatim. The negative
-half (each unset site fails closed with a typed/redacted error and no ``DIG`` request)
-lives in a held-out oracle the implementer does not see.
-
-Observable behavior only: returned scope values and the arguments a recording transport
-is constructed with.
+Cloud and Data Center resolution returns the configured project for write and query
+scope, including when that explicit project is ``DIG``.
 """
 
 from __future__ import annotations

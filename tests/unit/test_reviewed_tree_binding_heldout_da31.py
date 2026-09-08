@@ -1,18 +1,9 @@
-"""Held-out validation for bug da31 — authored independently of the implementation.
+"""Hold out validation of a fetched Gerrit tree against its voted revision.
 
-The review bot FETCHES the tree from `patchSet.ref` but VOTES against
-`patchSet.revision`. Those are two independently-supplied webhook fields, and the
-reviewed tree is whatever ended up in `repo_root`, so a stale/reused clone dir, a
-partial fetch, or a future refactor of the checkout logic silently decouples them.
-
-This is NOT a live vulnerability (Gerrit always emits the pair consistently, and
-decoupling requires forging a webhook behind WEBHOOK_TOKEN). The value is the signal.
-
-The dominant RISK OF THE FIX ITSELF is the opposite failure: a FALSE mismatch would
-refuse every review and wedge the merge gate. So most of these tests are false-positive
-probes, not true-positive ones.
-
-Everything here drives real git repos and the public seam; nothing pins internals.
+The independently supplied ``patchSet.ref`` and ``patchSet.revision`` fields can
+diverge from the checked-out tree. The binding check refuses proven mismatches but
+abstains when comparison is impossible. False-positive cases protect the merge gate
+from invalid refusals.
 """
 
 from __future__ import annotations

@@ -1,23 +1,8 @@
-"""RP-01 S2 — HELD-OUT oracle for the bounded structured-output operation
-(ticket [rebar:kingsize-unfair-blackbird], 66b3-4214-c70b-4a9a).
+"""Hold out the RP-01 S2 edge contract for one bounded structured-output operation.
 
-Withheld from the implementer (who sees only ``test_rp01_s2_bounded_op_happy.py``). Pins the
-edge/boundary/terminal behavior the happy path cannot: wire-context projection (complete-or-
-omit on proven fit), the context-window overflow error, concision reclassification of
-truncation and its bounded exhaustion, terminal refusal, and the shared request/output budget.
-
-Every test drives the REAL ``PydanticAIRunner`` over an offline ``FunctionModel`` (or calls the
-pure budget helper directly). No live/billable call can escape (ALLOW_MODEL_REQUESTS off).
-
-RED-first behavioral tests (fail against today's manual scheduler for the right reason):
-  * wire INCLUDE on fit — today's separate ``run_sync`` calls never carry the prior response
-  * ContextWindowExceededError — today's path never raises it (it just succeeds on retry)
-  * concision on truncation — today a ``length`` turn is TERMINAL, so recovery cannot succeed
-  * shared request budget — today ``request_limit`` == base, with no output-retry allowance
-Preservation guards (must stay green — a regression here breaks a landed contract):
-  * terminal refusal / content-filter, and the #5221 provider_details-only refusal shape
-Boundary teeth (separate a correct fit-rule from a naive always-include):
-  * wire OMIT when the failed response does not fit
+The tests cover complete-or-omit response projection, authoritative-input overflow,
+bounded prompted retries, terminal refusals, shared request budgets, and native
+fallback. They use offline ``FunctionModel`` instances or pure budget helpers.
 """
 
 from __future__ import annotations
@@ -153,10 +138,7 @@ def _wire_request_texts(wire):
 
 
 def test_failed_response_is_projected_on_the_retry_wire_when_it_fits():
-    """AC#2 (RED-first): a small failed response provably fits the window, so its complete
-    text is carried on the SECOND request's wire — the bounded operation keeps the failed
-    turn in context. Today's per-attempt scheduler runs a fresh ``run_sync``, so the prior
-    response is never on the retry wire."""
+    """A fitting failed response remains complete on the second request's wire."""
     marker = "FAILED-TURN-BODY-fits-42"
     model, state = _scripted_model([{"text": marker, "usage": (10, 10)}, {"text": _VALID}])
     result = _run(model)
@@ -169,10 +151,7 @@ def test_failed_response_is_projected_on_the_retry_wire_when_it_fits():
 
 
 def test_failed_response_is_omitted_whole_when_it_does_not_fit():
-    """AC#3 (boundary teeth): when input+output+reserve exceeds the window but the next
-    request itself still fits (input+reserve <= window), the failed response is omitted
-    WHOLE from the retry wire — never partially — yet recovery still completes. Separates a
-    correct fit-rule from a naive always-include."""
+    """An oversized failed response is omitted whole while the next request recovers."""
     marker = "FAILED-TURN-BODY-too-big-99"
     # Size against the REAL resolved-candidate window: input alone still fits the next request
     # (input + reserve <= window), but input + output + reserve overflows it -> omit WHOLE.
@@ -191,13 +170,7 @@ def test_failed_response_is_omitted_whole_when_it_does_not_fit():
 
 
 def test_unknown_count_response_is_omitted_but_retained_in_full_history():
-    """AC#3 (unknown-count + retention invariant): a failed response whose token count is
-    UNKNOWN (no usage metadata) is omitted WHOLE from the projected retry wire — the fit rule
-    fails safe, never guessing its size onto the wire — while the NON-MUTATING projection
-    leaves it in the underlying history (``all_messages()`` retains all of it). Exercised
-    through the public ``wire_history_processor`` seam: the returned wire is a filtered COPY,
-    so the omitted response is absent from the wire yet still present in the original message
-    list. A fitting (known-small) response is kept — the teeth separating unknown from fits."""
+    """Unknown-size responses leave the wire copy but remain in the stored history."""
     from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
     from pydantic_ai.usage import RequestUsage
 
@@ -238,10 +211,10 @@ def test_unknown_count_response_is_omitted_but_retained_in_full_history():
 
 
 def test_authoritative_input_over_window_raises_context_window_exceeded():
-    """AC#4 (RED-first): when the authoritative input alone plus the output reserve exceeds
-    the window, the next request cannot run at all — fail closed with
-    ``ContextWindowExceededError``, never a silent truncation of authoritative input. Today's
-    path has no such check and just succeeds on the retry."""
+    """Fail closed when authoritative input and its reserve exceed the window.
+
+    Raise before sending a retry instead of truncating authoritative input.
+    """
     # Authoritative input ALONE (input + reserve) overflows the real resolved-candidate window.
     cfg = LLMConfig(repo_path=".")
     window = _candidate_window(cfg)
@@ -254,9 +227,7 @@ def test_authoritative_input_over_window_raises_context_window_exceeded():
 
 
 def test_truncation_is_reclassified_into_a_bounded_concision_retry():
-    """AC#5 (RED-first): a ``length`` truncation on the prompted branch is reclassified into
-    a bounded in-run retry carrying the EXACT concision instruction, and recovery completes.
-    Today a ``length`` finish_reason is TERMINAL (UnretryableOutputError), so no recovery."""
+    """Prompted truncation retries with the exact concision instruction."""
     model, state = _scripted_model(
         [{"text": "half an ans", "finish_reason": "length"}, {"text": _VALID}]
     )
@@ -270,9 +241,7 @@ def test_truncation_is_reclassified_into_a_bounded_concision_retry():
 
 
 def test_repeated_truncation_exhausts_the_bounded_allowance_and_aborts():
-    """AC#5 (RED-first): a model that truncates every turn cannot loop unboundedly — the
-    shared output-retry allowance (OUTPUT_RETRIES == 2) bounds it to 1 + 2 == 3 calls, then
-    aborts as a runner error. Today the first ``length`` is already terminal (1 call)."""
+    """Repeated truncation consumes two retries and aborts after three calls."""
     model, state = _scripted_model([{"text": "x", "finish_reason": "length"}])
     with pytest.raises(LLMRunnerError):
         _run(model)
@@ -280,11 +249,7 @@ def test_repeated_truncation_exhausts_the_bounded_allowance_and_aborts():
 
 
 def test_transient_error_is_reclassified_into_a_bounded_output_retry():
-    """AC#5 (concision-guard delegation branch): a transient ``finish_reason='error'`` is NOT
-    a truncation and NOT terminal — the guard delegates to ``structured.check_response``, which
-    raises the RETRYABLE ``StructuredOutputError``, so it is translated into a bounded in-run
-    ``ModelRetry`` and the run recovers on the good turn-2. Separates the transient-retry branch
-    (recovers) from the terminal refusal branch (aborts) that share the same guard."""
+    """A transient error uses bounded output retry instead of terminal refusal."""
     model, state = _scripted_model([{"text": "boom", "finish_reason": "error"}, {"text": _VALID}])
     result = _run(model)
 
@@ -296,9 +261,7 @@ def test_transient_error_is_reclassified_into_a_bounded_output_retry():
 
 
 def test_content_filter_refusal_stays_terminal_after_one_call():
-    """AC#6 (preservation): a content-filter/refusal turn is a complete, unusable response —
-    it must stay terminal after exactly ONE model call, triggering neither an output retry
-    nor a concision retry. A regression that made it retryable would burn the allowance."""
+    """A content-filter refusal remains terminal and consumes one model call."""
     model, state = _scripted_model([{"text": "no", "finish_reason": "content_filter"}])
     with pytest.raises(LLMRunnerError):
         _run(model)
@@ -306,9 +269,7 @@ def test_content_filter_refusal_stays_terminal_after_one_call():
 
 
 def test_provider_details_only_refusal_stays_terminal():
-    """AC#6 (preservation, #5221 shape): a refusal signalled ONLY in provider_details (with
-    finish_reason absent) is still terminal after one call — the two-layer guard is not
-    fooled by an unmapped normalized finish_reason."""
+    """A refusal reported only in provider details remains terminal after one call."""
     model, state = _scripted_model(
         [{"text": "sure", "finish_reason": None, "provider_details": {"refusal": "policy"}}]
     )
@@ -321,11 +282,7 @@ def test_provider_details_only_refusal_stays_terminal():
 
 
 def test_build_usage_limits_returns_bare_base_but_constructs_base_plus_allowance():
-    """AC#8 (RED-first): ``build_usage_limits`` RETURNS the bare base req_limit
-    (``ceil(eff_max_iter/2)`` — the value ``completion_banking`` inverts as ``2*B``), while
-    the CONSTRUCTED ``UsageLimits.request_limit`` adds the output-retry allowance so the
-    request budget can never trip before the output-retry counter. Today both equal the base
-    (no allowance)."""
+    """The returned base limit excludes retries while the constructed limit includes them."""
     from pydantic_ai.usage import UsageLimits
 
     from rebar.llm import structured
@@ -342,11 +299,7 @@ def test_build_usage_limits_returns_bare_base_but_constructs_base_plus_allowance
 
 
 def test_lowering_structured_retry_limit_lowers_the_constructed_allowance():
-    """AC#8 (one value seeds BOTH budgets, non-default): lowering ``req.structured_retry_limit``
-    lowers the allowance N, and that SAME lowered N is the addend on the constructed
-    ``UsageLimits.request_limit`` (base + N) — proving the addend tracks the output-retry
-    counter for a non-default budget, not just the default. The RETURNED req_limit stays the
-    bare base regardless."""
+    """A lower retry limit reduces the constructed allowance but not the returned base."""
     import dataclasses
 
     from pydantic_ai.usage import UsageLimits
@@ -380,12 +333,7 @@ def _native_cfg():
 
 
 def test_native_branch_runs_under_the_bounded_op_and_keeps_truncation_terminal():
-    """AC#7: on a native-capable provider the bounded operation routes through the NativeOutput
-    branch (constrained decoding) — a clean native turn yields the validated verdict, and a
-    truncated (``length``) native turn stays TERMINAL after exactly ONE call. The native branch
-    attaches ``pai_output.guard_capability()`` (terminal), NOT the concision guard, so — unlike
-    the prompted branch, where an identical ``length`` turn is reclassified into a bounded
-    concision retry — a truncated native turn is never retried."""
+    """Native output validates clean results but ends on the first truncated response."""
     cfg = _native_cfg()
 
     ok, _state = _scripted_model([{"text": _VALID}])
@@ -400,12 +348,7 @@ def test_native_branch_runs_under_the_bounded_op_and_keeps_truncation_terminal()
 
 
 def test_native_grammar_compilation_rejection_falls_back_to_the_prompted_path(monkeypatch):
-    """AC#7 (bug-895c fallback preserved): when the provider 400s compiling this contract's JSON
-    Schema into a decoding grammar (a schema-complexity rejection the gate under-predicted for
-    THIS model/contract pair), the bounded operation falls back to the PROMPTED path and
-    completes — rather than losing the step to a request that can never succeed as configured.
-    The rejection is injected at the native run (simulating the provider's 400); the observable
-    outcome is a validated verdict produced by the prompted turn."""
+    """A native grammar rejection falls back once to prompted structured output."""
     from botocore.exceptions import ClientError
 
     from rebar.llm import structured_run

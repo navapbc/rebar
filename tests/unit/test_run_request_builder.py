@@ -1,15 +1,8 @@
-"""One shared constructor for the single-turn structured LLM sub-call (story
-``anthropoid-trophied-moose``).
+"""Enforce the shared constructor for single-turn structured requests.
 
-Fourteen sites in ``src/rebar/llm`` used to hand-build the same request shape —
-``mode="structured"`` + ``output_schema`` + ``execution_mode="single_turn"`` — and the four
-lowering-only ceilings (:class:`SingleTurnBounds`) were declared at exactly one of them. An
-omitted ceiling looks identical to a deliberately-inherited one, which is how bug
-``leathery-druidic-nurseshark`` bounded ``judge_batch`` and left the identical ``judge_one``
-block four lines above it unbounded.
-
-:func:`RunRequest.for_structured` is now the only way to build that shape outside the owner
-module, and it takes ``bounds`` as a REQUIRED argument, so the decision is always written down.
+``RunRequest.for_structured`` fixes mode and execution mode and requires an explicit
+``SingleTurnBounds`` decision. An AST guard rejects direct hand-built ``RunRequest(...)``
+sites outside the owner unless a reasoned exception marker documents the exception.
 """
 
 from __future__ import annotations
