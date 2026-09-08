@@ -1,16 +1,17 @@
-# Jira <-> rebar reconciliation template. Client repos copy it unchanged and supply the
-# Variables/Secrets in docs/jira-sync-setup.md; the installed package provides the runner.
-# The hourly schedule and manual dry-run/live/bootstrap modes route to `bridge preview` or
-# `bridge sync`. Canonical exits are 0 success/benign, 1 operational, and 2 invocation/config;
-# the strict adapter commits any remaining events and fails unless their push converges.
-#
-# Actions single-flight concurrency lets a pass finish; the self-healing
-# `refs/reconciler/lock` is the cross-run backstop (ADR 0031).
-# `RECONCILE_CONTINUOUS=true` opts into a paced workflow_dispatch chain: each pass waits its
-# own elapsed time before dispatching the next, for a two-pass-duration cadence, while the
-# hourly schedule re-seeds a stopped chain. It is default-off and billed on hosted runners,
-# including the wait, so enable it only for public repos or self-hosted runners. This repo
-# keeps it false; only the hourly schedule runs here.
+# This workflow is the Jira <-> rebar reconciliation template. Client repositories copy it and
+# configure the variables and secrets documented in `docs/jira-sync-setup.md`. The installed
+# package supplies the runner. The hourly schedule and manual `dry-run`, `live`, and
+# `bootstrap` modes invoke `bridge preview` or `bridge sync`. Exit 0 reports success or a
+# benign result. Exit 1 reports an operational failure. Exit 2 reports an invocation or
+# configuration failure. The strict adapter commits remaining events and requires the push to
+# converge. Actions concurrency permits one pass to finish. The `refs/reconciler/lock` ref
+# prevents overlapping runs as described by ADR 0031. `RECONCILE_CONTINUOUS=true` chains paced
+# `workflow_dispatch` runs. A pass waits for at most 900 seconds based on its elapsed duration
+# before dispatching the next pass. A pass that reaches 1800 seconds skips the wait. The hourly
+# schedule restarts a stopped chain. The setting defaults to false because hosted runners bill
+# the wait. Enable it only where that cost is acceptable, such as public repositories or
+# self-hosted runners. This repository leaves the continuous chain disabled. Hourly scheduling
+# is the automatic fallback, and manual dispatch remains available.
 
 name: Reconcile Bridge
 
@@ -60,9 +61,10 @@ jobs:
 
     env:
       MODE: ${{ github.event.inputs.mode || 'live' }}
-      # The materialization step exports REBAR_IDENTITY_SIGNING_KEY through $GITHUB_ENV.
-      # `${{ runner.temp }}` is step-only; using it here prevents the job from starting.
-      # Both rebar-writing steps run after materialization and inherit the exported path.
+      # The materialization step writes `REBAR_IDENTITY_SIGNING_KEY` to `$GITHUB_ENV`.
+      # `${{ runner.temp }}` is available only within steps and cannot appear in the job-level
+      # environment. The later `Run reconciler` step inherits the exported path for its internal
+      # ticket writes.
 
     steps:
       - name: Checkout repository
@@ -70,8 +72,9 @@ jobs:
         with:
           persist-credentials: true   # the mounted worktree reuses these creds to push
           filter: blob:none
-          # Compaction reconciliation needs a real merge base: use full history plus merge.
-          # A shallow/rebase path can resurrect deleted events as SNAPSHOT_INCONSISTENT (f193).
+          # Compaction reconciliation requires a merge base, so the checkout fetches full
+          # history. Later reconciliation performs the merge. A shallow checkout or rebase can
+          # restore deleted events and produce `SNAPSHOT_INCONSISTENT`.
           fetch-depth: 0
 
       - name: Record the pass start time (chain pacing)
@@ -118,9 +121,10 @@ jobs:
           git config merge.ours.driver true
 
       - name: Sync reconciler lock refs (ref-lock backend)
-        # The pass lock and phase gate live on `refs/reconciler/*`, outside the tickets tree.
-        # Fetch them best-effort before acquire; each lock operation also force-syncs and uses
-        # `--force-with-lease`. Missing refs are normal on a first run or file backend.
+        # The pass lock and phase gate use `refs/reconciler/*`, which is outside the tickets
+        # tree. Fetch those refs on a best-effort basis before acquisition. Each lock operation
+        # also synchronizes the refs and uses `--force-with-lease`. A first run or file backend
+        # may have no refs.
         run: |
           set -euo pipefail
           git fetch origin '+refs/reconciler/*:refs/reconciler/*' || true
@@ -192,12 +196,13 @@ jobs:
             --token
 
       - name: Configure git identity for the bridge bot
-        # Configure globally so the checkout, tickets mount, and temporary worktrees can commit;
-        # CI otherwise fails with an empty git identity.
+        # Set a global identity because the checkout, tickets mount, and temporary worktrees can
+        # all create commits. Git otherwise rejects those commits when no identity is configured.
         env:
           BRIDGE_BOT_NAME: ${{ vars.BRIDGE_BOT_NAME || 'rebar-bridge[bot]' }}
-          # Defaults to the Rebar Bot email so git-email fallback resolves inline-signed events
-          # to identity 594c-9dcf-5ad6-4e6d; BRIDGE_BOT_EMAIL may override it.
+          # The default Rebar Bot email lets the git-email fallback map inline-signed events to
+          # identity `594c-9dcf-5ad6-4e6d`. `BRIDGE_BOT_EMAIL` can select another configured
+          # email.
           BRIDGE_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'joeoakhart+bot@navapbc.com' }}
         run: |
           set -euo pipefail
@@ -236,9 +241,8 @@ jobs:
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           JIRA_PROJECT: ${{ vars.JIRA_PROJECT }}
           REBAR_ENV_ID: ${{ vars.REBAR_ENV_ID || 'reconciler' }}
-          # Fail loudly on silent sub-operation no-ops and swallowed comment failures. This live
-          # opt-in followed cleanup of tickets that exceeded Jira's comment cap; the mechanism
-          # remains default-off elsewhere.
+          # `REBAR_RECONCILER_FAIL_SILENT_NOOP=1` turns silent suboperation no-ops and swallowed
+          # comment failures into errors. The option defaults to off outside this workflow.
           REBAR_RECONCILER_FAIL_SILENT_NOOP: "1"
         run: rebar bridge run
 
@@ -262,15 +266,16 @@ jobs:
           echo "::error title=Reconcile Bridge failed::See run summary — $GH_RUN_URL"
 
       - name: Re-dispatch to sustain the continuous loop (opt-in)
-        # The opt-in chain uses workflow_dispatch, the GITHUB_TOKEN exception that may create a
-        # run, and therefore needs `actions: write`. Concurrency plus the pass lock permits one
-        # running and one queued pass without interruption or fan-out.
-        #
-        # Pacing waits one elapsed pass to make the period two pass durations. Missing or
-        # non-numeric PASS_STARTED_EPOCH skips arithmetic; sleep is capped at 900 seconds and
-        # omitted at 1800 seconds so a slow pass retains the 60-minute completion budget.
-        # Failed passes re-seed, cancellation is the kill switch, and disabling the Variable
-        # stops the chain after the current run. The unset template default remains hourly.
+        # `RECONCILE_CONTINUOUS=true` chains runs through `workflow_dispatch`, which requires the
+        # `GITHUB_TOKEN` exception and `actions: write`. Concurrency and the pass lock allow one
+        # running pass and one queued pass without interruption or fan-out. A pass shorter than
+        # 1800 seconds waits for the smaller of its elapsed duration and 900 seconds before
+        # dispatching its successor. A pass that reaches 1800 seconds skips the wait. A missing or
+        # nonnumeric `PASS_STARTED_EPOCH` skips the wait calculation. These bounds preserve the
+        # 60-minute job budget. A failed pass starts another pass. Cancellation stops the chain.
+        # Disabling the variable lets the current pass finish and prevents another dispatch.
+        # Without the variable, the hourly schedule remains the automatic trigger. Manual
+        # dispatch stays available.
         if: ${{ !cancelled() && vars.RECONCILE_CONTINUOUS == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -318,8 +323,8 @@ jobs:
           exit "${dispatch_rc}"
 
       # The host probe cannot observe this Actions-hosted bridge. Publish CloudWatch telemetry
-      # last so failure() covers reconciliation and re-dispatch; continue-on-error keeps a
-      # metrics outage from changing the bridge result.
+      # after reconciliation and redispatch so `failure()` includes both results.
+      # `continue-on-error` prevents a telemetry failure from changing the bridge result.
       - name: Configure AWS credentials (OIDC → the scoped bridge-metrics role)
         id: bridge_metrics_auth
         # Acquire credentials on both result paths, only in the canonical repo when a role exists.
@@ -330,9 +335,9 @@ jobs:
           role-to-assume: ${{ vars.AWS_BRIDGE_METRICS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_BRIDGE_METRICS_REGION }}
 
-      # Publish 1 on failure and 0 on success every run: the zero proves the publisher works and
-      # keeps healthy alarms in OK rather than INSUFFICIENT_DATA. Keep the metric dimensionless
-      # to match its alarm identity exactly.
+      # Publish 1 after failure and 0 after success. Reporting zero proves the publisher executed
+      # and keeps the alarm in `OK` instead of `INSUFFICIENT_DATA`. Use a dimensionless metric so
+      # its identity matches the alarm.
       - name: Publish bridge run failure to CloudWatch
         if: ${{ failure() && steps.bridge_metrics_auth.outcome == 'success' }}
         continue-on-error: true

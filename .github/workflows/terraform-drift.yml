@@ -1,12 +1,15 @@
-# Read-only drift detection for Terraform-path PRs and daily/manual branch health. A non-empty
-# plan catches unapplied HCL or live drift while applies remain manual. The plan job assumes the
-# scoped OIDC read role and uses `-lock=false`; no static AWS key or state-lock write is needed.
+# Detect Terraform drift for affected pull requests and scheduled or manual branch checks. A
+# nonempty plan identifies unapplied HCL or infrastructure drift. Applies remain manual. The plan
+# job assumes the scoped OIDC read role and uses `-lock=false`, so it requires neither a static AWS
+# key nor a state-lock write.
 #
-# Formatting and planning are independent jobs so a cosmetic fmt failure cannot suppress the
-# drift answer. Before planning, the latter proves its full-history checkout is current with the
-# tracked tree; a stale tree can otherwise report the same "No changes" as convergence. Job names
-# distinguish formatting from drift or an unprovable plan. This advisory workflow is outside the
-# Gerrit Verified aggregate, so it cannot lock its own repair out of review.
+# Separate formatting and planning jobs ensure a formatting failure does not suppress the drift
+# result. Before planning, scheduled and manual runs require the checkout to equal the tracked
+# branch tip. Pull requests require the tracked branch tip to be an ancestor of the checkout.
+# These checks prevent a stale tree from reporting "No changes" as if it were converged. The
+# generated step summary distinguishes detected drift from a failure to produce a plan. This
+# advisory workflow does not contribute to the Gerrit Verified label, so it cannot block review
+# of its repair.
 name: Terraform Drift
 
 # `main` CI on this mirror is SCHEDULED, not push-triggered (ticket 03ef-6fb5-158b-4abd).
@@ -114,9 +117,10 @@ jobs:
         run: terraform validate
 
       - name: terraform plan (fail on drift)
-        # `-detailed-exitcode` names all outcomes: 0 converged, 2 drift, and 1 no plan answer.
-        # Both non-zero cases still fail, but an evaluation error must not masquerade as observed
-        # drift. `-lock=false` keeps the live read from writing a state lock.
+        # `-detailed-exitcode` returns 0 for convergence, 2 for drift, and 1 when Terraform cannot
+        # produce a plan. Both nonzero cases fail the step. A plan error remains distinct from
+        # observed drift. `-lock=false` permits the infrastructure read without writing a state
+        # lock.
         shell: bash
         run: |
           set -o pipefail
