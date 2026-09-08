@@ -122,6 +122,10 @@ case "$1" in
     # reached via that backgrounded subshell, so FD 9 must be CLOSED here.
     if { true >&9; } 2>/dev/null; then echo "stop-fd9-leaked $nm" >> "$LOG"; fi
     set_state "$nm" exited; exit 0 ;;
+  start)
+    nm="$2"; echo "start $nm" >> "$LOG"
+    [ -f "$DS/start-fails" ] && exit 1
+    set_state "$nm" running; exit 0 ;;
   rm)
     if [ "$2" = "-f" ]; then nm="$3"; echo "rm-f $nm" >> "$LOG"
     else nm="$2"; echo "rm $nm" >> "$LOG"; fi
@@ -899,6 +903,92 @@ def test_no_op_tick_reaps_a_drained_old_container(mcp_box: dict[str, object]) ->
     assert not any(
         "rm rebar-mcp-live-8092" in c or "rm-f rebar-mcp-live-8092" in c for c in cmds
     ), f"the live container must never be reaped\n{ctx}"
+
+
+def test_no_op_tick_restarts_dead_live_mcp_backend(mcp_box: dict[str, object]) -> None:
+    """A dead container that still owns nginx's live MCP port must be restarted in place.
+
+    This is the withheld oracle for trivial-protected-barracuda: before the fix, the
+    no-op tick only logs mcp-live-backend-down and leaves /mcp pinned to a dead backend.
+    """
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    _seed_container(
+        mcp_box["dstate"],  # type: ignore[arg-type]
+        "rebar-mcp-live-8092",
+        8092,
+        in_flight=0,
+        state="exited",
+        image=f"compose-mcp:{_TARGET}",
+    )
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    cmds = _commands(mcp_box)
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0, f"self-heal should make a no-op tick healthy\n{ctx}"
+    assert "start rebar-mcp-live-8092" in cmds, f"the live backend must be restarted\n{ctx}"
+    assert not any(
+        "rm rebar-mcp-live-8092" in c or "rm-f rebar-mcp-live-8092" in c for c in cmds
+    ), f"the nginx-pinned backend must not be removed during self-heal\n{ctx}"
+    assert (mcp_box["upstream"]).read_text().strip() == "server 127.0.0.1:8092;", (  # type: ignore[operator]
+        f"in-place heal must leave nginx pinned to the same port\n{ctx}"
+    )
+    output = result.stdout + result.stderr
+    assert "mcp self-heal: restarted live backend rebar-mcp-live-8092" in output
+
+
+def test_dead_live_mcp_backend_heal_failure_is_retryable(mcp_box: dict[str, object]) -> None:
+    """A failed in-place restart keeps identity/upstream intact and records MCP backoff."""
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    _seed_container(
+        mcp_box["dstate"],  # type: ignore[arg-type]
+        "rebar-mcp-live-8092",
+        8092,
+        in_flight=0,
+        state="exited",
+        image=f"compose-mcp:{_TARGET}",
+    )
+    (mcp_box["dstate"] / "start-fails").write_text("1")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    cmds = _commands(mcp_box)
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert result.returncode != 0, f"failed self-heal should engage MCP backoff\n{ctx}"
+    assert "start rebar-mcp-live-8092" in cmds, f"the restart attempt must be visible\n{ctx}"
+    assert not any(
+        "rm rebar-mcp-live-8092" in c or "rm-f rebar-mcp-live-8092" in c for c in cmds
+    ), f"a failed restart must retain the nginx-pinned container identity\n{ctx}"
+    assert (mcp_box["upstream"]).read_text().strip() == "server 127.0.0.1:8092;", (  # type: ignore[operator]
+        f"failed self-heal must not rewrite nginx\n{ctx}"
+    )
+    assert (mcp_box["state"] / "mcp-deploy-backoff").exists(), (  # type: ignore[operator]
+        f"failed self-heal must be retryable through MCP backoff\n{ctx}"
+    )
+    assert "AUTODEPLOY_ERROR" in result.stdout + result.stderr
+    assert "mcp-live-backend-down" in result.stdout + result.stderr
+
+
+def test_mcp_self_heal_kill_switch_restores_log_only_behavior(
+    mcp_box: dict[str, object],
+) -> None:
+    """MCP_SELF_HEAL=0 is the source-free backout for the new watchdog branch."""
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    _seed_container(mcp_box["dstate"], "rebar-mcp-live-8092", 8092, state="exited")  # type: ignore[arg-type]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+
+    result = _run(mcp_box, {"MCP_SELF_HEAL": "0"})
+    cmds = _commands(mcp_box)
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0, f"disabled self-heal must keep the old no-op disposition\n{ctx}"
+    assert not any(c.startswith("start ") for c in cmds), f"kill switch must skip restart\n{ctx}"
+    assert "mcp-live-backend-down" in result.stdout + result.stderr
 
 
 def test_retire_never_stops_running_containers_when_live_port_unknown(

@@ -189,6 +189,8 @@ MCP_MEM_MIN_MB="${MCP_MEM_MIN_MB:-1024}"
 MCP_RELEASES_KEEP="${MCP_RELEASES_KEEP:-1}"           # retain the newest N mcp releases (the live one)
 MCP_RELEASES_CAP="${MCP_RELEASES_CAP:-3}"             # hard cap on managed containers = the {8091,A,B} port pool
 MCP_STOP_GRACE="${MCP_STOP_GRACE:-1260}"             # `docker stop --time`: >= _mcp_health grace (1200) + margin
+# mechanism-ok: env_var MCP_SELF_HEAL — ticket 85a5 kill switch for the live-backend restart watchdog.
+MCP_SELF_HEAL="${MCP_SELF_HEAL:-1}"
 
 # review-bot redeploys iff a matching path changed between deployed..target.
 BOT_PATHS='src/rebar/ infra/compose/Dockerfile.reviewbot pyproject.toml infra/compose/docker-compose.yml infra/scripts/reviewbot-ensure-tickets.sh'
@@ -491,7 +493,16 @@ mcp_managed() {
     | grep -E "^(${MCP_CONTAINER_PREFIX}|${MCP_COMPOSE_CONTAINER})" || true
 }
 # The HOST port a managed container publishes container-port 8091 on (echoes nothing if unknown).
-mcp_port_of() { docker port "$1" 8091/tcp 2>/dev/null | sed -E 's/.*:([0-9]+)$/\1/' | head -1; }
+# `docker port` is fast for running containers, but an exited live backend can report no mapping
+# there; fall back to HostConfig.PortBindings so the self-heal watchdog can map nginx's live port
+# back to the stopped container identity it must restart in place (bug 85a5).
+mcp_port_of() {
+  local p
+  p="$(docker port "$1" 8091/tcp 2>/dev/null | sed -E 's/.*:([0-9]+)$/\1/' | head -1)"
+  if [ -n "$p" ]; then echo "$p"; return 0; fi
+  docker inspect -f '{{json .HostConfig.PortBindings}}' "$1" 2>/dev/null \
+    | sed -nE 's/.*"8091\/tcp":[^]]*"HostPort":"([0-9]+)".*/\1/p' | head -1
+}
 # The port the /mcp/ upstream include currently points at (the LIVE backend).
 mcp_live_port() { sed -nE 's/.*server[[:space:]]+127\.0\.0\.1:([0-9]+);.*/\1/p' "$MCP_UPSTREAM_FILE" 2>/dev/null | head -1; }
 # The image reference of the container publishing $1 (the live host port). Echoes nothing when
@@ -815,14 +826,6 @@ fi
 # Up to date: no deploy is pending, so any deferral episode is over. Clearing it here (and at
 # the success footer) is what keeps a STALE episode from making the NEXT episode's bound look
 # already-exhausted and killing a review on the first busy tick.
-if [ "$TARGET" = "$DEPLOYED" ]; then
-  rm -f "$DEFER_FILE"
-  reclaim_under_pressure
-  mcp_retire_sweep          # reap mcp containers that finished draining since the last flip
-  log "up to date ($TARGET); no-op"
-  exit 0
-fi
-
 # backoff: same failed TARGET, not time yet -> skip. NEW target -> reset (fix-forward).
 # This file records REVIEW-BOT failures (every record_backoff_failure call site is inside
 # deploy_review_bot), so it gates the BOT path only. It used to `exit 0` the whole script,
@@ -875,6 +878,70 @@ record_mcp_routine_backoff() {
 }
 clear_mcp_backoff() { rm -f "$MCP_BACKOFF_FILE"; }
 
+mcp_health_contract_ok() {
+  local port body store handshake
+  port="$1"
+  body="$(curl -fsS -m 3 "http://127.0.0.1:${port}/health" 2>/dev/null)" || return 1
+  store="$(printf '%s' "$body" | python3 -c 'import json,sys
+try:
+    st = json.load(sys.stdin).get("store") or {}
+except Exception:
+    st = {}
+print("missing" if st.get("expected") and not st.get("present") else "ok")' 2>/dev/null || echo ok)"
+  [ "$store" = "missing" ] && return 1
+  handshake="$(printf '%s' "$body" | python3 -c 'import json,sys
+try:
+    hs = json.load(sys.stdin).get("handshake") or {}
+except Exception:
+    hs = {}
+print("failed" if hs.get("ok") is False else "ok")' 2>/dev/null || echo ok)"
+  [ "$handshake" = "failed" ] && return 1
+  return 0
+}
+
+mcp_wait_health_contract() {
+  local port ok=0 deadline
+  port="$1"; deadline=$(( $(now) + MCP_HEALTH_TIMEOUT ))
+  while [ "$(now)" -lt "$deadline" ]; do
+    mcp_health_contract_ok "$port" && { ok=1; break; }
+    sleep 2
+  done
+  [ "$ok" = 1 ]
+}
+
+mcp_live_backend_name() {
+  local live n p
+  live="$(mcp_live_port)"
+  [ -n "$live" ] || return 0
+  while read -r n; do
+    [ -n "$n" ] || continue
+    p="$(mcp_port_of "$n")"
+    [ "$p" = "$live" ] && { echo "$n"; return 0; }
+  done < <(mcp_managed -a)
+}
+
+mcp_self_heal_live_backend() {
+  local live name running
+  live="$(mcp_live_port)"; [ -n "$live" ] || return 0
+  name="$(mcp_live_backend_name)"; [ -n "$name" ] || return 0
+  running=false
+  [ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" = "true" ] && running=true
+  [ "$running" = true ] && return 0
+  err mcp-live-backend-down "live mcp backend $name on port $live is NOT running; /mcp is failing"
+  [ "$MCP_SELF_HEAL" = "0" ] && { log "mcp self-heal disabled by MCP_SELF_HEAL=0; retaining dead live backend"; return 0; }
+  if ! docker start "$name" >/dev/null 2>&1; then
+    record_mcp_backoff_failure
+    return 1
+  fi
+  if ! mcp_wait_health_contract "$live"; then
+    record_mcp_backoff_failure
+    return 1
+  fi
+  clear_mcp_backoff
+  log "mcp self-heal: restarted live backend $name on 127.0.0.1:${live}; nginx upstream unchanged"
+  return 0
+}
+
 # ── what changed? (computed in the mirror clone) ──────────────────────────────
 changed_range() { git -C "$MIRROR_DIR" diff --name-only "$1" "$2" -- $3 2>/dev/null | grep -q .; }
 changed() { changed_range "$DEPLOYED" "$TARGET" "$1"; }
@@ -900,7 +967,23 @@ bot_deployed="$(cat "$BOT_SHA_FILE" 2>/dev/null || true)"
 if [ -z "$bot_deployed" ] || ! git -C "$MIRROR_DIR" rev-parse --verify -q "$bot_deployed^{commit}" >/dev/null 2>&1; then
   bot_deployed="$DEPLOYED"
 fi
+
+# Up to date: no deploy is pending, so any deferral episode is over. Clearing it here (and at
+# the success footer) is what keeps a STALE episode from making the NEXT episode's bound look
+# already-exhausted and killing a review on the first busy tick. The MCP self-heal runs before
+# the ordinary no-op exit so a dead live backend does not stay pinned behind nginx until a future
+# source-changing deploy.
+if [ "$TARGET" = "$DEPLOYED" ]; then
+  rm -f "$DEFER_FILE"
+  reclaim_under_pressure
+  mcp_self_heal_live_backend || exit 1
+  mcp_retire_sweep          # reap mcp containers that finished draining since the last flip
+  log "up to date ($TARGET); no-op"
+  exit 0
+fi
+
 log "main advanced $DEPLOYED -> $TARGET; computing component deltas"
+mcp_self_heal_live_backend || exit 1
 
 # ── config refs (replication/g2p/meta): DETECT-ONLY (v1 boundary) ─────────────
 if changed "$CONFIG_PATHS"; then
