@@ -80,6 +80,49 @@ Two independent ways to rotate; pick per situation:
 
 Either way the value never lands in terraform state.
 
+### GitHub Actions mirror sync
+
+Some repository secrets are mirrors of the SSM source of record. A rotation is incomplete until
+every mirror below is updated in GitHub Actions; otherwise CI or scheduled workflows can keep using
+the stale pre-rotation value after SSM has changed.
+
+| GitHub name | Kind | SSM source |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | GitHub Actions secret | `/rebar/prod/anthropic-api-key` |
+| `JIRA_API_TOKEN` | GitHub Actions secret | `/rebar/prod/jira-api-token` |
+| `GERRIT_SSH_PRIVKEY` | GitHub Actions secret | `/rebar/prod/ci-gerrit-ssh-key` |
+| `OPENAI_API_KEY` | GitHub Actions secret | GitHub-only |
+| `REBAR_BOT_SIGNING_KEY` | GitHub Actions secret | `/rebar/prod/rebar-bot-signing-key` |
+
+After rotating any SSM-backed row above, sync its GitHub mirror from SSM. Keep shell tracing off, do
+not echo the values, and run only the rows whose source changed:
+
+```sh
+aws ssm get-parameter --with-decryption --name /rebar/prod/anthropic-api-key \
+  --query 'Parameter.Value' --output text \
+  | gh secret set ANTHROPIC_API_KEY --repo navapbc/rebar
+
+aws ssm get-parameter --with-decryption --name /rebar/prod/jira-api-token \
+  --query 'Parameter.Value' --output text \
+  | gh secret set JIRA_API_TOKEN --repo navapbc/rebar
+
+aws ssm get-parameter --with-decryption --name /rebar/prod/ci-gerrit-ssh-key \
+  --query 'Parameter.Value' --output text \
+  | gh secret set GERRIT_SSH_PRIVKEY --repo navapbc/rebar
+
+aws ssm get-parameter --with-decryption --name /rebar/prod/rebar-bot-signing-key \
+  --query 'Parameter.Value' --output text \
+  | gh secret set REBAR_BOT_SIGNING_KEY --repo navapbc/rebar
+```
+
+`OPENAI_API_KEY` has no SSM source in this inventory; rotate it directly in GitHub Actions (and the
+provider console) when needed.
+
+Optional drift check, when auditing a rotation: compare each SSM source's `LastModifiedDate` with
+the corresponding GitHub secret `updatedAt` from `gh secret list --json name,updatedAt`. GitHub does
+not expose secret values, so this is a timestamp freshness check only; if a mirror is older than its
+SSM source, rerun the sync command above.
+
 ## REMEDIATE the existing exposure (one-time operator cutover)
 
 This is the deferred operator work (a `task` linked `discovered_from` `finedrawn-closed-stud`). Run
