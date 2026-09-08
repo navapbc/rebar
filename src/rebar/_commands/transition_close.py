@@ -25,7 +25,7 @@ from typing import Any
 from rebar import config
 from rebar._commands import (
     scratch,
-    txn,  # noqa: F401 — historical monkeypatch seam
+    txn,
 )
 from rebar._commands._seam import CommandError
 
@@ -495,6 +495,7 @@ def _plan_review_close_recheck(
     *,
     repo_root,
     close_class: str,
+    close_reason: str,
     tracker: str,
 ) -> Callable[[Mapping[str, Any]], None] | None:
     """Run the plan-review close gate NOW (outside the write lock) and, when it actually
@@ -519,6 +520,7 @@ def _plan_review_close_recheck(
         ticket_state,
         repo_root=repo_root,
         close_class=close_class,
+        close_reason=close_reason,
         tracker=tracker,
     )
     if not check.get("ok"):
@@ -532,6 +534,7 @@ def _plan_review_close_recheck(
             locked_state,
             repo_root=repo_root,
             close_class=close_class,
+            close_reason=close_reason,
             tracker=tracker,
         )
         if not locked_check.get("ok"):
@@ -589,20 +592,10 @@ def close_ticket(
     # unavailable verifier. A receipt-bearing PASS is prepared for atomic publication; a
     # legacy PASS keeps the post-close signing path. force_close skips both.
     #
-    # `idea → closed` is a REJECT/DROP, not a completion: closing an undesigned idea
-    # means "we won't pursue this," so there is nothing built to verify or attest.
-    # Running the completion precheck (verifier + file-impact→referencing-commit +
-    # reason-guard copy) would nonsensically BLOCK the rejection, so we skip it entirely
-    # when the from-status is `idea`. The open-children structural guard above still
-    # ran unconditionally (integrity, not completion), so an idea parent over
-    # non-closed children is still refused.
-    # Machine-readable record of what became of the completion signature (bug
-    # silvern-dewy-damselfly). The close COMMITS before signing is attempted, so a signing
-    # failure leaves a ticket closed-without-signature while the command still succeeds. Left
-    # unreported, the only evidence was a stderr line whose text described the CLOSE as having
-    # failed. Consumers branch on `cause` without parsing English; see the vocabulary below.
-    # Stays None on any path where no completion signature is in play (a non-close transition,
-    # and `idea -> closed`), and is omitted from the payload entirely in that case.
+    # `idea → closed` is a REJECT/DROP, not a completion, so skip completion gates; the
+    # open-children structural guard above still applies.
+    # Stays None when no completion signature is in play; otherwise records whether signing
+    # succeeded so consumers need not parse stderr.
     completion_signature: dict[str, object] | None = None
     verified_result: dict[str, Any] | None = None
     completion_expectation = ""
@@ -617,6 +610,16 @@ def close_ticket(
 
         ticket_state = _reduce(os.path.join(tracker, ticket_id)) or {}
         ticket_type = ticket_state.get("ticket_type", "")
+        class_refusal = txn.close_class_refusal(
+            str(ticket_type),
+            close_class,
+            close_reason=close_reason,
+            force_close_reason=force_close,
+            ticket_id=ticket_id,
+            tracker=tracker,
+        )
+        if class_refusal:
+            raise CommandError(f"Error: {class_refusal}", returncode=1)
         if not force_close and ticket_type in _PLAN_REVIEW_CLOSE_TYPES:
             plan_review_recheck = _timed_close_phase(
                 close_metrics,
@@ -626,6 +629,7 @@ def close_ticket(
                 ticket_state,
                 repo_root=repo_root,
                 close_class=close_class,
+                close_reason=close_reason,
                 tracker=tracker,
             )
 
@@ -634,7 +638,7 @@ def close_ticket(
             ticket_type,
             repo_root_str,
             repo_root,
-            reason=reason,
+            reason=close_reason,
             force_close=force_close,
             close_class=close_class,
             ref=ref,

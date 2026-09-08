@@ -627,16 +627,6 @@ def _completion_precheck(
     # reads below continue to use the independently resolved tracker directory.
     code_root = str(config.repo_root(repo_root))
 
-    # Shared resolution + error-on-unreadable-config posture (see _commands/gates.py:
-    # an unreadable config raises ConfigError out of this close, per operator ruling
-    # 39f8-ae7c). The confirmed fail-CLOSED behavior still applies when the gate is
-    # readable-ON but the LLM is unavailable (below).
-    skip = _gate_skip_expectation(ticket_id, code_root, force_close)
-    if skip:
-        return None, skip
-    # Gate is ON and unforced: refuse a stale store BEFORE the billable verifier (bug b928).
-    freshness.assert_gate_store_fresh("the completion close gate", ticket_id, repo_root)
-
     # Cheap precondition BEFORE the billable LLM call: an invalid close-class combination
     # (missing bug class, non-administrative class on a non-bug, missing reason for a
     # reason-required class — tickets ed13 + fc20 + bug d54b). Shared rule
@@ -645,6 +635,11 @@ def _completion_precheck(
     # the LLM call. ticket_id + tracker let the rule honor a not_a_bug/escalated close whose
     # live replacement link stands in for its --reason.
     tracker = str(config.tracker_dir(repo_root))
+    if force_close:
+        skip = _gate_skip_expectation(ticket_id, code_root, force_close)
+        if skip:
+            return None, skip
+
     refusal = txn.close_class_refusal(
         ticket_type, close_class, close_reason=reason, ticket_id=ticket_id, tracker=tracker
     )
@@ -664,6 +659,18 @@ def _completion_precheck(
     disposition = _administrative_disposition(ticket_id, ticket_type, close_class, reason, tracker)
     if disposition is not _NO_DISPOSITION:
         return disposition, "disposition"
+
+    # Shared resolution + error-on-unreadable-config posture (see _commands/gates.py:
+    # an unreadable config raises ConfigError out of this close, per operator ruling
+    # 39f8-ae7c). The confirmed fail-CLOSED behavior still applies when the gate is
+    # readable-ON but the LLM is unavailable (below). Administrative dispositions are checked
+    # first because their deterministic attestation is not a completion-verification verdict
+    # and should be minted even when the completion gate is disabled.
+    skip = _gate_skip_expectation(ticket_id, code_root, force_close)
+    if skip:
+        return None, skip
+    # Gate is ON and unforced: refuse a stale store BEFORE the billable verifier (bug b928).
+    freshness.assert_gate_store_fresh("the completion close gate", ticket_id, repo_root)
 
     # A duplicate/superseded close without a usable replacement cannot be verified as complete.
     _ensure_duplicate_close_is_linked(ticket_id, ticket_type, close_class, tracker)
