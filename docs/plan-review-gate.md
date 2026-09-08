@@ -715,7 +715,8 @@ signed, or dead, and a blind re-run launches a **second, double-billed** LLM pas
   (mirroring `run_workflow`), so it OUTLIVES the request deadline. Then POLL for the verdict:
   `plan_review_status` / `verify_completion_status` read the durable **signed attestation**
   (the authoritative result), and `gate_status(job_id)` reads the run handle
-  (`running` → `passed` / `failed`, or `stale-running` if the daemon died mid-run). For
+  (`running` → `passed` / `failed`; a stale daemon is materialized as a failed
+  diagnostic). For
   plan-review jobs, `gate_status(job_id).findings.readable` is the per-run
   `REVIEW_RESULT` receipt: do not read the latest findings sidecar for remediation until it
   is `true`, because a terminal BLOCK verdict has no signed attestation and an older

@@ -535,7 +535,7 @@ try:
         # verify_completion_start, returned by those tools and by the gate_status poll
         # (bug d80d Phase 2). extra=allow carries the poll-only fields (verdict / error /
         # durable / findings) a settled run adds. status is running / passed / failed /
-        # stale-running / attaching / unknown.
+        # attaching / unknown.
         job_id: str
         status: str
         ticket_id: str | None = None
