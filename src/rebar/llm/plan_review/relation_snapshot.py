@@ -529,6 +529,23 @@ def _context_for(
     )
 
 
+def _retained_snapshot_states(
+    states: dict[str, dict],
+    *,
+    subject_id: str,
+    child_ids: set[str],
+    prerequisite_ids: set[str],
+) -> dict[str, dict]:
+    """Keep only rows downstream snapshot consumers can read after collection.
+
+    The complete ``states`` map remains available while collecting relations and computing
+    material pins. After that, the snapshot is long-lived review state, and consumers only
+    need the subject plus direct material children/prerequisites.
+    """
+    retained_ids = {subject_id, *child_ids, *prerequisite_ids}
+    return {ticket_id: states[ticket_id] for ticket_id in sorted(retained_ids)}
+
+
 def collect_plan_relation_snapshot(
     ticket_id: str, *, repo_root=None, ignore_untracked: bool = False
 ) -> PlanRelationSnapshot:
@@ -603,7 +620,12 @@ def collect_plan_relation_snapshot(
 
     return PlanRelationSnapshot(
         subject_state=subject,
-        ticket_states_by_id=states,
+        ticket_states_by_id=_retained_snapshot_states(
+            states,
+            subject_id=subject_id,
+            child_ids=child_ids,
+            prerequisite_ids=prerequisite_ids,
+        ),
         child_ids=tuple(sorted(child_ids)),
         prerequisite_ids=tuple(sorted(prerequisite_ids)),
         related_material=tuple(sorted(pins)),
