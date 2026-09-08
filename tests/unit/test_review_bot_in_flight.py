@@ -105,9 +105,11 @@ def test_health_endpoint_reports_the_in_flight_count(monkeypatch: pytest.MonkeyP
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
+    from rebar.review_bot import app as appmod
     from rebar.review_bot.app import app
 
     monkeypatch.setattr(voter, "in_flight_reviews", lambda: 2)
+    monkeypatch.setattr(appmod, "_gerrit_auth_health", lambda _cfg: (True, "ok"), raising=False)
     with TestClient(app) as client:
         response = client.get("/health")
 
@@ -133,15 +135,17 @@ def test_health_endpoint_reports_the_queue_depth(monkeypatch: pytest.MonkeyPatch
     extra.
     """
     pytest.importorskip("fastapi")
+    from fastapi import Response
 
     from rebar.review_bot import app as appmod
 
     monkeypatch.setattr(voter, "in_flight_reviews", lambda: 0)
+    monkeypatch.setattr(appmod, "_gerrit_auth_health", lambda _cfg: (True, "ok"), raising=False)
 
     # No lifespan has run in this test, so there may be no queue at all on app.state —
     # the field must still be present and 0, never absent.
     monkeypatch.delattr(appmod.app.state, "queue", raising=False)
-    idle = asyncio.run(appmod.health())
+    idle = asyncio.run(appmod.health(Response()))
     assert idle["queue_depth"] == 0, (
         f"with no queue yet, queue_depth must report 0, not be omitted\n{idle}"
     )
@@ -150,7 +154,7 @@ def test_health_endpoint_reports_the_queue_depth(monkeypatch: pytest.MonkeyPatch
     for n in range(3):
         backlog.put_nowait({"type": "patchset-created", "_n": n})
     monkeypatch.setattr(appmod.app.state, "queue", backlog, raising=False)
-    body = asyncio.run(appmod.health())
+    body = asyncio.run(appmod.health(Response()))
 
     assert body["queue_depth"] == 3, (
         f"/health must expose how many events are waiting to be reviewed\n{body}"
@@ -160,6 +164,35 @@ def test_health_endpoint_reports_the_queue_depth(monkeypatch: pytest.MonkeyPatch
     )
     # The pre-existing contract is additive-only: autodeploy.sh reads these two keys.
     assert body["status"] == "ok" and body["in_flight"] == 0
+
+
+def test_health_endpoint_fails_when_gerrit_auth_is_broken(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A listening process is not healthy if it cannot authenticate to cast votes."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from rebar.review_bot import app as appmod
+
+    monkeypatch.setattr(voter, "in_flight_reviews", lambda: 0)
+    monkeypatch.setattr(
+        appmod,
+        "_gerrit_auth_health",
+        lambda _cfg: (False, "gerrit_auth_failed:401"),
+        raising=False,
+    )
+    monkeypatch.delattr(appmod.app.state, "queue", raising=False)
+
+    with TestClient(appmod.app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "degraded",
+        "in_flight": 0,
+        "queue_depth": 0,
+        "gerrit_auth": "failed",
+        "reason": "gerrit_auth_failed:401",
+    }
 
 
 def test_health_exposes_in_flight_without_needing_the_reviewbot_extra() -> None:

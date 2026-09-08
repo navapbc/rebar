@@ -41,7 +41,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from rebar.review_bot import reconcile as _reconcile
@@ -55,6 +55,7 @@ from rebar.review_bot.config import (
     shutdown_drain_seconds,
     shutdown_force_exit_grace_seconds,
 )
+from rebar.review_bot.gerrit_client import GerritClient, GerritError
 from rebar.review_bot.startup import compose_startup_binding
 
 if TYPE_CHECKING:
@@ -176,6 +177,17 @@ def _config() -> ReceiverConfig:
     """Process-wide receiver config (env/SSM-sourced). Resolved fresh per app build so
     a reload picks up rotated secrets."""
     return ReceiverConfig.from_env()
+
+
+def _gerrit_auth_health(cfg: ReceiverConfig) -> tuple[bool, str]:
+    if not cfg.gerrit_bot_token:
+        return False, "gerrit_auth_missing_token"
+    try:
+        GerritClient(cfg).check_auth()
+    except GerritError as exc:
+        status = exc.status if exc.status is not None else "transport"
+        return False, f"gerrit_auth_failed:{status}"
+    return True, "ok"
 
 
 def _request_token(request: Request) -> str:
@@ -498,7 +510,7 @@ app.state.startup_binding = compose_startup_binding(app.state.config)
 
 
 @app.get("/health")
-async def health() -> dict[str, str | int]:
+async def health(response: Response) -> dict[str, str | int]:
     """Liveness probe + in-flight review count + queue depth. Returns 200 with
     ``{"status": "ok", "in_flight": N, "queue_depth": M}`` (no kernel call).
 
@@ -526,7 +538,22 @@ async def health() -> dict[str, str | int]:
     """
     queue: asyncio.Queue | None = getattr(app.state, "queue", None)
     queue_depth = int(queue.qsize()) if queue is not None else 0
-    return {"status": "ok", "in_flight": _voter.in_flight_reviews(), "queue_depth": queue_depth}
+    auth_ok, auth_reason = await asyncio.to_thread(_gerrit_auth_health, app.state.config)
+    if auth_ok:
+        return {
+            "status": "ok",
+            "in_flight": _voter.in_flight_reviews(),
+            "queue_depth": queue_depth,
+            "gerrit_auth": "ok",
+        }
+    response.status_code = 503
+    return {
+        "status": "degraded",
+        "in_flight": _voter.in_flight_reviews(),
+        "queue_depth": queue_depth,
+        "gerrit_auth": "failed",
+        "reason": auth_reason,
+    }
 
 
 @app.post("/webhook", status_code=202)
