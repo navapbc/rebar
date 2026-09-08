@@ -236,13 +236,22 @@ def _thread_offloaded(fn: Callable[..., Any]) -> Callable[..., Any]:
     ``functools.wraps`` matters: the SDK already built this tool's ``fn_metadata`` (and
     therefore its argument model and output schema) from the original callable at
     registration time, and ``Tool.run`` passes arguments by KEYWORD, so the wrapper must
-    stay transparent to introspection and accept whatever the original accepted."""
+    stay transparent to introspection and accept whatever the original accepted.
+
+    ``abandon_on_cancel`` is also load-bearing: a client-abandoned request must release
+    its worker-limiter token so later MCP calls are not queued behind work whose caller is
+    already gone. The sync body still runs to completion in the background, and its result
+    or exception is intentionally discarded by AnyIO because there is no caller left to
+    receive it."""
 
     @functools.wraps(fn)
     async def _offloaded(*args: Any, **kwargs: Any) -> Any:
         import anyio.to_thread
 
-        return await anyio.to_thread.run_sync(functools.partial(fn, *args, **kwargs))
+        return await anyio.to_thread.run_sync(
+            functools.partial(fn, *args, **kwargs),
+            abandon_on_cancel=True,
+        )
 
     return _offloaded
 
