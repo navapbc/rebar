@@ -98,6 +98,24 @@ def _iter_cursor_pages(
         next_page_token = token
 
 
+def _issue_local_id_property(issue: dict[str, Any]) -> str:
+    """Extract ``local_id`` from a Jira search issue's included properties."""
+    props = issue.get("properties")
+    if isinstance(props, dict):
+        raw = props.get("local_id")
+    elif isinstance(props, list):
+        raw = None
+        for prop in props:
+            if isinstance(prop, dict) and prop.get("key") == "local_id":
+                raw = prop.get("value")
+                break
+    else:
+        raw = None
+    if isinstance(raw, dict) and "value" in raw:
+        raw = raw["value"]
+    return str(raw) if raw else ""
+
+
 class AcliGraphMixin:
     """Labels, links, parent/comment maps, and field-edit ops for AcliClient."""
 
@@ -431,6 +449,41 @@ class AcliGraphMixin:
                 exc,
             )
 
+        return result
+
+    def get_local_id_map(
+        self,
+        project: str,
+        jql: str | None = None,
+    ) -> dict[str, str]:
+        """Return ``{jira_key: local_id}`` via one paged REST search.
+
+        Jira issue properties are identity data for duplicate suppression. They
+        must be fetched in bulk, not as one REST GET per issue; a property-read
+        failure raises so the reconciler does not proceed with an ambiguous
+        snapshot that can create duplicates.
+        """
+        effective_jql = jql or f"project = {project}"
+        result: dict[str, str] = {}
+        base_body: dict[str, Any] = {
+            "jql": effective_jql,
+            "maxResults": 100,
+            "fields": [],
+            "properties": ["local_id"],
+        }
+        for resp in _iter_cursor_pages(
+            self._direct_rest_post_json, "/rest/api/3/search/jql", base_body
+        ):
+            issues = resp.get("issues") or []
+            if not isinstance(issues, list):
+                break
+            for issue in issues:
+                if not isinstance(issue, dict):
+                    continue
+                key = issue.get("key")
+                local_id = _issue_local_id_property(issue)
+                if key and local_id:
+                    result[str(key)] = local_id
         return result
 
     def get_issuelinks_map(

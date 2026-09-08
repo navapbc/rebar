@@ -114,6 +114,10 @@ def _compute_outbound_create_mutation(
     if isinstance(tombstone, str) and tombstone:
         _best_effort(binding_store, "note_create_suppressed", local_id, tombstone)
         return
+    for remote_key, remote_fields in (config.jira_snapshot or {}).items():
+        if isinstance(remote_fields, dict) and str(remote_fields.get("local_id") or "") == local_id:
+            _best_effort(binding_store, "bind_confirm", local_id, remote_key)
+            return
     # Unbound -> outbound create
     # ticket 929a: for new issues the Jira side has no labels yet,
     # so the annotation label only needs an ADD (never a REMOVE).

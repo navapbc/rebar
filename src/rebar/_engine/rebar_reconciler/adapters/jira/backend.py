@@ -318,6 +318,9 @@ class JiraBackend:
     def get_comment_map(self, project_key: str) -> dict[str, Any]:
         return self.transport.get_comment_map(project_key)
 
+    def get_local_id_map(self, project_key: str) -> dict[str, str]:
+        return self.transport.get_local_id_map(project_key)
+
     # --- typed Cloud summary operation (REB-3115 S1 T2) ---
     def execute_summary_operation(self, remote_id: str, new_summary: str) -> Any:
         """Execute ONE Cloud summary write as a typed ``OperationOutcome`` (REB-3115

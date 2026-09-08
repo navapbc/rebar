@@ -60,6 +60,23 @@ class _PageClient:
         return {"issues": self._issues[start_at : start_at + max_results]}
 
 
+class _LocalIdMapClient:
+    def __init__(self, mapping: dict[str, str] | None = None, exc: Exception | None = None) -> None:
+        self.mapping = mapping or {}
+        self.exc = exc
+        self.property_gets = 0
+
+    def get_local_id_map(self, project: str) -> dict[str, str]:
+        assert project == "DIG"
+        if self.exc is not None:
+            raise self.exc
+        return self.mapping
+
+    def get_issue_property(self, *_args):
+        self.property_gets += 1
+        raise AssertionError("local_id enrichment must not do per-issue property GETs")
+
+
 def test_both_surfaces_drain_identically() -> None:
     """``collect`` reached via ``fetcher`` and via ``fetch_paging`` returns the same issues —
     the two entry points route through one implementation."""
@@ -74,6 +91,25 @@ def test_ceiling_still_raises_silent_truncation() -> None:
     re-exported surface — the guard survived the move."""
     with pytest.raises(fetcher.SilentTruncationError):
         fetcher.collect(_PageClient(fetcher._ACLI_CEILING + 50), "project = DC", page_size=100)
+
+
+def test_local_id_enrichment_uses_bulk_property_map() -> None:
+    snapshot = {"DIG-1": {"summary": "x"}, "DIG-2": {"summary": "y"}}
+    client = _LocalIdMapClient({"DIG-1": "loc-1"})
+
+    fetch_paging.enrich_local_id_properties(client, "DIG", snapshot, log=None)
+
+    assert snapshot["DIG-1"]["local_id"] == "loc-1"
+    assert "local_id" not in snapshot["DIG-2"]
+    assert client.property_gets == 0
+
+
+def test_local_id_enrichment_failure_is_not_silently_absent() -> None:
+    snapshot = {"DIG-1": {"summary": "x"}}
+    client = _LocalIdMapClient(exc=RuntimeError("property search unavailable"))
+
+    with pytest.raises(RuntimeError, match="property search unavailable"):
+        fetch_paging.enrich_local_id_properties(client, "DIG", snapshot, log=None)
 
 
 def test_both_modules_under_the_size_target() -> None:

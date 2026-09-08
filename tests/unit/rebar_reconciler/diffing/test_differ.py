@@ -124,6 +124,15 @@ def test_new_key_in_jira_produces_inbound_create_mutation(
     assert m.target == "DSO-43"
 
 
+def test_property_bound_new_jira_key_is_not_adopted(differ: ModuleType) -> None:
+    local = {"local-row": {"local_id": "loc-1", "summary": "managed"}}
+    jira = {"DSO-44": {"local_id": "loc-1", "summary": "managed"}}
+
+    result = differ.compute_mutations(local_state=local, jira_state=jira)
+
+    assert result == []
+
+
 def test_removed_key_produces_delete_mutation(differ: ModuleType, mutation_mod: ModuleType) -> None:
     """A key present in jira_state but removed from local_state → outbound delete."""
     local: dict = {}

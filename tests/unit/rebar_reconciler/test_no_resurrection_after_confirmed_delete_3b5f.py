@@ -144,6 +144,22 @@ def test_a_never_bound_local_ticket_still_gets_its_outbound_create(
     )
 
 
+def test_property_bound_remote_suppresses_create_and_repairs_binding(
+    od: ModuleType, binding_store_mod: ModuleType, tmp_path: Path
+) -> None:
+    store = binding_store_mod.BindingStore(tmp_path / ".tickets-tracker")
+
+    mutations, _ = od.compute_outbound_mutations(
+        local_tickets=[_ticket("loc-1")],
+        jira_snapshot={"DIG-77": {"summary": "Some issue", "local_id": "loc-1"}},
+        binding_store=store,
+        config=od.OutboundDiffConfig(pass_id="p1"),
+    )
+
+    assert _creates(mutations) == []
+    assert store.get_jira_key("loc-1") == "DIG-77"
+
+
 def test_the_suppression_is_observable_and_names_the_unretire_route(
     od: ModuleType, binding_store_mod: ModuleType, tmp_path: Path
 ) -> None:
@@ -294,3 +310,39 @@ def test_snapshot_differ_local_state_suppression_is_still_present_and_consulted(
     assert "drop_snapshot_differ_local_state_emissions(mutations)" in run_differs_src, (
         "run_differs must still consult the snapshot-differ suppression."
     )
+
+
+def test_property_bound_snapshot_differ_suppression_is_narrow() -> None:
+    helpers = _load_module("reconcile_helpers_property_bound", _REC / "reconcile_helpers.py")
+    mutation = _load_module("mutation_property_bound", _REC / "mutation.py")
+    Mutation = mutation.Mutation
+    MutationAction = mutation.MutationAction
+    MutationDirection = mutation.MutationDirection
+    blocked = Mutation(
+        direction=MutationDirection.inbound,
+        action=MutationAction.create,
+        target="DIG-1",
+        payload={},
+        provenance={"source": "differ"},
+    )
+    kept_outbound = Mutation(
+        direction=MutationDirection.outbound,
+        action=MutationAction.create,
+        target="DIG-1",
+        payload={},
+        provenance={"source": "differ"},
+    )
+    kept_other_source = Mutation(
+        direction=MutationDirection.inbound,
+        action=MutationAction.create,
+        target="DIG-1",
+        payload={},
+        provenance={"source": "binding_walk"},
+    )
+
+    result = helpers.drop_snapshot_differ_property_bound_emissions(
+        [blocked, kept_outbound, kept_other_source],
+        {"DIG-1": {"local_id": "loc-1"}},
+    )
+
+    assert result == [kept_outbound, kept_other_source]

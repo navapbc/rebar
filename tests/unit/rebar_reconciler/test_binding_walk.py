@@ -131,6 +131,23 @@ def test_active_local_binding_is_skipped(tmp_path: Path) -> None:
     assert not result.retired
 
 
+def test_property_bound_unbound_jira_stands_down_and_repairs_binding(tmp_path: Path) -> None:
+    bs = _store(tmp_path, {})
+    curr = {"REB-41": {"status": "To Do", "local_id": "loc-live"}}
+
+    result = compute(
+        bs,
+        curr,
+        active_local_ids={"loc-live"},
+        client=None,
+        local_reader=_archived_reader({"loc-live": {"ticket_id": "loc-live", "status": "open"}}),
+        max_acting_fraction=1.0,
+    )
+
+    assert result.mutations == []
+    assert bs.get_jira_key("loc-live") == "REB-41"
+
+
 # ── class C — probe → grace → retire (reversible) ────────────────────────────
 
 

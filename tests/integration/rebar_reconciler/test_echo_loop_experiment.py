@@ -239,15 +239,10 @@ def test_c_binding_and_label_both_removed(git_repo, reconciler_modules, monkeypa
 
     first, last = rec.rows[1], rec.rows[-1]
     print(f"(c) local {first[1]} -> {last[1]} ; jira {first[3]} -> {last[3]}")
-    # OBSERVED: no ticket-dir growth and no Jira-issue growth, but ONE duplicate
-    # CREATE EVENT is appended into the existing dir. With no marker,
-    # _adopt_stands_down returns False, so the level-triggered adopt arm re-adopts
-    # DIG-1; _jira_key_to_local_id gives the SAME deterministic id `jira-dig-1`,
-    # so the materialisation lands in the existing directory as a second CREATE.
-    # It converges after one pass (the re-written binding + label restore the
-    # steady state).
+    # The local_id entity property now survives loss of both the binding and label,
+    # so the pass repairs the binding without replaying an inbound CREATE.
     assert (last[1], last[3]) == (1, 1)
-    assert last[7] == {"jira-dig-1": 2}, "exactly ONE duplicate CREATE event, then stable"
+    assert last[7] == {"jira-dig-1": 1}, "no duplicate CREATE event"
     assert all(row[6] == [] for row in rec.rows[3:]), "converged: later passes write nothing"
 
 
@@ -341,19 +336,14 @@ def test_d_outbound_orphan_local_ticket_unbound_and_unlabelled(
     before, after = rec.rows[2], rec.rows[3]
     last = rec.rows[-1]
     print(f"(d) local {before[1]} -> {last[1]} ; jira {before[3]} -> {last[3]}")
-    # OBSERVED: a genuine ONE-SHOT duplication burst — +1 local ticket AND +1 Jira
-    # issue, both in the SAME pass, then convergence. Two independent arms fire:
-    #   * inbound: the orphaned issue is unbound and unmarked, so the adopt arm
-    #     materialises a NEW local ticket `jira-dig-<n>` (echo ticket);
-    #   * outbound: the local ticket is unbound, so outbound_differ (~588) emits a
-    #     create, and the dedup JQL (dispatch_one ~154) MISSES because the label
-    #     was stripped -> a second Jira issue.
-    # Growth stops because both new entities are bound + labelled in that same pass.
-    assert after[1] == before[1] + 1, "exactly one echo ticket"
-    assert after[3] == before[3] + 1, "exactly one duplicate Jira issue"
-    assert (last[1], last[3]) == (after[1], after[3]), "bounded: converges after ONE pass"
-    assert all(row[6] == [] for row in rec.rows[4:]), "converged: later passes write nothing"
-    assert any(i.startswith("jira-dig-1") for i in last[2]), last[2]
+    # Regression expectation for unaware-subwealthy-pintail: the Jira-side
+    # `local_id` entity property is the third identity signal that survives loss
+    # of both binding and label. The reconciler should therefore stand down both
+    # create arms instead of making a one-shot duplicate.
+    assert after[1] == before[1], "no echo ticket"
+    assert after[3] == before[3], "no duplicate Jira issue"
+    assert (last[1], last[3]) == (before[1], before[3]), "stable after perturbation"
+    assert all(row[6] == [] for row in rec.rows[3:]), "no Jira writes on later passes"
 
 
 # ---------------------------------------------------------------------------
@@ -427,18 +417,10 @@ def test_e_search_index_lag_dedup_jql_always_empty(git_repo, reconciler_modules,
     rec.dump()
     first, last = rec.rows[1], rec.rows[-1]
     print(f"(e) local {first[1]} -> {last[1]} ; jira {first[3]} -> {last[3]}")
-    # OBSERVED: under a permanently-lagging identity-label index AND a binding that
-    # is re-stripped every pass, the JIRA side grows by exactly +1 per pass and never
-    # converges, while the LOCAL side does not grow at all (the orphaned issues all
-    # carry a foreign rebar-id marker, so _adopt_stands_down keeps the adopt arm
-    # down). Nothing bounds the Jira side here: the two independent create guards —
-    # the binding store (outbound_differ ~588) and the dedup JQL (dispatch_one ~154)
-    # — are both defeated by construction. This is the UPPER BOUND under a forced
-    # per-pass perturbation, not an autonomous echo loop.
+    # The direct property read is not backed by the lagging label index, so it
+    # still reconnects the binding and suppresses duplicate Jira creates.
     loops = [r for r in rec.rows if r[0].startswith("loop")]
-    assert [r[3] for r in loops] == list(range(loops[0][3], loops[0][3] + len(loops))), (
-        "one duplicate Jira issue per forced pass"
-    )
+    assert [r[3] for r in loops] == [loops[0][3]] * len(loops), "no duplicate Jira issues"
     assert last[1] == first[1], "the LOCAL side does not grow"
 
 
@@ -597,10 +579,9 @@ def test_e3_keyless_pending_past_grace(git_repo, reconciler_modules, monkeypatch
     )
     before, after = rec.rows[2], rec.rows[-1]
     print(f"(e3) local {before[1]} -> {after[1]} ; jira {before[3]} -> {after[3]}")
-    # OBSERVED: exactly ONE duplicate Jira issue, then convergence. Past the grace
-    # the defer lifts and the lagging dedup JQL cannot see the original, so a second
-    # issue is written — but its key is bind_confirm'd immediately, and from the next
-    # pass on outbound_differ (~588) takes the update branch. Bounded at +1.
+    # The direct local_id property read now recovers the original issue after the
+    # grace expires even when the identity-label JQL is lagging, so no duplicate
+    # Jira issue is written.
     assert after[1] == before[1], "the LOCAL side does not grow"
-    assert after[3] == before[3] + 1, "exactly ONE duplicate Jira issue"
+    assert after[3] == before[3], "no duplicate Jira issue"
     assert all(row[6] == [] for row in rec.rows[4:]), "converged after one pass"
