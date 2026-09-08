@@ -414,19 +414,21 @@ fi
 # gap cost five hours: `/var/lib/docker` was 17G of a 28G working set, `overlay2` alone 16G
 # across 67 layer directories, and the only signal was "root disk high".
 #
-# THE DECISIVE PROBLEM, and why this section takes TWO measurements rather than one.
+# THE DECISIVE PROBLEM, and why this section takes TWO measurement sources rather than one.
 # `docker system df` reported ~9.5 GB with ZERO dangling images against that 16G of real
 # overlay2 — roughly 6.5 GB was invisible to Docker's own accounting, so no `docker prune`
 # could reach it (four rounds recovered ~1.06 GB against a 29 GB problem). A metric derived
 # from the DAEMON'S LEDGER alone is therefore blind to exactly the bytes that caused the
 # incident. So this publishes both halves and their difference:
 #
-#   filesystem truth  `du -sx` over ALL of /var/lib/docker. `-x` will not cross into a mounted
-#                     overlay2/*/merged, and ONE `du` run counts a file hardlinked across
-#                     layers once, so this is blocks actually consumed.
+#   filesystem truth  ONE `find -xdev -printf` metadata walk over ALL of /var/lib/docker. It
+#                     reports both allocated blocks (for docker_storage_bytes) and apparent
+#                     size (for docker_unaccounted_bytes), de-duplicated by device+inode so a
+#                     hardlinked file is counted once.
 #   Docker's ledger   `docker system df`, ALL FOUR rows: Images + Containers + Build Cache +
 #                     Local Volumes.
-#   the residue       docker_unaccounted_bytes = root truth - whole ledger, clamped at 0.
+#   the residue       docker_unaccounted_bytes = apparent root truth - whole ledger, clamped
+#                     at 0. The ledger reports apparent sizes, not allocated blocks.
 #
 # THE TWO SIDES MUST SPAN THE SAME BYTES, and getting that wrong is what code review caught on
 # patchset 1. That revision differenced a `du` of `overlay2` ALONE against the ledger's Images
@@ -465,20 +467,21 @@ fi
 # loses sensitivity rather than inventing a page — and it is not this box, whose Docker root
 # is entirely on the root volume.
 #
-# Some divergence is NORMAL — `du` counts allocated blocks including per-layer directory and
-# whiteout overhead plus the daemon's own metadata (image/, network/, buildkit/*.db, tmp/),
-# while the ledger reports layer sizes with sharing accounted differently — so the alarm
-# threshold (monitoring_autodeploy.tf) is 2 GiB, far above that overhead (hundreds of MB on
-# this box) and far below the 6.5 GB that went unnoticed.
+# Some divergence is NORMAL — the daemon's ledger reports layer sizes with sharing accounted
+# differently, and Docker metadata such as image/, network/, buildkit/*.db, tmp/ and container
+# logs can be outside any ledger row — so the alarm threshold (monitoring_autodeploy.tf) is 2
+# GiB, above the observed 1.18 GB apparent-size baseline on this box and far below the 6.5 GB
+# that went unnoticed.
 #
 # EVERY reading is GATED ON ITS OWN MEASUREMENT SUCCEEDING, the §2e rule: a probe that could
 # not measure publishes NOTHING rather than a plausible 0. The accepted degradation from bug
-# 5993 is explicit, however: the root `du` can time out under load while the probe remains
-# otherwise healthy, so the pageable state must be carried by a separate heartbeat instead of
-# spending the storage alarms' missing-data path on "bounded non-measurement". docker_du_ok
-# publishes 1 when the root `du` succeeded and 0 when it did not; the storage and residue gauges
-# stay silent on failure, and their alarms treat missing data as not-breaching so they do not
-# claim "full" when the actual observation is "could not check". The overlay2 `du` is a
+# 5993 is explicit, however: the Docker-root filesystem walk can time out under load while the
+# probe remains otherwise healthy, so the pageable state must be carried by a separate
+# heartbeat instead of spending the storage alarms' missing-data path on "bounded
+# non-measurement". docker_du_ok
+# publishes 1 when the Docker-root walk succeeded and 0 when it did not; the storage and residue
+# gauges stay silent on failure, and their alarms treat missing data as not-breaching so they do not
+# claim "full" when the actual observation is "could not check". The overlay2 subtotal is a
 # DIAGNOSTIC BREADCRUMB only — it names the subtree in the log line and nothing is derived from
 # it — so its failing mutes nothing.
 #
@@ -776,9 +779,10 @@ pct_of_cap() {
   printf '%s\n' "$(( $1 * 100 / $2 ))"
 }
 
-# ONE traversal, BOTH readings (bug 9313-1fac-9f32-4b07). Sets DOCKER_DU_TOTAL (blocks under
-# the whole root) and DOCKER_DU_OVERLAY2 (the overlay2 subtotal, "" when that child was not in
-# the listing); non-zero when nothing parseable came back.
+# ONE traversal, THREE readings (bug 9313-1fac-9f32-4b07, bug 81cc-bced-62f4-40b9). Sets
+# DOCKER_DU_TOTAL (allocated blocks under the whole root), DOCKER_DU_APPARENT (apparent bytes
+# under the whole root), and DOCKER_DU_OVERLAY2 (the overlay2 allocated subtotal, "" when that
+# child was not in the listing); non-zero when nothing parseable came back.
 #
 # WHAT THIS REPLACES, AND WHY IT WAS THE TIMEOUT. The previous shape called `du -sx` TWICE —
 # once over $DOCKER_ROOT and once over $DOCKER_ROOT/overlay2, which on this host is
@@ -793,23 +797,40 @@ pct_of_cap() {
 # install-observability.sh sets IOSchedulingClass=idle, so this walk is starved by design on a
 # box with IOPS-saturation history.
 #
-# `--max-depth=1` yields every immediate child of the root AND the grand total from a single
-# traversal, so the overlay2 subtotal now costs nothing. That reading was only ever a
-# breadcrumb in the log line at §2f ("deliberately no longer participates in the arithmetic"),
-# so the second walk was spending up to half of the probe's entire budget on a log message.
+# `find -xdev -printf` yields every inode below the root in a single metadata traversal, so the
+# allocated total, apparent total, and overlay2 breadcrumb come from one walk. GNU `du` cannot
+# report allocated and apparent sizes in one invocation, and a second walk is the timeout
+# regression above, so the metadata pass computes the two units directly from stat fields.
 docker_du_census() {
-  local root out parsed
+  local root out parsed root_dev ov_dev
   root="${1%/}"
   DOCKER_DU_TOTAL=""
+  DOCKER_DU_APPARENT=""
   DOCKER_DU_OVERLAY2=""
-  out="$(clamped "$DOCKER_DU_TIMEOUT" du -x --block-size=1 --max-depth=1 "$root" 2>/dev/null)" || return 1
-  # The grand-total row is the one whose path IS the root; every other row is a child. Matching
-  # on the path rather than on position keeps this correct whatever order the du implementation
-  # emits, and a `du` that printed only the total (the -s shape) still parses.
-  parsed="$(printf '%s\n' "$out" | awk -v root="$root" '
-    $2 == root            { total = $1 }
-    $2 == root "/overlay2" { overlay = $1 }
-    END { if (total == "") exit 1; printf "%s %s\n", total, (overlay == "" ? "-" : overlay) }
+  out="$(clamped "$DOCKER_DU_TIMEOUT" find "$root" -xdev -printf '%D\t%i\t%s\t%b\t%p\n' 2>/dev/null)" || return 1
+  # `%b` is 512-byte blocks allocated; `%s` is apparent file size. De-duplicating by device and
+  # inode preserves `du`-like hardlink semantics while keeping the apparent-size numerator in
+  # the same units as Docker's ledger.
+  parsed="$(printf '%s\n' "$out" | awk -F '\t' -v root="$root" '
+    NF >= 5 {
+      seen_any = 1
+      key = $1 ":" $2
+      if (seen[key]++) next
+      path = $5
+      blocks = $4
+      size = $3
+      allocated = blocks * 512
+      total += allocated
+      apparent += size
+      if (path == root "/overlay2" || index(path, root "/overlay2/") == 1) {
+        overlay_seen = 1
+        overlay += allocated
+      }
+    }
+    END {
+      if (!seen_any) exit 1
+      printf "%d %d %s\n", total, apparent, (overlay_seen ? overlay : "-")
+    }
   ')" || return 1
   # CROSS-DEVICE GUARD. `-x` is load-bearing for the total — it must not wander off the Docker
   # filesystem — but it also PRUNES at any mount boundary below the root, and a pruned directory
@@ -833,10 +854,11 @@ docker_du_census() {
       parsed="${parsed% *} -"
     fi
   fi
-  read -r DOCKER_DU_TOTAL DOCKER_DU_OVERLAY2 <<CENSUS
+  read -r DOCKER_DU_TOTAL DOCKER_DU_APPARENT DOCKER_DU_OVERLAY2 <<CENSUS
 $parsed
 CENSUS
   case "$DOCKER_DU_TOTAL" in ''|*[!0-9]*) DOCKER_DU_TOTAL=""; return 1 ;; esac
+  case "$DOCKER_DU_APPARENT" in ''|*[!0-9]*) DOCKER_DU_APPARENT=""; return 1 ;; esac
   case "$DOCKER_DU_OVERLAY2" in *[!0-9]*) DOCKER_DU_OVERLAY2="" ;; esac
   return 0
 }
@@ -912,6 +934,7 @@ docker_ledger_bytes() {
 }
 
 docker_total_bytes=""
+docker_apparent_bytes=""
 docker_overlay2_bytes=""
 docker_du_ok=0
 # ONE walk for both readings, and its cost is itself published (docker_du_seconds below) so the
@@ -919,6 +942,7 @@ docker_du_ok=0
 docker_du_started_at="$(date +%s)"
 if docker_du_census "$DOCKER_ROOT"; then
   docker_total_bytes="$DOCKER_DU_TOTAL"
+  docker_apparent_bytes="$DOCKER_DU_APPARENT"
   docker_overlay2_bytes="$DOCKER_DU_OVERLAY2"
   docker_du_ok=1
 fi
@@ -963,19 +987,20 @@ LEDGER
   # Docker's own accounting. The filesystem half is the WHOLE Docker root, matching the whole
   # ledger above; the overlay2 reading is carried in the log line as the incident breadcrumb
   # (16G of the 17G on 2026-09-02) and deliberately no longer participates in the arithmetic.
-  if [ -n "$docker_total_bytes" ]; then
-    docker_unaccounted=$(( docker_total_bytes - docker_accounted_bytes ))
-    # Clamped. The ledger can legitimately exceed the `du`: `docker system df` sums each row
-    # independently, so a build-cache record that SHARES its layer with an image is counted
-    # twice where `du` counts those blocks once (CLI <= v28 subtracted shared records from the
-    # Build Cache column; v29 stopped, so the overlap is version-dependent). A negative
-    # datapoint against a GreaterThanThreshold alarm reads as reassuring, which is worse than
-    # nonsense, so the floor is 0 — under-reporting, never a false all-clear that looks precise.
+  if [ -n "$docker_apparent_bytes" ]; then
+    docker_unaccounted=$(( docker_apparent_bytes - docker_accounted_bytes ))
+    # Clamped. The ledger can legitimately exceed the apparent filesystem total: `docker system
+    # df` sums each row independently, so a build-cache record that SHARES its layer with an
+    # image can be counted twice while the filesystem counts that inode once (CLI <= v28
+    # subtracted shared records from the Build Cache column; v29 stopped, so the overlap is
+    # version-dependent). A negative datapoint against a GreaterThanThreshold alarm reads as
+    # reassuring, which is worse than nonsense, so the floor is 0 — under-reporting, never a
+    # false all-clear that looks precise.
     [ "$docker_unaccounted" -lt 0 ] && docker_unaccounted=0
     aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
       --metric-name docker_unaccounted_bytes --unit Bytes --value "$docker_unaccounted" 2>/dev/null || true
     logger -t rebar-health \
-      "docker root bytes=${docker_total_bytes} overlay2=${docker_overlay2_bytes:-unread} ledger=${docker_accounted_bytes} unaccounted=${docker_unaccounted} (bytes docker prune cannot reach)"
+      "docker root bytes=${docker_total_bytes} apparent=${docker_apparent_bytes} overlay2=${docker_overlay2_bytes:-unread} ledger=${docker_accounted_bytes} unaccounted=${docker_unaccounted} (bytes docker prune cannot reach)"
   fi
 fi
 

@@ -604,13 +604,13 @@ resource "aws_cloudwatch_metric_alarm" "docker_buildkit_cache_high" {
 resource "aws_cloudwatch_metric_alarm" "docker_unaccounted_bytes" {
   alarm_name        = "rebar-docker-unaccounted-bytes"
   alarm_description = <<-EOT
-    More than 2 GiB exists under /var/lib/docker that `docker system df` does NOT account for
-    in ANY of its rows. MEANING: these bytes are unreachable by `docker prune` — the daemon
-    does not know they are there. At the 2026-09-02 outage this was ~6.5 GB of orphaned
-    overlay2 and four prune rounds recovered ~1.06 GB against a 29 GB problem, so "prune
-    harder" is the WRONG response here. DIAGNOSIS: the rebar-health log line published beside
-    this metric carries the root, overlay2 and ledger readings, which is what names the
-    subtree. REMEDIATION: stop the build path, then a daemon-level reclaim (`docker system
+    More than 2 GiB of apparent-size content exists under /var/lib/docker that `docker system
+    df` does NOT account for in ANY of its rows. MEANING: these bytes are unreachable by
+    `docker prune` — the daemon does not know they are there. At the 2026-09-02 outage this was
+    ~6.5 GB of orphaned overlay2 and four prune rounds recovered ~1.06 GB against a 29 GB
+    problem, so "prune harder" is WRONG. DIAGNOSIS: the rebar-health log line carries
+    allocated root, apparent root, overlay2 and ledger readings, separating allocation overhead
+    from a named subtree. REMEDIATION: stop the build path, then a daemon-level reclaim (`docker system
     prune -a` with the serving containers up, or a daemon restart scheduled per the runbook).
     NEVER rm anything under /var/lib/docker: the layer metadata is the daemon's, and deleting
     behind its back desynchronises it from the tree. Published as
@@ -630,17 +630,16 @@ resource "aws_cloudwatch_metric_alarm" "docker_unaccounted_bytes" {
   # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
   # or empty, and one healthy datapoint always clears it.
   #
-  # §2f publishes this ONLY when both the root `du` and Docker ledger succeeded. Bounded root-du
-  # misses are accepted degradation and page through docker_du_not_ok instead of this residue
-  # alarm pretending the unseen residue crossed the threshold.
+  # §2f publishes this ONLY when both the Docker-root filesystem walk and Docker ledger
+  # succeeded. Bounded walk misses are accepted degradation and page through docker_du_not_ok
+  # instead of this residue alarm pretending the unseen residue crossed the threshold.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 3
-  # 2 GiB. Some divergence between `du` and the ledger is NORMAL — `du` counts allocated
-  # blocks including per-layer directory and whiteout overhead plus the daemon's own metadata
-  # (image/, network/, buildkit/*.db, tmp/), while the ledger reports layer sizes with sharing
-  # accounted differently — so this is deliberately not "any divergence": far above that
-  # overhead (hundreds of MB on this box), and far below the 6.5 GB that went unnoticed.
+  # 2 GiB. This is deliberately not "any divergence": the production baseline on 2026-09-05 was
+  # 13,642,739,712 allocated bytes, 12,140,814,875 apparent bytes, and a 10,957,600,000-byte
+  # Docker ledger, i.e. 1,183,214,875 apparent bytes not in the ledger. The threshold is above
+  # that baseline while remaining far below the ~6.5 GB that went unnoticed.
   threshold           = 2147483648
   comparison_operator = "GreaterThanThreshold"
 

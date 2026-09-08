@@ -67,11 +67,11 @@ def _stub(bin_dir: Path, name: str, body: str) -> None:
 
 @pytest.fixture
 def probe(tmp_path: Path):
-    """Drive the real script over stubs, recording every ``du`` and ``aws`` invocation."""
+    """Drive the real script over stubs, recording every Docker-root walk and ``aws`` call."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     aws_log = tmp_path / "aws.log"
-    du_log = tmp_path / "du.log"
+    find_log = tmp_path / "find.log"
     grant_log = tmp_path / "grants.log"
 
     _stub(
@@ -94,7 +94,7 @@ def probe(tmp_path: Path):
     _stub(bin_dir, "journalctl", "exit 0")
     # `timeout` is absent on stock macOS. This stub is deliberately FAITHFUL to the duration
     # rather than dropping it, because the composed budget is what these tests measure: it
-    # records nothing and simply execs, while DU_SLEEP below supplies the overrun.
+    # records nothing and simply execs, while FIND_SLEEP below supplies the overrun.
     _stub(
         bin_dir,
         "timeout",
@@ -113,21 +113,22 @@ def probe(tmp_path: Path):
         exit 0
         """,
     )
-    # Records its full argv, then emits the `--max-depth=1` shape: a row per immediate child
-    # and the grand-total row for the root itself. DU_SLEEP simulates the I/O stall.
+    # Records its full argv, then emits one find/stat stream: root, overlay2, and a sibling
+    # child. FIND_SLEEP simulates the I/O stall.
     _stub(
         bin_dir,
-        "du",
+        "find",
         """
-        printf '%s\\n' "$*" >> "$DU_LOG"
-        [ -n "${DU_SLEEP:-}" ] && sleep "$DU_SLEEP"
-        root="${@: -1}"
-        printf '16000000000\\t%s/overlay2\\n' "$root"
-        printf '1024\\t%s/containers\\n' "$root"
-        printf '17000000000\\t%s\\n' "$root"
+        printf '%s\\n' "$*" >> "$FIND_LOG"
+        [ -n "${FIND_SLEEP:-}" ] && sleep "$FIND_SLEEP"
+        root="$1"
+        printf '1\\t1\\t0\\t0\\t%s\\n' "$root"
+        printf '1\\t2\\t16000000000\\t31250000\\t%s/overlay2\\n' "$root"
+        printf '1\\t3\\t1000000000\\t1953125\\t%s/containers\\n' "$root"
         exit 0
         """,
     )
+    _stub(bin_dir, "du", 'printf "1024\\t%s\\n" "${@: -1}"; exit 0')
     _stub(
         bin_dir,
         "free",
@@ -141,7 +142,7 @@ def probe(tmp_path: Path):
     env = {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "AWS_LOG": str(aws_log),
-        "DU_LOG": str(du_log),
+        "FIND_LOG": str(find_log),
         "GRANT_LOG": str(grant_log),
         # No real filesystem stands behind $DOCKER_ROOT here, so the census's cross-device
         # check has nothing to stat; the dedicated tests below cover it.
@@ -168,7 +169,7 @@ def probe(tmp_path: Path):
         return result
 
     run.aws_log = aws_log  # type: ignore[attr-defined]
-    run.du_log = du_log  # type: ignore[attr-defined]
+    run.find_log = find_log  # type: ignore[attr-defined]
     run.grant_log = grant_log  # type: ignore[attr-defined]
     return run
 
@@ -186,11 +187,11 @@ def _values(log: Path, metric: str) -> list[str]:
     return out
 
 
-def _docker_root_walks(du_log: Path) -> list[str]:
-    """Every ``du`` invocation that traverses the docker root (the expensive one)."""
-    if not du_log.exists():
+def _docker_root_walks(find_log: Path) -> list[str]:
+    """Every ``find`` invocation that traverses the docker root (the expensive one)."""
+    if not find_log.exists():
         return []
-    return [line for line in du_log.read_text().splitlines() if "/var/lib/docker" in line]
+    return [line for line in find_log.read_text().splitlines() if "/var/lib/docker" in line]
 
 
 # --- 1. ONE traversal, not two --------------------------------------------------------------
@@ -209,11 +210,13 @@ def test_docker_root_is_walked_exactly_once_per_run(probe, tmp_path: Path) -> No
     result = probe({"DOCKER_ROOT": "/var/lib/docker"})
     assert result.returncode == 0, result.stderr
 
-    walks = _docker_root_walks(probe.du_log)
+    walks = _docker_root_walks(probe.find_log)
     assert len(walks) == 1, f"expected exactly one docker-root walk per run, got {walks}"
-    assert "--max-depth=1" in walks[0], (
-        "the single walk must be the --max-depth=1 shape, which yields the overlay2 subtotal "
-        f"from the same traversal as the total; got {walks[0]!r}"
+    assert "-xdev" in walks[0], (
+        f"the single walk must stay on the Docker-root filesystem; got {walks[0]!r}"
+    )
+    assert "-printf" in walks[0], (
+        f"the single walk must emit stat fields for allocated and apparent sizes; got {walks[0]!r}"
     )
     assert "/var/lib/docker/overlay2" not in walks[0], (
         "the walk must target the ROOT, not overlay2 — the root reading is the one that "
@@ -314,7 +317,7 @@ def test_report_exit_does_not_run_the_probe(probe) -> None:
     """ExecStopPost runs on every stop; it must not become a second full probe run."""
     result = probe({"SERVICE_RESULT": "timeout"}, args=["--report-exit"])
     assert result.returncode == 0, result.stderr
-    assert _docker_root_walks(probe.du_log) == [], (
+    assert _docker_root_walks(probe.find_log) == [], (
         "--report-exit must publish the exit fact and stop, not walk the docker root again"
     )
     assert _values(probe.aws_log, "docker_storage_bytes") == []
@@ -334,7 +337,7 @@ def test_late_metrics_survive_an_overrunning_walk(probe) -> None:
     result = probe(
         {
             "DOCKER_ROOT": "/var/lib/docker",
-            "DU_SLEEP": "3",
+            "FIND_SLEEP": "3",
             "PROBE_DEADLINE_SEC": "2",
             "PROBE_TAIL_RESERVE_SEC": "1",
         }
@@ -471,6 +474,15 @@ def test_clamp_hands_an_exhausted_budget_to_the_expensive_call(tmp_path: Path) -
     _stub(bin_dir, "journalctl", "exit 0")
     _stub(bin_dir, "docker", "exit 1")
     _stub(bin_dir, "free", "exit 1")
+    _stub(
+        bin_dir,
+        "find",
+        """
+        root="$1"
+        printf '1\t1\t1024\t2\t%s\n' "$root"
+        exit 0
+        """,
+    )
     _stub(bin_dir, "du", "printf '1024\\t%s\\n' \"${@: -1}\"; exit 0")
 
     import os
@@ -502,7 +514,7 @@ def test_clamp_hands_an_exhausted_budget_to_the_expensive_call(tmp_path: Path) -
 
     recorded = [line.split() for line in grants.read_text().splitlines() if line.strip()]
     assert recorded, "no bounded call was made; the fixture is not exercising the budget"
-    walk = [secs for secs, command in recorded if command == "du"]
+    walk = [secs for secs, command in recorded if command == "find"]
     assert walk, f"the docker walk was never bounded; grants were {recorded}"
     assert walk[0] == "1", (
         f"the docker walk was granted {walk[0]}s against an exhausted budget — it must get the "
@@ -534,6 +546,15 @@ def test_budget_is_granted_in_full_when_it_is_available(tmp_path: Path) -> None:
     _stub(bin_dir, "journalctl", "exit 0")
     _stub(bin_dir, "docker", "exit 1")
     _stub(bin_dir, "free", "exit 1")
+    _stub(
+        bin_dir,
+        "find",
+        """
+        root="$1"
+        printf '1\t1\t1024\t2\t%s\n' "$root"
+        exit 0
+        """,
+    )
     _stub(bin_dir, "du", "printf '1024\\t%s\\n' \"${@: -1}\"; exit 0")
 
     import os
@@ -556,7 +577,7 @@ def test_budget_is_granted_in_full_when_it_is_available(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
 
     recorded = [line.split() for line in grants.read_text().splitlines() if line.strip()]
-    walk = [secs for secs, command in recorded if command == "du"]
+    walk = [secs for secs, command in recorded if command == "find"]
     assert walk and walk[0] == "60", (
         f"with a full budget the docker walk must get its own DOCKER_DU_TIMEOUT ceiling, got {walk}"
     )
@@ -715,11 +736,12 @@ def _census_env(tmp_path: Path, *, root_dev: str, overlay_dev: str):
     _stub(bin_dir, "timeout", 'shift\nexec "$@"')
     _stub(
         bin_dir,
-        "du",
+        "find",
         """
-        root="${@: -1}"
-        printf '16000000000\\t%s/overlay2\\n' "$root"
-        printf '17000000000\\t%s\\n' "$root"
+        root="$1"
+        printf '1\\t1\\t0\\t0\\t%s\\n' "$root"
+        printf '1\\t2\\t16000000000\\t31250000\\t%s/overlay2\\n' "$root"
+        printf '1\\t3\\t1000000000\\t1953125\\t%s/containers\\n' "$root"
         exit 0
         """,
     )
@@ -766,7 +788,7 @@ def test_overlay2_subtotal_survives_when_it_shares_the_docker_filesystem(
 
 
 def test_overlay2_subtotal_is_unknown_rather_than_wrong_across_a_mount(tmp_path: Path) -> None:
-    """``du -x`` prunes at a mount boundary and still PRINTS the pruned directory, as a stub.
+    """``find -xdev`` prunes at a mount boundary and still PRINTS the pruned directory.
 
     Latent today — overlay2 shares the root device on this host, verified by st_dev — but
     collapsing two walks into one is what arms it: the predecessor ran a second ``du -sx``
@@ -774,9 +796,10 @@ def test_overlay2_subtotal_is_unknown_rather_than_wrong_across_a_mount(tmp_path:
     5993-4cf7-0de9-4f72 proposes a dedicated Docker volume as one remedy, which would arm it for
     real, so the regression would land exactly when someone acts on my own recommendation.
 
-    A silently-wrong subtotal is the same defect class as a clamp that cannot say "over cap", so
-    on a device mismatch the subtotal is reported as UNKNOWN. The total is unaffected: ``-x`` is
-    correct for it, and must stay, so the walk cannot wander off the Docker filesystem.
+    A silently-wrong subtotal is the same defect class as a clamp that cannot say "over cap",
+    so on a device mismatch the subtotal is reported as UNKNOWN. The total is unaffected:
+    ``-xdev`` is correct for it, and must stay, so the walk cannot wander off the Docker
+    filesystem.
     """
     harness, env = _census_env(tmp_path, root_dev="66306", overlay_dev="66307")
     result = subprocess.run(
@@ -787,6 +810,7 @@ def test_overlay2_subtotal_is_unknown_rather_than_wrong_across_a_mount(tmp_path:
         f"the grand total must be unaffected by the mount boundary: {result.stdout!r}"
     )
     assert "overlay2=unread" in result.stdout, (
-        "across a mount boundary `du -x` prints a mount-point stub for overlay2; publishing it "
-        f"as the subtotal is silently wrong, so it must be blanked. Got: {result.stdout!r}"
+        "across a mount boundary `find -xdev` prints a mount-point stub for overlay2; "
+        "publishing it as the subtotal is silently wrong, so it must be blanked. Got: "
+        f"{result.stdout!r}"
     )
