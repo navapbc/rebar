@@ -45,9 +45,13 @@
 #    (operator, via infra/gerrit/register-deploy-key.sh or the GitHub UI).
 # 3. Overwrite SSM /rebar/prod/github-replication-deploy-key with the new PRIVATE
 #    key (aws ssm put-parameter --overwrite --type SecureString).
-# 4. Re-run THIS script (re-materialises the key + reloads/restarts).
-# 5. Once replication is confirmed healthy on the new key, REMOVE the OLD deploy
-#    key from navapbc/rebar.
+# 4. Re-run THIS script to re-materialise the key and install replication.config.
+# 5. Restart Gerrit (or reload the replication plugin on an instance where remote
+#    plugin admin is enabled). JGit caches SSH sessions/keys, so a mounted key file
+#    update alone does not prove the running replication plugin will use the new key.
+# 6. Verify replication by triggering `replication start --all --remote github
+#    --now --wait` and confirming the replication_log no longer tries the old key.
+# 7. REMOVE the OLD deploy key from navapbc/rebar only after that verification.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -104,7 +108,9 @@ else
 	cat >&2 <<EOF
 setup-replication: replication.config installed.
   Remote plugin admin is DISABLED on this instance, so the new replication.config
-  is loaded at Gerrit STARTUP. RESTART Gerrit to load it:
+  is loaded at Gerrit STARTUP. If the deploy key was re-materialised, Gerrit may keep using a cached SSH key until restart.
+  RESTART Gerrit to load current config
+  and key material:
       docker compose -f ${COMPOSE_FILE} restart gerrit
   (Set ALLOW_REMOTE_RELOAD=1 only if remote plugin admin has been enabled.)
 EOF
