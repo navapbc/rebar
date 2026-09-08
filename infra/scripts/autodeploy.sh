@@ -82,6 +82,7 @@ DEFER_FILE="$STATE_DIR/deploy-defer"
 BOT_SERVICE="${BOT_SERVICE:-review-bot}"              # compose service name (NEVER 'gerrit')
 BOT_IMAGE="${BOT_IMAGE:-compose-review-bot}"
 GERRIT_CONTAINER="${GERRIT_CONTAINER:-compose-gerrit-1}"
+DECLARED_COMPOSE_SERVICES="gerrit review-bot opcert"
 HEALTH_URL="${HEALTH_URL:-http://localhost:8000/health}"   # review-bot receiver (NOT Gerrit 8080)
 FETCH_TIMEOUT="${FETCH_TIMEOUT:-60}"                  # a hung fetch must not hold the lock
 # Readiness deadline for the freshly-deployed review-bot. It MUST outlast the budgets the
@@ -299,6 +300,25 @@ log() { printf '{"event":"autodeploy","ts":%s,"msg":%s}\n' "$(now)" "$(python3 -
 # let captured text carry one (see capture_bot_logs' redaction).
 marker() { printf '%s %s\n' "$1" "$(python3 -c 'import json,sys;print(json.dumps({"ts":int(sys.argv[1]),"reason":sys.argv[2],"detail":sys.argv[3]}))' "$(now)" "$2" "${3:-}")" >&2; }
 err() { marker AUTODEPLOY_ERROR "$1" "${2:-}"; }
+
+check_declared_compose_services() {
+  local svc cid status failures
+  [ -f "$COMPOSE_DIR/docker-compose.yml" ] || return 0
+  failures=""
+  for svc in $DECLARED_COMPOSE_SERVICES; do
+    cid="$( cd "$COMPOSE_DIR" && docker compose ps -q "$svc" 2>/dev/null )" || cid=""
+    if [ -z "$cid" ]; then
+      failures="${failures}${svc}=missing;"
+      continue
+    fi
+    status="$( docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null )" || status="unreadable"
+    [ "$status" = "running" ] || failures="${failures}${svc}=${status};"
+  done
+  if [ -n "$failures" ]; then
+    err declared-service-down "declared compose service not running: ${failures} decision=fail-loud-no-auto-restart"
+    return 1
+  fi
+}
 
 # How many reviews the review-bot is running RIGHT NOW, from its /health `in_flight` field.
 # Echoes -1 for "unknown" (bot unreachable / field missing / unparseable), which the drain gate
@@ -820,6 +840,7 @@ if [ "$TARGET" = "$DEPLOYED" ]; then
   rm -f "$DEFER_FILE"
   reclaim_under_pressure
   mcp_retire_sweep          # reap mcp containers that finished draining since the last flip
+  check_declared_compose_services || exit 1
   log "up to date ($TARGET); no-op"
   exit 0
 fi
