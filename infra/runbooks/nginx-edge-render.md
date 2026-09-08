@@ -20,13 +20,16 @@ Run on the Gerrit host (SSM). The template's only substituted variable is `${REV
 single-quoted `envsubst` argument is load-bearing — it stops `envsubst` from eating nginx's own
 `$host`, `$remote_addr`, `$proxy_add_x_forwarded_for` and friends.
 
+`/opt/rebar` is an rsync copy, not a git checkout. It is the compose/build tree autodeploy writes
+after deciding a change is safe to apply; it has no `.git` and must not be used as the source for
+git operations. Read the template from autodeploy's git mirror at `/var/lib/rebar/mirror`.
+
 ```sh
-cd /opt/rebar            # the checkout autodeploy maintains
-git fetch origin && git checkout origin/main -- infra/nginx/rebar.conf.template
+git -C /var/lib/rebar/mirror fetch origin
 
 export REVIEW_BOT_PORT   # the port the review-bot container publishes on loopback
-envsubst '${REVIEW_BOT_PORT}' \
-  < infra/nginx/rebar.conf.template \
+git -C /var/lib/rebar/mirror show origin/main:infra/nginx/rebar.conf.template |
+  envsubst '${REVIEW_BOT_PORT}' \
   > /etc/nginx/conf.d/rebar.conf
 
 nginx -t                 # MUST pass before you reload
@@ -43,12 +46,17 @@ Do not trust the reload's exit code alone. Assert on the running config:
 ```sh
 grep -c proxy_read_timeout /etc/nginx/conf.d/rebar.conf     # expect 4 (3x /mcp @3600s, 1x Gerrit @600s)
 grep -n proxy_read_timeout /etc/nginx/conf.d/rebar.conf     # confirm the values, not just the count
+grep -c '\${REVIEW_BOT_PORT}' /etc/nginx/conf.d/rebar.conf  # expect 0 after render
 systemctl is-active nginx                                   # expect: active
 curl -sS -o /dev/null -w '%{http_code}\n' https://rebar.solutions.navateam.com/   # expect 200
 ```
 
 A count of **3** means the render did not happen — the Gerrit `location /` is still on nginx's
 compiled-in 60-second read default and bug `5bba-45dd-3bfc-42f1` is still live.
+
+Any remaining literal `${REVIEW_BOT_PORT}` means the render did not substitute the template
+variable. The current template uses only the braced form, including in its explanatory comment, so
+the rendered config should leave zero such placeholders behind.
 
 End-to-end check for that bug specifically — a CI-shaped change-ref fetch should no longer 504:
 
