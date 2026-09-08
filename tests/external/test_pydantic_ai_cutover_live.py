@@ -1,31 +1,11 @@
-"""Live cutover validation for the **pydantic_ai** runner (story d6d1).
+"""External validation of the ``pydantic_ai`` runner across supported operation shapes.
 
-Before LangChain/LangGraph is dropped and pydantic_ai becomes the default runner, the
-pydantic_ai path must be validated LIVE across every operation it will back — not just the
-one reviewer the old live test covered. These exercise the real agent path (billable model
-calls), so they are ``external`` (excluded from the default run) and skip without an API key
-+ the ``agents`` extra. Each test FORCES ``runner="pydantic_ai"`` via config and asserts the
-runner provenance, so a regression in the new default surfaces here.
+The tests force ``runner="pydantic_ai"`` and assert provenance for findings, batch, completion
+verdict, text, and workflow paths. Provider models resolve from configured classes so
+each matrix overlay selects its arm. The frontier ``review_code`` case also covers provider
+parameter compatibility.
 
-Coverage (the operations the cutover repoints onto pydantic_ai):
-  * review_code    — findings mode on opus (validates opus param handling: no temperature 400)
-  * review_code    — findings mode
-  * scan_epics_for_spec — batch structured output
-  * verify_completion   — completion_verdict structured output (the close gate)
-  * text mode      — the non-findings output path, via the runner directly
-  * workflow agent step — the run_workflow → RunnerAgentStep → pydantic_ai path
-
-PROVIDER-PARAMETRIC (story f124). These tests construct ``LLMConfig`` DIRECTLY, which bypasses
-config discovery — so before f124 they pinned two literal Anthropic model ids and asserted
-``result["model"] == "anthropic:claude-opus-4-8"``. That made this module the one live module a
-provider matrix could NOT repoint: on a Bedrock arm it would either skip (no Anthropic key) or
-call Anthropic anyway. The models are now read from the RESOLVED model classes
-(``resolve_model_string``), which honour the arm's ``REBAR_LLM_CONFIG_FILE`` overlay, and the
-provenance assertion checks the resolved string rather than a hardcoded provider — so the
-"forces the pydantic_ai runner" intent is preserved while the PROVIDER stays a matrix dimension.
-
-Run::  REBAR_RUN_EXTERNAL=1 ANTHROPIC_API_KEY=… pytest -m external \
-           tests/external/test_pydantic_ai_cutover_live.py
+Execution requires the external opt-in, agents package, and configured provider credential.
 """
 
 from __future__ import annotations
@@ -66,17 +46,11 @@ def _cfg(repo: Path, model: str):
 
 @_skip
 def test_pydantic_review_code_opus(rebar_repo: Path) -> None:
-    """The primary review op via pydantic_ai on OPUS — validates opus parameter handling
-    (no `temperature` sent, which would 400) on the new runner.
+    """Run frontier ``review_code`` through pydantic-ai without an unsupported temperature.
 
-    Retargeted from the removed public ``rebar.llm.review_ticket`` (bug 751a): that
-    findings-mode reviewer no longer exists, so the opus param-handling intent is preserved
-    through the surviving findings-returning op, ``review_code``, forced onto the frontier
-    (opus) model. ``review_code`` always runs the four-pass gate (epic b744 + bug
-    5b32-37c4-f99a-4315) on the REAL pydantic_ai path, so a live opus ``temperature`` 400
-    would surface here. The finalized verdict
-    stamps the CONFIGURED model/runner (``cfg.model``/runner name), so the frontier-model and
-    ``pydantic_ai`` provenance assertions still hold."""
+    The four-pass findings path asserts configured model and runner provenance while covering
+    parameter handling for the frontier model.
+    """
     import rebar.llm as llm
 
     diff = "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1 @@\n+API_KEY = 'hardcoded-secret'\n"

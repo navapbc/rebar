@@ -1,14 +1,8 @@
-"""Story 4b2f: a LIVE single_turn workflow step (needs a real LLM).
+"""External check of a ``single_turn`` workflow step.
 
-Marked ``external`` → inert in the default suite (see tests/external/conftest.py);
-runs only with REBAR_RUN_EXTERNAL=1 + the [agents] extra + a credential for the CONFIGURED
-provider (``_live_llm``, story f124 — not a hardcoded ANTHROPIC_API_KEY, which would make a
-Bedrock/OpenAI matrix arm skip and report green). Kept minimal: it proves a single_turn prompt
-drives ONE real structured model call whose output validates against the prompt's declared
-``outputs`` contract.
-
-The step's model comes from the discovered config, so a matrix arm's ``REBAR_LLM_CONFIG_FILE``
-overlay repoints it at that arm's provider.
+The test requires the external opt-in, agents package, and configured provider credential. A
+matrix overlay selects the model through discovered configuration. The prompt makes one structured
+call whose result must satisfy its declared ``outputs`` contract.
 """
 
 from __future__ import annotations

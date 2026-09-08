@@ -1,14 +1,8 @@
-"""Story e7e0: LIVE completion-verifier PASS emits a positive per-criterion ``criteria[]``.
+"""External completion-verifier check for a persisted per-criterion PASS.
 
-Marked ``external`` → inert in the default suite (see tests/external/conftest.py); runs only
-with REBAR_RUN_EXTERNAL=1 + the [agents] extra + a credential for the CONFIGURED provider
-(``_live_llm``, story f124 — NOT a hardcoded ANTHROPIC_API_KEY, which would make a Bedrock or
-OpenAI arm skip and report green). Proves the cutover live-exercise DoD: the REAL agent path, on
-a fixture whose criterion is met, returns a PASS carrying a populated ``criteria[]`` that
-persists to the completion sidecar.
-
-The op reads its model from the discovered config (no ``config=`` override), so a matrix arm's
-``REBAR_LLM_CONFIG_FILE`` overlay repoints this test at that arm's provider.
+The test requires the external opt-in, agents package, and configured provider credential. It
+uses discovered configuration so a matrix overlay selects the provider. A satisfied fixture must
+return PASS with populated ``criteria[]`` and persist it to the completion sidecar.
 """
 
 from __future__ import annotations

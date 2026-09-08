@@ -1,23 +1,11 @@
-"""GATED LIVE eval: does a real verifier OBEY the kernel's soft rules? (epic vivid-gang-day WS4)
+"""External evaluation of review-kernel independence and insufficient-evidence rules.
 
-This is the live counterpart to the deterministic ``tests/unit/test_review_kernel_rules.py``.
-It runs the SHARED ``verify_findings`` Pass-2 against a LIVE model over a small fixed fixture
-and checks the rules behaviorally:
+The shared ``verify_findings`` second pass evaluates a fixed fixture through the configured
+provider. An ungrounded false claim must not be uniformly affirmed. Unanswerable subquestions
+may return ``insufficient``.
 
-* allow-insufficient — a finding with NO grounding should not be fabricated into a confident
-  yes/no; an honest verifier answers ``insufficient`` for the unanswerable sub-questions;
-* independence — the verdict does not collapse to the finding's asserted conclusion (a
-  deliberately FALSE claim should not be uniformly affirmed).
-
-Marked ``external`` (excluded from the default + the blocking CI path; needs
-REBAR_RUN_EXTERNAL=1) and SKIPS unless the ``agents`` extra plus a credential for the CONFIGURED
-provider are present (``_live_llm``, story f124). The Pass-2 config comes from
-``LLMConfig.from_env()``, so a matrix arm's ``REBAR_LLM_CONFIG_FILE`` overlay repoints it.
-MULTI-RUN with a LENIENT threshold (majority of N) — informational, never a hard gate
-(threshold calibration is deferred per the epic). Run locally::
-
-    REBAR_RUN_EXTERNAL=1 ANTHROPIC_API_KEY=… pytest -m external \
-        tests/external/test_review_kernel_rules_live.py
+The test requires the external opt-in, agents package, and provider credential. It runs a lenient
+majority threshold for informational calibration rather than a blocking gate.
 """
 
 from __future__ import annotations

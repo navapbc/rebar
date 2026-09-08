@@ -1,24 +1,12 @@
-"""Live Langfuse OTLP round-trip (rebar-ticket 416d-c02a-5be4-46ad): a real review
-run must EXPORT OpenTelemetry spans that Langfuse ingests into a fetchable trace.
+"""External Langfuse OTLP round trip for a review run.
 
-rebar emits traces write-only over OTLP — Langfuse is an OTLP *endpoint*, NOT an SDK
-dependency (``src/rebar/llm/tracing.py``): ``setup_tracing`` installs a
-``BatchSpanProcessor`` → ``OTLPSpanExporter`` and calls ``Agent.instrument_all()``.
-The runner does not surface a ``trace_id`` (it is a sink, never read back into a rebar
-decision), so this test does NOT look for one. Instead it drives a real review, flushes
-the span processor, and confirms via the public REST API that a trace with observations
-was ingested for the run.
+``setup_tracing`` exports OpenTelemetry spans through a batch processor and instruments the
+agent. This test runs a configured-provider review, flushes the processor, and queries the
+public REST API for a newly ingested trace with observations. A bounded retry handles
+asynchronous ingestion without adding the Langfuse SDK as a dependency.
 
-Runs against a SELF-HOSTED Langfuse (the ``docker-compose.langfuse.yml`` stack) —
-locally or the ephemeral stack the external-integration CI job brings up. Like the
-other ``tests/external`` suites it is inert unless ``REBAR_RUN_EXTERNAL=1`` and skips
-unless an LLM key + the ``agents`` extra + the ``tracing`` extra + a configured
-Langfuse are all present.
-
-Why REST (not the SDK's fetch helpers): the public ``GET /api/public/traces`` endpoint
-is stable across SDK majors and needs no ``langfuse`` dependency. Ingestion is async —
-spans are queryable only a few seconds AFTER ``force_flush()`` — so we poll with a
-bounded read-retry loop.
+The test requires ``REBAR_RUN_EXTERNAL``, the agents and tracing extras, a provider credential,
+and a configured Langfuse endpoint.
 """
 
 from __future__ import annotations
@@ -128,11 +116,8 @@ def test_live_review_exports_langfuse_trace(rebar_repo: Path) -> None:
     # the recursion limit — mirrors test_llm_live.test_live_review_ticket.
     (rebar_repo / "app.py").write_text("API_KEY = 'hardcoded-secret'\n", encoding="utf-8")
 
-    # review_code (the surviving findings-returning op this test retargeted onto after the
-    # public review_ticket was removed — bug 751a) always runs the four-pass gate (epic b744 +
-    # bug 5b32-37c4-f99a-4315), so this drives the REAL traced LLM run with no config key. Any
-    # findings-returning op works as the trace vehicle; the assertion below
-    # only requires that a real review executed and produced a result.
+    # ``review_code`` supplies a findings-returning operation that exercises the traced
+    # four-pass model path. The assertion only requires a completed review result.
     diff = "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1 @@\n+API_KEY = 'hardcoded-secret'\n"
 
     # from_env() picks up the LANGFUSE_* creds so tracing is enabled for this run.
@@ -140,10 +125,8 @@ def test_live_review_exports_langfuse_trace(rebar_repo: Path) -> None:
     cfg.model = _MODEL
     assert cfg.langfuse.enabled, "LANGFUSE_* must be configured for this test"
 
-    # List-filter window (bounds the page size only). Correctness does NOT rely on the
-    # timestamp: we snapshot the trace ids that ALREADY exist and require a genuinely NEW
-    # one, so a lingering trace from a prior run on a reused stack can't produce a false
-    # pass (a fresh CI stack has none anyway). The skew margin only widens the page.
+    # The timestamp only bounds the query. A snapshot of existing IDs requires a new trace, so
+    # stale data cannot satisfy the assertion. The skew margin widens the query window.
     from_ts = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=_SKEW_MARGIN_S)
     query = urllib.parse.urlencode(
         {"fromTimestamp": from_ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "limit": 100}

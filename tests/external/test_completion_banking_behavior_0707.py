@@ -1,24 +1,12 @@
-"""Live behavioral regression for completion-verifier criterion banking (bug 0707).
+"""Completion-verifier banking regression measured in evidence responses.
 
-This eval deliberately exercises the real dense ticket that exposed the zero-bank loop.  The
-ticket and repository are read-only inputs: ``verify_completion`` is called with the local source
-handle, and this module never emits a sidecar or transitions tracker state.
+The ``verify_completion`` call reads a local source snapshot without emitting a sidecar or
+transitioning its ticket; fixture setup creates and advances only scratch-store tickets. An
+evidence response is a model response in which a governed repository tool ran. Multiple reads in
+one response remain one budget unit.
 
-Measurement and oracle are denominated in evidence RESPONSES — distinct model responses
-(``ctx.run_step``) at which a governed repository tool actually executed — because that is the
-unit the completion evidence policy enforces (``max_evidence_responses`` in
-``src/rebar/llm/completion_tool_policy.py``).  Commit ``e1352535ace`` (ticket
-``dd41-239d-6e09-4a86``) deliberately lets a batched response execute ALL of its governed
-reads, so an executed-CALL denomination is unbounded per response and went stale (bug
-``9507-4676-27af-4344``).  Raw executed calls stay in the trial payload as a diagnostic only.
-
-The measured contract is SYSTEM-level boundedness (operator ruling, ticket
-``6543-24a7-d2fb-4ff9``): a criterion counts as banked at the first durable bank write by ANY
-actor — the model's genuine ``record_criterion_verdict`` upsert or the policy's silent
-bounded-fallback insufficiency snapshot.  dd41 also removed the steering pressure that once
-made the model interleave genuine records, so the model's voluntary banking cadence is
-explicitly not the contract; the system property under test is that progress is durably
-banked at bounded evidence-response intervals, however achieved.
+The contract is system-level boundedness. The first durable bank write counts, whether it comes
+from ``record_criterion_verdict`` or the policy's bounded-fallback insufficiency snapshot.
 """
 
 from __future__ import annotations
@@ -46,10 +34,8 @@ pytest.importorskip("pydantic_ai")
 pytestmark = pytest.mark.external
 
 _MODEL = "bedrock:us.anthropic.claude-sonnet-4-6"
-#: The provider _MODEL pins. This module does NOT follow the arm's `standard` model class, so
-#: its readiness must be asked about bedrock specifically — on an arm that resolves anything
-#: else there is no AWS credential (the OIDC step is gated to the bedrock arm) and every cell
-#: here would fail on a provider this arm never claimed to cover (bug 4f74).
+#: This module pins Bedrock instead of the arm's ``standard`` model. Readiness therefore requires
+#: the Bedrock arm and its AWS credential.
 _PINNED_PROVIDER = _MODEL.partition(":")[0]
 _live_llm_ready = _live_llm.live_llm_ready(_PINNED_PROVIDER)
 _skip = _live_llm.skip_unless_provider(_PINNED_PROVIDER)
@@ -146,11 +132,10 @@ def _bounded_bank_gaps(trial: dict[str, Any], expected_criteria: int) -> bool:
 
 
 def _dense_ticket(repo: Path) -> str:
-    """Build a real, deliberately broad repository-verification workload.
+    """Build a broad, immutable repository-verification workload.
 
-    Each criterion is demonstrably true, but a broad search reaches the production hit cap and
-    must be narrowed repeatedly.  This recreates the bounded-yet-always-promising evidence stream
-    that exposed the missing finite bank transition without depending on mutable tracker history.
+    Each true criterion narrows its searches after the production hit cap, creating the bounded
+    evidence stream that exercises durable banking without mutable tracker history.
     """
     adapters = repo / "src" / "adapters"
     adapters.mkdir(parents=True)

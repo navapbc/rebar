@@ -1,24 +1,9 @@
-"""Live probe: do the ACLI link CLIENT PRIMITIVES work end-to-end against Jira?
+"""External end-to-end check of Jira ACLI link primitives.
 
-Gated like tests/external/test_reconcile_live.py: marked ``external`` (excluded
-from the default ``-m "not integration and not external"`` CI run) and skipped
-unless Jira connection configuration including ``JIRA_PROJECT`` and the ``acli``
-binary are present.
-
-Scope: this proves whether ``set_relationship`` / ``get_issue_links`` /
-``delete_issue_link`` function live, AND captures the EXACT JSON shape of a live
-Jira issuelink (the shape a future fetcher / inbound differ must parse). It is
-DISTINCT from whether the reconcile PIPELINE wires those primitives — that is
-the job of tests/integration/rebar_reconciler/test_link_sync.py.
-
-Every Jira issue and link created here is cleaned up in a try/finally that runs
-even on failure. Authorized for PROBE issues this test creates and deletes
-itself.
-
-Run locally with configuration::
-
-    JIRA_URL=… JIRA_USER=… JIRA_API_TOKEN=… JIRA_PROJECT=… pytest -m external \
-        tests/external/test_link_sync_live.py
+The test requires the external opt-in, Jira configuration including ``JIRA_PROJECT``, and the
+``acli`` binary. It creates a link where A blocks B, reads the Jira response shape, deletes the
+link, and removes both issues in ``finally``. Integration tests cover reconcile wiring. This
+module covers the client operations and service response.
 """
 
 from __future__ import annotations
@@ -98,15 +83,13 @@ def test_link_primitives_roundtrip_live() -> None:
         )
         key_b = _new_key(created_b)
 
-        # Create the link A --blocks--> B.
         set_result = client.set_relationship(key_a, key_b, "Blocks")
         assert set_result.get("status") == "created", f"set_relationship failed: {set_result!r}"
 
-        # Read links back on A and assert the Blocks->B link is present.
         links_a = client.get_issue_links(key_a)
         assert isinstance(links_a, list), f"get_issue_links did not return a list: {links_a!r}"
 
-        # CAPTURE the exact live issuelink JSON shape (printed for the report).
+        # Print the Jira link shape for diagnostics.
         print("\n=== LIVE issuelink JSON shape (get_issue_links on A) ===")
         print(json.dumps(links_a, indent=2, default=str))
         print("=== end issuelink shape ===\n")
@@ -126,12 +109,11 @@ def test_link_primitives_roundtrip_live() -> None:
             f"{json.dumps(links_a, default=str)}"
         )
 
-        # Record the link id so the finally block can delete it.
+        # Retain the ID for failure cleanup.
         link_id = match.get("id")
         assert link_id, f"matched issuelink carries no 'id' to delete by: {match!r}"
         created_link_ids.append(str(link_id))
 
-        # Delete the link and confirm it is gone.
         del_result = client.delete_issue_link(str(link_id))
         assert del_result.get("status") == "deleted", f"delete_issue_link failed: {del_result!r}"
         created_link_ids.clear()  # deleted successfully; nothing left to clean
@@ -144,13 +126,13 @@ def test_link_primitives_roundtrip_live() -> None:
         )
 
     finally:
-        # Best-effort cleanup of any link that survived (delete failed mid-test).
+        # Clean up a link left by partial failure.
         for lid in created_link_ids:
             try:
                 client.delete_issue_link(lid)
             except Exception as exc:  # noqa: BLE001
                 print(f"CLEANUP WARNING: delete_issue_link({lid}) failed: {exc!r}")
-        # Delete both probe issues (404 is idempotent success per delete_issue).
+        # Delete both issues. A 404 is idempotent success.
         for key in (key_a, key_b):
             if key:
                 try:

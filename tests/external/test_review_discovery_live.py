@@ -1,18 +1,8 @@
-"""RP-06 S7 — the live external-provider canary for the cross-gate discovery cutover (AC7).
+"""External provider canary for plan-review discovery.
 
-[operator-attested] This is the ONLY test in the story that makes a real, billable model
-call. It is inert by default (the external tier's ``REBAR_RUN_EXTERNAL`` opt-in) and skips —
-visibly, never silently — unless the CONFIGURED provider's credential is present
-(``_live_llm``). The orchestrator runs it against the live external-provider matrix; the
-authoring session never executes it live.
-
-What it proves that no offline test can: that a plan-review run drives at least ONE real
-discovery call to the configured provider and still returns the NARROW public verdict, with
-the reducer-ignored internal journal retained off that public surface.
-
-Safety: it asserts only on booleans / enum verdicts / schema-shape. It NEVER prints the model
-credential, the raw plan/context body, the prompt, or the internal trace — a live canary must
-not leak sensitive data into CI logs (the RP-06 sensitive-data boundary).
+With the external opt-in and configured credential, a plan review must make at least one
+provider discovery call and return the narrow public verdict. The internal journal remains
+outside that surface. Assertions avoid credentials, prompts, raw context, and trace data in logs.
 """
 
 from __future__ import annotations

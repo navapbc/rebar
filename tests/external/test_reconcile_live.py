@@ -1,22 +1,8 @@
-"""Live-runtime validation of the Jira bridge preview plan (task c).
+"""External validation of a non-destructive Jira bridge preview.
 
-The reconciler counterpart to ``test_llm_live.py`` in the external-integration
-tier (``tests/external/``): it hits the REAL Jira instance, so it is marked
-``external`` (excluded from the default CI run, which uses ``-m "not integration
-and not external"``) and skips unless live Jira credentials AND the ``acli``
-binary are present.
-
-It validates the one runtime property that cannot be checked offline: a
-``bridge_preview`` against the real instance computes a WELL-FORMED plan and
-is NON-DESTRUCTIVE — it must apply ZERO mutations (``mutations_applied == 0``,
-``no_write`` true) even though it fetches the live working set. The mock-tier
-round-trip tests (tests/integration/rebar_reconciler/test_reconcile_roundtrip.py)
-own the field-fidelity assertions; this smoke only certifies the live plan is
-shaped like what the differ produces and never writes.
-
-Run locally with credentials::
-
-    JIRA_URL=… JIRA_USER=… JIRA_API_TOKEN=… pytest -m external tests/external
+The test requires the external opt-in, Jira credentials, and ``acli``. A ``bridge_preview``
+against the service must return a well-formed differ plan with ``mutations_applied == 0`` and
+``no_write`` set. Integration tests own detailed field-fidelity coverage.
 """
 
 from __future__ import annotations

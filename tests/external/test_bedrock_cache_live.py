@@ -1,21 +1,9 @@
-"""LIVE Bedrock prompt-cache canary (story S3, ticket 2932).
+"""Bedrock prompt-cache canary for the external tier.
 
-Marked ``external`` -> inert in the default suite (see ``tests/external/conftest.py``); runs
-only with ``REBAR_RUN_EXTERNAL=1`` (the tier opt-in) **and** ``REBAR_LIVE_BEDROCK=1`` (this
-canary's own opt-in, mirroring how ``test_completion_pass_live.py`` additionally gates on
-``ANTHROPIC_API_KEY``) plus real ambient AWS credentials (instance role / ``AWS_PROFILE`` /
-boto3's default chain — rebar manages no Bedrock key, see ``rebar.llm.bedrock_model``).
-
-Proves the MEASURED, load-bearing fact this story's cache-effectiveness warning
-(``rebar.llm.structured_run.warn_if_cache_ineffective``) exists to detect: on the DEFAULT
-Bedrock model (``us.anthropic.claude-sonnet-4-6``), repeating an identical, large system
-prompt (a cache-eligible prefix) actually gets a cache HIT on the second call
-(``cache_read_tokens > 0``) — the positive case, kept alive so a regression in either
-pydantic-ai's Bedrock cache wiring or rebar's ``capabilities.py``/``providers.py`` seam would
-be caught by this canary rather than only ever discovered by an operator's silent bill.
-
-Run::  REBAR_RUN_EXTERNAL=1 REBAR_LIVE_BEDROCK=1 pytest -m external \
-           tests/external/test_bedrock_cache_live.py
+The test requires both external and cache-canary opt-ins plus credentials from the boto3 chain.
+It repeats a cache-eligible system prefix on the configured Bedrock model and requires
+``cache_read_tokens`` on the second response. This detects regressions in provider cache wiring
+and capability selection.
 """
 
 from __future__ import annotations

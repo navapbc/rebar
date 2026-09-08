@@ -1,23 +1,9 @@
-"""RP-01 S4 AC-1 / AC-2 — real-OpenTelemetry-SDK candidate-span NESTING proof.
+"""OpenTelemetry SDK proof for nested model-candidate spans.
 
-The env-independent oracle (``tests/unit/test_candidate_tracing_oracle.py`` +
-``tests/unit/test_candidate_tracing.py``) proves the candidate-span contract that CAN be
-asserted against a recording fake: one span per attempted candidate, zero-based order, and the
-outcome/model/usage/error attributes. What a fake tracer CANNOT observe is the real
-ambient-context PARENTING — that every candidate span nests under the SINGLE Agent
-model-request span that pydantic-ai's own OTel instrumentation opens. Proving that needs a real
-``opentelemetry-sdk`` tracer provider shared by both rebar's candidate spans and pydantic-ai's
-model-request span.
-
-That SDK is the optional ``[tracing]`` extra, which the lean unit Verified lane deliberately
-does not install (``.github/workflows/_build-and-test.yml`` installs only dev/reviewbot/ui, and
-``tests/_extra_guard.py`` forbids ``importorskip``-dodging a missing extra there). So — exactly
-like ``tests/external/test_llm_trace.py``, the one other real-OTel-SDK test — this proof lives
-in the external tier: inert unless ``REBAR_RUN_EXTERNAL=1`` and the ``[tracing]`` extra is
-installed. It makes NO live/billable call: a real Anthropic ``FallbackModel`` runs against an
-httpx ``MockTransport`` (a dummy key, an in-memory span exporter), so it is fast and
-network-free — it is external only because it needs the optional SDK, not because it hits a
-service.
+Unit tests cover candidate order and attributes with a recorder. This external test uses the
+optional tracing SDK to prove each candidate span is parented by pydantic-ai's model-request
+span. An httpx ``MockTransport`` and in-memory exporter keep the test network-free and unbilled.
+It runs only when the external tier and tracing extra are enabled.
 """
 
 from __future__ import annotations
