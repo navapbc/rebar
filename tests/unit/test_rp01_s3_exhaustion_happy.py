@@ -1,20 +1,9 @@
-"""RP-01 S3 — HAPPY-PATH oracle for typed exhaustion restoration
-(ticket [rebar:serge-monotonous-aruanas], 558e-d9bd-e285-40a1).
+"""Expose the RP-01 S3 implementer-facing identity contract.
 
-This is the ONLY S3 behavioral test the implementer sees; the edge/negative/robustness cases
-live in ``test_rp01_s3_contract_oracle.py`` (held out).
-
-The one behavior it pins is the headline of AC2: when the bounded Agent operation exhausts its
-output-retry budget on a VALIDATION failure, the terminating ``UnexpectedModelBehavior`` carries
-the original Rebar :class:`StructuredOutputError` on its standard Python cause chain (because
-S2's ``pai_output.output_function`` raises ``ModelRetry(str(err)) from err``). S3 walks that
-chain and re-raises the IDENTICAL object — same ``id()`` — preserving its subtype and any
-attributes, instead of constructing a fresh, information-losing error.
-
-Driven through the REAL ``PydanticAIRunner`` over an offline ``FunctionModel``; no live/billable
-call can escape (ALLOW_MODEL_REQUESTS off). The exact-object identity is pinned by planting a
-recognizable sentinel ``StructuredOutputError`` at the parser seam and asserting the runner
-re-raises THAT object.
+When validation failures exhaust one bounded ``Agent`` operation, the terminating
+exception chain contains the original ``StructuredOutputError``. The runner must
+re-raise that object with its subtype and attributes intact. An offline
+``FunctionModel`` prevents provider calls.
 """
 
 from __future__ import annotations

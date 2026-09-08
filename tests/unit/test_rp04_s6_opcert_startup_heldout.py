@@ -1,16 +1,10 @@
-"""RP-04 S6 (6f14) HELD-OUT oracle — op-cert startup key composition.
+"""Hold out RP-04 S6 startup signer contracts.
 
-Withheld from the implementer. Validates the full S6 contract beyond the visible happy path:
-
-AC1  exactly-one-source startup validation (missing / both-set / unreadable / non-Ed25519),
-     rejected AT COMPOSITION — before any job runs.
-AC2  filesystem: composed key is a process-owned 0700 dir / 0600 file; the source is left
-     untouched; cleanup removes only the process copy.
-AC4  signer-seam threading through BOTH producer chains — completion AND plan-review sign
-     from the composed signer while REBAR_OPCERT_KEY_PATH / REBAR_OPCERT_ENV_ID are UNSET;
-     with no binding the developer-local path still signs from the env/genesis default.
-AC5  structural: the opcert_service package no longer imports boto3 / SSM / a region; the
-     deploy artifacts materialize the key file and drop the per-job SSM param.
+Composition accepts exactly one Ed25519 source and rejects invalid keys before jobs.
+It copies the key into process-owned 0700 and 0600 storage while preserving the source.
+Cleanup removes only that copy. Both producer chains use the composed signer without
+environment credentials, while unbound developer signing retains its environment path.
+Structural checks exclude AWS and per-job SSM handling from the service.
 """
 
 from __future__ import annotations

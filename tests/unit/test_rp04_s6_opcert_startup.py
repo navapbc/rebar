@@ -1,20 +1,8 @@
-"""RP-04 S6 (6f14) VISIBLE happy-path oracle — op-cert startup key composition.
+"""Expose the RP-04 S6 startup signer happy path.
 
-This is the ONLY S6 test the implementer sees. It pins the new startup-composition
-seam's happy path: the service composes ONE immutable signer at startup from a
-deployment-materialized key FILE (``REBAR_OPCERT_KEY_PATH`` source), and a completion
-job signs from that composed signer — with NO per-job SSM fetch and NO reliance on the
-signing seam re-reading ``REBAR_OPCERT_KEY_PATH`` / ``REBAR_OPCERT_ENV_ID`` from the
-process environment.
-
-New public API this pins (see the ticket plan):
-    rebar.opcert_service.keyprov.compose_signer(cfg) -> OpcertSigner
-        - reads EXACTLY ONE of cfg.key_path / cfg.private_key
-        - validates + copies the key into a process-owned 0700 dir / 0600 file
-        - returns a frozen OpcertSigner(key_path, principal, runtime_dir) with .cleanup()
-    rebar.opcert_service.jobs.run_job(*, ticket_id, kind, cfg, signer, ...)
-        - takes the composed signer (not a per-job ssm_fetcher) and threads it into
-          the signing producer so signing uses the composed key.
+The service composes one immutable signer from a deployment-provided key file.
+``run_job`` threads that signer into completion signing without per-job SSM access or
+environment rereads. The signer owns its protected runtime copy and cleanup.
 """
 
 from __future__ import annotations

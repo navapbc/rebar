@@ -1,22 +1,8 @@
-"""End-to-end harness for infra/scripts/reviewbot-ensure-tickets.sh (bug
-desirous-judicial-hogget / d220).
+"""Exercise ``reviewbot-ensure-tickets.sh`` against local Git repositories.
 
-A fresh ``git clone --single-branch --branch tickets`` of the shared tickets branch — the
-review-bot's persistent artifact store — is NOT a usable rebar store: it has no repo-local
-git identity and lacks the git-ignored ``.env-id`` marker, so every write fails "ticket
-system not initialized" (composer.py) and ``emit_code_review_artifact`` swallows it, making
-artifact emission a silent no-op on every fresh clone.
-
-This harness is fully hermetic (all local git; no network, no Docker, no real GitHub):
-
-  RED         — a store write into a fresh single-branch clone FAILS today;
-  GREEN       — after the ensure script runs, the SAME write SUCCEEDS + is durably committed;
-  idempotence — running the ensure step twice is a no-op and the write still succeeds;
-  AC#3        — ``emit_code_review_artifact`` emits the greppable ``ARTIFACT_EMIT_ERROR``
-                marker when a write into a non-initialized dir fails.
-
-Proving command:
-    .venv/bin/pytest tests/unit/test_reviewbot_ensure_tickets.py -v
+A fresh single-branch tickets clone lacks a Git identity and ``.env-id``, so writes
+fail. The suite proves that setup makes the clone writable, persists events, remains
+idempotent, and exposes artifact failures through ``ARTIFACT_EMIT_ERROR``.
 """
 
 from __future__ import annotations
@@ -213,13 +199,7 @@ def test_emission_failure_emits_greppable_marker(
 def test_ensure_sets_a_global_identity_for_attribution(
     origin_with_tickets: Path, tmp_path: Path
 ) -> None:
-    """rebar resolves event attribution via ``_seam.attribution_fields()``, which reads git
-    config from ``config.repo_root()`` — in the review-bot container that is /app, NOT the
-    tickets clone. A repo-local identity on the clone alone therefore left `author_email`
-    empty and `resolve_current_identity()` None, so events were stamped author "Unknown" with
-    author_id null. That also skipped SIGNING outright, because `_seam` gates on
-    ``if author_id and signing_key``. 8880 live events were written unsigned this way.
-    """
+    """Global Git identity supplies attribution when the application root is not the clone."""
     home = tmp_path / "home"
     clone = _fresh_clone(origin_with_tickets, tmp_path / "clone_global", home)
 

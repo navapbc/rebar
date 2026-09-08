@@ -1,10 +1,8 @@
-"""6cd0 (smart-evadable-teledu): the per-gate-run correlation identity.
+"""Define one correlation identity for each gate run.
 
-`trace_id` is declared in review_result.schema.json and completion_verdict.schema.json
-but every emitting site in runner.py hardcoded `None`, so a verdict could not name the
-run that produced it. This mints one identity per gate run — read from the active
-OpenTelemetry span when one is recording, else `secrets.token_hex(16)` — and threads it
-into all three `runner.py` emitters via `req.config`.
+The identity comes from a recording OpenTelemetry span or a newly minted 32-character
+hexadecimal value. Gate configuration carries it to every runner emitter. Review and
+completion schemas expose the field while standalone and deterministic paths remain null.
 """
 
 from __future__ import annotations

@@ -1,15 +1,8 @@
-"""The shared four-pass review KERNEL (epic ``vivid-gang-day``).
+"""Test the shared four-pass review kernel from ``vivid-gang-day``.
 
-WS1 — the Pass-3 deterministic decision core (:mod:`rebar.llm.review_kernel.decide`):
-
-* ground-truth behavioral assertions on the math (validity / impact / priority / the
-  decision labels) BY CONSTRUCTION — not a snapshot of prior output, so the test cannot
-  lock in a pre-existing bug;
-* the per-criterion ``block_threshold`` is a PARAMETER: two consumers with different
-  thresholds route through the SAME kernel and produce independently-correct partitions
-  (the divergence-danger this extraction removes);
-* the plan-review re-exports are the SAME objects as the kernel's (no second copy of the
-  decision math remains, AC #3).
+The suite derives Pass 3 decisions from validity, impact, priority, and configured
+thresholds. Contrasting thresholds verify parameterized policy. Plan review uses the
+shared kernel rather than maintaining separate decision logic.
 """
 
 from __future__ import annotations
@@ -77,11 +70,7 @@ def test_severity_label_buckets() -> None:
 
 
 def test_pass3_decide_never_stamps_a_severity_key() -> None:
-    """The retired impact-only severity label is not part of pass3_decide's output at any
-    return site -- including the no-verification/indeterminate early return, which used to
-    hardcode `severity: "none"` before any impact/validity was computed, and the veto/dropped
-    return sites (cited-reference veto, low-validity drop), which used to include the
-    severity_label-derived value alongside the veto's `reason`."""
+    """Pass 3 omits the retired ``severity`` field from every outcome."""
     assert "severity" not in review_kernel.pass3_decide(None)
     assert "severity" not in review_kernel.pass3_decide(_verif(), blocking_enabled=True)
     assert "severity" not in review_kernel.pass3_decide(_verif(), blocking_enabled=False)
@@ -105,9 +94,7 @@ def test_decision_labels_by_construction() -> None:
     assert review_kernel.pass3_decide(_verif(), blocking_enabled=True)["decision"] == "block"
     # same finding, blocking NOT opted in ⇒ advisory (the v1 default posture)
     assert review_kernel.pass3_decide(_verif(), blocking_enabled=False)["decision"] == "advisory"
-    # validity < 0.5 ⇒ dropped (low validity). A strict MAJORITY of the graded set is "no"
-    # (count-robust: holds as GRADED_BINARY grows — e.g. R5's na-default addition — since
-    # _verif fills the rest with "yes"), keeping the graded fraction below the 0.5 bar.
+    # A strict no majority keeps validity below 0.5 as the graded set grows.
     n_no = len(review_kernel.GRADED_BINARY) // 2 + 1
     low = _verif(binary={q: "no" for q in list(review_kernel.GRADED_BINARY)[:n_no]})
     assert review_kernel.pass3_decide(low)["decision"] == "dropped"
@@ -117,10 +104,7 @@ def test_decision_labels_by_construction() -> None:
 
 
 def test_absence_claim_veto_drops_refuted_absence() -> None:
-    """a8e5 Component 1: the absence-claim veto mirrors the cited-reference veto. A finding
-    whose premise asserts something is ABSENT (``claims_absence == "yes"``) that the verifier
-    then REFUTED by finding a provision in the plan (``absence_confirmed_in_context == "no"``)
-    is DROPPED with reason ``veto:absence-refuted`` — even at full validity + impact."""
+    """A refuted absence claim is dropped even at maximum validity and impact."""
     refuted = _verif(binary={"claims_absence": "yes", "absence_confirmed_in_context": "no"})
     d = review_kernel.pass3_decide(refuted, blocking_enabled=True)
     assert d["decision"] == "dropped"
@@ -128,10 +112,7 @@ def test_absence_claim_veto_drops_refuted_absence() -> None:
 
 
 def test_on_target_veto_only_fires_in_execution_review() -> None:
-    """The execution-phase on-target veto: a finding the verifier confirms the code already
-    satisfies (``current_state_satisfies_plan_goal == "yes"``) is DROPPED with reason
-    ``veto:plan-goal-satisfied`` — but ONLY when ``execution_review=True``. At planning time
-    (default) it is inert, so a genuine planning-stage true positive is byte-unchanged."""
+    """Only execution review drops a goal that the current state already satisfies."""
     on_target = _verif(binary={"current_state_satisfies_plan_goal": "yes"})
     # Planning phase (default): the veto is inert — full-validity finding survives.
     assert review_kernel.pass3_decide(on_target, blocking_enabled=True)["decision"] != "dropped"
@@ -152,10 +133,7 @@ def test_on_target_veto_only_fires_in_execution_review() -> None:
 
 # ── the threshold is a PARAMETER: two consumers, one kernel, independent partitions ──
 def test_parameterized_threshold_two_consumers_one_kernel() -> None:
-    """A mid-priority finding (validity 1.0 × impact 0.5 = 0.5): a STRICT gate
-    (threshold 0.95, blocking on) leaves it ADVISORY; a LENIENT gate (threshold 0.4,
-    blocking on) BLOCKS it. Same kernel math, different parameterized posture — the
-    extraction's whole point (no forked decision core)."""
+    """One kernel keeps a mid-priority finding advisory or blocking by consumer threshold."""
     mid = _verif(
         attrs={
             "prod_impact": "low",
@@ -237,19 +215,13 @@ def _severity_fields(model: type) -> set[str]:
 
 
 def test_verification_contract_shares_the_binary_vocabulary() -> None:
-    """The kernel registers ``verification``; plan-review's ``plan_review_verification`` EXTENDS
-    that shape with the 7 plan-severity axes + a detection axis (story fishable-apivorous-redhead)
-    while reusing the EXACT same Binary vocabulary via the shared builder — so the two models
-    never diverge on the sub-question set (derived from the single GRADED_BINARY + the
-    cited-reference veto), and the kernel model stays byte-identical for code-review."""
+    """Plan review extends the shared contract without changing code review's vocabulary."""
     from rebar.llm.plan_review import passes
 
     # plan-review dispatches the EXTENDED model, not the kernel alias
     assert passes._pass2_model is kverify.plan_review_verification_model
 
-    # The Binary vocabulary is the GRADED set + the THREE conditional veto binaries
-    # (cited_reference_accurate + the a8e5 absence-claim pair). None of the vetoes are in
-    # GRADED_BINARY (they gate/drop, they do not grade validity).
+    # The shared vocabulary adds three conditional vetoes outside validity grading.
     expected_binary = {
         *review_kernel.GRADED_BINARY,
         "cited_reference_accurate",
@@ -367,9 +339,7 @@ def test_verify_findings_chunks_runs_and_merges() -> None:
 
 
 def test_verify_findings_degrades_to_indeterminate_on_unparseable_turn() -> None:
-    """A chunk whose ``run_chunk`` raises (an unparseable turn surviving the tolerant
-    json-repair + bounded-retry stack) contributes NO verifications — never crashing — so those
-    findings have no verification and Pass-3 routes them to INDETERMINATE."""
+    """An unparseable chunk yields no verification and degrades to indeterminate."""
     findings = [_fnd("f0"), _fnd("f1")]
 
     def run_chunk(instructions: str, context: str) -> list[dict]:
@@ -392,10 +362,7 @@ def test_verify_findings_degrades_to_indeterminate_on_unparseable_turn() -> None
 
 # ── verifier→decide CONTRACT enforcement (epic drag-gripe-brake) ─────────────────────────────
 def test_strict_verification_model_rejects_divergent_shape_tolerant_drops() -> None:
-    """The REJECT-don't-ignore boundary (P1): the STRICT model raises on a divergent shape (a
-    wrong wrapper key, or a wrong per-item key), while the LIVE (tolerant) model silently drops
-    it to empty — the exact silent degrade that marked every finding `no-verification`. This pins
-    the strict contract AND documents the live behavior the expand-contract flip will change."""
+    """The strict model rejects divergent keys that the tolerant model drops or defaults."""
     from rebar.llm.errors import StructuredOutputError
     from rebar.llm.structured import parse_structured
 
@@ -407,9 +374,7 @@ def test_strict_verification_model_rejects_divergent_shape_tolerant_drops() -> N
         '{"verifications": [{"index": 0, "attributes": {"prod_impact": "high"}}]}'
     )
 
-    # LIVE tolerant path: BOTH divergences degrade SILENTLY, two different ways. A wrong wrapper
-    # key drops the whole list to empty (the #74 "all no-verification" bug); a wrong per-item key
-    # keeps the verification but discards its payload, leaving DEFAULT severity attributes.
+    # Tolerant parsing drops a wrong wrapper and defaults a wrong item payload.
     assert parse_structured(wrong_wrapper, tolerant).verifications == []
     item = parse_structured(wrong_item_key, tolerant).verifications
     assert len(item) == 1 and item[0].severity_attributes.prod_impact == "none"  # payload lost
@@ -422,10 +387,7 @@ def test_strict_verification_model_rejects_divergent_shape_tolerant_drops() -> N
 
 
 def test_reshape_classifies_contract_violations_structurally() -> None:
-    """The shared reshape seam classifies the violations the old silent-drop hid: a duplicate
-    index, an out-of-range index (outside ``valid_indices``), and a malformed (no-int-index)
-    item — while the returned map stays byte-identical to the tolerant merge. Pure structural
-    assertions on the returned dataclass — no string heuristics."""
+    """Reshaping reports duplicate, unexpected, and malformed indices without changing its map."""
     raw = [
         {"index": 0, "binary": {"is_verifiable": "yes"}},
         {"index": 0, "binary": {}},  # duplicate
@@ -451,10 +413,7 @@ def test_reshape_clean_run_reports_no_violations() -> None:
 
 
 def test_verify_findings_surfaces_structured_contract_failure_loudly(caplog) -> None:
-    """A ``run_chunk`` that raises ``StructuredOutputError`` (the verifier's turn could not be
-    validated to the `verification` contract) is a CONTRACT violation — recorded distinctly in
-    ``contract_violations['shape_failures']`` and logged at ERROR — NOT a silent degrade. The
-    OUTCOME is unchanged: those findings still have no verification → INDETERMINATE."""
+    """A structured output failure is logged as a shape failure before fallback."""
     import logging
 
     from rebar.llm.errors import StructuredOutputError
@@ -481,9 +440,7 @@ def test_verify_findings_surfaces_structured_contract_failure_loudly(caplog) -> 
 
 # ── semantically-empty verifier outcomes (story columned-azure-flea) ─────────────────────────
 def test_verify_findings_clean_chunk_counts_as_clean_outcome() -> None:
-    """A conforming, non-empty verifier response for a chunk counts as a `clean` outcome in the
-    new `outcome_counts` telemetry — additive, so existing consumers reading `contract_violations`
-    are unaffected (it stays empty/falsy on a clean run)."""
+    """A nonempty conforming chunk increments only the clean outcome count."""
     findings = [_fnd("f0"), _fnd("f1")]
 
     def run_chunk(instructions: str, context: str) -> list[dict]:
@@ -509,13 +466,7 @@ def test_verify_findings_clean_chunk_counts_as_clean_outcome() -> None:
 
 
 def test_verify_findings_flags_semantically_empty_outcome_as_contract_violation() -> None:
-    """A `run_chunk` that returns SUCCESSFULLY (no exception — the resilient tolerant-parse
-    stack validated) but with an EMPTY list for a non-empty chunk is the exact silent-degrade
-    ADR 0006 names (a divergent shape normalizes to an empty-but-valid object): it must be
-    flagged LOUDLY and distinctly from both a generic honest-degrade (no violation) and a
-    `StructuredOutputError` shape failure (`shape_failures`) — never silently treated as a
-    valid empty pass. The OUTCOME stays unchanged: those findings still have no verification,
-    so Pass-3 still routes them to INDETERMINATE (resilient parsing is preserved)."""
+    """An empty successful chunk becomes an empty-outcome violation before fallback."""
     import logging
 
     findings = [_fnd("f0"), _fnd("f1")]
@@ -539,9 +490,7 @@ def test_verify_findings_flags_semantically_empty_outcome_as_contract_violation(
 
 
 def test_verify_findings_recovered_outcome_counted_distinctly_from_clean() -> None:
-    """A non-empty verifier response that still needs tolerant reshaping (e.g. a duplicate
-    index) counts as `recovered`, not `clean` — distinguishing a response the resilient stack
-    had to work for from one that matched the schema outright."""
+    """A nonempty response that needs reshaping counts as recovered rather than clean."""
     findings = [_fnd("f0"), _fnd("f1")]
 
     def run_chunk(instructions: str, context: str) -> list[dict]:
@@ -563,10 +512,7 @@ def test_verify_findings_recovered_outcome_counted_distinctly_from_clean() -> No
 
 
 def test_verify_findings_mixed_chunks_tally_each_outcome_independently() -> None:
-    """Multiple chunks with distinct outcomes (clean, semantically-empty, shape-failure) tally
-    independently in `outcome_counts` and merge their violation reports without one masking
-    another — a large-batch verifier run must not let one bad chunk's telemetry swallow a good
-    chunk's."""
+    """Mixed chunks retain independent clean, empty, and shape-failure telemetry."""
     from rebar.llm.errors import StructuredOutputError
 
     findings = [_fnd(f"f{i}") for i in range(6)]

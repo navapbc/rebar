@@ -1,25 +1,9 @@
-"""RP-01 S3 — HELD-OUT oracle for the usage/failure/artifact compatibility contracts
-(ticket [rebar:serge-monotonous-aruanas], 558e-d9bd-e285-40a1).
+"""Hold out RP-01 S3 compatibility checks for typed exhaustion restoration.
 
-Withheld from the implementer (who sees only ``test_rp01_s3_exhaustion_happy.py``). Pins the
-behavior the identity happy-path cannot:
-
-AC2 — the chain-absent fallback and the negative guard:
-  * a repeated-TRUNCATION exhaustion carries NO Rebar object below its bare concision
-    ``ModelRetry`` (S2's ``concision_guard`` raises it WITHOUT ``from err``), so the DEFINED
-    fallback constructs a fresh ``UnretryableOutputError``;
-  * an unrelated ``UnexpectedModelBehavior`` (no exhaustion marker) is left untranslated.
-AC2 robustness (plan-review E6/T2/T3) — the cause-chain walk is version-resilient: it follows
-  the FULL ``__cause__``/``__context__`` chain to ANY depth (never a fixed number of hops) and
-  is cycle-safe, so a pydantic-ai nesting-depth change cannot silently drop the restoration.
-AC1 — whole-run accounting: a successful two-attempt run is ONE operation — one durable JSONL
-  row, ``requests == 2`` (the aggregate, never per-attempt rows).
-AC6 — no ``candidate_requests`` (or any competing per-candidate request-budget field) leaks
-  into ``_usage`` or the usage row.
-
-Every runner-level test drives the REAL ``PydanticAIRunner`` over an offline ``FunctionModel``
-(ALLOW_MODEL_REQUESTS off); the chain-walk tests call the pure helper directly with synthetic
-exception chains so they are deterministic and independent of the provider library version.
+The suite distinguishes validation exhaustion from truncation and unrelated provider
+failures, walks arbitrary cyclic cause and context chains, verifies one aggregate usage
+row for a multi-attempt operation, and forbids competing request-budget fields. Runner
+tests use an offline ``FunctionModel``.
 """
 
 from __future__ import annotations

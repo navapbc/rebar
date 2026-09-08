@@ -1,18 +1,9 @@
-"""RP-01 S2 — happy path for "run structured-output recovery as ONE bounded Agent
-operation" (ticket [rebar:kingsize-unfair-blackbird], 66b3-4214-c70b-4a9a).
+"""Provide the RP-01 S2 happy path for one bounded structured-output operation.
 
-This is the SINGLE happy-path specification handed to the implementer. It pins the core
-contract: a prompted invalid-then-valid recovery is driven as ONE bounded pydantic-ai
-``Agent`` run (composing the S1 output-policy adapter), so the whole recovery reports
-under one shared run rather than as a sequence of independent ``run_sync`` calls.
-
-Observable teeth: today's manual scheduler issues a SEPARATE ``run_sync`` per attempt, so
-``_extract_usage`` reports only the LAST run's ``requests`` (== 1). One bounded operation
-counts BOTH model requests in the same run (``requests`` == 2). Asserting the request count
-— not any private structure — is what distinguishes the new behavior from the old.
-
-Drives the REAL ``PydanticAIRunner`` over an offline ``FunctionModel``; no live/billable
-call can escape (ALLOW_MODEL_REQUESTS is forced off).
+An invalid prompted response followed by a valid response must use one Pydantic AI
+``Agent`` operation. Aggregate usage reports two requests, which distinguishes in-run
+recovery from separate ``run_sync`` calls. An offline ``FunctionModel`` prevents
+provider access.
 """
 
 from __future__ import annotations
