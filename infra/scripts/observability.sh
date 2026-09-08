@@ -281,12 +281,41 @@ esac
 
 # --- 1. Health probes ------------------------------------------------------
 gerrit_code=$(curl -sS -o /dev/null -w '%{http_code}' "https://${DOMAIN}/config/server/version" --max-time 10 2>/dev/null || echo 000)
-review_code=$(curl -sS -o /dev/null -w '%{http_code}' "https://${DOMAIN}/review/health" --max-time 10 2>/dev/null || echo 000)
+review_probe=$(curl -sS -w $'\n%{http_code}' "https://${DOMAIN}/review/health" --max-time 10 2>/dev/null || printf '\n000')
+if [[ "$review_probe" == *$'\n'* ]]; then
+  review_code="${review_probe##*$'\n'}"
+  review_body="${review_probe%$'\n'*}"
+else
+  review_code="$review_probe"
+  review_body=""
+fi
 logger -t rebar-health "gerrit=/config/server/version:${gerrit_code} review-bot=/review/health:${review_code}"
 
 # Publish health as a metric too (1=ok, 0=bad) for alarming if desired.
 gerrit_ok=0; [ "$gerrit_code" = "200" ] && gerrit_ok=1
 review_ok=0; [ "$review_code" = "200" ] && review_ok=1
+if [ -n "$review_body" ]; then
+  review_payload_ok="$(
+    python3 -c '
+import json
+import sys
+
+try:
+    body = json.loads(sys.argv[1])
+except Exception:
+    print(0)
+else:
+    print(
+        1
+        if isinstance(body, dict)
+        and body.get("status") == "ok"
+        and body.get("gerrit_auth", "ok") == "ok"
+        else 0
+    )
+    ' "$review_body" 2>/dev/null || echo 0
+  )"
+  [ "$review_payload_ok" = "1" ] || review_ok=0
+fi
 put_metric_data --region "$REGION" --namespace "$NS" \
   --metric-name gerrit_healthy --unit Count --value "$gerrit_ok" \
   --dimensions InstanceId="$IID" 2>/dev/null || true

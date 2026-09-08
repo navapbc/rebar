@@ -50,7 +50,7 @@ def _stub(bin_dir: Path, name: str, body: str) -> None:
     path.chmod(0o755)
 
 
-def _curl_stub(*, mcp_code: str | None) -> str:
+def _curl_stub(*, mcp_code: str | None, review_health_body: str | None = None) -> str:
     """Answer the ``/mcp`` probe with ``mcp_code``; ``None`` fails the way a dead network does.
 
     Every other ``curl`` the script makes keeps its ordinary healthy answer, so a failure
@@ -61,11 +61,18 @@ def _curl_stub(*, mcp_code: str | None) -> str:
         mcp_case = "printf '000'; exit 7"
     else:
         mcp_case = f"printf {shlex.quote(mcp_code)}; exit 0"
+    review_case = ""
+    if review_health_body is not None:
+        review_case = (
+            f"*/review/health*) printf {shlex.quote(review_health_body)}; "
+            "printf '\\n200'; exit 0 ;;"
+        )
     return f"""
         for a in "$@"; do
           case "$a" in
             *projects/rebar/branches/main*)
               printf ")]}}'\\n"; printf '{{"revision": "{_SHA}"}}\\n'; exit 0 ;;
+            {review_case}
             */mcp) {mcp_case} ;;
           esac
         done
@@ -74,12 +81,14 @@ def _curl_stub(*, mcp_code: str | None) -> str:
         """
 
 
-def _environment(tmp_path: Path, *, mcp_code: str | None) -> tuple[dict[str, str], Path]:
+def _environment(
+    tmp_path: Path, *, mcp_code: str | None, review_health_body: str | None = None
+) -> tuple[dict[str, str], Path]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     aws_log = tmp_path / "aws.log"
 
-    _stub(bin_dir, "curl", _curl_stub(mcp_code=mcp_code))
+    _stub(bin_dir, "curl", _curl_stub(mcp_code=mcp_code, review_health_body=review_health_body))
     _stub(bin_dir, "git", f'printf "{_SHA}\\trefs/heads/main\\n"; exit 0')
     _stub(bin_dir, "logger", "exit 0")
     _stub(bin_dir, "journalctl", "exit 0")
@@ -200,6 +209,19 @@ def test_the_sibling_health_probes_are_unaffected(tmp_path: Path) -> None:
     assert _values(aws_log, "gerrit_healthy") == [1]
     assert _values(aws_log, "reviewbot_healthy") == [1]
     assert _values(aws_log, "mcp_healthy") == [0]
+
+
+def test_reviewbot_degraded_gerrit_auth_publishes_unhealthy(tmp_path: Path) -> None:
+    """A 200 /health response is unhealthy when vote-casting auth is degraded."""
+    env, aws_log = _environment(
+        tmp_path,
+        mcp_code="401",
+        review_health_body='{"status":"degraded","gerrit_auth":"failed"}',
+    )
+
+    _run(env)
+
+    assert _values(aws_log, "reviewbot_healthy") == [0]
 
 
 def test_upstream_lost_mid_gate_latches_a_sustained_zero(tmp_path: Path) -> None:

@@ -109,7 +109,9 @@ class GerritClient:
         self._auth = "Basic " + base64.b64encode(raw).decode("ascii")
 
     # ── low-level HTTP ────────────────────────────────────────────────────────
-    def _request(self, method: str, path: str, *, body: dict | None = None) -> tuple[int, str]:
+    def _request(
+        self, method: str, path: str, *, body: dict | None = None, timeout: float = 60
+    ) -> tuple[int, str]:
         url = f"{self._base}{path}"
         data = json.dumps(body).encode("utf-8") if body is not None else None
         headers = {"Authorization": self._auth, "Accept": "application/json"}
@@ -117,7 +119,7 @@ class GerritClient:
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.status, resp.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace") if exc.fp else ""
@@ -126,6 +128,10 @@ class GerritClient:
             ) from exc
         except urllib.error.URLError as exc:
             raise GerritError(f"{method} {path} transport error: {exc.reason}") from exc
+
+    def check_auth(self) -> None:
+        """Raise if the configured bot credential cannot authenticate to Gerrit."""
+        self._request("GET", "/a/accounts/self", timeout=5)
 
     def _get_json(self, path: str) -> Any:
         status, text = self._request("GET", path)
