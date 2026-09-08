@@ -1,34 +1,9 @@
-"""J11 — the thin vertical slice: a REAL store copy, scrubbed and isolated, round-tripping
-against the Dockerized Data Center harness (epic e369, ticket 5200-e04e-246e-4aae).
+"""Round-trip a real scrubbed store copy through the Dockerized DC harness (J11, epic e369).
 
-WHY THIS EXISTS. Every earlier DC run in this epic converged over an EMPTY or unbound store,
-which is indistinguishable from working: the pass exits 0, prints a reassuring "converged"
-line, and proves nothing. This module runs the bridge against a copy of the project's ACTUAL
-ticket store — real ticket shapes, real link graphs, real volume — and asserts that data
-MOVES in both directions.
-
-ISOLATION IS THE PRECONDITION, AND IT IS ASSERTED, NOT ASSUMED. rebar's store auto-commits and
-auto-pushes to `sync.remote` on every write, so a test that mutates tickets could push into the
-project's real tickets branch, and a misconfigured backend could write into the project's real
-Jira. Three independent layers, all verified by the tests below rather than trusted:
-  1. BOTH repos — the outer working repo and the `.tickets-tracker/` STORE repo, which is the
-     one `sync.remote` would actually push — are fresh `git init`s with NO remote, so there is
-     physically nowhere to push;
-  2. `REBAR_SYNC_PUSH=off`;
-  3. no Cloud credential is present in the environment.
-Layer 1 is the primary one because it cannot be defeated by a mis-read setting.
-
-THE STORE COPY MUST LAND IN `.tickets-tracker/`, NOT AT THE REPO ROOT. The orphan `tickets`
-branch holds ticket files and `.bridge_state` at ITS OWN root, while the reconciler reads
-`repo_root / ".tickets-tracker"` (`reconcile.py:265`). Extracting to the root would put every
-ticket one directory above where the pass looks — a store that is empty as far as the
-reconciler is concerned, produced by the setup rather than by the product.
-
-THE SHARED MACHINERY MOVED. `dc_store_copy_repo` and `bound_dc_issue` now live in `conftest.py`
-and the plain helpers in `_dc_support.py`, because `test_dc_mutations.py` needs the same set
-and a module-local fixture is invisible to a sibling module. Keeping a second copy here would
-reproduce, inside this suite, the duplicated-and-drifted defect class the epic is fixing
-elsewhere.
+Unlike empty-store convergence, this proves real tickets and links move both directions.
+Isolation is asserted: outer and tracker repos have no remotes, sync push is off, and inherited
+Cloud credentials are absent. The copied tickets branch lives under ``.tickets-tracker`` where
+the reconciler reads it; shared fixtures and helpers prevent sibling-test drift.
 """
 
 from __future__ import annotations
@@ -50,12 +25,7 @@ from _dc_support import seed_searchable_issue as _seed_searchable_issue
 from _dc_support import skip_no_extra as _skip_no_extra
 from _dc_support import skip_no_harness as _skip
 
-# THE ALL-SKIP CANARY KEYS ON THIS NAME. `tests/external/conftest.py`'s
-# `pytest_collection_modifyitems` applies the `jira_live` marker only to modules that define a
-# module-level `_live_jira_ready`, and the canary then fails a run in which live tests were
-# COLLECTED but none EXECUTED. Refactoring this helper into `_dc_support` silently removed this
-# module from that bookkeeping — so the cells carrying the epic's headline evidence could all-skip
-# and the run would be green and silent. Re-exported under the name the canary looks for.
+# Re-export under the name that marks this module live and rejects all-skipped evidence.
 _live_jira_ready = live_jira_ready
 
 # ---------------------------------------------------------------------------
@@ -85,20 +55,15 @@ def test_the_working_repo_is_isolated_from_this_project(dc_store_copy_repo: Path
             f"{what} has git remote(s) {remotes!r} — a store write here could push into this "
             "project's real tickets branch"
         )
-    # FIXTURE REGRESSION GUARD, and labelled as one (bug 59b2, Finding A). `dc_store_copy_repo`
-    # itself sets REBAR_SYNC_PUSH=off, so this CANNOT detect a job environment that failed to set
-    # it — it can only detect the fixture ceasing to. That is worth keeping, because losing the
-    # fixture's setenv would re-enable pushes from the copy; it is NOT the environment check the
-    # original wording implied.
+    # Fixture regression guard: this proves the fixture still disables pushes, not what the
+    # inherited job environment supplied (bug 59b2, Finding A).
     assert os.environ.get("REBAR_SYNC_PUSH") == "off", (
         "the dc_store_copy_repo fixture no longer sets REBAR_SYNC_PUSH=off — a store write from "
         "this copy could push"
     )
 
-    # THE ACTUAL ENVIRONMENT CHECK: what the JOB supplied, recorded by the fixture BEFORE it
-    # deleted anything. Asserting on os.environ here would be circular — the fixture delenv's
-    # exactly these names, so the post-fixture environment is guaranteed clean whatever the job
-    # did. The recorded snapshot is a value this cell did not author, so it can fail.
+    # Check the snapshot captured before the fixture stripped credentials; current os.environ
+    # would be circular evidence.
     inherited = read_inherited_env(dc_store_copy_repo)
     leaked = {
         name: value for name, value in inherited.items() if name in CLOUD_CREDENTIAL_VARS and value
@@ -144,19 +109,10 @@ def test_the_store_copy_is_complete_and_scrubbed(dc_store_copy_repo: Path) -> No
 def test_the_inbound_create_is_PLANNED_for_a_new_dc_issue(
     dc_store_copy_repo: Path, dc_transport: Any, jira_dc_project: str, track_issue: Any
 ) -> None:
-    """DOES THE FETCH+DIFFER EVEN SEE THE ISSUE? Asserted separately from applying it.
+    """Prove fetch and differ plan a new DC issue independently of apply.
 
-    Split out because the round-trip cell below failed three times for three DIFFERENT
-    reasons, and each time its one assertion ("the ticket did not appear") could not say
-    whether the differ never planned the create or the pass failed to apply it. This cell
-    answers only the first question, so the two failures stop being indistinguishable.
-
-    UNFILTERED and DRY-RUN, both deliberately. Unfiltered because `--filter-local-ids` is a
-    POST filter — a pass reported "1640 mutations computed, 0 match filter" — so a filtered
-    run cannot show whether the create was planned. Dry-run because unfiltered is only SAFE
-    in dry-run: the scrub leaves every copied ticket unbound, so an unfiltered WRITING pass
-    would file production tickets into the harness (bootstrap-strict's cap=10 would file ten).
-    Dry-run computes the plan and writes nothing.
+    Use an unfiltered dry-run because the post-filter could hide the create, while an
+    unfiltered writing pass would create scrubbed production tickets in the harness.
     """
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
 
@@ -194,14 +150,8 @@ def test_a_dc_issue_reaches_the_local_store_inbound(
     )
     local_id = _jira_key_to_local_id(key)
 
-    # PASS BOTH THE LOCAL ID AND THE JIRA KEY. The flag is named --filter-local-ids, but
-    # `_build_filter_target_set` (reconcile_helpers.py:419-434) seeds the target set with the
-    # strings VERBATIM and can only add a Jira key via `binding_store.get_jira_key(lid)` — a
-    # binding that does not exist yet for an issue arriving inbound for the first time. An
-    # inbound create's `target` IS the Jira key, so filtering on the local id alone matches
-    # NOTHING: an earlier run reported "1640 mutations computed, 0 match filter" and the pass
-    # then reported `inbound_differ total=0` POST-filter, which read like the differ had planned
-    # nothing at all. It had — the companion dry-run cell above proves it.
+    # Include both local ID and Jira key: a first inbound create has no binding from which the
+    # literal filter can derive its Jira target.
     cp = _run_reconcile(dc_store_copy_repo, "bootstrap-strict", only=f"{local_id},{key}")
     assert_child_ran_clean(cp, what="the inbound bootstrap-strict pass")
 
@@ -217,12 +167,9 @@ def test_a_dc_issue_reaches_the_local_store_inbound(
 def test_the_scrubbed_copy_plans_no_deletions_or_outbound_updates(
     dc_store_copy_repo: Path,
 ) -> None:
-    """A dry-run over the scrubbed copy must plan ZERO deletions and ZERO outbound updates.
+    """Require zero deletions and outbound updates after binding scrub.
 
-    Both are exactly zero because the scrub removed every binding: a surviving `bindings.json`
-    would show up as deletions (its production keys do not exist in the harness), and an
-    outbound UPDATE is only ever emitted for a ticket that HAS a binding
-    (`outbound_differ.py:518-520`). Any non-zero value here means the scrub failed.
+    Either action needs a surviving binding, so any planned instance proves scrub failure.
     """
     cp = _run_reconcile(dc_store_copy_repo, "dry-run")
     plan = _envelope(cp).get("plan", [])
@@ -237,14 +184,9 @@ def test_the_scrubbed_copy_plans_no_deletions_or_outbound_updates(
 def test_a_local_edit_reaches_the_dc_issue_outbound(
     dc_store_copy_repo: Path, dc_transport: Any, bound_dc_issue: Any
 ) -> None:
-    """THE EPIC'S UNPROVEN HALF: a local edit surfaces on the DC issue after an outbound pass.
+    """Prove a local edit reaches the bound DC issue through an outbound pass.
 
-    Everything before this proved DATA ARRIVES (inbound). This is the other direction, and it is
-    the criterion the epic has never had evidence for — three live tests existed and none mutated
-    a local ticket then asserted the change on the DC issue.
-
-    The assertion reads the value THIS cell wrote, so it is a genuine round-trip rather than a
-    re-read of an unchanged field.
+    Direct readback must equal this test's new value, not an unchanged remote field.
     """
     import rebar
 

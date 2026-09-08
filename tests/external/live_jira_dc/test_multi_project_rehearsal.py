@@ -1,41 +1,9 @@
-"""Live multi-project bridge rehearsal against the Jira DATA CENTER harness (story 368f).
+"""Rehearse multi-project routing against disposable Jira Data Center projects (story 368f).
 
-Opt-in, LIVE-ONLY canary for the many-to-many Jira bridge, reworked from the earlier
-flawed live-Cloud design onto the ephemeral Jira Data Center harness this directory
-already provisions. Every scenario drives the reconciler against SEVERAL real, THROWAWAY
-scratch DC projects (provisioned by the ``scratch_projects`` conftest fixture) over an
-ISOLATED, LOCAL FILE-BASED copy of the tickets store (the ``store_copy`` fixture below)
-and asserts the headline invariant: work routes to EXACTLY its intended project and never
-contaminates another.
-
-Why DC and not Cloud: the harness is a fresh, disposable instance we own, so a rehearsal
-can create and destroy whole projects rather than sharing two fixed Cloud projects and a
-manually-wired S3 store copy. Isolation is now structural — the store copy has NO remote
-at all (``REBAR_SYNC_PUSH=off``, no ``sync.remote``), and every scratch project is deleted
-on teardown, cascading to its issues — instead of asserted against an ``s3://`` URL.
-
-Gating (three independent layers, all off the default lane):
-  1. the parent ``tests/external/conftest.py`` autouse skip on ``REBAR_RUN_EXTERNAL``;
-  2. ``_live_jira_ready()`` here (a reachable DC ``serverInfo``) via ``@_skip``;
-  3. every fixture depends on the DC provisioning fixtures, which themselves require the
-     harness to be up.
-Defining a module-level ``_live_jira_ready`` also earns the ``jira_live`` marker from the
-parent conftest's ``pytest_collection_modifyitems``.
-
-EVERY mutating pass is PREVIEW-GATED: it runs ``bridge_preview`` first and asserts
-``_planned_projects(preview)`` is a subset of the intended project set and disjoint from
-every OTHER configured project, THEN applies with ``bridge_sync``, THEN verifies live by a
-transport label query (a LIVE sync returns no plan, so ``_wait_label_count`` polls the
-label search to absorb the DC index lag after a create).
-Preview is a dry run and never reaches the write-path cross-project guard, so the empty-
-intersection assertion is what SURFACES a stray target in preview; the guard
-(``CrossProjectTargetError`` in the applier) fires on ``bridge_sync`` and the library
-re-raises it as a ``rebar.RebarError`` carrying the guard's message.
-
-Cleanup: ``scratch_projects`` deletes each project on exit (cascading to its issues) and
-``track_issue`` deletes each seeded probe, so this module does NOT need the old Cloud
-harness's S3/label session-sweep machinery. Per-issue ``finally`` deletes are kept for
-probe issues so scenario 10's failure-path cleanup proof is real rather than vacuous.
+Opt-in live scenarios use an isolated no-remote store copy and require every preview to
+target only the intended projects before syncing. Live label reads absorb index lag;
+write-path guards reject contamination. ``_live_jira_ready`` enrolls the all-skip canary,
+and project plus per-issue cleanup removes all probes even on scenario failure.
 """
 
 from __future__ import annotations
@@ -86,12 +54,9 @@ def _configured_projects(work: Path) -> set[str]:
 
 
 def _planned_projects(bridge_run: dict[str, Any]) -> set[str]:
-    """The set of Jira projects a preview/sync plan proposes to touch.
+    """Extract targets from Jira-key prefixes or create payload project stamps.
 
-    Defensive by construction: for each plan entry, add the key-prefix project when
-    ``target`` is a Jira key (``^[A-Z][A-Z0-9]+-\\d+$``), else fall back to the create
-    payload's ``_bridge_target_project`` stamp. Nones are skipped, so an entry that
-    carries neither (a not-synced ticket) contributes nothing.
+    Entries carrying neither target form are not synced and contribute nothing.
     """
     projects: set[str] = set()
     plan = (bridge_run.get("details") or {}).get("plan", [])
@@ -107,12 +72,9 @@ def _planned_projects(bridge_run: dict[str, Any]) -> set[str]:
 
 
 def _assert_scope(preview: dict[str, Any], intended: set[str], work: Path) -> None:
-    """Assert the plan touches only *intended* projects and no other configured one.
+    """Require planned targets within ``intended`` and outside every live-mapped remainder.
 
-    Two assertions, deliberately: the subset check is the positive invariant, and the
-    explicit empty-intersection with every OTHER configured project is what SURFACES a
-    contamination target that a subset check alone could let read as "just extra". The
-    "other" set is read live from the store's mapping so it cannot drift from the seed.
+    Separate checks make cross-project contamination explicit rather than merely extra.
     """
     planned = _planned_projects(preview)
     assert planned <= intended, (
@@ -152,15 +114,10 @@ def _wait_label_count(
     *,
     timeout: float = 90.0,
 ) -> list[str]:
-    """Poll the label search until at least *expected* issues are indexed (or *timeout*).
+    """Poll live label search until *expected* issues are indexed or *timeout* expires.
 
-    A LIVE ``bridge_sync`` does NOT surface a plan in its details — ``reconcile.py`` only
-    populates ``result['plan']`` in no-write/preview mode (``nowrite_plan``), so a
-    post-create wait cannot key ``wait_until_searchable`` on a plan entry (there is no
-    entry, and a freshly created issue has no key until after apply anyway). Polling the
-    label search directly absorbs the DC Lucene index lag and returns the keys the caller
-    asserts on. On timeout it returns whatever is currently indexed so the caller's own
-    count assertion produces the diagnostic rather than this helper masking it.
+    ``bridge_sync`` exposes no plan, so the label read absorbs Lucene lag. Return partial
+    keys on timeout so the caller's count assertion supplies the diagnostic.
     """
     deadline = time.monotonic() + timeout
     keys = _keys_by_label(transport, project, run_label)
@@ -180,14 +137,10 @@ def _make_outbound_ticket(
     omit_project: bool = False,
     return_id: bool = False,
 ) -> str:
-    """Create a rebar ticket tagged *run_label* so the bridge stamps the label on create.
+    """Create a run-labeled ticket with explicit, empty, or omitted project routing.
 
-    ``omit_project`` leaves the ``bridge_project`` field ABSENT (scenario 4's legacy
-    path); otherwise ``bridge_project`` is written verbatim (an empty string is the
-    explicit "not synced" signal of scenario 3). Returns the ticket alias, or the
-    canonical local id when ``return_id`` is set — ``--only``/``--except`` selection
-    (``resolve_selection``) resolves canonical local ids and Jira keys but NOT aliases,
-    so a scenario that scopes a pass to this ticket must hold the id.
+    Return the canonical ID when selection via ``--only`` is required; aliases are not
+    accepted by that resolver.
     """
     kwargs: dict[str, Any] = {"tags": [run_label], "return_alias": True, "repo_root": str(work)}
     if repos is not None:
@@ -210,11 +163,9 @@ def _projects_record_path(work: Path) -> Path:
 
 
 def _set_legacy_default(work: Path, key: str) -> None:
-    """Stamp ``legacy_default`` on the projects record (no library setter exists).
+    """Set ``legacy_default`` directly because the library only preserves that field.
 
-    ``bridge_projects_set`` preserves ``legacy_default`` on write but cannot SET it, so
-    the harness edits the committed record in place — the same JSON shape the reconciler
-    reads (``{"version","legacy_default","projects"}``).
+    Keep the committed JSON shape consumed by the reconciler.
     """
     path = _projects_record_path(work)
     record = json.loads(path.read_text())
@@ -229,12 +180,7 @@ def _set_legacy_default(work: Path, key: str) -> None:
 
 @pytest.fixture
 def run_label() -> str:
-    """A unique per-test label stamped on every issue a scenario creates.
-
-    Function-scoped (each scenario provisions its own scratch projects, so there is no
-    session-wide state to correlate), and printed so an operator can recover it if a run
-    is killed before ``scratch_projects`` teardown cascades the projects away.
-    """
+    """Return and print a per-test issue label for cleanup recovery."""
     label = f"rebar-dc-rehearsal-{uuid.uuid4().hex[:12]}"
     print(f"\n[live_jira_dc/multi_project] run label: {label}")
     return label
@@ -248,26 +194,12 @@ def store_copy(
     jira_dc_base_url: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> Path:
-    """An isolated, LOCAL file-based COPY of the real ticket store, mapped for M2M.
+    """Build an isolated, no-remote store copy mapped to four scratch projects.
 
-    Mirrors ``_dc_fixtures.dc_store_copy_repo`` — two repos (outer ``main`` + inner
-    ``.tickets-tracker`` on ``tickets``), git-archived from the live ``tickets`` branch,
-    every ``.bridge_state*`` binding scrubbed, converged with ``run_ensures``, re-scrubbed
-    and committed — but seeds the FOUR scratch projects for the many-to-many mapping
-    instead of a single ``[jira] project``.
-
-    NO remote is wired (that is the isolation layer here — a local copy that can never
-    push to production), and ``REBAR_SYNC_PUSH=off`` belt-and-braces it. The DC backend
-    is selected via the written ``rebar.toml``; cloud credentials are stripped from the
-    environment so no pass can reach a real Cloud instance.
-
-    The base mapping is the four REAL scratch projects ONLY (one→single repo, two→two
-    repos, zero→configured-but-empty, legacy→one repo). ``legacy_default`` is left UNSET
-    (None) so the scrubbed production tickets resolve to "not synced" rather than flooding
-    the outbound plan; only scenario 4 sets it, scoped to its own ticket. The UNKNOWN key
-    is deliberately NOT seeded here: it would perturb every scenario's per-project fan-out
-    (and pollute the alert stream with a skip on every pass); scenario 7 injects it locally
-    instead.
+    Archive the outer and tracker repositories, scrub bindings, run ensures, then scrub and
+    commit again. Pushes and cloud credentials are disabled. ``legacy_default`` remains
+    unset so copied production tickets cannot flood the create plan; its scoped scenario
+    sets it locally. The unknown project is also scenario-local to avoid polluting fan-out.
     """
     from _dc_fixtures import fetch_tickets, run_git, scrub_bridge_state
     from _dc_support import CLOUD_CREDENTIAL_VARS, source_repo_root
@@ -341,15 +273,8 @@ def store_copy(
     )
     rebar.bridge_projects_set(scratch_projects["zero"], [], repo_root=str(work))
     rebar.bridge_projects_set(legacy_key, ["rebar-legacy"], repo_root=str(work))
-    # legacy_default is deliberately LEFT UNSET (None) on the base copy. The copy holds the
-    # whole production ticket store with bindings scrubbed, and resolve_project sends any
-    # ticket whose bridge_project field is ABSENT to legacy_default. Were it a mapped key,
-    # every production ticket would resolve to it and flood the outbound CREATE plan (the
-    # exact hazard _dc_support.run_reconcile documents). With legacy_default=None those
-    # tickets resolve to "not synced" (absent -> None) or "outside mapping" (an explicit
-    # non-scratch key -> no mutation), so no scenario sees a production-ticket create. The
-    # ONE scenario that needs a legacy default (test_absent_project_resolves_to_legacy_default)
-    # sets it locally AND scopes its pass to its own ticket, so it never floods either.
+    # Leave legacy_default unset so scrubbed production tickets cannot flood the create plan.
+    # Its one scenario sets it locally and scopes every pass to that ticket.
     return work
 
 
@@ -463,10 +388,8 @@ def test_absent_project_resolves_to_legacy_default(
 
     preview = rebar.bridge_preview(only=[tid], repo_root=str(work))
     _assert_scope(preview, {legacy}, work)
-    # Positive invariant: the None-sentinel ticket MUST be planned into the legacy
-    # project. `_assert_scope` alone is vacuous on an empty plan (a suppressed create
-    # reads as "in scope"), so this is what actually catches the resolve_project
-    # None->never-sync regression (bug obsolete-lax-siamang) at preview time.
+    # Require the legacy target explicitly: scope alone passes on an empty plan and would
+    # miss the None-to-never-sync regression (obsolete-lax-siamang).
     assert legacy in _planned_projects(preview), (
         f"the absent-project ticket was not planned into the legacy default {legacy}; "
         f"planned={sorted(_planned_projects(preview))} — resolve_project suppressed the "
@@ -522,13 +445,10 @@ def test_repo_config_variety_both_directions(
 def test_contamination_guard_refuses_out_of_scope_target(
     store_copy: Path, scratch_projects: dict[str, str], dc_transport: Any, run_label: str
 ) -> None:
-    """An outbound update targeting OUTSIDE configured scope is surfaced then REFUSED.
+    """Surface and refuse an outbound target removed from configured scope.
 
-    Setup: bind a ticket to ``one``, then REMOVE ``one`` from the mapping so the existing
-    binding's target is now out of scope. Preview must SURFACE the stray ``one`` target
-    (the empty-intersection assertion trips), and ``bridge_sync`` must raise (fail closed)
-    with the guard's message and write nothing — proven by before/after live queries of the
-    remaining projects.
+    Bind while configured, remove the mapping, then require preview to expose the stale
+    target and sync to fail closed without changing the remaining live projects.
     """
     work = store_copy
     one, two = scratch_projects["one"], scratch_projects["two"]
@@ -575,18 +495,10 @@ def test_contamination_guard_refuses_out_of_scope_target(
 def test_unknown_project_skips_and_continues(
     store_copy: Path, scratch_projects: dict[str, str], dc_transport: Any, run_label: str
 ) -> None:
-    """A mapping entry for a project that does NOT exist in Jira is SKIPPED, and the pass
-    CONTINUES over the other mapped projects (ticket f643).
+    """Skip one nonexistent project while continuing the other mappings (ticket f643).
 
-    This is the intended per-project resilience contract (fetcher.py ``_isolate_projects``):
-    with MORE THAN ONE mapped project, an inbound fan-out over a non-existent key degrades
-    only THAT project — it is logged, an alert fires, and the key is dropped from the
-    snapshot — while every other mapped project still reconciles. The pass does NOT abort.
-    (The single-project boundary still fails closed; that has non-external coverage in
-    ``tests/unit/rebar_reconciler/test_fetch_multi_project.py``.)
-
-    The base copy already maps FOUR projects (one/two/zero/legacy), so adding the unknown
-    key exercises the >1 skip path, not the single-project fail-closed boundary.
+    In multi-project fan-out, only the bad key is logged, alerted, and removed from the
+    snapshot. The single-project fail-closed boundary is covered offline.
     """
     work = store_copy
     one, two = scratch_projects["one"], scratch_projects["two"]
@@ -635,10 +547,8 @@ def test_promote_only_binding_is_one_way(
     one_keys = _wait_label_count(dc_transport, one, run_label, 1)
     assert len(one_keys) == 1, f"promote did not create the `one` issue: {one_keys}"
 
-    # Re-pointing the bound ticket to `two` must be refused AT EDIT TIME. The promote-only
-    # guard fires inside rebar.edit_ticket when it would overwrite an existing binding —
-    # earlier and safer than sync — so the re-point never reaches the applier. Assert the
-    # refusal AND its reason so an unrelated edit failure cannot read as the guard firing.
+    # Repointing a bound ticket must fail with the promote-only reason at edit time, before
+    # the applier can change either project's issue.
     with pytest.raises(rebar.RebarError, match="promote-only"):
         rebar.edit_ticket(alias, repo_root=str(work), bridge_project=two)
     assert _keys_by_label(dc_transport, two, run_label) == [], (
@@ -665,15 +575,8 @@ def test_capability_stamp_and_fail_closed(
     work = store_copy
     tracker = work / ".tickets-tracker"
 
-    # The scratch mapping (one + two + zero + legacy) is written AND committed by
-    # `bridge_projects_set` itself (it routes through `commit_and_push_tickets_branch`,
-    # which commits under the write lock regardless of push policy — see ticket fea4).
-    # So a committed `.bridge_state/projects.json` blob already exists
-    # by the time this scenario runs: `run_ensures`'s `projects-seed` unit (tree-check keyed
-    # on that blob) skips, the mapping survives, and the ">1 project" precondition holds when
-    # the stamp unit reads it. No manual commit is needed here — an earlier one existed only
-    # while `bridge_projects_set` wrote to the worktree without committing, and it now fails
-    # with "nothing to commit" (ticket b783).
+    # `bridge_projects_set` already commits the mapping, so ensures retains all projects and
+    # sees the multi-project precondition. A manual commit would be empty (tickets fea4/b783).
 
     # The mapping now holds >1 project (one + two + zero + legacy); converging stamps it.
     list(run_ensures(str(tracker)))
@@ -709,15 +612,10 @@ def test_cleanup_runs_despite_mid_scenario_failure(
     track_issue: Any,
     run_label: str,
 ) -> None:
-    """Prove per-issue cleanup runs even when the scenario body raises mid-flight.
+    """Prove per-issue cleanup survives a caught mid-scenario failure.
 
-    The injected error is CAUGHT here so the pytest test itself passes while demonstrating
-    the contract: a labelled probe issue is created, an inner body deliberately raises, the
-    per-issue ``finally`` still deletes it, and a DIRECT fetch of the probe then 404s. The
-    deletion is confirmed against the direct ``get_issue`` endpoint rather than a label
-    query because the DC search index lags. ``scratch_projects`` teardown would cascade the
-    issue away anyway, so this proves the MID-RUN per-issue cleanup path rather than the
-    project-drop backstop.
+    Delete the live probe in ``finally``, then require direct readback to return 404. This
+    isolates per-issue cleanup from project teardown and avoids search-index lag.
     """
     from _dc_support import seed_searchable_issue
 
@@ -745,9 +643,7 @@ def test_cleanup_runs_despite_mid_scenario_failure(
 
     assert injected, "the injected failure did not fire — the cleanup proof is vacuous"
     assert probe is not None
-    # Prove the mid-run finally actually REMOVED the issue (not merely that it ran): a direct
-    # fetch must 404. Uses the direct issue endpoint, never a label search, because the DC
-    # Lucene index lags a delete and would give a false "still present"/"already gone" read.
+    # Require a direct 404 to prove deletion; label search is unreliable during index lag.
     with pytest.raises(Exception):  # noqa: B017 — the backend 404 error type is not pinned
         dc_transport.get_issue(probe)
 

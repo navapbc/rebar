@@ -1,30 +1,10 @@
-"""Agentic, in-CI investigator for the live Jira DC rich-text reconcile defect.
+"""Opt-in in-CI investigator for the live Jira DC rich-text defect.
 
-**This is an AUTHORING / DIAGNOSTIC tool, not a test-path component.** It is the debug
-analog of ``scripts/jira_dc_capability_map.py`` (ticket 259b): where that script runs an
-Opus agent over raw REST to *map* the pinned DC image, this module runs an Opus agent over
-rebar's OWN reconcile primitives to *root-cause* a defect against a live, ephemeral Jira DC.
-
-Why it exists: the working amd64 Jira DC only comes up inside the CI runner (arm64 hosts
-stall under emulation — see ``README.md``). Every blind ``print``-and-push observation
-therefore costs a full ~2h CI cycle. This module pays the DC boot cost ONCE, then hands an
-agent a fast local investigation loop against the already-bound store + live instance: it
-can compute the exact wire with ``WikiTextCodec``, diff with ``compute_update_fields``, run
-a full scoped reconcile subprocess, write directly through the transport, and read the raw +
-rendered ``description`` back — many experiments per boot instead of one per CI cycle.
-
-The bound scenario is NOT re-ported here: this test depends on the SAME proven fixtures the
-rest of the live suite uses (``bound_dc_issue`` → ``dc_store_copy_repo`` + a seeded, bound DC
-issue), so the agent starts from the exact ``(repo, local_id, key)`` the failing rich-text
-tests exercise, with the ``dc`` rich-text cutover on.
-
-Guardrails mirror the capability-map run: OPT-IN ONLY (``REBAR_DC_RICHTEXT_PROBE=1``, set by a
-``workflow_dispatch`` job — never a push/PR/schedule and never a normal external run), the DC
-is a throwaway ephemeral instance, ``REBAR_MCP_READONLY=1`` keeps rebar's own ticket store
-read-only, and the agent is instructed to REPORT the mechanism, never to fix the harness, the
-repository, or rebar's configuration. It asserts only that the agent produced a structured
-finding — it does NOT fail on discovering the bug (that is the point of the run); the finding
-+ full experiment evidence are printed and written as an artifact for a human to act on.
+This diagnostic reuses the proven bound store and ephemeral DC fixtures, then lets an
+agent exercise the exact codec, differ, reconcile, transport, and raw/rendered read paths
+within one amd64 CI boot. ``REBAR_DC_RICHTEXT_PROBE=1`` is workflow-dispatch only;
+``REBAR_MCP_READONLY=1`` protects rebar's tracker. The agent reports a structured mechanism
+and experiment evidence as logs/artifacts without fixing the harness or repository.
 """
 
 from __future__ import annotations
@@ -406,8 +386,6 @@ def test_agentic_richtext_investigation(
         print(f"agentic run did not return a structured finding: {run_error}")
     print("=" * 78 + "\n")
 
-    # This is an INVESTIGATION, not an assertion of correctness: it must not fail merely
-    # because the bug still reproduces. It fails only if the agent could not complete a
-    # structured investigation at all (a broken harness/runtime), so a green job means "the
-    # finding was produced" and the finding itself is read from the log/artifact.
+    # This diagnostic passes when it produces a structured finding, even if the defect
+    # reproduces; failure means the harness or runtime could not complete the investigation.
     assert result is not None, f"agentic investigation produced no finding: {run_error}"

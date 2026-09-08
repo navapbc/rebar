@@ -1,29 +1,9 @@
-"""Smoke oracle for the Dockerized Jira Data Center harness (story J5, epic e369).
+"""Smoke-test the Dockerized Jira Data Center harness (story J5, epic e369).
 
-This story IS the harness, so its oracle is that the harness starts, is usable,
-and provably cleans up. These tests speak **raw REST v2** to the instance — they
-deliberately do NOT construct rebar's DC backend, because that does not exist
-until J6/J7. What they prove is that the substrate those later stories will be
-validated against is real.
-
-Tier notes (inherited from ``tests/external/``, not optional):
-
-* ``tests/external/conftest.py`` auto-applies the ``external`` marker, and its
-  autouse ``_require_external_opt_in`` fixture skips everything here unless
-  ``REBAR_RUN_EXTERNAL=1``. So the full local invocation is::
-
-      make jira-dc-up
-      REBAR_RUN_EXTERNAL=1 pytest tests/external/live_jira_dc/ -q
-
-* the module-level ``_live_jira_ready`` sentinel below is what makes
-  ``tests/external/conftest.py`` attach the ``jira_live`` marker, which enrols
-  these tests in the all-skip canary: an opted-in run that collected them and
-  executed none FAILS the session rather than reporting a vacuous pass. Removing
-  the sentinel would silently opt out of that protection.
-
-Absent harness ⇒ SKIP (with an actionable message), never a hard failure: the
-pre-existing ``external`` CI job runs ``pytest -m external tests/external`` with
-no Docker at all, so failing here would break it.
+Raw REST v2 proves startup, Server/DC deployment and version, PAT authentication
+contrast, and cleanup without depending on rebar's backend. External opt-in still
+applies; ``_live_jira_ready`` enrolls the all-skip canary, while an absent harness
+skips so Dockerless external CI remains valid.
 """
 
 from __future__ import annotations

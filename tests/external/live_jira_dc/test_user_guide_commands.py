@@ -1,25 +1,8 @@
-"""The DOCUMENTED Data Center setup, executed against the J5 harness (story J8, epic e369).
+"""Execute the documented Data Center setup against the J5 harness (J8, epic e369).
 
-J8's acceptance criterion is not "the DC section exists in the user guide" — it is that
-**the documented commands have been executed against the harness**. Prose that has never
-been run is a hypothesis, and a setup guide is exactly the artifact where an untested
-hypothesis costs an operator an afternoon: they follow it literally, it fails, and they
-have no way to tell whether the guide or their instance is wrong.
-
-WHAT MAKES THIS DIFFERENT FROM ``test_reconcile_pass.py``. That module drives the
-reconciler through a config *the test itself* composes — the shape a rebar developer knows
-to write. This one drives it through the config shape **lifted out of `docs/user-guide.md`
-at runtime**, so the guide and the code cannot drift apart silently. If someone edits the
-documented TOML into something that no longer selects the DC backend, this fails; if
-someone renames a config key, this fails. A hand-copied duplicate of the doc would pass
-happily while the doc rotted, which is why the block is PARSED rather than restated.
-
-TWO SURFACES, AND WHY THIS ONE. rebar reads bare ``[reconciler]`` from a standalone
-``rebar.toml`` and ``[tool.rebar.reconciler]`` from a ``pyproject.toml``
-(``_config_sources.py:153-159``). The guide documents the ``[tool.rebar.…]`` form, so this
-writes a **pyproject.toml** — the surface where that table name is the correct one.
-Testing the documented spelling against the file it actually applies to is the whole point;
-rewriting it into the other form would prove the guide works by not using it.
+The test parses the ``[tool.rebar.reconciler]`` block from the user guide at runtime and
+writes it to the documented ``pyproject.toml`` surface. Running that exact configuration
+and command shape prevents the guide and implementation from drifting behind a copied fixture.
 """
 
 from __future__ import annotations
@@ -87,12 +70,7 @@ def _fail_if_extra_missing_while_harness_is_up() -> None:
 
 
 def _documented_toml_block() -> str:
-    """Return the ``[tool.rebar.reconciler]`` TOML block the user guide documents.
-
-    Parsed from the guide rather than restated, so this test measures the DOCUMENT.
-    A restated copy would keep passing while the guide drifted — the precise failure
-    this criterion exists to prevent.
-    """
+    """Parse the documented DC TOML block so the guide itself remains the test subject."""
     text = _USER_GUIDE.read_text()
     for block in re.findall(r"```toml\n(.*?)```", text, re.DOTALL):
         if "jira-datacenter" in block and "tool.rebar.reconciler" in block:
@@ -105,14 +83,8 @@ def _documented_toml_block() -> str:
     )
 
 
-# NOTE — the harness-FREE half of this criterion (does the documented `pip install`
-# name an extra that exists?) deliberately does NOT live here. Every test in this
-# directory inherits the session-scoped autouse `_jira_dc_harness_ready` fixture, which
-# waits out the full 20-minute readiness budget and then raises when no harness is
-# present. An unmarked test in this module therefore does not "run without the harness"
-# — it blocks for 20 minutes and errors (measured: 1208s). That check is a pure
-# repo-vs-repo comparison needing no network, so it lives in
-# `tests/unit/test_user_guide_dc_docs.py`, where it runs on every change.
+# Extra-name validation stays in the harness-free unit suite; this directory's autouse
+# readiness fixture would otherwise wait and fail when Jira is absent.
 
 
 # ---------------------------------------------------------------------------
@@ -127,22 +99,10 @@ def documented_repo(
     jira_dc_pat: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> Path:
-    """A rebar repo configured EXACTLY as ``docs/user-guide.md`` instructs.
+    """Apply only the guide's documented harness substitutions.
 
-    Three substitutions are made into the documented block, and each is itself
-    documented in the same section of the guide, so this stays a test of the guide
-    rather than of a variant of it:
-
-    * ``base_url`` — the guide's value is an illustrative
-      ``https://jira.internal.example.gov``; it is pointed at the harness.
-    * ``project`` — pointed at the scratch project this test owns.
-    * ``allow_insecure = true`` — the guide documents this key as the supported
-      answer for a non-``https`` instance and names a loopback test instance as its
-      intended use. The harness is plain http, so following the guide for THIS
-      deployment means setting it. Without it, config load correctly rejects the URL.
-
-    ``JIRA_PAT`` is exported rather than written to config because the guide says it is
-    env-only and never a config key — asserted below, since that is a security property.
+    Replace the example URL and project, enable ``allow_insecure`` for loopback, and export
+    ``JIRA_PAT`` as the guide's env-only credential rather than writing it to config.
     """
     block = _documented_toml_block()
     block = re.sub(r'base_url\s*=\s*"[^"]*"', f'base_url = "{_BASE}"', block)
@@ -158,12 +118,9 @@ def documented_repo(
 def test_the_documented_config_and_preview_work_against_a_real_dc_instance(
     documented_repo: Path,
 ) -> None:
-    """THE CRITERION: `rebar bridge preview`, run exactly as documented, against a
-    real Jira Data Center instance configured exactly as documented.
+    """Run the documented preview against real DC and require its non-mutating envelope.
 
-    Asserts on the ENVELOPE, not merely the exit code. ``preview`` is non-mutating,
-    and no-write modes are the ones that emit JSON on stdout (``__main__.py:445-452``);
-    a run that exited 0 having produced no envelope did not complete a pass.
+    Exit zero without the no-write JSON result does not prove a completed pass.
     """
     from rebar._engine import engine_env
 
@@ -215,14 +172,10 @@ def test_the_documented_config_and_preview_work_against_a_real_dc_instance(
 def test_the_documented_setup_refuses_to_read_the_pat_from_config(
     documented_repo: Path, jira_dc_pat: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The guide states JIRA_PAT is "env-only, never a config key" and presents that as a
-    SECURITY property — the credential cannot be committed by accident. A documented
-    security guarantee that nothing checks is the weakest kind of claim, so it is checked
-    here against the real instance rather than trusted.
+    """Require ``JIRA_PAT`` from the environment, never a config key.
 
-    Removing it from the environment must fail with an error NAMING the variable, and must
-    not fall back to anonymous access — an anonymous fallback would turn a missing
-    credential into a silently empty pass.
+    Removing it must fail with an error naming the variable rather than falling back to the
+    injected config value or anonymous access.
     """
     from rebar._engine import engine_env
 

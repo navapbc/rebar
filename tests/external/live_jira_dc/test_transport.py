@@ -1,31 +1,9 @@
-"""Live coverage for the Data Center transport against the J5 harness (story J6,
-epic e369).
+"""Exercise the real Data Center transport against Jira 8.17.1 (J6, epic e369).
 
-Drives the REAL ``JiraDataCenterTransport`` (built on ``pycontribs/jira``) against
-a real Jira 8.17.1 Data Center instance, asserting the SAME raw-shape contract the
-unit tier asserts against a fake client (``tests/_jira_shape_contract.py`` — see
-the execution-decision comment on ticket 9fd4-a94c-156e-4a56): if the DC transport
-ever leaked a ``jira.Issue`` instead of a raw dict, both tiers would fail on a
-shared assertion rather than a test-specific one.
-
-Tier notes (inherited from ``tests/external/`` — see
-``tests/external/live_jira_dc/test_harness_smoke.py``'s module docstring for the
-full rationale, reproduced here only where it differs):
-
-* the module-level ``_live_jira_ready`` sentinel below is what makes
-  ``tests/external/conftest.py`` attach the ``jira_live`` marker and enrol this
-  module in the all-skip canary;
-* absent harness ⇒ SKIP with an actionable message, never a hard failure — the
-  ``external`` CI job runs with no Docker and no Jira at all. A missing
-  ``[jira-datacenter]`` extra is a skip ONLY when the harness is absent too; when
-  the harness IS reachable, a missing extra is a LOUD FAILURE, because in that
-  environment this module is the acceptance evidence for the DC transport and a
-  skip would let the job report green having validated nothing (the all-skip canary
-  cannot catch it — ``test_harness_smoke.py``'s tests execute in the same session
-  and mask it);
-* every test here sets ``allow_insecure=true`` explicitly (the harness serves
-  plain ``http://localhost:2990/jira``), so the loopback path exercises the
-  config's TLS-override branch rather than bypassing the validator (epic AC13).
+Live operations share the unit tier's raw-dict shape contract, catching leaked
+``jira.Issue`` objects. ``_live_jira_ready`` enrolls the all-skip canary: an absent
+harness skips, but a reachable harness without the DC extra fails loudly. Loopback
+tests set ``allow_insecure=true`` to exercise, not bypass, TLS validation.
 """
 
 from __future__ import annotations
@@ -76,14 +54,8 @@ _skip = pytest.mark.skipif(
         f"{_BASE} — start it with `make jira-dc-up` and run with REBAR_RUN_EXTERNAL=1"
     ),
 )
-# A missing extra is a legitimate SKIP only when there is no harness to test
-# against either (a plain dev checkout). When the harness IS reachable, this module
-# is the acceptance evidence for the DC transport, and skipping it would let a
-# green run certify code that never executed — the CI job installs the extra
-# (external-integration.yml), so its absence here is a broken environment, not a
-# tier that does not apply. The all-skip canary cannot catch this on its own:
-# it counts collected-vs-executed globally per session, and test_harness_smoke.py's
-# tests DO execute in the same job, masking an all-skip of this module.
+# The extra may be absent only with no harness. When Jira is reachable, fail rather than let
+# smoke tests mask an all-skipped transport acceptance module.
 _extra_missing_but_harness_up = _live_jira_ready() and not _jira_extra_installed()
 
 _skip_no_extra = pytest.mark.skipif(
@@ -203,14 +175,10 @@ def test_comment_and_search_shapes_match_the_shared_contract(
 def test_name_identity_user_search_resolves_a_real_user_authoritatively(
     dc_transport: Any,
 ) -> None:
-    """The live half of the ``NameIdentity`` wire J4 left dangling.
+    """Prove ``NameIdentity`` resolves a real user authoritatively via live search.
 
-    J4 shipped ``NameIdentity`` taking its resolver as an EXPLICIT constructor
-    parameter so this story could supply a REAL lookup; a resolver that is absent
-    (or silently non-authoritative) makes the outbound diff re-emit an assignee
-    change it can never converge — the churn class J4's anti-churn oracle exists
-    to prevent. Asserting it against a fake would prove nothing about DC's
-    ``user/search`` endpoint, which is why this lives in the live tier.
+    A missing or non-authoritative resolver would re-emit assignee changes forever; a fake
+    cannot validate DC's ``user/search`` endpoint.
     """
     from rebar_reconciler.adapters.jira_datacenter.backend import _search_users_by_username
     from rebar_reconciler.adapters.jira_family.identity_model import NameIdentity
@@ -239,19 +207,10 @@ def test_name_identity_user_search_resolves_a_real_user_authoritatively(
 def test_assigning_an_unknown_user_raises_backend_assignee_not_found(
     dc_transport: Any, jira_dc_project: str, track_issue: Any
 ) -> None:
-    """An assignee that resolves to no DC user surfaces as the VENDOR-NEUTRAL
-    ``BackendAssigneeNotFoundError``, not a bare ``JIRAError``.
+    """Keep unknown-user resolution separate from assignment failure.
 
-    This is the other half of the AC. Note the deliberate division of labour,
-    confirmed live here rather than assumed:
-
-    * the RESOLVER reports an unknown user as ``(None, True, False)`` — the
-      "authoritative but unmappable" state, which ``NameIdentity``/``_resolve``
-      maps to ``("", True, False)`` (desired-unassigned). It does not raise,
-      because raising inside the resolver would break that state machine;
-    * the APPLY path (``transport._assign``) is where an unknown user becomes an
-      error, raised as ``BackendAssigneeNotFoundError`` so core ``except``
-      clauses catch it without importing anything DC-specific.
+    The resolver returns authoritative-but-unmappable without raising; apply converts the
+    assignment into vendor-neutral ``BackendAssigneeNotFoundError`` for core callers.
     """
     from rebar_reconciler._backend import BackendAssigneeNotFoundError
     from rebar_reconciler.adapters.jira_datacenter.backend import _search_users_by_username
@@ -292,21 +251,10 @@ def test_select_backend_resolves_after_importing_adapters() -> None:
 def test_add_label_and_the_links_surface_against_a_real_instance(
     dc_transport: Any, jira_dc_project: str, track_issue: Any
 ) -> None:
-    """The methods AC(a) names that no other live test reaches.
+    """Cover ``add_label`` and every link method omitted by earlier live tests.
 
-    A completion-verification run on this ticket correctly found that
-    ``add_label`` and the whole ``SupportsLinks`` surface had NO live coverage —
-    the earlier "11 passed" run exercised create/read/update/transition/comment/
-    search/probe and nothing else. AC(a) says EVERY method, so this closes that
-    gap rather than restating what already passes.
-
-    Link assertions read the DIRECT issue endpoint, never search: ADR 0037's
-    eventual-consistency discipline (and this harness's own conftest) note that
-    Jira's search index lags writes by an unbounded interval, so asserting a
-    freshly-created link via search would be flaky by construction. The
-    search-backed ``get_issuelinks_map`` is therefore held to its SHAPE contract
-    only — which tolerates an empty map — while the link's CONTENT is proven
-    through ``get_issue``.
+    Verify link content through direct issue reads to avoid index lag; the search-backed
+    map is held only to its raw-shape contract.
     """
     from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
@@ -355,24 +303,10 @@ def test_add_label_and_the_links_surface_against_a_real_instance(
     assert backend.link_payload_for_relation("not-a-relation") is None
 
 
-# ── bug 7c26 — the identity a project MOVE cannot change ─────────────────────
-#
-# Bindings key on the Jira KEY, which changes when an issue is moved between
-# projects; the numeric ``id`` never does. The fix re-asks by that id before
-# treating a 404 on a bound key as a deletion. These cells establish LIVE, on the
-# real 8.17.1 instance, the two facts the fix rests on — that an id resolves an
-# issue at all, and that a genuine deletion still fails BOTH lookups so the
-# recovery cannot mask it.
-#
-# WHAT COULD NOT BE ESTABLISHED HERE, and why the ticket says so plainly: an
-# actual project move is NOT performable through the authoritative client. Jira
-# DC's move is the UI wizard (``/secure/MoveIssue!default.jspa``, form-token
-# bound); pycontribs/jira 3.10.5 exposes no move member (verified at runtime —
-# ``move_to_backlog`` is Agile, ``move_version`` is versions), and the repo
-# forbids hand-rolled REST for DC. So what ``GET /issue/{oldKey}`` returns AFTER
-# a real move (200-with-new-key vs 301 vs 404) stays unsettled by this harness.
-# The fix is correct under all three readings — that was the design constraint
-# that made it safe to build without the answer.
+# Bindings use a mutable Jira key, so deletion recovery retries by immutable numeric ID.
+# Live tests prove ID lookup and that real deletion fails both lookups. The client cannot
+# perform Jira's UI-only project move, so its stale-key response remains unmeasured; recovery
+# deliberately handles 200-with-new-key, redirect, or 404 (bug 7c26).
 
 
 @_skip
@@ -467,37 +401,19 @@ def _admin_request(
 def test_a_rekeyed_issue_resolves_by_id_and_records_what_the_stale_key_returns(
     dc_transport: Any, jira_dc_project: str
 ) -> None:
-    """SETTLE THE FOLKLORE, and prove the remediation under a REAL re-key.
+    """Prove immutable-ID recovery under a real project-key rename.
 
-    Two research passes disagreed about what ``GET /rest/api/2/issue/{oldKey}`` returns
-    once a key is stale (200-with-new-key vs 301 vs 404), and the disagreement was never
-    resolved because a project MOVE is not performable here: pycontribs/jira 3.10.5 has no
-    move member (verified at runtime) and DC's move is a UI wizard.
-
-    A project KEY RENAME reaches the same state through the same mechanism — Jira re-keys
-    every issue in the project and keeps the old key resolvable via the ``moved_issue_key``
-    table, which is exactly the table the DC KB warns third-party movers fail to update.
-    It is reachable via REST, so it is the experiment that CAN be run.
-
-    BE PRECISE ABOUT WHAT THIS DOES AND DOES NOT SHOW: this performs a project key
-    RENAME, not an issue MOVE between projects. Both produce a stale key resolved through
-    ``moved_issue_key``, so this settles the stale-key READ behaviour; it does not prove
-    the move wizard behaves identically. The reading is recorded rather than asserted, so
-    this test reports the answer instead of encoding a guess as a contract.
-
-    What IS asserted is the load-bearing claim of the fix: after a re-key the issue still
-    resolves by its IMMUTABLE NUMERIC ID, and answers with its NEW key.
+    Rename reaches the ``moved_issue_key`` stale-key path available through REST, though it
+    does not prove UI move-wizard parity. Record rather than prescribe the old-key response;
+    require numeric-ID lookup to return the new key.
     """
     dc_transport.project = jira_dc_project
     created = dc_transport.create_issue({"summary": "rebar 7c26 live — rekey", "issuetype": "Task"})
     old_issue_key = created["key"]
     numeric_id = created["id"]
 
-    # Derived by a shared helper that CANNOT return the source key, and is pinned by a repo-only
-    # unit test over all 26 possible final letters (bug d582 — a fixed "Z" collided 1 run in 26).
-    # The setup assertion is RETAINED as a safety net: it is what caught the collision instead of
-    # letting the cell rename the project to the key it already had and then assert about a key
-    # that was never stale.
+    # The shared helper is checked across all final letters; retain the inequality assertion so
+    # a collision cannot turn the re-key experiment into a no-op (bug d582).
     new_project_key = derive_rename_target(jira_dc_project)
     assert new_project_key != jira_dc_project
 
@@ -589,34 +505,11 @@ def _request_as(
 @_skip
 @_skip_no_extra
 def test_whether_a_non_admin_pat_can_read_application_properties(jira_dc_project: str) -> None:
-    """MEASURE 049e's documentary claim instead of inheriting it (ticket 275e).
+    """Measure whether an ordinary PAT can read comment-limit properties (ticket 275e).
 
-    Bug 049e made the DC comment ceiling configurable and DROPPED auto-discovery from
-    ``/rest/api/2/application-properties``, reasoning that the ``/advanced-settings``
-    sub-resource — where ``jira.text.field.character.limit`` actually lives — requires the
-    global "Administer Jira" permission while rebar authenticates as an ordinary user's PAT.
-    That conclusion was never measured: no 403 was ever captured, because the harness image is
-    linux/amd64-only and never finished booting on the workstation where 049e was worked.
-
-    **THE PRINCIPAL IS THE WHOLE POINT, AND THE HARNESS DOES NOT SUPPLY ONE.** The session
-    ``jira_dc_pat`` fixture mints its token while authenticated as ADMIN, so it is an admin
-    PAT; probing with it would return whatever admin can see and prove nothing about rebar's
-    actual privilege level. So this cell creates an ordinary user and mints a PAT as THAT user.
-
-    Three positive controls, because a bare non-200 could mean any of several things and the
-    ticket's criterion explicitly refuses a bare non-200 assertion:
-
-    1. the new user's PAT really authenticates (``/myself`` -> 200 with their name), so a 401/403
-       on the probe is about the ENDPOINT, not a broken account;
-    2. the new user really lacks admin (``/mypermissions`` reports ADMINISTER false), so a 403
-       is attributable to non-adminness rather than to an accident of setup;
-    3. the same two paths are probed AS ADMIN in the same run, which is what distinguishes
-       "404 — absent on 8.17.1" from "403 — present but privileged".
-
-    The outcome is RECORDED, not pinned to one expected answer: the assertion admits every
-    documented possibility so this cell reports a fact rather than encoding today's guess as a
-    contract. ``jira_dc_project`` is requested only to order this cell after the scratch project
-    exists, keeping user creation inside the same live-instance lifecycle.
+    Mint a non-admin PAT because the session token is administrative. Prove its identity and
+    lack of ``ADMINISTER``, then compare application-properties and advanced-settings results
+    with admin requests. Record supported outcomes rather than encoding an unmeasured guess.
     """
     import random
     import string as _string
@@ -736,30 +629,11 @@ def test_whether_a_non_admin_pat_can_read_application_properties(jira_dc_project
 def test_the_instance_label_ceiling_measured_at_254_and_255(
     dc_transport: Any, jira_dc_project: str, track_issue: Any
 ) -> None:
-    """POST a 254-char and a 255-char label to the REAL instance and record what it does.
+    """Measure the live label boundary at 254, 255, and 256 characters (bug 2e47).
 
-    Bug 2e47-ae62-c0cf-48a0. rebar's shared ``JIRA_LABEL_MAX_CHARS`` is 255, taken from Jira's
-    documented "not more than 255 characters". A capability-map pass recorded DC 8.17.1 REJECTING
-    a 255-character label (req-0071/0072/0073), which would have made the effective ceiling 254
-    and put DC at odds with the shared constant.
-
-    **THAT CLAIM DID NOT REPRODUCE.** This cell measured 255 ACCEPTED and read back (run
-    30944241768), so there is no divergence and the shared 255 is correct for DC. The map was
-    wrong, and it took a live assertion to find out — which is the argument for measuring against
-    the instance rather than trusting a recorded measurement. 256 is now probed too, so the
-    inclusive ceiling is bounded from ABOVE as well as below rather than inferred from two points
-    that both pass.
-
-    WHY THIS CELL EXISTS RATHER THAN A TIGHTER CONSTANT. Every existing label test compares the
-    sanitizer against ``JIRA_LABEL_MAX_CHARS``, so the constant is checked against itself and no
-    unit test can detect that the real ceiling is one character lower. This asserts against the
-    INSTANCE, which is the only oracle that can. And it is the reason the constant was NOT simply
-    tightened: ``sanitize_label`` raises rather than truncates, so a shared 254 would make the
-    live-validated Cloud path reject a label Cloud accepts.
-
-    The 254 leg is the control. Without it, a 255 rejection could equally mean "labels are broken
-    on this instance" or "the field is not on the create screen"; with 254 accepted in the same
-    run against the same project, a 255 rejection is specifically an off-by-one at the ceiling.
+    The 254 value controls for a working label field; 255 must reproduce the accepted/read-back
+    result that refuted the capability map, and 256 bounds the ceiling above. A live oracle avoids
+    testing ``JIRA_LABEL_MAX_CHARS`` against itself or breaking Cloud with a tighter shared value.
     """
     dc_transport.project = jira_dc_project
     version = os.environ.get("JIRA_DC_VERSION", "8.17.1")
@@ -799,16 +673,9 @@ def test_the_instance_label_ceiling_measured_at_254_and_255(
         f"without it the readings above cannot be attributed to the ceiling, so fix or "
         f"re-scope this cell before reading anything into them."
     )
-    # MEASURED, and it REFUTED the capability map (run 30944241768, bug 2e47-ae62-c0cf-48a0).
-    # req-0071/0072/0073 recorded that DC 8.17.1 REJECTS a 255-character label, making the
-    # effective ceiling 254 and putting DC at odds with rebar's shared JIRA_LABEL_MAX_CHARS of
-    # 255. This cell measured the opposite: 255 was accepted AND read back. So there is no
-    # Cloud/DC divergence here, rebar's shared 255 is correct for DC, and the map's claim does
-    # not reproduce on this image.
-    #
-    # The assertion is now pinned to the MEASUREMENT rather than to the map, and the direction is
-    # deliberate: a future image that starts rejecting 255 is a real change that should fail here
-    # loudly, which is exactly what the map's un-reproducible claim failed to do.
+    # Pin the reproduced measurement: DC accepted and returned 255 characters, refuting the
+    # capability map and matching the shared ceiling. A future rejection is real divergence
+    # and must fail loudly (run 30944241768, bug 2e47-ae62-c0cf-48a0).
     assert observed[255][0], (
         f"a 255-character label was NOT stored ({observed[255][1]}). Run 30944241768 measured DC "
         f"{version} ACCEPTING 255, refuting the capability map's req-0071/0072/0073. If this "

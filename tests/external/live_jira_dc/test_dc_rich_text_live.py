@@ -1,34 +1,8 @@
-"""Live rich-text fidelity against a real Jira Data Center instance (story 3289, epic 708d).
+"""Exercise Jira Data Center's real rich-text renderer (story 3289, epic 708d).
 
-The offline DC codec suite validates the wire form against pandoc's jira reader as a
-PROXY. What no offline test can show is what Jira's OWN wiki renderer does with that wire
-form, or how the state-based echo-safety and settled-conflict arbitration (stories 5c0e +
-3388) behave against the real renderer. This module closes that residual gap by extending
-the existing Dockerized DC harness (it reuses the same `conftest`/`_dc_fixtures` fixtures,
-the session-scoped PAT, and the absent-harness / absent-extra skip markers), so it SKIPS
-cleanly wherever the harness or the `jira` extra is absent and only asserts on a live
-instance.
-
-Two live claims are proven here, each in its own test:
-
-  * RENDERED HTML, not wiki source. `test_live_rich_text_renders_and_echo_is_safe` pushes a
-    representative rich body through the real API and reads it back through
-    ``?expand=renderedFields`` — the HTML Jira actually interprets — asserting a heading
-    (`h1.`→``<h1>``), bold (`*foo*`→``<b>``), and a code macro (`{code}`→``<pre>``) all
-    rendered. No `renderedFields` assertion exists elsewhere in the harness, so this is a
-    genuinely new fidelity check rather than a re-read of the wiki source.
-
-  * STATE-BASED ECHO-SAFETY + SETTLED CONFLICT. The same test runs a SECOND reconcile pass
-    and asserts it re-pushes nothing (the landed rich body decodes to a value the differ
-    recognizes as unchanged — 3388's once-only-upgrade-then-converge holding against the
-    real renderer). `test_live_rich_text_both_sides_conflict_keeps_local` then proves 3388's
-    settled local-wins arbitration under the precondition policy actually requires: a
-    CONVERGED baseline, then a **both-sides** edit — rebar-side AND Jira-side to the
-    description — so the next pass keeps rebar's body (local-wins) AND records the deduped
-    ``outbound-field-conflict:<key>:description`` bridge alert. The remote edit is surfaced
-    through that alert, never silently destroyed; this mirrors 3388's
-    ``test_concurrent_conflict_alerts`` precondition (``local != baseline`` AND
-    ``remote != baseline``) live, not a novel last-writer clock.
+The shared live harness complements the offline pandoc proxy. It verifies rendered
+heading, bold, and code HTML; zero writes on a second pass; and local-wins arbitration
+plus a deduped conflict alert after a converged baseline and both-sides edit.
 """
 
 from __future__ import annotations
@@ -45,10 +19,7 @@ from _dc_support import run_bridge as _run_bridge
 from _dc_support import skip_no_extra as _skip_no_extra
 from _dc_support import skip_no_harness as _skip
 
-# THE ALL-SKIP CANARY KEYS ON THIS NAME. `tests/external/conftest.py` applies the `jira_live`
-# marker only to modules defining a module-level `_live_jira_ready`, and the canary then fails
-# a run in which live tests were COLLECTED but none EXECUTED — so a silent all-skip of the
-# evidence this story carries cannot pass as green. Re-exported under the name the canary reads.
+# Re-export under the name used to mark live modules and reject collected-but-all-skipped runs.
 _live_jira_ready = live_jira_ready
 
 
@@ -58,26 +29,16 @@ def _uniq(prefix: str) -> str:
 
 
 def _rich_markdown(heading: str, bold: str, code: str) -> str:
-    """A representative rich body: a level-1 heading, a bold span, and a code macro.
+    """Build Markdown heading/bold text plus an exact Jira ``{code}`` macro.
 
-    The heading and the bold span are authored as Markdown (``# ``, ``**foo**``); the
-    DC rich codec (story 271c's renderer, gated by the 3388 cutover) renders them to Jira
-    wiki (``h1.`` / ``*bold*``), which the real renderer then turns into HTML — the thing
-    this module asserts on. The code fragment is authored as a Jira ``{code}`` macro
-    directly: the renderer LOCKS code verbatim (a Markdown fenced block passes through as
-    literal back-ticks, never a macro — ``wiki_render`` classifies ``{code}``/fences as
-    ``_EXACT``), so the only wire that yields a rendered ``<pre>`` code panel is a real
-    ``{code}`` block, which the codec passes through unchanged for Jira to render.
+    The codec converts the Markdown to wiki; a fenced block would remain literal and
+    would not exercise Jira's rendered ``<pre>`` panel.
     """
     return f"# {heading}\n\nA paragraph with **{bold}** emphasis.\n\n{{code}}\n{code}\n{{code}}\n"
 
 
-# The reconcile passes this module spawns are SCOPED (``--filter-local-ids``), so bug
-# f449's lag-free snapshot overlay applies: each scoped pass direct-GETs the bound key from
-# the primary store (immediately consistent) and arbitrates on that, NOT on the
-# eventually-consistent JQL search index. So a pass run immediately after a write no longer
-# needs to wait for the Lucene index to catch up — the former search-visibility wait/reindex
-# dance is gone.
+# Scoped ``run_bridge ... --only`` uses f449's direct-GET snapshot overlay, avoiding JQL
+# index waits after writes. Only compatibility ``run_reconcile`` uses ``--filter-local-ids``.
 
 
 def _rendered_description_html(dc_request: Any, key: str) -> str:
@@ -106,17 +67,10 @@ def _push_and_converge(
     *,
     what: str,
 ) -> None:
-    """Set the local ``description`` and run a scoped writing pass.
+    """Set the local description and run a scoped writing pass to convergence.
 
-    Scoping (``--filter-local-ids local_id,key``) is MANDATORY for writing passes here:
-    the store copy is binding-scrubbed, so an unscoped pass would route the whole copied
-    store down the CREATE path. Asserts the pass settled (no traceback,
-    ``BRIDGE_STATE: converged``).
-
-    No post-push search-index wait is needed: the write lands over REST (immediately visible
-    to a direct GET) and the NEXT scoped pass arbitrates on a lag-free direct GET of the key
-    (bug f449's snapshot overlay), not on the eventually-consistent JQL search — so it cannot
-    diff against a stale pre-push remote.
+    ``--only`` is required because the binding-scrubbed copy would otherwise create every
+    ticket. REST writes and f449's direct-GET overlay remove any post-push index wait.
     """
     import rebar
 
@@ -135,20 +89,11 @@ def test_live_rich_text_direct_wire_probe(
     bound_dc_issue: Any,
     dc_request: Any,
 ) -> None:
-    """DIAGNOSTIC PROBE (bug reckless-diabolic-kob): isolate Jira DC's renderer from the
-    reconcile machinery.
+    """Isolate Jira DC's renderer from reconciliation (reckless-diabolic-kob).
 
-    The two rich-text tests below fail with an EMPTY rendered description and a perpetual
-    re-emit. Offline the DC codec produces well-formed wiki (verified), so the open question
-    is purely live: does Jira DC STORE and RENDER that wiki wire when it is PUT directly,
-    bypassing the whole reconcile pass? This test computes the EXACT wire the outbound mapper
-    would send (``WikiTextCodec(rich=True).normalize_outbound(fit_outbound(md))``, i.e.
-    ``outbound_mapper.py``'s description branch), PUTs it straight through the transport's
-    field edit, and reads back BOTH the raw stored ``fields.description`` and the
-    ``renderedFields`` HTML — surfacing all three verbatim on any failure. A single live run
-    then discriminates: a green probe means Jira DC handles the wire and the defect is in the
-    reconcile applier; a red probe (raw not stored verbatim, or rendered empty/wrong) means
-    the defect is in Jira DC's storage/renderer of that wire, and the diag shows exactly how.
+    PUT the exact outbound ``WikiTextCodec`` wire, then read both raw description and
+    rendered HTML. Sent/raw/rendered diagnostics distinguish applier faults from DC
+    storage or rendering faults.
     """
     from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec
 
@@ -180,10 +125,8 @@ def test_live_rich_text_direct_wire_probe(
         f"\n(renderedFields GET status {status})\n"
     )
 
-    # RENDER assertions FIRST — they are the decisive "does Jira DC render this wiki wire"
-    # signal, so a benign raw normalization (e.g. a stripped trailing newline) must not abort
-    # the probe before they run. The full diag (sent/raw/rendered/status) rides on every
-    # message, so any failure surfaces all three values in one live run.
+    # Check rendered HTML before raw equality so benign normalization cannot hide renderer
+    # evidence; every failure includes sent, raw, rendered, and status values.
     lowered = (rendered or "").lower()
     assert heading in (rendered or "") and "<h1" in lowered, (
         f"the heading did not render to an <h1> element on a direct wire PUT.{diag}"
@@ -216,32 +159,16 @@ def test_live_rich_text_renders_and_echo_is_safe(
     dc_request: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AC1 + AC2 (echo half): a pushed rich body renders to HTML, and a second pass re-pushes
-    nothing.
+    """Render unique heading/bold/code tokens, then prove echo safety.
 
-    RENDERED HTML: after pushing a heading/bold/code body, the ``renderedFields`` HTML must
-    carry an ``<h1>`` (heading), a ``<b>`` (bold), and a ``<pre>`` (the code macro), each
-    around the unique token this run wrote — so the assertion cannot pass on a stale document
-    or on wiki source that never rendered.
-
-    ECHO-SAFETY: a second reconcile pass immediately after must be a NO-OP. The landed rich
-    body decodes to a value the differ recognizes as unchanged (5c0e render robustness +
-    3388 upgrade-then-converge), so nothing is re-pushed. A pass that re-emitted every run
-    would still look green on a single run while thrashing the remote — hence the zero-write
-    assertion off the reconciler's own counters, not merely ``converged``.
+    Jira must return the tokens inside heading, bold, and preformatted HTML. An immediate
+    second pass must report zero writes, not merely convergence.
     """
     local_id, key = bound_dc_issue
     dc_transport.project = jira_dc_project
 
-    # Enable the DC rich-text cutover (story 3388) for the reconcile subprocesses this test
-    # spawns. The cutover ships OFF (``reconciler.rich_text_cutover`` defaults to ``off``), so
-    # ``WikiTextCodec.to_wire`` is the IDENTITY by default and a rich body would reach Jira as
-    # raw Markdown (``# x`` renders as an ordered list, not ``<h1>``). This is exactly the
-    # residual risk graywolf exists to prove is CLOSED when the flag is on: with the cutover
-    # enabled the codec renders Markdown to wiki markup and Jira produces the expected HTML.
-    # ``run_bridge`` builds the subprocess env from ``os.environ`` (via ``engine_env``), so the
-    # canonical env override reaches ``cutover_clients()`` in the child; ``monkeypatch`` reverts
-    # it after the test.
+    # Enable the DC cutover in the ``run_bridge`` child environment; otherwise Markdown is
+    # sent unchanged and cannot render the expected HTML (story 3388).
     monkeypatch.setenv("REBAR_RECONCILER_RICH_TEXT_CUTOVER", "dc")
 
     heading = _uniq("graywolf-heading")
@@ -292,20 +219,11 @@ def test_live_rich_text_both_sides_conflict_keeps_local(
     jira_dc_project: str,
     bound_dc_issue: Any,
 ) -> None:
-    """AC2 (conflict half): a both-sides edit keeps rebar's body AND records the conflict.
+    """Keep local rich text and record a genuine both-sides conflict.
 
-    The ``outbound-field-conflict`` alert fires ONLY on a genuine both-sides divergence
-    (``local != baseline`` AND ``remote != baseline``); a bare Jira-side edit with local
-    unchanged is Jira-wins inbound with NO conflict, so this test establishes the precondition
-    3388's ``test_concurrent_conflict_alerts`` requires:
-
-      1. push a rich body and let a pass converge, so a baseline is recorded;
-      2. make a REBAR-side edit to the description AND a JIRA-side edit to the same field
-         before the next pass;
-      3. run the pass and assert it emits rebar's body (LOCAL-WINS — the rebar token is on
-         the DC issue, the Jira token is gone) and records the deduped
-         ``outbound-field-conflict:<key>:description`` bridge alert (the remote edit is
-         surfaced, never silently destroyed).
+    After a converged baseline, edit the description locally and remotely before the next
+    pass. The local body must win and a deduped
+    ``outbound-field-conflict:<key>:description`` alert must preserve the remote evidence.
     """
     from rebar_reconciler import alert_store
 
