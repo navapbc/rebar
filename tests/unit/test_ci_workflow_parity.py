@@ -262,20 +262,20 @@ def test_sweep_install_extra_drift_is_declared_and_actionable() -> None:
 
 def test_sweep_extra_parity_would_have_caught_c57057f41() -> None:
     """The known historical workflow drift fails without an in-tree declaration."""
-    historical_bat = subprocess.run(
-        ["git", "show", "c57057f41:.github/workflows/_build-and-test.yml"],
-        cwd=_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    historical_test = subprocess.run(
-        ["git", "show", "c57057f41:.github/workflows/test.yml"],
-        cwd=_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
+    historical_bat = f"""
+jobs:
+  test:
+    steps:
+      - name: {_BAT_TEST_INSTALL_STEP}
+        run: uv sync --extra dev --extra reviewbot --extra ui --extra grounding-terraform
+"""
+    historical_test = f"""
+jobs:
+  sweep-interpreters:
+    steps:
+      - name: {_SWEEP_INSTALL_STEP}
+        run: uv sync --extra dev --extra reviewbot --extra ui
+"""
 
     try:
         _assert_sweep_extra_parity(
