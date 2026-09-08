@@ -40,6 +40,18 @@ from typing import Any
 # GitHub's wording when a job exceeds `timeout-minutes`. Matched case-insensitively on a
 # substring so a change to the duration suffix ("of 30m0s") cannot break detection.
 TIMEOUT_MARKER = "exceeded the maximum execution time"
+TRANSPORT_MARKERS = (
+    "error: rpc failed; http 5",
+    "the requested url returned error: 5",
+    "fatal: unable to access",
+    "gnutls recv error",
+    "connection reset by peer",
+    "failed to connect",
+    "could not resolve host",
+    "operation timed out",
+    "remote end hung up unexpectedly",
+    "early eof",
+)
 
 # Conclusions that say nothing useful on their own and so are worth explaining.
 REPORTABLE = ("failure", "cancelled", "timed_out")
@@ -48,6 +60,10 @@ HEADER = "CI did not pass. Jobs that did not succeed:"
 FOOTER_TIMEOUT = (
     "A job that TIMED OUT reports the same `cancelled` conclusion as a superseded run; "
     "it is not a test verdict. Re-run it or raise that job's `timeout-minutes`."
+)
+FOOTER_TRANSPORT = (
+    "An INFRASTRUCTURE/TRANSPORT FAULT means CI could not obtain the source; "
+    "this is not a statement about the change."
 )
 
 
@@ -93,6 +109,14 @@ def _is_timeout(annotations: list[dict[str, Any]]) -> bool:
     )
 
 
+def _is_transport_fault(job: dict[str, Any], annotations: list[dict[str, Any]]) -> bool:
+    """True when the job/annotations show an observable git/HTTP transport failure."""
+    haystack_parts = [str(job.get("name") or ""), str(job.get("html_url") or "")]
+    haystack_parts.extend(str(annotation.get("message", "")) for annotation in annotations)
+    haystack = "\n".join(haystack_parts).lower()
+    return any(marker in haystack for marker in TRANSPORT_MARKERS)
+
+
 def describe_job(job: dict[str, Any], annotations: list[dict[str, Any]]) -> str:
     """Render one non-successful job as a single triage line.
 
@@ -102,7 +126,9 @@ def describe_job(job: dict[str, Any], annotations: list[dict[str, Any]]) -> str:
     conclusion = str(job.get("conclusion") or "")
     name = sanitize(str(job.get("name") or "(unnamed job)"))
 
-    if conclusion == "timed_out" or (conclusion == "cancelled" and _is_timeout(annotations)):
+    if _is_transport_fault(job, annotations):
+        outcome = "INFRASTRUCTURE/TRANSPORT FAULT (not a test verdict)"
+    elif conclusion == "timed_out" or (conclusion == "cancelled" and _is_timeout(annotations)):
         outcome = "TIMED OUT"
     elif conclusion == "cancelled":
         outcome = "CANCELLED (not a test verdict)"
@@ -139,6 +165,8 @@ def summarize(
     summary = "\n".join([HEADER, *lines])
     if "TIMED OUT" in summary:
         summary += f"\n\n{FOOTER_TIMEOUT}"
+    if "INFRASTRUCTURE/TRANSPORT FAULT" in summary:
+        summary += f"\n\n{FOOTER_TRANSPORT}"
     # Final guard: sanitize the whole message, not just the job names, so no field that
     # reaches the remote `gerrit review` command can carry shell-quoting metacharacters.
     return sanitize(summary)
