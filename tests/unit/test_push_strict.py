@@ -297,10 +297,7 @@ _CI_TLS_STDERR = (
 def test_transient_tls_failure_is_retried_and_then_delivers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Bug f61c (subzero-locustal-junebug): a CONVERGED pass died on this exact stderr.
-
-    The commits were left on the runner and died with it. One blip must not cost the pass.
-    """
+    """A transient TLS delivery fault consumes one backoff and retries successfully."""
     tracker = tmp_path / ".tickets-tracker"
     _common(monkeypatch, tracker)
     push_calls = 0
@@ -392,13 +389,7 @@ _CANNOT_LOCK_REF_STDERR = (
 def test_lost_cas_race_backs_off_between_retries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Bug ebee (freeborn-dizzy-raven): 5 retries all lost the SAME race, back-to-back.
-
-    `cannot lock ref ... is at <a> but expected <b>` is correctly classified retriable, so
-    the budget was spent — but with no pause the retries kept colliding with the same
-    concurrent tickets writer and 6 commits were left unpushed. The attempt COUNT is
-    unchanged; only the spacing is.
-    """
+    """Lost CAS races back off between bounded retries so concurrent writers can advance."""
     tracker = tmp_path / ".tickets-tracker"
     _common(monkeypatch, tracker)
     monkeypatch.setattr(lock, "write_lock", _open_lock)
@@ -480,12 +471,7 @@ def _recovery_common(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_merge_recovery_retries_a_promisor_transport_fault(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Bug f61c (subzero-locustal-junebug): the TLS fault fired INSIDE `git merge`.
-
-    The checkout is a blob:none partial clone, so the merge does on-demand promisor
-    fetches — the failure surfaced as `merge-recovery-blocked` plus `could not fetch ...
-    from promisor remote`, and the converged pass was abandoned with 2 unpushed commits.
-    """
+    """Partial-clone merge transport faults retry before becoming terminal."""
     tracker = tmp_path / ".tickets-tracker"
     _common(monkeypatch, tracker)
     _recovery_common(monkeypatch)

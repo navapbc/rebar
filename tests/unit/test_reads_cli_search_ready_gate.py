@@ -1,19 +1,8 @@
-"""CLI ``search`` / ``ready`` must reject a present-but-UNUSABLE (and absent) store.
+"""CLI ``search`` and ``ready`` reject absent or present-but-unusable stores.
 
-WHY THIS TEST EXISTS. ``rapt-dreadable-dromedary`` (aefe-614a-2631-4117) hardened the
-in-process read chokepoint (``rebar._reads._tracker``) and the write gate to the content-aware
-``rebar._store.store_usability.store_is_usable`` predicate, and ``be80-8377-4b4c-44f4``
-(change 2412) extended that gate to the CLI ``list`` / ``session-logs`` arms.
-
-Two CLI read arms were left with **no readiness gate at all**: ``_cmd_search`` and ``_cmd_ready``
-in ``rebar._engine_support/reads_cli.py`` call ``search_state`` / ``ready_states`` DIRECTLY,
-bypassing both the bare-``isdir`` check the sibling arms carried and the hardened
-``_reads._tracker`` chokepoint. So on the CLI a broken/mid-clone store — AND an absent store —
-printed ``[]`` at exit 0, the exact fallback-masking rapt-d removed from the library, surviving
-on the CLI surface (an agent is told "no ready work" when the truth is "store is broken";
-97e9-e663-a94e-4038). These tests pin the strict contract (the owner's AC-1 decision): both arms
-reject a present-but-unusable store AND an absent store (exit 1, "not initialized"), while a
-valid, EMPTY, initialized store still returns ``[]`` at exit 0.
+These commands call their read helpers directly, so they enforce the same content-aware store
+usability gate as sibling CLI and library reads. Broken or mid-clone stores return an
+initialization error; a valid empty store still returns ``[]``.
 """
 
 from __future__ import annotations

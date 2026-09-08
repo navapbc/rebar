@@ -1,19 +1,7 @@
-"""Contract for the rebar-debug Step 7 class-review directive (story dff2).
+"""The rebar-debug Step 7 turns confirmed sibling defects into reviewable scope.
 
-Step 7 sweeps for siblings of a proven root cause. Before this story it fixed
-each sibling but never turned the confirmed sibling set into *declared,
-reviewable* scope, so the fix for one instance was never reviewed as a design
-for the family. The directive under contract here makes the sibling set:
-
-* become per-sibling acceptance criteria on the bug ticket,
-* be recorded as file impact and put through plan review before Phase 2
-  continues (which is what escalates the bug out of the light advisory tier),
-* stay portable across trackers.
-
-These assert the *directive is present and coherent*, not its wording: each
-check is a semantic requirement (a named command, a cross-reference, a
-non-duplication bound), so a rewording that keeps the directive keeps the test
-green.
+Each sibling becomes an acceptance criterion and file-impact entry before plan review resumes
+Phase 2. The directive cross-references the blast-radius rationale and remains tracker-portable.
 """
 
 from __future__ import annotations

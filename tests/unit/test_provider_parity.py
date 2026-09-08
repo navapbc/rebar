@@ -345,11 +345,7 @@ def test_the_corpus_excludes_every_agentic_solver_and_clears_the_gold_floor() ->
 
 
 def test_a_polarity_free_spec_is_excluded_from_the_corpus() -> None:
-    """A spec whose scorer has no block/advisory polarity must not enter the corpus.
-
-    RED before the fix: `code-review-verify` resolved to the `code-review` arm and was eligible,
-    so its gold-BLOCK case `V-real-defect` was scored `advisory` on BOTH arms — a guaranteed recall
-    miss that looked like agreement (bug ed82-08f3-a693-425f)."""
+    """Exclude scorers without block/advisory polarity from the comparison corpus."""
     eligible = pp.eligible_cases()
     selected = pp.select_corpus(eligible)
     assert {i.solver_id for i in eligible} & pp.POLARITY_FREE_SOLVERS == set()
@@ -360,28 +356,17 @@ def test_a_polarity_free_spec_is_excluded_from_the_corpus() -> None:
 
 
 def test_the_polarity_free_exclusion_is_not_folded_into_the_agentic_one() -> None:
-    """The two exclusions must stay separately named — they exclude for unrelated reasons.
-
-    AGENTIC_SOLVERS excludes ops `gate_config` cannot reach (both arms would read the same ambient
-    model). POLARITY_FREE_SOLVERS excludes a scorer with no decision to compare. Collapsing them
-    would lose one reason, and a future reader deleting the "redundant" set would silently
-    re-admit mis-scored cases."""
+    """Keep reachability and decision-polarity exclusions independently explicit."""
     assert pp.POLARITY_FREE_SOLVERS
     assert pp.POLARITY_FREE_SOLVERS.isdisjoint(pp.AGENTIC_SOLVERS)
-    # Each polarity-free solver is excluded ON ITS OWN, not incidentally by the agentic set.
+    # Polarity-free solvers are excluded independently of the agentic set.
     for solver_id in pp.POLARITY_FREE_SOLVERS:
         assert solver_id not in pp.AGENTIC_SOLVERS
         assert pp.solver_arm(solver_id) is None
 
 
 def test_a_verifications_only_output_carries_no_decision_polarity() -> None:
-    """Why exclusion is the fix and "presence -> block" is NOT.
-
-    `code-review-verify` is scored on the PRESENCE of a `verifications` list, "independently of any
-    FAIL/BLOCK polarity", and its dataset requires a non-empty list for the CLEAN diff as much as
-    the real-defect one. So the same output shape is correct for a gold-block case and a
-    gold-advisory case: mapping presence to `block` would fix the recall miss and simultaneously
-    score the clean case as a block, manufacturing a false accept."""
+    """Verification-list presence cannot encode block versus advisory polarity."""
     verify_shaped = {"verifications": [{"id": "F1", "binary": {"path_reachable": "yes"}}]}
     # It has neither key the two-bucket mapping reads, so it cannot yield a meaningful decision.
     assert "verdict" not in verify_shaped
@@ -427,41 +412,29 @@ def test_the_isf_finder_spec_is_excluded_because_it_resolves_to_no_arm() -> None
 
 
 def test_container_cases_without_a_children_payload_are_excluded() -> None:
-    """A container criterion runs over a (parent, children, roster) decomposition, so a fixture
-    that carries only the parent plan raises instead of returning a verdict. MEASURED in the
-    recorded live run: both plan-review-container G3 cases raised on BOTH arms, at every epoch,
-    before any model call. Such a case is not corpus."""
+    """Container criteria need a nonempty children payload to produce a verdict."""
     from rebar.llm.plan_review.pass1 import CONTAINER_CRITERIA
 
     for item in pp.eligible_cases():
         if item.solver_id in CONTAINER_CRITERIA:
             assert item.case.get("children"), f"{item.spec}/{item.case_id} has no children payload"
-    # The rule is real, not vacuous — pinned on synthetic cases, so it stays meaningful no
-    # matter which shipped fixtures happen to carry a payload.
+    # Synthetic cases keep the payload requirement independent of shipped fixtures.
     assert not pp._runnable("G3", {"input": "parent plan only"})
     assert not pp._runnable("G3", {"children": []})
     assert pp._runnable("G3", {"children": [{"ticket_id": "t"}]})
     assert pp._runnable("T2", {"input": "inline text"})  # non-container arms are unaffected
-    # An ISF finder is inline-unadmissible (needs a session log) — never runnable here, so it
-    # is excluded from the parity corpus instead of burning an epoch raising on both arms.
+    # ISF finders require session logs, so inline cases are not runnable.
     assert not pp._runnable("ISF", {"input": "inline plan text"})
 
 
 def test_container_spec_is_eligible_now_that_its_fixtures_carry_children() -> None:
-    """Ticket 3e8b: every `plan-review-container` case now ships a `children` payload, so the
-    spec is corpus again rather than excluded by `_runnable`. This is the inverse of the
-    exclusion witness this test used to carry: the RULE above is unchanged (and pinned on
-    synthetic cases); what changed is that the shipped fixtures satisfy it."""
+    """Container fixtures with children contribute both gold labels to the corpus."""
     eligible = pp.eligible_cases()
     container = [i for i in eligible if i.spec == "plan-review-container"]
     assert container, "plan-review-container is still excluded — its cases need `children`"
     assert all(i.case.get("children") for i in container)
 
-    # `select_corpus` takes the FIRST gold-block and FIRST gold-advisory case of each spec, so
-    # a re-eligible container spec contributes exactly those two — the two cases that used to
-    # burn an epoch raising on both arms (G3-R-uncovered-ac-rebar / G3-FP-covered-by-named-
-    # consumer-rebar). Asserted as a delta against the container-less corpus rather than as a
-    # hard-coded total, which would break whenever an unrelated spec is added.
+    # A container spec contributes its first block and advisory gold cases.
     selected = pp.select_corpus(eligible)
     picked = [i for i in selected if i.spec == "plan-review-container"]
     assert sorted(i.label for i in picked) == ["advisory", "block"], picked
@@ -551,22 +524,9 @@ def test_the_harness_is_never_invoked_from_a_workflow() -> None:
     assert proc.returncode == 1, f"provider_parity is referenced from a workflow: {proc.stdout}"
 
 
-# ── 7. PAYLOAD + TOOL PARITY: the outbound request, captured per provider ───────────
-#
-# Epic 061c's scope is that the same PAYLOAD reaches the model and the same TOOLS are offered,
-# whatever the provider. Comparing two models' JUDGEMENTS is out of scope: LLMs are
-# non-deterministic, so a verdict difference between two different models is expected rather
-# than a defect. Parity is therefore proven STRUCTURALLY, from the request that actually leaves
-# the process — not by reading code.
-#
-# Neither arm reaches the network, so this costs nothing. The Anthropic arm's real builder runs
-# and wraps an `httpx.MockTransport` (the technique `test_llm_provider_factory` already uses), so
-# the genuine SDK assembles the body; the Bedrock arm's real boto3 client is constructed and only
-# its `converse` is intercepted. Both abort at the provider boundary.
-
-#: Envelope differences the two provider APIs REQUIRE. Enumerated rather than waved at: the
-#: comparison normalizes exactly these away and nothing else, so a NEW divergence shows up as a
-#: differing field instead of being silently absorbed.
+# ── 7. outbound payload and tool parity ────────────────────────────────────────────
+# Normalize only required provider-envelope differences; all other request fields and offered
+# tools must match structurally. Both arms stop at mocked provider boundaries.
 ENVELOPE_DIFFERENCES = (
     "model id: Anthropic `model` takes the bare id; Bedrock `modelId` takes the "
     "inference-profile id (the `us.` form) -- a plain on-demand id is refused.",
@@ -752,37 +712,21 @@ def test_the_tool_set_offered_to_the_model_is_identical_across_providers(slot, m
 
 
 def test_the_temperature_capability_difference_is_symmetric_and_explicit(monkeypatch) -> None:
-    """The one capability difference that legitimately alters the payload, made explicit.
-
-    `us.anthropic.claude-opus-4-8` refuses `temperature` (MEASURED: Converse returns
-    `ValidationException: ... \\`temperature\\` is deprecated for this model`), and
-    `capabilities._MODEL_ID_CAPABILITY_OVERRIDES` carries `supports_temperature: False` for it.
-    The withdrawal must be driven by the MODEL's capability, not by the provider: it applies to
-    opus on BOTH providers and to neither sonnet arm."""
+    """Temperature support is model-specific and symmetric across provider arms."""
     sonnet_v1, sonnet_v2 = pp.CLASS_SLOTS["standard"]
     opus_v1, opus_v2 = pp.CLASS_SLOTS["frontier"]
     s1, s2 = _compare(sonnet_v1, sonnet_v2, monkeypatch, temperature=0.0)
     o1, o2 = _compare(opus_v1, opus_v2, monkeypatch, temperature=0.0)
-    # Requested temperature reaches sonnet on both providers...
+    # Temperature reaches both Sonnet provider arms.
     assert s1["temperature"] == 0.0 and s2["temperature"] == 0.0
-    # ...and is withdrawn from opus on both providers. Symmetric => model-driven, not provider.
+    # Opus omits it on both arms, proving the difference is model-specific.
     assert o1["temperature"] is None and o2["temperature"] is None
-    # Withdrawing it changes nothing else about the payload.
+    # No other normalized field changes.
     assert [f for f in o1 if f != "model_id" and o1[f] != o2[f]] == []
 
 
 def test_the_native_output_capability_is_measured_and_symmetric_for_sonnet(monkeypatch) -> None:
-    """Both measured Sonnet arms carry structured output natively.
-
-    18ae enabled `native_structured_output` for `us.anthropic.claude-sonnet-4-6` (the Bedrock
-    inference-profile id) in `capabilities._MODEL_ID_CAPABILITY_OVERRIDES`, from a MEASURED
-    Converse PASS (E1). A native-output arm carries the JSON schema out-of-band (NativeOutput),
-    so `structured.schema_directive` is NOT appended to the user turn; a prompted arm appends it.
-
-    The direct-Anthropic twin has now also been live-measured with native structured output both
-    with and without thinking. Its exact-id capability row must therefore override the same
-    conservative Claude-family default as the Bedrock row. Opus remains prompted on both arms.
-    """
+    """Both Sonnet arms use native output; both Opus arms remain prompted."""
     sonnet_v1, sonnet_v2 = pp.CLASS_SLOTS["standard"]
     opus_v1, opus_v2 = pp.CLASS_SLOTS["frontier"]
     raw_s1 = _capture(sonnet_v1, monkeypatch)["payload"]

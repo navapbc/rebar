@@ -1,22 +1,8 @@
-"""A push failure must survive the process that suffered it (bug vapoury-attack-lamb).
+"""Push failures persist as durable state even when logs are not observable.
 
-Bug 2a76 made the terminal push-failure WARNING informative. That is a no-op on the
-surfaces this ticket covers, because on them the warning is never DELIVERED:
-
-* ``sync.push = async`` re-spawns the push as a detached child with ``stderr=DEVNULL``;
-* a library embedder gets a ``NullHandler`` on the ``rebar`` root;
-* an MCP client reads only the tool result;
-* the reconciler installs its handler on a different logger root.
-
-So the remedy is STATE, not a log line: a durable marker any later caller can read. These
-tests drive REAL git against a REAL local bare origin whose REAL ``pre-receive`` hook
-declines the push — no mocks, and no assertions on log output (that is exactly the channel
-proven not to arrive).
-
-The best-effort contract is load-bearing and must NOT be broken by any of this:
-``push_tickets_branch`` still returns ``None`` and never raises on the default path
-(``docs/concurrency.md``). ``test_marker_write_failure_does_not_fail_the_push`` guards the
-inverse failure — a diagnostic that learns to crash its caller is worse than no diagnostic.
+Async, library, MCP, and reconciler callers may not receive warning output, so a marker records
+rejected delivery for later readers. Default pushes remain best-effort, and marker failures do
+not fail their callers.
 """
 
 from __future__ import annotations

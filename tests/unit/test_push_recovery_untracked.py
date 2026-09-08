@@ -1,18 +1,8 @@
-"""Push-recovery parity with reconverge's untracked-overwrite self-heal (variant (a),
-loris/1757; generalized by wolverine/1767): ``_recover_dirty_merge`` sets tracked
-changes aside with a stash COMMIT OBJECT and ``reset --hard``, but untracked files are
-deliberately left alone — so an untracked compaction leftover (`*-SNAPSHOT.json` /
-`*.retired`) colliding with a file the remote merge wants to create aborts the merge
-("untracked working tree files would be overwritten by merge"), and the pre-fix code
-gave up (abort, restore stash, warn). Every push retry then re-failed identically.
+"""Push recovery quarantines untracked files that would be overwritten by merge.
 
-The fix mirrors reconverge: parse exactly the paths git names (the shared pure parser
-in ``rebar._store.sync``), move — never delete — the named UNTRACKED paths into the
-shared ``<git-common-dir>/reconverge-quarantine/<utc-ts>/`` dir, retry the merge ONCE.
-The MOVE is implemented locally through push_recovery's late-bound ``core._git`` seam
-(sync's mover shells through sync's own module-level ``_git``, which would bypass the
-~25 ``push._git`` monkeypatch sites). Any other failure keeps today's behavior exactly,
-and the stash commit is restored exactly once on every exit path.
+After tracked changes are set aside, named untracked collision paths are moved, never deleted, into
+the shared reconverge quarantine before one merge retry. Other failures keep normal cleanup,
+and any stash commit is restored exactly once.
 """
 
 from __future__ import annotations

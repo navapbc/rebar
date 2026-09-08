@@ -1,20 +1,8 @@
-"""CLI read arms must reject a present-but-UNUSABLE store, not report it empty.
+"""CLI ``list`` and ``session-logs`` reject present-but-unusable stores.
 
-WHY THIS TEST EXISTS. ``rapt-dreadable-dromedary`` (aefe-614a-2631-4117) hardened the
-in-process read chokepoint (``rebar._reads._tracker``) and the write gate from a bare
-``os.path.isdir(tracker)`` existence check to the content-aware
-``rebar._store.store_usability.store_is_usable`` predicate, so a tracker DIRECTORY that
-exists but is not a usable store (no ``.git`` at all, or ``.git`` with an unresolvable HEAD
-mid-clone) reads as ``store_uninitialized`` instead of silently reducing to ``[]``.
-
-Two CLI read arms were left on the OLD gate: ``_cmd_list`` and ``_cmd_session_logs`` in
-``rebar._engine_support/reads_cli.py`` call ``list_states`` / ``recent_session_logs_state``
-(``reduce_all_tickets``) DIRECTLY, bypassing ``_reads._tracker``, and each still guards on
-``if not os.path.isdir(tracker)``. So on the CLI a broken/mid-clone store printed ``[]`` at
-exit 0 — the exact fallback-masking rapt-d removed from the library, surviving on the CLI
-surface (be80-8377). These tests pin the parity: the CLI arms must reject a
-present-but-unusable store (exit 1, "not initialized") while a genuinely ABSENT store still
-rejects (unchanged) and a valid, EMPTY, initialized store still returns ``[]`` at exit 0.
+Their direct reducer paths use the content-aware store-usability gate rather than directory
+existence alone. Absent, broken, and mid-clone stores report an initialization error, while a
+valid empty store still returns ``[]``.
 """
 
 from __future__ import annotations

@@ -1,31 +1,8 @@
-"""A tickets-branch push REJECTED BY REMOTE POLICY must surface to the writing caller
-(bug 2a76 / thorough-turophilic-airedale).
+"""Remote-policy push rejections stay visible without failing best-effort callers.
 
-The incident: GitHub push protection (GH013) rejected every `tickets` push for ~8 hours.
-122 ticket commits piled up locally while every `rebar comment`/`transition`/`create`
-returned normally. Found only because an unrelated CI failure prompted a manual `git push`,
-which finally printed the reason.
-
-Mechanism (proven at runtime, see the ticket's RCA comment):
-
-* ``_NON_FF`` (push.py) matched the BARE token ``rejected``. Git prints
-  ``! [remote rejected] HEAD -> tickets (pre-receive hook declined)`` for EVERY server-side
-  decline -- push protection, pre-receive hook, branch protection -- not just a
-  non-fast-forward. So a permanent policy rejection was misrouted onto the retriable
-  non-fast-forward path, skipping the ONLY stderr-bearing log call, burning three futile
-  fetch+merge cycles, and exiting with a bare ``"failed after 3 retries"`` that named neither
-  the reason nor the backlog. The reason WAS captured by ``run_git`` and then discarded.
-* Nothing re-announced the growing divergence: the message is byte-identical on write #1 and
-  write #122, and ``PUSH_PENDING`` is computed only by an explicitly-invoked ``rebar fsck``.
-
-The contract these tests must NOT break: push is best-effort and **never fails the caller**
-(``docs/concurrency.md:296-299``; ``push_tickets_branch`` "ALWAYS returns None"). The remedy
-is a richer SIGNAL, never an exception and never a non-zero exit.
-
-Everything here drives REAL git against a REAL local bare origin whose ``pre-receive`` hook
-declines the push -- no mocks, no call-count assertions (the ticket's AC says so explicitly).
-The hook records each invocation to a file, so "how many times did we actually hit the
-remote" is observed from the remote side rather than from a spy.
+Server-side declines are terminal rather than non-fast-forward contention: the signal retains
+the remote reason and durable backlog without futile fetch/merge retries. Tests observe a real
+bare remote and hook instead of mocking call counts.
 """
 
 from __future__ import annotations

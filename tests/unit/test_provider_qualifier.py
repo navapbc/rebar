@@ -1,25 +1,8 @@
-"""Provider-qualifier parsing for model ids that CONTAIN a colon (ticket 03b0).
+"""Provider qualification distinguishes registered prefixes from colons inside model ids.
 
-Bedrock's canonical model ids carry a version suffix containing a colon —
-``anthropic.claude-haiku-4-5-20251001-v1:0``, ``us.anthropic.claude-opus-4-5-20251101-v1:0`` —
-which is the majority form AWS publishes. Two places in the stack decide "is this string already
-provider-qualified?" by asking whether it contains a colon at all:
-
-* ``model_classes._resolve_target`` — ``if ":" in model: return model`` — which SILENTLY DISCARDS a
-  configured ``provider``, and
-* ``config.infer_provider`` — ``model.split(":", 1)[0]`` — which then reads most of the model id
-  back as though it were the provider name.
-
-Together those produce the observed failure: a class configured
-``{model: "us.anthropic.claude-haiku-4-5-20251001-v1:0", provider: "bedrock"}`` resolves to the bare
-id, and the run dies with ``unknown provider 'us.anthropic.claude-haiku-4-5-20251001-v1'; registered
-providers: ['anthropic', 'bedrock']`` — a message that contradicts the operator's own config, naming
-a "provider" they never typed. Only the UNVERSIONED aliases (``us.anthropic.claude-sonnet-4-6``)
-happen to work, which is why this stayed hidden.
-
-The distinguishing fact is not colon POSITION but whether the prefix names a provider. A provider
-name is a short identifier; a Bedrock id prefix is dotted. These tests pin that both deciders agree,
-on both id shapes, and that an already-qualified string is still never double-prefixed.
+An explicit provider prefixes bare or versioned Bedrock ids. Inline qualifiers split only when
+their prefix is registered, avoiding double-prefixing and misclassified version suffixes.
+Configured-provider conflicts fail explicitly, and inferred providers must resolve at runtime.
 """
 
 from __future__ import annotations
@@ -133,12 +116,8 @@ def test_an_unknown_bare_model_is_left_alone():
     assert _resolve_target("some-private-model", None) == "some-private-model"
 
 
-# ── an explicitly configured provider WINS over any inline qualifier (ticket 03b0) ────────────
-#
-# Guard ORDER, not just the qualifier test, is what actually fixes this bug class. LangChain's
-# `init_chat_model` uses the same order — `if not model_provider and ":" in model and prefix in
-# registry` — so an explicitly configured provider is never overruled by punctuation in the model
-# id. Verified against langchain/chat_models/base.py:599-608.
+# ── Explicit configuration takes precedence over inline qualification ────────────────────────
+# A conflicting inline provider is rejected; punctuation never overrides configuration.
 
 
 def test_a_configured_provider_is_not_overruled_by_an_inline_qualifier():
@@ -200,13 +179,8 @@ def test_the_conflict_is_raised_not_silently_resolved():
             _resolve_target(model, provider)
 
 
-# ── qualification is decided by REGISTRY MEMBERSHIP, not by prefix shape ──────────────────────
-#
-# The shape test this replaces asked "does this prefix LOOK like a provider name?" (an
-# identifier-like `^[a-z][a-z0-9_-]*$`). The question that matters is "IS it one?". Upstream
-# already answers it that way: pydantic-ai 1.107.1's `infer_model` raises `Unknown provider: X`
-# for any qualifier outside its registry. Membership narrows AND widens — slashed gateway names
-# were rejected by the old regex and now split correctly.
+# ── Qualifiers are recognized by runtime registry membership ─────────────────────────────────
+# Membership accepts supported gateway names and rejects identifier-shaped unknown prefixes.
 
 _KNOWN_25 = frozenset(
     {
@@ -258,12 +232,7 @@ def test_a_slashed_provider_name_splits():
     assert split_provider_qualifier("gateway/openai:gpt-4o") == ("gateway/openai", "gpt-4o")
 
 
-# ── no name is grandfathered: `test` and `google_genai` are not providers ─────────────────────
-#
-# pydantic-ai 1.107.1 rejects both — `infer_model("test:foo")` and
-# `infer_model("google_genai:gemini-2.0")` each raise `Unknown provider`. `test` is the special
-# bare string that builds a TestModel, never a provider. Admitting either would make rebar more
-# permissive than the library it wraps.
+# Unregistered names remain model text rather than provider qualifiers.
 
 
 @pytest.mark.parametrize("name", ["test", "google_genai"])
@@ -339,21 +308,8 @@ def test_the_static_set_does_not_drift_from_the_runtime_registries():
     assert _pydantic_ai_known_providers() <= KNOWN_PROVIDER_NAMES
 
 
-# ── every INFERRED provider name must be one a runtime registry can resolve ───────────────────
-#
-# `_PROVIDER_PREFIXES` is the inference table: a bare model id starting with a listed prefix is
-# qualified with the mapped name, and that composed string is what the runner dispatches on.
-# Nothing forced those mapped names to be names either registry knows — `gemini` mapped to
-# `google_genai`, which neither pydantic-ai nor `ProviderSession` recognizes — so a bare `gemini-*`
-# id composed a target that sailed through config resolution and could only fail at CALL time.
-#
-# The two composition sites differ, and only one broke: `anthropic_model._pai_model` passes the
-# inferred name through its own private `_PAI_PROVIDER_PREFIX` table, which happened to translate
-# the unusable name into a usable one; the model-class/ladder path below uses `infer_provider`'s
-# result VERBATIM. So the end-to-end assertion goes through `_resolve_target`, not `_pai_model`.
-#
-# The invariant is pinned over the WHOLE table, not the gemini row, so a future prefix cannot
-# reintroduce the class of defect.
+# Every inferred provider must resolve through a runtime registry. The end-to-end check uses
+# `_resolve_target` because it consumes `infer_provider` directly.
 
 
 def _resolving_session():

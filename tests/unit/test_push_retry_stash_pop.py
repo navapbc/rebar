@@ -1,16 +1,8 @@
-"""Regression: the push-retry stash→merge→pop dance must not strand a conflict
-(bug 6818 / filmy-basin-chasm).
+"""Push recovery leaves a writable tree when restoring stashed edits conflicts.
 
-On the clean-merge2 path, `git stash pop` (push.py) was run unconditionally and its
-return code ignored. When the stashed uncommitted edit to a tracked `.bridge_state/*`
-file collides with the freshly-merged upstream copy, the pop applies-with-conflict:
-it leaves `<<<<<<< Updated upstream … >>>>>>> Stashed changes` markers in the working
-tree and an unmerged (UU, stages 1/2/3) index entry, and keeps the stash. Because
-merge2 succeeded (rc 0), the `merge --abort` cleanup is skipped, so nothing repairs
-it. That wedged reconcile (the prev_snapshot read-guard fail-closes) AND every store
-write (`git commit` refuses an unmerged path → "git commit failed while holding lock").
-
-The dance must leave the worktree CONSISTENT — no markers, no UU, writable, valid JSON.
+A stash-pop conflict after a clean upstream merge must not strand conflict markers, an
+unmerged index, or invalid bridge state. Recovery preserves a consistent worktree so callers
+can continue writing.
 """
 
 from __future__ import annotations
