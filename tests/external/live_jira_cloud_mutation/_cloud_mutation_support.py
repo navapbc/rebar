@@ -1,23 +1,9 @@
-"""Shared, bounded helpers for the live-Cloud coordinator MUTATION probe.
+"""Helpers for bounded Jira Cloud coordinator mutation probes.
 
-The sibling ``jira-cloud-s3-rehearsal`` suite is deliberately READ-ONLY on Jira Cloud, so
-it cannot exercise the RP-03 create-coordinator's outbound WRITE paths (create / binding
-lifecycle / commit-unknown / fuse) against real Cloud. This suite is the mutating
-counterpart the epic's Live-External AC requires: it drives those exact seams against live
-Jira Cloud, but under a hard self-cleaning contract so it can run against the shared REB
-project without leaking.
-
-SAFETY CONTRACT (every helper here upholds it):
-  * every created issue is UNIQUELY labelled ``rebar-id:<local_id>`` (the coordinator's own
-    binding label) AND stamped with the run-scoped ``REBAR_PROBE_RUN_LABEL`` so a crashed
-    run's leftovers are sweepable by label;
-  * the OWNING test deletes its issue by key in a ``finally`` (the primary teardown);
-  * a session-level label sweep (conftest) and the workflow's always-run teardown step are
-    backstops for a crash between create and delete.
-
-Import-mode note: pytest's ``prepend`` mode puts this directory on ``sys.path``, so the
-test module and conftest import these helpers by bare module name, mirroring the DC and
-S3 live harnesses.
+Each created issue receives its coordinator binding label and a run-unique sweep label. The
+owning test deletes the issue by key in ``finally``, with session and workflow label sweeps as
+crash backstops. Pytest's ``prepend`` import mode exposes these helpers through the bare
+``_cloud_mutation_support`` name.
 """
 
 from __future__ import annotations
