@@ -3,6 +3,23 @@
     {
       "unresolved": false,
       "key": {
+        "uuid": "7bcd2bf3_cc272565",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 2
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 1000007
+      },
+      "writtenOn": "2026-09-08T03:05:33Z",
+      "side": 1,
+      "message": "Rejected because it violates the explicit description length cap.",
+      "revId": "603caf0a7051df71a8537fba33067aa9007f1684",
+      "serverId": "fc71b410-f5b3-4446-8e2c-e56c4676521b"
+    },
+    {
+      "unresolved": false,
+      "key": {
         "uuid": "112fc7f1_56e092d6",
         "filename": "src/rebar/_plan_clarity.py",
         "patchSetId": 2
