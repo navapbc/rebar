@@ -1,15 +1,10 @@
-"""Real-browser E2E for the workflow visual editor.
+"""Browser E2E coverage for the workflow editor.
 
-These run the ACTUAL editor bundle in headless Chromium (Playwright) against a live editor
-server, because the failures that matter here are runtime ones a Python/headless check
-can't see: whether edges render, whether the diagram is laid out (not a single column),
-whether the properties panel reacts to selection, and whether an edit actually persists to
-the IR on Save. When Node/Playwright/Chromium are unavailable the tier does not run, and
-that non-execution is licensed and announced by ``_browser_tier`` rather than silent
-(bug 337e-b558-17a2-49bd).
+Headless Chromium exercises the built bundle through an editor server. The tests verify
+rendered edges and layout, selection-driven properties, and saved IR changes. Missing browser
+dependencies use the recorded opt-out guard.
 
-This tier exists because earlier "verified" editor changes shipped broken — the bundle
-syntax-checked but threw at render time. The browser is the only faithful oracle.
+This boundary catches runtime failures that syntax and Python-only checks cannot observe.
 """
 
 from __future__ import annotations
@@ -62,13 +57,8 @@ def test_editor_edit_persists_to_ir_on_save(browser_runner, editor_server):
 
 
 def test_editor_structured_fields_roundtrip_error_and_no_raw_editor(browser_runner, editor_server):
-    # Story a83a + da27 AC "no raw JSON textarea": the structured per-field entries are the
-    # SOLE editor. Drive the LOOP step's structured `max_iterations` field and assert the
-    # three ACs in a real browser: (1) a valid edit writes back into rebar:Config and the
-    # save persists to the IR (round-trip); (2) a non-numeric entry shows a FIELD ERROR and
-    # does NOT lose the prior value (no silent loss / corruption); (3) there is NO raw JSON
-    # editor for the known kind — neither the old "Advanced (raw JSON)" fallback nor a bare
-    # raw-config entry.
+    # Verify structured max_iterations editing, invalid-value retention with an error,
+    # removal of the raw JSON editor, and persistence to the IR.
     import json
 
     url, ir = editor_server
@@ -97,10 +87,8 @@ def test_editor_structured_fields_roundtrip_error_and_no_raw_editor(browser_runn
 
 
 def test_editor_batch_criteria_render_add_remove_edit(browser_runner, editor_server_batch):
-    # Story A4: the v3 `batch` step is visually editable. In a real browser, select the batch
-    # ServiceTask and assert the editor (1) RENDERS the finder + criteria list (incl. a `when`
-    # overlay), (2) EDITs a criterion's prompt into rebar:Config, (3) ADDs a criterion, (4)
-    # REMOVEs one, (5) shows the `if:` overlay field on a prompt step, and (6) persists to IR.
+    # Verify batch fields, criterion edits, additions, removals, prompt overlays, step
+    # conversion, and persistence through the browser editor.
     import json
 
     url, ir = editor_server_batch

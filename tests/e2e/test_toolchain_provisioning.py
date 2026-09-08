@@ -1,16 +1,8 @@
-"""The e2e Node toolchain must be provisioned OUTSIDE a test's timeout budget, and its
-in-fixture fallback must be bounded, diagnosable and race-safe (bug 9a17-e0b3-7aa6-4091).
+"""Tests for bounded, selection-driven E2E toolchain provisioning.
 
-The defect these tests pin: ``bpmn_harness`` used to shell out to ``npm`` with no
-``timeout=``, inside the first e2e test's setup. The only bound was pytest's global
-``timeout = 300`` / ``timeout_method = "thread"``, and that method calls ``os._exit(1)`` —
-so a slow npm registry killed the whole xdist worker (``node down: Not properly
-terminated``) instead of reporting anything a reader could act on.
-
-Every case here drives a STUB ``npm`` on ``PATH``, so nothing touches the network and the
-slow path is reproduced in a second rather than in the ninety-plus that a real cold install
-costs. That is what makes the fix verifiable in one run instead of by waiting for a
-recurrence.
+Each case uses stub npm and Node executables, so the suite performs no network access. The
+tests cover collection-time provisioning, named failures, locking, optional browser packages,
+fixture fallbacks, and satisfied-tree no-ops.
 """
 
 from __future__ import annotations
@@ -238,16 +230,8 @@ def test_two_concurrent_workers_do_not_overlap_their_provisioning_steps(
     assert [start for start, _ in spans] == ["install-start", "build-start"] * 2, ordered
 
 
-# ---------------------------------------------------------------------------
-# the forced interleaving
-#
-# The race this pins is not reproduced by running N workers and hoping. The interleaving is
-# CONSTRUCTED: a peer process takes the provisioning lock and, while holding it, creates
-# exactly the state an unlocked readiness check inspects — node_modules, the browser stack,
-# and a `dist/roundtrip.mjs` that exists but is half-written, which is what esbuild leaves
-# visible while it writes the bundle in place. Only then does the caller run. The append-only
-# log is the oracle, so the verdict is an ORDER, not a duration.
-# ---------------------------------------------------------------------------
+# A peer holds the provisioning lock after creating an incomplete bundle. The append-only log
+# proves that the caller waits for the peer before checking readiness.
 
 _PEER_HOLD_SECONDS = 2.0
 _PEER_MID_BUILD = "peer-mid-build"
@@ -292,13 +276,10 @@ def _await_line(log: Path, needle: str, peer: subprocess.Popen, *, deadline_s: f
 def test_a_caller_cannot_return_while_a_peer_holds_the_lock_over_a_half_written_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The defect, forced: provisioning must not answer "ready" from outside the lock.
+    """Wait while a peer holds the lock over an incomplete bundle.
 
-    A pre-lock `_satisfied()` sees node_modules and an existing `dist/roundtrip.mjs` and
-    returns AT ONCE, while the peer holding the lock is still writing that file — so the
-    caller would go on to run `node dist/roundtrip.mjs` against a truncated bundle. With the
-    check under the lock the caller can only return after the peer releases it, which is a
-    fact about ORDER and so is decidable in one run rather than by repetition.
+    An unlocked readiness check would accept the existing path. The ordered log proves that
+    the caller returns only after the peer releases the lock.
     """
     pytest.importorskip("fcntl", reason="the provisioning lock needs POSIX fcntl")
     js_dir, bin_dir = _js_dir(tmp_path, _SUCCEEDS)
@@ -384,16 +365,8 @@ def test_the_portable_make_target_provisions_with_npm_ci() -> None:
     assert "run build" in recipe, f"e2e-deps does not build the harness bundle:\n{recipe}"
 
 
-# ---------------------------------------------------------------------------
-# the collection hook, driven through a real pytest run
-#
-# The hook is the load-bearing half of the fix, so it is exercised end to end: a replica of
-# the real tests/e2e tree (the SAME conftest.py and _toolchain.py, copied so their
-# module-relative `js` directory lands in the sandbox) is collected by a nested pytest with
-# stub `node`/`npm` on PATH. Every assertion below is on what that run OBSERVABLY did —
-# outcomes, skip reasons, files created, and how many times `npm` was invoked — never on the
-# module-level flags that produce them.
-# ---------------------------------------------------------------------------
+# A nested pytest run copies the E2E support files into pytester's sandbox and uses stub Node
+# tools. Assertions cover collection outcomes, skip reasons, created paths, and npm calls.
 
 _E2E_DIR = Path(__file__).parent
 
@@ -541,12 +514,7 @@ def test_provisioning_happens_once_for_a_whole_selection(
 def test_a_collection_failure_is_named_by_both_fixtures_and_never_retried(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """(d) A failed provisioning is re-REPORTED, not re-RUN, by every toolchain fixture.
-
-    Both fixtures must name it: reporting it for one and not the other is the asymmetric
-    surface this change exists to remove. And a slow failure must be paid once, not once per
-    test — which is why the count assertion matters as much as the messages.
-    """
+    """Report one named collection failure through both fixtures without retrying it."""
     _js_dir, log = _replica(
         pytester, _NPM_FAILS, test_harness=_NEEDS_HARNESS, test_browser=_NEEDS_BROWSER
     )
@@ -578,12 +546,7 @@ def test_a_tree_without_a_lockfile_falls_back_to_npm_install(
 def test_a_browser_request_completes_a_tree_installed_without_the_browser_stack(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A harness-only install must not look "done" to a later caller that needs the browser.
-
-    Without this, a session that provisioned for `bpmn_harness` would leave `node_modules`
-    in place and the next browser run would skip citing a missing playwright — the real
-    cause (the browser stack was deliberately omitted) never surfacing.
-    """
+    """Install Playwright when a browser caller follows a harness-only installation."""
     js_dir, bin_dir = _js_dir(tmp_path, _SUCCEEDS_LOGGING)
     _with_stub_on_path(monkeypatch, bin_dir)
     provision_toolchain(js_dir, with_browser=False)
@@ -612,13 +575,7 @@ def test_a_satisfied_tree_is_not_reinstalled(
 def test_a_satisfied_tree_needs_no_npm_on_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Readiness is answered under the lock BEFORE the `npm` lookup, so an already-provisioned
-    tree still returns cleanly on a host with no npm.
-
-    The old pre-lock fast path returned before ever looking npm up. Moving the readiness check
-    under the lock had to keep that property, or a machine that ran `make e2e-deps` once and
-    later lost npm from PATH would start failing provisioning that has nothing left to do.
-    """
+    """Check a satisfied tree under the lock before looking up npm on PATH."""
     js_dir, bin_dir = _js_dir(tmp_path, _SUCCEEDS_LOGGING)
     _with_stub_on_path(monkeypatch, bin_dir)
     provision_toolchain(js_dir, with_browser=True)

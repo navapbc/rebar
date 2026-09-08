@@ -1,24 +1,12 @@
-"""E2E tier: drive the REAL bpmn-io libraries the browser editor uses.
+"""E2E fixtures for bpmn-moddle serialization and browser editor tests.
 
-These tests round-trip BPMN through `bpmn-moddle` (the editor's read/write layer) and
-`bpmn-auto-layout` (its layout) via a small Node harness (``js/roundtrip.mjs``), instead
-of the permissive ``xml.etree`` the unit tests use. That is the only way to catch
-*faithfulness* bugs — e.g. an id that is a legal XML attribute but an illegal BPMN id,
-which ``xml.etree`` keeps and ``bpmn-moddle`` drops.
+The Node harness parses and serializes BPMN with bpmn-moddle. Toolchain provisioning follows
+selected fixtures and normally runs through ``make e2e-deps`` before pytest. The fixture
+fallback stores one named provisioning failure for both toolchain fixtures.
 
-The tier is **opt-in and self-skipping**: it needs Node + a one-time ``npm ci`` +
-esbuild bundle. Provision that AHEAD of pytest with ``make e2e-deps`` — a toolchain install
-is the build's work, not a test's, and charging it to the first e2e test's setup is what
-bug 9a17-e0b3-7aa6-4091 was. ``tests/e2e/_toolchain.py`` remains the in-fixture fallback for
-a checkout that never ran the target. When Node is absent or provisioning fails (offline CI,
-etc.) the whole tier skips with a clear reason rather than failing — the Python unit tests
-remain the always-on floor.
-
-The BROWSER half of the tier is stricter (bug 337e-b558-17a2-49bd). Its non-execution is not
-allowed to be silent: every ``browser_runner`` / ``editor_server*`` skip path calls
-``_browser_tier.tier_unavailable``, which licenses the skip only against the recorded opt-out
-in ``tests/e2e/browser-tier-optout.toml`` and FAILS when that record is missing. Delete the
-record and the browser tier turns red instead of quietly green.
+Browser fixture failures pass through ``tier_unavailable``. The recorded browser opt-out
+permits a reported skip. Without that record, unavailable browser dependencies fail the tier.
+Python unit tests remain the always-on floor.
 """
 
 from __future__ import annotations
@@ -48,10 +36,7 @@ _BUNDLE = _JS_DIR / "dist" / "roundtrip.mjs"
 _BROWSER_FIXTURE = "browser_runner"
 _TOOLCHAIN_FIXTURES = frozenset({"bpmn_harness", _BROWSER_FIXTURE})
 
-# The one piece of state: the message from a provisioning that FAILED at collection time.
-# The toolchain fixtures re-REPORT it rather than re-running the attempt, so a slow failure
-# is paid once per session instead of once per test. A successful provisioning needs no flag
-# — ``provision_toolchain`` is a no-op once the toolchain is on disk.
+# Store one collection-time provisioning error for both fixtures to report without retrying.
 _PROVISION_ERROR: str | None = None
 
 
@@ -60,16 +45,10 @@ def _have_node() -> str | None:
 
 
 def pytest_collection_modifyitems(config, items) -> None:
-    """Provision the Node toolchain at COLLECTION time, not inside a test.
+    """Provision selected Node dependencies during collection.
 
-    This is the load-bearing half of bug 9a17-e0b3-7aa6-4091. pytest-timeout bounds test
-    ITEMS: with ``timeout = 300`` / ``timeout_method = "thread"`` (pyproject.toml), a
-    session-scoped fixture that installs the toolchain spends that install inside the first
-    e2e test's setup, and crossing the budget makes the thread method ``os._exit(1)`` — the
-    whole xdist worker dies as ``node down: Not properly terminated`` with no traceback. A
-    lock alone does not fix it: under ``-n 4 --dist worksteal`` every worker runs the
-    fixture, so serializing them merely converts the race into a queue that is *still* being
-    charged to a test. Collection is not an item, so nothing here is on any test's clock.
+    Collection runs outside each test item's timeout. Provisioning before selected fixtures
+    prevents serialized session workers from charging installation time to a test.
     """
     global _PROVISION_ERROR
     here = Path(__file__).parent
@@ -144,12 +123,7 @@ def browser_runner():
     node = _have_node()
     if not node:
         tier_unavailable("`node` is not on PATH")
-    # Same provisioning contract as `bpmn_harness`: this fixture is in _TOOLCHAIN_FIXTURES,
-    # so a selection containing it triggers collection-time provisioning, and a failure there
-    # must surface HERE too. Reporting it only for `bpmn_harness` would leave exactly the
-    # asymmetric surface this change exists to remove — a browser test would skip citing a
-    # missing playwright dir while the real cause (a failed `npm ci`) went unnamed.
-    # (bug 9a17-e0b3-7aa6-4091)
+    # Report the stored collection-time error through the browser-tier guard.
     if _PROVISION_ERROR is not None:
         tier_unavailable(f"the Node toolchain failed to provision — {_PROVISION_ERROR}")
     try:
