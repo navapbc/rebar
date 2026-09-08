@@ -466,10 +466,11 @@ def test_advisory_alert_close_argv_survives_the_real_transition_parser(
     _reason, force_reason, close_class, _caused_by, _ref = _parse_flags(argv[5:])
 
     assert close_class == "env_integration"
-    assert force_reason, (
-        "the auto-close must reach the parser as a gate bypass carrying a reason — an "
-        "unrecognised flag would be silently skipped and the close would then hit the "
-        "completion gate it is meant to bypass"
+    assert force_reason is None
+    assert "--force" not in argv
+    assert not any(a.startswith("--force=") for a in argv), (
+        "bot alert recovery must use the attested env_integration disposition path, not "
+        "the human-only force bypass"
     )
 
 

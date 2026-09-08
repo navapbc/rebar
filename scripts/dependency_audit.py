@@ -564,10 +564,6 @@ def cmd_advisory_alert(
             return rc
     elif not blocking and tid:
         reason = f"Fixed: dependency advisories cleared on main at {ts}."
-        force_close = (
-            f"Fixed: dependency advisories cleared at {ts} (bot alert auto-close; advisory"
-            " tickets have no completion criteria to verify)."
-        )
         rc, _out, stderr = runner(
             [
                 "rebar",
@@ -579,7 +575,6 @@ def cmd_advisory_alert(
                 "env_integration",
                 "--reason",
                 reason,
-                f"--force={force_close}",
             ]
         )
         if rc != 0:
