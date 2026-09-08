@@ -222,3 +222,108 @@ def test_the_offloaded_tool_still_returns_its_value(tool_name: str) -> None:
         return str(await mcp._tool_manager.call_tool(tool_name, {}))
 
     assert "released" in anyio.run(scenario)
+
+
+def test_a_canceled_sync_tool_does_not_starve_later_tool_capacity() -> None:
+    """Canceled MCP callers must not keep occupying the worker limiter.
+
+    Without abandon-on-cancel semantics the canceled request coroutine stays attached to the
+    blocked worker thread, keeps the only limiter token borrowed, and the later quick tool
+    cannot start until the abandoned body finishes.
+    """
+
+    from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp.server import Settings
+
+    Settings.model_rebuild()
+    mcp = FastMCP("offload-cancel")
+    entered = threading.Event()
+    release = threading.Event()
+    slow_scope: dict[str, anyio.CancelScope] = {}
+
+    @mcp.tool()
+    def slow_sync() -> str:
+        entered.set()
+        release.wait(timeout=2.0)
+        return "slow"
+
+    @mcp.tool()
+    def quick_sync() -> str:
+        return "quick"
+
+    offload_sync_tools(mcp)
+
+    async def scenario() -> bool:
+        limiter = anyio.to_thread.current_default_thread_limiter()
+        old_tokens = limiter.total_tokens
+        limiter.total_tokens = 1
+        try:
+
+            async def cancelled_call() -> None:
+                with anyio.CancelScope() as scope:
+                    slow_scope["scope"] = scope
+                    await mcp._tool_manager.call_tool("slow_sync", {})
+
+            async with anyio.create_task_group() as task_group:
+                task_group.start_soon(cancelled_call)
+                while not entered.is_set():  # noqa: ASYNC110 - set from the worker thread.
+                    await anyio.sleep(0.005)
+                slow_scope["scope"].cancel()
+                await anyio.sleep(0.05)
+                try:
+                    with anyio.fail_after(0.2):
+                        result = await mcp._tool_manager.call_tool("quick_sync", {})
+                    return "quick" in str(result)
+                except TimeoutError:
+                    return False
+                finally:
+                    release.set()
+                    task_group.cancel_scope.cancel()
+        finally:
+            limiter.total_tokens = old_tokens
+
+    assert anyio.run(scenario), (
+        "the canceled tool kept the worker-limiter token, so a later MCP read would queue "
+        "behind abandoned work instead of receiving request capacity"
+    )
+
+
+def test_an_abandoned_certified_tool_releases_the_gauge_when_its_body_finishes() -> None:
+    from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp.server import Settings
+
+    Settings.model_rebuild()
+    mcp = FastMCP("offload-cancel-gauge")
+    entered = threading.Event()
+    release = threading.Event()
+    slow_scope: dict[str, anyio.CancelScope] = {}
+
+    @mcp.tool(name="review_plan")
+    def review_plan() -> str:
+        entered.set()
+        release.wait(timeout=2.0)
+        return "done"
+
+    gauge = wire_health(mcp)
+
+    async def scenario() -> int:
+        async def cancelled_call() -> None:
+            with anyio.CancelScope() as scope:
+                slow_scope["scope"] = scope
+                await mcp._tool_manager.call_tool("review_plan", {})
+
+        async with anyio.create_task_group() as task_group:
+            task_group.start_soon(cancelled_call)
+            while not entered.is_set():  # noqa: ASYNC110 - set from the worker thread.
+                await anyio.sleep(0.005)
+            assert gauge.value == 1
+            slow_scope["scope"].cancel()
+            await anyio.sleep(0.05)
+            assert gauge.value == 1
+            release.set()
+            while gauge.value != 0:  # noqa: ASYNC110 - decremented by the worker thread.
+                await anyio.sleep(0.005)
+            task_group.cancel_scope.cancel()
+        return gauge.value
+
+    assert anyio.run(scenario) == 0
