@@ -507,14 +507,20 @@ import-walk:  ## ERRORS ONLY: deterministic import walk — every rebar.* module
 config-check:  ## ERRORS ONLY: validate every infra config (fails CI on a malformed config -> can't reach main).
 	bash infra/scripts/config-check.sh
 
-check: lint typecheck  ## The tight loop: lint + typecheck only (~40 s). NOT the pre-push gate — see `verify`.
+check: lint typecheck import-convention  ## The tight loop: lint + typecheck + cheap import-convention guard. NOT the pre-push gate — see `verify`.
 	@# This target used to advertise itself as "run every check-only gate", which it never
 	@# was, and that over-claim is part of how the false green got its authority (bug
 	@# 1035-bed7-c855-4732): a large family of this repo's invariants is enforced by pytest,
 	@# not by a lint script, and none of it is reachable from here. Kept deliberately as the
 	@# fast tight-loop subset — but it now says so, and says what to run before pushing.
 
-verify: lint typecheck test  ## THE PRE-PUSH GATE: lint + typecheck + the default suite. Costs 20-25 min, not seconds.
+import-convention:  ## ERRORS ONLY: bare-pytest import convention guards (python -m pytest gives a false green).
+	@# These two repo-policy tests must run through the bare `pytest` console script:
+	@# `python -m pytest` injects the checkout root onto sys.path and can hide
+	@# `tests.`-rooted imports that fail under `make test` and CI.
+	pytest tests/unit/test_tests_import_convention.py tests/unit/test_scripts_import_convention.py -q
+
+verify: lint typecheck import-convention test  ## THE PRE-PUSH GATE: lint + typecheck + import convention + default suite. Costs 20-25 min, not seconds.
 	@# Bug 1035-bed7-c855-4732. `make lint` is what AGENTS.md names, what the pre-commit hook
 	@# runs, and what every contributor treats as the local proxy for CI — but it is only the
 	@# check-only half. Three gates enforced solely by pytest (test_mechanism_delta,

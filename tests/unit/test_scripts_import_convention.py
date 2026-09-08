@@ -102,7 +102,8 @@ def test_every_sibling_import_under_scripts_is_preceded_by_a_path_insert() -> No
 
     RED against the defect: with the insert removed from ``scripts/canary_bridge.py`` this
     fails naming that file and line, which is exactly the state that produced the reported
-    ``ModuleNotFoundError``.
+    ``ModuleNotFoundError``. Run with bare ``pytest``; ``python -m pytest`` can false-green
+    by adding the checkout root to ``sys.path``.
     """
     insert_dependent = _insert_dependent_modules()
     offenders: list[str] = []
