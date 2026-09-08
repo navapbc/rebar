@@ -548,17 +548,8 @@ def test_usage_is_surfaced_on_the_result_dict():
     }
 
 
-# ── Fault-matrix: a raise AT finalization (ticket fe75, mirror of bug 8455) ──────
-# `finalize_outcome` runs OUTSIDE the ProviderSession `with` block and OUTSIDE the
-# try/except that does failure accounting (runner.py:605-707) — both have already
-# exited by the time it's called. `log_call_success` already fired by design (its
-# own docstring: "called BEFORE finalize_outcome ... this line is already emitted
-# when it does" raise). The MODEL call itself SUCCEEDED — it burned real tokens —
-# and only the post-call finalization (e.g. schema validation) failed, so the spend
-# for those consumed tokens must STILL be recorded before the raise propagates.
-# Bug fe75 fixes exactly this: a raise in finalize_outcome now records a spend row
-# on the way out (mirroring bug 8455, which covers a raise DURING the agent call).
-# The ValueError still propagates unchanged — the fix does not swallow it.
+# A successful model call is logged before finalization. If finalization raises, preserve the
+# error while recording the consumed-token spend exactly once.
 
 
 def test_a_raise_in_finalize_outcome_still_logs_and_records_the_spend_row(monkeypatch, caplog):
@@ -611,10 +602,8 @@ def test_a_raise_in_finalize_outcome_still_logs_and_records_the_spend_row(monkey
     )
 
 
-# ── Read-only gate is config-aware (regression: ticket 9d7a-d09d-835f-484c) ─────
-# _readonly_gate() must honor `[mcp] readonly` from the CONFIG FILE, not just the
-# env var — otherwise a server set read-only via the file alone still hands the
-# review agent a live comment_ticket write (allow_comment computed from this gate).
+# The read-only gate resolves file configuration, not only the environment, so a file-configured
+# read-only server withholds write tools.
 
 
 def _write_mcp_readonly_config(tmp_path, monkeypatch, *, readonly: bool) -> None:

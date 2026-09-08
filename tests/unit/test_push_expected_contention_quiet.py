@@ -1,29 +1,8 @@
-"""EXPECTED, self-healing tickets-push outcomes must be suppressed from
-agent-visible output (bug 3ff9-a8f0-ff5a-457f / squeamish-halfawake-fantail).
+"""Expected self-healing push contention stays below agent-visible log levels.
 
-Bug 2a76 made the terminal push-failure report informative; the operator ruling of
-2026-08-21 draws the line the other way for outcomes that are expected and handled
-automatically: a lost contention race under concurrent writers, and a transient
-transport fault the code is already retrying, heal on the next successful write —
-surfacing them at WARNING primed agent sessions to assume the store was broken and
-burn tokens investigating ref topology. The ruling update of the same day goes
-further: "We should suppress the message under normal load. This is noise, not an
-outage signal." — so the expected case emits NOTHING at INFO or above (DEBUG at most).
-
-The distinction these tests pin:
-
-* expected-and-self-healing (lost contention race; mid-retry transport blip) → DEBUG,
-  wording that states the contract affirmatively ("expected under concurrent …
-  no action needed") — and NO record at INFO or above;
-* operator-actionable stays loud — a policy decline, a strict raise, and a backlog
-  that GREW across successive failures (the durable push-pending marker records the
-  previous count, so growth is provable without new state);
-* no message may say bare ``..HEAD`` — the tracker's HEAD reads as the session's code
-  worktree HEAD, which is exactly the ambiguity that burned a session turn.
-
-The scaffold mirrors ``test_push_strict.py``: a monkeypatched ``push._git`` drives the
-loop deterministically; the marker/observability assertions run against the real
-tracker directory so the durable channel is proven intact.
+Lost CAS races and retried transport faults emit only affirmative DEBUG context. Policy
+rejections, strict failures, and a growing durable backlog remain visible. Messages name the
+tickets ref explicitly to avoid confusing it with the caller's code-worktree HEAD.
 """
 
 from __future__ import annotations

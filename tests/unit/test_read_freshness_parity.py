@@ -1,23 +1,8 @@
-"""Read-freshness parity across the three facades (ticket 799f).
+"""Read synchronization behaves identically through CLI, library, and MCP facades.
 
-CLI, library, and MCP reads all funnel through the ONE shared
-``rebar._engine_support.reads.ensure_fresh`` reconvergence helper (a best-effort,
-throttled ``git fetch origin tickets`` + reconverge gated by a shared
-``/tmp/.ticket-sync-<md5>`` marker). Existing tests only prove the
-dispatcher-passthrough (by patching ``ensure_fresh``); nothing proves the actual
-*behavioral* contract holds identically through each facade's real entry point.
-
-This module drives the REAL facade entries against a two-repo git store (a local
-``origin`` whose ``origin/tickets`` carries a NEW commit) with a COUNTED fetch seam
-(monkeypatching ``rebar._store.sync.run_git`` — the git helper reconverge calls —
-so real fetch *attempts* are counted while everything else still runs for real),
-and asserts on OBSERVABLE behavior only (fetch count, visible ticket ids):
-
-1. remote visibility through each facade (parametrized over all three);
-2. the shared throttle: reads across the three facades fetch exactly once total;
-3. the three opt-outs (``REBAR_SYNC_PULL=off``, ``REBAR_SYNC_PULL=1``, ``--no-pull`` /
-   ``no_sync=True``) suppress the fetch while local replay still returns the store;
-4. a failing fetch leaves the facade returning consistent local state, no leak.
+Each real entry point uses the shared throttled reconvergence helper. A two-repository store
+verifies remote visibility, one fetch across facades, supported pull opt-outs, and best-effort
+local reads after fetch failure.
 """
 
 from __future__ import annotations

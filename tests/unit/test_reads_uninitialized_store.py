@@ -1,34 +1,9 @@
-"""Library reads must not report an ABSENT ticket store as an EMPTY one.
+"""Library reads distinguish an unusable ticket store from a valid empty store.
 
-WHY THIS TEST EXISTS. The in-process read path (`rebar._reads`) resolves the tracker
-directory through one chokepoint, `_reads._tracker()`, and for a long time never checked
-that the directory existed. One layer down, `reducer/_api.py` wraps its `os.listdir(tracker)`
-in `except OSError: return results` — and `FileNotFoundError` IS an `OSError` — so a store
-that is not there at all reduced to `[]` with no error at all.
-
-That is not a cosmetic difference. Every sibling surface treats an absent store as an error:
-the CLI reads (`_engine_support/reads_cli.py:340,384`) and the library WRITES
-(`_store/event_prepare.py:99-102`). Only library reads stayed silent, and the MCP read tools
-delegate straight to them (`_mcp_reads.py` -> `rebar.list_tickets`). The consequence was
-observed in production: an MCP server deployed with no store answered `list_tickets`,
-`search` and `ready` with `[]` while `fsck` correctly reported "ticket system not
-initialized". A driving agent is then told "there are no tickets" when the truth is "this
-store is missing", which is precisely the fallback-masking that `docs/mcp-reference.md:7`
-forbids -- faults surface as errors "instead of silently resolving to a fallback", so "a
-driving agent can tell a broken config from a deliberate policy refusal".
-
-The parametrized set is EVERY read entry the guard governs, not a sample. `ready` is the
-library spelling of the MCP `ready_tickets` tool (one of the three that answered `[]` on
-the storeless production server); `deps` and `next_batch` are the remaining two that
-funnel through `_tracker()`. Sampling here is what let the gap reach review twice --
-plan review caught the missing `ready`, code review caught `deps`/`next_batch` -- so the
-set is now exhaustive by construction: any new read entry added to `_reads.py` that is
-not listed here is an untested inheritance of this guard.
-
-THE DISTINCTION THIS PINS, and the reason the last test below is not optional: the fix must
-separate "the tracker directory does not exist" (an error) from "the tracker exists and holds
-no tickets" (a legitimate empty result). A guard that raises on both would be just as wrong
-in the other direction, and would break every caller that reads a freshly-initialized store.
+All public read entry points share the usability guard, including MCP delegates. Absent,
+broken, and mid-clone stores raise ``store_uninitialized``; initialized empty stores return
+``[]``. Structured read-only snapshots remain readable, while writes retain stricter git and
+provenance requirements.
 """
 
 from __future__ import annotations
@@ -142,18 +117,7 @@ def test_initialized_but_empty_store_still_returns_empty(tmp_path: Path) -> None
 
 
 def test_audit_index_renders_empty_rather_than_500ing_without_a_store(tmp_path: Path) -> None:
-    """The one caller that legitimately depends on the OLD degrade-to-empty behaviour.
-
-    `rebar.audit.server._audited_tickets` backs a read-only web index and documents itself as
-    best-effort. Making library reads raise is right for a driving agent -- it can act on
-    "the store is missing" -- but a browser hitting the audit index should see an empty page,
-    not a 500. This pins that the guard is scoped to the uninitialized-store case: the index
-    degrades, while a genuinely broken store still propagates.
-
-    This test exists because the caller sweep for the parent fix searched `_reads.*` consumers
-    and so never saw this call site, which reaches the same code through the PUBLIC
-    `rebar.list_tickets`. Code review caught it.
-    """
+    """The best-effort audit index renders an absent store as an empty page, not a 500."""
     from rebar.audit.server import _audited_tickets
 
     repo = _bare_repo(tmp_path)
@@ -184,21 +148,8 @@ def test_audit_index_still_propagates_a_non_store_read_failure(
         audit_server._audited_tickets(repo_root=str(tmp_path))
 
 
-# ---------------------------------------------------------------------------
-# rapt-dreadable-dromedary (aefe-614a-2631-4117): a tracker directory that
-# EXISTS but is not a USABLE store (no `.git` and no store structure, or `.git`
-# with an unresolvable HEAD mid-clone) must read as `store_uninitialized`, not
-# `[]`. The old guard keyed on `os.path.isdir(tracker)` alone, so a
-# present-but-unusable store slid through and every read reduced to an empty list
-# — a broken store made indistinguishable from an empty one. These pin the
-# widened predicate (`store_usability.store_is_usable`: isdir AND (a live `.git`
-# with a resolvable HEAD OR the rebar store structure on disk — the committed
-# `.store-compat.json` record or a ticket event dir)) across every read entry
-# point, the shared write gate, and the sole `store_uninitialized` consumer (the
-# audit index). The store-structure clause keeps a `.git`-less MATERIALIZED
-# snapshot readable (the gate-agent read surface) while a genuinely broken store
-# still raises.
-# ---------------------------------------------------------------------------
+# Public reads accept live git stores and structured snapshots, but reject absent, broken, or
+# mid-clone stores. Writes and the audit index apply their stricter contracts separately.
 
 _READ_ENTRY_POINTS = [
     ("list_tickets", lambda repo: rebar.list_tickets(repo_root=repo)),
@@ -211,12 +162,10 @@ _READ_ENTRY_POINTS = [
 
 
 def _tracker_present_without_git(tmp_path: Path) -> Path:
-    """The PRODUCTION shape: a tracker DIRECTORY that exists (holds marker files) but has NO
-    `.git` at all. `isdir` is true, so the old guard passed it through and reads returned `[]`.
+    """Return a nested tracker directory whose local ``.git`` is absent.
 
-    The tracker is deliberately nested inside a git-initialised code repo so the guard's
-    ordering matters: a naive `git -C tracker rev-parse HEAD` would WALK UP to the enclosing
-    repo. The predicate must reject on the absent `.git` BEFORE it ever probes HEAD.
+    The enclosing git repository ensures the predicate rejects locally before a command can
+    walk up and resolve the wrong HEAD.
     """
     repo = tmp_path / "brokenrepo"
     repo.mkdir()
@@ -229,9 +178,7 @@ def _tracker_present_without_git(tmp_path: Path) -> Path:
 
 
 def _tracker_midclone_unresolvable_head(tmp_path: Path) -> Path:
-    """A store MID-CLONE: the tracker `.git` is present but HEAD does not resolve yet (an
-    unborn branch, before any objects/refs land). `isdir` and `.git`-presence are both true,
-    so only a HEAD-resolvability probe can tell this apart from a finished clone."""
+    """Return a tracker with ``.git`` present but an unborn, unresolvable HEAD."""
     repo = tmp_path / "midclone"
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
@@ -251,10 +198,10 @@ def _tracker_midclone_unresolvable_head(tmp_path: Path) -> Path:
 
 
 def _clone_without_env_id(tmp_path: Path) -> Path:
-    """A valid, HEAD-resolvable store that is missing its git-ignored `.env-id` — the exact
-    shape right after a fresh clone (events are versioned; `.env-id` is local state that is
-    not). Reads MUST succeed here; only WRITES require the `.env-id` provenance stamp. This is
-    why the read predicate keys on `.git`/HEAD and deliberately does NOT adopt `.env-id`."""
+    """Return a readable clone without its local ``.env-id`` provenance stamp.
+
+    Reads require a resolvable git store; writes additionally require the environment identity.
+    """
     repo = _initialized_empty_repo(tmp_path)
     env_id = repo / ".tickets-tracker" / ".env-id"
     if env_id.exists():
@@ -293,10 +240,7 @@ def _write_create_event(event_dir: Path, tid: str, title: str) -> None:
 
 
 def _gitless_snapshot(tracker: Path, *, with_event: bool = True) -> Path:
-    """A `.git`-LESS tracker carrying the store STRUCTURE — the shape
-    `_snapshot.materialize_tickets` produces (a checked-out tickets tree, no `.git`): the
-    committed `.store-compat.json` record, and (optionally) a ticket event dir. Returns the
-    tracker dir itself."""
+    """Build a ``.git``-less snapshot with a compatibility record and optional event data."""
     tracker.mkdir(parents=True, exist_ok=True)
     (tracker / ".store-compat.json").write_text(_STORE_COMPAT_RECORD)
     if with_event:
@@ -306,8 +250,7 @@ def _gitless_snapshot(tracker: Path, *, with_event: bool = True) -> Path:
 
 
 def _gitless_event_dir_only(tracker: Path) -> Path:
-    """A `.git`-LESS tracker with a ticket event dir but NO committed record — a legacy store
-    shape; the store-structure clause's event-dir fallback must accept it. Returns the tracker."""
+    """Build a legacy snapshot recognized solely by its ticket event directory."""
     tracker.mkdir(parents=True, exist_ok=True)
     _write_create_event(tracker / "abcd-1234-5678-9abc", "abcd-1234-5678-9abc", "legacy ticket")
     assert not (tracker / ".git").exists() and not (tracker / ".store-compat.json").exists()
@@ -315,9 +258,7 @@ def _gitless_event_dir_only(tracker: Path) -> Path:
 
 
 def _gitless_snapshot_repo(tmp_path: Path, *, with_event: bool = True) -> Path:
-    """A repo ROOT whose `.tickets-tracker/` is a `.git`-less materialized snapshot (see
-    `_gitless_snapshot`). `config.tracker_dir(root)` resolves to that subdir, so
-    `rebar.<read>(repo_root=root)` exercises the snapshot read path end to end."""
+    """Wrap a materialized tracker snapshot in a repository root for public read calls."""
     repo = tmp_path / "snaproot"
     repo.mkdir()
     _gitless_snapshot(repo / ".tickets-tracker", with_event=with_event)
@@ -353,8 +294,7 @@ def test_reads_raise_on_midclone_store_unresolvable_head(tmp_path: Path, name: s
 
 
 def test_clone_without_env_id_still_reads(tmp_path: Path) -> None:
-    """The read/write asymmetry the predicate must preserve: a HEAD-resolvable store missing
-    its git-ignored `.env-id` still READS, while a WRITE is rejected by the `.env-id` gate."""
+    """A resolvable clone without ``.env-id`` stays readable but rejects writes."""
     repo = _clone_without_env_id(tmp_path)
 
     assert rebar.list_tickets(repo_root=repo) == []
@@ -365,9 +305,7 @@ def test_clone_without_env_id_still_reads(tmp_path: Path) -> None:
 
 
 def test_write_gate_rejects_midclone_store(tmp_path: Path) -> None:
-    """The write gate now shares the predicate: `_ensure_initialized` must REJECT a mid-clone
-    store (HEAD unresolvable) and still ACCEPT an initialized one. Under the old `.git`-only
-    gate the mid-clone store passed, so read and write disagreed about it."""
+    """Writes reject an unresolvable mid-clone while accepting an initialized store."""
     from rebar._store.event_prepare import StoreError, _ensure_initialized
 
     midclone = str(_tracker_midclone_unresolvable_head(tmp_path) / ".tickets-tracker")
@@ -379,11 +317,7 @@ def test_write_gate_rejects_midclone_store(tmp_path: Path) -> None:
 
 
 def test_write_gate_rejects_gitless_snapshot_that_reads_fine(tmp_path: Path) -> None:
-    """Write/read asymmetry (G6): a `.git`-LESS materialized snapshot is a READABLE store via
-    the structure clause, but the write gate must still REJECT it — you cannot commit events to
-    a `.git`-less read-only tree. `store_is_usable` is True (reads work) while `store_is_writable`
-    is False (`_ensure_initialized` raises), so sharing the usability predicate does NOT loosen
-    the write gate's original `.git` requirement."""
+    """Materialized snapshots are readable but remain unwritable without a git repository."""
     from rebar._store.event_prepare import StoreError, _ensure_initialized
     from rebar._store.store_usability import store_is_usable, store_is_writable
 
@@ -396,8 +330,7 @@ def test_write_gate_rejects_gitless_snapshot_that_reads_fine(tmp_path: Path) -> 
 
 
 def test_store_is_usable_predicate(tmp_path: Path) -> None:
-    """The shared predicate directly: False for absent / `.git`-less / mid-clone (incl. the
-    walk-up shape), True for an initialized store and a HEAD-resolvable clone without `.env-id`."""
+    """Usability accepts initialized clones and snapshots, but rejects absent or broken stores."""
     from rebar._store.store_usability import store_is_usable
 
     bases = {name: tmp_path / name for name in ("a", "b", "c", "d", "e")}
@@ -441,12 +374,7 @@ def test_store_is_usable_predicate(tmp_path: Path) -> None:
 def test_store_is_usable_propagates_missing_git_binary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Failure taxonomy (advisory T5b): a CLEAN non-zero `rev-parse` is 'HEAD unresolvable'
-    (-> not usable), but an OSError (git binary missing / environment fault) must PROPAGATE,
-    not be silently collapsed into `store_uninitialized`. Otherwise a stripped deploy image
-    with no `git` on PATH would report every store as uninitialized. The HEAD probe reuses the
-    store's bounded runner (`gitutil.run_git_bounded`), which folds only TimeoutExpired, so an
-    OSError from the underlying `run_git` propagates unchanged."""
+    """A missing git executable propagates instead of masquerading as an unusable store."""
     from rebar._store import gitutil
     from rebar._store.store_usability import store_is_usable
 
@@ -463,11 +391,7 @@ def test_store_is_usable_propagates_missing_git_binary(
 
 
 def test_materialized_snapshot_reads_instead_of_raising(tmp_path: Path) -> None:
-    """Regression fix: a `.git`-LESS materialized snapshot (a checked-out tickets tree with a
-    committed `.store-compat.json` + a ticket event dir, exactly what
-    `_snapshot.materialize_tickets` produces and the gate agents read) must READ, not raise
-    `store_uninitialized`. A pure `.git`/HEAD predicate rejected it, breaking the gate-agent
-    read surface."""
+    """A structured ``.git``-less snapshot serves public reads used by gate agents."""
     snap = _gitless_snapshot_repo(tmp_path)
 
     tickets = rebar.list_tickets(repo_root=str(snap))
@@ -476,8 +400,7 @@ def test_materialized_snapshot_reads_instead_of_raising(tmp_path: Path) -> None:
 
 
 def test_empty_materialized_snapshot_reads_empty(tmp_path: Path) -> None:
-    """Operator edge ruling: a snapshot with ZERO events is still a VALID store via the
-    committed `.store-compat.json` record (never keyed on emptiness), so it reads `[]`."""
+    """A compatibility record makes an eventless snapshot a valid empty store."""
     snap = _gitless_snapshot_repo(tmp_path, with_event=False)
 
     assert rebar.list_tickets(repo_root=str(snap)) == []
@@ -486,10 +409,7 @@ def test_empty_materialized_snapshot_reads_empty(tmp_path: Path) -> None:
 def test_store_structure_clause_is_load_bearing_for_snapshot_reads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Seeded-mutation guard (Step 5): STRIP the store-structure clause and the `.git`-less
-    snapshot read must return to RAISING `store_uninitialized`. This pins clause 2 as the thing
-    that fixes the snapshot regression, so a future revert to a `.git`/HEAD-only predicate
-    cannot silently reintroduce the break."""
+    """Disabling store-structure detection makes ``.git``-less snapshot reads fail."""
     import rebar._store.store_usability as su
 
     snap = _gitless_snapshot_repo(tmp_path)
@@ -505,10 +425,7 @@ def test_store_structure_clause_is_load_bearing_for_snapshot_reads(
 def test_audit_index_renders_empty_and_logs_for_present_but_unusable_store(
     tmp_path: Path, caplog
 ) -> None:
-    """The reconciled consumer (plan-review G6): widening `store_uninitialized` to cover a
-    present-but-unusable store must not RE-mask it silently at the audit layer. The read-only
-    web index still degrades to an empty page (it must not 500), but it now LOGS a warning so
-    the broken store is not silently blanked."""
+    """The audit index renders an unusable store empty and logs the condition."""
     import logging
 
     from rebar.audit.server import _audited_tickets

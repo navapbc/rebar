@@ -1,15 +1,8 @@
-"""Step 0 — Orient must precede Phase 1 in the rebar-debug skill (story a4d7-ee6a-99ba-423e).
+"""The rebar-debug skill orients against tracker history before Phase 1.
 
-Two halves are pinned, and the second is the one a plain "the text exists" test would miss.
-
-The rule must be PRESENT: a Step 0 section that sweeps the tracker across *all* statuses,
-establishes the reported-against floor, and confirms the worktree is current.
-
-And the broken mechanism must be GONE: the floor is derived from ``created_at``, which the
-ticket schema documents as an integer of nanoseconds. ``git --before=`` accepts an approxidate
-or ``@<unix-seconds>`` and silently mis-reads a raw 19-digit nanosecond value as a far-future
-seconds count, returning the tip of ``main`` — the exact wrong answer for a *floor*. So the
-skill must spell out the nanosecond-to-seconds conversion and must not carry the raw form.
+Step 0 searches every status, establishes the reported-against floor, and confirms the worktree
+tip. Nanosecond ticket timestamps are converted to Unix seconds before ``git --before`` so the
+floor is not misread.
 """
 
 import re

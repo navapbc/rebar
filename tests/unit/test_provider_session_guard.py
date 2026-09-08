@@ -1,19 +1,7 @@
-"""``run()`` guards the provider session with a context manager (task a49e, ADR 0056 decision 2).
+"""PydanticAIRunner guards every provider session for its full lifetime.
 
-THE DEFECT, measured at c1fc3cee4 before this ticket:
-
-    runner.py:294   provider_session = ProviderSession(cfg)   # builders open httpx clients
-    runner.py:445   try:                                       # guard starts 151 lines later
-    runner.py:501       provider_session.close()
-
-Lines 294-444 sit OUTSIDE the guard and code in that window raises BY DESIGN
-(``_check_tool_capability`` at :337). Anything raising there leaks an opened
-``httpx.AsyncClient``. ``ProviderSession.__enter__``/``__exit__`` already exist at
-providers.py:323/326 and were never used, while providers.py:18-24 documents a
-``with ProviderSession(cfg) as session:`` caller that did not exist.
-
-These tests assert the OBSERVABLE lifecycle — that the session is closed on every exit path —
-through the real ``PydanticAIRunner.run()``, not by inspecting how the guard is written.
+Construction is followed by context entry, so validation and model-call failures both trigger
+exactly-once best-effort teardown through the public runner path.
 """
 
 from __future__ import annotations

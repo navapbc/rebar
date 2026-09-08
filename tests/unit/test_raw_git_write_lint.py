@@ -1,17 +1,8 @@
-"""Raw-git-write lint (ticket d37e-4f64-3265-4f30).
+"""Deterministic lint for raw git writes.
 
-Two-layer deterministic lint over rebar's store write surface:
-
-- Layer P (Python, AST): raw subprocess git mutations (R1) and mutation verbs
-  reaching the shared git wrappers by name (R2), with local intra-function
-  argv tracking and a fail-closed opaque-argv class.
-- Layer W (workflows + shell, cwd-aware within-step): git mutation verbs in a
-  step/script block that establishes tracker context (.tickets-tracker).
-
-Sanction is a single inline marker with a mandatory reason:
-``# raw-git-ok: <reason>``. These tests drive the lint against synthetic
-trees under tmp_path; the fixtures here deliberately contain raw git write
-shapes, so this module is the lint's EXCLUDED_FILES fixture corpus.
+Python AST checks cover subprocess mutations, shared-wrapper calls, and non-atomic composition
+of sanctioned adapter primitives. Workflow and shell checks are cwd-aware. A sanctioned site
+requires ``# raw-git-ok: <reason>``; this module's synthetic violations are excluded fixtures.
 """
 
 from __future__ import annotations
@@ -371,17 +362,8 @@ def test_sibling_wrapper_names_not_in_name_set(lint, tree):
     assert lint.check(tree) == []
 
 
-# ---------------------------------------------------------------------------
-# Layer P — R2: the ATTRIBUTE call form (bug 4073-9d4f-c644-44a9)
-#
-# R2 matches the wrapper by the CALLABLE's name, which for an attribute call is
-# the attribute — so `core._git(...)` is linted exactly like a bare `_git(...)`.
-# That is load-bearing for the late-binding idiom in
-# `rebar_reconciler/_ref_lock_push.py`, where the caller's `_ref_lock` module is
-# passed down as `core` so `monkeypatch.setattr(_ref_lock, "_git", ...)` keeps
-# working across the module boundary. Every other R2 test above uses the bare
-# form; these pin the attribute form so the coverage cannot be read as absent.
-# ---------------------------------------------------------------------------
+# Layer P — R2: wrapper mutation calls through attributes.
+# Match the callable attribute so late-bound `core._git(...)` is covered like bare `_git(...)`.
 
 
 def test_wrapper_attribute_form_mutation_verb_fires(lint, tree):
@@ -680,15 +662,9 @@ def test_clean_tree_exits_zero(lint, tree):
     assert lint.main(["--root", str(tree)]) == 0
 
 
-# ---------------------------------------------------------------------------
-# Layer P — R3: seam composition (ticket 638a-3746-e58a-4929)
-#
-# R1/R2 enforce the MECHANISM rule ("no raw subprocess git"). R3 enforces the
-# PROTOCOL rule: the git-adapter's mutation primitives are sanctioned exports,
-# so a caller could compose them into a hand-rolled non-atomic sequence and
-# every individual call would pass. R3 fires on such a composition made from
-# outside the reconciler write-seam files.
-# ---------------------------------------------------------------------------
+# Layer P — R3: adapter-seam composition.
+# Individual mutation primitives are sanctioned, but combining them into a non-atomic write
+# outside reconciler seams remains a protocol violation.
 
 
 def test_r3_composed_add_commit_outside_seam_fires(lint, tree):

@@ -1,26 +1,8 @@
-"""The push retry loop must converge under a NARROW clone refspec (bug 35f7).
+"""Push retries converge when a clone fetches only a narrow refspec.
 
-Sibling of bug 5546 (fixed in ``_store/sync.py`` by ``2a3abe6ab``), same mechanism, a
-different site. ``push_tickets_branch``'s non-fast-forward retry loop fetches the remote
-branch and then reconciles with ``git merge <remote>/<branch>``. A bare
-``git fetch <remote> <branch>`` always writes ``FETCH_HEAD`` but writes
-``refs/remotes/<remote>/<branch>`` only OPPORTUNISTICALLY — when the remote's CONFIGURED
-refspec covers that branch. A single-branch clone configures
-``+refs/heads/main:refs/remotes/origin/main``, which does not cover ``tickets``, so the
-fetch exits 0 having left the remote-tracking ref ABSENT (or, when it already exists,
-STALE). The merge target therefore never advances, the loop cannot absorb the history that
-rejected the push, and every retry re-pushes the same rejected commits until the budget is
-exhausted — the push never lands and the competing writer's events are never adopted.
-
-Both shapes are pinned because they fail differently and are reached differently:
-
-* **absent** — a fresh single-branch clone that never resolved the ticket branch;
-* **stale** — the ref was created once by an explicit refspec and a later bare fetch left
-  it pinned to that first snapshot.
-
-The control (``test_push_retry_converges_under_wildcard_refspec``) runs the identical
-scenario with only the configured refspec changed, so a failure of the narrow cases
-isolates the refspec rather than the retry budget or a genuine merge conflict.
+Retry fetches update the tickets remote-tracking ref explicitly; a bare branch fetch can leave
+that ref absent or stale. The wildcard-refspec control isolates this requirement from retry
+limits and merge conflicts.
 """
 
 from __future__ import annotations
