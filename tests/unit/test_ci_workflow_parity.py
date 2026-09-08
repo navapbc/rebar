@@ -23,6 +23,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
 from _nested_pytest import run_nested_pytest
 from _subprocess_env import subprocess_env
 
@@ -267,20 +268,24 @@ def test_sweep_extra_parity_would_have_caught_c57057f41() -> None:
         cwd=_ROOT,
         capture_output=True,
         text=True,
-        check=True,
-    ).stdout
+        check=False,
+    )
+    if historical_bat.returncode != 0:
+        pytest.skip("historical commit c57057f41 is absent from this checkout")
     historical_test = subprocess.run(
         ["git", "show", "c57057f41:.github/workflows/test.yml"],
         cwd=_ROOT,
         capture_output=True,
         text=True,
-        check=True,
-    ).stdout
+        check=False,
+    )
+    if historical_test.returncode != 0:
+        pytest.skip("historical commit c57057f41 is absent from this checkout")
 
     try:
         _assert_sweep_extra_parity(
-            historical_bat,
-            historical_test,
+            historical_bat.stdout,
+            historical_test.stdout,
             intentional_gating_only={},
         )
     except AssertionError as exc:

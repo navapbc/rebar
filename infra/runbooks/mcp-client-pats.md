@@ -53,6 +53,11 @@ re-materialize is not clobbered by `rsync --delete`.
 4. Wire each client locally: copy `mcp-clients.local.example.json` (repo-root, committed
    placeholder) to `mcp-clients.local.json` (gitignored) and fill in the real PATs + box host.
 
+These MCP client PATs are **not** GitHub Actions repository secrets. If the same rotation window
+also touches a mirrored secret such as `ANTHROPIC_API_KEY`, `JIRA_API_TOKEN`,
+`GERRIT_SSH_PRIVKEY`, or `REBAR_BOT_SIGNING_KEY`, complete the separate Actions sync checklist in
+[`ssm-secret-write-only.md`](./ssm-secret-write-only.md#sync-mirrored-github-actions-secrets).
+
 ## Rotation (operator-driven)
 
 Rotation is **operator-driven**. A pure value rotation (re-seeding an SSM SecureString) is **not**
@@ -70,6 +75,11 @@ Step 3 is **mandatory**: the `static` verifier loads its token set **once at `__
 rewriting the tokens file. An operator who only re-materializes the file but does not restart
 `rebar-mcp` sees **no effect**: the old digest set stays live (the rotated token is rejected and
 the retired token is still accepted) until the process is replaced.
+
+MCP PAT rotation has no Actions mirror, but mixed secret-rotation windows often include LLM,
+Jira, CI vote-back, or signing-key credentials that do. Before declaring the window complete,
+check the mirrored-secrets inventory in
+[`ssm-secret-write-only.md`](./ssm-secret-write-only.md#sync-mirrored-github-actions-secrets).
 
 ## Back-out
 

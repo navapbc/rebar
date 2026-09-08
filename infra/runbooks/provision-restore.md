@@ -101,6 +101,11 @@ Order matters — secrets before the instance, infra before compose.
    # …repeat for gerrit-admin-password, github-replication-deploy-key,
    #   mcp-hmac-signing-key, anthropic-api-key, gerrit-bot-token, ssh host key.
    ```
+   If any seeded value is mirrored into GitHub Actions (`ANTHROPIC_API_KEY`,
+   `JIRA_API_TOKEN`, `GERRIT_SSH_PRIVKEY`, or `REBAR_BOT_SIGNING_KEY`), also run the
+   Actions-sync checklist in
+   [`ssm-secret-write-only.md`](./ssm-secret-write-only.md#sync-mirrored-github-actions-secrets)
+   before relying on CI.
 3. **Apply infra** (instance, volumes, EIP, DLM, IAM, monitoring):
    ```bash
    cd infra/terraform
