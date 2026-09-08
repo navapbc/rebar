@@ -1,11 +1,6 @@
-"""Plan-review Pass-1 finding-memory / recall (story disused-unpoliced-solenodon).
+"""Recall grounded prior findings missed by Pass-1 for the unchanged Pass-2 verifier.
 
-Recall re-surfaces prior-review findings the fresh Pass-1 finder MISSED, as POST-Pass-1 candidates
-for the UNCHANGED Pass-2 verifier. The Pass-1 finder never receives prior findings (independence by
-construction; ADR 0008 Invariant 1 / the pinned test_prior_findings_only_reach_the_novelty_seam).
-
-Proving command:
-    .venv/bin/pytest tests/unit/test_pass1_recall.py tests/unit/test_plan_review_novelty.py -v
+Prior findings never enter the independent Pass-1 finder.
 """
 
 from __future__ import annotations
@@ -84,12 +79,10 @@ def test_prior_concerns_caps_at_recall_cap(monkeypatch) -> None:
 
 # ── the replay ratchet (bug deceitful-flannel-jerboa) ────────────────────────────────────
 def test_ungrounded_prior_is_not_recalled(monkeypatch) -> None:
-    """THE REGRESSION. A prior finding persisted with NO grounding evidence is exactly what a
-    previous recall injection leaves behind (`run_pass1` injected `evidence: []`, `_slim`
-    persisted it). Re-surfacing it gives Pass-2 nothing to re-ground against the current plan,
-    and — because the replay is re-decided `block` and re-persisted — lets one finding block
-    every later review forever (observed: 5 consecutive rounds on epic 0e68-41eb-5782-4336,
-    the fresh finder having stopped emitting it once the plan was edited to address it)."""
+    """Do not recall evidence-free findings that Pass-2 cannot re-ground.
+
+    Replaying one would persist a permanent blocker across later reviews.
+    """
     payload = {
         "findings": [
             _prior("replayed", evidence=[]),  # a previous recall injection

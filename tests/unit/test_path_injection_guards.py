@@ -1,16 +1,7 @@
-"""Path-containment guards — regression cover for the remaining CodeQL
-``py/path-injection`` + ``py/stack-trace-exposure`` alerts (bug
-illbehaved-girlish-bubblefish).
+"""Path-containment and error-redaction regressions.
 
-Each test pins one containment barrier the fix introduced:
-
-* :func:`rebar._ids.resolve_ticket_id` / :func:`resolve_ticket_dir_name` refuse a
-  traversing / absolute id and never hand back a raw path segment;
-* the plan-review sidecar reader no longer falls back to the raw id (``... or
-  ticket_id``), so a traversal id reads nothing instead of escaping the tracker;
-* the workflow editor's ``_raw_prompt_text`` cannot read a file outside the
-  project prompt dir;
-* the review-bot ``/rerun`` 502 body carries no exception/stack-trace detail.
+Ticket resolution, sidecar reads, and workflow prompt reads reject traversal or absolute
+escape paths. Review-bot rerun failures expose no exception detail.
 """
 
 from __future__ import annotations
@@ -144,18 +135,10 @@ def test_editor_raw_prompt_text_refuses_traversal(tmp_path: Path) -> None:
 
 
 def test_rerun_502_body_has_no_exception_detail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A Gerrit lookup failure yields a 502 whose body carries NO exception detail.
+    """An ASGI TestClient request gets a detail-free 502 when Gerrit lookup fails.
 
-    Driven through ``TestClient`` rather than by calling ``rerun()`` with a hand-rolled
-    request double. That is deliberate and load-bearing: this test previously passed a
-    ``types.SimpleNamespace`` carrying only ``app`` + ``query_params``, and when ticket 66af
-    widened ``app._request_token`` to read ``request.headers`` first, the double raised
-    ``AttributeError`` *before any assertion ran* — so the containment guarantee below went
-    silently unverified (bug bolstered-afraid-ichidna). A header-less request is not a real
-    shape: ``.headers`` is an unconditional property on starlette's ``HTTPConnection`` and a
-    request with no caller headers still carries an empty ``Headers``. Exercising the real
-    ASGI request contract makes the whole drift class impossible rather than re-patching the
-    double each time the handler reads one more request attribute.
+    ``TestClient`` preserves Starlette's headers contract, avoiding a request double that can
+    fail before the redaction assertion.
     """
     pytest.importorskip("fastapi")  # the reviewbot extra; absent in the lean CI suite
     from fastapi.testclient import TestClient

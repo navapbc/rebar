@@ -1,19 +1,8 @@
-"""The SEPARATE Pass-2 completion sub-call (epic 66ac / child 94fd).
+"""Pass-2 independently classifies findings for the completion floor.
 
-Completion-aware container plan-review classifies each finding on three atomic axes (attribution /
-containment / layer) so the LATER Pass-3 completion floor can drop findings that merely re-litigate
-already-DELIVERED child work. These tests pin the MECHANISM this story builds — the sub-call and its
-manifest assembler — with a ``FakeRunner`` (no live LLM):
-
-* the registered contract's shape + fail-safe defaults;
-* enum coercion to the closed vocabulary (invalid/missing → fail-safe default);
-* the DETERMINISM rule: a ``_container_child`` (G3/G4 structural) finding gets its attribution set
-  deterministically — the model is NOT asked to re-derive it — while non-structural findings pass
-  the model's values through;
-* the DEGRADE path: a sub-call error (or empty findings/manifest) → ``{}`` (the floor drops
-  nothing);
-* the manifest assembler picks ONLY delivered children (``delivered_now`` monkeypatched) and
-  extracts each child's AC text.
+Structural child findings receive deterministic attribution. Other findings retain the model's
+attribution, containment, and layer values. Invalid enums fail safe, sub-call or manifest failure
+drops nothing, and manifests include only delivered children with their acceptance criteria.
 """
 
 from __future__ import annotations

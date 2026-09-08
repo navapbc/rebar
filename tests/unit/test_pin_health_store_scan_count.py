@@ -1,15 +1,8 @@
-"""Regression for bug 3d57-602f-0b75-48ee: plan-material pin health must not pay a
-full-store scan per pin.
+"""Plan-material pin health performs a constant number of full-store reductions.
 
-``derive_plan_material_pin_health`` fingerprints every pinned target, and each
-fingerprint enumerates the target's children via
-``relation_snapshot.live_material_children`` → ``_reads.list_tickets(parent=…)`` →
-``reads.list_states`` → ``reduce_all_tickets`` — a FULL-store reduction. A stale pin
-retries up to three legacy fingerprint generations, so a container with N stale pins
-cost O(4·N) full-store scans; on the production store (5 247 tickets, 23 pins) one
-``rebar show`` burned 466 983 single-ticket reduces (~745 s of CPU) while
-``rebar list --parent`` — a larger payload — did one scan. The contract pinned here:
-the number of full-store reductions is a small constant, independent of pin count."""
+Fingerprinting stale pins may try legacy generations, but reused state keeps scan count
+independent of the number of pins (bug 3d57-602f-0b75-48ee).
+"""
 
 from __future__ import annotations
 

@@ -1,28 +1,8 @@
-"""``search_files`` must never answer "(no matches)" for a path it did not search (bug bf31).
+"""``search_files`` reports no matches only after actually searching the path (bug bf31).
 
-``search_files``'s whole body is ``for dirpath, dirs, files in os.walk(base)``. ``os.walk``
-on a **file** — or on a path that does not exist — yields nothing, so control falls straight
-through to ``return "\\n".join(hits) or "(no matches)"``. The agent is told the literal is
-absent when it was never looked for.
-
-This is not cosmetic. It was MEASURED as the engine of a non-convergent verifier loop while
-closing epic ``e369-a449-4773-48fb``: an instrumented run (264 tool calls, 1074s,
-``max_iterations=480``) spent calls #121-264 in a closed 4-call cycle, 0% of it novel, because
-``search_files("J1", "tests/unit/rebar_reconciler/test_backend_characterization.py")`` kept
-answering "(no matches)" for a literal that sits on line 116 of that very file. Across the run
-**48% of ``search_files`` calls passed a file path, 100% of those returned "(no matches)", and
-26 of 29 had the literal genuinely present.**
-
-It is also a **false-FAIL vector on a signed gate**: the packaged ``completion-verifier`` prompt
-tells the agent that "a ``(no matches)`` result means only that *that literal string* is absent"
-and pushes it to narrow the search path — the exact move that returns the lie. A completion
-verdict is signed, so a false NOT MET is an invisible signed false FAIL.
-
-The contract these tests pin: **"(no matches)" means the literal was searched for and is
-absent — nothing else.** A path that cannot be searched must say so.
-
-The DIRECTORY branch is the one every existing gate already depends on, so it is pinned here as
-an explicit regression, not merely assumed.
+Explicit files are searched directly. Missing or unsearchable paths report an error, while
+directory search retains discovery filtering. This keeps signed LLM gates from treating a
+failed search as evidence that a literal is absent.
 """
 
 from __future__ import annotations
@@ -140,21 +120,9 @@ def test_nonexistent_path_is_an_explicit_error_not_no_matches(tree, missing):
 
 # ── An explicitly named file must not be hidden by the DISCOVERY filter ──
 def test_gitignored_file_named_explicitly_is_still_searched(tmp_path):
-    """The nastiest way to re-introduce this bug: apply the DISCOVERY filter to the file branch.
+    """Search an explicitly named ignored file despite directory discovery filters.
 
-    ``_discovery_filter``'s ``skip_file`` (``fs_tools.py:124-127``) is
-    ``tracked is not None and abs_path not in tracked``, where ``_git_tracked``
-    (``fs_tools.py:95-113``) is ``git ls-files --cached --others --exclude-standard`` — i.e. it
-    hides **gitignored** files. That filter exists so the agent is not drowned while *discovering*
-    files. Applying it to a path the agent named EXPLICITLY would answer "(no matches)" for a file
-    that plainly contains the literal — this bug's exact lie, wearing a different hat.
-    ``read_file`` already settled the precedent (``fs_tools.py:42-43``): "an explicitly named file
-    is always readable (only the security deny-list blocks it)".
-
-    The other tests here cannot catch this: their ``tmp_path`` root is not a git repo, so
-    ``_git_tracked`` returns ``None`` and ``skip_file`` never fires. This one builds a real repo
-    AND asserts the filter is genuinely armed before trusting the result — an unarmed fixture would
-    make the assertion below unfalsifiable.
+    A Git repository proves the filter is active. Only discovery may hide ignored files.
     """
     import subprocess
 

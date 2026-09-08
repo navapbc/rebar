@@ -322,15 +322,10 @@ def test_tracker_head_sha_still_fails_on_dirty_tracked_worktree(repo: str) -> No
 
 
 def test_review_plan_preflight_tolerates_unrelated_untracked_tracker_files(repo: str) -> None:
-    """Regression (bug d7cb-22ae): an unrelated untracked file left in the SHARED
-    tickets-tracker by a crashed process on ANOTHER ticket must not collapse
-    ``review-plan`` to INDETERMINATE/store-read-failure for every other ticket.
+    """Unrelated untracked tracker files do not invalidate review preflight.
 
-    The preflight relation snapshot is a READ that fingerprints the committed HEAD,
-    which untracked files cannot change (the authoritative under-lock signing check
-    already ignores them via ``ignore_untracked=True``), so the preflight must tolerate
-    them. ``.tickets-tracker`` is symlinked into every session, so one stray artifact
-    otherwise blocks review-plan — and therefore ``claim`` — machine-wide.
+    The snapshot fingerprints committed HEAD. Authoritative signing still checks tracked
+    state under lock.
     """
     from rebar.llm.plan_review import review_plan
 
@@ -366,14 +361,10 @@ def test_review_plan_preflight_tolerates_unrelated_untracked_tracker_files(repo:
 def test_sign_manifest_fence_tolerates_unrelated_untracked_tracker_files(
     repo: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Regression (bug d7cb-22ae, sibling on the SIGNING path): the generation
-    stability fence (``before``/``fresh``/``after`` reads in ``sign_manifest``) must
-    ignore unrelated untracked tracker files too, matching its own authoritative
-    under-lock re-check (which already passes ``ignore_untracked=True``). The fence
-    detects a concurrent COMMIT during generation — a moving committed HEAD, which
-    untracked files cannot cause. Otherwise a stray artifact left by a crashed process
-    on ANOTHER ticket aborts signing (``store-read-failure``), so no durable attestation
-    is persisted and the plan-review claim gate cannot pass even for a clean plan.
+    """The signing generation fence ignores unrelated untracked tracker files.
+
+    It detects committed HEAD movement while the authoritative under-lock recheck protects
+    tracked state.
     """
     monkeypatch.setenv("REBAR_SIGNING_KEY", "test-signing-key-2c2d")
     subject_id = rebar.create_ticket("bug", "Fence subject", description="x", repo_root=repo)
@@ -441,18 +432,10 @@ def _resign_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_resign_tolerates_unrelated_untracked_tracker_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Regression (bug c083): ``rebar sign-review`` must not abort because a crashed process
-    left an UNRELATED untracked artifact in the SHARED tickets-tracker.
+    """``sign-review`` tolerates unrelated untracked tracker artifacts.
 
-    This is the third site of the class bug ``d7cb-22ae`` fixed: that fix taught the review
-    preflight (``__init__.py``) and the signing fence (``generation.py``) to pass
-    ``ignore_untracked=True``, but missed ``resign.py``'s ``generation.collect`` — so the
-    sanctioned recovery for an unsigned PASS still collapsed to ``store-read-failure``.
-
-    The snapshot fingerprints the COMMITTED head, which an untracked file cannot change, and
-    the authoritative under-lock re-check already ignores them (``generation.py``'s
-    ``tracker_head_sha(..., ignore_untracked=True)``). ``.tickets-tracker`` is symlinked into
-    every session, so one stray artifact otherwise blocks signing machine-wide.
+    Recovery fingerprints committed state and matches the authoritative signing recheck's
+    ``ignore_untracked`` behavior.
     """
     resign, ticket_id, root = _resign_fixture(tmp_path, monkeypatch)
     tracker = Path(config.tracker_dir(root))
@@ -495,18 +478,10 @@ def test_resign_still_refuses_on_tracked_dirty_tracker(
 def test_resign_tolerates_a_concurrent_writer_churning_tracker_temp_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Regression (bug c083, concurrency model): this machine runs MANY sessions against ONE
-    shared ``.tickets-tracker`` (it is symlinked into every session), so untracked paths are
-    not merely crash debris — they are the NORMAL transient state of another session's
-    in-flight atomic write (write ``.tmp-event-<rand>``, then rename).
+    """Concurrent writers' temporary files do not race ``sign-review``.
 
-    With the strict check, signing was therefore a RACE: any session that signed while another
-    was mid-write failed with ``store-read-failure``, and the failure rate scaled with
-    concurrency. Tolerating untracked paths removes the race outright.
-
-    NOTE a deliberate non-goal: the fix must NEVER clean up stray temp files. Deleting one is
-    unsafe under this model — it could destroy another session's in-flight write. Tolerate,
-    never tidy.
+    Shared sessions create untracked files during atomic writes. Signing tolerates them and
+    never deletes another writer's artifact.
     """
     import threading
 
@@ -615,16 +590,10 @@ def _capture_warnings(logger_name: str) -> tuple[list[str], object, object]:
 
 
 def test_event_less_ticket_directory_does_not_fail_an_unrelated_snapshot(repo: str) -> None:
-    """Bug 043f: a ticket directory holding NO events — left behind when a write died
-    between ``os.makedirs`` and the event rename — made ``_load_states`` raise
-    ``reducer-error``, which surfaced as an unsigned INDETERMINATE verdict on plan
-    reviews of completely UNRELATED tickets (the store reduction is store-WIDE, so every
-    review in the clone failed until someone deleted the directory by hand).
+    """Skip an event-less ticket directory when snapshotting unrelated tickets.
 
-    An event-less directory carries no relation material by construction, so the correct
-    behaviour is to SKIP it with a warning naming the path, not to fail the whole
-    snapshot. Note the artifact is invisible to git — git cannot track an empty directory
-    — so no ``.gitignore`` remedy can reach it.
+    It has no relation material, and Git cannot track it. Warn with its path without failing
+    the store-wide reduction.
     """
     PlanRelationSnapshotError, collect_plan_relation_snapshot, _ = _api()
     subject = rebar.create_ticket("epic", "Unrelated subject", repo_root=repo)
