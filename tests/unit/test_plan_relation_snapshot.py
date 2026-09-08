@@ -140,6 +140,90 @@ def test_same_canonical_target_can_be_child_and_prerequisite(
     ]
 
 
+def test_retained_snapshot_states_do_not_scale_with_unrelated_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The long-lived relation snapshot must retain only direct material rows.
+
+    The full store reduction is still needed transiently to resolve aliases and discover
+    relations, but the returned snapshot lives through the whole plan-review run. Its retained
+    state map must not grow with unrelated tickets or their bulky bodies.
+    """
+    from rebar.llm.plan_review import relation_snapshot
+
+    subject = "1111-2222-3333-4444"
+    child = "2222-2222-2222-2222"
+    prerequisite = "3333-3333-3333-3333"
+    tracker = tmp_path / "tracker"
+    for ticket_id in (subject, child, prerequisite):
+        (tracker / ticket_id).mkdir(parents=True, exist_ok=True)
+
+    core_states = [
+        {
+            "ticket_id": subject,
+            "ticket_type": "epic",
+            "title": "Subject",
+            "description": "subject plan",
+            "status": "open",
+            "deps": [{"relation": "depends_on", "target_id": prerequisite}],
+        },
+        {
+            "ticket_id": child,
+            "ticket_type": "story",
+            "title": "Child",
+            "description": "child plan",
+            "status": "open",
+            "parent_id": subject,
+            "deps": [],
+        },
+        {
+            "ticket_id": prerequisite,
+            "ticket_type": "task",
+            "title": "Prerequisite",
+            "description": "prerequisite plan",
+            "status": "open",
+            "deps": [],
+        },
+    ]
+
+    def collect_with_unrelated(count: int):
+        unrelated = []
+        for i in range(count):
+            ticket_id = f"aaaa-bbbb-cccc-{i:04x}"
+            (tracker / ticket_id).mkdir(parents=True, exist_ok=True)
+            unrelated.append(
+                {
+                    "ticket_id": ticket_id,
+                    "ticket_type": "session_log",
+                    "title": f"Unrelated {i}",
+                    "description": "x" * 20_000,
+                    "status": "closed",
+                    "deps": [],
+                }
+            )
+
+        monkeypatch.setattr(
+            relation_snapshot,
+            "reduce_all_tickets",
+            lambda *a, **k: [
+                *core_states,
+                *unrelated,
+            ],
+        )
+        return relation_snapshot.collect_plan_relation_snapshot(subject, repo_root="ignored")
+
+    monkeypatch.setattr(relation_snapshot.config, "tracker_dir", lambda _: str(tracker))
+    monkeypatch.setattr(relation_snapshot, "tracker_head_sha", lambda *a, **k: "a" * 40)
+
+    small = collect_with_unrelated(3)
+    large = collect_with_unrelated(100)
+
+    assert set(small.ticket_states_by_id) == {subject, child, prerequisite}
+    assert set(large.ticket_states_by_id) == {subject, child, prerequisite}
+    assert small.ticket_states_by_id == large.ticket_states_by_id
+    assert large.ticket_states_by_id[prerequisite]["description"] == "prerequisite plan"
+
+
 def test_store_preload_accepts_canonical_jira_local_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
