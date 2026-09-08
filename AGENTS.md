@@ -30,10 +30,13 @@ baseline-vs-tree comparisons, the public-API surface census, CI-workflow parity,
 artifact and docs drift, whole-tree AST policy scans (roughly seventy modules). On 2026-09-04
 three separate changes were pushed red by exactly those tests after their authors ran
 `make lint` and `make typecheck` and saw green (bug `1035-bed7-c855-4732`). **`make verify`**
-= `lint` + `typecheck` + `test`, and `make test` selects exactly what CI's gating
-`ubuntu-latest, py3.13` cell selects (`not integration and not external`) — a superset of
-every other matrix cell — so it is the locally checkable half of `Verified`, with nothing to
-enumerate and nothing to drift.
+= `lint` + `typecheck` + the bare-`pytest` `import-convention` guard + `test`, and
+`make test` selects exactly what CI's gating `ubuntu-latest, py3.13` cell selects
+(`not integration and not external`) — a superset of every other matrix cell — so it is
+the locally checkable half of `Verified`, with nothing to enumerate and nothing to drift.
+The import-convention guard is intentionally called out and run with the **BARE `pytest`
+console script**: `python -m pytest` injects the checkout root onto `sys.path`, so it can
+false-green `tests.`-rooted imports that fail under `make test` and CI.
 
 **It costs 20-25 minutes** (measured twice on one six-performance-core host at the default
 `PYTEST_WORKERS=4`: 22 min 25 s and 26 min 04 s wall for lint + typecheck + ~19.2k tests --
