@@ -117,7 +117,8 @@ def _resolved_completion_scope(
     metrics: dict[str, int] | None = None,
     ticket_view: Any | None = None,
 ) -> tuple[str, set[str]]:
-    """Resolve the ticket and its transitive descendants to unique canonical ids."""
+    """Resolve the ticket, descendants, and disposition replacements to canonical ids."""
+    from rebar._commands.close_scope import expand_with_disposition_replacements
     from rebar._engine_support.descendants import list_descendants
     from rebar._engine_support.resolver import resolve_ticket_id
 
@@ -125,6 +126,9 @@ def _resolved_completion_scope(
     if ticket_view is not None:
         resolved_id = ticket_view.resolve(ticket_id) or ticket_id
         accepted_ids = {resolved_id, *ticket_view.transitive_descendant_ids(resolved_id)}
+        accepted_ids = expand_with_disposition_replacements(
+            accepted_ids, tracker, ticket_view=ticket_view
+        )
         if metrics is not None:
             metrics["descendant_ids"] = len(accepted_ids) - 1
             metrics["descendant_scope_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
@@ -137,6 +141,7 @@ def _resolved_completion_scope(
             desc_resolved = resolve_ticket_id(desc_id, tracker)
             if desc_resolved is not None:
                 accepted_ids.add(desc_resolved)
+    accepted_ids = expand_with_disposition_replacements(accepted_ids, tracker)
     if metrics is not None:
         metrics["descendant_ids"] = len(accepted_ids) - 1
         metrics["descendant_scope_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
