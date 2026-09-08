@@ -1,24 +1,14 @@
-"""Live structured-output measurement harness (story a40f) — the model call only.
+"""This module measures structured output through external provider calls.
 
-WHY THIS EXISTS. This is the shared, operator-triggered measurement instrument for the df3a
-schema-filtered selection parser and its siblings (the sentinel output-format directive and the
-capability-rows matrix). It sweeps a matrix of provider CELLS × directive VARIANTS × production-
-shaped PROMPTS, makes the live model calls, captures every raw reply as a CI artifact, and scores
-the replies into a before/after parse-success table.
+This operator-triggered harness sweeps configured providers, directive variants,
+production-shaped prompts, and repeats. It captures every raw reply as an artifact and reports
+before and after parser scores. Only provider calls occur here. ``_structured_matrix`` owns
+credential checks, call budgets, scoring, and layout classification, with unit coverage in
+``tests/unit/test_structured_matrix_scorer.py``.
 
-Everything DETERMINISTIC — the reply scorer, the layout classifier, the per-cell credential gate,
-and the call-budget cap — lives in ``_structured_matrix`` (imported as ``sm``) and is proven
-offline on committed golden fixtures by ``tests/unit/test_structured_matrix_scorer.py``. ONLY the
-model call is live here, so the harness itself carries almost no untested logic: the paid run
-exercises the wire, not the scoring.
-
-Gated exactly like every other live-LLM module in this tier (``_live_llm``, story f124): marked
-``external`` (inert in the default suite), auto-marked ``llm_live`` via the module-level
-``_live_llm_ready`` sentinel (tests/external/conftest.py), and skipped by
-``_live_llm.skip_without_live_llm`` when no credential is present for the configured provider.
-
-Run::  REBAR_RUN_EXTERNAL=1 ANTHROPIC_API_KEY=… \
-           pytest -m "external and llm_live" tests/external/test_structured_output_matrix.py
+The ``external`` and ``llm_live`` marks exclude the module by default. A configured cell without
+its provider credential skips. Set ``REBAR_RUN_EXTERNAL=1`` and the selected provider credential
+to run the matrix.
 """
 
 from __future__ import annotations
@@ -46,11 +36,8 @@ _live_llm_ready = _live_llm.live_llm_ready()
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PROVIDERS_DIR = _REPO_ROOT / ".github" / "llm-providers"
 
-# ── the two production-shaped prompts ───────────────────────────────────────────────────────
-#
-# (a) A df3a-shaped agentic transcript whose tool output QUOTES a dependency-link record before
-#     the real CompletionVerdict step — the exact multi-object shape whose first-object parse
-#     drops the verdict (bug df3a). (b) A single-shot contract step.
+# The agentic prompt quotes a dependency object before the final verdict to reproduce the
+# first-object parser trap. The single-shot prompt is its control.
 
 _AGENTIC_TRANSCRIPT_PROMPT = (
     "You are a completion verifier finishing an agentic review turn.\n\n"
@@ -112,12 +99,7 @@ def _artifact_dir(tmp_path: Path) -> Path:
 
 
 def _live_reply(prompt: str, config) -> str:
-    """One live model call returning the model's RAW reply text (no structured coercion).
-
-    Uses the same ``PydanticAIRunner`` text-mode / single-turn path the other ``*_live`` modules
-    exercise (see tests/external/test_pydantic_ai_cutover_live.py::test_pydantic_text_mode): a
-    single model call with NO tools, so we capture exactly what the model emits before any
-    parsing."""
+    """Return raw text from one text-mode, single-turn call without coercion or tools."""
     from rebar.llm.runner import PydanticAIRunner, RunRequest
 
     runner = PydanticAIRunner(config)
@@ -136,12 +118,11 @@ def _live_reply(prompt: str, config) -> str:
 
 @_live_llm.skip_without_live_llm
 def test_structured_output_matrix(rebar_repo: Path, tmp_path: Path) -> None:
-    """Sweep the credentialed cells, capture raw replies, and score them before/after.
+    """Capture provider replies and apply the deterministic scores from ``sm``.
 
-    The scoring is the deterministic ``sm`` logic proven offline; here the value added is the LIVE
-    reply. Cells whose provider credential is absent are recorded as ``unmeasured`` and skipped
-    WITHOUT failing (a partial matrix is a legitimate operator run); the shared all-skip canary
-    still guards a run in which EVERY live test skipped."""
+    Cells without credentials are recorded as ``unmeasured``. Partial runs are valid, while the
+    shared canary rejects an all-skipped external tier.
+    """
     from rebar.llm.config import LLMConfig
 
     cells = sm.load_cells(_PROVIDERS_DIR)
@@ -190,7 +171,6 @@ def test_structured_output_matrix(rebar_repo: Path, tmp_path: Path) -> None:
                 "layout_counts": table.layout_counts,
             }
 
-    # The before/after score table — the run's headline artifact.
     (artifact_dir / "score_table.json").write_text(
         json.dumps(
             {"scores": all_scores, "unmeasured": unmeasured, "call_budget": cap},
