@@ -1,7 +1,7 @@
 """Atomic file writes: temp-in-same-dir + ``os.replace`` (crash-atomic on one filesystem).
 
-Leaf module — **stdlib only, NO ``rebar.*`` imports** — so any layer can depend on it
-without an import cycle. It consolidates the many inline "write a temp file, then
+Low-level module — keep imports acyclic, and import sibling store helpers lazily when
+needed. It consolidates the many inline "write a temp file, then
 rename it over the target" sites (the HLC cache, ``rebar.toml``, the ticket-event
 staging in ``txn``/``compact``, the reducer/graph caches, the snapshot sidecars, prompt
 authoring, agent scratch) behind one call, so the crash-atomicity contract lives in
@@ -73,13 +73,13 @@ def sibling_exclusive_lock(
     *,
     lock_name: str | None = None,
 ) -> Iterator[None]:
-    """Hold an exclusive ``fcntl.flock`` on a stable sibling lock file.
+    """Hold an exclusive kernel lock on a stable sibling lock file.
 
     The lock file is intentionally retained after release. A retained empty
     lock path is harmless, avoids create/unlink races, and gives every process
     a stable inode-adjacent rendezvous point for read-modify-write sidecars.
     """
-    import fcntl
+    from rebar._store.lock_kernel import release_exclusive, take_blocking_exclusive
 
     path = os.fspath(path)
     directory = os.path.dirname(path) or "."
@@ -89,13 +89,13 @@ def sibling_exclusive_lock(
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
     locked = False
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        take_blocking_exclusive(fd)
         locked = True
         yield
     finally:
         try:
             if locked:
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                release_exclusive(fd)
         finally:
             os.close(fd)
 

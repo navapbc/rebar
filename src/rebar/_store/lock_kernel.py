@@ -1,13 +1,15 @@
 """THE kernel-mediated exclusive leg of the store write lock, one per platform.
 
-Every store write-lock probe goes through here: :func:`rebar._store.lock._acquire_fcntl`
-(the acquire path), :func:`rebar._store.lock.write_lock_is_busy` (the advisory
-stand-aside probe) and :func:`rebar._commands.doctor_locks._probe_fcntl` (``rebar doctor
---locks``). They previously each called ``fcntl.flock`` directly. ``fcntl`` has no Windows
-build, and while ``lock.py`` guarded the *import* (``except ImportError: fcntl = None``)
-nothing guarded the *uses*, so on Windows every ticket write raised ``AttributeError:
-'NoneType' object has no attribute 'flock'`` — 384 of the 510 failures in the Windows
-sweep (story ``friendless-alabaster-cub``).
+Every kernel-mediated store lock goes through here: :func:`rebar._store.lock._acquire_fcntl`
+(the write-lock acquire path), :func:`rebar._store.lock.write_lock_is_busy` (the advisory
+stand-aside probe), :func:`rebar._commands.doctor_locks._probe_fcntl` (``rebar doctor
+--locks``), and :func:`rebar._store.fsutil.sibling_exclusive_lock` (blocking sibling
+read-modify-write locks). They previously each called ``fcntl.flock`` directly.
+``fcntl`` has no Windows build, and while ``lock.py`` guarded the *import*
+(``except ImportError: fcntl = None``), nothing guarded the *uses*, so on Windows
+every ticket write raised ``AttributeError: 'NoneType' object has no attribute
+'flock'`` — 384 of the 510 failures in the Windows sweep (story
+``friendless-alabaster-cub``).
 
 **Why this is a leg selector and not an ``if fcntl is None: skip``.** The mkdir leg's
 reclamation logic consumes ``fcntl_held=True`` from :func:`rebar._store.lock._acquire_mkdir`,
@@ -53,15 +55,16 @@ Neither property is provable from a POSIX host, so they are not asserted and lef
 ``test_native_*``, which run only where ``os.name == 'nt'`` — i.e. in the Windows sweep.
 
 **Release is by closing the fd**, on both legs and for the same reason: that is the
-mechanism property 2 above depends on. :func:`release_exclusive` exists only for the one
-caller that already unlocked explicitly before closing (the doctor probe), so its shape is
-preserved rather than quietly changed.
+mechanism property 2 above depends on. :func:`release_exclusive` exists for callers that
+already unlocked explicitly before closing (the doctor probe and sibling locks), so their
+shape is preserved rather than quietly changed.
 """
 
 from __future__ import annotations
 
 import errno
 import os
+import time
 
 try:  # POSIX advisory locking; absent on some platforms (e.g. plain Windows)
     import fcntl
@@ -78,6 +81,7 @@ __all__ = [
     "is_contention",
     "leg_name",
     "release_exclusive",
+    "take_blocking_exclusive",
     "take_exclusive",
 ]
 
@@ -150,6 +154,32 @@ def release_exclusive(fd: int) -> None:
         msvcrt.locking(fd, msvcrt.LK_UNLCK, _WINDOWS_LOCK_BYTES)
         return
     raise NoExclusiveLegError("no exclusive lock primitive to release")
+
+
+def take_blocking_exclusive(fd: int, *, poll_s: float = 0.05) -> None:
+    """Take the exclusive lock on *fd*, waiting until it is available.
+
+    POSIX uses ``flock(LOCK_EX)`` directly. The Windows CRT's ``LK_LOCK`` has a
+    short built-in retry ceiling, so the Windows leg polls the non-blocking
+    primitive to preserve ``flock(LOCK_EX)``'s wait-until-released contract.
+    """
+    if fcntl is not None:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        return
+    if msvcrt is not None:
+        while True:
+            try:
+                take_exclusive(fd)
+                return
+            except OSError as exc:
+                if not is_contention(exc):
+                    raise
+                time.sleep(poll_s)
+    raise NoExclusiveLegError(
+        "no kernel-mediated exclusive lock primitive on this platform: neither fcntl "
+        "(POSIX) nor msvcrt (Windows) is importable, so the sibling lock cannot be "
+        "held safely"
+    )
 
 
 def is_contention(exc: OSError) -> bool:
