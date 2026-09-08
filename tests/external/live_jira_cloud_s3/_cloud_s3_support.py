@@ -1,15 +1,9 @@
-"""Shared constants + read-only helpers for the Cloud+S3 rehearsal.
+"""Read-only helpers for the Jira Cloud and S3 rehearsal.
 
-Self-contained sibling module (mirrors ``tests/external/live_jira_dc/_dc_support``):
-pytest's default ``prepend`` import mode puts this directory on ``sys.path`` when the
-suite is collected, so ``conftest.py`` and the test module both import these names
-with a bare ``from _cloud_s3_support import ...`` — never ``from conftest import``
-(the repo root's conftest also registers under the bare name ``conftest``, a
-documented collision hazard).
-
-Everything here is READ-ONLY with respect to Jira: the only Jira calls are searches
-and the transport constructor. The mutating-method inventory drives the structural
-guard in ``conftest.py``; it lists what to FORBID, it does not call any of them.
+Pytest's ``prepend`` import mode places this directory on ``sys.path``, so fixtures and tests
+use the bare ``_cloud_s3_support`` import instead of importing ``conftest``. Jira access here is
+limited to searches and transport construction. ``MUTATING_TRANSPORT_METHODS`` supplies the
+prohibition inventory used by the autouse guard and never invokes those methods.
 """
 
 from __future__ import annotations

@@ -1,28 +1,10 @@
-"""READ-ONLY, S3-backed live Jira Cloud multi-project rehearsal (REB + DIG).
+"""Read-only Jira Cloud and S3 rehearsal for REB and DIG.
 
-Opt-in, LIVE-ONLY canary for the many-to-many Jira bridge over the S3 store backend
-and real Cloud volume. See ``conftest.py`` for the design, the gating layers, and the
-STRUCTURAL read-only guard (``readonly_jira_guard``, autouse) that makes it impossible
-for any scenario here to write to Jira Cloud.
-
-Every scenario is read-only against Jira: the inbound side uses
-``rebar_reconciler.fetcher.compute_snapshot`` (the no-write fetch) and
-``rebar.bridge_preview`` (a dry run), the guard forbids every mutating transport
-method, and the Jira-touching scenarios assert per-project issue counts are identical
-before and after. The five validations the story requires map to the scenarios:
-
-  1. one S3 store maps BOTH projects  -> test_one_store_maps_both_projects
-  2. inbound pulls BOTH at real volume -> test_inbound_fetch_pulls_both_projects
-  3. read-only preview, scoped per project (no cross-project contamination)
-     -> test_fetch_is_scoped_per_project + test_bridge_preview_read_only_and_scoped
-  4. the S3 backend round-trips with the mapping intact
-     -> test_s3_store_roundtrips_with_mapping_intact
-  5. ZERO Jira mutations (structural + before/after counts)
-     -> enforced on every test; proven non-vacuous by test_read_only_guard_is_real
-
-Plus a negative control from the prior-failure lesson: an UNKNOWN mapped project (among
-several) is SKIPPED and the pass continues over the others
-(``test_unknown_project_skips_and_continues``).
+An autouse guard prevents Jira mutations while scenarios use ``compute_snapshot`` and dry-run
+``bridge_preview``. The tests verify one store mapping both projects, inbound fetch volume,
+project-scoped fetch and preview, S3 mapping round trips, continued processing after an unknown
+project, and a non-vacuous mutation guard. The dual-project fetch and preview scenarios also
+compare issue counts before and after.
 """
 
 from __future__ import annotations
