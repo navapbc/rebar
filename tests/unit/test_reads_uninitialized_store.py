@@ -438,6 +438,27 @@ def test_store_is_usable_predicate(tmp_path: Path) -> None:
     assert store_is_usable(str(stray)) is False
 
 
+def test_structured_store_usability_does_not_spawn_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An initialized store carrying committed structure is usable without probing HEAD.
+
+    The HEAD probe is only needed for live git stores whose structure has not landed yet
+    (for example a mid-clone store). A normal initialized store already carries the durable
+    compatibility record, so every read must not pay for an extra git subprocess.
+    """
+    from rebar._store import store_usability
+
+    tracker = str(_initialized_empty_repo(tmp_path) / ".tickets-tracker")
+
+    def _forbidden_head_probe(*_args, **_kwargs):
+        raise AssertionError("structured stores must not spawn git to prove usability")
+
+    monkeypatch.setattr(store_usability, "run_git_bounded", _forbidden_head_probe)
+
+    assert store_usability.store_is_usable(tracker) is True
+
+
 def test_store_is_usable_propagates_missing_git_binary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -450,7 +471,7 @@ def test_store_is_usable_propagates_missing_git_binary(
     from rebar._store import gitutil
     from rebar._store.store_usability import store_is_usable
 
-    tracker = str(_initialized_empty_repo(tmp_path) / ".tickets-tracker")
+    tracker = str(_tracker_midclone_unresolvable_head(tmp_path) / ".tickets-tracker")
 
     def _fake_run_git(*_a, **_kw):
         raise FileNotFoundError(2, "No such file or directory: 'git'")
