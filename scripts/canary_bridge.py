@@ -464,10 +464,6 @@ def cmd_heartbeat_alert(
             return rc
     elif stale == "false" and tid:
         reason = f"Fixed: reconciler recovered at {ts}. {status_msg}"
-        force_close = (
-            f"Fixed: reconciler recovered at {ts}"
-            " (bot alert auto-close; heartbeat tickets have no completion criteria to verify)."
-        )
         rc, _out, stderr = runner(
             [
                 "rebar",
@@ -479,7 +475,6 @@ def cmd_heartbeat_alert(
                 "env_integration",
                 "--reason",
                 reason,
-                f"--force={force_close}",
             ]
         )
         if rc != 0:
@@ -652,7 +647,6 @@ def cmd_binding_drift_alert(
             return rc
     elif drift_found == "false" and tid:
         reason = f"Fixed: bridge fsck reports zero audit findings at {ts}."
-        force_close = f"Fixed: zero bridge audit findings at {ts} (bot alert auto-close)."
         rc, _out, stderr = runner(
             [
                 "rebar",
@@ -664,7 +658,6 @@ def cmd_binding_drift_alert(
                 "env_integration",
                 "--reason",
                 reason,
-                f"--force={force_close}",
             ]
         )
         if rc != 0:

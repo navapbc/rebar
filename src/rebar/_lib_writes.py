@@ -332,11 +332,11 @@ def transition(
     force = _normalize_transition_force(force)
 
     # Mirror the CLI's admission rule (tickets 3803 + fc20 + bug d54b): the free-text
-    # ``reason`` is persisted as ``close_reason`` ONLY on a non-force close whose class can
-    # require one (obsolete/wontfix/not_a_bug/escalated). Any other combination discards it
-    # here exactly as the CLI refuses it, so the library and CLI paths cannot drift.
+    # ``reason`` is persisted as ``close_reason`` ONLY on a non-force close whose class
+    # admits one. Any other combination discards it here exactly as the CLI refuses it,
+    # so the library and CLI paths cannot drift.
     admits_close_reason = force is None and (
-        close_class in close_disposition.REASON_REQUIRED_CLASSES
+        close_class in close_disposition.REASON_REQUIRED_CLASSES or close_class == "env_integration"
     )
 
     tracker = str(config.tracker_dir(repo_root))

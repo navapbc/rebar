@@ -586,20 +586,20 @@ def _plain_reason_refused(reason: str, force: bool, target_status: str, close_cl
     """Whether a ``--reason`` given WITHOUT ``--force`` must be refused.
 
     Post-unification (ticket blusterous-earthly-kitten) ``--reason`` records ONLY a
-    reason-required disposition's ``close_reason`` — a close carrying
-    ``--class obsolete``/``wontfix``/``not_a_bug``/``escalated`` (``txn.close_class_refusal``
-    REQUIRES it unless a live replacement link stands in for the bug-only pair). It no longer
-    doubles as the gate-bypass audit note; that note rides on ``--force``'s own value
-    (``--force="<reason>"``). With ``--force`` present ``--reason`` is permissively ignored
-    (not refused). Any OTHER plain transition silently discarding the text would be worse than
-    refusing it. A guard function so ``transition_cli`` stays under its shrink-only complexity
-    ceiling."""
+    reason-bearing disposition's ``close_reason``. With ``--force`` present ``--reason`` is
+    permissively ignored (not refused). Any OTHER plain transition silently discarding the text
+    would be worse than refusing it. A guard function so ``transition_cli`` stays under its
+    shrink-only complexity ceiling."""
     if not reason or force:
         return False
     from rebar._commands import close_disposition
 
     return not (
-        target_status == "closed" and close_class in close_disposition.REASON_REQUIRED_CLASSES
+        target_status == "closed"
+        and (
+            close_class in close_disposition.REASON_REQUIRED_CLASSES
+            or close_class == "env_integration"
+        )
     )
 
 
@@ -735,9 +735,10 @@ def transition_cli(argv: list[str], *, repo_root=None, _confirm_verb: str = "tra
         if _plain_reason_refused(reason, force, target_status, close_class):
             raise CommandError(
                 "Error: --reason is only meaningful on a close whose --class is "
-                "reason-required (obsolete, wontfix, not_a_bug, or escalated — where it "
-                "records the disposition's close_reason). A plain transition discards it. Use "
-                '--force="<reason>" to record a gate-bypass audit note, '
+                "reason-bearing (obsolete, wontfix, not_a_bug, escalated, or "
+                "env_integration — where it records the disposition's close_reason). "
+                'A plain transition discards it. Use --force="<reason>" to record a '
+                "gate-bypass audit note, "
                 "or `rebar comment <id>` to record rationale on the ticket.",
                 returncode=1,
             )

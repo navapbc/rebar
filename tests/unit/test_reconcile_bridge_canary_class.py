@@ -110,9 +110,9 @@ def test_every_bug_close_carries_valid_class(mod: ModuleType, subcommand: str, e
         assert value in _VALID_CLASSES, (
             f"{subcommand} uses invalid --class value {value!r}; valid: {sorted(_VALID_CLASSES)}"
         )
-        assert any(a.startswith("--force") for a in argv), (
-            f"{subcommand} close must bypass the completion-verification gate "
-            f"(bot alert tickets have no verifiable criteria — bug 0dc5): {argv}"
+        assert "--force" not in argv and not any(a.startswith("--force=") for a in argv), (
+            f"{subcommand} close must use the attested env_integration disposition path, "
+            f"not the human-only force bypass: {argv}"
         )
 
 

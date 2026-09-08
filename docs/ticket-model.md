@@ -103,9 +103,10 @@ A missing or out-of-vocabulary `--class` is refused (the error names the allowed
 `--class` **replaces** the former free-text `--reason` requirement for bug closes.
 (`idea → closed` is a reject/drop and skips this gate.)
 
-When the completion-verification close gate is enabled, `duplicate`, `not_a_bug`, and
-`escalated` describe non-completion dispositions and skip completion verification only
-when their evidence holds. For `duplicate` that evidence is a net-active
+When the completion-verification close gate is enabled, `duplicate`, `not_a_bug`,
+`escalated`, and the protected bot-alert use of `env_integration` describe
+non-completion dispositions and skip completion verification only when their evidence
+holds. For `duplicate` that evidence is a net-active
 `bug -duplicates-> canonical` link to a live ticket, or a live replacement with a
 net-active `replacement -supersedes-> bug` link. `not_a_bug` and `escalated` are
 **reason-required** (bug d54b): a live replacement link (same shapes as above) satisfies
@@ -115,6 +116,12 @@ is signed into the disposition attestation. A close with neither is refused at w
 naming both doors; it never falls through to the completion verifier (which would demand
 proof that a nonexistent defect was fixed). A missing, reversed, unlinked, unresolved,
 archived, or deleted replacement does not count as a replacement.
+
+`env_integration` is a normal completed-bug class for human closes. It becomes a
+non-completion disposition only for the automated bot-alert tickets created by the
+dependency-advisory, heartbeat, and binding-drift canaries. Those closes require immutable
+`detected_by` provenance from the alert lane plus `--reason=<observed recovery>`, and the
+reason persists as `close_reason`.
 
 ## Administrative close dispositions (any ticket type)
 

@@ -274,12 +274,13 @@ def _stamp_close_metadata(
 
     * ``close_class`` — bug-close classification (ticket ed13): the validated ``--class``,
       folded by the reducer into ``state["close_class"]``.
-    * ``close_reason`` — the operator's justification for a reason-only administrative close
-      (ticket fc20): the CLI ``--reason`` on a NON-force administrative close. DISTINCT from
+    * ``close_reason`` — the operator's justification for a reason-bearing disposition close
+      (ticket fc20): the CLI ``--reason`` on a NON-force disposition close. DISTINCT from
       ``force_close_reason`` — this key records why a truthful disposition closed, that one
-      records why a gate was bypassed. Persisted ONLY for a reason-required class: any other
-      close discards the value rather than smuggling a free-text rationale past the bounded
-      vocabulary (ticket 3803's honesty rule, enforced write-side).
+      records why a gate was bypassed. Persisted ONLY for reason-required classes and the
+      provenance-guarded bot-alert ``env_integration`` disposition: any other close discards
+      the value rather than smuggling a free-text rationale past the bounded vocabulary
+      (ticket 3803's honesty rule, enforced write-side).
     * ``force_close_reason`` — the operator's ``--force=<reason>`` for bypassing the close
       gates (the unified ``force_reason`` in memory — ticket blusterous-earthly-kitten). The
       PERSISTED key stays ``force_close_reason``: it is durable reduced state (the reducer +
@@ -302,7 +303,9 @@ def _stamp_close_metadata(
         status_data["close_class"] = close_class
     from rebar._commands import close_disposition
 
-    if close_reason and close_class in close_disposition.REASON_REQUIRED_CLASSES:
+    if close_reason and (
+        close_class in close_disposition.REASON_REQUIRED_CLASSES or close_class == "env_integration"
+    ):
         status_data["close_reason"] = close_reason
     if force_reason:
         status_data["force_close_reason"] = force_reason

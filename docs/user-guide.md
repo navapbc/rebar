@@ -163,6 +163,11 @@ as `close_reason`). These mint a signed disposition verdict instead of running
 completion verification — see `docs/ticket-model.md` §"Administrative close
 dispositions":
 
+Automated dependency-advisory, heartbeat, and binding-drift canary alert tickets may also
+close with `--class=env_integration --reason=<observed recovery>`. That verifier bypass is
+not a general-purpose user close: it is accepted only when the ticket carries the canary's
+immutable `detected_by` creation provenance.
+
 ```sh
 rebar transition <id> in_progress closed --class=wontfix --reason="descoped by epic Y"
 ```
