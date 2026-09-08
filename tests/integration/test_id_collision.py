@@ -1,21 +1,9 @@
-"""Generated ticket IDs obey the canonical-id contract; aliases are deterministic.
+"""Exercise canonical ticket IDs and deterministic aliases at integration volume.
 
-Bounded in-process port of tests/integration/ticket-id-collision/run.sh (the bash
-harness is being deleted). The bash probe generated N=100K ids.
-
-The naive "no collisions in N draws" assertion is a near-tautology: an id is 16 hex
-== 64 bits of entropy (the first 16 hex of a ``uuid4``), so even N=2000 draws have a
-collision probability around 1e-13 — the test would pass even if generation were
-badly broken in ways that still avoid exact dupes. So this file asserts the actual
-id CONTRACT directly (format + structure + that it is the documented uuid4 slice)
-and runs the uniqueness check at a substantially higher N so it exercises real
-volume rather than relying on improbability.
-
-Aliases are mnemonic helpers (~1.5B combinations) and MAY collide by the birthday
-paradox, so we assert only that ``compute_alias`` is deterministic and total (never
-raises, always a value) for every generated id — not alias uniqueness.
-
-Marked ``integration`` (opt-in): run with ``pytest -m integration``.
+The ID oracle checks the 16-character lowercase hexadecimal form and integer parseability.
+The larger uniqueness sample supplements those assertions without treating improbable
+collisions as its only signal. Aliases may collide, so only determinism and totality are
+required. This integration test is selected with ``pytest -m integration``.
 """
 
 from __future__ import annotations

@@ -1,21 +1,9 @@
-"""WS3 concurrency-regression harness — the executable form of the Concurrency
-Doctrine (§0, invariants I1-I9).
+"""Exercise deterministic two-clone convergence through engine sync and push paths.
 
-Two independent clones of one tracker write disjoint events (create + comment on
-different tickets) and overlapping events (concurrent transitions of the SAME
-ticket to DIFFERENT targets), reconverge through the real engine sync/push paths
-(merge-as-union, never rebase), and must end at ONE deterministic state on both
-clones:
-
-  (a) union          — every append-only, UUID-named event file from both clones
-                       is present on both clones after reconvergence (I1/I2/I6).
-  (b) deterministic  — replay yields identical ticket state on both clones (I8).
-  (c) fork tie-break — the concurrent-transition fork resolves to the SAME winner
-                       on both clones, skew-independently by UUID (I8).
-  (d) no data loss   — a failed push never drops a local-only commit (WS3).
-
-This is the characterization gate every later write/sync change (WS2, WS5c) runs
-against. It exercises the actual engine paths, not a simulation.
+Independent clones write disjoint and conflicting events, then merge as a union. Both must
+retain every append-only event, replay identical state, select the same lower-UUID status-fork
+winner despite clock skew, and preserve local commits after failed pushes. This characterizes
+the write and sync invariants through Git subprocesses rather than a simulation.
 """
 
 from __future__ import annotations
@@ -76,17 +64,10 @@ def _engine_run(repo: Path, *args: str, check: bool = True) -> subprocess.Comple
 
 
 def _make_repo(remote: Path, path: Path) -> Path:
-    """Clone *remote* into *path*, configure identity, return the repo path.
+    """Clone ``remote`` into ``path`` and configure the clone with an independent object store.
 
-    ``--no-hardlinks`` is deliberate. *remote* is a local path, so git's default
-    ``--local`` optimization would HARDLINK ``remote.git/objects`` into this clone's object
-    database — and this clone's database is in turn shared with the ``.tickets-tracker``
-    linked worktree that the tests write through. git-clone(1) warns that the hardlink mode
-    "can race with concurrent modification to the source repository", which is precisely the
-    shape of this harness: the remote is pushed to throughout, from two clones. Copying the
-    objects keeps the three object stores independent, so the only thing that crosses
-    between them is what a push or fetch actually transfers — which is what these tests
-    characterize (bug 5b74-5d8f-a6b4-4674).
+    ``--no-hardlinks`` prevents concurrent pushes or maintenance in the local remote from
+    mutating objects shared with either clone. Only explicit fetches and pushes cross stores.
     """
     _git("clone", "-q", "--no-hardlinks", str(remote), str(path), cwd=path.parent)
     _git("config", "user.email", "test@example.com", cwd=path)
@@ -99,16 +80,10 @@ def _tracker(repo: Path) -> Path:
 
 
 def _expire_sync_marker(tracker: Path) -> None:
-    """Delete the once-a-minute sync marker so the next read actually syncs.
+    """Expire only this tracker's path-derived throttle marker before a read sync.
 
-    The production throttle marker (``rebar._engine_support.reads.ensure_fresh``)
-    is ``/tmp/.ticket-sync-<md5(realpath(tracker))[:12]>`` -- its name is uniquely
-    derived from THIS tracker's realpath, which lives under the test's ``tmp_path``,
-    so it is already namespaced per-test/per-worker and cannot perturb a sibling
-    test or xdist worker. We delete ONLY that tracker-specific marker. We do NOT
-    touch any fixed/global ``/tmp`` path (e.g. a non-namespaced
-    ``/tmp/.ticket-sync-fallback``): no production code reads such a path, and
-    deleting a global path would race other tests/workers (SDET I6).
+    The realpath hash namespaces the marker per test and worker. No global fallback path is
+    touched, avoiding races with unrelated trackers.
     """
     h = hashlib.md5(str(tracker).encode()).hexdigest()[:12]
     try:
@@ -118,49 +93,23 @@ def _expire_sync_marker(tracker: Path) -> None:
 
 
 def _sync_from_origin(tracker: Path) -> None:
-    """Deterministically fast-forward *tracker*'s tickets branch onto ``origin/tickets``.
+    """Establish a checked, deterministic ``origin/tickets`` fixture precondition.
 
-    Deliberately NOT ``_engine_run(repo, "list")``. Production read-freshness
-    (``rebar._engine_support.reads.ensure_fresh``) is best-effort BY DESIGN: it is
-    throttled by a ``/tmp`` marker, reconverges under a deliberately short lock timeout,
-    and swallows every failure, because "a read must never fail because a fetch could not
-    run". The read therefore succeeds whether or not the pull landed, so driving a clone's
-    sync through it makes the sync an unasserted side effect — and any fixture precondition
-    built on it is flaky under load, not deterministic (bug 1647-19b3-cbec-4a17).
-
-    Both git calls are ``check=True``, so a sync that does not land raises HERE, at the
-    setup step that owns it, instead of surfacing later as a misleading invariant failure.
-
-    Which helper does a given site want? The two are NOT interchangeable:
-
-    * Use ``_sync_from_origin`` when the sync is a fixture PRECONDITION — the test needs
-      this clone to hold the peer's already-pushed state before the interesting divergence
-      begins. A precondition that does not land must fail loudly, here.
-    * Use ``_reconverge_by_read_sync`` when reconvergence THROUGH the production read path
-      is the property under test. There the best-effort behaviour is the subject, not an
-      incidental means, and the assertion that follows is the real oracle.
+    Production read freshness is throttled and best-effort, so a successful read does not
+    prove its incidental sync landed. These checked fetch and fast-forward steps fail at the
+    setup site instead. Use ``_reconverge_by_read_sync`` when that production behavior is the
+    subject rather than a prerequisite.
     """
     _git("fetch", "-q", "origin", "tickets", cwd=tracker)
     _git("merge", "-q", "--ff-only", "FETCH_HEAD", cwd=tracker)
 
 
 def _reconverge_by_read_sync(repo: Path, tracker: Path, *, passes: int = 2) -> None:
-    """Drive *repo*'s reconvergence through the REAL read-side sync, ``passes`` times.
+    """Drive bounded reconvergence through the production best-effort read path.
 
-    The counterpart to `_sync_from_origin`, and deliberately the best-effort path: these
-    call sites are the tests whose claim IS "a clone reconverges through the production
-    read path". Replacing the engine read with a raw checked fetch here would delete the
-    very invariant the test exists to prove, so the incidental sync is not a fixture
-    shortcut to be hardened away — it is the subject.
-
-    That also makes these sites safe in the way the precondition sites were not: the
-    assertion that follows each call is the convergence oracle, so a sync that fails to
-    land surfaces as a true, on-topic failure rather than as a misleading setup error.
-
-    ``_expire_sync_marker`` clears the once-a-minute throttle so the read actually
-    attempts a fetch. ``passes=2`` is the belt-and-suspenders form used where one read may
-    only have fetched without reconverging; reconvergence must be reached in a bounded
-    number of reads, so this must not loop.
+    Each pass expires this tracker's throttle marker before reading. Call-site assertions
+    remain the convergence oracle. Two passes cover a fetch-only first read without an
+    unbounded loop. Fixture setup instead uses ``_sync_from_origin``.
     """
     for _ in range(passes):
         _expire_sync_marker(tracker)
@@ -321,13 +270,7 @@ def _object_inodes(objects_dir: Path) -> set[tuple[int, int]]:
 
 
 def test_fixture_remote_runs_no_detached_upkeep_and_shares_no_objects(two_clones):
-    """The harness's remote must be inert storage: nothing rewrites it but a push.
-
-    This is the deterministic oracle for bug 5b74-5d8f-a6b4-4674, whose real-world form was
-    a rare CI-only corruption. If a future edit recreates the remote without the pins, or
-    restores git's hardlinking local-clone default, it fails HERE and immediately -- not once
-    in dozens of parallel CI runs, as an unrelated change's spurious red.
-    """
+    """Keep the fixture remote inert: no detached upkeep or clone-shared objects."""
     remote, repo_a, repo_b, _seed = two_clones
 
     for key, expected in BARE_REMOTE_UPKEEP_PINS.items():
@@ -419,11 +362,8 @@ def test_two_clone_union_deterministic_replay_and_fork_tiebreak(two_clones):
         f"event sets diverged:\n  only in A: {sorted(events_a - events_b)}\n"
         f"  only in B: {sorted(events_b - events_a)}"
     )
-    # The disjoint creates must BOTH survive the union -- not merely "some CREATE
-    # file is present". A union that dropped exactly one side's CREATE would still
-    # satisfy any(...), so assert each ticket's own CREATE event file is present.
-    # CREATE events are committed under a per-ticket-id directory; read that dir
-    # set from git rather than guessing the (UUID-embedding) filename shape.
+    # Prove each disjoint CREATE survives by reading committed ticket directories. A generic
+    # existence check could pass after dropping one side, and filenames embed unknown UUIDs.
     listing = _git("ls-tree", "-r", "--name-only", "tickets", cwd=tracker_a).stdout
     create_dirs = {
         line.split("/")[0] for line in listing.splitlines() if line.endswith("-CREATE.json")
@@ -439,21 +379,8 @@ def test_two_clone_union_deterministic_replay_and_fork_tiebreak(two_clones):
     status_b = _list_status(repo_b)
     assert status_a == status_b, f"non-deterministic replay: A={status_a} B={status_b}"
 
-    # -- Fork tie-break: assert the SPECIFIC winner, not mere set-membership --
-    # Two concurrent STATUS events on the seed both forked from current_status
-    # == "open" (A->in_progress, B->blocked). The OLD assertion only checked
-    # ``status_a[seed] in ("in_progress","blocked")`` -- it could not tell WHICH
-    # event won, so any resolution rule (UUID, wall-clock, insertion order) passed.
-    #
-    # The reducer (``process_status``) resolves the fork by LEXICAL EVENT UUID:
-    # the lexically-LOWER of the two siblings' own UUIDs wins, deterministically
-    # and INDEPENDENT of replay/insertion order (bug 8874 fixed: the non-fork
-    # branch now advances ``parent_status_uuid`` to the event's own UUID, so a
-    # sibling forks against the prior sibling's identity rather than an empty
-    # parent pointer that would let the later-replayed event win by insertion
-    # order). So the expected winner is the forked STATUS event with the smallest
-    # UUID; asserting that exact target status makes the test FAIL if the rule
-    # regresses to insertion-order / a different key.
+    # Both events fork from ``open``. Assert the lower event UUID's exact target so wall-clock,
+    # insertion-order, or other tie-break regressions cannot satisfy mere set membership.
     seed_status_events = _status_events_for(tracker_a, seed)
     forked = [e for e in seed_status_events if e["current_status"] == "open"]
     assert len(forked) == 2, (
@@ -546,9 +473,7 @@ def test_two_clone_set_tags_table_converges(two_clones):
     assert _event_files(tracker_a) == _event_files(tracker_b)
     assert _tags(repo_a, seed) == _tags(repo_b, seed), "set‖set non-deterministic replay"
 
-    # set ‖ remove: A sets {m,n} while B removes m (m is in A's observed base from
-    # the prior phase? no — re-establish). Both clones must converge identically.
-    # Seed a shared 'm' first so B's remove targets a witnessed tag.
+    # set ‖ remove: first publish ``m`` so B removes a witnessed tag, then require convergence.
     _engine_run(repo_a, "edit", seed, "--set-tags=m,n")  # online; auto-push
     _sync_from_origin(tracker_b)  # SETUP precondition: B must witness 'm' before removing it
     assert "m" in _tags(repo_b, seed), "SETUP (not the convergence claim): B did not witness 'm'"
@@ -584,11 +509,8 @@ def test_two_clone_add_remove_converges(two_clones):
     assert tags_a == {"extra"}, f"expected shared removed + extra added, got {tags_a}"
 
 
-# ─────────────────── HLC skewed-clock convergence (P2.1) ─────────────────────
-# Two 19-digit physical-clock injections (REBAR_HLC_NOW): A runs FAST (a clock far
-# in the future), B runs SLOW. The scenario proves the Hybrid Logical Clock makes
-# causally-later edits win regardless of wall-clock skew — the gap raw time_ns()
-# left open (last-wall-clock-writer silently clobbers).
+# HLC skew oracle: a causally later edit from the slow clock must beat an earlier edit from
+# the fast clock. Nineteen-digit injections preserve lexical and numeric timestamp order.
 _FAST_NOW = 5_000_000_000_000_000_000  # ~year 2128, 19 digits
 _SLOW_NOW = 1_000_000_000_000_000_000  # ~year 2001, 19 digits
 
@@ -801,16 +723,8 @@ def test_commit_and_push_preserves_local_and_competing_remote_events(two_clones,
     )
 
 
-# ── lock-owned push-recovery merge vs a peer reconverge (consensual-hollow-drake) ────────
-#
-# `cindery-lithe-acaciarat` moved `push_tickets_branch`'s non-fast-forward recovery
-# merge UNDER the store write lock (and added an in-lock recovery re-check). While that
-# merge runs, git leaves `MERGE_HEAD` in the tracker gitdir. `sync.reconverge` used to
-# classify recovery state at a PRE-LOCK early-out: it saw that transient `MERGE_HEAD`,
-# warned "tracker in rebase/merge recovery state (run: rebar fsck-recover)", and returned
-# WITHOUT waiting for the lock — misclassifying the lock holder's own in-progress merge as
-# an abandoned recovery state and skipping the reconvergence round. Recovery-state
-# classification must be authoritative only AFTER the write lock is acquired.
+# A recovery merge leaves ``MERGE_HEAD`` while holding the write lock. Peer reconvergence must
+# acquire that lock before classifying recovery, or it mistakes active work for abandoned state.
 _DRAKE_PUSH_CODE = """
 import os
 from rebar._store import push
@@ -1051,13 +965,10 @@ def test_compaction_horizon_keeps_young_events_live(two_clones):
 
 
 def test_sub_horizon_append_orphan_recovered_by_fsck_rebuild(two_clones):
-    """RC2b regression (36d1): a comment appended on clone B that clone A never saw,
-    merged in AFTER A compacted, sorts before A's SNAPSHOT and is absent from
-    ``source_event_uuids`` — the positional skip silently drops it (the RC2 data-loss
-    class). ``fsck --repair-snapshots`` rebuilds the snapshot from the full log
-    (including ``*.retired``) and folds the orphan back in.
+    """Recover a pre-snapshot orphan merged after compaction.
 
-    RED before the rebuild path (the orphan stays dropped); GREEN after.
+    The positional replay skip initially drops B's unseen comment. Snapshot repair rebuilds
+    from live and retired sources and folds that orphan back into state.
     """
     _remote, repo_a, repo_b, seed = two_clones
     tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
@@ -1322,10 +1233,11 @@ def test_a3_repair_bare_remote_pause_is_owned_during_mutation_and_cleared(two_cl
 
 
 def test_a3_marker_is_optimization_not_authority_crash_before_marker(two_clones):
-    """A3 safety (34b1): the per-ticket ``a3-repaired`` marker is a LOCAL, uncommitted
-    optimization — fsck itself is the authoritative resumability check. A crash AFTER the
-    retire+commit but BEFORE the marker write (simulated by deleting the marker) must NOT
-    cause a re-repair: the re-run sees the ticket already clean and is a no-op."""
+    """Treat ``a3-repaired`` as a local optimization, with fsck as authority.
+
+    Deleting the marker after a committed repair simulates a crash before its write. Retry
+    must observe clean state and avoid re-retiring sources.
+    """
     _remote, repo_a, _repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
     create_file = _craft_inconsistent_snapshot(tracker_a, seed)
@@ -1371,12 +1283,10 @@ def test_a3_repair_surfaces_missing_create_without_auto_writing(two_clones):
 
 
 def test_two_clone_compaction_resurrection_no_data_loss_and_repairable(two_clones):
-    """b306 (I1) RC1 regression: clone A compacts (folding a source), and a merge with
-    clone B — which never compacted — resurrects the folded source file. Because A1
-    RENAMES folded sources to ``*.retired`` (never deletes), the source bytes are never
-    lost; the resurrected ``.json`` trips SNAPSHOT_INCONSISTENT, which ``fsck --repair``
-    resolves by re-retiring it. RED on the pre-b306 delete behavior (the resurrected
-    file would be an un-recoverable orphan); GREEN now.
+    """Repair a source resurrected when compacted and uncompacted clone histories merge.
+
+    Compaction renames sources to ``*.retired`` without data loss. A resurrected live copy
+    raises ``SNAPSHOT_INCONSISTENT`` and fsck restores consistency by retiring it again.
     """
     _remote, repo_a, _repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
@@ -1417,12 +1327,9 @@ def test_rebuild_restarts_from_stale_bak_sentinel(two_clones):
     tracker_a = _tracker(repo_a)
     seed_dir = tracker_a / seed
 
-    # An orphan COMMENT (absent from the snapshot's source_event_uuids), sorting before
-    # the snapshot → the RC2 silent-drop shape.
-    # Compile a CREATE-only baseline, append a COMMENT (normal HLC ts), THEN craft a
-    # future-dated SNAPSHOT whose source set excludes the comment → the comment sorts
-    # before the snapshot and is a genuine orphan the positional skip drops. (The
-    # snapshot must be written AFTER the comment so it does not poison the HLC clock.)
+    # Append an orphan after compiling the baseline, then write a future snapshot that excludes
+    # it. This preserves normal HLC generation while placing the omitted comment before the
+    # snapshot, where positional replay drops it.
     create_file = next(seed_dir.glob("*-CREATE.json"))
     create_uuid = _json.loads(create_file.read_text())["uuid"]
     compiled = {k: v for k, v in reduce_ticket(str(seed_dir)).items() if k != "updated_at"}
@@ -1489,31 +1396,21 @@ def test_push_retry_merge_under_lock_preserves_events(two_clones):
 
 
 def _tickets_merge_count(tracker: Path) -> int:
-    """Number of merge (2-parent) commits reachable from the local ``tickets`` branch.
+    """Count recovery merges reachable from local ``tickets``.
 
-    A merge commit on the tickets branch is produced ONLY by the non-fast-forward
-    recovery path (``rebar._store.push_recovery._recover_non_fast_forward`` →
-    ``_merge_remote_under_lock``), which runs after a push loses the CAS race and must
-    back off, re-fetch, and merge before retrying. A plain append push fast-forwards and
-    adds a single-parent commit. So a rise in this count is durable evidence that a real
-    CAS collision drove the backoff+refetch recovery — the anti-vacuity anchor the ticket
-    requires (a contention test that never actually collided has proven nothing).
+    Normal appends fast-forward with one parent. Only a lost CAS race invokes backoff,
+    refetch, and a two-parent recovery merge. An increase therefore proves that the test
+    exercised CAS recovery.
     """
     return int(_git("rev-list", "--merges", "--count", "tickets", cwd=tracker).stdout.strip())
 
 
 def test_cas_backoff_refetch_lands_all_writes_under_real_contention(two_clones):
-    """Bug baldish-regainable-steed (AC3): REAL concurrent writers colliding on the shared
-    tickets branch must each land, with no writer starved, through the CAS backoff+refetch
-    recovery path (back off → re-fetch → merge → retry).
+    """Land every writer through induced CAS contention without starvation or loss.
 
-    This drives the actual push/CAS/recovery path with NO mocked sleep and NO fake git: a
-    peer advances ``origin/tickets`` and then a stale-based writer's push is
-    non-fast-forward and must recover. It asserts OUTCOMES — every write present after
-    convergence — rather than internal call counts, and anchors against vacuity by proving
-    a collision actually occurred (a recovery merge commit appears on the branch). The
-    companion unit oracle (``tests/unit/test_cas_backoff_refetch_baldish.py``) carries the
-    jitter/ordering mutation teeth; this gate carries the real-contention no-loss outcome.
+    A peer advances the remote so a stale writer's Git push must back off, refetch, merge,
+    and retry. Final state proves every write survived, while a new recovery merge proves the
+    collision occurred. The companion unit test covers jitter and ordering.
     """
     _remote, repo_a, repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
@@ -1616,22 +1513,10 @@ def test_two_clone_concurrent_claim_loser_detects_and_fork_surfaced(two_clones):
     assert "status_fork_resolved" in kinds, f"fsck must flag the resolved fork; kinds={kinds}"
 
 
-# ─────────── Real push/fetch/merge during compaction (story 1fdc) ─────────────
-# The two compaction-resurrection/orphan tests above (…recovered_by_fsck_rebuild,
-# …resurrection_no_data_loss_and_repairable) SIMULATE a remote append by hand-copying
-# clone B's event file into clone A's tracker dir plus a ``--no-verify`` commit — they
-# never drive a real ``git push``/``fetch``/merge, so real publish/reconverge timing is
-# unexercised. The two tests below drive the actual engine sync (real push/fetch/merge)
-# across two clones so the snapshot-horizon safety property is exercised end-to-end.
-#
-# HLC note (why the timestamps are injected rather than "natural"): ``hlc.next_tick`` is
-# MONOTONIC — ``max(cache, witness, physical_now())+1`` — so deterministic "past" events
-# are only possible when the ticket starts from an empty HLC state and each injected
-# ``REBAR_HLC_NOW`` value moves FORWARD. Scenario A therefore creates its own fresh
-# far-past ticket and advances that injected clock in order; Scenario B creates B's
-# below-snapshot orphan BEFORE B witnesses A's higher future snapshot, then reconnects and
-# publishes it via a later real write. All cross-clone ordering below is fixed by explicit
-# timestamps, never by a wall-clock race (SDET: no timing races).
+# These scenarios exercise snapshot horizons through push, fetch, and merge, unlike the
+# manual-copy regressions above. Explicit increasing HLC values make ordering deterministic.
+# Scenario A starts a fresh far-past ticket. Scenario B writes its lower orphan before seeing
+# A's future snapshot, then reconnects and publishes through a later write.
 
 
 def _engine_run_env(repo: Path, *args: str, env_extra=None, check: bool = True):
@@ -1662,18 +1547,12 @@ _B_POST_MERGE_WRITE = 5 * 10**18  # the reconnect write that merges and publishe
 
 
 def test_scenario_a_normal_horizon_real_remote_append_visible_no_repair(two_clones):
-    """Scenario A (story 1fdc): the conservative horizon keeps a concurrent REAL remote
-    append safe with NO repair. A folds only FAR-PAST events while a YOUNG (current-time)
-    event stays live, so the SNAPSHOT timestamp is bounded far below any current-time
-    event; B's real current-time push therefore sorts AFTER the snapshot and replays on
-    top — visible immediately, with no ``fsck --repair`` and no SNAPSHOT_INCONSISTENT/
-    ORPHAN_EVENT. Unlike the two manual-copy regressions above, the remote append travels
-    through real ``git push``/``fetch``/merge via the engine's own sync.
+    """Keep a remote append safe under a conservative compaction horizon.
 
-    A purpose-built far-past ticket is used rather than the fixture ``seed`` because the
-    monotonic HLC floor (see module note) forbids a genuinely far-past event on ``seed``
-    (its CREATE is at real current time); the far-past band is what makes the snapshot ts
-    provably below the concurrent append."""
+    A fresh far-past ticket permits old events to fold while a young event remains above the
+    fold horizon, bounding the snapshot below B's later push. Read-side sync makes that append
+    immediately visible without repair, ``SNAPSHOT_INCONSISTENT``, or ``ORPHAN_EVENT``.
+    """
     _remote, repo_a, repo_b, _seed = two_clones
     tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
 
@@ -1718,10 +1597,8 @@ def test_scenario_a_normal_horizon_real_remote_append_visible_no_repair(two_clon
     )
     _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
 
-    # B fetches the compacted ticket via the engine's read-side sync, then appends a
-    # comment above the snapshot ts. The write auto-pushes to origin (real push).
-    # SETUP precondition: B must actually hold A's compacted ticket before it appends —
-    # an append onto a pre-compaction base would not exercise the scenario at all.
+    # Establish A's compacted state on B before its above-snapshot append. Otherwise the
+    # append would start from the pre-compaction base and miss the scenario.
     _sync_from_origin(tracker_b)
     _engine_run_env(
         repo_b,
@@ -1752,19 +1629,13 @@ def test_scenario_a_normal_horizon_real_remote_append_visible_no_repair(two_clon
 
 
 def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_clones):
-    """Scenario B (story 1fdc): an ADVERSARIAL far-FUTURE snapshot timestamp forces the
-    positional-skip data-loss class, and a REAL push/fetch/merge + ``fsck
-    --repair-snapshots`` converges BOTH clones. Mirrors
-    ``…resurrection_no_data_loss_and_repairable`` intent but via real sync (not a manual
-    file copy) and a far-future snapshot ts.
+    """Repair an orphan hidden below an adversarial future snapshot.
 
-    B first writes its orphan while disconnected, before it can witness A's future
-    snapshot. A then publishes a far-future snapshot. When B reconnects and performs a
-    later real write, merge-as-union publishes BOTH the pre-existing orphan (below the
-    snapshot) and the new post-merge event, reproducing the positional-skip drop without
-    any rollback switch. ``fsck --repair-snapshots`` then rebuilds the snapshot from the
-    full log and folds the orphan back in (GREEN); both clones then hold byte-identical
-    replayed state including B's specific comment."""
+    B writes offline before seeing A's snapshot, then reconnects and publishes both its
+    lower orphan and a later event through merge-as-union. Positional replay drops the orphan.
+    Snapshot repair rebuilds from the full log so both clones replay equal semantic state
+    except ``updated_at``, with B's comment restored.
+    """
     remote, repo_a, repo_b, seed = two_clones
     tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
 
@@ -1848,11 +1719,8 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
     # whose convergence is asserted byte-equal below.
     _reconverge_by_read_sync(repo_a, tracker_a, passes=1)
 
-    # GREEN convergence oracle — concrete, not merely exit 0. Parse each clone's replayed
-    # state and assert byte-equality. ``updated_at`` is a DERIVED presentation field
-    # (recomputed on every replay from the latest event) — popped from both before the
-    # comparison so an equality mismatch reflects real state divergence, not the derived
-    # clock. Everything else must match exactly.
+    # Compare complete replayed state except derived ``updated_at`` so only semantic state,
+    # rather than each replay's presentation clock, determines convergence.
     state_a = json.loads(_engine_run(repo_a, "show", seed, "--output", "json").stdout)
     state_b = json.loads(_engine_run(repo_b, "show", seed, "--output", "json").stdout)
     state_a.pop("updated_at", None)
@@ -1873,11 +1741,7 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
     assert b_uuid in _committed_files(tracker_b), f"B's comment {b_uuid} lost on B"
 
 
-# ──────────── Parent-first claim cascade cross-agent races (story f476) ───────────
-# The single-agent parent-first cascade (claiming an open child pulls its still-open
-# parent into progress under the same assignee) is covered elsewhere. The two tests
-# below add the CROSS-agent race coverage that Concurrency Doctrine sub-cases (a)
-# [same-tracker, two processes] and (b) [two offline clones] describe.
+# Cross-agent parent-first cascade races: two processes on one tracker and two offline clones.
 def _last_id(cp: subprocess.CompletedProcess) -> str:
     """The ticket id inside `create`'s confirmation line (warnings go to stderr)."""
     return _extract_created_id(cp.stdout)
@@ -1901,26 +1765,12 @@ def _dirs_with_blob(tracker: Path, needle: str) -> set[str]:
 
 
 def test_parent_cascade_same_tracker_race_winner_takes_parent_loser_aborts(two_clones):
-    """Same-tracker parent-cascade race (Concurrency Doctrine sub-case a). A parent
-    story P (open) with two open children C1/C2; two REAL processes concurrently claim
-    *different* children on the ONE tracker. Each child needs only its own single
-    claim — the sole point of contention is P's ``open -> in_progress`` driven by the
-    parent-first cascade.
+    """Let concurrent same-tracker claims of different children both succeed.
 
-    Contract asserted here: the two claims of DIFFERENT children never truly conflict,
-    so BOTH succeed (exit 0) and BOTH children end ``in_progress`` under their own
-    assignee. The only real contention is P's ``open -> in_progress``: whichever
-    cascade commits P first wins its ownership; the other process, arriving after the
-    lock shows P already ``in_progress``, does NOT re-cascade — it just claims its own
-    child (matching the single-agent contract "parent already in_progress -> only the
-    requested ticket moves"). Which agent's name lands on P is nondeterministic (either
-    is valid); everything else is deterministic.
-
-    Regression note: this pins the fix for the cascade TOCTOU where a concurrent
-    different-child claim used to abort with exit 10 because the parent-claim decision
-    was taken on an unlocked, stale ``open`` read and the locked parent claim then
-    rejected the second cascade. The cascade now treats a parent that a peer has
-    already progressed as a benign no-op and proceeds to claim the child.
+    The processes contend only on their open parent's cascade. The winner owns the parent.
+    Once the lock reveals it already in progress, the loser treats that transition as a
+    benign no-op and still claims its child. Thus both children retain their own assignees,
+    while either agent may validly own the parent.
     """
     _remote, repo_a, _repo_b, _seed = two_clones
     parent = _last_id(_engine_run(repo_a, "create", "story", "cascade race parent"))
@@ -2187,14 +2037,11 @@ def _merge_tree(tracker_a: Path, tracker_b: Path, label: str) -> subprocess.Comp
 
 
 def _assert_emit_is_append_only(two_clones, *, emit, event_type: str, retain: int) -> None:
-    """Two clones share a sidecar history padded to the retention bound, go offline, and each
-    performs ONE automatic emit. Emit must APPEND ONLY: no committed event may disappear, and
-    the two independently valid histories must still reconverge by union.
+    """Require offline emits at the retention bound to remain append-only and reconverge.
 
-    The base is padded with REAL emitted payloads so the pruned event and its replacement are
-    content-similar neighbours. Git's rename detection is similarity-based, so a synthetic
-    base whose events differ in length can fall under the 50% threshold and make a
-    delete+add pair merge cleanly by luck — masking the defect.
+    Production-shaped emitted payloads keep neighboring events similar enough for Git rename
+    detection.
+    Unequal synthetic content could let an illicit delete-add merge cleanly by luck.
     """
     _remote, repo_a, repo_b, ticket_id = two_clones
     tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)

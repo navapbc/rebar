@@ -49,12 +49,10 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
 
 
 def _clone_tickets(source: Path, destination: Path) -> None:
-    """Clone the ``tickets`` branch, surfacing git's own diagnosis on failure.
+    """Clone ``tickets`` and preserve Git's stderr in any assertion failure.
 
-    Deliberately NOT ``-q`` and NOT ``check=True``: a bare
-    ``CalledProcessError`` renders only ``returned non-zero exit status 128``
-    and drops the captured stderr, which is where git states the cause
-    [rebar:57d2-e356-7eb4-4bf5].
+    Quiet mode and ``check=True`` are avoided because they hide the diagnosis behind a
+    generic exit-128 ``CalledProcessError``.
     """
     cp = subprocess.run(
         ["git", "clone", "-b", "tickets", str(source), str(destination)],

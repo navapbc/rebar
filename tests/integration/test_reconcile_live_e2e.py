@@ -1,44 +1,14 @@
-"""Story d01e — comprehensive LIVE reconciler validation + GUARANTEED bilateral cleanup.
+"""Exercise the bidirectional reconciler matrix and its bilateral cleanup attempts.
 
-Runs the full bidirectional matrix against a dedicated live Jira TEST project and
-guarantees teardown in BOTH systems (Jira issues hard-deleted + the local throwaway
-env discarded), even on assertion failure / exception. The genuinely-live scenarios
-self-skip without live env; every other matrix criterion is exercised DETERMINISTICALLY
-against the real reconciler modules (no network), so the matrix runs green offline and
-emits a JSON/JUnit report.
+Credential-backed cases use a scoped Jira test project. Deterministic cases import production
+reconciler modules without network access. ``ArtifactTracker`` records partial setup. Teardown
+retries each deletion and logs identifiers that remain after retry exhaustion.
 
-Run the live matrix with:  ``pytest tests/integration/test_reconcile_live_e2e.py -m live``
-(the ``@_requires_live`` scenarios additionally need JIRA_URL / JIRA_USER /
-JIRA_API_TOKEN + acli on PATH + a scoped test project).
-
-Design (harness pattern, ADR 0037): an ``ArtifactTracker`` records exactly which of
-the N synthetic artifacts were actually created (partial-setup aware), and
-``_bilateral_teardown`` deletes precisely those — retrying each delete with bounded
-backoff, appending the id to ``leaked-artifacts.log`` (a CI artifact) and failing the
-run non-zero on exhaustion, so a leak is loud and never silent.
-
-Each matrix scenario asserts ONE observable pass criterion against the real reconciler
-seam that implements it:
-
-* C1 — outbound both-sides conflict is RECORDED (local-wins preserved) + a deduped
-  ``outbound-field-conflict`` bridge alert lands (bug a713).
-* C2 — a hard-deleted bound issue retires after grace, and the re-create path re-stamps
-  the SAME ``rebar-id:<local_id>`` label + ``local_id`` entity property and re-binds
-  (write-ahead ordering, story 9622).
-* C3 — a mapped-but-allowlist-dropped outbound field (issuetype) fires a deduped
-  ``outbound-field-dropped`` bridge alert (bug acd0).
-* C4 — a simulated 429 on the ``_run_acli`` subprocess loop → jittered bounded backoff →
-  success; Retry-After honored when present (bug 943f).
-* echo — outbound comments carry ``<!-- rebar:reconciler-echo -->`` and the inbound
-  differ suppresses them (zero inbound mutations over just-written data).
-* status round-trip — ``blocked`` → nearest live Jira status + ``rebar-status:blocked``
-  label → inbound restores ``blocked``; ``idea ↔ IDEA``; idempotent over N=3 (no
-  oscillation).
-* idempotency — a field diff over just-written (equal) data emits zero mutations.
-* tombstone/grace — a single 404 does NOT retire; ``RECONCILER_ABSENT_RETIRE_GRACE``
-  consecutive 404s soft-retire the binding to ``bindings-retired.json``.
-* blast-radius — ``classify.census(...)['breaker']['allowed'] is False`` on a mass-change
-  pass; a lone acting decision under the cap is allowed.
+The matrix covers deduplicated conflict and dropped-field alerts, grace-based retirement
+and identity-preserving rebinds, bounded 429 retries, echo suppression, stable status
+round-trips, no-op equality, tombstone grace, and blast-radius rejection. Run
+credential-backed cases with ``pytest tests/integration/test_reconcile_live_e2e.py -m live``
+and the documented Jira credentials, acli, and test project.
 """
 
 from __future__ import annotations
@@ -56,15 +26,8 @@ from typing import Any
 
 import pytest
 
-# xdist_group pins every test in this module to a SINGLE pytest-xdist worker so the
-# live-Jira reconciler round-trips run serially under parallel collection (story 8d36).
-# These tests assert on Jira's eventual consistency, which cross-worker interleaving would
-# make flaky. IMPORTANT: pytest-xdist honours this mark ONLY under `--dist loadgroup` —
-# under `--dist load` (xdist's default) or `--dist worksteal` it is parsed and silently
-# DISCARDED, so the tests scatter across workers with no warning. CI's integration tier
-# passes `--dist loadgroup`; an ad-hoc local `-n auto` does not. The collection guard in
-# tests/_live_jira_confinement.py hard-fails any other parallel invocation when live Jira
-# credentials are actually present, so the gap cannot pass unnoticed.
+# Serialize Jira round-trips on one xdist worker. The mark requires ``--dist loadgroup``.
+# The credential collection guard rejects other parallel modes.
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.live,
@@ -75,21 +38,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RECON_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
 LEAKED_LOG = REPO_ROOT / "leaked-artifacts.log"
 
-# The reconciler package is not installed top-level (it lives under _engine/); make it
-# importable so the modules' OWN top-level ``from rebar_reconciler.X import ...`` sibling
-# imports resolve. Story eca4 replaces this path shim with a proper package import.
+# Expose the nested reconciler package so its top-level sibling imports resolve.
 if str(RECON_DIR.parent) not in sys.path:
     sys.path.insert(0, str(RECON_DIR.parent))
 
-# CI runs this file in the shared *integration tier* alongside ~170 other reconciler test
-# modules that each load siblings via ``spec_from_file_location`` — so the canonical
-# ``sys.modules["rebar_reconciler.X"]`` entries get clobbered mid-session (a partial/other
-# copy). Importing a seam by that shared key is therefore NON-deterministic (it caused
-# ``rebar_reconciler.classify`` to read a copy with no ``Decision`` in CI). We instead load
-# every seam we assert against under a UNIQUE ``d01e_<mod>`` key, giving each test an
-# isolated module object immune to cross-test pollution. (Their internal sibling imports
-# still resolve via the canonical keys above — those are the real modules; we only need our
-# OWN references isolated.)
+# Other integration modules replace canonical reconciler entries in ``sys.modules``.
+# Cache this suite's references under unique keys while leaving sibling imports canonical.
 _MOD_CACHE: dict[str, ModuleType] = {}
 
 # The Jira vendor modules were relocated into ``adapters/jira/`` (ADR 0035 §(c), epic
@@ -325,13 +279,9 @@ def test_blast_radius_breaker_via_census():
     assert "breaker" not in bare
 
 
-# --------------------------------------------------------------------------- #
-# LIVE matrix scenarios — one observable pass criterion each, run under the
-# guaranteed ``_bilateral_teardown`` so a mid-scenario failure still cleans up
-# both systems. The deterministic scenarios drive the REAL reconciler seam that
-# implements the behavior; the ``@_requires_live`` probe additionally mutates
-# real Jira (project REB) with tracked, guaranteed cleanup.
-# --------------------------------------------------------------------------- #
+# Matrix cases assert one observable criterion through imported production modules. The single
+# credential-backed probe mutates tracked Jira artifacts. Teardown attempts their removal after
+# failures and records each artifact whose deletion retries exhaust.
 
 
 @_requires_live
@@ -391,24 +341,11 @@ def test_delete_permission_probe(tmp_path):
 
 
 def _fresh_search(client: Any, jql: str) -> Any:
-    """Run ``jql`` against Jira, bypassing ``AcliClient``'s per-JQL memo.
+    """Search Jira after invalidating this JQL's cached result when supported.
 
-    ``AcliClient.search_issues`` memoizes its full result set per JQL string —
-    no TTL, and **negative (empty) answers are cached too**. That is correct for
-    the pagination callers it was built for (they re-ask the same JQL only to
-    slice the next page), but it is
-    fatal for a poll: an index-visibility poll re-issues two CONSTANT JQL strings
-    on ONE client, so only the first attempt would ever reach Jira and every later
-    attempt would replay that first (empty) answer from a dict. The budget and the
-    exponential backoff would then be inert — the poll would sleep out its whole
-    budget without asking Jira again, and could only succeed if the index happened
-    to have converged at the instant of the very first query.
-
-    Evicting via the supported ``invalidate_search_cache`` door before each call
-    is the same pattern the production JQL
-    retry loop in ``rebar_reconciler.access_check`` already uses, and it keeps the
-    fix at the polling call site: ``search_issues``'s default caching semantics are
-    untouched for every other caller.
+    ``search_issues`` caches empty answers without a TTL, which would turn an
+    index-visibility poll into repeated reads of its first miss. Per-query eviction keeps
+    each polling attempt uncached without changing caching for other callers.
     """
     invalidate = getattr(client, "invalidate_search_cache", None)
     if callable(invalidate):
@@ -459,20 +396,12 @@ def _poll_until_visible(
     time_fn: Callable[[], float] = time.monotonic,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> bool:
-    """Poll for index-visibility of a just-created issue (Jira eventual consistency).
+    """Poll fresh key and summary searches until Jira indexes a new issue or time expires.
 
-    Tries a key search first, then a summary fallback (the ``labels``/``key`` index can
-    lag the ``summary`` index after create). Returns True as soon as either sees it.
-
-    ``timeout_s`` defaults to the env-tunable budget (see ``_default_index_visibility_timeout``)
-    because convergence lag under load can exceed the old flat 30s. The poll interval grows
-    exponentially (1, 2, 4, 8s, capped) — the same backoff shape as ``_retry`` — so a slow
-    index is waited out patiently rather than polled at a fixed 2s. ``time_fn``/``sleep_fn``
-    are injectable purely for deterministic testing; the live call site keeps real time.
-
-    Every attempt goes through ``_fresh_search``, so both JQLs are genuinely re-asked each
-    time round the loop; without that the client's per-JQL memo would serve the first
-    (empty) answer forever and make the budget and backoff below purely decorative.
+    The env-tunable budget accommodates loaded indexes. Intervals grow exponentially to a
+    cap. Injectable time functions keep tests deterministic. Credential-backed calls use the
+    monotonic clock and sleep functions.
+    Fresh searches prevent a cached initial miss from defeating the retry budget.
     """
     if timeout_s is None:
         timeout_s = _default_index_visibility_timeout()
@@ -520,13 +449,7 @@ class _EventuallyVisibleClient:
 
 
 def test_poll_until_visible_waits_out_slow_index_convergence():
-    """A just-created issue that only converges in Jira's index AFTER the old fixed 30s
-    budget (here at a simulated t=60s) must still be found within the hardened budget.
-
-    Drives the helper with an injected monotonic clock + fake client so it runs
-    deterministically in simulated time (no wall-clock, no Jira creds). Asserts the
-    observable outcome (found) — not sleep counts or private names.
-    """
+    """Find an issue that becomes visible at simulated 60 seconds, beyond the old budget."""
     clock = _FakeClock()
     client = _EventuallyVisibleClient("REB-9999", clock, visible_at=60.0)
     found = _poll_until_visible(
@@ -568,13 +491,7 @@ def test_index_visibility_timeout_env_override(monkeypatch):
 
 
 class _IndexLaggingAcliRun:
-    """Stands in for ``AcliClient._run`` — a Jira whose search index only returns the
-    just-created issue at/after ``visible_at`` on the injected simulated clock.
-
-    Substituting at the SUBPROCESS seam (not at ``search_issues``) is the point: it keeps
-    the real ``AcliClient.search_issues`` — including its per-JQL result cache — in the
-    path, which a hand-rolled fake client silently omits. No network, no creds.
-    """
+    """Model index lag at the subprocess seam while retaining ``AcliClient`` caching."""
 
     def __init__(self, key: str, summary: str, clock: _FakeClock, *, visible_at: float) -> None:
         self._key = key
@@ -592,17 +509,11 @@ class _IndexLaggingAcliRun:
 
 
 def test_poll_until_visible_requeries_a_real_client_until_the_index_converges():
-    """Bug d30c: the poll must keep asking JIRA, not keep re-reading its own first answer.
+    """Re-query Jira instead of replaying a client's cached initial miss.
 
-    ``AcliClient.search_issues`` memoizes per-JQL and caches NEGATIVE results too, so a
-    poll that re-calls it with the same JQL gets the first (empty) answer back forever —
-    turning the 120s budget into a single-shot check that can only pass if the index has
-    already converged when the very first query lands. Raising the budget or backing off
-    cannot help, because no further query is ever issued.
-
-    Drives the helper against a REAL ``AcliClient`` (stubbed only at the subprocess seam)
-    with an index that converges at a simulated t=60s — comfortably inside the 120s
-    budget — and asserts the observable outcome: the issue is found.
+    The test stubs the subprocess runner and injects simulated clock and sleep functions while
+    preserving ``AcliClient``'s per-JQL cache. An index appearing at simulated 60 seconds must
+    still be found within the 120-second budget.
     """
     clock = _FakeClock()
     key, summary = "REB-9999", "synthetic summary"
