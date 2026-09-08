@@ -24,18 +24,10 @@ def _env_truthy(name: str) -> bool:
 
 
 def _all_skipped_canary_should_fail(collected: int, executed: int, run_external: bool) -> bool:
-    """Decide whether an all-skip canary should FAIL the session.
+    """Return whether an opted-in service lane collected tests but ran none.
 
-    The canary exists so a scheduled external-integration run cannot go green while every
-    live test of some kind silently skipped (missing creds, a broken auth step) — an
-    all-skip run validates nothing. Only relevant when the external tier is opted in via
-    ``REBAR_RUN_EXTERNAL``; otherwise it is a no-op (returns False). Fails only when at
-    least one marked test was collected but NONE executed.
-
-    Marker-agnostic (story f124): the same predicate now guards BOTH the live-Jira lane and
-    the live-LLM provider-matrix lane. A provider arm whose credential is absent skips every
-    ``llm_live`` test, and without this the arm would report green having called no model —
-    the exact "a missing secret reads as green" failure the matrix must never have.
+    The marker-agnostic canary prevents missing credentials or broken authentication from making
+    an external Jira or provider lane pass without exercising its service.
     """
     if not run_external:
         return False
@@ -60,13 +52,10 @@ def _executed_set(config: pytest.Config) -> set[str]:
     return store
 
 
-# Module-level sentinel -> the marker it earns. Marking by sentinel presence keeps the canary
-# bookkeeping in one place instead of requiring each test to carry the marker by hand.
-#   _live_jira_ready -> jira_live  (live Jira credentials + acli)
-#   _live_llm_ready  -> llm_live   (a live LLM call on the CONFIGURED provider; story f124)
-# `llm_live` is what the external suite's provider matrix selects on: the matrix job runs
-# `-m "external and llm_live"` once per provider, and the services job runs the complement, so
-# the union is exactly the set that ran before the split.
+# Sentinel names map modules to the external lane selected by CI. Central marking also lets the
+# session canary detect a lane where every collected test skipped. ``_live_jira_ready`` selects
+# ``jira_live``. ``_live_llm_ready`` selects ``llm_live``. The provider matrix runs the latter,
+# while the services job runs its complement.
 _SENTINEL_MARKERS = {
     "_live_jira_ready": "jira_live",
     "_live_llm_ready": "llm_live",
@@ -119,11 +108,9 @@ _CANARIES = (
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """Fail a scheduled external run in which every test of a live lane skipped.
+    """Fail an opted-in external session when a collected service lane ran no tests.
 
-    No-op unless the external tier is opted in (``REBAR_RUN_EXTERNAL``). Reports the
-    collected/executed/skipped counts per live lane, and — when at least one test in a lane
-    was collected but none executed — flips the session to a failure exit.
+    The report includes collected, executed, and skipped counts for each lane.
     """
     if not _env_truthy("REBAR_RUN_EXTERNAL"):
         return
@@ -144,14 +131,10 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 @pytest.fixture(autouse=True)
 def _require_external_opt_in() -> None:
-    """Make every test under tests/external/ INERT unless explicitly opted in.
+    """Skip external tests unless ``REBAR_RUN_EXTERNAL`` is enabled.
 
-    External tests hit live third-party services (real Jira mutations, billable
-    LLM calls). They must not run during a default suite invocation even when
-    credentials happen to be present in the environment — that is the leak this
-    guard closes (see bug 4a48-6dd5-aef3-4c8e). This is IN ADDITION to each
-    test's own credential skipif: both the opt-in env var AND credentials are
-    required for an external test to actually execute.
+    This prevents credential presence alone from activating third-party mutations or provider
+    calls. Each test must also satisfy its service-specific readiness check.
     """
     if not _env_truthy("REBAR_RUN_EXTERNAL"):
         pytest.skip(
@@ -162,18 +145,10 @@ def _require_external_opt_in() -> None:
 
 @pytest.fixture(autouse=True)
 def _allow_live_model_requests() -> Iterator[None]:
-    """Re-enable live model requests for the external tier.
+    """Permit model requests only while the opted-in external tier runs.
 
-    The default suite installs a session-scoped safety net
-    (``tests/conftest.py::_no_live_model_requests``) that flips pydantic-ai's global
-    ``models.ALLOW_MODEL_REQUESTS`` kill-switch to ``False`` so no unit test can
-    accidentally bill a provider. The external tier's entire purpose is the opposite —
-    it makes REAL, billable calls — so it must flip the switch back on, or every live
-    call raises ``RuntimeError: model requests are not allowed`` before any network I/O
-    and the external-integration workflow fails without validating anything. Runs after
-    the ``_require_external_opt_in`` skip, so it is only active for opted-in runs.
-    Guarded — ``pydantic_ai`` is behind the ``[agents]`` extra and absent in lean lanes,
-    where this is a no-op. Restores the prior value on teardown.
+    The default suite disables pydantic-ai network requests. This fixture restores the prior
+    global value after the tier and does nothing when the optional agents package is absent.
     """
     try:
         from pydantic_ai import models as _pai_models
@@ -193,12 +168,7 @@ def _git(*args: str, cwd: Path) -> None:
 
 
 def build_scratch_rebar_repo(repo: Path) -> Path:
-    """Create an initialized rebar repo at *repo* (mirrors the interface tier).
-
-    Extracted from the ``rebar_repo`` fixture so the default-suite guard test
-    (``tests/unit/test_external_tier_gate_ref.py``) can exercise the REAL construction
-    this tier's live tests run on, without the ``external`` marker or live credentials.
-    """
+    """Initialize the repository shape shared by external and interface-tier fixtures."""
     repo.mkdir(parents=True, exist_ok=True)
     _git("init", "-q", cwd=repo)
     _git("config", "user.email", "test@example.com", cwd=repo)
@@ -212,15 +182,10 @@ def build_scratch_rebar_repo(repo: Path) -> Path:
 
 
 def write_project_prompt(repo: Path, prompt_id: str, text: str) -> Path:
-    """Write a project prompt override at ``<repo>/.rebar/prompts/<prompt_id>.md``, COMMITTED.
+    """Commit a project prompt override under ``.rebar/prompts``.
 
-    The commit is load-bearing, not hygiene. A workflow with LLM steps runs inside the
-    snapshot gate (``src/rebar/llm/workflow/runs.py``), and the suite defaults to
-    ``REBAR_GATE_SOURCE=attested`` / ``REBAR_GATE_REF=HEAD`` (``tests/conftest.py``), so
-    ``prompts.get_prompt`` re-roots onto the snapshot materialized at ``HEAD``. A prompt
-    left only in the working tree is simply ABSENT there, and the step dies on
-    ``PromptNotFound: unknown prompt '<id>'`` before reaching the model — which is how the
-    live ``single_turn`` test came back ``status='failed'`` (bug baa8).
+    Workflow steps read the attested ``HEAD`` snapshot. An uncommitted override is unavailable
+    there and fails before model execution.
     """
     path = repo / ".rebar" / "prompts" / f"{prompt_id}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -230,12 +195,9 @@ def write_project_prompt(repo: Path, prompt_id: str, text: str) -> Path:
     return path
 
 
-# The plan the live plan-review guard reviews. It must CLEAR the blocking DET floor:
-# `review_plan` short-circuits before the LLM tier on any blocking DET finding and reports
-# `coverage.llm_ran=False` (src/rebar/llm/plan_review/workflow_ops.py), so a plan that trips
-# one makes "did we reach a real model?" unprovable. The `## Testing` section is what
-# satisfies the BLOCKING P10 verification-presence check
-# (src/rebar/llm/plan_review/det_clarity.py) — do not drop it (bug baa8).
+# This plan clears deterministic review checks before the provider-backed phase. Its
+# ``## Testing`` section satisfies the verification-presence rule, allowing the fixture to
+# prove that a model call occurred.
 PLAN_REVIEW_FIXTURE_PLAN = (
     "## Why\nThe in-memory review cache is lost on restart.\n\n"
     "## What\nPersist it under `src/rebar/cache.py` behind the existing seam.\n\n"

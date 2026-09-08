@@ -1,33 +1,12 @@
-"""Provider-aware live-LLM readiness probe for the external tier (story f124).
+"""Provider-aware readiness checks for the external LLM tier.
 
-WHY THIS EXISTS. Every live-LLM module in this tier used to gate on the literal
-``ANTHROPIC_API_KEY``. That is correct only while the suite runs on exactly one provider, and it
-fails in the WORST possible way once it does not: on a Bedrock arm — which authenticates from the
-ambient AWS chain and deliberately carries no Anthropic key — every one of those tests would
-``skip``, the arm would report **green**, and it would have validated nothing. A credential check
-that names one provider cannot gate a multi-provider matrix.
+The probe resolves the ``standard`` model through project configuration, maps protocol
+qualifiers to a provider family, and checks that provider's credential. Key-authenticated
+providers use their configured environment variables. Bedrock uses the boto3 credential chain.
 
-So the probe asks two questions in order:
-
-1. **Which provider will this run actually call?** Read it from the RESOLVED ``standard`` model
-   class, i.e. from the same config layering (``REBAR_LLM_CONFIG_FILE`` over the discovered
-   config) that the run itself will use — never from "which key happens to be set", which is the
-   ambient-default behaviour this story removes.
-2. **Is THAT provider's credential present?** Anthropic/OpenAI carry an API key; Bedrock has none
-   — rebar manages no Bedrock key and authenticates from the ambient AWS chain
-   (``rebar.llm.bedrock_model``), so the Bedrock answer is "boto3 resolves credentials", not "an
-   env var is set".
-
-WHAT IT DELIBERATELY DOES **NOT** CHECK: the AWS **region**. A missing region must FAIL, loudly,
-with the typed ``LLMConfigError`` that names ``REBAR_LLM_BEDROCK_REGION`` (ticket a574) — folding
-it into a skip predicate would convert exactly that hard error back into a green no-op, which is
-the failure mode this module exists to prevent. Credential discovery and region discovery are
-independent (see ``infra/runbooks/bedrock-access.md``).
-
-Modules using this probe also expose a module-level ``_live_llm_ready`` sentinel, which
-``conftest.py`` auto-marks as ``llm_live`` — the marker the provider matrix selects on and the
-all-skip canary counts. ``tests/unit/test_ci_provider_matrix.py`` fails if a module imports this
-one without defining the sentinel.
+Region validation stays outside readiness so a missing Bedrock region raises ``LLMConfigError``
+instead of turning the run into a skip. Modules expose ``_live_llm_ready`` so ``conftest.py`` can
+apply ``llm_live`` and detect an arm where every provider-backed test skipped.
 """
 
 from __future__ import annotations
@@ -51,12 +30,8 @@ _PROVIDER_KEY_ENV = {
 #: best-effort OpenAI-compatible endpoint (story S4) is not forced to borrow OPENAI_API_KEY.
 _GENERIC_KEY_ENV = "REBAR_LLM_API_KEY"
 
-#: The matrix dimension names the provider family; Pydantic AI's OpenAI provider has
-#: protocol-specific model qualifiers. Rebar deliberately selects Chat Completions, so its
-#: resolver canonicalizes every openai-family spec to ``openai-chat:`` (ticket 1d22) — while
-#: the workflow's ``REBAR_EXPECTED_LLM_PROVIDER`` and this module's credential table stay keyed
-#: by the FAMILY name ``openai``. This map is the single qualifier→family translation point for
-#: the live tier (ticket cb46).
+#: Translate protocol qualifiers to the provider families used by workflow arms and credential
+#: lookup. Rebar selects ``openai-chat`` while the matrix names the family ``openai``.
 _PROVIDER_FAMILY_BY_QUALIFIER = {
     "openai-chat": "openai",
     "openai-responses": "openai",
@@ -73,15 +48,11 @@ def provider_family(qualifier: str) -> str:
 
 
 def configured_provider(repo_root: str | None = None) -> str:
-    """The provider FAMILY this run will actually call, read from the resolved ``standard`` class.
+    """Resolve the configured ``standard`` model and return its provider family.
 
-    Resolution goes through :func:`rebar.llm.model_classes.resolve_model_string`, so a
-    ``REBAR_LLM_CONFIG_FILE`` overlay (how the CI matrix selects its arm) and the discovered
-    config are honoured by the same code the run itself uses. The resolved qualifier is
-    translated to its provider family via :func:`provider_family` — the resolver emits
-    protocol-specific qualifiers like ``openai-chat`` (ticket 1d22), while credential lookup
-    and the arm-equality guard are keyed by family. A resolved string with no ``provider:``
-    prefix means the shipped default, :data:`DEFAULT_PROVIDER`.
+    This uses the same discovery and ``REBAR_LLM_CONFIG_FILE`` layering as execution. Protocol
+    qualifiers are normalized through :func:`provider_family`, and unqualified model strings
+    use :data:`DEFAULT_PROVIDER`.
     """
     try:
         from rebar.llm.model_classes import resolve_model_string
@@ -137,17 +108,10 @@ def agents_extra_installed() -> bool:
 
 
 def live_llm_ready(required_provider: str | None = None) -> bool:
-    """True when a real LLM call can be made on the CONFIGURED provider.
+    """Return whether the provider selected for this module has usable credentials.
 
-    ``required_provider`` is for a module that PINS a provider in its own ``LLMConfig``
-    instead of resolving the ``standard`` model class — e.g.
-    ``test_completion_banking_behavior_0707.py``, which pins
-    ``bedrock:us.anthropic.claude-sonnet-4-6`` to hold the model fixed while reproducing that
-    bug. Such a module calls Bedrock on EVERY arm, including the arms that carry no AWS
-    credential (the OIDC step is gated to the bedrock arm), so the plain probe answers the
-    wrong question: it reports the *arm's* credential while the module calls something else.
-    Passing the pinned provider makes readiness mean what the module actually needs — this arm
-    resolves that provider AND its credential is present (bug 4f74).
+    ``required_provider`` covers modules that pin a model instead of following the matrix arm.
+    Such modules are ready only when the arm resolves that provider and its credential is present.
     """
     if not agents_extra_installed():
         return False
@@ -180,14 +144,10 @@ skip_without_live_llm = pytest.mark.skipif(not live_llm_ready(), reason=_skip_re
 
 
 def skip_unless_provider(required_provider: str) -> pytest.MarkDecorator:
-    """The gate for a module that PINS *required_provider* rather than following the arm.
+    """Skip a provider-pinned module when its provider does not match the matrix arm.
 
-    Skips — VISIBLY, with a reason naming both the pinned provider and the arm's resolved one
-    — on any arm that does not run that provider. A skip here is honest: the anthropic arm
-    never claimed to cover Bedrock. It does not weaken the matrix's "a missing credential
-    FAILS, never skips" rule, which is enforced by the workflow's per-arm credential preflight
-    and by the all-skip canary (both untouched): the canary fires only when NO ``llm_live``
-    test executed, and the modules that follow the arm still execute here.
+    The reason names both providers. Arm-following modules still execute, so this skip does not
+    defeat credential preflight or the all-skip canary.
     """
     return pytest.mark.skipif(
         not live_llm_ready(required_provider),

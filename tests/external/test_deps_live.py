@@ -1,13 +1,8 @@
-"""Live deps.dev oracle check for the T0 dependency-existence lane (story 2554).
+"""External check of the deps.dev T0 dependency-existence oracle.
 
-The hermetic unit tier monkeypatches the HTTP seam; this is the external
-counterpart that hits the REAL deps.dev v3 existence endpoint, proving the
-end-to-end gauntlet against the live oracle (the spike2_deps.py E4 result, now in
-the suite). Real/normalized names → ``refuted``; a hallucinated/slop name → never
-a false absence (an ``abstain``). Marked ``external`` (excluded from the default
-run; needs REBAR_RUN_EXTERNAL=1 and network to api.deps.dev). Run locally::
-
-    REBAR_RUN_EXTERNAL=1 pytest -m external tests/external/test_deps_live.py
+The test calls the deps.dev v3 endpoint when ``REBAR_RUN_EXTERNAL`` is enabled. Existing and
+normalized package names produce ``refuted``. An unknown name produces ``abstain`` rather than a
+false absence.
 """
 
 from __future__ import annotations

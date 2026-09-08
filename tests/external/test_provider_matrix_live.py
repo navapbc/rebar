@@ -1,28 +1,12 @@
-"""The provider matrix's own arm-integrity checks, run INSIDE each arm (story f124).
+"""Runtime integrity checks for each external provider-matrix arm.
 
-The unit tier can prove things about the workflow FILE (see
-``tests/unit/test_ci_provider_matrix.py``); only a test running inside the arm can prove things
-about the arm's REALISED environment. That is what these are for, and each corresponds to a way
-the matrix could be silently wrong while every other test still passed:
+The workflow declares an expected provider family and selects it through a configuration overlay.
+These checks require the resolved model classes and scalar ``cfg.model`` to match that family,
+allow only its credential to be nonblank, and require both Bedrock region settings.
 
-* **the arm ran the provider it claims.** The workflow declares the arm's provider in
-  ``REBAR_EXPECTED_LLM_PROVIDER`` and selects it through a ``REBAR_LLM_CONFIG_FILE`` overlay. If
-  the pointer were mis-pathed, unreadable, or shadowed, every live test would still pass — on the
-  DEFAULT provider — and the arm would report a green Bedrock run that never touched Bedrock.
-* **the arm holds NO other provider's credential.** A Bedrock arm that also carried
-  ``ANTHROPIC_API_KEY`` could fall back to direct Anthropic on any path that reads a key rather
-  than the resolved model string, and the fallback would look like success.
-* **Bedrock resolved a region.** MEASURED (ticket a574): no region resolves from IMDS, and
-  ``build_bedrock_provider`` then raises a typed ``LLMConfigError``. Asserting a region resolved
-  turns "the arm is one env var away from a hard failure" into a visible test result.
-
-All of these are skipped when ``REBAR_EXPECTED_LLM_PROVIDER`` is unset — i.e. everywhere except
-CI — because a workstation legitimately has several providers' keys exported at once and the
-matrix's single-credential discipline is a property of the CI arm, not of a developer's shell.
-
-No model call is made here, but the module carries the standard live-LLM gate so that an arm with
-no credential skips these too; otherwise this module alone would keep executing and the
-``llm-live-canary`` all-skip check (tests/external/conftest.py) could never fire.
+CI sets ``REBAR_EXPECTED_LLM_PROVIDER`` so each arm can compare its resolved configuration with
+the declared family. The standard readiness sentinel keeps an arm without credentials eligible
+for the all-skip canary without making a model call.
 """
 
 from __future__ import annotations
@@ -53,18 +37,11 @@ _skip_unless_ci_arm = pytest.mark.skipif(
 @_live_llm.skip_without_live_llm
 @_skip_unless_ci_arm
 def test_the_ambient_default_model_also_resolves_to_the_declared_provider() -> None:
-    """`cfg.model` is a SECOND resolution path, and checking only the CLASSES misses it.
+    """Require scalar ``cfg.model`` to resolve to the arm's provider family.
 
-    This test exists because its sibling above did NOT catch a real leak. In the f124 incident the
-    class assertion PASSED on all three arms while three tests still called
-    `model=anthropic:claude-opus-4-8`, because an op that resolves `cfg.model` rather than naming a
-    class never consults the class table at all: `config.py` falls back to `DEFAULT_MODEL`, the bare
-    literal "claude-opus-4-8", which infers provider `anthropic`. On a non-Anthropic arm those calls
-    then failed with "Could not resolve authentication method" — the arm's `ANTHROPIC_API_KEY` is
-    blanked deliberately.
-
-    So the class assertion alone is over the WRONG SURFACE for this story's stated goal of removing
-    the ambient default. The overlay now sets `[llm] model` as well, and this pins it."""
+    Model classes are a separate resolution surface. Checking both prevents the scalar default
+    from sending an arm to another provider.
+    """
     from rebar.llm.config import LLMConfig
 
     resolved = LLMConfig.from_env().model
@@ -106,12 +83,9 @@ def test_every_model_class_resolves_to_the_declared_provider() -> None:
 @_live_llm.skip_without_live_llm
 @_skip_unless_ci_arm
 def test_the_arm_carries_no_other_providers_credential() -> None:
-    """Only the declared provider's credential may be present.
+    """Require only the declared provider credential to be nonblank.
 
-    This is the runtime half of "the Bedrock arm does not silently fall back to
-    ANTHROPIC_API_KEY": the workflow guards every key expression on ``matrix.provider``, and this
-    asserts the realised environment matches. An empty-string value counts as absent (that is
-    what a guarded GitHub Actions expression evaluates to on a non-matching arm).
+    Guarded CI expressions become empty strings on other arms, which count as absent.
     """
     foreign = {
         name: provider
@@ -128,14 +102,10 @@ def test_the_arm_carries_no_other_providers_credential() -> None:
 @_live_llm.skip_without_live_llm
 @_skip_unless_ci_arm
 def test_bedrock_arm_resolved_a_region() -> None:
-    """Bedrock only: a region resolved, from BOTH the rebar knob and the AWS-standard var.
+    """Require both Bedrock region variables on the Bedrock arm.
 
-    Ticket a574: IMDS supplies NO region, so credential discovery succeeding says nothing about
-    region discovery. rebar's own knob alone was ALSO insufficient there, which is why the arm
-    sets both. If either is missing the provider build raises a typed ``LLMConfigError`` (pinned by
-    ``test_missing_region_raises_a_typed_error_naming_the_setting`` in
-    ``tests/unit/test_bedrock_provider.py``) — this test makes that latent hard failure visible as
-    a named assertion instead.
+    Credentials do not supply a region. Missing either setting would fail provider construction
+    with ``LLMConfigError``.
     """
     if _expected != "bedrock":
         pytest.skip("region resolution is a Bedrock-arm concern")

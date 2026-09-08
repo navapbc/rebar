@@ -1,40 +1,17 @@
-"""COMPREHENSIVE LIVE round-trip test for Jira link sync (story 25ae-92e6-2927-49b6).
+"""External Jira link round trip through the reconciler differ and apply.
 
-This is the DIFFER→APPLY round-trip the client-primitive probe
-(tests/external/test_link_sync_live.py) deliberately is NOT: that probe proves
-``set_relationship`` / ``get_issue_links`` / ``delete_issue_link`` function and
-captures the live issuelink JSON shape; THIS test drives the actual
-reconciler differ/apply semantics against REAL Jira:
+The client-primitive probe covers individual operations. This test drives the reconciler's
+linked differ and apply path against Jira.
 
-  1. Outbound DIFFER emits a link ADD for a local ``blocks`` dep, and the
-     outbound APPLY leaf (``apply_outbound._apply_outbound_update``) creates a
-     real Jira link via the same wiring production uses.
-  2. The outbound DIFFER dedups against the now-live link (a second reconcile
-     pass would emit NO link ADD — no duplicate, no churn).
-  3. The inbound DIFFER reads the real live issuelink (REST-nested shape) and
-     reflects it into a rebar relation with the correct direction.
-  4. (OPTIONAL) inbound APPLY into a throwaway rebar tracker — SKIPPED by
-     default (the inbound apply via ``rebar.link`` is covered by the mocked
-     unit test ``tests/integration/rebar_reconciler/test_link_sync.py``); see
-     the note at the call site.
+It applies a local ``blocks`` dependency, confirms the service link, verifies outbound dedup,
+and maps the nested inbound response back to the correct local direction. Inbound application
+to a local tracker remains covered by integration tests.
 
-Gating (mirrors the client-primitive probe): auto-marked ``external`` by the
-root conftest hook, made inert unless ``REBAR_RUN_EXTERNAL=1`` by
-tests/external/conftest.py, and skipped here unless Jira connection configuration
-including ``JIRA_PROJECT`` and the ``acli`` binary are present. The test mutates
-Jira and must run serially because concurrent runs collide on rate-limit backoff
-and orphan probe issues.
+The serial test requires ``REBAR_RUN_EXTERNAL``, Jira connection settings including
+``JIRA_PROJECT``, and ``acli``.
 
-Cleanup (try/finally) deletes EVERY Jira artifact this test creates — issue
-links first (get_issue_links → delete_issue_link by id), then issues A and B —
-and is robust to partial setup (A created but B failed, link created but an
-assertion failed, etc.). The live issuelink JSON shape is printed once for the
-record.
-
-Run locally with configuration::
-
-    REBAR_RUN_EXTERNAL=1 JIRA_URL=… JIRA_USER=… JIRA_API_TOKEN=… JIRA_PROJECT=… \
-        pytest -m external tests/external/test_link_sync_roundtrip_live.py -s
+The ``finally`` cleanup removes every created artifact after partial setup or assertion failure.
+The test also prints the Jira link shape for diagnostics.
 """
 
 from __future__ import annotations
@@ -75,14 +52,10 @@ _skip = pytest.mark.skipif(
 
 
 def _ensure_engine_on_path() -> None:
-    """Put <repo>/src/rebar/_engine on sys.path so ``rebar_reconciler`` resolves.
+    """Expose the engine directory so outbound apply can import ``rebar_reconciler``.
 
-    The reconciler ships as the stdlib-only ``rebar_reconciler`` package under
-    the engine dir (not a top-level installed package). The outbound apply leaf
-    imports ``from rebar_reconciler.apply_base import ...`` at module import
-    time, so the package MUST be importable as a package (not merely loaded
-    file-by-file via spec_from_file_location). Mirrors the client builder in
-    tests/external/test_link_sync_live.py and tests/unit/.../conftest.py.
+    The leaf imports ``rebar_reconciler.apply_base`` as a package, matching the other client
+    fixtures.
     """
     if str(ENGINE_DIR) not in sys.path:
         sys.path.insert(0, str(ENGINE_DIR))
@@ -300,13 +273,8 @@ def test_link_sync_differ_apply_roundtrip_live() -> None:
             provenance={"test": "link_sync_roundtrip_live", "local_id": "loc-a"},
         )
         result = apply_outbound._apply_outbound_update(apply_mut, client=client)
-        # The typed leaf delegates outbound updates to the SINGLE production applier
-        # (batch update_one) and returns its raw result; per-sub-op telemetry like
-        # `links_applied` is intentionally NOT surfaced here (see apply_outbound
-        # ._apply_outbound_update docstring — story 2359 will surface it on the batch
-        # outcome). So assert the leaf delegated cleanly (an update_result, no comment
-        # errors); the AUTHORITATIVE proof the link was applied is the LIVE issuelink
-        # check immediately below.
+        # The typed leaf returns the production applier's batch result without per-link
+        # telemetry. A clean result proves delegation. The Jira read below proves the link.
         assert result.payload and "update_result" in result.payload, (
             f"apply leaf did not delegate to update_one: {getattr(result, 'payload', None)!r}"
         )
@@ -393,26 +361,9 @@ def test_link_sync_differ_apply_roundtrip_live() -> None:
         assert ia_link.get("target_id") == "loc-b", (
             f"inbound link change should target loc-b: {ia_link!r}"
         )
-        # DIRECTION ASSERTION — ROUND-TRIP FIDELITY (verified against live Jira).
-        #
-        # The local dep applied above is 'blocks' (loc-a blocks loc-b), so
-        # set_relationship(A, B, "Blocks") runs `link create --out A --in B` = "A blocks
-        # B". Confirmed against live Jira (navasage, standard semantics): viewing A's REST
-        # issuelinks, B appears as the **outwardIssue** on A (A is the outward/blocker
-        # side; "outward" for a Blocks link is "blocks"). The inbound differ
-        # (_diff_links_inbound, via the shared resolve_inbound_link) maps that
-        # "B is outwardIssue + Blocks" back to rebar relation **'blocks'** on A targeting
-        # B — a FAITHFUL round-trip. (The mirror case: an applied 'depends_on' dep issues
-        # set_relationship(B, A, "Blocks") so B is inwardIssue on A, and the differ
-        # reconstructs 'depends_on'.)
-        #
-        # The invariant under test is round-trip fidelity: applying relation R and reading
-        # it back must reconstruct R, regardless of Jira's internal link representation.
-        # An earlier version of this assertion flipped the expectation to 'depends_on' when
-        # B was outward — that was an inverted assumption (A-blocks-B genuinely records B
-        # OUTWARD on A); it masked the correct behavior as a failure. We now assert the
-        # applied relation is reconstructed, and surface the observed live direction so a
-        # genuine direction regression is an informative finding, not an opaque failure.
+        # Round-trip direction is absolute. ``set_relationship(A, B, "Blocks")`` records B as
+        # A's outward issue, meaning A blocks B. Inbound resolution must reconstruct ``blocks``
+        # on A. The mirror orientation reconstructs ``depends_on``.
         b_is_inward = any(
             isinstance(lk, dict)
             and (lk.get("type") or {}).get("name") == "Blocks"
@@ -441,28 +392,13 @@ def test_link_sync_differ_apply_roundtrip_live() -> None:
             f"'blocks'. live_links={live_links_a!r}"
         )
 
-        # =================================================================
-        # STEP 4 (OPTIONAL) — inbound apply into a throwaway rebar tracker.
-        # =================================================================
-        # SKIPPED by design. The inbound apply path
-        # (apply_inbound._apply_inbound_update → rebar.link) is exercised by the
-        # mocked unit/integration test
-        # (tests/integration/rebar_reconciler/test_link_sync.py). Initializing a
-        # throwaway tracker + creating loc-a/loc-b + driving rebar.link here adds
-        # real-store mutation risk and complexity for no additional LIVE-Jira
-        # coverage (the apply writes to LOCAL rebar, not Jira). Keeping it out
-        # preserves this test's single-responsibility: the DIFFER↔live-Jira
-        # round-trip. The relation correctness asserted in STEP 3 is exactly
-        # what rebar.link would receive.
+        # Inbound application is intentionally omitted. Integration tests exercise
+        # ``rebar.link``, while this external case isolates differ behavior against Jira and
+        # avoids local tracker mutation.
 
     finally:
-        # ---- Cleanup: delete EVERY Jira artifact, robust to partial setup. ----
-        # Delete the probe issues directly (404 is idempotent success per
-        # delete_issue). Deleting an issue removes its issue links too, so we do
-        # NOT call delete_issue_link here: that ACLI command currently hangs
-        # (no subprocess timeout — bug d843), which would block cleanup
-        # indefinitely and orphan the issues. Issue-delete is reliable and
-        # link-removing, so it is the safe cleanup path.
+        # Delete issues directly because deletion also removes links and treats 404 as success.
+        # Avoid ``delete_issue_link`` here because its CLI path can hang without a timeout.
         for key in (key_a, key_b):
             if key:
                 try:
@@ -474,17 +410,11 @@ def test_link_sync_differ_apply_roundtrip_live() -> None:
 @_skip
 @pytest.mark.parametrize(("relation", "a_is_blocker"), [("blocks", True), ("depends_on", False)])
 def test_link_sync_writes_absolute_direction_live(relation: str, a_is_blocker: bool) -> None:
-    """Outbound must write the link with the semantically CORRECT blocker (bug 3b86).
+    """Verify the absolute blocker orientation for both local link relations.
 
-    "A blocks B"      => A is the blocker (A on the outward/blocks side).
-    "A depends_on B"  == "B blocks A" => B is the blocker (B on the outward/blocks side).
-
-    Why this test exists: ``test_link_sync_differ_apply_roundtrip_live`` only checked that a
-    Blocks link existed in EITHER direction and that outbound↔inbound *agree* — a consistency
-    check that stays green even when the link is written backwards — and it never covered
-    ``depends_on``. So a reversed write went undetected (``blocks`` was reversed for a long
-    time; c8ed then reversed ``depends_on``). This asserts the ABSOLUTE orientation, per
-    relation, through the production apply path (``batch_dispatch.update_one``).
+    ``A blocks B`` places A on the outward side. ``A depends_on B`` places B on the outward
+    side. Exercising ``batch_dispatch.update_one`` prevents differ and apply agreement from
+    hiding a link written backward.
     """
     _ensure_engine_on_path()
     client = _build_client()

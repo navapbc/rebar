@@ -1,19 +1,8 @@
-"""Deterministic scoring/cap/cell logic for the structured-output measurement harness (a40f).
+"""Deterministic support for the structured-output measurement harness.
 
-WHY THIS EXISTS. The live measurement harness
-(``tests/external/test_structured_output_matrix.py``) makes real, billable model calls to
-measure how the df3a schema-filtered selection parser (and the sentinel sibling's output-format
-directive) move structured-output reliability across a matrix of providers, directive variants,
-and production-shaped prompts. Everything about that harness that is DETERMINISTIC — how a raw
-reply is scored (before/after parse success, layout class), the per-cell credential gate, and
-the call-budget cap — lives HERE, as a pure, importable helper with NO network dependency, so it
-is proven offline on committed golden fixtures and is never validated for the first time by a
-paid live run. This mirrors ``tests/external/_live_llm.py``: an underscore helper shared by the
-external harness and the ``tests/unit`` oracle, and NOT itself collected by pytest.
-
-The scoring reuses rebar's own JSON enumeration (``rebar.llm.structured``) rather than
-re-implementing brace matching, so "what parses" here is byte-for-byte what the production parser
-sees.
+This network-free helper classifies reply layouts, compares parser behavior, gates credentials
+per matrix cell, and enforces call budgets before client construction. JSON candidate enumeration
+reuses ``rebar.llm.structured`` so offline scoring matches production parsing.
 """
 
 from __future__ import annotations
