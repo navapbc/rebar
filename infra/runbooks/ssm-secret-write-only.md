@@ -80,6 +80,67 @@ Two independent ways to rotate; pick per situation:
 
 Either way the value never lands in terraform state.
 
+### Sync mirrored GitHub Actions secrets
+
+Some `/rebar/prod/*` SSM secrets are also mirrored into **GitHub Actions repository
+secrets**. A value-only SSM rotation is not complete until each mirror is updated: during
+the 2026-09-07 rotation, SSM was current but `ANTHROPIC_API_KEY` and `JIRA_API_TOKEN`
+in Actions still held their old 2026-08-12 values, so CI continued using stale
+credentials until an operator ran `gh secret set`.
+
+Inventory for `navapbc/rebar`:
+
+| GitHub Actions secret | SSM source | Notes |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | `/rebar/prod/anthropic-api-key` | Used by prompt/eval, external-integration, Jira DC probes, and review-bot-related workflows. |
+| `JIRA_API_TOKEN` | `/rebar/prod/jira-api-token` | Secret half of Jira config; `JIRA_URL` / `JIRA_USER` / `JIRA_PROJECT` are non-secret vars or config. |
+| `GERRIT_SSH_PRIVKEY` | `/rebar/prod/ci-gerrit-ssh-key` | CI service-account private key for the GitHub → Gerrit `Verified` vote path; see [`g2p-ci-credentials.md`](./g2p-ci-credentials.md). |
+| `REBAR_BOT_SIGNING_KEY` | `/rebar/prod/rebar-bot-signing-key` | Reconcile/canary signing key mirror; the on-box containers consume the SSM-materialized file. |
+| `OPENAI_API_KEY` | GitHub-only | No `/rebar/prod/*` SSM slot today; rotate in GitHub from the provider console value. |
+
+After changing any SSM source above, sync its Actions mirror from SSM:
+
+```sh
+aws ssm get-parameter --region us-east-1 --with-decryption \
+  --name /rebar/prod/anthropic-api-key \
+  --query Parameter.Value --output text \
+  | gh secret set ANTHROPIC_API_KEY --repo navapbc/rebar
+
+aws ssm get-parameter --region us-east-1 --with-decryption \
+  --name /rebar/prod/jira-api-token \
+  --query Parameter.Value --output text \
+  | gh secret set JIRA_API_TOKEN --repo navapbc/rebar
+
+aws ssm get-parameter --region us-east-1 --with-decryption \
+  --name /rebar/prod/ci-gerrit-ssh-key \
+  --query Parameter.Value --output text \
+  | gh secret set GERRIT_SSH_PRIVKEY --repo navapbc/rebar
+
+aws ssm get-parameter --region us-east-1 --with-decryption \
+  --name /rebar/prod/rebar-bot-signing-key \
+  --query Parameter.Value --output text \
+  | gh secret set REBAR_BOT_SIGNING_KEY --repo navapbc/rebar
+```
+
+Verify the mirror timestamps after syncing. `gh secret list` cannot reveal values, but it
+does show `updatedAt`; each mirrored secret should be newer than or equal to the SSM
+parameter's `LastModifiedDate` for the rotation window:
+
+```sh
+aws ssm get-parameters --region us-east-1 --with-decryption \
+  --names /rebar/prod/anthropic-api-key /rebar/prod/jira-api-token \
+          /rebar/prod/ci-gerrit-ssh-key /rebar/prod/rebar-bot-signing-key \
+  --query 'Parameters[].{Name:Name,LastModifiedDate:LastModifiedDate}' --output table
+
+gh secret list --repo navapbc/rebar --json name,updatedAt \
+  --jq '.[] | select(.name=="ANTHROPIC_API_KEY" or .name=="JIRA_API_TOKEN" or .name=="GERRIT_SSH_PRIVKEY" or .name=="REBAR_BOT_SIGNING_KEY")'
+```
+
+For a functional smoke test, dispatch the narrow workflow that consumes the rotated
+credential (for example `reconcile-bridge-canary.yml` after a Jira/signing-key rotation,
+or `prompt-eval.yml` / a Jira DC probe after an LLM key rotation) and read the logs before
+revoking the old value.
+
 ## REMEDIATE the existing exposure (one-time operator cutover)
 
 This is the deferred operator work (a `task` linked `discovered_from` `finedrawn-closed-stud`). Run
@@ -97,7 +158,8 @@ seeds the 4 new MCP-PAT SSM params so the scrub covers those too.
    it. Rotate the crown-jewels explicitly: Gerrit admin password, op-cert Ed25519 signing key,
    rebar-bot signing key, Anthropic API key, `jira-api-token`, and the SSH host keys. Update any
    external system that trusts the old value (Gerrit account, Jira token, bot's registered public
-   key, Anthropic console).
+   key, Anthropic console), then run the GitHub Actions sync above for every mirrored secret in the
+   rotation set.
 
 3. **Verify no secret is in live state.** After apply + re-seed, confirm the current state carries
    no SecureString value:
