@@ -388,8 +388,10 @@ at the definition site:
 ```
 
 The marker admits **exactly** the `(kind, name)` it names, never its whole kind, and a **blank
-reason is itself an error**. Do **not** hand-edit `.github/mechanism-baseline.json`;
-`--update-stale` is maintenance-only, and it refuses to write at all while anything is new.
+reason is itself an error**. Do **not** hand-edit `.github/mechanism-baseline.json`. When your
+own change removes a mechanism, run `python scripts/check_mechanism_delta.py --update-stale`
+in that change and commit the shrunken baseline; the drain refuses while any unadmitted
+mechanism is new or increased, so it cannot bless a regression.
 Names, marker placement per detection shape, and the kind partition (`feature_flag` claims the
 boolean config keys, `config_key` the non-boolean remainder; both are section-qualified) are in
 `docs/architecture.md` §"Mechanism-delta ratchet".

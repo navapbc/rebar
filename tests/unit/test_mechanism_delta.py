@@ -349,6 +349,53 @@ def test_update_stale_refuses_to_write_while_a_regression_stands(tmp_path, monke
     assert baseline.read_text() == original, "the baseline must be byte-identical after a refusal"
 
 
+def test_update_stale_drains_while_an_admitted_mechanism_stands(tmp_path, monkeypatch):
+    baseline = tmp_path / "mechanism-baseline.json"
+    baseline.write_text(ratchet.render_baseline({"lock::a.lock": 1, "lock::gone.lock": 1}))
+    monkeypatch.setattr(ratchet, "BASELINE_PATH", str(baseline), raising=False)
+    monkeypatch.setattr(
+        ratchet,
+        "detect_all",
+        lambda root: {"lock": {"a.lock", "marked.lock"}},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ratchet,
+        "markers_for",
+        lambda root: {"lock::marked.lock": "bug 1768 - probe"},
+        raising=False,
+    )
+
+    rc = ratchet.main(["--update-stale"])
+
+    assert rc == 0
+    assert ratchet.parse_baseline(baseline.read_text()) == {"lock::a.lock": 1}
+
+
+def test_update_stale_refuses_to_write_while_a_marker_reason_is_blank(tmp_path, monkeypatch):
+    baseline = tmp_path / "mechanism-baseline.json"
+    original = ratchet.render_baseline({"lock::a.lock": 1, "lock::gone.lock": 1})
+    baseline.write_text(original)
+    monkeypatch.setattr(ratchet, "BASELINE_PATH", str(baseline), raising=False)
+    monkeypatch.setattr(
+        ratchet,
+        "detect_all",
+        lambda root: {"lock": {"a.lock", "marked.lock"}},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ratchet,
+        "markers_for",
+        lambda root: {"lock::marked.lock": ""},
+        raising=False,
+    )
+
+    rc = ratchet.main(["--update-stale"])
+
+    assert rc != 0
+    assert baseline.read_text() == original
+
+
 # ---------------------------------------------------------------------------
 # the shipped artefacts
 # ---------------------------------------------------------------------------
@@ -509,6 +556,7 @@ def test_the_committed_tree_assertions_consult_marker_admission():
     for func in (
         test_check_passes_on_the_committed_tree,
         test_the_committed_baseline_matches_the_live_tree,
+        ratchet._run_update_stale,
     ):
         tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
 

@@ -672,9 +672,10 @@ the entrypoint's own complexity near 4. The subpackage is private because
 scripts directory stripped from `sys.path`, and a subpackage is invisible to that walk.
 
 `--update-stale` drops entries whose definition site is gone and rewrites canonical sorted
-JSON. It **refuses to write** — leaving the baseline byte-identical — while anything is new or
-increased, so it can never bless a regression into the baseline. It is maintenance-only; a
-contributor's path is the marker, or removing the mechanism.
+JSON. It refuses to write, leaving the baseline byte-identical, while any UNADMITTED mechanism
+is new or increased, so it can never bless a regression; a marker-admitted mechanism does not
+block it. Run it in the same change whenever your change removes a mechanism and `--check`
+reports only stale rows; a contributor never hand-edits the baseline.
 
 The gate is stdlib plus PyYAML (already a dev dep, used read-only) and needs **no CI
 provider**: it runs identically from `make lint`, a pre-commit hook, or a bare shell, so a
