@@ -105,9 +105,11 @@ def test_health_endpoint_reports_the_in_flight_count(monkeypatch: pytest.MonkeyP
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
+    from rebar.review_bot import app as appmod
     from rebar.review_bot.app import app
 
     monkeypatch.setattr(voter, "in_flight_reviews", lambda: 2)
+    monkeypatch.setattr(appmod, "_gerrit_auth_health", lambda _cfg: (True, "ok"), raising=False)
     with TestClient(app) as client:
         response = client.get("/health")
 
@@ -133,10 +135,10 @@ def test_health_endpoint_reports_the_queue_depth(monkeypatch: pytest.MonkeyPatch
     extra.
     """
     pytest.importorskip("fastapi")
-
     from rebar.review_bot import app as appmod
 
     monkeypatch.setattr(voter, "in_flight_reviews", lambda: 0)
+    monkeypatch.setattr(appmod, "_gerrit_auth_health", lambda _cfg: (True, "ok"), raising=False)
 
     # No lifespan has run in this test, so there may be no queue at all on app.state —
     # the field must still be present and 0, never absent.
@@ -160,6 +162,90 @@ def test_health_endpoint_reports_the_queue_depth(monkeypatch: pytest.MonkeyPatch
     )
     # The pre-existing contract is additive-only: autodeploy.sh reads these two keys.
     assert body["status"] == "ok" and body["in_flight"] == 0
+
+
+def test_health_endpoint_reports_degraded_when_gerrit_auth_is_broken(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A listening process is degraded if it cannot authenticate to cast votes."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from rebar.review_bot import app as appmod
+
+    monkeypatch.setattr(voter, "in_flight_reviews", lambda: 0)
+    monkeypatch.setattr(
+        appmod,
+        "_gerrit_auth_health",
+        lambda _cfg: (False, "gerrit_auth_failed:401"),
+        raising=False,
+    )
+    monkeypatch.delattr(appmod.app.state, "queue", raising=False)
+
+    with TestClient(appmod.app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "degraded",
+        "in_flight": 0,
+        "queue_depth": 0,
+        "gerrit_auth": "failed",
+        "reason": "gerrit_auth_failed:401",
+    }
+
+
+def test_gerrit_auth_health_checks_the_vote_casting_credential(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    pytest.importorskip("fastapi")
+
+    from rebar.review_bot import app as appmod
+    from rebar.review_bot.config import ReceiverConfig
+    from rebar.review_bot.gerrit_client import GerritError
+
+    cfg = ReceiverConfig(dedup_db_path=str(tmp_path / "voted.db"), gerrit_bot_token="tok")
+    calls: list[str] = []
+
+    def ok(self) -> None:
+        calls.append(self._cfg.gerrit_bot_token)
+
+    monkeypatch.setattr(appmod.GerritClient, "check_auth", ok, raising=True)
+
+    assert appmod._gerrit_auth_health(cfg) == (True, "ok")
+    assert calls == ["tok"]
+    assert appmod._gerrit_auth_health(ReceiverConfig(gerrit_bot_token="")) == (
+        False,
+        "gerrit_auth_missing_token",
+    )
+
+    def unauthorized(_self) -> None:
+        raise GerritError("nope", status=401)
+
+    monkeypatch.setattr(appmod.GerritClient, "check_auth", unauthorized, raising=True)
+    assert appmod._gerrit_auth_health(cfg) == (False, "gerrit_auth_failed:401")
+
+
+def test_gerrit_client_check_auth_uses_accounts_self_and_short_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from rebar.review_bot.config import ReceiverConfig
+    from rebar.review_bot.gerrit_client import GerritClient
+
+    client = GerritClient(ReceiverConfig(dedup_db_path=str(tmp_path / "voted.db")))
+    calls: list[tuple[str, str, float]] = []
+
+    def fake_request(method: str, path: str, *, timeout: float = 60, **_kwargs: object):
+        calls.append((method, path, timeout))
+        return 200, "{}"
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    client.check_auth()
+
+    assert calls == [("GET", "/a/accounts/self", 5)]
 
 
 def test_health_exposes_in_flight_without_needing_the_reviewbot_extra() -> None:
