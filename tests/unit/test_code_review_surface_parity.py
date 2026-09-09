@@ -130,3 +130,12 @@ def test_surface_parity_finder_dispatched_in_round_a_and_round_b():
         round_b.get("code-review-surface-parity")
         == "${{ steps.union.outputs.include_surface_parity }}"
     )
+
+
+def test_failover_finder_dispatched_in_round_a_and_round_b():
+    doc = yaml.safe_load(_GATE.read_text())
+    by_id = {s["id"]: s for s in doc["steps"]}
+    round_a = {c["prompt"]: c["when"] for c in by_id["round_a"]["batch"]["criteria"]}
+    round_b = {c["prompt"]: c["when"] for c in by_id["round_b"]["batch"]["criteria"]}
+    assert round_a.get("code-review-failover") == "${{ steps.triggers.outputs.include_failover }}"
+    assert round_b.get("code-review-failover") == "${{ steps.union.outputs.include_failover }}"

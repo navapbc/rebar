@@ -1,0 +1,67 @@
+prompt: code-review-failover
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: code_review_emits_valid_findings
+    description: The overlay output is a dict carrying a findings list.
+  - type: deterministic
+    name: code_review_recall
+    description: A fallback edit that masks a retryable primary failure produces a finding.
+  - type: deterministic
+    name: code_review_no_fire
+    description: A benign fallback edit that preserves the primary disposition produces no finding.
+
+dataset:
+  - id: R-retryable-primary-masked-by-fallback
+    corpus: failover-disposition
+    expect: finding
+    mode: retryable-primary-masked
+    note: >-
+      Incident-shaped case: the primary provider raises a retryable/transient error, the fallback
+      leg raises a permanent configuration error, and the changed code surfaces only the fallback
+      error so callers give up instead of retrying the primary.
+    diff: |
+      --- a/rebar/llm/provider.py
+      +++ b/rebar/llm/provider.py
+      @@ -20,7 +20,10 @@ def run_with_fallback(primary, fallback, request):
+       def run_with_fallback(primary, fallback, request):
+           try:
+               return primary.run(request)
+      -    except RetryableProviderError:
+      -        raise
+      +    except RetryableProviderError as primary_error:
+      +        try:
+      +            return fallback.run(request)
+      +        except PermanentConfigError as fallback_error:
+      +            raise fallback_error from primary_error
+  - id: FP-preserves-primary-disposition
+    corpus: failover-disposition
+    expect: pass
+    mode: primary-disposition-preserved
+    note: >-
+      Benign fallback handling: fallback failure is attached for diagnostics, but the retryable
+      primary disposition still surfaces to the caller.
+    diff: |
+      --- a/rebar/llm/provider.py
+      +++ b/rebar/llm/provider.py
+      @@ -20,7 +20,12 @@ def run_with_fallback(primary, fallback, request):
+       def run_with_fallback(primary, fallback, request):
+           try:
+               return primary.run(request)
+           except RetryableProviderError as primary_error:
+      +        try:
+      +            return fallback.run(request)
+      +        except PermanentConfigError as fallback_error:
+      +            primary_error.add_note(f"fallback failed: {fallback_error}")
+      +            raise primary_error
+      -        raise
+
+gold_set:
+  - input: A fallback leg's PermanentConfigError replaces a primary RetryableProviderError.
+    label: useful
+  - input: The code records fallback diagnostics but re-raises the retryable primary error.
+    label: not_useful

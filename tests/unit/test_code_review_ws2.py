@@ -93,6 +93,21 @@ def test_applies_to_globs_single_source_and_escalation_only():
     assert reg.applies_to_globs("unknown") == []
 
 
+def test_failover_overlay_is_advisory_and_routed_to_failure_paths():
+    assert "failover" in reg.OVERLAY_IDS
+    idx = reg.routing_index()
+    assert "failover" in idx, "failover overlay has no criteria_routing.json entry"
+    entry = idx["failover"]
+    assert entry["exec"] == "AGENT"
+    assert entry["default_posture"] == "advisory"
+    assert entry["blocking_enabled"] is False
+    assert reg.threshold_for(["failover"]) == (0.95, False)
+    assert {"**/llm/failure.py", "**/llm/model_classes.py", "**/llm/tracing.py"} <= set(
+        entry["applies_to"]
+    )
+    assert "should_fall_back" in entry["trigger_tokens"]
+
+
 # ── move-catalog: validates at load; applies_when vocabulary; kernel renders deterministically ─
 def test_move_catalog_validates_and_uses_closed_applies_when_vocabulary():
     mr = moves.load_move_registry()
@@ -151,6 +166,14 @@ def test_overlay_prompts_resolve_as_code_review_pass_finders():
         assert p.outputs == "code_review_findings"
         assert p.category == "code-review-pass"
         assert not p.is_reviewer  # stays out of the single-pass reviewer catalog
+
+
+def test_failover_prompt_is_canonical_front_matter_fixed_point():
+    from rebar.llm.prompting.prompts_frontmatter import _split_front_matter_raw, write_front_matter
+
+    path = pathlib.Path("src/rebar/llm/reviewers/code-review-failover.md")
+    text = path.read_text(encoding="utf-8")
+    assert write_front_matter(*_split_front_matter_raw(text)) == text
 
 
 def test_verify_prompt_embeds_verifier_rules_scaffold_and_regrounds_on_diff():
