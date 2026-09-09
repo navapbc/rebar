@@ -1,24 +1,9 @@
-"""[P0] RP-03 S1 T2 — Cloud summary operation core contract (held-out oracle).
+"""Held-out Cloud summary-operation contracts.
 
-Independent held-out pins on the mechanism of the Cloud summary operation defined in ticket
-a8cd-01cd-c370-454f, consuming the T1 seam (``operation_outcome`` / ``retry_budget``). This
-suite deliberately scopes to the parts that fake cleanly and carry the contract's weight — it is
-NOT the whole AC set (the one-process-per-write launch, historical-triple decoding, and POSIX /
-non-POSIX timeout cleanup are exercised by the implementation's own state tests):
-
-- the per-call retry policy is a PASS-THROUGH that leaves every existing caller unchanged: the
-  default path of ``_rest_urlopen_with_retry`` / ``_direct_rest_get`` / ``get_issue_by_rest``
-  still makes three attempts with 2s/5s waits, and ONLY a caller that opts in with
-  ``ONE_ATTEMPT_NO_SLEEP`` gets a single attempt with no sleep (this is the blocking-review fix:
-  outbound_differ / apply_handlers / binding_store keep the default),
-- summary recovery observes the PRIMARY store with exactly one REST request and no inner sleep,
-  then maps the observation through the T1 ``decide_replay`` table,
-- REST error classification splits permanent (auth/HTTP) from transient (network) without the
-  adapter itself sleeping or replaying,
-- exactly one redacted completion log per terminal/exhausted outcome, seven fields, its message
-  redacted through the T1 seam and capped at 512 code points, the whole log capped at 1,024.
-
-Every clock is injected; these tests perform zero wall-clock sleep.
+Default REST callers retain three attempts with two-second and five-second waits. The
+summary path uses one request without inner sleep, classifies transport failures, and
+delegates replay decisions. Each terminal outcome emits one redacted seven-field log
+record with bounded message and record sizes. Injected clocks keep tests deterministic.
 """
 
 from __future__ import annotations

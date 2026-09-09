@@ -1,33 +1,10 @@
-"""Held-out behavioral oracle for RP-03 S3 T2 — the scoped finite-pass fuse.
+"""Finite-pass endpoint and provider fuse contracts.
 
-This oracle pins the OBSERVABLE contract of the new endpoint/provider finite-pass
-fuse that sits over the S3 T1 coordinator's normalized outcomes:
-
-``rebar_reconciler.failure_policy`` (extended)
-    Gains ``is_fuse_eligible(disposition)`` — the fuse-eligible predicate keyed off
-    budget-exhaustion provenance as it surfaces in coordinator outcomes: only the
-    two dispositions the shared ``RetryBudget`` produces at its cap
-    (``exhausted_transient`` from the invocation cap, ``retryable_deferred`` from the
-    cumulative-sleep cap) are eligible. Every other disposition — ``applied`` /
-    ``already_satisfied`` / ``recovered`` / ``permanent_failure`` / ``commit_unknown``
-    / ``skipped`` and the S2 defer reasons — is excluded. PURE: no I/O, no clock.
-
-``rebar_reconciler.pass_fuse`` (new)
-    ``PassFuse(*, locate, now_ms=..., cooldown_ms=...)`` — a per-pass, in-memory,
-    per-scope state machine. ``record(outcome)`` folds one coordinator ``TicketOutcome``
-    (resolving its ``(provider, endpoint)`` identity from ``locate(identity)``) into the
-    per-scope consecutive counters; ``decision_for(identity)`` returns a ``FuseDecision``
-    (exact ``scope`` / ``reason`` / ``retry_not_before``) when that identity's endpoint
-    or provider scope is open, else ``None``. An endpoint opens after THREE consecutive
-    eligible outcomes spanning at least TWO distinct tickets; a provider additionally
-    requires the failures to span at least TWO distinct endpoints. A matching success
-    (applied / already_satisfied / recovered) resets that scope's consecutive state.
-    Independent scopes keep their own state. DECISION logic reads no clock and does no
-    I/O — ``retry_not_before`` is derived from an injected ``now_ms``.
-
-Assertions are OBSERVABLE ONLY (enums / bucket strings / decision fields / counts) —
-never private names or source text — so a behavior-preserving refactor cannot break
-them.
+Only retry-budget exhaustion dispositions increment a fuse. An endpoint opens after
+three consecutive eligible outcomes across two tickets. A provider also requires two
+endpoints. Matching success resets its scope, neutral outcomes do not reset or
+increment, and unresolved bindings never share a scope. Open decisions expose their
+scope, reason, identity, and retry time from the injected clock without performing I/O.
 """
 
 from __future__ import annotations
@@ -97,13 +74,7 @@ def coordinator_mod():
 
 
 class _Outcome:
-    """A minimal duck-typed stand-in for ``coordinator.TicketOutcome``.
-
-    The fuse reads only ``.identity`` / ``.disposition`` / ``.failure_scope`` off an
-    outcome, so the unit sequences drive it directly with these instead of building a
-    whole coordinator run. ``str``-``Enum`` members compare by value across module
-    instances, so a disposition constructed from this test's ``operation_outcome`` still
-    matches the fuse's eligibility set."""
+    """Minimal TicketOutcome shape whose string enums compare across module instances."""
 
     __slots__ = ("disposition", "failure_scope", "identity")
 
@@ -290,9 +261,7 @@ def test_matching_success_resets_consecutive_state(fuse_mod, outcome_mod):
 
 
 def test_provider_requires_two_distinct_endpoints(fuse_mod, outcome_mod):
-    """AC2: three eligible outcomes across two tickets but only ONE endpoint open the
-    endpoint scope, NOT the provider scope; the same provider only opens once a second
-    distinct endpoint contributes."""
+    """Provider scope opens only after eligible failures span two endpoints."""
     fuse = fuse_mod.PassFuse(locate=_locator(_BINDINGS))
     _feed(
         fuse,
@@ -376,9 +345,7 @@ def test_retryable_deferred_is_eligible(fuse_mod, outcome_mod):
     ],
 )
 def test_excluded_dispositions_never_increment(fuse_mod, outcome_mod, excluded):
-    """AC4: permanent failures, opaque commit-unknown, skipped, and the S2 defer reasons
-    never increment the inferred counter — three of any of them leave the endpoint
-    closed. (These are neutral: they neither increment nor reset.)"""
+    """Excluded dispositions neither increment nor reset the fuse."""
     fuse = fuse_mod.PassFuse(locate=_locator(_BINDINGS))
     _feed(
         fuse,
@@ -411,9 +378,7 @@ def test_success_dispositions_reset_and_never_increment(fuse_mod, outcome_mod, s
 
 
 def test_neutral_outcome_does_not_break_consecutive_run(fuse_mod, outcome_mod):
-    """A neutral, non-success, non-eligible outcome (permanent failure) between eligible
-    outcomes does NOT reset the run — only a success resets — so the endpoint still opens
-    once three eligible across two tickets have accrued."""
+    """A neutral outcome does not interrupt an eligible consecutive run."""
     fuse = fuse_mod.PassFuse(locate=_locator(_BINDINGS))
     _feed(
         fuse,
@@ -510,10 +475,7 @@ def _coord_report(coordinator_mod, budget_mod, plans, script):
 def test_e2e_budget_exhaustion_counts_first_attempt_transient_absorbed(
     fuse_mod, coordinator_mod, budget_mod, mutation_mod, ticket_plan_mod
 ):
-    """E2E provenance: a real coordinator run where every op on endpoint a exhausts the
-    shared budget (always-transient) yields eligible ``exhausted_transient`` outcomes
-    that open the endpoint. A first-attempt transient that then succeeds is absorbed in
-    the retry loop, surfaces as ``applied``, and is NOT counted."""
+    """Only terminal budget exhaustion feeds the fuse, while recovery resets it."""
     trans = coordinator_mod.AtomicSignal(status="transient")
     applied = coordinator_mod.AtomicSignal(status="applied")
     plans = [
@@ -568,10 +530,7 @@ def test_e2e_permanent_failure_and_recovered_never_open(
 def test_e2e_open_endpoint_defers_matching_but_independent_endpoint_runs(
     fuse_mod, coordinator_mod, budget_mod, mutation_mod, ticket_plan_mod
 ):
-    """E2E AC5 + open-behavior: once a real run opens endpoint a, a consumer that consults
-    the fuse defers the remaining endpoint-a plans (no decision -> execute; decision ->
-    defer) while an independent endpoint keeps running. Modeled by a simple consumer loop
-    over dependency-ordered plans that skips fuse-open scopes."""
+    """An open endpoint defers matching plans while an independent endpoint runs."""
     trans = coordinator_mod.AtomicSignal(status="transient")
     prime = [
         _plan(ticket_plan_mod, "T-1", [_mut(mutation_mod, "outbound", "update", "T-1")]),
@@ -597,11 +556,7 @@ def test_e2e_open_endpoint_defers_matching_but_independent_endpoint_runs(
 
 
 def test_success_after_open_recloses_scope(fuse_mod, outcome_mod):
-    """A matching success arriving AFTER the endpoint has opened fully resets the scope —
-    including re-closing it — so ``decision_for`` stops returning the open decision. (In
-    the real consumer, matching plans defer once open, so a post-open success only arises
-    when a plan genuinely proved the scope healthy; the fuse must then re-close rather
-    than keep deferring a recovered scope for the rest of the pass.)"""
+    """A matching success closes an already open endpoint scope."""
     fuse = fuse_mod.PassFuse(locate=_locator(_BINDINGS))
     _feed(
         fuse,
@@ -617,9 +572,7 @@ def test_success_after_open_recloses_scope(fuse_mod, outcome_mod):
 
 
 def test_unresolvable_binding_never_opens_or_conflates(fuse_mod, outcome_mod):
-    """Identities whose ``locate`` binding is empty resolve to no (provider, endpoint)
-    scope: their eligible outcomes are not folded into a shared phantom scope and never
-    open a fuse, even three eligible deep across three distinct identities."""
+    """Unresolved bindings never accumulate in a shared fuse scope."""
     fuse = fuse_mod.PassFuse(locate=_locator({}))  # every binding empty
     _feed(
         fuse,
@@ -634,9 +587,7 @@ def test_unresolvable_binding_never_opens_or_conflates(fuse_mod, outcome_mod):
 
 
 def test_retry_not_before_is_exact_literal(fuse_mod, outcome_mod):
-    """AC6: the ``retry_not_before`` is an exact rfc3339 UTC instant. Pinned to a LITERAL
-    string (not re-derived from the production helper) so a formatting regression in the
-    source cannot be mirrored into the oracle."""
+    """retry_not_before matches the literal RFC 3339 instant from injected time."""
     fuse = fuse_mod.PassFuse(locate=_locator(_BINDINGS), now_ms=0, cooldown_ms=60000)
     _feed(
         fuse,
@@ -650,9 +601,7 @@ def test_retry_not_before_is_exact_literal(fuse_mod, outcome_mod):
 
 
 def test_default_now_ms_is_not_epoch_zero(fuse_mod, outcome_mod):
-    """A fuse constructed WITHOUT an injected ``now_ms`` snapshots the real wall clock, so
-    an opened decision's ``retry_not_before`` is a genuine future instant — never the
-    1970 epoch-zero timestamp a ``now_ms=0`` default would emit."""
+    """The default clock produces a future instant instead of the epoch-zero sentinel."""
     fuse = fuse_mod.PassFuse(locate=_locator(_BINDINGS))
     _feed(
         fuse,
@@ -685,17 +634,12 @@ def test_both_open_prefers_provider_scope(fuse_mod, outcome_mod):
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# RP-03 S3 T3 — historical replay of the sanitized completed-run slice (AC6).
-# The fuse is a pure decision leaf, so the "would the new fuse have prematurely
-# stopped a completed job?" question is answered by replaying a corpus of NORMALIZED
-# TERMINAL outcomes through it and checking no scope opens before observed success.
+# Completed-run terminal outcomes verify that the fuse would not stop observed work.
 # ════════════════════════════════════════════════════════════════════════════════
 
 
 def test_historical_replay_completed_slice_never_prematurely_stops(fuse_mod, outcome_mod):
-    """AC6: replaying the sanitized synthetic 1,200-run completed slice through the fuse
-    — counting ONLY normalized terminal outcomes — opens no scope at any prefix, so the
-    fuse would never have prematurely stopped this observed successful/partial work."""
+    """Every prefix of the completed-run corpus leaves all scopes closed."""
     import json
 
     fixture = (
@@ -732,9 +676,7 @@ def test_historical_replay_completed_slice_never_prematurely_stops(fuse_mod, out
 
 
 def test_historical_replay_counterfactual_burst_would_stop(fuse_mod, outcome_mod):
-    """Control for the replay: a synthetic THREE-consecutive eligible burst across two
-    tickets on one endpoint DOES open the fuse — proving the completed-slice zero-stop
-    result is a genuine property of that corpus, not a fuse that can never fire."""
+    """A three-event eligible control burst opens the endpoint fuse."""
     fuse = fuse_mod.PassFuse(locate=_locator(_BINDINGS), now_ms=0)
     _feed(
         fuse,

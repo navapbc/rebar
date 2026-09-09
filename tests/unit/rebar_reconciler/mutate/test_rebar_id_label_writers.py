@@ -1,31 +1,8 @@
-"""Tests for the rebar-id label write authorization guard in applier.py.
+"""Canonical rebar-id label write authorization across applier paths.
 
-Covers _audit_rebar_id_label_writes and its integration into apply():
-
-  1. test_unauthorized_leaf_raises_rebar_id_label_write_error
-     — direct call to _audit_rebar_id_label_writes with an unauthorized leaf
-     and a rebar-id-* label create mutation (target='label') raises
-     RebarIdLabelWriteError.
-
-  2. test_authorized_leaves_pass_audit
-     — inbound_clean_label (delete) and outbound_create (create) pass through
-     _audit_rebar_id_label_writes without raising, even when target='label' and
-     payload starts with 'rebar-id-'.
-
-  3. test_apply_raises_for_unauthorized_rebar_id_label_mutation (behavioral)
-     — apply() with inbound_update Mutation carrying a rebar-id-* label in
-     payload raises RebarIdLabelWriteError after wiring.
-
-  4. test_audit_ignores_non_rebar_id_label_mutations
-     — mutations where target!='label' or payload doesn't start with 'rebar-id-'
-     do NOT trigger the guard from an unauthorized leaf.
-
-  5. test_warn_mode_logs_and_does_not_raise
-     — REBAR_UNSAFE_ID_GUARD_BYPASS=true logs a WARNING instead of raising.
-
-  6. test_guard_mode_precedence
-     — env var REBAR_UNSAFE_ID_GUARD_BYPASS takes precedence over config; default
-     is 'raise'.
+The audit rejects unauthorized leaf and action combinations, permits outbound create and
+inbound label cleanup, and ignores non-label mutations. The bypass environment setting
+takes precedence over typed config. Property writes remain outside label enforcement.
 """
 
 from __future__ import annotations
@@ -94,12 +71,7 @@ def applier():
 
 
 # ---------------------------------------------------------------------------
-# Simple mock objects for label-mutation structs
-#
-# _MockLabelMutation represents a single label-mutation event:
-#   target  = 'label'          (the surface being mutated — always 'label')
-#   payload = 'rebar-id-...'     (the label value string)
-#   action  = 'create'|'update'|'delete'
+# Minimal label-mutation shape for direct audit tests.
 # ---------------------------------------------------------------------------
 
 
@@ -179,17 +151,8 @@ def _make_inbound_update_mutation_with_rebar_id_label(mut_mod):
 
 
 def test_apply_raises_for_unauthorized_rebar_id_label_mutation(applier, errors_mod):
-    """BEHAVIORAL GREEN: apply() with inbound_update + rebar-id-* label mutation raises
-    RebarIdLabelWriteError.
-
-    After wiring _audit_rebar_id_label_writes into apply(), this call must raise.
-    (Before wiring: this test fails — that is the RED state.)
-    """
-    # apply() selects typed dispatch by an isinstance check against the CANONICAL
-    # mutation module (sys.modules['rebar_reconciler.mutation']); REB-3115 S5 T1 removed
-    # the class-name/duck-typed fallback. Build the Mutation from that same canonical
-    # module so it is the declared type apply() dispatches — not a forked identity loaded
-    # under a private key.
+    """Canonical inbound-update Mutation identity raises RebarIdLabelWriteError."""
+    # Build from the canonical module because typed dispatch checks Mutation identity.
     canonical_mut = sys.modules.get("rebar_reconciler.mutation") or applier._load_mutation_module()
     mut = _make_inbound_update_mutation_with_rebar_id_label(canonical_mut)
     # Use applier.RebarIdLabelWriteError to avoid importlib module-identity mismatch.
@@ -272,11 +235,10 @@ def test_warn_mode_logs_and_does_not_raise(applier, errors_mod, caplog):
 def test_guard_mode_precedence(
     applier, errors_mod, env_val, config_val, expected_raises, tmp_path, monkeypatch
 ):
-    """env var REBAR_UNSAFE_ID_GUARD_BYPASS takes precedence over the typed
-    `[reconciler] id_guard_bypass_unsafe` config key — exercised through the real
-    typed-config layer (0ac6 slice 2: the guard now resolves via
-    rebar.config.load_config, so the canonical env var and the typed config key
-    flow through the single config entry point with env > file precedence)."""
+    """REBAR_UNSAFE_ID_GUARD_BYPASS overrides the typed reconciler config key.
+
+    The default mode raises when neither source is set.
+    """
     import rebar.config as _cfg
 
     assert hasattr(applier, "_audit_rebar_id_label_writes"), (
@@ -307,23 +269,9 @@ def test_guard_mode_precedence(
 
 
 # ---------------------------------------------------------------------------
-# Per-leaf test matrix (9 tests, one per applier leaf)
-#
-# Canonical leaf names come from applier._LEAF_NAMES:
-#   outbound_create, outbound_update, outbound_delete, outbound_probe,
-#   outbound_conflict, inbound_create, inbound_update, inbound_clean_label,
-#   inbound_repair_property
-#
-# Authorization:
-#   AUTHORIZED (no raise):
-#     - outbound_create  → create action permitted
-#     - inbound_clean_label → delete action permitted
-#   UNAUTHORIZED (raises RebarIdLabelWriteError):
-#     - all other 7 leaves when they produce a rebar-id-* label mutation
-#
-# For inbound_repair_property: this leaf writes a PROPERTY FIELD (target='property'),
-# NOT a label. The test asserts that a property-field mutation does NOT trigger the
-# guard (target != 'label' so _is_rebar_id_label_write_mutation returns False).
+# The leaf and action matrix permits outbound_create/create and
+# inbound_clean_label/delete. All other label writes raise.
+# inbound_repair_property targets a property and bypasses label enforcement.
 # ---------------------------------------------------------------------------
 
 
@@ -333,12 +281,7 @@ def test_guard_mode_precedence(
 
 
 def test_outbound_create_may_write_rebar_id_label(applier):
-    """outbound_create is the only authorized leaf for rebar-id label CREATE.
-
-    Assertion: _audit_rebar_id_label_writes does NOT raise, and the mutation list
-    passed in is exactly the one mutation (no implicit extra writes possible via
-    the audit itself).
-    """
+    """Outbound create may add one rebar-id label without changing the mutation list."""
     mut = _MockLabelMutation(payload="rebar-id-abc-outbound-create", action="create")
     # Should not raise — outbound_create is authorized for create
     applier._audit_rebar_id_label_writes("outbound_create", [mut])
@@ -455,21 +398,8 @@ def test_inbound_update_must_not_write_rebar_id_label(applier):
 
 
 def test_inbound_repair_property_must_not_write_rebar_id_label(applier):
-    """inbound_repair_property writes a PROPERTY FIELD, NOT a label.
-
-    This leaf uses target='property' (not 'label'), so _is_rebar_id_label_write_mutation
-    returns False and _audit_rebar_id_label_writes does NOT raise — this is the expected
-    behavior (the leaf is neither authorized nor unauthorized for label writes; it simply
-    never produces label-surface mutations).
-
-    The test constructs a mutation with target='property' to reflect the actual
-    behavior of this leaf: it calls set_issue_property(), which operates on entity
-    properties, not labels. Even if payload starts with 'rebar-id-', the non-label
-    target means the guard is not triggered.
-    """
-    # NOTE: inbound_repair_property writes to target='property', not target='label'.
-    # The guard only fires when target='label' AND payload starts with 'rebar-id-'.
-    # A property-field mutation with a rebar-id-* value is NOT a label write.
+    """A property-target rebar-id value does not count as a label write."""
+    # Property-target mutations do not invoke the rebar-id label guard.
     property_mut = _MockLabelMutation(
         target="property",  # property surface, NOT label
         payload="rebar-id-local-ticket-id",
@@ -488,13 +418,7 @@ def test_inbound_repair_property_must_not_write_rebar_id_label(applier):
 
 
 def test_outbound_create_attempting_delete_action_raises(applier):
-    """outbound_create is authorized for `create` ONLY; a `delete` on a rebar-id
-    label from the same leaf is still UNAUTHORIZED and must raise.
-
-    Per-action enforcement closes the gap where _AUTHORIZED_REBAR_ID_LABEL_ACTIONS
-    was previously a dead constant — the leaf-name check alone would have let
-    an authorized writer perform any action, defeating the per-action contract.
-    """
+    """Outbound create authorization does not permit a rebar-id label delete."""
     mut = _MockLabelMutation(payload="rebar-id-mismatched-action", action="delete")
     with pytest.raises(applier.RebarIdLabelWriteError) as exc_info:
         applier._audit_rebar_id_label_writes("outbound_create", [mut])

@@ -1,19 +1,8 @@
-"""RED tests for the legacy update_one outbound field filter.
+"""Outbound update field filtering on the batch path.
 
-Historical bug (bug 85a1-f581-2252-4a21): the typed leaf ``_apply_outbound_update``
-filtered outbound update fields through ``_OUTBOUND_UPDATE_ALLOWLIST`` (since
-removed — epic f89d story D collapsed that dead typed leaf to delegate to
-``update_one``), but the actual production path on the outbound batch dispatcher
-routes through ``update_one``, which was unfiltered. A local issuetype
-change (probe Phase 2 ticket_type=task→bug) consequently flowed through as
-``--issuetype Bug`` to ACLI's ``jira workitem edit``, which rejects the
-flag with non-zero exit. ``_apply_batch`` had no try/except around this and
-the exception propagated up, aborting the entire batch loop and silently
-losing every subsequent outbound update (Phase 2 every-field FAIL).
-
-These tests assert ``update_one`` strips disallowed fields BEFORE calling
-``client.update_issue`` so the legacy batch path behaves like the typed
-leaf with respect to the apply allowlist.
+``update_one`` forwards summary, description, priority, assignee, and status while
+removing unsupported fields before ``update_issue``. An empty filtered update still
+calls ``update_issue`` so later comment and label dispatch can continue.
 """
 
 from __future__ import annotations
@@ -91,14 +80,7 @@ def test_update_one_keeps_allowlisted_fields(applier):
 
 
 def test_update_one_forwards_status_to_client(applier):
-    """Bug 85a1 (Gap 8): status is now allowlisted and must be forwarded.
-
-    Previously status was dropped here because outbound status was gated
-    BY_DESIGN behind REBAR_RECONCILER_STATUS_GATING. Gap 8 removed that gate
-    and rewrote ``transition_issue`` to use REST. update_one now passes
-    status through to ``client.update_issue``, which routes it to
-    ``transition_issue`` → REST POST /transitions.
-    """
+    """Status is allowlisted and reaches the client's transition route."""
     client = MagicMock()
     client.update_issue.return_value = None
     mutation = {
@@ -132,12 +114,7 @@ def test_update_one_strips_unknown_fields(applier):
 
 
 def test_update_one_empty_after_filter_still_calls_update_issue(applier):
-    """When all fields are stripped, update_issue is still called with empty kwargs.
-
-    This is intentional: the legacy contract treats an empty changed_fields as
-    a no-op success, and a fix in this area should not change that. Comment/label
-    dispatch (lines 1788+) must still run after the call returns.
-    """
+    """An empty filtered field set still calls update_issue before later dispatch."""
     client = MagicMock()
     client.update_issue.return_value = None
     mutation = {
