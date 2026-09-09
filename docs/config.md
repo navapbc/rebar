@@ -196,6 +196,12 @@ ticket.display_mode      = "auto"
 ticket.default_assignee  = ""     # assignee `claim` uses when --assignee is omitted (env REBAR_DEFAULT_ASSIGNEE)
 ticket_clarity.threshold = 5      # clarity-check pass threshold (env REBAR_TICKET_CLARITY_THRESHOLD)
 compact.threshold        = 10     # env REBAR_COMPACT_THRESHOLD
+compact.snapshot_alpha   = 0.0    # env REBAR_COMPACT_SNAPSHOT_ALPHA
+                        # Default-off adaptive compaction cadence. 0 disables it and
+                        # preserves the fixed event-count/backfill rule. A positive value
+                        # refolds already-snapshotted tickets when pending foldable source
+                        # bytes are at least this fraction of the active SNAPSHOT bytes;
+                        # the count threshold and first-SNAPSHOT backfill still apply.
 compact.trigger          = "async"  # async | always | off (env REBAR_COMPACT_TRIGGER)
                         # The OPERATION-LINKED compaction trigger. Compaction does not run on
                         # the close path any more (it held the store write lock for minutes),

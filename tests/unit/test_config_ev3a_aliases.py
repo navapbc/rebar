@@ -21,6 +21,7 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "REBAR_CONFIG",
         "XDG_CONFIG_HOME",
         "REBAR_COMPACT_THRESHOLD",
+        "REBAR_COMPACT_SNAPSHOT_ALPHA",
         "COMPACT_THRESHOLD",
         "REBAR_SCRATCH_BASE_DIR",
         "SCRATCH_BASE_DIR",
@@ -64,6 +65,19 @@ def test_compact_config_file(tmp_path: Path) -> None:
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text("[compact]\nthreshold = 13\n", encoding="utf-8")
     assert cfg.load_config(root=p).compact.threshold == 13
+
+
+def test_compact_snapshot_alpha_canonical_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REBAR_COMPACT_SNAPSHOT_ALPHA", "0.75")
+    assert cfg.load_config(root=_proj(tmp_path)).compact.snapshot_alpha == 0.75
+
+
+def test_compact_snapshot_alpha_config_file(tmp_path: Path) -> None:
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text("[compact]\nsnapshot_alpha = 0.25\n", encoding="utf-8")
+    assert cfg.load_config(root=p).compact.snapshot_alpha == 0.25
 
 
 # ── scratch.base_dir ──────────────────────────────────────────────────────────

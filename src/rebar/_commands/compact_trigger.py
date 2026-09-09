@@ -97,7 +97,6 @@ def ticket_needs_folding(tracker: str, ticket_id: str, *, repo_root=None) -> boo
     thing it triggers."""
     from rebar import config as _config
     from rebar._commands import compact_plan
-    from rebar._commands.compact import _foldable_event_count
     from rebar._store import hlc
 
     ticket_dir = os.path.join(tracker, ticket_id)
@@ -108,15 +107,24 @@ def ticket_needs_folding(tracker: str, ticket_id: str, *, repo_root=None) -> boo
         # which is the repo root only for a co-located store (auspicial-friended-merganser).
         cfg = _config.compose_config(repo_root).compact
         threshold, horizon = cfg.threshold, cfg.COMPACTION_HORIZON_NS
+        snapshot_alpha = cfg.snapshot_alpha
     except Exception:  # noqa: BLE001 — an unreadable config must never fail a close
         return False
-    foldable = _foldable_event_count(ticket_dir, hlc.physical_now(), horizon)
-    if foldable <= 0:
+    now = hlc.physical_now()
+    stats = compact_plan.foldable_stats(ticket_dir, now, horizon)
+    if stats.count <= 0:
         return False
     has_snapshot = compact_plan.has_snapshot(ticket_dir)
     if has_snapshot is None:
         return False  # unreadable ticket dir: a close must never fire on a guess
-    return compact_plan.needs_folding(foldable, has_snapshot, threshold)
+    return compact_plan.needs_folding(
+        stats.count,
+        has_snapshot,
+        threshold,
+        snapshot_alpha=snapshot_alpha,
+        pending_source_bytes=stats.pending_source_bytes,
+        active_snapshot_bytes=stats.active_snapshot_bytes,
+    )
 
 
 def _acquire_trigger_lock(tracker: str) -> int | None:

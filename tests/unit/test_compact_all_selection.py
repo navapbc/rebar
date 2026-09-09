@@ -112,6 +112,23 @@ def test_already_snapshotted_ticket_over_threshold_is_selected(store: Path) -> N
     )
 
 
+def test_already_snapshotted_ticket_over_alpha_is_selected(store: Path) -> None:
+    """Adaptive cadence widens recurrence by bytes without replacing the count threshold."""
+    repo = store
+    tid = _seed(repo, "grown by byte ratio", comments=1)
+    assert _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(repo)) == 0
+    tdir = _tdir(repo, tid)
+    assert list(tdir.glob("*-SNAPSHOT.json")), "precondition: the ticket has been folded once"
+
+    rebar.comment(tid, "post-fold " + ("x" * 5_000), repo_root=str(repo))
+    _age_events(tdir, _HOUR_NS)
+
+    needs, _rest = _compact._scan_snapshot_state(
+        str(_tracker(repo)), threshold=9_999, horizon=_HOUR_NS // 2, snapshot_alpha=0.01
+    )
+    assert tid in needs, "a high-byte replay tail should refold even below the count threshold"
+
+
 # ── the widening does not become a replacement ───────────────────────────────────────────────
 def test_under_threshold_already_snapshotted_ticket_is_not_selected(store: Path) -> None:
     """The quiet case: already folded, and nothing has accumulated since. Neither arm applies,
