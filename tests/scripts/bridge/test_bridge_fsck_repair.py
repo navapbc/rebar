@@ -1,15 +1,7 @@
-"""``bridge fsck --repair`` — the supported prune for orphaned reverse bindings.
+"""Test guarded repair of orphaned reverse bridge bindings.
 
-Bug 874a (vinifera-farflung-nyala). Before this verb, a ``reverse`` key with no
-forward entry was reported by ``bridge fsck`` as ``store_integrity`` / kind
-``reverse_missing_forward`` forever and no supported surface could remove it, so
-the binding-drift canary alerted indefinitely on a benign fault. The 13
-REB-410..REB-422 orphans repaired under nonliteral-spangly-fly had to reach into
-``BindingStore._data``.
-
-These cells pin the four pre-write guards: the prune acts on EXACTLY the audited
-finding set, refuses on any other integrity kind, refuses on a retired key, and
-leaves the forward map and the retired file untouched.
+Repair prunes exactly the audited orphan set. It refuses other integrity findings and retired
+keys while preserving forward bindings and the retired file.
 """
 
 from __future__ import annotations

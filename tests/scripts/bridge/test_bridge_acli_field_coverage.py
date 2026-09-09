@@ -1,24 +1,8 @@
-"""ACLI client field-extraction + contract-regression tests for the Jira bridge.
+"""Test Jira bridge field extraction, ACLI commands, and input sanitizers.
 
-This file has TWO test classes:
-
-1. TestAcliClientCreateFieldExtraction / TestAcliClientUpdateFieldExtraction —
-   verify which fields actually reach ACLI from a ticket-data dict.
-
-2. TestAcliContractRegression — locks down the EXACT ACLI command shape and
-   payload structure for every documented invocation pattern. These tests
-   exist because pre-extraction DSO epic 3a03-b3f2-b34c-4e4f surfaced three
-   layered ACLI invocation bugs (ProjectKey null, priority dict shape,
-   --label vs --labels flag) that would have been caught pre-cutover by a
-   command-shape contract test. Every confirmed-correct pattern from that
-   pre-extraction DSO epic's (3a03-b3f2-b34c-4e4f) ACLI audit is pinned
-   here; regression (flag rename, payload key drift, missing --yes) will
-   fail loudly in CI.
-
-3. TestAcliSanitizers — defends against untrusted user input in ticket
-   summaries and labels (whitespace, commas, empty strings, oversize values).
-
-Test: python3 -m pytest tests/scripts/test_bridge_acli_field_coverage.py -v
+Field tests pin values sent from ticket data. Command tests preserve ACLI arguments and
+payloads for project keys, priorities, labels, and confirmation flags. Sanitizer tests cover
+malformed and oversized summaries and labels.
 """
 
 from __future__ import annotations
@@ -31,21 +15,14 @@ import pytest
 
 
 class TestAcliClientCreateFieldExtraction:
-    """Test which fields AcliClient.create_issue() actually sends to the ACLI subprocess.
-
-    The bridge passes the full ticket data dict to acli_client.create_issue(),
-    but AcliClient.create_issue() may only extract a subset of those fields
-    for the ACLI command. These tests reveal what actually reaches Jira.
-    """
+    """Test fields forwarded by ``AcliClient.create_issue()``."""
 
     def test_acli_create_sends_summary(
         self, acli_mod: Any, acli_capture: Any, mock_jira_verify: Any
     ) -> None:
-        """AcliClient.create_issue() should send the title/summary to ACLI.
+        """Check summary placement in flag and JSON creation paths.
 
-        When priority is present, create uses --from-json (so --summary is in
-        the JSON payload, not the CLI args). When priority is absent, --summary
-        appears as a CLI flag.
+        Priority selects JSON input. Other creation requests use ``--summary``.
         """
         client, captured_cmds, fake_run_acli = acli_capture
 
@@ -178,22 +155,14 @@ class TestAcliClientCreateFieldExtraction:
     def test_acli_create_extracts_name_from_dict_shape_priority(
         self, acli_mod: Any, acli_capture: Any, mock_jira_verify: Any
     ) -> None:
-        """AcliClient.create_issue() must extract priority.name when priority
-        is a Jira REST-shape dict, not stringify the whole dict.
+        """Extract ``priority.name`` from Jira REST priority objects.
 
-        Bug 5010-1c6a-9387-4b5b: the reconciler differ propagates Jira's
-        snapshot priority field (a dict with iconUrl/id/name/self) into the
-        create payload. Before this fix, _create_issue_from_json fell through
-        the int-branch to str(priority), producing a Python-repr string that
-        ACLI rejects with "The priority selected is invalid". After the fix,
-        the dict must be unwrapped to its 'name' so the payload contains
-        additionalAttributes.priority.name == "High".
+        The reconciler forwards snapshot priority objects. ACLI requires the nested name
+        instead of a Python representation of the object.
         """
         client, _captured_cmds, fake_run_acli = acli_capture
 
-        # Jira REST snapshot shape — what fetcher.py:88-93 forwards into the
-        # differ-emitted mutation, what applier.py:337-351 then passes through
-        # client.create_issue.
+        # The fetcher forwards this Jira REST shape through the differ and applier.
         ticket_data = {
             "ticket_type": "bug",
             "title": "Test",
@@ -284,12 +253,7 @@ class TestAcliClientCreateFieldExtraction:
     def test_acli_create_sends_assignee(
         self, acli_mod: Any, acli_capture: Any, mock_jira_verify: Any
     ) -> None:
-        """AcliClient.create_issue() should send the assignee to ACLI.
-
-        Bug 544e: CREATE now resolves the assignee through the same assignable-search
-        validator as UPDATE, so a resolvable handle is forwarded as its accountId.
-        Mock the search so 'alice' resolves uniquely.
-        """
+        """Resolve the assignee and forward its account ID to ACLI."""
         client, captured_cmds, fake_run_acli = acli_capture
         client._direct_rest_get = MagicMock(
             return_value=[
@@ -328,11 +292,7 @@ class TestAcliClientUpdateFieldExtraction:
     """Test which fields AcliClient.update_issue() sends for non-status field updates."""
 
     def test_acli_update_routes_priority_to_rest(self, acli_mod: Any, acli_capture: Any) -> None:
-        """AcliClient.update_issue() routes priority to update_priority (REST PUT).
-
-        ACLI workitem edit does not support --priority. Priority updates are
-        now handled via direct REST API (PUT /rest/api/3/issue/{key}).
-        """
+        """Route priority updates through the Jira REST endpoint."""
         client, captured_cmds, fake_run_acli = acli_capture
 
         with (
@@ -341,15 +301,13 @@ class TestAcliClientUpdateFieldExtraction:
         ):
             result = client.update_issue("TEST-1", priority="High")
 
-        # No ACLI edit command should be issued for priority-only updates
+        # Priority-only updates must not invoke ACLI.
         assert len(captured_cmds) == 0, (
             f"No ACLI command should be issued for priority-only update. Got: {captured_cmds}"
         )
         assert result == {"key": "TEST-1"}
 
-        # Priority must be routed to update_priority via REST. No acli_cmd is
-        # forwarded: that path spawns no ACLI subprocess, so the client's ACLI argv
-        # prefix (the fixture's ["echo"]) is inapplicable to it (bug c9c6).
+        # The REST path does not receive the client's ACLI argument prefix.
         mock_priority.assert_called_once_with("TEST-1", "High")
 
     def test_acli_update_sends_description(self, acli_mod: Any, acli_capture: Any) -> None:
@@ -386,13 +344,7 @@ class TestAcliClientUpdateFieldExtraction:
         assert "content" in parsed, "ADF should have content field"
 
     def test_acli_update_sends_assignee(self, acli_mod: Any, acli_capture: Any) -> None:
-        """AcliClient.update_issue() should support sending assignee updates.
-
-        Bug 06a5: update_issue now pre-validates non-empty assignee values via
-        validate_assignee_exists (REST /assignable/search) before dispatching
-        to ACLI. Mock the validator so this test stays focused on ACLI flag
-        propagation rather than re-testing the validation path.
-        """
+        """Validate the assignee before forwarding its account ID to ACLI."""
         client, captured_cmds, fake_run_acli = acli_capture
 
         with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
@@ -406,38 +358,21 @@ class TestAcliClientUpdateFieldExtraction:
         )
 
 
-# ============================================================================
-# CONTRACT REGRESSION TESTS — added 2026-05-24 per ACLI audit (bug c916).
-#
-# Each test pins one ACLI invocation pattern to its EMPIRICALLY-VERIFIED shape
-# against ACLI v1.3.18 + DIG project. A regression introducing a flag rename,
-# missing --yes, payload-key typo, or shape drift WILL fail loudly in CI.
-# Reference: pre-extraction DSO epic 3a03-b3f2-b34c-4e4f spec External Command
-# Contract; bug c916 audit findings.
-# ============================================================================
+# ACLI command and payload contracts.
 
 
 class TestAcliContractRegression:
-    """Pin every ACLI invocation shape we use against its verified contract.
+    """Pin ACLI argument and payload shapes used by the bridge."""
 
-    Bugs prevented by this class:
-      - c916-74a1-ed06-40e4 (add_label uses nonexistent --label flag)
-      - 4fa9-0846-519e-4c30 (jira_project= kwarg omitted on AcliClient construction)
-      - 5010-1c6a-9387-4b5b (priority dict stringified via str() fallback)
-    """
-
-    # --- ADD LABEL contract (the bug that motivated this class) -----------
+    # Add labels without replacing the existing set.
 
     def test_add_label_uses_from_json_not_singular_label_flag(
         self, acli_mod: Any, acli_capture: Any
     ) -> None:
-        """add_label MUST use --from-json with labelsToAdd, NEVER --label.
+        """Use ``labelsToAdd`` because ACLI rejects the singular ``--label`` flag.
 
-        Empirically verified 2026-05-24: 'acli jira workitem edit --label X' is
-        rejected with 'unknown flag: --label'. The correct additive operation
-        is the labelsToAdd field in the --from-json payload (per ACLI's own
-        --generate-json output and Atlassian Community thread 3237097).
-        Regression check: if anyone reintroduces --label, this test fails.
+        The JSON operation follows ACLI-generated output and Atlassian Community thread
+        3237097.
         """
         client, captured_cmds, fake_run_acli = acli_capture
         with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):
@@ -462,12 +397,7 @@ class TestAcliContractRegression:
     def test_add_label_payload_uses_labelsToAdd_field(
         self, acli_mod: Any, acli_capture: Any
     ) -> None:
-        """add_label's --from-json payload MUST use 'labelsToAdd' (additive op).
-
-        Regression check: if anyone changes the payload key to 'labels'
-        (set-replace, would destroy existing labels) or to a snake_case form,
-        this test fails.
-        """
+        """Use ``labelsToAdd`` to preserve existing labels during additive updates."""
         client, _captured_cmds, fake_run_acli = acli_capture
         captured_payloads: list[Any] = []
         original_dump = json.dump
@@ -517,17 +447,13 @@ class TestAcliContractRegression:
         )
         assert payload.get("issues") == ["DIG-3802"]
 
-    # --- CREATE contract --------------------------------------------------
-
     def test_create_with_priority_payload_uses_projectKey_not_project(
         self, acli_mod: Any, acli_capture: Any, mock_jira_verify: Any
     ) -> None:
-        """CREATE --from-json payload MUST use 'projectKey' (NOT 'project').
+        """Use ``projectKey`` in JSON creation payloads.
 
-        Regression check for bug 4fa9: the ACLI payload schema uses
-        camelCase 'projectKey', not the bare 'project' field. Empty
-        projectKey is rejected by ACLI with 'ProjectKey can't be null or
-        blank'. Tests with priority=1 to force the --from-json path.
+        ACLI rejects empty ``projectKey`` values and does not accept ``project`` for this
+        field. Priority selects the JSON creation path.
         """
         client, _captured_cmds, fake_run_acli = acli_capture
         captured_payloads: list[Any] = []
@@ -558,11 +484,9 @@ class TestAcliContractRegression:
     def test_create_priority_payload_uses_additionalAttributes_priority_name(
         self, acli_mod: Any, acli_capture: Any, mock_jira_verify: Any
     ) -> None:
-        """CREATE priority MUST live under additionalAttributes.priority.name.
+        """Place creation priority under ``additionalAttributes.priority.name``.
 
-        Empirically verified 2026-05-24: ACLI accepts
-        additionalAttributes.priority = {"name": "High"} or {"id": "2"}.
-        Top-level 'priority' on the create payload yields 'unknown field'.
+        ACLI accepts name or ID priority objects and rejects a top-level ``priority`` field.
         """
         client, _captured_cmds, fake_run_acli = acli_capture
         captured_payloads: list[Any] = []
@@ -588,16 +512,8 @@ class TestAcliContractRegression:
             f"Got: {payload['additionalAttributes']['priority']!r}"
         )
 
-    # --- DELETE contract --------------------------------------------------
-
     def test_delete_issue_uses_key_and_yes_flags(self, acli_mod: Any, acli_capture: Any) -> None:
-        """DELETE MUST use --key and --yes (skip interactive confirmation).
-
-        Bug d843: delete_issue now routes through the ``_run_acli`` chokepoint
-        (so it inherits the timeout/process-group reaping), so we patch
-        ``_run_acli`` and inspect the captured cmd argv (sans the acli_cmd
-        prefix, which _run_acli prepends internally).
-        """
+        """Pass ``--key`` and ``--yes`` through the shared ACLI subprocess runner."""
         from unittest.mock import MagicMock
 
         captured: list[list[str]] = []
@@ -636,17 +552,11 @@ class TestAcliContractRegression:
             f"DELETE requires --yes or it hangs on the interactive prompt. Got: {acli_args}"
         )
 
-    # --- TRANSITION contract (module-level function) ----------------------
-
     def test_transition_issue_uses_rest_transitions_endpoint(self, acli_mod: Any) -> None:
-        """TRANSITION MUST use REST POST /rest/api/3/issue/{key}/transitions (bug 85a1 Gap 8).
+        """Use Jira REST to list and apply issue transitions.
 
-        The previous ACLI-based ``workitem transition`` subcommand silently
-        exited 0 on bogus transitions (bug 85a1 Gap 5 — the lying-success
-        bug), so ``transition_issue`` was rewritten to use direct REST.
-        This regression test pins the new contract: GET /transitions to
-        list available, then POST /transitions with ``{"transition":
-        {"id": "<id>"}}``. ACLI is NO LONGER called from this path.
+        The operation reads ``/transitions`` before posting the selected transition ID. It
+        does not invoke ACLI.
         """
         from unittest.mock import patch as _patch
 
@@ -680,12 +590,10 @@ class TestAcliContractRegression:
 
 
 class TestAcliSanitizers:
-    """Defend against untrusted user input in ticket summaries and labels.
+    """Validate user-supplied summaries and labels before reconciliation.
 
-    Local tickets may contain arbitrary user-supplied text (titles, tags).
-    The reconciler must not crash mid-pass on a single oversize / malformed
-    ticket, and must not pass invalid values to ACLI that would produce
-    silent server-side mangling.
+    Invalid input must fail before ACLI. Oversized summaries must be shortened to Jira's
+    limits.
     """
 
     def test_sanitize_label_strips_whitespace(self, acli_mod: Any) -> None:
@@ -716,12 +624,7 @@ class TestAcliSanitizers:
             acli_mod._sanitize_label("a" * 256)
 
     def test_sanitize_label_accepts_exact_max_length(self, acli_mod: Any) -> None:
-        """Jira's label max is inclusive 255 ('no more than 255 characters').
-
-        A 255-char label MUST be accepted (boundary-exact). This test catches
-        an off-by-one in _JIRA_LABEL_MAX_CHARS that would silently reject
-        a valid label.
-        """
+        """Accept Jira labels at the inclusive 255-character limit."""
         max_label = "a" * 255
         assert acli_mod._sanitize_label(max_label) == max_label
 
@@ -741,18 +644,13 @@ class TestAcliSanitizers:
         assert result.endswith(" [truncated]")
 
     def test_sanitize_summary_truncates_at_255_boundary(self, acli_mod: Any) -> None:
-        """Jira's summary error is 'must be less than 255' (strict less-than).
+        """Shorten summaries at Jira's exclusive 255-character boundary.
 
-        A 255-char summary MUST be rejected by Jira, so our sanitizer MUST
-        truncate it. This boundary-exact test catches the off-by-one that
-        the prior implementation had (_JIRA_SUMMARY_MAX_CHARS = 255 silently
-        passed 255-char titles through to Jira, which then rejected them
-        and crashed the reconciler pass). Source: Atlassian Community
-        thread 989632 + tenable/integration-jira-cloud#322.
+        Jira requires fewer than 255 characters. This limit follows Atlassian Community thread
+        989632 and ``tenable/integration-jira-cloud#322``.
         """
         summary_255 = "x" * 255
         result = acli_mod._sanitize_summary(summary_255)
-        # MUST be truncated — passing 255 chars through is a Jira API rejection.
         assert len(result) <= 254, (
             f"255-char summary must be truncated to <=254 to satisfy Jira's "
             f"'less than 255' rule. Got length {len(result)}: {result!r}"

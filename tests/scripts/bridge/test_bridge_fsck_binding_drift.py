@@ -1,11 +1,7 @@
-"""bridge fsck binding-level drift audit (epic 3006-e198, child 8de5).
+"""Test binding-level drift checks in ``bridge fsck``.
 
-The pre-fix ``audit_bridge_mappings`` walked local event dirs ONLY (orphan /
-duplicate / stale SYNC) and was structurally blind to binding-level drift: a
-confirmed binding whose local ticket is archived/deleted, a binding whose local
-ticket vanished, or a live/retired overlap. This asserts the new offline arm —
-the SECOND consumer of the one convergence classifier — reads bindings.json and
-flags them (the old checks return clean over the same store: RED before the arm).
+The audit reads binding state and identifies terminal local tickets, missing local tickets,
+and active entries that also appear in retired bindings.
 """
 
 from __future__ import annotations
@@ -135,10 +131,7 @@ def test_no_snapshot_skips_jira_requiring_cells(fsck, tmp_path):
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_absent_from_snapshot_without_confirmed_404_is_not_dangling(fsck, tmp_path):
-    # ADR 0028 §1 (bug f436) — a confirmed binding merely absent from the windowed
-    # snapshot is NOT a deletion candidate: the offline audit never probed it.
-    # (Historically this exact case was wrongly reported as ``dangling``.) With no
-    # persisted confirmed-404 state it is surfaced only informationally.
+    # ADR 0028 treats snapshot absence as informational until persisted 404 evidence exists.
     tracker = tmp_path / ".tickets-tracker"
     _write_bindings(tracker, bindings={"f8b5": _confirmed("REB-530")}, reverse={"REB-530": "f8b5"})
     drift = fsck.audit_binding_drift(
@@ -153,15 +146,8 @@ def test_absent_from_snapshot_without_confirmed_404_is_not_dangling(fsck, tmp_pa
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_alive_out_of_window_binding_is_not_dangling(fsck, tmp_path):
-    # ADR 0028 §1/§2 regression (bug f436): the reconciler snapshot is
-    # DELIBERATELY windowed — a Done binding aged out beyond the Done-recent cap
-    # is ALIVE in Jira but intentionally absent from prev_snapshot.json. The
-    # OFFLINE audit has no Jira client and never probes, so it must NOT report
-    # snapshot-window absence as a deletion candidate (``dangling``) — else an
-    # alive aged-out binding is reported dangling every pass forever (unhealable).
-    #
-    # Synthetic store: TWO confirmed bindings; the windowed snapshot contains
-    # only ONE (the other aged out of the Done-recent window while still alive).
+    # A windowed snapshot cannot distinguish an aged-out Jira issue from a deletion.
+    # The offline audit reports the missing binding as unprobed rather than dangling.
     tracker = tmp_path / ".tickets-tracker"
     _write_bindings(
         tracker,
@@ -177,21 +163,16 @@ def test_alive_out_of_window_binding_is_not_dangling(fsck, tmp_path):
         # Windowed snapshot: only REB-100 is inside the window; REB-200 aged out.
         jira_snapshot={"REB-100": {"status": "In Progress"}},
     )
-    # The alive out-of-window binding must NOT be dangling (un-probed absence is
-    # not a deletion signal); it is surfaced only informationally.
     assert {e["jira_key"] for e in drift["dangling"]} == set(), drift
     assert {e["jira_key"] for e in drift["absent_in_window_unprobed"]} == {"REB-200"}, drift
-    # The in-window binding is unaffected — present + bound + active → no drift.
+    # The in-window binding produces no informational finding.
     assert "REB-100" not in {e["jira_key"] for e in drift["absent_in_window_unprobed"]}
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_confirmed_404_state_sources_dangling(fsck, tmp_path):
-    # Option 1 (ADR 0028 §2): ``dangling`` is sourced ONLY from persisted
-    # confirmed-404 state that binding_store records on the binding entry
-    # (``absent_404_count`` via note_absent). An out-of-window binding the live
-    # pass HAS confirmed absent (count > 0) IS a real deletion candidate.
+    # Persisted confirmed-404 state is the only source for a dangling classification.
     tracker = tmp_path / ".tickets-tracker"
     entry = _confirmed("REB-300")
     entry["absent_404_count"] = 1
@@ -208,9 +189,7 @@ def test_confirmed_404_state_sources_dangling(fsck, tmp_path):
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_absent_local_without_confirmed_404_stays_informational(fsck, tmp_path):
-    # Regression guard for the 2571 refactor: a confirmed binding absent from the
-    # windowed snapshot but never confirmed 404 stays informational even when the
-    # local ticket is absent from the reducer output.
+    # Missing local state does not turn unprobed Jira absence into a dangling binding.
     tracker = tmp_path / ".tickets-tracker"
     _write_bindings(
         tracker,
@@ -413,9 +392,7 @@ def test_no_bindings_store_is_clean(fsck, tmp_path):
     assert drift == fsck._empty_binding_drift()
 
 
-# ---------------------------------------------------------------------------
-# Ticket 030f held-out oracle: committed-ref scanning and index integrity.
-# ---------------------------------------------------------------------------
+# Committed reference scanning and index integrity.
 
 
 @pytest.mark.unit

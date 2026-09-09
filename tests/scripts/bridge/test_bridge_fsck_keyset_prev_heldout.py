@@ -166,17 +166,10 @@ def _git_out(root: Path, *args: str) -> str:
 
 
 def _store_snapshot(root: Path) -> dict[str, object]:
-    """Snapshot what "the store did not change" actually means, in two parts.
+    """Capture payload bytes and logical Git references separately.
 
-    Payload: every file OUTSIDE ``.git/`` byte-for-byte -- the event files, ``.bridge_state/``
-    and bindings the store owns.
-
-    Git state: the LOGICAL ref state (``HEAD`` plus every ref) rather than the bytes of git's
-    object storage. Git's background auto-maintenance rewrites that storage on its own
-    schedule -- it takes ``.git/objects/maintenance.lock`` and repacks loose objects into a
-    packfile -- so comparing those bytes makes the oracle depend on git's scheduler rather than
-    on the command under test. Repacking cannot move a ref, so it is invisible here, while a
-    command that actually committed to the store would move ``HEAD`` and be caught.
+    Git maintenance may rewrite object storage without changing the store. Payload files detect
+    data mutation, while ``HEAD`` and all refs detect commits.
     """
     payload = {
         str(path.relative_to(root)): path.read_bytes()
@@ -251,14 +244,7 @@ def test_cli_keyset_is_informational_and_keeps_json_envelope_read_only(tmp_path)
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_store_snapshot_survives_git_maintenance_but_still_catches_mutation(tmp_path):
-    """The read-only oracle must answer "did the store change?", not "did git reorganise?".
-
-    Git auto-maintenance runs on its own schedule: it takes a lock under ``.git/objects/`` and
-    repacks loose objects. Neither is a store mutation, and both used to flip a byte-for-byte
-    snapshot of the whole tracker directory -- which is how this suite went intermittently red.
-    Both limbs are exercised here, and the second half of the test proves the oracle did not buy
-    that stability by going blind.
-    """
+    """Ignore Git storage maintenance while retaining payload mutation detection."""
     tracker = _cli_tracker(tmp_path / "churn", {"REB-464": {"status": "To Do"}})
     before = _store_snapshot(tracker)
 

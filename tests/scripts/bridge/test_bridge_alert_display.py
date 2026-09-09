@@ -1,34 +1,8 @@
-"""Tests for BRIDGE_ALERT detection in ticket-reducer.py and ticket-show.sh/ticket-list.sh.
+"""Test bridge alert reduction and read-command projections.
 
-BRIDGE_ALERT event format (from ticket dso-7n6c contract):
-    {
-        "event_type": "BRIDGE_ALERT",
-        "ticket_id": str,
-        "env_id": str,
-        "timestamp": int,
-        "uuid": str,
-        "data": {
-            "alert_type": str,
-            "detail": str,
-            # Optional for resolution events:
-            "resolved": True,
-            "resolves_uuid": str,  # UUID of the original alert being resolved
-        }
-    }
-
-The reducer is expected to accumulate bridge_alerts in state:
-    state["bridge_alerts"] = [
-        {
-            "reason": str,       # data.alert_type or data.detail
-            "timestamp": int,
-            "uuid": str,
-            "resolved": bool,
-        },
-        ...
-    ]
-
-Test: python3 -m pytest tests/scripts/test_bridge_alert_display.py -v
-All tests must return FAIL (AssertionError or pytest failure) before implementation.
+The reducer stores each alert's reason, timestamp, UUID, and resolution state. Resolution
+events identify the earlier alert through ``resolves_uuid``. The ``show`` and ``list`` readers
+surface unresolved alerts.
 """
 
 from __future__ import annotations
@@ -41,13 +15,7 @@ import pytest
 
 import rebar.reducer as ticket_reducer
 
-# ---------------------------------------------------------------------------
-# Module under test — in-process package (Tier E E7d). The reducer logic lives
-# in rebar.reducer; the bash-era engine shim (_engine/ticket-reducer.py) and the
-# ticket-show.sh/ticket-list.sh read shims are being deleted, so we drive the
-# reducer via the package and the read commands via the in-process read
-# handlers (rebar._engine_support.reads) rather than subprocessing helpers.
-# ---------------------------------------------------------------------------
+# Exercise reducer and read handlers through their Python interfaces.
 
 
 @pytest.fixture(scope="module")
@@ -55,10 +23,6 @@ def reducer() -> ModuleType:
     """Return the rebar.reducer module (in-process reducer logic)."""
     return ticket_reducer
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 _ENV_ID = "00000000-0000-4000-8000-000000000001"
 _BRIDGE_ENV_ID = "cccccccc-0000-4000-8000-000000000003"
@@ -111,9 +75,7 @@ def _make_ticket_dir(tmp_path: Path, ticket_id: str = "tkt-alert-001") -> Path:
     return ticket_dir
 
 
-# ---------------------------------------------------------------------------
-# Test 1: reducer detects an unresolved BRIDGE_ALERT event
-# ---------------------------------------------------------------------------
+# Alert reduction.
 
 
 @pytest.mark.unit
@@ -154,9 +116,7 @@ def test_reducer_detects_unresolved_bridge_alert(tmp_path: Path, reducer: Module
     assert alert["uuid"] == _UUID_ALERT
 
 
-# ---------------------------------------------------------------------------
-# Test 2: reducer marks an alert resolved when a resolution event is present
-# ---------------------------------------------------------------------------
+# Resolution events.
 
 
 @pytest.mark.unit
@@ -215,15 +175,13 @@ def test_reducer_alert_resolved_by_resolution_event(tmp_path: Path, reducer: Mod
         )
 
 
-# ---------------------------------------------------------------------------
-# Test 3: reducer returns empty bridge_alerts when no BRIDGE_ALERT events exist
-# ---------------------------------------------------------------------------
+# Tickets without alerts.
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_reducer_no_alerts_when_none_present(tmp_path: Path, reducer: ModuleType) -> None:
-    """A ticket with only a CREATE event has bridge_alerts == [] or key absent."""
+    """A CREATE-only ticket retains an empty ``bridge_alerts`` list."""
     ticket_dir = _make_ticket_dir(tmp_path, "tkt-alert-003")
 
     state = reducer.reduce_ticket(ticket_dir)
@@ -241,9 +199,7 @@ def test_reducer_no_alerts_when_none_present(tmp_path: Path, reducer: ModuleType
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 4: `show` surfaces a bridge alert indicator when unresolved alerts exist
-# ---------------------------------------------------------------------------
+# Show output.
 
 
 @pytest.mark.unit
@@ -256,7 +212,6 @@ def test_ticket_show_outputs_health_warning_when_unresolved_alerts(
     """
     from rebar._engine_support.reads_cli import _cmd_show
 
-    # Build a minimal tickets-tracker directory structure
     tracker_dir = tmp_path / ".tickets-tracker"
     tracker_dir.mkdir()
     ticket_id = "tkt-alert-004"
@@ -291,7 +246,6 @@ def test_ticket_show_outputs_health_warning_when_unresolved_alerts(
 
     assert rc == 0, f"show returned {rc}; stderr: {captured.err!r}"
     assert _NEUTRAL_ALERT_GUIDANCE in captured.err
-    # The output (stdout JSON or stderr warning) must contain some indication of bridge alerts
     assert any(
         indicator in combined_output
         for indicator in ("BRIDGE_ALERT", "bridge_alert", "bridge_alerts", "⚠")
@@ -301,9 +255,7 @@ def test_ticket_show_outputs_health_warning_when_unresolved_alerts(
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 5: `list` includes bridge_alerts in output for alerted tickets
-# ---------------------------------------------------------------------------
+# List output.
 
 
 @pytest.mark.unit
@@ -315,7 +267,6 @@ def test_ticket_list_includes_bridge_alerts_in_output(
     (in the printed state JSON and/or the stderr warning)."""
     from rebar._engine_support.reads_cli import _cmd_list
 
-    # Build minimal tracker directory
     tracker_dir = tmp_path / ".tickets-tracker"
     tracker_dir.mkdir()
     ticket_id = "tkt-alert-005"
@@ -350,7 +301,6 @@ def test_ticket_list_includes_bridge_alerts_in_output(
 
     assert rc == 0, f"list returned {rc}; stderr: {captured.err!r}"
     assert _NEUTRAL_ALERT_GUIDANCE in captured.err
-    # The list output must surface bridge_alerts for the ticket
     assert any(
         indicator in combined_output
         for indicator in ("bridge_alerts", "BRIDGE_ALERT", "bridge_alert")
