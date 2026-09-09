@@ -68,6 +68,14 @@ completion_floor_active = true
 # unassigned — bug 544e). Override per-checkout with the env var REBAR_DEFAULT_ASSIGNEE.
 default_assignee = "joeoakhart@navapbc.com"
 
+[snapshot]
+# Concurrent-gate admission cap for the shared Gerrit/rebar service host (story
+# 48f0-f7ff-c8df-43ac). The code default is 4; measured host memory on the old
+# t4g.large could not satisfy four concurrent plan-review peaks. Two slots plus
+# the MemAvailable floor in gate_admission bounds the sum rather than relying on
+# independent local limits.
+max_concurrent_gates = 2
+
 [mcp]
 # Enable the LLM agent operations over the MCP server (review_ticket / review_code /
 # scan_spec / verify_completion). They make live, billable LLM calls.

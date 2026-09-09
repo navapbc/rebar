@@ -32,6 +32,7 @@ services:
       context: ../..
       dockerfile: infra/compose/Dockerfile.gerrit
     restart: unless-stopped
+    mem_limit: 3072m
     ports:
       # 8080: Gerrit HTTP — published to host loopback so the HOST nginx (TLS
       # terminator) proxies to 127.0.0.1:8080; NOT directly internet-exposed.
@@ -78,6 +79,7 @@ services:
       context: ../..
       dockerfile: infra/compose/Dockerfile.reviewbot
     restart: unless-stopped
+    mem_limit: 2048m
     # Give the graceful shutdown (app.py lifespan) time to finish before Docker escalates
     # SIGTERM → SIGKILL on a redeploy/restart, so acknowledged (202) webhooks are not abandoned
     # AND — the reason this must be generous — an in-flight store write is never killed midway.
@@ -341,6 +343,7 @@ services:
       context: ../..
       dockerfile: infra/compose/Dockerfile.opcert
     restart: unless-stopped
+    mem_limit: 256m
     # ANTHROPIC_API_KEY (the gate's LLM ops) + REBAR_OPCERT_GUARD (appended by
     # infra/scripts/materialize-opcert-guard.sh, the SSM-materialized origin guard) come
     # from the regenerated .env.
@@ -412,6 +415,7 @@ services:
       context: ../..
       dockerfile: infra/compose/Dockerfile.mcp
     restart: always
+    mem_limit: 3712m
     # Cover the app's bounded SIGTERM grace (_mcp_health.DEFAULT_SHUTDOWN_GRACE_SECONDS =
     # 1200s: a retiring container waits for an in-flight certified op to finish) plus margin
     # so Docker never escalates SIGTERM->SIGKILL mid-op. MUST stay >= that constant;

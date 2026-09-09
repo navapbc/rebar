@@ -88,7 +88,9 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DEFAULT_MAX_CONCURRENT_GATES",
     "DISARMED_MARKER",
+    "GATE_MIN_AVAILABLE_MIB",
     "MARKER",
+    "available_memory_mib",
     "gate_admission",
     "max_concurrent_gates",
     "scratch_unavailable_detail",
@@ -120,6 +122,13 @@ DISARMED_MARKER = "GATE_ADMISSION_DISARMED"
 #: ~10 concurrent plan reviews — which is the point, since a cap at or above observed peak
 #: sheds no load and bounds nothing.
 DEFAULT_MAX_CONCURRENT_GATES = 4
+
+#: The floor, in MiB, of ``MemAvailable`` below which a gate is refused rather
+#: than started. It matches ``MCP_MEM_MIN_MB`` in ``infra/scripts/autodeploy.sh``:
+#: both shed load before starting a heavyweight overlap on this host.
+GATE_MIN_AVAILABLE_MIB = 1024
+
+_MEMINFO = Path("/proc/meminfo")
 
 _SLOT_PREFIX = "gate-slot-"
 
@@ -214,6 +223,71 @@ def scratch_unavailable_detail() -> str | None:
         f"{base} declares a dedicated scratch volume ({base.parent / _SCRATCH_REQUIRED_MARKER}) "
         f"but {_SCRATCH_MOUNTED_MARKER} is absent, so the volume is not mounted"
     )
+
+
+def available_memory_mib() -> int | None:
+    """Host ``MemAvailable`` in MiB, or ``None`` when the platform has no ``/proc/meminfo``.
+
+    Missing ``/proc/meminfo`` is inapplicable (for example macOS); an existing but
+    unparseable file is a broken Linux memory probe and is reported by the caller.
+    """
+    try:
+        text = _MEMINFO.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return None
+    for line in text.splitlines():
+        if line.startswith("MemAvailable:"):
+            fields = line.split()
+            if len(fields) >= 2 and fields[1].isdigit():
+                return int(fields[1]) // 1024
+            break
+    raise ValueError("/proc/meminfo exposes no parseable MemAvailable field")
+
+
+def _emit_memory_low(
+    gate: str,
+    ticket_id: str,
+    available_mib: int,
+    repo_root: str | os.PathLike[str] | None,
+) -> None:
+    """Announce a memory refusal on the existing congestion token."""
+    _emit(
+        MARKER,
+        gate,
+        ticket_id,
+        limit=max_concurrent_gates(repo_root),
+        reason="memory_low",
+        available_mib=available_mib,
+        floor_mib=GATE_MIN_AVAILABLE_MIB,
+    )
+
+
+def _require_available_memory(
+    gate: str,
+    ticket_id: str,
+    repo_root: str | os.PathLike[str] | None,
+) -> None:
+    """Refuse when the host cannot spare memory for another gate.
+
+    This is a precondition, not a reservation: it composes with the slot counter by
+    rejecting the case where the host is already in the low-memory band before the
+    next gate allocates its snapshot and review-clone working set.
+    """
+    try:
+        available = available_memory_mib()
+    except (OSError, ValueError) as exc:
+        _emit_admission_disarmed(gate, ticket_id, f"MemAvailable unreadable: {type(exc).__name__}")
+        return
+    if available is None:
+        return
+    if available < GATE_MIN_AVAILABLE_MIB:
+        _emit_memory_low(gate, ticket_id, available, repo_root)
+        raise GateCongestedError(
+            gate,
+            max_concurrent_gates(repo_root),
+            available_mib=available,
+            floor_mib=GATE_MIN_AVAILABLE_MIB,
+        )
 
 
 def _require_scratch_volume(gate: str) -> None:
@@ -337,6 +411,9 @@ def gate_admission(
     # gate bytes are about to land on the root filesystem. A host that turned the counter off
     # did not thereby consent to losing its scratch volume silently.
     _require_scratch_volume(gate)
+    # Also before the counter's ``0`` off-switch: disabling the concurrency bound is a
+    # different decision from starting gates into an exhausted host.
+    _require_available_memory(gate, ticket_id, repo_root)
     limit = max_concurrent_gates(repo_root)
     if limit <= 0:
         yield  # the operator's explicit off switch — a choice, not a fault: no marker
