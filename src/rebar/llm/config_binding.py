@@ -1,25 +1,12 @@
-"""The per-operation, authoritative :class:`~rebar.llm.config.LLMConfig` binding.
+"""Bind one authoritative ``LLMConfig`` for each public LLM operation.
 
-Ticket ec44 (ADR 0098, completing the ticket-3a08 CLI/command/store cutover for the
-LLM surface): one behavior-bearing ``LLMConfig`` per public LLM/gate/workflow
-operation, composed exactly once and bound for the whole operation so nested
-subcalls and multi-step workflow runs observe the SAME resolved config instead of
-re-reading the environment per call.
+Composition occurs once, and nested calls or workflow steps reuse the bound instance. An
+explicit config remains authoritative. Unlike the general operation snapshot, composition
+errors propagate before an external model call instead of falling back to ambient provider or
+credential selection.
 
-:func:`compose_and_bind_llm_config` is the LLM-surface counterpart to
-:func:`rebar._operation_config.compose_and_bind_operation_snapshot` — same
-reentrancy contract (an already-bound config is reused verbatim, never
-recomposed), same "explicit input stays authoritative" contract — but it does NOT
-share that function's fail-OPEN swallow: a malformed/missing LLM config decides
-which provider/credentials/model a live, billable call uses, so composition
-failure here propagates (AC3: fail before any external call, no anonymous/
-cross-provider fallback) rather than degrading to unbound ambient resolution.
-
-:func:`redacted_snapshot_values` / :func:`llm_config_fingerprint` give the LLM
-config a non-secret, fingerprintable projection (AC4) by reusing
-:class:`rebar._operation_config.OperationSnapshot`'s own validating constructor —
-the same secret/live-object screen the general operation snapshot gets, applied
-here to an EXPLICIT ALLOWLIST of known-safe ``LLMConfig`` fields.
+The redacted fingerprint projection uses an explicit allowlist of non-secret fields and the
+validated ``OperationSnapshot`` constructor. New config fields remain excluded until reviewed.
 """
 
 from __future__ import annotations

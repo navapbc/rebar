@@ -23,12 +23,8 @@ from rebar.llm.runner import Runner, RunRequest, get_runner
 # return additionally carries runner/model/trace_id provenance keys, which the op drops.
 _DIGEST_FIELDS = ("problem_keywords", "component_or_area", "key_entities", "propositions")
 
-# Chars-per-token for the physical context ceiling. VERBATIM the constant and the reasoning of
-# `rebar.llm.workflow.completion_criteria._CONTEXT_CHARS_PER_TOKEN`: English prose averages ~4
-# chars/token, so 2 is deliberately conservative and leaves room for the tokenizer's worst case
-# on the mixed prose/code/log text a ticket body actually contains. Duplicated rather than
-# imported because `rebar.llm.enrich` is on the STORE WRITE path (enrich_drain.maybe_drain) and
-# must not drag the completion-verifier workflow package into that import graph.
+# Conservative physical context conversion for mixed ticket prose, code, and logs. This local
+# copy avoids importing the completion workflow package onto the enrichment store-write path.
 _CONTEXT_CHARS_PER_TOKEN = 2
 
 # The visible shortening marker. Contract: the marker text is part of the string that is SENT,
@@ -39,51 +35,16 @@ _TRUNCATION_MARKER = "\n... <ticket source truncated to fit the model context ce
 
 
 def _bound_source(source: str, model: str | None, *, reserved_chars: int = 0) -> str:
-    """Shorten *source* so it can never overflow *model*'s own context window.
+    """Fit lossy ticket-digest input within the model's context window.
 
-    Bug 569c-931f-69a2-4c1d (spongy-illjudged-terrier): ``_assemble_text`` concatenates title +
-    description + EVERY comment body with no bound at all. On a long-lived ticket that reaches
-    millions of characters, and the provider rejects the request outright — ``status_code: 400
-    ... 'prompt is too long: 206826 tokens > 200000 maximum'`` against the `trivial` class's
-    200k-token window — so the queue's LARGEST entries were the ones that could never drain.
+    Authoritative verification evidence still fails closed when oversized. Digest enrichment
+    is assistance data, so a bounded prefix is preferable to a ticket that can never leave the
+    queue. ``reserved_chars`` accounts for the system prompt.
 
-    WHY TRUNCATE HERE, given :mod:`rebar.llm.pai_retry` states that "rebar fails closed rather
-    than SHORTENING authoritative system / user / tool content"?
-    That rule is scoped, not universal, and this content sits on the other side of the scope
-    line. ``pai_retry``'s ``_wire_keeps_response`` governs the *authoritative* conversation
-    carried on a RETRY wire for a verification op: the system prompt, the user's actual
-    instruction, and prior tool results are the evidence a verdict is computed from, so
-    silently shortening them would let a gate pass on partial evidence — an incorrect OUTCOME,
-    which is exactly what failing closed prevents.
-    The ticket-digest source is not that. It is *lossy summarizer input*: this op extracts four
-    constrained normalization fields for dedup candidate generation, and it is already lossy by
-    construction — ``enrich()`` truncates its own ``propositions`` output at
-    ``cfg.overlap_propositions_max`` a few lines below. A digest computed from a ticket's title,
-    description, and first N comments is a slightly weaker dedup hint; a digest that never
-    exists at all (the pre-fix behaviour) is no hint AND an infinite re-claim loop. The project
-    already takes exactly this position for assistance-class content in
-    ``completion_prefetch.fit_within_ceiling``, which trims a prefetch section to this same
-    ceiling and appends a visible marker rather than letting the run die. Failing closed here
-    would buy no correctness and cost the whole feature on precisely the tickets that most need
-    dedup.
-
-    Behaviour (mirrors ``fit_within_ceiling`` + ``comment_limits.truncate_comment_body``):
-
-    * a source at or below the budget is returned **byte-identical**;
-    * an over-budget source is cut on the last ``"\\n"`` join boundary that fits — the join
-      ``_assemble_text`` itself produces — so whole trailing COMMENTS are dropped rather than a
-      comment being severed mid-word, falling back to a hard cut when no boundary fits. Title
-      and description are joined first, so they always survive;
-    * the marker is counted against the budget and the result is defensively re-clamped, so the
-      return NEVER overflows the ceiling even after appending it;
-    * the operation is **idempotent** — the returned string is always within the budget, so a
-      second application returns it unchanged. This is load-bearing, not cosmetic: the digest
-      sidecar keys a stored digest by the ticket's content hash
-      (``overlap.digest_sidecar.freshness``), so a non-idempotent bound would make the same
-      ticket produce a different prompt on each drain and churn the sidecar forever.
-
-    ``reserved_chars`` is the caller's system-prompt size. The ceiling is already conservative,
-    but the budget should not pretend the system prompt is free.
+    Input within budget is byte-identical. Oversized input is cut at the last newline that fits,
+    or at the hard boundary when no newline fits. The visible marker counts against the budget,
+    and the final clamp cannot exceed it. The bounded result is idempotent so repeated drains do
+    not churn content-hash sidecars.
     """
     from rebar.llm.model_classes import own_window_tokens
 

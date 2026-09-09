@@ -1,37 +1,13 @@
-"""The Gerrit bugfix-size attestation criterion (ticket ad0d B2).
+"""Enforce plan review for Gerrit bug fixes over 150 non-test diff lines.
 
-An oversized bug-fix change (>150 non-test diff lines) landing through Gerrit must carry a
-VALID plan-review attestation on the bug named by its ``rebar-ticket:`` trailer. A large fix
-whose bug was never plan-reviewed — or whose attestation cannot be verified — is exactly the
-"drive-by rewrite labeled as a fix" failure mode this project's bug-trend analysis surfaced,
-so the review bot BLOCKS it with a teaching finding. Historical backtest: 13 of 113 bug-fix
-commits exceeded the floor, and every one of the 13 was a substantive change that warranted a
-reviewed plan; ``scripts/backtest_bugfix_size.py`` re-derives that corpus from git history
-against this module's shared constant + classifier.
+Local previews do not invoke this criterion. A certified review and the ``stale-code`` or
+``stale-head`` code-drift states are accepted. Missing or stale plan material produces a
+blocking finding. Store errors and unknown verdicts produce ``INDETERMINATE`` so no review
+vote is cast.
 
-Design constraints:
-
-* **Gerrit-only** — ``finalize_code_review_verdict`` invokes this gate only when the request
-  carries a ``change_id``; a local ``rebar review-code`` preview never blocks on it.
-* **Fail-CLOSED (abstain) on infrastructure** — a store read failure or an unknown future
-  verdict makes the review ABSTAIN: the verdict becomes ``INDETERMINATE`` (never silently
-  downgrading an existing ``BLOCK``), so no ``LLM-Review +1`` is cast and the change cannot
-  merge on the gate's silence (bug 9011). The classification error stays surfaced in the
-  coverage record for the bot's infra-recovery loop. Only an affirmative "the attestation is
-  missing/stale-material" classification blocks with a finding.
-* **Code drift is ACCEPTED** — ``stale-code`` / ``stale-head`` mean the plan WAS reviewed and
-  the tree moved on afterwards (routine on a rebase-if-necessary trunk); punishing them would
-  make the gate flaky-by-design.
-* **The FACT of a plan review, not its SOURCE** (current policy, adopted under bug 846b) —
-  the gate asks only whether an attested plan review was completed for the bug, and
-  deliberately NOT which environment or identity certified it. It does not consult
-  ``.rebar/trusted_environments.yaml``. Gating on the signer made the criterion
-  unsatisfiable in practice: a plan review run in an ordinary developer environment signs
-  with that developer's own environment id as the DSSE principal, and no contributor can pin
-  their own environment (that file is CODEOWNERS-protected), so a genuinely PASSING, genuinely
-  signed review was rejected purely on its provenance. What this does NOT grant: it does not
-  widen who may cast the Gerrit ``LLM-Review``/``Verified`` votes, so a change still cannot
-  self-approve — the plan review is an input to those gates, not a substitute for them.
+The policy verifies that a signed plan review exists, not which environment signed it. Gerrit
+still restricts the ``LLM-Review`` and ``Verified`` votes, so an author cannot self-approve.
+``scripts/backtest_bugfix_size.py`` shares the threshold and classifier.
 """
 
 from __future__ import annotations
@@ -54,12 +30,8 @@ CRITERION_ID = "bugfix-size-attestation"
 
 _PLAN_REVIEW_KIND = "plan-review"
 
-# ── verdict vocabulary ────────────────────────────────────────────────────────────────────
-# compute_validity's plan-review-reachable literals ('not-closed' is the completion-verifier
-# arm's literal and deliberately NOT part of this vocabulary), plus this gate's own `error`.
-# The verify-layer enum (mismatch / key_not_valid_at_era / invalid / unavailable / ...) is
-# deliberately ABSENT: since 846b the gate no longer verifies WHO signed, so those literals are
-# unreachable here and carrying them would be dead vocabulary contradicting the stated policy.
+# Plan-review validity literals plus this gate's local ``error`` state. Completion-only and
+# signer-identity verdicts are unreachable because this criterion checks review existence.
 _COMPUTE_VALIDITY_VERDICTS = frozenset(
     {
         "certified",

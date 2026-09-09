@@ -1,30 +1,14 @@
-# Standing eval spec for the code-review CONCURRENCY-RACE overlay (Pass-1) — story
-# ironfisted-humble-shrew, epic spoiled-theatrical-parrot.
+# Behavioral eval for the advisory code-review concurrency overlay. Recall cases contain
+# introduced races, while control cases contain safe concurrency changes. Scoring depends on
+# finding presence.
 #
-# Recall (real races distilled from their introducing commits) + no-fire families
-# (concurrency-touching changes that are BENIGN). The overlay reviews the change along
-# the concurrency-race dimension and emits kernel-evidence findings; it is scored on
-# FINDINGS presence, not a FAIL/BLOCK verdict (the overlay ships ADVISORY — see the
-# criteria_routing entry `concurrency`).
+# Every applicable case must pass each deterministic scorer within an epoch. The coverage
+# threshold measures successful execution, not case pass rate. ``at_least(2)`` over three
+# epochs permits one whole-epoch miss but cannot excuse a persistently failing case. The hard
+# R3 fail-open case remains documented and non-gating until recall is reliable.
 #
-# Validate offline: `rebar prompt eval code-review-concurrency` (validate-only — it
-# checks the spec is well-formed and the scorers/gate resolve). The LIVE behavioral
-# run (the `agents` extra + credentials) happens in eval CI, exactly as for every
-# sibling code-review overlay spec.
-#
-# GATE MECHANICS (grounded in rebar.llm.evals.eval.run_eval, NOT assumed):
-#   * A gating deterministic scorer passes an EPOCH iff every APPLICABLE case passes it
-#     (all-or-nothing per epoch); an epoch passes iff coverage_ok AND every gating
-#     scorer passes.
-#   * `coverage_threshold` is the fraction of cases that RAN (produced output without
-#     erroring) — it is a run-success floor, NOT a pass-rate carve-out, so it cannot
-#     make an individual case non-blocking.
-#   * `gate: at_least(2)` over `epochs: 3` is the ONLY per-run tolerance the framework
-#     provides: it lets a case miss in a MINORITY of epochs (a flaky WHOLE epoch)
-#     without failing the spec. It does NOT isolate a single persistently-failing case.
-#   * The known-hard R3 (fail-open guard) is therefore NOT a scored case — it is a
-#     documented NON-GATING stretch (a commented hunk block below), tracked but unable to
-#     fail the gate. Promote it to a scored recall case once the prompt reliably fires.
+# ``rebar prompt eval code-review-concurrency`` validates the spec offline. Eval CI runs the
+# behavioral model with the ``agents`` extra and credentials.
 prompt: code-review-concurrency
 model: anthropic:claude-opus-4-8
 epochs: 3
@@ -84,28 +68,10 @@ dataset:
       +        if age > STALE_SECONDS:
       +            os.remove(lockfile)      # ACT — no re-check that it is still the SAME stale lock
       +    open(lockfile, "x").close()
-  # ── KNOWN-HARD STRETCH — R3 fail-open guard — DELIBERATELY NON-GATING ─────────────────
-  # R3 is NOT a scored `- id:` case: the harness has no per-case exemption for a scored
-  # entry (a failing gating recall case fails the whole epoch — see GATE MECHANICS above),
-  # so a persistently-hard case would make the gate flaky. It is documented HERE as a
-  # tracked stretch target so the corpus stays complete; promote it to a scored recall
-  # case once the prompt reliably fires on it.
-  #
-  # Distilled from 3938c7ed2d (`greisen-draconian-annelid`). Drift between two reads is
-  # DETECTED and a warning is logged, but the operation proceeds ANYWAY on the first (now
-  # stale) read instead of re-reading or aborting — a fail-open guard that races the
-  # concurrent writer whose change caused the drift. It is the hardest recall case for a
-  # less-capable reviewer because the warning reads as "handled".
-  #
-  #   --- a/rebar/store/reconcile.py
-  #   +++ b/rebar/store/reconcile.py
-  #   @@ -20,4 +20,8 @@ def reconcile(store):
-  #        head = store.read_head()
-  #   -    apply(store, head)
-  #   +    if store.read_head() != head:
-  #   +        log.warning("head drifted during reconcile")   # detected...
-  #   +    apply(store, head)   # ...but proceeds on the STALE head anyway (fail-open)
-  # ── no-fire: concurrency-TOUCHING diffs that are BENIGN (the overlay must NOT fire) ──
+  # R3 tracks a guard that detects read drift but proceeds with stale state. It remains
+  # non-gating because the harness has no per-case exemption, and persistent R3 misses would
+  # fail every epoch. Promote it when the prompt recalls the pattern reliably. The following
+  # controls ensure race-removing changes do not produce findings.
   - id: F1-lock-added
     corpus: concurrency-epic
     expect: pass

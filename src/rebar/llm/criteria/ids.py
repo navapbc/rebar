@@ -1,32 +1,12 @@
-"""Canonical criterion-id → rubric-prompt-id mapping (task stew-kid-motif / epic 3156).
+"""Map logical criterion ids to filesystem-safe, gate-qualified prompt ids.
 
-A criterion's LOGICAL id is namespaced: a built-in is a bare id (``F1``, ``T5a``); a project
-criterion is ``project.<name>`` (dotted — the collision-safe namespace that guarantees a
-project criterion can never rebind a built-in, ADR 0015). Its RUBRIC is a prompt-library file
-whose id must be FILESYSTEM-SAFE — ``[A-Za-z0-9][A-Za-z0-9-]*`` (``prompt_authoring._valid_id``)
-— because a ``.`` in ``.rebar/prompts/<id>.md`` collides with the ``<id>.<variant>.md`` overlay
-convention (and ``_valid_id`` forbids it outright).
+Built-ins use bare logical ids. Project criteria use the collision-safe ``project.<name>``
+namespace. Prompt ids permit ``[A-Za-z0-9][A-Za-z0-9-]*``, so the mapping replaces the sole
+namespace dot and prepends the plan-review or code-review gate prefix.
 
-So the logical id is DECOUPLED from the physical prompt id via this deterministic,
-FORWARD-ONLY, gate-qualified map — the pattern popular, actively-maintained tools use (Semgrep's
-dotted rule ``id`` is metadata decoupled from the filename; npm maps ``@scope/name`` →
-``node_modules/@scope/name``; Python maps ``a.b.c`` → ``a/b/c.py``). The default
-``gate_key="plan_review"`` preserves the existing plan-review mapping; ``gate_key="code_review"``
-uses the corresponding code-review prefix:
-
-    plan_review built-in  ``F1``           → ``plan-review-F1``
-    plan_review project   ``project.foo``  → ``plan-review-project-foo``
-    code_review built-in  ``F1``           → ``code-review-F1``
-    code_review project   ``project.foo``  → ``code-review-project-foo``
-
-The map is TOTAL and INJECTIVE because a project ``<name>`` is constrained to the SAME charset as
-any prompt id (``[A-Za-z0-9][A-Za-z0-9-]*`` — alnum + dash, NO dots/underscores; enforced by
-``criteria.overlay._validate_routing_entry``), so the single namespace dot is the only ``.`` and
-the ``.``→``-`` rewrite can never collide. It is used at BOTH the descriptor-resolution site
-(``plan_review.registry``) and the editor-authoring site (``workflow.criterion_preview`` /
-``editor``) so the two can never diverge. It is deliberately one-way: a name may contain dashes,
-so the sanitized id is NOT reversibly split back to the dotted id — the dotted id is always
-carried explicitly, never reverse-derived.
+The project-name grammar makes this forward mapping total and injective. Descriptor resolution
+and prompt authoring share it. Prompt ids are never reverse-derived because project names may
+contain hyphens.
 """
 
 from __future__ import annotations

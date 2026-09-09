@@ -1,23 +1,11 @@
-# Standing eval spec for the plan-review CONTAINER finder — G3 (child coverage) and
-# G4 (child consistency) (story da34 / epic c81c; relates_to 6f2d WS-EVAL-EXISTING).
+# Behavioral eval for plan-review container criteria G3 and G4. G3 finds parent criteria not
+# covered by any child. G4 finds high-confidence inconsistencies across a child and its sibling
+# roster. Named consumer coverage and benign sibling interactions are negative controls.
 #
-# The container criteria evaluate a (parent + single child) pairing against the WHOLE
-# sibling roster:
-#   * G3 = does the union of children COVER the parent's acceptance criteria?
-#     An uncovered parent criterion is a finding. ANTI-FP: a criterion covered-by-
-#     definition by a named consumer counts as covered (no finding).
-#   * G4 = is the child CONSISTENT with the parent + siblings across the 7 interaction
-#     modes (shared state, conflicting assumptions, dependency gap, scope overlap,
-#     ordering violation, consumer impact, residual references)? Each detected mode is
-#     a finding. ANTI-FP: high-confidence only; a benign reading suppresses.
-#
-# This is the SEMANTIC fidelity gate S4 (merge G3+G4 into one call) and S5 (bin-pack
-# children per call) diff their CANDIDATE container path against the BASELINE
-# (separate per-criterion / one-child-per-call) path with — see `tolerance:` below and
-# `parity.container_fidelity_report` (recall + false-accept + G3/G4-attribution).
-# Validate offline: `rebar prompt eval plan-review-container`. The live model run needs
-# the [agents] extra + credentials (the gated, path-scoped, NON-BLOCKING semantic eval CI;
-# a human-reviewed development gate for S4/S5 — see eval_specs/README.plan-review.md).
+# The fidelity report compares merged and bin-packed candidate calls with separate baseline
+# calls for recall, false acceptance, and G3 or G4 attribution. ``rebar prompt eval
+# plan-review-container`` validates the spec offline. Path-scoped eval CI runs the model with
+# the ``agents`` extra and credentials.
 prompt: plan-review-container
 model: anthropic:claude-opus-4-8
 epochs: 3
@@ -64,12 +52,8 @@ scorers:
       seed: 21
       snapshot: "2024-08-06"
 
-# ── candidate-vs-baseline fidelity tolerance (story da34 AC: explicit + documented) ──
-# S4/S5 run the CANDIDATE container path (merged G3+G4 call / bin-packed children) vs the
-# BASELINE (separate-call G3,G4 / one-child-per-call) over this corpus and diff with
-# `rebar.llm.parity` (reused, not re-built). The candidate clears the gate ONLY if EVERY
-# margin below holds. Mirrored in code as parity.CONTAINER_* constants + enforced by
-# parity.container_fidelity_report; documented in eval_specs/README.plan-review.md.
+# Candidate and baseline calls may differ only within these machine-read fidelity limits.
+# Optimization cannot trade away findings, and attribution must retain the correct rubric.
 tolerance:
   finding_recall_margin: 0.02          # candidate finding-recall within 2pp of baseline (non-inferiority)
   false_accept_margin: 0.02            # candidate false-accept rises by <= 2pp vs baseline

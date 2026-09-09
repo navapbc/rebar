@@ -1,36 +1,13 @@
-"""Carry unresolved code-review findings forward across patchsets (story
-nitro-zombie-mealworm).
+"""Carry unresolved code-review findings across at most one later patchset.
 
-A code-review sidecar payload is keyed by ``(change_id, revision)`` and Gerrit emits one
-``code_review`` artifact per revision, so a finding raised on patchset N-1 and NOT re-emitted by
-the (non-deterministic) fresh finder on patchset N reaches no consumer at all — the change merges
-on the reviewer's silence. This module is the code-review analogue of plan-review's recall
-backstop (``plan_review.sidecar.prior_concerns``): it re-surfaces the prior review's SURFACED,
-GROUNDED findings as post-Pass-1 candidates for the UNCHANGED Pass-2 verifier. The finders never
-see them (independence by construction), and a carried item can only ever LOWER a decision.
+Only findings surfaced in the prior decision and carrying grounding evidence are eligible.
+An unchanged or unresolvable region is ``still-present`` and is carried. A changed region is
+``addressed`` and is dropped. An item that already has standing provenance is ``withdrawn`` and
+cannot be carried again. This three-state rule prevents a permanent finding ratchet while
+keeping ambiguous evidence in front of the verifier.
 
-STATE — one assignment rule per value, recorded on the additive ``standing`` sub-object
-``{origin_revision, origin_decision, state}``:
-
-* ``still-present`` — the cited file's current content hash equals the prior review's
-  (``REGION_UNCHANGED``), or the signal is unresolvable (``REGION_UNKNOWN``: a multi-file or
-  location-less citation, a path absent from the prior ``deps`` map, an error). CARRIED. UNKNOWN
-  defaults here deliberately: the posture clamp means carrying can only lower a decision, so the
-  fail-safe direction for an ambiguous signal is to keep the finding in front of the verifier.
-* ``addressed`` — the cited file's content DIFFERS (``REGION_CHANGED``). The edit is evidence the
-  finding was acted on, so the fresh finder's silence rules. NOT carried.
-* ``withdrawn`` — the prior item ITSELF carries a ``standing`` object, i.e. it was already carried
-  once. NOT carried.
-
-TERMINATION (anti-ratchet). plan-review suppresses recall wholesale when the ticket's material
-changed (``_material_changed``); ``addressed`` is the per-finding analogue of that guard, and
-``withdrawn`` bounds the remainder — an item is carried AT MOST ONCE, so the chain ends after a
-single patchset even when the cited region keeps churning. Without both rules this is not a
-one-shot backstop but a permanent ratchet that replays a fixed finding forever (bug
-deceitful-flannel-jerboa is the plan-review precedent).
-
-Best-effort throughout, mirroring the sidecar's observability posture: nothing here raises, and any
-failure degrades to "no standing items" (the review runs exactly as it did before this module).
+Fresh finders never receive standing items. Pass 2 re-grounds them, and the posture clamp can
+only lower a decision. Sidecar errors produce no standing items and never abort the review.
 """
 
 from __future__ import annotations
@@ -106,24 +83,13 @@ def _carried(finding: dict[str, Any], *, origin_revision: str, state: str) -> di
 
 
 def standing_items(key: str, *, repo_root=None, coverage: dict[str, Any] | None = None):
-    """The prior review's findings that must be CARRIED into this run, newest-decision-relevant
-    first and capped at :data:`STANDING_CAP`.
+    """Return eligible prior findings by descending priority, capped at ``STANDING_CAP``.
 
-    ``key`` is the typed memory key the region-gated floor already uses — ``session:<id>`` locally,
-    ``change:<id>`` on Gerrit — so this reads the same disjoint keyspaces and needs no CI provider.
-
-    Two eligibility guards beyond the state classification:
-
-    * **Surfaced-only** — ``latest_code_review_result`` unions the ``blocking`` + ``advisory``
-      buckets ONLY, and this reader must never widen that: a finding the region-gated floor
-      permanently dropped would otherwise re-enter and escape its own drop (bug
-      old-frilly-plankton).
-    * **Grounded-only** — an item with no ``evidence`` gives the verifier nothing to re-ground, so
-      re-grounding degenerates into confirming a bare assertion (bug deceitful-flannel-jerboa).
-
-    ``coverage`` is an optional observability sink: when supplied it records the per-state counts
-    and the ungrounded-suppression reason, so "no items" is distinguishable from "no prior review".
-    Never raises; any failure degrades to ``[]``."""
+    The typed key preserves separate local-session and Gerrit-change histories. The sidecar
+    reader supplies only findings surfaced as blocking or advisory, and this function further
+    requires grounding evidence. Optional ``coverage`` records state counts and ungrounded
+    suppression. Any read or classification failure returns an empty list.
+    """
     try:
         from rebar.llm.code_review import sidecar
 

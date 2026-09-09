@@ -57,24 +57,13 @@ __all__ = [
     "verify_completion",
 ]
 
-# Bounded completion verification wants a DECISIVE model, not a maximally-thorough one: the
-# framework default (opus) over-explores — it rabbit-holes on confirming code is "wired",
-# blowing the step budget even on a 2-criterion ticket (it tripped recursion_limit=300 / 385s
-# in testing) — whereas sonnet converges in ~12s. So default the verifier to sonnet (matching
-# the DSO completion-verifier's `model: sonnet`). An operator who EXPLICITLY sets a
-# non-default `[tool.rebar.llm].model` still wins (below). The literal lives in config.py
-# (VERIFIER_DEFAULT_MODEL) as the single source shared with the plan-review verifier.
+# Completion verification uses the shared standard-class default. The standard model avoids
+# frontier-model over-exploration, while an explicit operator class still wins. The literal is
+# single-sourced with the plan-review verifier in ``config.py``.
 _VERIFIER_DEFAULT_MODEL = VERIFIER_DEFAULT_MODEL
-# Completion verification is inherently more tool-heavy than a single-dimension review; the
-# framework default (REBAR_LLM_MAX_STEPS=50 ≈ 25 tool calls) trips the recursion cap
-# mid-verification (a false fail-closed block). A FLAT 480 floor manufactured exhaustion
-# (epic 10ae/story 2948); the criteria-scaled floor replaced it, and ticket 8d74 RECALIBRATED
-# it after live false unmets: runaway is already separately guarded (tool_calls_limit, loop
-# detection), so the floor is generous and scales with the evidence surface rather than
-# limiting authorized validation — the clamp below is a runaway ceiling, not a validation cap.
-# The floor is AUTHORITATIVE over the framework default (it may LOWER a small ticket below the
-# 250 default) but min-only against an explicit operator budget. Per-run step usage is logged
-# by the runner (`… steps=N/limit`) so a resize can be sized from observed headroom.
+# The criteria-scaled step floor accounts for explicit criteria, direct-child traversal, and
+# fixed evidence overhead. Existing tool and loop guards bound runaway behavior. This clamp is
+# the floor formula's ceiling, while an explicit operator budget remains authoritative.
 _VERIFY_STEP_FLOOR_MAX = 960
 
 
@@ -261,26 +250,12 @@ def verify_step_floor(criteria_count: int, verify_cfg, direct_children: int = 0)
 
 
 def _verifier_model_for_completion(repo_root: str | None = None) -> str:
-    """The completion verifier's model: the STANDARD model class (ticket 172e).
+    """Resolve the completion verifier through the ``standard`` model class.
 
-    This file carried its OWN copy of plan-review's equality test
-    (``if cfg.model == DEFAULT_MODEL: replace(model=_VERIFIER_DEFAULT_MODEL)``), so the same defect
-    lived on a second path: ANY provider-qualified or Bedrock model id read as an explicit operator
-    choice and left the completion verifier on the frontier model. Resolving the class keeps the two
-    gates in step.
-
-    With nothing configured, ``standard`` resolves to the same model ``_VERIFIER_DEFAULT_MODEL``
-    names -- but the returned string is now PROVIDER-QUALIFIED, so this is not byte-identical to the
-    old rule. See :func:`rebar.llm.plan_review._verifier_cfg` for why qualifying is the deliberate
-    and desirable direction.
-
-    A separate function rather than an inline call so the resolution is unit-testable without
-    standing up a whole ``verify_completion`` run.
-
-    ``repo_root`` is the root the class table is read from — the caller threads ``cfg.repo_path``
-    so the verifier's model comes from the SAME root the config resolved against instead of from
-    ambient cwd discovery (bug 2876). Left ``None`` it falls back to the active gate root, then
-    ambient discovery, exactly as every other class read does.
+    Class resolution keeps completion and plan review aligned and does not mistake a qualified
+    or Bedrock model id for an explicit frontier-model choice. The result is provider-qualified.
+    ``repo_root`` keeps the class table aligned with the operation config. ``None`` uses the
+    active gate root and then repository discovery. The helper remains separate for unit tests.
     """
     from rebar.llm.model_classes import STANDARD_CLASS, resolve_model_string
 

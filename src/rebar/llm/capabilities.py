@@ -26,45 +26,15 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-# The CONSERVATIVE fallback minimum prompt-prefix the anthropic cache will write/read, used
-# for any model with no documented per-model figure (see `_MODEL_CACHE_MIN_PREFIX_TOKENS`
-# below for the documented ones). Below the applicable floor a prefix never caches, so a
-# zero/zero cache reading is the EXPECTED result rather than a symptom of anything.
-#
-# Lives HERE, alongside ``cache_settings_for``, because it is a fact about the prompt cache
-# that BOTH sides need and neither owns (bug 7a79): the Pass-1 warm-up decision
-# (``llm/plan_review/pass1.py`` — warming a sub-floor prefix would add a serialized call for
-# no read benefit, story ba7e) and the cache-effectiveness warning
-# (``llm/structured_run.py:warn_if_cache_ineffective`` — it can only claim caching FAILED for
-# a prompt that was cacheable to begin with). ONE definition; do not restate the literal.
-#
-# 4096 is the HIGHEST value in Anthropic's published table, which makes it the conservative
-# choice for an unlisted model: too high merely under-warns (a missed signal), whereas too
-# low re-creates the unactionable warning spam bug 7a79 removed. Bug e3cd renamed what this
-# constant means — it is the FALLBACK, no longer "the floor" — because applying it to every
-# model made it 4x too high on rebar's own DEFAULT_MODEL.
+# Conservative fallback for models without a sourced cache minimum. Anthropic's highest
+# published minimum avoids warming sub-floor prompts or reporting their zero cache usage as a
+# failure. Pass 1 and cache diagnostics share this value through this module.
 CACHE_MIN_PREFIX_TOKENS = 4096
 
 
-# Anthropic's PUBLISHED per-model minimum cacheable prompt length. Transcribed from
-# https://platform.claude.com/docs/en/build-with-claude/prompt-caching
-# (§ "Minimum cacheable prompt length", read 2026-08-02) — the documentation is the source of
-# truth here. Independent empirical brackets recorded on bug e3cd VERIFY these values rather
-# than defining them:
-#
-#   sonnet-4-6    922 -> no cache, 1042 -> write 1035 / read 1035     => ~1024   ✓ doc 1024
-#   sonnet-4-5    253 -> no cache, 7930 -> cached                     => <=1024  ✓ doc 1024
-#   haiku-4-5    2748 -> no cache, 4749 -> write 4742 / read 4742     => (2748,4749] ✓ doc 4096
-#
-# NOT monotonic across generations — 512 on the newest models but 4096 on opus-4-6/4-5 and
-# haiku-4-5 — which is precisely why a single global constant could not express it.
-#
-# Keyed on the BARE model id (`_model_id_of` strips the provider prefix), so these cover both
-# `anthropic:claude-opus-4-8` and the bare string. Bedrock ids (`us.anthropic.…`,
-# `global.anthropic.…`) are DELIBERATELY absent: Anthropic's table states these minimums apply
-# on every platform EXCEPT Amazon Bedrock, which documents its own minimums separately. Rather
-# than guess a Bedrock number, a Bedrock model falls through to the conservative fallback —
-# the "if you cannot source it confidently, do not invent it" rule this bug was filed under.
+# Direct Anthropic minimum cacheable prefix lengths from its prompt-caching documentation,
+# read 2026-08-02. Bare model ids cover qualified and unqualified direct requests. Bedrock ids
+# use the fallback because Bedrock publishes separate limits and none are recorded here.
 _MODEL_CACHE_MIN_PREFIX_TOKENS: dict[str, int] = {
     "claude-opus-5": 512,
     "claude-fable-5": 512,
@@ -136,22 +106,12 @@ class ModelCapabilities:
 
 
 def _supports_native_web_search(profile: Any) -> bool:
-    """Does this model's profile list a provider-side web-search tool? (bug 129e)
+    """Return whether the profile advertises provider-side web search.
 
-    MEMBERSHIP in ``profile.supported_native_tools``, tested exactly the way pydantic-ai's own
-    request builder tests it (``models/__init__.py``: an unsupported native tool is dropped when a
-    local fallback exists, kept otherwise) — so this predicts pydantic-ai's routing from the same
-    registry pydantic-ai reads, rather than re-deriving it from the provider's NAME. That is the
-    whole point: `bedrock:us.anthropic.claude-opus-4-8` and `anthropic:claude-opus-4-8` are the
-    same MODEL reached through different providers, and only the registry knows they differ here.
-
-    MEASURED (ticket 129e, real Bedrock haiku call + a no-capability control on the same model):
-    Bedrock's Converse API cannot carry Anthropic's server-side web_search — the live call raised
-    ``UserError: Native tool(s) ['WebSearchTool'] not supported by this model. Supported: []``.
-    The static read agrees: ``BedrockProvider.model_profile('us.anthropic.claude-opus-4-8')
-    .supported_native_tools`` is empty, while the direct-Anthropic profile lists ``WebSearchTool``.
-
-    Never raises: an unresolvable/absent profile is simply not evidence of a provider-side tool."""
+    Membership in ``supported_native_tools`` mirrors pydantic-ai routing and distinguishes
+    direct Anthropic from Bedrock without interpreting provider names. Missing dependencies,
+    absent profiles, and malformed registries conservatively return ``False``.
+    """
     try:
         from pydantic_ai.native_tools import WebSearchTool
     except Exception:  # noqa: BLE001 — no pydantic-ai (lean install) is not evidence of support
@@ -177,34 +137,14 @@ _LOCAL_WEB_SEARCH_MAX_RESULTS = 5
 
 
 def web_search_capabilities(*, web: bool):
-    """The pydantic-ai capability list granting web access to THIS request, or ``None``.
+    """Return web-search capability for a web-enabled request, otherwise ``None``.
 
-    Takes NO model/provider argument, by design. Web access is required for a web-flagged
-    criterion on EVERY provider and model (operator decision, bug 129e), so nothing about the
-    provider is an input to the decision — and a function handed no model string demonstrably
-    cannot gate on the shape of one. This replaces an ``anthropic``-prefix gate that withdrew
-    T1's grounding tool the moment the production bot moved to Bedrock: same model, different
-    provider name, capability silently gone.
-
-    ``web=False`` (every criterion whose routing entry does not declare ``"web": true``, and the
-    injected-test-model path) returns ``None`` and the caller omits the ``capabilities`` kwarg
-    entirely, so an unflagged request stays byte-identical to the pre-129e wire format.
-
-    ONE ``WebSearch`` covers both routes: pydantic-ai keeps the provider's native tool where the
-    model's profile supports it (cheaper, provider-grounded, no third-party content entering
-    rebar's process) and drops it in favour of the local tool where it does not. That is why this
-    lives HERE rather than in ``anthropic_model.py``: it is no longer an Anthropic construction
-    detail but a capability decision, the same kind ``cache_settings_for`` makes, and this module
-    is the one that derives those from capability facts instead of provider names.
-
-    Bounds and the untrusted-content tradeoff are argued in ADR 0063 (web-search capability
-    security posture) — read it before widening anything here.
-
-    Raises ``pydantic_ai.exceptions.UserError`` if the ``duckduckgo`` optional group is missing
-    (the local tool resolves EAGERLY at construction). That is deliberate: a web-flagged blocking
-    criterion silently losing its grounding is the bug being fixed, so an unprovisioned
-    environment must fail loudly rather than degrade. The group ships in the ``agents`` extra and
-    in the review-bot image."""
+    The decision is independent of provider spelling. Pydantic-ai keeps the native tool when
+    the model profile supports it and otherwise uses the bounded DuckDuckGo tool. Returning
+    ``None`` leaves unflagged requests unchanged. A missing local-search dependency raises
+    instead of removing grounding from a blocking criterion. ADR 0063 defines the content and
+    usage bounds.
+    """
     if not web:
         return None
     from pydantic_ai.capabilities import WebSearch
@@ -236,101 +176,49 @@ def _is_claude(profile: Any) -> bool:
     )
 
 
-# Ordered (predicate, overrides) pairs — NOT a dict keyed by provider name, because a name key
-# would reintroduce the string-matching this story removes and could not express a rule spanning
-# two hosts of the same model family (direct Anthropic + Bedrock-hosted Anthropic). First
-# matching predicate wins; overrides are applied AFTER profile derivation so they take priority.
-#
-# The (only, so far) entry: Claude's upstream profile claims
-# `anthropic_model_profile("claude-opus-4-8").supports_json_schema_output is True` — without this
-# override a naive profile read would flip rebar's PRIMARY provider from PromptedOutput to
-# NativeOutput, breaking the deliberate choice documented at structured.py and the assertion at
-# tests/unit/test_structured.py. A flag-only rule
-# (`supports_json_schema_output and not supports_thinking`) was tried and REJECTED: it breaks
-# gemini (supports_thinking=True) and groq (supports_json_schema_output=False), both of which get
-# NativeOutput today. Do not reintroduce it.
+# Ordered predicates express model-family exceptions without provider-name matching. The first
+# match overrides the derived profile. Claude remains on prompted output despite its upstream
+# JSON-schema flag. A generic profile-flag rule would change the established Gemini and Groq
+# paths.
 _REBAR_OVERRIDES: tuple[tuple[Any, dict[str, Any]], ...] = (
     (_is_claude, {"native_structured_output": False}),
 )
 
 
-# Exact-model-id capability overrides (story S3/2932) — a SEPARATE table from
-# `_REBAR_OVERRIDES` above, not a widening of it: that table's predicate is
-# `Callable[[ModelProfile], bool]`, a SIGNED contract of the closed S2 story, and a leaf must
-# not redefine a signed upstream contract. Keyed on the EXACT model id — never prefix
-# matching (this module must contain no prefix-match call, an attested S2 criterion), so
-# this table also cannot speculate about an unmeasured model's behavior. Applied AFTER
-# `_REBAR_OVERRIDES` so an id-specific MEASURED fact always wins over the family-level default.
-#
-# MEASURED (ticket 2932, real AWS us-east-2): `us.anthropic.claude-opus-4-7` + `temperature=0`
-# returns HTTP 400 "temperature is deprecated for this model"; the IDENTICAL call without
-# temperature succeeds. pydantic-ai's `_drop_unsupported_sampling_settings` exists only in its
-# Anthropic adapter, not its Bedrock one, so the direct-Anthropic path degrades with a warning
-# but Bedrock hard-fails — and rebar's Pass-2 verifiers deliberately send `temperature=0`, so
-# leaving this model at the default would break Bedrock gate runs on it.
-# MEASURED matrix (ticket 1903, account 896586841071 / us-east-1, boto3 converse, maxTokens 8),
-# recorded so the next reader does not re-derive it:
-#
-#   model id                          temp unset | temp=0.0 | temp=0.5 | temp=1.0 | topP=0.9
-#   us./global. claude-sonnet-4-6     OK         | OK       | OK       | -        | -
-#   us./global. claude-opus-4-8       OK         | 400      | 400      | OK       | 400
-#   us./global. claude-opus-4-7       OK         | 400      | -        | -        | -
-#
-# NOTE the shape: this is NOT "temperature unsupported" — temp=1.0 (the API default) SUCCEEDS on
-# opus-4-8 while 0.0 and 0.5 fail, so what is deprecated is the parameter's TUNABILITY. Withdrawing
-# the parameter is still correct (the model then uses its own default), but the field name
-# understates the mechanism. `top_p` is deprecated on opus-4-8 too; that stays LATENT because rebar
-# never sets it (failure.py's _SAMPLING_PARAMS anticipates it).
-#
-# Keyed on the FULL model id, so each profile prefix needs its OWN entry — a `us.` entry does not
-# cover its `global.` twin. claude-opus-4-8 matters most: it is rebar's DEFAULT_MODEL.
+# Exact model-id overrides record measured exceptions after family defaults. Exact matching
+# prevents an unmeasured model from inheriting a capability. Opus 4.7 and 4.8 omit the tunable
+# temperature parameter because Bedrock rejects nondefault values while direct Anthropic drops
+# them. Regional and global Bedrock ids require separate entries.
 _MODEL_ID_CAPABILITY_OVERRIDES: dict[str, Mapping[str, object]] = {
-    # The DIRECT-ANTHROPIC forms. The table keys on the BARE id (`_model_id_of` strips the
-    # provider prefix), so these cover both `anthropic:claude-opus-4-8` and the bare string.
-    # MEASURED on ticket 8fbd-e9d5-326e-40d8: direct `claude-sonnet-4-6` accepted native JSON
-    # schema output both without thinking and with a 1024-token thinking budget, returning a
-    # valid structured result and a thinking part. This exact-id row makes that measured arm
-    # symmetric with the separately measured Bedrock inference-profile row below; unmeasured
-    # direct Claude ids still inherit the conservative family default.
+    # Direct Sonnet 4.6 accepted native JSON schema output with and without thinking. Bare ids
+    # also cover provider-qualified direct requests. Unmeasured Claude ids retain the family
+    # default.
     "claude-sonnet-4-6": {
         "native_structured_output": True,
         "native_output_with_thinking": True,
     },
-    # OBSERVED IN PRODUCTION on the code-review bot: pydantic-ai's Anthropic adapter emits
-    # "Sampling parameters ['temperature'] are not supported by 'claude-opus-4-8'. These settings
-    # will be ignored." on essentially EVERY call (models/anthropic.py:641, via
-    # `_drop_unsupported_sampling_settings`). Its Bedrock adapter has NO such drop, which is why
-    # the same model 400s there and merely warns here — same defect, two symptoms.
-    # The warning is the visible half; the REAL cost is that a pass pinning temperature=0 for
-    # determinism silently does not get it (code-review.yaml pins it on Pass-2 verify so that
-    # re-running a finding cannot resample its verdict, and code review has no verifier downgrade,
-    # so ALL its passes run on this model). Withdrawing the parameter here is wire-identical to
-    # having it dropped downstream, minus the per-call warning and minus the false belief that
-    # greedy decoding is in effect.
+    # The direct Anthropic adapter drops Opus 4.8 temperature settings. Recording that fact here
+    # avoids both its warning and a false claim that verifier decoding is pinned.
     "claude-opus-4-8": {"supports_temperature": False},
     "claude-opus-4-7": {"supports_temperature": False},
     "us.anthropic.claude-opus-4-8": {"supports_temperature": False},
     "global.anthropic.claude-opus-4-8": {"supports_temperature": False},
     "us.anthropic.claude-opus-4-7": {"supports_temperature": False},
     "global.anthropic.claude-opus-4-7": {"supports_temperature": False},
-    # MEASURED native structured output UNDER extended thinking (run E1, recorded on ticket
-    # df3a "EXPERIMENT RESULTS" comment: 39 live Bedrock calls, AWS account 896586841071 /
-    # us-east-1; outputConfig json_schema + extended thinking proven wire-legal — sonnet-4-6
-    # adaptive, haiku-4-5 budget 2048; no 400). Client-side Pydantic validators remain MANDATORY:
-    # Bedrock's schema transform strips ge/le bounds (E1 emitted a 1.0 out-of-bounds value).
+    # Bedrock measurements showed native JSON schema output works under extended thinking for
+    # Sonnet 4.6 and Haiku 4.5. Client-side validation remains required because Bedrock strips
+    # numeric bounds from the schema.
     "us.anthropic.claude-sonnet-4-6": {
         "native_structured_output": True,
         "native_output_with_thinking": True,
     },
-    # The DATED haiku profile id — the bare alias 400s at request validation.
+    # Bedrock requires the dated Haiku profile id. The bare alias fails request validation.
     "us.anthropic.claude-haiku-4-5-20251001-v1:0": {
         "native_structured_output": True,
         "native_output_with_thinking": True,
     },
-    # NON-ROW: Bedrock opus-4-7 / opus-4-8 are rejected server-side by Converse structured
-    # output under thinking (provider rollout gap; re-measure when AWS announces support), so
-    # they get NO native-output row and stay fail-closed (their supports_temperature rows above
-    # are a separate ticket's fact and untouched here).
+    # Bedrock Opus 4.7 and 4.8 reject structured output under thinking, so their missing rows
+    # preserve the conservative family default.
 }
 
 
@@ -508,19 +396,9 @@ def _model_id_of(model_or_model_string: Any) -> str | None:
     return None
 
 
-# The provider qualifiers that route a run through Pydantic's AI Gateway, ENUMERATED (bug 7fe2).
-#
-# Membership, never prefix matching. This module exists precisely because provider-name string
-# matching is wrong (see the module docstring), f184's attested criterion forbids prefix matching
-# here, and epic 061c's standing decision is provider qualification by REGISTRY MEMBERSHIP with
-# no exceptions — LiteLLM's Bedrock id-sniffing is the recurring bug class that rule exists to
-# avoid. Membership is also strictly better on the merits: the set is auditable at a glance, and
-# an unrecognized `gateway/...` string is not silently granted gateway semantics.
-#
-# These are exactly the ``gateway/*`` members of ``config.KNOWN_PROVIDER_NAMES`` — the registry
-# that decides whether a qualifier is admissible at all. They are restated rather than filtered
-# out of it because filtering would itself require the banned prefix test; a drift test pins the
-# two in lockstep, so a sixth gateway added to the registry fails the build here until listed.
+# Enumerated AI Gateway qualifiers use registry membership instead of provider-name parsing.
+# A drift test keeps this set aligned with ``config.KNOWN_PROVIDER_NAMES`` and requires each new
+# gateway to receive an explicit provenance decision.
 _GATEWAY_PROVIDER_NAMES = frozenset(
     {
         "gateway/anthropic",
@@ -562,63 +440,18 @@ def provenance_for(
     bedrock_region_source: str | None = None,
     header_names: list[str] | None = None,
 ) -> dict:
-    """The ``provider_provenance`` record for a signed gate verdict (story S5/343b).
+    """Build the provider provenance stored with a signed gate verdict.
 
-    A verdict used to record only a model STRING, so a run behind an opaque gateway still
-    claimed it came from ``anthropic:claude-opus-4-8``. This assembles the additive record
-    that names the resolved provider/model, the endpoint actually called (``tier`` flips to
-    ``"best_effort"`` once a custom ``base_url`` is set OR the provider is a known gateway
-    qualifier — see below), and the EFFECTIVE capability record
-    that drove the run — carried through from the ``caps`` argument, never recomputed (a
-    second `capabilities_for` resolution here could diverge from the record that actually
-    drove the run, which is exactly the prior regression this must not repeat).
+    The supplied capabilities are the ones that drove the run and are never recomputed. A
+    custom endpoint or enumerated gateway receives ``best_effort`` tier. Unknown gateway hosts
+    remain absent because this layer cannot observe them. The effective web flag records the
+    native, local, or off route.
 
-    GATEWAY QUALIFIERS (bug 7fe2). Deriving the tier from ``base_url`` ALONE was wrong: the
-    five ``gateway/*`` names in ``config.KNOWN_PROVIDER_NAMES`` are live (pydantic-ai's
-    ``infer_provider`` resolves them) and carry NO ``base_url``, because the gateway URL is
-    resolved inside pydantic-ai from its own env/API key. So a ``gateway/anthropic`` run — every
-    byte of which traverses an intermediary that can rewrite the request; the Vercel AI Gateway
-    has been documented silently downgrading Anthropic's 1-hour prompt cache — signed as
-    ``first_class``. Gateway membership is therefore a second, independent trigger for
-    ``best_effort``, decided by MEMBERSHIP in :data:`_GATEWAY_PROVIDER_NAMES` (never by prefix or
-    substring shape — see that constant), so a direct provider whose name merely contains the
-    token is not collaterally downgraded.
-
-    ``endpoint_host`` is deliberately NOT back-filled with a guessed gateway hostname. This seam
-    never observes the resolved gateway URL (pydantic-ai reads ``PYDANTIC_AI_GATEWAY_BASE_URL`` /
-    ``PAIG_BASE_URL``, or infers it from the API key), and synthesising ``gateway.pydantic.dev``
-    would place an UNVERIFIED fact into a SIGNED record — exactly what the tier field exists to
-    prevent. The intermediary is instead named by the OBSERVED ``provider`` field
-    (``gateway/anthropic``) and flagged by ``tier``. When a ``base_url`` IS configured its real
-    host is recorded, gateway or not.
-
-    ``web`` is the request's EFFECTIVE web flag (bug 129e) — whether the caller actually attached
-    ``web_search_capabilities`` to this run, not the criterion's declared intent. It is recorded
-    (with its route) under ``capabilities.web_access``; see ``web_access_provenance``.
-
-    BEDROCK REGION (bug 8274). On a ``"bedrock"`` run the record additionally carries ``region``
-    + ``region_source`` when rebar's OWN chain resolved the region —
-    ``bedrock_model.resolve_bedrock_region``, the same pure stdlib-only resolver the provider
-    builder feeds to the boto3 session, so record and runtime cannot disagree. Both keys are
-    ABSENT (never guessed) when only boto3's ambient profile resolution could supply one: this
-    seam never imports boto3, so that value is unobservable here, and synthesising it would put
-    an unverified fact into a signed record — the exact rule ``endpoint_host`` follows above.
-    ``bedrock_region_name`` is threaded unconditionally by the runner; the provider check gates
-    the record, so a non-bedrock verdict never carries region keys. ``bedrock_region_source``
-    (cda8) is the configured knob's TRUE origin — ``LLMConfig.bedrock_region_source``, resolved
-    by the SAME ``from_env`` pass that produced the value — so a ``[tool.rebar.llm]`` pin is
-    labeled ``repo-config`` (and a CLI override ``cli``), never blanket-labeled as the env var.
-
-    OPERATOR HEADERS (story 26ae). ``header_names`` records WHICH request headers the operator
-    configured, as a sorted list under ``header_names`` — NAMES ONLY, never values. This record
-    is written into signed verdicts and sidecars, and a header value is operator-supplied
-    material that may carry a token or an internal identifier, so it must never become durable;
-    a name is enough to audit what was attached. The key is ABSENT when no headers are
-    configured, so every existing provenance record is byte-unchanged.
-
-    Security: the host is read via ``urlparse(base_url).hostname``, never ``.netloc`` — the
-    latter retains embedded credentials (``user:secret@host``), and no credential material may
-    appear in a signed record."""
+    Bedrock region and source use the same resolver as provider construction. Ambient boto3
+    resolution remains absent when it cannot be observed here. Header names are sorted and
+    values are never persisted. ``urlparse(...).hostname`` excludes embedded credentials from
+    the endpoint record.
+    """
     from urllib.parse import urlparse
 
     endpoint_host = urlparse(base_url).hostname if base_url else None
@@ -662,40 +495,16 @@ _MESSAGE_TAIL_EXECUTION_MODES = frozenset({"agentic"})
 
 
 def cache_settings_for(caps: ModelCapabilities, *, execution_mode: str) -> Any:
-    """The provider-specific prompt-cache ``ModelSettings`` mapping for ``caps``, or ``None``.
+    """Return prompt-cache settings selected only by ``caps.prompt_cache_style``.
 
-    Dispatches SOLELY on ``caps.prompt_cache_style`` — never a provider-name string.
+    Every caching call marks instructions and tool definitions. Multi-turn modes also mark the
+    accumulated message tail to avoid repeatedly sending uncached tool history. The required
+    keyword-only ``execution_mode`` prevents a new caller from selecting a policy implicitly.
 
-    The instructions + tool-definitions breakpoints are set on every caching call. On a
-    MULTI-TURN mode (:data:`_MESSAGE_TAIL_EXECUTION_MODES`) a THIRD breakpoint covers the
-    accumulated message tail. Bug dd27: without it the growing tool-result history rode outside
-    every breakpoint and was re-sent uncached on each turn, making input cost O(N^2) in turns —
-    and invisible to ``structured_run.warn_if_cache_ineffective``, whose predicate requires
-    ``cache_read_tokens == 0`` while the SYSTEM block was hitting cache all along. Anthropic's
-    own prompt-caching guidance names this the multi-turn shape (system + a point the
-    conversation can be incrementally cached against), not an exotic optimisation.
-
-    ``execution_mode`` is keyword-only and REQUIRED on purpose. A default would let a new call
-    site silently pick an arm, which is the exact failure being fixed; the caller always knows
-    which mode it is on (``RunRequest.execution_mode``).
-
-    PROVIDER ASYMMETRY — the trap. The two arms must use their OWN keys:
-
-    * Anthropic — ``anthropic_cache=True``, the automatic-caching key, which sends a TOP-LEVEL
-      ``cache_control`` so the server places the breakpoint at the end of the prompt. It is
-      mutually exclusive with ``anthropic_cache_messages`` (pydantic-ai raises ``UserError`` if
-      both are set), so only one of the pair is ever emitted.
-    * Bedrock — ``bedrock_cache_messages=True``. There is NO ``bedrock_cache`` key, and Bedrock
-      REJECTS a top-level ``cache_control`` outright ("Extra inputs are not permitted").
-      LangChain shipped precisely this regression: their Anthropic prompt-caching middleware
-      broke on Bedrock in 1.4.1 by switching to top-level automatic caching (langchain#37042).
-
-    Breakpoint budget is safe on both. pydantic-ai's ``_limit_cache_points`` drops the Anthropic
-    budget to ``MAX_CACHE_POINTS = 3`` when automatic caching is on, and this sets exactly 3
-    (two explicit + the server-applied one); Bedrock's limit is 4 and this sets 3.
-
-    SINGLE-TURN CALLS ARE BYTE-IDENTICAL to the pre-dd27 behavior — there is no history to
-    cache, so no third breakpoint is added and the emitted mapping is unchanged."""
+    Anthropic uses mutually exclusive automatic ``anthropic_cache`` settings. Bedrock uses
+    ``bedrock_cache_messages`` and must not receive top-level ``cache_control``. Both paths stay
+    within their breakpoint limits. Single-turn mappings remain unchanged.
+    """
     cache_message_tail = execution_mode in _MESSAGE_TAIL_EXECUTION_MODES
     if caps.prompt_cache_style == "anthropic":
         from pydantic_ai.models.anthropic import AnthropicModelSettings
