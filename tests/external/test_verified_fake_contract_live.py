@@ -1,20 +1,11 @@
-"""Verified-fake contract (live half) — the REAL AcliClient honours the contract.
+"""Run the shared Jira shape contract against ``AcliClient`` and Jira.
 
-Epic f89d, story C (`59ef-ff3e-5aea-47b1`). Runs the SAME shape contract
-(``tests/_jira_shape_contract.py``) that the hermetic fake satisfies
-(``tests/integration/rebar_reconciler/test_verified_fake_contract.py``) against the
-REAL ``AcliClient`` over live Jira. This is the half that keeps the fake honest: if
-Jira's REST shape drifts from what the fixtures captured, THIS run goes red — the
-signal to re-capture (docs/jira-fixtures.md). It is the verified-fake's second
-implementation in the SWE-at-Google sense.
+The hermetic fake uses the same contract from ``tests/_jira_shape_contract.py``. Response-shape
+drift can require fixture recapture as documented in ``docs/jira-fixtures.md``. These tests require
+``REBAR_RUN_EXTERNAL=1``, Jira credentials, and the ``acli`` binary.
 
-Opt-in / inert by default: the ``external`` marker + ``tests/external/conftest.py``
-make it skip unless ``REBAR_RUN_EXTERNAL=1``, and ``_skip`` additionally requires
-live Jira creds + the ``acli`` binary. It never runs (or bills) in the default suite.
-
-Note: ``search_issues`` shells out to ``acli`` (which reads ``acli auth login``
-config), while the three map methods use the passed REST creds — so the search test
-additionally needs an *authenticated* ``acli``, not merely the binary on PATH.
+The map methods use REST credentials. ``search_issues`` also requires an authenticated
+``acli auth login`` session.
 """
 
 from __future__ import annotations
