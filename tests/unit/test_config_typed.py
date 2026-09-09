@@ -20,6 +20,7 @@ def test_defaults_when_empty() -> None:
     assert c.verify.require_plan_review_for_claim is False
     assert c.ticket.display_mode == "auto"
     assert c.compact.threshold == 10
+    assert c.compact.snapshot_alpha == 0.0
     assert c.reclaim.horizon_days == 30
     assert c.sync.push == "always" and c.sync.pull == "on"
     assert c.mcp.readonly is False and c.mcp.allow_llm is False and c.mcp.allow_jira_sync is False
@@ -32,7 +33,7 @@ def test_parses_known_keys_typed() -> None:
     c = Config.from_mapping(
         {
             "verify": {"require_plan_review_for_claim": True},
-            "compact": {"threshold": 25},
+            "compact": {"threshold": 25, "snapshot_alpha": 0.75},
             "reclaim": {"horizon_days": 45},
             "sync": {"push": "async", "pull": "off"},
             "mcp": {"allow_jira_sync": True},
@@ -43,6 +44,7 @@ def test_parses_known_keys_typed() -> None:
     )
     assert c.verify.require_plan_review_for_claim is True
     assert c.compact.threshold == 25
+    assert c.compact.snapshot_alpha == 0.75
     assert c.reclaim.horizon_days == 45
     assert c.sync.push == "async" and c.sync.pull == "off"
     assert c.mcp.allow_jira_sync is True
@@ -56,13 +58,14 @@ def test_string_coercion_from_env_or_flat_file() -> None:
     c = Config.from_mapping(
         {
             "verify": {"require_plan_review_for_claim": "yes"},
-            "compact": {"threshold": "30"},
+            "compact": {"threshold": "30", "snapshot_alpha": "0.25"},
             "sync": {"push": "OFF"},  # case-insensitive choice
             "mcp": {"readonly": "1"},
         }
     )
     assert c.verify.require_plan_review_for_claim is True
     assert c.compact.threshold == 30
+    assert c.compact.snapshot_alpha == 0.25
     assert c.sync.push == "off"
     assert c.mcp.readonly is True
 
@@ -76,6 +79,9 @@ def test_string_coercion_from_env_or_flat_file() -> None:
         ({"compact": {"threshold": "lots"}}, "integer"),
         ({"compact": {"threshold": 0}}, ">= 1"),  # below minimum
         ({"compact": {"threshold": True}}, "boolean"),  # bool rejected as int
+        ({"compact": {"snapshot_alpha": "lots"}}, "number"),
+        ({"compact": {"snapshot_alpha": -0.1}}, ">= 0.0"),
+        ({"compact": {"snapshot_alpha": True}}, "boolean"),
         ({"reclaim": {"horizon_days": 0}}, ">= 1"),
         ({"reclaim": {"horizon_days": True}}, "boolean"),
         ({"jira": {"url": {"nested": 1}}}, "string"),

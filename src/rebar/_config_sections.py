@@ -90,6 +90,8 @@ _SECTIONS: dict[str, dict] = {
     "ticket_clarity": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},
     "compact": {
         "threshold": lambda v, k: _as_int(v, k, minimum=1),
+        # mechanism-ok: config_key compact.snapshot_alpha — 933f-e7d8-696a-4fbd
+        "snapshot_alpha": lambda v, k: _as_float(v, k, minimum=0.0),
         "COMPACTION_HORIZON_NS": lambda v, k: _as_int(v, k, minimum=0),
         "trigger": lambda v, k: _as_choice(v, k, {"async", "always", "off"}),
         "trigger_interval_s": lambda v, k: _as_int(v, k, minimum=0),

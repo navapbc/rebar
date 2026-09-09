@@ -124,6 +124,26 @@ def test_fires_when_the_written_ticket_needs_folding(
     assert spawns, "a foldable just-closed ticket must trigger an out-of-band sweep"
 
 
+def test_fires_when_the_written_ticket_exceeds_snapshot_alpha(
+    store: Path, monkeypatch: pytest.MonkeyPatch, spawns: list[str]
+) -> None:
+    repo = store
+    monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "9999")
+    monkeypatch.setenv("REBAR_COMPACT_SNAPSHOT_ALPHA", "0.01")
+    tid = _seed(repo, "needs folding by byte ratio", comments=1)
+    tracker = _tracker(repo)
+    from rebar._commands import compact as _compact
+
+    assert _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(repo)) == 0
+    rebar.comment(tid, "post-fold " + ("x" * 5_000), repo_root=str(repo))
+    _age_events(Path(tracker) / tid, _HOUR_NS)
+    compact_trigger.record_sweep(tracker)  # a fresh sweep, so ONLY the ticket arm can fire
+
+    compact_trigger.maybe_compact(tracker, tid, repo_root=str(repo))
+
+    assert spawns, "a foldable replay tail above snapshot_alpha must trigger a sweep"
+
+
 def test_quiet_when_neither_condition_holds(
     store: Path, monkeypatch: pytest.MonkeyPatch, spawns: list[str]
 ) -> None:

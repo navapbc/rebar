@@ -96,6 +96,15 @@ class Candidate:
         return is_active_event(self.name)
 
 
+@dataclass(frozen=True)
+class FoldableStats:
+    """Replay-cost inputs for the compaction selection rule."""
+
+    count: int
+    pending_source_bytes: int
+    active_snapshot_bytes: int
+
+
 def list_candidates(ticket_dir: str, *, include_retired: bool = False) -> list[Candidate]:
     """Every event file in *ticket_dir*, parsed once, sorted by name.
 
@@ -159,7 +168,63 @@ def has_snapshot(ticket_dir: str) -> bool | None:
         return None
 
 
-def needs_folding(foldable: int, has_snap: bool, threshold: int) -> bool:
+def active_snapshot_bytes(ticket_dir: str) -> int:
+    """Size in bytes of the active SNAPSHOT that replay starts from, or 0 if absent/unreadable."""
+    try:
+        snapshots = [
+            os.path.join(ticket_dir, n)
+            for n in os.listdir(ticket_dir)
+            if is_snapshot_event_file(n) and is_active_event(n)
+        ]
+    except OSError:
+        return 0
+    if not snapshots:
+        return 0
+    try:
+        return os.path.getsize(max(snapshots, key=os.path.basename))
+    except OSError:
+        return 0
+
+
+def foldable_stats(ticket_dir: str, now: int, horizon: int) -> FoldableStats:
+    """Count and byte-size of live source events the fold would squash now."""
+    try:
+        candidates = compactable_source_candidates(ticket_dir, now, horizon)
+    except OSError:
+        return FoldableStats(0, 0, 0)
+    pending_bytes = 0
+    for candidate in candidates:
+        try:
+            pending_bytes += os.path.getsize(candidate.path)
+        except OSError:
+            continue
+    return FoldableStats(
+        count=len(candidates),
+        pending_source_bytes=pending_bytes,
+        active_snapshot_bytes=active_snapshot_bytes(ticket_dir),
+    )
+
+
+def compactable_source_candidates(ticket_dir: str, now: int, horizon: int) -> list[Candidate]:
+    """Known, non-SNAPSHOT live source events old enough for a normal fold."""
+    from rebar._commands._compact_policy import is_foldable
+
+    return [
+        c
+        for c in list_candidates(ticket_dir)
+        if c.is_known_type and not c.is_snapshot and is_foldable(c.timestamp, now, horizon)
+    ]
+
+
+def needs_folding(
+    foldable: int,
+    has_snap: bool,
+    threshold: int,
+    *,
+    snapshot_alpha: float = 0.0,
+    pending_source_bytes: int = 0,
+    active_snapshot_bytes: int = 0,
+) -> bool:
     """The sweep's two-arm selection rule, asked once.
 
     * **Recurrence** — the foldable count exceeds *threshold*, whatever the snapshot state;
@@ -167,8 +232,19 @@ def needs_folding(foldable: int, has_snap: bool, threshold: int) -> bool:
       again, and a trigger that cannot re-fire is no trigger.
     * **Backfill** — it has foldable events and no SNAPSHOT yet, so every ticket earns its
       first one regardless of size.
+    * **Adaptive recurrence** — when explicitly enabled, pending foldable source bytes at
+      least ``snapshot_alpha`` times the active SNAPSHOT bytes also re-fire compaction.
     """
-    return foldable > threshold or (foldable > 0 and not has_snap)
+    if foldable <= 0:
+        return False
+    count_or_backfill = foldable > threshold or not has_snap
+    if count_or_backfill:
+        return True
+    return (
+        snapshot_alpha > 0
+        and active_snapshot_bytes > 0
+        and pending_source_bytes >= snapshot_alpha * active_snapshot_bytes
+    )
 
 
 def git_author() -> str:

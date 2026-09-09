@@ -232,6 +232,12 @@ class CompactConfig:
         10,
         "Sets the minimum eligible event count that triggers ticket compaction.",
     )
+    # mechanism-ok: config_key compact.snapshot_alpha — 933f-e7d8-696a-4fbd
+    snapshot_alpha: float = _documented(
+        0.0,
+        "Enables adaptive compaction when pending source bytes reach this fraction "
+        "of the active snapshot bytes; 0 disables byte-based cadence.",
+    )
     # RC2b Option 3 (conservative horizon): compaction only folds an event once it is
     # older than this many HLC nanoseconds (``hlc.physical_now() - event_ts >=``). The
     # SNAPSHOT is timestamped at the fold boundary, so younger "hot-edge" events stay

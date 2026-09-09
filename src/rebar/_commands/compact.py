@@ -33,7 +33,6 @@ import sys
 
 from rebar import config
 from rebar._commands import compact_plan
-from rebar._commands._compact_policy import is_foldable
 from rebar._commands.compact_rebuild import (
     get_rebuild_count,
     rebuild_snapshot_from_full_log,
@@ -200,19 +199,16 @@ def _foldable_event_count(ticket_dir: str, now: int, horizon: int) -> int:
     An unreadable or undecodable file counts as foldable with an unknown timestamp only when
     the horizon is off, mirroring ``is_foldable``'s treatment of a ``None`` timestamp — and
     mirroring the fold, which keeps such a file as a candidate rather than dropping it."""
-    try:
-        candidates = compact_plan.list_candidates(ticket_dir)
-    except OSError:
-        return 0
-    return sum(
-        1
-        for c in candidates
-        if c.is_known_type and not c.is_snapshot and is_foldable(c.timestamp, now, horizon)
-    )
+    return compact_plan.foldable_stats(ticket_dir, now, horizon).count
 
 
 def _scan_snapshot_state(
-    tracker: str, threshold: int = 0, horizon: int = 0, *, include_archived: bool = False
+    tracker: str,
+    threshold: int = 0,
+    horizon: int = 0,
+    *,
+    snapshot_alpha: float = 0.0,
+    include_archived: bool = False,
 ) -> tuple[list[str], int]:
     """Return (ticket ids worth compacting, count of the rest), sorted by name.
 
@@ -257,11 +253,18 @@ def _scan_snapshot_state(
         return [], 0
     for name in names:
         path = os.path.join(tracker, name)
-        foldable = _foldable_event_count(path, now, horizon)
+        stats = compact_plan.foldable_stats(path, now, horizon)
         probe = compact_plan.has_snapshot(path)
         # unreadable: never select it on the backfill arm, the fold would fail anyway
         has_snapshot = True if probe is None else probe
-        if compact_plan.needs_folding(foldable, has_snapshot, threshold):
+        if compact_plan.needs_folding(
+            stats.count,
+            has_snapshot,
+            threshold,
+            snapshot_alpha=snapshot_alpha,
+            pending_source_bytes=stats.pending_source_bytes,
+            active_snapshot_bytes=stats.active_snapshot_bytes,
+        ):
             needs.append(name)
         else:
             rest += 1
@@ -543,6 +546,7 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
     try:
         _cfg = config.compose_config(repo_root).compact
         threshold, horizon = _cfg.threshold, _cfg.COMPACTION_HORIZON_NS
+        snapshot_alpha = _cfg.snapshot_alpha
     except config.ConfigError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
@@ -557,7 +561,11 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
         compact_recovery.recover_abandoned_folds_locked(tracker)
 
     needs, already = _scan_snapshot_state(
-        tracker, threshold, horizon, include_archived=include_archived
+        tracker,
+        threshold,
+        horizon,
+        snapshot_alpha=snapshot_alpha,
+        include_archived=include_archived,
     )
     total_needs = len(needs)
     sys.stdout.write(f"Tickets needing no compaction : {already}\n")

@@ -220,6 +220,86 @@ def test_needs_folding_keeps_both_selection_arms() -> None:
     assert compact_plan.needs_folding(0, has_snap=False, threshold=10) is False
 
 
+def test_needs_folding_default_off_ignores_byte_ratio() -> None:
+    """Unset/zero alpha must be byte-cadence OFF: only count/backfill arms decide."""
+    assert (
+        compact_plan.needs_folding(
+            1,
+            has_snap=True,
+            threshold=10,
+            snapshot_alpha=0.0,
+            pending_source_bytes=10_000,
+            active_snapshot_bytes=1,
+        )
+        is False
+    )
+
+
+def test_needs_folding_alpha_compares_pending_source_to_snapshot_bytes() -> None:
+    """A positive alpha refolds already-snapshotted tickets by replay-cost ratio."""
+    assert (
+        compact_plan.needs_folding(
+            2,
+            has_snap=True,
+            threshold=10,
+            snapshot_alpha=0.5,
+            pending_source_bytes=50,
+            active_snapshot_bytes=100,
+        )
+        is True
+    )
+    assert (
+        compact_plan.needs_folding(
+            2,
+            has_snap=True,
+            threshold=10,
+            snapshot_alpha=0.5,
+            pending_source_bytes=49,
+            active_snapshot_bytes=100,
+        )
+        is False
+    )
+
+
+def test_needs_folding_alpha_retains_first_snapshot_and_count_floor() -> None:
+    """Alpha widens recurrence; it cannot fold zero events or starve first snapshots."""
+    assert (
+        compact_plan.needs_folding(
+            1,
+            has_snap=False,
+            threshold=10,
+            snapshot_alpha=0.5,
+            pending_source_bytes=0,
+            active_snapshot_bytes=0,
+        )
+        is True
+    )
+    assert (
+        compact_plan.needs_folding(
+            0,
+            has_snap=True,
+            threshold=10,
+            snapshot_alpha=0.5,
+            pending_source_bytes=1_000,
+            active_snapshot_bytes=1,
+        )
+        is False
+    )
+
+
+def test_snapshot_envelope_schema_does_not_gain_cadence_fields(tmp_path: Path) -> None:
+    """The adaptive cadence is a selection rule; SNAPSHOT event schema stays unchanged."""
+    event, _path = compact_plan.build_snapshot_event(
+        str(tmp_path),
+        str(tmp_path / "ticket"),
+        compiled_state={"id": "t"},
+        source_uuids=["u1"],
+        snapshot_ts=123,
+    )
+    assert "snapshot_alpha" not in event
+    assert set(event["data"]) == {"compiled_state", "source_event_uuids", "compacted_at"}
+
+
 def test_has_snapshot_reports_an_unreadable_dir_as_unknown(tmp_path: Path) -> None:
     """``None`` is the third answer the two callers need: the sweep treats it as
     already-snapshotted, the per-close trigger declines to fire."""

@@ -56,7 +56,7 @@ or conversely if false positives prove noisy once an acting id is resolved.
 
 ## Configuration keys
 
-The 104 typed `section.field` keys with type, default, description, and lifecycle.
+The 105 typed `section.field` keys with type, default, description, and lifecycle.
 
 | Key | Type | Default | Description | Lifecycle |
 |-----|------|---------|-------------|-----------|
@@ -94,6 +94,7 @@ The 104 typed `section.field` keys with type, default, description, and lifecycl
 | `ticket.default_assignee` | `str` | `''` | Supplies the Jira-resolvable assignee used by claim when no assignee is provided. | active |
 | `ticket_clarity.threshold` | `int` | `5` | Sets the minimum score required for a ticket to pass the clarity check. | active |
 | `compact.threshold` | `int` | `10` | Sets the minimum eligible event count that triggers ticket compaction. | active |
+| `compact.snapshot_alpha` | `float` | `0.0` | Enables adaptive compaction when pending source bytes reach this fraction of the active snapshot bytes; 0 disables byte-based cadence. | active |
 | `compact.COMPACTION_HORIZON_NS` | `int` | `1800000000000` | Keeps events newer than this nanosecond horizon outside compaction snapshots. | active |
 | `compact.trigger` | `str` | `'async'` | Selects asynchronous, inline, or disabled compaction after qualifying write operations. | active |
 | `compact.trigger_interval_s` | `int` | `21600` | Starts a compaction sweep when the prior sweep is older than this many seconds. | active |
