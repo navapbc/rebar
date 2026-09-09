@@ -333,17 +333,10 @@ def test_background_janitor_runs_and_stops(store, repo, monkeypatch):
     assert len(calls) >= 1
 
 
-# --------------------------------------------------------------------------------------
-# Bug 3a52 (masonic-abeyant-stagbeetle) — the free-space watermark must scale with the
-# VOLUME, so it can never sit ABOVE the operator's disk-pressure alarm floor.
-#
-# On the review-bot host the root volume is 30 GiB and `rebar-root-disk-pressure`
-# (infra/terraform/monitoring_autodeploy.tf) alarms above 85% used = 4.5 GiB free. The
-# absolute 2-GiB DEFAULT_FREE_WATERMARK_BYTES is only crossed at 93.3% used, so the
-# janitor — the only thing that bounds /tmp/rebar-gate-snapshots — provably cannot engage
-# until after the alarm has already breached. These cases pin the ordering the runbook
-# states (infra/runbooks/review-bot-ops.md: reclaim, then alarm as the backstop).
-# --------------------------------------------------------------------------------------
+# Bug 3a52: scale the free-space watermark with volume size so reclamation precedes the
+# operator's disk-pressure alarm. On the 30-GiB review-bot volume, an 85%-used alarm leaves
+# 4.5 GiB free, while the absolute 2-GiB floor engages only at 93.3% used. These cases pin
+# the runbook's ordering: reclaim first; alarm as backstop.
 _GIB = 1024**3
 _ROOT_TOTAL = 30 * _GIB  # the review-bot host's root volume
 _ALARM_FLOOR_FREE = int(_ROOT_TOTAL * 0.15)  # 85% used — the CloudWatch threshold
@@ -522,15 +515,9 @@ def test_absolute_floor_still_governs_when_it_is_the_larger_term(store, repo, mo
     assert not entry.exists()
 
 
-# --------------------------------------------------------------------------------------
-# Bug 3907 — the ADR-promised byte-total backstop + accounting for the tickets- entries
-#
-# ADR 0005 D5 ("backstopped by the byte total") and the janitor's own module contract both
-# promise a THIRD reclamation trigger driven by the incrementally-maintained byte total.
-# _gc_pass read only free space and mtime, so the promise was inert; and materialize_tickets
-# populated the store's LARGEST entries (~861 MiB each in the wild) without ever calling
-# add_bytes, so the total those triggers would read under-counted them to zero.
-# --------------------------------------------------------------------------------------
+# Bug 3907: enforce ADR 0005 D5's incrementally maintained byte-total backstop. ``_gc_pass``
+# must consult it, and ``materialize_tickets`` must charge its large (~861-MiB) entries via
+# ``add_bytes``; otherwise this third reclamation axis undercounts them as zero.
 def test_max_bytes_cap_evicts_when_over_budget(store, repo):
     """The byte-total backstop is the ONLY term left armed here: free space is abundant
     (``free_bytes`` far above the watermark), the cold-trim is disarmed (``max_age`` huge) and
@@ -651,16 +638,11 @@ def test_max_bytes_resolved_from_env_and_snapshot_table(tmp_path, monkeypatch):
 # Bug 8386 (review finding) — hardlink sharing invalidates the janitor's size assumptions
 # --------------------------------------------------------------------------------------
 def _real_store_bytes(root: Path) -> int:
-    """Bytes the store's ENTRIES actually occupy, charging every distinct inode once.
+    """Count entry bytes independently, charging each inode once.
 
-    Deliberately a SEPARATE implementation from ``cache.distinct_bytes`` rather than a call
-    to it: an accounting test whose expected value comes from the code under test measures
-    only that the code agrees with itself. This walk is written from the definition of "bytes
-    on disk", so the two sides of every assertion below can disagree.
-
-    Scoped to entries because that is what the byte total accounts for — the store also holds
-    ``bytes.total`` itself, ``locks/`` and the per-entry sidecars, which it deliberately does
-    not track."""
+    This oracle intentionally does not call ``cache.distinct_bytes``. It excludes
+    ``bytes.total``, ``locks/``, and sidecars because the production total tracks entries
+    only."""
     seen: set[tuple[int, int]] = set()
     total = 0
     for entry in janitor._entries(root):
@@ -697,15 +679,11 @@ def _three_sharing_ticket_entries(repo: Path, store: Path) -> list[Path]:
 
 
 def test_evicting_a_shared_entry_keeps_the_byte_total_honest(store, repo):
-    """The running byte total must keep describing real disk once entries share inodes.
+    """Keep the running total honest when entries share hardlinked inodes.
 
-    Hardlink sharing (bug 8386) broke an assumption the janitor's accounting rested on. An
-    apportioned per-entry size (``st_size // st_nlink``) is a reasonable REPORTING figure, but
-    it is wrong as an incremental decrement: removing one of ``k`` links frees nothing until
-    the last link goes, so subtracting a 1/k share drives the running total away from the
-    bytes actually on disk. The ``max_bytes`` cap then evicts against bytes that do not
-    exist. Measured on this fixture pre-fix: evicting one entry credited 69,997 bytes while
-    freeing 20,000.
+    Apportioned size is useful for reporting but not incremental eviction: removing a link
+    frees no inode bytes until the last link disappears. Bug 8386 credited 69,997 bytes here
+    while freeing only 20,000, corrupting ``max_bytes`` decisions.
     """
     entries = _three_sharing_ticket_entries(repo, store)
     assert len(entries) == 3
@@ -727,14 +705,11 @@ def test_evicting_a_shared_entry_keeps_the_byte_total_honest(store, repo):
 
 
 def test_populating_shared_entries_tracks_real_disk_without_a_sweep(store, repo):
-    """The POPULATE side must be honest on its own, with no reconciling walk to rescue it.
+    """Track populate-time disk growth without a reconciling sweep.
 
-    The eviction tests below start with ``startup_sweep``, which resets the total from an
-    authoritative walk — and in doing so would launder an over-credit made at populate time.
-    This one never sweeps, so the only thing keeping ``byte_total`` in step with the disk is
-    what each materialization added. Charging a shared entry its full size here inflates the
-    total by every blob it reused, and the ``max_bytes`` cap then evicts against bytes that
-    were never consumed — defeating the sharing this ticket exists to introduce.
+    This case deliberately skips ``startup_sweep``: each materialization alone must keep
+    ``byte_total`` accurate. Charging reused hardlinks at full size invents consumption and
+    makes ``max_bytes`` evict shared entries unnecessarily.
     """
     entries = _three_sharing_ticket_entries(repo, store)
     assert len(entries) == 3
@@ -873,16 +848,10 @@ def test_hot_tickets_entry_is_not_first_lru_victim(store, repo):
     assert not cold.exists(), "the genuinely cold entry is the correct victim"
 
 
-# --------------------------------------------------------------------------------------
-# Bug a37c-d55c-72c3-439b — the ENTRY-COUNT axis (filesystem-metadata pressure).
-#
-# Every pre-existing reclamation term is denominated in BYTES or free space. On a large,
-# mostly-empty volume all of them are inert: 886 GiB free is nowhere near the 2 GiB floor,
-# ``free_watermark_pct`` and ``max_bytes`` both default off, and a host that mints
-# snapshots faster than the 7-day cold-trim expires them keeps every entry inside the age
-# window. 13,056 entries in one directory then drove macOS ``fseventsd`` to 26.3 GB RSS and
-# >150% CPU. The harm was directory-entry COUNT, which no byte-denominated axis measures.
-# --------------------------------------------------------------------------------------
+# Bug a37c-d55c-72c3-439b: bound directory-entry count independently of byte pressure.
+# A large empty volume can leave byte and age thresholds inert while snapshots accumulate;
+# 13,056 entries drove macOS ``fseventsd`` to 26.3 GB RSS and >150% CPU. These cases pin the
+# metadata-pressure axis under every byte-threshold configuration.
 def test_entry_count_cap_reclaims_under_every_byte_denominated_threshold(store):
     """AC2 — the incident, reproduced: free space abundant, ``max_bytes`` off, every entry
     newer than ``max_age_seconds``. No byte axis can fire; the count axis must."""

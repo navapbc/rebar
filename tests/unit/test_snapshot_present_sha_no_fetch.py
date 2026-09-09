@@ -1,18 +1,9 @@
-"""Bug ``sawdusty-snotty-fossa`` — a locally-present full SHA must skip the opening fetch.
+"""Skip fetch for a full SHA already present locally (bug ``sawdusty-snotty-fossa``).
 
-``lemuroid-compliant-hoopoe`` scoped attested resolution's opening fetch to the requested
-ref, so it no longer pulls every origin head. But it still ALWAYS fetches when a remote is
-present: for a bare full SHA it issues a targeted single-object want. A full SHA is
-immutable, so when the commit object is already local NO remote round-trip is owed at all —
-on a checkout whose ``origin.fetch`` maps every head even a scoped want is unnecessary latency
-(and, if the remote is wedged, a needless failure path) for a lookup that ``rev_parse`` can
-answer with zero network.
-
-The invariant pinned here is the *absence of any fetch*: resolving a locally-present full SHA
-must not invoke ``git fetch`` at all. A RED run (hoopoe's merged code, pre-fossa) issues a
-targeted want and the spy records it; GREEN issues nothing. The companion guards prove the
-skip is narrow — a moving ``origin/<branch>`` still refreshes, and a full SHA absent locally
-still takes the targeted-want path (never a broad fetch).
+Even the ref-scoped fetch from ``lemuroid-compliant-hoopoe`` adds latency and failure risk
+when ``rev_parse`` can resolve this immutable object offline. The spy pins zero fetches for a
+present SHA; companion cases require moving ``origin/<branch>`` refs to refresh and an absent
+SHA to use a targeted want, never a broad fetch.
 """
 
 from __future__ import annotations
@@ -45,16 +36,11 @@ def _isolate_store(monkeypatch, tmp_path):
 
 @pytest.fixture
 def clone_with_present_sha(tmp_path) -> tuple[Path, str, str, str]:
-    """A ``--filter=blob:none`` clone whose ``main`` commit is already LOCAL, plus a large
-    unrelated ``tickets`` branch and a ``main`` commit created AFTER the clone (absent).
+    """Create a blobless clone with present, unrelated, and absent full SHAs.
 
-    Returns ``(clone, present_sha, tickets_sha, absent_sha)``:
-      * ``present_sha`` — a full SHA whose commit object the clone already holds (blob:none
-        clones keep every commit/tree, only blobs are filtered), with its tracking ref
-        deleted so nothing but the object itself makes it resolvable.
-      * ``tickets_sha`` — tip of a large, unrelated branch that must never be transferred.
-      * ``absent_sha`` — a full SHA committed upstream after the clone, so the clone lacks
-        its object and must issue a targeted want to resolve it.
+    ``present_sha`` remains only as a local object after its tracking ref is deleted;
+    ``tickets_sha`` names a large branch that must not transfer; ``absent_sha`` is committed
+    upstream after cloning and therefore requires a targeted want.
     """
     upstream = tmp_path / "upstream"
     upstream.mkdir()

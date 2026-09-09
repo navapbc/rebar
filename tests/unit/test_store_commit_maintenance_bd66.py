@@ -1,23 +1,11 @@
-"""bd66-28a4-fd31-4c9f — a lock-held store write must not be lost to ``_GIT_TIMEOUT`` while
-git's post-commit FOREGROUND auto-maintenance runs an O(store) repack inside the commit.
+"""Keep lock-held commits separate from foreground maintenance (bd66-28a4-fd31-4c9f).
 
-Mechanism (see the ticket RCA): on git >= 2.47 ``git commit`` runs ``git maintenance run
---auto`` automatically, and ADR 0051 deliberately forces it FOREGROUND on the tickets worktree
-(``maintenance.autoDetach=false``) so it serialises under the store write lock. That repack
-therefore runs *inside* the same ``git commit`` subprocess that ``event_commit_git._run_git``
-bounds with ``_GIT_TIMEOUT``. ``gc.auto`` is left at git's default (~6700 loose objects), so
-once a store crosses that threshold the triggering commit pays the full O(store) repack cost;
-on a large store it exceeds the per-commit bound and the write is SIGKILLed mid-repack — the
-write is lost AND the kill lands mid-``git repack`` (the interrupted-maintenance corruption
-ADR 0051 exists to prevent).
-
-The fix keeps ``_GIT_TIMEOUT`` = 30 (the c2ba parity test is untouched) but suppresses git's
-auto-maintenance ON the lock-held commit (so the bound covers only the commit) and runs
-maintenance as an explicit, watchdog-budgeted step under the same write lock.
-
-This test crosses the loose-object threshold, monkeypatches ``_GIT_TIMEOUT`` to a value the
-foreground repack would exceed, and asserts the create still succeeds (the write is not lost).
-It fails RED before the fix (the create raises ``git timed out``).
+Git 2.47+ may run ``maintenance --auto`` inside ``git commit``. With ADR 0051's
+``maintenance.autoDetach=false``, crossing the default loose-object threshold could put an
+O(store) repack inside the ``_GIT_TIMEOUT`` subprocess, kill it mid-repack, and lose the write.
+The fix retains the 30-second commit bound, suppresses that implicit maintenance, then runs an
+explicit watchdog-budgeted step under the same lock. This test crosses the threshold, lowers
+the commit timeout below repack duration, and requires the create to succeed.
 """
 
 from __future__ import annotations

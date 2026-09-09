@@ -1,13 +1,9 @@
-"""Bug ``undamaged-epidermic-kakarikis`` (58a3-0756-e470-4b40) — the operation-linked snapshot-GC
-trigger.
+"""Pin operation-linked snapshot GC (bug ``undamaged-epidermic-kakarikis``).
 
-The janitor's ONLY production driver was the review-bot's resident thread, so every other host
-that resolves an attested gate populated ``$REBAR_GATE_TMPDIR/rebar-gate-snapshots`` and never
-reclaimed it (measured: 47.24 GiB on one developer host). ``rebar._snapshot.gc_trigger``
-mirrors the compaction sweep's operation-linked trigger (``compact_trigger.py``, the pattern
-that fixed bug ``0d15-59a4``): a near-free stamp check on the tail of gate resolution, the
-existing :func:`janitor.run_gc` policy in a DETACHED child, single-flight via a stamped worker
-lock, and NO ticket-store lock anywhere in the trigger path.
+A review-bot-only driver left other attested-gate hosts unreclaimed (47.24 GiB on one host).
+The resolver-side trigger therefore uses a cheap stamp check, runs :func:`janitor.run_gc` in
+a detached child, admits one worker through a stamped lock, and never takes the ticket-store
+lock. This mirrors the compaction trigger that fixed bug ``0d15-59a4``.
 """
 
 from __future__ import annotations

@@ -1,15 +1,9 @@
-"""Offline unit oracle for the structured-output measurement harness (story a40f).
+"""Offline oracle for the structured-output measurement harness (story a40f).
 
-The live measurement itself is operator-triggered and its evidence is an uploaded CI artifact
-(the epic's shared harness for the sentinel + capability-rows siblings). Everything DETERMINISTIC
-about that harness — the reply scorer, the per-cell credential gate, the call-budget cap, and the
-committed workflow's discipline — is proven here, offline, on committed golden fixtures, so the
-scoring logic is never validated for the first time by a paid live run.
-
-The scorer's pure logic lives in ``tests/external/_structured_matrix.py`` (an underscore helper,
-imported by both the live harness ``tests/external/test_structured_output_matrix.py`` and this
-unit test, exactly as ``tests/external/_live_llm.py`` is shared today). This file inserts that
-directory on ``sys.path`` so the unit tier can import it without collecting the external module.
+Committed fixtures prove deterministic scoring, credential gating, call budgets, and workflow
+discipline before any operator-triggered paid run uploads evidence. Pure logic is shared with
+the live harness in ``tests/external/_structured_matrix.py``; this unit module adds that
+directory to ``sys.path`` without collecting the external test.
 """
 
 from __future__ import annotations

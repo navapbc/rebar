@@ -1,26 +1,12 @@
-"""A store materialised WITHOUT `.env-id` rejects library writes until it is converged.
+"""Require convergence before library writes to a store copied without ``.env-id``.
 
-WHY THIS TEST EXISTS. J11's live DC cells run against a copy of the real ticket store, built by
-`git archive`-ing the orphan `tickets` branch. That copy is not a usable store: `.env-id` is the
-FIRST line of the tickets branch's own `.gitignore`, so the archive cannot contain it, and
-`composer.edit_core` (`composer.py:400`) refuses every library write with "ticket system not
-initialized". The J11 fixture converges the copy with `run_ensures`; this test pins the mechanism
-and the remedy so that call cannot be "simplified" away without a failure that explains itself.
-
-THE TRAP THIS DOCUMENTS, which cost four CI cycles to place. That one message string is emitted
-from FOURTEEN sites in `src/`, and the ones that matter here enforce TWO DIFFERENT preconditions:
-  * `event_append._ensure_initialized` requires `tracker/.git`;
-  * the write seam requires `tracker/.env-id` — `_seam.py:374-381`, the authoritative gate: "every
-    write ... flows through here ... guarantees no event is ever appended without an env_id
-    provenance stamp ... this is the backstop none can bypass". `composer` (x3), `transition`,
-    `claim`, `unlink` and `compact` keep their own EARLY pre-checks emitting the identical string.
-The reconciler's store writes go through the `.git` guard and the library's through the `.env-id`
-seam, so an archive-materialised copy lets a reconciler pass WRITE SUCCESSFULLY while a library
-edit fails on the very same store. That asymmetry looks like a contradiction and is not — and
-reasoning from "the reconciler wrote, therefore the store is initialized" is exactly what hid the
-real gate. Because the message is duplicated across layers, disabling any single gate does NOT
-surface the others; only removing composer's pre-check AND the seam backstop makes the first test
-below go red.
+J11 archives the orphan ``tickets`` branch, whose ignored ``.env-id`` cannot enter the copy;
+``run_ensures`` must restore that identity before library use. Two similarly worded guards are
+intentionally distinct: ``event_append._ensure_initialized`` requires ``tracker/.git``, while
+the write seam requires ``tracker/.env-id`` so no event lacks environment provenance. Thus a
+reconciler can write through the Git guard while a library edit correctly fails at the identity
+backstop. The tests pin both composer's early check and the authoritative seam check despite
+their shared error text.
 """
 
 from __future__ import annotations

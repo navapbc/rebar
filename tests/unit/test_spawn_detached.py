@@ -1,16 +1,10 @@
-"""One implementation of "spawn a detached rebar child" (task 2dc4-9bcd-75b9-4544).
+"""Pin the shared detached-child launcher (task 2dc4-9bcd-75b9-4544).
 
-rebar detaches children that outlive the command that started them — the async
-tickets-branch push, the enrichment drain, the compaction sweep, and the snapshot-GC
-trigger — and each site used to
-carry its own copy of the PYTHONPATH bootstrap, the ``-c`` re-entry stub, the platform detach
-flags and the stdio discipline. A defect (the missing durable ``cwd``, bug
-3198-438c-72a5-470f) propagated to all three by exactly that imitation. These tests pin the
-consolidation: the pattern's signature exists only in ``rebar._proc.spawn_detached``, its
-construction is correct, and its boundaries (per-caller env, per-caller catch) hold.
-
-The end-to-end cwd contract across the original three call sites stays pinned by
-``tests/unit/test_detached_child_cwd.py``, which drives the real sites with real processes.
+Async push, enrichment drain, compaction, and snapshot GC share PYTHONPATH bootstrap,
+re-entry, detach flags, stdio handling, and durable ``cwd`` ownership. Keeping that signature
+only in :mod:`rebar._proc` prevents copy drift such as bug 3198-438c-72a5-470f while preserving
+per-caller environment and error handling. ``test_detached_child_cwd.py`` exercises the real
+call sites with real processes.
 """
 
 from __future__ import annotations

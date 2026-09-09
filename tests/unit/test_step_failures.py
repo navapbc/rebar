@@ -1,17 +1,9 @@
-"""Repeated non-fatal LLM step failures must be visible in a gate run summary
-(ticket eclectic-industrial-argali).
+"""Expose nonfatal LLM step failures in gate summaries (ticket eclectic-industrial-argali).
 
-An LLM sub-step that fails is usually swallowed on purpose — the overlap judge treats a dead
-batch as abstain, the novelty sub-calls degrade to un-floored — so the run continues and the
-verdict never mentions it. Observed live: three overlap-judge batches, each burning ~310s,
-each ending in ``abstain``; the emitted JSON was byte-identical to a run in which nothing
-overlapped. These tests pin the tally that closes that gap and, just as importantly, pin that
-a CLEAN run's coverage is unchanged (the count rides on a signed attestation).
-
-The wiring test drives the REAL runner to failure rather than calling ``record`` by hand,
-because the defect is about whether the runner's except spine reaches the sink at all.
-Offline throughout: a ``FunctionModel`` with ``ALLOW_MODEL_REQUESTS = False``, the seam
-``tests/unit/test_usage_log_failed_calls.py`` already uses.
+Overlap failures degrade to abstention and novelty failures to an unfloored score, so the run
+continues; the signed attestation must still tally them without changing clean-run coverage.
+The wiring case drives the real runner's exception path with an offline ``FunctionModel`` and
+``ALLOW_MODEL_REQUESTS = False`` rather than recording a synthetic failure directly.
 """
 
 from __future__ import annotations

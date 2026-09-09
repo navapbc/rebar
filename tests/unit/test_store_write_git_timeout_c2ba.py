@@ -1,19 +1,9 @@
-"""c2ba AC3: the lock-held git subprocess calls in ``event_append`` must carry a wall-clock
-timeout, matching ``_store/push.py``.
+"""Bound every lock-held Git call in ``event_append`` (c2ba AC3).
 
-``event_append`` holds the store's MKDIR write lock across its ``git add``/``git commit`` (and
-the recovery paths' ``diff``/``rm``/``checkout``/``read-tree``/``ls-files``). Before this fix
-those ran via bare ``subprocess.run(...)`` with no ``timeout=`` (unlike ``push.py``, which
-passes ``_GIT_TIMEOUT``), so a stuck or contended tracker volume could hold the write lock
-indefinitely — the residue that made the review-bot ``stop_grace_period`` unprovable and, when
-a SIGKILL landed mid-write, orphaned the lock (the autodeploy incident recorded on ticket
-c2ba-98bf-ca2d-481a).
-
-Every lock-held git call now funnels through ``event_append._run_git``, which mirrors
-``push.py._git``: it bounds the child with ``_GIT_TIMEOUT`` and folds a
-:class:`subprocess.TimeoutExpired` into a synthetic failed result (returncode 124) so the
-existing returncode-inspecting callers fail the write cleanly (releasing the lock) instead of
-hanging.
+Add, commit, and recovery commands previously used unbounded ``subprocess.run`` while holding
+the MKDIR write lock. ``event_append._run_git`` now mirrors ``push._git``: apply
+``_GIT_TIMEOUT`` and convert :class:`subprocess.TimeoutExpired` to return code 124. Existing
+callers then fail cleanly and release the lock instead of hanging or leaving it orphaned.
 """
 
 from __future__ import annotations

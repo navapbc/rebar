@@ -1,12 +1,8 @@
-"""Regression: a store write must not be permanently wedged by a PRE-EXISTING
-unmerged (UU) index entry on a reconciler-regenerable .bridge_state/* file
-(bug 6818 / filmy-basin-chasm, the "store writes wedged" half).
+"""Self-heal a pre-existing unmerged ``.bridge_state/*`` entry (bug 6818).
 
-Before the fix, any `git commit` refused while an unmerged path existed, so an
-event append raised the cryptic "git commit failed while holding lock" and the
-tracker stayed wedged until manual recovery. Because .bridge_state/* files are
-reconciler-REGENERABLE, the write path should self-heal such an entry (restore it
-to HEAD) and complete the commit — no manual intervention.
+Git otherwise rejects every event commit and wedges the store. Because bridge state is
+reconciler-regenerable, the write path restores it to HEAD and completes without manual
+recovery.
 """
 
 from __future__ import annotations
@@ -124,11 +120,11 @@ def _event(uuid: str = "u-2") -> dict:
 
 
 def test_write_self_heals_unmerged_path_foreign_to_the_branch(tmp_path: Path) -> None:
-    """A `git stash pop` in the tickets worktree can apply a stash created in a SOURCE
-    worktree (the stash stack is shared across worktrees), dropping `src/...` into the store.
-    Such a path is not reconciler-regenerable, but it is also NOT ticket data — the tickets
-    branch tracks no source tree — so it must be discarded, not left to wedge every write.
-    Uses the exact path observed on the live store.
+    """Discard a foreign source-path conflict rather than wedge the ticket store.
+
+    A repository-wide stash can drop ``src/...`` from another worktree into the tickets
+    worktree. The tickets branch owns no source tree, so the observed path is safe to discard
+    even though it is not regenerable bridge state.
     """
     rel = "src/rebar/llm/plan_review/det_floor.py"
     tracker = _tracker_with_unmerged(tmp_path, rel, seed_path=False)

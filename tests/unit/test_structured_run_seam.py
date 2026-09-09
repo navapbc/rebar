@@ -1,17 +1,9 @@
-"""The structured-output execution cluster is a LEAF module (task 2682).
+"""Pin the structured-output execution cluster as a genuine leaf module (task 2682).
 
-``runner.py`` sat at exactly the 800-LOC hard cap, so the next line added to it would have
-failed `Verified` for everyone — and two stories in the provider-seam epic must add lines to
-it. This pins the split that bought the headroom back.
-
-A relocation has no new behaviour, so the real regression net is the existing suite passing
-unchanged. What CAN be asserted here is the structure the split has to preserve: the new
-module is a genuine leaf, the split did not fragment into a stub, and nothing in the move
-dragged a heavy import into the stdlib-only ``import rebar.llm`` path.
-
-The upper LOC ceiling is NOT asserted here: `.github/module-size-limit.txt` is the single
-authoritative bound (ADR 0058), enforced by the CI module-size gate and mirrored in
-`tests/unit/test_module_size_contract.py`.
+Extracting it gave the 800-line ``runner.py`` room without creating a stub or pulling heavy
+imports into the stdlib-only ``import rebar.llm`` path. Existing tests cover relocated
+behavior. The authoritative ceiling remains ``.github/module-size-limit.txt`` (ADR 0058),
+with its own CI and unit guards.
 """
 
 from __future__ import annotations
