@@ -11,25 +11,32 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
+import selectors
 import shutil
-import signal
 import stat
 import subprocess
 import tempfile
+import time
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from rebar import schemas
+from rebar._proc import reap_process_group
 
 from . import terraform_index as tfi
+
+logger = logging.getLogger(__name__)
 
 TOOL_NAME = "terraform-config-inspect"
 DEADLINE_SECONDS = 60.0
 MAX_STDOUT = 4 * 1024 * 1024
 MAX_STDERR = 64 * 1024
+_REAP_GRACE_SECONDS = 1.0
+_REAP_DRAIN_SECONDS = 1.0
 _OPERATION = "corroborate_diagnostic"
 _LANGUAGE = "terraform"
 _SUPPORTED = frozenset({"declaration_present", "module_source_equals", "required_provider_present"})
@@ -86,6 +93,10 @@ class _Abstain(Exception):
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
         self.detail = detail
+
+
+class _OutputLimitExceeded(Exception):
+    pass
 
 
 def corroborate(
@@ -299,12 +310,13 @@ def _run(exe: Path, snapshot: Path) -> _Execution:
             start_new_session=(os.name != "nt"),
         )
         try:
-            stdout, stderr = proc.communicate(timeout=DEADLINE_SECONDS)
+            stdout, stderr = _read_limited(proc)
         except subprocess.TimeoutExpired as exc:
-            _terminate(proc)
+            _reap(proc)
             raise _Abstain("worker_timeout") from exc
-        if len(stdout) > MAX_STDOUT or len(stderr) > MAX_STDERR:
-            raise _Abstain("worker_failure")
+        except _OutputLimitExceeded as exc:
+            _reap(proc)
+            raise _Abstain("worker_failure") from exc
         if proc.returncode != 0:
             raise _Abstain("nonzero_exit")
         return _Execution(proc.returncode, stdout, stderr)
@@ -315,7 +327,7 @@ def _run(exe: Path, snapshot: Path) -> _Execution:
 
 
 def _minimal_env(home: Path) -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if k in _KEEP_ENV and not _drop_env(k)}
+    env = {k: v for k, v in os.environ.items() if k in _KEEP_ENV}
     env["HOME"] = str(home)
     env["TMPDIR"] = str(home)
     return env
@@ -326,26 +338,53 @@ def _drop_env(name: str) -> bool:
     return any(upper.startswith(prefix) for prefix in _DROP_ENV_PREFIXES)
 
 
-def _terminate(proc: subprocess.Popen[bytes]) -> None:
-    if proc.poll() is None:
-        try:
-            if os.name != "nt":
-                os.killpg(proc.pid, signal.SIGTERM)
-            else:
-                proc.terminate()
-        except OSError:
-            pass
+def _read_limited(proc: subprocess.Popen[bytes]) -> tuple[bytes, bytes]:
+    if proc.stdout is None or proc.stderr is None:
+        raise _OutputLimitExceeded
+    stdout_fd = proc.stdout.fileno()
+    stderr_fd = proc.stderr.fileno()
+    chunks: dict[int, list[bytes]] = {
+        stdout_fd: [],
+        stderr_fd: [],
+    }
+    limits = {stdout_fd: MAX_STDOUT, stderr_fd: MAX_STDERR}
+    totals = {stdout_fd: 0, stderr_fd: 0}
+    deadline = time.monotonic() + DEADLINE_SECONDS
+    with selectors.DefaultSelector() as selector:
+        selector.register(proc.stdout, selectors.EVENT_READ)
+        selector.register(proc.stderr, selectors.EVENT_READ)
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(proc.args, DEADLINE_SECONDS)
+            for key, _events in selector.select(timeout=min(0.1, remaining)):
+                fd = key.fd
+                try:
+                    chunk = os.read(fd, 65536)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                totals[fd] += len(chunk)
+                if totals[fd] > limits[fd]:
+                    raise _OutputLimitExceeded
+                chunks[fd].append(chunk)
     try:
-        proc.communicate(timeout=1)
-    except subprocess.TimeoutExpired:
-        try:
-            if os.name != "nt":
-                os.killpg(proc.pid, signal.SIGKILL)
-            else:
-                proc.kill()
-        except OSError:
-            pass
-        proc.wait()
+        proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired as exc:
+        raise subprocess.TimeoutExpired(proc.args, DEADLINE_SECONDS) from exc
+    return b"".join(chunks[stdout_fd]), b"".join(chunks[stderr_fd])
+
+
+def _reap(proc: subprocess.Popen[bytes]) -> None:
+    reap_process_group(
+        proc,  # type: ignore[arg-type]
+        grace=_REAP_GRACE_SECONDS,
+        drain=_REAP_DRAIN_SECONDS,
+        label="terraform-corroborator",
+        logger=logger,
+    )
 
 
 def _load_module_json(result: _Execution) -> dict[str, Any]:
