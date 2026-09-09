@@ -1,17 +1,8 @@
-"""The LLM config table is discovered from the GATE's pinned code root, not from the ambient
-cwd (bug 2876).
+"""Read LLM configuration from the gate's pinned code root, not ambient cwd (bug 2876).
 
-`gate_source.gate_read_root` promises that activating a snapshot means "every config rebuilt
-deep in the gate reads each" root. `LLMConfig.from_env` honours that for `repo_path`, but the
-`[tool.rebar.llm]` TABLE itself was read through `_config_sources.repo_root(None)` — i.e.
-`REBAR_ROOT`, else the git toplevel of the process cwd. When ambient discovery missed the
-project's config, `parse_class_slots({})` silently returned the BUILT-IN defaults, which are
-bare Anthropic ids, so a Bedrock-configured project issued direct-Anthropic calls and 401'd.
-
-These are end-to-end over the REAL discovery path — a real `rebar.toml` on disk, read through
-`load_class_slots`/`resolve_model_string` and through the runner's chain lookup. The existing
-`test_llm_fallback_chain.py` monkeypatches `_read_llm_file_table`, which is exactly why the
-whole suite was blind to this: it stubs out the layer that was broken.
+These end-to-end tests use an on-disk ``rebar.toml`` through class-slot discovery and runner chain
+lookup. Missing the pinned config would substitute built-in Anthropic ids for a configured
+Bedrock chain.
 """
 
 from __future__ import annotations
@@ -217,15 +208,10 @@ def _run(cfg):
 
 
 def test_a_gate_rooted_chain_actually_serves_the_fallbacks_answer(tmp_path, elsewhere, socket):
-    """The acceptance criterion the ticket asks for: not "a fallback was attempted" but "the
-    fallback ANSWERED and its answer is what the caller got".
+    """Return the pinned-root fallback's answer and attest that selected model.
 
-    A test that only asserted the attempt would have passed throughout the reported failure —
-    the arm WAS attempted, it just 401'd. So this asserts the returned TEXT is the fallback's,
-    and that the attestation names the fallback rather than the primary.
-
-    Before the fix the chain was invisible: `fallback_targets_for` looked the class up through
-    the ambient root, found no config, built an unwrapped primary, and the 529 propagated.
+    Observing both the returned text and attestation proves successful failover, not merely an
+    attempted fallback request.
     """
     root = _project(tmp_path, primary=f"anthropic:{_ANTHROPIC_PRIMARY}")
     socket["status"][_ANTHROPIC_PRIMARY] = 529  # overloaded: an availability failure

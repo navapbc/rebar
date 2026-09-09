@@ -1,20 +1,8 @@
-"""Live-Jira test isolation must not depend on a distribution mode nobody configures.
+"""Keep live-Jira tests confined under the xdist schedulers the project uses.
 
-Bug 06f4-1c04-83c8-4a9f. `pytest-xdist` honours ``@pytest.mark.xdist_group`` in exactly ONE
-scheduler: ``--dist loadgroup``. Under ``load`` (xdist's default) and under ``worksteal`` (what
-CI's default tier and ``docs/coverage.md``'s local command both use) the mark is parsed and then
-DISCARDED — silently, with no error and no warning. Story 8d36 introduced xdist parallelism on
-the invariant "live tests are kept serial or xdist_group-confined ... the command must not
-assume [they self-skip]", so the confinement has to hold wherever those tests can actually run.
-
-Two guards here, one per way that invariant broke:
-
-* :func:`test_every_live_jira_test_is_xdist_group_confined` — a static policy scan: a test that
-  gates on ``acli`` being on PATH is a live-Jira test and MUST carry the group. This is the guard
-  that would have caught ``test_reconcile_dry_run_against_live_jira`` shipping without one.
-* the subprocess guards — collection must FAIL FAST when group-confined live-Jira tests are
-  collected under ``-n>0`` with a scheduler that ignores groups AND live credentials are present.
-  They use ``--collect-only``, so no test body runs and no Jira traffic is ever issued.
+A static scan requires every ``acli``-gated test to carry ``xdist_group``. Collection also fails
+fast when live credentials meet parallel ``load`` or ``worksteal`` scheduling, which ignores
+that marker. The subprocess checks use ``--collect-only`` and issue no Jira traffic.
 """
 
 from __future__ import annotations

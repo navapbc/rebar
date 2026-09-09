@@ -1,16 +1,8 @@
-"""Unit coverage for the live_jira_dc harness fixtures (bug f391, epic e369).
+"""Unit contracts for the live-Jira DC harness fixtures (bug f391, epic e369).
 
-WHY THESE ARE UNIT TESTS. The behaviour under test lives in a LIVE-tier conftest
-that cannot run on every workstation — the harness base image is linux/amd64 only
-(``tests/external/live_jira_dc/README.md``) — and the defect it fixes only fires
-after 10 accumulated tokens. Waiting for the live tier to prove the sweep is
-correct means the sweep's own failure modes (deleting a human's PAT; raising when
-the endpoint is unavailable) would first be observed against a real instance. So
-the PARSING and DEGRADATION paths are pinned here, against a stubbed ``_request``,
-and the live job supplies the acceptance evidence that the cap is no longer hit.
-
-The module is loaded by PATH rather than imported as ``conftest``: pytest owns
-that name, and a second module claiming it collides.
+Stubbed requests cover token cleanup, readiness ordering, shared probe behavior, and fixture
+surface without a live instance. The harness is loaded by path because pytest owns the
+``conftest`` module name.
 """
 
 from __future__ import annotations
@@ -227,32 +219,9 @@ def test_an_already_gone_token_counts_as_reclaimed(harness, monkeypatch) -> None
     assert harness._sweep_leaked_harness_tokens() == ["rebar-j5-harness-aaaa1111"]
 
 
-# ---------------------------------------------------------------------------
-# WHEN the Epic fields can be demanded — after provisioning, never before
-# (bug 941b-f049-5f29-4410, correcting bug 9790-cafa-dffa-462e)
-#
-# 9790 was right that a `serverInfo` 200 does not imply the Epic machinery is
-# usable, and wrong about why. It read a system-only field inventory as "the
-# GreenHopper plugin is still starting" and made the fields a SESSION-START
-# readiness predicate under a timeout. MEASURED on experiment run 30981084637:
-#
-#     [before]           27 fields, customfield_count=0, EpicLink=False
-#     [after-180s-quiet] 27 fields, customfield_count=0, EpicLink=False
-#     create project  -> HTTP 201
-#     [after-create+0s]  55 fields, customfield_count=13, EpicLink=True
-#
-# 180 seconds of extra time changed NOTHING; creating the pinned GreenHopper
-# project changed everything in 0.05s. GreenHopper provisions its custom fields
-# when the first Jira SOFTWARE PROJECT is created. So an empty custom-field
-# inventory is the NORMAL state of a fresh instance, not a fault — and demanding
-# the fields before any project exists is a deadlock: the gate waits for a
-# capability only the action it blocks can create. It expired identically at 600s
-# (run 30975323866) and at 1800s (run 30978613228), erroring all 62 cells.
-#
-# These cells therefore pin WHERE the capability may be demanded: session
-# readiness must tolerate the pre-provisioning inventory, and the post-create
-# check must be a real bounded WAIT that still fails loudly.
-# ---------------------------------------------------------------------------
+# Epic fields are provisioned by the first Jira Software project, so session
+# readiness accepts a system-only inventory. A bounded post-create check then
+# waits for the fields and fails loudly if the declared capability is absent.
 
 _SYSTEM_ONLY_FIELDS = [
     {"id": f"sys{i}", "name": name, "custom": False}
@@ -324,16 +293,10 @@ def _stub_readiness_transport(harness, monkeypatch, field_bodies):
 def test_session_readiness_tolerates_the_pre_provisioning_inventory(
     harness, monkeypatch, fast_field_poll
 ) -> None:
-    """THE DEADLOCK (bug 941b-f049-5f29-4410). A fresh Jira Software instance with
-    no project has ZERO custom fields — measured on run 30981084637, and unchanged after 180s of
-    additional quiet time. 9790 read that state as "not ready yet" and blocked
-    session start on it, but the fields are provisioned BY the first project
-    create, which cannot happen while session start is blocked. So the gate waited
-    for something only the action it blocked could produce, and expired identically
-    at 600s and at 1800s, erroring all 62 cells at setup.
+    """Accept the system-only field inventory that precedes project provisioning.
 
-    Session readiness must therefore RETURN against this inventory. It is the
-    normal pre-provisioning state, not a fault."""
+    Requiring Epic fields here would deadlock on a capability created by the first project.
+    """
     _stub_readiness_transport(harness, monkeypatch, [_SYSTEM_ONLY_FIELDS])
 
     harness.wait_for_jira_dc_ready(timeout=0.05)
@@ -406,18 +369,10 @@ def test_a_degraded_image_still_fails_the_capability_check_loudly(
 def test_the_failure_message_does_not_send_the_reader_at_the_budget(
     harness, monkeypatch, fast_field_poll
 ) -> None:
-    """THE MOST EXPENSIVE ARTIFACT OF THE BUG, so it gets its own cell.
+    """Explain the missing project precondition without blaming the readiness budget.
 
-    9790's message states a decision rule: *"if it contains no customfield_*
-    entries whatsoever the plugin is still starting and the budget
-    (JIRA_DC_FIELD_READY_TIMEOUT) is too short"*. That rule is wrong AND
-    self-confirming — an empty custom-field inventory is the normal state of an
-    instance with no project, so the message points every reader at the budget.
-    It misdiagnosed 9790, it misdiagnosed this bug's own opening analysis, and it
-    bought a 50-minute run at 1800s that failed byte-identically to the 600s one.
-
-    A message that names the wrong remedy is worse than no message, so the prose
-    must name the real precondition and must not blame the budget."""
+    An empty custom-field inventory is normal before provisioning, not evidence of a slow plugin.
+    """
     _stub_readiness_transport(harness, monkeypatch, [_SYSTEM_ONLY_FIELDS])
 
     with pytest.raises(AssertionError) as excinfo:
@@ -438,11 +393,7 @@ def test_the_failure_message_does_not_send_the_reader_at_the_budget(
 
 
 def test_the_probe_creates_its_project_before_it_awaits_the_epic_fields(monkeypatch) -> None:
-    """THE PARITY SIBLING. The deterministic probe has the identical ordering bug —
-    `_await_named_fields` runs before its project create — which is why probe runs
-    30944211742 and 30930839323 both died at `PROBE SETUP FAILED: Epic Link=None
-    Epic Name=None`. Fixing only the harness would leave the probe deadlocked, and
-    the probe is the cheap tool this class of question gets answered with."""
+    """Create the probe project before awaiting the Epic fields it provisions."""
     import importlib.util
     import pathlib as _pathlib
 
@@ -493,10 +444,7 @@ def test_the_probe_creates_its_project_before_it_awaits_the_epic_fields(monkeypa
 
 
 def test_the_probe_and_the_harness_share_one_readiness_definition(harness, monkeypatch) -> None:
-    """AC4, the anti-drift pin. Gerrit 1387 fixed the probe alone and by doing so
-    CREATED the divergence this criterion exists to prevent. Both tiers must route
-    through the same function, so a change to the required names or the budget
-    cannot land on one path only."""
+    """Route probe and harness readiness through one definition to prevent drift."""
     import importlib.util
     import pathlib as _pathlib
 
@@ -568,26 +516,8 @@ def test_an_unreadable_field_inventory_reads_as_not_ready(
     assert "503" in message, "the failure does not record the HTTP status it actually got"
 
 
-# ---------------------------------------------------------------------------
-# The by-path load's SURFACE contract (ticket ccf6) — what a split may not break
-# ---------------------------------------------------------------------------
-#
-# conftest.py exceeded AGENTS.md's 800-LOC hard cap, and the fixture cluster that
-# was extracted to `_dc_fixtures.py` is re-exported back into conftest's namespace.
-# Two distinct things can silently break when that file is split further, and
-# neither shows up until a ~35-minute live harness run:
-#
-#   1. A fixture stops being an attribute of the conftest module, so pytest no
-#      longer collects it and every consumer ERRORS at setup with
-#      "fixture '<name>' not found" (`--collect-only` does not catch this;
-#      fixtures resolve at SETUP).
-#   2. Worse and quieter: a function these unit tests drive through a stubbed
-#      `_request` moves OUT of conftest. `monkeypatch.setattr(harness, "_request",
-#      ...)` rebinds a name in conftest's globals, so a caller living in another
-#      module keeps resolving the REAL `_request` and the "unit" test starts
-#      attempting live HTTP. That fails OPEN — the stub simply stops applying.
-#
-# These two cells pin both, against the loaded-by-path module the split targets.
+# A harness split must keep required fixtures exported for pytest and stubbed-request callers
+# in this module, where monkeypatching cannot fall through to live HTTP (ticket ccf6).
 
 #: Fixtures the live suite resolves from this conftest. Sourced from the suite's
 #: own signatures, not from conftest's contents, so a fixture that silently stops
@@ -646,14 +576,10 @@ _MUST_STAY_IN_CONFTEST = (
 
 
 def test_the_monkeypatched_surface_is_still_defined_in_conftest(harness) -> None:
-    """The stub surface these unit tests rely on has not been moved to a sibling.
+    """Keep stubbed-request callers defined in the conftest module.
 
-    `monkeypatch.setattr(harness, "_request", fake)` only reaches callers whose OWN
-    module globals are conftest's namespace. A caller that moved to another module
-    would keep resolving the real `_request` and start making live HTTP calls from
-    the unit tier — green locally only by accident, and a hang or a real mutation
-    against a running harness otherwise. So each name below must be defined HERE,
-    not merely importable from here.
+    Moving one to a sibling would bypass ``monkeypatch.setattr(harness, "_request", fake)`` and
+    could send live HTTP from the unit tier.
     """
     strays = []
     for name in _MUST_STAY_IN_CONFTEST:
@@ -671,13 +597,7 @@ def test_the_monkeypatched_surface_is_still_defined_in_conftest(harness) -> None
 
 
 def test_the_live_harness_conftest_is_within_the_module_size_cap() -> None:
-    """conftest.py stays at or under the repo's single-sourced hard cap.
-
-    The CI module-size gate covers `src/rebar` only, so this file drifted to 932
-    LOC without failing the build (ticket ccf6). The limit is read from
-    `.github/module-size-limit.txt` rather than restated, so raising the repo cap
-    raises this with it and the two cannot disagree.
-    """
+    """Keep conftest within the hard cap read from ``.github/module-size-limit.txt``."""
     repo_root = pathlib.Path(__file__).resolve().parents[2]
     cap = int((repo_root / ".github" / "module-size-limit.txt").read_text().strip())
     loc = len(_CONFTEST.read_text(encoding="utf-8").splitlines())

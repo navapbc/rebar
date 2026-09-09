@@ -1,28 +1,9 @@
-"""A same-host orphan is reclaimable when the container id changed (bug castoff-tigerseye-ammonite).
+"""Reclaim same-host orphans across container recreation (bug castoff-tigerseye-ammonite).
 
-``_owner_stamp`` recorded ``socket.gethostname():pid``, and ``_mkdir_lock_is_stale``
-refused to reclaim unless the recorded host equalled ``socket.gethostname()``. Inside a
-container the hostname IS the container id, and a ``compose up -d`` recreate assigns a new
-one — so a lock orphaned by the SAME host's previous container was misclassified as the
-foreign-host (shared-filesystem) case and could never be reclaimed. With no age ceiling the
-orphan was permanent: production 2026-07-31 saw the review-bot's boot go from <4s to ~62s
-for every subsequent deploy.
-
-The fix keeps the refusal-without-proof contract of bug yaw-gravel-linen intact and instead
-makes "same host" provable independently of the hostname:
-
-* the stamp records a **boot id** (``/proc/sys/kernel/random/boot_id``, stable across
-  container recreates on one kernel) rather than the hostname, plus the **pid namespace**
-  and the owning pid's **start time**;
-* a same-host owner in the SAME pid namespace is still judged by probing the pid (now
-  start-time-qualified, so a recycled pid cannot masquerade as the owner);
-* a same-host owner in a DIFFERENT pid namespace (the container recreate) is not
-  pid-probeable, so it is reclaimed only under the fcntl proof: the caller holds the
-  exclusive ``fcntl.flock`` leg of the same tracker, which the kernel shares across
-  namespaces on one host and releases when its holder dies — so no live same-host owner
-  of a stamped mkdir lock can exist while we hold it.
-
-A genuinely foreign host has a different boot id and is still never reclaimed.
+Owner stamps use boot id, PID namespace, PID, and process start time instead of container
+hostname. Same-namespace owners require a start-qualified PID probe. Different namespaces on the
+same boot are reclaimed only while holding the cross-namespace fcntl leg. A different boot id
+remains foreign and is refused.
 """
 
 from __future__ import annotations

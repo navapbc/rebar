@@ -1,13 +1,7 @@
-"""The live DC rekey cell's rename-target derivation cannot return the source key (bug d582).
+"""Keep the live-DC rekey target distinct from its source (bug d582).
 
-REPO-ONLY BY CONSTRUCTION — no Jira, no credentials, no network. That is the point: the defect
-this pins was a 1-in-26 flake that only ever surfaced on a live harness run (30772461871, which
-drew ``RBJDRDZ``), so the guard has to live somewhere that runs on every commit instead of
-somewhere that runs when a random draw cooperates.
-
-``_dc_support`` is loaded BY PATH rather than imported by name because ``tests/external/`` is not
-a package on ``sys.path`` for the unit tier — pytest only puts that directory on the path when it
-collects the external suite itself.
+This repo-only oracle needs no Jira or network. It loads ``_dc_support`` by path because the unit
+tier does not place the non-package ``tests/external`` directory on ``sys.path``.
 """
 
 from __future__ import annotations

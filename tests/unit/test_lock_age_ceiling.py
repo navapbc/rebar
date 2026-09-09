@@ -1,30 +1,9 @@
-"""A wall-clock age ceiling closes the permanent-wedge CLASS (9305 rec #1).
+"""Age-ceiling contracts for mkdir-lock ownership (research 9305 recommendation 1).
 
-``_mkdir_lock_is_stale`` refuses to reclaim without POSITIVE proof of a dead same-host
-owner (bug yaw-gravel-linen). That is correct while an owner might be live, but several
-of its branches refuse for the mere ABSENCE of a liveness signal — an absent/unreadable
-owner stamp, a malformed v2 stamp, a genuinely foreign-host stamp on a shared filesystem,
-or a same-host stamp in an unprobeable pid namespace seen without the fcntl proof. With no
-upper bound in time, any of those wedges the store FOREVER: the 2026-07-31 production
-incident (review-bot boot 62s vs a 30s health check, seven rolled-back deploys) was exactly
-this class, and 304e/castoff-tigerseye-ammonite fixed only ONE instance of it.
-
-The 9305 research (rec #1) prescribes git gc's gc.pid precedent (builtin/gc.c, 12h): honour
-an unprovable stamp UNTIL a generous ceiling, then reclaim, so the store can never wedge
-permanently. rebar holds the write lock for a single event append (seconds), so the ceiling
-is far tighter than git's 12h.
-
-The ceiling is a BACKSTOP, never a timer on its own. Per the research's rule — "if you ever
-break a lock, do it under a conservative fail-closed guard PLUS a wall-clock backstop, NEVER
-ON A TIMER ALONE" — a branch with a POSITIVE liveness signal keeps refusing regardless of age.
-
-What counts as positive requires care, and bug larval-tribal-tigermoth narrowed it. A live-pid
-probe is proof only when a start time CORROBORATES it: ``os.kill(pid, 0)`` alone says the pid
-NUMBER is in use, and numbers recycle. On a platform with no ``/proc`` the start time is never
-observable, so that branch was refusing forever on no proof at all — an UNBOUNDED wedge, the
-worst instance of the very class this ceiling exists to close. It now takes the ceiling like
-every other refuse-without-proof branch; the corroborated-live case is still never reclaimed
-on a timer. (This was research rec #6, previously deferred.)
+Unproved owners are honored until a conservative ceiling, preventing permanent wedges without
+making age sufficient on its own. A positively live owner is never reclaimed by timer. PID
+liveness is positive only when its start time corroborates the stamp, because PID numbers recycle.
+Platforms without that evidence use the ceiling or the independent fcntl proof.
 """
 
 from __future__ import annotations
@@ -138,20 +117,11 @@ def test_aged_live_owner_is_never_reclaimed(tmp_path, monkeypatch):
 
 
 def test_aged_live_pid_with_unknown_start_is_reclaimed_by_the_ceiling(tmp_path, monkeypatch):
-    """THE BOUNDARY, MOVED (bug larval-tribal-tigermoth). Same host, same namespace, the
-    stamped pid probes ALIVE but its start time is unconfirmable — the macOS case, where
-    ``_process_start_time`` reads ``/proc`` and so ALWAYS returns None.
+    """Reclaim an aged same-host PID stamp when its start time cannot be corroborated.
 
-    This used to assert refusal, on the reading that ``os.kill(pid, 0)`` is a positive
-    liveness signal. It is not, unqualified: with no start time it only says the NUMBER is in
-    use, and pid numbers recycle. Left refusing, an orphan stamp wedged the store with NO
-    bound at all — the unbounded wedge this bug was filed for. It is therefore a
-    refuse-without-proof branch and takes the ceiling, like every other such branch.
-
-    Breaking a genuinely-live owner remains impossible here: reaching this call at all means
-    the caller holds the exclusive fcntl leg, which a live owner inside its own hold would
-    still be holding. See ``test_aged_live_owner_is_never_reclaimed`` for the corroborated
-    case, which is still never reclaimed on a timer."""
+    A live PID number alone is not ownership proof because numbers recycle. The exclusive fcntl
+    leg protects an active owner. The start-corroborated case remains timer-independent.
+    """
     _pose_as(monkeypatch, boot_id=_HOST_BOOT_ID, hostname="host", ns=_NS)
     monkeypatch.setattr(_owner, "_process_start_time", lambda pid: None)  # start unknowable
     lock_dir = _seed(tmp_path, _owner._owner_stamp())  # our own live pid
@@ -187,10 +157,8 @@ def test_reclaim_logs_the_holder_stamp_and_age(tmp_path, monkeypatch, caplog):
     assert any("age" in m.lower() for m in warnings), f"dir age not disclosed: {warnings!r}"
 
 
-# --- RECYCLED PID ON A PLATFORM WITH NO /proc (bug larval-tribal-tigermoth) ----------------
-# The reported wedge: the holder is DEAD, but its pid NUMBER has been reissued to an unrelated
-# live process. `_pid_alive` says "live", and with no start time to qualify that verdict the
-# lock was judged fresh FOREVER. These pin the reclamation and its bound.
+# A recycled PID without a readable start time is unproved ownership. These cases pin its
+# reclamation boundary (bug larval-tribal-tigermoth).
 
 
 def _recycled_stamp(dead_pid: int) -> str:
@@ -278,10 +246,7 @@ def _boom(*_a, **_kw):
 
 
 def test_lock_module_does_not_re_export_the_moved_private_names():
-    """The staleness cluster moved to `lock_owner` (module-size seam). A convenience re-export
-    on `lock` would keep attribute access working while SILENTLY breaking every test that
-    patches these names, because `_mkdir_lock_is_stale` resolves them through its own module
-    globals. There must be exactly one home, so patches reach the code under test."""
+    """Keep staleness helpers solely in ``lock_owner`` so patches reach their module globals."""
     moved = (
         "_mkdir_lock_is_stale",
         "_reclaim_mkdir_lock",

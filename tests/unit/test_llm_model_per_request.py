@@ -1,23 +1,9 @@
-"""The per-request MODEL override on ``RunRequest.config`` (story b690).
+"""Per-request model selection through ``RunRequest.config`` (story b690).
 
-``PydanticAIRunner`` holds one ``self._config`` for a whole gate run — it is built once at
-gate-dispatch time and shared by every step. The per-call tuning a workflow step needs therefore
-rides on ``RunRequest.config``, and that contract is already documented in the same call path:
-``build_usage_limits`` states "``self._config`` (``cfg``) is the floor; ``req.config`` is the
-per-call override", added so a finding-rich Pass-2 verifier could raise its own step budget
-"without a shared runner's ``self._config`` changing under other steps" (bug 59bc). Temperature
-follows the same rule (``test_llm_temperature.py``).
-
-THE MODEL DID NOT. ``run()`` opened with ``cfg = self._config`` and resolved the model from it, so
-a workflow step's declared ``model:`` — which ``RunnerAgentStep`` resolves through
-``resolve_model`` and writes into ``req.config.model`` — was computed correctly and then discarded
-one layer lower. Every call in a gate run went to the shared config's model, which is why
-``code-review.yaml``'s five model-class declarations had no observable effect.
-
-These tests observe the model handed to ``_pai_model`` — the resolution point that feeds the
-ProviderSession, the capability record, the fallback chain and the caching decision — because that
-is the value that determines what actually runs. Observing ``req.config.model`` instead would pass
-against the defect: the bug is precisely that the runner ignores what it is handed.
+The runner's shared configuration is the floor. A workflow step may override it without mutating
+other steps. Tests observe the model delivered to ``_pai_model``, the selection point feeding the
+provider session, capabilities, fallback chain, and caching decision, rather than merely checking
+the request value that the runner could ignore.
 """
 
 from __future__ import annotations

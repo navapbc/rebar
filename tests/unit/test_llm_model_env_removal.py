@@ -1,25 +1,9 @@
-"""`REBAR_LLM_MODEL` was REMOVED and TOMBSTONED (pre-1.0 breaking pass #3, ticket 6cc4).
+"""Tombstone the removed ``REBAR_LLM_MODEL`` input (ticket 6cc4, ADR 0057).
 
-History: story d23e deprecated the bare variable once model CLASSES became the interface
-(ADR 0057) -- a SUPERSESSION, not a rename, so it was `_scheduled(...)` rather than
-`_permanent(...)`. It shipped deprecated in v0.11.0 and was removed early by operator ruling,
-the same lever DE7 and the ticket-5899 pass used.
-
-WHY A TOMBSTONE, AND WHY `error`. The tombstone registry covers `env`/`cfg`/`file` inputs --
-things an operator can still have SET after the code stopped reading them. Silently ignoring a
-still-set `REBAR_LLM_MODEL` would quietly change which model every operation runs, i.e. cost and
-quality, with no signal at all. So it fails LOUD, matching `REBAR_LLM_MAX_ITERS`, the closest
-precedent (also a superseded LLM knob, also enforced in `LLMConfig.from_env`).
-
-WHERE THE CHECK LIVES. In `LLMConfig.from_env`, NOT the core config layer, so a retired LLM knob
-fails only when the LLM stack actually loads. `RemovedInputError` subclasses `BaseException` so
-the broad `except Exception` on this method's tracker-probe path cannot demote it to a silent
-default.
-
-WHAT SURVIVES. The CONFIG key `[tool.rebar.llm].model` is NOT removed -- it is still the
-top-level model knob, resolving CLI > config table > `DEFAULT_MODEL` with no env channel. The
-per-class `REBAR_LLM_<CLASS>_MODEL` variables and the per-step workflow `model:` override are
-likewise untouched.
+``LLMConfig.from_env`` raises ``RemovedInputError`` when the stale variable is set, preventing a
+silent model, cost, or quality change. The check loads only with the LLM stack and cannot be
+demoted by its tracker-probe ``except Exception`` path. ``[tool.rebar.llm].model``, per-class
+model variables, and per-step workflow overrides remain supported.
 """
 
 from __future__ import annotations

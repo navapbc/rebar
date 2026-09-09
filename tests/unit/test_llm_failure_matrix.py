@@ -1,42 +1,13 @@
-"""RED baseline: the LLM-failure matrix, pinning rebar's CURRENT behavior (story
-gnomish-nosophobic-arawana, epic jira-reb-687).
+"""Baseline matrix for current LLM failure behavior (story gnomish-nosophobic-arawana).
 
-Injects the full matrix of provider/output failure modes through the pydantic-ai
-MODEL layer — a ``FunctionModel`` that RAISES (e.g. ``ModelHTTPError(429)``,
-``httpx.ReadTimeout``) or returns a CANNED ``ModelResponse`` (a truncation/
-content-filter ``finish_reason``) — driven through ``PydanticAIRunner(model_override=…)``
-and the plan-review gate. It asserts what rebar does *today*, so the later stories in
-this epic (which add deliberate retry/timeout/classification/silent-success handling)
-flip these assertions and this file is their regression net.
+Offline ``FunctionModel`` cases raise provider errors or return responses with stop reasons,
+then run through ``PydanticAIRunner`` and the plan-review gate. Each row cites its
+``CURRENT(<file>:<line>)`` source seam, and the meta-test requires that citation. Injection is
+above the HTTP transport, so this suite covers classification, gate behavior, and silent stop
+reasons rather than transport retries. ``ALLOW_MODEL_REQUESTS = False`` forbids billable calls.
 
-THE TEST IS THE SOURCE OF TRUTH for current behavior: each row pins the typed error
-the runner ACTUALLY raises (discovered empirically, offline — see the epic's
-``tmp/discover_matrix.py`` experiment log), not a pre-asserted guess. Every row carries
-an inline ``# CURRENT(<file>:<line>): …`` marker naming the source seam it pins; the
-meta-test at the bottom asserts every parametrized id has one.
-
-Coverage boundary: ``model_override`` injects the pydantic-ai MODEL layer, ABOVE the
-httpx transport where retry will live (story morbid-uncultured-arcticduck) — so
-transport-layer retry is NOT exercisable here. This suite covers classification + gate
-behavior + silent-success finish-reasons, not transport. Guarded by
-``ALLOW_MODEL_REQUESTS = False`` so a stray real request would fail loudly.
-
-## Verified library behavior (experiment log — pydantic-ai 1.107.0, offline)
-```
-[1] pydantic_ai.exceptions symbols resolve:
-    ModelHTTPError      <: ['ModelAPIError', 'AgentRunError', 'RuntimeError']
-    ContentFilterError  <: ['UnexpectedModelBehavior', 'AgentRunError', 'RuntimeError']
-    IncompleteToolCall  <: ['UnexpectedModelBehavior', 'AgentRunError', 'RuntimeError']
-    UsageLimitExceeded  <: ['AgentRunError', 'RuntimeError', 'Exception']
-[2] injected ModelHTTPError propagated: status_code=429 type=ModelHTTPError
-[3] canned finish_reason readable: result.response.finish_reason='length'
-[4] httpx.ReadTimeout propagated unwrapped: ReadTimeout: read timed out
-[5] max_iterations=6 -> request_limit=3, tool_calls_limit=8; =250 -> 125, 250
-[6] runner collapses injected 429 -> LLMUnavailableError (current behavior)
-```
-``ContentFilterError`` / ``IncompleteToolCall`` are real, importable pydantic-ai LIBRARY
-symbols (not rebar symbols) — a code-grounding pass restricted to the rebar snapshot must
-not read their repo-absence as non-existence (tracked as bug succinct-formable-kite).
+``ContentFilterError`` and ``IncompleteToolCall`` are pydantic-ai library symbols even though
+their definitions are absent from the rebar source tree (bug succinct-formable-kite).
 """
 
 from __future__ import annotations
@@ -132,18 +103,10 @@ class Case:
     marker: str  # CURRENT(<file>:<line>): <one-line behavior it pins>
 
 
-# CURRENT behavior, discovered empirically: nearly every provider HTTP error / network
-# timeout / raised model exception collapses into the single opaque LLMUnavailableError at
-# the runner's generic ``except Exception`` seam (run_failure.py:interpret_failure). 429 is
-# indistinguishable from 401 from a connect-timeout — the exact opacity this epic replaces.
-# The ONE split (bug 43d4): a failure the classifier maps to ResolutionClass.CHANGE_INPUT —
-# a context-length 400, a 413, a raised ContentFilterError — raises LLMInputRejectedError
-# instead, because the provider ANSWERED and rejected the INPUT; calling that an outage
-# hid a caller-fixable problem AND shadowed the plan-review size ladder. The canned
-# finish_reason cases (content_filter / length) instead reach the structured stack's
-# check_stop_reason and raise UnretryableOutputError; a canned non-JSON body fails output
-# validation as StructuredOutputError; a model-raised UsageLimitExceeded maps to
-# LLMRunnerError. Each row's `marker` names the seam; the meta-test enforces one per id.
+# Provider and network failures generally collapse to ``LLMUnavailableError``. CHANGE_INPUT
+# failures become ``LLMInputRejectedError``. Stop reasons become ``UnretryableOutputError``.
+# Invalid output becomes ``StructuredOutputError``. Usage limits become ``LLMRunnerError``.
+# Each row's marker identifies the current source seam.
 MATRIX: list[Case] = [
     Case(
         "429-rate",
@@ -254,12 +217,8 @@ MATRIX: list[Case] = [
         "CURRENT(structured_run.py:84): UsageLimitExceeded -> LLMRunnerError (step budget)",
     ),
     Case(
-        # DISTINCT failure CLASS from the step-budget row above: a UsageLimitExceeded that
-        # trips on the TOOL-CALLS ceiling (tool_calls_limit=max(8,max_iterations)), not the
-        # request/step budget (request_limit=ceil(max_iterations/2)). Today the runner's ONE
-        # `except UsageLimitExceeded` handler collapses BOTH sub-classes into the same opaque
-        # LLMRunnerError — the tool-call-runaway signal is indistinguishable from step-budget
-        # exhaustion (the opacity a later story splits). Discovered empirically: LLMRunnerError.
+        # A tool-call ceiling is distinct from the request budget, but the shared
+        # ``UsageLimitExceeded`` handler currently maps both to ``LLMRunnerError``.
         "tool-call-limit-usage-limit",
         lambda: _raise(
             UsageLimitExceeded("The next request would exceed the tool_calls_limit of 8")
@@ -269,13 +228,8 @@ MATRIX: list[Case] = [
         "(same handler as step budget)",
     ),
     Case(
-        # Validation-RETRY EXHAUSTION (distinct from `unparseable-output`): the body is VALID
-        # JSON but the WRONG SHAPE, so it clears the tolerant parse yet fails Pydantic schema
-        # validation. The PromptedOutput loop feeds the validation error back and retries
-        # OUTPUT_RETRIES(2)+1 = 3 times; every attempt re-fails (the canned model is static),
-        # so the loop exhausts and `raise last` surfaces the final StructuredOutputError. This
-        # is the validation-retry-exhaustion → StructuredOutputError seam (gate INDETERMINATE).
-        # Discovered empirically (3 model calls, then StructuredOutputError).
+        # Valid JSON with the wrong shape exhausts three prompted-output validation attempts,
+        # then surfaces the final ``StructuredOutputError``.
         "validation-retry-exhaustion",
         lambda: _canned('{"wrong_field": 1, "also_wrong": true}'),
         StructuredOutputError,
@@ -300,9 +254,7 @@ def test_runner_level_classification_pins_current_behavior(case: Case):
 
 
 def test_text_mode_does_not_read_finish_reason_today():
-    """CURRENT(runner.py:325-328): mode='text' bypasses the structured stack, so a
-    truncation finish_reason is NOT detected — the run returns OK. This is exactly the
-    silent-success gap story polite-dutiful-drake closes; pinned green here."""
+    """CURRENT(runner.py:325-328): text mode bypasses stop-reason checks, so truncation succeeds."""
     out = _run(_canned("a partial answer", finish_reason="length"), mode="text")
     assert out["text"] == "a partial answer"
 
@@ -380,10 +332,10 @@ def _plan_ctx(root: str):
 
 
 def test_plan_review_gate_degrades_to_indeterminate_on_systemic_outage(tmp_path):
-    """CURRENT(gate_dispatch.py:136,173,206): a SYSTEMIC provider failure (injected 429)
-    mid plan-review degrades to an unsigned INDETERMINATE verdict (coverage.llm_unavailable
-    =True, llm_ran=False) — never a hollow PASS, never a signature. The two-scope 'systemic'
-    arm; per-criterion fail-open is pinned separately below."""
+    """CURRENT(gate_dispatch.py:136,173,206): systemic 429 failure yields unsigned INDETERMINATE.
+
+    Coverage records ``llm_unavailable=True`` and ``llm_ran=False`` rather than a hollow pass.
+    """
     from rebar.llm.workflow import gate_dispatch
 
     root = str(tmp_path)
@@ -477,11 +429,11 @@ class _ExplodingRunner:
 
 
 def test_disabled_code_review_never_invokes_runner():
-    """CURRENT(workflow/gate_dispatch.py:_code_review_preflight): a DISPATCH-disabled code
-    review (enabled=False, or config off for a caller that leaves enabled=None) returns an
-    inert empty verdict WITHOUT touching the runner — the feature-off path short-circuits
-    before any model call. The EXPLICIT `review_code()` surface always runs the gate (bug
-    5b32-37c4-f99a-4315), so this guard now lives at the dispatch level, not the shim."""
+    """CURRENT(workflow/gate_dispatch.py:_code_review_preflight): disabled dispatch skips the
+    runner.
+
+    The explicit ``review_code()`` surface still always runs the gate (bug 5b32-37c4-f99a-4315).
+    """
     from rebar.llm.config import LLMConfig
     from rebar.llm.workflow import gate_dispatch
 
@@ -500,13 +452,10 @@ def test_disabled_code_review_never_invokes_runner():
 
 # ── Guard: --force SKIPS the plan-review / completion gates (no LLM) ────────────
 def test_force_claim_skips_plan_review_gate(monkeypatch):
-    """CURRENT(gates.py:120): with the plan-review claim gate ENABLED, a non-empty
-    ``force_reason`` (the ``claim --force="<reason>"`` bypass) short-circuits and returns
-    None BEFORE the gate check runs — proving the injected gate call is NEVER invoked on the
-    --force path. A non-force claim DOES reach the check (positive control), so the skip is
-    attributable to --force, not to the gate being off. The claim gate is a fast LOCAL HMAC
-    verify (no billable model call), so the ``claim_gate_check`` seam stands in for the gate
-    work the bypass must skip."""
+    """CURRENT(gates.py:120): a force reason bypasses the enabled claim gate check.
+
+    A non-force positive control reaches ``claim_gate_check``, isolating the bypass behavior.
+    """
     from rebar._commands import gates as _gates
 
     monkeypatch.setattr(_gates, "gate_enabled", lambda *a, **k: True)
@@ -530,11 +479,10 @@ def test_force_claim_skips_plan_review_gate(monkeypatch):
 
 
 def test_force_close_skips_completion_gate(monkeypatch):
-    """CURRENT(transition_close.py:114): with the completion-verification close gate ENABLED,
-    a non-empty ``force_close`` (the ``--force="<reason>"`` bypass) short-circuits and
-    returns None BEFORE the billable ``verify_completion`` LLM call — proving the model is
-    NEVER invoked on the --force path. A non-force close DOES reach ``verify_completion``
-    (positive control), so the skip is attributable to --force."""
+    """CURRENT(transition_close.py:114): ``force_close`` bypasses completion verification.
+
+    A non-force positive control reaches ``verify_completion``, isolating the bypass behavior.
+    """
     from rebar._commands import gates as _gates
     from rebar._commands import transition_close as _tc
 
@@ -584,9 +532,7 @@ def test_force_close_skips_completion_gate(monkeypatch):
 
 # ── Meta-test: every parametrized id carries a CURRENT(<file>:<line>) marker ───
 def test_every_matrix_case_pins_a_current_source_seam():
-    """Each row documents the exact seam it pins via a CURRENT(<file>:<line>) marker, and
-    those markers appear inline in THIS file's source (the 'source citation' this baseline
-    requires) so a later story flipping a row is forced to update the cited seam."""
+    """Require every matrix row to cite its source seam with ``CURRENT(<file>:<line>)``."""
     src = Path(__file__).read_text()
     for case in MATRIX:
         assert case.marker.startswith("CURRENT("), case.id

@@ -1,27 +1,9 @@
-"""Contract: ``run()`` sources its provider through the ``ProviderSession`` seam (story S1).
+"""Require ``run()`` to construct providers through ``ProviderSession`` (story S1).
 
-This is a CONTRACT test, not a registry unit test. The provider factory is the producer and
-``PydanticAIRunner.run()`` the consumer, so the assertions must be made on what ``run()``
-actually builds and on what the session actually closes — a registry-only test cannot observe
-either of the two defects this seam exists to prevent ("``run()`` bypasses the seam" and "the
-session leaks the client it opened").
-
-Every existing ``run()`` test drives ``model_override``, which BYPASSES provider construction
-entirely, so nothing in the suite currently covers this path. Here everything is real except
-the socket: the production Anthropic builder runs, wrapping a ``MockTransport``, so the real
-``AsyncTenacityTransport`` / ``AsyncAnthropic`` / ``AnthropicModel`` objects are constructed and
-the assertions land on real object state (``httpx.AsyncClient.is_closed``), never on call counts.
-
-**Two kinds of test live here, deliberately.** S1 is a *pure relocation* of the Anthropic
-construction path, so a behavioural test of that path passes both before and after the move —
-it cannot be RED, and pretending otherwise would be dishonest:
-
-- **§A characterization** — these PASS against the pre-move inline branch and must keep passing
-  after it becomes a registry entry. They are the regression net that gives the story's "no
-  behavior change" claim teeth: a botched relocation (a dropped tenacity transport, a leaked
-  client, teardown moved into the success path) turns them red.
-- **§B new contract** — the behavior that genuinely does not exist yet: the ``ProviderSession``
-  seam itself and its typed failure for an unknown provider. These are RED now.
+Characterization tests preserve Anthropic construction and teardown across its relocation.
+Contract tests cover the session seam and typed unknown-provider failure. The production builder
+wraps a ``MockTransport``, so assertions observe constructed model objects and client closure
+without a network socket.
 """
 
 from __future__ import annotations
@@ -86,14 +68,10 @@ def _anthropic_env(monkeypatch):
 
 @pytest.fixture
 def seam(monkeypatch):
-    """Real construction, mocked socket.
+    """Build provider objects over a mock socket and expose observable lifecycle state.
 
-    - ``httpx.AsyncHTTPTransport`` -> ``MockTransport``: the production builder still wraps it in
-      a real ``AsyncTenacityTransport``, so retry/timeout wiring is genuinely exercised.
-    - ``httpx.AsyncClient`` -> a subclass that records every instance, so closure is asserted on
-      the REAL client object rather than on a spy's call count.
-    - ``runner.Agent`` -> a pass-through that captures the model ``run()`` handed its consumer.
-      The real Agent still runs; this only observes what crossed the seam.
+    The seam retains the retry transport, records constructed clients for closure checks, and
+    captures the model handed through the ``Agent`` consumer path.
     """
     transport_http = _transport_http_module()
     clients: list = []
@@ -204,17 +182,11 @@ def test_session_closes_the_client_it_opened_after_a_successful_run(seam):
 
 
 def test_provider_session_exposes_a_pydantic_ai_compatible_factory(seam):
-    """The seam's public contract, exercised exactly as ``infer_model`` will call it.
+    """Expose the provider factory shape consumed by ``infer_model`` and own its teardown.
 
-    ``infer_model`` invokes ``provider_factory(provider_name)`` with the BARE provider name
-    (verified against pydantic-ai 1.107.1: ``provider = provider_factory(provider_name)``), so the
-    callable must accept one positional ``str`` and return a pydantic-ai ``Provider``. The session
-    also owns teardown of anything the builder opened, which is why it is a session and not a
-    bare function.
-
-    Closure is observed on the REAL client objects constructed during the block (captured by the
-    ``seam`` fixture), never by reading a private attribute off the session — so a
-    behavior-preserving rename of the session's internals cannot turn this into a vacuous pass."""
+    The callable accepts a bare provider name and returns a pydantic-ai ``Provider``. Closure is
+    observed on constructed clients from ``seam``, independent of session internals.
+    """
     from pydantic_ai.providers import Provider
 
     from rebar.llm.providers import ProviderSession
@@ -232,15 +204,11 @@ def test_provider_session_exposes_a_pydantic_ai_compatible_factory(seam):
 
 
 def test_openai_responses_is_resolvable_without_a_rebar_builder():
-    """The ``openai-responses`` provider must resolve so the ticket-155c default-flipped
-    ``openai-responses:<model>`` string is a live target, not a config error.
+    """Resolve ``openai-responses`` through pydantic-ai without a rebar builder.
 
-    This pins the SOLE purpose of the ``_EXTRA_KNOWN_PROVIDERS`` union in providers.py: rebar
-    registers NO builder for ``openai-responses`` (its OpenAI builder answers only under
-    ``openai``/``openai-chat``, and only when a ``base_url`` is set), so with no custom endpoint
-    the name is resolvable purely because it is folded into ``_pydantic_ai_known_providers`` —
-    handed to pydantic-ai's own resolution exactly like ``openai-chat``. Checked WITHOUT
-    constructing anything (no OpenAI credentials required)."""
+    With no custom endpoint, the extra known-provider union admits the name without constructing
+    a client or requiring OpenAI credentials.
+    """
     from rebar.llm.providers import ProviderSession
 
     cfg = _cfg()  # no base_url → the OpenAI builder is NOT registered

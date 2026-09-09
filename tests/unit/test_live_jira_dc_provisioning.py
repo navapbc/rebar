@@ -1,30 +1,9 @@
-"""Unit coverage for the live_jira_dc harness's PROVISIONING contract.
+"""Unit contracts for live-Jira DC project provisioning.
 
-Bug 3fe5-c22e-dc2d-4c9e, under epic e369-a449-4773-48fb.
-
-WHY THESE ARE UNIT TESTS, and why they are the right tier for this bug.
-
-The defect 3fe5 records is that ``_create_scratch_project`` walked a fallback chain
-— every discovered template, then a bare ``software`` project, then no template at
-all — and took the first ``201`` **without asserting anything about what it got**.
-A degrade to a template lacking the ``Epic`` issue type is indistinguishable on the
-wire from a good provision, so the failure surfaced 35 minutes later inside one
-cell as ``SETUP FAILED: project offers no 'Epic' issue type``.
-
-The live tier cannot be the first place that regression is caught: a run costs ~35
-minutes and the harness image is linux/amd64 only. So the DECLARED CONTRACT and its
-drift detector are pinned here against a stubbed ``_request``, and the live job
-supplies the acceptance evidence that the epic cells now execute.
-
-The declared values come from the capability map of the pinned Jira DC 8.17.1
-image, recorded with its evidence ids in ``docs/jira-dc-capability-map.md``: all
-three software templates yield ``Epic``, and the ``Epic Link`` / ``Epic Name``
-field ids are named there. That map ALSO falsified a predicted requirement —
-``Epic Link`` is not on the default edit screen and the REST PUT persists anyway
-— so provisioning deliberately does NOT touch screens.
-
-The module is loaded by PATH rather than imported as ``conftest``: pytest owns that
-name, and a second module claiming it collides.
+Stubbed requests require a software template that supplies ``Epic`` and verify the ``Epic Link``
+and ``Epic Name`` fields after creation. Screen configuration is intentionally outside the
+contract because REST updates do not require it. The harness is loaded by path because pytest
+owns the ``conftest`` module name.
 """
 
 from __future__ import annotations
@@ -193,19 +172,10 @@ def test_an_unreadable_project_fails_loudly_rather_than_passing_vacuously(
 
 
 def test_a_missing_epic_field_aborts_provisioning(harness, monkeypatch) -> None:
-    """``Epic Name`` is required by DC to CREATE an epic and ``Epic Link`` is the
-    field the outbound parent write targets. Both are instance-global, so they are
-    verified once here rather than as a mid-run SETUP failure in one cell.
+    """Abort when either required Epic field remains absent after provisioning.
 
-    The stubbed field is PERMANENTLY absent, so the readiness poll can only expire —
-    and it used to expire against the real 120s production budget, costing this unit
-    test two minutes of wall clock to learn something the stub decided up front
-    (ticket e394-9433-c839-4c9f). ``_assert_project_capabilities`` passes
-    ``budget=_field_ready_timeout()`` explicitly, and that reads
-    ``JIRA_DC_FIELD_READY_TIMEOUT`` before falling back to the module constant, so
-    the environment variable is the seam that works from here — rebinding
-    ``FIELD_READY_BUDGET_S`` would be silently defeated whenever the variable is
-    already set in the ambient environment.
+    Set ``JIRA_DC_FIELD_READY_TIMEOUT`` through the production lookup seam so the permanently
+    missing stub expires deterministically without using the live budget.
     """
     monkeypatch.setenv("JIRA_DC_FIELD_READY_TIMEOUT", "0")
     calls = _stub_request(harness, monkeypatch, fields=_field_body("Summary", "Epic Name"))
@@ -214,11 +184,8 @@ def test_a_missing_epic_field_aborts_provisioning(harness, monkeypatch) -> None:
         harness._assert_project_capabilities("RBTEST")
 
     assert "Epic Link" in str(excinfo.value), "the abort does not name the missing field"
-    # A zero budget makes the loop DETERMINISTIC, not merely fast: one attempt is
-    # always made, `monotonic() >= deadline` is then true, and it breaks BEFORE
-    # `sleep`. So exactly one field read proves the expiry path ran without sleeping
-    # — reaching a real sleep requires another lap, which would read again. This is a
-    # poll-count assertion, deliberately not a wall-clock budget.
+    # A zero budget permits one field read, then expires before sleeping. The poll count keeps
+    # this deterministic without asserting elapsed wall time.
     field_reads = [call for call in calls if call[1] == "/rest/api/2/field"]
     assert len(field_reads) == 1, f"expected exactly one field poll, got {len(field_reads)}"
 
