@@ -77,7 +77,41 @@ jobs:
     needs: clear-vote
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 1
+        id: checkout-gerrit-attempt-1
+        if: inputs.GERRIT_REFSPEC != ''
+        continue-on-error: true
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      # mechanism-ok: ci_gate .github/workflows/gerrit-verify.yaml::Wait before retrying Gerrit patchset checkout — 1e24-bfc0 in-job retry keeps transient Gerrit transport faults from causing false Verified -1 votes.
+      - name: Wait before retrying Gerrit patchset checkout
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
+        shell: bash
+        run: |
+          echo '::warning::Gerrit patchset checkout failed; retrying after 15 seconds (transport faults are retried in-job)'
+          sleep 15
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 2
+        id: checkout-gerrit-attempt-2
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
+        continue-on-error: true
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      # mechanism-ok: ci_gate .github/workflows/gerrit-verify.yaml::Wait before final Gerrit patchset checkout retry — 1e24-bfc0 in-job retry keeps transient Gerrit transport faults from causing false Verified -1 votes.
+      - name: Wait before final Gerrit patchset checkout retry
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
+        shell: bash
+        run: |
+          echo '::warning::Gerrit patchset checkout failed twice; final retry after 45 seconds'
+          sleep 45
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 3
+        id: checkout-gerrit-attempt-3
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
         uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
@@ -133,7 +167,41 @@ jobs:
     outputs:
       route: ${{ steps.route.outputs.route }}
     steps:
-      - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 1
+        id: checkout-gerrit-attempt-1
+        if: inputs.GERRIT_REFSPEC != ''
+        continue-on-error: true
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      # mechanism-ok: ci_gate .github/workflows/gerrit-verify.yaml::Wait before retrying Gerrit patchset checkout — 1e24-bfc0 in-job retry keeps transient Gerrit transport faults from causing false Verified -1 votes.
+      - name: Wait before retrying Gerrit patchset checkout
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
+        shell: bash
+        run: |
+          echo '::warning::Gerrit patchset checkout failed; retrying after 15 seconds (transport faults are retried in-job)'
+          sleep 15
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 2
+        id: checkout-gerrit-attempt-2
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
+        continue-on-error: true
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      # mechanism-ok: ci_gate .github/workflows/gerrit-verify.yaml::Wait before final Gerrit patchset checkout retry — 1e24-bfc0 in-job retry keeps transient Gerrit transport faults from causing false Verified -1 votes.
+      - name: Wait before final Gerrit patchset checkout retry
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
+        shell: bash
+        run: |
+          echo '::warning::Gerrit patchset checkout failed twice; final retry after 45 seconds'
+          sleep 45
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 3
+        id: checkout-gerrit-attempt-3
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
         uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
@@ -176,7 +244,41 @@ jobs:
     if: ${{ always() && needs.classify.result == 'success' && needs.classify.outputs.route == 'docs-only' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 1
+        id: checkout-gerrit-attempt-1
+        if: inputs.GERRIT_REFSPEC != ''
+        continue-on-error: true
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      # mechanism-ok: ci_gate .github/workflows/gerrit-verify.yaml::Wait before retrying Gerrit patchset checkout — 1e24-bfc0 in-job retry keeps transient Gerrit transport faults from causing false Verified -1 votes.
+      - name: Wait before retrying Gerrit patchset checkout
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
+        shell: bash
+        run: |
+          echo '::warning::Gerrit patchset checkout failed; retrying after 15 seconds (transport faults are retried in-job)'
+          sleep 15
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 2
+        id: checkout-gerrit-attempt-2
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
+        continue-on-error: true
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      # mechanism-ok: ci_gate .github/workflows/gerrit-verify.yaml::Wait before final Gerrit patchset checkout retry — 1e24-bfc0 in-job retry keeps transient Gerrit transport faults from causing false Verified -1 votes.
+      - name: Wait before final Gerrit patchset checkout retry
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
+        shell: bash
+        run: |
+          echo '::warning::Gerrit patchset checkout failed twice; final retry after 45 seconds'
+          sleep 45
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 3
+        id: checkout-gerrit-attempt-3
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
         uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
@@ -319,7 +421,41 @@ jobs:
     if: ${{ !cancelled() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 1
+        id: checkout-gerrit-attempt-1
+        if: inputs.GERRIT_REFSPEC != ''
+        continue-on-error: true
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      # mechanism-ok: ci_gate .github/workflows/gerrit-verify.yaml::Wait before retrying Gerrit patchset checkout — 1e24-bfc0 in-job retry keeps transient Gerrit transport faults from causing false Verified -1 votes.
+      - name: Wait before retrying Gerrit patchset checkout
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
+        shell: bash
+        run: |
+          echo '::warning::Gerrit patchset checkout failed; retrying after 15 seconds (transport faults are retried in-job)'
+          sleep 15
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 2
+        id: checkout-gerrit-attempt-2
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
+        continue-on-error: true
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      # mechanism-ok: ci_gate .github/workflows/gerrit-verify.yaml::Wait before final Gerrit patchset checkout retry — 1e24-bfc0 in-job retry keeps transient Gerrit transport faults from causing false Verified -1 votes.
+      - name: Wait before final Gerrit patchset checkout retry
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
+        shell: bash
+        run: |
+          echo '::warning::Gerrit patchset checkout failed twice; final retry after 45 seconds'
+          sleep 45
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 3
+        id: checkout-gerrit-attempt-3
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
         uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
@@ -374,7 +510,41 @@ jobs:
     if: ${{ !cancelled() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 1
+        id: checkout-gerrit-attempt-1
+        if: inputs.GERRIT_REFSPEC != ''
+        continue-on-error: true
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      # mechanism-ok: ci_gate .github/workflows/gerrit-verify.yaml::Wait before retrying Gerrit patchset checkout — 1e24-bfc0 in-job retry keeps transient Gerrit transport faults from causing false Verified -1 votes.
+      - name: Wait before retrying Gerrit patchset checkout
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
+        shell: bash
+        run: |
+          echo '::warning::Gerrit patchset checkout failed; retrying after 15 seconds (transport faults are retried in-job)'
+          sleep 15
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 2
+        id: checkout-gerrit-attempt-2
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
+        continue-on-error: true
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      # mechanism-ok: ci_gate .github/workflows/gerrit-verify.yaml::Wait before final Gerrit patchset checkout retry — 1e24-bfc0 in-job retry keeps transient Gerrit transport faults from causing false Verified -1 votes.
+      - name: Wait before final Gerrit patchset checkout retry
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
+        shell: bash
+        run: |
+          echo '::warning::Gerrit patchset checkout failed twice; final retry after 45 seconds'
+          sleep 45
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 3
+        id: checkout-gerrit-attempt-3
+        if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
         uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}

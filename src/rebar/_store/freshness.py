@@ -109,7 +109,10 @@ def _ref_divergence(tracker: str, remote_ref: str) -> tuple[str, int] | None:
         return ("diverged", 0)  # common ancestor, neither side an ancestor
     cp = _git("rev-list", f"HEAD..{remote_ref}", "--count")
     raw = (cp.stdout or "").strip()
-    return ("behind", int(raw) if raw.isdigit() else 0)
+    behind = int(raw) if raw.isdigit() else 0
+    if behind <= 0:
+        return None
+    return ("behind", behind)
 
 
 def resolve_tracker(repo_root: Any = None) -> str | None:

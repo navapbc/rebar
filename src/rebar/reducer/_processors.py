@@ -87,15 +87,8 @@ def process_create(
     add_managed_ref(state, "parent", state["parent_id"])
     state["priority"] = data.get("priority")
     state["assignee"] = data.get("assignee")
-    # Adjective-noun-noun alias (3363-fa8b): ticket_create computes this and
-    # writes it onto the CREATE event's data; the reducer must propagate it
-    # into compiled state so resolve_ticket_id and ticket_show can return
-    # human-friendly aliases. Without this assignment, alias is silently
-    # dropped between persistence and compiled state, defeating the entire
-    # alias system. For tickets created before the alias feature shipped
-    # (data.alias is missing), backfill at read time using the deterministic
-    # ticket_id-derived alias so legacy tickets surface the same alias they
-    # would have been assigned at creation.
+    # Project the stored alias for lookup and display. Events without one derive the same
+    # deterministic alias from ``ticket_id``.
     stored_alias = data.get("alias")
     if stored_alias:
         state["alias"] = stored_alias
@@ -112,12 +105,8 @@ def process_create(
     if "bridge_project" in data:
         state["bridge_project"] = data["bridge_project"]
     state["repos"] = data.get("repos", state.get("repos", []))
-    # Provenance (P1.2 import): a ticket re-created by `rebar import` carries the
-    # ORIGINAL store's id/date/author/env as source_* on the CREATE data (fresh
-    # local id + fresh HLC timestamp are used for the new event; foreign HLC
-    # timestamps are never injected). Surface them additively — present only when
-    # the CREATE carried them, so a normally-created ticket's state is byte-for-byte
-    # unchanged. Mirrors the conditional jira_comment_id handling in process_comment.
+    # Project imported source metadata only when present. The local event retains its own ID and
+    # HLC, while ordinary CREATE events keep their existing shape.
     for _src_key in ("source_id", "source_created_at", "source_author", "source_env"):
         _src_val = data.get(_src_key)
         if _src_val is not None:
@@ -126,13 +115,8 @@ def process_create(
     _detected_by_val = data.get("detected_by")
     if _detected_by_val is not None:
         state["detected_by"] = _detected_by_val
-    # Creation-channel provenance (epic jira-reb-977, story 6fe2): the public ingress
-    # (cli/mcp/python/jira/import) that produced this genesis CREATE. Projected
-    # UNCONDITIONALLY — a post-feature CREATE always carries it; a LEGACY CREATE with no
-    # field provisionally projects "unknown" (the projection-only fallback). We do NOT
-    # set `creation_channel_inferred` here (a later story owns legacy inference); this is
-    # a provisional projection only. `process_edit` guards both keys against overwrite so
-    # genesis provenance is immutable.
+    # Project immutable ingress provenance. Recorded values identify CLI, MCP, Python, Jira, or
+    # import creation. Missing values stay ``unknown`` until legacy inference runs.
     state["creation_channel"] = data.get("creation_channel", "unknown")
     # Legacy-Jira inference (story e622): a CREATE that carried NO recorded channel
     # provisionally projected "unknown" above. When (and only when) the envelope bears
@@ -157,23 +141,11 @@ def process_create(
 
 
 def _project_legacy_creation_channel(state: dict) -> None:
-    """Infer a `jira` origin for a channel-less legacy CREATE (story e622).
+    """Infer Jira origin for a channel-less legacy CREATE.
 
-    A CREATE written before the `creation_channel` feature carries no recorded
-    channel and provisionally projects ``"unknown"``. This heuristic upgrades that
-    projection to ``"jira"`` — and flags it as inferred — ONLY when the envelope bears
-    the exact legacy-Jira signature: a ``jira-`` ticket id AND the reconciler's default
-    author AND its default env_id. On every near-miss the channel stays ``"unknown"``
-    and NO inferred marker is set.
-
-    Trust boundary: this is heuristic AUDIT metadata, not a security attestation. It
-    reads ONLY the immutable genesis envelope (ticket_id / author / env_id) — never
-    tags, bindings, source_*, comments, or any other mutable state — so it yields zero
-    false positives (nothing a later edit could forge into a spurious `jira`).
-
-    Pure ``(state) -> None`` by design: the SNAPSHOT-fold path a later story adds reuses
-    this exact state-shaped interface (it has ``ticket_id``/``author``/``env_id`` folded
-    the same way), so the inference lives in one place.
+    Only the immutable ``jira-`` ID, reconciler author, and environment combination changes
+    unknown to ``jira`` and records an inference marker. Other envelopes remain unknown. The
+    helper reads no mutable fields and also supports snapshot migration.
     """
     ticket_id = state.get("ticket_id")
     if (
@@ -226,23 +198,12 @@ def process_comment(state: dict, event: dict, data: dict) -> None:
 
 
 def process_link(state: dict, event: dict, data: dict, tracker_dir: str | None = None) -> None:
-    """Apply a LINK event: append a dep entry to state.deps.
+    """Append a LINK dependency after optional target resolution.
 
-    When tracker_dir is provided, attempt to resolve an alias-form or short-hex
-    target_id to its canonical UUID via resolve_ticket_id.  On failure (alias
-    unresolvable, resolver unavailable, or no tracker_dir) the verbatim value
-    is stored as a graceful fallback so no data is lost.
-
-    Deliberate boundary (do NOT "fix" this as a wrong-answer — story lean-sloth-ham
-    investigated it): when a ``depends_on`` target cannot be resolved because its
-    directory is absent, the readiness paths treat that blocker as **closed** — this
-    is the intentional *tombstone-awareness* invariant (an archived/deleted blocker
-    must not block its dependents forever), see ``_status._get_ticket_status`` and
-    ``tests/scripts/graph/test_graph_unresolved_blocker.py``. A missing-target
-    ``depends_on`` is therefore correctly NOT a blocker. Failing closed on every
-    unresolved target was tried and rejected: ``resolve_ticket_id`` returns ``None``
-    for BOTH normal archival and a genuinely-bogus alias, indistinguishably, so a
-    blanket fail-closed would break archived-blocker unblocking (a tested invariant).
+    When no tracker exists or resolution fails, retain the original target. Readiness treats an
+    unresolved ``depends_on`` target as a closed tombstone because archived and invalid targets
+    cannot be distinguished. Treating both as open would leave archived blockers active. See
+    ``_status._get_ticket_status`` and its unresolved-blocker regression test.
     """
     raw_target = data.get("target_id", data.get("target", ""))
     resolved_target = raw_target
@@ -318,19 +279,10 @@ def process_bridge_alert(state: dict, event: dict, data: dict, event_uuid: str) 
 
 
 def process_revert(state: dict, event: dict, data: dict, event_uuid: str) -> None:
-    """Apply a REVERT event: append a revert record to state.reverts.
+    """Append a REVERT record and undo a reverted ARCHIVED projection.
 
-    Reverting an ARCHIVED event also UN-ARCHIVES the projection (bug
-    vocal-jig-apron). The designed unarchive seam (``rebar revert <id>
-    <archived-uuid>``) removes the .archived marker and is recognised by the
-    list fast-path, but replay still re-applied the ARCHIVED event, leaving
-    compiled state at status=archived/archived=True (ticket stayed hidden).
-    Clear the archived projection so the ticket is visible again with status
-    open. A ticket that was DELETED (delete writes STATUS(deleted)+ARCHIVED) is
-    left FULLY untouched: it keeps status="deleted" AND archived=True, so it
-    stays hidden. (Default `list` excludes archived but not deleted, so clearing
-    archived on a deleted ticket would resurrect it into the listing — review
-    H1.) The status!="deleted" guard on the whole block enforces this.
+    Reverting ARCHIVED clears the marker projection and reopens an archived status. Deleted
+    tickets keep both deleted status and archival, preventing their return to list output.
     """
     _revert_record = {
         "uuid": event_uuid,
@@ -413,31 +365,20 @@ def process_file_impact(state: dict, _event: dict, data: dict) -> None:
 
 
 def process_verify_commands(state: dict, _event: dict, data: dict) -> None:
-    """Apply a VERIFY_COMMANDS event: replace state.verify_commands (last-writer-wins).
+    """Replace ``verify_commands`` by LWW and map missing or null input to an empty list.
 
-    Mirrors the jq `show` reducer semantics (`.verify_commands = ev.data.verify_commands // []`)
-    and the FILE_IMPACT processor. Without this, `verify_commands` was produced only
-    by the jq reducer (show/get-file-impact), never by the Python reducer — so it was
-    invisible in list/search and silently DROPPED when a ticket was compacted into a
-    SNAPSHOT (the compactor builds compiled_state via this reducer). `or []` handles
-    both missing key and JSON null.
+    This matches jq and FILE_IMPACT reduction, allowing list, search, and SNAPSHOT compaction to
+    retain the commands.
     """
     state["verify_commands"] = data.get("verify_commands") or []
 
 
 def process_workflow_run(state: dict, _event: dict, data: dict) -> None:
-    """Apply a WORKFLOW_RUN event: per-key LWW into ``state.workflow_runs[run_id]``.
+    """LWW-fold a complete workflow run by ``run_id``.
 
-    Workflow run-state lives on rebar's only durable surface — the target ticket's
-    append-only event log (epic a88f / WS-C). Each event carries the COMPLETE
-    current run record (status, timing, inputs, the captured now/uuid for
-    deterministic replay, …); replay keeps the LAST event per ``run_id`` because
-    event files sort by ``{HLC-timestamp}-{uuid}`` and that order is identical on
-    every clone, so concurrent runs converge deterministically with no extra
-    tie-break. The map is created lazily (``setdefault``) so a ticket that never ran
-    a workflow keeps its exact prior shape — no empty ``workflow_runs`` key leaks
-    into ``show``/``list`` for the common case. Only the one ``run_id`` key is
-    replaced, never the whole map (so two runs on one ticket don't clobber).
+    Deterministic HLC and UUID replay selects the final record for each run on every clone. Lazy
+    map creation preserves the shape of tickets without runs, and per-key replacement keeps
+    other runs.
     """
     run_id = data.get("run_id")
     if not isinstance(run_id, str) or not run_id:
@@ -447,22 +388,11 @@ def process_workflow_run(state: dict, _event: dict, data: dict) -> None:
 
 
 def process_workflow_step(state: dict, _event: dict, data: dict) -> None:
-    """Apply a WORKFLOW_STEP event: per-key LWW into
-    ``state.workflow_steps[run_id][frame_key]``.
+    """LWW-fold a completed step record by run and frame key.
 
-    The step's idempotency marker + result: the executor commits one of these AFTER
-    a step's effect (WS-C3), carrying the full per-step record (status, outputs,
-    error, captured non-determinism). The slot key is the **frame key** — the bare
-    ``step_id`` at the top frame, or an iteration-embedding path (e.g.
-    ``L#2/attempt``) for a step inside a loop/map body (v2). So a step that runs once
-    per iteration gets a DISTINCT marker per iteration — the (run_id, step_id,
-    iteration) keying the v2 interpreter relies on for exactly-once replay — while a
-    flat (v1 / migrated) run stays keyed exactly as before (frame_key == step_id;
-    older events with no ``frame_key`` fall back to ``step_id``). Per key it is
-    last-writer-wins in replay (HLC+UUID filename order), so a re-run/retry's later
-    event supersedes the earlier one and all clones agree. Lazy + per-key like
-    :func:`process_workflow_run` (no nested per-iteration dict, so the flat hot path
-    is untouched).
+    The event records the post-effect result and captured nondeterminism. Loop and map iterations
+    use distinct frame paths, while flat and legacy events use ``step_id``. Deterministic replay
+    lets retries replace earlier records without changing unrelated steps.
     """
     run_id = data.get("run_id")
     step_id = data.get("step_id")
@@ -476,18 +406,12 @@ def process_workflow_step(state: dict, _event: dict, data: dict) -> None:
 
 
 def process_commits(state: dict, _event: dict, data: dict) -> None:
-    """Apply a COMMITS event: union commit records into ``state.commits`` (WS-H).
+    """Union attached commit records by SHA into ``state.commits``.
 
-    The code-review example workflow needs commit SHAs attached to a ticket as
-    input. Each event carries ``data.commits`` — a list of SHAs (strings) or commit
-    records ({sha, message?, author?, …}); they are UNIONED into the ticket's
-    ``commits`` list, deduplicated by ``sha`` (first occurrence in replay order
-    wins). Union-add is order-insensitive for the SET, and replay order is the
-    deterministic HLC+UUID filename order, so every clone converges to the same
-    list. Lazy/additive (``setdefault``-free guard) so a ticket with no commits
-    keeps its exact prior shape; restored verbatim by SNAPSHOT, so it survives
-    compaction. Never surfaced to Jira (the outbound differ is field-driven and
-    does not read ``commits``)."""
+    Each input is a SHA string or record. The first replay occurrence wins for each SHA.
+    Deterministic replay yields a convergent list. Lazy state survives snapshots and is excluded
+    from Jira projection.
+    """
     incoming = data.get("commits")
     if not isinstance(incoming, list) or not incoming:
         return
@@ -508,23 +432,12 @@ def process_commits(state: dict, _event: dict, data: dict) -> None:
 
 
 def process_tag_delta(state: dict, data: dict) -> None:
-    """Apply a TAG_DELTA event: add/remove tag deltas into ``state.tags`` (P2.3).
+    """Apply tag removals before additions.
 
-    Replaces the whole-field ``EDIT.tags`` last-writer-wins clobber: each event
-    carries ``data.added`` / ``data.removed`` (lists of tag strings). We mutate the
-    CURRENT ``state.tags`` in replay order — remove the ``removed`` set, then union
-    the ``added`` set — so two clones concurrently adding different tags both
-    survive (union is order-insensitive) and replay order is the deterministic
-    HLC+UUID filename order, so every clone converges to the same list.
-
-    Idempotent on replay (skip-if-present add / skip-if-absent remove). INTRA-EVENT
-    CONFLICT CONTRACT: if a tag is in both ``added`` and ``removed``, **add wins**
-    (remove runs first, then add) — enforced and tested here at the reducer, the
-    cross-version convergence point, never delegated to the command layer (a
-    future/buggy/old client may emit a contradictory pair). Defensive ``isinstance``
-    guards mirror :func:`process_commits` / :func:`process_workflow_run`: a non-list
-    ``added``/``removed`` is treated as empty. Legacy/historical ``EDIT.tags`` is
-    still handled by :func:`process_edit` (unchanged) and forms the replay base.
+    Per-event deltas preserve concurrent additions without whole-field EDIT replacement.
+    Deterministic replay orders conflicts, and removal before addition gives additions precedence
+    within one event. Repeated folds are idempotent. Non-list deltas act as empty lists, and
+    legacy ``EDIT.tags`` remains the base.
     """
     added = data.get("added")
     removed = data.get("removed")
@@ -581,28 +494,14 @@ def process_snapshot(state: dict, data: dict) -> None:
         }
         logger.info("plan review phase bootstrapped: %s", record, extra=record)
 
-    # claimed_session (epic crust-fetch-stump, story 199b) needs NO active snapshot guard:
-    # a POST-feature snapshot carries the key and it is restored verbatim above, and a
-    # PRE-feature snapshot's compiled_state simply lacks it, leaving the make_initial_state
-    # seed (None) intact. Unlike managed_refs (seeded) / attestations (folded), there is no
-    # migration to perform — the round-trip regression test pins both directions.
-    # Managed-ref provenance migration (safe-luge-nog): a SNAPSHOT written before
-    # this field existed carries no ``managed_refs``, so restoring it would leave the
-    # projection empty and silently disable removal-propagation for the ticket's
-    # existing refs (the compaction durability hole). Seed it from the restored
-    # current parent_id + deps so those refs are treated as managed. Post-feature
-    # SNAPSHOTs DO carry managed_refs and are restored verbatim above (this is a
-    # no-op for them). Post-snapshot LINK/UNLINK/EDIT events replay afterwards and
-    # fold in normally.
+    # Holder provenance needs no migration because missing fields retain their initial ``None``.
+    # Missing ``managed_refs`` instead seed from restored parent and dependency state. Later
+    # LINK, UNLINK, and EDIT events continue folding the set.
     if "managed_refs" not in compiled_state:
         state["managed_refs"] = seed_managed_refs_from_current(state)
 
-    # Attestations fold-in (epic dark-acme-lumen): an OLD snapshot (written before the
-    # kind-keyed map existed) carries only the legacy single `signature` and no
-    # `attestations`. Fold that record into the map under its manifest-derived kind so
-    # kind-keyed consumers see it; a blank/unkindable legacy record is dropped (no sentinel).
-    # Post-snapshot SIGNATURE events replay into the map normally. A post-feature snapshot
-    # already carries `attestations` and is restored verbatim above (this is a no-op).
+    # A snapshot without ``attestations`` folds its kind-bearing legacy signature into the map.
+    # Blank or unkindable records add nothing. Later SIGNATURE events continue normal folding.
     if "attestations" not in compiled_state:
         sig = state.get("signature")
         if isinstance(sig, dict):
@@ -610,14 +509,8 @@ def process_snapshot(state: dict, data: dict) -> None:
             if kind is not None:
                 state.setdefault("attestations", {})[kind] = sig
 
-    # Keyring migration (epic gnu-whale-ichor — position-based keyring, SCHEMA_VERSION 5):
-    # a SNAPSHOT written before the position-based keyring existed either carries no
-    # `keyring` at all, OR carries stale epoch-era records ({added_epoch, revoked_epoch}
-    # with no `added_at`) plus a `keyring_epoch` cursor. In BOTH cases do NOT trust the
-    # stale fields: drop the legacy cursor and re-seed a genesis keyring from the identity's
-    # static `keys` (every key added at the CREATE position), so position-based verification
-    # keeps working. A post-feature SNAPSHOT carries position-based records (each with
-    # `added_at`) and is restored verbatim above (a no-op here).
+    # Replace missing or epoch-based keyrings with position records. Remove ``keyring_epoch`` and
+    # seed static identity keys at the CREATE position. Records with ``added_at`` need no migration.
     _restored_ring = state.get("keyring") or []
     _stale_epoch_era = any(
         isinstance(rec, dict) and "added_at" not in rec for rec in _restored_ring
@@ -626,17 +519,9 @@ def process_snapshot(state: dict, data: dict) -> None:
         state.pop("keyring_epoch", None)
         _bootstrap_genesis_keyring(state, str(state.get("created_at") or ""))
 
-    # Creation-channel provenance migration (story 568c): a PRE-feature SNAPSHOT (written
-    # before `creation_channel` existed) carries no channel in its compiled_state, so a
-    # SNAPSHOT-only replay has no CREATE to re-infer from and would leave genesis provenance
-    # unset. Re-infer it at restore time from the restored genesis envelope
-    # (ticket_id/author/env_id ride compiled_state and are folded above), mirroring the
-    # `managed_refs`/`attestations` migration idiom. The guard is LOAD-BEARING: a POST-feature
-    # SNAPSHOT that carries a concrete recorded channel (e.g. "cli") or an already-inferred
-    # `jira` (marker set) must be preserved VERBATIM — `_project_legacy_creation_channel`'s
-    # else-branch would clobber a recorded value with "unknown" if it ran unconditionally. So
-    # re-evaluate ONLY the three provisional states the plan names — absent, None, or a
-    # marker-less "unknown" — never a concrete channel or an already-inferred value.
+    # A legacy snapshot has no CREATE event to replay. Run the shared envelope heuristic only for
+    # an absent, None, or unmarked ``unknown`` channel. Preserve recorded and inferred channels
+    # because unconditional inference could replace them with ``unknown``.
     _channel = compiled_state.get("creation_channel")
     if _channel in (None, "unknown") and not compiled_state.get("creation_channel_inferred"):
         _project_legacy_creation_channel(state)

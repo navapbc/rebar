@@ -1,7 +1,7 @@
 """Run the shared Jira shape contract against ``AcliClient`` and Jira.
 
 The hermetic fake uses the same contract from ``tests/_jira_shape_contract.py``. Response-shape
-drift can require fixture recapture as documented in ``docs/jira-fixtures.md``. These tests require
+drift can require fixture recapture as documented in ``docs/jira-fixtures.md``. The test requires
 ``REBAR_RUN_EXTERNAL=1``, Jira credentials, and the ``acli`` binary.
 
 The map methods use REST credentials. ``search_issues`` also requires an authenticated

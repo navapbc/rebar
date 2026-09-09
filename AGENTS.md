@@ -30,20 +30,18 @@ baseline-vs-tree comparisons, the public-API surface census, CI-workflow parity,
 artifact and docs drift, whole-tree AST policy scans (roughly seventy modules). On 2026-09-04
 three separate changes were pushed red by exactly those tests after their authors ran
 `make lint` and `make typecheck` and saw green (bug `1035-bed7-c855-4732`). **`make verify`**
-= `lint` + `typecheck` + `test`, and `make test` selects exactly what CI's gating
-`ubuntu-latest, py3.13` cell selects (`not integration and not external`) — a superset of
-every other matrix cell — so it is the locally checkable half of `Verified`, with nothing to
-enumerate and nothing to drift.
+= `lint` + `typecheck` + the bare-`pytest` `import-convention` guard + `test`, and
+`make test` selects exactly what CI's gating `ubuntu-latest, py3.13` cell selects
+(`not integration and not external`) — a superset of every other matrix cell — so it is
+the locally checkable half of `Verified`, with nothing to enumerate and nothing to drift.
+The import-convention guard is intentionally called out and run with the **BARE `pytest`
+console script**: `python -m pytest` injects the checkout root onto `sys.path`, so it can
+false-green `tests.`-rooted imports that fail under `make test` and CI.
 
-**It costs 20-25 minutes** (measured twice on one six-performance-core host at the historical
+**It costs 20-25 minutes** (measured twice on one six-performance-core host at the default
 `PYTEST_WORKERS=4`: 22 min 25 s and 26 min 04 s wall for lint + typecheck + ~19.2k tests --
-the spread is host load, so plan for the top of the range). `make test` now runs through a
-host-memory guard that may lower `PYTEST_WORKERS` when another full suite is active or free
-RAM is low; if a run is killed by OOM/low memory rather than a test assertion, treat that as
-an environmental fault and rerun at `PYTEST_WORKERS=1` instead of retrying the same parallel
-shape or root-causing a phantom flaky test. Cleanup must be scoped to your own worktree's
-processes only — never sweep with `pgrep -f pytest`, because other agents' workers match the
-same text.
+the spread is host load, so plan for the top of the range; `make test PYTEST_WORKERS=8` on a
+bigger box).
 That is the price of the contract, and it is stated here so you can plan for it rather than
 kill it: it is still cheaper than a 15–20 minute `Verified -1` round trip, and it is the only
 local command that lets you say "I verified this" and be right. Run it once before
@@ -235,7 +233,8 @@ restated here:
   **`review_plan_start`/`verify_completion_start`** (they return a `{job_id,…,status:'running'}`
   handle in ms on a background daemon, mirroring `run_workflow`), then POLL —
   `plan_review_status`/`verify_completion_status` for the durable signed verdict, or
-  `gate_status(job_id)` for the run handle (`running` → `passed`/`failed`/`stale-running`);
+  `gate_status(job_id)` for the run handle (`running` → `passed`/`failed`, with a
+  stale daemon materialized as a failed diagnostic);
   for plan-review jobs, wait for `gate_status(job_id).findings.readable` before reading the
   latest `REVIEW_RESULT` findings sidecar. The
   synchronous `review_plan`/`verify_completion` tools remain the fallback and are now
@@ -393,8 +392,10 @@ at the definition site:
 ```
 
 The marker admits **exactly** the `(kind, name)` it names, never its whole kind, and a **blank
-reason is itself an error**. Do **not** hand-edit `.github/mechanism-baseline.json`;
-`--update-stale` is maintenance-only, and it refuses to write at all while anything is new.
+reason is itself an error**. Do **not** hand-edit `.github/mechanism-baseline.json`. When your
+own change removes a mechanism, run `python scripts/check_mechanism_delta.py --update-stale`
+in that change and commit the shrunken baseline; the drain refuses while any unadmitted
+mechanism is new or increased, so it cannot bless a regression.
 Names, marker placement per detection shape, and the kind partition (`feature_flag` claims the
 boolean config keys, `config_key` the non-boolean remainder; both are section-qualified) are in
 `docs/architecture.md` §"Mechanism-delta ratchet".

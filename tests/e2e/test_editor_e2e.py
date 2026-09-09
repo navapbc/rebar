@@ -1,4 +1,4 @@
-"""Exercise workflow serialization with bpmn-moddle in E2E tests.
+"""E2E coverage for workflow serialization with bpmn-moddle.
 
 The Node harness parses and serializes generated BPMN with the same library used by the
 editor. These tests verify that IDs, branch arms, sample workflows, and rebar configuration
@@ -100,5 +100,5 @@ def test_rebar_config_survives_real_parse(bpmn_harness):
 
 
 # The Python serializer generates layout geometry. Unit tests inspect diagram data, and
-# browser tests inspect rendering. The Node harness exposes a bpmn-auto-layout mode, but this
-# module does not exercise it, so it has no library-layout test.
+# browser tests inspect rendering. The Node harness does not use bpmn-auto-layout, so this
+# module has no library-layout test.

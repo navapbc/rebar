@@ -101,6 +101,34 @@ def test_a_store_behind_the_shared_store_is_stale(store: Path) -> None:
     assert result["behind"] == 1, f"the behind-count was not reported: {result}"
 
 
+def test_zero_behind_count_is_not_a_stale_store(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A behind refusal whose own count is zero is a non-reason, so gates proceed."""
+    from rebar._store import gitutil
+
+    def _run_git(_cwd, *args, **_kwargs):
+        if args == ("rev-parse", "--verify", "origin/tickets"):
+            return subprocess.CompletedProcess(["git", *args], 0, "remote-sha\n", "")
+        if args == ("merge-base", "HEAD", "origin/tickets"):
+            return subprocess.CompletedProcess(["git", *args], 0, "base-sha\n", "")
+        if args == ("merge-base", "--is-ancestor", "origin/tickets", "HEAD"):
+            return subprocess.CompletedProcess(["git", *args], 1, "", "")
+        if args == ("merge-base", "--is-ancestor", "HEAD", "origin/tickets"):
+            return subprocess.CompletedProcess(["git", *args], 0, "", "")
+        if args == ("rev-list", "HEAD..origin/tickets", "--count"):
+            return subprocess.CompletedProcess(["git", *args], 0, "0\n", "")
+        raise AssertionError(f"unexpected git probe: {args}")
+
+    monkeypatch.setattr(gitutil, "run_git", _run_git)
+
+    result = freshness.store_freshness(str(store))
+
+    assert result["fresh"] is True
+    assert result["verdict"] == "fresh"
+    assert result["behind"] is None
+
+
 def test_a_diverged_store_is_stale(store: Path) -> None:
     """Neither history contains the other: this clone can neither see nor publish.
 

@@ -121,6 +121,103 @@ def test_ruleset_verdict_schema() -> None:
     )
 
 
+# --- Behavioral: merged-reachability guard --------------------------------
+def test_merged_reachability_verdict_is_healthy_when_all_checked() -> None:
+    v = mirror_guard.merged_reachability_verdict(3, [])
+
+    assert v["healthy"] is True
+    assert v["check"] == "merged-reachability"
+    assert v["checked"] == 3
+
+
+def test_merged_reachability_verdict_names_unreachable_changes() -> None:
+    v = mirror_guard.merged_reachability_verdict(
+        2, [{"number": 2809, "revision": "85abd2f", "reason": "not ancestor of main"}]
+    )
+
+    assert v["healthy"] is False
+    assert "2809" in v["reason"]
+    assert v["unreachable"][0]["revision"] == "85abd2f"
+
+
+def test_merged_reachability_check_fetches_change_refs_and_checks_ancestry(monkeypatch) -> None:
+    change = {
+        "_number": 2809,
+        "subject": "Condense reducer comments",
+        "current_revision": "85abd2f",
+        "revisions": {
+            "85abd2f": {
+                "fetch": {
+                    "anonymous http": {
+                        "url": "https://rebar.solutions.navateam.com/rebar",
+                        "ref": "refs/changes/09/2809/2",
+                    }
+                }
+            }
+        },
+    }
+    calls: list[tuple[str, ...]] = []
+
+    def fake_git(*args: str):
+        calls.append(args)
+        return type("CP", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(mirror_guard, "fetch_gerrit_merged_changes", lambda *a, **k: [change])
+    monkeypatch.setattr(mirror_guard, "_git", fake_git)
+
+    v = mirror_guard.merged_reachability_check(limit=1)
+
+    assert v["healthy"] is True
+    assert calls == [
+        (
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "https://rebar.solutions.navateam.com/rebar",
+            "refs/changes/09/2809/2",
+        ),
+        ("merge-base", "--is-ancestor", "FETCH_HEAD", "HEAD"),
+    ]
+
+
+def test_merged_reachability_check_reports_merged_revision_not_on_main(monkeypatch) -> None:
+    change = {
+        "_number": 2810,
+        "subject": "Condense E2E test comments",
+        "current_revision": "af20ccf",
+        "revisions": {
+            "af20ccf": {
+                "fetch": {
+                    "anonymous http": {
+                        "url": "https://rebar.solutions.navateam.com/rebar",
+                        "ref": "refs/changes/10/2810/2",
+                    }
+                }
+            }
+        },
+    }
+
+    def fake_git(*args: str):
+        rc = 1 if args[:2] == ("merge-base", "--is-ancestor") else 0
+        return type("CP", (), {"returncode": rc, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(mirror_guard, "fetch_gerrit_merged_changes", lambda *a, **k: [change])
+    monkeypatch.setattr(mirror_guard, "_git", fake_git)
+
+    v = mirror_guard.merged_reachability_check(limit=1)
+
+    assert v["healthy"] is False
+    assert v["unreachable"] == [
+        {
+            "number": 2810,
+            "revision": "af20ccf",
+            "subject": "Condense E2E test comments",
+            "ref": "refs/changes/10/2810/2",
+            "reason": "not ancestor of main",
+        }
+    ]
+
+
 # --- Contractual: CLI runner exit codes ------------------------------------
 def test_run_all_healthy_exit_0(monkeypatch) -> None:
     monkeypatch.setattr(mirror_guard, "fetch_gerrit_main_sha", lambda *a, **k: "sha1")

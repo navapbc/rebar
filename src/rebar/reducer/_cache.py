@@ -11,43 +11,23 @@ from rebar._store.fsutil import atomic_write
 
 logger = logging.getLogger(__name__)
 
-# Invariant I1 (docs/concurrency.md): compaction RENAMES the event files it folds
-# to ``<name>.retired`` instead of hard-deleting them. A hard delete can be
-# resurrected by a delete/add reconciliation (the RC1 rebase class) and then trips
-# SNAPSHOT_INCONSISTENT; an append-only rename never loses the source bytes and is
-# invisible to replay/fsck. This is the SINGLE source of truth for that suffix —
-# compaction (the producer), the reducer (both listing paths), and fsck all import
-# it so there is exactly one string literal to reason about.
+# Compaction preserves folded events as ``<name>.retired`` under invariant I1 in
+# ``docs/concurrency.md``. The append-only source remains available without entering replay
+# or fsck. This shared suffix keeps compaction and reducer scans aligned.
 RETIRED_SUFFIX = ".retired"
 
 
 def is_active_event(name: str) -> bool:
-    """True for a live event file, False for a folded ``*.retired`` source.
+    """Return whether ``name`` is an active event rather than a retired source.
 
-    A retired file is an append-only tombstone of an event that compaction has
-    already folded into a SNAPSHOT; it must be excluded from every replay, dir
-    hash, and fsck scan so it neither re-enters state nor reads as an
-    inconsistency."""
+    Retired events have already entered a SNAPSHOT. Ordinary replay, directory hashes, and
+    fsck omit them. Rebuild mode restores them explicitly.
+    """
     return not name.endswith(RETIRED_SUFFIX)
 
 
-# Reducer-logic cache version. The dir-hash captures EVENT-FILE changes, but not
-# changes to how the reducer PROJECTS those events into state. When the reducer's
-# projection semantics change, every previously-cached .cache.json would
-# otherwise serve a state compiled by the old logic. Folding this version into
-# the dir hash invalidates all caches on a bump. BUMP THIS whenever a processor's
-# projection changes.
-#   v2: process_revert now un-archives on REVERT-of-ARCHIVED (bug vocal-jig-apron)
-#   v3: replay now projects a derived `updated_at` (P1.1); pre-v3 caches lack it
-#   v4: replay now projects the kind-keyed `attestations` map (epic
-#       dark-acme-lumen); pre-v4 caches lack it, hiding a signed plan-review
-#       attestation and wrongly blocking `claim` (bug wait-warp-inlay)
-#   v5: replay now projects an identity's epoch-scoped `keyring` + `keyring_epoch`
-#       (epic gnu-whale-ichor / e165); pre-v5 caches lack them
-#   v6: keyring is now POSITION-based — records are {public_key, added_at, revoked_at}
-#       and the `keyring_epoch` cursor is gone (epic gnu-whale-ichor, git-commit-ancestry
-#       validity); pre-v6 caches hold stale epoch-era records
-#   v7: replay projects plan_review_phase and bootstraps pre-feature snapshots.
+# Event metadata does not reflect changed projections. Including this manual version in the
+# directory hash invalidates older caches. Increment it whenever projection semantics change.
 _REDUCER_CACHE_VERSION = 7
 
 
@@ -62,19 +42,10 @@ def _load_json(path: str) -> dict | None:
 
 
 def _ondisk_attestation_kinds(ticket_dir: str, event_filenames: list[str]) -> set[str]:
-    """The set of attestation kinds the reducer would project from the events ON DISK.
+    """Derive additive attestation kinds from active SIGNATURE and SNAPSHOT events.
 
-    Attestation kinds are purely ADDITIVE in the projection — ``process_signature``
-    only ever files a kind into ``state['attestations']`` and nothing removes one — so
-    the net projected key-set equals the union of the kinds derivable from every active
-    SIGNATURE event PLUS the kinds a compacted SNAPSHOT already folded in. Deriving this
-    straight from the log (independent of any cached state) is what lets
-    :func:`read_cache` reject a ``.cache.json`` whose encoded ``attestations`` disagree
-    with the bytes on disk (validity-on-read; see ``docs/concurrency.md`` §Read-freshness
-    policy and the ``process_signature`` docstring).
-
-    Only SIGNATURE / SNAPSHOT files are opened — both rare. A ticket with neither pays a
-    string check per name and NO extra I/O, so ordinary cache reads are unaffected.
+    The result lets :func:`read_cache` reject cached attestations that conflict with the log
+    under the validity-on-read policy. Other event names require no file reads.
     """
     from ._processors_identity import attestation_kind
 
@@ -110,21 +81,11 @@ def _ondisk_attestation_kinds(ticket_dir: str, event_filenames: list[str]) -> se
 def read_cache(
     cache_path: str, dir_hash: str, ticket_dir: str, event_filenames: list[str]
 ) -> dict | None:
-    """Return the cached state on a valid hit, else None (cache miss).
+    """Return state when its hash and logged attestation kinds match.
 
-    A hit requires BOTH the ``dir_hash`` match AND that the cached state's kind-keyed
-    ``attestations`` map agrees with the attestation evidence ACTUALLY on disk
-    (validity-on-read; ``docs/concurrency.md`` §Read-freshness policy). ``dir_hash``
-    keys the cache on event-file stats (name/size/mtime) plus a manually-bumped reducer
-    version — neither of which moves when the reducer's attestation PROJECTION changes
-    without a version bump, nor when a ``.cache.json`` was written by a
-    differently-projecting build. Such an entry serves a stale ``attestations`` map
-    (e.g. empty) while the signed SIGNATURE event is physically present, so ``show``
-    (served the stale cache) and ``verify-signature`` (re-derived) disagree — a SIGNED
-    attestation is hidden and a ``claim``/close gate wrongly blocks (the incident the
-    v4 cache-version comment records). Cross-checking the cached ``attestations`` keys
-    against the on-disk kind-set makes any such divergence a MISS that re-derives, so
-    the cache can NEVER serve attestations that contradict the log.
+    A missed reducer-version increment or cache written by another projection can retain a
+    matching event hash with stale attestations. Comparing its keys with SIGNATURE and
+    SNAPSHOT evidence forces recomputation.
     """
     cached = _load_json(cache_path)
     if not (cached and cached.get("dir_hash") == dir_hash):
@@ -140,14 +101,11 @@ def read_cache(
 
 
 def write_cache(cache_path: str, dir_hash: str, state: dict, ticket_dir: str) -> None:
-    """Atomically publish one complete cache generation.
+    """Cache state atomically unless ``ticket_dir`` belongs to an immutable snapshot.
 
-    No-op when ``ticket_dir`` lies inside a snapshot-store entry: those trees are
-    immutable and content-addressed (ADR 0005 D2), so a read must not add derived
-    files to them — it would break the janitor's reverify digest and, with entries
-    hardlink-sharing blobs, turn any in-place write into cross-entry corruption
-    (bug 5c27-7926). The cache is a rebuildable optimization; under a pinned
-    snapshot root the read simply stays uncached."""
+    A derived cache file would change janitor digests and can corrupt shared hardlinks. Snapshot
+    reads therefore remain uncached under ADR 0005 D2 and ticket 5c27-7926.
+    """
     # Deferred import: keep the reducer core decoupled from the snapshot subsystem
     # except at this one write seam.
     from rebar._snapshot.repo_snapshot import in_snapshot_entry
@@ -162,13 +120,10 @@ def write_cache(cache_path: str, dir_hash: str, state: dict, ticket_dir: str) ->
 
 
 def compute_dir_hash(ticket_dir: str, event_filenames: list[str]) -> str:
-    """Compute a content hash based on event filenames, sizes, and mtimes.
+    """Hash the reducer version and event names, sizes, and nanosecond mtimes.
 
-    Uses filename + file size + modification time (a single fast stat per file)
-    to detect additions/deletions and in-place content overwrites — including a
-    same-byte-length rewrite (e.g. from a git checkout/rebase of the tickets
-    branch or an fsck-recover cherry-pick), which a filename+size key alone
-    cannot see. Folding in st_mtime_ns closes that stale-read gap.
+    One stat per file detects additions, deletions, and same-size rewrites that names and sizes
+    alone miss.
     """
     hash_parts: list[str] = [f"rv:{_REDUCER_CACHE_VERSION}"]
     for name in event_filenames:
@@ -192,22 +147,11 @@ def prepare_event_files(
     *,
     include_retired: bool = False,
 ) -> tuple[str, str, list[str], dict | None]:
-    """Build sorted event file list and compute dir_hash; check cache.
+    """Return cache metadata, sorted event paths, and cached state when present.
 
-    Returns (cache_path, dir_hash, event_files, cached_state_json_or_none).
-    cached_state_json_or_none is the raw cached state dict if a cache hit
-    occurred, or None if a cache miss (caller must recompute).
-
-    Normal mode (``include_retired=False``): ``event_files`` is the sorted list of
-    active ``*.json`` event file paths (dotfiles and folded ``*.retired`` sources
-    excluded), and the reducer cache is consulted.
-
-    Rebuild mode (``include_retired=True``, RC2b Option 1): the folded ``*.retired``
-    tombstones are folded back into the set and every ``SNAPSHOT`` file is *excluded*,
-    so the full ordered history replays from scratch (no snapshot short-circuit) —
-    this reconstructs state that a stale snapshot's positional skip had silently
-    dropped. This path **bypasses the cache entirely** (it reads the full file set
-    directly and must never return a stale ``*.json``-only cache entry).
+    Normal mode omits dotfiles and retired sources before reading the cache. Rebuild mode
+    includes retired raw events, omits SNAPSHOT events, and bypasses the active-event cache to
+    replay the entire event log.
     """
     from ._sort import event_sort_key
 

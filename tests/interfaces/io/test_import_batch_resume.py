@@ -1,8 +1,18 @@
-"""Interface tests for batched import commit counts and crash recovery.
+"""Batched-import benchmark + crash-resume (epic cold-stall-chalk / B4).
 
-An N-record CREATE and comment import must create ``2 * ceil(N / 256)`` commits. Malformed
-events roll back a whole chunk. A later commit failure leaves earlier chunks durable, and
-rerunning skips them and imports each remaining ticket once. Fixtures use synthesized records.
+Proves the write-time batching actually reduces commits and is crash-safe:
+
+- **Benchmark** — a synthetic N=3000 CREATE+comment import makes exactly
+  ``2*ceil(3000/256)`` commits (Pass 1 + Pass 2d), a >=10x reduction vs the ~2N
+  per-event baseline.
+- **Malformed-event-mid-chunk** — a bad event in a batch rolls the whole chunk back
+  (index clean, commit count unchanged) — exercised at the primitive level.
+- **Crash-resume** — a crash before a LATER chunk's commit leaves whole-commit-or-
+  none; the re-run's ``source_id`` re-scan skips the committed chunks and re-emits
+  the rest, ending with every ticket exactly once.
+
+Records are synthesized as dicts (the importer accepts an iterable of dicts), so no
+slow interactive seeding of a source store is needed.
 """
 
 from __future__ import annotations
@@ -35,7 +45,10 @@ def _tracker(repo: Path) -> str:
 
 
 def _commit_count(repo: Path) -> int:
-    # The shared helper retries transient empty output and includes Git stderr in persistent errors.
+    # `git rev-list --count HEAD` can transiently fail under CI load (rc!=0, empty stdout) —
+    # bug efb7-09de: the old `int(r.stdout.strip())` turned that into an opaque
+    # `ValueError: invalid literal for int()` that masked git's real error and flaked the test.
+    # The shared helper retries the transient and raises a diagnostic carrying git's stderr.
     return commit_count(_tracker(repo))
 
 
@@ -110,7 +123,13 @@ def test_benchmark_commit_count_is_ceil_per_pass(tmp_path: Path, monkeypatch) ->
 def test_commit_count_tolerates_transient_git_failure_not_opaque_int_crash(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Retry transient empty Git output and report stderr for persistent failures."""
+    """Regression (bug efb7-09de): _commit_count must NOT crash with the opaque
+    `ValueError: invalid literal for int() with base 10: ''` when `git rev-list --count HEAD`
+    transiently returns empty stdout (the observed CI flake, run 29620766631). It must:
+      (a) retry past a TRANSIENT failure and return the real commit count, and
+      (b) on a PERSISTENT failure, raise a CLEAR diagnostic carrying git's stderr — never int('').
+    Both simulated by patching subprocess.run the same way the crash-resume test injects a git
+    failure (fake CompletedProcess with rc!=0 + empty stdout)."""
     dst = _fresh_repo(tmp_path, "cc")
     real_run = subprocess.run
     expected = int(

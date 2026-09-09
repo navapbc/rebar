@@ -1,8 +1,15 @@
-"""Verify the nonblocking write-lock busy probe used to skip optional compaction.
+"""The non-blocking write-lock busy probe (bug 7084 / remediation R3).
 
-The probe attempts both fcntl and mkdir acquisition legs with no wait, releases any partial
-acquisition, and leaves no lock behind. Unexpected errors fail open by reporting not busy,
-allowing lock acquisition itself to decide whether work proceeds.
+Compaction is the store's longest lock holder and its work is optional, so
+compact-on-close now stands aside when the lock is already busy. Detection needs no new
+mechanism: ``_acquire_fcntl`` already polls ``fcntl.flock(LOCK_EX|LOCK_NB)`` and
+``_acquire_mkdir`` already polls ``mkdir`` — the probe is those same two legs with a zero
+deadline.
+
+These tests pin the properties that make the probe safe to build a skip on: it covers
+BOTH legs, it releases the first when the second is unavailable, it never leaves a lock
+behind, and it fails OPEN (an unexpected error reports "not busy", degrading to today's
+behaviour rather than suppressing work on a free store).
 """
 
 from __future__ import annotations

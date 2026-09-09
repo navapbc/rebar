@@ -248,11 +248,19 @@ def test_manual_awaiting_parent_defers_children(tracker: Path) -> None:
 
 
 def test_childless_story_is_an_executable_leaf(tracker: Path) -> None:
-    """Schedule a childless story as a leaf while preserving its ticket type.
+    """A childless story is a LEAF and is scheduled, keeping its ``story`` type.
 
-    ADR 0078 defines containers by the presence of children, not ticket type. The published
-    ``skipped_needs_planning`` field remains empty, and ``ready`` and ``next-batch`` agree that
-    the story is schedulable.
+    Contract card: ADR 0078 (Accepted) — "Proportionate scrutiny is keyed on
+    container (has children) vs leaf (no children), never on ticket type" —
+    restated in the shipped author contract at
+    ``src/rebar/_guides/writing-a-passing-plan.md``. The structural container
+    boundary is the already-computed ``parent_ids_with_children`` check; ticket
+    type does not veto scheduling. ``skipped_needs_planning`` is retained as a
+    published compatibility field (result, JSON, schema) but ticket type no
+    longer populates it.
+
+    ``reads.ready_states`` applies no type filter, so this also pins the
+    ``ready`` -> ``next-batch`` pipeline agreeing about the same ticket.
     """
     ts = 1700000000000000000
     _create(tracker, "e", "epic", None, priority=1, ts=ts)
@@ -278,7 +286,14 @@ def test_childless_story_is_an_executable_leaf(tracker: Path) -> None:
 
 @pytest.mark.parametrize("leaf_type", ["story", "task", "bug", "epic"])
 def test_childless_leaf_is_batched_regardless_of_ticket_type(tracker: Path, leaf_type: str) -> None:
-    """Apply the ADR 0078 child and container rule uniformly to every ticket type."""
+    """Schedulability is type-INDEPENDENT: only children make a container.
+
+    Before the fix a childless ``epic`` and a childless ``bug`` were both
+    batched while an otherwise-identical childless ``story`` was not — the
+    asymmetry that falsified the "stories are containers" reading. This pins
+    the ADR 0078 principle itself rather than the story case alone, so the
+    defect cannot return under a different ticket type.
+    """
     ts = 1700000000000000000
     _create(tracker, "e", "epic", None, priority=1, ts=ts)
     _create(tracker, "leaf", leaf_type, "e", priority=2, ts=ts + 1)

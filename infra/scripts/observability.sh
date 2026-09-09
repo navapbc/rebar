@@ -64,16 +64,61 @@ probe_budget_left() {
 # mechanism-ok: env_var REGION_CACHE — 9313-1fac-9f32-4b07: the region the truncation hook reads
 # so it does not depend on IMDS answering during the stall it is reporting.
 REGION_CACHE="${REGION_CACHE:-/var/lib/rebar/probe-region}"
+# mechanism-ok: env_var INSTANCE_ID_CACHE — a7bd-0cee-404f-4c06: lets the main probe reuse the
+# last valid instance id when IMDS has a transient miss, so head-of-script CloudWatch publishes
+# do not all run with an empty InstanceId.
+REGION_CACHE_DIR="${REGION_CACHE%/*}"
+[ "$REGION_CACHE_DIR" = "$REGION_CACHE" ] && REGION_CACHE_DIR="."
+INSTANCE_ID_CACHE="${INSTANCE_ID_CACHE:-${REGION_CACHE_DIR}/probe-instance-id}"
 # mechanism-ok: env_var DOCKER_DU_OVERLAY2_DEVCHECK_SKIP — 9313-1fac-9f32-4b07: lets the tests
 # drive docker_du_census without a real filesystem behind $DOCKER_ROOT.
 DOCKER_DU_OVERLAY2_DEVCHECK_SKIP="${DOCKER_DU_OVERLAY2_DEVCHECK_SKIP:-}"
+
+cached_region() {
+  local candidate
+  candidate="$(head -n 1 "$REGION_CACHE" 2>/dev/null || true)"
+  case "$candidate" in *[!a-z0-9-]* | '') return 1 ;; esac
+  printf '%s\n' "$candidate"
+}
+
+cached_instance_id() {
+  local candidate
+  candidate="$(head -n 1 "$INSTANCE_ID_CACHE" 2>/dev/null || true)"
+  case "$candidate" in i-*) printf '%s\n' "$candidate" ;;
+  *) return 1 ;;
+  esac
+}
+
+metric_name_from_args() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --metric-name)
+        shift
+        printf '%s\n' "${1:-unknown}"
+        return 0
+        ;;
+    esac
+    shift
+  done
+  printf 'unknown\n'
+}
+
+put_metric_data() {
+  local metric
+  metric="$(metric_name_from_args "$@")"
+  if aws cloudwatch put-metric-data "$@" 2>/dev/null; then
+    return 0
+  fi
+  logger -t rebar-health \
+    "cloudwatch put-metric-data FAILED metric=${metric} region=${REGION:-unresolved}"
+  return 1
+}
 
 if [ "${1:-}" = "--report-exit" ]; then
   probe_result="${SERVICE_RESULT:-success}"
   probe_truncated=1
   [ "$probe_result" = "success" ] && probe_truncated=0
-  report_region="$(head -n 1 "$REGION_CACHE" 2>/dev/null || true)"
-  case "$report_region" in *[!a-z0-9-]* | '') report_region="" ;; esac
+  report_region="$(cached_region || true)"
   if [ -z "$report_region" ]; then
     # Cold start only: take one bounded IMDS shot, then give up.
     report_token="$(curl -s --max-time 3 -X PUT http://169.254.169.254/latest/api/token \
@@ -94,11 +139,13 @@ fi
 
 # Fetch bounded IMDSv2 identity before publishing metrics.
 TOKEN=$(curl -s --max-time 5 -X PUT http://169.254.169.254/latest/api/token \
-  -H 'X-aws-ec2-metadata-token-ttl-seconds: 120')
+  -H 'X-aws-ec2-metadata-token-ttl-seconds: 120' 2>/dev/null || true)
 REGION=$(curl -s --max-time 5 http://169.254.169.254/latest/meta-data/placement/region \
-  -H "X-aws-ec2-metadata-token: $TOKEN")
+  -H "X-aws-ec2-metadata-token: $TOKEN" 2>/dev/null || true)
 IID=$(curl -s --max-time 5 http://169.254.169.254/latest/meta-data/instance-id \
-  -H "X-aws-ec2-metadata-token: $TOKEN")
+  -H "X-aws-ec2-metadata-token: $TOKEN" 2>/dev/null || true)
+case "$REGION" in *[!a-z0-9-]* | '') REGION="$(cached_region || true)" ;; esac
+case "$IID" in i-*) : ;; *) IID="$(cached_instance_id || true)" ;; esac
 
 # Cache only a valid region for ExecStopPost; cache failure must not stop the main probe.
 case "$REGION" in
@@ -106,6 +153,12 @@ case "$REGION" in
   *)
     mkdir -p "$(dirname "$REGION_CACHE")" 2>/dev/null || true
     printf '%s\n' "$REGION" >"$REGION_CACHE" 2>/dev/null || true
+    ;;
+esac
+case "$IID" in
+  i-*)
+    mkdir -p "$(dirname "$INSTANCE_ID_CACHE")" 2>/dev/null || true
+    printf '%s\n' "$IID" >"$INSTANCE_ID_CACHE" 2>/dev/null || true
     ;;
 esac
 
@@ -146,15 +199,22 @@ else:
   )"
   [ "$review_payload_ok" = "1" ] || review_ok=0
 fi
-aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+put_metric_data --region "$REGION" --namespace "$NS" \
   --metric-name gerrit_healthy --unit Count --value "$gerrit_ok" \
   --dimensions InstanceId="$IID" 2>/dev/null || true
-aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+put_metric_data --region "$REGION" --namespace "$NS" \
   --metric-name reviewbot_healthy --unit Count --value "$review_ok" \
   --dimensions InstanceId="$IID" 2>/dev/null || true
 
-# The gate alarm expects this heartbeat in Rebar/Gate without dimensions; missing data breaches.
-aws cloudwatch put-metric-data --region "$REGION" --namespace "Rebar/Gate" \
+# Gate-reachable signal for the S7 gerrit-gate-down alarm. Reuses the SAME
+# gerrit_ok value computed above (1 if the /config/server/version probe returned
+# 200, else 0) but publishes it to a SEPARATE namespace WITHOUT dimensions.
+# DIMENSIONLESS ON BOTH SIDES: the S7 alarm (monitoring.tf, Rebar/Gate /
+# GerritReachable) declares no dimensions, and CloudWatch keys a metric by
+# namespace+name+dimensions — adding a dimension to only one side makes the alarm
+# silently stop matching. When the host/probe stops publishing entirely the alarm's
+# treat_missing_data=breaching turns that gap into an ALARM (host-down backstop).
+put_metric_data --region "$REGION" --namespace "Rebar/Gate" \
   --metric-name GerritReachable --unit Count --value "$gerrit_ok" 2>/dev/null || true
 
 # --- 1b. MCP serving-path health -------------------------------------------
@@ -164,7 +224,7 @@ aws cloudwatch put-metric-data --region "$REGION" --namespace "Rebar/Gate" \
 mcp_code=$(curl -sS -o /dev/null -w '%{http_code}' "https://${DOMAIN}/mcp" --max-time 10 2>/dev/null || echo 000)
 mcp_ok=0; [ "$mcp_code" = "401" ] && mcp_ok=1
 logger -t rebar-health "mcp=/mcp:${mcp_code} mcp_healthy=${mcp_ok}"
-aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+put_metric_data --region "$REGION" --namespace "$NS" \
   --metric-name mcp_healthy --unit Count --value "$mcp_ok" 2>/dev/null || true
 [ "$mcp_ok" -eq 0 ] && logger -t rebar-health \
   "mcp serving path UNHEALTHY: https://${DOMAIN}/mcp returned '${mcp_code}' (expected 401); check the live rebar-mcp container and the materialized /etc/nginx/mcp-upstream.conf"
@@ -172,7 +232,7 @@ aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
 # --- 2. Disk usage of the Gerrit data volume -------------------------------
 used_pct=$(df --output=pcent "$DATA_MOUNT" 2>/dev/null | tail -1 | tr -dc '0-9')
 if [ -n "$used_pct" ]; then
-  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  put_metric_data --region "$REGION" --namespace "$NS" \
     --metric-name disk_used_percent --unit Percent --value "$used_pct" \
     --dimensions InstanceId="$IID",mount="$DATA_MOUNT" 2>/dev/null || true
   logger -t rebar-health "disk ${DATA_MOUNT} used_percent=${used_pct}"
@@ -182,7 +242,7 @@ fi
 # This dimensionless gauge measures space only; it does not detect IOPS saturation.
 root_pct=$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9')
 if [ -n "$root_pct" ]; then
-  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  put_metric_data --region "$REGION" --namespace "$NS" \
     --metric-name root_disk_used_percent --unit Percent --value "$root_pct" 2>/dev/null || true
   logger -t rebar-health "disk / used_percent=${root_pct}"
 fi
@@ -192,7 +252,7 @@ fi
 # This avoids treating an unmounted directory's root-filesystem `df` result as healthy scratch.
 scratch_mounted=0
 [ -f "$GATE_SCRATCH_MOUNT/.gate-scratch-mounted" ] && scratch_mounted=1
-aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+put_metric_data --region "$REGION" --namespace "$NS" \
   --metric-name gate_scratch_mounted --unit Count --value "$scratch_mounted" 2>/dev/null || true
 logger -t rebar-health "gate scratch ${GATE_SCRATCH_MOUNT} mounted=${scratch_mounted}"
 if [ "$scratch_mounted" -eq 0 ]; then
@@ -232,7 +292,7 @@ if [ "$scratch_mounted" -eq 1 ]; then
   scratch_pct=$(df --output=pcent "$GATE_SCRATCH_MOUNT" 2>/dev/null | tail -1 | tr -dc '0-9')
 fi
 if [ -n "$scratch_pct" ]; then
-  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  put_metric_data --region "$REGION" --namespace "$NS" \
     --metric-name disk_used_percent --unit Percent --value "$scratch_pct" \
     --dimensions InstanceId="$IID",mount="$GATE_SCRATCH_MOUNT" 2>/dev/null || true
   logger -t rebar-health "disk ${GATE_SCRATCH_MOUNT} used_percent=${scratch_pct}"

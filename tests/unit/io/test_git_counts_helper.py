@@ -1,9 +1,12 @@
-"""Test bounded retry and diagnostic errors for commit counting.
+"""Regression for the shared crash-safe commit-count helper (bug cf3a / efb7-09de).
 
-When ``git rev-list --count`` fails transiently, ``_git_counts.commit_count`` retries and
-returns the later count. A persistent failure raises ``RuntimeError`` containing Git stderr
-instead of an integer-conversion ``ValueError``. Sentinel mocks leave subprocess-backed
-repository-isolation checks intact.
+``git rev-list --count`` can transiently fail under CI load (rc!=0, empty stdout).
+The old inline ``int(r.stdout.strip())`` turned that into an opaque
+``ValueError: invalid literal for int() with base 10: ''``. The shared
+``_git_counts.commit_count`` helper must instead retry the transient and, on a
+persistent failure, raise a diagnostic ``RuntimeError`` that surfaces git's stderr
+— never a bare ``ValueError``. These tests inject the failure so no real CI-load
+race is needed, and they pin BOTH the retry path and the diagnostic surface.
 """
 
 from __future__ import annotations

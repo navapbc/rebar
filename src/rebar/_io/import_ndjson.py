@@ -1,41 +1,14 @@
-"""NDJSON import (P1.2): re-create a store's tickets through the locked write path.
+"""Recreate exported NDJSON through ordinary locked write APIs, never raw events.
 
-Consumes our own export NDJSON and reproduces the same *logical* state in the
-target repo by composing ordinary events (CREATE + EDIT-parent + LINK + COMMENT +
-FILE_IMPACT/VERIFY_COMMANDS + STATUS) — never raw-event injection. This is a
-**provenance** import, not raw fidelity: tickets get fresh ids + fresh HLC
-timestamps, with the source identity preserved as ``source_*`` (see
-:mod:`_provenance`).
+Tickets receive fresh IDs/HLCs while ``source_*`` preserves origin. Pass 1 creates and maps
+IDs without parents. Pass 2 applies parents, links, file impact/verify commands, comments,
+then child-first statuses so each phase's reads and close guards see committed prerequisites.
+Dangling targets warn and skip.
 
-Import is the highest-volume LOCAL writer. Any commit-batching for imports belongs
-to the ``rebar._store`` write path — NOT the Jira reconciler's inbound batcher (a
-separate system). See ``docs/architecture.md`` "Two writers, one store".
-
-Two passes:
-
-* **Pass 1 — create.** Every record becomes a ticket; we capture
-  ``{source_id → local_id}``. Parent is deliberately NOT set here (the parent may
-  not exist yet, and ``edit`` refuses a closed parent).
-* **Pass 2 — wire up,** in sub-phases ordered so each step's preconditions hold:
-  parents (while everything is still open) → links (so blocking-link promotion can
-  walk the now-set hierarchy) → file-impact / verify-commands → comments →
-  statuses (last, children-before-parents so the open-children close guard is
-  satisfied; ``force`` is a safety net for a genuinely-non-closed child).
-
-A dangling parent / link target (a source id not in this import set) is skipped
-with a warning — never a hard failure.
-
-**Performance (epic cold-stall-chalk).** The import is idempotent (skip-by-
-``source_id``) and defers push (``REBAR_SYNC_PUSH=off`` + one final push). On top of
-that, the independent passes — Pass 1 (CREATE), Pass 2a (parents), Pass 2c (file-
-impact / verify-commands), Pass 2d (comments) — are **batch-committed**: each pass
-buffers its events through the ``_seam.batch_sink`` contextvar and flushes them via
-``event_append.batch_stage_and_commit`` in ``_CHUNK``-sized commits, collapsing
-``ceil(pass/_CHUNK)`` commits from one-per-event. Each pass is flushed before the
-next so later passes read the prior pass's committed state. Pass 2b (links) and Pass
-2e (statuses) stay one-event-per-commit: 2b because ``add_dependency`` does read-
-after-write within the pass (reciprocal ``relates_to`` + idempotency), 2e because it
-is stateful (children-before-parents). Interactive writes are never batched.
+Imports skip existing ``source_id`` values and defer one final push. Independent create,
+parent, impact/command, and comment phases commit in ``_CHUNK`` batches, flushing between
+phases. Read-after-write links and stateful statuses retain per-event commits; interactive
+writes never use this importer-owned batching seam.
 """
 
 from __future__ import annotations
@@ -90,11 +63,10 @@ def _local_depth(local_id: str, parent_local: dict[str, str]) -> int:
 
 
 def _scan_existing_source_ids(tracker: str) -> dict[str, str]:
-    """Map ``source_id → local ticket_id`` for tickets already imported into the
-    target store. One streaming scan (one ``reduce_ticket`` per dir) at import start
-    so a re-run / resume-after-crash never duplicates: a record whose ``source_id``
-    is already present is skipped (existing tickets are never updated — that is sync,
-    out of scope)."""
+    """Scan once for ``source_id → local ticket_id`` to make resumes idempotent.
+
+    Existing imports are skipped, never updated; synchronization is out of scope.
+    """
     from rebar.reducer import reduce_ticket
 
     from .export_ndjson import _ticket_dir_names
@@ -120,17 +92,10 @@ def _rec_sid(rec: dict) -> str:
 def import_tickets(
     source: Any, *, dry_run: bool = False, repo_root: str | Path | None = None
 ) -> dict:
-    """Import tickets from NDJSON ``source`` into the target repo.
+    """Import NDJSON idempotently, skipping existing source IDs and pushing once.
 
-    Idempotent: a streaming scan of the target builds ``{source_id → local_id}`` and
-    any record whose ``source_id`` already exists is SKIPPED (never updated). A
-    re-run or resume-after-crash therefore produces zero duplicates. Push is deferred
-    for the duration (``REBAR_SYNC_PUSH=off``) and a single push runs at the end, so
-    a bulk import pays one network round-trip instead of one per event.
-
-    Returns run metadata
-    ``{created, skipped, links, comments, warnings, dry_run}`` (``warnings`` is a
-    list of human-readable strings; also echoed to stderr).
+    Return ``{created, skipped, links, comments, warnings, dry_run}``; warnings are also
+    logged for operators.
     """
     from rebar import config
 
@@ -181,12 +146,8 @@ def import_tickets(
     from rebar._commands.transition import transition_compute
     from rebar._store import event_append
 
-    # Chunk size for the batched-commit flush (epic cold-stall-chalk / B2). Bulk
-    # import collapses each independent pass's writes into ceil(pass/CHUNK) commits
-    # instead of one-per-event via event_append.batch_stage_and_commit. Hard-coded
-    # (single consumer — no config key). Interactive writes are unaffected: only the
-    # importer sets the _seam.batch_sink contextvar, so every other caller still
-    # commits one-event-per-commit (the per-write durability guarantee).
+    # Hard-code the importer-only batch size: independent phases use ceil(pass/CHUNK)
+    # commits, while callers outside its contextvar retain per-write durability.
     _CHUNK = 256
 
     def _flush(buf: list[tuple[str, dict]]) -> None:
@@ -354,12 +315,8 @@ def import_tickets(
                 except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad archive never aborts the import run; collected via warn()
                     warn(f"could not archive {local}: {exc}")
             elif status == "closed":
-                # transition_core requires a bounded --class on every bug *->closed
-                # write (ticket ed13). Carry the source close_class from the exported
-                # line (a top-level state key survives public_state); default a bug
-                # that lacks one to the safe bounded "undetermined" so the replay close
-                # is not rejected and the bug left open by the fail-open below (376d).
-                # Non-bug closes ignore close_class, so leave it empty for them.
+                # Bug closes require a bounded class: carry the exported value or default to
+                # ``undetermined``. Leave non-bug classes empty.
                 cc = str(rec.get("close_class") or "")
                 if not cc and rec.get("ticket_type") == "bug":
                     cc = "undetermined"
@@ -368,13 +325,8 @@ def import_tickets(
         # Close children before parents so the open-children guard is satisfied.
         closes.sort(key=lambda triple: _local_depth(triple[0], parent_local), reverse=True)
         for local, _sid, close_class in closes:
-            # Every closeable ticket is still 'open' here (only in_progress/blocked/
-            # archived were set above). This is deliberately a PLAIN close: before force
-            # unification the importer passed ``force=True``, which armed only the start-work
-            # bypass and never the completion close bypass (then keyed on ``force_close``).
-            # Supplying unified force here would silently expand import authority and skip the
-            # target repository's completion gate. Per-row fail-open below preserves replay's
-            # tolerance when that ordinary close is legitimately refused.
+            # Remaining closeable tickets are open. Use ordinary close authority so import never
+            # bypasses the target completion gate; per-row tolerance handles a legitimate refusal.
             try:
                 transition_compute(
                     local,
