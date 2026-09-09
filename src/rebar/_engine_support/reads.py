@@ -1,24 +1,11 @@
-"""Single-source read implementation for CLI, library, and MCP (story 23d2-e0f3).
+"""Shared CLI, library, and MCP implementations for show/list/ready/search/deps.
 
-This is the ONE implementation of the five read commands (show / list / ready /
-search / deps), consumed by:
+CLI dispatches through ``reads_cli.main``. Library and MCP callers use the
+``*_state`` helpers. Keeping both paths here prevents read-contract drift.
 
-  * the CLI dispatch arms in ``rebar._engine_support.reads_cli`` (via this module's
-    ``main``), which format output + emit the historical CLI text/JSON/errors;
-  * ``rebar/_reads.py`` (library + MCP), which calls the ``*_state`` helpers for
-    the parsed-object return shapes.
-
-It lives in ``rebar._engine_support`` so the single implementation is a real
-package submodule importable in-process by every interface (no ``sys.path``
-insertion of generic engine-dir names). History (the pre-collapse bash read path):
-``docs/bash-migration.md`` §5.
-
-Read-freshness policy (uniform across interfaces): each read first runs a
-best-effort, throttled (<=1/min) ``git fetch origin tickets`` + reconverge via
-``rebar._store.sync`` (HEAD-based local-ahead detection, merge-as-union,
-lock-guarded reset), throttled by a ``/tmp/.ticket-sync-<md5>`` marker, so all
-three interfaces share one contract. Opt out
-with ``REBAR_SYNC_PULL=off`` or the ``--no-pull`` CLI flag.
+Every interface performs the same best-effort, at-most-once-per-minute fetch and
+reconverge through ``rebar._store.sync``. ``REBAR_SYNC_PULL=off`` and the CLI
+``--no-pull`` flag disable it.
 """
 
 from __future__ import annotations
@@ -68,13 +55,10 @@ def sort_key_valid(sort: str) -> bool:
 
 
 def sort_states(states: list[dict], sort: str) -> list[dict]:
-    """Return ``states`` ordered by ``sort`` (``key`` asc, ``-key`` desc).
+    """Order states by an optional ``key``/``-key`` sort.
 
-    Unset values always sort LAST in both directions (a ``(is_none, value)``
-    discipline implemented by partitioning, NOT ``key or 0`` — which would sort
-    an unset priority as 0 and raise on mixed None/int). Ties break by
-    ``ticket_id`` ascending regardless of direction (stable two-stage sort).
-    An empty/unknown ``sort`` returns the input list unchanged (default order)."""
+    Missing values remain last in either direction, ties use ascending
+    ``ticket_id``, and an empty or unknown key preserves input order."""
     if not sort or sort.lstrip("-") not in _SORT_FIELD:
         return states
     desc = sort.startswith("-")
@@ -97,16 +81,12 @@ _NOT_A_REPO = "not inside a git repository (set REBAR_ROOT or run inside the rep
 
 
 def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
-    """Resolve the tracker dir for the read path. The configurable dir NAME comes from
-    the single source of truth (``rebar.config``: the ``REBAR_TRACKER_DIR`` override or
-    the ``tracker.dir`` config key, default ``.tickets-tracker``); this function adds the
-    read-path-specific git precondition, raising :class:`TrackerRootError` on an
-    uninitialized root (never ``sys.exit`` — this is reached from the library/MCP).
+    """Resolve the read-path tracker directory.
 
-    Resolution: an explicit override / absolute configured dir is returned verbatim with
-    NO git precondition (test fixtures and tooling point this at a hand-built tracker on
-    purpose); otherwise the relative dir name is joined under the resolved repo root
-    (explicit arg > REBAR_ROOT > git toplevel of cwd), which must be a git work tree.
+    Explicit ``REBAR_TRACKER_DIR`` and absolute ``tracker.dir`` values bypass the
+    Git precondition. Otherwise resolve the root from the argument, ``REBAR_ROOT``,
+    or Git, append the configured relative directory, and raise
+    :class:`TrackerRootError` outside a worktree.
     """
     from rebar.config import ConfigError, compose_config, repo_root_env, tracker_dir_override
 
@@ -138,14 +118,8 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
         except (subprocess.CalledProcessError, FileNotFoundError):
             raise TrackerRootError(_NOT_A_REPO) from None
     else:
-        # A repo-root was supplied (arg / REBAR_ROOT). The rebar
-        # store is git-backed, so require root to be a git work tree — matching
-        # the pre-collapse bash read path, which errored ("not inside a git
-        # repository") on an uninitialized dir. This is the precondition
-        # rebar_reconciler._read_local_tickets relies on: against a minimal /
-        # uninitialized environment `rebar list` must fail so the reconciler
-        # treats it as "no local tickets" rather than reading a half-built,
-        # uncommitted working tree. (Bug: see ticket below.)
+        # Explicit roots must still be Git worktrees. The reconciler relies on a
+        # failed read from an uninitialized root meaning "no local tickets".
         _r = subprocess.run(
             ["git", "-C", root, "rev-parse", "--is-inside-work-tree"],
             stdout=subprocess.DEVNULL,
@@ -158,10 +132,8 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
 
 
 # ───────────────────────────── freshness policy ──────────────────────────────
-# Read-path reconverge waits only briefly for the write lock before skipping this
-# round (bug slim-fetch-ledge). Freshness is an optimization; a read must prefer
-# its consistent local snapshot over stalling ~15s while a concurrent background
-# push holds the lock. Writers reconverge with the longer default.
+# Reads wait briefly for the write lock, then use their consistent local snapshot.
+# Writers retain the longer default.
 _RECONVERGE_LOCK_TIMEOUT = 2
 _LOCAL_READ_CONTEXT = ContextVar("rebar_local_read_context", default=False)
 _TICKET_VIEW_CONTEXT: ContextVar[object | None] = ContextVar(
@@ -207,12 +179,10 @@ def use_ticket_view(view: object | None) -> Iterator[None]:
 
 
 def _sync_disabled(root: str | None = None) -> bool:
-    """Whether inbound freshness (fetch/reconverge) is turned off — the ``sync.pull``
-    policy resolved via the typed config (env ``REBAR_SYNC_PULL=off`` or a config
-    file). ``root`` (the repo dir holding the
-    tracker) is passed explicitly so resolution is pure stat-based discovery — no
-    ``git`` subprocess for root detection. Best-effort: a malformed config leaves
-    sync enabled (every fetch failure is swallowed downstream anyway)."""
+    """Return whether typed ``sync.pull`` policy disables inbound freshness.
+
+    Resolve from ``root`` without a Git lookup. Malformed config leaves the
+    best-effort sync enabled."""
     from rebar.config import ConfigError, compose_config
 
     try:
@@ -222,22 +192,16 @@ def _sync_disabled(root: str | None = None) -> bool:
 
 
 def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
-    """Best-effort, throttled (<=1/min) fetch + reconverge of the local tickets
-    branch with origin/tickets. Shared by CLI/library/MCP so all three observe
-    the same freshness contract.
+    """Best-effort, at-most-once-per-minute fetch and in-process reconvergence.
 
-    Uses the ``/tmp/.ticket-sync-<md5>`` throttle marker and ``rebar._store.sync``
-    (HEAD-based local-ahead detection, merge-as-union, lock-guarded reset) — so
-    there is ONE sync implementation, not a reinvented one. Every failure path is
-    swallowed: a read must never fail because a fetch could not run.
+    All read surfaces share the marker throttle and ``rebar._store.sync``
+    implementation. Every failure is swallowed so remote freshness never breaks
+    a read.
     """
     if _LOCAL_READ_CONTEXT.get() or no_sync:
         return
-    # sync.pull and tickets.branch are CODE-repo config (rebar.toml lives in the checkout,
-    # not beside a REBAR_TRACKER_DIR-relocated store) — resolve the code root the config way
-    # (None == discover), NOT os.path.dirname(tracker), which is the config root only for a
-    # co-located store. repo_root_or_none() is resolved AFTER the cheap short-circuits above
-    # so a local/no-sync read still pays no root-discovery cost.
+    # Resolve ``sync.pull`` and ``tickets.branch`` from the code checkout, not a
+    # relocated tracker's parent, after the cheap local/no-sync exits.
     from rebar.config import repo_root_or_none
 
     cfg_root = repo_root_or_none()
@@ -272,22 +236,15 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
             marker_age = 9999
         if marker_age < 60:
             return
-        # Claim the throttle window BEFORE reconverging (bug slim-fetch-ledge): a
-        # rapid burst of reads (the scripted read→transform→write loops that hit this
-        # bug) would otherwise ALL enter reconverge before any marker was written and
-        # ALL stall on the same contended lock. Writing the marker first means only
-        # the first read in the window reconverges; the rest skip and return their
-        # consistent local snapshot immediately.
+        # Write the marker before reconverging so only the first read in a burst
+        # waits on the lock. Later reads immediately use consistent snapshots.
         try:
             with open(marker, "w") as fh:
                 fh.write(str(now))
         except OSError:
             pass
-        # Reconverge in-process (Tier D retired the bash helper; rebar._store.sync is
-        # the sole impl). The throttle/marker above is the single owner — reconverge
-        # itself is throttle-free. Use a SHORT lock timeout: a read must prefer its
-        # local snapshot over stalling many seconds while a concurrent background push
-        # holds the write lock (the empty-stdout-under-contention symptom).
+        # The marker owns throttling. Reconverge uses the short read-lock budget so
+        # a concurrent writer cannot stall this best-effort path.
         from rebar._store import sync as _store_sync
 
         try:
@@ -318,19 +275,12 @@ class TicketNotFoundError(ReadError):
 
 
 def inbound_deps_state(ticket_id: str, tracker: str) -> list[dict]:
-    """Computed INBOUND edges for the per-ticket show view (bug 05cb).
+    """Return sorted inbound links with source status for ``show``.
 
-    A LINK event is stored one-sided on the SOURCE ticket's record, so a
-    ticket's own ``deps`` list carries only its OUTGOING edges — "is this
-    ticket blocked?" is definitionally not answerable from the subject's
-    record alone. This derives the missing half at read time (no stored
-    mirror, so nothing can drift) via the same inbound derivation the close
-    gate uses (``find_inbound_relationships``), enriched with each source's
-    current status so blocked-ness is readable from a single ``show``.
-
-    Returns a sorted list of ``{"from_id", "relation", "status"}``, each
-    meaning "``from_id`` <relation> this ticket" (e.g. ``relation: blocks``
-    reads "from_id blocks this ticket").
+    LINK records store only outgoing edges. Deriving their reverse view through
+    ``find_inbound_relationships`` avoids a drift-prone mirror and makes blocker
+    status available in one response. Each row is
+    ``{"from_id", "relation", "status"}``.
     """
     entries: list[dict] = []
     for link in find_inbound_relationships(ticket_id, tracker)["inbound_links"]:
@@ -358,10 +308,8 @@ def show_state(
         raise ReadError(f'ticket "{resolved}" has no CREATE or SNAPSHOT event')
     if state.get("status") in ("error", "fsck_needed"):
         raise ReadError(f'ticket "{resolved}" has status "{state["status"]}"')
-    # NOTE: show emits the SAME compiled-state shape as list/search by default
-    # (production show==list==search contract, test_reducer_single_source);
-    # ``include_inbound`` layers the computed ``inbound_deps`` key on top for
-    # the per-ticket surfaces (CLI show default view, MCP show_ticket).
+    # Keep the default compiled-state shape shared with list/search.
+    # ``include_inbound`` adds the edge view only for per-ticket surfaces.
     state = public_state(state)
     if not state.get("ticket_type"):
         raise ReadError(f'ticket "{resolved}" has no CREATE or SNAPSHOT event')
@@ -376,12 +324,9 @@ def show_state(
 
 
 def _load_scratch(ticket_id: str) -> dict:
-    # scratch.base_dir via the typed config (env REBAR_SCRATCH_BASE_DIR or a config
-    # file). Resolve the CODE repo root the config
-    # way (None == discover), NOT os.path.dirname(tracker), which is the config root only
-    # for a co-located store; a relocated store's parent holds no rebar.toml. Explicit root
-    # → pure stat discovery (no git subprocess); a malformed config falls back to the
-    # default (display path).
+    # Resolve ``scratch.base_dir`` against the code checkout, not a relocated
+    # tracker's parent. Explicit roots avoid Git discovery. Malformed config falls
+    # back to the display path.
     from rebar.config import ConfigError, compose_config, repo_root_or_none
 
     repo_root = repo_root_or_none()
@@ -413,16 +358,10 @@ def _load_scratch(ticket_id: str) -> dict:
     return data
 
 
-#: Fields a DISCOVERY list never consumes, dropped when ``include_body`` is False.
+#: Fields excluded from discovery lists when bodies are omitted.
 #:
-#: ``description``/``comments`` are the bodies. The other four are signature material:
-#: measured on the real store (2,855 tickets) they were 88% of a "lean" list's bytes --
-#: ``authorship_ledger`` 26.2 MB (59%), ``attestations`` 10.4 MB, ``signature`` 2.6 MB --
-#: which is why an unfiltered MCP ``list_tickets`` returned 94.5 MB and killed the client's
-#: transport (story 98b8-5f08-1569-45cc, bug 494b-2dd3-e9d3-4fb0). A list caller wants to
-#: CHOOSE a ticket; the
-#: signature record is read per-ticket via ``show`` / ``verify-signature``. Per row this is
-#: 15,548 bytes -> 1,726 bytes.
+#: Lists use these rows only for selection. Ticket bodies and signature material
+#: remain available through ``show`` and verification surfaces.
 LEAN_OMITTED_FIELDS: tuple[str, ...] = (
     "description",
     "comments",
@@ -434,33 +373,22 @@ LEAN_OMITTED_FIELDS: tuple[str, ...] = (
 
 
 def lean_projection(state: dict) -> dict:
-    """A copy of ``state`` without :data:`LEAN_OMITTED_FIELDS`.
+    """Copy ``state`` without :data:`LEAN_OMITTED_FIELDS`.
 
-    The ONE spelling of the lean list row, shared by the event-log read path
-    (:func:`list_states`) and the snapshot read path
-    (``rebar._snapshot.ticket_view.TicketView.list_by_query``) so the two backends
-    cannot drift into returning different shapes for the same query.
+    Event-log and snapshot list backends share this definition, keeping lean row
+    shapes identical.
     """
     return {k: v for k, v in state.items() if k not in LEAN_OMITTED_FIELDS}
 
 
 def list_states(tracker: str, query: TicketQuery | None = None) -> list[dict]:
-    """List ticket states narrowed by a :class:`TicketQuery`. Two universal
-    cross-ticket filters reuse the same reducer/graph the bespoke ``list-epics``
-    used: ``min_children`` (keep tickets with ≥ N direct children) and
-    ``blocking_state`` ("unblocked" = all blockers closed via
-    ``find_ready_tickets``; "blocked" = active with an open blocker).
-    ``with_children_count`` additionally surfaces a ``children_count`` field — kept
-    OPT-IN so the default list shape stays identical to show/search (the
-    single-reducer invariant, bug f026). These generalize what ``list-epics``
-    filtered by, so it becomes a thin wrapper over ``list``.
+    """List states filtered by ``query``.
 
-    ``query.include_body`` (default ``True``) controls whether the bulky
-    ``description`` and ``comments`` fields are emitted. Agent-facing list surfaces
-    (the ``list`` CLI and the MCP ``list_tickets`` tool) pass ``False`` so the
-    default list stays lean; internal callers (``validate``/``next_batch``/
-    ``list-epics``) keep the default and still receive the bodies they consume.
-    ``query`` defaults to an all-pass :class:`TicketQuery` (list everything)."""
+    ``min_children`` and ``blocking_state`` reuse reducer and graph data.
+    ``with_children_count`` is opt-in to preserve the default show/list/search
+    shape. When ``include_body`` is false, agent-facing lists omit bodies and
+    signature material. Internal callers retain them. A missing query selects
+    every ticket."""
     if query is None:
         query = TicketQuery()
     # Unpack once into locals; the filter body below is unchanged. ``ticket_type``
@@ -586,11 +514,8 @@ def search_state(
     states = reduce_all_tickets(
         tracker, exclude_archived=not include_archived, exclude_deleted=True
     )
-    # Enrich each state with its bound Jira key so `search <JIRA-KEY>` surfaces the
-    # ticket `show <JIRA-KEY>` resolves (the reported footgun). Built ONCE from the
-    # binding store reverse map — the same authoritative source
-    # `_resolve_via_binding_store` reads — keeping `search_states` pure (no
-    # filesystem/binding access inside the reducer).
+    # Add Jira keys once from the binding store so search matches show resolution
+    # without introducing filesystem access into the reducer.
     jira_by_ticket = binding_jira_key_map(tracker)
     if jira_by_ticket:
         for st in states:
@@ -614,11 +539,9 @@ def search_state(
 
 
 def recent_session_logs_state(tracker: str, *, limit: int = 5) -> list[dict]:
-    """The ``limit`` newest ``session_log`` tickets, ordered by ``created_at``
-    (ns) descending. session_logs are hidden from default ``list`` but are the
-    sole subject here, so this is the one read that includes them by type — the
-    counterpart to ``search``/``show``. Archived/deleted logs are excluded; a
-    ``limit`` <= 0 returns an empty list."""
+    """Return session logs in descending ``created_at`` order without archived or deleted rows.
+
+    Session logs are hidden from normal lists. Nonpositive limits return no rows."""
     states = reduce_all_tickets(tracker, exclude_archived=True, exclude_deleted=True)
     logs = [t for t in states if t.get("ticket_type") == "session_log"]
     # created_at is the CREATE-event timestamp (ns); missing/None sorts oldest.
