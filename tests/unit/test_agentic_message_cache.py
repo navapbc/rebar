@@ -1,35 +1,13 @@
-"""Bug dd27: the AGENTIC message tail was re-sent UNCACHED every turn.
+"""Verify message-history prompt caching on agentic provider paths.
 
-``cache_settings_for`` set exactly two of the four available breakpoints (instructions +
-tool definitions), so on the agentic path the GROWING tool-result history rode outside every
-breakpoint and was re-sent uncached on each turn — input cost O(N^2) in turns.
+Agentic Anthropic requests cache after accumulated tool-result history while retaining
+the system and tool breakpoints. Agentic Bedrock requests express the same boundary
+with a final-message ``cachePoint`` and never top-level ``cache_control``. Single-turn
+requests remain byte-identical to frozen baseline settings.
 
-It was invisible to rebar's own telemetry: ``warn_if_cache_ineffective`` requires
-``cache_read_tokens == 0``, but the SYSTEM block WAS hitting cache, so the counter was never
-zero and the predicate could never fire. A usage log would never have surfaced it.
-
-THE DISCRIMINATING EVIDENCE IS NOT "A BREAKPOINT EXISTS" — two breakpoints existed before this
-bug was filed, which is precisely why a settings-shaped assertion cannot tell the fixed code
-from the broken code. The evidence is the CAPTURED OUTBOUND REQUEST:
-
-* agentic/anthropic — the request carries the automatic-caching directive that puts a
-  breakpoint AFTER the accumulated history, and the request grows a breakpoint it did not
-  have before;
-* agentic/bedrock — the same intent expressed with BEDROCK'S OWN key, landing as a
-  ``cachePoint`` on the last message, and NEVER as a top-level ``cache_control``. This is the
-  trap: Bedrock has no ``bedrock_cache`` automatic key and rejects a top-level
-  ``cache_control`` outright ("Extra inputs are not permitted"). LangChain shipped exactly
-  this regression — their prompt-caching middleware broke on Bedrock in 1.4.1 by switching to
-  top-level automatic caching (langchain#37042);
-* single_turn — BYTE-IDENTICAL to the pre-fix request. That is the regression this change
-  could plausibly cause, so it is pinned against a FROZEN copy of the pre-fix settings
-  (:data:`_PRE_FIX_ANTHROPIC_SETTINGS` / :data:`_PRE_FIX_BEDROCK_SETTINGS`) rather than
-  against the implementation's own output, which would make the assertion a tautology.
-
-Capture technique is story 0d76's, reused rather than reinvented: drive the PRODUCTION path
-(the real ``_build_retrying_anthropic_model`` builder behind its ``_wrapped_transport`` seam;
-the real ``BedrockConverseModel`` over an intercepted ``converse``) until the request is fully
-assembled, then abort at the wire boundary. Zero network calls, zero tokens.
+Tests capture requests from production builders at the transport boundary without
+network calls. This distinguishes the history breakpoint from the two other
+breakpoints and enforces each provider's request schema.
 """
 
 from __future__ import annotations
@@ -238,10 +216,11 @@ def _capture_bedrock_request(
 
 
 def test_agentic_anthropic_adds_the_automatic_message_breakpoint() -> None:
-    """THE defect, at the settings seam. The agentic arm keeps both existing breakpoints and
-    adds `anthropic_cache` — the automatic key that puts a breakpoint after the accumulated
-    history. `anthropic_cache_messages` must NOT also be set: pydantic-ai raises
-    `UserError('anthropic_cache and anthropic_cache_messages cannot both be enabled')`."""
+    """Require agentic Anthropic settings to add only automatic history caching.
+
+    The system and tool breakpoints remain, while ``anthropic_cache_messages`` stays
+    absent because it conflicts with ``anthropic_cache``.
+    """
     settings = cache_settings_for(_caps("anthropic"), execution_mode="agentic")
     assert settings is not None
     assert settings["anthropic_cache"] is True
@@ -314,13 +293,11 @@ def test_an_unknown_execution_mode_is_treated_as_single_turn() -> None:
 
 
 def test_captured_agentic_request_carries_a_breakpoint_after_the_message_history() -> None:
-    """THE discriminating assertion. Captured from the production Anthropic path with a
-    mid-flight tool loop: the request carries the top-level `cache_control` directive, which is
-    how Anthropic's automatic caching places a breakpoint at the END of the prompt — i.e. after
-    the accumulated tool-result history — on every turn.
+    """Require captured Anthropic requests to cache after tool-result history.
 
-    The pre-fix settings are captured in the SAME run for a real before/after diff, so this
-    cannot pass by the breakpoints that already existed."""
+    The agentic request carries top-level ``cache_control``. Same-run baseline capture
+    proves that the system and tool breakpoints cannot satisfy the assertion.
+    """
     messages, tools = _multi_turn_messages(), _tools()
     before = json.loads(_capture_anthropic_body(_PRE_FIX_ANTHROPIC_SETTINGS, messages, tools))
     after = json.loads(
@@ -397,11 +374,11 @@ def test_captured_bedrock_single_turn_request_is_identical_to_the_pre_fix_reques
 
 
 def test_the_anthropic_breakpoint_budget_is_not_exceeded_on_the_agentic_path() -> None:
-    """pydantic-ai's `_limit_cache_points` drops the budget to `MAX_CACHE_POINTS = 3` when
-    automatic caching is on, and RAISES `UserError` if system + tools alone exceed it. This
-    change puts rebar at exactly 3 (system + tools + the automatic point), so the assembly must
-    complete rather than raise — proven by the request existing at all, plus the explicit count
-    of EXPLICIT breakpoints, which must stay at 2."""
+    """Require Anthropic request assembly to stay within three cache points.
+
+    Automatic caching lowers ``MAX_CACHE_POINTS`` to three. The request contains two
+    explicit system and tool points plus the automatic history point.
+    """
     body = json.loads(
         _capture_anthropic_body(
             cache_settings_for(_caps("anthropic"), execution_mode="agentic"),

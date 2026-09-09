@@ -80,12 +80,12 @@ def test_absence_veto_defaults_are_na_in_the_model() -> None:
 
 
 def test_f1fa_1144_false_absence_regression_fixture() -> None:
-    """Regression fixture replaying the f1fa 11:44 verdict (norm ne7642adbf79 + the G3 finding
-    n0eb3f2e9da9): the blocking finding asserted the plan 'never tasks anyone with capturing the
-    pre-cutover snapshot' — a FALSE absence (the plan named the actor, the artifact
-    infra/gerrit/access-snapshot-pre-autolander.json, and the timing). Pass-3 must DROP it via the
-    absence veto (claims_absence=yes AND absence_confirmed_in_context=no), while a genuinely-true
-    absence in the SAME shape survives."""
+    """Replay the f1fa 11:44 false-absence verdict and its control.
+
+    The plan names the actor, pre-cutover snapshot, and timing, so Pass 3 drops the
+    finding when ``claims_absence=yes`` and ``absence_confirmed_in_context=no``. A
+    matching finding about a confirmed absence remains.
+    """
     # norm ne7642adbf79 — the false-absence blocking finding the verifier confirmed was refuted
     false_absence = _verif(
         binary={"claims_absence": "yes", "absence_confirmed_in_context": "no"},

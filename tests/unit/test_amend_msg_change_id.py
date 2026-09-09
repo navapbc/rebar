@@ -1,23 +1,12 @@
-"""Ticket 5304: amending a commit message must not silently drop its ``Change-Id``.
+"""Verify safe Gerrit commit-message amendments.
 
-``git commit --amend -F <file>`` (and ``-m``) REPLACES the whole message, so the
-``Change-Id`` trailer goes with it. Gerrit's ``commit-msg`` hook then stamps a FRESH one —
-it only ever ADDS a Change-Id when none is present — and the next
-``git push gerrit HEAD:refs/for/main`` opens a SECOND change instead of adding a patchset
-to the existing one. That happened three times in one session (abandoned duplicates
-Gerrit 1921, 1926, 1931).
-
-A hook cannot close this: ``git commit --amend -F <file>`` hands
-``prepare-commit-msg`` ``source='message'`` with an EMPTY sha — byte-identical to a fresh
-``-F`` commit — so nothing downstream can tell "amending, keep the Change-Id" from
-"new commit, stamp one". Every large Gerrit project (Go's ``git codereview change``,
-OpenStack's ``git-review``, Android's ``repo upload``, Chromium's ``git cl upload``)
-therefore makes the failure UNREACHABLE with a wrapper rather than DETECTABLE with a
-guard. ``scripts/amend_commit_message.py`` (``make amend-msg FILE=…``) is that wrapper.
-
-The load-bearing test here is the CONTRAST. "the wrapper preserved the Change-Id" passes
-vacuously if the wrapper is broken in a way that leaves the message untouched, so the
-same fixture, from the same starting commit, must also show the NAIVE form losing it.
+Naive ``git commit --amend -m`` or ``-F`` replaces trailers, so the Gerrit hook can
+issue a new ``Change-Id`` and DCO sign-offs can disappear.
+``scripts/amend_commit_message.py``, exposed by ``make amend-msg``, carries the
+existing change ID and sign-offs into the replacement while respecting supplied
+sign-offs. Contrast tests start from the same commit so an unchanged message cannot
+pass vacuously. The wrapper also rejects missing IDs, missing message files, and
+host-shared fixed temporary paths.
 """
 
 from __future__ import annotations

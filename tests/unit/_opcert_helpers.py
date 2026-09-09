@@ -1,10 +1,7 @@
-"""Shared fixtures for op-cert tests under Option B (story 4214).
+"""Build op-cert test stores with tickets-branch key-era history.
 
-Option B anchors op-cert key era-validity at the certificate's STORAGE ANCHOR — a TICKETS-BRANCH
-commit — and expresses key era boundaries as TICKETS-BRANCH log positions
-(``added_at_log_position`` / ``revoked_at_log_position``). So these tests need a real rebar store
-whose tickets-branch commits form a resolvable position chain, rather than a bare code repo. This
-module builds that store and returns the chain, plus the ssh keypair helper.
+Option B validates a key era at the certificate's storage anchor. These helpers
+return a store, an ordered log-position chain, and an SSH key pair.
 """
 
 from __future__ import annotations
@@ -27,12 +24,10 @@ def keypair(tmp_path: Path, name: str) -> tuple[str, str]:
 
 
 def store_with_chain(tmp_path, monkeypatch, n: int) -> tuple[Path, str, list[tuple[str, str]]]:
-    """A real rebar store seeded with ``n`` tickets so the tickets branch has a resolvable chain.
+    """Return ``(repo, tracker, positions)`` after creating ``n`` ticket commits.
 
-    Returns ``(repo, tracker, positions)`` where ``positions`` is a list of
-    ``(log_position, tickets_branch_commit)`` sorted OLDEST-first. Each entry's commit is an
-    ancestor of every later entry's commit, so callers can pick an early position as a key's
-    ``added_at_log_position`` and a later commit as the storage anchor S.
+    Each ordered ``(log_position, commit)`` entry precedes later commits, allowing
+    callers to choose a key-era start and a later storage anchor.
     """
     import rebar
     from rebar._commands._seam import tracker_dir

@@ -1,15 +1,10 @@
-"""Happy-path oracle for RP-05 S2c advanced-command parser factories.
+"""Exercise the happy path for advanced command parser factories.
 
-These tests pin the *shape* of the migration: the S2a factory contract is
-extended with the optional presentation passthroughs the advanced families
-need, every advanced command family exposes a lean ``build(*, prog=...)``
-parser factory that constructs a :class:`RebarArgumentParser`, nested families
-still select their subcommand, and constructing any advanced parser imports no
-heavy optional runtime.
-
-Edge/parity behavior (byte-exact help, the ParseError-vs-SystemExit exit-code
-seam, alias option-surface sharing, and full registry factory-reference
-readiness) lives in the held-out interface oracle, not here.
+The shared factory accepts optional presentation settings needed by advanced command
+families. Each family builds a :class:`RebarArgumentParser`, preserves nested
+subcommand selection, and avoids optional-runtime imports during construction.
+Interface tests cover exact help, parse-error exit behavior, aliases, and registry
+references.
 """
 
 from __future__ import annotations

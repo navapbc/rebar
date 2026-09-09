@@ -1,37 +1,17 @@
-"""Every CloudWatch alarm in ``infra/terraform/`` must notify somebody (ticket 9baf).
+"""Enforce notification and missing-data contracts for Terraform CloudWatch alarms.
 
-Two alarms — ``voter_errors`` (``monitoring_s4b.tf``) and ``replication_errors``
-(``monitoring_s5.tf``) — shipped with NO ``alarm_actions``, so they transitioned
-``OK -> ALARM`` and told nobody. Eleven of the repo's thirteen alarms wire the shared
-``aws_sns_topic.alerts``; those two were the outliers. ``monitoring.tf`` names this exact
-condition a "silent-alarm gap".
-
-Two instances that both survived human review means the convention was not checkable, so this
-is the check: parse EVERY ``aws_cloudwatch_metric_alarm`` block under ``infra/terraform/`` and
-fail on any that does not assign ``alarm_actions``. The same guard also asserts that
-host-published disk alarms treat missing data as breaching, so a dead publisher pages.
-
-An alarm that legitimately should not notify must say so with an explicit marker comment
-inside its block::
+Every ``aws_cloudwatch_metric_alarm`` assigns ``alarm_actions`` unless its block uses
+this reasoned opt-out marker.
 
     # rebar:allow-actionless-alarm: <reason>
 
-Silence never passes.
-
-The same file also guards the DEAD-PUBLISHER case (ticket bff5-9163-cddd-4158). Every
-``rebar/host`` metric is an offset-delta published unconditionally by
-``infra/scripts/observability.sh`` on a 5-minute timer: a healthy period publishes ``0``, not
-nothing. So ``treat_missing_data = "notBreaching"`` on such an alarm does not mean "quiet when
-healthy" — it means "quiet when the publisher is DEAD", which is the one state the alarm most
-needs to announce. Every alarm in the ``rebar/host`` namespace must therefore treat missing
-data as breaching, unless its block carries::
+Alarms in the ``rebar/host`` namespace treat missing data as breaching because their
+metrics publish zero during healthy periods. A reasoned opt-out uses this marker.
 
     # rebar:allow-missing-data-notbreaching: <reason>
 
-Both markers require a non-empty reason; a bare marker is an error, not an opt-out.
-
-This is an offline text-contract test on the committed IaC, following
-``tests/unit/test_mirror_lock_terraform.py``; live confirmation is an apply-time observation.
+Both markers require text after the colon. Alarm-count floors prevent empty parser
+results from passing. The checks inspect committed Terraform without contacting AWS.
 """
 
 from __future__ import annotations
@@ -46,11 +26,8 @@ pytestmark = pytest.mark.unit
 
 _TF_DIR = Path(__file__).resolve().parents[2] / "infra" / "terraform"
 
-# The repo had 13 alarms when this guard was written. The floor exists so that a parser that
-# silently matches NOTHING — after an HCL reformat, a directory move, or a regex slip — fails
-# loudly instead of passing vacuously. A vacuous guard is the failure mode this guard exists
-# to prevent, so it must not be able to fall to it itself. Raise this floor when alarms are
-# added; never lower it without deleting alarms.
+# This floor makes an empty or incomplete alarm parse fail. Raise it when alarms are
+# added, and lower it only when alarms are deleted.
 _MIN_EXPECTED_ALARMS = 31
 
 _ALARM_RE = re.compile(
@@ -491,12 +468,10 @@ _QUOTED_DESCRIPTION_RE = re.compile(r'alarm_description\s*=\s*"(?P<body>(?:[^"\\
 
 
 def _rendered_description(match: re.Match[str]) -> str:
-    """The string terraform actually sends to AWS.
+    """Return the description that Terraform derives from a heredoc.
 
-    ``<<-`` strips the common leading indentation, so measuring the RAW heredoc body
-    over-counts by the indent on every line. Verified against the live alarm
-    ``rebar-bedrock-invoke-client-errors``: 1037 raw, 981 dedented, and AWS reports 982.
-    Counting raw would have failed this valid alarm.
+    ``<<-`` removes common leading indentation, while the plain form preserves it.
+    Measuring the derived value enforces AWS's 1024-character limit.
     """
     body = match.group("body")
     return textwrap.dedent(body) if match.group("squash") else body

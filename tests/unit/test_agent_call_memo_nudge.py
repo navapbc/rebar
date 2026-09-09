@@ -1,17 +1,10 @@
-"""f6fc: memoize + nudge duplicate read-only tool calls at the shared agent-call seam.
+"""Specify memoization and nudges for duplicate read-only agent tools.
 
-Held-out oracle for the f6fc acceptance criteria. A duplicate ALLOWLISTED read-only
-tool call returns the cached result WITHOUT re-executing the wrapped tool, plus a
-graduated static nudge (level-1 on the first repeat, level-2 thereafter, byte-stable
-for prompt caching). The runaway guard stays OUTERMOST, but its executed-work ratio no
-longer counts memo-served repeats as loop evidence (bug 3211) — a pure cache-served
-loop is bounded by the served-streak backstop instead, while free re-reads interleaved
-with novel work never abort the run. Error results (the "Error:"-prefixed strings the
-read-only tools return; they
-never raise into the agent loop) are NOT memoized and re-execute on retry; the
-deterministic sentinel-empty results ("(no matches)") ARE memoized — the core waste
-case. Only the four read-only tools are wrapped; write/non-deterministic tools always
-execute.
+The four allowlisted tools cache successful results, including ``(no matches)``, and
+return byte-stable escalating nudges without re-execution. ``Error:`` results and
+non-allowlisted, write, or nondeterministic tools execute again. The outer runaway
+guard excludes cached calls from its executed-work ratio, bounds cache-only loops by
+served streak, and permits cached reads interleaved with new work.
 """
 
 from __future__ import annotations
@@ -375,11 +368,7 @@ def test_parallel_batch_of_identical_calls_executes_wrapped_tool_once(monkeypatc
     )
 
 
-# ── lever 2 (story 2948): read_file memo NORMALIZED BY PATH ─────────────────────────────
-# The f6fc memo keyed on read_file's exact (path, line_start, line_end) signature, so re-reads
-# of the SAME file at DIFFERENT ranges slipped past it — the measured dominant verifier waste
-# (48 read_file calls, 11 distinct files, 77% re-reads). Lever 2 caches the whole file ONCE (an
-# internal line_start=1/line_end=0 read) and serves every subsequent range by slicing the cache.
+# Path-normalized memoization reads each file once and serves later ranges from cached text.
 
 
 def _file_backed_read_file(lines: list[str], calls: dict):

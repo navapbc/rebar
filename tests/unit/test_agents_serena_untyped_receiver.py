@@ -1,15 +1,10 @@
-"""Guard the untyped-receiver caveat in the navigation guidance (bug dbf9).
+"""Document Serena's blind spot for attribute calls on ``Any`` receivers.
 
-`AGENTS.md` §"Navigating the codebase" documented `grep`'s blind spot (a symbol named as a
-string) but not Serena's second one: an attribute access on a receiver whose static type is
-`Any` — an unannotated parameter, or one explicitly annotated `Any` — cannot be bound to a
-definition by Pyright, so `find_referencing_symbols` returns an EMPTY result rather than an
-error. Reproduced on `AcliRestMixin/set_entity_property` (zero references; three real call
-sites), with `AcliRestMixin/_direct_rest_put_raw` in the same class as the control.
-
-`docs/code-navigation.md` opens by stating why this matters: the rule "replaced an earlier one
-that was wrong in an important case — and a rule that is wrong some of the time teaches agents
-to discount it all of the time". These tests keep the rule from being wrong in this case.
+Pyright cannot bind an attribute on an unannotated or explicitly ``Any`` receiver, so
+``find_referencing_symbols`` may return an empty set despite existing callers. The
+``AcliRestMixin.set_entity_property`` reproduction has three call sites, while
+``_direct_rest_put_raw`` is the control. Tests keep ``AGENTS.md`` aligned with
+``docs/code-navigation.md``.
 """
 
 from pathlib import Path
@@ -56,10 +51,7 @@ def test_nav_doc_carries_the_untyped_receiver_reproduction() -> None:
     doc = NAV_DOC.read_text(encoding="utf-8")
     assert "set_entity_property" in doc
     assert "_direct_rest_put_raw" in doc, "the control that proves Serena is not simply broken"
-    # The three real call sites the empty result hides. The third moved from
-    # ``apply_inbound_records.py`` into ``apply_inbound_events.py`` when that module was
-    # split at its concern boundary (ticket 6f51-f8a4-b4fb-450c); the doc cites the writer's
-    # true home, so this anchor follows it. The census is unweakened — still three sites.
+    # These three call sites are the evidence hidden by Serena's empty result.
     assert "dispatch_one.py" in doc
     assert "binding_store.py" in doc
     assert "apply_inbound_events.py" in doc
