@@ -249,3 +249,44 @@ def test_block_impact_on_an_empty_corpus_reports_zeroes_instead_of_dividing_by_z
     assert result["of_all_changes"] == 0.0
     assert result["of_surviving"] == 0.0
     assert result["mean_validity"] is None
+
+
+def test_calibration_script_normalizes_synonym_labels_before_accumulating() -> None:
+    mod = _calibrate_module()
+    mod.ROUTING = _routing()
+    mod.SYNONYMS = dict(registry.CRITERIA_SYNONYMS)
+
+    assert mod._crits({"criteria": ["sec", "security", "documentation"]}) == [
+        "security",
+        "docs",
+    ]
+
+
+def test_newly_blocking_uses_normalized_dump_specs() -> None:
+    mod = _calibrate_module()
+    mod.ROUTING = _routing()
+    mod.SYNONYMS = dict(registry.CRITERIA_SYNONYMS)
+
+    criterion, threshold = mod._parse_block_impact_specs(["sec=0.45"])[0]
+    findings = mod.newly_blocking(
+        {
+            "alpha": [
+                {
+                    "pools": {
+                        "blocking": [],
+                        "advisory": [
+                            {"criteria": ["sec"], "priority": 0.45, "validity": 1.0},
+                            {"criteria": ["security"], "priority": 0.44, "validity": 1.0},
+                        ],
+                        "dropped": [],
+                        "indeterminate": [],
+                    }
+                }
+            ]
+        },
+        criterion,
+        threshold,
+    )
+
+    assert criterion == "security"
+    assert [f["priority"] for f in findings] == [0.45]
