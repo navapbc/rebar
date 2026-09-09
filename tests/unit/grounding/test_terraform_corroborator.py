@@ -141,6 +141,14 @@ def _fixture_binary(
                 time.sleep(10)
             elif {mode!r} == "overflow":
                 sys.stdout.write("x" * (4 * 1024 * 1024 + 2))
+            elif {mode!r} == "stdout_overflow_then_hang":
+                sys.stdout.write("x" * (4 * 1024 * 1024 + 2))
+                sys.stdout.flush()
+                time.sleep(10)
+            elif {mode!r} == "stderr_overflow_then_hang":
+                sys.stderr.write("x" * (64 * 1024 + 2))
+                sys.stderr.flush()
+                time.sleep(10)
             elif {mode!r} == "nonzero":
                 sys.stderr.write("child stream {SECRET}\\n")
                 sys.exit(1)
@@ -237,6 +245,8 @@ def test_exact_declaration_matches_every_supported_class(
     assert result.receipt["outcome"] == "match"
     assert result.receipt["reason"] is None
     assert result.receipt["reason_detail"] is None
+    encoded = json.dumps({"e": result.evidence, "r": result.receipt}, sort_keys=True)
+    assert SECRET not in encoded
     schemas.validator(schemas.GROUNDING).validate(result.evidence)
     schemas.validator(schemas.TERRAFORM_GROUNDING_RECEIPT).validate(result.receipt)
 
@@ -362,6 +372,20 @@ def test_faults_abstain_redact_cleanup_and_retry(
 
     retry, _capture, _ = _corroborate(repo, monkeypatch)
     assert retry.evidence["outcome"] == ev.OUTCOME_MATCH
+
+
+@pytest.mark.parametrize("mode", ["stdout_overflow_then_hang", "stderr_overflow_then_hang"])
+def test_output_caps_abort_running_child_before_deadline(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    from rebar.grounding import terraform_corroborator as tc
+
+    monkeypatch.setattr(tc, "DEADLINE_SECONDS", 5.0)
+    result, _capture, _ = _corroborate(repo, monkeypatch, mode=mode)
+    assert result.evidence["outcome"] == ev.OUTCOME_ABSTAIN
+    assert result.receipt["reason_detail"] == "worker_failure"
+    assert not hasattr(tc, "_terminate")
+    assert not list(repo.parent.glob(".rebar-tfci-*"))
 
 
 @pytest.mark.parametrize(
