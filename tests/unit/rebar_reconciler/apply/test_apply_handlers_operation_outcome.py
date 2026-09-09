@@ -1,20 +1,12 @@
-"""[P0] RP-03 S1 T4 — the legacy-default summary-executor seam in ``handle_update``.
+"""Verify the injected summary executor preserves update outcomes.
 
-``BatchApplyContext`` carries an optional, **constructor-injected** ``summary_executor``.
-It defaults to ``None`` — the production wiring passes nothing, so every outbound update
-stays on the legacy ``dispatch_one.update_one`` path exactly as before (no config key, no
-environment key gates it: selection is pure constructor state).
+With no executor, `handle_update` uses `dispatch_one.update_one`. An injected
+provider-neutral `(client, jira_key, new_summary) -> OperationOutcome` handles
+summary-only updates. `applied` and `recovered` results advance
+`ctx.synced_fields`. Constructor state alone selects the route.
 
-When a test injects a ``summary_executor`` — a provider-neutral callable
-``(client, jira_key, new_summary) -> OperationOutcome`` — an outbound update whose fields
-are EXACTLY ``{"summary": <str>}`` routes through it instead of the generic path. A confirmed
-outcome (``applied`` / ``recovered``) preserves the legacy result and advances the ADR-0026
-baseline (``ctx.synced_fields``) with the summary that landed.
-
-This file is the happy-path core. The edge tables — mixed-field non-splitting, the
-generic-retry poison bypass, terminal (``commit_unknown`` / ``retryable_deferred``) mapping
-with its single redacted ≤512-code-point message and *no* baseline/provenance advance, the
-512-boundary, and the ADR-0103 S3-ownership assertion — live in the held-out suite.
+The held-out suite covers mixed fields, retry bypass, terminal mapping, message
+bounds, and ADR 0103 ownership.
 """
 
 from __future__ import annotations

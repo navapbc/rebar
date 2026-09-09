@@ -1,12 +1,8 @@
-"""Parametrized DirectionMismatchError tests across every _LEAVES entry (2f51 DD remediation).
+"""Verify every registered apply leaf rejects an opposite direction.
 
-For each (direction, action) pair registered in applier._LEAVES, this test:
-1. Constructs a valid Mutation with the leaf's expected direction.
-2. Flips direction to the opposite via object.__setattr__ (frozen dataclass bypass).
-3. Invokes the leaf and asserts DirectionMismatchError is raised.
-
-The production _direction_guard is wired identically on all 12 leaves; this
-test is structural coverage to satisfy the per-leaf DD requirement from 2f51.
+Each case builds a valid `Mutation`, flips its frozen direction, and invokes
+the matching `_LEAVES` entry. Failures identify the specific direction/action
+pair.
 """
 
 from __future__ import annotations
@@ -59,15 +55,7 @@ def _permissive_client():
 
 
 def test_every_leaf_raises_direction_mismatch_when_direction_flipped(applier):
-    """Smoke-loop: every leaf must raise DirectionMismatchError when its
-    Mutation's direction is set to the opposite of the leaf's expectation.
-
-    Implemented as a single test (not @pytest.mark.parametrize) so the
-    fixture loads applier exactly once and so a single test name documents
-    "all leaves covered" per the 2f51 DD. Per-pair failures are collected
-    into a single failures list and reported via one assert at the end so
-    that a leaf with a missing or wrong-direction guard is clearly attributed.
-    """
+    """Call every leaf with the opposite direction and report all failures."""
     mut_mod = applier._load_mutation_module()
     errs = applier._load_errors_module()
     client = _permissive_client()

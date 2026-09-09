@@ -1,20 +1,12 @@
-"""HELD-OUT oracle (rebar-debug, bug af1b) — a scoped `sync --only` LIVE pass MUST
-dispatch a bound issue's outbound scalar UPDATE to the transport write, exactly as the
-legacy `--filter-local-ids` route does.
+"""Exercise scoped sync dispatch in an isolated process.
 
-Confirmed root cause: run_differs builds the outbound update with ``target = jira_key``
-and hands ``ticket_planner.plan_pass`` a selection whose ``ids`` are the SELECTED LOCAL
-IDS only. ``_scope_excluded`` then compares the jira-key target against those local ids
-(``target not in ids``), classifies the in-scope bound-issue update as ``scope_deferred``,
-and the live coordinator+fuse reroute (batch_dispatch) skips the deferred plan — the write
-is dropped. The legacy route works because it scopes via ``_build_filter_target_set``
-(LOCAL IDS ∪ their bound JIRA KEYS). This oracle pins the write actually landing on the
-primary route (the teeth: it is RED before the fix for ``--only`` and GREEN for
-``--filter-local-ids``).
+`sync --only` must deliver a bound issue's scalar update to `update_issue`,
+matching `--filter-local-ids`. The former selects local IDs while planned
+outbound updates target Jira keys, so scoping must retain both identities. An
+in-memory transport isolates the routing contract from Jira.
 
-No live Jira: a faithful in-memory transport records ``update_issue`` calls. The bug is not
-codec/DC-specific, so an offline transport reproduces it (matching the live in-CI probe for
-bug af1b; context: external, GH Actions run 33129851229).
+Consumers invoke `python _sync_only_dispatch_probe.py <route> <base_dir>`.
+`test_sync_only_scalar_update_dispatch_heldout.py` reaches it through `_PROBE`.
 """
 
 from __future__ import annotations

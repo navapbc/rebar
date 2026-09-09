@@ -1,40 +1,13 @@
-"""The Cloud/ACLI transport returns a BATCH ENVELOPE, not a comment resource.
+"""Verify comment identity handling for ACLI batch envelopes.
 
-Bug irongrey-chubby-oxpecker (aa7b-5e47-6d3d-4615). ``acli jira workitem comment
-create --json`` reports per-work-item results::
+ACLI returns work-item results whose `results[].id` is an issue key, not a
+comment ID. `acli_cli_ops.add_comment` normalizes a successful envelope to
+`{"id": None, "acli_envelope": ...}` and passes DC/REST resource IDs through.
+Unrecognized shapes raise.
 
-    {"results": [{"status": "SUCCESS", "message": "...", "id": "REB-1861"}],
-     "totalCount": 1, "successCount": 1}
-
-There is no top-level ``id`` (and ``results[].id`` is the WORK ITEM key, not a
-comment id) because the command is batch-shaped -- ``--key`` takes a list, and
-``--jql``/``--filter`` are alternatives. Verified live against acli 1.3.19 and
-already documented for the ``comment`` verb by ``AcliMutationError``
-(``adapters/jira/acli_subprocess.py``, bug 44de).
-
-``_record_comment_id`` keyed its persistence on ``result["id"]``, so on Cloud it
-silently no-opped for every successful post: ``comment_ids`` stayed empty, the
-PRIMARY id-identity skip in ``_diff_comments`` could never fire, and the lossy
-SECONDARY body-equality skip became the only defence -- re-posting every richly
-formatted comment on every hourly pass.
-
-The contract these tests pin: after a SUCCESSFUL ``add_comment`` the entry's
-``local_comment_key`` is recorded in the comment map REGARDLESS of whether the
-transport echoed a comment id, and a re-diff therefore emits nothing -- even when
-the Jira-side body has diverged through ADF/wiki round-tripping. A transport that
-DOES return an id (the DC/REST path) still has that exact id recorded verbatim.
-
-Ticket crusty-brinish-ass (3235-8aaf-e288-48f2) closed the transport seam itself:
-``acli_cli_ops.add_comment`` no longer returns the raw envelope. It normalizes via
-``_parse_comment_created`` — a resource-shaped payload (the DC/REST ``{"id": ...}``)
-passes through verbatim, the SUCCESS envelope becomes the honest resource
-``{"id": None, "acli_envelope": <envelope>}`` (explicit no-comment-id; the envelope
-preserved under a clearly-named key so ``results[].id`` — the WORK ITEM key — can
-never be mistaken for a comment id), and an unrecognised shape raises instead of
-returning a silently-unusable payload.
-
-Hermetic: no network. The ACLI stdout is stubbed at the ``_run_acli`` seam so the
-real ``acli_cli_ops.add_comment`` parse runs; the binding store is real.
+After success, `_record_comment_id` maps the local comment key even when no
+remote comment ID exists. `_diff_comments` then emits nothing despite body
+round-tripping. The hermetic test stubs `_run_acli` and uses a `BindingStore`.
 """
 
 from __future__ import annotations

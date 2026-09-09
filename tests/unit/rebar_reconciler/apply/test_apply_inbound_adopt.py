@@ -117,17 +117,13 @@ class _StampingClient:
 
 
 def test_lost_final_push_runner_replay_heals(tmp_path: Path) -> None:
-    """Bug 2392-9389-39f9-4ca6 end-to-end: the lost-final-push ephemeral runner.
+    """Replay adoption after the first runner loses its final tracker push.
 
-    Runner 1 adopts a Jira-native issue — the CREATE event + binding are written
-    and the ``rebar-id:<deterministic-id>`` label is stamped on Jira — then the
-    pass's final tickets push is REJECTED (non-fast-forward) and the runner is
-    destroyed: ALL runner-1 local state is discarded while the Jira label
-    persists. Runner 2 starts from a fresh store + fresh tracker and sees only
-    the labeled snapshot. The walk must emit the replay adopt, and applying it
-    through the SAME inbound-create leaf re-materialises the local ticket +
-    binding under the SAME deterministic local id (the manual REB-3510 repair,
-    mechanized)."""
+    Runner 1 writes the local ticket and Jira label, then discards its local state
+    after the push is rejected. Runner 2 reconstructs the ticket and binding from
+    that label through the inbound-create leaf, preserving the deterministic local
+    ID.
+    """
     fields = {
         "summary": "native issue",
         "status": {"name": "To Do"},

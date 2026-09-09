@@ -1,29 +1,10 @@
-"""HELD-OUT oracle for the ARG lint sweep (ticket fc0c-e218-8b34-4858).
+"""Distinguish safe ARG cleanup from signature-breaking changes.
 
-These are the discriminating cases withheld from the implementer's working tree.
-They separate a careful, behaviour-preserving sweep from a sloppy one that either
-makes the newly-delivered ``binding_store`` / ``repo_root`` keywords observable
-(they must stay inert), or that RENAMES a Cluster-2 Protocol parameter to silence
-ruff (which would break the keyword call sites and the Protocol contract) instead
-of suppressing it with ``# noqa: ARG002``.
-
-Two clusters are pinned, both through REAL entry points asserting OBSERVABLE output:
-
-* Cluster-1 (``**_kwargs`` normalization) — normalizing the ten leaves flips
-  ``_apply_typed``'s ``accepts_repo_root`` / ``accepts_binding_store`` introspection
-  to True for every leaf, so a leaf that previously did NOT receive those keywords
-  now does. The contract is that the extra keyword is INERT: the observable result
-  is byte-for-byte identical whether or not a value is supplied.
-* Cluster-2 (Protocol methods) — the shared ``OutboundFieldMapper`` and the Data
-  Center backend accept-and-ignore several Protocol-mandated keyword parameters.
-  The sweep must NOT rename them (real callers in ``outbound_field_diff`` /
-  ``outbound_differ`` pass them BY KEYWORD, and the ``OutboundMapper`` Protocol
-  pins the names) and must NOT ``# noqa: ARG`` them either: ``ARG`` is not in the
-  enabled rule ``select`` while ``RUF100`` is, so an ARG noqa is an unused-noqa
-  that fails default ``ruff check``. They therefore stay as raw ``--select ARG``
-  residuals (the irreducible floor) while the params keep their Protocol names.
-  Renaming ``binding_store`` -> ``_binding_store`` would raise ``TypeError`` at the
-  keyword call sites and silently drop the Protocol conformance.
+For leaf functions, values newly delivered through `binding_store` and
+`repo_root` must remain inert. For `OutboundFieldMapper` and Data Center
+Protocol methods, required keyword names and their raw `--select ARG` residuals
+remain unchanged. Renaming them breaks keyword callers. Adding `# noqa: ARG`
+would instead fail the enabled RUF100 rule.
 """
 
 from __future__ import annotations

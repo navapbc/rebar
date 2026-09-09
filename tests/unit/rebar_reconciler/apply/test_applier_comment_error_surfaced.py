@@ -1,21 +1,8 @@
-"""Axis 3 — surface the swallowed add_comment failure in the batch outcome.
+"""Verify update comment failures are visible and nonfatal.
 
-Bug 6afc-20ee-84e5-4dd5. When ``client.add_comment`` raises (e.g. ACLI's
-silent exit-0 over-length failure surfaced as ``AcliMutationError``), the
-applier's update_one comment-dispatch loop CAUGHT the exception and only logged
-it — the batch outcome stayed ``error=None``. As a result ``RECON: batch_outcome``
-reported success while the comment never landed, hiding the divergence that
-drives the outbound comment-sync loop.
-
-Fix: when add_comment raises, collect it and propagate into the per-mutation
-outcome (a ``comment_errors`` field) so the manifest no longer reports a clean
-outcome for a mutation whose comment sub-mutation failed. The failure stays
-NON-fatal — the scalar field update genuinely succeeded — matching the existing
-stale-binding-404 / assignee-unresolved soft-fail style.
-
-RED test: an update mutation that carries a comment whose add_comment raises
-must produce an outcome whose ``comment_errors`` is populated (not a clean
-outcome), while the scalar update still succeeds and the batch does not abort.
+When `add_comment` raises, the mutation outcome carries `comment_errors`.
+The scalar update still succeeds and the batch continues, so a missing
+comment cannot appear as a clean outcome.
 """
 
 from __future__ import annotations

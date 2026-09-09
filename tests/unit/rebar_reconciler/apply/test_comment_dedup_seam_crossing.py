@@ -1,29 +1,10 @@
-"""Seam-crossing dedup test: the real envelope through record, then re-diff SAME store.
+"""Verify comment deduplication across transport, recording, and re-diff.
 
-Ticket vanitied-kitschy-mantis (9dc3-7d6c-83d7-41c7), filed from the escape analysis
-on marshy-chummy-coot (2399-5e49-6b28-4d59): an instrumented run (hard-wiring
-``BindingStore.is_comment_mapped`` to ``False`` on every loaded module copy) showed
-the dedup suite could not observe the PRIMARY skip being disabled end-to-end — the
-differ tests seed map state via a private stub store, the apply tests seed synthetic
-id-bearing payloads, and each layer's test seeds the invariant the other layer is
-supposed to establish.
-
-These tests cross the seam with NO seeded invariants:
-
-- the transport return is produced by the REAL ``acli_cli_ops.add_comment`` (stubbed
-  only at the ``_run_acli`` subprocess seam) fed the RECORDED ACLI batch envelope;
-- the recording runs through the REAL ``dispatch_apply_phases._record_comment_id``
-  against a REAL ``BindingStore``;
-- the re-diff runs the REAL ``outbound_comments._diff_comments`` against that SAME
-  store instance.
-
-The Jira-side body diverges from every local body, so the SECONDARY body-equality
-skip can never mask an inert PRIMARY id-identity skip. A control comment that was
-never recorded must still be emitted, and a store whose ``is_comment_mapped`` is
-forced inert must re-emit the recorded comment — so a hard-wired-False guard is
-distinguishable from a store that was never written.
-
-Test-only change; no production code (ticket non-goal).
+The test obtains an ACLI envelope from `acli_cli_ops.add_comment`, persists it
+through `_record_comment_id` into a `BindingStore`, then runs `_diff_comments`
+against that same store. A divergent Jira body prevents body equality from
+masking ID deduplication. An unrecorded control and a disabled
+`is_comment_mapped` guard must both re-emit.
 """
 
 from __future__ import annotations

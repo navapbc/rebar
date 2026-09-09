@@ -1,16 +1,9 @@
-"""Tests for the Cycle 3 inbound link-apply path in _apply_inbound_update.
+"""Verify inbound link mutations delegate to `rebar.link`.
 
-Behavior under test:
-  - payload['links'] entries with action='add' are written into rebar via the
-    LIBRARY facade rebar.link(local_id, target_id, relation, repo_root=...).
-    rebar.link owns relation validation, hierarchy promotion, and the LINK
-    event write, so the applier delegates rather than hand-writing events.
-  - repo_root threads from the leaf signature into the rebar.link call.
-  - rebar.link failures are non-fatal (logged, not raised); links_applied counts
-    only the successful writes.
-  - Malformed entries (missing target_id/relation, action != add) are skipped.
-
-rebar.link is MONKEYPATCHED so the test does NOT touch a real store.
+Delegation preserves library relation validation and hierarchy promotion. The
+leaf passes `repo_root`, skips malformed or non-add entries, counts successful
+writes, and logs failures without aborting. Tests replace `rebar.link` to avoid
+ticket-store writes.
 """
 
 from __future__ import annotations

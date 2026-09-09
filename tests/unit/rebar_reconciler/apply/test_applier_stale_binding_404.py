@@ -1,29 +1,8 @@
-"""Bug tan-coin-atone (6614-43cd-3a48-4f63): HTTPError 404 on a stale-binding
-update mutation must soft-fail, not abort the whole pass.
+"""Verify a stale-binding 404 soft-fails within an update batch.
 
-Production cron evidence (GHA run 27023829257, 2026-06-05, first run post-chunk-12):
-
-    RECON: batch_outcome action=update key=DIG-5305 ...
-    ERROR: reconcile_once raised: HTTP Error 404: Not Found
-    ##[error]Process completed with exit code 1.
-
-DIG-5305 is a deleted probe ticket with a stale binding (1e08 class). An
-outbound 'update' mutation against it routes status/priority through REST
-sub-calls (transition_issue / update_priority) that raise a RAW
-``urllib.error.HTTPError`` on non-2xx. The update_one try/except only catches
-``JiraAPIError`` (illegal-transition 400), so a raw HTTPError 404 escapes
-update_one -> _apply_batch -> reconcile_once -> fatal exit 1.
-
-Fix: per-mutation catch of ``urllib.error.HTTPError`` with ``code == 404`` in
-the ``_apply_batch`` update branch — record the error in the batch outcome
-(failed count), log a WARNING naming the key + "stale binding (1e08)", and
-continue. Only 404 is softened; other HTTP errors keep current behavior.
-Mirrors the adjacent AssigneeNotFoundError soft-fail handler.
-
-RED test: a batch with one good update + one update whose target raises
-``urllib.error.HTTPError(404)``. Pre-fix, ``apply()`` raises and the good one
-never runs. Post-fix, the good mutation applies, ``apply()`` returns without
-raising, and a 404 batch-outcome error record lands in the manifest.
+A missing Jira target records a failed mutation outcome, logs a warning, and
+allows valid sibling updates to complete. Only HTTP 404 is softened. Other
+HTTP errors retain their current behavior.
 """
 
 from __future__ import annotations
@@ -152,17 +131,7 @@ def test_http_404_on_update_soft_fails_batch_continues(
     acli_mod: ModuleType,
     tmp_path: Path,
 ) -> None:
-    """The exact production scenario: 1 valid update + 1 stale-binding update
-    whose target is gone (HTTP 404).
-
-    Pre-fix: the raw urllib.error.HTTPError(404) from client.update_issue
-    propagates through applier.apply, killing the whole pass — the valid
-    mutation may never apply and the pass exits 1.
-
-    Post-fix: the 404 is caught per-mutation, recorded in the batch outcome,
-    a WARNING is logged, and the batch continues. The valid mutation applies;
-    apply() returns without raising.
-    """
+    """Record a stale 404 and continue to the valid sibling update."""
     pass_id = f"test-pass-404-{int(time.time())}"
 
     good_mutation = {
