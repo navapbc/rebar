@@ -1,0 +1,935 @@
+name: Build and Test (reusable)
+
+# Reusable (workflow_call) form of the lint + pip-audit + test gate/suite — the single
+# source of truth for the gates that BOTH CI lanes run. Invoked from TWO callers:
+#   * test.yml           — push / pull_request (branch-head checkout), post-merge branch CI.
+#   * gerrit-verify.yaml — the Verified gate (checks out the EXACT Gerrit patchset), so a
+#     gate/suite regression BLOCKS the Verified vote pre-merge instead of only reddening main.
+#
+# Before this extraction the two lanes hand-copied the same gate+suite command list and a
+# parity test (tests/unit/test_ci_workflow_parity.py) policed the copies against drift; sharing
+# ONE definition makes that drift impossible by construction (the pattern _optionality.yml uses).
+#
+# Checkout is parameterized by `gerrit-refspec`: empty => actions/checkout (branch head);
+# set => checkout-gerrit-change-action (the patchset). A LOCAL composite action cannot do this
+# (a `./.github/actions/...` reference needs the repo already checked out), so the conditional
+# checkout is inlined per job. This workflow takes NO secrets: the Gerrit values are non-secret
+# inputs (checkout-gerrit-change-action is mirror-first), and the Verified vote key stays
+# confined to gerrit-verify.yaml (never inherited here — test.yml's pull_request trigger
+# includes fork PRs).
+
+on:
+  workflow_call:
+    inputs:
+      gerrit-refspec:
+        description: "Gerrit refspec (refs/changes/NN/NNNN/P). Empty => branch-head checkout."
+        required: false
+        type: string
+        default: ""
+      gerrit-project:
+        description: "Gerrit project (required when gerrit-refspec is set)."
+        required: false
+        type: string
+        default: ""
+      gerrit-url:
+        description: "Gerrit base URL (required when gerrit-refspec is set)."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint + type-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch head (push/PR lane)
+        if: inputs.gerrit-refspec == ''
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
+        if: inputs.gerrit-refspec != ''
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.gerrit-refspec }}
+          gerrit-project: ${{ inputs.gerrit-project }}
+          gerrit-url: ${{ inputs.gerrit-url }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-uv
+        with:
+          enable-cache: true
+      # GATING: the committed uv.lock must match pyproject (a drifted lock would make
+      # every `--locked` install below lie about what the change actually resolves to).
+      - name: uv lock --check (committed lock is current)
+        run: uv lock --check
+      - name: Install rebar from the committed lock (dev extra)
+        run: |
+          uv sync --locked --extra dev
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      # shellcheck-py is exactly pinned in the dev extra; fail closed if packaging or
+      # PATH drift exposes a different ShellCheck than provider-wrapper tests expect.
+      - name: ShellCheck 0.11.0 smoke check (gating)
+        run: |
+          actual="$(shellcheck --version | awk '/^version:/ {print $2}')"
+          if [ "$actual" != "0.11.0" ]; then
+            echo "Expected ShellCheck 0.11.0, found ${actual:-missing}" >&2
+            exit 1
+          fi
+
+      # GATING: the flake8 "real-bug" smoke set (configured in pyproject
+      # [tool.ruff.lint]) — syntax errors + undefined names — plus formatting
+      # consistency (ruff format --check). Routed through `make lint` (the single
+      # source of truth shared by local + the pre-commit hook), running the EXACT
+      # ruff pinned in pyproject's [dev] extra so CI and local never drift. CHECK-ONLY
+      # (never mutates) — a failure means "run `make format`". This is the gate that
+      # catches NameError-on-error-path bugs + format drift.
+      - name: lint (ruff check + format --check, gating)
+        env:
+          # Give zizmor a GitHub token so its `make lint` step runs ONLINE (bug 7a03) and
+          # executes the five token-backed supply-chain audits (impostor-commit,
+          # ref-confusion, known-vulnerable-actions, stale-action-refs, ref-version-mismatch)
+          # that require a GitHub client for live action metadata. Least-privilege: the
+          # automatic, read-only job token (this job's `permissions:` is `contents: read`).
+          # Local `make lint` has no token and stays offline/portable — the Makefile picks
+          # the mode, so CI and local invoke one recipe.
+          GH_TOKEN: ${{ github.token }}
+        run: make lint
+
+      # GATING: parity between the local pre-commit gate and CI. Runs the hygiene hooks
+      # in .pre-commit-config.yaml across all files (check-yaml/toml/merge-conflict/
+      # added-large-files), so the hook set a contributor commits through is also
+      # enforced server-side. This is the belt-and-suspenders for those hooks.
+      #
+      # SKIP three hooks in CI (env below):
+      #  - `no-commit-to-branch`: a LOCAL commit-time guardrail (fails a `git commit` made
+      #    while HEAD is on main/master). The branch-head lane runs on `main` (post-merge
+      #    branch CI), so it would fire and fail every main push; the real "land through
+      #    Gerrit" boundary is server-side (GitHub ruleset + the two Gerrit votes), not this
+      #    hook. (On the Gerrit lane HEAD is a detached refs/changes/* ref, so it is silent
+      #    anyway — skipping keeps both lanes identical.)
+      #  - `lint` and `typecheck`: these local hooks just re-invoke `make lint` / `make
+      #    typecheck`, which already run as their own named steps in this job — running them
+      #    again here is pure duplicate work. They stay in .pre-commit-config.yaml so a local
+      #    `git commit` still runs them; CI runs each linter exactly once (the direct steps).
+      - name: pre-commit (all hooks, all files, gating)
+        run: pre-commit run --all-files --show-diff-on-failure
+        env:
+          SKIP: no-commit-to-branch,lint,typecheck
+
+      # GATING: mypy over the WHOLE library AND scripts/. Previously core-only (reducer/
+      # graph/_store) with the rest tracked as an advisory "full tree" ratchet — that debt
+      # was driven to zero (story urge-abbey-goal), so `make typecheck` covers all of
+      # src/rebar; ticket cc99 then added scripts/, so the gate implementations invoked by
+      # this workflow are themselves type-checked. Same command local + pre-commit hook.
+      - name: mypy — full library + scripts/ (gating)
+        run: make typecheck
+
+      # Validate every infra config so a MALFORMED config can never reach `main` (epic 88ab
+      # story 8903). Runs in BOTH lanes via this reusable, so it fails the two-vote gate, not
+      # just branch CI.
+      - name: config-check (infra configs parse; gating)
+        run: make config-check
+
+      # Verified-gate parity drift-guard (jira-reb-1163): the Gerrit `Verified` vote
+      # (gerrit-verify.yaml's `vote` job) must depend on EVERY job that gates main on the
+      # push/PR mirror lanes. A job that gates main but is missing from vote.needs would earn
+      # Verified +1 pre-merge yet redden main post-merge (green-verify/red-main). This fails
+      # the build on any such drift. Style mirrors the server.json / criteria-routing gates.
+      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
+      - name: Verified-gate parity gate
+        run: |
+          if [ ! -f scripts/check_verify_gate_parity.py ]; then
+            echo "scripts/check_verify_gate_parity.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          python scripts/check_verify_gate_parity.py
+
+      # Comment-hygiene gate (ticket b047): comments/docstrings must not anchor on
+      # rot-prone history tokens (bare commit SHAs, CI run ids, dated incident
+      # narratives). Cite a resolvable ticket/ADR id or describe behavior instead —
+      # the ticket system owns history; source comments carry current state.
+      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
+      - name: comment-hygiene gate
+        run: |
+          if [ ! -f scripts/check_comment_hygiene.py ]; then
+            echo "scripts/check_comment_hygiene.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          python scripts/check_comment_hygiene.py
+
+      # Raw-git-write gate (ticket d37e): direct git mutations of the tickets
+      # store must flow through the sanctioned write seams (gitutil.run_git_write,
+      # event_append, txn, git_adapter/_ref_lock). Any raw `git add/commit/push`
+      # against the tracker outside a seam needs a reasoned `# raw-git-ok:` marker
+      # — see docs/architecture.md §"Sanctioned git-write seams".
+      #
+      # Definition-vs-tree skew guard (ticket ee2a): Gerrit's verify job takes
+      # the workflow DEFINITION from the target branch but checks out the
+      # CHANGE'S tree, so a gate step added on main runs against open changes
+      # whose base predates its script. New gate steps that run a repo script
+      # must copy this if-present guard: skip (with a log line) when the script
+      # is absent from the checked-out tree; the gate re-enforces on rebase and
+      # on every post-merge change.
+      - name: raw-git-write gate
+        run: |
+          if [ -f scripts/check_raw_git_writes.py ]; then
+            python scripts/check_raw_git_writes.py
+          else
+            echo "scripts/check_raw_git_writes.py not in checked-out tree (change predates the gate) — skipping"
+          fi
+
+      # Wall-clock-assert gate (ticket 1e95): upper-bound wall-clock asserts in
+      # tests are the proven CI flake class under runner contention (19d7, 5e94,
+      # edfe, 85c3). Prefer counting/structural proxies; a deliberate stuck-run
+      # guard carries `# timing: hang-guard — <reason>`, and perf-lane tests use
+      # the skipif-CI guard (the bare benchmark marker still runs on CI).
+      # If-present guard per ticket ee2a (see raw-git-write gate above).
+      - name: wall-clock-assert gate
+        run: |
+          if [ -f scripts/check_wall_clock_asserts.py ]; then
+            python scripts/check_wall_clock_asserts.py
+          else
+            echo "scripts/check_wall_clock_asserts.py not in checked-out tree (change predates the gate) — skipping"
+          fi
+
+      # Complexity-baseline lock (task 47e9): .github/complexity-baseline.json is shrink-only
+      # and LOCKED against main. Raised ceilings and added entries require an administrator
+      # override (force-submit). Removed entries and lowered ceilings pass freely (the ratchet).
+      # The script fetches main by explicit URL (GITHUB_REPOSITORY) and FAILS CLOSED when the
+      # base copy cannot be established — no warn-and-continue. Definition-vs-tree skew guard
+      # (ticket ee2a): skip with a log line when the script is absent from the checked-out tree.
+      - name: Complexity-baseline lock
+        shell: bash
+        run: |
+          if [ ! -f scripts/check_complexity_baseline.py ]; then
+            echo "scripts/check_complexity_baseline.py not in checked-out tree" \
+                 "(change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          python scripts/check_complexity_baseline.py --lock
+
+  pip-audit:
+    # Dependency-vulnerability scan (story 95dc), routed BY LANE (bug 63e8). Audits
+    # rebar's actual installed dependency closure against the PyPI advisory / OSV
+    # database. We scan the base runtime install (no extras) — that is what a plain
+    # `pip install nava-rebar` consumer gets — plus the [dev] extra so build/test
+    # tooling is covered too.
+    #
+    # Failure policy — the verdict depends on the LANE, because a committed lock makes
+    # any new advisory against a PINNED transitive dep red on every change in flight at
+    # once (click 8.2.1 / PYSEC-2026-2132: six changes, five work streams, none at
+    # fault). Decision logic + severity bar live in scripts/dependency_audit.py, which is
+    # unit-tested (tests/scripts/test_dependency_audit.py) — workflow YAML is not
+    # reachable from a test, and this class of defect survives exactly by being eyeballed.
+    #   - Gerrit (Verified) lane: a CRITICAL/HIGH advisory fails the job ONLY when the
+    #     change TOUCHES THE DEPENDENCY MAP (uv.lock / pyproject deps / requirements /
+    #     constraints). "If you touch it, you own it." A change that leaves the map alone
+    #     is never blocked by an advisory — it prints the finding and stays green.
+    #   - Branch / scheduled `main` lane: always blocking, so a vulnerable pin surfaces
+    #     loudly. That red blocks no merge and no submit (the mirror casts no vote); it
+    #     blocks RELEASES (release.yml) and escalates to a ticket via
+    #     dependency-advisory-canary.yml.
+    #   - Severity bar: CRITICAL/HIGH fail, MEDIUM warns, LOW is tracked. pip-audit
+    #     carries no severity, so it is enriched from OSV; an advisory with NO severity
+    #     is treated as HIGH (fails) — documented in docs/dependency-advisory-runbook.md.
+    #   - Network flake: the advisory-DB fetch is retried (3× with backoff). Only a
+    #     DB-UNREACHABLE failure is recheckable; `recheck` can NEVER clear a real finding.
+    name: pip-audit (dependency vulnerabilities)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch head (push/PR lane)
+        if: inputs.gerrit-refspec == ''
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
+        if: inputs.gerrit-refspec != ''
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.gerrit-refspec }}
+          gerrit-project: ${{ inputs.gerrit-project }}
+          gerrit-url: ${{ inputs.gerrit-url }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-uv
+        with:
+          enable-cache: true
+      - name: Install rebar from the committed lock (dev extra) and pip-audit
+        run: |
+          uv sync --locked --extra dev
+          # pip-audit is a scan TOOL, not a dependency of the project — kept out of the lock.
+          uv pip install pip-audit
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - name: Deepen the checkout so the patchset's parent is diffable (Gerrit lane)
+        if: inputs.gerrit-refspec != ''
+        shell: bash
+        # The dependency-map ownership signal is `git diff HEAD^..HEAD`. A shallow
+        # patchset checkout has no parent object, so the diff would be unresolvable and
+        # the gate would fail CLOSED (block every change) — defeating the fix. Deepen by
+        # one; a no-op (and harmless error) on a non-shallow clone.
+        run: |
+          set -uo pipefail
+          git rev-parse --verify -q 'HEAD^' >/dev/null 2>&1 || git fetch --deepen=1 || true
+      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
+      - name: Dependency advisories (lane-routed verdict; network-retried)
+        shell: bash
+        env:
+          # Empty on the branch/PR lane, a refspec on the Verified lane — the only thing
+          # that distinguishes "this change owns the advisory" from "someone else's".
+          LANE: ${{ inputs.gerrit-refspec != '' && 'gerrit' || 'branch' }}
+        run: |
+          set -uo pipefail
+          if [ ! -f scripts/dependency_audit.py ]; then
+            echo "scripts/dependency_audit.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          # Default to the STRICTER lane if LANE is somehow unset — never fail open.
+          python scripts/dependency_audit.py gate --lane "${LANE:-branch}"
+
+  sandbox-enforcement:
+    # The Linux write-deny had NO gating control (`0d22-f664`). bubblewrap is installed
+    # on the pytest cells, but those runners deny unprivileged CLONE_NEWUSER, so
+    # `probe()` returns None, every enforcement test SKIPS, and the leg goes green
+    # having proven nothing — the signal for a broken sandbox is indistinguishable from
+    # the signal for a healthy one.
+    #
+    # MEASURED (ubuntu:24.04, bubblewrap 0.9.0), running a real write through bwrap:
+    #   default container            -> UNUSABLE, bwrap never starts
+    #   --security-opt seccomp=...   -> UNUSABLE, bwrap never starts
+    #   --privileged                 -> ENFORCING, child ran, outside write denied
+    # so a plain `container:` job does not work and relaxing seccomp alone does not
+    # either. `--privileged` is an OCI runtime capability, not a CI-provider feature:
+    # the identical `docker run` works on a developer laptop, which is what
+    # `project.portability` requires.
+    name: sandbox enforcement (Linux bwrap, gating)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout branch head (push/PR lane)
+        if: inputs.gerrit-refspec == ''
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
+        if: inputs.gerrit-refspec != ''
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.gerrit-refspec }}
+          gerrit-project: ${{ inputs.gerrit-project }}
+          gerrit-url: ${{ inputs.gerrit-url }}
+
+      # PRECONDITION, asserted before any test runs. The probe carries a LIVENESS check
+      # and that is load-bearing: without one, a bwrap that fails to start never writes
+      # the file whose absence would be read as "denied", so every mode reports
+      # enforcement — the same false pass fixed under `c100-c4f1`. Requires BOTH that
+      # the child ran AND that the outside write did not land.
+      - name: Prove bwrap can namespace and enforce (fail the lane if not)
+        run: |
+          docker run --rm --privileged ubuntu:24.04 bash -c '
+            set -e
+            apt-get update -qq >/dev/null 2>&1
+            apt-get install -y -qq bubblewrap >/dev/null 2>&1
+            bwrap --version
+            d=$(mktemp -d); mkdir -p "$d/allow"
+            bwrap --ro-bind / / --bind "$d/allow" "$d/allow" --dev /dev -- \
+              /bin/sh -c "echo ran > \"$d/allow/live.txt\"; echo x > \"$d/denied.txt\"" \
+              >/dev/null 2>&1 || true
+            if [ ! -f "$d/allow/live.txt" ]; then
+              echo "::error::bwrap never started — this lane cannot prove enforcement"
+              exit 1
+            fi
+            if [ -f "$d/denied.txt" ]; then
+              echo "::error::bwrap ran but did NOT deny a write outside its allow-list"
+              exit 1
+            fi
+            echo "bwrap enforces: child ran, outside write denied"
+          '
+
+      # REBAR_REQUIRE_SANDBOX_ENFORCEMENT=1 turns the `@live` skip into a hard
+      # requirement, so a missing mechanism fails this lane instead of quietly skipping.
+      # If-present guard per ticket ee2a: Gerrit's Verified lane takes the workflow
+      # DEFINITION from the target branch but the TREE from the change, so a base that
+      # predates this test file would die with "can't open file" — a hard failure
+      # indistinguishable from a real gate violation. Re-enforces on rebase and on every
+      # post-merge change.
+      - name: Run the sandbox enforcement tests under a real bwrap
+        run: |
+          if [ ! -f tests/scripts/test_mutation_sandbox.py ]; then
+            echo "tests/scripts/test_mutation_sandbox.py not in checked-out tree (change predates the lane) — skipping;" \
+                 "the lane re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          docker run --rm --privileged \
+            -v "$PWD:/w" -w /w \
+            -e REBAR_REQUIRE_SANDBOX_ENFORCEMENT=1 \
+            python:3.13-slim bash -c '
+              set -e
+              apt-get update -qq >/dev/null 2>&1
+              apt-get install -y -qq bubblewrap git >/dev/null 2>&1
+              git config --global --add safe.directory /w
+              pip install -q ".[dev]"
+              python -m pytest tests/scripts/test_mutation_sandbox.py \
+                -p no:cacheprovider --no-header -v
+            '
+
+  test:
+    name: pytest (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # requires-python is >= 3.11 (the reconciler uses enum.StrEnum, new in
+        # 3.11), so test the full supported range on Linux. macOS runs only the
+        # primary interpreter (runner cost) — its value is the platform-compat
+        # coverage (flock/mkdir lock, gtimeout), not the Python rev.
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+        exclude:
+          # macOS runs only the newest interpreter (runner cost); its value is
+          # platform-compat coverage (flock/mkdir lock, gtimeout), not the rev.
+          - os: macos-latest
+            python-version: "3.11"
+          - os: macos-latest
+            python-version: "3.12"
+    steps:
+      - name: Checkout branch head (push/PR lane)
+        if: inputs.gerrit-refspec == ''
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
+        if: inputs.gerrit-refspec != ''
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.gerrit-refspec }}
+          gerrit-project: ${{ inputs.gerrit-project }}
+          gerrit-url: ${{ inputs.gerrit-url }}
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: ./.github/actions/setup-uv
+        with:
+          enable-cache: true
+
+      # Install EVERY test-bearing extra, not just `dev` (bug 599e-77da-29dd-482d).
+      # `dev` alone left `fastapi` and `jinja2` uninstalled, so 38 tests behind
+      # `pytest.importorskip("fastapi"/"jinja2")` — the review-bot receiver, the
+      # opcert service app, the audit UI, and the path-injection + token-redaction
+      # SECURITY guards — silently SKIPPED in every lane. A change could break all of
+      # them and still earn `Verified +1`; that is how ticket 66af landed a broken
+      # guard. The two extras add only small pure-python wheels on top of what `dev`
+      # already resolves (uvicorn/httpx/boto3 arrive transitively today), and nothing
+      # they unlock needs network or AWS credentials — the suite's own network guard
+      # holds. REBAR_REQUIRE_EXTRAS=1 on the pytest steps below turns "an extra went
+      # missing again" into a hard failure instead of a silent skip.
+      # bubblewrap is the Linux sandbox the mutation gate wraps its test subprocesses
+      # in (ticket e668-b496-e264-4283). Without it the gate fails CLOSED — by design,
+      # since a silent unsandboxed run is indistinguishable from a sandboxed one — so
+      # the runner must provide it. macOS needs no install: sandbox-exec ships with the OS.
+      - name: Install bubblewrap (Linux mutation-sandbox enforcement tests)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          bwrap --version
+
+      # The e2e tier drives the real bpmn-io libraries through a Node harness, so `npm ci`
+      # + an esbuild bundle are test DEPENDENCIES — provisioned below with the Python ones,
+      # rather than lazily inside the first e2e test. Doing it lazily is what bug
+      # 9a17-e0b3-7aa6-4091 was: a 90-120s cold install was charged to that one test's 300s
+      # pytest-timeout budget, and `timeout_method = "thread"` calls os._exit(1), so crossing
+      # it killed the whole xdist worker (`node down: Not properly terminated`) with no
+      # traceback.
+      #
+      # Pin the toolchain rather than inheriting whatever Node the runner image happens to
+      # ship: an image bump would otherwise silently change what the e2e tier builds and
+      # runs.
+      - name: Pin the Node toolchain for the e2e tier
+        id: e2e-node
+        if: matrix.os != 'macos-latest'
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903  # v6.0.0
+        with:
+          node-version: '22'
+
+      # Keyed on the RESOLVED Node version as well as the lockfile, so a Node upgrade cannot
+      # reuse a ~/.npm tree populated by a different toolchain.
+      - name: Cache the npm store for the e2e Node toolchain
+        if: matrix.os != 'macos-latest'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ steps.e2e-node.outputs.node-version }}-${{ hashFiles('tests/e2e/js/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-${{ steps.e2e-node.outputs.node-version }}-
+
+      - name: Install rebar from the committed lock (dev + reviewbot + ui extras)
+        shell: bash
+        run: |
+          uv sync --locked --extra dev --extra reviewbot --extra ui --extra grounding-terraform --python '${{ matrix.python-version }}'
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          # `make e2e-deps` (not an inline npm invocation) is deliberate: the same
+          # portable target provisions a checkout with no CI provider at all, and the e2e
+          # conftest keeps an in-fixture fallback. macOS is skipped because that lane
+          # selects only the platform_compat subset, which contains no e2e node.
+          #
+          # `make -n` is the PREDATES-THE-GATE guard. The Verified lane runs this workflow
+          # from trusted main against an arbitrary patchset, so a base older than this
+          # change has no `e2e-deps` rule and a bare `make e2e-deps` would fail the step —
+          # turning a fix for someone else's flake into a red vote on their change. Probing
+          # the target keeps the guard on the tree's OWN Makefile, which is the only thing
+          # that can answer whether the rule exists.
+          #
+          # Pre-provisioning is an OPTIMISATION, so it must never fail this step. It moves
+          # the install off a test's clock; when it cannot run — a transient registry
+          # failure, an offline runner, or a patchset whose base has no `e2e-deps` rule —
+          # the correct outcome is to fall through to the in-fixture path, which is the
+          # portable half that works with no CI provider at all. Failing here instead would
+          # turn a fix for someone else's flake into a red vote on their change, which this
+          # step has now risked twice. The notice keeps a silent skip from reading as
+          # success.
+          if [ '${{ matrix.os }}' = 'macos-latest' ]; then
+            echo "::notice::e2e toolchain: macOS lane selects no e2e node — not provisioning"
+          elif ! make -n e2e-deps >/dev/null 2>&1; then
+            echo "::notice::e2e toolchain: this tree has no e2e-deps rule (change predates it) — the fixture will provision"
+          elif ! make e2e-deps; then
+            echo "::notice::e2e toolchain: pre-provisioning failed (offline or registry error) — the fixture will provision, or the tier self-skips"
+          fi
+
+      # Git identity is required by the suites that build throwaway commit stores.
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+
+      # Git version floor gate: the two-clone convergence regressions merge divergent
+      # tracker histories with `git merge-tree --write-tree`, a mode Git gained in 2.38.
+      # rebar DECLARES and ENFORCES that floor rather than skipping those regressions on
+      # older clients — a regression that quietly does not run reads as coverage while
+      # providing none (ticket 980d-83ac-a6bb-4edb). This step fails the runner early and
+      # by name; tests/conftest.py enforces the same floor for every contributor. The
+      # value is single-sourced in .github/git-version-floor.txt, which the contributor
+      # docs and tests/unit/test_git_version_floor.py also read, so the three cannot drift.
+      # If-present guard per ticket ee2a (see raw-git-write gate above): the floor file is
+      # this step's repo artifact, so a change whose base predates it would otherwise fail
+      # hard on file absence alone (bug 7e90-233b-3ee9-4f14). Skip with a log line when it
+      # is missing from the checked-out tree; the gate re-enforces on rebase and on every
+      # post-merge change. When the file IS present the ticket 980d-83ac-a6bb-4edb
+      # enforcement below is unchanged.
+      - name: Git version floor gate
+        shell: bash
+        run: |
+          floorfile=.github/git-version-floor.txt
+          if [ ! -f "$floorfile" ]; then
+            echo "$floorfile not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          floor=$(tr -d '[:space:]' < "$floorfile")
+          have=$(git --version | awk '{print $3}')
+          echo "declared floor: git >= $floor; runner has git $have"
+          if [ "$(printf '%s\n%s\n' "$floor" "$have" | sort -V | head -n1)" != "$floor" ]; then
+            echo "::error::this runner has git $have but rebar requires git >= $floor" \
+                 "(git merge-tree --write-tree). Upgrade git on the runner image;" \
+                 "the merge-tree regressions must run here, not be skipped."
+            exit 1
+          fi
+
+      # pandoc provenance gate (story 5c0e): the DC wiki renderer executes a GPL binary that
+      # ships inside the `pypandoc-binary` wheel, and NOTICE records that binary's version and
+      # licence for anyone redistributing a bundle containing it. The obligation is only
+      # discharged if NOTICE describes what is actually shipped, so this fails when the wheel
+      # pin is loosened (a range would make the shipped pandoc unknowable) or when the pin and
+      # NOTICE disagree about the version.
+      - name: pandoc pin + NOTICE provenance gate
+        shell: bash
+        run: |
+          pins=$(grep -oE 'pypandoc-binary==[0-9][0-9A-Za-z.]*' pyproject.toml | sort -u)
+          if [ -z "$pins" ]; then
+            echo "::error::pyproject.toml must pin pypandoc-binary with '==' — a range leaves the"
+            echo "  bundled GPL pandoc version unknowable, so NOTICE cannot describe what ships."
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$pins" | wc -l)" -ne 1 ]; then
+            echo "::error::pypandoc-binary is pinned to more than one version: $pins"
+            exit 1
+          fi
+          if [ ! -f NOTICE ]; then
+            echo "::error::NOTICE is missing — it records the bundled pandoc's GPL obligation."
+            exit 1
+          fi
+          if ! grep -q "$pins" NOTICE; then
+            echo "::error::NOTICE does not mention the pinned wheel ($pins). Update NOTICE so the"
+            echo "  recorded pandoc provenance matches what the wheel actually ships."
+            exit 1
+          fi
+          if ! grep -qi 'GPL' NOTICE; then
+            echo "::error::NOTICE no longer records pandoc's GPL licence."
+            exit 1
+          fi
+          echo "pandoc provenance gate: OK ($pins, recorded in NOTICE)."
+
+      # Module-size gate: an ABSOLUTE hard cap on every src/rebar/**/*.py file. There is no
+      # allowlist escape hatch any more (epic 716f drained it to zero). The limit is
+      # single-sourced in .github/module-size-limit.txt and LOCKED: changing it requires an
+      # administrator to override this gate (force-submit) — a normal contributor change to
+      # the limit fails Verified. Mirrored by tests/unit/test_module_size_contract.py.
+      - name: Module-size gate
+        shell: bash
+        run: |
+          limitfile=.github/module-size-limit.txt
+          if [ ! -f "$limitfile" ]; then
+            echo "::error::$limitfile is missing — the module-size limit lock file must not be removed."
+            exit 1
+          fi
+          LIMIT=$(tr -d '[:space:]' < "$limitfile")
+          if ! printf '%s' "$LIMIT" | grep -qE '^[0-9]+$'; then
+            echo "::error::$limitfile must contain a single positive integer (got '$LIMIT')."
+            exit 1
+          fi
+          # Limit lock: the limit may only change when an administrator overrides this gate.
+          # Fetch main's tip by EXPLICIT URL from the canonical GitHub repo — the same pattern
+          # the tickets-branch fetch in gerrit-verify.yaml uses — so the lock does NOT depend on
+          # an `origin` remote being configured by the checkout action (checkout-gerrit-change-action
+          # does not guarantee one). `git cat-file -e` distinguishes "main has the limit file ->
+          # compare" from "main lacks it -> bootstrap (allow)". If the fetch fails we WARN (not
+          # silently skip) — the absolute cap below still runs regardless.
+          if git fetch --depth=1 "https://github.com/${{ github.repository }}" \
+               '+refs/heads/main:refs/remotes/gh-main' 2>/dev/null; then
+            if git cat-file -e refs/remotes/gh-main:"$limitfile" 2>/dev/null; then
+              BASE=$(git show refs/remotes/gh-main:"$limitfile" | tr -d '[:space:]')
+              if [ "$BASE" != "$LIMIT" ]; then
+                echo "::error::module-size limit changed ($BASE -> $LIMIT). This limit is LOCKED: an administrator must override this gate (force-submit) to land a limit change."
+                exit 1
+              fi
+            fi
+          else
+            echo "::error::could not fetch main to verify the module-size limit lock; failing closed."
+            exit 1
+          fi
+          # Absolute cap: no src/rebar/**/*.py file may exceed the limit. No allowlist, no exemptions.
+          over=$(find src/rebar -name '*.py' | grep -v __pycache__ \
+            | xargs wc -l 2>/dev/null \
+            | awk -v lim="$LIMIT" '$2 != "total" && $1 > lim { print $1 " " $2 }' | sort -k2)
+          if [ -n "$over" ]; then
+            echo "::error::src/rebar file(s) over the ${LIMIT}-LOC hard cap (split them — there is no allowlist):"
+            printf '%s\n' "$over"
+            exit 1
+          fi
+          echo "Module-size gate: OK (no src/rebar file exceeds the ${LIMIT}-LOC hard cap; limit locked at $LIMIT)."
+          # Near-cap leading indicator (NON-BLOCKING, always exits 0): surface files approaching
+          # the locked cap BEFORE they breach it, so the next split is not discovered by an
+          # already-blocked contributor. The band is within 10% of the cap — the same rule
+          # code_health.size_near_fraction (default 0.1) uses to drive
+          # module_size_distribution.near_cap_count. Reuses THIS gate's own find|wc -l, so the
+          # cap rule has no second definition and this pass adds no new failure mode.
+          BAND=$(( LIMIT - LIMIT / 10 ))
+          near=$(find src/rebar -name '*.py' | grep -v __pycache__ \
+            | xargs wc -l 2>/dev/null \
+            | awk -v lim="$LIMIT" -v band="$BAND" '$2 != "total" && $1 >= band && $1 <= lim { print $1 " " $2 }' | sort -k2)
+          if [ -n "$near" ]; then
+            echo "Near-cap files (>= ${BAND} LOC, within 10% of the ${LIMIT}-LOC cap) — split proactively before they breach:"
+            while read -r loc path; do
+              [ -n "$path" ] || continue
+              echo "::warning file=${path}::${path} is ${loc} LOC, within 10% of the ${LIMIT}-LOC module-size cap; split it before it breaches the hard cap."
+            done <<< "$near"
+          else
+            echo "Near-cap check: OK (no src/rebar file is within 10% of the ${LIMIT}-LOC cap)."
+          fi
+
+      # The target-branch workflow can run against an older Gerrit patchset whose tree
+      # predates the extracted local action. Materialize trusted main's action only in that
+      # compatibility case; otherwise exercise the action from the checked-out change.
+      - name: Restore documentation action for a patchset that predates it
+        if: inputs.gerrit-refspec != ''
+        shell: bash
+        run: |
+          if [ -f .github/actions/docs-gates/action.yml ]; then
+            exit 0
+          fi
+          if ! git fetch --depth=1 "https://github.com/${{ github.repository }}" \
+               '+refs/heads/main:refs/remotes/gh-main-docs-action'; then
+            echo "::error::could not fetch trusted main documentation action"
+            exit 1
+          fi
+          mkdir -p .github/actions/docs-gates
+          git show refs/remotes/gh-main-docs-action:.github/actions/docs-gates/action.yml \
+            > .github/actions/docs-gates/action.yml
+
+      # All documentation gates are single-sourced in the local composite action. The
+      # Gerrit docs-only lane invokes this same action after its own checkout/setup, while
+      # the full lane keeps it inside the existing matrix (no additional full-route job).
+      - name: Documentation gates (shared with Gerrit docs-only route)
+        uses: ./.github/actions/docs-gates
+
+      # Prompt-index drift gate (story afe6): reviewers/index.json is DERIVED from the
+      # prompt front-matter and committed. Regenerate it and fail if the working tree
+      # now differs — a stale index means a prompt's front-matter changed without the
+      # committed index being regenerated. Style mirrors the Module-size gate above.
+      - name: Prompt-index drift gate
+        shell: bash
+        run: |
+          # The prompt library is moving rebar.llm.prompts -> rebar.llm.prompting.prompts
+          # (ticket toll-clock-tier); invoke whichever module path this checkout provides so
+          # the gate stays green across the move.
+          python -m rebar.llm.prompting.prompts regenerate-index 2>/dev/null \
+            || python -m rebar.llm.prompts regenerate-index
+          if ! git diff --exit-code -- src/rebar/llm/reviewers/index.json; then
+            echo "::error::reviewers/index.json is stale — regenerate it with"
+            echo "  python -m rebar.llm.prompting.prompts regenerate-index"
+            echo "and commit the result (it is derived from the prompt front-matter)."
+            exit 1
+          fi
+          echo "Prompt-index drift gate: OK (index.json is up to date)."
+
+      # Security-rules freshness gate (epic b744 / WS5; ADR 0012). The vendored security rule
+      # subset is pinned for reproducibility; this WARNS (never fails) when the recorded
+      # `vendored_at` is older than the quarterly cadence, prompting a deliberate
+      # `make vendor-security-rules` refresh PR. Time-based + network-free (an upstream-version
+      # diff is the documented follow-on). Warn-only so a lapsed cadence never blocks unrelated PRs.
+      - name: Security-rules freshness gate (warn-only)
+        shell: bash
+        run: python -m rebar.grounding.detectors.security_pin
+
+      # Criteria-routing parity gate (epic 3156): criteria_routing.json is hand-authored
+      # (thresholds/applies_at are judgement, no derivation source), so this is a PARITY gate
+      # (not a regenerate-and-diff): it fails when the committed routing drifts out of sync
+      # with the canonical vocabulary (missing/orphan entry) or carries a malformed entry.
+      - name: Criteria-routing parity gate
+        shell: bash
+        run: |
+          if ! python -m rebar.llm.plan_review.registry validate-routing; then
+            echo "::error::src/rebar/llm/plan_review/criteria_routing.json is out of parity"
+            echo "with CANONICAL_LLM (a missing/orphan/malformed criterion routing entry)."
+            exit 1
+          fi
+
+      # server.json env-contract drift gate (epic sail-shoe-smear): server.json is the
+      # MCP front-door manifest; rebar.mcp_server.MCP_ENV_VARS is the single source of
+      # truth for the env gates. This fails when the manifest's advertised env-var set
+      # diverges from that canonical list (missing/extra var). Style mirrors the
+      # prompt-index / criteria-routing drift gates above.
+      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
+      - name: server.json env-contract drift gate
+        shell: bash
+        run: |
+          if [ ! -f scripts/check_server_manifest.py ]; then
+            echo "scripts/check_server_manifest.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          python scripts/check_server_manifest.py
+
+      # Public-types drift gate (story 3a10): src/rebar/types.py is DERIVED from the
+      # canonical JSON Schemas (the schema-backed rebar.* return shapes). Regenerate
+      # it and fail if the working tree now differs — a stale types.py means a
+      # schema changed without the committed TypedDicts being regenerated. Style
+      # mirrors the prompt-index drift gate above.
+      - name: Public-types drift gate
+        shell: bash
+        run: |
+          python -m rebar.schemas.gen_types
+          if ! git diff --exit-code -- src/rebar/types.py; then
+            echo "::error::src/rebar/types.py is stale — regenerate it with"
+            echo "  python -m rebar.schemas.gen_types"
+            echo "and commit the result (it is derived from the canonical JSON Schemas)."
+            exit 1
+          fi
+          echo "Public-types drift gate: OK (types.py is up to date)."
+
+      # MCP model schema drift gate (ticket 8efe): the hand-mirrored pydantic output
+      # models in _mcp_models.py must declare every property their canonical JSON
+      # Schema defines (minus intentional PERMISSIVE_OMISSIONS).  Fails on drift.
+      - name: MCP model schema drift gate
+        shell: bash
+        run: |
+          python -m rebar.schemas.check_mcp_models --check
+
+      # Config-boundary gates (config-read gate ticket 6754, config-ownership gate RP-04 S7.1)
+      # run through the `make lint` step above (RP-04 S7.2, ticket 735b) — the portable,
+      # no-CI-required trigger — so they are NOT standalone steps here (that would double-run
+      # them). The tree-skew case the old if-present guard covered is handled inherently:
+      # `make lint` runs the patchset's OWN Makefile, which for a change predating the slice
+      # lacks the invocations, so the gate re-enforces on rebase and every post-merge change.
+
+      - name: Run the default suite (Python tiers; excludes integration + external)
+        # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
+        # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp
+        # mid-run, producing a spurious FileNotFoundError cascade. -p no:cacheprovider
+        # keeps a stale cache from leaking across runs.
+        #
+        # Coverage is reported (term-missing) and carries a conservative floor
+        # (fail_under in [tool.coverage.report], pyproject.toml): the floor sits well
+        # below the measured in-process total because several tests run rebar as a
+        # subprocess and so don't count toward in-process coverage. It guards against
+        # a large regression without pinning the exact number; see docs/coverage.md.
+        # Parallelized with pytest-xdist (story 8d36). `-n` is PINNED to the runner's
+        # real vCPU count (ubuntu-latest = 4, macos arm = 3), NOT `-n auto` (which
+        # over-subscribes on larger local hosts). Coverage combines correctly only
+        # because `parallel = true` is set in [tool.coverage.run] (pyproject.toml).
+        #
+        # COVERAGE IS COLLECTED ON THE PRIMARY UBUNTU 3.13 CELL ONLY. All four matrix
+        # cells still run this same default tier and the integration tier below; only
+        # duplicate coverage tracing is omitted. The three ubuntu interpreters execute
+        # the same selection, production has no Python-version branches, and the one
+        # primary report still enforces centralized branch coverage and `fail_under`.
+        # A same-host A-B-B-A-A-B experiment measured 34.00s median tracing overhead,
+        # so omitting it from ubuntu 3.11 and 3.12 saves about 68 runner-seconds per run
+        # and releases those contended runners sooner without deleting any test or cell.
+        #
+        # REBAR_REQUIRE_EXTRAS=1 (bug 599e): this lane installs every test-bearing extra,
+        # so an `importorskip` that WOULD skip means the install step lost an extra.
+        # tests/conftest.py turns that into a hard error naming the module instead of a
+        # skip nobody reads. Skips keyed on a missing binary/version floor are unaffected.
+        env:
+          REBAR_REQUIRE_EXTRAS: "1"
+          # Repository-policy tests inspect this immutable checkout's text/AST, so their
+          # result cannot vary by OS or Python. Keep them in the existing primary Ubuntu
+          # 3.13 process (which also owns coverage) and omit only their duplicate executions
+          # from the other Ubuntu cells. macOS runs ONLY the platform_compat subset (story
+          # ci-runtime-round2): the macOS runner is ~3.7x slower per test (process-spawn +
+          # git-store fixture overhead), and its unique value is platform behaviour, not test
+          # breadth — the CPU-bound policy/AST scanners are equal/faster on Linux, so running
+          # the full suite there only lengthened the gate's critical path. The platform_compat
+          # subset (flock/mkdir lock, atomic rename, gtimeout, cross-process git contention) +
+          # the integration tier below preserve full macOS platform coverage on cheap fixtures.
+          # All three non-empty branches are intentional shell strings; this changes no runner,
+          # setup, or fixture session, only which nodes each cell selects.
+          DEFAULT_SUITE_MARKS: ${{ matrix.os == 'macos-latest' && 'platform_compat and not external' || (matrix.python-version == '3.13' && 'not integration and not external' || 'not integration and not external and not repo_policy') }}
+        # The per-test HANG GUARD lives in [tool.pytest.ini_options] (`timeout = 300`,
+        # `timeout_method = "thread"`, story bold-abeyant-indri) — NOT on this command line.
+        # timeout-minutes above only bounds the whole job, so a single deadlocked test stays
+        # invisible behind the last -q dot and eats the full 60 min with no traceback (the
+        # ubuntu/py3.11 incident, ticket 89d5-61da-b621-47f8). The `thread` method is
+        # load-bearing: the default `signal` method can't fire while a worker is blocked in a
+        # C-level flock/socket/subprocess call (the exact hang shapes this suite exercises);
+        # the thread watchdog + faulthandler dumps every thread's stack and aborts the worker,
+        # so a recurrence NAMES the offending test. This lane carries NO --timeout flag on
+        # purpose (ticket 5a30-d423-b1f5-4e33): pytest-timeout precedence is CLI > ini, and
+        # the Verified gate runs the workflow files from trusted MAIN, not the patchset — so
+        # a CLI flag here permanently shadows any patchset's ini change, which is how a stale
+        # tighter flag killed workers on every run while the fix raising the budget could
+        # never take effect on its own gate (bug 3fa7-94ba-42aa-4623, change 2115 PS1).
+        # test_ci_workflow_parity.py asserts these lanes stay flag-free. 300s is
+        # sized to DWARF the slowest legitimate test, not to sit just above it: on THIS leg
+        # (the only one adding --cov=rebar) about fourteen whole-tree-scanning gate tests
+        # legitimately cost 18.7-29.93s of `call` time under -n 4 --dist worksteal --cov. A
+        # budget tight enough to clip them does not report `Failed: Timeout` — the thread
+        # method calls os._exit(1), so it kills the whole xdist worker (`node down: Not
+        # properly terminated`). The long `timeout=` values in test
+        # SOURCES are subprocess ceilings, not durations; a test that must genuinely run longer
+        # carries a plain `@pytest.mark.timeout(N)` with a reason (never func_only — the budget
+        # deliberately covers fixture setup/teardown too, bug 797b-bbc4-01cf-42d5).
+        run: |
+          rc=0
+          pytest -m "$DEFAULT_SUITE_MARKS" \
+            -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal \
+            -q -p no:cacheprovider --durations=25 \
+            --basetemp="${{ runner.temp }}/rebar-basetemp" \
+            ${{ !startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' && '--cov=rebar --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml' || '' }} || rc=$?
+          # pytest rc 5 = "no tests collected". On the macOS platform_compat cell this is a
+          # LEGITIMATE outcome for any patchset whose tree predates the conftest
+          # auto-marker (story omphacite-desertlike-coney): that marker is
+          # applied at COLLECTION time, but the Verified gate runs THIS workflow from trusted
+          # main against the raw patchset tree (reusable-workflow ref binding), so a pre-marker
+          # tree carries zero platform_compat nodes and the selection matches nothing. Such a
+          # patchset is still fully exercised by the ubuntu cells (whole-suite selection, which
+          # is marker-independent), and a CURRENT-tree marker regression is caught on ubuntu by
+          # test_platform_compat_suite_covers_the_core_os_sensitive_seams. So treat an empty
+          # collection as pass HERE ONLY; on every other cell the selection is the whole suite,
+          # where rc 5 is a real empty-suite failure that must stay red.
+          if [ "$rc" -eq 5 ] && [ "${{ matrix.os }}" = "macos-latest" ]; then
+            echo "::notice::macOS platform_compat subset selected 0 tests (patchset predates the conftest auto-marker); treating an empty collection as pass — see step comment."
+            rc=0
+          fi
+          exit "$rc"
+
+      - name: Diff coverage on changed lines (report-only; Gerrit Verified lane)
+        if: ${{ !startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' }}
+        shell: bash
+        env:
+          # Route the Gerrit refspec through env (not direct ${{ }} interpolation into the run
+          # block) so it cannot expand into attacker-controllable shell — the same
+          # template-injection remedy used for the mutation shard input.
+          GERRIT_REFSPEC: ${{ inputs.gerrit-refspec }}
+        # OSS-aligned coverage signal (epic soupy-bilineate-whiteeye, story S4): report line
+        # coverage on the lines THIS change touches, reusing the coverage.xml the default-suite
+        # step already emits on this cell — no extra test run, no material added hot-path
+        # latency (the epic's central constraint). NON-BLOCKING by design: a diff-coverage dip
+        # is surfaced to the author, never a merge gate. The enforcing coverage check stays the
+        # whole-tree branch-coverage floor (`fail_under` in [tool.coverage.report], pyproject).
+        #
+        # Diff-coverage is a PRE-MERGE signal, and rebar's pre-merge lane is Gerrit: the
+        # meaningful comparison is the patchset vs its PARENT (HEAD^) — deepened by one like the
+        # pip-audit dependency-map gate above, since a shallow patchset checkout has no parent
+        # object. The post-merge push/branch lane has no proposed diff (the change is already in
+        # main) AND its actions/checkout is shallow with no origin/main tracking ref, so there is
+        # nothing to compare and no reliable base — this step SKIPS there rather than erroring on
+        # an unresolvable ref. Because the Verified gate binds this workflow from trusted main
+        # (not the patchset), the step first runs against the NEXT change's patchset after it
+        # lands. diff-cover is a report TOOL, not a project dependency — installed ad hoc with
+        # `uv pip install` into the same `.venv`, kept out of the lock, like pip-audit. Unlike
+        # pip-audit (a security scanner that wants the LATEST advisory DB, so it floats), this is
+        # a report-only tool with no latest-version rationale, so it is VERSION-PINNED: its
+        # resolved version and transitive deps cannot float on every run (supply-chain hygiene,
+        # epic soupy-bilineate-whiteeye S2 precedent). Bump the pin deliberately.
+        run: |
+          set -uo pipefail
+          if [ -z "$GERRIT_REFSPEC" ]; then
+            echo "::notice::diff-coverage is a pre-merge signal reported on the Gerrit Verified lane (patchset vs its parent); the post-merge branch lane has no proposed diff and no reliable base — skipping."
+            exit 0
+          fi
+          if [ ! -f coverage.xml ]; then
+            echo "::notice::coverage.xml absent (patchset predates the diff-coverage step) — skipping"
+            exit 0
+          fi
+          uv pip install --quiet 'diff-cover==10.5.1'
+          # Compare against the patchset's PARENT (HEAD^), deepening by one first because a
+          # shallow patchset checkout has no parent object (mirrors the pip-audit gate above).
+          git rev-parse --verify -q 'HEAD^' >/dev/null 2>&1 || git fetch --deepen=1 || true
+          # --fail-under=0 keeps it strictly report-only (belt: `|| true`). The markdown report
+          # lands in the step summary so the author sees uncovered changed lines at a glance.
+          # `--format markdown:<path>` is the non-deprecated spelling (the older
+          # `--markdown-report` warns and is slated for removal); flag spellings + HEAD^
+          # commit-ish support were confirmed against diff-cover's --help before landing.
+          diff-cover coverage.xml --compare-branch='HEAD^' --fail-under=0 \
+            --format "markdown:${GITHUB_STEP_SUMMARY:-/dev/null}" || true
+
+      - name: Run the integration tier (concurrency + reconciler; network-guarded)
+        # These need no live services (mocked acli / local git), so they run in CI
+        # for cross-process concurrency + reconciler coverage. Live-Jira validation
+        # stays a manual probe (bridge check-access / reconcile dry-run).
+        # Parallelized (story 8d36) with `--dist loadgroup` so xdist_group-marked
+        # tests (the live reconciler E2E) co-locate on one worker and stay serial.
+        # No --timeout flag here either — the ini governs (see the default-suite
+        # step above, ticket 5a30-d423-b1f5-4e33).
+        env:
+          REBAR_REQUIRE_EXTRAS: "1"  # see the default-suite step above (bug 599e)
+        # --max-worker-restart=0 (bug 3fa7): under loadgroup a dead worker's pending workload
+        # — including the item that crashed it — is re-dispatched to respawned workers, which
+        # die on the same item up to xdist's default numprocesses*4 restarts, re-paying session
+        # setup each cycle toward the 60-min job cap (xdist #1094/#1189). =0 aborts the session
+        # on the first worker death instead. Exactly 0, not a small cap: the deterministic
+        # cause of worker deaths (the over-tight 20s budget) was fixed by the --timeout=300
+        # restore (change 2115), so any residual death is unexpected and should fail fast.
+        # The worksteal lane above must NOT get this flag — it never re-dispatches the crash
+        # item, so its default restart allowance only replaces lost capacity.
+        run: >-
+          pytest -m integration
+          -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist loadgroup
+          --max-worker-restart=0
+          -q -p no:cacheprovider --durations=25
+          --basetemp="${{ runner.temp }}/rebar-basetemp-int"
