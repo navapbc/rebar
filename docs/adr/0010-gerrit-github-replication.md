@@ -41,11 +41,10 @@ by `infra/gerrit/setup-replication.sh`). The contract:
    them all to the one GitHub repo. `projects = rebar` scopes it correctly.
 
 4. **`replicatePermissions = false` — `refs/meta/config` is NEVER pushed.** Gerrit
-   ACLs, group files, and the webhook URL token embedded in `refs/meta/config`
-   stay on-box. **ADR-0014 explicitly DEPENDS on this**: the inbound-webhook
-   token's "not replicated off-box" property holds only while this stays `false`.
-   Flipping it to `true` would mirror `refs/meta/config` (and the token) to
-   GitHub and break ADR-0014 — do not change it without revisiting ADR-0014.
+   ACLs, group files, and webhook routing policy stay on-box. **ADR-0014
+   explicitly DEPENDS on this**: flipping it to `true` would mirror
+   `refs/meta/config` to GitHub and widen the inbound-webhook trust boundary — do
+   not change it without revisiting ADR-0014.
 
 5. **Deploy-key identity (least privilege).** Gerrit authenticates to GitHub as a
    per-repo **deploy key** (an ed25519 keypair), not a user PAT. The private key
@@ -98,10 +97,10 @@ is Apache-2.0. So S5 carries no BSL obligation.
   and trips the CloudWatch alarm (`infra/terraform/monitoring_s5.tf`, watching the
   `rebar/host:replication_errors` metric the host probe publishes from
   `replication_log` ERROR / REJECTED_NONFASTFORWARD / max-retry lines).
-- **No secret leakage off-box.** `replicatePermissions = false` keeps
-  `refs/meta/config` (ACLs + webhook token) on the box, satisfying ADR-0014's
-  dependency. Only `main` and tags reach GitHub — never `refs/changes/*` or
-  `refs/meta/*`.
+- **No policy leakage off-box.** `replicatePermissions = false` keeps
+  `refs/meta/config` (ACLs + webhook routing policy) on the box, satisfying
+  ADR-0014's dependency. Only `main` and tags reach GitHub — never
+  `refs/changes/*` or `refs/meta/*`.
 - **Tight blast radius on the GitHub side.** The deploy key has write access to
   one repo only and is rotatable via a single scripted lifecycle.
 - **Coupling to ADR-0014.** This ADR and ADR-0014 are joined at

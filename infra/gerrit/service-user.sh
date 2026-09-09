@@ -14,10 +14,10 @@
 # fresh webhooks.config. The bot always ends up in "Service Users" with the
 # known token, and that same token lands in SSM and in refs/meta/config.
 #
-# NOTE: the bot's HTTP token DOUBLES as the inbound webhook URL token (the
-# `__BOT_TOKEN__` substituted into webhooks.config), so the receiver's
-# `/review/?token=…` and the SSM-stored bot HTTP token are one and the same
-# secret. See ADR-0014.
+# NOTE: the bot's HTTP token is still accepted by the public `/review/*` receiver
+# routes via `X-Rebar-Token`, but the Gerrit webhooks plugin itself does not carry
+# it: Gerrit's internal compose-network delivery is accepted by the plugin's
+# built-in `X-Origin-Url` header. See ADR-0014.
 #
 # NOTE: the surgical refs/meta/config push below requires Administrators to have
 # push on refs/meta/config in All-Projects. On a FRESH instance that grant may be
@@ -117,9 +117,9 @@ cd "$work/repo"
 git fetch -q origin refs/meta/config
 git checkout -q FETCH_HEAD
 
-# Render the committed template: substitute __BOT_TOKEN__ with the live token.
-# Use awk (not sed) so token characters are never interpreted as sed replacement
-# metacharacters. The rendered file is written ONLY to the working tree here.
+# Render the committed template. Kept as an awk substitution so older checked-out
+# templates with __BOT_TOKEN__ still rotate safely; current templates deliberately
+# do not embed the secret in webhook URLs or unsupported header keys.
 awk -v tok="$TOKEN" '{ gsub(/__BOT_TOKEN__/, tok); print }' \
 	"${SCRIPT_DIR}/webhooks.config" > webhooks.config
 

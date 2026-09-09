@@ -108,6 +108,28 @@ operator-side equivalent and additionally works when the bot cannot read comment
 `infra/gerrit/webhooks.config`; after that file changes, an operator must re-run
 `infra/gerrit/service-user.sh` to push the rendered config to `refs/meta/config`.)
 
+**After rotating `/rebar/prod/gerrit-bot-token`, prove the public receiver token and
+internal Gerrit webhook path both work.** The token is consumed by the review-bot's
+public `/review/*` routes (for `/rerun` and any external operator call). Gerrit's own
+`webhooks` plugin does **not** support arbitrary configured headers in the deployed 3.14
+plugin; it posts on the private compose network and the receiver authenticates that path
+with the plugin's built-in `X-Origin-Url` header instead. A rotation is not complete until
+the review-bot has picked up the new secret and a fresh Gerrit-originated webhook is accepted:
+
+1. Run `infra/gerrit/service-user.sh` from the host/apply environment to write the new SSM
+   value and push the rendered `webhooks.config` to `refs/meta/config` (the config must keep
+   the URL tokenless; do not add a `?token=` secret or unsupported `header =` key).
+2. Redeploy/restart the review-bot so its `WEBHOOK_TOKEN` comes from the new environment.
+3. Reload Gerrit's webhooks plugin or restart only the Gerrit container if plugin reload is
+   unavailable and the project `refs/meta/config` changed; do not restart Gerrit itself for
+   unrelated incidents without the current host maintenance owner.
+4. Smoke test with a fresh Gerrit event (new patchset on a WIP scratch change, or a comment
+   containing `rerun-llm-review`) and confirm the review-bot access log shows `POST /webhook`
+   202, not `review-bot webhook: rejected (missing/invalid token)`.
+5. Check `/review/health`: `webhook_auth_rejections` should stay unchanged after the smoke,
+   and the CloudWatch alarm `rebar-reviewbot-webhook-auth-rejections` must be OK after its
+   window clears.
+
 **SEMANTICS (budget).** Both `/rerun` and an accepted `rerun-llm-review` trigger also
 best-effort **reset the change's retry-budget row** in the dedup store, so a change that
 previously exhausted its automatic retries gets a fresh budget for the forced run. A local

@@ -278,12 +278,15 @@ class ReceiverConfig:
     #: Gerrit REST base; the receiver reaches Gerrit over the compose network as the
     #: ``gerrit`` service on 8080 (NOT through public nginx). See docker-compose.yml.
     gerrit_base_url: str = "http://gerrit:8080"
+    #: Canonical public Gerrit URL emitted by the webhooks plugin in ``X-Origin-Url``.
+    gerrit_canonical_web_url: str = "https://rebar.solutions.navateam.com"
     #: The bot's Gerrit account name (HTTP basic-auth user). ADR-0013 / S4a.
     bot_user: str = "rebar-review-bot"
     #: The bot's Gerrit HTTP token (basic-auth password). SSM-sourced; never defaulted.
     gerrit_bot_token: str = ""
-    #: Inbound webhook shared secret (the ``?token=`` query value). Per ADR-0014 this
-    #: is the SAME value as the bot token (the plugin offers no HMAC).
+    #: Public inbound shared secret (``X-Rebar-Token`` preferred, legacy ``?token=`` accepted).
+    #: Per ADR-0014 this is the SAME value as the bot token; Gerrit's internal webhook path
+    #: authenticates by network + built-in origin header instead.
     webhook_token: str = ""
     #: Backfill reconciler cadence (seconds); startup + every interval.
     reconcile_interval_seconds: int = 300
@@ -325,7 +328,7 @@ class ReceiverConfig:
     def from_env(cls) -> ReceiverConfig:
         """Build the config from the process environment (the only source)."""
         bot_token = os.environ.get("GERRIT_BOT_TOKEN", "").strip()
-        # WEBHOOK_TOKEN defaults to the bot token (ADR-0014: same secret, URL-embedded).
+        # WEBHOOK_TOKEN defaults to the bot token (ADR-0014: same public receiver secret).
         webhook_token = os.environ.get("WEBHOOK_TOKEN", "").strip() or bot_token
         return cls(
             llm_review_max_value=_int_env("LLM_REVIEW_MAX_VALUE", 1),
@@ -334,6 +337,13 @@ class ReceiverConfig:
                 "DEDUP_DB_PATH", "/var/gerrit/site/reviewbot/voted.db"
             ).strip(),
             gerrit_base_url=os.environ.get("GERRIT_BASE_URL", "http://gerrit:8080")
+            .strip()
+            .rstrip("/"),
+            gerrit_canonical_web_url=(
+                os.environ.get("GERRIT_CANONICAL_WEB_URL")
+                or os.environ.get("CANONICAL_WEB_URL")
+                or "https://rebar.solutions.navateam.com"
+            )
             .strip()
             .rstrip("/"),
             bot_user=os.environ.get("BOT_USER", "rebar-review-bot").strip(),

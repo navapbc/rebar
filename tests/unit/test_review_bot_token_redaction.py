@@ -150,8 +150,8 @@ def test_rerun_rejects_missing_and_wrong_token(monkeypatch):
 
 
 def test_webhook_authenticates_via_header(monkeypatch):
-    """/webhook also accepts the header form (Gerrit's webhooks plugin can send a header),
-    so the inbound path can be moved off the query string too."""
+    """/webhook also accepts the header form for non-Gerrit callers, so any public caller
+    can stay off the query string too."""
     _app_module, client = _app_and_client(monkeypatch)
     resp = client.post(
         "/webhook",
@@ -163,9 +163,8 @@ def test_webhook_authenticates_via_header(monkeypatch):
 
 
 def test_webhook_still_accepts_query_token_for_backward_compat(monkeypatch):
-    """Backward-compat: until Gerrit's webhooks.config is re-pushed to send the header, the
-    live query-string path must keep authenticating — the redaction filter (option c) is
-    what protects that value in the log, not rejection."""
+    """Backward-compat: legacy public callers using a query token still authenticate — the
+    redaction filter (option c) is what protects that value in the log, not rejection."""
     _app_module, client = _app_and_client(monkeypatch)
     resp = client.post(
         f"/webhook?token={SENTINEL}",
