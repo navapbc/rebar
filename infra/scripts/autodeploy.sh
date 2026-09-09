@@ -257,11 +257,11 @@ EDGE_PATHS='infra/nginx/rebar.conf.template'
 # Before this, a merged materializer-source change reached /opt/rebar and then silently did
 # nothing, with NO signal at all (bug 5524-e353-2e2d-4dbe); detect-only at least makes it
 # visible.
-MATERIALIZER_PATHS='infra/scripts/compose-up.sh infra/scripts/materialize-opcert-guard.sh infra/scripts/materialize-mcp-upstream.sh infra/nginx/mcp-upstream.conf'
+MATERIALIZER_PATHS='infra/scripts/compose-up.sh infra/scripts/materialize-opcert-guard.sh infra/scripts/materialize-mcp-upstream.sh infra/scripts/container-cap.sh infra/scripts/docker-storage-cap.sh infra/scripts/journald-cap.sh infra/scripts/vartmp-cap.sh infra/nginx/mcp-upstream.conf'
 # host observability probe: re-materialized (idempotent installer) on a source change.
 # Its installed copy at /usr/local/bin lives OUTSIDE the compose build context, so a probe
 # change reaches no trigger above and would otherwise never be refreshed on the box.
-OBS_PATHS='infra/scripts/observability.sh infra/scripts/install-observability.sh'
+OBS_PATHS='infra/scripts/observability.sh infra/scripts/install-observability.sh infra/scripts/container-cap.sh infra/scripts/docker-storage-cap.sh infra/scripts/journald-cap.sh infra/scripts/vartmp-cap.sh'
 # host certbot renew timer: same drift class as the probe above. The installed units
 # /etc/systemd/system/certbot-renew.{service,timer} live OUTSIDE the compose build
 # context; only install-certbot-timer.sh writes them, and infra/scripts/ is in no
