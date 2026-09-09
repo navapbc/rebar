@@ -1,23 +1,10 @@
-"""Write-op parity conformance oracle (ticket topaz-blubbery-mice).
+"""Transport-neutral write parity oracle (ticket topaz-blubbery-mice).
 
-A Pattern-B behavioral oracle: the single contract table in
-``write_parity_contract`` is executed through EVERY adapter (library / CLI /
-MCP) against a fresh store, and each adapter's classification
-(``ACCEPTED`` / ``REJECTED(code)`` / ``PARAM_NOT_EXPOSED``) is asserted to match
-the row's transport-agnostic expectation. Because all three are checked against
-the same expectation, any surface drift — a param present on one adapter but
-missing on another, or a runtime rule enforced inconsistently — fails the suite
-WITHOUT an LLM, a change-detector, or a hand-maintained NxM matrix.
-
-Known, ticketed divergences are
-recorded as per-row strict-xfails: the suite is
-GREEN today, and when the gap is closed the MCP classification flips to match
-the expectation, the strict-xfail xpasses, and the marker must be deleted — the
-intended forcing function for cleanup.
-
-The suite runs as an ordinary pytest with no CI-provider-specific trigger
-(portability), reusing the shared three-adapter harness (``adapters``) and the
-interfaces sandbox-store bootstrap (``conftest.rebar_repo``).
+Each contract row runs through library, CLI, and MCP against a fresh store and
+must match one shared ``ACCEPTED`` / ``REJECTED(code)`` /
+``PARAM_NOT_EXPOSED`` expectation. A populated strict xfail marks a ticketed gap
+and fails on convergence. All current maps are empty. This portable pytest suite
+reuses the shared adapter and interface-store harnesses.
 """
 
 from __future__ import annotations
@@ -45,7 +32,7 @@ def _case(case_id: str) -> Case:
 
 
 def _params() -> list:
-    """One parametrization per (case × adapter), strict-xfailing known gaps."""
+    """Parametrize case/adapter pairs. Declare strict-xfail gaps."""
     out = []
     for case in CASES:
         for name in _ADAPTERS:
@@ -74,8 +61,7 @@ def test_write_parity(case: Case, adapter_name: str, rebar_repo: Path) -> None:
         "— write-surface parity divergence"
     )
 
-    # Effect: an ACCEPTED op must actually have moved the ticket, so a silently
-    # dropped param (e.g. a flag the CLI parser ignores) cannot pass as ACCEPTED.
+    # An accepted result must move the ticket, catching silently dropped parameters.
     if result.kind == ACCEPTED and case.expected_status and subject is not None:
         actual = rebar.show_ticket(subject, repo_root=str(rebar_repo))["status"]
         assert actual == case.expected_status, (
@@ -83,9 +69,7 @@ def test_write_parity(case: Case, adapter_name: str, rebar_repo: Path) -> None:
             f"expected {case.expected_status!r} — the param did not take effect"
         )
 
-    # Store-invariance: a REJECTED op must have applied NO write — the subject is
-    # left at its pre-op status. Guards against a rejection that nonetheless took
-    # partial effect (a param applying despite a non-zero exit).
+    # A rejected result must leave the subject unchanged, excluding partial writes.
     if result.kind == REJECTED and case.unmutated_status and subject is not None:
         actual = rebar.show_ticket(subject, repo_root=str(rebar_repo))["status"]
         assert actual == case.unmutated_status, (

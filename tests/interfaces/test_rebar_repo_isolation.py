@@ -1,18 +1,9 @@
-"""Sentinels for the ``rebar_repo`` template/copy scheme (ticket 699f).
+"""Sentinels for the ``rebar_repo`` copy-isolation contract (ticket 699f).
 
-``rebar_repo`` no longer builds a store per test; it copies a per-worker template.
-That is a ~14x speedup on the tier that gates CI, but it introduces one catastrophic
-failure mode: a copy that is not re-pointed at itself keeps using the TEMPLATE's
-object database and ``refs/heads/tickets``. A write in such a copy advances the
-template's ref, so under ``-n 3`` every worker shares one ref — an unreproducible
-flake spray.
-
-The failure is INVISIBLE to ordinary assertions: ``rebar list`` reads the worktree's
-JSON files, which are per-copy and look correct, while the refs underneath are shared.
-
-These tests are the durable proof that the guard catches it. They are deliberately
-written against half-broken copies constructed here, rather than as a one-time manual
-RED/GREEN check during development, so the protection survives every later edit.
+The optimized fixture copies one per-worker template. A copy that is not
+re-pointed can look correct while sharing the template's object database and
+``refs/heads/tickets``, so its writes corrupt siblings. These tests construct broken
+copies and assert topology and refs directly.
 """
 
 from __future__ import annotations
@@ -60,13 +51,10 @@ def test_fully_fixed_copy_is_self_contained(rebar_repo: Path) -> None:
 
 
 def test_half_fixed_copy_is_rejected(_rebar_repo_template: Path, tmp_path: Path) -> None:
-    """A copy with ONLY ``.tickets-tracker/.git`` rewritten must FAIL the guard.
+    """Reject a copy whose worktree ``.git`` changed but ``gitdir`` stayed stale.
 
-    This is the test that pins the guard's shape. ``rev-parse --git-common-dir``
-    returns the COPY's path for this exact store — it derives from the ``.git`` file
-    alone and cannot witness the stale ``gitdir`` — so a ``--git-common-dir`` guard
-    would pass here while ``worktree list`` still names the template. If someone
-    "simplifies" assert_store_self_contained to --git-common-dir, this test goes red.
+    ``rev-parse --git-common-dir`` passes on this broken shape, so only the
+    worktree topology exposes it.
     """
     dest = tmp_path / "half"
     shutil.copytree(_rebar_repo_template, dest, symlinks=True)
@@ -90,18 +78,10 @@ def test_half_fixed_copy_is_rejected(_rebar_repo_template: Path, tmp_path: Path)
 def test_bare_worktree_repair_is_destructive_and_is_rejected(
     _rebar_repo_template: Path, tmp_path: Path
 ) -> None:
-    """Bare ``git worktree repair`` does not fix a copy — and it CORRUPTS the source.
+    """Prove bare worktree repair leaves the copy broken and corrupts its source.
 
-    Measured: run inside the copy, it reports ``repair: .git file incorrect`` against
-    the SOURCE and rewrites the source's ``.tickets-tracker/.git`` to point into the
-    COPY. So it is not merely the silent no-op it first appears to be — using it in
-    the fixture would redirect the shared per-worker template into whichever test copy
-    ran it, corrupting every later test in that worker.
-
-    Because of that, this test must NEVER run repair against a copy of the live
-    session template: it would sacrifice it. It builds a private throwaway source
-    first, so the damage lands there. (This bug was real — an earlier version of this
-    test corrupted the session template and made a sibling test fail confusingly.)
+    Repair rewrites the source tracker pointer toward the copy, so this test uses a
+    private sacrificial source instead of the shared session template.
     """
     sacrificial = tmp_path / "sacrificial"
     shutil.copytree(_rebar_repo_template, sacrificial, symlinks=True)
@@ -116,12 +96,11 @@ def test_bare_worktree_repair_is_destructive_and_is_rejected(
     shutil.copytree(sacrificial, dest, symlinks=True)
     subprocess.run(["git", "-C", str(dest), "worktree", "repair"], check=True, capture_output=True)
 
-    # The copy is still not self-contained: bare repair did not re-point it.
+    # Repair leaves the copy linked to its source.
     with pytest.raises(AssertionError, match="outside itself"):
         assert_store_self_contained(dest)
 
-    # And it damaged the source it was run against — the property that makes it
-    # unsafe to reach for as a "simpler" fix-up.
+    # It also redirects the source tracker into the copy.
     assert str(dest.resolve()) in (sacrificial / _WORKTREE_POINTERS[0]).read_text(
         encoding="utf-8"
     ), "expected bare repair to redirect the SOURCE store into the copy"
@@ -144,11 +123,7 @@ def test_copy_rejects_shared_git_object_alternates(
 def test_no_file_in_a_copy_contains_the_template_path(
     _rebar_repo_template: Path, rebar_repo: Path
 ) -> None:
-    """Generic catch for a THIRD pointer a future ``init_repo`` might add.
-
-    _WORKTREE_POINTERS is a snapshot of today's ``init_repo``; nothing keeps it
-    complete. This scans the whole copy, so a new absolute-path file fails loudly.
-    """
+    """Catch absolute template paths beyond the known pointer list."""
     needle = str(_rebar_repo_template.resolve())
     offenders = []
     for p in rebar_repo.rglob("*"):
@@ -165,11 +140,9 @@ def test_no_file_in_a_copy_contains_the_template_path(
 def test_write_in_one_store_does_not_move_another_stores_ref(
     _rebar_repo_template: Path, rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The core isolation property, asserted at the REF level, not via ``rebar list``.
+    """Prove a copy write advances only its own ticket ref.
 
-    ``rebar list`` reads per-copy worktree files and would look correct even with a
-    shared object store, which is precisely why the original validation of this
-    scheme missed the bug. Compare refs instead.
+    File-based reads can hide a shared object store, so compare refs directly.
     """
     template_before = _tickets_ref(_rebar_repo_template)
 
@@ -185,12 +158,10 @@ def test_write_in_one_store_does_not_move_another_stores_ref(
 
 
 def test_identity_is_reminted_per_store(_rebar_repo_template: Path, rebar_repo: Path) -> None:
-    """``.env-id``/``.signing-key`` must differ from the template's.
+    """Require fresh store identity files instead of copied template values.
 
-    They are copied verbatim, so they must be overwritten UNCONDITIONALLY. The
-    obvious helper, ``init._gen_local_files()``, guards both writes with
-    ``if not os.path.isfile`` and is therefore a silent no-op on a copy — this test
-    fails if the fixture is ever switched to it.
+    The guarded ``init._gen_local_files()`` helper would leave existing copies
+    unchanged, so cloning must overwrite them.
     """
     for rel, _mode in _IDENTITY_FILES:
         template_val = (_rebar_repo_template / rel).read_text(encoding="utf-8").strip()
@@ -243,12 +214,7 @@ def test_two_stores_are_mutually_independent(
 
 
 def test_template_stays_virgin(_rebar_repo_template: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The template must never be pre-seeded.
-
-    Several tests in this tier assert on emptiness (e.g. session-log counts) and hold
-    only because the template carries no tickets. Pre-warming it — the obvious next
-    optimisation — would silently invert them.
-    """
+    """Keep the template ticket-free. Interface empty-state tests depend on it."""
     monkeypatch.setenv("REBAR_ROOT", str(_rebar_repo_template))
     monkeypatch.chdir(_rebar_repo_template)
     assert rebar.list_tickets() == [], "the template has been seeded with tickets"
@@ -259,23 +225,10 @@ def test_fixture_bare_remote_leaves_no_detached_upkeep_behind_a_push(
     _rebar_repo_template: Path,
     tmp_path: Path,
 ) -> None:
-    """A push into a fixture bare remote must not outlive itself (bug dca1).
+    """Prove fixture pushes leave no detached Git maintenance process (bug dca1).
 
-    The durable half of the fix below. ``test_copy_repoints_sibling_origin_and_keeps_refs_
-    isolated`` copies ``source_origin`` on the statement after pushing into it; that is only
-    sound while nothing is still writing to it. Asserting the copy "works" cannot prove that —
-    the race is a coin flip, so a green copy is consistent with the mutator still existing.
-
-    So assert the mutator's ABSENCE directly, from git's own process trace: no
-    ``git maintenance run`` child spawned by the push may carry ``--detach``. Measured
-    postures, all with ``receive-pack`` confirmed present in the trace:
-
-    * git defaults                   -> 1 child, ``--detach``     (a background mutator: RED)
-    * ``autoDetach`` pins only       -> 1 child, ``--no-detach``  (foreground, push waits)
-    * all of ``BARE_REMOTE_UPKEEP_PINS`` -> 0 children            (no upkeep at all)
-
-    The assertion is a content fact about an argv list. It has no timing bound, polls nothing,
-    and does not care how long maintenance takes — only that none of it is left running.
+    The next test copies the remote immediately after a push. Trace argv directly
+    and reject ``git maintenance run --detach`` instead of relying on timing.
     """
     trace = tmp_path / "trace2.json"
     remote = init_bare_remote(tmp_path / "origin.git")
