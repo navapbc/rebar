@@ -1,23 +1,9 @@
-"""Bug f449 — a scoped reconcile pass must arbitrate on LAG-FREE remote state.
+"""Lag-free scoped snapshot overlay contracts.
 
-The exposed defect (see f449 root-cause): the bound-field INBOUND differ
-(``inbound_differ._diff_jira_vs_local``) is LEVEL-triggered and consults NO baseline —
-it emits an inbound mirror for any mirrored field where the current snapshot differs from
-local. The snapshot is the fetcher's JQL-SEARCH result, which lags on an eventually-
-consistent remote. After rebar pushes a field (local=NEW, baseline advanced to NEW), the
-OUTBOUND differ suppresses it (local==baseline, ADR 0026 / bug e6e9), so same-pass
-bidirectional suppression (bug 3bf8) does NOT fire — and the inbound differ, seeing the
-STALE snapshot (description=OLD) against local(NEW), mirrors OLD back over local. That is a
-clobber of rebar's own just-synced write.
-
-The fix refreshes the actively-scoped bound keys from the PRIMARY store
-(``get_issue_by_rest`` — immediately consistent) and MERGES the mirrored scalar fields into
-``curr_snapshot`` BEFORE both differs and baseline advancement run. With the snapshot made
-lag-free, the echo pass sees jira==local and mirrors nothing.
-
-This is the HELD-OUT oracle (rebar-implement TDD): it pins the overlay's field-merge,
-enrichment preservation, transport-error / 404 fallback, and — the teeth — that a stale
-snapshot WOULD clobber but the overlay prevents it.
+Before either differ runs, actively scoped bindings are refreshed from the
+primary Jira store. Mirrored scalar fields merge into the search snapshot
+without removing enrichment. Transport errors and missing issues preserve the
+prior snapshot. The refreshed view prevents stale inbound clobber.
 """
 
 from __future__ import annotations
@@ -97,9 +83,7 @@ def test_overlay_merges_lagfree_scalar_fields_over_the_stale_entry() -> None:
 
 
 def test_overlay_preserves_snapshot_enrichment_keys() -> None:
-    """The search snapshot entry carries enrichment (parent/comment/issuelinks) added by
-    the fetcher's _enrich_project AFTER the base fields. A direct GET does not return that
-    enrichment; the overlay must MERGE mirrored scalars, never wholesale-replace."""
+    """The overlay merges mirrored fields without discarding snapshot enrichment."""
     stale = {
         "REB-1": _vendor(
             description="OLD body",
@@ -214,9 +198,7 @@ def _inbound(snapshot: dict[str, dict[str, Any]]) -> list[Any]:
 
 
 def test_stale_snapshot_would_clobber_without_the_overlay() -> None:
-    """Documents the bug (and gives the fix its teeth): a stale post-write search snapshot
-    (description=OLD) against local(NEW) makes the level-triggered inbound differ emit a
-    description mirror that reverts local to OLD."""
+    """A stale search snapshot makes the inbound differ revert local state."""
     stale = {"REB-1": _vendor(description="OLD body", summary="NEW title")}
 
     clobbers = _inbound(stale)
@@ -236,12 +218,8 @@ def test_overlay_prevents_the_inbound_clobber() -> None:
     assert _inbound(stale) == []
 
 
-# --- 6. the ORCHESTRATOR refresh_scoped_snapshot: its guard branches --------------
-#
-# refresh_scoped_snapshot is the spine wrapper run at the top of run_differs(); it
-# decides WHETHER to overlay and maps scoped local_ids -> jira_keys. Each guard branch
-# (unscoped, no transport, no binding_store/snapshot, key-not-in-snapshot) and the
-# happy scoped path is pinned directly here.
+# The wrapper maps scoped local IDs to Jira keys and skips the overlay when scope,
+# transport, bindings, or snapshot entries are unavailable.
 
 
 class _CtxBindingStore:

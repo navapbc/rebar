@@ -1,29 +1,8 @@
-"""Bug 79a4 — the ``run_differs`` WIRING of ``refresh_scoped_snapshot`` must be
-covered offline.
+"""Offline wiring contracts for scoped snapshot refresh.
 
-The overlay ``refresh_scoped_snapshot`` (bug f449) has genuine behaviour teeth: 13
-tests in ``test_scoped_snapshot_overlay_f449.py`` pin its field-merge, enrichment
-preservation, transport/404 fallback, and the stale-snapshot clobber pair — but they
-all call the overlay **directly**. NOTHING asserted that ``run_differs`` actually
-invokes it. Measured while filing ticket 79a4-eae7-e5c7-4713 (and re-proven here):
-commenting out the
-``refresh_scoped_snapshot(ctx)`` call at ``run_differs.py:237`` leaves the entire
-offline reconciler suite (3,636 tests) GREEN. Only the live Jira DC lane caught the
-drop. A refactor / bad merge / the ongoing module-size splits could silently remove the
-call and reintroduce f449's clobber.
-
-This test closes the wiring gap. It asserts the CALL HAPPENED (spy) with the RIGHT
-``ctx`` — not that the downstream snapshot looks fresh (a coincidentally-fresh fixture
-would satisfy that vacuously; ticket AC2). It goes RED when the call is deleted and
-GREEN when present — the mutation-survivor kill.
-
-Rename / module-move robustness (ticket AC + Testing note): ``run_differs`` imports the
-overlay LOCALLY (``from rebar_reconciler.snapshot_lagfree_refresh import
-refresh_scoped_snapshot``), so the spy is installed on the **source module**
-``snapshot_lagfree_refresh`` rather than on ``run_differs``' namespace. That target
-survives ``run_differs`` being relocated to another module by a split — exactly the drop
-scenario the ticket calls out — because the call always re-resolves the name from
-``snapshot_lagfree_refresh`` at execution time.
+``run_differs`` calls ``refresh_scoped_snapshot`` once with its context before
+computing mutations. The spy patches the source module so the oracle survives
+an orchestrator module move.
 """
 
 from __future__ import annotations
@@ -90,9 +69,7 @@ def _stub_surrounding_phases(run_differs_mod, monkeypatch):
 
 
 def _empty_ctx():
-    """A minimal ``_PassContext``-shaped ctx that drives the real ``run_differs``
-    orchestrator over an empty pass (every other field is read via ``getattr`` with a
-    default, so a partial namespace is tolerated)."""
+    """Build the minimal context accepted by ``run_differs`` for an empty pass."""
     return types.SimpleNamespace(
         differ=types.SimpleNamespace(compute_mutations=lambda *a, **k: []),
         invariants_mod=None,
@@ -105,9 +82,7 @@ def _empty_ctx():
 def test_run_differs_invokes_refresh_scoped_snapshot_once_with_ctx(
     run_differs_mod, snapshot_lagfree_mod, monkeypatch
 ):
-    """The wiring contract: driving the real ``run_differs(ctx)`` invokes
-    ``refresh_scoped_snapshot`` exactly once, with the SAME ``ctx``. Deleting the call
-    at ``run_differs.py:237`` makes ``spy.calls`` empty -> RED (the mutation kill)."""
+    """``run_differs`` calls the scoped refresh once with its context."""
     spy = _SpyRefresh()
     monkeypatch.setattr(snapshot_lagfree_mod, "refresh_scoped_snapshot", spy)
     _stub_surrounding_phases(run_differs_mod, monkeypatch)
@@ -127,10 +102,7 @@ def test_run_differs_invokes_refresh_scoped_snapshot_once_with_ctx(
 def test_refresh_scoped_snapshot_runs_before_the_snapshot_differ(
     run_differs_mod, snapshot_lagfree_mod, monkeypatch
 ):
-    """Ordering half of the contract (f449): the overlay must refresh ``curr_snapshot``
-    BEFORE the differ reads it, otherwise the differ arbitrates on the stale snapshot.
-    We record the observed order of the two collaborators and assert the overlay ran
-    first. This also kills a mutant that moves the call to AFTER ``compute_mutations``."""
+    """Scoped refresh runs before the differ reads current snapshot state."""
     order: list[str] = []
 
     def _spy_refresh(ctx: object) -> None:

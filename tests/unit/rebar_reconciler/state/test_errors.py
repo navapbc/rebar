@@ -10,10 +10,8 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 ERRORS_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_errors.py"
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 
-# The 9 canonical applier leaf names as of draft-2/draft-6.
-# This set is the single source of truth for drift detection — if a leaf is
-# added, renamed, or removed, this set and the docstring contract MUST be
-# updated together.
+# These nine applier leaves expose authorization-documentation drift.
+# Update this set with the production documentation contract.
 _CANONICAL_9_LEAVES = frozenset(
     {
         "outbound_create",
@@ -108,18 +106,11 @@ def test_authorized_writers_is_frozenset(applier):
 
 
 def test_authorized_writers_docstring_documents_full_contract(applier):
-    """The _AUTHORIZED_REBAR_ID_LABEL_WRITERS docstring must document the full 9-leaf contract.
+    """Production authorization prose names every applier leaf.
 
-    Asserts that the docstring (stored as __doc__ on the constant's hosting
-    module-level object, or in the module docstring — the convention is to
-    attach it as a comment-style docstring via a dedicated sentinel) mentions:
-      - All 9 applier leaf names
-      - 'conflict_resolver' (per-element provenance skip requirement)
-      - 'inbound_repair_property' (property field, NOT label)
-
-    Because Python frozenset constants cannot carry __doc__, the contract text
-    MUST appear in _AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC (a string constant)
-    OR in the module-level docstring of applier.py.
+    The contract includes ``conflict_resolver`` and distinguishes the
+    ``inbound_repair_property`` property path. It may live in the module
+    documentation or the dedicated documentation constant.
     """
     # Collect candidate docstring sources: module docstring + dedicated doc constant.
     candidates = []

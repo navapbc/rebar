@@ -1,26 +1,9 @@
-"""Story 3388 — the ``rich_sha`` / ``rich_reemit`` pair that bounds a lossy body.
+"""Rich-description re-emission state contracts.
 
-The Data Center codec is one-way and lossy, so a description is not guaranteed to
-reach a codec fixed point. The differ can decide the local body still differs from
-the baseline, push an identical wire, and decide the same thing again next pass.
-Under the plain wire that cannot happen, so nothing in the existing design detects
-it.
-
-Two pieces of inline binding state close that hole, and both are pinned here:
-
-* ``rich_sha`` — the digest of the description wire we last pushed. Change-gated
-  and fixed-size, because it rides on every binding in every committed version of
-  the store (epic ``0303``'s churn discipline: a per-pass timestamp there is what
-  produced the 12.62 KB anti-pattern).
-* ``rich_reemit`` — how many times in a row that identical wire has gone out.
-  Never stored while it is zero, so a healthy body adds nothing at all.
-
-At ``RICH_REEMIT_OBSERVE_AT`` the apply path reads the body back ONCE and hands
-what Jira actually stored to ``_advance_baselines`` as a ``synced_fields``
-overlay. The route matters as much as the value: ``_advance_baselines`` stays the
-SOLE baseline writer, so the observation reaches the baseline through
-``merge_baseline`` exactly like every other confirmed write, and there is no
-second place that can write a baseline out from under it.
+``rich_sha`` hashes the last wire body and ``rich_reemit`` counts consecutive
+identical pushes without storing zero. At the observation threshold, the apply
+path reads Jira once and sends the stored body through ``_advance_baselines``.
+That function remains the sole baseline writer.
 """
 
 from __future__ import annotations
@@ -114,12 +97,7 @@ def test_rich_sha_is_eight_bytes_and_deterministic() -> None:
 
 
 def test_rich_sha_takes_cloud_adf_dicts_and_ignores_key_order() -> None:
-    """Cloud's wire is an ADF dict, DC's a string; only the CONTENT may move the digest.
-
-    Without the sorted-key serialization a re-encode that emitted the same document
-    with its keys in another order would read as a changed body and reset the
-    counter, which is precisely the loop this state exists to detect.
-    """
+    """Equivalent ADF dictionaries produce one digest regardless of key order."""
     adf = {"type": "doc", "version": 1, "content": [{"type": "paragraph"}]}
     reordered = {"content": [{"type": "paragraph"}], "version": 1, "type": "doc"}
     assert peer_state.rich_sha(adf) == peer_state.rich_sha(reordered)
@@ -150,12 +128,7 @@ def test_counter_climbs_only_while_the_wire_is_unchanged(tmp_path: Path) -> None
 
 
 def test_an_entry_mutation_survives_the_store_save_reload_round_trip(tmp_path: Path) -> None:
-    """``all_bindings`` copies only the OUTER mapping — the contract the writer relies on.
-
-    If that ever became a deep copy the state would be written to a throwaway dict
-    and silently lost, so this pins the property rather than the implementation
-    detail's current spelling.
-    """
+    """An inner binding mutation survives the shallow-map save and reload."""
     store = _store(tmp_path)
     peer_state.note_rich_emit(_entry(store), _WIRE)
     store.save()
@@ -226,14 +199,9 @@ def test_a_baseline_write_for_another_field_does_not_end_the_episode(tmp_path: P
 
 @pytest.mark.parametrize("value", ["off", "cloud", "dc", "both", "nonsense"])
 def test_the_core_flag_read_agrees_with_the_codecs(value: str, set_flag) -> None:
-    """Core and the adapter answer the same question from two independent reads.
+    """Core and adapter configuration reads agree without reversing dependencies.
 
-    ``apply_handlers`` cannot call ``rich_text.cutover_clients``: the vendor
-    package's dependency direction is one-way, and importing it from core would
-    invert the layering (the same reason ``config.local_to_jira_status`` is a
-    second literal of the adapter's status map rather than an import). What keeps
-    a second read honest there is a parity test, so this is that test — including
-    the unparseable value, where both must fail CLOSED.
+    Both readers fail closed on an invalid value.
     """
     from rebar_reconciler.adapters.jira_family.rich_text import cutover_clients
 
@@ -296,12 +264,7 @@ def test_a_looping_body_is_read_back_exactly_once(tmp_path: Path, set_flag) -> N
 def test_the_observation_reaches_the_baseline_through_advance_baselines(
     tmp_path: Path, set_flag
 ) -> None:
-    """The sole-writer invariant: the overlay lands via ``_advance_baselines`` alone.
-
-    Nothing in the apply path writes a baseline; it only records what it synced.
-    Driving the REAL advance here is what proves the observed value actually
-    arrives — and arrives by the same route as every other confirmed write.
-    """
+    """Observed Jira content reaches the baseline only through ``_advance_baselines``."""
     set_flag("dc")
     store, client = _store(tmp_path), _Client()
     ctx = _ctx(store, client, tmp_path)
@@ -342,20 +305,8 @@ def test_a_store_predating_the_fields_degrades_instead_of_raising(tmp_path: Path
     assert ctx.synced_fields["loc-1"]["description"] == _WIRE
 
 
-# ===========================================================================
-# RP-02 S2 T3 (morose-selfaware-unicorn) — the narrow rich-emission seam.
-#
-# Production reaches a binding entry through the SHALLOW `all_bindings()` query
-# and mutates it in place. That works only because the outer copy shares inner
-# entries, and it bypasses lifecycle policy entirely. This adds a named facade
-# operation as the supported mutation seam. The caller cutover is RP-02 S3 T3.
-#
-# The oracle is DIFFERENTIAL: the new operation must agree with the legacy
-# sequence on hash, counter and persisted bytes, for changed / unchanged /
-# missing input. Critically it must perform NO save of its own — the production
-# caller never saves per emit and relies on the pass's later unconditional save,
-# so adding one would be write amplification, not parity.
-# ===========================================================================
+# The narrow operation matches legacy hash, counter, and persisted bytes without
+# saving. Production uses this facade instead of mutating through ``all_bindings``.
 
 import json as _json  # noqa: E402
 from pathlib import Path as _Path  # noqa: E402
@@ -408,15 +359,10 @@ def test_narrow_operation_persists_the_same_bytes_as_the_legacy_sequence(
     tmp_path: _Path,
     monkeypatch: _Any,
 ) -> None:
-    """Byte equivalence is asserted after ONE save, not per emit: neither path saves during
-    emission, so the comparison is 'same state, then the pass's single save'.
+    """The narrow and legacy paths persist identical bytes after one save.
 
-    ``created_at``/``updated_at`` are stamped from the wall clock in
-    ``BindingLifecycle.bind_confirm``. The two stores are bound in two separate
-    ``bind_confirm`` calls, so on a real clock they can straddle a one-second boundary and
-    serialize different timestamp bytes (index 72 in the saved JSON) even though the state
-    is identical. Freeze the clock so the comparison isolates state, not timing (bug
-    ``c49a-225d-2bc0-4478``)."""
+    A frozen clock isolates state from binding timestamps.
+    """
     monkeypatch.setattr(_bl, "_now_iso", lambda: "2026-01-01T00:00:00Z")
     legacy_root, new_root = tmp_path / "legacy", tmp_path / "new"
     legacy, new = _bound_store(legacy_root), _bound_store(new_root)
@@ -462,9 +408,7 @@ def test_a_converging_body_never_stores_the_counter(tmp_path: _Path) -> None:
 
 
 def test_a_missing_binding_is_nonfatal_and_distinguishable(tmp_path: _Path) -> None:
-    """Today's caller resolves the entry and simply returns when it is absent. The operation
-    must be nonfatal and return something a caller can tell apart from a count — 0 would be
-    read as 'first push of this wire' and trigger real work for a binding that is not there."""
+    """A missing binding returns ``None`` without work, distinct from a zero count."""
     store = _bound_store(tmp_path)
 
     result = store.note_rich_emit("loc-MISSING", "wire")
@@ -475,16 +419,9 @@ def test_a_missing_binding_is_nonfatal_and_distinguishable(tmp_path: _Path) -> N
 
 
 def test_the_operation_performs_no_save_at_either_layer(tmp_path: _Path) -> None:
-    """No per-emit save on ANY path, at EITHER layer.
+    """Rich-emission updates never save at the facade or repository layer.
 
-    The production caller mutates in place and relies on the pass's later unconditional
-    save, so introducing a save here would be write amplification — a whole-store rewrite
-    plus fsync per description push — rather than parity.
-
-    Both the facade and the repository save are counted. Watching only the facade was a
-    mutation-proven tautology: the policy owner holds the repository directly, so a
-    `self._repo.save()` slipped into the operation never touches `BindingStore.save` and
-    was invisible to the narrower spy.
+    The pass performs its single store save after emission.
     """
     from rebar_reconciler.binding_repository import BindingRepository
 
@@ -541,22 +478,14 @@ def test_the_narrow_operation_does_not_expose_the_owners(tmp_path: _Path) -> Non
         assert not isinstance(member, (BindingLifecycle, BindingRepository)), name
 
 
-# --- 9. RP-02 S3 T3: production no longer mutates through the query --------------
-#
-# S2 T3 added ``BindingStore.note_rich_emit`` as the named door onto this state; this
-# section is the oracle for the PRODUCTION caller finally walking through it. The tests
-# above are the compatibility half and must pass UNCHANGED — the cutover is required to be
-# behaviour-preserving, so a change in the counter progression, the single read-back, the
-# baseline route or the fail-open branches would be a regression, not an improvement.
+# Production records rich-emission state through ``BindingStore.note_rich_emit``.
+# Compatibility tests pin counters, read-back, baseline routing, and missing bindings.
 
 
 class _AllBindingsWatcher(_Store):
-    """A real store that counts every ``all_bindings()`` call made against it.
+    """Count each ``all_bindings`` query without changing its behavior.
 
-    A counting subclass rather than a poisoned return value, because the interesting
-    assertion is that the shallow query is not CONSULTED at all. Poisoning what it returns
-    would only prove the mutation fails, and ``_observe_rich_reemit`` swallows exceptions
-    by design — the failure would be indistinguishable from a transport fault.
+    This distinguishes an unused query from a swallowed downstream failure.
     """
 
     def __init__(self, tracker_dir: _Path) -> None:
@@ -577,10 +506,7 @@ def _watching_store(tmp_path: _Path) -> _AllBindingsWatcher:
 def test_the_production_push_never_reaches_a_binding_through_all_bindings(
     tmp_path: _Path, set_flag
 ) -> None:
-    """The point of this task. ``all_bindings()`` is a READ-shaped query, and reaching a
-    live entry through it to write is an unowned write seam — the store cannot enforce any
-    invariant on a mutation it never saw.
-    """
+    """Production never mutates bindings reached through ``all_bindings``."""
     set_flag("dc")
     store = _watching_store(tmp_path)
     ctx = _ctx(store, _Client(), tmp_path)
@@ -593,15 +519,9 @@ def test_the_production_push_never_reaches_a_binding_through_all_bindings(
 def test_the_production_push_records_through_the_narrow_operation(
     tmp_path: _Path, set_flag, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Not merely "does not use the query" but "uses the named door" — the two are
-    different claims, and only the second one survives someone deleting the call.
+    """Production records rich-emission state through ``note_rich_emit``.
 
-    This binds to the method NAME deliberately. "Record rich-emission state through the
-    facade's narrow operation" is the acceptance criterion, not an implementation detail
-    that happens to satisfy it, and ``note_rich_emit`` is a public method on the store that
-    the reconciler, the adapters and ``bridge fsck`` all bind to. Renaming it IS a contract
-    change and should break a test; what must not break this is a change to how the
-    operation computes its answer, which the spy passes straight through.
+    The named facade operation is public while its calculation may change.
     """
     set_flag("dc")
     store = _watching_store(tmp_path)
@@ -640,11 +560,7 @@ def test_the_cutover_preserves_the_read_back_threshold(tmp_path: _Path, set_flag
 def test_a_missing_binding_still_skips_the_read_back_after_the_cutover(
     tmp_path: _Path, set_flag
 ) -> None:
-    """The fail-open branch that the narrow operation reports as ``None`` rather than 0.
-
-    ``0`` would read as "first push of this wire" and, on a threshold of one, could trigger
-    a read-back for a binding that is not there. An unbound id must simply do nothing.
-    """
+    """A missing binding returns ``None`` and cannot trigger a read-back."""
     set_flag("dc")
     store = _AllBindingsWatcher(tmp_path / ".tickets-tracker")
     client = _Client()
@@ -659,18 +575,9 @@ def test_a_missing_binding_still_skips_the_read_back_after_the_cutover(
 
 
 def test_the_call_site_makes_no_false_claim_about_the_facade(tmp_path: _Path) -> None:
-    """The docstring justified mutation-through-query with a claim that S2 T3 falsified.
+    """Call-site prose must not restore the retired module-size justification.
 
-    It said ``binding_store.py`` "sits at the module-size cap and cannot carry a narrower
-    accessor". A narrower accessor now exists AND that file is no longer at the cap, so
-    the sentence was doubly wrong and is exactly the kind of stale justification that
-    keeps a workaround alive after its reason has gone.
-
-    Asserted as source text because there is no other way: the absence of a false comment
-    has no runtime behaviour to observe. That makes this a deliberately narrow assertion —
-    it pins one retired sentence, not the docstring's wording — and its value is
-    preventing the justification from being restored alongside a revert of the cut, which
-    is exactly how this workaround survived its own obsolescence the first time.
+    This source assertion pins only that obsolete claim.
     """
     source = (_ENGINE / "rebar_reconciler" / "apply_handlers.py").read_text(encoding="utf-8")
 
@@ -679,13 +586,8 @@ def test_the_call_site_makes_no_false_claim_about_the_facade(tmp_path: _Path) ->
 
 # --- 10. the production mutation-through-query census ---------------------------
 
-#: Production modules permitted to call ``all_bindings()``, each with the reason it is a
-#: READ. The census is an allowlist rather than a ban because the query is legitimate for
-#: iteration — what it must never be is a write seam. Keying on classification instead of
-#: absence means a NEW caller cannot appear silently: it fails this test and someone has to
-#: decide, in writing, which kind it is. Every entry below was verified by reading the call
-#: site: each iterates or snapshots, and every write in those modules goes through a named
-#: facade method (``set_baseline``, ``merge_baseline``, ``unbind``).
+#: Production callers may use ``all_bindings`` only for iteration or snapshots.
+#: Every mutation in those modules uses a named facade operation.
 _ALL_BINDINGS_READERS = {
     "_engine/rebar_reconciler/binding_walk.py": (
         "iterates entries to classify off-snapshot bindings; phase 1 is read-only by design"
@@ -701,15 +603,7 @@ _ALL_BINDINGS_READERS = {
 
 
 def _production_all_bindings_callers() -> set[str]:
-    """Every production module containing a real ``x.all_bindings()`` CALL.
-
-    Parsed, not grepped. A substring search cannot tell a call from a mention, and this
-    codebase discusses ``all_bindings()`` in prose constantly — the shallow-copy contract
-    is documented on ``peer_state``, on the facade's own method, and on the lifecycle
-    owner that replaced it as the write door. Those are the files most likely to talk about
-    it and least likely to misuse it, so a text match would fill the allowlist with
-    docstrings and leave no room to notice a real new caller.
-    """
+    """Parse production ``all_bindings`` calls without counting prose mentions."""
     import ast
 
     from _tree_scan import parsed_python_files
@@ -729,11 +623,7 @@ def _production_all_bindings_callers() -> set[str]:
 
 
 def test_no_production_module_outside_the_read_allowlist_calls_all_bindings() -> None:
-    """AC3, as a standing gate rather than a one-off inspection.
-
-    ``apply_handlers.py`` leaving this set IS the deliverable of this task, so its absence
-    is asserted by the equality below rather than as a separate check.
-    """
+    """The caller census excludes unauthorized production modules."""
     assert _production_all_bindings_callers() == set(_ALL_BINDINGS_READERS)
 
 

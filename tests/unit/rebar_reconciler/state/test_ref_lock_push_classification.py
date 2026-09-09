@@ -1,26 +1,9 @@
-"""A push rejection is only a CAS mismatch when the LEASE actually moved
-(bug 4afc-33cc-9e4f-4fe2).
+"""Lease-push rejection classification contracts.
 
-`_push_lease_cas` runs `git push --force-with-lease=<ref>:<old>` and, on failure,
-substring-matches stderr against `_PUSH_REJECT_MARKERS`. A hit is re-raised in the
-exit-128 `update-ref` shape that `_cas_once` reads as a compare-and-swap mismatch, which
-`renew` converts to `LeaseLostError` -> heartbeat abort -> the whole pass aborts.
-
-The marker set is `("stale info", "rejected", "cannot lock ref")`. Only "stale info" is
-the `--force-with-lease` signal. The other two match failures that have nothing to do
-with the lease: git prints `! [remote rejected]` for pre-receive hook declines, quota and
-rate-limit rejections and server-side errors, and `cannot lock ref ... File exists` for
-ordinary server-side ref contention. Each of those is currently reported as "your lease
-was stolen".
-
-That contradicts the module's own documented promise, immediately above the marker list:
-"a genuine transport failure ... which we do NOT classify as a CAS mismatch
-(fail-closed)", and ADR 0031's "Three exit-128 outcomes, one classifier".
-
-Compounding it, the CAS branch raises WITHOUT logging the stderr while the fail-closed
-branch below it logs. So the one path that makes a consequential claim keeps no evidence
-for it — which is why the two lease losses on 2026-07-30 (runs 30576272914, 30579382013)
-cannot be shown to be genuine or spurious after the fact.
+Only a moved force-with-lease target is a CAS mismatch. Server, hook, quota,
+and transport failures remain fail-closed. CAS verdicts retain Git stderr on
+the established ``rebar_reconciler._ref_lock`` logger. Moved helpers preserve
+their original patch points and exports.
 """
 
 from __future__ import annotations
@@ -50,9 +33,7 @@ NON_CAS = {
     "pre-receive hook declined": (
         "! [remote rejected] refs/reconciler/lock (pre-receive hook declined)"
     ),
-    # Bug ebee (freeborn-dizzy-raven): the witness push failed server-side against a HEALTHY
-    # lease and was logged as "classified as CAS mismatch (lease moved)" — a false claim
-    # that a competing pass stole the lease.
+    # A server-side witness failure with an unchanged lease stays fail-closed.
     "github ref-transaction failure": (
         "remote: fatal error in commit_refs\n"
         "! [remote rejected]       1e5caeb7c8c9af4ab7cb33501eae7102ba3efa47 -> "
@@ -99,11 +80,7 @@ def test_genuine_lease_mismatch_is_still_a_cas_mismatch(
 def test_non_cas_rejections_are_not_reported_as_a_stolen_lease(
     label: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A rejection the lease did not cause must not masquerade as a stolen lease.
-
-    Reporting these as a CAS mismatch aborts the whole pass with "lease lost/stolen",
-    sending an operator hunting for a competing holder that never existed.
-    """
+    """A rejection with an unchanged lease remains a fail-closed transport error."""
     verdict = _classify(monkeypatch, NON_CAS[label])
     assert verdict == "fail-closed", (
         f"{label!r} is not a lease mismatch — the lease never moved — so it must "
@@ -120,12 +97,7 @@ def test_transport_failures_stay_fail_closed(label: str, monkeypatch: pytest.Mon
 def test_cas_mismatch_logs_the_stderr_that_justified_it(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The CAS branch must record the evidence for its claim.
-
-    Without this the "lease lost/stolen" verdict is unfalsifiable after the fact: the
-    fail-closed branch logs its stderr, the CAS branch does not, and the CAS branch is
-    the one that aborts a production pass.
-    """
+    """A CAS verdict logs the Git stderr, ref, and expected object identifier."""
     with caplog.at_level(logging.WARNING):
         verdict = _classify(monkeypatch, CAS_MISMATCH)
     assert verdict == "cas-mismatch"
@@ -145,13 +117,7 @@ def test_cas_mismatch_logs_the_stderr_that_justified_it(
 def test_a_github_server_side_ref_failure_is_not_reported_as_a_stolen_lease(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regression for bug ebee (freeborn-dizzy-raven), a Reconcile Bridge witness publish.
-
-    The witness push hit `remote: fatal error in commit_refs` while its lease was intact.
-    The broad `rejected` marker won, so the pass claimed the lease had MOVED — sending an
-    operator hunting a concurrent holder that never existed. A server fault must fail
-    closed on its own terms instead.
-    """
+    """A server-side witness failure with an intact lease remains fail-closed."""
     assert _classify(monkeypatch, NON_CAS["github ref-transaction failure"]) == "fail-closed"
 
 
@@ -165,12 +131,7 @@ def test_stale_info_still_wins_over_the_new_server_side_markers(
     assert _classify(monkeypatch, combined) == "cas-mismatch"
 
 
-# ---------------------------------------------------------------------------
-# The split of the push/CAS cluster into the `_ref_lock_push` sibling must not move
-# the seams the tests above (and any future caller) bind to: the `_git` patch point,
-# the logger the CAS evidence is emitted on, and the names' original module path.
-# Ticket splurgy-witless-flamingo (6d4f-165e-188c-42a3).
-# ---------------------------------------------------------------------------
+# The push-helper split preserves the original patch point, logger, and exports.
 
 
 @pytest.mark.parametrize(
@@ -191,13 +152,9 @@ def test_stale_info_still_wins_over_the_new_server_side_markers(
 def test_the_git_patch_point_survives_the_module_split(
     call: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`monkeypatch.setattr(_ref_lock, "_git", ...)` must still intercept every lease push.
+    """Lease pushes resolve ``_git`` from ``_ref_lock`` at call time.
 
-    The push functions live in the `_ref_lock_push` sibling, loaded under its own
-    `sys.modules` key, so a module object distinct from `_ref_lock`. If they resolved
-    `_git` at import time — or from their own module — this patch would miss and the call
-    would shell out to real git. Each entry point must resolve `_git` at CALL time from
-    the `_ref_lock` module object, which is the one tests patch.
+    This preserves the existing monkeypatch seam after the helper split.
     """
     calls: list[Any] = []
 
@@ -217,12 +174,7 @@ def test_the_git_patch_point_survives_the_module_split(
 def test_the_cas_verdict_still_logs_on_the_ref_lock_logger(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The CAS evidence must stay on `rebar_reconciler._ref_lock`.
-
-    Moving a function moves its module-level `logger = logging.getLogger(__name__)` with
-    it, silently re-homing operator-facing evidence onto a logger nobody filters for. The
-    push module must log through the caller's logger instead.
-    """
+    """CAS evidence remains on the ``rebar_reconciler._ref_lock`` logger."""
     with caplog.at_level(logging.WARNING):
         assert _classify(monkeypatch, CAS_MISMATCH) == "cas-mismatch"
     cas_records = [r for r in caplog.records if "CAS mismatch" in r.getMessage()]
@@ -239,10 +191,5 @@ def test_the_cas_verdict_still_logs_on_the_ref_lock_logger(
     "name", ["_push_lease_cas", "_push_cas", "_push_delete_cas", "_is_cas_mismatch_stderr"]
 )
 def test_moved_names_stay_resolvable_at_the_original_module_path(name: str) -> None:
-    """Every moved symbol keeps its `rebar_reconciler._ref_lock` attribute path.
-
-    `_push_cas` and `_push_delete_cas` have in-module production callers (acquire's
-    `_plant`, release's `_delete`, `_cas_advance`'s `_do`); dropping the names would break
-    the remote acquire/release/advance paths with a NameError.
-    """
+    """Moved push helpers remain callable from their original module path."""
     assert callable(getattr(_ref_lock, name)), f"{name} is no longer resolvable on _ref_lock"

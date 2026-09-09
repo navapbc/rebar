@@ -1,13 +1,9 @@
-"""0ac6 (slice 3): route jira.* (url/user/project) through the typed Config so a
-`[tool.rebar.jira]` / `rebar.toml` value is actually CONSUMED by the reconciler,
-with the Atlassian-standard env vars JIRA_URL / JIRA_USER / JIRA_PROJECT as the
-canonical (no-warn) env override. The SECRET JIRA_API_TOKEN stays env-ONLY (never a
-config key).
+"""Configuration resolution contracts for Jira settings.
 
-Exercises the shared resolver acli_subprocess.resolve_jira_settings() across config
-LOCATIONS (pyproject, rebar.toml, XDG user, env, `rebar -c`), asserting precedence
-CLI > env > project > user > default, project_default substitution, the env-only
-token, ConfigError → env fallback, and provenance.
+Typed configuration supplies the Jira URL, user, and project. Environment
+variables take precedence. The API token remains environment-only. The shared
+resolver preserves CLI, project, user, and default precedence with provenance
+and malformed-configuration fallback.
 """
 
 from __future__ import annotations
@@ -150,17 +146,11 @@ def test_malformed_config_falls_back_to_env(tmp_path: Path, monkeypatch) -> None
 
 # ── a non-https jira.url FAILS LOUD (parity with DC), NOT env fallback ─────────
 def test_non_https_jira_url_fails_loud_not_env_fallback(tmp_path: Path, monkeypatch) -> None:
-    """bug bdb8: a WELL-FORMED config whose EFFECTIVE jira.url is cleartext is a deliberate
-    security-policy rejection (InsecureUrlError), so resolve_jira_settings must let it
-    PROPAGATE — unlike a malformed config, which degrades to env. This is the fail-loud
-    posture the DC resolver already has.
+    """A resolved cleartext Jira URL raises ``InsecureUrlError``.
 
-    (An env JIRA_URL would OVERRIDE the file by precedence — env > file — so the http value
-    must be the effective one here, i.e. no overriding env is set.)
-
-    MUTATION-CHECK (inverse): drop the ``except InsecureUrlError: raise`` re-raise in
-    resolve_jira_settings → the rejection is swallowed and this test goes RED (it would
-    degrade to the env values instead of raising).
+    Malformed configuration may fall back to environment values. A policy
+    rejection propagates. No overriding ``JIRA_URL`` is set, so the file value
+    is effective.
     """
     from rebar.config import InsecureUrlError
 
@@ -183,9 +173,7 @@ def test_non_https_jira_url_resolves_when_allow_insecure(tmp_path: Path, monkeyp
 
 
 def test_dc_resolver_also_fails_loud_on_non_https_jira_url(tmp_path: Path, monkeypatch) -> None:
-    """The DC settings resolver reads config.jira.project, so building the typed Config
-    validates jira.url too — a non-https jira.url raises InsecureUrlError from the DC path
-    as well (consistent with its documented fail-loud posture)."""
+    """The Data Center resolver propagates ``InsecureUrlError`` from typed settings."""
     from rebar.config import InsecureUrlError
     from rebar_reconciler.adapters.jira_datacenter.settings import (
         resolve_jira_datacenter_settings,
@@ -214,10 +202,7 @@ def test_provenance(tmp_path: Path, monkeypatch) -> None:
 
 # ── consumer: the bootstrap env fail-fast requires the resolved essentials ────
 def test_bootstrap_env_check_requires_resolved_url_user_token(tmp_path: Path, monkeypatch) -> None:
-    """The bootstrap-band fail-fast reads the SAME resolved settings this module
-    pins. Asserted through the live seam — ``JiraBackend.assert_env_ready()``,
-    which preserves the pre-97f2 bootstrap contract — plus the shared resolver for
-    the ``project_default`` substitution."""
+    """Bootstrap checks the resolved URL, user, token, and explicit project default."""
     from rebar_reconciler.adapters.jira.backend import JiraBackend
 
     p = _proj(tmp_path)

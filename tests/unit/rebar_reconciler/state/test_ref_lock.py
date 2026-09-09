@@ -1,18 +1,8 @@
-"""Unit tests for _ref_lock.py — the bare-ref CAS lock primitive (task 524d).
+"""Bare-reference compare-and-swap lock contracts.
 
-Covers the C1 acceptance criteria:
-
-  * acquire on a free ref; a second concurrent acquire fails (already exists);
-  * read on present vs absent ref (defined contract) + blob schema round-trip;
-  * release requires the correct old oid; a stale-oid release is idempotent success;
-  * corrupt / empty / non-UTF-8 / missing-field / wrong-type blob decode fails closed;
-  * subprocess timeout -> RefLockTimeoutError;
-  * AC0: a blob-pointing refs/reconciler/* ref round-trips push+fetch through a remote;
-  * a parametrized regression that the shared _is_cas_mismatch still classifies exit-128
-    on refs/heads/tickets AND classifies the ref-lock delete-CAS on refs/reconciler/lock.
-
-Module loading follows the by-path spec_from_file_location convention used across
-the reconciler test suite.
+The suite covers acquire, read, release, corrupt blobs, subprocess timeouts,
+remote blob-reference round trips, and shared CAS classification. Modules load
+by file to preserve the standalone reconciler boundary.
 """
 
 from __future__ import annotations
@@ -59,13 +49,10 @@ def _git(args: list[str], repo: Path) -> subprocess.CompletedProcess:
 
 
 def _bare_git(args: list[str], bare: Path) -> subprocess.CompletedProcess:
-    """Run git against a BARE repo via explicit --git-dir naming.
+    """Run Git with an explicit bare repository path.
 
-    ``git -C <bare.git>`` relies on implicit repository discovery, which git
-    refuses under the ``safe.bareRepository=explicit`` policy (exit 128:
-    "cannot use bare repository"). Explicit ``--git-dir`` naming is always
-    permitted, so bare fixture repos stay portable to hosts that inject that
-    policy (same pattern as tests/_git_upkeep.py; bug 02e8-96bd).
+    Explicit ``--git-dir`` works when host policy disables implicit bare
+    repository discovery.
     """
     return subprocess.run(
         ["git", "--git-dir", str(bare), *args], capture_output=True, text=True, check=True
