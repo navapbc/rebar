@@ -105,7 +105,7 @@ def test_reducer_assignee_defaults_to_none_when_absent(tmp_path: Path, reducer: 
     )
 
 
-# A trailing slash still yields the directory ticket ID
+# A trailing slash preserves the ticket ID
 
 
 @pytest.mark.unit

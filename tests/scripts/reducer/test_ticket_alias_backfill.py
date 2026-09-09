@@ -1,7 +1,7 @@
 """Alias generation, CREATE backfill, and resolver contracts.
 
-Stored aliases outrank deterministic backfill; Jira keys resolve through the
-binding-store index; malformed or unavailable inputs degrade as specified.
+Stored aliases outrank backfill. Jira keys resolve through the binding-store
+index. Malformed or unavailable inputs degrade as specified.
 """
 
 import json
@@ -342,7 +342,7 @@ def test_resolver_snapshot_only_ticket_does_not_match_computed_alias(tmp_path):
     )
 
 
-# Genesis aliases use adjective-adjective-animal; legacy backfill stays independent.
+# Genesis aliases use adjective-adjective-animal. Legacy backfill stays independent.
 
 
 def test_genesis_alias_is_adj_adj_animal():
