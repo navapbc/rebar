@@ -68,7 +68,8 @@ SCANNER_INTEGRATION_NODES := \
 PYTHON_VERSION_FILE := .github/python-version.txt
 
 # Default-suite parallelism (bug 1035-bed7-c855-4732). See the `test` target for why the
-# default is 4 and not `auto`; override per invocation with `make test PYTEST_WORKERS=8`.
+# default is 4 and not `auto`; scripts/run_default_tests.py may reduce it when host memory
+# or another full-suite run is already consuming the shared developer machine.
 PYTEST_WORKERS ?= 4
 
 .PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check verify test scanner-integration e2e-deps jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
@@ -589,8 +590,9 @@ test:  ## Run the default test suite (excludes integration + external), parallel
 	@# measurement on a 6-performance-core/18-logical host confirms it: `-n auto` (18
 	@# workers) reached 7% in ~8 min, extrapolating past 100 min, because a large share of
 	@# this suite forks git/bash/pytest subprocesses of its own. The same tree at `-n 4`
-	@# finished in 22 min 13 s. Override for a bigger box: `make test PYTEST_WORKERS=8`.
-	pytest -m "not integration and not external" -n $(PYTEST_WORKERS) --dist worksteal -q
+	@# finished in 22 min 13 s, but the runner may reduce any request when host memory or a
+	@# peer full-suite run makes the requested fan-out unsafe.
+	python scripts/run_default_tests.py --workers "$(PYTEST_WORKERS)"
 
 # mechanism-ok: ci_gate scanner-integration — aa9e-3d35 advisory native-scanner lane.
 scanner-integration:  ## Install pinned native review scanners, then run the nine real scanner contracts.

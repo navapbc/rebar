@@ -478,12 +478,19 @@ lint` and `make typecheck` and saw green (bug `1035-bed7-c855-4732`). Budget for
 deliberately: it is cheaper than a 15–20 minute `Verified -1` round trip, and it is the only
 local command that can honestly be called "I verified this".
 
-Measured twice on one six-performance-core host at the default `PYTEST_WORKERS=4`: 22 min 25 s
-and 26 min 04 s wall (lint ~27 s, typecheck ~10 s, ~19.2k tests). The spread is host load, so
-plan for the top of the range rather than the faster figure. Raise it for a bigger box
-(`make test PYTEST_WORKERS=8`); do **not** reach for `-n auto`, which resolves to the logical
-CPU count and over-subscribes badly — on that same host `auto` (18 workers) was still at 7%
-after eight minutes, because much of this suite forks git/bash/pytest subprocesses of its own.
+Measured twice on one six-performance-core host at the historical `PYTEST_WORKERS=4`: 22 min
+25 s and 26 min 04 s wall (lint ~27 s, typecheck ~10 s, ~19.2k tests). The spread is host
+load, so plan for the top of the range rather than the faster figure. `make test` runs through
+`scripts/run_default_tests.py`, a host-memory guard that may lower the requested worker count
+when another full suite is active or free RAM is low. Do **not** reach for `-n auto`, which
+resolves to the logical CPU count and over-subscribes badly — on that same host `auto` (18
+workers) was still at 7% after eight minutes, because much of this suite forks git/bash/pytest
+subprocesses of its own.
+
+If a run is killed by OOM/low memory, classify it as an environmental failure, not a test
+failure or flaky pass. Rerun once at `PYTEST_WORKERS=1` after the host settles. If you need to
+inspect or clean up processes, scope the check to your own worktree path and recorded PIDs;
+never run a broad `pgrep -f pytest` sweep, because it matches other agents' suites too.
 
 ### The per-test hang budget (300 s) and how to override it
 
