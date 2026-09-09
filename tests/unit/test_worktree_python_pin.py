@@ -1,14 +1,8 @@
-"""The dev-env interpreter pin: `make venv` builds on the Python CI tests (bug a5f5).
+"""Keep development worktrees on a Python version exercised by CI.
 
-`make worktree` used to provision with `python3 -m venv .venv`, inheriting whatever the host's
-ambient `python3` happened to be. On the machine where this was found that was 3.14.6 while CI
-tested 3.11/3.12/3.13, so **every** worktree the repo's own one-command setup produced ran an
-interpreter CI never exercised. The failure mode is corrosive rather than loud: local red that
-CI cannot reproduce trains people to discount local failures in general.
-
-These contracts pin two things that must not drift apart — what `make venv` asks for, and what
-CI actually runs — with the value single-sourced in `.github/python-version.txt`, the same
-discipline as `.github/git-version-floor.txt` and `.github/module-size-limit.txt`.
+``make venv`` reads ``.github/python-version.txt`` instead of inheriting ambient ``python3``,
+and every setup-python workflow pin must match it. These tests keep provisioning and CI on the
+same single-sourced interpreter version.
 """
 
 from __future__ import annotations
