@@ -1,11 +1,6 @@
-"""Git subprocess + fetch-locking plumbing for the snapshot materializer.
-
-Extracted whole from :mod:`rebar._snapshot.repo_snapshot` along the call-graph seam it
-already formed there (that module sits against the 800-LOC cap). Everything here is the
-*lowest* layer of the snapshot stack — the bounded git child process, the two locks that
-coalesce concurrent fetches, and the fail-closed error vocabulary they raise — so the
-dependency runs one way: ``repo_snapshot`` imports this module, never the reverse.
-
+"""Bounded git subprocess and fetch-lock plumbing for snapshot materialization.
+This lowest layer owns child-process bounds, thread/process fetch coalescing, and the
+fail-closed error vocabulary. :mod:`rebar._snapshot.repo_snapshot` imports it one-way.
 """
 
 from __future__ import annotations
@@ -49,14 +44,10 @@ class SnapshotError(RuntimeError):
 
 
 class SnapshotFetchError(SnapshotError):
-    """``git fetch`` failed — typically missing/invalid credentials for a private repo.
+    """Fail-closed fetch error with an actionable credential remedy.
 
-    Carries an actionable remedy (configure a credential helper / deploy key / token);
-    see the MCP-server setup docs. Attested mode treats this as fail-closed.
-
-    ``stderr`` preserves git's raw failure text so a caller can classify the failure
-    (e.g. :func:`is_missing_ref` — a scoped fetch of a ref the remote simply lacks is a
-    resolution miss, not a transport failure) without re-parsing the composed message."""
+    Raw ``stderr`` lets callers distinguish a missing scoped ref from transport or
+    authentication failure without parsing the composed message."""
 
     def __init__(self, *args: object, stderr: str = "") -> None:
         super().__init__(*args)
@@ -69,12 +60,9 @@ class SnapshotRefError(SnapshotError):
 
 @contextmanager
 def interprocess_lock(lock_path: Path) -> Iterator[None]:
-    """Hold an exclusive cross-process lock for the duration of the block.
+    """Hold an exclusive process lock via ``flock`` or atomic-``mkdir`` fallback.
 
-    Uses ``fcntl.flock(LOCK_EX)`` where available; otherwise falls back to an atomic
-    ``mkdir`` spin-lock (``mkdir`` is atomic on a local FS). A lost race here is only
-    ever *wasteful* (a redundant fetch), never *wrong*, so the fallback's coarseness is
-    acceptable."""
+    The fallback may permit redundant work but cannot change correctness."""
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     if fcntl is not None:
         fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
@@ -120,30 +108,14 @@ def fetch_lock_for(repo_root: str) -> threading.Lock:
         return lk
 
 
-# --------------------------------------------------------------------------------------
-# git plumbing
-# --------------------------------------------------------------------------------------
-# Bound every git call on this path so a stuck remote (or hung credential helper) can never
-# wedge the long-lived MCP server. Deliberately MUCH larger than the 30s in _store/push.py
-# and _store/sync.py: those bound a tickets push/fetch (a few tiny event files), whereas a
-# materialization fetch here is UNFILTERED and transfers every blob of a whole tree in one
-# RPC — legitimately minutes on a cold clone. A timeout surfaces as a failed
-# CompletedProcess (returncode 124), never a hang.
-#
-# _GIT_TIMEOUT bounds the QUICK LOCAL git ops on this path (rev-parse, cat-file, remote —
-# all O(1) against the local object store). The NETWORK materialization fetch has its own,
-# far more generous ceiling: see _FETCH_TIMEOUT_SECONDS / fetch_timeout() below.
+# Git subprocess bounds. _GIT_TIMEOUT covers quick local plumbing such as rev-parse and
+# cat-file, preventing a hung child from wedging the server. Whole-tree network fetches
+# use their separate, larger fetch_timeout() ceiling.
 _GIT_TIMEOUT = 300
 
-# Wall-clock backstop for the NETWORK materialization fetch (fetch_origin here and the
-# --refetch in repo_snapshot). Deliberately generous, and NOT the guard against a wedged
-# remote: the throughput-keyed stall-abort (stall_abort_args / is_stall_abort) trips a dead
-# connection in seconds regardless of this value, so this ceiling only backstops a hang the
-# low-speed check cannot see (a pre-transport wedge moving zero bytes). A fixed 300s cap
-# fails an HONEST large/cold-store transfer closed even while data keeps flowing above the
-# floor (bug curly-open-swan); an hour is far above any real cold-clone wall time yet still
-# bounds a truly parked child. Tunable per deployment via
-# REBAR_SNAPSHOT_FETCH_TIMEOUT_SECONDS (resolved live per call by fetch_timeout()).
+# Generous wall-clock backstop for network fetches and repo_snapshot's --refetch. The
+# low-speed guard handles dead transfers; this live-configured ceiling catches pre-transport
+# hangs without rejecting a healthy large clone.
 _FETCH_TIMEOUT_SECONDS = 3600
 
 
@@ -198,17 +170,11 @@ _FULL_SHA_RE = re.compile(r"\A(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\Z")
 
 
 def is_present_full_sha(repo_root: str, ref: str) -> bool:
-    """True when ``ref`` is a FULL object name already present locally as a commit.
+    """Return whether ``ref`` is a full commit SHA already present offline.
 
-    A full SHA is immutable, so — unlike a branch or tag — it owes no remote-freshness
-    fetch: when the commit object is already in the repo, an attested resolution can skip
-    the opening fetch entirely (bug sawdusty-snotty-fossa) rather than paying even a scoped
-    single-want round-trip. Abbreviated names are rejected (ambiguous) and moving refs never
-    match, so freshness for branches/tags and targeted recovery for an ABSENT full SHA are
-    both preserved by the callers that gate on this predicate. ``GIT_NO_LAZY_FETCH`` keeps
-    the presence probe OFFLINE — on a promisor/partial clone an absent object must NOT be
-    lazily fetched here (that is the very round-trip we skip); it returns non-zero instead,
-    so the caller falls through to the explicit, fail-closed targeted-want fetch."""
+    Immutable local SHAs need no freshness fetch. Abbreviations and moving refs do not
+    match; absent objects in partial clones cannot lazy-fetch, so callers fall through to
+    the explicit fail-closed targeted fetch."""
     if not _FULL_SHA_RE.match(ref):
         return False
     env = {**os.environ, "GIT_NO_LAZY_FETCH": "1"}
@@ -221,10 +187,8 @@ def is_auth_failure(stderr: str) -> bool:
     return any(marker in low for marker in _AUTH_STDERR_MARKERS)
 
 
-# stderr fragments that mean "the remote simply does not have the ref we asked for" — a
-# scoped fetch of a nonexistent branch. This is a RESOLUTION miss (the caller should fall
-# through to a targeted SHA want / fail-closed ref error), NOT a transport failure that must
-# fail closed. Distinct from an auth/stall/timeout failure.
+# These stderr fragments mean a scoped ref is absent, a resolution miss that may fall
+# through to a targeted SHA; authentication, stall, and timeout remain transport failures.
 _MISSING_REF_STDERR_MARKERS = (
     "couldn't find remote ref",
     "no such ref",
@@ -239,17 +203,12 @@ def is_missing_ref(stderr: str) -> bool:
 
 
 def scoped_fetch_target(ref: str, remote: str) -> str:
-    """The single-ref fetch target that scopes an attested resolution's opening fetch.
+    """Return a single-ref target for an attested resolution fetch.
 
-    A remote-qualified ``ref`` (``<remote>/<name>``) becomes a forced tracking refspec
-    ``+<name>:refs/remotes/<remote>/<name>`` — git transfers ONLY that branch and updates
-    ``refs/remotes/<remote>/<name>`` so ``rev_parse(ref)`` resolves it (a bare
-    ``git fetch <remote> <name>`` only writes ``FETCH_HEAD``). Any other form (a plain
-    branch/tag, or a bare SHA served under ``allowReachableSHA1InWant``) is passed through
-    as a targeted want. Either way the fetch names a target, so it never falls back to the
-    clone's configured all-heads refspec (bug lemuroid-compliant-hoopoe). Handed to
-    :func:`fetch_origin` as ``ref`` — placed after ``--end-of-options``, so a hostile value
-    is treated strictly as a refspec (fail-closed on an invalid one), never as an option."""
+    ``<remote>/<name>`` becomes a forced remote-tracking refspec so later resolution sees
+    it; branches, tags, and SHAs remain targeted wants. This avoids the clone's all-heads
+    refspec. :func:`fetch_origin` places the result after ``--end-of-options`` so untrusted
+    input is only a refspec and fails closed if invalid."""
     prefix = f"{remote}/"
     if ref.startswith(prefix) and len(ref) > len(prefix):
         name = ref[len(prefix) :]
@@ -257,33 +216,16 @@ def scoped_fetch_target(ref: str, remote: str) -> str:
     return ref
 
 
-# --------------------------------------------------------------------------------------
-# Stall detection: a throughput-keyed abort, NOT a second wall clock
-# --------------------------------------------------------------------------------------
-# _GIT_TIMEOUT above bounds ELAPSED TIME, which is the wrong axis for a stalled transfer.
-# A remote that completes the TCP handshake and the HTTP response headers and then sends
-# ZERO bytes looks, to subprocess.run(), exactly like a legitimately slow cold clone: both
-# are "still running". So the only thing that ends a dead-air fetch is the 300s ceiling —
-# five minutes of a wedged child before the caller learns anything.
-#
-# git's curl transport already carries the right instrument: http.lowSpeedLimit /
-# http.lowSpeedTime abort the transfer when throughput stays BELOW a floor for a window.
-# That distinction matters: a slow-but-alive transfer keeps clearing the floor and is left
-# alone (a dribbling remote at 2000 B/s is never aborted under a 1000 B/s floor), while a
-# genuinely dead connection trips the window in seconds. Real cold clones of the ~80 MB
-# mirror (88-101s wall) sustain far more than 1000 B/s throughout, so the defaults below
-# cannot fire on a healthy-but-large fetch.
+# Throughput-based stall detection complements the wall clock. Git's low-speed limit and
+# window abort sustained dead air while allowing a slow transfer that keeps exceeding the
+# floor. Healthy large cold clones remain above the conservative defaults.
 _STALL_FLOOR_BYTES_PER_SEC = 1000
 _STALL_WINDOW_SECONDS = 10
-# A stall is the one failure worth retrying in-process: it is a transport-level flap with
-# no diagnosis attached, and a fresh connection usually succeeds. Deliberately bounded, so
-# a persistently dead remote still fails closed in bounded time.
+# Retry transient stalls only, with a bounded attempt count so persistent failure closes.
 _STALL_ATTEMPTS = 3
 
-# Backoff between bounded retries of the concurrent-fetch ref compare-and-swap mismatch
-# (bug agrologic-oval-bobolink). The common-dir fetch lock already excludes rebar peers, so
-# a CAS here is a NON-rebar git peer moving the ref; a short settle lets it land before the
-# re-read. Bounded by the same stall-attempt budget so a persistent racer still fails closed.
+# A CAS mismatch comes from a non-rebar git peer; briefly let it settle before the bounded
+# retry, while the common-directory lock already excludes rebar peers.
 _CAS_RETRY_BACKOFF_S = 0.1
 
 # curl's wording when the low-speed check fires, as git relays it on stderr:
@@ -292,13 +234,9 @@ _STALL_STDERR_MARKER = "operation too slow"
 
 
 def stall_abort_args() -> list[str]:
-    """The ``git -c`` pairs that arm the throughput-keyed abort on the child's curl handle.
+    """Return live-configured ``git -c`` low-speed options.
 
-    Must be spliced in BEFORE the subcommand (``git -C <root> -c ... fetch ...``); git only
-    accepts ``-c`` as a top-level option, so ``git fetch -c ...`` is a usage error. The
-    floor/window overrides are resolved through the owned config seam
-    (:func:`rebar.config.resolve_stall_abort_limits`) — live per call — rather than read
-    from ``os.environ`` here."""
+    Callers must place them before the subcommand, where git accepts top-level ``-c``."""
     from rebar import config
 
     floor, window = config.resolve_stall_abort_limits(
@@ -308,11 +246,9 @@ def stall_abort_args() -> list[str]:
 
 
 def is_stall_abort(stderr: str) -> bool:
-    """True when git's stderr shows the low-speed abort fired (i.e. the remote went quiet).
+    """Detect curl's low-speed-abort wording in git stderr.
 
-    Keyed on curl's own wording rather than the exit code, because git reports every
-    transport failure with the same generic status — the message is the only signal that
-    distinguishes "went silent" from "rejected us"."""
+    Git's generic transport exit status cannot distinguish silence from rejection."""
     return _STALL_STDERR_MARKER in stderr.lower()
 
 
@@ -325,40 +261,23 @@ def fetch_origin(
     remote: str = "origin",
     blobless: bool = True,
 ) -> None:
-    """Coalesced ``git fetch <remote>`` (optionally a targeted ref/SHA).
+    """Run a coalesced, optionally targeted ``git fetch``.
 
-    Serialized in-process (one fetch per repo at a time) and cross-process (an exclusive
-    flock), since fetch is the only lock-taking step. ``blobless`` selects the filtering
-    policy (see the module docstring): ``True`` (the default, preserving today's behaviour
-    for pure-resolution callers) fetches ``--filter=blob:none`` — commits and trees only. A
-    caller whose ref WILL be materialized must pass ``blobless=False`` → ``--no-filter``, so
-    blobs arrive with the commit in a single RPC and an ordinary clone is never latched into
-    a promisor remote.
-
-    ``lock_path`` is the cross-process fetch lock file (the snapshot store owns its
-    location, so the caller supplies it and this layer stays free of store layout). A
-    SECOND, bounded cross-process lock keyed on the repo's canonical Git COMMON directory
-    (:func:`~rebar._store.gitutil.fetch_coordination_lock`) additionally serializes this
-    fetch against EVERY other rebar ref-updating fetch that shares those remote-tracking
-    refs — a sync-leg fetch, or a snapshot fetch from another worktree — which the
-    snapshot-store lock alone cannot see (bug agrologic-oval-bobolink).
-
-    Raises :class:`SnapshotFetchError` (fail-closed) on failure, with an actionable
-    credential remedy when the remote rejected us for auth reasons; a timeout is likewise
-    surfaced as a descriptive error rather than a hang. A concurrent-fetch ref
-    compare-and-swap mismatch is bounded-retried (the residual race is a NON-rebar git peer,
-    which does not take the common-dir lock); an exhausted retry raises one actionable
-    error."""
+    Thread, snapshot-store, and canonical-common-directory locks serialize every rebar
+    fetch sharing remote-tracking refs. ``blobless=True`` fetches commits and trees for
+    pure resolution; materializers pass ``False`` to fetch all blobs in one RPC without
+    latching ordinary clones into promisor mode. The caller supplies the store lock path,
+    preserving dependency direction. Authentication, transport, and timeout failures raise
+    actionable :class:`SnapshotFetchError`; stalls and non-rebar CAS races retry only within
+    the configured bound."""
     # Disable any interactive credential prompt so a missing credential fails fast with a
     # descriptive error instead of hanging the long-lived server on a TTY prompt.
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     filter_arg = "--filter=blob:none" if blobless else "--no-filter"
     args = ["fetch", "--quiet", filter_arg, remote]
     if ref is not None:
-        # SECURITY: a client ref reaches this positional, so it MUST be terminated with
-        # --end-of-options. Without it, git reorders interspersed options and a ref like
-        # "--upload-pack=<cmd>" would be parsed as an option and EXECUTE (RCE). With it,
-        # git treats the value strictly as a refspec (invalid refspec -> fail closed).
+        # SECURITY: terminate before this untrusted positional so git cannot reinterpret a
+        # ref such as --upload-pack=<cmd> as an executable option; invalid refspecs fail closed.
         args += ["--end-of-options", ref]
     # The -c pairs must precede the subcommand; see stall_abort_args().
     argv = ["git", "-C", repo_root, *stall_abort_args(), *args]
@@ -367,13 +286,9 @@ def fetch_origin(
     attempts = config.resolve_stall_attempts(_STALL_ATTEMPTS)
     timeout_s = fetch_timeout()
     for attempt in range(1, attempts + 1):
-        # Re-acquire the locks PER ATTEMPT rather than holding them across the whole retry
-        # budget: a peer that is waiting to fetch the same repo gets a turn between our
-        # attempts, and — better still — may land the fetch we were failing at, so our next
-        # attempt is served by a warmer remote instead of queueing behind a dead one. The
-        # common-dir fetch lock (outermost cross-process leg) coordinates with the sync
-        # fetch and other worktrees' snapshot fetches; the snapshot-store lock is the
-        # in-store global fetch lock.
+        # Reacquire per attempt so peers can fetch between retries and warm the remote.
+        # The common-directory lock covers sync and other worktrees; the store lock covers
+        # snapshot fetches within this cache.
         with (
             fetch_lock_for(repo_root),
             fetch_coordination_lock(repo_root),
@@ -389,10 +304,8 @@ def fetch_origin(
                     check=False,
                 )
             except subprocess.TimeoutExpired as exc:
-                # Backstop for a hang the low-speed check cannot see (e.g. a wedged
-                # credential helper, which moves no bytes because it never reaches the
-                # transport at all). Fail closed with a description (this function's
-                # contract) — never leave the caller, or the long-lived server, blocked.
+                # Backstop pre-transport hangs invisible to the low-speed check, such as a
+                # wedged credential helper; fail closed rather than block the server.
                 raise SnapshotFetchError(
                     f"git fetch from '{remote}' timed out after {timeout_s}s (attested "
                     "mode fails closed) — the remote may be unreachable or the transfer "
@@ -401,13 +314,8 @@ def fetch_origin(
         if proc.returncode == 0:
             return
         stderr = (proc.stderr or "").strip()
-        # A stall or a concurrent-fetch ref CAS mismatch is worth another attempt; every
-        # other failure carries a diagnosis a second identical invocation cannot change —
-        # bad credentials stay bad, a missing ref stays missing, an unreachable host stays
-        # unreachable — so those fall straight through to the error branches below on the
-        # first attempt. The common-dir lock already excludes rebar peers, so a CAS here
-        # means a NON-rebar git peer moved the ref; a brief backoff lets it settle before we
-        # re-read.
+        # Retry only a stall or non-rebar CAS race; credentials, missing refs, and unreachable
+        # hosts have stable diagnoses. Brief backoff lets the external ref writer settle.
         cas = is_ref_cas_mismatch(stderr)
         if (not is_stall_abort(stderr) and not cas) or attempt == attempts:
             break
