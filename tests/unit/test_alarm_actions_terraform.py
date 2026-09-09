@@ -256,6 +256,7 @@ def test_host_published_disk_alarms_treat_missing_data_as_breaching() -> None:
         # named set is that pin, so a later edit to either alarm fails here by name.
         ("monitoring_autodeploy.tf", "gate_scratch_disk_high"),
         ("monitoring_autodeploy.tf", "gate_scratch_unmounted"),
+        ("monitoring_autodeploy.tf", "gate_scratch_volume_not_in_service"),
         # The Docker generator pair (story 9183-aaae-667d-45e6). Same ADR 0112 obligation,
         # and the same reason to PIN rather than trust the copy-paste — but with one extra
         # edge these have and the others do not: observability.sh 2f publishes them ONLY on a

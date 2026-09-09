@@ -236,6 +236,7 @@ fi
 chmod 0700 "$GATE_SCRATCH_MOUNT"
 touch "$GATE_SCRATCH_MOUNT/../.gate-scratch-required"
 touch "$GATE_SCRATCH_MOUNT/.gate-scratch-mounted"
+printf '%s\n' "${gate_scratch_volume_id}" >"$GATE_SCRATCH_MOUNT/../gate-scratch-volume-id"
 echo "Gate scratch mounted at $GATE_SCRATCH_MOUNT and marked"
 
 # ---------------------------------------------------------------------------

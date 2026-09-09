@@ -10,6 +10,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 install -m 0755 "${SCRIPT_DIR}/observability.sh" /usr/local/bin/rebar-observability.sh
+install -m 0755 "${SCRIPT_DIR}/../../scripts/assert_volumes_in_service.py" \
+  /usr/local/bin/rebar-assert-volumes-in-service.py
 
 # The probe EXECUTES cap scripts to read each generator's budget, and resolves them relative to
 # its OWN path — so an installed probe looks for them in /usr/local/bin. Installing only the

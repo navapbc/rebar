@@ -307,6 +307,18 @@ def _dimensioned(log: Path, metric: str, mount: str) -> list[int]:
     return values
 
 
+def _dimensioned_scratch_volume(log: Path, metric: str, mount: str, volume_id: str) -> list[int]:
+    values: list[int] = []
+    for line in log.read_text().splitlines() if log.exists() else []:
+        parts = line.split()
+        if "--metric-name" not in parts or parts[parts.index("--metric-name") + 1] != metric:
+            continue
+        if f"mount={mount}" not in line or f"VolumeId={volume_id}" not in line:
+            continue
+        values.append(int(parts[parts.index("--value") + 1]))
+    return values
+
+
 def _scratch_env(tmp_path: Path, *, mounted: bool) -> tuple[dict[str, str], Path, Path]:
     env, aws_log, _paths = _environment(tmp_path, [])
     # `df --output=pcent` is GNU-only and the suite also runs on macOS, so stub it the way
@@ -319,6 +331,21 @@ def _scratch_env(tmp_path: Path, *, mounted: bool) -> tuple[dict[str, str], Path
         (scratch / ".gate-scratch-mounted").write_text("")
     env["GATE_SCRATCH_MOUNT"] = str(scratch)
     return env, aws_log, scratch
+
+
+def test_scratch_volume_join_failure_publishes_unknown_every_tick(tmp_path: Path) -> None:
+    env, aws_log, scratch = _scratch_env(tmp_path, mounted=True)
+    volume_id = "vol-06780b8557d1416b7"
+    volume_id_file = tmp_path / "gate-scratch-volume-id"
+    volume_id_file.write_text(volume_id)
+    env["GATE_SCRATCH_VOLUME_ID_FILE"] = str(volume_id_file)
+    _stub(tmp_path / "bin", "lsblk", "exit 2")
+
+    assert _run(env).returncode == 0
+
+    assert _dimensioned_scratch_volume(
+        aws_log, "gate_scratch_volume_in_service", str(scratch), volume_id
+    ) == [-1]
 
 
 def test_a_mounted_scratch_volume_publishes_the_heartbeat_and_its_usage(tmp_path: Path) -> None:
