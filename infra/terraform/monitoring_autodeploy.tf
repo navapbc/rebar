@@ -242,6 +242,47 @@ resource "aws_cloudwatch_metric_alarm" "review_interrupts_signal_unavailable" {
   }
 }
 
+# mechanism-ok: ci_gate rebar-reviewbot-webhook-auth-rejections — 073f-b86f-42c6-456f: pages when Gerrit delivers webhooks with a stale token while the bot process and outbound Gerrit auth still look healthy.
+resource "aws_cloudwatch_metric_alarm" "reviewbot_webhook_auth_rejections" {
+  alarm_name        = "rebar-reviewbot-webhook-auth-rejections"
+  alarm_description = <<-EOT
+    The review-bot rejected Gerrit webhook deliveries with a missing or stale X-Rebar-Token.
+    This is the rotation failure mode where /review/health can stay HTTP 200 and Gerrit auth
+    can stay OK while no patchset-created/comment-added webhook is accepted, so LLM-Review votes
+    stall silently. Published as rebar/host:reviewbot_webhook_auth_rejections by
+    observability.sh from the review-bot health payload. Remediation: check
+    infra/gerrit/service-user.sh rotation output, refs/meta/config:webhooks.config, and restart
+    or reload Gerrit/webhooks so the plugin uses the current token.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "reviewbot_webhook_auth_rejections"
+  statistic   = "Sum"
+
+  dimensions = {
+    InstanceId = data.aws_instance.gerrit.id
+  }
+
+  period              = 900
+  evaluation_periods  = 4
+  datapoints_to_alarm = 2
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+
+  # rebar:allow-missing-data-notbreaching: liveness is carried by the reviewbot_healthy and
+  # host dead-man alarms; this counter must page on observed rejected webhooks, not on a missing
+  # probe run.
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "073f-b86f-42c6-456f"
+  }
+}
+
 # ---------------------------------------------------------------------------
 # Root-filesystem disk pressure (incident 2731). The box's 60G ROOT disk holds
 # docker's image/build-cache storage and the review-bot's working tmp; when it

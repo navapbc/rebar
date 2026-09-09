@@ -192,6 +192,8 @@ def test_health_endpoint_reports_degraded_when_gerrit_auth_is_broken(
         "queue_depth": 0,
         "gerrit_auth": "failed",
         "reason": "gerrit_auth_failed:401",
+        "webhook_auth_rejections": 0,
+        "webhook_auth_last_rejected_age_seconds": -1,
     }
 
 

@@ -14,9 +14,11 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `ANTHROPIC_API_KEY` | `src/rebar/llm/config.py` |  |
 | `ANTHROPIC_BASE_URL` | `src/rebar/llm/anthropic_model.py` |  |
 | `BOT_USER` | `src/rebar/review_bot/config.py` |  |
+| `CANONICAL_WEB_URL` | `src/rebar/review_bot/config.py` |  |
 | `DEDUP_DB_PATH` | `src/rebar/review_bot/config.py` |  |
 | `GERRIT_BASE_URL` | `src/rebar/review_bot/config.py` |  |
 | `GERRIT_BOT_TOKEN` | `src/rebar/review_bot/config.py` |  |
+| `GERRIT_CANONICAL_WEB_URL` | `src/rebar/review_bot/config.py` |  |
 | `GERRIT_PROJECT` | `src/rebar/review_bot/config.py` |  |
 | `GITHUB_STEP_SUMMARY` | `src/rebar/_cli/_bridge_commands.py` |  |
 | `GITHUB_TOKEN` | `src/rebar/mirror_guard.py` |  |
@@ -177,7 +179,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_165 variables._
+_167 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 

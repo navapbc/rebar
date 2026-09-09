@@ -6,16 +6,18 @@ stdio MCP server (`rebar-mcp`) over HTTP: Gerrit emits a plain webhook (a JSON
 POST), not MCP JSON-RPC, so an MCP HTTP transport would reject the body. nginx
 routes ``/review/`` to this app (stripping the prefix), so externally the receiver
 lives at ``https://<host>/review/`` and these routes are reached as ``/health`` and
-``/webhook`` after the prefix strip.
+``/webhook`` after the prefix strip. The production Gerrit webhook path is internal
+(``gerrit`` container → ``review-bot`` container) and authenticated by Gerrit's built-in
+``X-Origin-Url`` header; the public nginx route still requires the explicit review-bot token.
 
-S4b BEHAVIOR (the proven pipe). ``POST /webhook`` (1) validates the inbound
-``?token=`` secret (ADR-0014 — the ``webhooks`` plugin has no HMAC, so the URL token
-+ network ACL are the inbound auth), (2) parses the JSON body, and (3) **ACKs fast**:
-it enqueues the event and returns 202 immediately. A background worker consumes the
-queue and runs ``voter.review_and_vote`` (clone → review → cast the ``LLM-Review``
-vote). An LLM review takes 30s–minutes and would blow Gerrit's ~5s webhook socket
-timeout if processed inline (→ timeout + re-delivery). On startup the lifespan also
-launches the ``reconcile_loop`` backfill poller.
+S4b BEHAVIOR (the proven pipe). ``POST /webhook`` (1) authenticates the inbound
+request (ADR-0014 — public callers use the explicit receiver token; Gerrit's internal
+plugin delivery uses its built-in origin header + network ACL), (2) parses the JSON body,
+and (3) **ACKs fast**: it enqueues the event and returns 202 immediately. A background
+worker consumes the queue and runs ``voter.review_and_vote`` (clone → review → cast the
+``LLM-Review`` vote). An LLM review takes 30s–minutes and would blow Gerrit's ~5s webhook
+socket timeout if processed inline (→ timeout + re-delivery). On startup the lifespan
+also launches the ``reconcile_loop`` backfill poller.
 
 IMPORTABILITY CONTRACT. ``fastapi`` is imported at module top here on purpose — it
 is fine that ``import rebar.review_bot.app`` requires the ``reviewbot`` extra. What
@@ -36,10 +38,12 @@ import contextlib
 import hmac
 import logging
 import os
+import socket
 import threading
 import time
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -63,16 +67,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("rebar.review_bot")
 
-#: HTTP header carrying the webhook/rerun secret (ticket 66af). The token is read from THIS
-#: header in preference to the legacy ``?token=`` query param because uvicorn's access log
+#: HTTP header carrying the public webhook/rerun secret (ticket 66af). The token is read from
+#: THIS header in preference to the legacy ``?token=`` query param because uvicorn's access log
 #: records the request LINE (method + path + query) but NOT headers — so a header-authenticated
 #: request never writes the secret to stderr → journald. Do NOT reintroduce the query-string
 #: form as a convenience: it is exactly what leaked the bot's Gerrit credential into the most-
 #: grepped log on the box. ``config.install_access_log_redaction()`` is the backstop for any
-#: caller still using the query form. Gerrit's ``webhooks`` plugin can send this via its
-#: ``header`` config (see infra/gerrit/webhooks.config); the operator ``/rerun`` recipe uses it
-#: directly.
+#: caller still using the query form. Gerrit's deployed ``webhooks`` plugin cannot send this
+#: arbitrary header; its internal compose-network delivery is checked separately.
 TOKEN_HEADER = "X-Rebar-Token"
+_WEBHOOK_AUTH_REJECTIONS_ATTR = "webhook_auth_rejections"
+_WEBHOOK_AUTH_LAST_REJECTED_AT_ATTR = "webhook_auth_last_rejected_at"
 
 #: Default listen port when run via the ``__main__`` convenience runner. The
 #: deployment single-sources this from the ``.env`` (``REVIEW_BOT_PORT``) and passes
@@ -204,6 +209,74 @@ def _request_token(request: Request) -> str:
     return request.query_params.get("token", "")
 
 
+def _resolve_host_addresses(hostname: str) -> set[str]:
+    try:
+        return {
+            str(sockaddr[0])
+            for *_, sockaddr in socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+        }
+    except socket.gaierror:
+        return set()
+
+
+def _configured_gerrit_service_addresses(cfg: ReceiverConfig) -> set[str]:
+    host = urlparse(cfg.gerrit_base_url).hostname
+    return _resolve_host_addresses(host) if host else set()
+
+
+def _is_internal_gerrit_webhook(request: Request, cfg: ReceiverConfig) -> bool:
+    """Return true for Gerrit's direct compose-network webhook delivery.
+
+    The Gerrit webhooks plugin version deployed with Gerrit 3.14 does not read arbitrary
+    ``header =`` values from ``webhooks.config``; it sends only its built-in ``X-Origin-Url``.
+    The header is not a secret, so it is only accepted when the TCP peer resolves to the
+    configured Gerrit service host. Public nginx requests always carry ``X-Forwarded-For``, so
+    absence of that header is the final guard that keeps this fallback off the public edge.
+    """
+    origin = request.headers.get("X-Origin-Url", "").strip().rstrip("/")
+    forwarded_for = request.headers.get("X-Forwarded-For", "").strip()
+    client_host = request.client.host if request.client is not None else ""
+    expected_origins = {
+        cfg.gerrit_base_url.rstrip("/"),
+        cfg.gerrit_canonical_web_url.rstrip("/"),
+    }
+    return (
+        bool(origin)
+        and origin in expected_origins
+        and not forwarded_for
+        and client_host in _configured_gerrit_service_addresses(cfg)
+    )
+
+
+def _webhook_authorized(request: Request, cfg: ReceiverConfig) -> bool:
+    token = _request_token(request)
+    if cfg.webhook_token and hmac.compare_digest(token, cfg.webhook_token):
+        return True
+    return _is_internal_gerrit_webhook(request, cfg)
+
+
+def _reset_webhook_auth_rejections(app: FastAPI) -> None:
+    setattr(app.state, _WEBHOOK_AUTH_REJECTIONS_ATTR, 0)
+    setattr(app.state, _WEBHOOK_AUTH_LAST_REJECTED_AT_ATTR, None)
+
+
+def _record_webhook_auth_rejection(app: FastAPI) -> None:
+    current = int(getattr(app.state, _WEBHOOK_AUTH_REJECTIONS_ATTR, 0))
+    setattr(app.state, _WEBHOOK_AUTH_REJECTIONS_ATTR, current + 1)
+    setattr(app.state, _WEBHOOK_AUTH_LAST_REJECTED_AT_ATTR, time.monotonic())
+
+
+def _webhook_auth_rejection_health(app: FastAPI) -> dict[str, int]:
+    last_rejected_at = getattr(app.state, _WEBHOOK_AUTH_LAST_REJECTED_AT_ATTR, None)
+    age_seconds = (
+        -1 if last_rejected_at is None else max(0, int(time.monotonic() - last_rejected_at))
+    )
+    return {
+        "webhook_auth_rejections": int(getattr(app.state, _WEBHOOK_AUTH_REJECTIONS_ATTR, 0)),
+        "webhook_auth_last_rejected_age_seconds": age_seconds,
+    }
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Start the queue, the background review worker(s), the backfill reconciler, and
@@ -213,6 +286,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # executor so the shutdown force-exit gate (_running_offload_threads) can recognise an
     # orphaned offload precisely and never mistake an unrelated default-executor thread for it.
     _install_offload_executor()
+    _reset_webhook_auth_rejections(app)
     app.state.queue = asyncio.Queue()
     tasks: list[asyncio.Task] = []
     for _ in range(WORKER_COUNT):
@@ -535,16 +609,22 @@ async def health() -> dict[str, str | int]:
     has run) and always reported as a plain ``int``, ``0`` when there is no queue, so the key
     is never absent. The ``status`` / ``in_flight`` keys and their expressions are untouched:
     ``infra/scripts/autodeploy.sh`` parses ``in_flight``.
+
+    ``webhook_auth_rejections`` makes the inbound-auth failure mode observable: a rotated token
+    can leave the process live and outbound Gerrit auth healthy while Gerrit-originated webhooks
+    are rejected before they enqueue any work.
     """
     queue: asyncio.Queue | None = getattr(app.state, "queue", None)
     queue_depth = int(queue.qsize()) if queue is not None else 0
     auth_ok, auth_reason = await asyncio.to_thread(_gerrit_auth_health, app.state.config)
+    webhook_auth = _webhook_auth_rejection_health(app)
     if auth_ok:
         return {
             "status": "ok",
             "in_flight": _voter.in_flight_reviews(),
             "queue_depth": queue_depth,
             "gerrit_auth": "ok",
+            **webhook_auth,
         }
     return {
         "status": "degraded",
@@ -552,6 +632,7 @@ async def health() -> dict[str, str | int]:
         "queue_depth": queue_depth,
         "gerrit_auth": "failed",
         "reason": auth_reason,
+        **webhook_auth,
     }
 
 
@@ -559,17 +640,19 @@ async def health() -> dict[str, str | int]:
 async def webhook(request: Request) -> JSONResponse:
     """Authenticate, ACK fast (202), and enqueue the event for background review.
 
-    Auth (ADR-0014, ticket 66af): the secret must equal the configured ``WEBHOOK_TOKEN``
-    (constant-time compare), supplied in the ``X-Rebar-Token`` header (preferred — kept out of
-    the access-logged request line) or the legacy ``?token=`` query param (accepted for
-    backward-compat, its value scrubbed from the log by the redaction filter). A
-    missing/empty/wrong token is 401. The
-    review itself is NOT awaited here — it is enqueued and a background worker casts the
-    vote — because the review takes far longer than Gerrit's webhook socket timeout.
+    Auth (ADR-0014, ticket 66af): public callers must supply the configured ``WEBHOOK_TOKEN``
+    (constant-time compare) in the ``X-Rebar-Token`` header (preferred — kept out of the
+    access-logged request line) or the legacy ``?token=`` query param (accepted for
+    backward-compat, its value scrubbed from the log by the redaction filter). The internal
+    Gerrit→review-bot path has no public hop and is authenticated by the Gerrit webhooks
+    plugin's built-in ``X-Origin-Url`` header because that plugin does not support arbitrary
+    configured headers. Unauthorized requests are 401. The review itself is NOT awaited here —
+    it is enqueued and a background worker casts the vote — because the review takes far longer
+    than Gerrit's webhook socket timeout.
     """
     cfg: ReceiverConfig = request.app.state.config
-    token = _request_token(request)
-    if not cfg.webhook_token or not hmac.compare_digest(token, cfg.webhook_token):
+    if not _webhook_authorized(request, cfg):
+        _record_webhook_auth_rejection(request.app)
         logger.warning("review-bot webhook: rejected (missing/invalid token)")
         return JSONResponse(status_code=401, content={"status": "unauthorized"})
 
