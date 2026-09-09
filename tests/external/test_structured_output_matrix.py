@@ -2,14 +2,13 @@
 
 This operator-triggered harness sweeps configured providers, directive variants,
 production-shaped prompts, and repeats. It captures every raw reply as an artifact and reports
-before and after parser scores. Provider calls contact external services.
-``_structured_matrix`` owns credential checks, call budgets, scoring, and layout classification,
-with unit coverage in ``tests/unit/test_structured_matrix_scorer.py``.
+before and after parser scores. Only provider calls occur here. ``_structured_matrix`` owns
+credential checks, call budgets, scoring, and layout classification, with unit coverage in
+``tests/unit/test_structured_matrix_scorer.py``.
 
-The ``external`` mark excludes the module by default, while ``llm_live`` routes provider-matrix
-selection. A provider arm without its configured credential skips. Cells without credentials
-inside a running sweep are recorded as ``unmeasured``. Set ``REBAR_RUN_EXTERNAL=1`` and the
-selected provider credential to run the matrix.
+The ``external`` and ``llm_live`` marks exclude the module by default. A configured cell without
+its provider credential skips. Set ``REBAR_RUN_EXTERNAL=1`` and the selected provider credential
+to run the matrix.
 """
 
 from __future__ import annotations

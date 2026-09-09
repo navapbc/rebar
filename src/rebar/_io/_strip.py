@@ -1,17 +1,8 @@
-"""Provider-neutral external-tracker stripping (P1.2 ``export --strip-external``).
+"""Strip external-provider linkage while retaining source provenance.
 
-This is the ONLY seam the GitHub-sync follow-on inherits: it strips *all*
-external-tracker linkage from a ticket-state projection, regardless of provider,
-so a stripped export carries no foreign-tracker association and re-imports cleanly
-into a new project. It deliberately knows nothing about the reconciler — it
-pattern-matches the linkage the event-sourced state surfaces:
-
-* top-level ``bridge_alerts`` (the Jira bridge's alert records),
-* any top-level provider key (``jira_*`` / ``*_jira_key``), and
-* per-comment provider comment ids (``jira_comment_id`` / ``*_comment_id``).
-
-Future providers add to the same shapes (a ``github_*`` key, a ``github_comment_id``),
-so the conventions below cover them without a reconciler dependency.
+Remove top-level bridge alerts and provider ID keys plus per-comment provider IDs, so an
+export re-imports without foreign associations. Naming patterns cover future providers
+without coupling this seam to a reconciler.
 """
 
 from __future__ import annotations

@@ -5,13 +5,13 @@ aefe-614a-2631-4117).
 A directory that merely EXISTS is not a store. A store is usable iff it is a
 directory AND EITHER:
 
-1. it holds a git repository (``.git``) whose HEAD resolves — a live tracker
-   clone/worktree; OR
-2. it carries the rebar STORE STRUCTURE on disk — the committed
+1. it carries the rebar STORE STRUCTURE on disk — the committed
    ``.store-compat.json`` record (preferred: it is committed into the tickets
    tree and so survives ``materialize_tickets``' bare checkout, and is present
    even in a zero-ticket store), or, as a fallback for a store predating that
-   record, at least one ticket event directory.
+   record, at least one ticket event directory; OR
+2. it holds a git repository (``.git``) whose HEAD resolves — a live tracker
+   clone/worktree whose structure has not been checked out yet.
 
 Keying on directory presence alone let a present-but-unusable store — a tracker
 with no ``.git`` (the production shape: marker files only), or a ``.git`` whose
@@ -162,18 +162,24 @@ def _carries_store_structure(tracker: str) -> bool:
 def store_is_usable(tracker: str) -> bool:
     """Return ``True`` iff *tracker* is a usable store (see the module docstring).
 
-    isdir AND (a live ``.git`` repo with a resolvable HEAD OR a directory that carries
-    the rebar store structure). The ``.git``-existence check MUST precede the HEAD probe:
-    ``git -C tracker rev-parse`` walks UP to an enclosing repository, so probing HEAD on a
-    ``.git``-less tracker nested inside a code checkout would resolve the WRONG (parent)
-    HEAD and report a broken store as usable. ``os.path.exists`` (not ``isdir``) because
-    ``.git`` is a directory for a normal clone but a FILE for a linked worktree.
+    isdir AND (a directory that carries the rebar store structure OR a live ``.git``
+    repo with a resolvable HEAD). The structure check comes first because normal
+    initialized stores carry the committed compatibility record; they do not need an
+    unthrottled ``git`` subprocess on every read. The HEAD probe remains a fallback for
+    live git stores whose structure has not landed yet.
+
+    The explicit ``.git``-existence check still MUST precede the HEAD probe:
+    ``git -C tracker rev-parse`` walks UP to an enclosing repository, so probing HEAD on
+    a ``.git``-less tracker nested inside a code checkout would resolve the WRONG
+    (parent) HEAD and report a broken store as usable. ``os.path.exists`` (not
+    ``isdir``) because ``.git`` is a directory for a normal clone but a FILE for a
+    linked worktree.
     """
     if not os.path.isdir(tracker):
         return False
-    if _has_git(tracker) and _head_resolves(tracker):
+    if _carries_store_structure(tracker):
         return True
-    return _carries_store_structure(tracker)
+    return _has_git(tracker) and _head_resolves(tracker)
 
 
 def store_is_writable(tracker: str) -> bool:

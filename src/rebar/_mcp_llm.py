@@ -164,8 +164,8 @@ def _spawn_gate_daemon(
 
     DURABILITY IS LIMITED, exactly like ``run_workflow``: the daemon does not survive the
     MCP process exiting and there is no reaper, so a process death mid-run leaves the index
-    at ``running`` — which ``gate_status`` surfaces as ``stale-running`` (the gate's own
-    attestation, read via the ``durable`` field, remains the authoritative verdict)."""
+    at ``running`` — which ``gate_status`` settles to a failed diagnostic record (the gate's
+    own attestation, read via the ``durable`` field, remains the authoritative verdict)."""
     import rebar.llm
 
     def _bg() -> None:

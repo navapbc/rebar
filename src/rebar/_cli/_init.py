@@ -1,19 +1,8 @@
-"""Auto-init + freshness middleware for the in-process CLI.
+"""Apply CLI auto-initialization and freshness policy.
 
-The CLI runs this before each in-process command arm, with a per-command policy:
-
-* ``init_only=True`` (read arms: show/list/deps/ready/search/next-batch)
-  — auto-init only; the read path owns its own throttled reconverge
-  (``rebar._engine_support.reads.ensure_fresh``), so the middleware must NOT
-  reconverge too (that would double-sync).
-* ``init_only=False`` (write/lifecycle arms) — auto-init **and** the same
-  marker-throttled, fetch-free reconverge the write path needs. It reuses
-  ``reads.ensure_fresh`` for the reconverge so there is ONE sync implementation
-  and ONE ``/tmp/.ticket-sync-<md5>`` throttle marker shared with the read path.
-
-When the tracker override is injected (``REBAR_TRACKER_DIR``; tests / embedding)
-the caller owns the
-tracker — the middleware returns immediately.
+Read arms initialize only because their read path owns reconvergence. Write and
+lifecycle arms also reuse the read path's throttled, fetch-free reconvergence.
+An injected tracker override leaves both responsibilities to the caller.
 """
 
 from __future__ import annotations
@@ -52,20 +41,10 @@ def _is_interactive() -> bool:
 
 
 def _create_tracker(repo_root: str) -> None:
-    """Materialize the missing tracker, distinguishing the two init concepts.
+    """Materialize a missing tracker through the appropriate initialization path.
 
-    The store at ``repo_root`` does not exist yet, but "make it exist" means one of
-    two very different things, and only one of them changes the underlying repo:
-
-    * **Symlink to an existing store** — when the host repo is a linked git
-      worktree whose MAIN repo is already initialized, ``init_core`` just creates a
-      ``.tickets-tracker`` symlink to the main repo's store. That adds a local link
-      to an *existing* system and leaves the underlying repo's state untouched, so
-      we create it AUTOMATICALLY — no prompt, even non-interactively.
-    * **First-time init** — when there is no store to link to, materializing one
-      mutates the host repo (orphan ``tickets`` branch + linked worktree +
-      ``.git/info/exclude`` edits). That requires consent (see
-      :func:`_confirm_and_init`).
+    Linking a worktree to an existing store is local and automatic. Creating the
+    first store changes repository state and therefore delegates to the consent gate.
     """
     from rebar._commands import init as _init_cmd
 
@@ -77,10 +56,8 @@ def _create_tracker(repo_root: str) -> None:
             )
             raise SystemExit(1)
         return
-    # Attaching to an existing tickets branch (local or origin/tickets) only mounts
-    # already-shared state — no new orphan store is fabricated — so, like the
-    # symlink case, do it AUTOMATICALLY, even with no TTY (bug wet-chair-peg). Only a
-    # genuine first-time init (no branch to attach to) requires consent below.
+    # An existing local or remote tickets branch is shared state, so attach automatically.
+    # Only true first-store creation requires consent.
     if _init_cmd.pending_init_attaches_to_existing(repo_root):
         if _init_cmd.init_core(repo_root, silent=False) != 0:
             sys.stderr.write(
@@ -104,23 +81,12 @@ def _create_tracker(repo_root: str) -> None:
 
 
 def _confirm_and_init(repo_root: str) -> None:
-    """First-time-init consent gate: a NEW ticket store is never
-    created without consent.
+    """Require consent before creating the repository's first ticket store.
 
-    Reached only when there is no existing store to symlink to (see
-    :func:`_create_tracker`), so creating one mutates the host repo. Interactive
-    (TTY): prompt ``[Y/n]`` (default Yes); a No aborts. Non-interactive
-    (CI/pipe/library/MCP-shaped): error — no silent creation. The explicit
-    ``rebar init`` / :func:`rebar.init_repo` paths bypass this gate entirely. init
-    runs in-process via :func:`rebar._commands.init.init_core`.
-
-    Prior-art rationale: git-attached trackers split into silent-implicit creation
-    (git-bug/git-appraise, ref-only storage — invisible, cheap to auto-create) and
-    explicit-init (git-issue/bugs-everywhere/Fossil). rebar joins the explicit camp
-    and goes further (consent or explicit, never silent in automation) because its
-    init mutates the WORKING TREE — an orphan ``tickets`` branch, a linked worktree,
-    and ``.git/info/exclude`` edits — a far heavier footprint than git-bug's refs,
-    so silently materializing it on a stray read would surprise the user.
+    Interactive callers may accept the ``[Y/n]`` prompt. Non-interactive callers
+    must run an explicit initialization API or command. This path creates the orphan
+    branch, linked worktree, and exclude entry, so it never runs implicitly in
+    automation.
     """
     if not _is_interactive():
         sys.stderr.write(
@@ -149,13 +115,10 @@ def _confirm_and_init(repo_root: str) -> None:
 
 
 def ensure_initialized(*, init_only: bool) -> None:
-    """Auto-init + freshness gate for in-process CLI arms.
+    """Initialize a CLI arm and refresh it when ``init_only`` is false.
 
-    This never creates a NEW store without an interactive confirmation (TTY) — non-interactive
-    callers must run ``rebar init`` / :func:`rebar.init_repo` explicitly first.
-    Creating a worktree's symlink to an ALREADY-initialized store is the one
-    exception: it doesn't change the underlying repo, so it happens automatically
-    (see :func:`_create_tracker`).
+    First-store creation still needs interactive consent. Linking to an existing
+    store is automatic.
     """
     # Explicit tracker injected → the caller manages init/freshness (do not
     # auto-init the cwd repo's tracker).
@@ -165,10 +128,8 @@ def ensure_initialized(*, init_only: bool) -> None:
         return
 
     repo_root = _resolve_repo_root()
-    # Check existence at the SAME location init writes / commands read
-    # (config.tracker_dir), not a hard-coded repo_root/.tickets-tracker — otherwise a
-    # REBAR_ROOT that differs from the git toplevel would re-prompt
-    # forever (the check never sees the tracker init actually created).
+    # Check the configured tracker path, which initialization writes, to avoid
+    # repeated prompts when ``REBAR_ROOT`` differs from Git's top level.
     from rebar import config
 
     if not config.tracker_dir(repo_root).is_dir():
@@ -186,29 +147,12 @@ def ensure_initialized(*, init_only: bool) -> None:
 
 
 def ensure_store_mounted_best_effort() -> None:
-    """Best-effort central store mount for EVERY dispatched command (bug ad9f).
+    """Attach an existing store before any dispatched command that may need one.
 
-    The CLI runs this once, before both the pure intercepts (``verify-commit-ticket``,
-    …) and the set-based dispatch, so no store-touching command can silently skip the
-    mount — several pure intercepts resolve ticket ids against the store yet return
-    before the per-arm :func:`ensure_initialized`, and in a fresh linked worktree /
-    clone with no ``.tickets-tracker`` yet they died with "ticket store not found"
-    instead of auto-mounting.
-
-    Its contract is deliberately narrow — **attach-if-possible, never error, never
-    first-time-init, never reconverge**:
-
-    * It MOUNTS the store only in the auto-attachable cases (a worktree symlink to an
-      already-initialized main repo, or attaching to an existing local/origin
-      ``tickets`` branch) — cases that never mutate the underlying repo and never need
-      consent, exactly the ones :func:`_create_tracker` mounts silently.
-    * It NEVER forces a genuine greenfield first-time init (no
-      :func:`_confirm_and_init`): the strict per-arm :func:`ensure_initialized` still
-      owns that refusal for store-REQUIRING arms, so no-store commands (``explain``…)
-      keep working store-less.
-    * It NEVER reconverges (freshness stays owned by the per-arm gate / read path).
-    * It NEVER raises: the whole resolve+attach is swallowed so a no-store command run
-      outside any repo is unaffected.
+    This best-effort gate covers intercepts that run before per-arm initialization.
+    It may link a worktree or attach an existing tickets branch, but never creates
+    the first store, reconverges, or raises. Strict per-arm initialization retains
+    greenfield refusal and freshness ownership.
     """
     from rebar import config
 
@@ -218,9 +162,8 @@ def ensure_store_mounted_best_effort() -> None:
         return
 
     try:
-        # Resolve the repo root with the REBAR_ROOT > git precedence. Unlike
-        # ensure_initialized this must not raise when there is no repo — a no-store
-        # command (e.g. `rebar explain`) may run outside any git repo.
+        # Resolve ``REBAR_ROOT`` before Git. Absence is harmless because storeless commands
+        # may run outside a repository.
         root = config.repo_root_or_none()
         if not root:
             return

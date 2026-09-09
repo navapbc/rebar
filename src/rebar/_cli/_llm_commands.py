@@ -1,10 +1,7 @@
-"""LLM / agent-operation CLI command handlers — extracted from ``rebar._cli.__init__``
-to keep the argv router lean (module-size policy). Covers the review family — ``rebar
-review`` / ``review-code`` / ``scan-spec`` / ``verify-completion`` / ``review-plan`` /
-``explain`` — plus their shared ``--ref``/``--source`` controls and text renderers. The
-eval / config cluster (``prompt`` / ``criteria`` / ``llm setup``) lives in the sibling
-:mod:`rebar._cli._llm_eval_commands` and is re-exported below (module-size split), so
-``main()`` in ``rebar._cli`` imports every entrypoint it dispatches to from here.
+"""Implement CLI handlers and text renderers for LLM-backed operations.
+
+Review, scan, verification, plan, and explain commands reside here. Prompt, criteria,
+and setup handlers are re-exported from the sibling evaluation module.
 """
 
 from __future__ import annotations
@@ -13,10 +10,8 @@ import sys
 
 from rebar._cli._init import ensure_initialized
 
-# The eval / config command cluster (``prompt`` / ``criteria`` / ``llm setup``) lives in
-# a sibling module (module-size split) and is re-exported here so ``main()`` in
-# ``rebar._cli`` and existing importers (``from rebar._cli._llm_commands import _criteria``)
-# keep resolving unchanged.
+# Re-export the split evaluation/config handlers so existing imports and main dispatch
+# retain one stable surface.
 from rebar._cli._llm_eval_commands import _criteria, _llm, _prompt  # noqa: F401
 from rebar._cli._parser import guard_parse_errors
 from rebar._cli._parsers.advanced import llm as _llm_parsers
@@ -24,22 +19,19 @@ from rebar._mcp_errors import js_safe_dumps
 
 
 def _admission_refusal() -> tuple[type[Exception], ...]:
-    """The gate-admission refusals to catch AHEAD of the generic ``LLMError`` arms.
+    """Return retryable gate-admission errors that need distinct CLI handling.
 
-    Both are ``LLMError`` subclasses carrying a retryable outcome, so a handler that already
-    routes through :func:`_llm_error_exit_code` needs nothing; this exists for the handlers
-    that hardcode exit 1 for an ``LLMError`` and would otherwise report a refusal to START as
-    a plain failure. Imported in-body to keep this module's import light."""
+    These ``LLMError`` subclasses must precede generic arms that otherwise hardcode
+    exit 1.
+    """
     from rebar.llm.errors import GateCongestedError, GateScratchUnavailableError
 
     return (GateCongestedError, GateScratchUnavailableError)
 
 
 def _gate_source_error() -> type[Exception]:
-    """The snapshot/ref-resolution error class to catch at the CLI boundary so an
-    unresolvable/absent ref, a missing-credential fetch, or an unreachable object DB at
-    REBAR_ROOT surfaces as a clean, actionable ``Error:`` line (attested fails closed) rather
-    than a traceback. (An invalid ``--source`` is rejected earlier by argparse's choices.)"""
+    """Return the snapshot error rendered cleanly for missing or unresolvable sources,
+    credentials, or object databases."""
     from rebar._snapshot import SnapshotError
 
     return SnapshotError
@@ -101,12 +93,12 @@ def _llm_error_exit_code(exc: Exception) -> int:
 
 
 def _disposition_exit_code(result: dict, *, indeterminate_code: int) -> int:
-    """Map a shape-A gate result to an exit code, honouring the systemic-degrade disposition
-    (story authorial-hated-blackbear). A PASS is 0. Otherwise, a persisted retryable disposition
-    (``coverage.retryable``, set from the classifier's ``LLMOutcome``) → exit 11
-    ("transient — retry"); a non-retryable INDETERMINATE → ``indeterminate_code`` (the gate's
-    existing INDETERMINATE exit, UNCHANGED); any other non-PASS → 1. The class-specific message
-    is printed to stderr as a side effect so the driving agent sees what to do."""
+    """Map a gate result to its contractual exit code.
+
+    PASS returns 0. Retryable degradation returns 11. Non-retryable INDETERMINATE
+    uses ``indeterminate_code``. Other failures return 1. Resolution details go to
+    stderr.
+    """
     coverage = result.get("coverage") or {}
     rc = coverage.get("resolution_class")
     if rc:
@@ -120,13 +112,8 @@ def _disposition_exit_code(result: dict, *, indeterminate_code: int) -> int:
     v = result.get("verdict")
     verdict = str((v.get("verdict", "") if isinstance(v, dict) else v) or "").upper()
     if verdict == "PASS":
-        # A signable PASS whose attestation was ATTEMPTED but FAILED to persist is NOT a
-        # silent success: the review's sole durable product — the signature the claim gate
-        # consumes — was lost to a recoverable condition (e.g. a git index.lock), so a later
-        # `claim` still fails the gate. The discrimination (stale plan vs unreadable relation
-        # vs transient) lives BELOW this CLI in `rebar.llm.plan_review.resign` so the MCP
-        # surface applies the SAME rule (ticket ammonic-amoral-nabarlek); here it maps to
-        # exit 11 ("transient — retry") with the classifier's message on stderr.
+        # A PASS whose required signature could not persist is retryable, never successful.
+        # Shared attestation classification keeps CLI and MCP behavior aligned.
         from rebar.llm.plan_review.resign import classify_plan_review_attestation
 
         attestation = classify_plan_review_attestation(result)
@@ -159,12 +146,8 @@ def _review_code(argv: list[str]) -> int:
         except OSError as exc:
             sys.stderr.write(f"Error: cannot read --diff-file: {exc}\n")
             return 1
-    # Local memory key (story paradoxal-balsamic-bubblefish): resolve the shared session id so the
-    # gate can emit/reuse a `code-review: session:<id>` artifact across `rebar review-code` runs. A
-    # bare/headless invocation (no session var, no SessionStart shim) returns None → mint a
-    # per-invocation uuid4 (NOT persisted): local convergence is intentionally INERT there, chosen
-    # for isolation (no local→Gerrit bleed, no cross-session contamination). Genuine per-session
-    # convergence arrives wherever a session lifecycle exports one of the session-id env vars.
+    # Reuse a session-scoped review artifact when an exported session id exists. Headless calls
+    # get an unpersisted UUID, preventing local/Gerrit or cross-session leakage.
     import uuid
 
     from rebar._commands.session_id import resolve_session_id
@@ -266,9 +249,9 @@ def _verify_completion(argv: list[str]) -> int:
     except _gate_source_error() as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
-    # Record the run ON THE TICKET (story reuse-standalone-completion): an attested PASS signs a
-    # completion-verifier attestation a later same-ref close REUSES; PASS and FAIL emit the
-    # COMPLETION_VERDICT sidecar. --no-sign / a --source local verdict record only the sidecar.
+    # Persist standalone completion evidence. A certifiable PASS signs evidence that a same-ref
+    # close can reuse. PASS and FAIL write sidecars, while local or ``--no-sign`` runs write only
+    # sidecars.
     from rebar._commands.transition_close import record_completion_verdict
 
     result["record"] = record_completion_verdict(result, args.ticket_id, sign=not args.no_sign)
@@ -278,11 +261,8 @@ def _verify_completion(argv: list[str]) -> int:
         _render_verdict_text(result)
         _render_source_line(result)
         _render_record_line(result["record"])
-    # A verifier FAULT is retryable, not a completion judgement — exit 11 like every other
-    # transient degrade, so a caller scripting this verb can retry instead of treating it as
-    # "criteria unmet". Both fault classes ("no verdict obtainable", bug 2a6f, and an
-    # insufficiency-only FAIL) map to 11 via the shared helper; the close gate disposes them
-    # identically. Without this the standalone verb flattened them into the generic exit 1.
+    # Verifier faults are retryable (exit 11), distinct from unmet criteria. The shared
+    # completion classifier preserves that distinction for standalone and close paths.
     if result.get("verdict") == "PASS":
         return 0
     from rebar.llm import completion_reconcile
@@ -318,22 +298,19 @@ def _explain(argv: list[str]) -> int:
 
 @guard_parse_errors
 def _review_plan(argv: list[str]) -> int:
-    """``rebar review-plan`` → rebar.llm.review_plan (native; like verify-completion).
+    """Run, record, and optionally sign the multi-pass plan review.
 
-    Runs the four-pass plan-review gate on a ticket's whole plan, emits the
-    ``REVIEW_RESULT`` sidecar, and (on a non-blocking PASS) signs a plan-review
-    attestation so a subsequent ``claim`` passes the gate (when enabled). Needs the
-    'agents' extra + a model API key to run the LLM tiers; the DET floor runs
-    without them. A ticket that is not yet claimable (status closed/idea/blocked, or
-    open but blocked by an unclosed dependency) fast-fails to INDETERMINATE with no LLM
-    unless ``--force`` is passed. Exit 0 on PASS, 1 on BLOCK, 2 on INDETERMINATE."""
+    A non-blocking PASS signs the attestation consumed by claim. Ineligible ticket
+    states fail fast without LLM work unless human ``--force`` is supplied. The
+    command exits 0 for PASS, 1 for BLOCK, and 2 for INDETERMINATE. LLM tiers require
+    the agents extra and model credentials.
+    """
 
     parser = _llm_parsers.build_review_plan(prog="rebar review-plan")
     args = parser.parse_args(argv)
 
-    # --retry resumes ONLY the exact latest eligible INDETERMINATE review; it is an operator
-    # override of the read-only/status paths, so it is mutually exclusive with --force, --status,
-    # and --check (compatible with --no-sign). Mirror argparse's conflict convention (exit 2).
+    # ``--retry`` accepts only the latest eligible INDETERMINATE and conflicts with force,
+    # status, or check. ``--no-sign`` remains compatible.
     if getattr(args, "retry", False):
         conflict = next((f for f in ("force", "status", "check") if getattr(args, f, False)), None)
         if conflict is not None:
@@ -374,10 +351,8 @@ def _review_plan(argv: list[str]) -> int:
             retry=getattr(args, "retry", False),
         )
     except _admission_refusal() as exc:
-        # Host congestion / unreachable gate scratch: the gate never RAN, so this is not a
-        # BLOCK and not an INDETERMINATE. Exit 11 ("transient — retry") via the shared
-        # classifier, which reads the retryable outcome the refusal carries. Its own arm
-        # because this handler — unlike verify-completion's — hardcodes 1 for an LLMError.
+        # Admission congestion means the gate never ran, so return retryable exit 11 rather
+        # than BLOCK or INDETERMINATE.
         sys.stderr.write(f"Error: {exc}\n")
         return _llm_error_exit_code(exc)
     except llm.LLMError as exc:
@@ -403,15 +378,11 @@ def _review_plan(argv: list[str]) -> int:
 
 @guard_parse_errors
 def _sign_review(argv: list[str]) -> int:
-    """``rebar sign-review`` invokes ``rebar.llm.resign_plan_review``.
+    """Re-sign the latest still-current PASS without rerunning review.
 
-    Top-level help is served from the committed parser artifact.
-
-    The CHEAP recovery path (ticket middle-actinium-thrush): (re)persist the plan-review
-    attestation for an ALREADY-COMPUTED, still-valid PASS verdict from the latest
-    ``REVIEW_RESULT`` sidecar — WITHOUT re-running the multi-pass LLM review. No LLM, no
-    network, no 'agents' extra. REFUSES (exit 1) when there is no PASS sidecar, or the plan
-    changed since the review (stale). Exit 0 on a successful re-sign."""
+    This LLM- and network-free recovery path refuses absent, non-PASS, or stale
+    sidecars. It exits 0 only after persisting the attestation.
+    """
 
     parser = _llm_parsers.build_sign_review(prog="rebar sign-review")
     args = parser.parse_args(argv)
@@ -439,10 +410,11 @@ def _sign_review(argv: list[str]) -> int:
 
 
 def _render_step_failures(result: dict) -> None:
-    """Name the LLM step calls that failed but did not fail the run
-    (eclectic-industrial-argali). Absent from a clean run's coverage, so this prints only when
-    something actually degraded — which is the point: repeated silent degradation used to be
-    visible only by scraping the logs."""
+    """Render non-fatal LLM step failures recorded in coverage.
+
+    Clean runs omit the line. Degraded runs name failed steps that contributed
+    nothing.
+    """
     tally = (result.get("coverage", {}) or {}).get("llm_step_failures") or {}
     if not tally:
         return
@@ -456,14 +428,12 @@ def _render_step_failures(result: dict) -> None:
 
 
 def _render_reuse_notation(result: dict) -> None:
-    """Reuse notation (b3e5/7e77, sharpened by task 167e): the rendered findings are the
-    LAST review's result REPLAYED because nothing that review read has changed — not a
-    fresh LLM run. Says so unmistakably on both reuse paths, keeps the ``--force``
-    pointer, and renders the stored review's recency anchor
-    (``coverage.replayed_review``: its timestamp + reviewed-code SHA) so the reader can
-    judge staleness — omitted gracefully when the sidecar carried none. The JSON already
-    carries ``coverage.idempotent_skip`` / ``coverage.verdict_reuse`` and
-    ``runner="reused"``; a fresh review prints nothing here."""
+    """Explain that unchanged findings were replayed, not freshly reviewed.
+
+    Both reuse paths retain the force hint and, when available, show the stored
+    review's timestamp and code SHA. JSON conveys the same state through coverage
+    fields and the ``reused`` runner.
+    """
     coverage = result.get("coverage", {}) or {}
     if coverage.get("idempotent_skip"):
         sys.stdout.write(
@@ -506,9 +476,8 @@ def _render_plan_review_text(result: dict) -> None:
         f"overflow={overflow} "
         f"dropped={counts.get('dropped', 0)} indeterminate={counts.get('indeterminate', 0)}\n"
     )
-    # Surface each indeterminate finding's reason (+ remediation) so a non-PASS with no
-    # blocking findings — e.g. a not-claimable fast-fail or a snapshot-collection error —
-    # tells the reader WHY and how to proceed, not just a bare count.
+    # Explain each indeterminate result and remedy, including fast-fail admission and
+    # snapshot errors that have no blocking finding.
     for f in result.get("indeterminate", []):
         reason = f.get("reason") or f.get("finding") or ""
         sys.stdout.write(f"  [indeterminate {f.get('id', '')}] {reason}\n")
@@ -535,9 +504,7 @@ def _render_plan_review_text(result: dict) -> None:
     for f in result.get("advisory", []):
         sys.stdout.write(f"  [advisory {','.join(f.get('criteria', []))}] {f.get('finding', '')}\n")
     if overflow:
-        # The surfaced advisory list is capped; tell the reader the tail exists (it is
-        # NOT "only N issues") and where the full set lives, so a capped list never
-        # reads as a complete count.
+        # Disclose capped advisory overflow and point to the complete sidecar.
         sys.stdout.write(
             f"  (+{overflow} more advisory finding(s) beyond the surfacing cap — "
             f"see the REVIEW_RESULT sidecar)\n"

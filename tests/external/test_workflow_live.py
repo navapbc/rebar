@@ -1,10 +1,10 @@
-"""Test provider-backed workflow-engine paths through ``RunnerAgentStep``.
+"""This module tests the workflow engine through ``RunnerAgentStep``.
 
-One test runs the packaged ``review_skeleton`` stages. The other invokes the provider-backed
-plan-review workflow. A ``REBAR_LLM_CONFIG_FILE`` overlay routes both paths to the configured
-provider. The ``external`` marker excludes these tests by default, and ``_live_llm`` requires
-the ``agents`` extra plus the selected provider credential. Set ``REBAR_RUN_EXTERNAL=1`` to
-include them.
+The tests exercise prompt resolution and model execution through the packaged
+``review_skeleton`` stages. A ``REBAR_LLM_CONFIG_FILE`` overlay routes the full path to its
+configured provider. The ``external`` marker excludes these tests by default, and ``_live_llm``
+requires the ``agents`` extra plus the selected provider credential. Set
+``REBAR_RUN_EXTERNAL=1`` to include them.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def test_live_review_skeleton_workflow_end_to_end(rebar_repo: Path) -> None:
     assert result["status"] == "succeeded", result.get("error")
     assert result["dry_run"] is False  # the REAL agent leg ran (tokens spent)
 
-    # 2. Require every workflow stage to finish successfully.
+    # Require every workflow stage to finish successfully.
     steps = result.get("steps", {})
     assert steps.get("triggers") == "succeeded"
     assert steps.get("finders") == "succeeded"

@@ -1,15 +1,8 @@
-"""The rebar argparse CLI — the ``rebar`` entrypoint.
+"""Provide the in-process argparse entrypoint for ``rebar``.
 
-An in-process Python CLI. Its structure:
-
-* ``main()`` owns top-level tokenization (subcommand + remainder args); per-command
-  flag parsing stays in each command's own implementation, so argument-error
-  messages come from the unchanged impls.
-* Help / overview / unknown-subcommand output comes from the pinned package-data
-  strings in :mod:`rebar._cli._help`.
-* Read and leaf-write commands dispatch **in-process** to
-  ``rebar._engine_support.reads.main`` / ``rebar._commands.main`` with the
-  per-command auto-init policy (:mod:`rebar._cli._init`).
+``main()`` tokenizes the subcommand. Implementations parse their own flags. Pinned
+package data supplies help, overview, and unknown-command output. Registry routes
+dispatch reads and writes with their per-command initialization policy.
 """
 
 from __future__ import annotations
@@ -21,35 +14,24 @@ from rebar._cli import _help, _help_route, _registry
 from rebar._cli._init import ensure_initialized, ensure_store_mounted_best_effort
 from rebar._mcp_errors import js_safe_dumps
 
-# The registry route table is the SOLE routing authority; the router derives the four
-# policy sets it still consults at runtime from it (RP-05 S6 cutover). ``_registry``
-# imports only stdlib, so this stays cheap and pulls in no command handlers.
+# The stdlib-only registry is the sole routing authority and source of runtime policy sets.
 _DERIVED_POLICY_SETS = _registry.derive_policy_sets()
-# EXCLUDED from the central best-effort store-mount gate (bug ad9f): `init` IS init (it
-# must not pre-mount) and `scratch` is filesystem-only. ``config validate`` is also
-# excluded in ``_store_mount_eligible``: its job is to aggregate bad config, so consulting
-# config to locate a store would fail before that audit runs. Everything else passes
-# through the gate, which silently no-ops when there is no attachable store.
+# ``init``, ``scratch``, and ``config validate`` bypass the central mount gate. The last
+# must report invalid configuration before consulting it. Other commands mount only when
+# an attachable store exists.
 _NO_AUTO_MOUNT = _DERIVED_POLICY_SETS["_NO_AUTO_MOUNT"]
-# Every pure-intercept subcommand the router routes through the executor. The central
-# store mount (bug ad9f) must keep firing for these — several touch the store yet return
-# before any per-arm ensure_initialized. test_central_mount_gate_ad9f pins the
-# store-touching-intercept behavior.
+# Pure intercepts still pass through the central mount gate because some access the store
+# before any per-arm initialization.
 _INTERCEPTS = _DERIVED_POLICY_SETS["_INTERCEPTS"]
 
 
 def _store_mount_eligible(argv: list[str]) -> bool:
-    """Should the central best-effort store mount (bug ad9f) run for this invocation?
+    """Return whether this invocation should attempt the central store mount.
 
-    NOT for: an empty invocation, the no-mount arms (``init``/``scratch``), ``config
-    validate`` (which must inspect invalid config without loading it first), any HELP
-    rendering (``rebar help …`` / ``--help`` / ``-h`` anywhere), or an UNKNOWN
-    subcommand (about to be rejected with usage). Rendering usage/help is a pure read
-    of the CLI surface — creating repo state (``.tickets-tracker``) for it surprised
-    every fresh worktree and clone (bug dd62 ``sapient-rutile-penguin``). Everything
-    else mounts exactly as before. Skipping here can never break a store-REQUIRING arm:
-    the strict per-arm ``ensure_initialized`` calls still own their own mount +
-    greenfield refusal."""
+    Empty input, ``init``, ``scratch``, ``config validate``, help forms, and unknown
+    commands are ineligible. Help remains side-effect free. Strict per-arm initialization
+    still mounts or rejects greenfield stores for commands that require one.
+    """
     if not argv:
         return False
     sub = argv[0]
@@ -85,22 +67,12 @@ def _identity_intercept(rest: list[str]) -> int:
 
 
 def _bridge_probe(argv: list[str], *, extra_env: dict[str, str] | None = None) -> int:
-    """``rebar bridge check-access`` → live Jira capability preflight.
+    """Run Jira's capability probe without initializing a local tracker.
 
-    Launches the genuine python probe (``jira-capability-probe.py``) under
-    ``sys.executable`` with ``engine_env`` (so the engine's
-    ``rebar_reconciler.adapters.jira.acli`` transport resolves). Talks only to
-    Jira (creates + deletes a throwaway
-    issue); needs no local tracker, so NO auto-init.
-    Output streams inherit so the operator sees the PROBE_PASS/FAIL lines directly.
-
-    ``extra_env`` overlays additional variables onto ``engine_env()`` before launch,
-    and these **override** any same-named variable inherited from ``os.environ``
-    (``{**engine_env(), **extra_env}`` — last writer wins). The probe reads
-    ``JIRA_URL`` / ``JIRA_USER`` / ``JIRA_PROJECT`` from its process env (not from
-    ``load_config()``), so ``rebar bridge setup`` passes the just-persisted,
-    config-resolved settings here to bridge the file→env gap and to ensure the probe
-    validates exactly what was persisted (not a stale inherited env value).
+    The probe inherits output streams and runs under ``sys.executable`` with
+    ``engine_env()``. ``extra_env`` overrides that environment, allowing setup to test
+    the newly persisted ``JIRA_URL``, ``JIRA_USER``, and ``JIRA_PROJECT`` values. The
+    probe creates and deletes only its throwaway Jira issue.
     """
     from rebar._engine import engine_dir, engine_env
 
@@ -112,18 +84,13 @@ def _bridge_probe(argv: list[str], *, extra_env: dict[str, str] | None = None) -
 
 
 def _bridge_suggest_mapping(argv: list[str]) -> int:
-    """``rebar bridge suggest-mapping <PROJECT> [--write]`` → the read-only mapping probe.
+    """Probe a Jira project read-only and emit or persist a mapping suggestion.
 
-    Observes a live Jira project through the read-only probe port
-    (``rebar_reconciler.mapping_probe``) and emits a suggested ``[mapping.projects.<KEY>]``
-    block seeded with the project's real vocabulary and identity-seed axis maps. Reads
-    only — the port has no create/transition/delete surface, so this never mutates Jira
-    (distinct from ``check-access``). Default: serialize the block to stdout. ``--write``:
-    deep-merge it into a rebar-owned ``rebar.toml`` (existing keys win — hand edits are
-    never clobbered).
-
-    The port is obtained through ``mapping_probe.build_probe`` as a MODULE ATTRIBUTE so a
-    test monkeypatch on that factory injects an offline fake."""
+    The probe exposes no Jira mutation operations. Its project vocabulary and identity
+    axes seed a mapping written to stdout. ``--write`` merges it into owned
+    ``rebar.toml`` data without replacing existing keys. Access the factory as a module
+    attribute so tests can substitute an offline probe.
+    """
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -184,12 +151,12 @@ def _suggest_mapping_deep_merge(incoming: dict, existing: dict) -> dict:
 
 
 def _suggest_mapping_write(key: str, block: dict) -> int:
-    """Deep-merge the suggested ``block`` into a rebar-owned ``rebar.toml`` and write it
-    atomically. Target selection mirrors ``write_jira_config``: an existing ``rebar.toml``
-    is the target, else ``<repo_root>/rebar.toml`` is created; a user ``pyproject.toml`` is
-    NEVER edited. The whole file is read with stdlib ``tomllib``, mutated in memory, and
-    re-emitted via ``_emit_config_toml`` (existing keys win under
-    ``mapping.projects.<KEY>``), preserving flat ``[jira]``/``[tracker]`` siblings."""
+    """Atomically merge ``block`` into an owned ``rebar.toml``.
+
+    Use an existing ``rebar.toml`` or create one at the repository root. Never edit
+    ``pyproject.toml``. Existing ``mapping.projects.<KEY>`` values win, while flat
+    ``[jira]`` and ``[tracker]`` siblings survive reserialization.
+    """
     import tomllib
 
     from rebar import config as _config
@@ -287,15 +254,9 @@ def _grounding_info(argv: list[str]) -> int:
     return 0
 
 
-# Mutating verbs that confirm their result on stdout (ticket 6bda-9d58-8546-4638).
-# The global --quiet / --output flags are pre-extracted here at the router — BEFORE
-# any partition dispatch — because the positional-only _REGISTRY leaves
-# (rebar._commands.__init__) usage-error on any option-looking token, so a
-# per-verb parse could never see them. Both sets are derived from the registry route
-# table (RP-05 S6): ``_CONFIRM_SCOPE`` is consulted by ``_dispatch``, ``_LEGACY_OUTPUT``
-# by ``_dispatch_confirmable`` (verbs that parsed --output themselves before the global
-# extraction existed — the extracted format is re-injected so their own parse_output
-# keeps producing the byte-identical, pre-existing JSON shapes).
+# Extract global confirmation flags before positional dispatch, which otherwise rejects
+# option-looking tokens. Registry-derived scopes preserve each legacy command's existing
+# output parsing and byte-identical JSON shape.
 _CONFIRM_SCOPE = _DERIVED_POLICY_SETS["_CONFIRM_SCOPE"]
 _LEGACY_OUTPUT = _DERIVED_POLICY_SETS["_LEGACY_OUTPUT"]
 
@@ -358,10 +319,8 @@ def main(argv: list[str] | None = None) -> int:
 
     argv = list(sys.argv[1:] if argv is None else argv)
 
-    # A REMOVED, still-set, load-bearing input (env var / TOML key / legacy file) raises
-    # RemovedInputError (a BaseException) from anywhere in the dispatch body below. Catch
-    # it at this single boundary so the command surfaces the targeted migration message +
-    # a non-zero exit, NOT a raw traceback. (BaseException would otherwise print one.)
+    # Catch the BaseException-derived RemovedInputError once so obsolete inputs produce the
+    # migration message and exit 1 instead of a traceback.
     from rebar._deprecations import RemovedInputError
     from rebar._errors import TrackerRootError
     from rebar.config import ConfigError
@@ -372,17 +331,12 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(str(e) + "\n")
         return 1
     except ConfigError as e:
-        # An unreadable/invalid config is a LOUD, clean operator-facing error, never a
-        # traceback (operator ruling 39f8-ae7c: gated operations raise ConfigError on an
-        # unreadable config; this boundary renders it the same way the `-c` override
-        # parse below already renders its own ConfigError).
+        # Render invalid configuration as the same clean exit-1 error used by global overrides.
         sys.stderr.write(f"Error: {e}\n")
         return 1
     except TrackerRootError as e:
-        # bug 176d: the read core now RAISES instead of calling sys.exit, so the exit
-        # decision lives here. The auto-init middleware (_cli/_init.py) already refuses
-        # a non-repo cwd before dispatch, so this is the residual path — an explicit
-        # non-repo root, or the repo vanishing mid-session. Same line, same exit 1.
+        # The read core raises this residual non-repository error. The CLI owns its exit-1
+        # rendering.
         sys.stderr.write(f"Error: {e}\n")
         return 1
 
@@ -392,19 +346,14 @@ def _main_dispatch(argv: list[str]) -> int:
     operation snapshot, the central store-mount gate, and ``return _dispatch(...)``
     (which routes every command, intercepts included, through the registry executor).
     Wrapped by :func:`main` in a ``RemovedInputError`` handler (see there)."""
-    # Canonical help / overview / unknown pre-scan (RP-05 S2d): answer a help, bare-overview,
-    # or unknown-subcommand request from the committed help artifacts BEFORE any operation
-    # snapshot, config materialization, store mount, handler/factory resolution, or optional
-    # import. An exit code means the request was served. None means a command invocation or a
-    # nested child help request continues to dispatch.
+    # Serve help, the bare overview, and unknown commands from committed artifacts before
+    # configuration, snapshots, mounts, or lazy imports. Other invocations continue.
     _served = _help_route.pre_scan(argv)
     if _served is not None:
         return _served
 
-    # Global config overrides (git -c style): `rebar -c section.key=value [...] <cmd>`,
-    # repeatable, BEFORE the subcommand. They install the highest-precedence `cli`
-    # layer (CLI > env > project > user > defaults) for every config consumer this
-    # invocation — the verify gate, push/pull policy, display mode, etc.
+    # Leading, repeatable ``-c``/``--config`` values become the highest-precedence CLI layer
+    # for every configuration consumer in this invocation.
     _overrides: list[str] = []
     while argv and (argv[0] in ("-c", "--config") or argv[0].startswith("--config=")):
         tok = argv.pop(0)
@@ -424,35 +373,21 @@ def _main_dispatch(argv: list[str]) -> int:
             sys.stderr.write(f"Error: {exc}\n")
             return 1
 
-    # Authoritative operation snapshot (RP-04 S2, ticket 3a08): compose ONE snapshot per
-    # invocation, after config is resolvable but before any dispatch/store-mount/write
-    # effect, and BIND it active for the whole invocation — store/config helpers
-    # (rebar.config.tracker_dir / tickets_branch / tickets_remote) consult it instead of
-    # a fresh ambient read, so a later env/project/CWD mutation cannot change this
-    # operation's selected tracker dir/branch/remote mid-flight. Fails OPEN on a
-    # malformed/insecure config (matching the prior shadow's discipline): some legacy
-    # operations (e.g. ``bridge setup --reset``, which only clears a bad section) must
-    # keep working even when composition itself cannot succeed — with no snapshot bound,
-    # downstream helpers fall back to their pre-existing ambient resolution and a real
-    # operation that NEEDS a valid config still fails on its own read, same as before.
+    # Bind one operation snapshot after overrides and before dispatch or mounting so later
+    # environment, project, or CWD changes cannot retarget the operation. Composition fails
+    # open for malformed configuration and preserves legacy repair commands. Consumers that
+    # require valid configuration still fail at their own boundary.
     from rebar._operation_config import compose_and_bind_operation_snapshot
 
     with compose_and_bind_operation_snapshot():
-        # Central store-mount gate (bug ad9f): every store-touching command — INCLUDING the
-        # pure intercepts (verify-commit-ticket, ...) that historically bypassed the per-arm
-        # ensure_initialized — mounts the store ONCE here, before dispatch, so none can
-        # silently skip it. Best-effort (attach-if-possible, never error, never first-time-init,
-        # never reconverge): the strict per-arm ensure_initialized calls remain and still own
-        # greenfield refusal + reconverge for store-REQUIRING arms. Excluded: no-store commands,
-        # help/usage rendering, and unknown subcommands (bug dd62 — see _store_mount_eligible).
+        # Mount an attachable store once before dispatch, including for pure intercepts. This
+        # best-effort gate never initializes greenfield state or reconverges, and skips help,
+        # unknown, and explicitly storeless commands. Strict per-arm initialization remains.
         if _store_mount_eligible(argv):
             ensure_store_mounted_best_effort()
 
-        # Help, overview, and unknown-subcommand forms were already served by
-        # ``_help_route.pre_scan`` at the top of this function (before any snapshot/config/mount).
-        # Reaching here means a real command invocation — including the intercept commands,
-        # which now carry registry execution metadata and route through the executor like every
-        # other command (RP-05 S6); route it to the dispatcher.
+        # Pre-scan already handled non-command forms. Route this invocation, including
+        # registry-described intercepts, through the common dispatcher.
         sub, rest = argv[0], argv[1:]
         return _dispatch(sub, rest)
 

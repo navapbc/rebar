@@ -231,3 +231,34 @@ def test_entrypoint_survives_empty_input() -> None:
     result = _run("")
     assert result.returncode == 0
     assert result.stdout.strip() == ""
+
+
+# --- transport failures are infrastructure, not test verdicts ------------------------
+
+GERRIT_504_ANNOTATION = [
+    {
+        "message": "git fetch https://rebar.solutions.navateam.com/rebar "
+        "refs/changes/56/2656/1 failed: error: RPC failed; HTTP 504 curl 22 "
+        "The requested URL returned error: 504",
+    }
+]
+
+
+def test_gerrit_checkout_504_is_classified_as_transport_fault() -> None:
+    summary = summarize(
+        [_job("require resolvable rebar ticket", "failure", job_id=504)],
+        {"504": GERRIT_504_ANNOTATION},
+    )
+
+    assert "INFRASTRUCTURE/TRANSPORT FAULT" in summary
+    assert "CI could not obtain the source" in summary
+    assert "not a statement about the change" in summary
+    assert "FAILED" not in summary
+
+
+def test_genuine_test_failure_still_classifies_as_failed() -> None:
+    summary = summarize([_job("pytest (ubuntu-latest, py3.13)", "failure", job_id=313)], {})
+
+    assert "pytest (ubuntu-latest, py3.13)" in summary
+    assert "FAILED" in summary
+    assert "INFRASTRUCTURE/TRANSPORT FAULT" not in summary

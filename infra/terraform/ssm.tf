@@ -33,9 +33,10 @@ locals {
     # A tickets-only contents:write PAT lets reviewbot push code_review events through its
     # URL-scoped credential helper (REVIEWBOT_TICKETS_PAT). The operator supplies it.
     "/rebar/prod/reviewbot-tickets-pat",
-    # The operator-supplied Rebar Bot Ed25519 key becomes the host review-bot's 0600
-    # `identity.signing_key` file. GitHub reconciliation, canary, and compact-sweep consumers
-    # use the same key as `REBAR_BOT_SIGNING_KEY`.
+    # The operator-supplied Rebar Bot Ed25519 key becomes a 0600 `identity.signing_key` file for
+    # review-bot, not an environment value. GitHub stores the same key as
+    # `REBAR_BOT_SIGNING_KEY` for reconcile-bridge and canary workflows. ADR 0047 retired the
+    # separate auto-lander.
     "/rebar/prod/rebar-bot-signing-key",
     # Optional per-client PATs authenticate the nginx `/mcp/` edge through the static verifier.
     # Blank slots are omitted. Nonblank values become MCP_CLIENT_PAT_* entries in a 0600,

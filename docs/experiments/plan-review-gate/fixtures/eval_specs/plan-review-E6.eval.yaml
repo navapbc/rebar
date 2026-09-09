@@ -81,7 +81,7 @@ dataset:
     is always `REVIEW_RESULT`. `current-review-result-sidecar` is readable. `sidecar-not-emitted`
     is a new record with `sidecar_emitted=false` and no receipt; `review-result-generation-unknown`
     is a legacy terminal record with no receipt fields; `run-failed` is a terminal
-    gate failure with no review result; `run-stale-running` is a crashed-leader unavailable
+    gate failure with no review result; a crashed leader is materialized as a failed diagnostic
     state. `review-result-sidecar-missing` covers absent, unreadable, corrupt, or
     unsupported exact-prefix files; callers may keep polling only under their normal
     bounded wait policy and must not read latest findings while false. `run-running`
@@ -591,8 +591,8 @@ gold_set:
     is always `REVIEW_RESULT`. `current-review-result-sidecar` is readable. `sidecar-not-emitted`
     is a new record with `sidecar_emitted=false` and no receipt; `review-result-generation-unknown`
     is a legacy terminal record with no receipt fields; `run-failed` is a terminal
-    gate failure with no review result; `run-stale-running` is a crashed-leader unavailable
-    state. `review-result-sidecar-missing` covers absent, unreadable, corrupt, or
+    gate failure with no review result; a crashed leader is materialized as a failed diagnostic
+    record. `review-result-sidecar-missing` covers absent, unreadable, corrupt, or
     unsupported exact-prefix files; callers may keep polling only under their normal
     bounded wait policy and must not read latest findings while false. `run-running`
     and `run-attaching` mean keep polling.

@@ -53,8 +53,9 @@ Exit-code contract
     mechanism carries a non-blank marker for its exact key and no marker anywhere is blank.
     ``stale>0`` alone always passes — a REMOVED mechanism is the outcome the ratchet wants.
   * ``--update-stale`` — drops baseline entries whose definition site is gone and rewrites
-    canonical sorted JSON. REFUSES to write (nonzero, baseline byte-identical) while
-    ``new>0`` or ``increased>0``, so it can never bless a regression into the baseline.
+    canonical sorted JSON. REFUSES to write (nonzero, baseline byte-identical) while any
+    UNADMITTED mechanism is new or increased, so it can never bless a regression into the
+    baseline; marker-admitted mechanisms do not block the stale-entry drain.
 """
 
 from __future__ import annotations
@@ -182,12 +183,14 @@ def _run_update_stale(repo_root: Path) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     current = census(repo_root)
-    counters = compare(current, baseline)
-    if counters.has_regression:
+    code, lines = evaluate(current, baseline, markers_for(repo_root))
+    if code != 0:
         print(
-            f"refusing to update: the tree has new/increased mechanisms ({counters.summary})",
+            "refusing to update: the tree has an unadmitted new/increased mechanism",
             file=sys.stderr,
         )
+        for line in lines:
+            print(line, file=sys.stderr)
         return 1
     drained = drain_stale(current, baseline)
     atomic_write(path, render_baseline(drained))
@@ -218,7 +221,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Maintenance rewrite. Drop baseline entries whose definition site is gone, then "
             "atomically write canonical sorted JSON. REFUSES to write (nonzero) while any "
-            "mechanism is new or increased, so it can never bless a regression."
+            "unadmitted mechanism is new or increased, so it can never bless a regression."
         ),
     )
     return parser

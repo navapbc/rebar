@@ -1,4 +1,4 @@
-"""Exercise prompt-library-backed batch criteria in browser E2E tests.
+"""Browser E2E coverage for batch criteria backed by the prompt library.
 
 A Chromium session uses an editor server rooted in a temporary project. The tests verify that
 prompt choices come from ``window.REBAR_LIBRARY``, chosen identifiers persist, and new ``when``

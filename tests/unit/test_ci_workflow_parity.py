@@ -653,7 +653,7 @@ def test_mutation_reusable_expands_selector_json_into_one_bounded_job_per_shard(
         ]
         destructive_ref_replacement = re.compile(r"\bgit\s+(?:checkout|switch|reset)\b")
         return {
-            "complete_action_set": len(checkout_steps) == 2,
+            "complete_action_set": len(checkout_steps) == 4,
             "branch_or_pr": len(branch_or_pr) == 1
             and (branch_or_pr[0].get("with") or {}).get("fetch-depth") == 2
             and (branch_or_pr[0].get("with") or {}).get("persist-credentials") is False,

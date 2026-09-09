@@ -103,7 +103,7 @@ EXEMPT_GENERIC: dict[str, str] = {
     "string (a read-only render); no canonical structured shape.",
     "gate_status": "async gate-run status poll (bug d80d P2): an MCP-only READ that "
     "returns the GateRunOut handle for a review_plan_start/verify_completion_start job "
-    "(status running -> passed/failed/stale-running, plus the durable attestation "
+    "(status running -> passed/failed, plus the durable attestation "
     "currency). It advertises its auto-derived model schema, but — like the run_workflow "
     "handle it mirrors — there is NO canonical CLI `--output json` shape to pin, so it "
     "stays EXEMPT_GENERIC rather than canonical.",

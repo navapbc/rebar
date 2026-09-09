@@ -1,4 +1,4 @@
-"""Provide E2E fixtures for bpmn-moddle serialization and browser editor tests.
+"""E2E fixtures for bpmn-moddle serialization and browser editor tests.
 
 The Node harness parses and serializes BPMN with bpmn-moddle. Toolchain provisioning follows
 selected fixtures and normally runs through ``make e2e-deps`` before pytest. The fixture

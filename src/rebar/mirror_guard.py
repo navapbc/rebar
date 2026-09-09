@@ -29,9 +29,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -49,6 +51,7 @@ REQUIRED_INCLUDE_REFS = ["refs/heads/main"]
 _EXIT_HEALTHY = 0
 _EXIT_UNHEALTHY = 1
 _EXIT_ERROR = 2
+_GIT_TIMEOUT = 120
 
 
 # ===========================================================================
@@ -129,6 +132,29 @@ def ruleset_verdict(ruleset: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def merged_reachability_verdict(checked: int, unreachable: list[dict[str, Any]]) -> dict[str, Any]:
+    """Healthy iff every checked Gerrit MERGED revision is reachable from ``main``."""
+    if not unreachable:
+        return {
+            "check": "merged-reachability",
+            "healthy": True,
+            "reason": f"all {checked} checked merged change revision(s) are reachable from main",
+            "checked": checked,
+            "unreachable": [],
+        }
+    nums = ", ".join(str(c.get("number")) for c in unreachable)
+    return {
+        "check": "merged-reachability",
+        "healthy": False,
+        "reason": (
+            f"{len(unreachable)} of {checked} merged change revision(s) are not reachable "
+            f"from main: {nums}"
+        ),
+        "checked": checked,
+        "unreachable": unreachable,
+    }
+
+
 # ===========================================================================
 # Thin I/O fetchers (urllib; the seams tests monkeypatch)
 # ===========================================================================
@@ -190,6 +216,89 @@ def fetch_github_ruleset(
     return json.loads(detail)
 
 
+def fetch_gerrit_merged_changes(
+    base_url: str = GERRIT_BASE_URL,
+    *,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Recent Gerrit ``MERGED`` changes with current revision fetch refs."""
+    params = urllib.parse.urlencode(
+        {
+            "q": "project:rebar branch:main status:merged",
+            "n": str(limit),
+            "o": ["CURRENT_REVISION", "DOWNLOAD_COMMANDS"],
+        },
+        doseq=True,
+    )
+    body = _http_get(f"{base_url.rstrip('/')}/changes/?{params}")
+    return json.loads(_strip_xssi(body))
+
+
+def _git(*args: str) -> subprocess.CompletedProcess[str]:
+    # raw-git-ok: read-only reachability probe for the checked-out mirror-guard workspace.
+    return subprocess.run(  # raw-git-ok: read-only reachability probe, never writes refs
+        ["git", *args], capture_output=True, text=True, check=False, timeout=_GIT_TIMEOUT
+    )
+
+
+def _revision_fetch(change: dict[str, Any]) -> tuple[str | None, str | None]:
+    rev = change.get("current_revision")
+    if not rev:
+        return None, None
+    fetches = (change.get("revisions") or {}).get(rev, {}).get("fetch") or {}
+    anon = fetches.get("anonymous http") or fetches.get("http") or fetches.get("ssh") or {}
+    return anon.get("url"), anon.get("ref")
+
+
+def merged_reachability_check(
+    base_url: str = GERRIT_BASE_URL,
+    *,
+    limit: int = 100,
+    destination_ref: str = "HEAD",
+) -> dict[str, Any]:
+    """Fetch recent merged patch-set refs and prove each is an ancestor of ``destination_ref``."""
+    unreachable: list[dict[str, Any]] = []
+    changes = fetch_gerrit_merged_changes(base_url, limit=limit)
+    for change in changes:
+        revision = change.get("current_revision")
+        url, ref = _revision_fetch(change)
+        number = change.get("_number")
+        subject = change.get("subject")
+        if not revision or not url or not ref:
+            unreachable.append(
+                {
+                    "number": number,
+                    "revision": revision,
+                    "subject": subject,
+                    "reason": "no fetch ref",
+                }
+            )
+            continue
+        fetched = _git("fetch", "--quiet", "--no-tags", url, ref)
+        if fetched.returncode != 0:
+            unreachable.append(
+                {
+                    "number": number,
+                    "revision": revision,
+                    "subject": subject,
+                    "reason": "fetch failed",
+                    "stderr": fetched.stderr.strip()[-500:],
+                }
+            )
+            continue
+        if _git("merge-base", "--is-ancestor", "FETCH_HEAD", destination_ref).returncode != 0:
+            unreachable.append(
+                {
+                    "number": number,
+                    "revision": revision,
+                    "subject": subject,
+                    "ref": ref,
+                    "reason": "not ancestor of main",
+                }
+            )
+    return merged_reachability_verdict(len(changes), unreachable)
+
+
 # ===========================================================================
 # CLI
 # ===========================================================================
@@ -241,11 +350,13 @@ def run(
     *,
     check_replication: bool,
     check_ruleset: bool,
+    check_merged_reachability: bool = False,
     github_token: str | None,
     base_url: str = GERRIT_BASE_URL,
     repo: str = GITHUB_REPO,
     lag_attempts: int = 3,
     lag_delay_seconds: float = 45.0,
+    merged_limit: int = 100,
 ) -> tuple[list[dict[str, Any]], int]:
     """Run the requested checks; return (verdicts, exit_code). Never raises for expected
     network errors — those become exit code 2 so a scheduler can distinguish drift (1) from
@@ -264,7 +375,16 @@ def run(
             )
         if check_ruleset:
             verdicts.append(ruleset_verdict(fetch_github_ruleset(repo, token=github_token)))
-    except (urllib.error.URLError, TimeoutError, KeyError, ValueError, json.JSONDecodeError) as exc:
+        if check_merged_reachability:
+            verdicts.append(merged_reachability_check(base_url, limit=merged_limit))
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        KeyError,
+        ValueError,
+        json.JSONDecodeError,
+        subprocess.TimeoutExpired,
+    ) as exc:
         verdicts.append({"check": "io", "healthy": False, "reason": f"fetch error: {exc}"})
         return verdicts, _EXIT_ERROR
     exit_code = _EXIT_HEALTHY if all(v["healthy"] for v in verdicts) else _EXIT_UNHEALTHY
@@ -280,6 +400,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--ruleset", action="store_true", help="check the mirror-lock ruleset for drift"
+    )
+    parser.add_argument(
+        "--merged-reachability",
+        action="store_true",
+        help="check recent Gerrit MERGED revisions are reachable from this checkout's main",
     )
     parser.add_argument(
         "--all", action="store_true", help="run all checks (default when none selected)"
@@ -298,17 +423,25 @@ def main(argv: list[str] | None = None) -> int:
         default=45.0,
         help="seconds to wait between replication samples",
     )
+    parser.add_argument(
+        "--merged-limit",
+        type=int,
+        default=100,
+        help="number of recent merged Gerrit changes to check for branch reachability",
+    )
     args = parser.parse_args(argv)
 
-    do_all = args.all or not (args.replication or args.ruleset)
+    do_all = args.all or not (args.replication or args.ruleset or args.merged_reachability)
     verdicts, code = run(
         check_replication=do_all or args.replication,
         check_ruleset=do_all or args.ruleset,
+        check_merged_reachability=do_all or args.merged_reachability,
         github_token=os.environ.get("GITHUB_TOKEN"),  # read-via: cli-credential-boundary
         base_url=args.base_url,
         repo=args.repo,
         lag_attempts=args.lag_attempts,
         lag_delay_seconds=args.lag_delay,
+        merged_limit=args.merged_limit,
     )
     json.dump({"exit_code": code, "verdicts": verdicts}, sys.stdout, indent=2)
     sys.stdout.write("\n")

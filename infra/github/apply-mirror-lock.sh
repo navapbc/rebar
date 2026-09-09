@@ -31,12 +31,6 @@
 # Roll back with ./rollback-mirror-lock.sh.
 # See infra/runbooks/github-mirror-lock.md for verification and recovery.
 #
-#
-#
-#
-#
-#
-#
 # ---------------------------------------------------------------------------
 set -euo pipefail
 

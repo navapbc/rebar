@@ -23,9 +23,11 @@ def _replication_step_run() -> str:
 def test_workflow_surfaces_unreachable_distinct_from_divergence() -> None:
     run = _replication_step_run()
 
+    assert "fetch-depth: 0" in _WORKFLOW.read_text(encoding="utf-8")
+    assert "--merged-reachability" in run
     assert 'case "$code" in' in run
     assert "Mirror Guard unreachable" in run
     assert "not a divergence" in run
     assert "exit 2" in run
-    assert "Mirror Guard divergence" in run
+    assert "Mirror Guard invariant failure" in run
     assert "exit 1" in run

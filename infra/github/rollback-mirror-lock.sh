@@ -18,15 +18,6 @@
 #   ./rollback-mirror-lock.sh
 #   ./rollback-mirror-lock.sh --disable
 #   ./rollback-mirror-lock.sh --reenable-features
-#
-#
-#
-#
-#
-#
-#
-#
-#
 # ---------------------------------------------------------------------------
 set -euo pipefail
 

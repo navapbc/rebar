@@ -61,6 +61,7 @@ def test_no_tests_rooted_imports_anywhere_under_tests() -> None:
     Same-directory helpers are imported by bare name (pytest's prepend mode puts the test's
     own directory on ``sys.path``); cross-directory helpers live directly under ``tests/``,
     which ``tests/conftest.py`` guarantees is importable.
+    Run this with bare ``pytest``: ``python -m pytest`` injects the repo root and can false-green.
     """
     offenders: list[str] = []
     for module in parsed_python_files(_TESTS_DIR):
