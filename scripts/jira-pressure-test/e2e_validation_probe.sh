@@ -251,10 +251,7 @@ else:
 "
 }
 
-# Extract the FILTERED mutation count from a filtered reconciler pass. The line
-# is "filter: <N> mutations computed, <M> match filter ..."; we want M (the count
-# scoped to the probe's filter), not N (the whole-store total). Uses awk (BSD grep
-# lacks the -P/PCRE used previously, which silently failed on macOS).
+# Return M from "N mutations computed, M match filter" using BSD-portable awk.
 extract_mutation_count() {
     local output="$1"
     echo "$output" | awk '/^filter: [0-9]+ mutations computed, [0-9]+ match filter/ {print $5; exit}'
@@ -268,12 +265,11 @@ echo ""
 echo "=== PHASE 1: Create local ticket and sync outbound ==="
 echo ""
 
-# Step 1: Create a local test ticket with known field values.
 create_output=$("$TICKET_CLI" create task "E2E-PROBE: sync validation ${PROBE_TS}" \
     -d "Description for E2E probe test" \
     --priority 1 \
     --tags "${PROBE_TAG},${E2E_TAG}" 2>&1)
-# `create` prints a one-line confirmation embedding the id — extract it.
+# Extract the ticket ID from create's one-line confirmation.
 LOCAL_ID=$(echo "$create_output" | grep -oE '[0-9a-f]{4}(-[0-9a-f]{4}){3}' | tail -1)
 
 if [ -z "$LOCAL_ID" ]; then
@@ -284,12 +280,10 @@ if [ -z "$LOCAL_ID" ]; then
 fi
 pass_test "Phase1.create-local (${LOCAL_ID})"
 
-# Step 2: Run one reconciler pass with mode=bootstrap-strict (cap=10).
 echo "Running reconciler pass (bootstrap-strict)..."
 reconciler_output=$(run_filtered_reconciler)
 echo "$reconciler_output"
 
-# Step 3: Verify a new Jira issue was created via the binding store.
 binding_state=$(check_binding "$LOCAL_ID")
 if [[ "$binding_state" == confirmed:* ]]; then
     JIRA_KEY="${binding_state#confirmed:}"
@@ -303,7 +297,6 @@ else
     exit 1
 fi
 
-# Step 3a: Verify Jira issue has correct summary.
 jira_summary=$(get_jira_field "$JIRA_KEY" "summary")
 if [[ "$jira_summary" == *"E2E-PROBE: sync validation ${PROBE_TS}"* ]]; then
     pass_test "Phase1.jira-summary"
@@ -311,7 +304,6 @@ else
     fail_test "Phase1.jira-summary" "expected title containing probe TS, got: ${jira_summary}"
 fi
 
-# Step 3b: Verify Jira issue has correct priority (1 → High).
 jira_priority=$(get_jira_field "$JIRA_KEY" "priority")
 if [[ "$jira_priority" == "High" ]]; then
     pass_test "Phase1.jira-priority"
@@ -319,7 +311,6 @@ else
     fail_test "Phase1.jira-priority" "expected High, got: ${jira_priority}"
 fi
 
-# Step 3c: Verify Jira issue type is Task.
 jira_type=$(get_jira_field "$JIRA_KEY" "issuetype")
 if [[ "$jira_type" == "Task" ]]; then
     pass_test "Phase1.jira-issuetype"
@@ -327,7 +318,6 @@ else
     fail_test "Phase1.jira-issuetype" "expected Task, got: ${jira_type}"
 fi
 
-# Step 3d: Verify Jira labels include probe-test and e2e-validation.
 jira_labels=$(get_jira_labels "$JIRA_KEY")
 if echo "$jira_labels" | grep -q "$PROBE_TAG"; then
     pass_test "Phase1.jira-label-probe-test"
@@ -340,7 +330,6 @@ else
     fail_test "Phase1.jira-label-e2e-validation" "labels: ${jira_labels}"
 fi
 
-# Step 3e: Verify Jira issue has rebar-id label for binding.
 if echo "$jira_labels" | grep -q "rebar-id"; then
     pass_test "Phase1.jira-rebar-id-label"
 else
@@ -355,38 +344,29 @@ echo ""
 echo "=== PHASE 2: Edit locally and sync outbound ==="
 echo ""
 
-# Step 4: Edit the local ticket title via the CLI. The store is event-sourced —
-# there is no per-ticket ticket.json to edit in place — and `rebar edit` exists
-# (the old "CLI has no edit subcommand" assumption is stale).
+# Edit through the CLI because the event-sourced store has no per-ticket file.
 if "$TICKET_CLI" edit "$LOCAL_ID" --title="E2E-PROBE: EDITED title ${PROBE_TS}" 2>/dev/null; then
     pass_test "Phase2.edit-local-title"
 else
     fail_test "Phase2.edit-local-title" "rebar edit --title failed for ${LOCAL_ID}"
 fi
 
-# Step 5: Edit local priority to 3 via the CLI.
 if "$TICKET_CLI" edit "$LOCAL_ID" --priority=3 2>/dev/null; then
     pass_test "Phase2.edit-local-priority"
 else
     fail_test "Phase2.edit-local-priority" "rebar edit --priority failed for ${LOCAL_ID}"
 fi
 
-# Step 6: Add a local comment.
 "$TICKET_CLI" comment "$LOCAL_ID" "Probe comment from local" 2>/dev/null || true
 pass_test "Phase2.add-local-comment"
 
-# Step 7: Add a local tag.
 "$TICKET_CLI" tag "$LOCAL_ID" "probe-edit-tag" 2>/dev/null || true
 pass_test "Phase2.add-local-tag"
 
-# Step 8: Run another reconciler pass.
 echo "Running reconciler pass (bootstrap-strict) for outbound updates..."
 reconciler_output=$(run_filtered_reconciler)
 echo "$reconciler_output"
 
-# Step 9: Verify Jira issue updated.
-
-# 9a: Summary changed.
 jira_summary=$(get_jira_field "$JIRA_KEY" "summary")
 if [[ "$jira_summary" == *"EDITED title"* ]]; then
     pass_test "Phase2.jira-summary-updated"
@@ -394,7 +374,6 @@ else
     fail_test "Phase2.jira-summary-updated" "expected EDITED title, got: ${jira_summary}"
 fi
 
-# 9b: Priority changed to Low (3 → Low).
 jira_priority=$(get_jira_field "$JIRA_KEY" "priority")
 if [[ "$jira_priority" == "Low" ]]; then
     pass_test "Phase2.jira-priority-updated"
@@ -402,7 +381,6 @@ else
     fail_test "Phase2.jira-priority-updated" "expected Low, got: ${jira_priority}"
 fi
 
-# 9c: Comment added.
 jira_comments=$(get_jira_comments "$JIRA_KEY")
 if echo "$jira_comments" | grep -q "Probe comment from local"; then
     pass_test "Phase2.jira-comment-added"
@@ -410,7 +388,6 @@ else
     fail_test "Phase2.jira-comment-added" "comment not found in Jira comments"
 fi
 
-# 9d: Label added.
 jira_labels=$(get_jira_labels "$JIRA_KEY")
 if echo "$jira_labels" | grep -q "probe-edit-tag"; then
     pass_test "Phase2.jira-label-added"
@@ -426,8 +403,7 @@ echo ""
 echo "=== PHASE 3: Edit on Jira side and sync inbound ==="
 echo ""
 
-# Step 10: Edit Jira summary via ACLI.
-# Use the Jira adapter wrapper to avoid raw subprocess calls.
+# Edit Jira through the adapter wrapper.
 cd "$RECONCILER_DIR"
 if "$PYTHON_BIN" -c "
 import importlib.util
@@ -439,7 +415,6 @@ else
     fail_test "Phase3.jira-edit-summary"
 fi
 
-# Step 11: Add Jira comment via ACLI.
 if "$PYTHON_BIN" -c "
 import os
 from rebar_reconciler.adapters.jira import acli as mod
@@ -456,22 +431,18 @@ else
     fail_test "Phase3.jira-add-comment"
 fi
 
-# Wait briefly for Jira consistency.
+# Allow Jira's index to settle.
 sleep 2
 
-# Step 12: Run another reconciler pass (inbound sync).
 echo "Running reconciler pass (bootstrap-strict) for inbound sync..."
 reconciler_output=$(run_filtered_reconciler)
 echo "$reconciler_output"
 
-# Step 13: Verify local ticket updated with Jira-side title.
 local_title=$(get_local_field "$LOCAL_ID" "title")
 if [[ "$local_title" == *"JIRA-EDITED"* ]]; then
     pass_test "Phase3.local-title-synced-from-jira"
 else
-    # The inbound differ may not update title if the outbound differ already
-    # pushed our local edit — this depends on conflict resolution policy.
-    # Accept either the Jira-edited or locally-edited title as valid.
+    # Local-wins conflict resolution may retain the outbound title.
     if [[ "$local_title" == *"EDITED title"* ]]; then
         pass_test "Phase3.local-title-synced-from-jira (local-wins — title retained)"
     else
@@ -487,9 +458,7 @@ echo ""
 echo "=== PHASE 4: Idempotency check (3 no-op passes) ==="
 echo ""
 
-# Settle to steady state first — the reconciler is eventually-consistent (a
-# prior Jira-side edit converges over 2-3 passes), so reconcile until the
-# filtered count reaches 0 before asserting no-op idempotency.
+# Settle bounded eventual convergence before asserting no-op idempotency.
 echo "Settling to steady state (eventual consistency)..."
 for _ in 1 2 3 4 5 6; do
     reconciler_output=$(run_filtered_reconciler)
@@ -498,7 +467,6 @@ for _ in 1 2 3 4 5 6; do
     sleep 1
 done
 
-# Once settled, repeated no-op passes MUST each be 0 (true idempotency).
 for i in 1 2 3; do
     echo "Idempotency pass ${i}..."
     reconciler_output=$(run_filtered_reconciler)
@@ -541,7 +509,6 @@ echo ""
 echo "=== PHASE 6: Cleanup ==="
 echo ""
 
-# Step 18: Delete the Jira test issue.
 cd "$RECONCILER_DIR"
 if "$PYTHON_BIN" -c "
 import importlib.util, os
@@ -559,7 +526,6 @@ else
     fail_test "Phase6.delete-jira-issue (${JIRA_KEY})"
 fi
 
-# Step 19: Delete the local test ticket.
 if "$TICKET_CLI" delete "$LOCAL_ID" --user-approved 2>/dev/null; then
     pass_test "Phase6.delete-local-ticket (${LOCAL_ID})"
 else
