@@ -282,8 +282,9 @@ class ReceiverConfig:
     bot_user: str = "rebar-review-bot"
     #: The bot's Gerrit HTTP token (basic-auth password). SSM-sourced; never defaulted.
     gerrit_bot_token: str = ""
-    #: Inbound webhook shared secret (the ``?token=`` query value). Per ADR-0014 this
-    #: is the SAME value as the bot token (the plugin offers no HMAC).
+    #: Public inbound shared secret (``X-Rebar-Token`` preferred, legacy ``?token=`` accepted).
+    #: Per ADR-0014 this is the SAME value as the bot token; Gerrit's internal webhook path
+    #: authenticates by network + built-in origin header instead.
     webhook_token: str = ""
     #: Backfill reconciler cadence (seconds); startup + every interval.
     reconcile_interval_seconds: int = 300
@@ -325,7 +326,7 @@ class ReceiverConfig:
     def from_env(cls) -> ReceiverConfig:
         """Build the config from the process environment (the only source)."""
         bot_token = os.environ.get("GERRIT_BOT_TOKEN", "").strip()
-        # WEBHOOK_TOKEN defaults to the bot token (ADR-0014: same secret, URL-embedded).
+        # WEBHOOK_TOKEN defaults to the bot token (ADR-0014: same public receiver secret).
         webhook_token = os.environ.get("WEBHOOK_TOKEN", "").strip() or bot_token
         return cls(
             llm_review_max_value=_int_env("LLM_REVIEW_MAX_VALUE", 1),

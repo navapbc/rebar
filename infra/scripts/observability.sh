@@ -4,7 +4,8 @@
 #
 # Metric catalog (rebar/host unless noted):
 #   0  probe_ok, probe_elapsed_seconds, probe_truncated
-#   1  gerrit_healthy, reviewbot_healthy; Rebar/Gate:GerritReachable
+#   1  gerrit_healthy, reviewbot_healthy, reviewbot_webhook_auth_rejections;
+#      Rebar/Gate:GerritReachable
 #   1b mcp_healthy (the public nginx-to-application serving path)
 #   2  disk_used_percent; 2b root_disk_used_percent
 #   2c data_disk_debris_bytes
@@ -70,6 +71,10 @@ REGION_CACHE="${REGION_CACHE:-/var/lib/rebar/probe-region}"
 REGION_CACHE_DIR="${REGION_CACHE%/*}"
 [ "$REGION_CACHE_DIR" = "$REGION_CACHE" ] && REGION_CACHE_DIR="."
 INSTANCE_ID_CACHE="${INSTANCE_ID_CACHE:-${REGION_CACHE_DIR}/probe-instance-id}"
+# mechanism-ok: env_var REVIEWBOT_WEBHOOK_AUTH_OFFSET_FILE — 073f-b86f-42c6-456f: persists the
+# review-bot health payload's process-local webhook rejection counter so the alarm receives per-
+# interval deltas and can clear after stale-token retries stop.
+REVIEWBOT_WEBHOOK_AUTH_OFFSET_FILE="${REVIEWBOT_WEBHOOK_AUTH_OFFSET_FILE:-/var/lib/rebar/reviewbot-webhook-auth-offset}"
 # mechanism-ok: env_var DOCKER_DU_OVERLAY2_DEVCHECK_SKIP — 9313-1fac-9f32-4b07: lets the tests
 # drive docker_du_census without a real filesystem behind $DOCKER_ROOT.
 DOCKER_DU_OVERLAY2_DEVCHECK_SKIP="${DOCKER_DU_OVERLAY2_DEVCHECK_SKIP:-}"
@@ -177,8 +182,9 @@ logger -t rebar-health "gerrit=/config/server/version:${gerrit_code} review-bot=
 # Health heartbeats use 1 for healthy and 0 otherwise.
 gerrit_ok=0; [ "$gerrit_code" = "200" ] && gerrit_ok=1
 review_ok=0; [ "$review_code" = "200" ] && review_ok=1
+review_webhook_auth_rejections=0
 if [ -n "$review_body" ]; then
-  review_payload_ok="$(
+  review_payload="$(
     python3 -c '
 import json
 import sys
@@ -186,24 +192,48 @@ import sys
 try:
     body = json.loads(sys.argv[1])
 except Exception:
-    print(0)
+    print("0 0")
 else:
-    print(
-        1
-        if isinstance(body, dict)
+    healthy = (
+        isinstance(body, dict)
         and body.get("status") == "ok"
         and body.get("gerrit_auth", "ok") == "ok"
-        else 0
     )
+    rejections = body.get("webhook_auth_rejections", 0) if isinstance(body, dict) else 0
+    try:
+        rejections = int(rejections)
+    except Exception:
+        rejections = 0
+    print(f"{1 if healthy else 0} {max(0, rejections)}")
     ' "$review_body" 2>/dev/null || echo 0
   )"
+  review_payload_ok="${review_payload%% *}"
+  review_webhook_auth_rejections="${review_payload##* }"
   [ "$review_payload_ok" = "1" ] || review_ok=0
 fi
+case "$review_webhook_auth_rejections" in
+  '' | *[!0-9]*) review_webhook_auth_rejections=0 ;;
+esac
+mkdir -p "$(dirname "$REVIEWBOT_WEBHOOK_AUTH_OFFSET_FILE")" 2>/dev/null || true
+review_webhook_auth_prev="$(cat "$REVIEWBOT_WEBHOOK_AUTH_OFFSET_FILE" 2>/dev/null || echo 0)"
+case "$review_webhook_auth_prev" in
+  '' | *[!0-9]*) review_webhook_auth_prev=0 ;;
+esac
+if [ "$review_webhook_auth_rejections" -ge "$review_webhook_auth_prev" ]; then
+  review_webhook_auth_delta=$(( review_webhook_auth_rejections - review_webhook_auth_prev ))
+else
+  review_webhook_auth_delta=0
+fi
+printf '%s\n' "$review_webhook_auth_rejections" >"$REVIEWBOT_WEBHOOK_AUTH_OFFSET_FILE" \
+  2>/dev/null || true
 put_metric_data --region "$REGION" --namespace "$NS" \
   --metric-name gerrit_healthy --unit Count --value "$gerrit_ok" \
   --dimensions InstanceId="$IID" 2>/dev/null || true
 put_metric_data --region "$REGION" --namespace "$NS" \
   --metric-name reviewbot_healthy --unit Count --value "$review_ok" \
+  --dimensions InstanceId="$IID" 2>/dev/null || true
+put_metric_data --region "$REGION" --namespace "$NS" \
+  --metric-name reviewbot_webhook_auth_rejections --unit Count --value "$review_webhook_auth_delta" \
   --dimensions InstanceId="$IID" 2>/dev/null || true
 
 # Gate-reachable signal for the S7 gerrit-gate-down alarm. Reuses the SAME
