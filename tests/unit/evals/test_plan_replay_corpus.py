@@ -1,18 +1,9 @@
-"""Tests for the replay corpus builder (``rebar.llm.evals.plan_replay.corpus``).
+"""Test replay-corpus reconstruction from ticket-store Git history.
 
-The builder enumerates plan_review_result_v1/v2 sidecars from a tickets-tracker git
-history (mirroring the proven git-object-walk approach in
-``docs/experiments/plan-review-gate/harnesses/mine_outcome_corpus.py``: event blobs at
-``<ticket_id>/<ns_ts>-<uuid>-<TYPE>.json``, enumerated via ``git rev-list --objects
---all`` so compacted/deleted blobs are still recovered), reconstructs the at-review
-material by replaying CREATE/EDIT events up to the sidecar's timestamp, and marks a row
-``verified`` when the reconstructed material's fingerprint matches the sidecar's stored
-``material_fingerprint`` — trying the SAME generation ladder ``attest._legacy_material_ok``
-uses (current normalized, and three legacy candidates), so a sidecar signed under an
-older normalization generation still verifies.
-
-No live/billable call: everything here is pure git + the real ``pass1.material_fingerprint``
-/ ``material_diff.material_basis`` functions — no LLM, no network.
+The builder walks all objects so review sidecars removed from the current tree remain
+discoverable, replays ticket events only through each review timestamp, and accepts current
+and supported legacy material fingerprints. These tests use the production material functions
+without LLM or network calls.
 """
 
 from __future__ import annotations

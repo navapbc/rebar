@@ -248,12 +248,9 @@ def test_merge_synthetic_reads_is_order_independent_and_deduped() -> None:
     assert set(targets) == {"a.tf", "b.tf", "**/*.tf"}
 
 
-# ─────────────── PRODUCTION Pass-1 path: tools ride extra_tools ───────────────
-# The live plan-review gate drives the Pass-1 finder through ProductionBatchRunner, which
-# DISCARDS the injected agent_runner (its RunnerAgentStep.tool_provider only reaches Pass-2).
-# So the T10 finder gets its grounding tools ONLY if they ride RunRequest.extra_tools via
-# terraform_seam.pass1_tool_hook threaded run_pass1 → pass1_with_ladder → passes.pass1_chunk —
-# the SAME per-criterion seam ``web`` uses (test_web_tool_gating mirrors this for ``web``).
+# ProductionBatchRunner does not pass the injected agent_runner to Pass 1. Terraform tools
+# therefore travel through RunRequest.extra_tools via terraform_seam.pass1_tool_hook and the
+# run_pass1 → pass1_with_ladder → passes.pass1_chunk chain, matching the web-tool seam.
 
 
 class _CaptureRunner:
