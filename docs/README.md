@@ -140,3 +140,5 @@ These pages preserve completed migrations, contract changes, and validation resu
 - **[serena-symbol-reference-coaching-sample.md](serena-symbol-reference-coaching-sample.md)**. Recorded plan-review runs for symbol reference coaching.
 
 The [archive index](archive/README.md) covers completed planning and handoff records. Frozen plan-review corpora are indexed under [recorded runs](experiments/plan-review-gate/runs/README.md). Calibration evidence includes the [trust boundary](calibration/T5c_trust_boundary.md), [completion floor](calibration/completion_floor.md), [overlap batch confidence](calibration/overlap_batch_confidence.md), and [plan kind sets](calibration/plan_v5_kind_sets.md). Third-party license texts are preserved under [licenses](licenses/).
+
+Scratch verification change for noolbenger; abandon after upload.
