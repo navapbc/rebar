@@ -1,19 +1,8 @@
-"""`docs/env-vars.md` must document EVERY env var read through an `_llm_*` resolver (bug b00f).
+"""Keep ``docs/env-vars.md`` complete for every ``_llm_*`` environment resolver.
 
-`scripts/gen_env_registry.py` builds the registry with a pure AST scan: it records a read only when
-the callee name is in `KNOWN_ENV_HELPERS` **and** the env-name argument is a string literal
-(`gen_env_registry.py:117-124`). A helper that is missing from that table is not an error — it is
-SILENTLY INVISIBLE, and every variable read through it vanishes from the generated doc while the CI
-drift gate stays green. A clean `--check` is therefore evidence of AGREEMENT with the generator, not
-of COMPLETENESS.
-
-MEASURED: `_llm_float` was absent from `KNOWN_ENV_HELPERS` while `_llm_str` and `_llm_int` — its two
-siblings, same signature, same file — were present. Four real, settable, operator-facing knobs were
-undocumented as a result.
-
-The last test here is the durable one: it fails when a FUTURE `_llm_*` resolver is added without
-registering it, which is the actual defect class. The first two only pin the four variables we
-happened to lose this time.
+The registry generator's AST scan recognizes only helpers and argument positions in
+``KNOWN_ENV_HELPERS``. These tests ensure new resolvers cannot silently disappear
+from generated documentation, as ``_llm_float`` once did.
 """
 
 from __future__ import annotations
@@ -84,16 +73,7 @@ def test_the_committed_registry_documents_the_llm_float_vars() -> None:
 
 
 def test_every_env_reading_llm_helper_is_registered_at_the_right_position() -> None:
-    """THE DURABLE GUARD, and the reason this bug is worth a test rather than just a fix.
-
-    Adding a fifth `_llm_*` resolver without a `KNOWN_ENV_HELPERS` row silently drops its variables
-    from the docs with no error anywhere — the same way `_llm_float` was lost. This asserts
-    registration for every resolver that takes an `env_name`.
-
-    It also pins the ARGUMENT POSITION. A registered helper with the wrong index does not fail
-    loudly either: the scanner reads the wrong argument, `_str_literal` returns None for it, and the
-    read is filed under "dynamically-constructed" — i.e. it disappears exactly as if unregistered.
-    """
+    """Register every ``_llm_*`` resolver at the ``env_name`` parameter position."""
     gen = _gen_env_registry()
     registered = gen.KNOWN_ENV_HELPERS
     expected = _llm_helpers_with_env_arg()
@@ -127,16 +107,7 @@ def test_a_non_env_llm_helper_is_not_registered() -> None:
 
 
 def test_dropping_a_used_helpers_row_fails_loudly_instead_of_shrinking(tmp_path) -> None:
-    """THE b00f REPLAY (bug ff2e). The guard above pins that today's `_llm_*` resolvers ARE
-    registered, but it is a static table check: it cannot show what the GENERATOR does when a
-    row for a live helper goes missing. That is the behaviour b00f actually cost us, and until
-    ff2e it was silence -- the scan walked past every call and the registry simply shrank while
-    `--check` stayed green.
-
-    Re-enacts it at runtime on the real tree: drop `_llm_float`'s row and scan. The registry
-    must not quietly lose its four variables; the generator must refuse to emit a registry it
-    knows to be incomplete, naming the helper.
-    """
+    """Require a scan with a missing used-helper row to fail and name that helper."""
     gen = _gen_env_registry()
     baseline, _dynamic = gen.scan(gen.DEFAULT_SCAN_ROOT)
     assert all(v in baseline for v in _FLOAT_VARS), "precondition: the row resolves them today"

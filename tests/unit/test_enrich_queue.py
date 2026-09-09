@@ -198,10 +198,8 @@ def test_lease_reclaim(repo: str) -> None:
     assert Q.claim(tid, "B", lease_ttl_min=15, now_ns=after, repo_root=repo) is True
 
 
-# ── bounded reduce read (ticket emersed-utopic-whiterhino) ───────────────────────
-# reduce_ticket used to json.load EVERY queue event file in a ticket dir, three times over
-# (once per event type), so the enrich-drain gate's cost grew without bound as enrichment
-# re-ran. The reduce now walks newest→oldest and stops early. These tests pin that bound.
+# ``reduce_ticket`` walks events newest-to-oldest and stops once each required event type is
+# resolved, bounding reads as histories grow.
 
 _BASE_NS = 1_700_000_000_000_000_000  # a realistic fixed-width ns stamp (Nov 2023)
 
@@ -338,13 +336,8 @@ def test_all_events_corrupt_reads_as_absent(repo: str) -> None:
     assert state["pending"] is False
 
 
-# ── O(1) drain-gate fast path (bug moist-short-lionfish 958e) ────────────────────
-# The write-path gate (`enrich_drain.maybe_drain`) probes the queue on EVERY store write
-# against a declared 20 ms budget. Reducing every ticket dir to answer it made the common
-# "nothing soaked" answer cost a full store walk — ~486 ms / ~24,000 metadata syscalls at
-# 4,831 tickets, and worse than linearly so when several agents' gates overlap. These pin
-# the ALGORITHMIC property (work does not scale with the store) rather than a wall clock,
-# which would be flaky under exactly the contention that motivated the fix.
+# The write-path drain gate runs on every store write. Count reductions instead of elapsed
+# time to prove its common no-work path does not scale with total store size.
 
 
 def _count_reductions(monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -499,14 +492,10 @@ def test_marker_written_in_the_future_is_not_trusted(repo: str) -> None:
 
 
 def test_gate_marker_lives_outside_the_tracker(repo: str) -> None:
-    """The marker is machine-local cache state, so it must live in the repo-local ``.rebar``
-    dir and NEVER inside the tracker — the tracker auto-commits and auto-pushes, so a marker
-    written there would travel to every clone and be reported as store drift.
+    """Keep the machine-local gate marker outside the auto-pushed tracker.
 
-    The lockstep half of this test is SUBSUMED by story ``6f18-05de-beaf-42be``: the marker
-    and the drain lock no longer have two implementations of the tracker→``.rebar`` sibling
-    convention to keep in step — both derive from the one owner,
-    :class:`rebar._store.paths.StorePaths`, so the assertion now names that owner directly.
+    ``StorePaths`` is the single owner of the tracker-to-``.rebar`` sibling
+    convention used by both the marker and drain lock.
     """
     from rebar._store.paths import StorePaths
 
@@ -523,14 +512,11 @@ def test_gate_marker_lives_outside_the_tracker(repo: str) -> None:
 def test_existence_probe_cost_does_not_scale_with_the_backlog(
     repo: str, monkeypatch: pytest.MonkeyPatch, backlog: int
 ) -> None:
-    """Bug 6148-5d81-8e80-41e8 (draughty-callous-tanager): the write-path gate needs a
-    yes/no, and answering it with the O(backlog) list probe priced EVERY tracker write at
-    ~2-8 s against a 20 ms budget once a ~1,050-entry backlog stood — the task-4144
-    marker-scoped walk re-reduced every live entry per probe. The existence probe must stop
-    at the FIRST pending hit: ONE reduction, whatever the backlog size, on the marker-scoped
-    path AND on the cold full-walk path.
+    """Stop the existence probe at its first pending entry.
 
-    Counted, not timed, for the same flake-class reason as the store-size test above."""
+    Both marker-scoped and cold full-walk paths perform one reduction regardless
+    of backlog size. The oracle counts work instead of timing it.
+    """
     tracker = _tracker(repo)
     now = 45_000_000_000_000
     tids = [rebar.create_ticket("task", f"B{i}", repo_root=repo) for i in range(backlog)]
@@ -603,14 +589,8 @@ def test_bool_typed_marker_fields_are_rejected(repo: str) -> None:
         assert Q.pending_enrichment(now + 1, tracker) == [tid]
 
 
-# ── one store, one gate marker (bug nuclear-calm-heron da68-fc7c-068c-4c53) ──────────────────
-#
-# Same class as the drain lock and the compaction sidecars (bug 93a9-66cf-e681-4f49): the
-# marker was derived from `os.path.dirname(tracker)` without resolving the `.tickets-tracker`
-# SYMLINK a `make worktree` worktree holds, so each worktree kept its own marker for the ONE
-# shared queue. The marker only ever says "nothing is pending", so a worktree-local one can
-# assert quiet for a store another worktree just made noisy — and a mutation's invalidation
-# (`_clear_gate_marker`) unlinked the WRONG file, leaving the stale claim standing.
+# Symlinked worktrees share one queue and therefore one canonical gate marker.
+# Invalidation must clear that shared marker rather than a worktree-local file.
 
 
 def _canonical_store(tmp_path: Path) -> str:
@@ -664,15 +644,9 @@ def test_a_mutation_in_one_worktree_invalidates_the_marker_another_wrote(
     )
 
 
-# ── scoped gate marker: a standing backlog no longer disables the fast path store-wide ───────
-# (task tireless-convenable-canvasback 4144-75d3-6af1-47d3)
-#
-# The 958e marker was all-or-nothing: written only by a scan that found NOTHING pending, so a
-# single standing pending entry forced a full store walk on every write. The marker now also
-# records the LIVE set (ids with an enqueued, not-DONE entry at full-scan time), asserting
-# "nothing is pending OUTSIDE this set" — probes then reduce only the live entries. Honesty is
-# unchanged: pending verdicts always come from reducing real queue events; the marker only
-# ever asserts absence. Counted by instrumenting reduce_ticket, never wall clock.
+# A scoped marker records active queue ids so a standing backlog reduces only that set.
+# Queue events remain authoritative. The marker asserts absence outside the set.
+# Tests count reductions rather than elapsed time.
 
 
 @pytest.mark.parametrize("n_tickets", [4, 40])

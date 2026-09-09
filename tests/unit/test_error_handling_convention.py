@@ -1,14 +1,7 @@
-"""Lint-gate proving test for the error-handling convention (epic ring-gun-jot).
+"""Prove Ruff enforces the BLE001/T201 error-handling convention.
 
-Universal `make lint` passing does NOT by itself prove the BLE001/T201 rules actually
-*fire* on the exemplar package vs. merely being added to `select` (plan-review advisory
-fc67). These tests prove the gate is wired correctly by feeding ruff synthetic code via
-`--stdin-filename` so the configured `per-file-ignores` allowlist is applied by path:
-
-* a broad `except Exception` + `print()` on a `llm/plan_review/` path is FLAGGED
-  (the exemplar is fully gated — not exempt);
-* the same code on an allowlisted (not-yet-swept) path is SUPPRESSED;
-* the real `llm/plan_review/` package is itself clean for BLE001 + T201.
+Synthetic input must fail on the gated plan-review path, pass on a
+still-allowlisted path, and leave the shipped package clean under both rules.
 """
 
 from __future__ import annotations

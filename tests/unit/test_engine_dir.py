@@ -149,30 +149,11 @@ def test_wheel_ships_author_guides(tmp_path):
 
 
 def test_engine_submodules_resolve_when_the_tests_unit_shadow_is_active(tmp_path: Path):
-    """bug dbb2: engine ``rebar_reconciler.*`` submodules must resolve in ANY session
-    that collects ``tests/unit/**``, not only one that collects
-    ``tests/unit/rebar_reconciler/**``.
+    """Resolve engine submodules while the ``tests/unit`` package shadow is active.
 
-    ``tests/unit/`` has no ``__init__.py``, so pytest's prepend import mode puts it at
-    ``sys.path[0]`` for every ``tests/unit`` module it collects — and
-    ``tests/unit/rebar_reconciler/__init__.py`` then shadows the engine package of the
-    same name. Anything that exec's an engine module standalone (e.g.
-    ``tests/scripts/reducer/test_managed_refs.py``'s ``spec_from_file_location`` of
-    ``outbound_differ.py``) resolves its ``from rebar_reconciler.… import …`` through
-    that shadow, and dies with ``ModuleNotFoundError: No module named
-    'rebar_reconciler._loader'`` unless the shadow's ``__path__`` carries the engine
-    package.
-
-    Run in a subprocess, and select a ``tests/unit`` module that is NOT under
-    ``rebar_reconciler/``: an in-process assertion is masked, because a full-suite run
-    always collects ``tests/unit/rebar_reconciler/**`` and therefore always fires that
-    directory's own compensation — the invariant would hold even with the fix reverted.
-    Same masking hazard, and same subprocess remedy, as
-    :func:`test_library_path_exposes_no_generic_top_level_engine_names` above.
-
-    ``-k`` deselects every test in the module named below, so this guard does not
-    recurse into itself; the module is imported (which is what creates the shadow) and
-    only the reducer test actually runs.
+    A subprocess collects a unit module outside ``rebar_reconciler`` so normal
+    full-suite compensation cannot mask the shadowing bug. ``-k`` imports that
+    module but deselects its tests, preventing this guard from recursing.
     """
 
     repo_root = REPO_ROOT

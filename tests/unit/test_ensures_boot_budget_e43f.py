@@ -1,16 +1,8 @@
-"""The review-bot boot path bounds the ensure-sweep write-lock budget (bug e43f).
+"""Bound the review-bot boot ensure sweep below the deployment health window.
 
-``run_ensures`` acquires the store write lock with ``write_lock``'s default budget of
-``_DEFAULT_TIMEOUT`` (30s) × ``_DEFAULT_ATTEMPTS`` (2) = 60s. On the review-bot boot path
-(``opcert_service.workspace._populate``) that runs behind the autodeploy health check
-(``HEALTH_TIMEOUT=30``), so any genuinely contended lock — a concurrent writer, a slow
-push, a correctly-never-reclaimed foreign-host lock — can stall the sweep for a full minute
-and fail the deploy on its own, with no orphaned lock involved. 304e/castoff-tigerseye-
-ammonite fixed the reclaimability defect but left this budget untouched.
-
-The fix gives the boot sweep a SHORT bounded budget (``workspace._ENSURE_BOOT_TIMEOUT`` ×
-``_ENSURE_BOOT_ATTEMPTS``, mirroring the MCP-boot budget), so a contended lock SKIPS the sweep
-(idempotent — it re-runs next boot) rather than delaying boot past the health check.
+A contended store lock uses the short boot-specific timeout and attempt budget.
+The idempotent sweep then skips until the next boot instead of exhausting the
+health check while waiting on the normal write-lock budget.
 """
 
 from __future__ import annotations

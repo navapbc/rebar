@@ -226,17 +226,11 @@ def test_strict_catches_missing_payload_and_dupe_id() -> None:
 
 
 def test_every_packaged_spec_passes_strict_validation() -> None:
-    """The eval-discipline gate, as a UNIT test so it runs in the DEFAULT suite and thus
-    BLOCKS the Gerrit `Verified` vote pre-merge (via `_build-and-test.yml`) — not only the
-    standalone `Prompt Eval` workflow, which casts no vote and never gated a landing. This
-    is the exact check `prompt-eval.yml` used to run as an inline CI script; hosting it here
-    (ticket 1a5f) closes that gap. Globbing EVERY packaged spec — rather than a hardcoded
-    tuple (this superseded `test_three_plan_review_specs_pass_strict`) — means a NEWLY added
-    spec is covered automatically, the gap that let plan-review-{asserted-capability,
-    decomp-shape,necessity} ship a dataset with no gold_set and merge green (bug d37b).
+    """Validate every packaged spec in the default test suite.
 
-    Every packaged spec must be lenient-clean; every dataset-bearing spec must ALSO be
-    strict-clean (registered scorers + balanced dataset + non-empty gold_set)."""
+    All specs must be lenient-clean. Dataset-bearing specs must also pass strict
+    scorer, balance, and nonempty-gold-set checks. Globbing covers new specs.
+    """
     specs = glob.glob("src/rebar/llm/eval_specs/*.eval.yaml")
     assert specs, "no packaged eval specs found"
     for p in specs:
@@ -247,11 +241,7 @@ def test_every_packaged_spec_passes_strict_validation() -> None:
             assert ev.validate_eval_spec(spec, strict=True) == [], p
 
 
-# ── 74d9: completion-verifier enumerates ALL unmet criteria (happy path) ────────
-# The scorer `enumerates_all_unmet_criteria` proves a FAIL verdict emits a distinct
-# finding for EVERY criterion the case annotates as unmet (anti-ratchet). Happy path:
-# it reads `expected_unmet_criteria` (list of substrings) off the case and requires a
-# bijective match against the findings' `criterion` fields.
+# Require a bijection between expected unmet criteria and emitted finding criteria.
 
 _TWO_UNMET_CASE = {"expect": "fail", "expected_unmet_criteria": ["AC1", "AC2"]}
 _TWO = _TWO_UNMET_CASE

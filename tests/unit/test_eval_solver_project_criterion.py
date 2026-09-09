@@ -1,14 +1,8 @@
-"""Regression: the live eval path resolves namespaced project criteria (bug 2340).
+"""Resolve namespaced project criteria through the eval command path.
 
-`rebar criteria eval <project.criterion>` / `calibrate_criterion` computes the physical
-prompt id `plan-review-project-<name>` (the forward map replaces the `project.` dot with a
-dash) to load the eval fixture, then runs the criterion via `eval_solver.run_case`. The
-reverse resolution (`_criterion_id`) stripped only the `plan-review-` prefix, leaving
-`project-<name>` (dash), which never matched the dot-keyed registry entry `project.<name>`
-— so every namespaced project criterion failed with `no eval solver`.
-
-These tests are self-contained: they build their own tmp project-criterion overlay and do
-NOT depend on any repository `.rebar/` configuration.
+The forward map uses hyphenated prompt ids, while the routing registry uses dotted
+criterion ids. Tests exercise the reverse mapping with a self-contained temporary
+overlay rather than repository `.rebar` configuration.
 """
 
 from __future__ import annotations

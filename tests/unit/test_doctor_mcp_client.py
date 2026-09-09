@@ -1,21 +1,8 @@
-"""``doctor`` MCP client-config diagnostics — ticket 71e7-4626-cb19-42d7.
+"""Test portable ``doctor`` diagnostics for MCP client configuration.
 
-The rebar MCP server disappears from a client's tool list for two silent reasons, and
-neither is visible from inside the server:
-
-  * the config names a bearer PAT env var that is **not set** in the environment the
-    client was launched from — the exact shape of the documented one-off ``export``,
-    which is persisted nowhere and dies with the shell it was typed in; and
-  * the config names a bearer PAT env var that is **not the canonical one** for that
-    client, so the operator's (correctly exported) canonical variable and the config's
-    variable never meet — a fault that persists even when the misnamed variable happens
-    to resolve.
-
-Fixing either alone can leave the server omitted, so ``scan_mcp_clients`` must report
-them independently. Every assertion here targets OBSERVABLE behaviour — the finding
-dicts returned and the strings ``render_text`` renders — never source text or private
-structure. The scan is stdlib-only and OS-agnostic, so these tests run anywhere
-(``project.portability``).
+``scan_mcp_clients`` independently reports unset bearer variables and variables
+whose names are noncanonical for the client. Assertions cover returned findings
+and rendered text rather than private implementation details.
 """
 
 from __future__ import annotations

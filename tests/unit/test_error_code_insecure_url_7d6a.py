@@ -1,12 +1,7 @@
-"""InsecureUrlError classifies as ``config_insecure_url``, not ``config_unreadable`` (7d6a).
+"""Classify ``InsecureUrlError`` as ``config_insecure_url``.
 
-``error_code_for`` step 4 used to classify EVERY :class:`ConfigError` subclass as
-``config_unreadable`` by isinstance — including :class:`InsecureUrlError`, which was
-explicitly designed (bug bdb8) to let a caller tell a deliberate cleartext-URL
-security-policy rejection apart from a malformed-config parse fault. An MCP client
-branching on ``config_unreadable`` would mis-prompt the operator to "fix an unreadable
-config" when the config parsed fine and was rejected by policy. The fix: a distinct
-``config_insecure_url`` code, classified before the ``ConfigError`` arm.
+The distinct code separates a cleartext-URL policy rejection from an unreadable
+configuration and must be selected before the general ``ConfigError`` arm.
 """
 
 from __future__ import annotations
