@@ -1,14 +1,9 @@
-"""Opt-in raw-reply artifact on final structured-parse failure (story 2fd6).
+"""Pin the opt-in artifact for final structured-parse failure (story 2fd6).
 
-When the prompted reask loop in ``_pai_structured`` exhausts ``OUTPUT_RETRIES`` the raw model
-reply is discarded today, so every recurrence of the schema-blind extraction class had to be
-diagnosed from a lucky console capture. This pins the opt-in, LOCAL, fail-closed debugging
-artifact: with ``llm.parse_failure_artifact_dir`` set, the FINAL failure writes ONE file
-carrying the raw reply + metadata and names it in the raised error; unset (the default) the
-failure path is byte-for-byte unchanged and nothing is written.
-
-The seam is driven through the public runner (a ``FunctionModel`` override returning fixed
-text), exactly as ``test_runner_hardening.py`` does — no live call, the parse failure is real.
+After ``OUTPUT_RETRIES`` is exhausted, configured ``llm.parse_failure_artifact_dir`` receives
+one local, fail-closed file containing raw reply and metadata, and the error names it. The
+default writes nothing and preserves the original failure path. Tests drive a real parse
+failure through the public runner with an offline ``FunctionModel``.
 """
 
 from __future__ import annotations
@@ -165,12 +160,8 @@ def test_config_key_is_documented_with_default_and_rotation(tmp_path) -> None:
     assert "rotat" in lowered or "newest" in lowered or "20" in doc
 
 
-# ── 4ca2 retry-tail pin (appended into tests/unit/test_structured_run.py) ──
-#
-# The bounded-retry prompt must name the SAME sentinel markers as the first attempt, not
-# instruct bare JSON — so the fail-closed retry channel matches layer 1. Driven through the
-# real runner with a _sequence_model whose first reply fails to parse (forcing one retry);
-# we capture the SECOND call's prompt and assert it names both markers.
+# 4ca2: a bounded retry must repeat the first attempt's sentinel markers, not request bare
+# JSON. A sequence model forces one retry so the second prompt can be inspected.
 
 _OPEN = "<<<REBAR_OUTPUT>>>"
 _END = "<<<END>>>"

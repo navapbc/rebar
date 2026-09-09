@@ -1,15 +1,9 @@
-"""Write-time op batching (epic cold-stall-chalk / B1): ``batch_stage_and_commit``.
+"""Pin atomic ``batch_stage_and_commit`` behavior (cold-stall-chalk B1).
 
-The batch primitive commits MANY events under ONE lock acquire + ONE ``git commit``
-(all-or-nothing) instead of one commit per event. These tests pin the properties that
-make that collapse safe:
-
-- N events land in ONE commit, byte-identical to what the per-event path would write;
-- an empty batch is a no-op (no lock, no commit);
-- any failure (validation, rename, ``git add``, non-recoverable ``git commit``) rolls
-  the WHOLE batch back — no phantom event left staged in the index or on disk;
-- a subsequent successful write is uncontaminated by a failed batch;
-- the pre-existing unmerged (UU) self-heal (bug 6818) still applies to a batch.
+The primitive writes N byte-identical events with one lock and one commit; an empty batch
+takes neither. Validation, rename, add, or unrecoverable commit failure must roll back disk
+and index state so the next write is clean. Batch writes also retain bug 6818's unmerged-index
+self-heal.
 """
 
 from __future__ import annotations

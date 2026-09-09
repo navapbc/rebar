@@ -83,10 +83,8 @@ def test_validate_to_rejects_non_object():
 
 
 def test_validate_to_unwraps_single_element_array():
-    # Bug artsy-chain-hold/dash-lure-slag: the completion-verifier's model sometimes
-    # emits its structured verdict wrapped in a top-level JSON array (a bare one-element
-    # list) instead of the bare object, deterministically blocking a close fail-closed.
-    # A single-element array carrying one object must be unwrapped, not rejected.
+    # Some completion-verifier models wrap the verdict in a one-element top-level array.
+    # Unwrap its sole object instead of fail-closing (bug artsy-chain-hold/dash-lure-slag).
     obj = structured.validate_to(_Verdict, [{"verdict": "PASS", "confidence": 0.9}])
     assert obj.verdict == "PASS" and obj.confidence == 0.9
 
@@ -105,12 +103,9 @@ def test_validate_to_still_rejects_multi_element_array():
 
 
 def test_validate_to_recovers_sole_dict_among_non_dict_noise():
-    # Bug slit-rubble-braid: a REASONING completion-verifier model emits a valid top-level
-    # JSON array that concatenates echoed intermediate arrays it reasoned over with the real
-    # verdict object as the sole dict element, e.g. [["open","in_progress"], {verdict}]. This
-    # parses whole via json.loads (a list), and the length-1 unwrap does not catch it, so it
-    # was rejected "got list" on every bounded retry — fail-closing the completion gate and
-    # blocking every close. The sole dict element must be recovered.
+    # A reasoning model may combine echoed arrays with the real verdict, for example
+    # [["open", "in_progress"], {verdict}]. Recover the sole dict rather than reject the
+    # parsed list and fail-close every retry (bug slit-rubble-braid).
     obj = structured.validate_to(
         _Verdict, [["open", "in_progress"], {"verdict": "PASS", "confidence": 0.9}]
     )
@@ -127,13 +122,9 @@ def test_parse_structured_recovers_verdict_from_array_with_leading_noise():
 
 
 def test_tolerant_parse_skips_nonjson_brace_before_object():
-    # Bug 67ee / messianic-wild-dassie: the completion-verifier model prepended a prose
-    # preamble whose GitHub Actions expression ``${{ github.repository }}`` puts a NON-JSON
-    # '{' BEFORE the real trailing verdict object. _first_json_object anchored on that first
-    # '{', failed to parse the ``{{ … }}`` region, and gave up — so json-repair then mangled
-    # the whole text into a list of prose fragments (zero dicts), and validate_to rejected it
-    # "got list", fail-closing every close of that ticket. The scan must ADVANCE past the
-    # non-JSON brace to the first '{' that actually parses.
+    # A GitHub Actions expression in prose puts a non-JSON brace before the verdict. Advance
+    # past unparseable ``${{ github.repository }}`` instead of anchoring there and fail-closing
+    # after JSON repair produces prose fragments (bug 67ee / messianic-wild-dassie).
     text = (
         "The fix adds `GH_REPO: ${{ github.repository }}` to the release step, resolving "
         '"fatal: not a git repository".\n\n'
@@ -144,10 +135,9 @@ def test_tolerant_parse_skips_nonjson_brace_before_object():
 
 
 def test_completion_verdict_recovered_when_prose_holds_github_actions_expr():
-    # Faithful end-to-end reproduction of the CAPTURED 67ee runtime payload: prose containing
-    # ``${{ github.repository }}`` before the verdict object, whose own ``summary`` also holds
-    # that expression (the '{{' inside a JSON string must be string-aware, not a brace). Must
-    # recover + validate to a real CompletionVerdict, not fail-close "got list".
+    # Reproduce the captured 67ee payload end to end. The expression appears both before the
+    # verdict and inside its summary, where braces are string content; recover a real
+    # CompletionVerdict rather than fail-close with "got list".
     from rebar.llm.contracts import completion_verdict_response_model
 
     model = completion_verdict_response_model()
@@ -429,13 +419,10 @@ def test_completion_verdict_accepts_coerced_citation_kind() -> None:
     assert dumped["findings"][0]["citations"][0]["kind"] == "file"
 
 
-# ── df3a: schema-filtered candidate selection (last-valid-wins) ─────────────────
-# The completion verifier's agentic transcript quotes dependency-link records from
-# show_ticket tool results; today's schema-BLIND first-parseable-object selection lets a
-# quoted record win over the real verdict that appears later, fail-closing a legitimate
-# close. parse_structured now enumerates candidate JSON objects, screens each by top-level
-# key-overlap against the target model's fields, validates the survivors, and takes the
-# LAST valid one. Corpus fixtures replay the captured b586 reply shape.
+# df3a: transcripts can quote dependency records before the real verdict. Enumerate JSON
+# candidates, filter by target-model key overlap, validate survivors, and choose the last
+# valid one. Corpus fixtures replay the captured b586 shape that first-object selection
+# incorrectly fail-closed.
 
 _CORPUS_DIR = _Path(__file__).parent.parent / "fixtures" / "structured_reply_corpus"
 
@@ -449,10 +436,8 @@ def _all_corpus() -> list[dict]:
 
 
 def test_selection_recovers_verdict_over_quoted_dep_record():
-    # HAPPY PATH: a completion-verifier reply that quotes a dependency-link record (0 shared
-    # top-level keys with CompletionVerdict) before the real verdict object must parse to the
-    # VERDICT, not the dep record. Today the first parseable object (the dep record) wins and
-    # fails validation ("verdict Field required"), blocking the close.
+    # A quoted dependency record shares no CompletionVerdict keys. Skip it and return the
+    # later verdict instead of failing validation on the first parseable object.
     from rebar.llm.contracts import completion_verdict_response_model
 
     model = completion_verdict_response_model()
@@ -463,9 +448,8 @@ def test_selection_recovers_verdict_over_quoted_dep_record():
 
 @pytest.mark.parametrize("variant", _all_corpus(), ids=lambda v: v["id"])
 def test_selection_recovers_verdict_all_corpus_variants(variant):
-    # The captured b586 reply in 4 recorded layout variants (bare-dep-first, fenced-dep-first,
-    # both-fenced-verdict-last, and the verdict-first control that already passes today). All
-    # four must recover the REAL verdict after the fix; 3 of 4 fail on today's first-wins parser.
+    # All four captured b586 layouts—bare or fenced dependency first, both fenced, and the
+    # verdict-first control—must recover the real verdict.
     from rebar.llm.contracts import completion_verdict_response_model
 
     model = completion_verdict_response_model()
@@ -474,9 +458,8 @@ def test_selection_recovers_verdict_all_corpus_variants(variant):
 
 
 def test_selection_last_valid_wins_and_warns_when_two_validate(caplog):
-    # When >=2 candidates validate and last != first, last-valid-wins takes the LAST and logs a
-    # warning naming both (a model that emits a draft verdict then a correction). The corrected
-    # (last) verdict is authoritative; the warning surfaces the ambiguity.
+    # When draft and corrected verdicts both validate, return the last and log both candidates
+    # so the ambiguity remains visible.
     import logging
 
     reply = (
@@ -567,11 +550,8 @@ def test_selection_property_payload_last_recovers_verdict():
         assert obj.verdict == want, reply
 
 
-# ── 4ca2 sentinel marker-channel — GIVEN happy-path pins (implementer-visible) ──
-# The adversarial/edge pins (fail-closed decoy, line-anchor collision, empty-block,
-# reverse-iteration-skips-invalid, marker-authority-over-earlier-decoy) are HELD OUT and
-# restored by the orchestrator after implementation — so the implementation is designed from
-# the SPEC, not fitted to the visible tests.
+# 4ca2 GIVEN pins: sentinel markers are authoritative. Held-out cases cover decoys, line-anchor
+# collisions, empty blocks, and reverse iteration so implementation follows the specification.
 
 _OPEN = "<<<REBAR_OUTPUT>>>"
 _END = "<<<END>>>"
@@ -649,9 +629,7 @@ def test_sentinel_corpus_fixture_extracts_marker_wrapped_verdict():
     assert obj.verdict == "PASS"
 
 
-# ── 4ca2 sentinel marker-channel — HELD-OUT adversarial/edge pins ──
-# Restored by the orchestrator AFTER the implementer finishes (helpers _OPEN/_END/_block are
-# already defined by the GIVEN block above in the same module).
+# 4ca2 held-out sentinel edge cases, using the GIVEN block's ``_OPEN``, ``_END``, and ``_block``.
 
 
 def test_last_block_invalid_earlier_block_valid_returns_earlier_valid():

@@ -1,13 +1,9 @@
-"""Reconverge robustness: a union merge blocked ONLY by origin-introduced untracked paths
-must self-heal instead of wedging the store (bug small-delicious-loris / 6ccc-0577-198c-44fa).
+"""Self-heal reconvergence blocked by origin-introduced untracked paths (bug 6ccc-0577).
 
-Compaction can leave regenerable artifacts (`*-SNAPSHOT.json`, `*.retired`) as UNTRACKED files
-in the tracker working tree. When a peer clone has already committed+pushed those same paths,
-the next reconverge's ``git merge origin/tickets`` must CREATE them and aborts with
-"untracked working tree files would be overwritten by merge". The pre-fix handler was
-abort-only, so every retry re-aborted and local commits never reached origin. The fix
-quarantines exactly the untracked paths git names (they exist on origin, so they are
-regenerable) and retries the merge once, keeping both parents.
+Compaction can leave regenerable snapshots or retirement markers untracked while a peer has
+committed the same paths. Rather than repeat Git's overwrite refusal forever, reconvergence
+quarantines exactly the named paths and retries the union merge once, preserving both parents.
+Real conflicts remain abort-only.
 """
 
 from __future__ import annotations
@@ -180,21 +176,11 @@ def test_reconverge_genuine_content_conflict_still_aborts_and_keeps_local(tmp_pa
     assert not (tracker / ".git" / "MERGE_HEAD").exists()
 
 
-# ---------------------------------------------------------------------------
-# Variant (b): "Your local changes to the following files would be overwritten
-# by merge" — tracked files with LOCAL WORKING-TREE changes (in practice the
-# tracked-deletion half of an interrupted compaction fold's rename) abort the
-# union merge before it even starts, stranding local ticket commits off origin
-# (live wedge on e72e-259d-5ee7-4e73: 119 tracked `.archived` deletions).
-# Empirically (git 2.55 / ort): a STAGED deletion (`D ` — what the fold leaves
-# after its `git add -A`) and a worktree MODIFICATION (` M`) both abort; a pure
-# worktree deletion (` D`) does not (git recreates the file), but the restore
-# helper still handles it for older gits. Recovery: DELETION of a tracked file
-# → restore from HEAD (bytes already committed — nothing can be lost);
-# worktree MODIFICATION → copy the local bytes into the same quarantine dir
-# variant (a) uses, THEN restore. Retry the merge ONCE. Anything else keeps
-# the abort-only net.
-# ---------------------------------------------------------------------------
+# Variant (b): tracked local changes can also block the union merge. Restore deletions from
+# HEAD because their bytes are already committed; quarantine modified bytes before restoring.
+# Git 2.55 rejects staged deletion (``D ``) and worktree modification (`` M``), while pure
+# worktree deletion (`` D``) is restored for older versions. Retry once; all other conflicts
+# remain abort-only. This covers the live wedge with 119 interrupted-fold deletions.
 
 _TRACKED_DIR = "cccc-trkd-3333-3333"
 _TRACKED_FILE = "1700000000000000000-cccc-trkd-3333-3333-CREATE.json"

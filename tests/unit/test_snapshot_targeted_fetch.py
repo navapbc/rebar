@@ -1,16 +1,9 @@
-"""Bug ``lemuroid-compliant-hoopoe`` — attested ref resolution must scope its fetch.
+"""Scope attested-ref fetches to the requested ref (bug ``lemuroid-compliant-hoopoe``).
 
-``resolve_ref`` used to open with an UNSCOPED ``git fetch --no-filter origin`` (no refspec).
-On a partial/promisor checkout whose ``origin.fetch`` maps every head
-(``+refs/heads/*:refs/remotes/origin/*``) that transfers EVERY branch — including the huge,
-unrelated ``tickets`` history — when only a single code SHA is needed. In the field a
-post-merge ``review-plan`` made zero LLM calls and still spent 512s before ``git fetch``
-tripped the 300s ceiling, leaving partial packs (~153.6 MB).
-
-The invariant pinned here is deliberately about the *fetch shape*, not wall-clock time: the
-network fetch backing an attested resolution must carry a refspec scoped to the requested
-ref, and must NEVER be the bare-remote ``git fetch ... origin`` that pulls all heads. A RED
-run (pre-fix) sees exactly that unscoped argv and the unrelated branch materialized locally.
+An unqualified ``git fetch --no-filter origin`` follows ``origin.fetch`` and can transfer
+every branch, including large unrelated ticket history. These tests pin command shape rather
+than timing: resolution must include a refspec and must not materialize the unrelated branch.
+The former broad fetch took 512 seconds and left roughly 153.6 MB of partial packs.
 """
 
 from __future__ import annotations
@@ -42,12 +35,10 @@ def _isolate_store(monkeypatch, tmp_path):
 
 @pytest.fixture
 def clone_with_large_unrelated_branch(tmp_path) -> tuple[Path, str, str]:
-    """A ``--filter=blob:none`` clone of an upstream carrying a tiny ``main`` and a large,
-    UNRELATED ``tickets`` branch, with ``origin.fetch`` mapping every head.
+    """Create a blobless clone with tiny ``main`` and large unrelated ``tickets``.
 
-    Returns ``(clone, main_sha, tickets_sha)``. The clone starts with NO local
-    remote-tracking refs for either branch (they are deleted) so resolving ``origin/main``
-    genuinely needs a network fetch — the exact shape of the deployment that broad-fetched.
+    ``origin.fetch`` maps every head, but both tracking refs are deleted, so resolving
+    ``origin/main`` genuinely exercises the network-fetch shape.
     """
     upstream = tmp_path / "upstream"
     upstream.mkdir()

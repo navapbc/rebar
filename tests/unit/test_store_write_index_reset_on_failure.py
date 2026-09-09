@@ -1,12 +1,8 @@
-"""Regression: a failed store write must leave NO phantom event staged in the index.
+"""Prevent failed store writes from leaving phantom index entries.
 
-Audit reliability #4 / audit 2.2. Before the fix, `stage_and_commit`'s failure paths
-only unlinked the worktree file — the `git add`-staged blob stayed in the index, so the
-NEXT successful write (which commits the whole index) durably committed the failed
-write's phantom event. The claim/transition path (txn.py) already reset the index on
-failure; the general append path did not. Also, `git commit` used to run before `git
-add`'s return code was checked, so a failed add could still let a commit sweep in
-unrelated staged residue under this write's message.
+Unlinking the worktree event is insufficient after ``git add``: the next successful write
+could commit its staged blob. General append must reset the index like claim/transition, check
+add failure before commit, and avoid sweeping unrelated staged residue into this write.
 """
 
 from __future__ import annotations

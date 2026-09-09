@@ -1,28 +1,12 @@
-"""Hand-built LLM sub-calls must select their model from the model-CLASS vocabulary (bug afeb).
+"""Require hand-built LLM sub-calls to honor model classes (bug afeb).
 
-Four sites built a ``RunRequest`` with ``config=cfg`` and declared no model class, so they
-inherited ``cfg.model`` and ignored ``[tool.rebar.llm.model_classes]`` entirely. MEASURED on the
-ticket: with all three classes pointed at Bedrock and ``cfg.model`` left on direct Anthropic, 18 of
-the 23 LLM calls in a plan review went to direct Anthropic.
+Four ``RunRequest`` sites inherited ``cfg.model``; with class slots on Bedrock and that default
+on Anthropic, 18 of 23 plan-review calls used the wrong provider. Per-site probes make class
+values distinct from ``cfg.model`` and inspect the runner. A whole-tree provenance guard also
+rejects any config flowing from bare ``LLMConfig.from_env()`` without a class binder.
 
-Two kinds of test live here, and both are needed:
-
-1. **Per-site runtime probes.** Each configures a class table whose values DIFFER from
-   ``cfg.model`` — the only configuration in which "honoured the class" and "fell through to
-   cfg.model" are distinguishable strings — and asserts the model that reaches the runner is the
-   class value. The class table is the discriminator: with no table configured, ``frontier``
-   resolves to the same default ``cfg.model`` carries and the observation would carry no
-   information (the ticket's config-A/config-B analysis).
-2. **A general provenance guard** (:func:`test_no_run_request_inherits_the_raw_config_model`) that
-   fails for ANY ``RunRequest`` site in ``src/rebar`` whose config traces back to a bare
-   ``LLMConfig.from_env()`` without passing through the class vocabulary. It enumerates nothing:
-   a NEW hand-built sub-call with the same defect fails it on the day it is written.
-
-The ``overlap-judge`` probe drives :func:`judge_one` DIRECTLY rather than through a gate. That is
-deliberate: ``overlap/wire.py`` runs the judge only when BM25F retrieval returns candidates
-(``if not candidates: return []``, with the query's own graph excluded), so a test that runs a gate
-and hopes the judge fires silently passes while testing nothing — two probes during the
-investigation hit exactly that and produced zero judge calls.
+The overlap probe calls :func:`judge_one` directly because gate retrieval may return no
+candidates and skip the judge, producing a vacuous pass.
 """
 
 from __future__ import annotations
@@ -46,10 +30,8 @@ from rebar.llm.runner import FakeRunner, Runner, RunRequest
 
 pytestmark = pytest.mark.unit
 
-# `cfg.model` and the three class slots are deliberately DISTINCT strings: a probe can then name
-# which one arrived. `test` is NOT a provider name, so `split_provider_qualifier` reads these as
-# unqualified — and since no inference prefix matches them either, `resolve_class` returns them
-# unchanged rather than re-prefixed.
+# Keep ``cfg.model`` distinct from every class slot so probes identify the source. ``test`` is
+# not a provider, so these unqualified class values survive resolution unchanged.
 _CFG_MODEL = "anthropic:cfg-model-must-not-be-inherited"
 _STANDARD = "test:standard-class-model"
 _FRONTIER = "test:frontier-class-model"
@@ -65,11 +47,9 @@ _DIGEST = {
 
 @pytest.fixture(autouse=True)
 def class_table(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Configure all three model classes away from ``cfg.model`` (the ticket's config B).
+    """Set all classes apart from ``cfg.model`` through the shared file-table seam.
 
-    Patched at ``_read_llm_file_table`` — the one function ``load_class_slots`` reads — rather than
-    via the nine env vars, so the table is identical for every probe regardless of the ambient
-    environment the conftest scrubs.
+    This avoids nine environment variables and remains stable under conftest cleanup.
     """
     monkeypatch.setattr(
         llm_config,
@@ -85,10 +65,9 @@ def class_table(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class _Recorder(Runner):
-    """Records the model on every request's config, then answers with a canned payload.
+    """Record each request model before returning a canned payload.
 
-    Recording happens BEFORE the payload is produced, so a site that swallows downstream errors
-    (the novelty and overlap sub-calls both do, by design) still yields the observation.
+    The observation survives downstream errors swallowed by novelty or overlap callers.
     """
 
     name = "recorder"
@@ -136,9 +115,8 @@ def test_overlap_judge_selects_the_standard_class_for_every_pair() -> None:
     per call and not only on the first."""
     from rebar.llm.overlap.judge import _CANDIDATES_PER_CALL, judge
 
-    # Enough candidates to fill more than one BATCH: the judge sends one call per batch per
-    # ordering, so a corpus one over the bound is the smallest that still proves the binding is
-    # re-applied on a LATER call rather than only on the first.
+    # One candidate beyond the batch limit is the smallest corpus proving both orderings bind
+    # the class again on their later batch.
     ids = [f"C{i}" for i in range(_CANDIDATES_PER_CALL + 1)]
     rec = _Recorder({"relation": "unrelated", "confidence": 0.0, "abstain": True})
     judge(
@@ -154,9 +132,7 @@ def test_overlap_judge_selects_the_standard_class_for_every_pair() -> None:
 
 
 def test_ticket_digest_selects_the_trivial_class() -> None:
-    """`trivial`: the ticket-digest prompt is a single-turn, tool-less extractor of four
-    structured fields ("Not a reviewer" in its own frontmatter) — narrow canonicalizing work, and
-    the highest-volume site of the four since it runs on every ticket store write."""
+    """Ticket-digest extraction is high-volume, single-turn canonicalization: ``trivial``."""
     from rebar.llm.enrich import enrich
 
     rec = _Recorder(dict(_DIGEST))
@@ -165,9 +141,7 @@ def test_ticket_digest_selects_the_trivial_class() -> None:
 
 
 def test_ticket_digest_holds_on_the_store_write_path() -> None:
-    """``enrich_drain.maybe_drain`` runs on the ticket STORE WRITE path (``event_append`` /
-    ``push``), so the binding must hold for a caller that builds its own config from the
-    environment and never passes one in — not only for a gate that hands ``enrich`` a config."""
+    """Bind ``trivial`` when the store-write path creates config from the environment."""
     from rebar.llm.enrich import enrich
 
     rec = _Recorder(dict(_DIGEST))
@@ -176,11 +150,11 @@ def test_ticket_digest_holds_on_the_store_write_path() -> None:
 
 
 def test_review_ticket_uses_the_operators_configured_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    """BY DESIGN, and registered as such: `review_ticket` is a top-level op's single LLM call, so
-    there are no passes to differentiate and the operator's configured model is the right knob. The
-    class vocabulary exists to spend differently ACROSS a gate's passes. Binding a class here would
-    remove `llm.model` as a steering knob for this command and give nothing back. Same reasoning as
-    `spec_scan`. (Retirement of this op is ticket 316a; if it goes, so does this test.)"""
+    """Keep the operator's model for this top-level, single-call operation.
+
+    Classes differentiate passes and add nothing here; ``spec_scan`` follows the same design.
+    Remove this test when ticket 316a retires the operation.
+    """
     from rebar.llm import operations
 
     monkeypatch.setattr(
@@ -188,12 +162,8 @@ def test_review_ticket_uses_the_operators_configured_model(monkeypatch: pytest.M
     )
     rec = _Recorder()
     cfg = _cfg()
-    # `source="local"` is REQUIRED, not incidental. The conftest pins the suite to
-    # `REBAR_GATE_SOURCE=attested`, and attested mode materializes the pinned snapshot — two real
-    # `git fetch` subprocesses against `origin`. This test is about which model reaches the runner
-    # and has no business touching the network: the checkout the CI gate runs in has no `origin`
-    # remote, so the fetch cannot succeed and blocks until the snapshot timeout. An explicit
-    # `source` argument wins over the environment (see `gate_source.resolve_gate_handle`).
+    # Override conftest's attested source: materializing it performs real origin fetches, while
+    # this model-selection test must stay offline. Explicit ``source`` wins over the environment.
     operations._review_ticket_impl(
         "abc123", "ticket-quality", config=cfg, runner=rec, source="local"
     )
@@ -277,11 +247,8 @@ _CLASS_BINDERS = (
 # reaches a RunRequest from one of these without crossing a binder above is exactly bug afeb.
 _RAW_ORIGIN = "LLMConfig.from_env"
 
-# Helpers that return a COPY of the config with a NON-model field adjusted — the output-token
-# budget. They are transparent to MODEL provenance, so the analysis follows through them to their
-# argument instead of stopping at the call. Stopping would be the dangerous reading: it renders a
-# site `unresolved`, and the only way to pass then is to register it as unfollowable, which would
-# blind this guard at the very plan-review passes bug afeb is about.
+# Output-budget helpers copy config without changing its model. Provenance must follow their
+# argument; treating them as unresolved would require an exemption and blind the afeb guard.
 _MODEL_TRANSPARENT = ("max_output_cfg", "_max_output_cfg")
 
 
@@ -297,14 +264,12 @@ def _unwrap_model_transparent(expr: str) -> str | None:
     return ast.unparse(node.args[0]) if name in _MODEL_TRANSPARENT else None
 
 
-# Sites that inherit `cfg.model` ON PURPOSE. Registration is a DELIBERATE act, and it is the
-# ONLY way a raw site passes: a new hand-built sub-call fails until someone either declares a
-# class or writes down why the operator's bare model is the right one there.
+# Intentional ``cfg.model`` inheritance. A raw site passes only after documenting why the
+# operator's model is correct instead of a class.
 _CFG_MODEL_BY_DESIGN: dict[str, str] = {}
 
-# Sites whose config provenance this analysis cannot follow — it stops at attribute access
-# (`self._config`) and at parameters whose callers are outside `src/rebar` — each with the reason
-# it is not a bug-afeb site. Same ratchet: unregistered means failing.
+# Unfollowable attribute or external-caller provenance, each justified as outside bug afeb.
+# Unregistered sites fail the ratchet.
 _UNFOLLOWABLE: dict[str, str] = {
     "llm/workflow/completion_recovery.py::_run_one_successor": (
         "config is `self._config` (an attribute): a batched recovery successor re-runs the "
@@ -367,14 +332,10 @@ _UNFOLLOWABLE: dict[str, str] = {
 
 @functools.cache
 def _parsed(path: pathlib.Path) -> ast.Module:
-    """``ast.parse`` of one source file, memoised for this process.
+    """Parse each read-only source file once per process (ticket fa90-3292-38d4-4fd2).
 
-    The provenance scan reads the same files over and over: ``_verdict`` re-walks the
-    WHOLE tree once per site whose config arrives as a parameter, and ``_functions``
-    walks it again. Memoising by path collapses that to one read+parse per file
-    (ticket fa90-3292-38d4-4fd2). Safe because ``src/rebar`` is READ-ONLY to this
-    suite — no test in this module writes it — and the cache dies with the process,
-    so it can never be served to a later pytest session.
+    ``_verdict`` and function discovery repeatedly walk the same trees; process lifetime keeps
+    this cache from surviving a later source change.
     """
     return ast.parse(path.read_text())
 
@@ -490,23 +451,21 @@ def _arg_for_param(call: ast.Call, fn: Any, param: str) -> str | None:
 
 
 def _combine(verdicts: set[str]) -> str:
-    """Fold sibling verdicts. ``bound`` WINS over ``raw``: the shape of the fix is a
-    reassignment (``cfg = replace(cfg, model=resolve_model_string(...))``), so a function whose
-    config is minted raw and then rebound must read as bound — the engine's own
-    ``RunnerAgentStep`` does exactly that with ``resolve_model``. The cost is that a function
-    which binds a class for one call and passes the raw config to a second RunRequest reads as
-    bound; the per-site probes above cover the sites where that would matter."""
+    """Fold provenance with ``bound`` overriding ``raw`` after config reassignment.
+
+    This recognizes ``RunnerAgentStep``-style rebinding. It can mask a later raw second call,
+    so the per-site runtime probes cover that limitation.
+    """
     if "bound" in verdicts:
         return "bound"
     return "raw" if "raw" in verdicts else "unresolved"
 
 
 def _verdict(tree: ast.AST, site: ast.Call, expr: str, depth: int) -> str:
-    """``"bound"`` | ``"raw"`` | ``"unresolved"`` for the config expression ``expr`` at ``site``.
+    """Classify ``expr`` as bound, raw, or unresolved by backward provenance.
 
-    Backward provenance, one hop at a time: a class binder anywhere in the chain cleanses it, a
-    bare ``LLMConfig.from_env`` at the end of it is the defect, and a parameter transfers the
-    obligation to the function's callers.
+    A class binder resolves the chain; bare ``LLMConfig.from_env`` is raw; parameters transfer
+    the obligation to callers.
     """
     if any(binder in expr for binder in _CLASS_BINDERS):
         return "bound"
@@ -544,12 +503,10 @@ def _verdict(tree: ast.AST, site: ast.Call, expr: str, depth: int) -> str:
 
 
 def _is_run_request_construction(func: ast.expr) -> bool:
-    """``RunRequest(...)`` or its ``RunRequest.for_structured(...)`` builder.
+    """Match direct and ``for_structured`` RunRequest construction.
 
-    Matching the bare name alone would make this scan FAIL OPEN the day a site adopts the
-    builder: the single-turn structured sites would silently leave the corpus and every guard
-    below would pass on a smaller one — the exact vacuous-pass failure
-    :func:`test_the_provenance_analysis_can_see_the_sites_it_judges` exists to catch.
+    Omitting the builder would silently shrink the provenance corpus; the census guard catches
+    that vacuous-pass shape.
     """
     if isinstance(func, ast.Name):
         return func.id == "RunRequest"
@@ -655,12 +612,9 @@ def test_provenance_scan_preserves_verdicts_with_linear_whole_tree_work(
 
 @pytest.fixture(scope="session")
 def run_request_sites() -> list[tuple[str, str, str]]:
-    """The provenance analysis, derived ONCE per test process.
+    """Derive immutable provenance once per pytest session (ticket fa90-3292-38d4-4fd2).
 
-    The four guards below each used to call :func:`_run_request_sites`, re-deriving an
-    identical, immutable answer four times over (ticket fa90-3292-38d4-4fd2). A session
-    fixture is the whole cache: it is bounded by the pytest session that created it, so
-    nothing can survive a source change into a later run.
+    The fixture replaces four identical scans and cannot outlive a source-changing run.
     """
     return _run_request_sites()
 
