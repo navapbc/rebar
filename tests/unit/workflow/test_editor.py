@@ -442,6 +442,7 @@ def test_sequential_saves_each_back_up_the_prior_ir(tmp_path):
     first_saved = path.read_text(encoding="utf-8")
     # A second save (re-serialize the now-saved IR) backs up `first_saved`.
     assert editor.save_bpmn_to_ir(editor._load_bpmn_for(path), path) == []
+    # timing: artifact-equality — deterministic backup of the immediately prior IR bytes
     assert bak.read_text(encoding="utf-8") == first_saved
 
 

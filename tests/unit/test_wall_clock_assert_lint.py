@@ -229,6 +229,124 @@ def test_excluded_files_skips_own_fixture_corpus(lint, tree: Path) -> None:
     assert _findings(lint, tree) == []
 
 
+# ── fire: transitive wall-clock artifact equality proxies ───────────────────
+
+
+def test_direct_artifact_equality_between_different_receivers_fires(lint, tree: Path) -> None:
+    _t(
+        tree,
+        "tests/unit/test_artifact_bytes.py",
+        """
+        def test_outputs_match(tmp_path):
+            left = tmp_path / "left.json"
+            right = tmp_path / "right.json"
+            assert left.read_bytes() == right.read_bytes()
+        """,
+    )
+    fs = _findings(lint, tree)
+    assert len(fs) == 1
+    assert "artifact" in fs[0].why
+
+
+def test_variable_artifact_equality_between_different_receivers_fires(lint, tree: Path) -> None:
+    _t(
+        tree,
+        "tests/unit/test_artifact_vars.py",
+        """
+        def test_outputs_match(tmp_path):
+            before = (tmp_path / "before.json").read_text()
+            after = (tmp_path / "after.json").read_text()
+            assert before == after
+        """,
+    )
+    fs = _findings(lint, tree)
+    assert len(fs) == 1
+    assert "artifact" in fs[0].why
+
+
+def test_direct_artifact_equality_same_receiver_is_silent(lint, tree: Path) -> None:
+    _t(
+        tree,
+        "tests/unit/test_same_artifact.py",
+        """
+        def test_self_comparison(tmp_path):
+            path = tmp_path / "out.json"
+            assert path.read_bytes() == path.read_bytes()
+        """,
+    )
+    assert _findings(lint, tree) == []
+
+
+def test_variable_artifact_equality_same_receiver_is_silent(lint, tree: Path) -> None:
+    _t(
+        tree,
+        "tests/unit/test_same_artifact_var.py",
+        """
+        def test_before_after_same_file(tmp_path):
+            before = (tmp_path / "out.json").read_bytes()
+            rewrite_same_file()
+            assert (tmp_path / "out.json").read_bytes() == before
+        """,
+    )
+    assert _findings(lint, tree) == []
+
+
+def test_artifact_equality_clock_freeze_escapes(lint, tree: Path) -> None:
+    _t(
+        tree,
+        "tests/unit/test_frozen_artifact.py",
+        """
+        def test_outputs_match(tmp_path, monkeypatch):
+            monkeypatch.setattr(binding_lifecycle, "_now_iso", lambda: "2026-01-01T00:00:00Z")
+            assert (tmp_path / "a.json").read_bytes() == (tmp_path / "b.json").read_bytes()
+        """,
+    )
+    assert _findings(lint, tree) == []
+
+
+def test_artifact_equality_inline_marker_escapes(lint, tree: Path) -> None:
+    _t(
+        tree,
+        "tests/unit/test_marked_artifact.py",
+        """
+        def test_outputs_match(tmp_path):
+            a = tmp_path / "a.json"
+            b = tmp_path / "b.json"
+            assert a.read_bytes() == b.read_bytes()  # timing: artifact-equality — fixture data
+        """,
+    )
+    assert _findings(lint, tree) == []
+
+
+def test_artifact_equality_previous_line_marker_escapes(lint, tree: Path) -> None:
+    _t(
+        tree,
+        "tests/unit/test_marked_artifact_previous.py",
+        """
+        def test_outputs_match(tmp_path):
+            # timing: artifact-equality — generated from timestamp-free fixture data
+            assert (tmp_path / "a.json").read_bytes() == (tmp_path / "b.json").read_bytes()
+        """,
+    )
+    assert _findings(lint, tree) == []
+
+
+def test_artifact_equality_marker_without_reason_still_fires(lint, tree: Path) -> None:
+    _t(
+        tree,
+        "tests/unit/test_bare_artifact_marker.py",
+        """
+        def test_outputs_match(tmp_path):
+            a = tmp_path / "a.json"
+            b = tmp_path / "b.json"
+            assert a.read_bytes() == b.read_bytes()  # timing: artifact-equality
+        """,
+    )
+    fs = _findings(lint, tree)
+    assert len(fs) == 1
+    assert "reason" in fs[0].why
+
+
 # ── CLI contract ────────────────────────────────────────────────────────────
 
 

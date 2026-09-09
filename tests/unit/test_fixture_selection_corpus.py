@@ -146,7 +146,7 @@ def test_two_runs_emit_byte_identical_manifest_with_real_candidate(tmp_path):
     write_manifest(rows1, out1)
     write_manifest(rows2, out2)
 
-    # AC10: byte-identical across runs
+    # timing: artifact-equality — deterministic sorted JSONL manifest over identical inputs
     assert out1.read_bytes() == out2.read_bytes()
     # every emitted line is sorted-key JSON
     for line in out1.read_text(encoding="utf-8").splitlines():

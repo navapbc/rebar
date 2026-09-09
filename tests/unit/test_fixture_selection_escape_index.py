@@ -233,6 +233,7 @@ def test_manifest_is_byte_identical_to_the_eager_per_ticket_path(tmp_path):
     write_manifest(eager_rows, eager_path)
     write_manifest(batched_rows, batched_path)
 
+    # timing: artifact-equality — deterministic JSONL from eager and batched readers
     assert batched_path.read_bytes() == eager_path.read_bytes()
     # and the corpus is not trivially empty: three ranked candidates flowed through
     assert len(_by_norm(batched_rows)) == 3
