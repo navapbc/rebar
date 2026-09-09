@@ -47,7 +47,7 @@ def test_threshold_for_unknown_criterion_is_the_default():
 def test_threshold_for_takes_min_threshold_and_any_blocking():
     # min over thresholds; blocking_enabled True iff ANY criterion is blocking-enabled.
     bt, blocking = reg.threshold_for(["security", "secret-detection"])
-    assert bt == 0.5  # secret-detection's lower threshold wins (min)
+    assert bt == 0.45  # security's lower code-v5 threshold wins (min)
     assert blocking is True  # secret-detection is blocking-enabled (WS5 flipped it)
     # a purely-advisory criterion set stays non-blocking (performance + docs are both advisory;
     # b9c0 flipped only `security`, so this pair no longer includes a blocking criterion).
@@ -70,7 +70,9 @@ def test_secrets_security_keys_are_the_ws5_blocking_handoff():
     # and flipped them at 0.54 off the same block-impact replay (correctness 4.04% of all
     # changes, edge-cases 1.74%, both inside the 8.0% operator-accepted friction budget; see
     # docs/experiments/code-review-threshold-calibration.md "Code-v4 friction replay at 0.54").
-    # The approved blocking set is now exactly these ten, and adding an eleventh must be a
+    # Ticket 3055-e92d-7063-4a32 then approved `concurrency` from the code-v5 calibration
+    # record, docs/experiments/code-review-threshold-calibration-code-v5.md.
+    # The approved blocking set is now exactly these eleven, and adding a twelfth must be a
     # deliberate, re-approved change.
     blocking = [k for k, v in idx.items() if v.get("blocking_enabled")]
     assert set(blocking) == {
@@ -84,6 +86,7 @@ def test_secrets_security_keys_are_the_ws5_blocking_handoff():
         "tests",
         "correctness",
         "edge-cases",
+        "concurrency",
     }
 
 

@@ -239,14 +239,16 @@ over the code-v3 sidecar corpus (1262 changes). `decision` is the posture now co
 `src/rebar/llm/code_review/criteria_routing.json`; the `of all changes` column is the friction the
 flip costs, held to the 8.0% operator-accepted budget recorded on the `tests` routing entry.
 
-| criterion | thr | surviving | would-block | of surviving | changes hit | of all changes | mean validity | val<0.5 | decision |
-|---|---|---|---|---|---|---|---|---|---|
-| correctness | 0.54 | 715 | 62 | 8.7% | 51 | 4.04% | 1.00 | 0 | flip |
-| edge-cases | 0.54 | 485 | 27 | 5.6% | 22 | 1.74% | 0.99 | 0 | flip |
-| concurrency | 0.54 | 1 | 0 | 0.0% | 0 | 0.0% | n/a | 0 | hold |
+| criterion | thr | surviving | would-block | of surviving | changes hit | of all changes | mean validity | val<0.5 | decision | superseded_by |
+|---|---|---|---|---|---|---|---|---|---|---|
+| correctness | 0.54 | 715 | 62 | 8.7% | 51 | 4.04% | 1.00 | 0 | flip | — |
+| edge-cases | 0.54 | 485 | 27 | 5.6% | 22 | 1.74% | 0.99 | 0 | flip | — |
+| concurrency | 0.54 | 1 | 0 | 0.0% | 0 | 0.0% | n/a | 0 | superseded | docs/experiments/code-review-threshold-calibration-code-v5.md |
 
-`concurrency` is HELD advisory: its single surviving finding is far below the script's
+In code-v4, `concurrency` was HELD advisory: its single surviving finding is far below the script's
 `MIN_N = 25` power floor, so 0.00% is an absence of evidence, not evidence of low friction.
+That hold reason expired under the code-v5 record, which measured n=68 / 53 surviving
+concurrency findings and supersedes only the routing decision, not this code-v4 measurement.
 
 **Recall of the two escaped defects is NOT the justification for these flips, and the originating
 claim about them was wrong.** Change `c3aec3eae6` (the completion-verifier banking bug) does have a

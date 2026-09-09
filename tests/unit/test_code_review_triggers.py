@@ -155,11 +155,11 @@ def test_concurrency_committed_token_fires_on_added_line():
     assert "concurrency" in reg.content_triggered_overlays(diff)
 
 
-def test_concurrency_routing_posture_is_advisory():
-    """The committed routing entry resolves `concurrency` to advisory / 0.95 / blocking-disabled."""
+def test_concurrency_routing_posture_is_blocking():
+    """The committed routing entry resolves `concurrency` to blocking / 0.52."""
     threshold, blocking_enabled = reg.threshold_for(["concurrency"])
-    assert threshold == 0.95
-    assert blocking_enabled is False
+    assert threshold == 0.52
+    assert blocking_enabled is True
 
 
 # ── EDGE: removing synchronization is concurrency-introducing (fires on a `-` line) ──────────
@@ -274,6 +274,6 @@ def test_project_concurrency_entry_does_not_retune_committed_block_threshold():
     repo_root = str(pathlib.Path(__file__).resolve().parents[2])
     committed = reg.routing_index()["concurrency"]
     effective = reg.effective_routing(repo_root)["concurrency"]
-    assert effective["block_threshold"] == committed["block_threshold"] == 0.95
-    assert effective["blocking_enabled"] is False
-    assert effective["default_posture"] == "advisory"
+    assert effective["block_threshold"] == committed["block_threshold"] == 0.52
+    assert effective["blocking_enabled"] is True
+    assert effective["default_posture"] == "blocking"

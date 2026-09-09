@@ -15,6 +15,7 @@ to tune. These tests pin, corpus-free:
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import re
@@ -128,8 +129,7 @@ def test_every_blocking_row_stays_inside_the_friction_budget() -> None:
 
 
 def test_document_decision_column_matches_the_routed_posture() -> None:
-    """`flip` rows must be routed blocking at the threshold they were measured at; `hold`
-    rows must stay advisory."""
+    """Live `flip`/`hold` rows bind to routing; superseded rows point at the later record."""
     routing = _routing()
     decisions = set()
     for row in _measured_rows():
@@ -145,9 +145,15 @@ def test_document_decision_column_matches_the_routed_posture() -> None:
             )
         elif decision == "hold":
             assert entry["blocking_enabled"] is False, f"{criterion} is marked hold but blocks"
+        elif decision == "superseded":
+            assert row["superseded_by"] == (
+                "docs/experiments/code-review-threshold-calibration-code-v5.md"
+            )
         else:  # pragma: no cover — an unknown decision word is a document error
             pytest.fail(f"unknown decision {decision!r} for {criterion}")
-    assert {"flip", "hold"} <= decisions, "the table should record both a flip and a hold"
+    assert {"flip", "superseded"} <= decisions, (
+        "the table should record live flips and superseded measurements"
+    )
 
 
 def test_project_overlay_cannot_clobber_the_packaged_concurrency_posture() -> None:
@@ -173,7 +179,7 @@ def test_replay_script_advertises_the_routed_blocking_set() -> None:
             f"routed blocking={entry['blocking_enabled']}"
         )
     assert {"correctness", "edge-cases", "tests", "regression"} <= advertised
-    assert advertised.isdisjoint({"docs", "concurrency", "scope-intent", "maintainability"})
+    assert advertised.isdisjoint({"docs", "scope-intent", "maintainability"})
 
 
 def test_project_criteria_routing_json_stays_valid() -> None:
@@ -264,7 +270,8 @@ def test_calibration_script_normalizes_synonym_labels_before_accumulating() -> N
 
 def test_newly_blocking_uses_normalized_dump_specs() -> None:
     mod = _calibrate_module()
-    mod.ROUTING = _routing()
+    mod.ROUTING = copy.deepcopy(_routing())
+    mod.ROUTING["security"] = {**mod.ROUTING["security"], "block_threshold": 0.54}
     mod.SYNONYMS = dict(registry.CRITERIA_SYNONYMS)
 
     criterion, threshold = mod._parse_block_impact_specs(["sec=0.45"])[0]

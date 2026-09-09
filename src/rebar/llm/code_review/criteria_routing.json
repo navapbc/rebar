@@ -1,6 +1,7 @@
 {
   "_comment": "Committed routing index for the code-review gate (analog of plan_review/criteria_routing.json). Top-level _-prefixed keys are stripped by registry.routing_index(). The secret-detection / high-critical-security keys ship blocking_enabled=false (advisory in v1); WS5 flips exactly those two to true (the deterministic gitleaks/semgrep detectors, fail-closed). An overlay's optional nit_suppressed:true (story grusome-uncheerful-nematode) demotes an advisory finding whose criteria are ALL nit-suppressed from the surfaced set to dropped (code_review_decide), reducing docs/llm-prompts nit noise; it does not affect blocking.",
   "security": {
+    "_comment": "ticket 3055-e92d-7063-4a32: code-v5 calibration (docs/experiments/code-review-threshold-calibration-code-v5.md) lowered the blocking line to 0.45; all 13 newly-blocking findings were adjudicated TP-blockworthy with 0 nits/FPs and 1.43% change friction.",
     "exec": "AGENT",
     "applies_to": [
       "**/auth*",
@@ -10,7 +11,7 @@
       "**/*cred*"
     ],
     "default_posture": "blocking",
-    "block_threshold": 0.54,
+    "block_threshold": 0.45,
     "blocking_enabled": true
   },
   "performance": {
@@ -151,10 +152,10 @@
   "concurrency": {
     "exec": "AGENT",
     "applies_to": [],
-    "default_posture": "advisory",
-    "block_threshold": 0.95,
-    "blocking_enabled": false,
-    "_comment": "Committed high-precision concurrency-race overlay (epic spoiled-theatrical-parrot). Ships ADVISORY; calibrate on real fire data before flipping blocking_enabled true. Token tier grounded in Lu et al. ASPLOS'08, Tu et al. ASPLOS'19, RacerD, CodeQL CERT concurrency packs."
+    "default_posture": "blocking",
+    "block_threshold": 0.52,
+    "blocking_enabled": true,
+    "_comment": "ticket 3055-e92d-7063-4a32: flipped to blocking@0.52 from the code-v5 calibration (docs/experiments/code-review-threshold-calibration-code-v5.md). The prior code-v4 hold was underpowered (n=1); code-v5 had n=68 / 53 surviving and the two newly-blocking findings were both TP-blockworthy with 0 nits/FPs."
   },
   "regression": {
     "_comment": "ticket cranial-goodly-seahog: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 the base reviewer always evaluates it, so exec/applies_to are inert here and only the posture/threshold/blocking_enabled fields are consulted by registry.threshold_for. Flipped advisory->blocking@0.54 from the code-v3 sidecar calibration (docs/experiments/calibrate_code_review_thresholds.py): a finding tagged `regression` that survives Pass-3 verification is a high-precision defect (validity>=0.95 on would-block findings). Any finding whose criteria include `regression` now blocks at 0.54 (min-threshold/any-enabled resolution).",
@@ -181,7 +182,7 @@
     "blocking_enabled": true
   },
   "error-handling": {
-    "_comment": "ticket cranial-goodly-seahog: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 always evaluated by the base reviewer; exec/applies_to are inert and only posture/threshold/blocking_enabled are consulted. Flipped advisory->blocking@0.50 from the code-v3 sidecar calibration: swallowed exceptions / missing error paths that survive Pass-3 verification are high-precision defects (validity>=0.95 on would-block findings). Story 3fce-cccf-d38b-4072 (sphinxian-agrarian-snake): the base reviewer prompt now carries fail-open check detection tagged to this dimension — a silent lookup/registry MISS path, a subprocess health check that never reads the returncode, a pgrep/pkill pattern that can match the matching process itself, and any best-effort check whose failure is invisible. Security-consequence fail-open (permissive authz/validation fallback) stays with the security overlay. Detection language lives in reviewers/code-review-base.md; calibration corpus in eval_specs/code-review-base.eval.yaml (R-/FP-failopen-* cases).",
+    "_comment": "ticket cranial-goodly-seahog: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) — always evaluated by the base reviewer; exec/applies_to are inert and only posture/threshold/blocking_enabled are consulted. Flipped advisory->blocking@0.50 from the code-v3 sidecar calibration: swallowed exceptions / missing error paths that survive Pass-3 verification are high-precision defects (validity>=0.95 on would-block findings). Story 3fce-cccf-d38b-4072 (sphinxian-agrarian-snake): the base reviewer prompt now carries fail-open check detection tagged to this dimension — a silent lookup/registry MISS path, a subprocess health check that never reads the returncode, a pgrep/pkill pattern that can match the matching process itself, and any best-effort check whose failure is invisible. Security-consequence fail-open (permissive authz/validation fallback) stays with the security overlay. Detection language lives in reviewers/code-review-base.md; calibration corpus in eval_specs/code-review-base.eval.yaml (R-/FP-failopen-* cases).",
     "exec": "AGENT",
     "applies_to": [],
     "default_posture": "blocking",

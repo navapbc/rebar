@@ -42,7 +42,7 @@ _GRADED_YES = {
 _IMPACTFUL_ATTRS = {"contract_drift": "yes"}
 
 # data_loss_without_recovery (serious tier 0.9) + silent_failure (amp 1.0) → impact 0.9, so
-# priority = validity 1.0 × 0.9 = 0.9: above security's tuned block line (0.54, blocking
+# priority = validity 1.0 × 0.9 = 0.9: above security's tuned block line (blocking
 # enabled) yet below the 0.95 default an unknown label would resolve to.
 _BLOCKING_ATTRS = {"data_loss_without_recovery": "yes", "silent_failure": "yes"}
 
@@ -129,7 +129,7 @@ def test_sec_normalizes_to_security_and_gets_its_tuned_blocking_routing() -> Non
     findings = [{"finding": "credentials logged in cleartext", "criteria": ["sec"]}]
     out = _decide(findings, [_verif(0, dict(_BLOCKING_ATTRS))])
     assert len(out["blocking"]) == 1, (
-        "a sec-labelled finding must resolve security's tuned routing (block at 0.54), "
+        "a sec-labelled finding must resolve security's tuned blocking routing, "
         "not the 0.95 unknown-label default"
     )
     blocked = out["blocking"][0]
