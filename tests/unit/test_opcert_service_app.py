@@ -267,22 +267,11 @@ def test_unknown_job_is_404(client):
 
 @pytest.mark.timeout(60)
 def test_shutdown_does_not_wait_for_an_in_flight_job(monkeypatch):
-    """Lifespan shutdown must NOT wait for an in-flight job (bug c89f).
+    """Shutdown must not wait for an in-flight worker thread.
 
-    The worker offloads ``run_job`` to a thread, and a thread cannot be force-cancelled. Before
-    the fix the job ran on the event loop's DEFAULT executor, whose teardown
-    (``loop.shutdown_default_executor()``) joins orphaned threads with NO timeout — so teardown
-    tracked the JOB's duration. On CI that let one slow job burn the whole ``--timeout=300``
-    budget, at which point pytest-timeout's ``thread`` method called ``os._exit(1)`` and the xdist
-    worker died with no traceback.
-
-    Asserted STRUCTURALLY, not against a wall-clock budget (an upper-bound timing assert is the
-    very flake class this file is fixing). The job parks on an event that is only released AFTER
-    the assertion, so ``finished`` can be set only if shutdown waited for the thread: the check is
-    an ordering fact, not a duration, and cannot flake under runner contention.
-
-    This is the ONLY shape in this module that reaches that path: every other test either polls to
-    a terminal status or enqueues nothing, so only a test that returns mid-job races teardown.
+    The worker needs a dedicated executor because default-executor shutdown joins threads. The job
+    blocks until the assertion releases it, so ``finished`` records whether lifespan teardown
+    waited. This ordering oracle avoids timing bounds. Only this case returns while work remains.
     """
     from rebar.opcert_service import app as app_module
 

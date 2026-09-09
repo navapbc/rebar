@@ -1,17 +1,8 @@
-"""Behavioral oracle for the RP-04 S1 ``OperationSnapshot`` composer.
+"""Behavioral oracles for the immutable ``OperationSnapshot`` configuration authority.
 
-RP-04 S1 (ticket a377) adds ``src/rebar/_operation_config.py``: one immutable,
-serializable, non-secret configuration authority composed once per operation. The
-snapshot carries validated non-secret effective values, explicit source-kind
-provenance, the selected repository root, and an envelope version. It delegates
-precedence/provenance to ``config.resolve_with_sources``, root selection to
-``_config_sources.repo_root``, and canonical serialization/fingerprinting to
-``_store.canonical`` — it must not reimplement any of them.
-
-These are the AC2–AC4 unit/property oracles: precedence, root, immutability,
-deterministic canonical serialization, fingerprint, envelope-version rejection, and
-secret/live-object exclusion. Observable behavior only — no assertions on private
-names or source text.
+Tests cover source provenance, repository-root selection, canonical serialization and
+fingerprints, envelope-version rejection, and secret or runtime-object exclusion. Composition
+delegates to ``resolve_with_sources``, ``repo_root``, and ``_store.canonical``.
 """
 
 from __future__ import annotations

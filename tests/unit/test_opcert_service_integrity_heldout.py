@@ -1,14 +1,9 @@
-"""Independent held-out integrity + no-push oracle for the trusted op-cert gate service (ee0b).
+"""Held-out integrity and no-push oracles for the trusted op-cert service.
 
-NOT shown to the implementer. Two load-bearing properties of the trusted server:
-  1. INTEGRITY: the values the signed cert binds are SERVER-DERIVED (the fetched review-remote main
-     HEAD, read back from the SIGNED envelope payload) — a client cannot supply them.
-  2. NO-PUSH: the authoritative source the server fetched FROM is byte-identical after a completed
-     PASS job (the SIGNATURE event lands only in the discarded ephemeral clone).
-
-FastAPI-free: drives the real job core with a fake authoritative source + fake SSM key (a real
-Ed25519 key). LLM dispatch is injected (no billable call); the SIGNING and the fetch/clone/discard
-are real.
+Signed values come from the server's fetched review-remote head and verified envelope payload,
+never client input. A passing job leaves the authority byte-identical because its signature event
+exists only in the discarded clone. Tests drive the job core with a temporary Ed25519 key and
+injected LLM dispatch.
 """
 
 from __future__ import annotations

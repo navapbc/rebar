@@ -1,16 +1,7 @@
-"""The op-cert kind vocabulary has one master (mirror F2).
+"""Pin ``signing.OPCERT_KINDS`` as the sole op-cert kind source.
 
-Ticket 6850-af5c-a4a1-4c5d (musophobic-repellent-ovenbird).
-
-`signing.OPCERT_KINDS` is canonical and already exported, but `opcert_service.jobs` and
-`_commands.remote_cert` each re-listed the same two kinds, and both gate client REQUEST
-VALIDATION — so a kind present canonically but missing from a copy is silently rejected.
-
-The interesting part is what a naive fix would have broken. `OPCERT_KINDS` is an UNORDERED
-frozenset; both copies are ORDERED tuples, and three consumers depend on that: argparse
-`choices=` at `_cli/_parsers/advanced/certs.py`, the `list(...)` rendered into an API error
-message in `opcert_service/app.py`, and `opcert_service.__all__`, which makes `VALID_KINDS`
-public API. Hence `tuple(sorted(...))`, not the frozenset.
+The ordered consumer tuples use ``tuple(sorted(...))`` so argparse choices, API error lists, and
+the public ``VALID_KINDS`` export remain deterministic.
 """
 
 from __future__ import annotations

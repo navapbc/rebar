@@ -1,15 +1,8 @@
-"""Verification resolves the public half where the SIGNING key is (bug d26a-8ffa-97cd-4b2a).
+"""Verify against the public counterpart of the active op-cert signing key.
 
-The deployed MCP server signs its op-certs under a startup-composed binding whose private key is
-a process-owned copy of a bind-mounted deployment secret — never ``<tracker>/.opcert-key``. The
-verify side read the public key ONLY from the tracker, so a box with no tracker genesis key could
-not certify the certs it had just minted: every ``verify_signature`` returned ``foreign_key``
-("this environment has no op-cert public key"), which fails the plan-review CLAIM gate closed.
-
-These tests pin the invariant that closes the loop: whatever private key the signing seam
-resolves (bound startup signer → ``REBAR_OPCERT_KEY_PATH`` override → tracker genesis), the
-verify side finds a public counterpart for it — including when the key sits on a READ-ONLY
-secrets mount where no ``.pub`` cache can ever be written.
+Signing and verification share this source order: bound startup key, ``REBAR_OPCERT_KEY_PATH``,
+then tracker genesis. A bind-mounted private key may lack a writable ``.pub`` file, so verification
+derives its public key in memory.
 """
 
 from __future__ import annotations

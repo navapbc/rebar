@@ -1,17 +1,8 @@
-"""Best-effort OpenAI-compatible endpoint: honor REBAR_LLM_BASE_URL (story S4).
+"""Contract tests for OpenAI-compatible endpoints configured by ``REBAR_LLM_BASE_URL``.
 
-`_pai_check_config` used to REFUSE any `base_url`/`api_key` outright, while
-`docs/llm-framework.md` documented both as working and printed an LMStudio/Ollama recipe, and
-`config.py` already parsed them. The documentation was false. This pins the behaviour that
-makes it true.
-
-Contract tier: the defect class is a consumer (the runner) reading configuration the wrong
-way, so these drive real config resolution and the real provider seam rather than calling the
-builder directly. Everything is real except the socket.
-
-Each test names the acceptance criterion it discharges, because story f184 closed late when
-half a criterion turned out to have no test despite an 18-test oracle — mutation testing
-verifies the tests you have, not the test you never wrote.
+They drive configuration resolution and the production provider seam with only transport stubbed.
+Coverage includes endpoint configuration, provider-selection separation, per-class routing,
+structured-output capability, and retry scope. Each test maps to an acceptance criterion.
 """
 
 from __future__ import annotations
@@ -97,11 +88,7 @@ def _req(cfg) -> RunRequest:
 
 
 def test_documented_local_server_recipe_returns_a_structured_verdict(stub_openai_server):
-    """AC1 — the exact recipe printed at ``docs/llm-framework.md:131-133`` works end to end.
-
-    That recipe is ``REBAR_LLM_MODEL=local-model REBAR_LLM_MODEL_PROVIDER=openai
-    REBAR_LLM_BASE_URL=http://localhost:1234/v1 REBAR_LLM_API_KEY=not-needed``. It is
-    documented as working and currently raises, which is the falsehood this story fixes."""
+    """The documented model, provider, base URL, and API key produce a structured verdict."""
     cfg = _cfg(
         model="local-model",
         model_provider="openai",
@@ -166,11 +153,7 @@ def test_custom_endpoint_withdraws_native_structured_output(stub_openai_server):
 
 
 def test_base_url_does_not_hijack_provider_selection(stub_openai_server):
-    """AC2 — the PR #121 regression this story exists to prevent.
-
-    ``base_url`` is provider CONFIGURATION, never provider SELECTION. With
-    ``REBAR_LLM_MODEL_PROVIDER=anthropic`` set explicitly, a base_url must not silently
-    reroute the run to an OpenAI-shaped provider."""
+    """A base URL configures an explicit provider without rerouting Anthropic to OpenAI."""
     cfg = _cfg(
         model="claude-opus-4-8",
         model_provider="anthropic",
@@ -348,15 +331,11 @@ def _configure_class_endpoint(
 def test_per_class_endpoint_routes_the_primary_through_the_local_builder(
     stub_openai_server, monkeypatch
 ):
-    """Regression for bug 6e70 — a model class configured with a local ``endpoint``
-    (``REBAR_LLM_<CLASS>_ENDPOINT`` / the slot ``endpoint`` field) and NO top-level ``base_url``
-    must reach the local server through rebar's OpenAI-compatible builder, not fall through to
-    pydantic-ai's stock ``OpenAIProvider`` (which raises 'Missing credentials').
+    """A primary model recovers its class endpoint after resolution onto ``cfg.model``.
 
-    The slot ``endpoint`` was parsed, given dedicated env vars, and documented, but the only
-    consumer of any ``.endpoint`` was the FALLBACK chain — the PRIMARY model silently dropped it.
-    Ops collapse the class onto ``cfg.model`` via ``resolve_model_string``; the endpoint stays in
-    the slot config, never on ``cfg``, so the runner must recover it from the resolved model."""
+    Without a top-level base URL, it must use rebar's OpenAI-compatible builder instead of the
+    stock provider.
+    """
     _configure_class_endpoint(monkeypatch)
 
     from rebar.llm.model_classes import TRIVIAL_CLASS, resolve_model_string

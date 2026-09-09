@@ -1,19 +1,8 @@
-"""Local same-environment op-cert verify path: SIGNED subject binding + payload-authoritative
-material/commit (security findings A + B on story 8d8e's local verify path).
+"""Security oracles for local op-cert verification.
 
-The epic's "verify-then-extract" principle (finding #4): a verifier trusts ONLY the signed DSSE
-envelope payload, never the record's plaintext mirror fields (which live on the auto-pushed,
-non-Gerrit-gated tickets branch and are attacker-writable). The merge-gate path already followed
-this; these tests pin that the LOCAL path (``verify_opcert_record`` / ``verify_signature`` +
-``compute_validity``) now does too:
-
-  * Finding A — a valid op-cert the environment signed for ticket X is REJECTED when replayed onto
-    ticket Y's record, and a cert signed for kind K1 is REJECTED under kind K2's slot (the signature
-    still verifies; the subject binding does not).
-  * Finding B — corrupting the plaintext ``material_fingerprint`` / ``merged_log_commit`` /
-    ``head_sha`` mirrors (and the plaintext manifest ``material:`` line) on an envelope record does
-    NOT change the local verify verdict and does NOT flip ``compute_validity`` — the SIGNED payload
-    is authoritative.
+A verified DSSE payload binds its ticket and kind, rejecting cross-ticket replay and kind
+confusion. Signed material and commit fields drive ``verify_opcert_record``, ``verify_signature``,
+and ``compute_validity``. Attacker-writable plaintext mirrors cannot change those verdicts.
 """
 
 from __future__ import annotations

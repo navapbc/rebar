@@ -1,9 +1,8 @@
-"""Independent held-out oracle for op-cert key genesis (story 8d8e). NOT shown to the implementer.
+"""Held-out security oracles for op-cert key genesis.
 
-Two security-critical properties of the ambient-environment Ed25519 key:
-  1. Concurrent first-sign is race-safe: many signers hitting a fresh tracker at once converge on
-     EXACTLY ONE keypair (the os.link exclusive-create commit point; losers adopt the winner).
-  2. The verify side NEVER creates a key (`create_if_missing=False`): a fresh tracker stays keyless.
+Concurrent first signing converges on one keypair through the exclusive ``os.link`` commit point.
+Losing signers adopt that keypair. Verification with ``create_if_missing=False`` never creates a
+key, including under contention.
 """
 
 from __future__ import annotations

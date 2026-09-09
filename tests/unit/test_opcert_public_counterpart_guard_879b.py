@@ -1,17 +1,9 @@
-"""Guards that surface a signing key with no usable public counterpart (bug 879b-9bf0-86fd-4a6b).
+"""Non-refusing guards expose an op-cert signing key without its public counterpart.
 
-Split from ``d26a-8ffa-97cd-4b2a`` (``dire-expectable-terrapin``), which fixed the key-resolution
-DIVERGENCE (Gerrit 2337). These two ADDITIVE, NON-REFUSING guards surface the class if it ever
-regresses under a new deployment shape:
-
-  * AC1/AC2 — the mint path (``sign_manifest`` -> ``mint_opcert_record``) emits a WARNING naming
-    the resolved key path and the principal when the SAME-ENVIRONMENT verify resolver
-    (``_opcert_own_public_keys``) cannot resolve a public counterpart for the key it just signed
-    under, and STILL returns the signature (no refusal, no existing sign flow broken).
-  * AC3 — the MCP server's startup health surface reports a DEGRADED field and logs a warning when
-    the bound startup signer's public key is NOT among the pinned trusted-environment keys for its
-    principal (the one failure the derived-key same-env verify path cannot catch). Non-blocking: it
-    NEVER aborts boot (ADR 0104 decision 3 — required-environment binding is advisory today).
+Minting warns with the resolved path and principal when the specific signing key is absent from
+``_opcert_own_public_keys``, even if another key resolves, and still returns the signature. Startup
+reports degraded health and warns when the bound signer is not pinned for its principal. Both
+checks preserve startup and signing because environment binding remains advisory.
 """
 
 from __future__ import annotations
@@ -138,11 +130,7 @@ def test_mint_warns_when_verify_cannot_resolve_public_counterpart(
 def test_mint_warns_when_signed_key_pub_absent_though_another_chain_key_resolves(
     store: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """AC1 specific-key contract (G6, Gerrit 2360 plan-review): the guard checks the SPECIFIC
-    signing key's public counterpart, NOT mere non-emptiness of the aggregate own-key chain. When
-    a DIFFERENT chain key's pub resolves (aggregate NON-EMPTY) but the signed key's own public
-    half is absent from the resolvable set, the mint must still WARN — a non-emptiness check would
-    stay wrongly silent here."""
+    """Warn when the signing key lacks its counterpart even if another chain key resolves."""
     other = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOtherChainKeyBodyNotTheSigner999 other@elsewhere"
     monkeypatch.setattr("rebar._opcert_signing._opcert_own_public_keys", lambda tracker: [other])
     tid = rebar.create_ticket("task", "warn-specific", repo_root=str(store))
