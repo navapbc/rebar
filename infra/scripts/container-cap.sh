@@ -1,68 +1,21 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# container-cap.sh — the ONE place that says how big the WRITABLE CONTAINER LAYERS may get
-# (ADR 0112 decisions 1+2, story 910b-2d43-4482-4c64).
+# Bound writable container layers within the Docker storage budget under ADR 0112.
 #
-# The 2026-09-02 outage filled the box's ROOT volume and took Gerrit, the review-bot's
-# LLM-Review votes and the on-box MCP server down for ~5h. Writable container layers are the
-# LAST of the four named root generators: they live INSIDE `/var/lib/docker/overlay2` as each
-# container's `upperdir`, they grow independently of image layers and BuildKit cache, and
-# nothing on this box measured them. The only signal was `rebar-root-disk-pressure` — "root
-# disk high", which cannot name a generator.
+# Writable layers share `/var/lib/docker` with images and build cache. Docker can enforce an
+# overlay2 size per container only when the backing XFS filesystem mounts with `pquota` at boot.
+# Enabling it on root requires `rootflags=pquota` and a reboot. Quotas apply at container
+# creation and do not impose an aggregate cap, so existing services must be recreated.
 #
-# ## The ceiling that is NOT available here, and exactly why
+# Until quota enforcement is available, the reaper measures one shared budget and removes
+# eligible exited debris. It cannot reclaim running layers or protected recent exits. Between
+# runs, reclaimable debris can reach `cap + fill_rate x interval`. If it cannot restore the
+# budget, it reports the remaining running and protected bytes.
 #
-# Docker's overlay2 driver DOES have a per-container size quota — `--storage-opt size=…`, or
-# `storage-opts: ["overlay2.size=…"]` as a daemon default. It is accepted only when the
-# filesystem backing `/var/lib/docker` is XFS mounted with the `pquota` option; otherwise the
-# daemon refuses outright:
+# `docker container prune` has no name filter. MCP blue-green containers require autodeploy's
+# upstream-aware guard, so this script enumerates candidates. It independently protects compose
+# and `rebar.service` labels, MCP names, and every running container.
 #
-#     --storage-opt is supported only for overlay over xfs with 'pquota' mount option
-#
-# `/var/lib/docker` is on this box's ROOT filesystem, and XFS reads its quota mount options at
-# MOUNT time and refuses to enable accounting on a remount. So enabling it needs
-# `rootflags=pquota` on the kernel command line (GRUB_CMDLINE_LINUX), a grub regeneration and a
-# REBOOT — a scheduled Gerrit outage, which a deploy tick may not take. That is the SAME
-# constraint story 2ba3 hit for `/var/tmp`, re-derived for this mechanism and binding here too.
-#
-# Two further limits even after that reboot, so nobody plans around a stronger promise than the
-# quota makes: it is PER-CONTAINER, not an aggregate ceiling over the share, and it is applied
-# at container CREATION, so every live service must be recreated to acquire one.
-#
-# This script therefore does what 2ba3 did: ship the mitigation, PUBLISH which regime the box is
-# in (`--check-quota` feeds `container_quota_enforceable`), and put the enablement steps in the
-# runbook rather than letting a runbook assert a ceiling that does not exist.
-#
-# ## What the reaper does NOT guarantee — first, not in a footnote
-#
-#   1. IT CANNOT RECLAIM A RUNNING CONTAINER'S WRITABLE LAYER AT ALL. Only exited/dead
-#      containers can be removed, so for the LIVE compose set this file delivers measurement and
-#      an alarm, NOT a bound. The one mechanism that would bound them is the per-container quota
-#      above, and it is reboot-gated. This is a sharper limitation than a fill rate and it is
-#      stated first because an operator reading "bounded" must not read it as covering Gerrit's
-#      own writable layer.
-#   2. For the debris it DOES bound, the enforced bound between two runs is
-#      `cap + fill_rate x interval`, not `cap`. At the 2 GiB share and the 300 s period below, a
-#      sustained net fill above ~7.2 MB/s exceeds the share before the reaper next runs — and
-#      this gp3 volume does 125 MB/s baseline, roughly 17x that. A single runaway writer defeats
-#      it; its real job is bounding STEADY debris accumulation.
-#   3. Nothing that exited inside CONTAINER_MIN_AGE_SECONDS is ever removed, so a burst of fresh
-#      exits is unreclaimable BY DESIGN. When it cannot get under the share it SAYS SO; it never
-#      exits quietly as though it had.
-#
-# ## Why this is not `docker container prune`
-#
-# The ticket names `docker container prune --filter until=…`, and it cannot express what this
-# host needs: prune's filter set is `until` and `label`, with NO name filter. `autodeploy.sh`
-# starts the mcp blue-green backends with a BARE `docker run` that compose never sees, and reaps
-# them itself in `mcp_retire_sweep` under a guard this script cannot replicate — it reads the
-# nginx `/mcp/` upstream include and REFUSES to reap an exited container that is still the live
-# backend, because `--restart always` would otherwise have restored it. Reaping one anyway is
-# bug 9ea3 exactly: a transient exit became a PERMANENT 502 on 2026-09-02. So candidates are
-# enumerated and removed individually, and three overlapping protected sets are spared (see
-# `classify` below).
-#
-# ## Usage
+# Usage:
 #
 #   container-cap.sh --print-env      # the share + policy, for observability.sh
 #   container-cap.sh --print-units    # the rendered reaper service+timer, no writes
@@ -71,50 +24,32 @@
 #   container-cap.sh --reap           # one bounded oldest-first pass (what the timer runs)
 #   container-cap.sh --install        # write units, enable the timer, then OBSERVE
 #
-# Every `--print-*` and `--check-*` mode is SIDE-EFFECT-FREE (the journald-cap.sh / vartmp-cap.sh
-# precedent), so rendering and both checks are testable without root, without systemd, without
-# XFS and without a docker daemon.
-# ---------------------------------------------------------------------------
+# Every `--print-*` and `--check-*` mode is side-effect-free. They require no root access,
+# systemd, XFS, or Docker daemon.
 set -uo pipefail
 
-# --- The share -------------------------------------------------------------
-# ONE budget with an internal split, never a second cap over the same bytes (ADR 0112, and
-# docker-storage-cap.sh's header states it): writable layers live INSIDE `/var/lib/docker`, so
-# the share is READ from docker-storage-cap.sh rather than re-spelled here as a literal that a
-# later edit could drift out of agreement.
+# The share
+# Writable layers reside inside `/var/lib/docker`. Read their share from docker-storage-cap.sh
+# so ADR 0112 retains one budget rather than overlapping caps over the same bytes.
 CONTAINER_CAP_DOCKER_CAP_SH="${CONTAINER_CAP_DOCKER_CAP_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker-storage-cap.sh}"
 eval "$(bash "$CONTAINER_CAP_DOCKER_CAP_SH" --print-env 2>/dev/null)" || true
 #
-# There is deliberately NO fallback literal here. A default spelled in two files is a ceiling
-# that drifts, and a reaper running against a guessed share is worse than one that does not run:
-# it would delete containers to satisfy a number nobody chose. When the share cannot be read this
-# script REFUSES to reap and says so — autodeploy.sh's `prune_docker_caches` takes exactly this
-# position on the BuildKit cap ("skipping the capped builder prune rather than guessing a
-# ceiling"), and observability.sh then publishes no percentage rather than one about no quantity.
+# There is no numeric fallback. An unreadable share stops reaping rather than authorizing
+# deletion against a guessed budget. Observability then omits the percentage.
 CONTAINER_WRITABLE_BYTES="${DOCKER_CONTAINER_WRITABLE_BYTES:-}"
 DOCKER_ROOT="${DOCKER_ROOT:-/var/lib/docker}"
 
-# The reaper's grace window. Nothing that exited more recently than this is ever removed,
-# however full the share — a container that exited seconds ago is very likely one an operator is
-# about to read `docker logs` from, and this is the snapshot janitor's grace-window reasoning
-# applied to a different tree.
+# Preserve recent exits so operators can inspect their logs.
 CONTAINER_MIN_AGE_SECONDS="${CONTAINER_MIN_AGE_SECONDS:-900}"
 
-# --- The protected sets ----------------------------------------------------
-# Never eviction candidates, for three INDEPENDENT reasons, so losing any one of them still
-# leaves the live set spared:
+# The protected sets
+# Three independent protections exclude candidates:
 #
-#   1. CONTAINER_KEEP_LABELS — a container carrying any of these labels belongs to something
-#      that owns its own lifecycle. `com.docker.compose.project` is on every compose service
-#      (gerrit, review-bot, opcert, compose-mcp-1); an EXITED compose service is a CRASHED
-#      service whose logs are the evidence, so removing it destroys the forensics of an incident
-#      in progress. `rebar.service` is the STABLE service identity `mcp_run_new` stamps on the
-#      bare-`docker run` blue-green containers precisely because compose never sees them.
-#   2. CONTAINER_KEEP_NAME_RE — `mcp_managed`'s OWN regex from autodeploy.sh, so the two agree by
-#      construction. autodeploy reaps this set itself under the live-upstream guard (bug 9ea3).
-#   3. The daemon: candidates come from `--filter status=exited --filter status=dead`, which
-#      never lists a running container, and removal is `docker rm` WITHOUT `-f`, which the daemon
-#      refuses for a running container. Neither is shell logic that can be got wrong here.
+#   1. CONTAINER_KEEP_LABELS covers compose-owned services and `rebar.service` MCP instances.
+#      Their lifecycle owners retain crash evidence and perform guarded cleanup.
+#   2. CONTAINER_KEEP_NAME_RE matches autodeploy's MCP set, which uses the upstream-aware guard.
+#   3. Candidate classification admits only exited or dead containers, and `docker rm` omits
+#      `-f`. The daemon therefore refuses a container that starts running after the census.
 CONTAINER_KEEP_LABELS="${CONTAINER_KEEP_LABELS:-com.docker.compose.project rebar.service}"
 MCP_CONTAINER_PREFIX="${MCP_CONTAINER_PREFIX:-rebar-mcp}"
 MCP_COMPOSE_CONTAINER="${MCP_COMPOSE_CONTAINER:-compose-mcp-1}"
@@ -123,20 +58,15 @@ CONTAINER_KEEP_NAME_RE="${CONTAINER_KEEP_NAME_RE:-^(${MCP_CONTAINER_PREFIX}|${MC
 CONTAINER_UNIT_DIR="${CONTAINER_UNIT_DIR:-/etc/systemd/system}"
 CONTAINER_INSTALLED_PATH="${CONTAINER_INSTALLED_PATH:-/usr/local/bin/rebar-container-cap.sh}"
 
-#: The filesystem the overlay2 quota would live on. `/var/lib/docker` is a directory on root
-#: here; a box that later gives Docker its own volume points this at that mount.
+#: Filesystem for the overlay2 quota. Point this at a dedicated Docker mount when present.
 CONTAINER_QUOTA_FS="${CONTAINER_QUOTA_FS:-/}"
 
-#: The reaper timer's period, and its start timeout. The bound NESTS below the period for the
-#: reason install-observability.sh records (bug 1205): a `Type=oneshot` with no TimeoutStartSec
-#: gets TimeoutStartUSec=INFINITY, and because OnUnitActiveSec is measured from the last
-#: COMPLETED activation, one run that never finishes does not delay the timer — it DELETES the
-#: next elapse. A reaper that latches off is a ceiling that silently stops existing.
+#: Reaper period and start bound. Keep the bound below the period. `OnUnitActiveSec` starts
+#: after a completed activation, so an unbounded `Type=oneshot` run prevents later elapses.
 CONTAINER_REAP_PERIOD_MIN="${CONTAINER_REAP_PERIOD_MIN:-5}"
 CONTAINER_REAP_TIMEOUT_SEC="${CONTAINER_REAP_TIMEOUT_SEC:-240}"
 
-#: Per-docker-invocation bound. A wedged daemon must not hold the pass open until the unit's own
-#: timeout; this is autodeploy.sh's `timeout 120 docker …` convention.
+#: Per-call Docker bound so one daemon request cannot consume the whole unit timeout.
 CONTAINER_DOCKER_TIMEOUT="${CONTAINER_DOCKER_TIMEOUT:-60}"
 
 REAPER_UNIT=rebar-container-reaper
@@ -144,8 +74,7 @@ REAPER_UNIT=rebar-container-reaper
 die() { printf 'container-cap: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'container-cap: %s\n' "$*" >&2; }
 
-# A share nothing can parse is a ceiling that does not exist. Refuse loudly rather than reaping
-# against a number that is not one.
+# Reject malformed limits before they can authorize deletion.
 case "$CONTAINER_WRITABLE_BYTES" in
   '') CONTAINER_WRITABLE_BYTES="" ;;
   *[!0-9]*) die "CONTAINER_WRITABLE_BYTES must be an integer byte count" ;;
@@ -154,8 +83,8 @@ case "$CONTAINER_MIN_AGE_SECONDS" in
   '' | *[!0-9]*) die "CONTAINER_MIN_AGE_SECONDS must be an integer number of seconds" ;;
 esac
 
-# Bounded docker. `timeout` is absent on some developer hosts, so its absence degrades to an
-# unbounded call plus the unit's own TimeoutStartSec rather than exit 127 and no call at all.
+# Bound Docker when `timeout` exists. Other hosts rely on the unit's `TimeoutStartSec` rather
+# than failing with exit 127 before Docker runs.
 _docker() {
   if command -v timeout >/dev/null 2>&1; then
     timeout "$CONTAINER_DOCKER_TIMEOUT" docker "$@"
@@ -164,7 +93,6 @@ _docker() {
   fi
 }
 
-# --- Rendering -------------------------------------------------------------
 render_service() {
   cat <<UNIT
 [Unit]
@@ -201,7 +129,7 @@ WantedBy=timers.target
 UNIT
 }
 
-# What `--print-units` shows: both units, marked, so a reviewer reads one artefact.
+# Mark both units in the side-effect-free `--print-units` output.
 render_units() {
   printf '# ---- %s.service\n' "$REAPER_UNIT"
   render_service
@@ -216,21 +144,15 @@ write_units() {
   render_timer >"${dir}/${REAPER_UNIT}.timer" || return 1
 }
 
-# --- Is the REAPER in force? -----------------------------------------------
-# Two independent things have to be true, and either can quietly stop being true: the unit files
-# have to be the ones this script renders, and the timer has to be running. An installed unit
-# with a dead timer is a reaper that never reaps — the state most likely to be mistaken for a
-# working ceiling, and the one a "usage is nominal" reading cannot distinguish from health.
-# FAILS CLOSED.
+# Reaper enforcement
+# Require current unit content and an active timer. Either missing condition fails closed.
 reaper_in_effect() {
   local service="${CONTAINER_UNIT_DIR}/${REAPER_UNIT}.service"
   local timer="${CONTAINER_UNIT_DIR}/${REAPER_UNIT}.timer"
   [ -f "$service" ] || return 1
   [ -f "$timer" ] || return 1
-  # The timer is compared EXACTLY: it carries the period, and a stale period is a different
-  # ceiling. The service is checked for the SHAPE that matters instead of byte equality, because
-  # its ExecStart legitimately names either the installed copy or the checkout depending on
-  # whether `install` succeeded — pinning one would report a working reaper as dead.
+  # Compare the timer exactly because its period defines the ceiling. Check only the service
+  # contract because ExecStart may name the installed copy or the checkout fallback.
   [ "$(render_timer)" = "$(cat "$timer" 2>/dev/null)" ] || return 1
   grep -qE '^ExecStart=.*container-cap\.sh --reap$' "$service" 2>/dev/null || return 1
   grep -qE "^TimeoutStartSec=${CONTAINER_REAP_TIMEOUT_SEC}\$" "$service" 2>/dev/null || return 1
@@ -238,31 +160,19 @@ reaper_in_effect() {
   systemctl is-active --quiet "${REAPER_UNIT}.timer" 2>/dev/null
 }
 
-# --- Is a HARD per-container quota possible? -------------------------------
-# Accounting alone MEASURES and bounds nothing, so "Accounting: ON" is not a ceiling — reporting
-# it as one would be exactly the paper bound this epic exists to remove. Only ENFORCEMENT counts,
-# and enforcement on the filesystem backing DOCKER_ROOT is the precondition overlay2's
-# `--storage-opt size=` refuses without. FAILS CLOSED: no xfs_quota, a non-XFS root, an
-# unreadable state, or enforcement off all answer 0, because the cost of over-claiming here is a
-# writable-layer footprint everybody believes is capped.
+# Quota enforcement
+# Accounting does not bound storage. Report a hard ceiling only when XFS project-quota
+# enforcement is active on the Docker filesystem. Missing tools or unreadable state fail closed.
 quota_enforced() {
   command -v xfs_quota >/dev/null 2>&1 || return 1
   xfs_quota -x -c "state -p" "$CONTAINER_QUOTA_FS" 2>/dev/null |
     grep -qiE '^[[:space:]]*Enforcement:[[:space:]]*ON'
 }
 
-# --- The census ------------------------------------------------------------
-# ONE `docker inspect --size` over every container, which yields the whole writable footprint
-# AND the candidate set from a single daemon walk. `--size` is what makes the daemon compute
-# `SizeRw`, the writable layer — the same field `docker system df` sums into its Containers row,
-# so the reaper and observability.sh §2i are reading the same quantity from the same daemon and
-# cannot disagree about what "writable layer" means.
-#
-# `{{index .Config.Labels "k"}}` renders `<no value>` for an absent key on some engine versions
-# and the empty string on others; both are normalised to empty below.
-# The label columns are DERIVED from CONTAINER_KEEP_LABELS rather than spelled out here. A
-# keep-list that the census does not actually read would be decorative — the variable would
-# promise a protection the code never applies, which is worse than having no variable at all.
+# Container census
+# One `docker inspect --size` yields both the aggregate `SizeRw` footprint and candidates,
+# matching observability.sh §2i. Label columns come from CONTAINER_KEEP_LABELS so every declared
+# protection is inspected. Engines render absent labels as `<no value>` or empty; both work below.
 census_format() {
   local fmt='{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.FinishedAt}}|{{.SizeRw}}' label
   for label in $CONTAINER_KEEP_LABELS; do
@@ -279,11 +189,8 @@ census() {
   _docker inspect --size --format "$(census_format)" $ids 2>/dev/null
 }
 
-# Is $1 (container name) protected, either by name or by any of the label values in $2 (the
-# remaining `|`-separated census columns, one per CONTAINER_KEEP_LABELS entry)? 0 = protected.
-#
-# `{{index .Config.Labels "k"}}` renders `<no value>` for an absent key on some engine versions
-# and the empty string on others; both count as "not carrying that label".
+# Return 0 when $1 matches a protected name or any `|`-separated label in $2 is present.
+# Both `<no value>` and empty represent an absent label.
 protected() {
   local name="$1" rest="${2:-}" label
   case "$name" in /*) name="${name#/}" ;; esac
@@ -296,7 +203,7 @@ protected() {
   return 1
 }
 
-# --- The reaper ------------------------------------------------------------
+# Reaping
 reap() {
   local rows total=0 target reclaimed=0 removed=0 protected_bytes=0 running_bytes=0
   local id name status finished size labels epoch now candidates
@@ -317,8 +224,7 @@ DOCKER_CONTAINER_WRITABLE_BYTES); reaping NOTHING rather than deleting container
   now="$(date -u +%s)"
   candidates=""
 
-  # Five fixed columns then the label columns; `read` with six names leaves every remaining
-  # column, separators included, in `labels` — which is exactly what `protected` splits.
+  # Six `read` names leave all label columns, with separators, in `labels` for `protected`.
   while IFS='|' read -r id name status finished size labels; do
     [ -n "$id" ] || continue
     case "$size" in '' | *[!0-9]*) size=0 ;; esac
@@ -347,15 +253,12 @@ EOF
     return 0
   fi
 
-  # Oldest-first: the container that finished longest ago is the one whose logs are least likely
-  # to still be wanted.
+  # Remove oldest exits first because their logs are least likely to be needed.
   while read -r epoch size id name; do
     [ -n "$id" ] || continue
     [ "$total" -le "$target" ] && break
-    # NEVER `-f`. The daemon refuses to remove a RUNNING container without it, so a candidate
-    # that started running between the census and here is refused BY THE DAEMON rather than by
-    # this loop's own bookkeeping — the same guarantee mcp_retire_image relies on for images.
-    # No `-v`/`--volumes`: named and bind volumes carry the source-of-truth state.
+    # Omit `-f` so Docker rejects a candidate that restarted after the census. Omit
+    # `-v`/`--volumes` because named and bind volumes may contain source-of-truth state.
     if _docker rm "$id" >/dev/null 2>&1; then
       total=$((total - size))
       reclaimed=$((reclaimed + size))
@@ -379,11 +282,8 @@ See infra/runbooks/review-bot-ops.md"
   return 0
 }
 
-# Epoch seconds for a Docker RFC3339 timestamp, or 0 when it cannot be read. python3 rather than
-# `date -d`, whose flags differ between GNU and BSD (the docker-storage-cap.sh precedent). A
-# never-started container carries the zero timestamp 0001-01-01T00:00:00Z, which parses to a
-# negative epoch and would read as infinitely old; it is reported as 0 (age unknown) instead, and
-# an unknown age is treated as reapable only by the sort, never by the grace check.
+# Convert Docker RFC3339 to epoch seconds with portable Python, returning 0 for unreadable or
+# never-started timestamps. Age 0 sorts first but never satisfies the recent-exit grace check.
 finished_epoch() {
   python3 - "$1" <<'EPOCH' 2>/dev/null || printf '0\n'
 import datetime
@@ -413,7 +313,7 @@ print(max(epoch, 0))
 EPOCH
 }
 
-# Report, in the strongest terms the evidence supports, which regime the box is in.
+# Report the quota capability and reaper state supported by current evidence.
 report_state() {
   if quota_enforced; then
     warn "XFS project quota is ENFORCED on ${CONTAINER_QUOTA_FS}, so a per-container overlay2 size \
@@ -433,7 +333,7 @@ running); NOTHING is bounding exited-container debris"
   fi
 }
 
-# --- Argument handling -----------------------------------------------------
+# Arguments
 mode=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -449,12 +349,8 @@ EXEC_PATH="$SCRIPT_PATH"
 
 case "$mode" in
   --print-env)
-    # Consumed with `eval "$(… --print-env)"` by observability.sh, so the published
-    # percent-of-share and the share the reaper holds are the same number by construction.
-    # SINGLE-QUOTED values, not bare ones. This is consumed with `eval "$(… --print-env)"`, and
-    # two of these are not words: the keep-list contains a space and the name pattern contains
-    # `^(…|…)`, which an eval of a bare assignment parses as a subshell and dies on. Bare output
-    # worked for docker-storage-cap.sh only because every value there is an integer.
+    # observability.sh evaluates this output to share the reaper's budget. Quote values because
+    # the label list contains spaces and the name regex contains shell metacharacters.
     printf "CONTAINER_WRITABLE_BYTES='%s'\n" "$CONTAINER_WRITABLE_BYTES"
     printf "CONTAINER_MIN_AGE_SECONDS='%s'\n" "$CONTAINER_MIN_AGE_SECONDS"
     printf "CONTAINER_KEEP_LABELS='%s'\n" "$CONTAINER_KEEP_LABELS"
@@ -473,11 +369,9 @@ case "$mode" in
   --reap) reap; exit 0 ;;
 esac
 
-# --- Install ---------------------------------------------------------------
-# The reaper unit runs from a copy under ${CONTAINER_INSTALLED_PATH}, following
-# install-observability.sh, so the unit does not depend on the checkout staying where it is. If
-# that copy cannot be made the unit points at the script in place and says so — a reaper running
-# from the checkout is worth having; a unit pointing at nothing is not.
+# Installation
+# Prefer an installed copy so the unit does not depend on the checkout path. On copy failure,
+# use this script in place and report the fallback.
 if install -m 0755 "$SCRIPT_PATH" "$CONTAINER_INSTALLED_PATH" 2>/dev/null; then
   EXEC_PATH="$CONTAINER_INSTALLED_PATH"
 else
