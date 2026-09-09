@@ -1,16 +1,8 @@
-"""Repo-only oracles for the live-DC isolation controls repaired by bug 59b2.
+"""Repo-only oracles for live-DC isolation controls.
 
-WHY THESE LIVE IN THE UNIT TIER. Every assertion 59b2 repaired shares one defect: it could not
-fail. A fix for that class is unverifiable unless the fixed assertion is shown to go RED, and a
-demonstration that only runs on a booted amd64-only harness image is a demonstration nobody will
-repeat. So the two pieces of logic that CAN be lifted out of the live cells — the ``base_url``
-collector and the inherited-environment reader — live in ``_dc_support`` and are mutation-checked
-here, on every commit.
-
-What is NOT covered here, recorded honestly rather than implied: the two Finding B positive
-controls (the idempotence cell's pending-plan check and the row-14 filter-reach check) call the
-live reconcile pass, so they cannot be exercised without the harness. They are asserted in the
-live tier and exercised by a harness run.
+These tests keep the ``base_url`` collector and inherited-environment reader non-vacuous on
+every commit. Positive controls requiring a reconcile pass remain in the live harness, including
+the pending-plan idempotence and row-filter reach checks.
 """
 
 from __future__ import annotations
@@ -46,13 +38,7 @@ def dc_support() -> ModuleType:
 
 
 def test_the_collector_finds_a_foreign_base_url_nested_under_dot_rebar(dc_support, tmp_path):
-    """THE MUTATION CHECK for the live cell's decoy control.
-
-    The live assertion is `set(found) == {BASE}` over the store copy. That passes whether the
-    collector works or returns nothing, because the copy legitimately contains exactly one
-    base_url. This proves the collector reports a second value when one exists — the property
-    the live assertion silently depends on.
-    """
+    """Require the collector to expose a second, foreign ``base_url`` when present."""
     (tmp_path / ".rebar").mkdir()
     (tmp_path / "rebar.toml").write_text(f'[reconciler]\nbase_url = "{_HARNESS_URL}"\n')
     (tmp_path / ".rebar" / "nested.toml").write_text(f'[reconciler]\nbase_url = "{_FOREIGN_URL}"\n')
@@ -101,12 +87,7 @@ def test_a_missing_snapshot_is_a_hard_error_not_an_empty_dict(dc_support, tmp_pa
 
 
 def test_a_recorded_leak_is_reported_so_the_assertion_can_fail(dc_support, tmp_path):
-    """MUTATION CHECK: with a credential recorded as inherited, the cell's predicate is non-empty.
-
-    Mirrors the live cell's computation over the snapshot. The pre-fix assertion read
-    `os.environ` AFTER the fixture had deleted these very names, so no job environment could
-    ever make it fail; this shows the post-fix input can.
-    """
+    """Require a credential recorded as inherited to make the leak predicate non-empty."""
     (tmp_path / dc_support.INHERITED_ENV_FILE).write_text(
         json.dumps({"JIRA_API_TOKEN": "leaked-value", "JIRA_EMAIL": None, "REBAR_SYNC_PUSH": None})
     )
@@ -150,17 +131,10 @@ def test_the_credential_vocabulary_covers_the_names_the_old_list_missed(dc_suppo
 
 
 def test_the_fixture_and_the_assertion_share_one_definition():
-    """No second hardcoded list: the fixture's delenv loop must consume the shared constant.
+    """Keep fixture cleanup and assertions on one shared credential-name definition.
 
-    Finding A's defect was that the cell's list and the fixture's list were the same three names
-    written twice — so the fixture guaranteed the cell could not fail. Grep-based because the
-    subject IS the source text: a duplicated literal is what must not come back.
-
-    Scanned across the harness's whole fixture surface rather than `conftest.py`
-    alone: `dc_store_copy_repo` moved to the sibling `_dc_fixtures.py` when conftest
-    was split under the 800-LOC cap (ticket ccf6), and a guard keyed to one filename
-    would have reported the fixture as *deleted* when it had only moved. The
-    invariant is "one shared definition, wherever the fixture lives".
+    The source scan covers the full harness fixture surface because fixtures may move between
+    ``conftest.py`` and sibling modules while the single-definition invariant stays unchanged.
     """
     live = Path(__file__).resolve().parents[1] / "external" / "live_jira_dc"
     fixture_modules = sorted(live.glob("conftest.py")) + sorted(live.glob("_dc_fixtures.py"))
@@ -183,13 +157,9 @@ def test_the_fixture_and_the_assertion_share_one_definition():
 
 
 def test_every_empty_plan_idempotence_verdict_is_preceded_by_a_positive_control():
-    """EVERY such verdict, counted — not just the first one the ticket happened to name.
+    """Require every empty-plan verdict to have a preceding positive control.
 
-    This is how the second offender was found: 59b2's Finding B cited one idempotence cell (by a
-    line number that had already drifted), but two cells draw the same conclusion from an empty
-    filtered plan, and fixing only the cited one would have left the identical vacuity in place
-    while the ticket read as closed. Pairing the counts is what makes an unguarded new cell fail
-    here rather than pass silently.
+    Pairing the counts makes any newly unguarded idempotence cell fail explicitly.
     """
     body = (
         Path(__file__).resolve().parents[1] / "external" / "live_jira_dc" / "test_dc_mutations.py"

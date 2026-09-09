@@ -1,24 +1,8 @@
-"""The live-DC pass-health oracle must not fail OPEN on a signal-killed child.
+"""Unit oracle for fail-closed live-DC pass health (bug 0e1d-c698-c38d-4c3e).
 
-Bug 0e1d-c698-c38d-4c3e.
-
-The live Data Center tier is the epic-exit evidence that the reconciler mutates a real
-instance correctly. Its pass-health assertions were written as a bare stderr scan::
-
-    assert "Traceback" not in cp.stderr, f"inbound pass raised:\n{cp.stderr[-2000:]}"
-
-A child killed by a signal is terminated by the kernel before it can write, so its stderr
-is EMPTY -- ``"Traceback" not in ""`` is True and the assertion PASSES. A reaped or
-OOM-killed reconciler pass was therefore recorded as proof the pass succeeded. That is the
-dangerous direction: a spuriously red test costs time, a spuriously GREEN one destroys the
-evidence someone is relying on it to produce.
-
-These tests live in the UNIT tier on purpose. The live-DC tier needs a Jira DC harness and
-self-skips without one, so a regression test placed there could never gate this in CI --
-and a gate that cannot run is the same fail-open one layer up. Killing a child needs no
-Jira at all, so the mechanism is exercised here, for real, on every run.
-
-Sibling of bug f0fb-de7a-b315-4508, which fixed the same construct in ``tests/e2e``.
+A signal-killed child can leave empty stderr, so pass health must check its return code before
+treating a clean stderr stream as success. The unit tier exercises a signal-killed subprocess on
+every run without requiring the Jira DC harness.
 """
 
 from __future__ import annotations

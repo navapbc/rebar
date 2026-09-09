@@ -1,15 +1,9 @@
-"""Per-class fallback chains: `FallbackModel` construction and selection (task cc33).
+"""Per-class fallback construction and selection contracts (task cc33).
 
-A class may name a model that is not always reachable — a local endpoint that is down, a
-provider being throttled. These pin the chain rebar builds from a class slot's `fallback`
-array, the condition under which it fails over, and the four facts a chain silently gets
-wrong if it is built naively: the per-entry `endpoint`, the SHARED client lifecycle, the
-CONSERVATIVE capability intersection, and WHICH model a verdict attests.
-
-Everything is real except the socket: the production Anthropic builder runs against a
-`MockTransport` that answers per requested model id, so failover is exercised through the
-real `FallbackModel.request` loop rather than a call-count spy. Assertions land on returned
-values, constructed object state, and what the run attests — never on private structure.
+Tests preserve each entry's endpoint, shared-client lifecycle, conservative capability
+intersection, and the selected model recorded in an attestation. The production Anthropic
+builder and ``FallbackModel.request`` loop run against a per-model ``MockTransport``. Assertions
+observe responses and public object state rather than private structure.
 """
 
 from __future__ import annotations
@@ -112,15 +106,10 @@ def _anthropic_env(monkeypatch):
 
 @pytest.fixture
 def seam(monkeypatch):
-    """Real construction, mocked socket, with per-model control of the answer.
+    """Build production model objects over a mock socket with observable selection and lifecycle.
 
-    - `status`: `{model_id: http_status}`, defaulting to 200 — how a specific candidate answers.
-    - `seen`: the model ids the transport was actually asked for, in order, so "the fallback was
-      never reached" is observable rather than inferred.
-    - `clients`: every `httpx.AsyncClient` built, each counting its own `aclose()` calls, so
-      "closed exactly once" is asserted on the real object.
-    - `captured`: what `run()` handed its `Agent`, plus an event log ordering model entry,
-      agent construction and model exit.
+    ``status`` controls replies by model. ``seen`` records request order. ``clients`` exposes
+    closure. ``captured`` records the model handed to ``Agent`` plus lifecycle ordering.
     """
     transport_http = _transport_http_module()
     clients: list = []
@@ -293,12 +282,7 @@ def test_a_fallback_entry_endpoint_is_built_against_that_endpoint(seam, monkeypa
 
 
 def test_a_host_that_merely_shares_the_endpoint_prefix_is_not_the_same_origin():
-    """The comparison must reject a look-alike host, which is what a prefix test could not.
-
-    `https://fallback.test.evil.example` STARTS WITH `https://fallback.test`, so the assertion this
-    file used to make would have accepted it as "built against that endpoint". Pinned here so the
-    weak form cannot come back: an origin comparison rejects it, and the prefix test it replaced
-    would have accepted it."""
+    """Reject a look-alike host that shares the endpoint prefix but not its exact origin."""
     look_alike = "https://fallback.test.evil.example/v1"
     assert _origin(look_alike) != _origin(_FALLBACK_ENDPOINT)
     # ...and this is exactly what the replaced prefix check would have got wrong:

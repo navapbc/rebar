@@ -1,12 +1,8 @@
-"""Activity-based liveness: per-request read timeout + per-tool timeout (story
-chief-contained-hoopoe, epic jira-reb-687). Offline, no billable call.
+"""Activity-based LLM liveness without billable calls (story chief-contained-hoopoe).
 
-The per-request READ timeout reuses ``cfg.timeout_s`` and is set as an ``httpx.Timeout`` on
-arcticduck's shared client (authoritative on the anthropic path). The per-TOOL timeout
-(``Agent(tool_timeout=cfg.llm_tool_timeout_s)``) bounds an ASYNC/MCP tool — verified here to
-cancel one — while a SYNC in-process tool is NOT interrupted (async cancel can't stop a
-blocking call); the sync caveat is pinned so the scope is honest. Step caps (arawana) bound
-runaway loops. No total-runtime timeout and no new event loop are introduced.
+``cfg.timeout_s`` bounds HTTP reads and ``llm_tool_timeout_s`` cancels async/MCP tools. Blocking
+sync tools remain outside async cancellation. Step caps bound loops. The contract is no total-run
+timeout and introduces no event loop.
 """
 
 from __future__ import annotations
@@ -98,14 +94,8 @@ def test_helper_default_timeout_falls_back_to_cfg_timeout_s():
     assert http_client.timeout.read == 321.0
 
 
-# ── Read-timeout PROBES: cross the mechanism against a REAL localhost socket ───
-# The value tests above only assert the timeout is STORED on the client. These two probes fire
-# the mechanism end-to-end: an ``AnthropicModel`` built by the real helper runs under
-# ``agent.run_sync()`` against a REAL loopback socket, so httpx's real transport enforces the
-# ``read`` timeout on an actual socket read. A ``MockTransport`` cannot exercise this — it
-# bypasses the socket layer, so a sleeping mock handler NEVER trips ``httpx.ReadTimeout`` (it
-# just returns late). Only a real (localhost-only) socket genuinely crosses the read path;
-# hence ``@pytest.mark.allow_network`` (no public network — the server binds 127.0.0.1).
+# Read-timeout probes run the HTTP transport against a loopback socket because ``MockTransport``
+# bypasses socket reads. ``allow_network`` permits only the local server bound below.
 
 
 @contextlib.contextmanager
@@ -339,20 +329,10 @@ _WALL_CLOCK_PRIMITIVES = ("signal.alarm", "Timer(")
 
 
 def _runner_scanned_sources() -> dict[str, str]:
-    """The exact source the wall-clock guard below inspects, as ``{module name: source}``.
+    """Return all transitive ``rebar.llm`` runner sources inspected by the wall-clock guard.
 
-    Named and separated so the guard's POPULATION is itself assertable.
-
-    NON-VACUITY (bug 8a5e, same rot class as bug 34c2). This guard used to read exactly one
-    module — ``inspect.getsource(rebar.llm.runner)``. The run path has since been split, and
-    the timeout-bearing code moved into siblings (``structured_run``, ``agent_call``), so the
-    guard was left reading a module that names ``timeout`` once and could not have caught a
-    new wall-clock primitive landing in the half it no longer saw.
-
-    The repair is the one proven on bug 34c2: derive the population rather than pin it. Walk
-    the runner's intra-``rebar.llm`` imports transitively, so every module the run path was
-    split into is scanned. A relocation cannot orphan this — the runner must import whatever
-    it delegates to.
+    Exposing the population lets tests prove a module split cannot silently move timeout logic
+    beyond the scan (bug 8a5e).
     """
     import ast
     import pathlib
@@ -403,14 +383,9 @@ def test_no_total_runtime_timer_mechanism():
 
 
 def test_the_wall_clock_guard_scans_the_modules_that_hold_the_timeout_machinery():
-    """ANTI-VACUITY (bug 8a5e). The guard above can only be meaningful if the source it
-    scans is where a wall-clock primitive would plausibly LAND — i.e. the modules that
-    actually carry the call's timeout handling. Pinning it to ``runner.py`` alone is what
-    hollowed it out: the run-path split left that module naming ``timeout`` once while its
-    siblings carried the rest.
+    """Require the scan population to include multiple timeout-bearing runner modules.
 
-    Assert the POPULATION, not just the verdict, so the next split fails the build instead
-    of silently disarming the guard.
+    This anti-vacuity check makes a broken import walk or later module split fail explicitly.
     """
     sources = _runner_scanned_sources()
     timeout_bearing = sorted(name for name, src in sources.items() if "timeout" in src)
@@ -423,13 +398,7 @@ def test_the_wall_clock_guard_scans_the_modules_that_hold_the_timeout_machinery(
 
 
 def test_the_wall_clock_guard_fires_on_a_primitive_outside_the_runner_module():
-    """TEETH for the widened scan, driven through the REAL modules rather than a synthetic
-    string — a synthetic-source teeth test proves the predicate works but cannot detect the
-    guard being aimed at the wrong file, which is exactly how this one survived the split.
-
-    Plant each banned primitive in a scanned module OTHER than ``runner`` and require the
-    guard to report it against that module.
-    """
+    """Plant each banned primitive in a scanned non-runner module and require its detection."""
     sources = _runner_scanned_sources()
     others = sorted(name for name in sources if name != "runner")
     assert others, "precondition: the runner delegates to at least one sibling module"

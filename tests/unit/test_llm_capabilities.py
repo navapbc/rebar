@@ -1,23 +1,8 @@
-"""Capability decisions read ``ModelProfile``, never a provider-name string (story S2).
+"""Model-profile capability mapping and consumer contracts (story S2).
 
-Two decisions used to string-match a provider name: ``structured.output_mode()`` consulted a
-hardcoded native-output provider frozenset, and the runner's cache gate matched a provider-name
-prefix on the resolved model string. Both are wrong for Bedrock-hosted Claude, whose model string
-says ``bedrock`` — so caching silently switched off and structured output silently took the
-prompted path.
-
-Unit tier for the mapping (a pure function over a profile) plus the two consumers' contracts,
-since the defect class is *a consumer reading the wrong signal*.
-
-Every profile value asserted here was verified against the pinned pydantic-ai 1.107.1 rather than
-assumed; the surprising ones are called out inline, because they are why the override layer exists.
-
-**No ``boto3`` anywhere on the always-run path.** ``BedrockModelProfile`` is exported only from
-``pydantic_ai.models.bedrock``, which imports ``botocore`` at module top, and ``boto3`` lives only
-in the ``reviewbot`` extra — so the CI env running ``make test`` does not have it. The Bedrock
-capability assertions therefore run against a field-stub, and a separate
-``importorskip("boto3")`` test pins that stub against the REAL profile so it cannot drift into a
-fake that passes while Bedrock breaks.
+Structured-output and caching decisions use ``ModelProfile`` fields rather than provider-name
+strings, including for Bedrock-hosted Claude. Always-run tests use a field stub because ``boto3``
+is optional. An ``importorskip("boto3")`` check pins it to the pydantic-ai profile when available.
 """
 
 from __future__ import annotations
@@ -299,10 +284,8 @@ def test_no_native_output_provider_is_dropped_except_the_disclosed_groq():
     assert actual == previously_native
 
 
-# ── §S3/18ae — measured Bedrock native-output rows + native_output_with_thinking plumbing ───
-#
-# APPENDED to tests/unit/test_llm_capabilities.py. Uses the module's existing _Verdict, _caps,
-# and _bedrock_claude_profile_stub helpers.
+# Measured Bedrock native-output rows and ``native_output_with_thinking`` plumbing use the
+# module's shared profile helpers.
 
 _MEASURED_SONNET_ID = "us.anthropic.claude-sonnet-4-6"
 _MEASURED_HAIKU_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
@@ -343,10 +326,7 @@ def test_measured_bedrock_dated_haiku_flips_to_native_under_thinking():
 
 
 def test_native_under_thinking_reaches_record_on_profile_construction_site():
-    """Plumbing regression pin (review BLOCK 1): `_capabilities_from_profile` must SEED the field
-    in its caps dict AND pass it to the `ModelCapabilities(...)` constructor. A build that omits
-    it leaves the field at its dataclass default False and the row is silently inert — this pin
-    goes RED in that case."""
+    """Carry ``native_output_with_thinking`` from the profile into ``ModelCapabilities``."""
     caps = _caps(_bedrock_claude_model(_MEASURED_SONNET_ID))
     assert caps.native_output_with_thinking is True
 
@@ -363,11 +343,7 @@ def test_native_under_thinking_reaches_record_on_string_fallback_site():
 
 
 def test_fallback_chain_all_supporting_preserves_native_under_thinking():
-    """Third construction site (review BLOCK/T3): `_intersect_capabilities` builds the conservative
-    record for a FallbackModel chain and feeds it straight into `output_mode`. It must intersect
-    `native_output_with_thinking` with `all(...)` like every sibling field — a chain whose
-    candidates ALL support native-under-thinking keeps it True and routes NativeOutput under
-    thinking. A build omitting the field collapses it to False and this goes RED."""
+    """Preserve native-under-thinking only when every fallback candidate supports it."""
     from rebar.llm.runner_support import _intersect_capabilities
 
     measured = _caps(_bedrock_claude_model(_MEASURED_SONNET_ID))
@@ -394,10 +370,10 @@ def test_fallback_chain_mixed_collapses_to_prompted_under_thinking():
 
 
 def test_opus_with_only_temperature_row_stays_prompted_under_thinking():
-    """Fail-closed negative control: `us.anthropic.claude-opus-4-8` carries ONLY a
-    `supports_temperature: False` row (ticket 2932/1903) and NO native-output/thinking row, so it
-    keeps the Claude family default and stays PromptedOutput even under thinking. This proves the
-    enablement is scoped to the exact measured ids, not the whole Bedrock-Claude family."""
+    """Keep Opus prompted under thinking when only its temperature capability is measured.
+
+    This confines native-output enablement to exact measured model ids, not the Claude family.
+    """
     caps = _caps(_bedrock_claude_model("us.anthropic.claude-opus-4-8"))
     assert caps.native_structured_output is False
     assert caps.native_output_with_thinking is False

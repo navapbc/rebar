@@ -186,15 +186,10 @@ def test_classifier_is_total_and_never_raises(exc):
 
 # ── Preservation: the CHANGE_INPUT type swap keeps the ladder predicate working ─
 def test_context_length_error_still_detected_by_the_ladder_predicate():
-    """A context-length 400 now raises LLMInputRejectedError (bug 43d4), and
-    sizing.is_context_limit_error must STILL recognise it — the whole point of the swap is
-    that the escalation ladder finally sees this failure instead of it being re-raised as an
-    LLMUnavailableError one clause earlier.
+    """Let a wrapped context-length rejection reach the sizing ladder (bug 43d4).
 
-    The predicate matches the WHOLE message, so this also guards the prefix hazard: rebar's
-    own prefix must contribute NONE of the eight substrings, or a content-filter refusal
-    (also CHANGE_INPUT, but NOT a size problem) would masquerade as a context limit and burn
-    the full model-escalation ladder before emitting a bogus "too big to review" finding.
+    The wrapper prefix must not itself match a size token, or other input rejections could be
+    misclassified as context limits.
     """
     from rebar.llm.errors import LLMInputRejectedError
     from rebar.llm.plan_review.sizing import is_context_limit_error
