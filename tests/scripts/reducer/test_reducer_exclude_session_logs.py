@@ -1,11 +1,6 @@
-"""7657 (epic 7738): reduce_all_tickets(exclude_session_logs=...) flag semantics.
+"""Verify optional session-log exclusion without dropping tickets or error states.
 
-The flag is the single seam the graph/health hot paths (`ready`, `next_batch`,
-`deps`, `validate`) and default `list` set to keep verbose `session_log` bodies
-out of the compile that backs them, mirroring the existing exclude_archived /
-exclude_deleted post-filters. Default OFF (so `search` / `show` keep logs).
-Error dicts (no ``ticket_type``) must be preserved intact, exactly as the
-exclude_deleted filter preserves error dicts (no ``status``).
+The default remains off so search and show paths retain logs.
 """
 
 from __future__ import annotations

@@ -1,24 +1,7 @@
-"""Tests for rebar._alias.compute_alias and the read-time backfill
-applied by ticket_reducer._processors.process_create.
+"""Alias generation, CREATE backfill, and resolver contracts.
 
-Tier E E7d: the bash-era helpers ``ticket-alias-compute.py`` (alias computation)
-and ``ticket-alias-resolve.py`` (alias/jira_key resolution) were thin CLI wrappers
-over the in-process logic — ``rebar._alias.compute_alias`` and
-``rebar._engine_support.resolver.resolve_ticket_id`` respectively. These tests
-exercise that in-process logic directly instead of subprocessing the (deleted)
-helpers.
-
-Behaviours under test:
-  - compute_alias returns adj-noun-noun for full 16-hex IDs
-  - compute_alias returns adj-noun (2 words) for legacy 8-hex IDs
-  - process_create populates state['alias'] from data.alias when present
-  - process_create backfills state['alias'] from ticket_id when data.alias missing
-  - resolve_ticket_id resolves by stored/backfilled alias, skips dotfile dirs and
-    malformed CREATE events, and fails loud (returns None + stderr diagnostic) on
-    an unreadable tracker directory
-  - resolve_ticket_id resolves a Jira issue key (REB-NNN) via the binding store
-    reverse index, degrading to None (never raising) when the store is
-    missing/corrupt or the binding is stale; the dead data.jira_key scan is gone
+Stored aliases outrank deterministic backfill; Jira keys resolve through the
+binding-store index; malformed or unavailable inputs degrade as specified.
 """
 
 import json
@@ -54,14 +37,6 @@ def test_compute_alias_legacy_8hex_two_words():
 def test_compute_alias_too_short_returns_none():
     assert compute_alias("abc") is None
     assert compute_alias("") is None
-
-
-# NOTE (Tier E E7d): the former test_compute_alias_matches_shell_helper asserted
-# byte-parity between compute_alias and the deleted ticket-alias-compute.py CLI.
-# That helper was a thin re-export of compute_alias, so the parity check is now an
-# identity (compute_alias == compute_alias) with no remaining in-process meaning;
-# it has been dropped. compute_alias is exercised directly by the tests above and
-# by the resolver backfill tests below.
 
 
 def _plant_ticket(root: Path, ticket_id: str, alias_in_data: str | None) -> Path:
@@ -113,14 +88,7 @@ def test_process_create_backfills_when_alias_missing(tmp_path):
     assert state["alias"] is not None
 
 
-# ── Edge-case coverage for resolve_ticket_id alias resolution ─────────────────
-#
-# Tier E E7d: ticket-alias-resolve.py was a thin CLI over
-# rebar._engine_support.resolver. In-process, resolve_ticket_id returns the
-# resolved ticket-dir name (or None on no-match / hard failure) and prints
-# diagnostics to stderr; _scan_alias returns the alias matches (or None on a hard
-# tracker-listing failure). We assert on those return values + captured stderr
-# (via capsys) instead of subprocess streams.
+# Alias resolution returns directory names or None and diagnoses listing failures.
 
 
 def test_resolver_missing_tracker_dir_fails_loud(tmp_path, capsys):
@@ -170,12 +138,7 @@ def _write_bindings(tracker: Path, reverse: dict) -> None:
     (bs / "bindings.json").write_text(json.dumps({"version": 1, "reverse": reverse}))
 
 
-# ── Jira-key resolution via the binding store ─────────────────────────────────
-#
-# The authoritative Jira↔rebar mapping is the reconciler's binding store reverse
-# index (.bridge_state/bindings.json), NOT a data.jira_key field on CREATE events
-# (that field is never written — the old scan for it was dead code, now removed).
-# resolve_ticket_id resolves a Jira-key-shaped input via _resolve_via_binding_store.
+# Jira keys resolve through the authoritative binding-store reverse index.
 
 
 def test_resolver_jira_key_resolves_via_binding_store(tmp_path):
@@ -328,18 +291,9 @@ def _plant_snapshot_ticket(
 
 
 def test_resolver_snapshot_only_ticket_matches_stored_alias(tmp_path):
-    """A SNAPSHOT-only ticket (no CREATE event) must resolve by the alias stored
-    in compiled_state.alias, not by compute_alias(ticket_id).
+    """Resolve a SNAPSHOT-only ticket by its authoritative stored alias.
 
-    Bug 9894-a463-090a-43e5: the resolver fell back to compute_alias when no
-    CREATE event was found, ignoring the authoritative stored alias in the
-    SNAPSHOT's compiled_state.  After the fix the resolver must read the SNAPSHOT
-    and emit the stored alias, not the computed one.
-
-    Invariant: compute_alias('9894-a463-090a-43e5') == 'real-soil-anger'
-               stored alias                          == 'brawny-gill-inlay'
-               These must differ (verified below) so the test distinguishes
-               stored-wins from compute_alias-wins.
+    The stored and computed aliases differ so the assertion proves precedence.
     """
     ticket_id = "9894-a463-090a-43e5"
     stored = "brawny-gill-inlay"
@@ -365,18 +319,7 @@ def test_resolver_snapshot_only_ticket_matches_stored_alias(tmp_path):
 
 
 def test_resolver_snapshot_only_ticket_does_not_match_computed_alias(tmp_path):
-    """Negative control for bug 9894-a463-090a-43e5.
-
-    When a SNAPSHOT-only ticket has a stored alias that differs from
-    compute_alias(ticket_id), querying by the COMPUTED alias must NOT match —
-    the stored alias in compiled_state is authoritative and the computed alias
-    is irrelevant once overridden.
-
-    If the resolver incorrectly falls back to compute_alias, this test passes
-    with a match, which is wrong behavior (it contradicts the stored value).
-    The correct post-fix behavior: compute_alias is not consulted for
-    SNAPSHOT-only tickets; no match is found; stdout is empty.
-    """
+    """Do not match a computed alias that a SNAPSHOT's stored alias overrides."""
     ticket_id = "9894-a463-090a-43e5"
     stored = "brawny-gill-inlay"
     computed = compute_alias(ticket_id)
@@ -399,12 +342,7 @@ def test_resolver_snapshot_only_ticket_does_not_match_computed_alias(tmp_path):
     )
 
 
-# ── v2 genesis alias (adjective-adjective-animal) ─────────────────────────────
-#
-# New tickets use compute_genesis_alias (gfycat adjective-adjective-animal),
-# persisted onto the CREATE event at create time. Legacy tickets are unaffected:
-# their read-time backfill still uses compute_alias (adjective-noun-noun). These
-# tests pin the new format and prove the two paths are independent.
+# Genesis aliases use adjective-adjective-animal; legacy backfill stays independent.
 
 
 def test_genesis_alias_is_adj_adj_animal():

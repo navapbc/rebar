@@ -1,9 +1,4 @@
-"""reduce_all_tickets: .archived fast-skip, orphan-marker self-heal, dir-hash
-
-Split from the former monolithic tests/scripts/test_ticket_reducer.py along
-reducer-concern seams. The module-under-test fixture (`reducer`) lives in
-conftest.py; event-writing helpers (`_write_event`, `_UUID*`) in _events.py.
-"""
+"""Bulk reduction fast-skip, orphan-marker repair, and directory hashing."""
 
 from __future__ import annotations
 
@@ -16,18 +11,7 @@ from types import ModuleType
 import pytest
 from _events import _UUID, _UUID2, _UUID3, REPO_ROOT, _write_event
 
-# ---------------------------------------------------------------------------
-# Tests: reduce_all_tickets() .archived marker fast-skip (c125-f82e)
-#
-# T1: fast-skip — .archived marker present + exclude_archived=True → reduce_ticket()
-#     is NOT called for that dir (marker detected before reduce_ticket() dispatch).
-# T2: slow-path fallback — ARCHIVED event present but NO .archived marker
-#     (crash-injection scenario) + exclude_archived=False → reduce_ticket() IS
-#     called and returns correct archived=True state.
-#
-# both tests fail until reduce_all_tickets() is updated to check for a
-# .archived marker file before calling reduce_ticket() (fast-skip path).
-# ---------------------------------------------------------------------------
+# Archived-marker fast-skip and missing-marker fallback.
 
 
 @pytest.mark.unit
@@ -35,20 +19,7 @@ from _events import _UUID, _UUID2, _UUID3, REPO_ROOT, _write_event
 def test_reduce_all_tickets_skips_dir_with_archived_marker(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """reduce_all_tickets(exclude_archived=True) must NOT call reduce_ticket()
-    for a ticket directory that has a .archived marker file.
-
-    Without the fix: current implementation calls reduce_ticket() on every directory and
-    filters archived tickets only AFTER reduce_ticket() returns.  Once the
-    fast-skip path is implemented, the .archived marker is detected before
-    reduce_ticket() is called, so the archived ticket never appears in the
-    returned results.
-
-    Setup:
-      - One ticket directory with an ARCHIVED event AND a .archived marker file.
-    When: reduce_all_tickets(tracker_dir, exclude_archived=True) is called.
-    Then: the ticket is absent from the returned results entirely (fast-skip).
-    """
+    """Skip marked archived directories before calling `reduce_ticket`."""
     import unittest.mock
 
     tracker_dir = tmp_path / "tracker"
@@ -113,20 +84,7 @@ def test_reduce_all_tickets_skips_dir_with_archived_marker(
 def test_reduce_all_tickets_fallback_without_marker_correct_state(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """reduce_all_tickets(exclude_archived=False) must call reduce_ticket() for
-    a ticket directory that has an ARCHIVED event but NO .archived marker file,
-    and the returned state must have archived=True.
-
-    This verifies the SC 1 correctness fallback: when a crash occurs between
-    writing the ARCHIVED event and writing the .archived marker, the slow path
-    (full reduce_ticket() replay) still returns the correct archived=True state.
-
-    Setup:
-      - One ticket directory with a CREATE event + an ARCHIVED event.
-      - NO .archived marker file (simulates crash between event write and marker write).
-    When: reduce_all_tickets(tracker_dir, exclude_archived=False) is called.
-    Then: reduce_ticket() IS called; result contains the ticket with archived=True.
-    """
+    """Replay ARCHIVED state when its fast-skip marker is missing."""
     import unittest.mock
 
     tracker_dir = tmp_path / "tracker"
@@ -190,11 +148,7 @@ def test_reduce_all_tickets_fallback_without_marker_correct_state(
     )
 
 
-# ---------------------------------------------------------------------------
-# Tests: compute_dir_hash() is sensitive to .archived marker presence/absence (SC5).
-# These tests import compute_dir_hash directly and test the hashing contract.
-# compute_dir_hash() includes marker:present/marker:absent in its hash input.
-# ---------------------------------------------------------------------------
+# Directory hashes include archived-marker presence.
 
 _SCRIPTS_DIR = str(REPO_ROOT / "src" / "rebar" / "_engine")
 if _SCRIPTS_DIR not in sys.path:
@@ -206,13 +160,7 @@ from rebar.reducer._cache import compute_dir_hash as _compute_dir_hash  # noqa: 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_cache_hash_differs_with_marker_present(tmp_path: Path) -> None:
-    """Hash must change after an .archived marker is written to the ticket dir.
-
-    Setup: create a ticket dir with one event file. Compute the hash (no marker).
-    Write an .archived marker. Compute the hash again.
-
-    Asserts: the two hashes are different (marker presence changes the hash).
-    """
+    """Change the directory hash when an archived marker appears."""
     ticket_dir = tmp_path / "tkt-marker-present"
     ticket_dir.mkdir()
 
@@ -290,41 +238,13 @@ def test_cache_hash_stable_when_no_marker_change(tmp_path: Path) -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Tests: reduce_all_tickets() orphan-marker self-heal (96e0-4634)
-#
-# SC7: Orphan-marker self-heal — .archived marker present but NO *-ARCHIVED.json
-#      event file → reduce_all_tickets() removes the stale marker and falls back
-#      to slow path, returning correct active state.
-# SC8 (cache): After self-heal removes the marker, a second reduce_all_tickets()
-#      call also returns correct active state (marker absence propagated to cache).
-#
-# UPDATE: these tests assert new behavior not yet present in reduce_all_tickets().
-# They must FAIL on current code (orphan marker triggers the fast-skip instead
-# of self-heal) and pass once the self-heal logic is added.
-# ---------------------------------------------------------------------------
+# Orphan-marker repair and cache invalidation.
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_orphan_marker_removed_and_slow_path_taken(tmp_path: Path, reducer: ModuleType) -> None:
-    """reduce_all_tickets() must detect an orphan .archived marker (no matching
-    *-ARCHIVED.json event) and self-heal by removing it, then fall back to slow
-    path and return the correct active (non-archived) state.
-
-    UPDATE: currently the fast-skip fires unconditionally when .archived is
-    present, returning an empty result list. After self-heal is implemented,
-    the marker is removed and the active ticket is returned.
-
-    Setup:
-      - One ticket directory with a CREATE event only (active ticket).
-      - A stale .archived marker file (orphan — no ARCHIVED event present).
-    When: reduce_all_tickets(tracker_dir, exclude_archived=True) is called.
-    Then:
-      - The .archived marker is removed (self-heal).
-      - The ticket IS included in results (slow path returns active state).
-      - The returned state has archived=False (or archived absent/None).
-    """
+    """Remove an orphan marker and return the ticket as active."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -371,20 +291,7 @@ def test_orphan_marker_removed_and_slow_path_taken(tmp_path: Path, reducer: Modu
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_valid_marker_not_removed(tmp_path: Path, reducer: ModuleType) -> None:
-    """reduce_all_tickets() must NOT remove a valid .archived marker that has a
-    corresponding *-ARCHIVED.json event file.
-
-    This is the complement of the orphan self-heal test: a legitimately archived
-    ticket (marker + event both present) must keep its marker intact.
-
-    Setup:
-      - One ticket directory with a CREATE event + an ARCHIVED event.
-      - A .archived marker (valid — ARCHIVED event is present).
-    When: reduce_all_tickets(tracker_dir, exclude_archived=True) is called.
-    Then:
-      - The .archived marker is NOT removed (no self-heal triggered).
-      - The ticket is absent from results (fast-skip still fires).
-    """
+    """Retain a marker backed by an ARCHIVED event and skip its ticket."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -431,21 +338,9 @@ def test_valid_marker_not_removed(tmp_path: Path, reducer: ModuleType) -> None:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_orphan_marker_cache_miss_on_self_heal(tmp_path: Path, reducer: ModuleType) -> None:
-    """After orphan self-heal removes .archived marker, a second reduce_all_tickets()
-    call must also return the correct active state (cache invalidated by marker removal).
+    """Invalidate cached marker state after orphan repair.
 
-    This tests the SC8 cache-key interaction: compute_dir_hash() includes marker
-    presence/absence, so removing the marker during self-heal must cause a cache
-    miss on the next call.
-
-    Setup:
-      - One ticket directory with a CREATE event only (active ticket).
-      - A stale .archived marker (orphan — no ARCHIVED event present).
-    When: reduce_all_tickets() is called TWICE (first call self-heals; second call
-          must see the updated state, not a stale cache).
-    Then:
-      - First call: marker is removed, ticket returned as active.
-      - Second call: ticket still returned as active (cache miss due to marker removal).
+    Both reductions must return the ticket as active.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -500,15 +395,7 @@ def test_orphan_marker_cache_miss_on_self_heal(tmp_path: Path, reducer: ModuleTy
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_cache_hash_differs_after_marker_removal(tmp_path: Path) -> None:
-    """Hash must change again after .archived marker is removed.
-
-    Setup: create a ticket dir with one event file. Write .archived marker.
-    Compute hash (with marker). Remove .archived. Compute hash again.
-
-    Asserts:
-      - hash_with_marker != hash_without_marker_after_removal (removal changes hash)
-      - hash_without_marker_after_removal == original hash_without_marker (symmetric)
-    """
+    """Restore the original directory hash after removing the marker."""
     ticket_dir = tmp_path / "tkt-marker-removed"
     ticket_dir.mkdir()
 
@@ -556,23 +443,9 @@ def test_cache_hash_differs_after_marker_removal(tmp_path: Path) -> None:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_reverted_archived_marker_is_orphan(tmp_path: Path, reducer: ModuleType) -> None:
-    """reduce_all_tickets() must remove a .archived marker when the ARCHIVED event
-    has been cancelled by a subsequent REVERT (net non-archived state).
+    """Treat a marker as orphaned when REVERT cancels its ARCHIVED event.
 
-    A ticket with ARCHIVED + REVERT(targeting that ARCHIVED UUID) has a net
-    non-archived state: _is_net_archived() must return False and trigger self-heal.
-
-    This test verifies the marker removal. The compiled-state un-archive
-    (process_revert clearing archived/status on REVERT-of-ARCHIVED) is covered
-    by test_revert_of_archived_unarchives_state below (bug vocal-jig-apron).
-
-    Setup:
-      - One ticket directory with CREATE + ARCHIVED + REVERT(target=ARCHIVED UUID) events.
-      - A .archived marker (stale — the ARCHIVED event has been cancelled by REVERT).
-    When: reduce_all_tickets(tracker_dir, exclude_archived=True) is called.
-    Then:
-      - The stale .archived marker is removed by the self-heal logic.
-      - The slow path runs (reduce_ticket() is called on the ticket).
+    Self-heal removes the marker before the slow reduction path.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()

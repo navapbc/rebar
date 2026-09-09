@@ -1,9 +1,4 @@
-"""Unit tests for ticket_reducer.llm_format.
-
-Covers to_llm(), shorten_comment(), and shorten_dep() in isolation.
-
-Test: python3 -m pytest tests/scripts/test_ticket_llm_format.py -v
-"""
+"""Unit tests for compact ticket, comment, and dependency formatting."""
 
 from __future__ import annotations
 
@@ -19,10 +14,7 @@ if _SCRIPTS_DIR not in sys.path:
 
 from rebar.reducer.llm_format import shorten_comment, shorten_dep, to_llm  # noqa: E402
 
-# ---------------------------------------------------------------------------
-# Fixture shim — provides a 'mod' namespace with the three public functions
-# so existing test methods that call mod.to_llm() etc. work unchanged.
-# ---------------------------------------------------------------------------
+# Namespace fixture for the three public formatters.
 
 
 class _Mod:
@@ -36,9 +28,7 @@ def mod() -> _Mod:
     return _Mod()
 
 
-# ---------------------------------------------------------------------------
-# to_llm — key mapping
-# ---------------------------------------------------------------------------
+# Key mapping
 
 
 class TestToLlmKeyMapping:
@@ -88,9 +78,7 @@ class TestToLlmKeyMapping:
         assert result.get("extra_data") == 42
 
 
-# ---------------------------------------------------------------------------
-# to_llm — None values and empty lists omitted
-# ---------------------------------------------------------------------------
+# Omit None values and empty lists.
 
 
 class TestToLlmOmissions:
@@ -146,11 +134,6 @@ class TestToLlmOmissions:
         assert "dp" not in result
 
 
-# ---------------------------------------------------------------------------
-# shorten_comment
-# ---------------------------------------------------------------------------
-
-
 class TestShortenComment:
     def test_body_mapped_to_b(self, mod):
         result = mod.shorten_comment({"body": "hello", "author": "x"})
@@ -177,11 +160,6 @@ class TestShortenComment:
     def test_unknown_comment_keys_passed_through(self, mod):
         result = mod.shorten_comment({"body": "hi", "author": "x", "extra": "val"})
         assert result.get("extra") == "val"
-
-
-# ---------------------------------------------------------------------------
-# shorten_dep
-# ---------------------------------------------------------------------------
 
 
 class TestShortenDep:
@@ -212,9 +190,7 @@ class TestShortenDep:
         assert result.get("meta") == "info"
 
 
-# ---------------------------------------------------------------------------
-# to_llm — comment and dep sub-key shortening applied via to_llm
-# ---------------------------------------------------------------------------
+# Nested comment and dependency formatting.
 
 
 class TestToLlmSubkeyShortening:
@@ -247,9 +223,7 @@ class TestToLlmSubkeyShortening:
         assert "link_uuid" not in dp[0]
 
 
-# ---------------------------------------------------------------------------
-# RED tests: priority and assignee get dedicated short keys
-# ---------------------------------------------------------------------------
+# Priority, assignee, and description keys.
 
 
 class TestPriorityAssigneeMapping:

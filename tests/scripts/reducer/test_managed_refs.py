@@ -1,14 +1,7 @@
-"""Managed-reference provenance: the compaction-surviving removal-sync primitive.
+"""Prove managed-reference provenance survives migration and compaction.
 
-Covers story safe-luge-nog's foundational layer:
-  - the reducer maintains a strictly-monotonic ``managed_refs`` projection
-    (folded from CREATE/LINK/parent-EDIT, never reduced by UNLINK/detach),
-  - it survives a compaction boundary (a removal still propagates after compact),
-  - an old SNAPSHOT lacking the field is migration-seeded from current refs,
-  - the shared ``should_propagate_removal`` gate decides REMOVE-vs-ADOPT.
-
-The reducer-behaviour tests drive the REAL ``reduce_ticket`` replay path (not the
-processors in isolation) so the dispatch wiring + snapshot interaction is exercised.
+The real reducer replay path maintains a monotonic projection used by
+``should_propagate_removal`` to choose removal over inbound adoption.
 """
 
 from __future__ import annotations
@@ -75,9 +68,7 @@ def _refs(state: dict) -> set[tuple[str, str]]:
 
 # ── reducer: monotonic fold ─────────────────────────────────────────────────
 def test_link_then_unlink_keeps_managed_ref(tmp_path: Path, reducer: ModuleType) -> None:
-    """A LINK folds (relation, target) into managed_refs; the later UNLINK removes the
-    dep but NOT the managed ref — that monotonicity is what lets the unlink propagate a
-    peer delete instead of being silently re-resurrected."""
+    """UNLINK removes a dependency but retains its managed reference for peer deletion."""
     d = tmp_path / "abc-1111-2222-3333"
     d.mkdir()
     _write_event(d, 1, _UUID, "CREATE", {"ticket_type": "task", "title": "T"})
@@ -134,9 +125,7 @@ def test_managed_ref_fold_is_idempotent(tmp_path: Path, reducer: ModuleType) -> 
 def test_snapshot_without_managed_refs_is_seeded_from_current(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """An old SNAPSHOT whose compiled_state predates managed_refs is seeded from the
-    restored current parent_id + deps, so the ticket's existing refs become managed and
-    a subsequent unlink/detach can propagate (closing the compaction durability hole)."""
+    """Seed a legacy snapshot from current references so later removals propagate."""
     d = tmp_path / "abc-dddd-eeee-ffff"
     d.mkdir()
     legacy_compiled = {
@@ -169,9 +158,7 @@ def test_seed_helper_builds_from_parent_and_deps() -> None:
 
 # ── compaction survival (post-feature SNAPSHOT carries + round-trips) ───────
 def test_managed_refs_survive_compaction_roundtrip(tmp_path: Path, reducer: ModuleType) -> None:
-    """Reducing a fresh log yields managed_refs; feeding that compiled_state back as a
-    SNAPSHOT (what compact_ticket persists) restores the SAME refs verbatim — the field
-    survives a compaction boundary, so a removal still propagates afterwards."""
+    """A compacted snapshot restores managed references verbatim for later removals."""
     d = tmp_path / "abc-1212-3434-5656"
     d.mkdir()
     _write_event(
@@ -213,12 +200,7 @@ def test_gate_defaults_missing_managed_refs_to_no_removal() -> None:
 def test_unlink_after_compaction_still_propagates_removal(
     tmp_path: Path, reducer: ModuleType, outbound_differ: ModuleType, monkeypatch
 ) -> None:
-    """The durability hole closed (story safe-luge-nog AC3): a removal performed AFTER a
-    compaction boundary still propagates. Chain it end-to-end — reduce a CREATE+LINK, COMPACT
-    to a SNAPSHOT (managed_refs lives in compiled_state), then a POST-compaction UNLINK, reduce
-    again (deps empty, managed_refs survives), and feed the reduced ticket to the outbound
-    differ: it must emit the link REMOVE. A raw-event ever-seen projection would fail closed
-    here (the compacted log no longer proves we managed the link) and re-resurrect it."""
+    """A post-compaction UNLINK retains provenance and emits an outbound removal."""
     # bug ad85: compute_outbound_mutations builds the (default Cloud) backend, which now
     # fails loudly on absent credentials; this offline differ test needs valid creds pinned.
     monkeypatch.setenv("JIRA_URL", "https://example.atlassian.net")

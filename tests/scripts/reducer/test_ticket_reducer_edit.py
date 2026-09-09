@@ -1,29 +1,4 @@
-"""RED tests for EDIT event support in ticket-reducer.py.
-
-These tests are RED — they test functionality that does not yet exist.
-All test functions must FAIL until the reducer handles EDIT events.
-
-The reducer is expected to apply EDIT events by merging `data.fields` into
-the current ticket state (last-writer-wins for sequential edits).
-
-EDIT event structure:
-    {
-        "timestamp": <int>,
-        "uuid": "<uuid>",
-        "event_type": "EDIT",
-        "env_id": "<uuid>",
-        "author": "<str>",
-        "data": {
-            "fields": {
-                "<field>": <value>,
-                ...
-            }
-        }
-    }
-
-Test: python3 -m pytest tests/scripts/test_ticket_reducer_edit.py
-All tests must return non-zero until EDIT event handling is implemented.
-"""
+"""Reducer coverage for EDIT field merges and sequential last-writer-wins."""
 
 from __future__ import annotations
 
@@ -33,9 +8,7 @@ from types import ModuleType
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Reducer under test — ``rebar.reducer``.
-# ---------------------------------------------------------------------------
+# Reducer fixture
 
 
 @pytest.fixture(scope="module")
@@ -45,10 +18,6 @@ def reducer() -> ModuleType:
 
     return reducer_mod
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 _UUID_CREATE = "aaaaaaaa-0001-4000-8000-000000000001"
 _UUID_EDIT_1 = "bbbbbbbb-0002-4000-8000-000000000002"
@@ -94,9 +63,7 @@ def _base_create_data(title: str = "Original Title") -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Test 1: reducer applies EDIT event to title
-# ---------------------------------------------------------------------------
+# EDIT updates title
 
 
 @pytest.mark.unit
@@ -126,9 +93,7 @@ def test_reducer_applies_edit_event_to_title(tmp_path: Path, reducer: ModuleType
     assert state["title"] == "Updated", f"EDIT event must update title; got {state.get('title')!r}"
 
 
-# ---------------------------------------------------------------------------
-# Test 2: reducer applies EDIT event to priority
-# ---------------------------------------------------------------------------
+# EDIT updates priority
 
 
 @pytest.mark.unit
@@ -158,9 +123,7 @@ def test_reducer_applies_edit_event_to_priority(tmp_path: Path, reducer: ModuleT
     assert state["priority"] == 1, f"EDIT event must update priority; got {state.get('priority')!r}"
 
 
-# ---------------------------------------------------------------------------
-# Test 3: reducer applies EDIT event to assignee
-# ---------------------------------------------------------------------------
+# EDIT updates assignee
 
 
 @pytest.mark.unit
@@ -192,9 +155,7 @@ def test_reducer_applies_edit_event_to_assignee(tmp_path: Path, reducer: ModuleT
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 4: reducer applies multiple fields in a single EDIT event
-# ---------------------------------------------------------------------------
+# EDIT updates several fields
 
 
 @pytest.mark.unit
@@ -230,9 +191,7 @@ def test_reducer_applies_multiple_fields_in_single_edit(
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 5: reducer applies sequential EDIT events — last writer wins
-# ---------------------------------------------------------------------------
+# Sequential EDIT events
 
 
 @pytest.mark.unit
@@ -271,9 +230,7 @@ def test_reducer_applies_sequential_edit_events(tmp_path: Path, reducer: ModuleT
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 6: EDIT event does not affect unedited fields
-# ---------------------------------------------------------------------------
+# EDIT preserves untouched fields
 
 
 @pytest.mark.unit
