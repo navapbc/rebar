@@ -1,13 +1,8 @@
-"""WS-K1: characterization / golden-master of the review-ops public surface.
+"""Public return contract for review operations.
 
-Freezes the library return contract of review_ticket / review_code /
-scan_epics_for_spec BEFORE WS-K2 reframes their internals as workflows. Driven with
-an injected FakeRunner (offline, deterministic) so the SHAPE — not a live model —
-is what is pinned. WS-K2 must keep these green (the parallel-diff invariant).
-
-CLI stdout/exit + MCP outputSchema for these ops are separately frozen by
-test_schema_outputs.py / test_mcp_output_schema_coverage.py (review_result) and
-test_llm_optionality.py (degradation), which WS-K2 must also keep green.
+Injected ``FakeRunner`` instances pin the result shape for ``review_ticket``, ``review_code``, and
+``scan_epics_for_spec``. CLI and MCP output contracts remain covered by ``test_schema_outputs.py``
+and ``test_mcp_output_schema_coverage.py``. ``test_llm_optionality.py`` covers disabled behavior.
 """
 
 from __future__ import annotations

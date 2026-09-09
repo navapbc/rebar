@@ -1,27 +1,11 @@
-"""Interface oracle for RP-04 S3 — making the LLM ``OperationSnapshot`` (a focused
-``LLMConfig`` projection) AUTHORITATIVE for LLM/gate/workflow operations, completing
-ADR 0098 for the LLM surface (ticket ec44-b572-1067-4c52, the LLM-side counterpart
-of 3a08's ``test_operation_snapshot_authoritative_binding.py``).
+"""Contract for authoritative LLM operation configuration.
 
-This mirrors 3a08's oracle shape but for :func:`rebar.llm.config_binding.
-compose_and_bind_llm_config` rather than the general operation snapshot:
-
-AC1: each public LLM/gate/workflow operation (``review_code``, ``verify_completion``,
-``review_plan``, ``scan_epics_for_spec``, ``run_workflow``) composes exactly ONE
-``LLMConfig``, reused (never recomposed) by nested subcalls/steps within the same
-operation. ``resign_plan_review`` is EXCLUDED (documented no-LLM exception, see
-its own docstring) — it must bind NO ``LLMConfig`` at all.
-
-AC2 (metamorphic): mutating model/provider/timeout/retry/cache/headers/tracing/
-repository settings AFTER composition cannot change an in-progress operation's
-bound config; a fresh operation observes the mutation.
-
-AC3 (failure edge): missing/conflicting decision-bearing provider/auth composition
-fails BEFORE any external call, with no anonymous/cross-provider fallback — unlike
-the general operation snapshot's fail-OPEN swallow, this composer propagates.
-
-AC4 (secret boundary): no secret/live capability (``api_key``, ``ticket_view``, ...)
-ever enters the redacted snapshot values or its fingerprint.
+Each ``review_code``, ``verify_completion``, ``review_plan``, ``scan_epics_for_spec``, and
+``run_workflow`` operation composes one ``LLMConfig`` and reuses it in nested calls.
+``resign_plan_review`` composes none. A bound configuration remains unchanged when ambient
+settings mutate, while the next operation sees the new settings. Missing or conflicting provider
+credentials fail before external calls. Snapshot values and fingerprints exclude secrets and
+callable capabilities.
 """
 
 from __future__ import annotations

@@ -1,29 +1,11 @@
-"""Interface oracle for RP-04 S2 — making the operation snapshot AUTHORITATIVE for
-CLI, command, and store operations (ticket 3a08-4016-0a3a-4be0).
+"""Contract for authoritative operation snapshots.
 
-Unlike the S1 shadow oracle (``test_operation_snapshot_surfaces.py``, ticket a377),
-which proves every surface merely COMPOSES an equivalent snapshot as a side,
-diagnostic effect, this file proves the snapshot now CONTROLS what
-``rebar.config.tracker_dir`` / ``tickets_branch`` / ``tickets_remote`` — and
-therefore every ``_store/*`` consumer — resolve to for the DURATION of a bound
-operation:
+CLI and command-write operations compose one snapshot and reuse it in nested store calls. A bound
+snapshot freezes the tracker path, branch, remote, and repository root for the operation.
+``REBAR_TRACKER_DIR`` and an explicit ``root`` argument still take precedence.
 
-AC1: a CLI operation and a command-write (``append_event``) each compose exactly
-ONE snapshot, reused (never recomposed) by nested seams within the same operation.
-
-AC2: the tracker dir/branch/remote resolved through a bound operation are FROZEN
-against a later env/project-file mutation for the REST of that operation, while a
-fresh operation observes the change — the store-level counterpart of the existing
-AC2 snapshot-content freeze.
-
-AC3: the ``REBAR_TRACKER_DIR`` env override and an explicit, different-repo
-``root=`` argument both continue to outrank/bypass the bound snapshot.
-
-Exclusion (documented, not a gap): push mode (``config.resolve_push_mode`` /
-``_store/push.py``) is deliberately NOT bound — ``_io/import_ndjson.py`` toggles
-``REBAR_SYNC_PUSH`` mid-bulk-import and depends on a LIVE per-call read
-(``tests/unit/test_c3b_push_defer_coupling_heldout.py``). A test here proves that
-carve-out holds even from inside a bound operation.
+Push mode remains unbound because bulk import changes ``REBAR_SYNC_PUSH`` between calls. Tests
+preserve that per-call behavior.
 """
 
 from __future__ import annotations
@@ -219,13 +201,7 @@ def test_cli_ticket_create_binds_one_snapshot_for_the_whole_operation(
 def test_tracker_dir_root_is_frozen_too_not_just_the_configured_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """AC2 freezes the tracker directory as a WHOLE path, not merely the configured
-    relative name: if ``REBAR_ROOT`` (the ambient repository-root selector) changes
-    mid-operation, ``tracker_dir(root=None)`` must still resolve against the bound
-    operation's OWN repository root, not a freshly re-resolved (and now different) one.
-    Without this, a frozen relative name gets joined against a moved root — a partial,
-    silently-broken freeze that only ``test_tracker_dir_frozen_within_bound_operation``
-    (same root throughout) cannot catch."""
+    """Keep the bound tracker path anchored to its captured root when ``REBAR_ROOT`` changes."""
     original = _proj(tmp_path / "original", tracker_dir="orig-store")
     moved = _proj(tmp_path / "moved", tracker_dir="moved-store")
     monkeypatch.setenv("REBAR_ROOT", str(original))
@@ -275,11 +251,7 @@ def test_mcp_tool_registered_through_the_proxy_binds_a_snapshot(tmp_path: Path) 
 
 
 def test_mcp_async_tool_registered_through_the_proxy_binds_a_snapshot() -> None:
-    """The async branch (``inspect.iscoroutinefunction`` -> ``awrapper``) must bind a
-    snapshot too, and preserve the awaited return value — the async counterpart of
-    ``test_mcp_tool_registered_through_the_proxy_binds_a_snapshot``, mirroring
-    ``test_double_advisory_proxy_scopes_suppression_for_async_handler`` in
-    ``test_cross_session_lib.py`` for the sibling proxy this wrapper mirrors."""
+    """Bind an async proxied tool, preserve its result, and clear the binding afterward."""
     import asyncio
 
     from rebar._operation_config import bind_operation_snapshot_for_tools
@@ -310,13 +282,7 @@ def test_mcp_async_tool_registered_through_the_proxy_binds_a_snapshot() -> None:
 def test_bridge_setup_reset_still_succeeds_when_compose_and_bind_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Fail-open litmus: the CLI's ``compose_and_bind_operation_snapshot`` swallowing
-    a real composition failure must never block a legacy operation that does not
-    itself need a valid config (mirrors
-    ``tests/unit/test_jira_onboard.py::test_reset_clears_and_exits`` at the CLI
-    binding seam this ticket adds). A malformed ``[verify]`` value makes
-    ``compose_operation_snapshot`` raise ``ConfigError`` — proven directly below —
-    yet the reset command still runs to completion."""
+    """Preserve bridge reset when fail-open binding cannot compose malformed configuration."""
     p = tmp_path
     (p / ".git").mkdir()
     (p / "rebar.toml").write_text(

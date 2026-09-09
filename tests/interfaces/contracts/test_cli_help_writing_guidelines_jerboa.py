@@ -1,16 +1,7 @@
-"""Content contract for ticket alamode-greasy-jerboa (F20).
+"""Content contract for selected CLI help wording.
 
-F12 committed one help artifact for every visible route and generates the CLI
-reference from those artifacts. Several parser descriptions and option help
-strings that F12 newly exposed predated the documentation writing rules in
-``docs/documentation-policy.md`` and carried em dashes, semicolons, clause-joining
-colons, and casual connectors.
-
-This is a content-specific behavior test over the named affected commands. It
-asserts the specific corrected wording is present and that the specific removed
-fragments are gone. It is deliberately NOT a repository-wide punctuation, banned
-word, or character scanner: it names each command and each substring it checks,
-so it enforces the outcome of this change rather than a general prose gate.
+Each named command must include its required phrases and exclude its prohibited fragments.
+This test is intentionally command-specific rather than a repository-wide writing-policy scan.
 """
 
 from __future__ import annotations

@@ -1,29 +1,12 @@
-"""Interface oracle for RP-04 S1 cross-surface snapshot equivalence (ticket a377).
+"""Cross-surface contract for operation snapshot composition.
 
-AC1: representative ticket/store, LLM-gate, and reconcile operations reached
-through CLI, public Python, MCP, and the direct reconciler entry point compose
-the *same* immutable snapshot (values, source kinds, root, version, redacted
-fingerprint) from identical five-layer inputs — because every surface routes
-through the one ``compose_operation_snapshot`` seam.
+CLI, public Python, MCP, and the reconciler entry point must compose equivalent snapshots from
+identical inputs. MCP and reconciler tests invoke their public entry points and require the shared
+composer to run. Each captured snapshot is checked against absolute values, provenance, root, and
+envelope data so common corruption cannot pass by equality alone.
 
-The MCP and reconciler halves of AC1 drive their REAL entry points (a FastMCP
-tool call on a real ``build_server()``, and ``rebar_reconciler.__main__.main``),
-because a surface that performs the operation without routing through the shared
-composer is exactly where a parity bug hides — and a block that re-calls the
-composer itself cannot see that. Two properties make the contract discriminate:
-the surface must actually reach the composer (an un-fired recorder is a failure,
-not a silent pass), and the snapshot it composed is anchored to ABSOLUTE expected
-values as well as compared across surfaces — without that anchor a perturbed
-composer moves every surface together and "equal to each other" stays true.
-
-AC2: a captured snapshot is byte-stable across later environment/file/cwd
-mutation, while the next composition observes the change.
-
-AC5: malformed selected config raises the typed config error *before* any lock,
-subprocess, network, or store-write effect.
-
-These assert observable behavior at real entry points; they are the held-out E2E
-half of the S1 oracle.
+A captured snapshot remains stable after environment, file, or working-directory changes. A later
+composition observes those changes. Invalid selected configuration fails before side effects.
 """
 
 from __future__ import annotations
@@ -71,16 +54,10 @@ def _proj(tmp: Path, *, push: str = "always") -> Path:
 
 
 def _reconciler_main() -> Any:
-    """Import the REAL ``python -m rebar_reconciler`` entry-point module.
+    """Import the reconciler entry point from its sibling package.
 
-    The bundled engine ships as a sibling top-level package under
-    ``src/rebar/_engine``, so importing it needs that directory on ``sys.path`` —
-    the same prepare-then-import step every other reconciler-driving test uses
-    (``tests/interfaces/facades/test_reconciler_last_pass_heldout.py``,
-    ``tests/interfaces/facades/test_bridge_status.py``). The entry is left in
-    place rather than popped: it is idempotent (guarded by the membership test),
-    and removing it would strand a later import of a not-yet-loaded
-    ``rebar_reconciler`` submodule in this or any subsequent test.
+    The engine directory stays on ``sys.path`` so later imports of unloaded reconciler submodules
+    continue to work.
     """
     engine_dir = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine"
     if str(engine_dir) not in sys.path:
@@ -89,23 +66,12 @@ def _reconciler_main() -> Any:
 
 
 def _composed_by(run: Callable[[], object]) -> list[OperationSnapshot]:
-    """Every snapshot the SHARED composer produced while ``run`` executed.
+    """Record snapshots composed while ``run`` executes.
 
-    Instrumentation point: the module global
-    ``rebar._operation_config.compose_operation_snapshot``.
-    ``compose_and_bind_operation_snapshot`` — the seam the MCP tools and the reconciler
-    entry point call — resolves that name from its module's globals at CALL time, so
-    rebinding the attribute genuinely reaches code entered through the real surfaces;
-    it is not merely this test module's import-time binding (which the direct
-    ``compose_operation_snapshot`` calls elsewhere in this file deliberately keep
-    using, so they stay uninstrumented).
-
-    The real composer still runs and its result is returned unchanged, so the driven
-    surface behaves exactly as in production. An EMPTY list therefore means the
-    surface did not route through the shared composer at all — the parity bug this
-    contract exists to catch — and every caller asserts on it rather than looping
-    over nothing, which is how a recorder that never fires would otherwise be
-    indistinguishable from a passing assertion.
+    Proxy surfaces resolve ``rebar._operation_config.compose_operation_snapshot`` at call time, so
+    rebinding that attribute captures their calls. Direct imports in this module remain
+    uninstrumented. The wrapper returns each original result unchanged. An empty capture means the
+    surface bypassed the shared composer.
     """
     import rebar._operation_config as opcfg
 
@@ -173,13 +139,7 @@ def test_surfaces_compose_equivalent_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     p = _proj(tmp_path, push="always")
-    # The surface-neutral "explicit operation input", expressed in the layers EVERY
-    # surface can carry: a project layer (``sync.push``) and an env layer
-    # (``verify.max_ticket_description_chars``), each with distinct provenance. The
-    # MCP tools and the reconciler entry point take no ``cli_overrides``, so pinning
-    # the shared contract on the cli layer alone could only ever be asserted on the
-    # surfaces that do — which is how the previous version of this test ended up
-    # re-calling the composer instead of driving them.
+    # Use project and environment inputs that every surface accepts with distinct provenance.
     monkeypatch.setenv("REBAR_ROOT", str(p))
     monkeypatch.setenv("REBAR_VERIFY_MAX_TICKET_DESCRIPTION_CHARS", "4321")
     cfg.reset_config_cache()
@@ -187,17 +147,11 @@ def test_surfaces_compose_equivalent_snapshot(
     # Python surface: compose directly (once per operation).
     py_snap = compose_operation_snapshot(repo_root=str(p))
 
-    # Anchor the reference ABSOLUTELY: values, provenance, root, and envelope. A
-    # cross-surface comparison alone is vacuous — perturb the composer and every
-    # surface moves together, so "equal to each other" stays true while all of them
-    # are wrong. Each surface block below re-applies the same absolute anchor.
+    # Check absolute content before comparing surfaces so shared corruption cannot pass.
     expected_root = p.resolve()
     _assert_snapshot_content("public Python", py_snap, expected_root)
 
-    # MCP surface: a REAL FastMCP tool call on a REAL server. ``explain_criterion``
-    # is a pure registry read (no store, no LLM, no network), so what it proves is
-    # the surface's own config-composition path and nothing incidental. The server is
-    # built OUTSIDE the recording window so only the tool call's composition counts.
+    # Invoke a FastMCP registry read to isolate the MCP composition path.
     from rebar.mcp_server import build_server
 
     server = build_server()
@@ -206,10 +160,7 @@ def test_surfaces_compose_equivalent_snapshot(
     )
     _assert_surface("MCP", mcp_composed, expected_root=expected_root, reference=py_snap)
 
-    # Direct reconciler surface: the real ``rebar_reconciler.__main__.main`` argv
-    # entry point. ``--dry-run-enumerate`` returns right after the entry point
-    # composes its snapshot from the resolved request root, so no lock, pass, or
-    # network effect is reached.
+    # Dry-run enumeration reaches reconciler composition before locks, passes, or network effects.
     reconciler_main = _reconciler_main()
     rcs: list[int] = []
     reconc_composed = _composed_by(

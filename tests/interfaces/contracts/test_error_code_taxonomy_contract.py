@@ -1,24 +1,11 @@
-"""Epic 3405-c0b7-0436-4b46 prevention guardrail — the exhaustive ``exception -> code`` contract
-for the ``LLMError`` family, plus vocabulary-closure over ``KNOWN_ERROR_CODES``.
+"""Exhaustive ``LLMError`` exception-to-code contract.
 
-This is the epic's AC6 guardrail: it freezes the RECONCILED error-code taxonomy so a future
-change cannot silently re-misclassify an ``LLMError`` subclass or emit an unregistered code.
-
-Reconciled taxonomy (by exception TYPE, precedence high→low):
-  * ``WorkflowNotFoundError``                                  -> ``not_found``      (dbca)
-  * ``WorkflowParse/Validation/Version/UnknownStepError``      -> ``invalid_input``  (dbca)
-  * ``LLMUnavailableError`` (incl. ``LLMConfigError`` + prompt subtree)  -> ``llm_unavailable``
-  * ``LLMRunnerError`` subtree (input-rejected / budget / context-window /
-    tool-loop / output-defect)                                -> ``command_failed`` (f75f)
-  * bare ``WorkflowError`` base                                -> ``llm_unavailable`` (dbca)
-  * bare ``LLMError``, ``FindingsError``, ``EvalError``,
-    ``SnapshotError``, ``WorkflowAssetsUnavailableError``       -> ``command_failed`` (ce6b)
-  * ``ExpressionError``                                        -> ``invalid_input``  (73d8)
-
-The map is asserted to be EXHAUSTIVE: the set of live ``LLMError`` subclasses must equal the
-keys below, so adding a new subclass FAILS this test until its intended code is recorded here —
-that forced decision is the prevention this guardrail exists to provide. It must AGREE with, not
-contradict, ``tests/interfaces/contracts/test_workflow_error_codes_dbca.py``.
+Every subclass must appear in ``EXPECTED_CODE``, and each mapped code must belong to
+``KNOWN_ERROR_CODES``. Workflow lookup errors map to ``not_found``. Workflow parse, validation,
+version, unknown-step, and expression errors map to ``invalid_input``. Availability,
+configuration, prompt, library-write, and reviewer errors map to ``llm_unavailable``. Runner,
+findings, evaluation, snapshot, workflow-asset, and bare ``LLMError`` cases map to
+``command_failed``. The bare ``WorkflowError`` retains ``llm_unavailable``.
 """
 
 from __future__ import annotations
@@ -38,12 +25,11 @@ pytestmark = pytest.mark.unit
 
 
 def _materialize_llm_error_tree() -> None:
-    """Import every ``rebar.llm`` submodule so the ``LLMError`` subclass tree is FULLY and
-    DETERMINISTICALLY registered. ``type.__subclasses__()`` only sees classes whose defining
-    module has been imported, and the family is spread across many modules (findings, evals,
-    prompting, workflow.snapshot/executor/prompt_authoring, …). Without this, the exhaustive
-    assertions below would depend on incidental import order. Best-effort: a submodule that
-    cannot import in this environment (e.g. an optional-extra edge) is skipped, not fatal."""
+    """Import all ``rebar.llm`` submodules before enumerating subclasses.
+
+    ``type.__subclasses__()`` includes only imported definitions. Optional submodules that fail
+    to import are excluded from the census.
+    """
     for mod in pkgutil.walk_packages(rebar.llm.__path__, "rebar.llm."):
         try:
             importlib.import_module(mod.name)
