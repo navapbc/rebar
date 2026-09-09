@@ -1,19 +1,8 @@
-"""Effect-spy safety oracle for the shadow comparator (ADR 0107, e9d5).
+"""Effect-spy contract for side-effect-free payload shadow replay.
 
-AC2: "The shadow comparator executes no Jira transport or ticket-store write,
-proven with failing spies on every effect seam." This file patches every
-named effect seam (subprocess, socket connect, clock sleep, and the ticket
-store's write entry points) to RAISE if called, then drives the ENTIRE
-replay corpus (both match and reject scenarios) plus the payload-dataclass
-construction paths through those patches active.
-
-Per the task's TDD discipline ("get RED-then-GREEN against a deliberately
-leaky stub before trusting them"): ``test_spies_actually_fire_on_a_leaky_stub``
-proves each spy is a real, load-bearing tripwire — not a fixture that merely
-never gets exercised — by calling the patched target directly and asserting
-the resulting ``EffectViolation``. Only after that self-check do the
-corpus-wide tests below trust an ABSENCE of ``EffectViolation`` as proof of
-"no effect happened", rather than "the spy was never wired at all".
+The match and reject corpus plus payload construction run with subprocess, socket,
+sleep, and ticket-store writes replaced by failing spies. A self-check calls the
+tripwires before the corpus relies on their silence.
 """
 
 from __future__ import annotations
@@ -58,16 +47,7 @@ def _boom(name: str):
 
 
 def _boom_unless_git(name: str, real):
-    """Like :func:`_boom`, but pass through a ``git`` invocation to *real*.
-
-    ``tests/_isolation.py``'s repo-isolation guard (autouse, ``tests/conftest.py``)
-    samples ``git rev-parse HEAD`` / ``git status --porcelain`` around EVERY test
-    in this suite via the real ``subprocess.run``/``Popen`` — that guard is
-    infrastructure this test must not break. Real Jira/vendor subprocess calls
-    (e.g. the ``acli`` binary) never start with ``"git"``, so this still catches
-    any actual effect this story's code would trigger while leaving the
-    pre-existing isolation guard functional.
-    """
+    """Raise for subprocess effects while allowing test-isolation Git probes."""
 
     def _raise_or_delegate(*args, **kwargs):
         cmd = args[0] if args else kwargs.get("args")
@@ -82,27 +62,10 @@ def _boom_unless_git(name: str, real):
 
 @pytest.fixture
 def effect_spies(monkeypatch):
-    """Patch every named effect seam to raise ``EffectViolation`` if invoked
-    (git-probe calls from the pre-existing repo-isolation guard pass through).
+    """Install tripwires for subprocess, sleep, store writes, and socket connects.
 
-    ``socket.socket.connect``/``connect_ex`` are patched via
-    ``unittest.mock.patch.object`` rather than ``monkeypatch.setattr``: both
-    attributes are normally *inherited* (from ``_socket.socket``, not local to
-    ``socket.socket``), and the pre-existing, autouse ``_network_guard``
-    fixture (``tests/conftest.py``) ALSO patches ``socket.socket.connect`` for
-    every test in this tier. ``monkeypatch.setattr`` on a class records
-    ``oldval`` via a plain ``target.__dict__.get(name, NOTSET)`` snapshot and
-    restores via a plain ``setattr``/``delattr`` on that snapshot; when this
-    fixture's patch is applied *while ``_network_guard``'s own patch is
-    already active*, that snapshot captures ``_network_guard``'s patched
-    function (not ``NOTSET``), so ``monkeypatch``'s teardown re-``setattr``s
-    it back — creating a *new local* ``connect`` entry that permanently
-    shadows the real, inherited method for every later test in the same
-    worker, even ones marked ``@pytest.mark.allow_network`` (see bug
-    edeb-c3ad-c051-4e6a). ``mock.patch.object`` instead detects "was this
-    name local to the class before I patched it" at both enter and exit, so
-    it composes correctly regardless of what else is layered on the same
-    attribute — matching the mechanism ``_network_guard`` already uses.
+    Git probes pass through for repository isolation. Socket methods use nested-aware
+    patching so teardown restores inherited methods after the autouse network guard.
     """
     monkeypatch.setattr(subprocess, "run", _boom_unless_git("subprocess.run", subprocess.run))
     monkeypatch.setattr(subprocess, "Popen", _boom_unless_git("subprocess.Popen", subprocess.Popen))
@@ -138,9 +101,7 @@ def effect_spies(monkeypatch):
 
 
 def test_spies_actually_fire_on_a_leaky_stub(effect_spies):
-    """A deliberately leaky stub calling each patched target must raise
-    EffectViolation — proving the fixture is load-bearing (RED-then-GREEN
-    per the task's TDD discipline), not merely unexercised scaffolding."""
+    """Representative direct calls prove that the tripwire fixture is active."""
     with pytest.raises(EffectViolation, match=re.escape("subprocess.run")):
         subprocess.run(["true"], check=False)
     with pytest.raises(EffectViolation, match=re.escape("subprocess.Popen")):
@@ -161,23 +122,7 @@ def test_spies_actually_fire_on_a_leaky_stub(effect_spies):
 
 @pytest.mark.allow_network  # nested pytest binds a loopback ephemeral port; no live service
 def test_effect_spies_do_not_leak_socket_connect_into_later_tests(tmp_path: Path) -> None:
-    """Regression for bug edeb-c3ad-c051-4e6a.
-
-    ``effect_spies`` patches ``socket.socket.connect``/``connect_ex`` in the
-    SAME pytest worker as the autouse, class-scoped ``_network_guard``
-    fixture (``tests/conftest.py``) that every other test in this tier also
-    relies on. A prior version of this fixture used ``monkeypatch.setattr``
-    for those two attributes; because ``monkeypatch`` snapshots/restores a
-    class attribute via a plain dict check rather than tracking whether the
-    attribute was already local due to another active patch, tearing down
-    while ``_network_guard``'s own patch was active left ``connect``
-    *permanently* shadowed for every subsequent test in the worker — even
-    ones marked ``@pytest.mark.allow_network`` — which is exactly the
-    "Network access is forbidden" failure observed in CI on
-    ``tests/unit/test_audit_serve_heldout.py``
-    ``test_serve_binds_loopback_ephemeral_and_lists_ticket`` once this file
-    ran first. Reproduce the real ordering (this file's tests, then that
-    one) in a fresh pytest worker and assert both suites still pass."""
+    """Nested pytest proves socket teardown restores a later network-enabled test."""
     this_file = Path(__file__).resolve()
     audit_serve_file = REPO_ROOT / "tests" / "unit" / "test_audit_serve_heldout.py"
     assert audit_serve_file.is_file()

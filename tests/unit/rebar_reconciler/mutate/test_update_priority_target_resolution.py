@@ -1,16 +1,8 @@
-"""[bug c9c6] Happy path: the priority-update REST write targets the CONFIGURED Jira.
+"""Priority updates send authenticated REST requests to configured Jira.
 
-``acli_cli_ops.update_priority`` deliberately bypasses ACLI (ACLI has no priority
-edit) and writes with a bare ``urllib`` PUT. It therefore spawns no subprocess, so
-an ACLI argv prefix (``acli_cmd``) is structurally inapplicable to it and it no
-longer accepts one; it resolves its Jira target through
-``acli_subprocess.resolve_jira_settings`` instead.
-
-These tests assert the OBSERVABLE outbound request — the URL, method, body and
-Basic-auth credential actually sent — for the normal successful path, both when
-``update_priority`` is called directly and when it is reached through the caller
-that used to forward ``acli_cmd`` (``acli.update_issue(..., priority=...)``, which
-still carries an ``acli_cmd`` for its own ACLI calls).
+Coverage inspects the URL, PUT method, JSON priority body, and Basic authorization for
+direct ``update_priority`` calls and the ``update_issue`` caller. ``acli_cmd``
+remains reserved for subprocess-backed operations.
 """
 
 from __future__ import annotations

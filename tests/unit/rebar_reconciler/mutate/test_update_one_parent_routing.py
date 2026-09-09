@@ -1,21 +1,8 @@
-"""RED tests for parent routing on the legacy update_one batch path.
+"""Parent handling on the batch update path.
 
-Root cause (ticket 8b25-ae7a-efc3-47f6): the production outbound dispatch path
-routes through ``applier.update_one`` (via ``_apply_batch``), whose field
-allowlist ``_OUTBOUND_BATCH_ALLOWLIST`` did NOT include ``parent``. A
-parent-only outbound update mutation (``fields={"parent": "DIG-X"}``) was
-therefore stripped to an empty field set and ``client.set_parent`` was never
-called — the parent never landed in Jira.
-
-Because the parent never lands, the next fetch_snapshot still shows no parent,
-the outbound differ re-emits the SAME parent mutation, and the bridge churns a
-perpetual parent re-emission on every bound child (the Phase-6 idempotency
-failure: ~230 steady-state ``fields=['parent']`` mutations).
-
-The typed leaf ``_apply_outbound_update`` already routes parent via
-``client.set_parent`` (applier.py ~316). These tests assert ``update_one``
-does the same — pops ``parent`` from the field set and dispatches it through
-``client.set_parent(issue_key, parent_key)`` instead of dropping it.
+``update_one`` removes parent from scalar fields and calls ``set_parent`` with the issue
+and parent keys. Jira hierarchy rejection remains non-fatal. Updates without a parent
+do not call the parent route.
 """
 
 from __future__ import annotations

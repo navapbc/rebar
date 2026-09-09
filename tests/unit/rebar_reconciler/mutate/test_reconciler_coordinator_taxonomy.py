@@ -1,22 +1,9 @@
-"""RP-03 S5 — create / restart / partial / delivery taxonomy (scenarios 7-10).
+"""Coordinator taxonomy coverage for create, replay, partial, and delivery paths.
 
-The sibling module ``test_reconciler_coordinator.py`` covers the coordinator's bucket and
-fuse taxonomy through ``coordinate_and_fuse`` directly. This module covers the scenarios
-whose real home is a layer AROUND the coordinator, driving each real entry point against a
-fake backend:
-
-* scenario 7 — the create route (``apply_handlers.dispatch_mutation``), asserting the
-  issue is created BEFORE labels are added and NO ``delete_issue`` is ever called;
-* scenario 8 — the transition-replay resume (``transition_replay.replay_transition``) plus
-  the observe-before-replay guard (``retry_budget.decide_replay`` /
-  ``operation_outcome.replay_safety_for``);
-* scenario 9 — the ``commit_unknown`` partial outcome (its own non-applied bucket,
-  replay-FORBIDDEN);
-* scenario 10 — the fail-open delivery invariant (``pass_io.record_parent_divergence``):
-  the observability sink failing must never cost a mutation that would land.
-
-The shared, credential-free harness lives in ``_coordinator_harness.py``. Everything is
-credential-free: no network, no real Jira, a frozen clock, no wall-clock sleep.
+The create route precedes label writes and never deletes remotely. Replay observes state
+before retrying and resumes after completed hops. ``commit_unknown`` stays non-applied
+and replay-forbidden. Observability sink failure remains isolated from delivery. Tests
+use credential-free fakes and frozen time.
 """
 
 from __future__ import annotations
@@ -50,10 +37,7 @@ pytestmark = pytest.mark.unit
 
 
 class _RecordingCreateClient:
-    """A declared-protocol transport fake recording every physical call, in ORDER.
-
-    Provider-neutral (stands in for either Cloud or DC). ``delete_issue`` is recorded but
-    must NEVER be called on a create path (rollback-by-reobservation invariant)."""
+    """Record transport calls in order, including forbidden create-path deletes."""
 
     def __init__(self) -> None:
         self.calls: list[tuple] = []
@@ -89,9 +73,7 @@ class _RecordingCreateClient:
 
 @pytest.mark.parametrize("route", [None, "legacy"])
 def test_s7_create_route_creates_before_label_and_never_deletes(tmp_path, monkeypatch, route):
-    """The create route (coordinated default AND legacy rollback core) drives a create
-    end-to-end against a fake backend with the observable ordering: the issue is CREATED
-    before any label is added, and ``delete_issue`` is NEVER called."""
+    """Both create routes create the issue before labels and never delete it."""
     if route is None:
         monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
     else:
@@ -121,10 +103,11 @@ def test_s7_create_route_creates_before_label_and_never_deletes(tmp_path, monkey
 
 
 def test_s8_replay_safety_forbids_replay_after_ambiguous_commit():
-    """After an ambiguous commit, ``commit_unknown`` is REPLAY-FORBIDDEN (observe before
-    replaying a non-idempotent write); ``decide_replay`` yields ``recovered`` (no replay)
-    for an already-``desired`` observation and ``retryable_deferred`` for an
-    ``old_conclusive`` observation with budget."""
+    """Ambiguous commits prohibit blind replay.
+
+    Desired state recovers, old conclusive state can retry, and inconclusive
+    observation stays commit-unknown.
+    """
     assert replay_safety_for(Disposition.commit_unknown) == ReplaySafety.forbidden
     assert replay_safety_for(Disposition.commit_unknown) != ReplaySafety.safe
 
@@ -177,9 +160,7 @@ def _make_tracker(root: Path, local_id: str, local_hops: list[str]) -> Path:
 
 
 def test_s8_transition_replay_resume_skips_already_applied_hops(tmp_path, monkeypatch):
-    """A resume from a mid-trail point (current status ``In Progress`` on a recorded
-    ``open → in_progress → closed`` trail) replays ONLY the remaining ``Done`` hop — the
-    already-applied ``In Progress`` hop is NOT re-executed."""
+    """Replay resumes at the first unapplied transition hop."""
     tracker = _make_tracker(tmp_path, "tkt-resume", ["open", "in_progress", "closed"])
     monkeypatch.setenv("REBAR_TRACKER_DIR", str(tracker))
     monkeypatch.setenv("REBAR_ROOT", str(tracker.parent))
@@ -217,10 +198,7 @@ def test_s9_commit_unknown_is_its_own_outcome_and_not_applied():
 
 
 def test_s10_observability_sink_failure_never_costs_delivery(tmp_path, monkeypatch):
-    """The delivery/observability layer failing must NOT abort a mutation that would
-    otherwise land: a broken alert store raises inside the sink, yet
-    ``record_parent_divergence`` fails OPEN (returns None, no exception) AND a concurrent
-    coordinator cutover still applies its mutation with an intact report."""
+    """A broken observability sink neither aborts delivery nor corrupts its report."""
 
     class _BrokenAlertStore:
         def append(self, *_a, **_k):

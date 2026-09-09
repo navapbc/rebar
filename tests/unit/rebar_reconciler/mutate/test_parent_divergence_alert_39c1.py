@@ -1,27 +1,8 @@
-"""RED tests for ticket 39c1 AC4 — an unrepresentable parent must be OBSERVABLE.
+"""Parent-divergence alert contracts for outbound parent updates.
 
-Root cause: ``dispatch_one._update_one_parent`` catches every ``set_parent``
-failure and emits nothing but a ``logger.warning``. A reconcile pass in which the
-parent never reached the tracker therefore exits 0, reports OK, and leaves no
-durable record anywhere an operator looks. That invisibility is what let the
-"Cloud has the translation, DC never got its half" class run to FIVE instances
-(d067, 8d68, 751e, 2b16/88d9, and this ticket) before anyone noticed.
-
-The signal these tests require is the one the reconciler already uses for exactly
-this shape of non-fatal-but-real divergence: a ``bridge_alerts`` entry, the same
-channel ``apply_handlers.record_backstop_failure`` writes and that
-``IllegalTransitionError`` was deliberately routed to (see
-``adapters/jira_datacenter/transitions.py:34-49``). Warn-and-continue is kept —
-a parent failure must still not abort the rest of the batch — but it stops being
-silent.
-
-The kinds are DISTINCT on purpose. ``outbound-parent-unrepresentable`` means the
-deployment cannot express this parent at all (DC's ``set_parent`` raising
-``NotImplementedError``); no retry will ever help and an operator must change the
-hierarchy or the configuration. ``outbound-parent-rejected`` is Jira refusing THIS
-reparent on hierarchy grounds (the 8b25 HTTP 400), which a different parent would
-satisfy. Collapsing them would tell the operator a permanent structural gap and a
-per-issue rejection with the same words.
+Unrepresentable parents and hierarchy rejections use distinct durable alert kinds
+because their remedies differ. Transport error text remains operator evidence. Alert
+delivery and alert-store failure remain non-fatal so unrelated fields can still land.
 """
 
 from __future__ import annotations
@@ -69,13 +50,7 @@ def _alerts(root: Path) -> list[dict]:
 
 
 def test_unrepresentable_parent_writes_a_bridge_alert(applier, tmp_path, monkeypatch):
-    """DC declining a parent it cannot express must leave a durable record.
-
-    This is AC4's core cell. ``NotImplementedError`` is DC's transport saying the
-    deployment has no way to hold this relationship — after change 1302 the epic-link
-    route handles the representable cases, so a decline that still reaches here is
-    genuinely unrepresentable, not a missing translation.
-    """
+    """An unrepresentable parent writes a durable alert with transport evidence."""
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
     client = MagicMock()
     client.update_issue.return_value = None
@@ -108,12 +83,7 @@ def test_unrepresentable_parent_writes_a_bridge_alert(applier, tmp_path, monkeyp
 
 
 def test_unrepresentable_parent_is_still_non_fatal(applier, tmp_path, monkeypatch):
-    """Recording the alert must not turn a warn-and-continue into an abort.
-
-    The existing contract is explicit that a parent failure must not take down the
-    rest of the batch. An alert that raises would convert five instances of silent
-    divergence into a loud outage, which is not an improvement.
-    """
+    """An alert does not turn a parent warning into a batch abort."""
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
     client = MagicMock()
     client.update_issue.return_value = None
@@ -133,12 +103,7 @@ def test_unrepresentable_parent_is_still_non_fatal(applier, tmp_path, monkeypatc
 
 
 def test_hierarchy_rejection_alerts_under_a_distinct_kind(applier, tmp_path, monkeypatch):
-    """The 8b25 HTTP 400 is a per-reparent refusal, not a structural gap.
-
-    It gets an alert too — it was equally silent — but a different ``kind``, because
-    the operator action differs: pick a valid parent, versus this deployment can
-    never hold this relationship.
-    """
+    """A hierarchy rejection uses the per-parent rejection alert kind."""
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
     client = MagicMock()
     client.update_issue.return_value = None
@@ -159,10 +124,7 @@ def test_hierarchy_rejection_alerts_under_a_distinct_kind(applier, tmp_path, mon
 
 
 def test_a_successful_parent_set_writes_no_alert(applier, tmp_path, monkeypatch):
-    """The negative cell. Without it, an implementation that alerts unconditionally
-    passes every other cell here and floods the operator's only divergence channel
-    on the happy path — which would make the signal worthless exactly as fast as
-    having none."""
+    """A successful parent update writes no divergence alert."""
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
     client = MagicMock()
     client.update_issue.return_value = None
@@ -175,11 +137,7 @@ def test_a_successful_parent_set_writes_no_alert(applier, tmp_path, monkeypatch)
 
 
 def test_a_broken_alert_store_does_not_break_the_pass(applier, tmp_path, monkeypatch):
-    """If the alert channel itself fails, the pass must still continue.
-
-    Observability is a secondary concern to delivery: a full disk or an unwritable
-    state directory must not start failing mutations that would otherwise land.
-    """
+    """Alert-store failure does not prevent other mutation fields from landing."""
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
     # Occupy the alert directory's path with a FILE, so mkdir/append raise.
     (tmp_path / "bridge_state").mkdir()
@@ -188,9 +146,7 @@ def test_a_broken_alert_store_does_not_break_the_pass(applier, tmp_path, monkeyp
     client = MagicMock()
     client.update_issue.return_value = None
     client.set_parent.side_effect = NotImplementedError("nope")
-    # A summary rides along: a parent-ONLY mutation deliberately skips the scalar
-    # update (there would be nothing left to send), so it cannot show that the rest
-    # of the mutation survived.
+    # Include a scalar field to prove alert failure does not block the remaining update.
     mutation = {
         "action": "update",
         "key": "DIG-104",

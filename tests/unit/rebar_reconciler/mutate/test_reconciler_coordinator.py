@@ -1,25 +1,9 @@
-"""RP-03 S5 — coordinator bucket/fuse taxonomy + venue parity (scenarios 1-6).
+"""Coordinator bucket and fuse contracts across Jira Cloud and Data Center.
 
-This suite validates already-merged S1–S4 behaviour: there is NO new production code.
-It drives the REAL ``rebar_reconciler.batch_dispatch.coordinate_and_fuse`` pipeline and
-covers the coordinator's outcome buckets (applied / recovered / deferred / failed) and
-its fuse taxonomy (endpoint / provider / reset).
-
-Design, mirroring the landed unit oracles it extends:
-
-* the coordinator DECISION taxonomy is driven with a scripted, venue-AGNOSTIC ``execute``
-  returning ``AtomicSignal``s — exactly the ``test_operation_coordinator.py`` pattern —
-  because the coordinator's decision logic performs ZERO I/O, so its outcome is
-  venue-neutral BY CONSTRUCTION;
-* venue PARITY is pinned by running the SAME applied cutover through TWO real venue
-  backends over verified fakes (the Cloud ``AcliClient`` and the DC
-  ``JiraDataCenterTransport``), reusing the ``test_coordinator_venue_cutover.py`` harness,
-  and asserting byte-identical five-bucket tallies.
-
-The create / restart / partial / delivery scenarios (7-10) live in the sibling module
-``test_reconciler_coordinator_taxonomy.py``. The shared, credential-free harness lives in
-``_coordinator_harness.py``. Assertions are OBSERVABLE ONLY — report buckets,
-``fuse_decision`` fields, recorded wire calls, and the tally dict.
+The suite covers five outcome buckets, endpoint and provider fuse isolation, and scope
+reset. Venue parity drives the same summary update through each backend and compares
+the resulting tallies. Create, replay, partial, and delivery cases are in the sibling
+taxonomy module.
 """
 
 from __future__ import annotations
@@ -84,9 +68,7 @@ def test_s1_mixed_success_exact_five_bucket_tally():
 
 
 def test_s1_venue_parity_cloud_and_dc_applied_cutover(tmp_path, monkeypatch):
-    """venue PARITY: the SAME applied summary cutover through the real Cloud and DC
-    backends reaches each venue's own wire as EXACTLY ONE physical mutation and yields
-    byte-identical five-bucket tallies — the coordinator is venue-neutral."""
+    """Cloud and Data Center each emit one summary mutation and the same tally."""
     rec = RecordingAcli()
     cloud = cloud_backend(monkeypatch, rec)
     cloud_report, cloud_tally, cloud_sink = run_coordinator_cutover(
@@ -144,10 +126,7 @@ def test_s2_transient_recovery_folds_into_applied_yet_reports_recovered():
 
 
 def test_s3_long_delay_deferral_endpoint_fuse_with_retry_not_before():
-    """Enough same-endpoint exhaustion opens the endpoint fuse; a later matching ticket
-    is ``deferred`` carrying the exact fuse scope / reason / deterministic
-    ``retry_not_before`` (now_ms=0, cooldown_ms=60000 → 1970-01-01T00:01:00Z), while an
-    independent github ticket applies."""
+    """Endpoint exhaustion defers matching work until the exact retry instant."""
     plans = [plan(i) for i in ("T-1", "T-2", "T-3", "T-4")]
     plans.append(plan("O-1"))
 
@@ -180,9 +159,7 @@ def test_s3_long_delay_deferral_endpoint_fuse_with_retry_not_before():
 
 
 def test_s4_permanent_failure_not_masked_under_open_scope():
-    """A genuine ``permanent`` signal is ``failed`` and drives ``degraded=True``; under an
-    already-open endpoint scope it is NEVER reclassified to ``deferred`` — an open fuse
-    must not mask a real failure."""
+    """A permanent failure stays failed even when its endpoint fuse is open."""
     plans = [plan(i) for i in ("T-1", "T-2", "T-3", "T-4")]
 
     def execute(ticket_plan, mutation):
@@ -213,10 +190,7 @@ def test_s4_simple_permanent_failure_is_failed_and_degraded():
 
 
 def test_s5_provider_scope_fuse_isolates_and_never_conflates_independent_provider():
-    """Fuse-eligible exhaustion spanning two endpoints of ONE provider opens a
-    PROVIDER-scope fuse; remaining matching-provider work is ``deferred`` carrying
-    ``fuse_decision.scope == 'provider'``, while an INDEPENDENT provider's ticket stays
-    ``applied`` — scopes are isolated, never conflated."""
+    """A provider fuse defers matching work and leaves other providers active."""
     order = ("J-A1", "J-A2", "J-B1", "J-B2", "J-C1", "G-1")
     plans = [plan(i) for i in order]
 

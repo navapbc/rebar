@@ -1,34 +1,8 @@
-"""Route-census guard for AC6/AC7 (single-vast-roan / ADR 0107): production is
-cut over to the typed payload contract, with the shadow-comparator module kept
-strictly out of the loop.
+"""Typed payload routing remains limited to approved production cutover sites.
 
-This story wires ``mutation_payloads.py`` (the typed ``Mutation.payload``
-dataclasses) into the two production modules the ADR's "Cut"/"Delete" step
-names — the outbound producer (``outbound_pass.py``, which now constructs
-``OutboundCreatePayload``/``OutboundUpdatePayload``/``OutboundDeletePayload``
-directly) and the dispatch-shape normalizer (``batch_dispatch.py``'s
-``_mutation_to_batch_dict``, which now reads those dataclasses' own named
-attributes instead of sniffing an ambiguous dict shape). ``payload_shadow.py``
-(the side-effect-free shadow-replay comparator built by the `e9d5` dependency
-story) stays additive/shadow-only — no production dispatch/producer module may
-import it.
-
-This test proves both halves mechanically, without relying on a subjective
-"no bridge is presented as final architecture" judgment call:
-
-1. NONE of the named production modules import ``payload_shadow`` — nothing
-   wires the shadow-comparator path into a real dispatch decision.
-2. ONLY ``outbound_pass`` and ``batch_dispatch`` (the two named cutover call
-   sites) import ``mutation_payloads``; every other named production module
-   still does not — the wiring didn't spread further than the ADR's scope.
-3. Each named production entry point still exists with its documented shape
-   (``typed_dispatch._LEAVES`` still has exactly its 10 registered leaves,
-   ``batch_dispatch._mutation_to_batch_dict``/``applier.apply`` still resolve)
-   — a cheap, portable "this story only touched what it says it touched"
-   corroboration alongside (1) and (2).
-
-Pure source-text + attribute inspection: no git diff, no I/O beyond reading
-already-imported modules' source files.
+No production module imports the shadow comparator. Only ``outbound_pass`` and
+``batch_dispatch`` import ``mutation_payloads``, and documented entry points remain
+present. The census uses source and attribute inspection without transport I/O.
 """
 
 from __future__ import annotations

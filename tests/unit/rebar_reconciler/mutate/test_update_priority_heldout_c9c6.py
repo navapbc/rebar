@@ -1,15 +1,8 @@
-"""Held-out validation for bug c9c6 — authored independently of the implementation.
+"""Held-out contract for priority target selection and ACLI command scope.
 
-The ticket's open question was whether ``acli_cmd`` can encode a Jira target distinct
-from ``resolve_jira_settings()``. It cannot: it is consumed in exactly ONE place,
-``acli_subprocess._run_acli`` (``base = acli_cmd if acli_cmd is not None else
-_DEFAULT_ACLI_CMD; full_cmd = base + cmd``), i.e. an argv prefix for the ``acli``
-binary. ``update_priority`` spawns nothing at all -- it is a direct ``urllib`` PUT --
-so no argv prefix could ever apply to it. Signature hygiene, not a cross-target write.
-
-These tests pin the three things that must hold after the parameter is removed, and
-in particular the one the fix could plausibly get wrong: over-reaching and stripping
-``acli_cmd`` from the paths that legitimately need it.
+``update_priority`` sends REST directly to the configured Jira target and accepts no
+``acli_cmd``. Operations that spawn ACLI retain ``acli_cmd`` as an argument-vector
+prefix. Coverage guards both boundaries.
 """
 
 from __future__ import annotations
@@ -83,9 +76,7 @@ def test_priority_put_targets_the_configured_jira_not_a_hardcoded_default(
 
 
 def test_acli_cmd_is_still_honoured_where_a_subprocess_is_actually_spawned() -> None:
-    """The regression this fix could plausibly cause: stripping `acli_cmd` from the
-    paths that DO exec the binary. `_run_acli` must still accept it, and the sibling
-    ops that spawn acli must still take it."""
+    """Subprocess-backed operations retain the acli_cmd argument-vector prefix."""
     assert "acli_cmd" in inspect.signature(acli_subprocess._run_acli).parameters
     for fn_name in ("get_issue", "add_comment"):
         fn = getattr(acli_cli_ops, fn_name)
@@ -95,10 +86,7 @@ def test_acli_cmd_is_still_honoured_where_a_subprocess_is_actually_spawned() -> 
 
 
 def test_run_acli_uses_acli_cmd_as_an_argv_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pins the semantics the investigation rests on: `acli_cmd` is prepended to the
-    subcommand argv and carries no target/credential of its own. If this ever stopped
-    being true, the (b) answer -- and therefore this whole remediation -- would need
-    revisiting."""
+    """The ACLI prefix precedes its subcommand and carries no Jira target."""
     captured: dict[str, Any] = {}
 
     class _FakePopen:

@@ -1,17 +1,8 @@
-"""Portable legacy-vs-typed shadow replay over the versioned corpus (ADR 0107, e9d5).
+"""Versioned legacy and typed payloads match except for approved rejects.
 
-Loads ``tests/fixtures/reconciler/payload_corpus/v1/scenarios.json`` and drives
-every scenario through ``rebar_reconciler.payload_shadow``:
-
-* ``expect: "match"`` scenarios must produce byte-identical legacy/typed
-  ``serialize_manifest`` output (AC5: "zero unexplained differences").
-* ``expect: "reject"`` scenarios must raise from typed construction — each is
-  an approved, named, rationale-carrying intentional delta (see the corpus
-  README's "Approved intentional deltas" section and the ticket comment
-  recording sign-off).
-
-No I/O anywhere in this file: pure JSON load + pure dataclass construction +
-pure serialization compare.
+The corpus compares serialization for supported mutations and requires typed
+construction to reject documented legacy-only inputs. Comparison performs no transport
+or ticket-store I/O.
 """
 
 from __future__ import annotations
