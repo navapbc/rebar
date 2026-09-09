@@ -1,15 +1,8 @@
-"""``build_agent_kwargs`` + the post-call telemetry pair — the last of ADR 0056's four named
-extractions, lifted out of ``PydanticAIRunner.run()``.
+"""Verify the ``build_agent_kwargs`` extraction and post-call telemetry seam.
 
-A relocation has no new behaviour, so the real regression net is the existing suite passing
-UNCHANGED. What CAN be asserted here is the structure and the contracts the move has to
-preserve: the kwargs dict is byte-shaped the same, the ``tool_step_limit`` convergence
-boundary still rewrites tools into a filtered toolset, the optional keys stay ABSENT rather
-than ``None``, the new module clears the anti-fragmentation floor, and it is a genuine leaf.
-
-Deliberately NOT asserted: any ceiling on ``runner.py``'s own line count.
-``.github/module-size-limit.txt`` is the single authoritative limit (ADR 0058), and the
-module-size policy forbids splitting to hit a number.
+The extracted leaf preserves kwargs shape, tool-step convergence filtering, and
+omission of unused optional keys. Existing regression tests cover unchanged behavior,
+while ``.github/module-size-limit.txt`` remains the authoritative size limit.
 """
 
 from __future__ import annotations

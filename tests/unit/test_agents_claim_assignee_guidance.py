@@ -1,13 +1,8 @@
-"""Guard the claim-assignee guidance in the canonical agent guide (bug 5cc0).
+"""Keep claim guidance aligned with configured assignee resolution.
 
-`AGENTS.md` used to instruct `claim <id> --assignee <you>` unconditionally. An explicit
-`--assignee` always wins over the configured `ticket.default_assignee`
-(`_commands/claim.py`: `if assignee is None: assignee = _config_default_assignee(...)`,
-covered by `tests/unit/test_claim_default_assignee.py`), so the agent path never reached
-the configured default — and `<you>` / `assignee="me"` invite a bare handle the reconciler
-cannot resolve to a remote user, which the inbound differ then clears back to `""`
-(bug 544e). `docs/config.md` already documents the correct rule; these tests keep the two
-documents from contradicting each other.
+Agents omit ``--assignee`` so ``ticket.default_assignee`` can apply. Explicit
+overrides use a Jira-resolvable email or ``accountId`` because reconciliation clears
+unresolved handles. Tests keep ``AGENTS.md`` aligned with ``docs/config.md``.
 """
 
 from pathlib import Path

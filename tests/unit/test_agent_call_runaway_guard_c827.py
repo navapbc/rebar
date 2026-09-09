@@ -1,12 +1,10 @@
-"""c827: the runaway actuator — detection must ACT, bounded on both kill paths.
+"""Specify bounded runaway-loop detection at the agent-call seam.
 
-Held-out oracle for the c827 acceptance criteria: a repeating tool-call cycle is
-detected DURING the run (windowed distinct-ratio, window 24, trip <= 0.50), aborted
-with a typed error, classified typed by ``interpret_failure`` (never the provider-
-outage bucket), and routed into the shipped bounded recovery + tool-free finalizer.
-Healthy breadth is never touched; both kill paths (requests AND tool calls) are
-bounded; the discriminator is memoised once per run_step and single-sourced from
-``usage_log``.
+A 24-call window aborts at a distinct-call ratio of at most 0.50 and raises
+``RunawayToolLoopError``. ``interpret_failure`` retains that classification, while
+request and tool-call limits route through bounded recovery and a tool-free finalizer.
+Broad healthy call sequences remain unaffected. The discriminator is computed once
+per ``run_step`` from ``usage_log``.
 """
 
 from __future__ import annotations

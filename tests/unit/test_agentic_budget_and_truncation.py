@@ -1,17 +1,9 @@
-"""Regression tests for the plan-review step-budget exhaustion + truncation retry-storm
-(joe-debug RC-A + RC-B).
+"""Cover agentic review budgets and unretryable structured-output failures.
 
-RC-A: the framework agent step budget was 50 (~25 tool-call cycles) — far too low for an
-agentic review, so a code-grounding finder / multi-child container call exhausted it and
-raised a step-budget ``LLMRunnerError``. The default is now 250.
-
-RC-B: a TRUNCATED structured-output turn (the model hit its output-token cap) is a
-complete, unusable response that re-running the SAME call reliably reproduces — yet the
-bounded retry re-paid the full (agentic) call ``1 + OUTPUT_RETRIES = 3`` times before
-failing. Two fixes: (1) ``cfg.max_tokens`` is now actually WIRED into the model call
-(previously dropped → pydantic-ai's 4096 default applied, guaranteeing truncation on a
-multi-child review); (2) truncation/refusal/content-filter raise ``UnretryableOutputError``
-so the retry loop FAST-FAILS instead of retrying a deterministically-doomed call.
+Agentic reviews receive 250 steps. ``cfg.max_tokens`` reaches the model call, while
+truncation, refusal, or content filtering raises ``UnretryableOutputError`` without
+output retries. These rules prevent repeated calls that cannot produce a usable
+structured response.
 """
 
 from __future__ import annotations

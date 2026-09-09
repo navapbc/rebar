@@ -1,12 +1,7 @@
-"""Guard the packaged agent skills against ticket workflow regressions.
+"""Keep packaged agent skills aligned with ticket workflow policy.
 
-Ticket comely-craven-apatosaur establishes atomic claim behavior.
-
-Ticket stealthful-calmy-erin establishes plan-review behavior.
-
-Ticket helpful-stale-wildcat records the portable assignee rule.
-
-Ticket arid-gutless-myna introduced the blocked-review wording that this module corrects.
+The assertions cover atomic claims, plan-review handling, portable assignees, and
+wording for blocked reviews.
 """
 
 from pathlib import Path

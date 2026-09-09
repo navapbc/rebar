@@ -1,26 +1,14 @@
-"""The completion-floor CALIBRATION gold set (epic 66ac / story 77cf).
+"""Provide calibration cases for Pass 2 analysis and the Pass 3 completion floor.
 
-A frozen, labelled corpus for the Pass-2 completion sub-call (attribution / containment / layer) and
-the Pass-3 completion floor. Each :class:`GoldCase` carries a synthetic finding, the **correct**
-sub-answers (``gold``), whether its attributed child is delivered-now, and the **expected floor
-outcome** (``expect_drop``). It has two consumers:
+Each :class:`GoldCase` supplies a synthetic finding, expected subanswers, child
+delivery state, and ``expect_drop``. ``test_completion_floor_e2e.py`` verifies
+deterministic floor behavior. ``scripts/calibrate_completion_floor.py`` measures
+model agreement with the same labels.
 
-* the DETERMINISTIC e2e test (``test_completion_floor_e2e.py``) feeds ``gold`` through the floor and
-  asserts ``expect_drop`` — pinning the floor's drop/keep logic against every anchor;
-* the LIVE calibration (``scripts/calibrate_completion_floor.py``) feeds each finding to the REAL
-  model and scores the model's answers against ``gold`` — the agreement recorded under
-  ``docs/calibration/``.
-
-The five anchor categories (the must-never-suppress set is everything but ``DROP``):
-
-* ``DROP`` — pure re-litigation of a delivered child's settled plan text → the ONLY drop.
-* ``DELIVERED_FUNC`` — about the delivered *functionality* (mechanism/contract), not plan → keep.
-* ``SECURITY_CONTRACT`` — a security (T5c) / contract (T10) criterion → keep (preserve-set veto).
-* ``CROSS_SIBLING`` — spans an OPEN sibling / the system, not limited to closed work → keep.
-* ``FORCE_CLOSED`` — attributed to a force-closed (unverified, not delivered-now) child → keep.
-
-Provenance ∈ {``G3G4`` (structural container finding — carries ``_container_child``), ``coherence``
-(the COH criterion), ``overlay`` (the T-series overlay criteria)}.
+Only ``DROP`` findings relitigate a delivered child's plan and may be removed.
+``DELIVERED_FUNC``, ``SECURITY_CONTRACT``, ``CROSS_SIBLING``, and
+``FORCE_CLOSED`` findings remain. Provenance is ``G3G4`` for structural container
+findings, ``coherence`` for COH, or ``overlay`` for T-series criteria.
 """
 
 from __future__ import annotations

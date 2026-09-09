@@ -1,22 +1,10 @@
-"""Sanctioned administrative-disposition close path (ticket fc20-2df1-426e-42ab).
+"""Define the attested administrative close path.
 
-THE PROBLEM. Store mining found the single largest FORCE_CLOSE class to be ADMINISTRATIVE
-closes — duplicate, obsolete, superseded, wontfix — where completing the described work was
-never the intent, so the completion verifier can never PASS them and operators reached for
-``--force``. A narrow attested-disposition path existed but was doubly scoped down: to the
-class set {duplicate, not_a_bug, escalated} and to ``bug`` tickets only, so an obsolete
-task/story/epic had NO truthful exit. And the completion-FAIL message never mentioned the
-path that exists (incident 9b70).
-
-THE FIX (asserted here): the existing ``--class`` mechanism gains ``obsolete`` /
-``superseded`` / ``wontfix``; a non-bug close may carry ``--class`` only from the new
-``ADMINISTRATIVE_CLASSES`` subset (write-side, gate-independent); ``obsolete`` / ``wontfix``
-REQUIRE a ``--reason`` which persists as a new present-only ``close_reason`` key on the close
-STATUS event; reason-only administrative closes skip the billable verifier and mint a SIGNED
-disposition attestation whose manifest carries the class+reason line; ``duplicate`` /
-``superseded`` demand a live replacement link; and the completion-FAIL message finally
-enumerates the applicable ``--class`` values so a wontfix-shaped ticket is offered a
-truthful exit.
+Non-bug tickets accept only ``duplicate``, ``obsolete``, ``superseded``, or
+``wontfix`` as administrative classes. ``obsolete`` and ``wontfix`` require a
+persisted reason. ``duplicate`` and ``superseded`` require a replacement link.
+Eligible closes skip completion verification, record a signed disposition manifest,
+and expose the applicable classes in completion-failure guidance.
 """
 
 from __future__ import annotations

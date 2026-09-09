@@ -1,12 +1,8 @@
-"""The ``ac-satisfiability`` plan-review criterion (bug creamy-cocksure-elkhound).
+"""Exercise the advisory ``ac-satisfiability`` plan-review criterion.
 
-Plan review certified an epic whose acceptance criteria were mutually unsatisfiable: no
-criterion owned the question "can all of this ticket's own commitments hold at once?" —
-``COH`` scans BETWEEN sections and disclaims within-section contradictions, ``E1`` maps
-criteria to described work, ``F1`` judges one criterion's measurability. These tests pin the
-new criterion's registration, the GENERICITY of its rubric (it must describe the defect
-class, not the migration that motivated it), and that it is actually WIRED into a Pass-1
-review rather than merely registered.
+The criterion detects contradictions among one ticket's acceptance criteria, a scope
+not covered by cross-section coherence, work mapping, or per-criterion measurability.
+Tests verify generic rubric text, registry metadata, and Pass 1 execution.
 """
 
 from __future__ import annotations
@@ -27,13 +23,10 @@ def _fake_cfg() -> LLMConfig:
 
 
 def test_routing_entry() -> None:
-    """Registered as a CHEAP single-turn criterion in the coherence facet, advisory.
+    """Verify advisory coherence routing through the single-turn execution tier.
 
-    The exec tier is load-bearing: a 1-TURN criterion rides ``chunk_by_facet``'s
-    fixed-size slicing (so it adds a call only when the applicable population is already an
-    exact multiple of the chunk size) and is never shed by the per-plan budget cap. An
-    AGENT-tier equivalent would cost ~85x and could be shed on a large ticket. The advisory
-    posture is deliberate — promoting it needs replay calibration data.
+    Fixed-size facet chunks avoid the per-plan agent budget and add a call only when
+    the applicable population fills a chunk. Promotion requires replay calibration.
     """
     assert registry.validate_packaged_routing() == []
     assert CRITERION in registry.CANONICAL_LLM
@@ -123,12 +116,10 @@ def test_graded_by_existing_internal_conflict_axis() -> None:
 
 
 def test_reaches_pass1_and_attributes() -> None:
-    """END-TO-END WIRING through the Pass-1 single-turn path: the criterion's rubric
-    reaches the finder call, and a finding tagged with its id survives criterion-attribution
-    validation (out-of-set tags are dropped, so a mis-registered id would vanish here).
+    """Verify Pass 1 sends the rubric and preserves findings attributed to its ID.
 
-    This proves the criterion participates in a review. Judging whether the LLM's
-    satisfiability calls are ACCURATE is what the deferred dogfooding pass is for.
+    Attribution drops unknown criterion IDs, so the surviving finding proves
+    registration and execution. Model judgment accuracy remains part of calibration.
     """
     crit = registry.by_id()[CRITERION]
     captured: dict[str, str] = {}
