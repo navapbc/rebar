@@ -97,7 +97,9 @@ def test_code_review_approved_blocking_criteria_set() -> None:
     # gate can block consequential test-sufficiency findings; PLUS the two base dimensions story
     # 4144-2784-6437-4efb routed and flipped at 0.54 off the same block-impact replay
     # (correctness, edge-cases) — measured at 4.04% and 1.74% of all changes, inside the 8.0%
-    # operator-accepted friction budget recorded on the `tests` entry.
+    # operator-accepted friction budget recorded on the `tests` entry. Ticket
+    # 3055-e92d-7063-4a32 then approved `concurrency` from the code-v5 calibration record,
+    # docs/experiments/code-review-threshold-calibration-code-v5.md.
     # Any addition beyond this set must be a deliberate, re-approved change (this pin forces it).
     assert blocking == {
         "secret-detection",
@@ -110,11 +112,12 @@ def test_code_review_approved_blocking_criteria_set() -> None:
         "tests",
         "correctness",
         "edge-cases",
+        "concurrency",
     }
     for c in ("secret-detection", "high-critical-security"):
         assert idx[c].get("exec") == "DET"
     # `security` is the deliberate exception to the old "only DET blocks" invariant.
-    assert idx["security"].get("exec") == "AGENT" and idx["security"].get("block_threshold") == 0.54
+    assert idx["security"].get("exec") == "AGENT" and idx["security"].get("block_threshold") == 0.45
 
 
 # The plan-review criteria whose hard-block posture is APPROVED (set by the threshold-recalibration
