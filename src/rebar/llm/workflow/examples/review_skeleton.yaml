@@ -1,15 +1,8 @@
 # yaml-language-server: $schema=https://github.com/navapbc/rebar/schemas/workflow.v3.schema.json
 #
-# RETAINED visual-editing sample (epic A / story A3 — sage-votary-logic; KEPT by Joe's
-# selection in epic B / story B6). It proves the 4-pass review SHAPE that epic B migrated
-# plan-review onto, runs end-to-end on the v3 engine OFFLINE (--dry-run / FakeAgentRunner,
-# no tokens): an overlay precompute -> a `batch` finder over an authored, prompt-library-
-# backed `criteria` list (one criterion conditionally included via `when`) -> one aggregate
-# verify -> a deterministic decide.
-#
-# It uses catalog prompt-ids (code-quality/security/tests/ticket-quality/completion-verifier).
-# This is the ONE retained sample (the throwaway examples/code_review.yaml + the templates.py
-# scaffold were removed in B6); the two REAL gate workflows live in workflow/gates/.
+# Retained offline visual-editing sample for the v3 four-pass review shape: precompute
+# overlays, batch prompt-backed criteria, aggregate verification, then deterministic
+# decision. Real gates live under workflow/gates/.
 schema_version: "3"
 name: review_skeleton
 description: Retained 4-pass review sample proving overlay + batch + verify + decide on the v3 engine.
@@ -28,9 +21,8 @@ steps:
       keyword_triggers:
         security: [secret, password, token, credential]
 
-  # 2. Pass-1 finders: a `batch` runs the finder over the INCLUDED criteria in budgeted
-  #    batches. Each criterion is an authored, prompt-library-backed entry; `security`
-  #    fires only when the overlay trigger is truthy (conditional inclusion).
+  # 2. Run prompt-backed Pass-1 criteria in budgeted batches; include `security` only
+  #    when its overlay trigger is true.
   - id: finders
     needs: [triggers]
     batch:
@@ -41,9 +33,8 @@ steps:
           when: ${{ steps.triggers.outputs.security }}
         - prompt: tests
       usd_budget: 2.0
-      # Classes, not literal ids: a bare `claude-*` id infers provider `anthropic`, so this
-      # example would pin an Anthropic ladder into any provider's run. MEASURED in run
-      # [rebar:f124-f14a-fd62-4973], where this ladder called direct Anthropic on the bedrock arm.
+      # Use model classes: literal `claude-*` ids infer Anthropic and would pin the
+      # example to the wrong provider.
       model_ladder: [trivial, standard, frontier]
 
   # 3. Pass-2 verify: ONE aggregate verifier call over the Pass-1 findings.

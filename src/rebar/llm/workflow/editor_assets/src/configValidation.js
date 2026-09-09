@@ -1,20 +1,7 @@
 /**
- * Live config validation + per-kind help (story 998e).
- *
- * Wires the editor to the Python `/validate` endpoint so a step's `<rebar:Config>`
- * JSON is checked against its input contract BEFORE Save, with three DISTINCT states
- * mirrored from the server's defined shape `{ok, errors:[{path,message}], unavailable}`:
- *
- *   - VALID    → the inline error region is cleared and Save is enabled.
- *   - ERRORS   → a red inline error region lists `errors[]` and Save is BLOCKED.
- *   - UNAVAILABLE → a distinct, VISIBLE amber banner ("validation unavailable"); this
- *     fires when the response has `unavailable:true` OR the POST fails / times out /
- *     returns 500. It is NEVER rendered as valid and NEVER silently swallowed, and Save
- *     is BLOCKED (fail-closed) just like for errors.
- *
- * Edits are DEBOUNCED (~300ms) so we don't POST on every keystroke. The per-kind HELP
- * panel is driven by window.REBAR_KIND_HELP (the single Python source of truth, also
- * served by GET /help) so it never drifts from the contracts.
+ * Validate rebar config before Save. Valid responses enable Save; errors and unavailable
+ * responses remain visibly distinct and fail closed. Requests are debounced, and per-kind
+ * help comes from the server-backed REBAR_KIND_HELP registry.
  */
 
 const DEBOUNCE_MS = 300;

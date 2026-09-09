@@ -1,19 +1,7 @@
 /**
- * The prompt LIBRARY + CREATE/EDIT side panel and the typed INSERTION chooser (6592).
- *
- * A vanilla-DOM panel (no extra framework) mounted next to the canvas. It:
- *   - lists built-in + project prompts from GET /prompts, grouped by the CLOSED
- *     category vocabulary (review/verifier/transform/code/exploration), in a dropdown;
- *   - shows the typed INSERTION chooser: pick a scripted op (from window.REBAR_CONTRACTS)
- *     or a prompt (from /prompts), grouped by category, and insert a valid uses:/prompt:
- *     step (via insertTypedStep);
- *   - a CREATE/EDIT form (id + front-matter fields + a body textarea) that on Save POSTs
- *     to /prompt/save, SHOWS the resolved write target path (from GET /prompt?id= or the
- *     fresh /prompt?id= probe) BEFORE saving, and surfaces server errors (collision /
- *     invalid / neither-writable) inline;
- *   - guards discard-of-unsaved-edits (confirm) and empty/invalid id client-side.
- *
- * All fetches carry the per-session token (window.REBAR_TOKEN) the host page injected.
+ * Token-authenticated prompt library, typed insertion chooser, and create/edit panel.
+ * It groups built-in and project entries, previews write targets, surfaces server errors,
+ * validates ids, and confirms before discarding unsaved edits.
  */
 import { insertTypedStep } from "./insertionProvider";
 
@@ -40,9 +28,8 @@ function el(tag, attrs = {}, ...kids) {
   return n;
 }
 
-// The scripted ops with declared contracts (window.REBAR_CONTRACTS is keyed by op/prompt
-// name → contract view). We can't reliably split ops from prompts there, so the op list
-// is best-effort: any contract whose name isn't a known prompt id is treated as an op.
+// REBAR_CONTRACTS mixes ops and prompts; treat names absent from the prompt catalog as
+// scripted ops.
 function scriptedOps(promptIds) {
   const all = Object.keys(window.REBAR_CONTRACTS || {});
   return all.filter((name) => !promptIds.has(name));
@@ -66,10 +53,8 @@ export function mountPromptLibrary(modeler, container) {
     editForm.style.display = show ? "" : "none";
   }
 
-  // ── INSERTION chooser (on-demand: revealed by the "Add step" button) ─────────
-  // The structural kinds (branch/loop/map/batch) carry no action name — their config is
-  // edited in the panel after insert — so the "choice" dropdown only applies to the leaf
-  // kinds (prompt/scripted op). NAMELESS_KINDS drives hiding the choice select for them.
+  // The on-demand chooser asks only leaf kinds for an action. NAMELESS_KINDS hides that
+  // choice for structural steps, whose config is completed after insertion.
   const NAMELESS_KINDS = new Set(["branch", "loop", "map", "batch"]);
   const insertKind = el("select", { id: "rebar-insert-kind" });
   insertKind.appendChild(el("option", { value: "service" }, "prompt (prompt:)"));

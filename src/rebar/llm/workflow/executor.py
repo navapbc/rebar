@@ -1,34 +1,12 @@
-"""The thin linear workflow executor (WS-C2).
+"""Synchronous topological workflow execution.
 
-Deliberately minimal. This runs a validated workflow's steps in
-``graphlib.static_order`` (topological) order, threading each step's named outputs
-forward so a downstream step can reference ``${{ steps.<id>.outputs.<name> }}``.
-Scripted steps (WS-E) dispatch through a registry; agentic steps (WS-D) dispatch
-through an injected runner. Both are SEAMS so this module owns control flow only,
-not step internals.
-
-**Thin on purpose (the Burr tripwire).** A single in-process, synchronous, linear
-pass — NO ``asyncio`` / ``concurrent.futures`` / ``threading`` / ``multiprocessing``
-/ retry libraries. ``tests/unit/workflow/test_executor_tripwire.py`` reads THIS
-file and fails if any of those is imported, so the executor cannot silently grow a
-scheduler. The run state is modeled as an immutable, copy-on-write
-:class:`RunState` (a Burr-style ``State``) so that adopting Burr later is a swap,
-not a rewrite.
-
-Burr-adoption trigger list (full rationale + the withdrawn alternatives: ADR 0065). Adopt
-the framework only when one is TRUE — until then this hand-rolled executor is correct and
-cheaper:
-  1. durable cross-process PAUSE/RESUME (human-in-the-loop holds that outlive the run),
-     beyond our crash-recovery replay;
-  2. non-linear control flow the static DAG can't express (data-dependent branching/looping/
-     fan-out);
-  3. parallel step execution becomes a hard requirement (concurrent independent steps);
-  4. Burr's telemetry/UI wanted as a product surface rather than our event log.
-None hold today, so the tripwire stays armed.
-
-Persistence (WORKFLOW_RUN/WORKFLOW_STEP events) goes through a :class:`RunRecorder`
-seam; the in-memory default keeps this module testable, and the event-backed
-recorder with marker-after-effect idempotency + determinism capture is WS-C3.
+Scripted and agentic steps use injected seams while immutable :class:`RunState`
+threads named outputs. A tripwire forbids scheduler and retry imports. Adopt Burr only for:
+1. durable cross-process pause/resume;
+2. data-dependent non-linear flow;
+3. required parallel step execution; or
+4. Burr telemetry/UI as a product surface.
+The :class:`RunRecorder` seam supplies persistence, determinism, and idempotency.
 """
 
 from __future__ import annotations
@@ -80,29 +58,18 @@ _SECRET_RE = re.compile(r"^secrets\.([A-Za-z_][A-Za-z0-9_]*)$")
 
 
 def new_run_id() -> str:
-    """A globally-unique, sortable run id: ``{ns-timestamp}-{uuid4hex}``.
+    """Return a sortable, globally unique ``{ns-timestamp}-{uuid4hex}`` run id.
 
-    The time prefix makes runs sort newest-last (handy for listing/sweeps); the
-    uuid suffix guarantees global uniqueness even across clones writing
-    concurrently. Generated ONCE per run and persisted on every WORKFLOW_RUN/STEP
-    event so the whole run is keyed identically on every clone.
+    It is generated once and persisted on every run and step event.
     """
     return f"{time.time_ns()}-{_uuid.uuid4().hex}"
 
 
 def _capture_nondeterminism() -> dict[str, Any]:
-    """Snapshot the non-deterministic inputs a step may use — the wall clock, a
-    fresh uuid, and a random seed — ONCE per step EXECUTION (WS-C3).
+    """Capture the engine clock, UUID, and seed once per step execution.
 
-    Persisted in that execution's WORKFLOW_STEP record, so a later status/result
-    read replays the exact values the step ran with, and a step that needs a
-    clock/uuid/seed reads them from ``ctx.captured`` instead of a live source.
-    Note the scope: the capture is per execution, not immortal — a step that
-    crashed BEFORE its marker committed legitimately re-executes (forward-only
-    recovery) and captures afresh; effectively-once then rests on the effect being
-    idempotent over (run_id, step_id), which is the step's contract, not the
-    clock's. (Live external reads a step performs are the step's own concern; the
-    seed/clock/uuid are the engine-provided non-determinism.)
+    Persisted values replay through ``ctx.captured``. A pre-marker crash may
+    re-execute and recapture; effect safety remains the step's idempotency contract.
     """
     return {
         "now_ns": time.time_ns(),
@@ -131,20 +98,14 @@ class StepContext:
     workflow: Mapping[str, Any]
     target_ticket: str | None = None
     repo_root: str | None = None
-    # The full FRAME KEY of this execution (``step_id`` at the top frame; a path like
-    # ``L#2/attempt`` inside a loop/map iteration). It is the durable, iteration-aware
-    # idempotency token — a side-effecting step inside a loop/map uses
-    # ``(run_id, frame_key)`` (not ``(run_id, step_id)``, which repeats every
-    # iteration) so each iteration's effect is distinct yet replay-stable (WS-C3 / v2).
+    # Full execution frame key. Side effects use ``(run_id, frame_key)`` so nested
+    # iterations remain distinct and replay-stable.
     frame_key: str = ""
     # The immediate enclosing loop/map iteration index (None at the top frame). Carried
     # so a step can read its own iteration; the full path is in ``frame_key``.
     iteration: int | None = None
-    # Non-determinism captured ONCE for this step execution (now_ns + a fresh uuid
-    # + a random seed), persisted in the WORKFLOW_STEP record so a status/result
-    # read replays what actually happened (WS-C3). A side-effecting step uses
-    # (run_id, step_id) as its downstream idempotency token; ``captured`` gives it a
-    # clock/uuid/seed to read instead of a live source.
+    # Persisted clock, UUID, and seed for this execution; status/result reads replay
+    # these values instead of consulting live sources.
     captured: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -173,12 +134,9 @@ def register_step(
     output_schema: str | None = None,
     description: str | None = None,
 ) -> Callable[[ScriptedStep], ScriptedStep]:
-    """Decorator: register a scripted step under ``name`` (used by WS-E).
+    """Register a scripted step and expose supplied contract metadata.
 
-    The optional ``input_schema`` / ``output_schema`` (schema NAMES) and
-    ``description`` declare the step's contract (workflow authoring v2). When any is
-    given a :class:`StepContract` is recorded in ``STEP_CONTRACTS`` and exposed via
-    :func:`contract_for` — consumed by the editor inspector and the reference linter.
+    The editor and reference linter consume the resulting :class:`StepContract`.
     """
 
     def deco(fn: ScriptedStep) -> ScriptedStep:
@@ -194,14 +152,11 @@ def register_step(
     return deco
 
 
-# The agent + batch runner SEAMS live in `runners.py` (imported above and re-exported via
-# __all__). They are constructed at call time
-# in `run_workflow` (FakeAgentRunner / DefaultBatchRunner defaults).
+# Runner seams live in runners.py, remain re-exported here, and are constructed per run.
 
 
-# ── Run recorder seam (WS-C3 supplies the event-backed, idempotent one) ───────
-# The recorder classes live in recorder.py; re-exported here so existing
-# executor.RunRecorder / MemoryRecorder / TicketEventRecorder references keep working.
+# ── Recorder seam ─────────────────────────────────────────────────────────────
+# Recorder classes live in recorder.py but remain re-exported for compatibility.
 from .recorder import MemoryRecorder, RunRecorder, TicketEventRecorder  # noqa: E402
 
 __all_recorders__ = ("RunRecorder", "MemoryRecorder", "TicketEventRecorder")
@@ -212,12 +167,7 @@ __all_recorders__ = ("RunRecorder", "MemoryRecorder", "TicketEventRecorder")
 
 @dataclass(frozen=True)
 class RunState:
-    """Immutable, copy-on-write run state (pre-shaped toward a Burr ``State``).
-
-    Holds the workflow inputs and each completed step's outputs. Updates return a
-    NEW instance — no in-place mutation — so the execution history is a sequence of
-    immutable states, exactly the shape Burr would manage.
-    """
+    """Immutable workflow inputs and completed outputs; updates return a new state."""
 
     inputs: Mapping[str, Any] = field(default_factory=dict)
     outputs: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
@@ -281,11 +231,9 @@ def _resolve_one(expr: str, state: RunState, secrets: Mapping[str, str]) -> Any:
 
 
 def resolve_value(value: Any, state: RunState, secrets: Mapping[str, str]) -> Any:
-    """Substitute every ``${{ … }}`` / ``${env:VAR}`` in ``value`` (recursively).
+    """Recursively resolve step/input and environment expressions in ``value``.
 
-    A string that is EXACTLY one expression resolves to the raw referenced value
-    (which may be a list/dict — e.g. a findings array wired between steps); an
-    expression embedded in surrounding text is stringified in place.
+    A whole-string expression preserves its raw type; embedded values become text.
     """
     if isinstance(value, dict):
         return {k: resolve_value(v, state, secrets) for k, v in value.items()}
@@ -334,18 +282,16 @@ def _terminal_step(doc: Mapping[str, Any]) -> str | None:
     return sinks[-1] if sinks else None
 
 
-# ── The v2 worklist interpreter ───────────────────────────────────────────────
-# The recursive frame walk (branch/loop/map + the frame-scoped resolver + _RunCtx)
-# lives in :mod:`rebar.llm.workflow.interpreter` (scanned by the same Burr tripwire).
-# ``run_workflow`` imports it lazily below to
-# avoid an import cycle (interpreter imports the step interfaces from here).
+# ── v2 worklist interpreter ──────────────────────────────────────────────────
+# Recursive frame execution lives in interpreter and is imported lazily to avoid
+# cycling back to this module's step interfaces. The Burr tripwire scans both files.
 
 
 def _resolve_terminal_output(rc, steps: list, terminal_sid: str | None, prefix: str = "") -> Any:
-    """Resolve the executed terminal LEAF's output, descending through any terminal
-    ``branch`` into its taken arm (recursively). For a non-branch terminal this returns
-    that step's own output (the historical behaviour). ``rc.outputs`` is keyed by full
-    frame-key, so a nested arm's leaf is found at ``<branch-fk>@<arm>/<leaf-id>``."""
+    """Return the executed terminal leaf output, recursively following taken branches.
+
+    Non-branch terminals retain their own output; nested results use full frame keys.
+    """
     if not terminal_sid:
         return None
     step = next((s for s in steps if isinstance(s, dict) and s.get("id") == terminal_sid), None)
@@ -375,18 +321,11 @@ def run_workflow(
     recorder: RunRecorder | None = None,
     secrets: Mapping[str, str] | None = None,
 ) -> RunResult:
-    """Execute a validated workflow ``doc`` start to finish, synchronously.
+    """Validate, lint, and synchronously execute ``doc`` to its terminal output.
 
-    Validates + lints first (raises :class:`WorkflowValidationError` on any error),
-    then runs each step in ``static_order``, substituting expressions, dispatching
-    scripted/agent steps, and threading named outputs forward. A failed step stops
-    the run. Returns a :class:`RunResult` whose terminal-step output is the run's
-    result.
-
-    ``run_id`` defaults to a fresh globally-unique id. When ``target_ticket`` is set
-    and no ``recorder`` is given, run-state persists durably via a
-    :class:`TicketEventRecorder` (so ``get_workflow_status/result`` can read it back
-    and a crashed run can resume idempotently); otherwise it stays in memory.
+    Steps resolve expressions and thread named outputs; failure stops the run. A fresh
+    id is used by default. ``target_ticket`` selects durable ticket recording when no
+    recorder is supplied; otherwise state remains in memory.
     """
     run_id = run_id or new_run_id()
     registry = STEP_REGISTRY if scripted_registry is None else scripted_registry
@@ -399,10 +338,7 @@ def run_workflow(
     rec = recorder
     secrets = secrets or {}
     inputs = dict(inputs or {})
-    # Apply declared input defaults: a `default:` on a workflow input. Without this a
-    # `${{ inputs.<x> }}` reference to an optional input the caller omitted fails to resolve
-    # (the resolver raises on an unknown input). Only fills a MISSING key — a passed value
-    # (including a falsy one) always wins.
+    # Fill only missing inputs from declared defaults; explicit falsy values still win.
     for _name, _spec in (doc.get("inputs") or {}).items():
         if _name not in inputs and isinstance(_spec, dict) and "default" in _spec:
             inputs[_name] = _spec["default"]
@@ -423,12 +359,8 @@ def run_workflow(
         {"run_id": run_id, "workflow_name": name, "status": "running", "inputs": inputs}
     )
 
-    # Walk the IR frame by frame (the v2 worklist interpreter). For a leaf-only
-    # (migrated-v1) workflow this degenerates to the old linear pass: the top frame's
-    # keys ARE the bare step ids (frame_key == step_id), so the recorded markers and
-    # the RunResult below are byte-compatible with the v1 path. Imported lazily — the
-    # interpreter imports the step interfaces from here, so a module-level import
-    # would cycle.
+    # Walk v2 frames. Leaf-only workflows retain v1 bare step keys and compatible
+    # markers/results. The lazy import avoids cycling through the step interfaces.
     from .interpreter import _execute_frame, _RunCtx
 
     rc = _RunCtx(
@@ -447,11 +379,8 @@ def run_workflow(
 
     run_status = "failed" if rc.failed else "succeeded"
     run_error = rc.error
-    # The terminal step may be a `branch` (the gate workflows end in one), whose own
-    # output is just the routing marker ``{taken: arm}`` — NOT the verdict the executed
-    # arm produced. Descend through the taken arm(s) to the real terminal LEAF so
-    # ``terminal_output`` carries the verdict regardless of branching (epic B / story B5;
-    # backward-compatible — a plain terminal still returns its own output).
+    # A terminal branch returns routing metadata, so follow its taken arm to the verdict;
+    # plain terminals keep their own output.
     terminal_output = (
         _resolve_terminal_output(rc, list(doc.get("steps", [])), terminal) if terminal else None
     )
@@ -488,11 +417,8 @@ def _dispatch(
     if ctx.kind == "agent":
         result = runner.run(ctx)
         sr = result if isinstance(result, StepResult) else StepResult(outputs=dict(result))
-        # Materialize the declared output-schema's default-valued fields when a lean/canned
-        # runner emitted a sparse payload, so downstream wiring can reference an always-present
-        # model default (e.g. completion_verdict's `criteria: []`) instead of raising on a
-        # missing output. A live structured run already emits these via model_dump(exclude_none);
-        # runner-supplied values always win (defaults are merged UNDER the outputs).
+        # Add schema defaults beneath sparse runner output so downstream references remain
+        # resolvable; explicit runner values always win.
         schema = ctx.step.get("output_schema") if isinstance(ctx.step, dict) else None
         if schema:
             from rebar.llm import contracts
@@ -504,12 +430,8 @@ def _dispatch(
                 sr = StepResult(
                     outputs={**defaults, **sr.outputs}, status=sr.status, error=sr.error
                 )
-        # Same reason, for the one runner-stamped field that is CONDITIONAL rather than
-        # schema-declared: `provider_provenance` (343b). findings.finalize_outcome emits it only
-        # when the runner resolved a provider — FakeRunner and every canned/injected agent omit
-        # it — yet the gates wire `${{ steps.<agent>.outputs.provider_provenance }}`, so it must
-        # resolve offline too. Always-present-but-None = "no provider record for this call", which
-        # downstream carries as an ABSENT verdict key, exactly like a runner that stamped nothing.
+        # Offline/canned runners omit conditional provider_provenance. Supply None so gate
+        # wiring resolves it and downstream verdicts still represent the record as absent.
         if "provider_provenance" not in sr.outputs:
             sr = StepResult(
                 outputs={**sr.outputs, "provider_provenance": None},
@@ -558,12 +480,9 @@ def _step_record(
     return record
 
 
-# ── Snapshot TTL sweep (WS-C3 owns the sweep; WS-D owns create + teardown) ─────
+# ── Snapshot TTL sweep ────────────────────────────────────────────────────────
 
-# Conventional location for git-ref filesystem snapshots a run creates (WS-D). The
-# sweep is here (run-lifecycle concern); WS-D writes into this directory and
-# normally tears its own snapshot down in a finally — the sweep is the backstop for
-# the crash case (a run that died before teardown leaves an orphan).
+# Runs normally tear down snapshots; this lifecycle backstop removes crash orphans.
 SNAPSHOT_DIR_NAME = ".rebar/run_snapshots"
 SNAPSHOT_TTL_SECONDS = 24 * 3600  # a day; far longer than any run, short enough to GC
 
@@ -577,10 +496,9 @@ def snapshot_root(repo_root: str | None = None) -> Path:
 def sweep_orphan_snapshots(
     repo_root: str | None = None, *, ttl_seconds: int = SNAPSHOT_TTL_SECONDS
 ) -> list[str]:
-    """Remove snapshot tmpdirs older than ``ttl_seconds`` (orphans from crashed
-    runs). Returns the list of removed paths. Best-effort: an unremovable entry is
-    skipped, not raised — the sweep must never break a run. Idempotent and safe to
-    call at the start of every run.
+    """Best-effort removal of snapshot directories older than ``ttl_seconds``.
+
+    Returns removed paths, skips failures, and is safe to repeat before each run.
     """
     # Published snapshot trees are chmod'd read-only, so a plain rmtree can fail to
     # remove them (and ignore_errors would silently leak the cache). Restore write

@@ -1,24 +1,7 @@
 /**
- * rebar workflow visual editor — the browser app.
- *
- * A bpmn-js *Modeler* (its palette is BPMN-only, so edits stay inside a metamodel that
- * maps back to the rebar IR) wired with three bpmn-io pieces so a human can actually
- * READ and EDIT a workflow:
- *
- *   - bpmn-auto-layout : on open we DISCARD any incoming DI and lay the diagram out
- *     fresh, left-to-right, so parallel steps get their own rows and edges dock to node
- *     edges (fixes the "everything on one row / arrows through the text" problem — the
- *     Python serializer no longer hand-rolls geometry).
- *   - bpmn-js-properties-panel + a custom Rebar provider : a side panel that shows each
- *     step's kind and its rebar config (the `<rebar:Config>` JSON, the agent prompt, the
- *     branch condition, loop bounds, …) and lets the user EDIT it — previously invisible.
- *   - the rebar moddle extension : so `<rebar:Config>`/`<rebar:Agent>` survive save.
- *
- * Save serializes back to BPMN and POSTs it to `/save` with the per-session token; the
- * Python side round-trips it to the IR (the visual format is never written to git).
- *
- * The host page injects three globals: REBAR_DIAGRAM (BPMN xml), REBAR_TOKEN, and
- * REBAR_MODDLE (the descriptor).
+ * Browser workflow editor. It auto-lays out BPMN, exposes typed rebar properties, and
+ * preserves extension data through Save's token-authenticated BPMN-to-IR round trip.
+ * The host injects REBAR_DIAGRAM, REBAR_TOKEN, and REBAR_MODDLE.
  */
 import BpmnModeler from "bpmn-js/lib/Modeler";
 import {
