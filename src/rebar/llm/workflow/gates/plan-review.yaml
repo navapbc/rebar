@@ -64,14 +64,8 @@ steps:
           # `include_<ID>` below), but the runner re-routes ACTIVATED project criteria itself,
           # so it needs the allowlist to filter those too. `[]` = normal full review.
           probe_criteria: ${{ inputs.probe_criteria }}
-        # Pass-1 GENERATES the findings that become blocking, so it runs on the FRONTIER class
-        # (ticket 77ed). Pass-2 verify and Pass-4 coach run on `standard` instead — that downgrade
-        # is deliberate and lives in `_verifier_cfg`; this rung must not be conflated with it.
-        #
-        # ONLY RUNG 0 IS READ: every consumer takes `model_ladder[0]` and nothing else, and the
-        # full list is journaled for observability only. Context-limit escalation comes from the
-        # separate `sizing.MODEL_LADDER` (bug 7de4), so a second rung here would be decorative
-        # rather than a fallback.
+        # Pass-1 uses frontier because it generates blocking findings; verify and coach use
+        # standard. Consumers read only rung 0—context escalation uses sizing.MODEL_LADDER.
         model_ladder:
         - frontier
         criteria:
@@ -168,12 +162,8 @@ steps:
       uses: plan_review_grounding
       with:
         findings: ${{ steps.finders.outputs.findings }}
-    # Pass-2 verify is DYNAMIC (B5): branch on `code_grounded` to pick the agentic vs the
-    # single-turn verifier (ADR 0001 — execution_mode is fixed per prompt, so two prompts
-    # gated by a branch, NOT a dynamic mode). Decide+coach live INSIDE each arm because the
-    # interpreter scopes step references to the frame: a `decide` sibling of the branch could
-    # not reach a `verify` nested in an arm. The two arms are IDENTICAL except the verify
-    # `prompt:` id; they reach the enclosing finders/assemble/precheck outputs.
+    # Branch on code_grounded to select agentic or single-turn verification. Decide and
+    # coach stay inside each arm because frame-scoped references cannot reach nested siblings.
     - id: verify_branch
       needs:
       - grounding
@@ -195,20 +185,12 @@ steps:
             findings: ${{ steps.finders.outputs.findings }}
             shared_prefix: ${{ steps.verify_inputs.outputs.shared_prefix }}
             instructions: ${{ steps.verify_inputs.outputs.instructions }}
-            # The agentic verifier makes ~1 tool-call cycle per finding; scale this step's budget
-            # with the finding count (min = the configured floor) so a finding-rich ticket does
-            # not trip the default cap and degrade the whole review (bug 59bc). A `with:` input
-            # (the v3 step schema is immutable + closed; `with` is the open extension point).
+            # Scale the agentic verifier's step budget with findings, never below the
+            # configured floor. `with:` is the v3 step's extension point.
             step_budget_per_item: 25
-            # OUTPUT budget — the plan-review rule (bug 30a2): every review LLM call runs at
-            # the RESOLVED MODEL'S MAXIMUM output capacity ('effectively unlimited' — output is
-            # bounded by the model's actual findings; any finite ceiling below model-max
-            # re-creates the truncation → UnretryableOutputError → INDETERMINATE class this
-            # remediates, mirroring spy-luge-wool / sole-teal-churn). `output_budget: model_max`
-            # raises the cap to that maximum; the per-item scaling below is RETAINED as an
-            # additional floor-raiser (both are only-raise, so the final budget is
-            # max(configured floor, 2000×findings capped at 64000, model max)) — it keeps a
-            # finding-rich verify from truncating on a model the max-output table doesn't map.
+            # Use the resolved model's maximum output budget to prevent truncation-driven
+            # INDETERMINATE results. Per-finding scaling remains an additional floor for
+            # models absent from the capacity table.
             output_budget: model_max
             output_tokens_per_item: 2000
             # Greedy Pass-2 verification: a re-run of the same finding must not resample its narrow
@@ -239,10 +221,8 @@ steps:
             blocking: ${{ steps.decide.outputs.blocking }}
             indeterminate: ${{ steps.decide.outputs.indeterminate }}
             prerequisite_coverage: ${{ steps.decide.outputs.prerequisite_coverage }}
-        # Pass-4 coach is gated on there being a coachable finding — blocking OR surviving
-        # advisory (story 8086: blocking findings get coaching too). A clean PASS with zero
-        # findings takes the else arm — coach renders with notes:[] and makes NO coach
-        # LLM call, matching the live workflow contract (WS4 crimp-polar-jag).
+        # Coach blocking or surviving advisory findings. A clean pass skips the LLM call
+        # and renders empty notes.
         - id: coach_gate
           needs:
           - coach_inputs
@@ -279,13 +259,8 @@ steps:
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
                 outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
                 prerequisite_coverage: ${{ steps.coach_inputs.outputs.prerequisite_coverage }}
-                # The verify step is an AGENT step, so its outputs are the runner result
-                # VERBATIM (workflow/runs.py) — and the runner already stamped the provenance
-                # record for the call that actually ran (capabilities.provenance_for via
-                # findings.finalize_outcome). Carry that record; never recompute one at the
-                # verdict site (capabilities.provenance_for docstring: a second resolution can
-                # diverge from what ran). Every coach arm must wire it — a missed arm ships a
-                # verdict whose `provider_provenance` is silently absent, the 343b defect.
+                # Carry the verify runner's provider provenance; recomputation can diverge
+                # from the call that ran. Every coach arm must preserve it.
                 provider_provenance: ${{ steps.verify.outputs.provider_provenance }}
             else:
             - id: coach
@@ -305,13 +280,8 @@ steps:
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
                 outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
                 prerequisite_coverage: ${{ steps.coach_inputs.outputs.prerequisite_coverage }}
-                # The verify step is an AGENT step, so its outputs are the runner result
-                # VERBATIM (workflow/runs.py) — and the runner already stamped the provenance
-                # record for the call that actually ran (capabilities.provenance_for via
-                # findings.finalize_outcome). Carry that record; never recompute one at the
-                # verdict site (capabilities.provenance_for docstring: a second resolution can
-                # diverge from what ran). Every coach arm must wire it — a missed arm ships a
-                # verdict whose `provider_provenance` is silently absent, the 343b defect.
+                # Carry the verify runner's provider provenance; recomputation can diverge
+                # from the call that ran. Every coach arm must preserve it.
                 provider_provenance: ${{ steps.verify.outputs.provider_provenance }}
         else:
         - id: verify_inputs
@@ -360,10 +330,8 @@ steps:
             blocking: ${{ steps.decide.outputs.blocking }}
             indeterminate: ${{ steps.decide.outputs.indeterminate }}
             prerequisite_coverage: ${{ steps.decide.outputs.prerequisite_coverage }}
-        # Pass-4 coach is gated on there being a coachable finding — blocking OR surviving
-        # advisory (story 8086: blocking findings get coaching too). A clean PASS with zero
-        # findings takes the else arm — coach renders with notes:[] and makes NO coach
-        # LLM call, matching the live workflow contract (WS4 crimp-polar-jag).
+        # Coach blocking or surviving advisory findings. A clean pass skips the LLM call
+        # and renders empty notes.
         - id: coach_gate
           needs:
           - coach_inputs
@@ -400,13 +368,8 @@ steps:
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
                 outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
                 prerequisite_coverage: ${{ steps.coach_inputs.outputs.prerequisite_coverage }}
-                # The verify step is an AGENT step, so its outputs are the runner result
-                # VERBATIM (workflow/runs.py) — and the runner already stamped the provenance
-                # record for the call that actually ran (capabilities.provenance_for via
-                # findings.finalize_outcome). Carry that record; never recompute one at the
-                # verdict site (capabilities.provenance_for docstring: a second resolution can
-                # diverge from what ran). Every coach arm must wire it — a missed arm ships a
-                # verdict whose `provider_provenance` is silently absent, the 343b defect.
+                # Carry the verify runner's provider provenance; recomputation can diverge
+                # from the call that ran. Every coach arm must preserve it.
                 provider_provenance: ${{ steps.verify.outputs.provider_provenance }}
             else:
             - id: coach
@@ -426,13 +389,8 @@ steps:
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
                 outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
                 prerequisite_coverage: ${{ steps.coach_inputs.outputs.prerequisite_coverage }}
-                # The verify step is an AGENT step, so its outputs are the runner result
-                # VERBATIM (workflow/runs.py) — and the runner already stamped the provenance
-                # record for the call that actually ran (capabilities.provenance_for via
-                # findings.finalize_outcome). Carry that record; never recompute one at the
-                # verdict site (capabilities.provenance_for docstring: a second resolution can
-                # diverge from what ran). Every coach arm must wire it — a missed arm ships a
-                # verdict whose `provider_provenance` is silently absent, the 343b defect.
+                # Carry the verify runner's provider provenance; recomputation can diverge
+                # from the call that ran. Every coach arm must preserve it.
                 provider_provenance: ${{ steps.verify.outputs.provider_provenance }}
     else:
     - id: passthrough

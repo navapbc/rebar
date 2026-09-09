@@ -1,22 +1,7 @@
 /**
- * Custom properties-panel provider: a "Rebar" group that surfaces what bpmn-js's stock
- * panel can't — the step's rebar KIND and its `<rebar:Config>` payload (the with/mode/
- * model/loop-bounds/branch-condition JSON). It is shown for the element types that carry
- * rebar semantics, and the config is editable in place, so a human can both READ what a
- * step does and CHANGE it (or fill one in for a freshly-drawn step) before Save.
- *
- * Structured-only authoring (story a83a; da27 AC "no raw JSON textarea"). Every step kind
- * is edited through typed, per-field entries — `with.<field>` driven by the step's contract
- * (window.REBAR_CONTRACTS[name].consumes), plus mode/model (agent), the loop/map bounds, and
- * the branch `when` condition — so authoring NEVER means hand-editing JSON. There is NO raw
- * JSON textarea anywhere in the panel: the free-form `rebar:Config` editor has been removed.
- * Every structured field read/writes a SLICE of the SAME parsed `rebar:Config` blob (parse →
- * mutate slice → re-serialize → updateModdleProperties), so the Python round-trip contract is
- * unchanged. Keys outside the structured set are NOT shown, but a slice-write preserves them
- * verbatim (mutateConfig edits one key and re-serializes the rest), so they are never lost on
- * round-trip — they are simply not hand-editable in the UI. Field-level invalids (a non-numeric
- * bound, an empty required field) surface a visible entry error via each entry's `validate` and
- * DO NOT mutate the blob — the prior value is preserved.
+ * Typed Rebar property editor for semantic BPMN elements. Each control mutates one slice
+ * of the shared rebar:Config blob, so unknown keys survive round trips. There is no raw
+ * JSON editor; invalid field values show errors without replacing prior data.
  */
 import {
   ListGroup,
@@ -91,9 +76,8 @@ function configEl(bo) {
   return ee && (ee.values || []).find((v) => v.$type === "rebar:Config");
 }
 
-// Parse the node's `rebar:Config` blob into an object; an empty / malformed blob parses
-// to {} so structured reads never throw. A genuinely-broken blob is surfaced by the live
-// /validate region (story 998e) rather than edited as raw JSON in this panel.
+// Parse empty or malformed rebar:Config as {} for safe structured reads; live validation
+// reports malformed source instead of exposing raw JSON editing.
 function parseConfig(bo) {
   const c = configEl(bo);
   if (!c || !c.value) return {};
@@ -176,10 +160,8 @@ function ActionEntry(props) {
 
 function PromptTextEntry(props) {
   const { element, id } = props;
-  // The prompt TEXT (resolved from the reviewer / .rebar/prompts/<id>.md by the Python
-  // side and injected as window.REBAR_PROMPTS) — read-only, so you can see what the agent
-  // step actually runs without leaving the editor. Editing prompts stays a git-file
-  // concern (the IR references a prompt id, never inlines the text).
+  // Show server-resolved prompt text read-only. The IR keeps an id; prompt editing remains
+  // a git-file concern.
   const debounce = useService("debounceInput");
   const bo = element.businessObject;
   return (
@@ -199,12 +181,8 @@ function PromptTextEntry(props) {
 }
 
 function formatContract(view) {
-  // Render a scripted op's contract (window.REBAR_CONTRACTS[uses]) as legible read-only
-  // text: its description + CONSUMES (input fields) / PRODUCES (output fields). A node
-  // with no declared contract shows a defined empty state, never a blank/crash.
-  // An opaque / contract-less node (checked === false, or no view) is UNCHECKED: the
-  // static contract check has nothing to verify against, so flag it visibly rather than
-  // let a blank read as "fine" (c768).
+  // Render scripted input/output contracts read-only. Missing or opaque contracts show
+  // explicit empty/unchecked states rather than a blank that implies success.
   if (!view || !view.has_contract || view.checked === false) {
     return "⚠ unchecked (opaque source)\n(no declared contract for this step)";
   }
@@ -258,10 +236,7 @@ function ContractEntry(props) {
 
 function WhenEntry(props) {
   const { element, id } = props;
-  // The branch's `when` is an EDITABLE structured field (a83a): it writes the
-  // condition slice of rebar:Config like every other structured entry. (The deeper
-  // branch UX — adding/removing arms + connection routing — is the deferred S9 scope;
-  // this is just the condition field so `branch` is covered by structured fields.)
+  // Edit only the branch `when` slice here; arm and connection authoring is deferred.
   const modeling = useService("modeling");
   const bpmnFactory = useService("bpmnFactory");
   const debounce = useService("debounceInput");
@@ -291,15 +266,9 @@ function WhenEntry(props) {
   );
 }
 
-// ── Structured fields (a83a) ────────────────────────────────────────────────────
-// Each structured entry reads/writes ONE slice of the shared `rebar:Config` blob via
-// mutateConfig (parse → mutate → re-serialize), so the round-trip contract is unchanged
-// and the raw "Advanced" editor stays consistent with the typed fields.
-
-// Coerce a raw text field value to the contract field's declared type. Strings pass
-// through; booleans accept true/false; numbers accept a finite numeric literal — anything
-// non-coercible for number/boolean is reported via `coerceError` so the caller can show a
-// field error and skip the write (never silently storing a bad value).
+// ── Structured fields ───────────────────────────────────────────────────────────
+// Each entry mutates one config slice. Coercion accepts strings, true/false, and finite
+// numbers; invalid typed text reports an error and skips the write.
 function coerceTyped(raw, type) {
   const t = String(type || "").toLowerCase();
   if (raw === "" || raw == null) return { value: "", empty: true };
@@ -410,10 +379,8 @@ function ConfigTextEntry(props) {
   );
 }
 
-// A NUMERIC slice of the config (loop `max_iterations`, map `max_concurrency`). Kept a
-// TEXT field with a numeric `validate` rather than a number input so a NON-NUMERIC entry
-// surfaces a visible error AND the prior numeric value is preserved (an HTML number input
-// would silently swallow the bad keystrokes — defeating the "shows an error, no loss" AC).
+// Numeric config stays in a validated text field so bad input remains visible and cannot
+// silently replace the prior value.
 function ConfigNumberEntry(props) {
   const { element, id, ckey, label, description } = props;
   const modeling = useService("modeling");
@@ -483,10 +450,8 @@ function ModeEntry(props) {
   );
 }
 
-// A `bpmn:ServiceTask` is EITHER an agent step (prompt) or a v3 batch step — a closed select
-// lets the author convert between them, so a freshly-drawn ServiceTask can BECOME a batch.
-// Switching to batch seeds an (invalid-until-filled) cfg.batch the criteria UI then completes;
-// switching to agent drops cfg.batch. Either way the rest of cfg is preserved (slice-write).
+// ServiceTasks can switch between agent and batch. Batch seeds cfg.batch; agent removes it;
+// slice writes preserve all other config.
 function ServiceKindEntry(props) {
   const { element, id } = props;
   const modeling = useService("modeling");
@@ -517,12 +482,9 @@ function ServiceKindEntry(props) {
   );
 }
 
-// ── Batch step fields (epic A: the v3 `batch` step) ───────────────────────────────
-// A batch step's params live under cfg.batch (NOT cfg directly), so these read/write a
-// slice of cfg.batch — keeping the SAME parse → mutate → re-serialize round-trip contract.
-
-// The batch FINDER prompt (cfg.batch.prompt) — the single packing/finder pass the runner
-// applies per batch. Required (a batch with no finder is meaningless).
+// ── Batch fields ────────────────────────────────────────────────────────────────
+// Batch parameters use cfg.batch slice writes. Its required prompt selects the finder
+// applied to each batch.
 function BatchFinderEntry(props) {
   const { element, id } = props;
   const modeling = useService("modeling");
@@ -593,10 +555,7 @@ function BatchNumberEntry(props) {
   );
 }
 
-// model_ladder (cfg.batch.model_ladder) is an ordered escalation list of model ids, edited as
-// an add/remove LIST of rows (story B-UX item 18) rather than a comma string. Each row is one
-// model id at its index; add appends an empty id, remove drops the row. Reads/writes the same
-// cfg.batch.model_ladder array slice, so the round-trip is unchanged.
+// Edit cfg.batch.model_ladder as ordered add/remove rows, preserving its array slice.
 function readLadder(element) {
   const v = (parseConfig(element.businessObject).batch || {}).model_ladder;
   return Array.isArray(v) ? v : [];
@@ -605,11 +564,8 @@ function readLadder(element) {
 function writeLadder(element, modeling, bpmnFactory, list) {
   mutateConfig(element, modeling, bpmnFactory, (cfg) => {
     const batch = cfg.batch && typeof cfg.batch === "object" ? cfg.batch : {};
-    // Keep rows verbatim (trimmed) — a freshly-ADDED empty row must survive so it renders
-    // for editing (filtering empties here would silently drop the add, like the criteria
-    // list keeps an empty {prompt:""}). An empty/whitespace id is a transient editing state
-    // the user fills in; lint catches a still-empty entry on save. Drop the key only when the
-    // whole list is gone (last row removed).
+    // Preserve trimmed empty rows while they are being edited; lint rejects them on save.
+    // Remove the key only after the last row is deleted.
     const rows = list.map((s) => String(s).trim());
     if (rows.length) batch.model_ladder = rows;
     else delete batch.model_ladder;
@@ -674,32 +630,23 @@ function modelLadderGroup(element, modeling, bpmnFactory) {
   };
 }
 
-// ── Library-backed criterion pickers + in-editor authoring (story B-UX) ───────────
-// A batch criterion's `prompt` and `when` are SELECTED from library-/IR-backed dropdowns
-// (no free-text typing) and new criteria/prompts + overlay triggers can be CREATED in the
-// panel. The picker sources are injected by editor.py: window.REBAR_LIBRARY (the authorable
-// prompt+criterion list from enumerate_library) and window.REBAR_OVERLAY_TRIGGERS (this
-// workflow's overlay_triggers outputs, as {stepId,name,expr,label}); the client maintains
-// the latter as triggers are added.
+// ── Library-backed criterion authoring ─────────────────────────────────────────
+// Prompt and trigger dropdowns use injected library/IR catalogs. The panel can create
+// entries and updates its local overlay-trigger catalog as they are added.
 
 const SENTINEL_CREATE = "__rebar_create__"; // "➕ Create new criterion/prompt…" in the prompt select
 const SENTINEL_NEW_TRIGGER = "__rebar_new_trigger__"; // "➕ New trigger…" in the when select
 const WHEN_ALWAYS = "__rebar_always__"; // "(always include)" → clears `when`
 
-// A tiny module-level store for the transient AUTHORING forms (create criterion/prompt, and
-// create overlay trigger). It is NOT persisted to rebar:Config — it only drives which form
-// fields are visible and remembers which criterion opened the form. Components subscribe via
-// useAuthoring() and force a re-render through notifyAuthoring() (the properties-panel does
-// not re-run getGroups on a non-model event, so the form's visibility is store-driven).
+// Module-local transient form state never enters rebar:Config. Subscribers force panel
+// rerenders because non-model events do not rerun getGroups.
 const authoring = {
   open: false,
   kind: "criterion",
   id: "",
   body: "",
-  // Routing-fields overlay for authoring a plan-review CRITERION (story 6e31). Collected only
-  // when kind === "criterion" and POSTed as a `routing` object to /library/create, which writes
-  // the .rebar/criteria_routing.json overlay + activation (author_criterion_overlay). Defaults
-  // mirror the packaged routing floor so a minimal form still produces a valid entry.
+  // Plan-review criterion routing is posted only for criterion authoring. Defaults mirror
+  // the packaged floor so the minimal form produces a valid activated overlay.
   routingExec: "1-TURN", // 1-TURN | 2-STEP | AGENT | DET
   routingGate: "plan_review", // which review the criterion belongs to: plan_review | code_review
   routingScope: "container,leaf", // applies_at.scope (comma-separated) — plan_review only
@@ -709,18 +656,11 @@ const authoring = {
   routingFailMode: "open", // DET only: open | closed
   routingDetector: "", // DET only: a detector id, or `<prefix>*` for an id_prefix class
   targetIndex: null,
-  // What the create-prompt save assigns the new id to: "criterion" (a batch criterion's
-  // prompt at targetIndex) or "name" (the selected step's NAME == its prompt/uses action,
-  // for an agent step's library-backed prompt picker — story B-UX item 7).
+  // Assign a created prompt id either to a batch criterion or to the selected step name.
   targetKind: "criterion",
-  // What a newly-added overlay trigger's expression is assigned to: "criterion" (a batch
-  // criterion's `when` at triggerTargetIndex) or "if" (the selected step's `if` overlay
-  // predicate — story B-UX item 9, the agent/scripted step-level inclusion select).
+  // Assign a new trigger expression either to a criterion `when` or a step-level `if`.
   triggerTargetKind: "criterion",
-  // The bpmn id of the element whose criterion opened a form. Used to detect a selection
-  // change so a form is never applied to the wrong element/index (see resetAuthoring +
-  // authoringGroup): the store is module-global, so without this guard a form opened on
-  // batch step A would write its new id/trigger to whatever element B is selected next.
+  // Remember the form's BPMN element so selection changes cannot redirect its write.
   targetElementId: "",
   status: "",
   triggerOpen: false,
@@ -908,10 +848,8 @@ function CriterionWhenEntry(props) {
   );
 }
 
-// The step-level `if` overlay predicate, as a SELECT over this workflow's overlay triggers —
-// the SAME picker the batch criterion `when` uses (story B-UX item 9), so a step's conditional
-// inclusion is chosen, not free-typed. Writes/reads the cfg.if slice; "(always include)" clears
-// it; "➕ New trigger…" opens the trigger authoring form targeting this step's `if`.
+// Select cfg.if from workflow triggers. “Always include” clears it; creating a trigger
+// targets this step's predicate.
 function IfPredicateSelectEntry(props) {
   const { element, id } = props;
   const modeling = useService("modeling");
@@ -950,10 +888,8 @@ function IfPredicateSelectEntry(props) {
   );
 }
 
-// The agent step's `prompt` id (round-tripped through the element NAME), as a library-backed
-// SELECT (story B-UX item 7) — the same affordance the batch criterion prompt uses, instead of
-// a free-text field. Picks a window.REBAR_LIBRARY entry; a hand-authored id not in the list is
-// preserved as a "(custom)" option; "➕ Create new…" opens the prompt authoring form.
+// Select an agent prompt from the library through the element name. Preserve unknown ids as
+// custom options, and open the authoring form for new prompts.
 function PromptIdSelectEntry(props) {
   const { element, id } = props;
   const modeling = useService("modeling");
@@ -985,10 +921,8 @@ function PromptIdSelectEntry(props) {
   );
 }
 
-// The "Batch criteria" ListGroup: a per-criterion collapsible (prompt SELECT + `when` SELECT)
-// with the stock add (+) / remove (×) affordances. add/remove edit cfg.batch.criteria via
-// mutateConfig (no hooks — they fire on click, so they take modeling/bpmnFactory captured by
-// the provider).
+// Batch criteria are collapsible prompt/when rows; add/remove actions mutate the
+// cfg.batch.criteria slice with provider-captured modeling services.
 function batchCriteriaGroup(element, modeling, bpmnFactory) {
   const criteria =
     (parseConfig(element.businessObject).batch || {}).criteria || [];
@@ -1038,12 +972,9 @@ function batchCriteriaGroup(element, modeling, bpmnFactory) {
   };
 }
 
-// ── Authoring forms (create criterion/prompt + create overlay trigger) ────────────
-// These render INTO a dedicated "Authoring" group on a batch step. Each field component is
-// store-driven (useAuthoring) and renders null until its form is opened by the matching
-// sentinel, so the panel stays uncluttered until the author asks to create something.
-
-// Always-visible info + status line (keeps the group non-empty and surfaces the last result).
+// ── Authoring forms ─────────────────────────────────────────────────────────────
+// Store-driven fields render only for the active form. An always-visible status keeps the
+// group present and reports the latest result.
 function AuthoringInfoEntry(props) {
   const { id } = props;
   const a = useAuthoring();
@@ -1090,10 +1021,8 @@ function AuthoringKindEntry(props) {
   );
 }
 
-// Derive the rubric prompt filename from a criterion id, mirroring the backend's canonical
-// `criteria.ids.criterion_prompt_id` (task stew-kid-motif): a project.<name> logical id is stored
-// at the filesystem-safe `plan-review-project-<name>.md`, so the dotted namespace never reaches a
-// filename. Kept in lockstep with the Python mapping.
+// Mirror criterion_prompt_id: map project.<name> to the filesystem-safe
+// plan-review-project-<name>.md form. Keep this synchronized with Python.
 function criterionPromptId(cid) {
   return "plan-review-" + String(cid || "").replace(/\./g, "-");
 }
@@ -1150,20 +1079,16 @@ function AuthoringBodyEntry(props) {
   );
 }
 
-// ── Routing-fields form (story 6e31): the plan-review ROUTING overlay for a criterion ──────
-// Shown only when authoring a criterion (a.kind === "criterion"). Each field drives one key of
-// the `routing` object POSTed to /library/create; fail_mode + detector are DET-only.
+// ── Criterion routing form ──────────────────────────────────────────────────────
+// Visible only for criterion authoring; each field feeds /library/create routing.
+// fail_mode and detector apply only to DET entries.
 function isCriterionAuthoring(a) {
   return a.open && a.kind === "criterion";
 }
 
-// Build the `routing` object from the authoring store (or null when not authoring a criterion).
-//
-// The batch-criterion prompt picker (targetKind === "criterion") authors a rubric it references
-// by prompt-library id — it must NOT force the plan-review criteria_routing.json ACTIVATION
-// overlay. That overlay (author_criterion_overlay) requires a `project.<name>`-prefixed id and
-// 400s an un-namespaced one (bug jinx-node-mudra), which stranded the new id on the step. So
-// return null for that reference flow; the genuine overlay-activation flow keeps its routing.
+// Build routing only for genuine criterion activation. A batch criterion's referenced
+// prompt is not an overlay id, so its picker returns null instead of forcing project.*
+// validation and stranding the step reference.
 function buildRouting(a) {
   if (a.kind !== "criterion" || a.targetKind === "criterion") return null;
   const gate = a.routingGate || "plan_review";
@@ -1581,10 +1506,8 @@ function TriggerSaveEntry(props) {
 // The "Authoring" group on a batch step: the create-criterion/prompt form and the
 // create-overlay-trigger form, each store-driven (visible only once its sentinel is picked).
 function authoringGroup(element) {
-  // The store is module-global, so a form left open on a previously-selected batch step
-  // would otherwise apply its new id/trigger to THIS element's criterion at the remembered
-  // index (wrong element). If a form is open for a DIFFERENT element, close it on render so
-  // the create form never targets the wrong element/index.
+  // Close forms opened for another element so module-global state cannot target this
+  // element's remembered criterion index.
   const elId = element.businessObject.id || element.id;
   if (
     (authoring.open || authoring.triggerOpen) &&
@@ -1818,12 +1741,9 @@ function structuredEntries(element, kind) {
   return entries;
 }
 
-// ─── RP-06 S6: the READ-ONLY "Effective Policy" view — provenance ONLY. It fetches the
-// narrow /effective-policy projection (derived from the compiled S1 CriteriaSnapshot) and
-// renders it as a disabled, non-editable summary. It has NO control that writes/serializes
-// back to the workflow or the criteria overlay, and is kept DISTINCT from the editable
-// "Authored Workflow" (Step behavior / authoring) UI. An `available: false` payload shows an
-// unavailable banner carrying the compiler's located remedy, never a blank or crash.
+// ─── Read-only Effective Policy provenance ─────────────────────────────────────
+// Render the compiled projection separately from authored controls, with no write path.
+// Unavailable payloads show the compiler's located remedy.
 function formatEffectivePolicy(state) {
   if (!state || state.loading) return "Loading effective policy…";
   if (state.error) return "⚠ effective policy unavailable\n" + state.error;
@@ -1914,9 +1834,8 @@ function rebarGroup(element) {
   const entries = [{ id: "rebar-kind", component: KindEntry }];
 
   if (kind === "branch") {
-    // Branch's only step config is the `when` condition, edited via a structured field
-    // (a83a). The deeper branch UX — arm add/remove + connection routing — is deferred
-    // S9 scope. No raw JSON editor: any non-`when` keys round-trip via the slice-write.
+    // Branch editing covers only structured `when`; other keys survive the slice write
+    // while arm and connection authoring remains deferred.
     entries.push({ id: "rebar-when", component: WhenEntry });
     return { id: "rebar", label: "Step behavior", entries };
   }
@@ -1945,9 +1864,7 @@ class RebarPropertiesProvider {
       const bo = element.businessObject;
       if (bo && REBAR_KINDS.includes(bo.$type)) {
         groups.push(rebarGroup(element));
-        // The READ-ONLY Effective Policy view (RP-06 S6): the compiled review-policy
-        // provenance, kept DISTINCT from the authored-workflow editing groups above and
-        // below. Provenance-only — it never writes back to the workflow or the overlay.
+        // Keep read-only compiled policy provenance separate from authored workflow controls.
         groups.push(effectivePolicyGroup());
         const k = rebarKind(bo);
         // A batch step gets two more groups: its editable, add/remove criteria LIST and the
@@ -1960,10 +1877,8 @@ class RebarPropertiesProvider {
             modelLadderGroup(element, this._modeling, this._bpmnFactory),
           );
         }
-        // The in-panel authoring forms (create criterion/prompt + create overlay trigger) are
-        // reachable from a batch criterion's pickers AND from an agent step's prompt/`if`
-        // pickers and a scripted step's `if` picker (story B-UX items 7 + 9), so the group is
-        // rendered for all of those kinds.
+        // Render authoring forms for batch criteria, agent prompt/if pickers, and scripted
+        // if pickers—the entry points that can create their referenced records.
         if (k === "batch" || k === "agent" || k === "scripted") {
           groups.push(authoringGroup(element));
         }

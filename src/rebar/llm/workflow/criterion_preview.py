@@ -1,36 +1,9 @@
-"""Live must-fire / must-not-fire preview for a plan-review criterion (story 6e31).
+"""Preview a plan-review criterion against an isolated fixture.
 
-The visual editor authors criteria; this module lets an author PROBE one against a
-fixture and see whether it fires — the same runners the real gate uses, but over an
-isolated fixture instead of a ticket:
-
-* an **LLM criterion** (``exec: 1-TURN`` / ``AGENT``) runs as its Pass-1 finder over the
-  fixture text (``eval_solver.run_case`` criterion arm, story 55b8, for an existing id;
-  an ad-hoc ``passes.pass1_chunk`` for an unsaved ``inline`` prompt). Fire ⇔ non-empty
-  findings.
-* a **DET invariant** (``exec: DET``) resolves its ``detector`` selector, materializes the
-  fixture into a disposable temp repo, and runs the grounding scan the way
-  :func:`rebar.llm.plan_review.det_invariants._run_one` does (story 7f0d). A ``match`` ⇒
-  fire; an ``abstain`` ⇒ no-fire, reported per the criterion's ``fail_mode``.
-
-Container/ISF finders (G3/G4/ISF) need a ticket graph or a session log, so they are NOT
-previewable inline — :class:`PreviewError` (mapped to a 4xx by the editor handler).
-
-The preview is SYNCHRONOUS with a configurable timeout (default 60s, overridable via
-``REBAR_PREVIEW_TIMEOUT``). The **spike-gate** threshold + fallback (:func:`preview_or_job`):
-the endpoint attempts the preview within the timeout; if it finishes in time it returns the
-verdict inline (HTTP 200); if it EXCEEDS the timeout it registers the still-running preview as
-a background JOB and returns ``{status: "pending", job_id}`` (HTTP 202), and the client polls
-``POST /criterion/preview/status`` (:func:`poll_job`) until it reads
-``{status: "done", result: {verdict, …}}``. The job store is an in-memory dict keyed by a
-per-request ``secrets``-derived id, guarded by a lock — so the editor's single-threaded
-``ThreadingHTTPServer`` handler never blocks past the timeout. (The direct
-:func:`preview_criterion` keeps a simple sync-with-timeout contract for library/eval callers.)
-
-Also hosts :func:`write_criterion_overlay` — the single ATOMIC overlay write that couples
-a project criterion's routing entry with its ``activate`` membership so authoring can never
-leave a half-active criterion (the rubric prompt is written first, harmlessly, by
-``create_prompt``).
+LLM criteria run a Pass-1 finder; DET criteria scan a disposable repository.
+Context-dependent container/G3/G4/ISF finders raise :class:`PreviewError`.
+Synchronous previews are bounded, while :func:`preview_or_job` preserves timed-out
+work for polling. Overlay authoring couples routing and activation atomically.
 """
 
 from __future__ import annotations
@@ -93,20 +66,13 @@ def preview_criterion(
     runner: Any = None,
     timeout: float = 60.0,
 ) -> dict[str, Any]:
-    """Run a criterion against a fixture and return ``{verdict, finding?, rationale, timed_out?}``.
+    """Preview an existing or inline criterion.
 
-    ``request`` = ``{criterion_id?, inline?: {prompt?, routing}, fixture: {input, filename?}}``.
-    Supply EITHER an existing ``criterion_id`` (its routing/descriptor is resolved from the
-    effective registry) OR an ``inline`` criterion (a routing dict + optional prompt text, run
-    ad-hoc — for previewing an unsaved authoring draft). The criterion's ``exec`` is read
-    DIRECTLY from the routing (never ``exec_tier``, which has no DET arm): ``DET`` → a grounding
-    scan of the materialized fixture; otherwise → the LLM Pass-1 finder path.
-
-    Raises :class:`PreviewError` for an unknown criterion or a container/ISF finder. On timeout,
-    returns a no-fire verdict with ``timed_out: True`` (never blocks forever)."""
-    # Run the (LLM or DET) call under a timeout so a slow model / scan never wedges the
-    # editor's single-threaded HTTP handler. The worker thread is left to finish in the
-    # background on timeout (the async job+poll fallback via preview_or_job continues it).
+    ``DET`` uses grounding; other tiers use Pass-1. Unknown or context-dependent
+    criteria raise :class:`PreviewError`. Timeout returns a no-fire timed-out verdict.
+    """
+    # Bound the call so the editor stays responsive; preview_or_job retains a timed-out
+    # worker for polling.
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(_run_preview_core, request, repo_root=repo_root, runner=runner)
         try:
@@ -159,11 +125,9 @@ def _run_preview_core(
     return _preview_llm(criterion_id, inline, fixture, repo_root, runner)
 
 
-# ── spike-gate: sync-within-timeout, else a background job + poll ─────────────────
-# An in-memory job store keyed by a per-request secrets-derived id, guarded by a lock. A
-# job is registered "pending" at submit and OVERWRITTEN with its terminal state by the
-# worker thread. Deliberately process-local + unbounded-until-polled (an editor session is
-# short-lived + single-user); a durable/distributed store is out of scope for the MVP.
+# ── Synchronous within the timeout; otherwise return a pollable job. ──────────────
+# The locked, process-local store replaces pending entries with terminal results.
+# Short-lived single-user sessions make durability and eviction unnecessary here.
 _JOBS: dict[str, dict[str, Any]] = {}
 _JOBS_LOCK = threading.Lock()
 _DEFAULT_TIMEOUT = 60.0
@@ -189,11 +153,11 @@ def preview_or_job(
     runner: Any = None,
     timeout: float | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """The spike-gate endpoint shim. Run the preview on a background thread and wait up to
-    ``timeout`` (default :func:`_default_timeout`): if it finishes in time, return ``(200,
-    verdict)`` (or ``(400, {error})`` for a :class:`PreviewError` / missing agents extra); if it
-    EXCEEDS the timeout, leave it running and return ``(202, {status:"pending", job_id})`` — the
-    client polls :func:`poll_job`. Never blocks past ``timeout``."""
+    """Return an inline preview or a pollable background job.
+
+    Success and preview errors map to 200 and 400. Timeout leaves the worker running
+    and returns ``(202, {status: "pending", job_id})`` for :func:`poll_job`.
+    """
     from rebar._optional import OptionalDependencyError
     from rebar.llm.errors import LLMError
 
@@ -315,9 +279,7 @@ def _preview_llm(
 def _run_inline_finder(
     inline: dict[str, Any], plan: str, repo_root: str | None, runner: Any
 ) -> list[dict[str, Any]]:
-    """Run an UNSAVED inline criterion as a Pass-1 finder via an ad-hoc descriptor — no temp
-    prompt file. The descriptor's ``id`` is the tag the finder must attribute its findings to
-    (``inline.id`` or ``preview``); ``inline.prompt`` is the rubric body."""
+    """Run an unsaved rubric through Pass-1 under its inline id, without a prompt file."""
     from rebar.llm.config import resolve_gate_config
     from rebar.llm.plan_review import passes
 
@@ -469,13 +431,11 @@ def author_criterion(
     body: str,
     routing: dict[str, Any] | None,
 ) -> Path:
-    """Author a criterion END-TO-END from its LOGICAL (dotted-for-project) id: write its rubric at
-    the filesystem-safe ``criterion_prompt_id(criterion_id)`` (task stew-kid-motif — so a net-new
-    ``project.<name>`` is authorable despite the ``.``-free filename rule), then, if ``routing`` is
-    given, atomically write + activate its overlay entry keyed by the dotted id. Prompt-first: a
-    failed overlay leaves an inactive, harmless rubric. Returns the rubric ``Path``. Raises
-    ``LibraryWriteError``/``PromptError`` (bad id/rubric) or ``RegistryError`` (bad overlay) — the
-    HTTP caller maps either to a 4xx."""
+    """Write a dotted criterion's filesystem-safe rubric, then optionally activate it.
+
+    Routing and activation share one atomic overlay update. Prompt-first failure leaves
+    a harmless inactive rubric. Returns its path and propagates authoring errors.
+    """
     from rebar.llm.criteria.ids import criterion_prompt_id
     from rebar.llm.prompting.prompt_library import CRITERION_CATEGORY, create_prompt
     from rebar.llm.prompting.prompts import write_front_matter
@@ -488,13 +448,11 @@ def author_criterion(
 
 
 def write_criterion_overlay(repo_root: str, criterion_id: str, routing: dict[str, Any]) -> None:
-    """Write (read-modify-write) the project criterion's routing entry AND its ``activate``
-    membership into ``.rebar/criteria_routing.json`` in a SINGLE atomic replace.
+    """Atomically update a criterion's routing and activation membership.
 
-    Activation requires BOTH the routing entry and the ``activate`` id (ef7e semantics), and
-    both are set in the same atomic write — so a project criterion is never left half-active. A
-    failed overlay write leaves the (already-written) rubric prompt harmlessly inactive. Callers
-    should invalidate the registry caches (``prompt_library._invalidate_caches``) after writing."""
+    Failure leaves the previously written rubric inactive. Callers must then invalidate
+    the registry caches.
+    """
     from rebar._store.fsutil import atomic_write
 
     path = Path(repo_root) / ".rebar" / _OVERLAY_FILENAME
@@ -506,10 +464,8 @@ def write_criterion_overlay(repo_root: str, criterion_id: str, routing: dict[str
                 data = loaded
         except (OSError, ValueError):
             data = {}
-    # ``gate`` is a TRANSPORT-ONLY hint on the routing (which review the criterion belongs to);
-    # it is honored to pick the overlay SECTION + activation membership and is NEVER persisted
-    # inside the stored entry (the section already expresses the gate). Absent/unknown ⇒
-    # plan_review, preserving the pre-RP-06 default.
+    # ``gate`` selects the overlay section and activation only; it is not persisted in
+    # the entry. Missing or unknown values retain the plan_review default.
     gate = str(routing.get("gate", "plan_review"))
     if gate not in ("plan_review", "code_review"):
         gate = "plan_review"
@@ -538,21 +494,12 @@ def write_criterion_overlay(repo_root: str, criterion_id: str, routing: dict[str
 
 
 def author_criterion_overlay(repo_root: str, criterion_id: str, routing: dict[str, Any]) -> None:
-    """Author a criterion's routing overlay from its LOGICAL (dotted) criterion id, atomically
-    write its routing + activation (:func:`write_criterion_overlay`), then invalidate the
-    registry caches so it is immediately active. Called AFTER the rubric prompt is written
-    (prompt-first).
+    """Activate an explicit dotted criterion id and refresh the registry caches.
 
-    ``criterion_id`` is the DOTTED logical id (``project.<name>`` for a project criterion, or a
-    built-in id for a re-tune) — it is passed EXPLICITLY, never reverse-derived from the sanitized
-    rubric prompt id (which is a one-way, non-reversible map — task stew-kid-motif).
-
-    VALIDATE-then-rollback: after writing, the merged overlay is re-resolved
-    (``effective_routing`` + ``effective_criteria``). If it is invalid (e.g. a net-new id that
-    is not ``project.<name>``-prefixed, or a name outside the filesystem-safe charset), the prior
-    overlay is restored and the :class:`RegistryError` re-raised, so a bad authoring attempt NEVER
-    persists a broken overlay (the caller maps it to a 4xx; the just-written prompt is left
-    harmlessly inactive)."""
+    The logical id is never recovered from its one-way filename mapping. Validation
+    re-resolves the merged registry; failure restores the prior overlay and leaves the
+    prompt inactive.
+    """
     from rebar.llm.plan_review import registry
     from rebar.llm.prompting.prompt_library import _invalidate_caches
 

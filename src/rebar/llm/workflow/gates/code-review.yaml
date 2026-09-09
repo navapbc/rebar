@@ -1,18 +1,9 @@
 # yaml-language-server: $schema=https://github.com/navapbc/rebar/schemas/workflow.v3.schema.json
 #
-# The four-pass CODE-REVIEW gate (epic b744). Consumes the shipped review kernel (Pass-2
-# verify / Pass-3 decide / Pass-4 coach) with a base->overlay two-round escalation on the
-# RECALL side; the decision side stays deterministic (escalation can never change the verdict).
-# NO core-engine change — only the code_review scripted ops + a gate-specific batch runner
-# (CodeReviewBatchRunner, injected by produce_code_review_verdict / the offline test).
-#
-# CONFIG (operator-facing, lives HERE not hard-coded): the Round-B escalation cap N is the
-# `cap` on the `union` step (default 3). Per-criterion thresholds/posture live in
-# code_review/criteria_routing.json (read by registry.threshold_for); this file holds NO
-# threshold values — it only gates WHICH overlays run, via each criterion's `when:`.
-#
-# Topology: assemble_diff -> triggers(glob) -> base -> round_a(glob overlays) -> union(escalate)
-# -> round_b(escalated overlays) -> merge -> verify(Pass-2) -> decide(Pass-3) -> coach(Pass-4).
+# Four-pass code review: recall can escalate from base to overlays, but verification,
+# decision, and coaching remain deterministic. `union.cap` sets the escalation limit;
+# criteria routing owns thresholds and posture. Topology runs assemble, trigger, two
+# recall rounds, merge, verify, decide, then coach.
 schema_version: "3"
 name: code-review
 description: Four-pass code-review gate — base + two-round overlay escalation into the kernel.
@@ -95,11 +86,8 @@ steps:
     needs: [triggers]
     batch:
       prompt: code-review-base
-      # Pass-1 fan-out. DECLARED INSIDE `batch:` ON PURPOSE: the interpreter builds
-      # BatchRunRequest from this sub-dict only and never reads a step-level `model:`, so putting
-      # the class up there would validate and then be silently discarded (ticket 3768). ONE rung —
-      # a multi-rung ladder escalates per criterion, which makes the resolved model per pass
-      # non-deterministic and the per-pass assertions unwritable.
+      # Pass-1 model belongs inside `batch:`; the interpreter ignores a step-level value.
+      # Keep one rung so every criterion in the pass resolves deterministically.
       model_ladder: [frontier]
       criteria:
         - { prompt: code-review-security, when: "${{ steps.triggers.outputs.include_security }}" }
@@ -135,11 +123,8 @@ steps:
     needs: [union]
     batch:
       prompt: code-review-base
-      # Pass-1 fan-out. DECLARED INSIDE `batch:` ON PURPOSE: the interpreter builds
-      # BatchRunRequest from this sub-dict only and never reads a step-level `model:`, so putting
-      # the class up there would validate and then be silently discarded (ticket 3768). ONE rung —
-      # a multi-rung ladder escalates per criterion, which makes the resolved model per pass
-      # non-deterministic and the per-pass assertions unwritable.
+      # Pass-1 model belongs inside `batch:`; the interpreter ignores a step-level value.
+      # Keep one rung so every criterion in the pass resolves deterministically.
       model_ladder: [frontier]
       criteria:
         - { prompt: code-review-security, when: "${{ steps.union.outputs.include_security }}" }
@@ -181,14 +166,8 @@ steps:
     prompt: code-review-verify
     mode: structured
     output_schema: code_review_verification
-    # The STANDARD model class (task 172e). This step declared no model and so fell through to
-    # cfg.model — the FRONTIER model — which cost the Pass-2 downgrade AND silently voided the
-    # `temperature: 0` below: pydantic-ai's Anthropic adapter drops temperature for that model,
-    # so the greedy determinism the verification contract depends on was never in force.
-    # A CLASS name rather than a literal id, so the operator retargets Pass-2 by configuring the
-    # class and a step-level value does not out-rank that configuration (`resolve_model`
-    # precedence is step > workflow > cfg). Resolution is sibling 7761's wiring of
-    # config.resolve_model; before it, this string reached the runner as a literal model id.
+    # Pin Pass-2 to the configurable `standard` class. This avoids frontier fallback,
+    # preserves deterministic temperature handling, and lets operators retarget the class.
     model: standard
     with:
       ticket_context: ${{ steps.assemble_diff.outputs.context }}
@@ -241,12 +220,6 @@ steps:
       indeterminate: ${{ steps.decide.outputs.indeterminate }}
       notes: ${{ steps.coach.outputs.notes }}
       outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
-      # The Pass-2 `verify` step is an AGENT step, so its outputs are the runner result
-      # VERBATIM (workflow/runs.py) — and the runner already stamped the provenance record
-      # for the call that actually ran (capabilities.provenance_for via
-      # findings.finalize_outcome). Carry THAT record; never recompute one at the verdict
-      # site (capabilities.provenance_for docstring: a second resolution can diverge from
-      # what ran). Sourcing it from a scripted op instead would silently wire None forever.
-      # Without this wire the signed code-review sidecar records provenance as absent on
-      # every run — the 343b defect, which skipped code review (task e951).
+      # Carry the verify runner's stamped provider provenance verbatim. Recomputing can
+      # diverge from the call that ran; a scripted source would always yield None.
       provider_provenance: ${{ steps.verify.outputs.provider_provenance }}

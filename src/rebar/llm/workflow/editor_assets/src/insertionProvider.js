@@ -1,21 +1,7 @@
 /**
- * Typed insertion for the workflow editor (story 6592).
- *
- * MECHANISM: a custom **bpmn-js context-pad provider** plus a **palette provider**.
- * Both let the user insert a new step by picking EITHER a scripted op OR a prompt from
- * a typed, category-grouped chooser; the chosen entry creates a real bpmn shape whose
- * NAME is the action (the editor's name==action convention, see rebarProvider.jsx), so
- * it round-trips to a valid `uses:` (scripted) or `prompt:` (agent) IR step on Save:
- *
- *   - a SCRIPTED op  → a `bpmn:ScriptTask`  whose name is the op id → `uses: <op>`
- *   - a PROMPT       → a `bpmn:ServiceTask` whose name is the prompt id → `prompt: <id>`
- *
- * The op list comes from `window.REBAR_CONTRACTS` (the scripted ops with declared
- * contracts) and the prompt list from the `/prompts` endpoint (built-in + project),
- * both grouped by the CLOSED category vocabulary (review/verifier/transform/code/
- * exploration). The actual chooser UI lives in the side panel (promptLibrary.js); the
- * context-pad/palette entries open it pre-filtered to "insert" mode so insertion is
- * reachable from the canvas too.
+ * Typed context-pad and palette insertion. The category-grouped chooser maps scripted
+ * ops to named ScriptTasks (`uses:`) and prompts to named ServiceTasks (`prompt:`), so
+ * both round-trip through the IR. Canvas entries open the side-panel chooser.
  */
 
 const LOW_PRIORITY = 900;
@@ -31,10 +17,8 @@ export function createTypedStep(modeler, kind, name) {
   return shape;
 }
 
-// The bpmn element TYPE each insertable step kind maps to. The leaf kinds (scripted/agent)
-// round-trip via their NAME == action; the structural kinds (branch/loop/map) carry no name
-// and are completed in the edit panel after insert; `batch` is a ServiceTask seeded with a
-// rebar:Config `batch` object so the editor recognizes it as a batch step (story B-UX item 14).
+// Leaf kinds round-trip through NAME == action. Structural kinds are completed in the
+// panel; batch starts as a ServiceTask with a recognizable rebar:Config seed.
 const KIND_BPMN_TYPE = {
   script: "bpmn:ScriptTask",
   service: "bpmn:ServiceTask",
@@ -48,10 +32,8 @@ const KIND_BPMN_TYPE = {
 // (branch/loop/map/batch) do not — their config is edited in the panel after insert.
 const KIND_HAS_NAME = { script: true, service: true };
 
-// Programmatic insert (used by the side-panel "Insert" button and the e2e harness): drop a
-// typed step at a sensible spot on the root, seed any structural shape (loop/map bounds, a
-// batch config) so the editor recognizes its kind, and SELECT it so its edit panel (with its
-// fields) opens immediately (story B-UX items 14 + 15).
+// Insert on the root, seed structural config, and select the new step so its typed
+// editor opens immediately. Used by the side panel and E2E harness.
 export function insertTypedStep(modeler, kind, name) {
   const modeling = modeler.get("modeling");
   const bpmnFactory = modeler.get("bpmnFactory");
