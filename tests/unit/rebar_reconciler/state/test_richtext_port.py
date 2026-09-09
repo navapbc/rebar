@@ -1,18 +1,9 @@
-"""Ticket 21ca: rich-text codec + comment limits behind the port (happy path).
+"""Neutral-core rich-text port contracts.
 
-Two neutral-core modules reached Jira rich-text/limit modules by literal lazy-load key:
-``outbound_comments.py`` (ADF decode for comment-diff + comment truncation) and
-``inbound_translate.py`` (ADF decode as inbound defense-in-depth). 21ca routes them
-through port roles:
-
-* ``InboundMapper.normalize_rich_text(body)`` — decode a remote rich-text payload to
-  text (Jira: ``adf_to_text`` for dicts, identity for strings). Serves BOTH the inbound
-  apply path AND the outbound comment-diff decode.
-* ``FieldSanitizer.fit_comment(body)`` — pure fit-to-limit for the comment-diff
-  comparison (Jira: ``comment_limits.truncate_comment_body``; no send-side warning).
-
-Happy-path oracle: the two port members exist on JiraBackend and behave for well-formed
-input.
+``InboundMapper.normalize_rich_text`` converts remote payloads to text for
+inbound application and outbound comparison. ``FieldSanitizer.fit_comment``
+applies the Jira comment limit. The tests pin Jira backend wiring for valid
+inputs.
 """
 
 from __future__ import annotations

@@ -1,8 +1,7 @@
-"""Ticket 21ca (HELD-OUT edge oracle): rich-text/limit port edges + neutrality sweep.
+"""Held-out rich-text port edge contracts.
 
-Withheld from the implementer: the byte-identical over-limit truncation, the decode
-edges, the bug 1bb2-5da5 defense (a raw ADF dict never survives as a dict), and the
-package-root literal-key sweep with its single recorded inbound_fields.py exemption.
+The suite pins serialized ADF fitting, decode boundaries, dictionary
+normalization, and the neutral-core literal-key exemption.
 """
 
 from __future__ import annotations
@@ -37,27 +36,10 @@ def _backend() -> JiraBackend:
 
 # ── fit_comment truncates over-limit bodies byte-identically to the vendor rule ─
 def test_fit_comment_truncates_over_limit_byte_identical() -> None:
-    """The vendor fit rule is what the SEND PATH lands, not a standalone cap.
+    """The port fits comments exactly as the send path does.
 
-    Retargeted under bug e339-9709-15fe-419a. This oracle originally compared
-    ``fit_comment`` against ``comment_limits.truncate_comment_body`` — correct
-    when ``acli_cli_ops.add_comment`` still fitted with that same helper, stale
-    since `emersed-specific-mutt` moved the send path onto
-    ``fit_preserving_marker(body, AdfCodec.fit_outbound)``, which measures the
-    SERIALIZED ADF and reserves budget for ``RECONCILER_MARKER``. Pinning the
-    superseded helper pinned the defect: the differ's dedup key could never equal
-    the landed body, so every over-length comment re-posted on every pass.
-
-    The expectation is therefore rebuilt from the send path's own composition
-    rather than from any one fitter, so it cannot go stale the same way again.
-
-    Scope: this is a PORT-level characterization — it pins what ``fit_comment``
-    returns, and it re-derives its expectation from the same helpers the
-    implementation uses, so it does NOT discriminate a send path that drifts off
-    those helpers. That discrimination lives in
-    ``diffing/test_comment_dedup_key_matches_send_fit.py``, which captures the
-    ``--body`` argument out of a real ``acli_cli_ops.add_comment`` call instead of
-    re-deriving it.
+    Expected bytes come from the marker-preserving ADF composition. A separate
+    transport test captures the sent body and owns send-path parity.
     """
     huge = "x" * 40_000  # well over Jira's comment limit on either measure
     fitted = _backend().sanitizer.fit_comment(huge)

@@ -1,18 +1,8 @@
-"""Unit tests for rebar_reconciler/config.py — EXCLUDED_FIELDS constant and
-local_to_jira_status mapping.
+"""Status mapping and excluded-field contracts for the reconciler.
 
-Tests cover:
-  - test_excluded_fields_is_tuple: EXCLUDED_FIELDS is a tuple.
-  - test_excluded_fields_has_exactly_two_elements: EXCLUDED_FIELDS has exactly 2 elements.
-  - test_excluded_fields_contains_local_id: EXCLUDED_FIELDS contains 'local_id'.
-  - test_excluded_fields_contains_rebar_id: EXCLUDED_FIELDS contains 'rebar-id'.
-  - test_local_to_jira_status_is_nonempty_dict: default mapping is a non-empty
-    dict of str->str.
-  - test_local_to_jira_status_keys_are_known_local_statuses: keys cover the
-    canonical local-side statuses used by outbound_update v1.
-  - test_empty_mapping_kill_switch_safe: an empty mapping is a valid
-    kill-switch configuration — module re-import with an empty dict assigned
-    must not raise, and the default re-loaded value remains non-empty.
+The tests pin excluded identifiers, outbound statuses, canonical inbound
+preimages, and adapter-map parity. Empty outbound mappings remain a supported
+status-update kill switch.
 """
 
 from __future__ import annotations
@@ -118,9 +108,7 @@ def test_jira_to_local_status_is_nonempty_str_dict(config: ModuleType) -> None:
 
 
 def test_jira_to_local_status_canonical_preimages(config: ModuleType) -> None:
-    """The non-injective forward map's canonical preimages: the UNANNOTATED
-    local statuses. (Pre-fix, a lexicographic inversion imported
-    'In Progress' as blocked and 'Done' as cancelled.)"""
+    """Canonical inbound preimages avoid ambiguous blocked and cancelled mappings."""
     mapping = config.jira_to_local_status
     assert mapping["To Do"] == "open"
     assert mapping["In Progress"] == "in_progress"
@@ -131,9 +119,7 @@ def test_jira_to_local_status_canonical_preimages(config: ModuleType) -> None:
 def test_jira_to_local_status_round_trips_through_forward_map(
     config: ModuleType,
 ) -> None:
-    """Every reverse-mapped local status forward-maps to a live Jira status,
-    and Jira statuses that exist in the forward map round-trip exactly
-    (To Do/In Progress/Done are fixed points of forward∘reverse)."""
+    """Each inbound local status maps forward, and canonical statuses round-trip."""
     fwd = config.local_to_jira_status
     rev = config.jira_to_local_status
     for _jira_status, local_status in rev.items():
@@ -148,11 +134,7 @@ def test_jira_to_local_status_round_trips_through_forward_map(
 def test_jira_to_local_status_parity_with_inbound_differ(
     config: ModuleType,
 ) -> None:
-    """config.jira_to_local_status must stay in lock-step with
-    inbound_differ._JIRA_TO_LOCAL_STATUS: _apply_inbound_create maps the
-    import's status through config, and the bound-ticket inbound differ maps
-    through its module constant — any drift re-opens the pass-2 churn this
-    map was added to fix (ticket robe-creek-zealot)."""
+    """The inbound differ and configuration share the Jira-to-local status map."""
     import sys
 
     spec = importlib.util.spec_from_file_location(
@@ -196,35 +178,15 @@ def test_idea_maps_to_jira_idea_across_all_status_maps(config: ModuleType) -> No
 
 
 def test_local_to_jira_status_parity_with_the_jira_family_map(config: ModuleType) -> None:
-    """`config.local_to_jira_status` must equal the canonical Jira-family map.
+    """The core status map equals the Jira-family map.
 
-    THE THIRD COPY (bug fe15-3bc4-ed70-4b61). Story J2 consolidated the two drifted copies
-    inside `adapters/jira/` into a single definition in
-    `adapters/jira_family/value_maps.LOCAL_STATUS_TO_JIRA`, which both the ACLI transport and
-    the Backend port now read. It deliberately left THIS copy out of scope and named this bug
-    in its own module docstring. The two are content-identical today, so there is no drift yet
-    — and nothing prevented one: mutating `local_to_jira_status["deleted"]` to
-    "Archived-MUTANT", a value that is not a state in the live DIG workflow, left **59 tests
-    green** across this module, the ACLI status-resolution suite and the jira-family seam
-    suites. That measurement is why this test exists.
-
-    A PARITY TEST RATHER THAN A SHARED IMPORT, for the reasons recorded on
-    `local_to_jira_status` itself: `config.py` imports nothing but `__future__`, and pulling a
-    vendor adapter into core would invert the one-way dependency direction `adapters/jira_family`
-    declares. This mirrors what `test_jira_to_local_status_parity_with_inbound_differ` above
-    already does for the reverse map — the established idiom here for exactly this problem.
-
-    FULL-DICT EQUALITY, not a per-key spot check.
-    `test_idea_maps_to_jira_idea_across_all_status_maps` already pins the single `idea -> IDEA`
-    entry across all three maps; the other six keys were
-    the unguarded ones, which is precisely why the mutation above went unseen.
+    Full-dictionary parity catches drift without importing a vendor adapter
+    into core. The test loads the adapter map by path to preserve dependency
+    direction.
     """
     import sys
 
-    # Loaded BY PATH, not imported as a package, so reading the adapter's map here creates no
-    # import-time dependency from core's test context onto the vendor package. The nested
-    # helper mirrors `test_idea_maps_to_jira_idea_across_all_status_maps`'s own loader rather
-    # than editing it, keeping this change purely additive.
+    # Load by path to compare maps without importing the vendor package into core.
     path = (
         REPO_ROOT
         / "src"

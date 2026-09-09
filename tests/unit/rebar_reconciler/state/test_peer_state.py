@@ -1,13 +1,8 @@
-"""Direct unit tests for the extracted last-synced-peer-state module (ticket 4522).
+"""Standalone peer-state contracts.
 
-Exercises ``rebar_reconciler.peer_state`` WITHOUT constructing a ``BindingStore`` —
-the point of the extraction — and pins the two absence-semantics properties that
-make the cluster safe (a refactor is exactly when they get quietly dropped):
-
-- an ABSENT baseline is VALID and degrades to local-wins (``get_baseline`` → None,
-  ADR 0026 §2);
-- an ABSENT peer-parent observation is VALID and fails safe to NO clear
-  (``get_peer_parent`` → None, ticket 88d9).
+The module reads and writes baselines without constructing a binding store.
+Missing baselines return ``None`` for local precedence. Missing peer-parent
+observations return ``None`` and never authorize a clear.
 """
 
 from __future__ import annotations

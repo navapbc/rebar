@@ -1,21 +1,8 @@
-"""Tests for corrupt bridge-state file handling (bug 4292-f24b-c0de-4f61).
+"""Corrupt bridge state fails closed.
 
-Covers two seams:
-  SEAM 1 — reconcile.py:472-473: bare json.loads(prev_path.read_text()) with no
-    error handling. A conflict-corrupted or truncated prev_snapshot.json causes a
-    JSONDecodeError that crashes the entire pass before the outbound differ runs.
-
-  SEAM 2 — binding_store.py:53-57: bare json.load(f) with no error handling.
-    A conflict-corrupted bindings.json raises JSONDecodeError propagated uncaught
-    from __init__ → load_binding_store → reconcile_once.
-
-Safety invariant: NEVER emit outbound comment-add mutations when the Jira-side
-comment state is unknown (i.e., when the pass has not fetched curr_snapshot
-successfully due to a crash before the outbound differ).
-
-Fixture conventions:
-  - importlib loader (spec_from_file_location) — per conftest.py docstring
-  - inline StubBindingStore — same pattern as test_outbound_differ_comment_dedup.py
+Invalid binding or snapshot JSON aborts reconciliation instead of presenting
+empty state. Unknown Jira comment state never authorizes blind comment
+additions. Healthy snapshots still deduplicate comments.
 """
 
 from __future__ import annotations
@@ -79,12 +66,10 @@ class TestBindingStoreCorrupt:
     def test_corrupt_json_raises_with_named_file(
         self, tmp_path: Path, binding_store_mod: ModuleType
     ) -> None:
-        """A bindings.json containing invalid JSON must raise an informative
-        exception that names the corrupted file.
+        """Invalid binding JSON raises an error that names the corrupt file.
 
-        Rationale: silently returning an empty store would treat all local
-        tickets as unbound → emit CREATE mutations for every ticket → mass
-        duplicate Jira issues. Fail-closed is the safe behavior.
+        Failing closed prevents an empty store from creating duplicate Jira
+        issues.
         """
         bridge_dir = tmp_path / ".bridge_state"
         bridge_dir.mkdir(parents=True, exist_ok=True)
@@ -106,14 +91,7 @@ class TestBindingStoreCorrupt:
     def test_git_conflict_markers_in_bindings_raises(
         self, tmp_path: Path, binding_store_mod: ModuleType
     ) -> None:
-        """A bindings.json containing git merge-conflict markers (<<<<<<< HEAD,
-        =======, >>>>>>> branch) must not silently return an empty store.
-
-        A file containing conflict markers is NOT valid JSON — json.load will
-        raise JSONDecodeError. The BindingStore must propagate a meaningful
-        exception rather than silently defaulting to empty bindings (which
-        would cause every ticket to be emitted as a CREATE on the next pass).
-        """
+        """Git conflict markers in ``bindings.json`` raise a named parse error."""
         bridge_dir = tmp_path / ".bridge_state"
         bridge_dir.mkdir(parents=True, exist_ok=True)
         bindings_path = bridge_dir / "bindings.json"
@@ -140,13 +118,7 @@ class TestBindingStoreCorrupt:
     def test_corrupt_bindings_no_empty_fallback(
         self, tmp_path: Path, binding_store_mod: ModuleType
     ) -> None:
-        """Corrupt bindings.json must NOT silently fall back to empty bindings.
-
-        An empty fallback would make all tickets appear unbound → emit CREATE
-        mutations for all of them → duplicate Jira issues on every pass.
-        The safe behavior is to abort the reconcile run (raise), not to continue
-        with a known-bad state.
-        """
+        """Corrupt bindings abort reconciliation instead of appearing unbound."""
         bridge_dir = tmp_path / ".bridge_state"
         bridge_dir.mkdir(parents=True, exist_ok=True)
         bindings_path = bridge_dir / "bindings.json"
@@ -177,35 +149,10 @@ class TestBindingStoreCorrupt:
 
 
 class TestPrevSnapshotCorrupt:
-    """SEAM 1 tests: when comment state is unknown (corrupt prev_snapshot.json
-    causes the pass to crash before curr_snapshot is fetched), no comment-add
-    mutations may be emitted.
-
-    These tests exercise outbound_differ._diff_comments with a snapshot that
-    represents the degraded state (jira_snapshot={}) to verify the fix blocks
-    comment-add mutations when Jira-side comment state is unknown.
-
-    The fix is in reconcile.py's snapshot-load path: catching JSONDecodeError
-    on prev_snapshot.json load must abort the pass (or skip comment mutations),
-    not silently substitute {} for curr_snapshot.
-
-    Since outbound_differ is a pure function (no I/O), we test the invariant
-    by simulating what the reconcile.py fix must guarantee:
-      - A corrupt prev_snapshot.json must not cause the outbound differ to
-        receive an empty jira_snapshot for comment diffing.
-      - We test the _read_prev_snapshot helper behavior directly on reconcile.py
-        when it exists, falling back to verifying the invariant via a probe.
-    """
+    """Corrupt snapshots abort before unknown comment state reaches the differ."""
 
     def test_prev_snapshot_json_parse_error_helper(self, tmp_path: Path) -> None:
-        """prev_snapshot.json with invalid JSON must raise JSONDecodeError or
-        be caught and the pass must abort without emitting comment mutations.
-
-        This test validates the reconcile.py load path behavior by calling
-        the module-level snapshot-load function or by observing that
-        json.loads raises on the corrupt content (proving the bare load
-        path has no guard, so the fix must add one).
-        """
+        """Invalid snapshot JSON raises before comment mutations are computed."""
         # Write a corrupt snapshot file
         prev_dir = tmp_path / ".tickets-tracker" / ".bridge_state"
         prev_dir.mkdir(parents=True, exist_ok=True)
@@ -235,28 +182,7 @@ class TestPrevSnapshotCorrupt:
     def test_corrupt_prev_snapshot_must_not_emit_comment_adds(
         self, tmp_path: Path, outbound_differ_mod: ModuleType
     ) -> None:
-        """When prev_snapshot is corrupt, the reconcile.py fix must ensure the
-        outbound differ does NOT receive an empty jira_snapshot for comment diffing.
-
-        This test validates the invariant: if the pass proceeds despite a corrupt
-        prev_snapshot (e.g. because only the INBOUND differ uses prev_snapshot,
-        and curr_snapshot is the authoritative Jira state for outbound diffing),
-        then the comment-add logic uses curr_snapshot (live fetch) and NOT a
-        fallback-empty prev_snapshot.
-
-        We probe the outbound differ's behavior directly:
-        - When jira_snapshot is {} (as if curr_snapshot was never fetched),
-          _diff_comments treats all local comments as new → emits adds.
-        - The fix must ensure curr_snapshot is always the live fetch result, and
-          if curr_snapshot cannot be obtained (because the pass crashed on prev),
-          the pass ABORTS rather than continuing with an empty jira_snapshot.
-
-        This test documents the invariant by asserting on the FIXED behavior:
-        a corrupt prev_snapshot.json file at the reconcile.py read path raises
-        JSONDecodeError (no guard in place before the fix = crash = no mutations).
-        After the fix: the exception must be caught, alert emitted, and pass
-        aborted with a clear error rather than silently continuing with {}.
-        """
+        """A corrupt snapshot never supplies empty comment state to the differ."""
         # Set up a ticket with comments
         ticket = {
             "ticket_id": "local-corrupt-test",
@@ -314,19 +240,8 @@ class TestPrevSnapshotCorrupt:
             f"Got: {[m.comments for m in comment_adds]}"
         )
 
-        # Defense-in-depth (bug 4292): even when jira_snapshot is empty AND
-        # no client is provided, the outbound differ must NOT emit blind
-        # comment-add mutations. The corrupt-state guard in reconcile.py is
-        # the primary defense (it aborts the pass before outbound_differ runs).
-        # The differ-level safety invariant (bug 4292) is a secondary defense:
-        # when the snapshot entry lacks a 'comment' field and no client is
-        # available to fetch live comment state, _diff_comments skips comment
-        # mutations rather than emitting blind adds.
-        # Previously this block asserted that the UNSAFE path would emit adds
-        # (to document why the reconcile.py abort was necessary). With bug 4292
-        # fixed, that path is also safe — no adds, no client call. The corrupt-
-        # state guard is still load-bearing for the primary protection, but the
-        # differ is now hardened as a second layer.
+        # Missing comment state without a client cannot authorize blind additions.
+        # The load guard aborts corrupt passes, and the differ supplies a second check.
         jira_snapshot_empty = {}
 
         result_no_client, _ = outbound_differ_mod.compute_outbound_mutations(
@@ -364,12 +279,7 @@ class TestHealthyStateRegression:
     """
 
     def test_healthy_snapshot_deduplicates_comments(self, outbound_differ_mod: ModuleType) -> None:
-        """When prev_snapshot.json is healthy, comment dedup still works.
-
-        This mirrors the existing test_outbound_differ_comment_dedup.py fixtures
-        but exercises the full compute_outbound_mutations path for regression
-        coverage after the SEAM 1 fix.
-        """
+        """Healthy Jira comment state deduplicates through the outbound differ."""
         jira_key = "DIG-HEALTHY"
         existing_bodies = ["Already synced", "Also synced"]
         new_body = "Brand new comment"

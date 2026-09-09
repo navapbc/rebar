@@ -1,29 +1,9 @@
-"""Standalone contract for the pass-support git-adapter seam.
+"""Standalone pass-support and git-adapter contracts.
 
-Test contract card::
-
-    authoritative_contract: >
-      pass_support.py explicitly supports by-file standalone loading;
-      _commit_binding_store_snapshot returns True for no state/success and
-      False with a diagnostic for operational failure; _loader.py preserves an exact
-      sys.modules key supplied by the caller.
-    trigger_preconditions: >
-      an isolated child interpreter cannot import a rebar_reconciler parent package
-      and loads pass_support.py with spec_from_file_location.
-    production_path: >
-      pass_support.py -> _commit_binding_store_snapshot -> rebar._store.push.commit_tickets_branch
-      (the locked store commit seam; the git-adapter module is still loaded for
-      the tracker/state-file path constants).
-    test_tier: >
-      unit test driving a real isolated Python subprocess; an in-process unit is
-      insufficient because prior imports can leak package/sys.modules context.
-    observable_postcondition: >
-      no-state and successful state calls return True; adapter failure returns False
-      and emits the documented diagnostic; a pre-seeded canonical adapter is reused.
-    negative_control: >
-      the same standalone route is exercised with no state, successful state, and
-      an adapter failure so the oracle distinguishes all documented outcomes.
-    ci_gate: make test
+An isolated interpreter loads ``pass_support.py`` by file without an importable
+parent package. The helper reuses the canonical adapter key, commits through the
+locked tickets-branch operation, returns ``True`` for absent or persisted state,
+and reports operational failure as ``False`` with a diagnostic.
 """
 
 from __future__ import annotations
