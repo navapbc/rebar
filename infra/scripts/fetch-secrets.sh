@@ -1,18 +1,11 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# fetch-secrets.sh — write the container .env from SSM Parameter Store (ADR-0008).
-# A change to this file is intentionally a secrets-only deploy signal for autodeploy's MCP delta
-# gate: the MCP container consumes the generated .env and static-token digest file at startup.
+# Materialize container secrets from SSM using the EC2 instance role (ADR 0008).
+# Required reads finish before the atomic 0600 .env replacement; failures leave the
+# prior file intact. Autodeploy treats this source as an MCP secrets deploy signal.
 #
-# Reads the SUBSET of /rebar/prod/* SecureString params the containers need and
-# writes them to infra/compose/.env (0600), authenticating via the EC2 INSTANCE
-# ROLE (no static keys). Idempotent: overwrites the .env each run. FAIL-FAST: if
-# any SSM read fails (SSM unreachable / param missing), abort with exit 1 and do
-# NOT touch the .env — never run on a stale secrets file.
-#
-# SSM-leaf -> env-var mapping (only the leaves the containers consume):
+# SSM leaf -> container setting:
 #   /rebar/prod/anthropic-api-key      -> ANTHROPIC_API_KEY     (review-bot LLM, S4b)
-#   /rebar/prod/mcp-hmac-signing-key   -> MCP_HMAC_SIGNING_KEY  (verdict signing)
+#   /rebar/prod/mcp-hmac-signing-key   -> MCP_HMAC_SIGNING_KEY  (legacy compatibility)
 #   /rebar/prod/gerrit-admin-password  -> GERRIT_ADMIN_PASSWORD (admin bootstrap)
 #   /rebar/prod/gerrit-bot-token       -> GERRIT_BOT_TOKEN      (bot posts reviews)
 #   /rebar/prod/github-oauth-client-id     -> GITHUB_OAUTH_CLIENT_ID     (WS8, OPTIONAL)
@@ -26,25 +19,16 @@
 #   /rebar/prod/jira-user                  -> JIRA_USER                  (bridge, String,  OPTIONAL)
 #   /rebar/prod/jira-project               -> JIRA_PROJECT               (bridge, String,  OPTIONAL)
 #   /rebar/prod/jira-api-token             -> JIRA_API_TOKEN             (bridge, SECRET,  OPTIONAL)
-# The four Jira leaves keep the GitHub Actions var/secret split: only the token is a
-# SecureString (read decrypted); the other three are plain Strings read WITHOUT
-# --with-decryption. All four are OPTIONAL -- see the soft-degrade note at their read below.
-# The two OAuth creds are OPTIONAL here (blank if unpopulated) — they are only needed
-# under auth.type = OAUTH, and compose-up.sh FAILS LOUD if OAUTH is selected but they
-# are empty. Making them REQUIRED here would couple every boot (incl. non-OAUTH rollback)
-# to their presence.
-# Plus a non-secret: REVIEW_BOT_PORT=8000 (single-source the port for compose + nginx).
-# (The other /rebar/prod/* params — ssh host key, replication deploy key, alert
-# endpoint — are consumed elsewhere, not by these containers, so they are not fetched.)
-# ---------------------------------------------------------------------------
+# Jira's token is decrypted; its three configuration values remain plain Strings.
+# Jira and OAuth values are optional here and enforced only by their consumers.
+# REVIEW_BOT_PORT=8000 is generated locally; unrelated SSM leaves are owned elsewhere.
 set -euo pipefail
 
 # Output path (overridable for testing).
 ENV_FILE="${ENV_FILE:-infra/compose/.env}"
 SSM_PREFIX="/rebar/prod"
 
-# --- Region via IMDSv2 (token-required) ------------------------------------
-# IMDSv2 is enforced on the box, so fetch a session token before reading metadata.
+# Read the region through token-required IMDSv2.
 imds_token="$(curl -sf -X PUT "http://169.254.169.254/latest/api/token" \
   -H "X-aws-ec2-metadata-token-ttl-seconds: 60")"
 AWS_REGION="$(curl -sf \
@@ -52,8 +36,7 @@ AWS_REGION="$(curl -sf \
   "http://169.254.169.254/latest/meta-data/placement/region")"
 export AWS_REGION AWS_DEFAULT_REGION="${AWS_REGION}"
 
-# --- Read one SecureString param (decrypted), fail-fast --------------------
-# Echoes the decrypted value; aborts the whole script if the read fails.
+# Read a required, decrypted SecureString.
 get_param() {
   local leaf="$1" val
   val="$(aws ssm get-parameter \
@@ -61,9 +44,7 @@ get_param() {
     --with-decryption \
     --query 'Parameter.Value' \
     --output text)"
-  # Harden the fail-fast: a successful call that yields an empty value or the
-  # literal "None" (or the unpopulated placeholder) must NOT silently produce a
-  # broken `KEY=` line — abort instead.
+  # Blank and placeholder values fail like missing parameters.
   if [ -z "${val}" ] || [ "${val}" = "None" ] || [ "${val}" = "CHANGEME" ]; then
     echo "fetch-secrets.sh: ${SSM_PREFIX}/${leaf} is empty/None/CHANGEME — aborting" >&2
     exit 1
@@ -71,10 +52,7 @@ get_param() {
   printf '%s' "${val}"
 }
 
-# --- Read one OPTIONAL SecureString param ----------------------------------
-# Like get_param but NEVER aborts: yields empty if the param is absent, empty,
-# "None", or the "CHANGEME" placeholder. Used for conditionally-required creds
-# whose presence is enforced downstream (compose-up, only under auth.type = OAUTH).
+# Optional SecureStrings map missing, blank, None, or CHANGEME to an empty value.
 get_param_optional() {
   local leaf="$1" val
   val="$(aws ssm get-parameter \
@@ -89,11 +67,7 @@ get_param_optional() {
   printf '%s' "${val}"
 }
 
-# --- Read one OPTIONAL PLAIN (String) param --------------------------------
-# Like get_param_optional but for a NON-SecureString leaf, so it deliberately OMITS
-# --with-decryption. AWS would tolerate the flag on a String, but spelling it here would
-# erase the very distinction this script is preserving: which leaves are secrets and which
-# are ordinary configuration. Same never-abort contract: empty/None/CHANGEME yields empty.
+# Optional plain Strings deliberately omit --with-decryption and use the same blank semantics.
 get_param_optional_plain() {
   local leaf="$1" val
   val="$(aws ssm get-parameter \
@@ -107,54 +81,29 @@ get_param_optional_plain() {
   printf '%s' "${val}"
 }
 
-# Fetch all required params FIRST (into shell vars) so a failure aborts BEFORE we
-# overwrite the existing .env — a partial/empty .env must never be left behind.
+# Resolve required values before creating any replacement output.
 anthropic_api_key="$(get_param anthropic-api-key)"
 mcp_hmac_signing_key="$(get_param mcp-hmac-signing-key)"
 gerrit_admin_password="$(get_param gerrit-admin-password)"
 gerrit_bot_token="$(get_param gerrit-bot-token)"
-# OPTIONAL (blank until an operator populates them + auth.type = OAUTH is in use).
+# OAuth is enforced downstream only when auth.type is OAUTH.
 github_oauth_client_id="$(get_param_optional github-oauth-client-id)"
 github_oauth_client_secret="$(get_param_optional github-oauth-client-secret)"
-# OPTIONAL: the reviewbot's tickets-repo PAT (contents:write on the tickets repo only). Blank
-# until the operator populates the SSM slot; the container boots either way, and the code_review
-# artifact push (story limestone-unethical-zebrafinch) starts working once it is set.
+# The review-bot tickets PAT is optional; blank defers artifact pushes.
 reviewbot_tickets_pat="$(get_param_optional reviewbot-tickets-pat)"
-# OPTIONAL: the fine-grained GitHub PAT (contents:write on the tickets repo) the mcp
-# container's entrypoint feeds to a URL-scoped git credential helper so it can clone the
-# `tickets` branch into REBAR_TRACKER_DIR and auto-push the events its tools write. Blank is
-# fine: the clone is simply deferred and the container still boots (soft failure posture).
+# The MCP tickets PAT is optional; blank defers its URL-scoped store clone.
 mcp_tickets_pat="$(get_param_optional mcp-tickets-pat)"
-# FALLBACK to the review-bot's tickets PAT when the mcp-specific slot is empty. Both
-# credentials do the same thing against the same target -- clone and push the `tickets`
-# branch of the same repo -- so an empty dedicated slot would leave the mcp store
-# unprovisioned while an equivalent, already-populated credential sat right next to it, and
-# the endpoint would keep reporting "not initialized" for want of a second copy of the same
-# secret. The dedicated slot stays the PREFERRED source and wins whenever it is set, so an
-# operator can scope mcp to its own credential later without touching this script.
-# Deliberately NOT a fallback for mcp-static-tokens.json: that one is an AUTH boundary and
-# must fail closed. This one is a data-store credential whose absence is a soft degrade.
+# Prefer the MCP-specific PAT, but reuse the review-bot PAT for the same repo/branch.
+# This data-store fallback never applies to the fail-closed static-auth token set.
 if [ -z "${mcp_tickets_pat}" ] && [ -n "${reviewbot_tickets_pat}" ]; then
   mcp_tickets_pat="${reviewbot_tickets_pat}"
   echo "fetch-secrets.sh: mcp-tickets-pat is blank — falling back to reviewbot-tickets-pat for the MCP ticket store (same repo/branch); set the dedicated slot to scope it separately" >&2
 fi
 
-# OPTIONAL: the Rebar Bot ed25519 authorship signing key (story 245e). A multi-line
-# OpenSSH PEM key cannot live in a single-line .env value, so materialize it to a 0600
-# FILE next to the .env (the ci-gerrit-ssh-key / g2p-github-pat materialize-to-file
-# precedent). This script does NOT emit REBAR_IDENTITY_SIGNING_KEY into the shared .env:
-# each service owns its OWN container-side path explicitly (the review-bot's compose
-# `environment:` → /run/secrets/rebar-bot-signing-key; the MCP container's `docker run -e`
-# → /run/secrets/opcert-ed25519-key). Emitting it here too would define the variable TWICE
-# for the MCP container — `docker run` keeps BOTH the `--env-file` .env entry and the `-e`
-# flag in Config.Env (unlike compose's env-over-env_file merge), leaving the effective value
-# resting on docker's last-wins ordering (bug calcite-farsighted-goose). Blank SSM slot ⇒
-# the reviewbot writes unsigned (its types are gate-exempt, so this is attribution only).
+# Materialize the optional multiline authorship key as a 0600 file. Each service
+# supplies its own container path, so REBAR_IDENTITY_SIGNING_KEY is not duplicated in .env.
 rebar_bot_signing_key="$(get_param_optional rebar-bot-signing-key)"
-# ALWAYS create the file, even when the SSM slot is blank (bug beb1). docker creates a
-# DIRECTORY when a bind-mount source is missing, so an absent key file would break review-bot
-# start now that the key is mounted in. An EMPTY file is the "unsigned" state: rebar treats an
-# unreadable/empty key as no key and writes unsigned, which is the documented fallback.
+# Always create the bind source; an empty file is the supported unsigned state.
 signing_key_path="$(dirname "${ENV_FILE}")/rebar-bot-signing-key"
 key_tmp="$(mktemp "${signing_key_path}.XXXXXX")"
 chmod 600 "${key_tmp}"
@@ -169,14 +118,8 @@ else
        "the review bot will write UNSIGNED events" >&2
 fi
 
-# OPTIONAL: the trusted op-cert gate service's passphrase-free Ed25519 PRIVATE signing key
-# (story 6f14). Materialized OUTSIDE the app so the app runtime needs no boto3/SSM — the same
-# materialize-to-file precedent as rebar-bot-signing-key above. Write the SSM value to a 0600
-# FILE next to the .env; the opcert compose service bind-mounts it read-only at the fixed
-# container target and points REBAR_OPCERT_KEY_PATH at it. ALWAYS create the file (empty when
-# the SSM slot is blank, bug beb1) so the bind-mount source exists — an absent source would make
-# docker create a DIRECTORY and break opcert start-up. (An empty file fails compose_signer's
-# validation, so a blank slot surfaces as a clear startup error rather than a silent mis-sign.)
+# Materialize the current Ed25519 op-cert verdict-signing key as a 0600 file outside
+# the application. Always create the bind source; an empty file fails startup explicitly.
 opcert_signing_key="$(get_param_optional opcert-ed25519-key)"
 opcert_key_path="$(dirname "${ENV_FILE}")/opcert-ed25519-key"
 opcert_key_tmp="$(mktemp "${opcert_key_path}.XXXXXX")"
@@ -193,52 +136,22 @@ else
   echo "fetch-secrets.sh: opcert-ed25519-key is blank — wrote an EMPTY ${opcert_key_path}; the op-cert gate service will fail startup key composition until the SSM slot is set" >&2  # gitleaks:allow
 fi
 
-# OPTIONAL: the per-client MCP bearer PATs (epic jira-reb-3527 "Enable MCP on AWS", ADR 0104 §1).
-# One SecureString per client; each client presents its own bearer PAT to the nginx `/mcp/` TLS
-# edge and the `static` verifier authenticates it. Two on-box sinks (gotcha f600 — the .env is
-# rsync-EXCLUDED, so a rotated SSM value is MATERIALIZED here, not baked into the rsync'd tree):
-#   1. the RAW value lands in the 0600 .env as MCP_CLIENT_PAT_* (below, in the .env heredoc);
-#   2. the tokens file the verifier reads (mcp-static-tokens.json) references it via `token_env`
-#      — env-var NAMES, never a plaintext token, never the raw value in the tokens file (ADR 0050
-#      §4 / ADR 0104: the server holds only SHA-256 digests, supplied via env-var names).
-# A blank slot's record is OMITTED so `_parse_static_record` never sees an empty token_env; the
-# file is ALWAYS written (bug beb1 — a missing bind-mount source would make docker create a
-# DIRECTORY). All-blank ⇒ `{"tokens": []}` and the verifier fails-closed at startup ("defines no
-# tokens") until an operator populates ≥1 PAT. Rotation is operator-driven (re-materialize +
-# RESTART rebar-mcp so the init-time verifier re-reads) — see infra/runbooks/mcp-client-pats.md.
+# Keep raw per-client PATs only in the 0600 .env; the always-present token file names
+# their environment variables. Blank records are omitted, so an all-blank set fails closed.
 mcp_pat_copilot="$(get_param_optional mcp-client-pat-copilot)"
 mcp_pat_codex="$(get_param_optional mcp-client-pat-codex)"
 mcp_pat_claude="$(get_param_optional mcp-client-pat-claude)"
 
-# OPTIONAL: the Jira bridge configuration (bug colourless-hasteless-lamb). Without these the
-# MCP server's bridge tools fail immediately -- `bridge_check_access` exits 2 with
-# "bridge access check requires JIRA_URL, JIRA_USER, and JIRA_API_TOKEN".
-#
-# FAILURE POSTURE: SOFT DEGRADE, chosen deliberately. Precedent on this box is SPLIT --
-# mcp-static-tokens.json fails CLOSED because it is an AUTH boundary (no bearer store, no
-# endpoint), while a missing tickets PAT degrades softly. Jira credentials are an OUTBOUND
-# INTEGRATION credential: their absence cannot expose an unauthenticated endpoint, only leave
-# bridge tools unable to reach Jira. So all four use the OPTIONAL readers, never get_param.
-# That is not a stylistic choice -- get_param exits 1 and writes NO .env at all, and
-# autodeploy aborts the whole mcp deploy when fetch-secrets fails, so a REQUIRED read would
-# let one unpopulated Jira slot block deploys of entirely unrelated code and take every
-# container down. With the optional read, a blank slot leaves a blank .env value, the stack
-# boots, the endpoint stays up, and only the bridge tools report unavailable -- via the
-# already-typed exit-2 error that names exactly which variables are missing.
-#
-# Only the token is decrypted; the three plain Strings use the non-decrypting reader, keeping
-# the GitHub Actions vars.*-vs-secrets.* split intact on the box.
+# Jira is an outbound integration, so missing optional values disable only bridge tools.
+# Static MCP authentication remains independently fail-closed. Only Jira's token is decrypted.
 jira_url="$(get_param_optional_plain jira-url)"
 jira_user="$(get_param_optional_plain jira-user)"
-# JIRA_PROJECT is a FOURTH required input for a live verdict, not an optional extra:
-# access_check._resolve_probe_scope fails closed with reason=missing_project when it is unset,
-# and rebar.config.resolve_jira_probe_scope reads the ENVIRONMENT ONLY -- the committed
-# rebar.toml `[jira] project` never reaches the probe. Terraform owns this parameter's value.
+# Live bridge checks also require JIRA_PROJECT from the environment.
 jira_project="$(get_param_optional_plain jira-project)"
 jira_api_token="$(get_param_optional jira-api-token)"
 mcp_static_tokens_path="$(dirname "${ENV_FILE}")/mcp-static-tokens.json"
 
-# Append one token_env record per POPULATED client (env-var NAMES only; no secret interpolated).
+# Add token_env records only for populated clients; never interpolate their secrets.
 mcp_records=""
 add_mcp_record() {
   local client="$1" value="$2" envvar="$3"
@@ -261,7 +174,7 @@ else
   echo "fetch-secrets.sh: no MCP client PATs set — wrote an EMPTY token set to ${mcp_static_tokens_path}; the static verifier fails-closed until ≥1 PAT is populated" >&2
 fi
 
-# --- Write the .env atomically (0600), then move into place ----------------
+# Atomically replace the generated 0600 environment file.
 tmp="$(mktemp "${ENV_FILE}.XXXXXX")"
 chmod 600 "${tmp}"
 {
@@ -275,17 +188,12 @@ chmod 600 "${tmp}"
   echo "GITHUB_OAUTH_CLIENT_SECRET=${github_oauth_client_secret}"
   echo "REVIEWBOT_TICKETS_PAT=${reviewbot_tickets_pat}"
   echo "MCP_TICKETS_PAT=${mcp_tickets_pat}"
-  # REBAR_IDENTITY_SIGNING_KEY is deliberately NOT emitted here: each service sets its own
-  # container-side path (compose `environment:` / `docker run -e`), and a shared .env entry
-  # would define it twice for the MCP container's `docker run` (bug calcite-farsighted-goose).
-  # Per-client MCP bearer PATs (blank ⇒ that client's record was omitted from the tokens file).
-  # The tokens file references these env-var NAMES via token_env; the raw values live only here.
+  # Each service sets its own REBAR_IDENTITY_SIGNING_KEY path; do not duplicate it here.
+  # The token file references these PAT variable names and never contains their values.
   echo "MCP_CLIENT_PAT_COPILOT=${mcp_pat_copilot}"
   echo "MCP_CLIENT_PAT_CODEX=${mcp_pat_codex}"
   echo "MCP_CLIENT_PAT_CLAUDE=${mcp_pat_claude}"
-  # Jira bridge config. Blank is a SUPPORTED state: the container boots and the bridge tools
-  # report unavailable (see the soft-degrade note at the reads above). These reach the mcp
-  # container through this .env alone -- compose `env_file:` and mcp_run_new's `--env-file`.
+  # Blank Jira values keep the container up while bridge tools report unavailable.
   echo "JIRA_URL=${jira_url}"
   echo "JIRA_USER=${jira_user}"
   echo "JIRA_PROJECT=${jira_project}"
