@@ -1,34 +1,12 @@
-"""Warn when the rebar build running a gate is older than the ref that gate pins.
+"""Warn when gate code predates the target ref it reads.
 
-Every code-reading gate (``review_plan``, ``verify_completion``, ``review_code``,
-``scan_spec``) resolves a base ref to a pinned SHA and materializes a snapshot of the
-repo at that SHA (see :mod:`rebar.llm.gate_source`). Nothing, however, compared the
-RUNNING BUILD against that SHA — so a checkout that had drifted behind ``origin/main``
-would review brand-new material with old gate code, silently.
+Code-reading gates materialize their input at a pinned SHA. An older running build can still
+misinterpret that newer tree, especially its configuration. The warning is advisory and appears
+only when ancestry proves the drift. Missing provenance, unavailable Git data, unrelated
+repositories, and all probe errors fail open without changing the verdict or signature.
 
-The failure mode is quiet by construction. In the incident that motivated this module
-(ticket b273-e0ba-f719-4f1c) a build predating the commit that renamed
-``verify.overlap_enabled`` to ``verify.suggest_duplicate_tickets`` read the CURRENT
-base ref's ``rebar.toml``, did not recognise the current key name, and fell back to a
-default — the only trace being a config warning that said "typo?" about a key that was
-not a typo.
-
-Design notes:
-
-* **Advisory only.** Reviewing from a slightly-behind checkout is legitimate. This module
-  never raises, never changes a verdict, an exit code, a signature, or a provenance stamp.
-  :func:`warn_if_behind` swallows everything and returns ``None`` on any problem.
-* **Silent unless drift is PROVEN.** Missing build provenance, a build SHA that is not
-  present in the target repo, an unresolvable pinned SHA, an absent ``git`` — all degrade
-  to silence. A warning storm in dev installs would be worse than the bug.
-* **Only meaningful when rebar reviews rebar.** When the gate code and the target repo are
-  different repositories the build SHA simply is not an object in the target repo, so the
-  ancestry probe finds nothing and this stays quiet. That is the desired behaviour, not an
-  accident of implementation.
-* **Direction of the config coupling.** The unknown-key wording in
-  :mod:`rebar._config_coercion` needs to know whether drift was detected. Core config
-  must not import the optional ``rebar.llm`` layer, so this module (high) PUSHES the flag
-  down into core (low) via :func:`rebar._config_coercion.note_build_may_predate_config`.
+This optional LLM layer reports the condition to :mod:`rebar._config_coercion` so core config
+does not need to import upward into ``rebar.llm``.
 """
 
 from __future__ import annotations

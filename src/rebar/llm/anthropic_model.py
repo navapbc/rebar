@@ -1,24 +1,8 @@
-"""Provider/model resolution + Anthropic model construction (leaf).
+"""Resolve provider-qualified models and construct Anthropic providers.
 
-The provider-agnostic runner (``runner.PydanticAIRunner``) picks a Pydantic AI
-model purely from a provider-qualified model string. This module holds that
-resolution cluster (``_pai_model`` + the ``_PAI_PROVIDER_PREFIX`` map) together
-with the Anthropic-specific construction path the runner funnels through on the
-``anthropic:…`` provider: the retrying transport client
-(``_build_retrying_anthropic_model``) and the loopback-proxy bypass
-(``_local_proxy_bypass_base_url``). Prompt-cache settings live in
-``rebar.llm.capabilities`` (story S2) — that module reads capability FIELDS off a
-``ModelProfile`` rather than string-matching a provider name, which this module's old
-the removed anthropic-only cache-settings helper (``startswith`` gated) did not: it
-silently disabled caching for Bedrock-hosted Claude. The web-search capability helper
-(once ``_anthropic_web_search_capabilities`` here, ``startswith``-gated in the same way)
-moved to that module too and stopped being provider-gated at all — bug 129e: the Bedrock
-cutover silently withdrew the T1 blocking criterion's grounding tool.
-
-Heavy libraries (httpx, anthropic, pydantic-ai, tenacity, urllib) are imported
-**inside** the functions that need them, never at module top, so this module
-keeps the stdlib-only ``import rebar.llm`` contract that ``runner`` relies on.
-This is a leaf: it imports nothing back from ``runner``.
+Anthropic construction owns the retry transport and optional loopback bypass. Prompt-cache and
+web-search decisions remain in :mod:`rebar.llm.capabilities`. Heavy dependencies are imported
+inside their consumers, and this leaf has no runtime import from ``runner``.
 """
 
 from __future__ import annotations
@@ -213,26 +197,12 @@ def _move_unsupported_beta_create_kwargs(anthropic_client: Any) -> None:
 
 
 def _build_retry_wait(*, max_wait: float, rng=None):
-    """Build the tenacity wait strategy for the Anthropic transport (ticket
-    ``254e-1770-854b-47a2``). Hardens pydantic-ai's ``wait_retry_after`` against two
-    thundering-herd vectors that surface when many agent processes share ONE throttled
-    account (incident 1c0d):
+    """Build the bounded retry wait strategy for Anthropic transport calls.
 
-    1. **Jittered fallback.** With no ``Retry-After``, pydantic-ai's default fallback is a
-       NON-jittered ``wait_exponential``, so co-throttled clients back off by the identical
-       amount and retry in lockstep. Replace it with Equal Jitter ``rng.uniform(cap / 2, cap)``
-       over an exponential cap (Marc Brooker's AWS taxonomy; the gobifrost/bifrost pattern) so
-       concurrent clients scatter.
-    2. **Zero/expired ``Retry-After`` guard.** A ``Retry-After: 0`` (or negative) integer can
-       otherwise collapse to an IMMEDIATE replay — re-forming the herd.
-       Treat a non-positive integer ``Retry-After`` as ABSENT and fall through to the jittered
-       fallback. (An already-expired HTTP-date falls through the same way.)
-
-    A positive in-window ``Retry-After`` is still honored (capped at ``max_wait``). ``rng``
-    defaults to the process-global ``random`` module, which
-    Python seeds from OS entropy once per interpreter start — so the N SEPARATE agent processes
-    that form the herd draw from independent streams; it is an injection seam for deterministic
-    tests only, never threaded from production config.
+    A positive, unexpired ``Retry-After`` is honored up to ``max_wait``. Missing, non-positive,
+    or expired values use equal jitter over an exponential cap so throttled processes do not
+    retry in lockstep. ``rng`` is injectable for tests and otherwise uses the process-global
+    entropy-seeded generator.
     """
     import random as _random
 
@@ -258,32 +228,16 @@ def _build_retry_wait(*, max_wait: float, rng=None):
 def _build_retrying_anthropic_provider(
     *, base_url: str | None, cfg: LLMConfig, http_timeout=None, _wrapped_transport=None, auth=None
 ):
-    """Build the ``AnthropicProvider`` wrapping an ``AsyncAnthropic`` client that carries a
-    retrying ``AsyncTenacityTransport`` (story morbid-uncultured-arcticduck). Retry is owned
-    SOLELY by the transport (SDK ``max_retries=0``); a construction-time guard fails fast rather
-    than silently regress to SDK-managed retries. Returns ``(provider, http_client)`` — the
-    caller closes ``http_client`` on run teardown via ``asyncio.run(http_client.aclose())``.
+    """Build an ``AnthropicProvider`` and its caller-owned HTTP client.
 
-    This is the entry point ``ProviderSession._build_anthropic`` uses: the ``provider_factory``
-    hook's contract is a ``Provider`` (not a ``Model``), so building the provider directly avoids
-    constructing a throwaway ``AnthropicModel`` just to read ``.provider`` off it.
+    The transport alone owns retries, with SDK retries disabled and checked at construction.
+    Eligible transport failures retry below the agent loop so completed tool calls are not
+    repeated. ``base_url=None`` preserves the SDK endpoint, while a value supplies the loopback
+    bypass. The per-attempt timeout is always bounded.
 
-    ``base_url=None`` uses the Anthropic SDK default (the normal path); a non-empty value is
-    the loopback-proxy-bypass direct URL. ``http_timeout`` is story hoopoe's per-attempt
-    ``httpx.Timeout`` when present (coerced to ``httpx2.Timeout`` for the SDKs that require
-    it), else a bounded default from ``cfg.timeout_s`` (never unbounded). A transient
-    ``{429,529,5xx}``/timeout/network blip is re-sent BELOW the agent loop, so completed tool
-    calls are never re-executed; a positive ``Retry-After`` is honored (capped at
-    ``llm_retry_max_wait_s``), else a jittered exponential backoff (``_build_retry_wait``; a
-    zero/negative/expired ``Retry-After`` is guarded to that jittered fallback rather than an
-    immediate replay — ticket 254e).
-
-    ``auth`` is the optional RP-04 S4 :class:`~rebar.llm.auth.AnthropicAuth` carrier. When
-    SUPPLIED it is fail-closed-validated (exactly one of ``api_key``/``auth_token`` — a
-    conflicting or empty carrier raises :class:`LLMConfigError` BEFORE the client is built,
-    never degrading to the ambient credential) and its single key is injected into the
-    ``AsyncAnthropic(...)`` call; ``None`` means the SDK resolves its ambient credential
-    exactly as before RP-04."""
+    A supplied ``auth`` must contain exactly one API key or auth token and never falls back to
+    ambient credentials. With ``auth=None``, the SDK resolves ambient credentials. The caller
+    closes the returned HTTP client during run teardown."""
     from anthropic import AsyncAnthropic
     from pydantic_ai.providers.anthropic import AnthropicProvider
     from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig

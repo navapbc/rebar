@@ -58,13 +58,8 @@ INSUFFICIENT_EVIDENCE_REMEDIATION = (
     "that inherently lives outside the repository: a criterion a test file, a file path, "
     "or a merge SHA can prove IS in the codebase, so it is not non-codebase."
 )
-# Bounded completion verification wants a DECISIVE model, not a maximally-thorough one: the
-# framework default (opus) over-explores — it rabbit-holes on confirming code is "wired",
-# blowing the step budget even on a 2-criterion ticket (it tripped recursion_limit=300 / 385s
-# in testing) — whereas sonnet converges in ~12s. So default the verifier to sonnet (matching
-# the DSO completion-verifier's `model: sonnet`). An operator who EXPLICITLY sets a
-
-
+# Framework-owned criterion for unusable verifier output. It distinguishes a retryable
+# verifier fault from an unmet acceptance criterion without expanding the PASS or FAIL vocabulary.
 NO_VERDICT_CRITERION = "(no verdict obtainable)"
 
 
@@ -137,30 +132,14 @@ def completion_fail_returncode(result: dict) -> int:
 
 
 def reconcile_verdict(result: dict) -> None:
-    """Normalize the verdict and enforce the FAIL⇔findings invariant IN PLACE.
+    """Normalize ``result`` in place and enforce the FAIL-to-findings invariant.
 
-    The agent emits the verdict; this is a deterministic guardrail, NOT a re-judge:
-    * normalize ``verdict`` — upper-case; exactly ``PASS`` is PASS, anything else FAIL
-      (fail-safe: a garbled verdict never silently passes);
-    * ``FAIL`` with no findings → recover the failing criteria from the positive ``criteria``
-      manifest when it names any (the contract is FAIL ⇒ ≥1 finding), else record that NO
-      verdict was obtainable — see below;
-    * ``PASS`` with findings → flip to ``FAIL`` (the prompt defines findings as failures-only,
-      so a listed failure must block — keyed on the EXISTENCE of a failure finding, not on
-      severity, so it stays consistent with "the agent emits the verdict").
-
-    **"No verdict obtainable" (bug 2a6f).** A FAIL that names no criterion is not evidence the
-    work is incomplete — it is the verifier failing to produce a usable answer (a truncated or
-    garbled structured turn; ``verdict`` absent entirely also lands here, since anything that is
-    not exactly ``PASS`` normalizes to FAIL). Reporting that as an unmet criterion invented a
-    requirement the ticket never had and left the caller with no remediation path. It is now
-    marked with ``verdict_obtainable=False`` so callers can distinguish a verifier FAULT from a
-    judgement. The marker is framework-set and rides ALONGSIDE the ``{PASS, FAIL}`` vocabulary
-    rather than adding a third token, so the normalizing fail-safe above, the schema, and every
-    existing consumer's blocking behaviour are unchanged: the verdict stays ``FAIL`` and still
-    blocks. The decision keys on FINDINGS, not on ``criteria`` — the workflow path populates
-    ``result["criteria"]`` before delegating here, so a genuine fault can arrive carrying a
-    criteria manifest.
+    Only exact ``PASS`` survives normalization. Findings turn PASS into FAIL. An empty FAIL
+    first recovers named unmet criteria from the positive manifest. If none can be recovered,
+    the framework adds ``NO_VERDICT_CRITERION`` and ``verdict_obtainable=False``. That marker
+    identifies a retryable verifier fault while the verdict remains blocking FAIL. Model output
+    cannot assign the marker, and a second reconciliation preserves only a fault synthesized by
+    this function.
     """
     raw = str(result.get("verdict", "")).strip().upper()
     verdict = "PASS" if raw == "PASS" else "FAIL"
@@ -189,26 +168,14 @@ def reconcile_verdict(result: dict) -> None:
             ]
             result["verdict_obtainable"] = False
     elif not _is_no_verdict_fault(result, items):
-        # Clear a stale/undeserved marker — but NOT when this verdict is an
-        # already-reconciled fault. `reconcile_verdict` runs a second time on the sidecar
-        # path (over an in-place-mutated copy), where `findings` now holds the fault finding
-        # this function itself synthesized; popping there would strip the marker from the
-        # durable record and the fault would look like a genuine unmet criterion forever
-        # after. Recognised by the framework-owned criterion label, so a model cannot mint
-        # the marker by supplying it in its own output.
+        # Preserve the marker only on a previously synthesized fault. The framework-owned
+        # criterion label prevents model output from claiming retryable status.
         result.pop("verdict_obtainable", None)
     result["verdict"] = verdict
     result["findings"] = items
-    # Coach the caller toward the evidence channel on ANY failure: a criterion that is already
-    # met but not visible in the code can be satisfied by DOCUMENTING the evidence as a comment
-    # on the ticket (the verifier reads ticket comments). Set here — the single chokepoint both
-    # the agentic verdict and the deterministic child-closure verdict pass through — so every FAIL
-    # carries it uniformly. A PASS has nothing to remediate, so it never carries the field (and a
-    # verdict flipped PASS->... stays consistent: only FAIL gets guidance).
-    # The top-level `evidence_sufficient` marker is DERIVED here, never trusted from model
-    # output: set iff the FAIL has no genuinely-unmet criterion (met=false WITHOUT the
-    # per-criterion marker) and at least one marker-carrying record — pure insufficiency.
-    # Such a FAIL carries the insufficient-evidence remediation instead of the generic one.
+    # Every FAIL receives evidence remediation. ``evidence_sufficient`` is derived only from
+    # framework-set per-criterion markers and selects insufficiency-specific guidance. PASS
+    # removes both fields.
     if verdict == "FAIL":
         if _insufficiency_only(result):
             result["evidence_sufficient"] = False

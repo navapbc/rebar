@@ -1,33 +1,14 @@
-"""Completion-only policy for finite, incrementally banked repository evidence.
+"""Separate completion evidence gathering from criterion-verdict commits.
 
-The policy is selected by private metadata on ``record_criterion_verdict``.  The metadata is
-attached to the Python callable, so it is invisible to pydantic-ai's generated tool schema and
-does not add a request field, public API, workflow key, or prompt vocabulary.  Unflagged calls
-therefore retain the old tool surface and wrapper behavior exactly.
+Private callable metadata enables the policy without changing tool schemas or public APIs. The
+wrapper stays outside memoization so cached evidence still counts by model response, and inside
+runaway detection so every attempted call remains visible.
 
-``agent_call.build_agent_kwargs`` composes toolsets from innermost to outermost as: existing
-step-limit steering, memoization, this completion policy, then the runaway guard.  This layer
-must remain outside memoization so a governed evidence action is counted by model response even
-when the repository result is served from memo, and inside runaway detection so every attempted
-call remains observable to the general loop guard.
-
-Pydantic-ai may execute all tool calls in one model response concurrently and may copy toolsets
-while preparing later steps.  Consequently the lock, response-kind markers, current criterion,
-and evidence-response state below are closure-owned and shared by every wrapper/toolset copy.
-The response marker is checked and claimed atomically before the selected tool is awaited.
-
-The exclusion is per *kind*, not per call.  A ``run_step`` is claimed by the kind of its first
-governed call, and the COMMIT discipline that the claim protects is the separation of evidence
-gathering from verdict recording: a record must never share a response with evidence, and only
-one verdict is recorded per response.  Read-only repository evidence calls do not need that
-protection from each other, so further evidence calls in an evidence-claimed step execute
-normally rather than being answered with a synthetic notice and dropped.  Suppressing them
-would cost the criterion its evidence rather than a round trip, because the finite boundary
-below counts responses: a response whose only useful call was suppressed still consumes one of
-the three, so a persistently batching model can bank ``met=false`` against a file that exists.
-Executing them is free of that risk and adds no round trip -- ``current_evidence_steps`` is a
-set of steps, so N evidence calls in one response still consume exactly one evidence response.
-Non-governed tools pass through and definitions remain advertised.
+Pydantic-ai can execute one response concurrently and copy toolsets. Closure-owned state and a
+shared lock therefore assign each response to one governed kind before awaiting a tool. A
+verdict response records one verdict and cannot contain evidence. An evidence response may run
+multiple read-only evidence calls, which together consume one of the finite response allowance.
+Non-governed tools pass through unchanged.
 """
 
 from __future__ import annotations

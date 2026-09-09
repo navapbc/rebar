@@ -1,23 +1,8 @@
-"""The Agent-call EDGE cluster — the kwargs handed to one ``Agent(...)`` invocation and the
-two records emitted after it returns (ADR 0056 decision 3, the last of its four extractions).
+"""Prepare one Pydantic AI agent call and record its result.
 
-This module holds the blocks ADR 0056 names and its earlier stories left inline:
-``build_agent_kwargs`` (the fourth named extraction) and the post-call telemetry pair the
-ADR's Consequences section calls out.
-
-``structured_run.py`` is the natural sibling — ``build_agent_kwargs`` consumes what
-``build_model_settings`` returns — but could not host them without pushing it past the
-``100 <= loc < 500`` band ``test_structured_run_seam.py`` pins on it.
-
-These three functions do NOT call each other. What binds them is that they are the EDGES of
-exactly one Agent call, sharing ``run()``'s per-call locals (``usage``, ``ran_model``,
-``call_label``, ``req_limit``, ``eff_max_iter``); ``structured_run.py`` keeps its distinct job
-of DRIVING the structured-output retry loop and computing the settings.
-
-Leaf module (the ``structured_run.py`` / ``capabilities.py`` convention): imports NOTHING from
-``runner`` at runtime — the one annotation naming ``RunRequest`` is deferred via
-``from __future__ import annotations`` + ``TYPE_CHECKING`` — so ``import rebar.llm`` stays
-stdlib-only and the dependency direction is one-way (``runner`` -> ``agent_call``, never back).
+``build_agent_kwargs`` assembles the call arguments. The telemetry helpers record the usage and
+model selected after the call. This leaf imports no runtime code from ``runner``, which keeps
+``import rebar.llm`` stdlib-only and the dependency directed from ``runner`` to this module.
 """
 
 from __future__ import annotations
@@ -139,29 +124,16 @@ def _steering_toolsets(tools: list, toolsets: list, limit: int) -> list:
 
 
 def _memo_toolsets(tools: list, toolsets: list, *, ledger: ToolCallLedger) -> list:
-    """Wrap every toolset with a memoizing layer that caches results for the four
-    allowlisted read-only tools and appends a graduated nudge on duplicate calls.
-    Non-allowlisted tools always pass through with no caching.
+    """Memoize four read-only tools and add a graduated nudge on duplicate calls.
 
-    Every path that actually reaches a wrapped tool reports the ORIGINAL call's
-    signature to ``ledger.record_executed`` — the runaway guard's loop predicate runs
-    over executed work only, so a repeat the cache absorbs is never loop evidence
-    (see :class:`~rebar.llm.runaway_guard.ToolCallLedger`).
+    The closure owns the cache, repeat counts, and per-signature locks because Pydantic AI copies
+    toolsets between run steps. Identical concurrent calls therefore execute once, while distinct
+    signatures proceed independently. Executed calls record their original signature in the
+    runaway ledger, while cache hits do not count as loop evidence.
 
-    The cache, per-signature repeat counts, and per-signature locks live in this
-    ENCLOSING scope, not on the toolset instance — pydantic-ai copies a toolset per run
-    step while PREPARING the request, so instance attributes set inside ``call_tool`` do
-    not survive to the next turn (the exact reason the runaway guard keeps its
-    ``signatures`` window here too). A single shared cache across the wrapped toolsets is
-    correct: a tool-call SIGNATURE is unique to its tool, so there is no cross-toolset
-    collision.
-
-    A per-signature :class:`asyncio.Lock` serialises the check-execute-store critical
-    section so that a PARALLEL batch of N identical calls in ONE turn (pydantic-ai runs a
-    turn's tool calls concurrently) still executes the wrapped tool exactly once — the
-    first caller executes and populates the cache while the rest await, then read the
-    cached result. Distinct signatures take distinct locks, so genuine breadth still runs
-    concurrently.
+    ``read_file`` stores whole-file content by normalized path so requests for different ranges
+    share one read. The other allowlisted tools use their exact call signature. Non-allowlisted
+    tools always pass through.
     """
     import asyncio
     from dataclasses import dataclass
@@ -171,13 +143,7 @@ def _memo_toolsets(tools: list, toolsets: list, *, ledger: ToolCallLedger) -> li
     cache: dict[str, Any] = {}
     counts: dict[str, int] = {}
     locks: dict[str, asyncio.Lock] = {}
-    # read_file is memoized by NORMALIZED PATH, not by exact signature (epic 10ae/story 2948,
-    # lever 2). The f6fc exact-signature memo keyed on line_start/line_end, so re-reads of the
-    # same file at DIFFERENT ranges slipped past it — the measured dominant waste (48 read_file
-    # calls hitting only 11 distinct files, 77% re-reads). The path cache holds the file's WHOLE
-    # content once (a single line_start=1/line_end=0 read through the wrapped tool) and serves
-    # every subsequent range by slicing it. The other three allowlisted tools keep exact-sig memo.
-    # Each value: {"lines": list[str], "max": int, "complete": bool}.
+    # Whole-file values let range requests share the normalized-path cache.
     read_cache: dict[str, dict] = {}  # keyed by normalized path
     read_counts: dict[str, int] = {}
 

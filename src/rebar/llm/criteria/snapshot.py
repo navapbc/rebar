@@ -1,30 +1,13 @@
-"""Immutable effective review-policy snapshots — the single compiled authority a review
-gate consumes instead of rereading ambient ``.rebar/criteria_routing.json`` policy (RP-06 S1).
+"""Compile immutable, digest-bound review policy for both gates.
 
-WHY this exists. The overlay core (:mod:`rebar.llm.criteria.overlay`) already reconciles the
-packaged routing index with a project overlay into an *effective* view, and each gate's
-registry exposes thin readers over it. But every consumer reads that ambient policy on its
-own cadence, so two consumers of the same gate can disagree the instant the overlay changes
-under them, and the code-review applicability rule (``applies_to`` globs) lives in one gate's
-registry where a plan-review reader can never see it. This module compiles ONE immutable,
-digest-bound projection — effective built-ins, project LLM criteria, project DET criteria,
-routing, and per-id source provenance for BOTH gates — from a repo root, and hands it to
-consumers whole. It is DATA/POLICY only: it does not interpret YAML/BPMN topology, execute a
-criterion, or decide a verdict. It sits ALONGSIDE the existing registry readers (which remain
-compatibility adapters over the same overlay core); rollback is a plain code revert.
+One snapshot contains effective built-ins, project LLM and deterministic criteria, routing,
+and source provenance. Consumers therefore cannot observe different overlay revisions during
+one operation. The digest combines the overlay content signature with canonical per-gate
+routing. This module represents policy data and does not execute criteria or decide verdicts.
 
-The digest reuses the overlay's own content signature (:func:`overlay._overlay_signature`)
-combined with a canonical serialization of the compiled per-gate routing, so it is stable
-across recompiles of the same policy and changes exactly when overlay content changes. See
-ADR 0102 (it is a projection composed with ADR 0098's ``OperationSnapshot`` and extends the
-ADR 0017 shared-``rebar.llm.criteria`` delegation layer).
-
-The gate-specific applicability rule for code-review project LLM criteria — an empty/absent
-``applies_to`` is legacy "ungated"; ``["**"]`` is repository-wide and selects UNCONDITIONALLY
-(including an empty ``changed_files`` set); a scoped glob selects only on a match — is
-implemented ONCE in :func:`select_project_applicability` and shared by both this snapshot and
-the code-review registry consumer, so the ``[]`` → ``["**"]`` migration never regresses at the
-empty-``changed_files`` edge.
+Code-review applicability is shared with the registry. Empty globs retain legacy ungated
+behavior. ``["**"]`` selects repository-wide even when ``changed_files`` is empty. Other globs
+select only matching paths.
 """
 
 from __future__ import annotations

@@ -1,43 +1,15 @@
-"""The epic-close bug screen: haiku relevance triage over out-of-hierarchy bugs (ticket 4b54).
+"""Screen unresolved bugs outside an epic hierarchy before closing the epic.
 
-Agents file bugs OUTSIDE an epic's hierarchy during epic execution and deem them
-out-of-scope/pre-existing even when they are defects in the epic's own deliverable; the
-direct-children close gate cannot see them (event-precise backtest over 56 epic closes: 2 real
-at-close escapes, 30a2 and 5b09). The gate is three-staged, cheapest-first:
+An open bug with ``caused_by`` into the subtree blocks deterministically. The candidate filter
+then selects open bugs created after the first claim or linked to the subtree in either
+direction, up to ``EPIC_BUG_SCREEN_CEILING``. A TRIVIAL-class call assigns A for an epic defect,
+B for adjacent or pre-existing work, or C for unrelated work. Capped A results reach the
+completion verifier as evidence.
 
-1. **DET caused_by floor** (:func:`epic_bug_floor_findings`, below) — an
-   open/in_progress bug with a ``caused_by`` edge into the subtree deterministically blocks
-   the close (enforced in ``gate_ops.completion_precheck``, no LLM call). The hard tier.
-2. **DET candidate filter** (:func:`epic_bug_candidates`, below) — status/type
-   + (created-after-first-claim OR linked-any-relation-any-depth, both directions), ceiling
-   :data:`EPIC_BUG_SCREEN_CEILING`.
-3. **The LLM screen** — one single-turn TRIVIAL-class (haiku-tier) call per candidate, forced
-   choice ``A`` (defect in something this epic changed/built) / ``B`` (same subsystem,
-   pre-existing or adjacent) / ``C`` (unrelated) + one-line citation. A-verdicts are forwarded
-   to the completion verifier as a compact evidence block (:data:`FORWARD_CAP` rows of
-   title + citation + id, ~40 tokens each) appended INSIDE the precheck-assembled fenced
-   context; the verifier adjudicates disposition via its native read-only ``show_ticket``
-   tool. A false NEGATIVE here is no worse than today (the bug was invisible before); a false
-   POSITIVE costs the verifier one adjudication.
-
-The screen degrades OPEN on non-systemic failures — malformed output, store read error —
-(logged, candidate treated as ``C`` / screen skipped), with ONE deliberate exception (bug
-1019, operator-ratified fail-closed): a SYSTEMIC provider error (:class:`LLMUnavailableError`,
-subclass ``LLMConfigError`` included) PROPAGATES so the close gate's existing fail-closed
-handler blocks the close. Degrading it per-candidate silently blinded the caused_by bug floor
-when a Bedrock ValidationException failed all 32 screen calls of one close while the verifier
-PASSed. Unlike the ``plan_review/pass1.py`` container fan-out (which degrades a fanned-out
-worker's systemic error because an upstream chunk pool already re-raises), this screen has no
-upstream tripwire — its own calls are the ONLY place the outage can surface — so the warm
-call and the fan-out both re-raise. The tally
-(per-bug verdict + citation + unevaluated-overflow count) is recorded on the completion
-sidecar for audit and live false-negative calibration.
-
-Model-class + caching discipline: calls bind the TRIVIAL class per call (never raw
-``cfg.model`` — bug afeb: hand-built sub-calls bypassed the class table) and put the epic
-material in the SYSTEM prompt so the provider's prompt cache amortizes it across the fan-out;
-small epics may fall under the provider's cache floor (bug 7a79) — acceptable, the trivial
-tier is cheap uncached.
+Malformed candidate output and store-read errors degrade to C or skip the screen. Systemic
+provider errors propagate so an outage cannot hide every candidate. The completion sidecar
+records verdicts, citations, and overflow. Each call resolves the TRIVIAL class and places epic
+material in the system prompt for cache reuse across the fan-out.
 """
 
 from __future__ import annotations
@@ -82,7 +54,7 @@ EPIC_BUG_SCREEN_CEILING = 32
 
 
 def _epic_subtree_states(ticket_id: str, repo_root) -> list[dict]:
-    """Compiled states of the epic + every descendant (parent links, any depth), BFS."""
+    """Return the epic and all descendant states in breadth-first order."""
     from rebar import _reads
 
     root = _reads.show_ticket(ticket_id, repo_root=repo_root)
