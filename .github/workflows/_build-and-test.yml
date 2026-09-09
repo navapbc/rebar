@@ -869,6 +869,12 @@ jobs:
             echo "::notice::macOS platform_compat subset selected 0 tests (patchset predates the conftest auto-marker); treating an empty collection as pass — see step comment."
             rc=0
           fi
+          runner_exit_classifier="$PWD/scripts/classify_runner_exit.py"
+          if [ -f "$runner_exit_classifier" ]; then
+            PYTHONPATH="$PWD/scripts${PYTHONPATH:+:$PYTHONPATH}" python -m classify_runner_exit "$rc" || true
+          else
+            echo "::notice::runner-exit classifier not in checked-out tree (change predates the diagnostic) — skipping"
+          fi
           exit "$rc"
 
       - name: Diff coverage on changed lines (report-only; Gerrit Verified lane)

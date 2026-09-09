@@ -34,6 +34,8 @@ from unittest.mock import patch
 
 import pytest
 
+pytest_plugins = ("_crash_guard",)
+
 _CallResult = TypeVar("_CallResult")
 
 _SLOW_SPAN_THRESHOLD_SECONDS = 1.0
