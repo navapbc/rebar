@@ -1,16 +1,8 @@
-"""B1 regression: the review operations raise the agent step budget to a floor.
+"""Ticket review runs with at least ``_REVIEW_MIN_STEPS``.
 
-``review_ticket`` / ``review_code`` build their ``LLMConfig`` via
-``LLMConfig.from_env()``. The framework default ``max_iterations`` is now **250**
-(≈125 tool-call cycles), raised from 50 because 50 (~25 cycles) was far too few for a
-tool-using review and tripped ``LLMRunnerError('agent exceeded its step budget')``.
-The operations still apply a verification-style FLOOR (``_REVIEW_MIN_STEPS=120``) via
-``max(floor, configured)`` — a guard for an operator who LOWERS the budget below the
-floor; with the new default it no-ops (250 ≥ 120). An operator who sets a HIGHER
-``REBAR_LLM_MAX_STEPS`` still wins. The invariant under test: each op runs at ``>= floor``.
-
-Offline: a recording fake runner captures the ``max_iterations`` the operation
-hands the runner. No API call.
+The default ``max_iterations`` is 250, and the review floor is 120. A configured lower value rises
+to the floor, while a higher ``REBAR_LLM_MAX_STEPS`` value remains unchanged. A recording runner
+captures the request budget without an API call.
 """
 
 from __future__ import annotations
@@ -67,11 +59,9 @@ def test_review_ticket_applies_step_floor(rebar_repo: Path) -> None:
     assert fake.seen_max_iterations >= _FLOOR
 
 
-# NOTE: the single-pass `review_code` step-floor (`_REVIEW_MIN_STEPS`) was RETIRED with the
-# single-pass route (epic b744 / WS4, ADR 0011). `review_code` is now the gate-backed shim;
-# per-step budgeting is the workflow's concern (the verify step's `step_budget_per_item`), and
-# the off-by-default gate makes ZERO LLM calls when disabled. The gate-backed disabled/enabled
-# review_code behaviour is covered by tests/unit/test_code_review_ws4.py.
+# ``review_code`` uses the gate workflow, whose verification step owns per-item budgeting.
+# The disabled path makes no model calls. Both modes are covered by
+# ``tests/unit/test_code_review_ws4.py``.
 
 
 def test_review_ticket_operator_higher_budget_wins(rebar_repo: Path) -> None:

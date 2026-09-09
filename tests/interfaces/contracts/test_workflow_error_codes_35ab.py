@@ -1,18 +1,9 @@
-"""Held-out regression oracle for 35ab-f0e0-3e4a-4b72.
+"""Contract for unknown scripted workflow steps.
 
-An unknown scripted ``uses:`` step (``executor.py`` ``_dispatch``) raised a **bare**
-``WorkflowError``, which ``error_code_for`` blanket-maps to ``llm_unavailable`` (branch 7)
-because ``WorkflowError`` subclasses ``LLMError``. Per the dbca-97ac-ad96-4d6d taxonomy a
-workflow that WAS found but references a nonexistent step is a caller/plan-authoring INVALID
-workflow = ``invalid_input`` (the same class as ``WorkflowValidationError``), not an
-LLM outage. Only the bare ``WorkflowError`` execute base stays ``llm_unavailable`` (dbca AC3).
-
-The site is caught by the interpreter (``interpreter.py`` ``except Exception`` around
-``_dispatch``) and folded into a failed ``StepResult`` string, so it is latent at the
-classifier today. Exactly like dbca's own direct ``error_code_for`` assertions for the
-analogous subtypes, these tests pin the classification contract on the pure classifier and
-exercise the raise site white-box via ``_dispatch``. They assert on the machine-readable
-error CODE, never the message text, so a behaviour-preserving refactor does not break them.
+``_dispatch`` raises ``WorkflowUnknownStepError`` for an unknown ``uses`` value. That subtype maps
+to ``invalid_input`` through both ``error_code_for`` and ``_structured_llm_failure``. The bare
+``WorkflowError`` and provider outages remain ``llm_unavailable``. The bare ``LLMError`` maps to
+``command_failed``.
 """
 
 from __future__ import annotations

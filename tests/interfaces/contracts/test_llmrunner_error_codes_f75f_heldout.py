@@ -1,18 +1,10 @@
-"""Held-out oracle for f75f-5509-10c0-4430 (edge + E2E).
+"""Contract for runner error classification.
 
-Kept OUT of the implementer's working tree during implementation, restored and run by the
-orchestrator afterward. It separates a real, TYPE-discriminated fix from one that fakes the
-headline case or over-reaches:
-
-- EVERY ``LLMRunnerError`` subclass (not just the headline) -> ``command_failed``;
-- the RESERVE (``LLMUnavailableError`` and its ``LLMConfigError`` subclass) -> ``llm_unavailable``;
-- the dbca-97ac-ad96-4d6d workflow taxonomy is PRESERVED, not collapsed
-  (``WorkflowNotFoundError`` -> ``not_found``; the parse/validation/version/unknown-step
-  family -> ``invalid_input``);
-- the bare ``WorkflowError`` base stays at dbca's ``llm_unavailable`` compatibility
-  contract, while the bare ``LLMError`` base now falls to ``command_failed`` (ce6b); and
-- the routing is OBSERVABLE through the real MCP gate-tool failure envelope
-  (``_structured_llm_failure``), not only the classifier return value.
+Every ``LLMRunnerError`` subtype maps to ``command_failed``. Availability errors map to
+``llm_unavailable``. Workflow lookup errors map to ``not_found``, and workflow input errors map to
+``invalid_input``. The bare ``WorkflowError`` retains ``llm_unavailable``, while the bare
+``LLMError`` maps to ``command_failed``. Tests also verify these codes through
+``_structured_llm_failure``.
 """
 
 from __future__ import annotations

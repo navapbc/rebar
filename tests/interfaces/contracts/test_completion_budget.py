@@ -1,25 +1,12 @@
-"""The completion verifier sets the agent step budget to a CRITERIA-SCALED floor (lever 1).
+"""Completion verification derives its step floor from criteria and direct children.
 
-Completion verification is tool-heavy (potentially many criteria x several files each), so the
-framework default ``max_iterations=250`` is the wrong budget in BOTH directions: too high for a
-small ticket (a flat 480 floor used to MANUFACTURE the exhaustion the recovery path then banked
-around - measured, an 8-criteria verify converges ~32 requests but spends the whole flat budget on
-~77% read_file re-read waste until the runaway guard trips) and too low for a genuinely large one.
-Epic 10ae / story 2948 lever 1 replaces the flat ``_VERIFY_MIN_STEPS = 480`` with a scaled floor;
-ticket 8d74 recalibrates it: ``verify_step_floor(c, direct_children=k) = clamp(steps_per_criterion
-x c + child_traversal x k + fixed_overhead, step_floor_min, 960)`` with defaults 24/16/16/160. The
-budget exists ONLY to stop runaway tool use (runaway is separately guarded by tool_calls_limit +
-loop detection); for valid tool use the floor is GENEROUS — child traversal and fixed overhead are
-sized in, and the 960 clamp is a runaway ceiling, not a validation cap.
+With default configuration, ``verify_step_floor(c, direct_children=k)`` computes
+``clamp(24 * max(c, 1) + 16 * max(k, 0) + 16, 160, 960)``. The ceiling limits runaway tool use.
 
-* AUTHORITATIVE over the framework default - at ``max_iterations == DEFAULT_MAX_ITERATIONS`` the
-  scaled floor becomes the budget even when that LOWERS it below 250 (a small ticket gets a
-  proportionally smaller primary budget than the old flat 480).
-* min-only against an EXPLICIT operator budget - a value the operator set via
-  ``REBAR_LLM_MAX_STEPS`` is only ever RAISED up to the floor, never lowered.
-
-Offline: spy on ``gate_dispatch.produce_completion_verdict`` (the delegate ``verify_completion``
-hands the already-tuned cfg to) to capture the ``max_iterations`` - no workflow, no LLM call.
+When ``max_iterations`` equals ``DEFAULT_MAX_ITERATIONS``, the scaled floor replaces that default.
+An explicit ``REBAR_LLM_MAX_STEPS`` value is never reduced and rises only when below the floor.
+Tests capture the budget through ``gate_dispatch.produce_completion_verdict`` without running a
+workflow or model.
 """
 
 from __future__ import annotations
@@ -55,14 +42,13 @@ def _spy_produce(monkeypatch, captured: dict) -> None:
 
 
 def test_verify_step_floor_clamps_between_min_and_960() -> None:
-    """The floor scales linearly in c (+ child term + overhead) and clamps to
-    [step_floor_min, 960] — recalibrated defaults 24/criterion, min 160, ceiling 960."""
-    vc = VerifyConfig()  # defaults: steps_per_criterion=24, step_floor_min=160
-    assert verify_step_floor(1, vc) == 160  # 24 + 16 overhead < 160 -> clamped up to the min
-    assert verify_step_floor(8, vc) == 208  # 24 x 8 + 16, inside the band
-    assert verify_step_floor(40, vc) == 960  # 24 x 40 + 16 = 976 -> clamped to the ceiling
-    assert verify_step_floor(100, vc) == _VERIFY_STEP_FLOOR_MAX == 960  # clamped down to the max
-    assert verify_step_floor(0, vc) == 160  # degenerate zero-criteria surface floored at 1
+    """The default formula clamps its criterion and child terms from 160 through 960."""
+    vc = VerifyConfig()
+    assert verify_step_floor(1, vc) == 160  # The minimum applies.
+    assert verify_step_floor(8, vc) == 208  # No clamp applies.
+    assert verify_step_floor(40, vc) == 960  # The ceiling applies.
+    assert verify_step_floor(100, vc) == _VERIFY_STEP_FLOOR_MAX == 960  # The maximum applies.
+    assert verify_step_floor(0, vc) == 160  # Zero counts as one.
 
 
 def test_verify_step_floor_child_traversal_term() -> None:
@@ -79,8 +65,7 @@ def test_verify_step_floor_child_traversal_term() -> None:
 
 
 def test_epic_request_budgets_meet_the_recalibrated_floor() -> None:
-    """Sizing ACs (ticket 8d74): a 6-AC epic sizes to >=80 requests, a 15-AC epic to >=180
-    (requests = steps / 2 as build_usage_limits halves them)."""
+    """Six criteria receive at least 80 requests, while fifteen receive at least 180."""
     vc = VerifyConfig()
     assert verify_step_floor(6, vc) / 2 >= 80
     assert verify_step_floor(15, vc) / 2 >= 180
@@ -89,8 +74,7 @@ def test_epic_request_budgets_meet_the_recalibrated_floor() -> None:
 def test_small_ticket_budget_is_lowered_below_the_framework_default(
     rebar_repo: Path, monkeypatch
 ) -> None:
-    """A 1-criterion ticket at the framework default gets the scaled floor (160), NOT the old 480 -
-    lever 1 lowers a small ticket below the 250 default rather than raising it to a flat 480."""
+    """A default one-criterion budget uses the 160-step floor instead of 250 iterations."""
     r = str(rebar_repo)
     tid = _seed(rebar_repo, n_criteria=1)
     cfg = LLMConfig.from_env(repo_root=r)
@@ -136,8 +120,8 @@ def test_explicit_operator_higher_budget_wins(rebar_repo: Path, monkeypatch) -> 
 def test_explicit_operator_lower_budget_is_raised_to_floor(rebar_repo: Path, monkeypatch) -> None:
     """An explicit operator budget BELOW the scaled floor is raised up to it (the min-only arm)."""
     r = str(rebar_repo)
-    tid = _seed(rebar_repo, n_criteria=40)  # floor = 960 (clamped)
-    # 100 != DEFAULT_MAX_ITERATIONS (an explicit operator budget) and 100 < 960 -> raised to 960.
+    tid = _seed(rebar_repo, n_criteria=40)  # The ceiling applies.
+    # An explicit lower budget rises to the floor.
     cfg = replace(LLMConfig.from_env(repo_root=r), max_iterations=100)
 
     captured: dict = {}
