@@ -1,15 +1,9 @@
-"""Browser E2E for the prompt LIBRARY + typed INSERTION + create/edit (story 6592).
+"""Exercise prompt library authoring and typed insertion in browser E2E tests.
 
-Drives the REAL bundle in headless Chromium against a live editor server: the library
-mounts and lists prompts, the typed insertion produces a valid scripted-op step
-(`uses:` → ScriptTask) AND a prompt step (`prompt:` → ServiceTask), and creating a new
-prompt via the form POSTs `/prompt/save` and persists a `.rebar/prompts/<id>.md`.
-
-Does not run when Node/Playwright/Chromium or the built bundle are unavailable. That
-non-execution goes through ``_browser_tier.tier_unavailable`` like the rest of the tier,
-so it is a loud, licensed skip rather than a silent one (bug 337e-b558-17a2-49bd) — the
-Python unit suite in ``tests/unit/workflow/test_prompt_authoring.py`` is the always-on
-verification floor.
+A Chromium session verifies prompt listing, ``ScriptTask`` and ``ServiceTask`` insertion,
+and prompt creation through ``/prompt/save`` under the temporary project root. Unavailable
+browser dependencies pass through the recorded opt-out guard. Unit prompt-authoring tests
+provide the always-on floor.
 """
 
 from __future__ import annotations
