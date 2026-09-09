@@ -1,18 +1,8 @@
-"""RED test: the fetcher flags a Jira workflow status with no reconciler mapping.
+"""Exercise fetch-time alerts for Jira statuses absent from the local map.
 
-When the fetcher builds a snapshot and a Jira issue carries a workflow status
-absent from ``config.jira_to_local_status`` (e.g. an ``Backlog`` status added on the
-Jira side before the reconciler has a mapping for it), the fetcher MUST surface it
-proactively — emit an observable ``fetcher-unmapped-jira-status`` BRIDGE_ALERT via
-``alert_store.append`` naming the offending status — so a newly-added Jira status
-is flagged for a mapping at snapshot-build time, rather than being discovered only
-downstream when it reaches an outbound mutation and trips the status preflight
-(``pass_support.preflight_status_mapping``).
-
-RED expectation: the current fetcher builds the snapshot but never inspects status
-names, so no such alert is emitted — the test fails RED. GREEN: the fetcher detects
-the unmapped status and emits the alert (once per distinct status), while a mapped
-status is never flagged.
+An unmapped status emits one ``fetcher-unmapped-jira-status`` record through
+``alert_store.append`` naming that status; mapped statuses never alert. Detection
+at snapshot time keeps the status from reaching outbound preflight first.
 """
 
 from __future__ import annotations
@@ -48,9 +38,8 @@ def fetcher():
 
 @pytest.fixture(autouse=True)
 def _protect_alert_store():
-    # The fetcher resolves alert_store via a shared sys.modules dotted key; save/
-    # restore it so this test is order-independent w.r.t. sibling tests that also
-    # touch that key (mirrors test_fetcher_dedup_observable.py).
+    # Preserve the shared alert-store key so sibling loaders cannot make this
+    # module order-dependent.
     key = "rebar_reconciler.alert_store"
     saved = sys.modules.pop(key, None)
     try:
@@ -176,14 +165,10 @@ def test_all_mapped_statuses_emit_no_alert(tmp_path, fetcher):
 
 
 def test_unmapped_status_alert_deduped_across_passes(tmp_path, fetcher):
-    """Dedup contract (plan-review advisory E4): the emitted record carries
-    ``key`` == the dedup key AND a non-zero ``timestamp_ns``, so the REAL
-    ``alert_store.is_deduped`` suppresses a repeat within the 24h window — the
-    alert fires ONCE across passes, not every ~20-minute pass.
+    """Use real JSONL dedup to allow one alert per status in 24 hours.
 
-    Exercises the real alert_store (no ``is_deduped`` stub) so the contract the
-    advisory flagged as unverifiable is actually verified end-to-end: a record
-    missing ``key`` or ``timestamp_ns`` would re-fire and fail this test.
+    The record's dedup ``key`` and nonzero ``timestamp_ns`` must suppress the
+    second pass.
     """
     mock_acli = _make_acli_mock()  # returns the unmapped 'Backlog' issue
 

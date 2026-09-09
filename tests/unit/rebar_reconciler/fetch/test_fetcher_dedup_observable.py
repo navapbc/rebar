@@ -1,21 +1,8 @@
-"""RED test for fetcher cross-page dedup observability (task aa11-440a).
+"""Pin observable cross-page deduplication for ``DIG-100``.
 
-Asserts that when the fetcher encounters the same issue key on two different
-pages of the paginated ACLI response, it MUST:
-
-  1. Deduplicate — the resulting snapshot contains exactly one record for the
-     duplicated key (the snapshot is a key -> fields mapping, so dedup is
-     implicit, but the test pins the invariant explicitly).
-  2. Emit an observable BRIDGE_ALERT of kind ``fetcher-dedup-suppressed`` via
-     ``alert_store.append`` so operators can detect when remote pagination has
-     gone unstable. The alert record must reference the duplicated issue key
-     (``DIG-100``) in a structured field.
-
-RED expectation against current fetcher.py: the existing implementation
-silently overwrites the duplicate when building the ``snapshot`` dict and
-never calls ``alert_store.append`` — so this test fails RED. The GREEN fix is
-to detect the cross-page key collision and emit the observability alert
-(without dropping data semantics).
+When a newer ``DIG-100`` reappears on page two, the snapshot retains one record
+and ``alert_store.append`` receives a ``fetcher-dedup-suppressed`` alert naming
+that key.
 """
 
 from __future__ import annotations
@@ -50,18 +37,10 @@ def fetcher():
 
 @pytest.fixture(autouse=True)
 def _isolate_alert_store_module():
-    """Isolate the shared ``alert_store`` dotted key across tests (bug 4cc1).
+    """Keep the shared alert-store module key order-independent.
 
-    ``test_bridge_alerts_surface.py`` registers its OWN module object under
-    ``rebar_reconciler.alert_store`` (via namespace stubs +
-    importlib). ``fetcher._load_alert_store()`` resolves that same dotted key at
-    call time. When the bridge-alerts test runs first, the leftover object in
-    ``sys.modules`` diverges from the one this test patches — silently defeating
-    the patch and producing an ORDER-DEPENDENT failure (passes alone, fails in
-    the full suite). Snapshot and clear the key around each test so loads are
-    fresh and no foreign object leaks in. The dedup test below additionally
-    patches the ``_load_alert_store`` seam directly, which is order-independent
-    on its own; this fixture protects every other test in the module too.
+    Sibling tests may install another object at ``rebar_reconciler.alert_store``;
+    snapshot and restore it while this module patches the loader seam directly.
     """
     key = "rebar_reconciler.alert_store"
     saved = sys.modules.pop(key, None)
@@ -75,16 +54,7 @@ def _isolate_alert_store_module():
 
 
 class _DuplicatingPaginatingClient:
-    """Stub ACLI client that returns DIG-100 on BOTH page 1 and page 2.
-
-    Page 1: [DIG-1, ..., DIG-100]  (100 issues; DIG-100 at end)
-    Page 2: [DIG-100, DIG-101]     (DIG-100 reappears with a NEWER timestamp)
-    Page 3: empty -> terminates
-
-    The mismatched ``updated`` timestamp on the two DIG-100 records mirrors the
-    real-world failure mode (remote re-paged because an issue was updated
-    mid-fetch).
-    """
+    """Return 100 issues, then newer ``DIG-100`` plus ``DIG-101``, then stop."""
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -128,12 +98,7 @@ def _make_acli_mock():
 
 
 def test_dedup_suppression_emits_alert(tmp_path, fetcher):
-    """Cross-page duplicate of DIG-100 is deduped AND emits a fetcher-dedup-suppressed alert.
-
-    The alert MUST be written via ``alert_store.append`` (the canonical
-    observability channel) with ``kind="fetcher-dedup-suppressed"`` and a
-    structured reference to the duplicated key ``DIG-100``.
-    """
+    """Keep one DIG-100 and append a dedup-suppressed alert naming it."""
     mock_acli, _holder = _make_acli_mock()
 
     captured: list[dict] = []
@@ -141,12 +106,8 @@ def test_dedup_suppression_emits_alert(tmp_path, fetcher):
     def _capture_append(record, repo_root):
         captured.append(record)
 
-    # Patch the _load_alert_store SEAM rather than
-    # `rebar_reconciler.alert_store.append` directly: the
-    # fetcher resolves alert_store via this helper at call time, and patching
-    # the seam is independent of which module object happens to occupy the
-    # shared sys.modules dotted key (the source of the order-dependent failure,
-    # bug 4cc1). The stub exposes the single attribute fetcher uses (`append`).
+    # Patch the loader seam so whichever object occupies the shared module key
+    # is irrelevant; the stub supplies the fetcher's sole ``append`` API.
     stub_alert_store = types.SimpleNamespace(append=_capture_append)
 
     with (

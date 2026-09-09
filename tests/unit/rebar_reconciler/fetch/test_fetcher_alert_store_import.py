@@ -1,16 +1,8 @@
-"""Regression tests for bug ec9a-be6b-f50a-47b4 — fetcher's alert_store lazy load.
+"""Exercise the alert-store loader without a ``plugins`` namespace.
 
-Pre-fix: fetcher.py:160 used `from rebar_reconciler import alert_store`,
-which only resolves when `plugins` is importable as a Python package. Production
-CI does not pre-seed the namespace; the import raised `ModuleNotFoundError`
-inside fetch_snapshot's dedup-alert path.
-
-These tests exercise the production helper `fetcher._load_alert_store()` directly
-in an environment with NO `plugins.*` namespace stubs, verifying:
-  1. Successful load returns a module exposing the .append API.
-  2. Repeat calls return the SAME module object (sys.modules cache hit).
-  3. exec_module failure does NOT leave a partially-initialised module in
-     sys.modules under the canonical key.
+The lazy load must expose ``append``, cache one module at
+``rebar_reconciler.alert_store``, and remove a partial cache entry when
+``exec_module`` fails so a retry can load cleanly.
 """
 
 import importlib.util
@@ -50,12 +42,7 @@ def fetcher_mod():
 
 
 def test_load_alert_store_registers_under_canonical_key(fetcher_mod):
-    """_load_alert_store must register alert_store under the canonical
-    `rebar_reconciler.alert_store` key — same key used by
-    __main__'s _ADVISORY_LOCK_KEY and applier's _MUTATION_KEY conventions.
-    Tests that patch this key (test_fetcher_dedup_observable.py) depend on
-    a single module object shared across loaders.
-    """
+    """Cache one module at the canonical key shared by every loader."""
     assert fetcher_mod._ALERT_STORE_KEY == _CANONICAL_KEY, (
         f"Canonical key drift: fetcher uses {fetcher_mod._ALERT_STORE_KEY!r}, "
         f"convention is {_CANONICAL_KEY!r}"
