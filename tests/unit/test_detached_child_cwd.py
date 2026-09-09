@@ -1,21 +1,8 @@
-"""A detached child must not inherit an ephemeral working directory (bug 3198-438c-72a5-470f).
+"""Detached children must use a durable working directory.
 
-rebar detaches three children that OUTLIVE the command that started them: the enrichment
-drain (``llm.enrich_drain._spawn_detached_drain``), the async tickets-branch push
-(``_store.push.push_tickets_branch``), and the compaction sweep
-(``_commands.compact_trigger._spawn_detached_sweep``). Each documents that contract in its
-own docstring ("a child that outlives the current command").
-
-``subprocess.Popen`` without ``cwd=`` hands the child the PARENT's working directory. This
-project's workflow runs ordinary writes from short-lived git worktrees which are then
-removed — while the child is still working — so the child's inherited cwd stops existing and
-the first ``os.getcwd()`` (``_config_sources.repo_root``'s final fallback, or any ``git``
-startup) raises ``FileNotFoundError``. The child dies before claiming any work, which is not
-"outliving the command" in any useful sense.
-
-The durable answer is the store's own repo root, resolved through symlinks: a worktree's
-``.tickets-tracker`` is a SYMLINK to the canonical store, so the UNRESOLVED parent is the very
-worktree the child must not depend on.
+The enrichment drain, async tickets push, and compaction sweep outlive their
+short-lived spawning worktrees. Their cwd therefore resolves through the
+``.tickets-tracker`` symlink to the canonical store root.
 """
 
 from __future__ import annotations
@@ -108,12 +95,7 @@ def _worktree_view(tmp_path: Path, tracker: str, name: str = "ephemeral-worktree
 def test_detached_drain_child_survives_removal_of_the_spawning_worktree(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The mechanism end to end, with real processes and a real ``rmtree``.
-
-    RED before the fix: the child inherits the worktree cwd and reports
-    ``ERR FileNotFoundError`` from ``os.getcwd()`` — the production traceback in
-    ``.rebar/logs/enrich-drain.log``, reproduced.
-    """
+    """Use operating-system processes to prove the child survives worktree removal."""
     root, tracker = _store(tmp_path)
     worktree = _worktree_view(tmp_path, tracker)
     go, out = tmp_path / "go", tmp_path / "probe.out"

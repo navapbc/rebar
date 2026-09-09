@@ -1,24 +1,9 @@
-"""The dirty-tracker wedge class: ``fsck`` DETECTS it, ``doctor --repair`` HEALS it
-(ticket c925-7669-ded8-43a3).
+"""Exercise ``fsck`` detection and ``doctor --repair`` for dirty tracker wedges.
 
-The wedge shape (live P0s 6ccc-0577-198c-44fa / e72e-259d-5ee7-4e73): the tickets
-tracker working tree carries (1) tracked deletions of store artifacts whose bytes are
-intact at HEAD, (2) untracked regenerable compaction leftovers (``*-SNAPSHOT.json``,
-``*.retired`` whose retired-source is already folded), and (3) orphaned ``.tmp-event-*``
-staging files — while origin has diverged, so every union merge aborts and local ticket
-commits strand off origin.
-
-Pinned here:
-
-* classification fences — a plain untracked ``.json`` (a live event pending append) and
-  a ``.retired`` whose source is preserved NOWHERE committed are never classified;
-* the fsck text/JSON contract — each class gets a distinct finding kind carrying count
-  and paths;
-* the doctor repair protocol — backup ref before the first mutation, ONE short write-lock
-  window for the file mutations (restore / quarantine-move, never delete), lock RELEASED
-  before ``sync.reconverge`` (which self-locks; the store write lock is non-reentrant),
-  class 3 untouched;
-* idempotence — a clean store makes zero changes, zero commits, and no backup ref.
+The fixtures cover tracked deletions, regenerable compaction leftovers, and
+orphaned staging files. They pin classification fences, distinct text/JSON
+findings, backup-before-repair, a short non-reentrant lock window, quarantine
+instead of deletion, reconvergence after unlock, and clean-store idempotence.
 """
 
 from __future__ import annotations

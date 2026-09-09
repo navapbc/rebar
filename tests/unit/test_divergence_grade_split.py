@@ -1,18 +1,8 @@
-"""divergent_implementation divergence-kind grade split (doggish-nonorganic-tsetsefly, plan-v4).
+"""Grade ``divergent_implementation`` findings by divergence kind.
 
-The hard floor for divergent_implementation is keyed on WHICH divergence the finding names:
-contradicts_reality / omits_required_site keep the 0.85 auto-high; incomplete_enumeration (an
-omitted site that is optional/cosmetic) scores below every blocking threshold and never floors.
-This mirrors the ac_unverifiable oracle-kind split (plan-v3, story large-sleepful-needlefish).
-
-Motivating field evidence (plan-v3 corpus, 18,085 verified findings): the axis fired on only
-7.72% of findings, and across the 1,307-finding "omitted scope site / unenumerated consumer"
-class it exists to describe it was graded `none` 1,173 times (~90%) — so a plan that provably
-under-scoped reality scored impact 0.0 and could not block. The regression test below replays the
-exact recorded attributes of the finding that motivated this change.
-
-Proving command:
-    .venv/bin/pytest tests/unit/test_divergence_grade_split.py -v
+Contradictions and omitted required sites retain the 0.85 floor. Optional or
+cosmetic incomplete enumerations remain advisory. The regression replays a
+field finding that previously scored zero despite proven under-scoping.
 """
 
 from __future__ import annotations
@@ -142,11 +132,8 @@ def test_incomplete_contrib_stays_below_every_blocking_threshold() -> None:
     assert DIVERGENCE_INCOMPLETE_CONTRIB < min(blocking)
 
 
-# ── the regression this change exists for ──────────────────────────────────────────────────
-# Recorded attributes of finding fc347224733dccc6b on epic c4ad-a93e-0613-408f
-# (sec-semantic-layer-2026-challenge): a G6 finding naming four sites that branch on the literal
-# "s3vectors" and were omitted from the plan's scope. It scored impact 0.0 / severity none and
-# landed ADVISORY at validity 0.8889 against G6's block_threshold 0.60.
+# Four omitted ``s3vectors`` sites in a recorded G6 finding scored zero impact
+# and remained advisory despite 0.8889 validity against a 0.60 blocking threshold.
 _RECORDED_BINARY = {
     "absence_confirmed_in_context": "yes",
     "asserted_capability_confirmed": "yes",

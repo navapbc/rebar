@@ -1,10 +1,7 @@
-"""HELD-OUT oracle for the measurement-provenance DET lint (story f161, epic 3147).
+"""Define the held-out measurement-provenance lint oracle.
 
-Withheld from the implementation subagent by design: it sees only the happy path in
-``test_det_measurement_provenance.py``. These cases separate a real implementation from one
-that fakes the happy path — per-key absence, placeholder semantics, enum membership, the
-binding rule, the explicit NO-CORRECTNESS-JUDGEMENT boundary, and the advisory wiring that
-grandfathers every ticket predating the contract.
+Covers missing keys, placeholders, enum membership, declaration binding, the
+no-correctness-judgement boundary, and advisory handling for pre-contract tickets.
 """
 
 from __future__ import annotations

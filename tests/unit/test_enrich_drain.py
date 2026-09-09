@@ -58,12 +58,8 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     subprocess.run(["git", "config", "user.name", "t"], cwd=r, check=True)
     rebar.init_repo(repo_root=str(r))
     monkeypatch.setattr(ds, "_active_model", lambda repo_root: "claude-opus-4-8")
-    # Pin the opportunistic write-path drain OFF for this fixture's baseline. The write
-    # path calls maybe_drain() with repo_root=None, so its overlap gate reads the AMBIENT
-    # checkout config (cwd) — and this repo enables verify.suggest_duplicate_tickets.
-    # Without this, every create_ticket/enqueue during test setup would spawn a drain child,
-    # polluting the _spawn_detached_drain spies and racing the queue in test_batch_cap. Tests
-    # exercise a drain mode opt in explicitly via _mock_flags(drain=...) / direct D.drain.
+    # Disable the ambient-config write-path drain during setup. Tests opt in explicitly,
+    # keeping drain spies and queue state deterministic.
     monkeypatch.setenv("REBAR_LLM_OVERLAP_DRAIN", "off")
     return str(r)
 
@@ -186,22 +182,11 @@ def test_batch_cap(repo: str, monkeypatch: pytest.MonkeyPatch) -> None:
 def test_backlog_drains_despite_a_low_sorted_churn_set(
     repo: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Every queued entry is eventually served, even when `DRAIN_BATCH` entries that sort
-    EARLIER keep re-entering the queue (bug f400-987f-45f6-419a).
+    """Ensure repeated low-sorted churn cannot starve later queued entries.
 
-    Contract: story c1de-d6a0-6cef-4135's AC — "`rebar enrich --drain` processes up to
-    `DRAIN_BATCH` (default 5) soaked+unclaimed entries then exits; backlog drains over
-    successive runs."
-
-    The mechanism this pins is the interaction between the queue's candidate ORDER and the
-    drain's success-counted batch cap: an order keyed on the ticket-id directory name returns
-    a re-enqueued entry to the FRONT, so a churn set of `DRAIN_BATCH` low-sorted ids consumes
-    the whole per-run budget forever and later-sorted entries are never claimed at all.
-
-    The expected sets are built from ids this test created — never from `pending_enrichment`,
-    which would make the oracle tautological. The assertion is on SERVICE (which entries reach
-    a DONE tombstone), not on the order the queue happens to return, so any fair policy
-    satisfies it and no wall-clock timing is involved.
+    The drain still honors its success-counted batch cap. Expected service sets
+    come from created ids rather than queue output and require DONE tombstones without
+    depending on candidate order or wall-clock timing.
     """
     monkeypatch.setenv("REBAR_LLM_OVERLAP_DRAIN_BATCH", "5")  # pin the mechanism at batch 5
     tids = [rebar.create_ticket("task", f"T{i}", repo_root=repo) for i in range(14)]
@@ -469,14 +454,10 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_overlap_drain_is_read_from_the_llm_table(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`overlap_drain` is read from `[llm]`; a `[tool.rebar.llm]` table is NOT parsed.
+    """Read ``overlap_drain`` from ``[llm]``, never ``[tool.rebar.llm]``.
 
-    Deliberately asserts a NON-default value ("always"). With "off" or "async" the
-    assertion could not distinguish "the table was read" from "the table was ignored and
-    the default happens to match" — which is exactly how rebar.toml came to ship a
-    rollback instruction naming a table that has no effect. `_llm_drain_mode` also maps
-    any unrecognized value back to the default, so a silently-ignored table and a typo
-    are indistinguishable from the resolved value alone.
+    A nondefault value distinguishes a parsed table from an ignored table that
+    merely resolves to the default.
     """
     from rebar.llm.config import LLMConfig
 
@@ -711,12 +692,8 @@ def test_drain_preserves_committed_queue_history(repo: str) -> None:
     }
 
 
-# --- drain-lock ownership + staleness (bug knavish-stimulated-bluebottle) -------------
-#
-# The drain lock used to be a bare O_EXCL file with no owner stamp and no staleness path:
-# a drainer that died between acquire and release leaked it PERMANENTLY and every later
-# drain skipped silently. These tests pin the stamp, the reclaim, and the refusals — all
-# adjudicated by the SHARED lock_owner decision table, never a second heuristic.
+# A stamped drain lock permits safe reclamation after a dead owner. The shared
+# ``lock_owner`` decision table also defines every refusal.
 
 
 def _drain_lock(repo: str) -> Path:
@@ -1045,18 +1022,8 @@ def test_transient_failure_keeps_the_retry_posture(repo: str) -> None:
     assert tid in Q.pending_enrichment(end, _tracker(repo))
 
 
-# ── one store, one drain lock (bug nuclear-calm-heron da68-fc7c-068c-4c53) ───────────────────
-#
-# `make worktree` provisions a worktree whose `.tickets-tracker` is a SYMLINK to the canonical
-# store while its `.rebar` is a real, per-worktree directory. The drain derived its lock and
-# its log from `os.path.dirname(tracker)` without resolving that symlink, so two agents in two
-# worktrees held two DIFFERENT lock files while draining the SAME queue — the lock's whole
-# purpose defeated exactly when it matters — and the drain log was written into, and deleted
-# with, the ephemeral worktree. The store's own contract is explicit:
-# `_store.lock.canonical_tracker` exists "so symlinked and real-path callers contend on the
-# SAME lock file". These tests pin the drain to that contract, the same way
-# tests/unit/test_compact_trigger.py pins the compaction trigger (the landed half of this
-# class fix, bug intangible-ladyish-vicuna 93a9-66cf-e681-4f49).
+# Symlinked worktrees share one canonical queue, so their drain lock and durable log
+# must also resolve through the canonical tracker rather than per-worktree ``.rebar``.
 
 
 def _canonical_store(tmp_path: Path) -> str:
@@ -1174,12 +1141,11 @@ def _count(tid: str, tracker: str, event_type: str) -> int:
 def test_reenrich_debounce_bounds_the_self_heal_fanout(
     repo: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Held-out oracle (bug 8bef): a ticket enriched once, then drifting repeatedly WITHIN the
-    debounce window, must NOT re-enrich on every drain. Pre-fix ``_stale_digest_ids`` returned
-    the present-stale ticket every drain and ``_collect_claims`` re-enqueued it, firing a full
-    ENQUEUE/CLAIM/DONE quartet per drift (the unbounded fan-out that grew the tickets branch
-    ~10x). Post-fix the debounce skips a present-stale ticket whose last DONE_ENRICH is inside
-    the window, so N in-window drifts add ZERO enrichment cycles."""
+    """Keep repeated in-window content drift from starting new enrichment cycles.
+
+    The initial enrichment remains, while every present-stale drift inside the
+    debounce window adds no ENQUEUE/CLAIM/DONE cycle.
+    """
     monkeypatch.setenv("REBAR_LLM_OVERLAP_REENRICH_DEBOUNCE_MIN", "1440")
     tracker = _tracker(repo)
     tid = rebar.create_ticket("task", "Churner", repo_root=repo)

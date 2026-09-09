@@ -1,31 +1,12 @@
-"""Epic-close bug screen (ticket 4b54): DET caused_by floor, candidate filter, haiku
-screen orchestration, forwarding cap, sidecar tally.
+"""Exercise the epic-close screen for bugs outside the epic hierarchy.
 
-Agents file bugs OUTSIDE an epic's hierarchy during epic execution and deem them
-out-of-scope even when they are defects in the epic's own deliverable; the direct-children
-close gate cannot see them. The gate here is three-staged: a deterministic ``caused_by``
-floor (hard block), a deterministic candidate filter (status/type + created-after-claim OR
-linked-to-subtree), and an LLM relevance screen whose A-verdicts are forwarded compactly to
-the completion verifier for store-grounded disposition adjudication.
+The gate combines a deterministic ``caused_by`` floor, a status/time/link candidate
+filter, and an LLM relevance screen whose A verdicts reach the completion verifier.
+Unit tests use a forced-choice seam. Operator calibration covers the model boundary.
 
-Every test here is LLM-free at BOTH tiers: the screen runs through a FAKE forced-choice
-verdict map (the ``screen_fn`` seam), and the verifier path is asserted UP TO the forwarded
-candidate block inside the precheck-assembled fenced context. The REAL haiku screen and the
-REAL verifier's disposition rule (must-block 30a2/5b09; must-pass 30d3/e6a0/c8ed) are proven
-exclusively in the ticket's [operator-attested] live calibration AC.
-
-Regression encodings from the event-precise backtest over 56 epic closes:
-
-* 30a2-shape (must-block tier): a bug created during the epic window, unlinked, screened A
-  → forwarded to the verifier (``test_regression_30a2_shape_forwarded``).
-* c8ed-shape (must-pass tier): a bug that supersedes the epic — linked, so a candidate; the
-  verifier (not the filter) adjudicates via its supersedes link
-  (``test_regression_c8ed_shape_is_candidate``).
-* 22f5-shape (not-flagged): fixed during the epic, CLOSED at close time → excluded by the
-  status filter (``test_closed_bugs_excluded``).
-* 5e94-shape (not-flagged): created 13 days POST-close — does not exist when the gate runs,
-  so it is trivially absent from any candidate enumeration (no test can time-travel; the
-  status/type filter is the enforced surface).
+Backtest shapes pin an in-window unlinked bug forwarded to the verifier, a
+``supersedes`` candidate adjudicated there, a closed bug excluded by status, and a
+post-close bug absent from enumeration.
 """
 
 from __future__ import annotations
@@ -522,15 +503,8 @@ def test_regression_c8ed_shape_is_candidate(rebar_repo: Path) -> None:
     assert bug in _candidate_ids(epic, rebar_repo)
 
 
-# ------------------------------------------------------------ provider error fails closed (1019)
-#
-# Operator-ratified fail-closed ruling (bug 1019): a SYSTEMIC provider error
-# (LLMUnavailableError, subclass LLMConfigError included) raised by a screen call must
-# PROPAGATE — never degrade to C — so the close gate's existing fail-closed handler blocks
-# the close. On epic e369 a Bedrock ValidationException failed all 32 per-candidate calls
-# and the degrade silently blinded the caused_by bug floor while the verifier PASSed.
-# Non-provider failures (malformed output, RuntimeError) keep the degrade-open contract
-# pinned by the tests above.
+# Systemic provider errors propagate to the close gate's fail-closed handler.
+# Malformed output and other non-provider failures retain degrade-open behavior.
 
 
 def test_screen_warm_call_provider_error_propagates(rebar_repo: Path) -> None:

@@ -1,21 +1,8 @@
-"""``doctor`` mapping-config diagnostics — offline-always / live-drift-degrades
-(epic ravenous-dirt-widgeon, story panphobic-prickly-xenarthra / 52b0-6a6a-c66b-4c59).
+"""Test portable ``doctor`` diagnostics for the hand-edited ``[mapping]`` surface.
 
-The mapping seam (S1-S8) adds a hand-editable ``[mapping]`` config surface. ``doctor``
-must surface two failure classes before a reconcile silently drifts:
-
-  * **internally-invalid config** — already fail-closed via ``MappingConfigError`` (a
-    non-integer ``hierarchy`` / malformed block fails at LOAD; an out-of-vocabulary value
-    or an unmapped-non-skipped type fails in the ``rebar_reconciler.config`` resolvers) —
-    surfaced as **error** findings (non-zero exit);
-  * **live drift** — internally valid but disagreeing with live Jira (a configured
-    status/type/link value Jira no longer exposes) — surfaced when Jira is reachable and
-    degraded to a single ``unavailable`` finding (zero exit) when it is not.
-
-Every assertion targets OBSERVABLE behaviour and contracts only — the finding list
-``scan_mapping`` returns (kind / severity / detail) and the exit code ``doctor_cli``
-yields — never private structure. The check must stay PORTABLE: it runs in-process with
-no live Jira and no specific CI provider (``project.portability``).
+Invalid local mappings fail closed with error findings. Valid mappings that
+disagree with Jira report drift, or one ``unavailable`` finding when Jira
+cannot be reached. Assertions cover observable findings and exit codes only.
 """
 
 from __future__ import annotations
@@ -540,24 +527,11 @@ def test_doctor_cli_mcp_client_scan_is_hermetic(
     _empty_mcp_client_home: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """``doctor_cli`` must not read the operator's real HOME MCP client configs.
+    """Confine MCP client discovery to the injected empty home.
 
-    The scan (``doctor_mcp_client.scan_mcp_clients``) defaults ``home`` to
-    ``Path.home()``, so an un-isolated unit test transitively reads
-    ``~/.codex/config.toml`` / ``~/.copilot/mcp-config.json`` / ``~/.claude.json`` —
-    live machine state the test does not control. The unit tier redirects the scan's
-    default home to the empty ``_empty_mcp_client_home`` fixture directory
-    (``tests/unit/conftest.py``). This test asserts that isolation is in force: every
-    MCP-client finding path must resolve UNDER that fixture directory (never under
-    ``Path.home()``), and — because the fixture home is empty — every client is simply
-    ``config-missing``.
-
-    The oracle keys on the injected fixture directory rather than "not under the real
-    home": on a CI runner the fixture's ``basetemp`` itself lives under the real home
-    (``/home/runner/...``), so a "not under real home" check gives a false positive
-    there. Keying on the fixture dir is both portable and machine-independent — before
-    the fix the scan reads ``Path.home()``, which is never under the fixture dir, so
-    this test is RED against the pre-fix code and GREEN with the fixture.
+    Every finding path must be below the fixture directory and report
+    ``config-missing``. The oracle uses that directory instead of excluding
+    ``Path.home()`` because CI temporary directories may themselves be below HOME.
     """
     proj = _proj(tmp_path, "[mapping.projects.STUB]\n")
     isolated = str(_empty_mcp_client_home)
