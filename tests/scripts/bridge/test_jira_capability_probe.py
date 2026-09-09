@@ -15,17 +15,10 @@ from unittest import mock
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Module loading — filename has hyphens so we use importlib
-# ---------------------------------------------------------------------------
+# Load the hyphenated probe with importlib.
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PROBE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "jira-capability-probe.py"
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_client_mock(
@@ -61,11 +54,10 @@ def _run_probe_with_mocked_acli(
     if not PROBE_PATH.exists():
         pytest.fail(f"jira-capability-probe.py not found at {PROBE_PATH}")
 
-    # The mocked module is actually produced inside _patched_module_from_spec
-    # (further down). We just need the AcliClient mock class for the patch.
+    # The injected ACLI module supplies this client class.
     mock_acli_cls = mock.MagicMock(return_value=client_instance)
 
-    # Build a mock spec whose loader.exec_module populates a module object
+    # Build a loader for the fallback module import.
     mock_spec = mock.MagicMock()
     mock_spec.loader = mock.MagicMock()
 
@@ -74,13 +66,11 @@ def _run_probe_with_mocked_acli(
 
     mock_spec.loader.exec_module.side_effect = _fake_exec_module
 
-    # The probe now does `from rebar_reconciler import acli` (the file was renamed
-    # from acli-integration into the package; see below), so inject a fake acli module
-    # sys.modules rather than intercepting spec_from_file_location.
+    # Register the package module through ``sys.modules``.
     _fake_acli_mod = types.ModuleType("rebar_reconciler.adapters.jira.acli")
     _fake_acli_mod.AcliClient = mock_acli_cls  # type: ignore[attr-defined]
 
-    # We need the real spec_from_file_location for the probe itself
+    # Keep standard loading for the probe module.
     _real_spec_from_file = importlib.util.spec_from_file_location
     _real_module_from_spec = importlib.util.module_from_spec
 
@@ -94,7 +84,7 @@ def _run_probe_with_mocked_acli(
 
     def _patched_module_from_spec(spec: object) -> object:
         if spec is mock_spec:
-            # Return a fresh ModuleType; _fake_exec_module will set AcliClient on it
+            # The loader attaches ``AcliClient`` to a fresh fallback module.
             return types.ModuleType("acli_integration")
         return _real_module_from_spec(spec)
 
@@ -123,8 +113,6 @@ def _run_probe_with_mocked_acli(
     with contextlib.ExitStack() as stack:
         for p in patches:
             stack.enter_context(p)  # type: ignore[arg-type]
-        # Load the module first (no main() side effect — main is guarded
-        # by `if __name__ == "__main__":`).
         probe_spec.loader.exec_module(probe_mod)
         with pytest.raises(SystemExit) as exc_info:
             probe_mod.main()
@@ -155,19 +143,12 @@ def _run_probe_no_acli(
         mock.patch.dict("os.environ", env, clear=False),
         mock.patch("sys.stdout", captured),
     ):
-        # Load the module first (no main() side effect — main is guarded
-        # by `if __name__ == "__main__":`).
         probe_spec.loader.exec_module(probe_mod)
         with pytest.raises(SystemExit) as exc_info:
             probe_mod.main()
         exit_code = exc_info.value.code
 
     return exit_code, captured.getvalue()
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.scripts
@@ -281,10 +262,7 @@ def test_probe_retries_jql_search_with_capped_exponential_backoff() -> None:
         "JIRA_PROJECT": "DIG",
     }
 
-    # RECORD the backoff instead of sleeping it. `access_check.run_access_check`
-    # resolves its sleep seam at call time, so this patch reaches it whether or not
-    # the module was already imported — which is what used to decide between 0.01s
-    # and a real 25s here (ticket 5ea3-76e5-480a-4464).
+    # Capture delays through the call-time sleep hook. This also detects early hook binding.
     delays: list[float] = []
 
     _run_probe_with_mocked_acli(
@@ -297,18 +275,13 @@ def test_probe_retries_jql_search_with_capped_exponential_backoff() -> None:
         module_suffix="t4",
     )
 
-    # search_issues must be called exactly JIRA_PROBE_JQL_RETRIES times (one per attempt
-    # when every attempt returns empty). The default is now 10 attempts (was 6); this
-    # tracks the widened default schedule rather than a hard-coded literal that drifts.
+    # Empty results consume the ten default attempts.
     assert client_mock.search_issues.call_count == 10, (
         f"Expected search_issues called 10 times (JIRA_PROBE_JQL_RETRIES), got "
         f"{client_mock.search_issues.call_count}"
     )
-    # The LOGICAL schedule: a capped-exponential backoff min(base * 2**k, cap) with
-    # defaults base=3s, cap=30s over the nine between-attempt gaps. This doubles as the
-    # guard — if the seam is ever bound early again, or the retry stops going through it,
-    # `delays` is empty and this fails instead of the test quietly going slow. It is a
-    # schedule assertion, not a wall-clock budget.
+    # Nine gaps follow the capped exponential schedule for a three-second base and 30-second cap.
+    # An unbound hook leaves ``delays`` empty and fails this assertion.
     assert delays == [3, 6, 12, 24, 30, 30, 30, 30, 30], (
         f"expected the capped-exponential schedule, got {delays}"
     )
