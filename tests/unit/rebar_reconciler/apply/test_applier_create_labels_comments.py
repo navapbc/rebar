@@ -1,21 +1,8 @@
-"""RED tests for Fix #1: create_one labels/comments dispatch.
+"""Verify create mutations dispatch requested labels and comments.
 
-Historical bug (bug 85a1-f581-2252-4a21, originated PR #87e4): the
-label/comment dispatch fix for outbound UPDATE was added to ``update_one``
-(applier.py:1744-1779) but NOT to the symmetric CREATE leaf ``create_one``.
-Phase 1 of the e2e field-validation probe consequently observed
-freshly-created Jira issues with only the ``rebar-id:<local_id>`` system
-label (written at applier.py:1628) — user-supplied labels and comments
-from the mutation payload were silently dropped.
-
-Mutation payload shape for CREATE (per _mutation_to_batch_dict applier.py:2376-2390
-and reconcile.py:592-603): ``labels`` and ``comments`` survive as
-top-level keys on the batch dict.
-
-This RED test asserts that, after a successful create, ``client.add_label``
-is called for each ``{action: "add", label: X}`` entry and ``client.add_comment``
-is called for each ``{body: Y}`` entry — in addition to the existing
-``rebar-id:<local_id>`` identity label write.
+After `create_issue` succeeds, `create_one` writes each add-label and comment
+entry alongside the `rebar-id:<local_id>` identity label. Remove-label entries
+remain inert because a new issue has no prior user labels.
 """
 
 from __future__ import annotations

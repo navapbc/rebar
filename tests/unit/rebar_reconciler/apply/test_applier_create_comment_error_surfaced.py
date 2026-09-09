@@ -1,21 +1,8 @@
-"""Surface the swallowed add_comment failure in the CREATE batch outcome.
+"""Verify create comment failures are visible and nonfatal.
 
-Bug ea6d-e4b2-a316-45ec. The outbound UPDATE path already surfaces swallowed
-add_comment failures via a ``comment_errors`` field on the outcome (bug 6afc).
-The CREATE path (``create_one`` comment-dispatch loop) did NOT: a comment-add
-failure during an outbound CREATE was caught and only logged, leaving the batch
-outcome with ``error=None`` / no ``comment_errors`` — invisible to the outbound
-comment-sync loop.
-
-Fix: mirror the update-path pattern into create_one — collect add_comment
-failures during the create's comment-dispatch loop and surface them in the
-create's outcome under the same ``comment_errors`` field shape used by the
-update path. NON-fatal — the issue create itself succeeded; comment failures
-are recorded, not raised.
-
-RED test: an outbound CREATE whose add_comment raises must produce an outcome
-whose ``comment_errors`` is populated (not a clean error=None outcome), while
-the issue create still succeeds and the batch does not abort.
+When `add_comment` raises, the create outcome carries `comment_errors`.
+The issue creation still succeeds and the batch continues, so a missing
+comment cannot appear as a clean outcome.
 """
 
 from __future__ import annotations

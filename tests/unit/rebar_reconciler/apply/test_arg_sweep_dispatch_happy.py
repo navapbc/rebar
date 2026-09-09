@@ -1,19 +1,9 @@
-"""HAPPY-path oracle for the ARG lint sweep (ticket fc0c-e218-8b34-4858).
+"""Verify ARG cleanup preserves reconciler dispatch.
 
-The sweep normalizes the ten reconciler leaf signatures (Cluster-1) so their
-accepted-but-unused parameters are absorbed by ``**_kwargs`` instead of tripping
-ruff's ARG rule. The behavioural contract that MUST survive that edit is that
-``applier._apply_typed`` still routes each ``(direction, action)`` mutation to the
-correct leaf and the leaf still reaches the transport — i.e. the signature
-normalization is behaviour-preserving for dispatch.
-
-This file is the happy-path specification handed to the implementer: it pins the
-routing invariant through the REAL dispatcher (``_apply_typed``, whose runtime
-signature introspection decides which of ``repo_root`` / ``binding_store`` to pass)
-and pins that the two Cluster-1 leaf modules are ARG-clean after the sweep. The
-discriminating edge cases (the inertness of the newly-delivered ``binding_store`` /
-``repo_root`` keywords, and the Cluster-2 Protocol keyword-conformance) are held
-out of the implementer's tree.
+After unused leaf parameters move into `**_kwargs`, `_apply_typed` must still
+route every direction/action pair to its transport write. Runtime introspection
+may now supply `repo_root` and `binding_store`. Their inertness and required
+Protocol keyword names remain covered by the held-out suite.
 """
 
 from __future__ import annotations

@@ -1,29 +1,8 @@
-"""Bug 17b5-dda4-6662-4616: AssigneeNotFoundError must soft-fail.
+"""Verify assignee resolution failures remain local to one update.
 
-Production cron evidence (GHA run 26657962362, 2026-05-29T19:34:53Z):
-
-    RECON: batch_outcome action=update key=DIG-4275 error=None
-    RECON: batch_outcome action=update key=DIG-4276 error=None
-    ERROR: reconcile_once raised: validate_assignee_exists:
-      no assignable user matches 'Worktree' for issue='DIG-4276'
-    ##[error]Process completed with exit code 1.
-
-The Phase A client-side assignee validator (commit 84a3aab72c) raises
-``AssigneeNotFoundError`` (a ValueError subclass) when the assignee
-doesn't map to a real Jira account. The applier batch loop in
-``applier.apply`` (applier.py:2782-2882) only catches ``HeadDriftError``;
-``AssigneeNotFoundError`` escapes and kills the entire pass.
-
-Fix: per-mutation catch in the applier outbound batch loop that records
-a ``bridge_alerts`` JSONL entry and continues. Mirrors the existing
-soft-fail patterns (create-identity BRIDGE_ALERT, 400-illegal-transition
-comment fallback).
-
-RED test: dispatch two outbound update mutations through ``apply()``.
-One has a valid assignee; one triggers ``AssigneeNotFoundError``. Without
-the fix, ``apply()`` raises and the good one never runs. With the fix,
-``apply()`` returns successfully, the good mutation applies, and an
-alert record lands in ``bridge_alerts/<date>.jsonl``.
+`AssigneeNotFoundError` records a `bridge_alerts/<date>.jsonl` entry and
+lets valid sibling mutations run. The batch returns without discarding
+independent writes.
 """
 
 from __future__ import annotations
@@ -122,17 +101,7 @@ def test_assignee_not_found_soft_fails_batch_continues(
     acli_mod: ModuleType,
     tmp_path: Path,
 ) -> None:
-    """The exact production scenario: 1 valid update + 1 bad-assignee
-    update in the same batch.
-
-    Pre-fix: AssigneeNotFoundError raised by client.update_issue
-    propagates through applier.apply, killing the whole pass — the
-    valid mutation never gets a chance to run.
-
-    Post-fix: applier catches AssigneeNotFoundError per-mutation,
-    records a bridge_alerts entry, and continues. The valid mutation
-    applies; apply() returns without raising.
-    """
+    """Record the bad assignee and continue to the valid sibling update."""
     pass_id = f"test-pass-{int(time.time())}"
 
     good_mutation = {

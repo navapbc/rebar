@@ -1,14 +1,9 @@
-"""Ticket 97f2: ``apply_handlers`` soft-fails on the NEUTRAL assignee error base.
+"""Verify assignee failures use the backend-neutral exception boundary.
 
-The pre-97f2 code caught the vendor ``adapters.jira.acli_subprocess.AssigneeNotFoundError``
-by a direct import. 97f2 routes the catch through the neutral
-``rebar_reconciler._backend.BackendAssigneeNotFoundError`` base instead, so the core
-module carries no ``adapters.jira`` import.
-
-This is the teeth for "catches the NEUTRAL base": we raise the base type itself (not the
-Jira subclass) from the transport. If ``apply_handlers`` reverted to catching only the
-vendor subclass, the base would escape and kill the batch — this test would fail.
-Companion to ``test_applier_assignee_soft_fail.py`` (which raises the vendor subclass).
+The transport raises `BackendAssigneeNotFoundError` directly, proving
+`apply_handlers` does not depend on a Jira subclass. The core retains no
+`adapters.jira` import. The vendor-subclass case remains in
+`test_applier_assignee_soft_fail.py`.
 """
 
 from __future__ import annotations

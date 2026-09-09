@@ -71,16 +71,11 @@ def _make_create_mutation(local_id: str = "tick-rb01") -> dict:
 
 
 def test_created_issue_is_retained_when_set_entity_property_raises(applier, tmp_path):
-    """The created issue is RETAINED, not rolled back, when the property write fails.
+    """Retain a created issue when its entity-property write fails.
 
-    This test previously asserted `delete_issue` was called once. That assertion encoded
-    bug 387d: destroying a successfully-created issue because LABELLING it failed inverts
-    the cost — a created-but-unlabelled issue is recoverable via the deterministic
-    keyed-pending retro-attach path, a deleted one is not. The trigger is ordinary (a
-    project whose Create/Edit screen omits `labels`), so the rollback destroyed real work.
-
-    The original intent — the failure is handled and the error still propagates — is
-    preserved and asserted below; only the mechanism changed.
+    The keyed pending repair path can attach the missing identity later. Deleting
+    the issue would lose a successful create. The property error still propagates,
+    and `delete_issue` remains unused.
     """
     local_id = "tick-rb01"
     client = _make_mock_client(create_return={"key": "DIG-999"})

@@ -129,28 +129,10 @@ def test_failure_resilient_to_label_remove_error(applier):
     assert "label removal failure" in (follow_on["label_remove_error"] or "")
 
 
-# ---------------------------------------------------------------------------
-# Import-direction guarantee (F6): the applier must not import invariants
-# ---------------------------------------------------------------------------
-#
-# NON-VACUITY (bug 8a5e, same rot class as bug 34c2). This guard used to read exactly one
-# file, `applier.py`, and match three literal line prefixes (`from .invariants`,
-# `from invariants`, `import invariants`). Both halves went hollow:
-#
-#   * WRONG FILE. `applier.py` is now a re-export facade; the function the acceptance
-#     criterion is actually about, `inbound_repair_property`, lives in `apply_inbound.py`
-#     (which carries the AC text verbatim in its own docstring). A `from
-#     rebar_reconciler.invariants import ...` added to any implementation module was
-#     invisible to the guard.
-#   * WRONG SPELLING. The facade imports its siblings as
-#     `from rebar_reconciler.<module> import ...`, so even an invariants import placed in
-#     `applier.py` itself would not have matched any of the three prefixes.
-#
-# The repair is the one proven on bug 34c2: derive the scan POPULATION instead of pinning
-# it, then assert the population covers the code the contract is about. The population here
-# is the facade plus the transitive closure of its intra-package imports — a relocation
-# cannot orphan it, because any module the facade's behaviour moves into must be imported
-# back for `applier.<name>` to keep resolving.
+# F6 import-direction guard. Scan the applier facade and the transitive closure
+# of its intra-package imports so relocation cannot hide
+# `inbound_repair_property`. Implementation modules must not import
+# `invariants`, including through fully qualified imports.
 
 _RECONCILER_DIR = APPLIER_PATH.parent
 

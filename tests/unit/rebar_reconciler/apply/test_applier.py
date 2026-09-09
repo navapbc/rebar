@@ -308,17 +308,12 @@ def test_apply_constructs_client_with_env_derived_args(tmp_path, applier, monkey
 
 
 def test_apply_constructs_client_with_empty_strings_when_env_unset(tmp_path, applier, monkeypatch):
-    """When credential env vars are absent, building the backend transport must now
-    FAIL LOUDLY with ``BackendEnvError`` rather than constructing an anonymous
-    AcliClient with empty-string creds (bug ad85 — parity with the DC ``JIRA_PAT``
-    guard). Historically this seam built ``AcliClient(jira_url="", user="",
-    api_token="", jira_project="DIG")`` and every request went out effectively
-    anonymous, failing only later at the first API call with a misleading
-    "project does not exist"/401. The guard raises at construction (in
-    ``_build_jira_backend``) instead, naming every missing variable.
+    """Reject backend construction when credential variables are absent.
 
-    S4: asserted at the relocated backend-factory construction seam (let the real
-    ``_load_acli`` backend path run)."""
+    `_build_jira_backend` raises `BackendEnvError` and names each missing variable
+    before an anonymous request can be attempted. The test keeps the production
+    `_load_acli` path active.
+    """
     pass_id = "2026-05-23-env-unset"
     _init_git_repo(tmp_path)
 
