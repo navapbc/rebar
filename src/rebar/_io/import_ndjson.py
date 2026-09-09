@@ -195,6 +195,7 @@ def import_tickets(
         final push at the end. All-or-nothing per chunk; a crash mid-flush leaves
         whole-commit-or-none and the source_id re-scan resumes on re-run."""
         for i in range(0, len(buf), _CHUNK):
+            _seam._refuse_unpublishable_store(tracker)
             event_append.batch_stage_and_commit(tracker, buf[i : i + _CHUNK])
         buf.clear()
 
