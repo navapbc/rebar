@@ -1,12 +1,5 @@
-// Browser structured-fields probe (story a83a): load the editor, select the LOOP
-// SubProcess, and exercise the structured per-field entries that replace the raw JSON
-// textarea for the common path:
-//   1. ROUND-TRIP — edit the structured `max_iterations` field; assert it writes back into
-//      the node's rebar:Config blob (the same blob the Python serializer reads).
-//   2. FIELD ERROR / NO LOSS — type a NON-NUMERIC max_iterations; assert a field error is
-//      shown AND the prior numeric value survives in the blob (never silently dropped).
-//   3. RAW FALLBACK — assert the "Advanced (raw JSON)" entry is present for the known kind
-//      (the raw editor stays reachable for uncommon keys).
+// Exercises structured loop-field round trips and validation: invalid input reports an error
+// without losing the prior value, and known kinds expose no raw-JSON fallback.
 // Usage: node browser_structured.mjs <editor-url>
 import { chromium } from "playwright";
 

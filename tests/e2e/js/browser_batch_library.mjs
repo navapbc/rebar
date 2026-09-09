@@ -1,13 +1,5 @@
-// Browser probe for the library-backed batch criteria editing (story B-UX): load the editor
-// on the batch-demo fixture, select the BATCH ServiceTask, and exercise the dropdowns + the
-// in-editor authoring the editor must now provide instead of free-text typing:
-//   (a) RENDER  — the criterion `prompt` field is a SELECT whose options are the library
-//                 entries (window.REBAR_LIBRARY) plus a "➕ Create new…" sentinel.
-//   (b) SELECT  — picking an existing library id persists into rebar:Config (the IR source).
-//   (c) TRIGGER — opening the `when` "➕ New trigger…" form, naming a trigger + keywords, and
-//                 adding it sets the criterion's `when` to the full ${{ steps... }} expression.
-//   (d) AUTHOR  — the prompt "➕ Create new…" form creates a NEW criterion (POST /library/create
-//                 → .rebar/prompts/<id>.md) and references the new id on the criterion.
+// Exercises library-backed criteria editing on the batch-demo fixture: render and select
+// library prompts, create a trigger, author a criterion, and persist each result.
 // Usage: node browser_batch_library.mjs <editor-url>
 import { chromium } from "playwright";
 
