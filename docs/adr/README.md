@@ -42,7 +42,7 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 
 - [0004 — Reconciler producer↔consumer snapshot contract (anti-change-detector guardrail)](0004-reconciler-snapshot-contract.md)
 - [0005 — Content-addressed snapshot cache + janitor architecture](0005-snapshot-cache-architecture.md)
-- [0014 — Inbound webhook auth — network ACL primary, URL token secondary](0014-inbound-webhook-auth.md)
+- [0014 — Inbound webhook auth — network ACL primary, token public-only](0014-inbound-webhook-auth.md)
 - [0023 — Inbound GitHub → Gerrit SSH vote for the CI `Verified` label](0023-inbound-github-gerrit-ssh-vote.md)
 - [0026 — Reconciler three-way-merge baseline (direction arbitration)](0026-reconciler-three-way-merge-baseline.md)
 - [0027 — Reconciler binding lifecycle (pending → confirmed → retired; adoption gating)](0027-reconciler-binding-lifecycle.md)

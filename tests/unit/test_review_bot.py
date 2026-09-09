@@ -1775,11 +1775,80 @@ def test_lifespan_is_safe_by_default_without_per_test_stubs(monkeypatch, tmp_pat
             "in_flight": 0,
             "queue_depth": 0,
             "gerrit_auth": "ok",
+            "webhook_auth_rejections": 0,
+            "webhook_auth_last_rejected_age_seconds": -1,
         }
 
     # timing: hang-guard — 2s dwarfs this sub-second local lifecycle path.
     assert time.monotonic() - start < 2
     assert shutdown_drain_seconds() == 1.0
+
+
+@pytest.mark.timeout(3)
+def test_webhook_auth_rejection_is_visible_on_health(monkeypatch, tmp_path):
+    """A stale Gerrit webhook token must be visible while ordinary health is 200."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from rebar.review_bot import app as appmod
+
+    async def _idle_worker(queue, cfg):
+        await asyncio.Event().wait()
+
+    async def _idle_loop(*, config):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(appmod, "_worker", _idle_worker, raising=True)
+    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_loop, raising=True)
+    monkeypatch.setattr(appmod.app.state, "config", _cfg(tmp_path), raising=False)
+    monkeypatch.setattr(appmod, "_gerrit_auth_health", lambda _cfg: (True, "ok"), raising=True)
+
+    with TestClient(appmod.app) as client:
+        rejected = client.post("/webhook", headers={"X-Rebar-Token": "stale"}, json={})
+        health = client.get("/health")
+
+    assert rejected.status_code == 401
+    assert health.status_code == 200
+    assert health.json()["webhook_auth_rejections"] == 1
+    assert health.json()["webhook_auth_last_rejected_age_seconds"] >= 0
+
+
+@pytest.mark.timeout(3)
+def test_gerrit_internal_webhook_does_not_need_unsupported_plugin_header(monkeypatch, tmp_path):
+    """The Gerrit webhooks plugin cannot add the X-Rebar-Token header; internal origin proves it."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from rebar.review_bot import app as appmod
+
+    async def _idle_worker(queue, cfg):
+        await asyncio.Event().wait()
+
+    async def _idle_loop(*, config):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(appmod, "_worker", _idle_worker, raising=True)
+    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_loop, raising=True)
+    monkeypatch.setattr(appmod.app.state, "config", _cfg(tmp_path), raising=False)
+
+    with TestClient(appmod.app) as client:
+        accepted = client.post(
+            "/webhook",
+            headers={"X-Origin-Url": "http://gerrit:8080/"},
+            json={"type": "comment-added"},
+        )
+        spoofed = client.post(
+            "/webhook",
+            headers={
+                "X-Origin-Url": "http://gerrit:8080/",
+                "X-Forwarded-For": "203.0.113.10",
+            },
+            json={"type": "comment-added"},
+        )
+
+    assert accepted.status_code == 202
+    assert accepted.json() == {"status": "accepted", "queued": True}
+    assert spoofed.status_code == 401
 
 
 def _idle_reconcile_loop(*a, **k):

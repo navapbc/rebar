@@ -320,8 +320,8 @@ idempotent, same script):
 # From the workstation with the Gerrit admin key:
 GERRIT_HOST=<your-domain> infra/gerrit/service-user.sh
 #   creates/rotates the rebar-review-bot Service User + HTTP token,
-#   overwrites SSM /rebar/prod/gerrit-bot-token, renders webhooks.config
-#   (substituting the token for __BOT_TOKEN__) and pushes it to refs/meta/config.
+#   overwrites SSM /rebar/prod/gerrit-bot-token, renders the tokenless
+#   webhooks.config and pushes it to refs/meta/config.
 
 # On the box: install events-log (NOT bundled; webhooks IS bundled+enabled):
 sudo infra/gerrit/install-plugins.sh      # downloads the pinned events-log jar,
@@ -332,20 +332,20 @@ sudo infra/gerrit/install-plugins.sh      # downloads the pinned events-log jar,
 Design (ADR-0014):
 
 - The bot is a Gerrit **Service User** (`rebar-review-bot`) in the `Service Users`
-  group, with a single HTTP token. That **one token doubles** as the bot's REST
-  identity *and* the inbound webhook URL token — one secret to rotate, stored once at
-  `/rebar/prod/gerrit-bot-token`.
+  group, with a single HTTP token. That token is the bot's REST identity and the
+  public `/review/*` receiver token — one secret to rotate, stored once at
+  `/rebar/prod/gerrit-bot-token`. Gerrit webhooks do not carry the token.
 - The `webhooks` plugin has **no HMAC** request signing, so the inbound auth is a
   **two-layer, network-first** control:
   - **PRIMARY — internal-only delivery.** The webhook URL targets the receiver
     **directly over the private docker compose network**
-    (`http://review-bot:8000/webhook?token=…`), so a webhook **never traverses the
+    (`http://review-bot:8000/webhook`), so a webhook **never traverses the
     public internet or nginx**. The receiver's host port is loopback-bound and port
     8000 is not open in the security group — the network boundary is the real gate.
-  - **SECONDARY — URL-embedded token** (bounded exposure): it lives only in
-    `refs/meta/config` (Gerrit-access-controlled), is **not replicated off-box**
-    (Step 6 keeps `replicatePermissions=false`), and is rotatable via
-    `service-user.sh`.
+  - **SECONDARY — Gerrit-origin assertion:** the deployed 3.14 plugin ignores
+    arbitrary `header =` keys in `webhooks.config`, but it sends a built-in
+    `X-Origin-Url` header. The receiver accepts tokenless requests only on that
+    internal path and only when the request did not pass through public nginx.
 - The **`events-log`** plugin is the backfill source the reconciler reads (Step 5).
   Its REST endpoint is `GET /a/plugins/events-log/events/` — **the trailing slash is
   required**.
@@ -367,9 +367,10 @@ as a library** — it is *not* the stdio `rebar-mcp` server over HTTP, because G
 speaks plain webhook JSON, not MCP JSON-RPC (ADR-0007). The flow on a
 `patchset-created` event (ADR-0009):
 
-1. **`POST /webhook`** validates the inbound `?token=` (constant-time compare),
-   enqueues the event, and **ACKs 202 immediately** — an LLM review takes 30s–minutes
-   and would blow Gerrit's ~5s webhook socket timeout if processed inline.
+1. **`POST /webhook`** validates the internal Gerrit origin (or the public
+   `X-Rebar-Token` for non-Gerrit callers), enqueues the event, and **ACKs 202
+   immediately** — an LLM review takes 30s–minutes and would blow Gerrit's ~5s
+   webhook socket timeout if processed inline.
 2. A background worker takes a per-`(change_id, revision)` **single-flight lock**,
    short-circuits if the vote is already recorded (dedup) or already present on
    Gerrit (the authoritative check), then **clones the change ref** into a temp tree
