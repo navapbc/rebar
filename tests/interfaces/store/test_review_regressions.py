@@ -1,13 +1,8 @@
-"""Regression tests for the 3 correctness bugs the E0–E4 opus review surfaced.
+"""Pin three store correctness regressions from the E0–E4 review.
 
-Each test FAILS against the pre-fix code and passes after the fix:
-  1. delete must abort (non-zero, no false "Deleted") + roll back on a git-commit
-     failure — not report success on a half-written store.
-  2. transition_core must UN-STAGE the orphaned event on a commit failure, so it is
-     not swept into the next write's commit (index pollution).
-  3. the auto-init consent gate must check the tracker at the SAME location init
-     writes it (config.tracker_dir), so a REBAR_ROOT that differs from the git
-     toplevel does not cause an infinite re-prompt / re-error.
+Delete must roll back and report commit failure; transition must unstage and remove an
+orphaned event after commit failure; and auto-init must check the configured tracker root
+that initialization writes.
 """
 
 from __future__ import annotations

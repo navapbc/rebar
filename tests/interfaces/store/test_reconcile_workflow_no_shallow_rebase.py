@@ -1,16 +1,8 @@
-"""The Jira reconciler workflows must reconcile the tickets branch with FULL history
-+ merge, never shallow + rebase.
+"""Require Jira reconciler workflows to use full tickets history and merge.
 
-Regression guard for bug saggy-pupil-plant / f193 (RC1). A shallow (``--depth=1``)
-tickets history defeats git's merge-base computation; reconciling a compaction
-(which deletes source event files) with ``git rebase`` then re-applies the stale
-worktree over the compaction and resurrects the deleted files —
-SNAPSHOT_INCONSISTENT corruption. The controlled experiment showed only
-shallow+rebase corrupts; full+merge is clean. There is no in-process seam for a
-GitHub Actions workflow, so this asserts the operative config invariants directly.
-
-Covers BOTH reconciler workflows (primary + canary) — both mount and push the
-tickets branch and both had the defect.
+A shallow fetch defeats merge-base calculation, allowing rebase to replay stale events
+over compaction and resurrect deleted files. Both primary and canary workflows therefore
+fetch full history and delegate merge-based delivery.
 """
 
 from __future__ import annotations
@@ -74,21 +66,11 @@ def test_reconcile_delegates_merge_not_rebase_to_supported_seam(
 
 @pytest.mark.parametrize("workflow", RECONCILE_WORKFLOWS, ids=lambda p: p.name)
 def test_tickets_fetch_always_names_the_destination_ref(workflow: Path) -> None:
-    """Every ``git fetch`` of the tickets branch must name its destination ref (bug 35f7).
+    """Require every tickets fetch to write an explicit destination ref.
 
-    A bare ``git fetch origin tickets`` always writes ``FETCH_HEAD`` but writes
-    ``refs/remotes/origin/tickets`` only OPPORTUNISTICALLY — when the remote's CONFIGURED
-    refspec covers that branch. The workflow mount consumes the result as
-    ``origin/tickets``; delivery now delegates to the core push entrypoint, whose own
-    real-git suite pins the same explicit destination-ref contract. A narrow configured
-    refspec must not leave either consumer reading an absent or stale ref.
-
-    ``actions/checkout`` builds its workspace with ``git remote add``, which installs the
-    wildcard ``+refs/heads/*:refs/remotes/origin/*``, so these workflows are not currently
-    exposed. That is an implementation detail of a third-party action, not a guarantee this
-    repo controls — naming the destination ref makes the fetch correct without depending on
-    it, and matches the form already used to mount the worktree. Same defect class as
-    ``_store/sync.py`` (bug 5546) and ``_store/push.py`` (bug 35f7).
+    ``FETCH_HEAD`` alone does not guarantee ``origin/tickets`` under a narrow configured
+    refspec, yet mounting and delivery read that tracking ref. Explicit source/destination
+    refspecs keep both workflows independent of checkout's wildcard configuration.
     """
     text = workflow.read_text(encoding="utf-8")
     offenders = [

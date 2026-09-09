@@ -1,23 +1,9 @@
-"""Exhaustive LLM-optionality guard: the ``rebar.llm`` stack must be **optional**
-for *every* interface (library / CLI / MCP) and *every* operation
-(``review_code`` / ``scan_epics_for_spec`` / ``verify_completion``).
+"""Require the LLM stack to remain optional across library, CLI, and MCP.
 
-This is the single, deliberately-redundant contract test for the hard rule stated
-in the ``rebar.llm`` epic: core rebar stays stdlib-only; the agent runtime
-(pydantic-ai) / langfuse / anthropic stack is behind ``nava-rebar[agents]`` and
-lazy-imported; and when the
-extra is absent every surface **degrades cleanly** (a typed ``LLMError`` / a
-``Error:`` + non-zero exit / a gated tool error) rather than crashing with an
-``ImportError`` traceback or — worse — silently doing nothing.
-
-Two halves, both runnable offline:
-  * **Import-cleanliness** — importing any interface entrypoint must not pull the
-    agents stack into ``sys.modules`` (proves the imports are lazy). Always runs.
-  * **Graceful degradation** — when the extra is genuinely absent, each
-    operation on each interface fails loudly and cleanly. These assertions are
-    guarded on the extra's real absence (when it *is* installed, exercising the
-    path needs live credentials, which an offline test must not do), mirroring
-    the idiom in ``test_llm_framework.py``.
+Public operations stay lazy-imported and an exhaustive discovered matrix prevents omissions.
+Without ``[agents]``, each surface follows its typed, non-billable degradation contract;
+``review_code`` remains fail-safe. Offline tests always cover import cleanliness and exercise
+missing-extra behavior only when the runtime is absent.
 """
 
 from __future__ import annotations
@@ -50,34 +36,20 @@ _AGENTS = agents_extra_installed()
 
 @pytest.fixture(autouse=True)
 def _gate_source_local(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin THIS module to the explicit in-place read (``source=local``).
+    """Use ``source=local`` so code-less fixture repos reach missing-extra preflight.
 
-    These tests exercise the [agents]-extra degradation seam, not gate semantics: each op
-    must fail with a typed ``LLMError`` naming the extra (or, for the fail-safe op, return
-    cleanly). The suite-wide default is ``attested``/``ref=HEAD`` (tests/conftest.py), but
-    the shared ``rebar_repo`` fixture's repo has NO code-branch commit, so ``HEAD`` cannot
-    resolve — under attested, the clean-wheel CI lane (where these tests actually run;
-    they skip wherever the extra is installed) died on ``SnapshotRefError`` before ever
-    reaching the degradation seam. A production lean install is unaffected (a real repo
-    resolves its ref long before the LLM seam); local simply keeps the fixture repos on
-    the read path these tests are about. Local reads are fine here: degradation never
-    signs anything."""
+    The suite's attested default cannot resolve ``HEAD`` here and would raise
+    ``SnapshotRefError`` before optionality. Degradation signs nothing, so local reads are
+    appropriate."""
     monkeypatch.setenv("REBAR_GATE_SOURCE", "local")
     monkeypatch.delenv("REBAR_GATE_REF", raising=False)
 
 
-# The full operation matrix. The exhaustiveness test below asserts this stays in
-# lock-step with the public ops exported by rebar.llm, so a newly-added operation
-# cannot ship without an optionality entry here.
+# The guard below discovers public operations and rejects omissions from this matrix.
 OPERATIONS = ("review_code", "scan_epics_for_spec", "verify_completion")
 
-# review_code is the ONE FAIL-SAFE op (epic b744 / WS4 + bug 5b32-37c4-f99a-4315): the public
-# `review_code` shim always runs the gate and returns a VALID review_result rather than raising —
-# without the extra, the runner preflight failure degrades to INDETERMINATE +
-# coverage.llm_unavailable. So it degrades WITHOUT the extra by returning cleanly, NOT by
-# raising/exit-1. The raise-degradation invariant below therefore EXEMPTS it; its real contract is
-# pinned by test_review_code_is_fail_safe_without_extra (here) and by
-# tests/unit/test_code_review_ws4.py. It stays in OPERATIONS so the exhaustiveness check holds.
+# ``review_code`` is the fail-safe exception: missing runtime returns a valid
+# INDETERMINATE result with ``coverage.llm_unavailable``, never PASS or a raise.
 _FAIL_SAFE = frozenset({"review_code"})
 
 
@@ -87,10 +59,7 @@ _FAIL_SAFE = frozenset({"review_code"})
     ["rebar", "rebar._cli", "rebar.mcp_server", "rebar.llm"],
 )
 def test_interface_import_pulls_no_agents_stack(module: str) -> None:
-    """Importing any interface entrypoint must not drag in the agents stack.
-
-    Run in a clean subprocess so an already-imported module in this test process
-    can't mask a non-lazy import."""
+    """Import each interface cleanly and require the agents stack to stay unloaded."""
     code = (
         f"import sys, {module};"
         f"stack={_AGENTS_STACK!r};"
@@ -111,9 +80,7 @@ def test_interface_import_pulls_no_agents_stack(module: str) -> None:
 @pytest.mark.skipif(_AGENTS, reason="agents extra installed → degradation path not exercised")
 @pytest.mark.parametrize("op", OPERATIONS)
 def test_library_operation_degrades_without_extra(op: str, rebar_repo: Path) -> None:
-    """Calling a library op with the default (pydantic_ai) runner and no extra must
-    raise a typed ``LLMError`` whose message points at the extra — never an
-    ``ImportError``/``AttributeError`` traceback, and never a silent success."""
+    """Without the extra, library operations raise typed ``LLMError``, never silent success."""
     from rebar.llm.errors import LLMError
 
     epic = _seed(rebar_repo)
@@ -138,10 +105,7 @@ def test_library_operation_degrades_without_extra(op: str, rebar_repo: Path) -> 
 
 @pytest.mark.skipif(_AGENTS, reason="the fail-safe path is the point WITHOUT the extra installed")
 def test_review_code_is_fail_safe_without_extra(rebar_repo: Path) -> None:
-    """review_code always runs the gate (bug 5b32-37c4-f99a-4315), and stays FAIL-SAFE without
-    the agents extra: the runner preflight failure degrades to a valid INDETERMINATE
-    review_result — no raise, no billable call, and never a PASS-looking empty result — so a
-    lean install never crashes on it and never mistakes 'could not review' for 'reviewed clean'."""
+    """Without the extra, ``review_code`` returns INDETERMINATE without raising or billing."""
     import rebar.llm
 
     result = rebar.llm.review_code(
@@ -159,9 +123,7 @@ def test_review_code_is_fail_safe_without_extra(rebar_repo: Path) -> None:
 def test_cli_operation_degrades_without_extra(
     op: str, rebar_repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
-    """Each ``rebar`` LLM subcommand must exit non-zero with a clean ``Error:``
-    line (no Python traceback) when the extra is absent — automation that checks
-    exit codes must not mistake a missing-extra run for a successful review."""
+    """Without the extra, CLI operations emit ``Error:`` and exit nonzero without traceback."""
     from rebar._cli import main
 
     epic = _seed(rebar_repo)
@@ -190,8 +152,7 @@ def test_cli_operation_degrades_without_extra(
 def test_cli_review_check_is_offline_and_truthful(
     capsys: pytest.CaptureFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``rebar review-plan --check`` is the offline preflight: it never imports the
-    stack, always exits 0, and reports the real availability of the extra."""
+    """Offline ``review-plan --check`` reports availability without importing the stack."""
     import json
 
     from rebar._cli import main
@@ -222,8 +183,7 @@ def _build_mcp():
 def test_mcp_operations_registered_and_gated_off_by_default(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """All three LLM tools are registered but DISABLED unless REBAR_MCP_ALLOW_LLM
-    is set, so a default MCP client can never trigger a billable LLM call."""
+    """LLM tools register disabled by default, preventing accidental billable calls."""
     import asyncio
 
     from adapters import _unwrap  # tests/interfaces on sys.path
@@ -249,13 +209,10 @@ def test_mcp_operations_registered_and_gated_off_by_default(
 def test_mcp_operations_error_cleanly_when_gated_on_but_extra_absent(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Even with the gate explicitly opened, a missing extra must surface — never a
-    billable call, never a silent empty result. The public tools split into two
-    contracts (story authorial-hated-blackbear): scan_spec RAISEs the
-    typed LLMError (transport-wrapped); the gate-shaped tools (review_code,
-    verify_completion, review_plan) instead RETURN a STRUCTURED degrade dict so the
-    driving agent/close-gate can branch on it. Both surface the missing 'agents' extra;
-    neither is silent."""
+    """With MCP gating enabled, missing runtime follows each tool's explicit contract.
+
+    ``scan_spec`` raises transport-wrapped ``LLMError``; gate-shaped tools return
+    structured degradation. Both identify ``[agents]`` without billing or silent success."""
     import asyncio
 
     from adapters import _unwrap
@@ -263,48 +220,36 @@ def test_mcp_operations_error_cleanly_when_gated_on_but_extra_absent(
     monkeypatch.setenv("REBAR_MCP_ALLOW_LLM", "1")
     srv = _build_mcp()
     epic = _seed(rebar_repo)
-    # Give review_code a real HEAD~1..HEAD range so it reaches the runner preflight
-    # (rather than failing earlier at git range resolution) — proving review_code,
-    # too, degrades on the missing extra rather than for an unrelated reason.
+    # Supply a real range so ``review_code`` reaches runner preflight, not range resolution.
     _two_commits(rebar_repo)
-    # ── Contract A: tools that RAISE the typed LLMError on a missing extra. ──
-    # review_code EXCLUDED: fail-safe (WS4) — returns an inert disabled result, see
-    # test_review_code_is_fail_safe_without_extra. verify_completion EXCLUDED: it is a
-    # gate-shaped tool that returns a STRUCTURED degrade dict (Contract B, below), not a raise.
+    # Contract A raises typed ``LLMError``. Fail-safe ``review_code`` and structured
+    # ``verify_completion`` follow Contract B instead.
     forced = {
         "scan_spec": {"spec_text": "the spec"},
     }
     for name, args in forced.items():
         with pytest.raises(Exception) as exc:
             _unwrap(asyncio.run(srv.call_tool(name, args)))
-        # Prove it degraded *because the extra is absent*, not because it is gated
-        # (the gate is open here) or for some unrelated reason.
+        # The gate is open; any error must therefore identify the missing extra.
         msg = str(exc.value).lower()
         assert "agents" in msg and "disabled" not in msg, str(exc.value)
 
-    # ── Contract B: verify_completion RETURNS a structured degrade dict (never raises,
-    # never a billable call, never a silent empty result). It carries the classifier
-    # disposition so the close gate can fail-closed on it programmatically. ──
+    # Contract B returns structured degradation without raising or billing; its classifier
+    # disposition lets the close gate fail closed.
     verdict = _unwrap(asyncio.run(srv.call_tool("verify_completion", {"ticket_id": epic})))
     assert isinstance(verdict, dict), verdict
-    # 8a31: the soft-error `error` is now a shared vocabulary code; the human text
-    # (naming the missing extra) moved to `message`.
+    # Human detail belongs in ``message``; ``error`` is the shared vocabulary code.
     assert verdict.get("error") == "llm_unavailable", verdict
     msg = str(verdict.get("message", "")).lower()
     assert "agents" in msg and "disabled" not in msg, verdict
     assert verdict.get("resolution_class"), verdict  # classifier disposition present, not silent
 
 
-# ── Guard: the matrix above must enumerate every public LLM operation ──────────
+# Discover runner-backed operations; reject omissions from this matrix.
 def test_optionality_matrix_covers_every_public_operation() -> None:
-    """If a new runner-backed LLM operation is added without a matching entry in
-    OPERATIONS, this fails — forcing optionality coverage to track the public
-    surface rather than silently lagging it.
+    """Require each exported callable with a ``runner`` seam to appear in ``OPERATIONS``.
 
-    Operations are DISCOVERED, not restated: an "operation" is a callable exported
-    by one of the operation modules that takes a ``runner`` injection seam (the
-    thing that makes it an LLM op). The deterministic ``select_*`` helpers, which
-    have no ``runner`` parameter, are correctly excluded."""
+    Deterministic ``select_*`` helpers have no runner and are excluded."""
     import inspect
 
     from rebar.llm import code_review, completion, operations, spec_scan
@@ -365,11 +310,6 @@ def _git(*args: str, cwd: Path) -> None:
 
 # ── local seed helper (mirrors test_llm_framework._seed) ──────────────────────
 def _seed(repo: Path) -> str:
-    # A CHILDLESS epic on purpose. verify_completion runs a deterministic
-    # child-closure gate BEFORE the LLM: an epic with an open/unsigned child returns
-    # a FAIL verdict without ever reaching the runner — so it would NOT exercise the
-    # missing-extra degradation path these tests assert on. A childless ticket passes
-    # the gate and reaches the runner preflight (which raises the typed "install the
-    # agents extra" error when the stack is absent). The epic-with-children
-    # deterministic path is covered in test_completion_verifier.py.
+    # Use a childless epic so deterministic child closure passes and runner preflight is reached.
+    # A child would fail before exercising missing-extra degradation.
     return rebar.create_ticket("epic", "Login epic", repo_root=str(repo))

@@ -1,15 +1,8 @@
-"""A transient git object-DB failure on `git add` is retried, not surfaced as a hard
-write failure (bug vocal-dip-robin / brainy-floral-globefish).
+"""Pin retries for transient git object-database writes.
 
-On CI runners the loose-object temp write under a tracker's `.git/objects/`
-intermittently fails while hashing a blob during `git add` — observed verbatim as
-``error: unable to create temporary file: No such file or directory`` (Linux/ENOENT)
-or ``… Invalid argument`` (macOS/EINVAL), followed by ``failed to insert into
-database`` / ``unable to index file`` / ``fatal: adding files failed``. It is a
-filesystem hiccup, not a data fault: a Gerrit ``recheck`` on the identical patchset
-passes. These tests inject that exact stderr on the FIRST add and assert the write
-self-heals on retry — on both the single-event and batched write paths — while a
-NON-transient add failure still fails immediately (no behavior change there).
+Linux ENOENT and macOS EINVAL variants share the ``unable to create temporary file``
+marker. The first ``git add`` or commit must self-heal on single and batched write paths;
+non-transient failures must still surface immediately.
 """
 
 from __future__ import annotations
@@ -32,11 +25,8 @@ _TRANSIENT_ADD_STDERR = (
     "fatal: adding files failed"
 )
 
-# The verbatim CI stderr (macOS EINVAL variant) — the exact signature this bug
-# (instant-digestive-flyingfish) was filed against on macos-latest. It differs from the
-# Linux variant only in the errno phrase ("Invalid argument" vs "No such file or
-# directory"); the retry classifier keys on the shared, errno-independent prefix
-# "unable to create temporary file", so this variant must self-heal identically.
+# macOS EINVAL differs from Linux ENOENT only after the shared, errno-independent
+# ``unable to create temporary file`` marker and must classify identically.
 _MACOS_EINVAL_ADD_STDERR = (
     "error: unable to create temporary file: Invalid argument\n"
     "error: 227c/1783673831282139152-3a825e61-STATUS.json: failed to insert into database\n"
@@ -61,18 +51,12 @@ def test_macos_einval_matches_via_errno_independent_prefix() -> None:
     assert gitutil._is_transient_object_write_error(einval_only)
 
 
-# git's lockfile-commit failure for the INDEX write (read-cache.c write_locked_index /
-# do_write_index via commit_lock_file), emitted verbatim by `git add` / `git write-tree` /
-# a commit's pre-ref-update index prep on a transient runner-FS hiccup. Reported from a
-# production `rebar create` that required an operator retry (bug scary-fiscal-grunion). It is
-# the INDEX-write sibling of the object-DB temp-create WRITE faults above and must self-heal
-# the same way.
+# Pre-ref-update index-write failure from ``git add``, ``git write-tree``, or commit prep.
+# HEAD has not moved, so the shared transient-write retry is safe.
 _TRANSIENT_INDEX_WRITE_STDERR = "fatal: unable to write new index file"
 
-# git's DISTINCT message for a POST-ref-update index-write failure (builtin/commit.c, after
-# HEAD already moved). It must NEVER be classified transient: retrying it could duplicate the
-# already-committed event. Note the underscore ("new_index file") — it does not contain the
-# contiguous marker substring, which is what keeps the two apart.
+# Post-ref-update failure: HEAD already moved, so retry could duplicate the event.
+# Its ``new_index file`` spelling intentionally avoids the transient marker.
 _POST_REF_INDEX_WRITE_STDERR = (
     "fatal: repository has been updated, but unable to write\nnew_index file."
 )
@@ -237,12 +221,7 @@ def _fail_first_commit(monkeypatch: pytest.MonkeyPatch, stderr: str) -> None:
 def test_single_write_retries_transient_commit_odb_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A git COMMIT object-DB temp-create transient must self-heal on retry, exactly like the
-    git ADD path. `_git_commit` retried only index.lock + "could not parse HEAD" — not the
-    object-DB write signature — so a CI-runner FS blip during commit's loose-object write
-    surfaced as a hard StoreError and dropped a concurrent locked write (the enrich-prune
-    concurrency flake). Injects the object-DB signature on the FIRST commit; the write must
-    self-heal on the retried commit."""
+    """A transient loose-object failure during ``git commit`` retries and commits once."""
     tracker = _fresh_tracker(tmp_path, "commit-odb")
     _fail_first_commit(monkeypatch, _TRANSIENT_COMMIT_STDERR)
 
@@ -258,10 +237,7 @@ def test_single_write_retries_transient_commit_odb_failure(
 def test_single_write_retries_transient_index_write_add_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A transient `fatal: unable to write new index file` on `git add` must self-heal on
-    retry (bug scary-fiscal-grunion). This is the INDEX-write member of the runner-FS transient
-    WRITE family; it was the one signature the shared retry did not cover, so a production
-    `rebar create` surfaced it as a hard StoreError and required an operator retry."""
+    """A pre-ref index-write failure during ``git add`` must self-heal on retry."""
     tracker = _fresh_tracker(tmp_path, "index-write-add")
     _fail_first_add(monkeypatch, _TRANSIENT_INDEX_WRITE_STDERR)
 
@@ -294,13 +270,10 @@ def test_single_write_retries_transient_index_write_commit_failure(
 
 
 def test_orphan_index_lock_under_write_lock_self_heals(tmp_path: Path) -> None:
-    """A stranded YOUNG ``.git/index.lock`` must not wedge writes for 300s (Mode B cascade).
+    """Reclaim a young orphaned ``index.lock`` while holding the exclusive write lock.
 
-    An abnormally-terminated git subprocess (SIGKILL/OOM/FS-fault under CI pressure) can leave
-    an ``index.lock`` orphan. Because every store write runs under the exclusive write lock,
-    that orphan is PROVABLY not held by a live peer, so it must be reclaimed IMMEDIATELY rather
-    than blocked behind ``_INDEX_LOCK_STALE_S`` (300s) — otherwise every subsequent locked
-    ``append_event`` raises for ~5 minutes (the catastrophic 73%-write-loss cascade)."""
+    No live peer can own it inside this boundary, so waiting for the 300-second stale
+    threshold would cascade failures across subsequent writes."""
     from rebar._commands.fsck import _resolve_tracker_git_dir
 
     tracker = _fresh_tracker(tmp_path, "orphan-lock")
@@ -349,15 +322,10 @@ def _plant_poison(tracker: str, path: str = "tk-poison/evt.json") -> str:
 def test_cross_path_poisoned_index_self_heals(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A vanished-object index entry left by an EARLIER write must not cascade into every
-    later write (bug 4c1c / Mode D (residual of ac26) — the enrich-prune ``invalid object … Error
-    building trees`` loss).
+    """Reset an earlier cross-path vanished-object entry before committing a new write.
 
-    The poison belongs to a DIFFERENT path than the current write, so the per-path unstage
-    never clears it; only a full index reset to HEAD does. A new write for another ticket
-    must self-heal (drop the cross-path poison, commit) rather than raise, and leave no
-    lingering wedge for the write after it. The heal must also be OBSERVABLE — it logs a
-    warning naming the orphaned worktree path, so a silent local↔remote divergence can't hide."""
+    Per-path unstage cannot clear another path's poison. Recovery must drop it, commit the
+    current and subsequent writes, and warn with the orphaned path so divergence is visible."""
     tracker = _fresh_tracker(tmp_path, "poison-xpath")
     event_append.stage_and_commit(tracker, "tk-0", _event("u0"))  # baseline HEAD
     poison_path = _plant_poison(tracker)  # earlier write's entry whose object vanished, staged

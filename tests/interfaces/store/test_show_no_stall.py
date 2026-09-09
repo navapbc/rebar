@@ -1,12 +1,8 @@
-"""A read's freshness reconverge must not stall on a held write lock (slim-fetch-ledge).
+"""Require ``rebar show`` to return local state promptly under a held write lock.
 
-`rebar show` runs a throttled fetch+reconverge (`reads.ensure_fresh`) before
-reading. The reconverge acquired the write lock with a 15s timeout, so while a
-concurrent background push held that lock, `show` STALLED for many seconds — long
-enough that a consumer piping `show` into a parser read an empty/incomplete buffer
-(or timed out), the empty-stdout-exit-0 symptom. A read must prefer the local
-snapshot promptly over a long stall, so the read-path reconverge now waits only
-briefly for the lock and otherwise proceeds with local state.
+Its throttled ``ensure_fresh`` reconverge uses a short read ledge rather than the
+15-second writer timeout, preventing empty or incomplete consumer reads while a
+background push owns the lock.
 """
 
 from __future__ import annotations
@@ -69,12 +65,8 @@ def test_cli_show_complete_or_erroring_under_write_burst(repo_with_origin_ticket
         rebar.create_ticket("task", f"burst target {i}", repo_root=str(repo)) for i in range(3)
     ]
 
-    # Storm right-sized to its measured detection floor (ce38-2914-d2f4-4826): the
-    # afa0-2e15 fault-seeding matrix showed this test's exclusive detections — F3/F6,
-    # exit 0 with a shape-valid but content-incomplete payload — fire deterministically
-    # on round 0 / ticket 0, and re-running the full F1-F7 seed set at 1 round
-    # reproduced the 6-round detection column exactly (F2/F3/F4/F6 RED, F1/F5/F7
-    # green). One round keeps the oracle; the extra five bought no detection.
+    # One round is the measured detection floor: F3/F6 fail on ticket zero, and the full
+    # F1–F7 matrix reproduces the six-round detection set without five redundant rounds.
     for round_no in range(1):
         # Burst of writes (each spawns a background push to origin under =always).
         for i, t in enumerate(ids):

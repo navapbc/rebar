@@ -69,10 +69,7 @@ def test_single_turn_step_runs_structured_against_prompt_outputs(rebar_repo: Pat
 
 
 def test_single_turn_runner_builds_agent_with_no_tools(rebar_repo: Path, monkeypatch) -> None:
-    """The no-tools guarantee, asserted directly on PydanticAIRunner.run(): a
-    single_turn RunRequest builds the agent with empty tools AND empty toolsets (so it
-    is exactly one model call, no tool loop). We stub the heavy pydantic_ai pieces and
-    capture the kwargs the runner assembles."""
+    """Require single-turn requests to build an agent with no tools or toolsets."""
     from rebar.llm import runner as runner_mod
     from rebar.llm.config import LLMConfig
     from rebar.llm.runner import PydanticAIRunner, RunRequest
@@ -87,31 +84,17 @@ def test_single_turn_runner_builds_agent_with_no_tools(rebar_repo: Path, monkeyp
         return {"verdict": "PASS", "findings": [], "summary": "s"}, {}
 
     monkeypatch.setattr(structured_run_mod, "_pai_structured", _fake_structured)
-    # Caching is orthogonal here; stub it off at the capabilities seam so we don't import
-    # the real anthropic settings module (pydantic_ai is stubbed empty below). Story S2
-    # replaced the provider-name-string cache-settings helper with the
-    # capability-based `capabilities_for`/`cache_settings_for` pair; stub the latter,
-    # mirroring how `ProviderSession` is stubbed below rather than reaching into the
-    # (SDK-free) profile-resolution internals.
-    # `execution_mode` is keyword-only and REQUIRED since bug dd27 (the agentic arm caches the
-    # message tail), so the stub must accept it or the runner's call raises TypeError.
+    # Stub caching at its capability seam to avoid provider settings imports through the
+    # empty ``pydantic_ai`` double. Accept the required keyword-only execution mode.
     monkeypatch.setattr(runner_mod, "cache_settings_for", lambda caps, *, execution_mode: None)
     monkeypatch.setattr(structured_run_mod, "_import_pydantic_ai", lambda: object)
     monkeypatch.setattr(anthropic_model_mod, "_pai_model", lambda cfg: "anthropic:fake")
-    # Env-independence: the loopback-proxy bypass (story 454a-9266-ada6-43cc) fires inside run()
-    # when ANTHROPIC_BASE_URL is a loopback host and imports the REAL
-    # pydantic_ai.models.anthropic — which explodes against the empty pydantic_ai stub
-    # below. Stub the bypass off so this test builds the agent regardless of the local
-    # ANTHROPIC_BASE_URL (e.g. a dev machine running a headroom proxy on 127.0.0.1).
+    # Disable the ambient loopback-proxy bypass; it imports the real Anthropic model against
+    # the empty ``pydantic_ai`` stub.
     monkeypatch.setattr(anthropic_model_mod, "_local_proxy_bypass_base_url", lambda: None)
 
-    # story arcticproxy/arcticduck: the runner wraps ANY anthropic model in the retrying
-    # transport (real pydantic_ai import). Since story S1 that construction lives behind
-    # `providers.ProviderSession`, so this test stubs the SESSION rather than the builder.
-    # `supports()` False + `is_resolvable()` True routes run() down its lazy model-STRING
-    # path — no `infer_model` call and no provider build — which is what lets this test keep
-    # stubbing `pydantic_ai` empty below. Provider construction is incidental scaffolding
-    # here; the assertion under test is the single_turn no-tools guarantee.
+    # Stub ``ProviderSession`` and select its lazy model-string path so provider construction
+    # cannot obscure the no-tools assertion.
     class _NoBuildProviderSession:
         def __init__(self, _cfg):
             pass

@@ -1,14 +1,8 @@
-"""RP-04 S3 (6e3b) HAPPY-path oracle — reconciler apply uses the composed runtime.
+"""Require reconcile apply to use the pass's single composed runtime.
 
-Declared AC1-AC6 gate file (see ticket verify_commands). The implementer works
-against THIS happy path; the poisoned-ambient / child-env-sibling / concurrency edge
-cases live in a held-out oracle the implementer does not see.
-
-Contract: ``reconcile.reconcile_once`` composes ONE ``ReconcilerRuntime`` through
-``runtime.compose_reconciler_runtime`` per pass and threads its already-built backend's
-transport into the apply phase, forwarding it to ``applier.apply`` as ``client=`` —
-rather than each apply re-resolving ambient config via ``_load_acli``. Asserts the
-recorded ``client`` argument (observable behavior), never private source text.
+``reconcile_once`` builds one ``ReconcilerRuntime`` and forwards its backend transport to
+``applier.apply(client=...)``, avoiding ambient ``_load_acli`` resolution. The oracle
+asserts the observable client; split-install identity has a companion regression.
 """
 
 from __future__ import annotations
@@ -37,19 +31,9 @@ def _load(name: str, rel: str):
 def test_reconcile_once_threads_composed_runtime_transport_into_apply(monkeypatch, tmp_path):
     """A pass composes one runtime and the apply phase receives its captured transport."""
     reconcile = _load("rebar_reconciler.reconcile", "reconcile.py")
-    # Patch the runtime module ``reconcile`` ITSELF resolved (reconcile.py's ``_runtime``,
-    # the exact object it hands to ``bind_operation_runtime``), never a copy loaded here.
-    # Loading it via the ``_load`` above would be wrong whenever the engine exists at TWO
-    # paths — which is what a NON-editable install (``uv pip install '.'``, three sweep
-    # lanes) produces: the checkout keeps ``src/rebar/_engine/`` while the package resolves
-    # to site-packages. ``reconcile.py`` reaches siblings through ``_loader.lazy_load``,
-    # which caches by ``sys.modules`` KEY and ignores the path, so ``_runtime`` is whichever
-    # copy an earlier test registered; ``_load``'s ``__file__`` guard (bug 9f0b, pinned by
-    # ``diffing/test_load_module_identity.py``) then read that live module as a MISS,
-    # replaced the shared key with a second copy, and this test patched the copy nobody
-    # used. The real ``compose_reconciler_runtime`` then raised for a scope-less
-    # ``tmp_path``, ``bind_operation_runtime`` swallowed it for a non-persisting pass, and
-    # apply was handed ``client=None`` (bug ae96-72a9-8145-4c85).
+    # Patch the runtime already resolved by ``reconcile``. Non-editable installs can expose
+    # checkout and site-packages copies under one key; loading by path would patch an unused
+    # copy and leave apply with ``client=None``.
     runtime = reconcile._runtime
 
     captured_transport = SimpleNamespace(name="composed-transport")

@@ -1,16 +1,9 @@
-"""Ticket-directory creation is atomic: an interrupted create leaves no debris (021d).
+"""Pin atomic ticket-directory publication and interruption cleanup (bug 021d).
 
-The debris signature this pins: the write path used to ``os.makedirs`` the ticket
-directory OUTSIDE the write lock and only land its first event at the under-lock
-``os.replace``. Death anywhere in that window (host sleep, kill, lock timeout) stranded an
-empty, plausible-looking ticket directory that ``fsck`` reports TWICE — ``MISSING_CREATE``
-(the reducer finds no CREATE) and ``FOREIGN_STORE_PATH`` (the directory holds no event
-file). A real sweep of 8 such directories is recorded on ticket illsuited-erect-ibis.
-
-The interruption is injected at the write lock, which sits INSIDE the vulnerable window and
-is a genuine failure mode. It is deliberately shape-independent — it fails the same call in
-the old shape and the new one — so RED and GREEN are compared honestly rather than by
-patching a symbol only one shape happens to call.
+Creation stages the directory and first event until the write lock can publish them
+together. Interrupting at that lock must leave neither a visible ticket directory nor
+``fsck`` debris; the shape-independent injection models termination at the former
+vulnerable boundary.
 """
 
 from __future__ import annotations

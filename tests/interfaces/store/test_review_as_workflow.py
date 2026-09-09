@@ -1,9 +1,7 @@
-"""WS-K2: review_ticket reframed as a workflow + parallel-run-and-diff.
+"""Require ``review_ticket`` workflow execution to bridge through the executor.
 
-Proves (a) the RunnerAgentStep bridge runs a real agent workflow through the
-executor (closing the WS-C4 _PendingAgentRunner gap), and (b) the workflow path is
-equivalent (same findings/summary) to the legacy review_ticket — the cutover gate.
-The public review_ticket entry point is unchanged (legacy path).
+The ``RunnerAgentStep`` path must match the legacy findings and summary while the public
+entry point continues to use the legacy path.
 """
 
 from __future__ import annotations
