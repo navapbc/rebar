@@ -56,6 +56,9 @@ ATTACHMENT_TYPE = "aws_volume_attachment"
 IN_SERVICE = "in-service"
 NOT_IN_SERVICE = "NOT-IN-SERVICE"
 UNKNOWN = "UNKNOWN"
+METRIC_IN_SERVICE = 1
+METRIC_NOT_IN_SERVICE = 0
+METRIC_UNKNOWN = -1
 
 
 @dataclass(frozen=True)
@@ -176,9 +179,19 @@ def classify(attached: list[tuple[str, str]], host_mounts: dict[str, str | None]
     return verdicts
 
 
+def volume_in_service_metric_value(volume_id: str, expected_mount: str, report: str) -> int:
+    """CloudWatch heartbeat value for one volume's live mount join."""
+    host_mounts = parse_host_mounts(report)
+    mount = host_mounts.get(volume_id.replace("-", ""))
+    if volume_id.replace("-", "") not in host_mounts:
+        return METRIC_UNKNOWN
+    return METRIC_IN_SERVICE if mount == expected_mount else METRIC_NOT_IN_SERVICE
+
+
 #: What the host runs. One `NAME="..." SERIAL="..." MOUNTPOINT="..."` line per block device,
 #: partitions included -- the rollup in :func:`parse_host_mounts` needs both.
 HOST_PROBE = "lsblk -P -o NAME,SERIAL,MOUNTPOINT"
+HOST_PROBE_ARGV = ["lsblk", "-P", "-o", "NAME,SERIAL,MOUNTPOINT"]
 
 
 def probe_host(instance_id: str, region: str) -> str:
@@ -250,17 +263,45 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--plan-json",
         type=Path,
-        required=True,
         help="`terraform show -json` output (a plan file or current state).",
     )
-    parser.add_argument("--instance-id", required=True)
+    parser.add_argument("--instance-id")
     parser.add_argument("--region", default="us-east-1")
     parser.add_argument(
         "--host-report",
         type=Path,
         help="Read the host probe from this file instead of calling SSM.",
     )
+    parser.add_argument(
+        "--metric-value",
+        action="store_true",
+        help="Print 1/0/-1 for a single volume's expected mount instead of the tabular report.",
+    )
+    parser.add_argument("--volume-id", help="Volume id for --metric-value.")
+    parser.add_argument("--mount", help="Expected mount point for --metric-value.")
     args = parser.parse_args(argv)
+
+    if args.metric_value:
+        if not args.volume_id or not args.mount:
+            print("--metric-value requires --volume-id and --mount", file=sys.stderr)
+            return 2
+        report = (
+            args.host_report.read_text(encoding="utf-8")
+            if args.host_report
+            else subprocess.check_output(  # raw-git-ok: local read-only lsblk probe, not git
+                HOST_PROBE_ARGV,
+                text=True,
+            )
+        )
+        print(volume_in_service_metric_value(args.volume_id, args.mount, report))
+        return 0
+
+    if not args.plan_json or not args.instance_id:
+        print(
+            "--plan-json and --instance-id are required unless --metric-value is used",
+            file=sys.stderr,
+        )
+        return 2
 
     attached = attachments_from_plan(json.loads(args.plan_json.read_text(encoding="utf-8")))
     if not attached:

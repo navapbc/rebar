@@ -437,6 +437,50 @@ resource "aws_cloudwatch_metric_alarm" "gate_scratch_unmounted" {
   }
 }
 
+# mechanism-ok: ci_gate rebar-gate-scratch-volume-not-in-service — eb65-84c3-071a-404b:
+# pages when Terraform's attached scratch volume is not the filesystem mounted at the gate
+# scratch path, closing the delivered-but-not-in-effect gap left by marker-only monitoring.
+resource "aws_cloudwatch_metric_alarm" "gate_scratch_volume_not_in_service" {
+  alarm_name        = "rebar-gate-scratch-volume-not-in-service"
+  alarm_description = <<-EOT
+    Terraform's dedicated review-gate scratch EBS volume is not confirmed as the
+    filesystem mounted at the gate scratch path. This catches the applied-but-not-in-use
+    state: a marker may exist, and df may publish, while the intended EBS volume is not the
+    one backing /var/lib/rebar/gate-scratch. Published as
+    rebar/host:gate_scratch_volume_in_service with InstanceId, VolumeId, and mount
+    dimensions by observability.sh every probe tick. Values: 1 in service, 0 mounted
+    elsewhere/not mounted, -1 unknown/check failure.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "gate_scratch_volume_in_service"
+  statistic   = "Minimum"
+
+  dimensions = {
+    InstanceId = data.aws_instance.gerrit.id
+    VolumeId   = aws_ebs_volume.gate_scratch.id
+    mount      = var.gate_scratch_mount
+  }
+
+  period              = 300
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+
+  # Heartbeat semantics: the healthy path publishes 1 on EVERY tick, while 0 and -1 both mean
+  # the live volume-to-mount join is either bad or unmeasured.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "eb65"
+  }
+}
+
 # ---------------------------------------------------------------------------
 # Docker storage generators (ADR 0112 decisions 1+2, story 9183-aaae-667d-45e6)
 # ---------------------------------------------------------------------------
