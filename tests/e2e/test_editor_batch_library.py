@@ -1,23 +1,13 @@
-"""Browser E2E for the library-backed batch criteria editing (story B-UX).
+"""Exercise prompt-library-backed batch criteria in browser E2E tests.
 
-Drives the REAL bundle in headless Chromium against a live editor server whose repo_root is
-a writable PROJECT tmp dir (so an authored prompt lands in tmp's ``.rebar/prompts`` rather
-than the real source tree). Proves the four B-UX guarantees the editor must now offer on a
-batch step's criteria — instead of free-text typing:
+A Chromium session uses an editor server rooted in a temporary project. The tests verify that
+prompt choices come from ``window.REBAR_LIBRARY``, chosen identifiers persist, and new ``when``
+triggers use full ``${{ steps.<id>.outputs.<name> }}`` expressions and update
+``overlay_triggers``. Prompts created through ``/library/create`` are saved under
+``.rebar/prompts`` and referenced by the criterion.
 
-  (a) the criterion ``prompt`` field is a SELECT of library options (window.REBAR_LIBRARY);
-  (b) selecting an existing library id persists into the criterion's rebar:Config;
-  (c) authoring a NEW overlay trigger from the ``when`` dropdown sets the criterion's ``when``
-      to the full ``${{ steps.<id>.outputs.<name> }}`` expression (and writes the trigger
-      onto the overlay_triggers step);
-  (d) authoring a NEW criterion via the prompt "➕ Create new…" form POSTs /library/create,
-      writes ``.rebar/prompts/<id>.md`` under the server's repo_root, and references the new
-      id on the criterion.
-
-Does not run when Node/Playwright/Chromium or the built bundle are unavailable; that
-non-execution goes through ``_browser_tier.tier_unavailable`` like the rest of the tier, so
-it is a loud, licensed skip rather than a silent one (bug 337e-b558-17a2-49bd). The
-always-on verification floor is the Python unit suite for ``prompt_library`` + ``editor``.
+Unavailable browser dependencies pass through the recorded opt-out guard. Unit tests for
+``prompt_library`` and ``editor`` provide the always-on floor.
 """
 
 from __future__ import annotations

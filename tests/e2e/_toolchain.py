@@ -1,35 +1,12 @@
-"""Provisioning for the e2e Node toolchain: bounded, diagnosable and race-safe.
+"""Provision the E2E Node harness before pytest starts.
 
-The e2e tier drives the real bpmn-io libraries through a small Node harness, which needs a
-one-time ``npm`` install plus an esbuild bundle. That work used to happen inside the first
-e2e test's *fixture setup*, with no ``timeout=`` on either subprocess — so its only bound was
-pytest's global ``timeout = 300`` / ``timeout_method = "thread"``. The thread method calls
-``os._exit(1)``, which kills the whole xdist worker (``node down: Not properly terminated``)
-instead of reporting a failure anyone can read. A cold install measured 90-120s of that 300s
-budget in *passing* CI runs, so ordinary npm-registry variance was enough to cross it
-(bug 9a17-e0b3-7aa6-4091).
+The harness requires installed packages and an esbuild bundle. ``make e2e-deps`` performs
+normal provisioning before test execution. The importable fallback reports each install or
+build failure by name and bounds each subprocess independently.
 
-Three things follow, and this module is where they live:
-
-**It is a module, not a fixture.** Provisioning is the build's job, not a test's. ``make
-e2e-deps`` calls it (well, calls the same two commands) before pytest starts, so in the
-normal case the fixture finds the toolchain already there and pays nothing. Being importable
-outside pytest is also what lets the failure paths be tested in a second with a stub ``npm``
-rather than by waiting for a real cold install to go slow.
-
-**Each step carries its own bound.** ``install_timeout``/``build_timeout`` are generous —
-they exist to convert an unbounded hang into a *named* failure, not to police a slow
-registry. The default install bound is deliberately larger than the pytest budget it used to
-sit inside: the point is never to be the thing that fires first on a merely slow day.
-
-**The install is locked — readiness check included.** Under ``-n 4 --dist worksteal`` each
-xdist worker runs the session-scoped fixture independently, so several can race the same
-``node_modules``/``dist``. An advisory ``fcntl.flock`` serializes them; where ``fcntl`` is
-absent the lock degrades to a no-op, which changes nothing for the single-process case that
-platform is in. Nothing — not even the "is it already provisioned?" question — is answered
-outside that lock: ``_satisfied`` reads mere existence and esbuild writes the bundle IN
-PLACE, so a caller that checked first and locked second could see a peer's half-written
-``dist/roundtrip.mjs`` and run node against a truncated file (bug 477b-4130-424d-41eb).
+Provisioning holds one advisory lock while checking readiness, installing packages, and
+building the bundle. This prevents a caller from accepting a bundle that another process is
+still writing. Platforms without ``fcntl`` use the same flow without interprocess locking.
 """
 
 from __future__ import annotations
@@ -49,10 +26,8 @@ JS_DIR = Path(__file__).parent / "js"
 BUNDLE_RELPATH = Path("dist") / "roundtrip.mjs"
 LOCK_NAME = ".provision.lock"
 
-#: The browser stack, declared in package.json as an OPTIONAL dependency so `--omit=optional`
-#: can leave it out. Only ``browser_runner`` needs it; the bpmn-moddle round-trip harness does
-#: not, and it is 4 of the 15 installed packages and 16.8M of the 30M `node_modules` tree. A
-#: run that selects no browser test should not pay for it.
+#: Playwright is optional because only ``browser_runner`` requires it.
+#: Harness-only selections omit the package.
 BROWSER_PACKAGE = "playwright"
 OMIT_BROWSER_FLAG = "--omit=optional"
 
@@ -74,10 +49,7 @@ def _install_lock(js_dir: Path) -> Iterator[None]:
     if fcntl is None:  # pragma: no cover - platforms without fcntl
         yield
         return
-    # An unwritable directory, a lock file owned by another user, a filesystem without
-    # advisory locking: every one of those is a PROVISIONING failure and must be reported as
-    # one. Letting an OSError escape would abort collection itself — the caller records a
-    # named skip, it does not expect to have to survive an arbitrary exception.
+    # Report lock setup errors as provisioning failures so collection can name the cause.
     try:
         js_dir.mkdir(parents=True, exist_ok=True)
         handle = (js_dir / LOCK_NAME).open("a+")
@@ -137,27 +109,15 @@ def provision_toolchain(
     install_timeout: float = INSTALL_TIMEOUT_S,
     build_timeout: float = BUILD_TIMEOUT_S,
 ) -> None:
-    """Ensure ``js_dir`` has the node modules and harness bundle this caller needs.
+    """Ensure ``js_dir`` contains the requested packages and harness bundle.
 
-    ``with_browser=False`` omits the optional browser stack, which only ``browser_runner``
-    uses. That is the cheap half of the fix: a selection with no browser test installs 11
-    packages instead of 15 and 12M instead of 30M. The structural half — provisioning at
-    collection time — is what makes the budget question moot; this makes the bill smaller
-    as well, which matters while the failure rate is what it is.
-
-    A no-op when the tree already satisfies the request, so the normal case (``make
-    e2e-deps`` ran first) costs nothing. Raises :class:`ToolchainProvisioningError` naming the
-    step that failed; it never blocks indefinitely, and so never leaves the caller to be
-    killed by an outer watchdog.
+    ``with_browser=False`` omits Playwright. A satisfied tree returns before the npm lookup.
+    Each bounded failure raises :class:`ToolchainProvisioningError` with the failing step.
     """
     js_dir = Path(js_dir)
     bundle = js_dir / BUNDLE_RELPATH
-    # EVERY question is answered under the lock, readiness first. Asking it outside was a
-    # fast path for the already-provisioned case, but it bought microseconds — the lock is a
-    # local-file flock taken a handful of times per run, during COLLECTION and so off every
-    # test's timeout budget — while opening the window this whole module exists to close: a
-    # peer mid-build has already created `dist/roundtrip.mjs`, so an unlocked existence check
-    # reports "ready" over a file that is still being written (bug 477b-4130-424d-41eb).
+    # Check readiness under the lock because esbuild writes the bundle in place.
+    # An unlocked existence check could accept another process's incomplete bundle.
     with _install_lock(js_dir):
         # The browser stack is checked separately, so a tree provisioned earlier WITHOUT it
         # is completed rather than mistaken for a finished install.
