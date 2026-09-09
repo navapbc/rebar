@@ -35,10 +35,15 @@ three separate changes were pushed red by exactly those tests after their author
 every other matrix cell — so it is the locally checkable half of `Verified`, with nothing to
 enumerate and nothing to drift.
 
-**It costs 20-25 minutes** (measured twice on one six-performance-core host at the default
+**It costs 20-25 minutes** (measured twice on one six-performance-core host at the historical
 `PYTEST_WORKERS=4`: 22 min 25 s and 26 min 04 s wall for lint + typecheck + ~19.2k tests --
-the spread is host load, so plan for the top of the range; `make test PYTEST_WORKERS=8` on a
-bigger box).
+the spread is host load, so plan for the top of the range). `make test` now runs through a
+host-memory guard that may lower `PYTEST_WORKERS` when another full suite is active or free
+RAM is low; if a run is killed by OOM/low memory rather than a test assertion, treat that as
+an environmental fault and rerun at `PYTEST_WORKERS=1` instead of retrying the same parallel
+shape or root-causing a phantom flaky test. Cleanup must be scoped to your own worktree's
+processes only — never sweep with `pgrep -f pytest`, because other agents' workers match the
+same text.
 That is the price of the contract, and it is stated here so you can plan for it rather than
 kill it: it is still cheaper than a 15–20 minute `Verified -1` round trip, and it is the only
 local command that lets you say "I verified this" and be right. Run it once before
