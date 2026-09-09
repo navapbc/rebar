@@ -1,19 +1,12 @@
-# ---------------------------------------------------------------------------
-# infra/bootstrap/main.tf — ONE-TIME, LOCAL-STATE bootstrap (standalone)
-# ---------------------------------------------------------------------------
-# This config breaks the state-backend chicken-and-egg: the main config in
-# ../terraform uses an S3 backend, but that bucket has to EXIST before the
-# backend can be configured. So this tiny config is applied ONCE, by hand,
-# with LOCAL state (no backend block), to create the state bucket. Its bucket
-# name then feeds the main config's `backend "s3"` block (versions.tf).
+# One-time local-state bootstrap for the main Terraform backend.
+#
+# This configuration has no backend block. Apply it once to create the S3
+# bucket required by ../terraform/versions.tf for remote state and lock files.
 #
 #   cd infra/bootstrap && terraform init && terraform apply
 #
-# The bucket carries `prevent_destroy = true`: destroying it would orphan the
-# remote state of the main config. Tearing this down REQUIRES an explicit
-# state migration of the main config back to local state first, then removing
-# the prevent_destroy guard. Do not `terraform destroy` this casually.
-# ---------------------------------------------------------------------------
+# `prevent_destroy` protects the main configuration's remote state. Migrate
+# that state to local storage before removing the guard or destroying the bucket.
 
 terraform {
   required_version = ">= 1.10"

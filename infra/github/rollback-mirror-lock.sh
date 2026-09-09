@@ -1,23 +1,32 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# rollback-mirror-lock.sh — S6 <15-minute rollback of the GitHub mirror-lock.
+# rollback-mirror-lock.sh: Restore GitHub write paths.
 #
-# Reverses apply-mirror-lock.sh:
-#   1. Removes the two lock rulesets (gerrit-mirror-lock-main / -tags), found by
-#      name. Default is DELETE; pass --disable to instead set enforcement to
-#      "disabled" (keeps them for inspection).
-#   2. Recreates the original `main-protection` ruleset by POSTing the snapshot
-#      at infra/github/main-protection.snapshot.json (read-only fields stripped).
-#   3. (optional --reenable-features) re-enables PRs/Issues/Actions in case the
-#      cutover disabled them for mirror hygiene.
+# DEFAULT EFFECT
+# Delete `gerrit-mirror-lock-main` and `gerrit-mirror-lock-tags`.
+# Recreate `main-protection` from infra/github/main-protection.snapshot.json.
 #
-# AUTH: gh authenticated with a token holding Administration:write on
-# navapbc/rebar (gh auth login or GH_TOKEN). NO token in this file.
+# OPTIONS
+# --disable keeps both lock rulesets but sets enforcement to disabled.
+# --reenable-features also enables PRs, Issues, and Actions.
 #
-# USAGE:
-#   ./rollback-mirror-lock.sh                       # delete locks + restore main-protection
-#   ./rollback-mirror-lock.sh --disable             # disable (not delete) the locks
-#   ./rollback-mirror-lock.sh --reenable-features   # also re-enable PRs/Issues/Actions
+# AUTH
+# Authenticate gh for navapbc/rebar with Administration:write through
+# gh auth login or GH_TOKEN. This file contains no token.
+#
+# USAGE
+#   ./rollback-mirror-lock.sh
+#   ./rollback-mirror-lock.sh --disable
+#   ./rollback-mirror-lock.sh --reenable-features
+#
+#
+#
+#
+#
+#
+#
+#
+#
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
