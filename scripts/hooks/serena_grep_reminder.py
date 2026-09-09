@@ -1,32 +1,11 @@
 #!/usr/bin/env python3
-"""`PreToolUse` hook: remind an agent about Serena's symbol tools when a `Bash` command
-invokes the grep family.
+"""`PreToolUse` hook that reminds Bash grep-family users about Serena.
 
-Why this exists: `AGENTS.md` §"Navigating the codebase" already tells agents to prefer
-Serena's `find_referencing_symbols` / `find_symbol` over `grep` for finding call sites — but
-launch-time guidance decays over a long session, and an agent with Serena configured has still
-been observed hand-enumerating references with `grep` for many turns. A reminder delivered by
-the harness at the moment of the action does not decay the way a line read once at launch does.
-
-Why the trigger is deliberately dumb: this hook matches `grep`/`rg`/`egrep`/`fgrep` appearing
-anywhere in the command string — full stop. It does NOT try to classify whether the searched
-pattern "looks like a symbol", whether the path is under `src/`, or otherwise parse the
-command. A false positive (nudging on a grep that was already the right call) costs three
-lines of ignorable text. A false negative (staying silent on a grep that should have been a
-Serena call) costs the exact behaviour this hook exists to fix. And a clever predicate that
-occasionally fires on the wrong thing is worse than a dumb one that always fires on the right
-family of commands: a hook an agent learns to distrust gets ignored or disabled, so simple and
-consistent beats clever and occasionally wrong.
-
-Contract (see tests/unit/test_serena_grep_reminder_hook.py):
-  * Reads a single JSON object from stdin (the standard `PreToolUse` envelope).
-  * Only acts when `tool_name == "Bash"` and `tool_input.command` contains a grep-family token.
-  * On a match, writes a `PreToolUse` JSON envelope with `hookSpecificOutput.additionalContext`
-    to stdout and exits 0. `permissionDecision` is deliberately never set, so the normal
-    permission flow still applies -- this hook only ever adds context, never a decision.
-  * On anything else -- no match, malformed/empty stdin, missing fields, non-Bash tool -- it
-    exits 0 with no stdout. It must never raise, never block (exit 2 blocks the tool call),
-    and never print anything but the one JSON envelope.
+The hook reads one JSON object from stdin. A Bash command containing a lexical `grep`, `rg`,
+`egrep`, or `fgrep` token yields one `PreToolUse` JSON envelope with
+`hookSpecificOutput.additionalContext`; the hook never sets `permissionDecision`. Malformed
+input, missing fields, non-Bash tools, and nonmatches exit 0 without stdout. Matching
+intentionally does not parse commands, patterns, or paths.
 """
 
 from __future__ import annotations
@@ -35,8 +14,7 @@ import json
 import re
 import sys
 
-# Deliberately dumb: any of these tokens anywhere in the command string is a match. No
-# attempt to parse the command, classify the pattern, or check the path.
+# Match tokens lexically; do not parse the command, pattern, or path.
 _GREP_FAMILY = re.compile(r"(?<![\w-])(grep|rg|egrep|fgrep)(?![\w-])")
 
 _REMINDER = (

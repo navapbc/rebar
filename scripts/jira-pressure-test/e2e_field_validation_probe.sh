@@ -11,7 +11,7 @@
 #   1. Create 10 local tickets → sync outbound → verify all fields in Jira
 #   2. Edit fields locally → sync outbound → verify Jira updated
 #   3. Edit fields in Jira → sync inbound → verify local updated
-#   4. Status outbound negative test (gated/stub)
+#   4. Status outbound propagation
 #   5. Delete behavior negative test (excluded by design)
 #   6. Idempotency — 3 no-op passes → verify 0 mutations each
 #   7. Bridge preview cleanliness check — verify 0 proposed probe changes
@@ -70,10 +70,7 @@ fail_test() {
     local detail="${2:-}"
     echo "FAIL: $name${detail:+ — $detail}"
     FAILED=$((FAILED + 1))
-    # Bug b859 (Part 0a): dump the most recent reconciler output's last 60
-    # lines so unmatched stderr (including Python tracebacks) is visible.
-    # The probe's main log captures this dump verbatim, eliminating the
-    # observability gap that hid Phase 4's silent failure.
+    # Include the latest unfiltered output so failures expose tracebacks and other stderr.
     if [ -n "${LAST_RECONCILER_LOG:-}" ] && [ -s "$LAST_RECONCILER_LOG" ]; then
         echo "=== last reconciler output (tail 60) ==="
         tail -60 "$LAST_RECONCILER_LOG"
@@ -121,24 +118,11 @@ restore_snapshot() {
 # Restore snapshot on any exit (crash safety).
 trap restore_snapshot EXIT
 
-# Bug b859 (Part 0a): the prior implementation captured reconciler output
-# only to the local `output` var, and the caller piped it through a grep
-# filter `^(FILTERED|filter:|OK:|ERROR:)` that silently dropped Python
-# tracebacks. When the reconciler aborted pre-FILTERED PASS, operators saw
-# nothing between "Running reconciler..." and the verify FAIL.
-# Now: write every reconciler invocation's full unfiltered output to a
-# side-car file at $LAST_RECONCILER_LOG, and expose $LAST_RECONCILER_LOG
-# for fail_test to dump when an assertion fails. The function still echoes
-# the output to stdout so existing callers see the same lines they always
-# did.
+# Save each pass's unfiltered output for fail_test while preserving stdout for callers.
 LAST_RECONCILER_LOG=""
 run_reconciler() {
     local output
-    # Template form (not `-t`): the -t flag has divergent macOS/GNU semantics
-    # and is prohibited by AGENTS.md rule:mktemp-tmp. Production/orchestrator
-    # context, so a literal /tmp template is fine (no per-test TMPDIR contract).
-    # The XXXXXX run MUST be trailing: BSD/macOS mkstemp fails on a ".log" suffix
-    # after the X's (GNU tolerates it, BSD does not), so omit the suffix.
+    # Use trailing Xs: `mktemp -t` differs across platforms and BSD rejects suffixes.
     LAST_RECONCILER_LOG=$(mktemp "/tmp/recon-probe.XXXXXX")
     output=$(cd "$RECONCILER_DIR" && "$PYTHON_BIN" -m rebar_reconciler "$@" 2>&1) || true
     printf '%s\n' "$output" > "$LAST_RECONCILER_LOG"
@@ -213,10 +197,7 @@ client = mod.AcliClient(
 issue = client.get_issue_by_rest('${key}')
 fields = issue.get('fields', issue)
 val = fields.get('${field}', '')
-# Description is returned as an ADF document, not a string. Decode via adf_to_text
-# so the probe asserts against canonical plain text (bug 85a1 — the probe's prior
-# raw.get('name', ...) returned '' for ADF, producing false-negative description
-# verification failures).
+# Jira returns description as ADF; decode it before comparing canonical text.
 if '${field}' == 'description' and isinstance(val, dict):
     val = adf_mod.adf_to_text(val)
 elif isinstance(val, dict):
@@ -287,21 +268,13 @@ else:
 " "$local_id"
 }
 
-# is_valid_ticket_id: returns 0 (true) if the string looks like a probe-issued
-# UUID (4-segment hex, e.g. 7f6e-e5de-4613-473c), 1 (false) otherwise.
-# Used to guard Phase 2c create steps from propagating error strings as IDs.
+# Reject create errors before they can be reused as Phase 2c ticket IDs.
 is_valid_ticket_id() {
     local id="$1"
     [[ "$id" =~ ^[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}$ ]]
 }
 
-# restore_bindings_if_corrupt: if bindings.json fails to parse, restore it
-# from the tickets branch using git show.  Called before each Phase-2b
-# reconciler sub-cycle to guard against corruption left by a prior push
-# failure (see probe run notes: the priority-1 pass succeeded but the
-# subsequent git push to origin/tickets failed, leaving the local tickets
-# branch ahead of origin; the next reconciler call found bindings.json
-# in a partially-merged / truncated state).
+# Recover a binding store left unparseable by a failed push from the tickets branch.
 restore_bindings_if_corrupt() {
     local bindings_file="${TRACKER_DIR}/.bridge_state/bindings.json"
     if "$PYTHON_BIN" -c "import json; json.load(open('${bindings_file}'))" 2>/dev/null; then
@@ -326,13 +299,7 @@ restore_bindings_if_corrupt() {
     fi
 }
 
-# restore_prev_snapshot_if_corrupt: if prev_snapshot.json fails to parse,
-# restore it from the probe's own startup backup (PREV_SNAPSHOT_BACKUP).
-# If the backup is unavailable, delete the file to force a full re-fetch on
-# the next reconciler pass (the reconciler treats a missing prev_snapshot.json
-# as a clean-start signal).  Called before each sub-cycle reconcile that may
-# follow a git-push failure that can leave prev_snapshot.json in a
-# partially-written / conflict-marker state.
+# Recover an unparseable snapshot from the startup backup, or remove it for a full refetch.
 restore_prev_snapshot_if_corrupt() {
     if "$PYTHON_BIN" -c "import json; json.load(open('${PREV_SNAPSHOT}'))" 2>/dev/null; then
         return 0  # healthy — nothing to do
@@ -345,7 +312,6 @@ restore_prev_snapshot_if_corrupt() {
             return 0
         fi
     fi
-    # Backup unavailable or also corrupt: delete to force full re-fetch.
     echo "restore_prev_snapshot_if_corrupt: no usable backup — deleting prev_snapshot.json to force full re-fetch." >&2
     rm -f "$PREV_SNAPSHOT"
     return 0
@@ -691,15 +657,8 @@ echo "Running reconciler (bootstrap-throttle, filtered to ${#LOCAL_IDS[@]} IDs).
 reconciler_output=$(run_filtered_reconciler "$FILTER_IDS")
 echo "$reconciler_output" | grep -E "^(FILTERED|filter:|OK:|ERROR:)" || true
 
-# Verify bindings and extract Jira keys.  The reconciler saves the binding
-# store at the end of a pass — if the pass partially failed (e.g. HeadDrift
-# or DirectionMismatch), the save may be skipped.  As a workaround, poll
-# until the binding is confirmed or a ~120s budget is exhausted, using
-# adaptive backoff (2s for the first 5 attempts, then 5s per attempt).
-# On success the function returns immediately — no fixed worst-case wait.
-# Bug 0877-2d0a-3c29-4292: the prior 3×2s (~6s) budget was too short for
-# reconciler passes that include Jira REST roundtrips; all Phase-2
-# outbound-UPDATE rows showed N/A because JIRA_KEYS were never populated.
+# A partial pass can skip saving bindings. Poll with adaptive backoff and a 120-second
+# cap, returning immediately when the binding is confirmed.
 check_binding_with_retry() {
     local local_id="$1"
     local state
@@ -1043,11 +1002,7 @@ fi
 edit_ticket_field "${LOCAL_IDS[2]}" "priority" "3"
 pass_test "Phase2b.edit-priority-to-3"
 
-# Restore bindings.json and prev_snapshot.json before this sub-cycle's
-# reconcile in case the priority-1 reconciler's git push left either file
-# in a corrupt state (confirmed pattern: push failure after sub-cycle A
-# corrupts both files, causing sub-cycle B reconcile to abort and leaving
-# Jira at priority=1/High instead of priority=3/Low).
+# Repair either state file if the previous sub-cycle's push left it corrupt.
 restore_bindings_if_corrupt || true
 restore_prev_snapshot_if_corrupt || true
 
@@ -1251,12 +1206,7 @@ print(parent_map.get('${CHILD_JIRA_KEY}') or '')
 fi
 
 # --- 2c-3: Reparent child to a SECOND epic → verify Jira parent changed ---
-# Jira's next-gen hierarchy permits ONLY an Epic as a parent (outbound_differ
-# suppresses non-epic parents; the applier 400-skips them). A Task→Task
-# reparent is therefore rejected by design — reparenting to a task would never
-# land and is not a valid outbound-reparent assertion. We create + bind a
-# second epic (EPIC2) and reparent the child epic→epic, which is the real
-# supported outbound reparent path (live-proven, ticket 8b25).
+# Jira accepts only epics as parents; use a second epic to exercise reparenting.
 EPIC2_LOCAL_ID=""
 EPIC2_JIRA_KEY=""
 if [ -n "$CHILD_LOCAL_ID" ] && [ -n "$EPIC_JIRA_KEY" ]; then
@@ -1357,11 +1307,7 @@ client.set_parent('${THIRD_JIRA_KEY}', '${EPIC_JIRA_KEY}')
     fi
 fi
 
-# Inbound epic check: if the EPIC_JIRA_KEY ticket is visible on the inbound
-# mirror path (i.e., the reconciler's inbound fetch includes it and it is
-# locally typed as 'epic'), verify that.  Because the epic was locally created
-# and is already bound, the inbound differ will not retype it (36af exclusion);
-# the local ticket_type is already 'epic' — assert it directly.
+# A locally created bound epic is not retyped inbound; assert its existing type.
 if [ -n "$EPIC_LOCAL_ID" ]; then
     epic_local_type=$(get_local_field "$EPIC_LOCAL_ID" "ticket_type")
     if [ "$epic_local_type" = "epic" ]; then
@@ -1377,12 +1323,7 @@ fi
 # PHASE 2d: Ticket-level dedup
 # ===========================================================================
 #
-# Outbound dedup (2d-1): Run reconciler a second time after all creates.
-#   For each original 10 probe tickets, assert that Jira search by their
-#   rebar-id label returns EXACTLY 1 issue per ticket.
-# Inbound dedup (2d-2): Assert that each probe Jira issue has exactly one
-#   local jira-* mirror (or one confirmed binding) — no duplicate local
-#   CREATE events across passes.
+# A second pass must leave one Jira issue and one local mirror or binding per probe.
 
 echo ""
 echo "=== PHASE 2d: Ticket-level dedup (outbound + inbound) ==="
@@ -1543,17 +1484,10 @@ echo "Running reconciler for inbound sync..."
 reconciler_output=$(run_filtered_reconciler "$FILTER_IDS")
 echo "$reconciler_output" | grep -E "^(FILTERED|filter:|OK:|ERROR:)" || true
 
-# Verify inbound updates AGAINST THE DOCUMENTED CONFLICT-RESOLUTION POLICY
-# (rebar_reconciler/conflict_resolver.py FIELD_CLASSES):
-#   state  (title/priority/status/assignee/type) → resolve_state: LOCAL ALWAYS
-#       WINS. A Jira-side edit does NOT sync inbound; local is pushed outbound.
-#   additive (description/comments) → local content is never dropped.
-#   set    (labels) → union: a Jira ADD propagates inbound; a Jira REMOVE does not.
-# Tickets 1,2,5 were also edited locally in Phase 2; for STATE fields the outcome
-# is identical whether or not local changed (resolve_state is unconditional).
+# Conflict policy makes state fields local-wins, retains local additive content, and
+# unions Jira set additions without propagating removals.
 
-# Title (ticket 1) — STATE → local-wins. Jira "JIRA-EDITED" must NOT land; local
-# keeps its Phase-2 value and the reconciler reverts Jira outbound.
+# Title is state: keep the Phase 2 local value and revert Jira outbound.
 local_title=$(get_local_field "${LOCAL_IDS[0]}" "title")
 if [[ "$local_title" == *"UPDATED title"* && "$local_title" != *"JIRA-EDITED"* ]]; then
     pass_test "Phase3.verify-title-inbound (state→local-wins; no inbound)"
@@ -1563,8 +1497,7 @@ else
     matrix_set "title" "inbound" "update" "FAIL"
 fi
 
-# Description (ticket 1) — ADDITIVE → local content is never dropped (local-first
-# merge). Local keeps its Phase-2 edit; Jira receives the merge outbound.
+# Description is additive: retain local content and merge it outbound.
 local_desc=$(get_local_field "${LOCAL_IDS[0]}" "description")
 if [[ "$local_desc" == *"Updated description"* ]]; then
     pass_test "Phase3.verify-description-inbound (additive: local content retained)"
@@ -1574,8 +1507,7 @@ else
     matrix_set "description" "inbound" "update" "FAIL"
 fi
 
-# Priority (ticket 2) — STATE → local-wins. Local stays 3 (Phase-2 value); Jira
-# "High" (→1) does NOT sync inbound.
+# Priority is state: retain local 3 rather than Jira's High (1).
 local_priority=$(get_local_field "${LOCAL_IDS[1]}" "priority")
 if [ "$local_priority" = "3" ]; then
     pass_test "Phase3.verify-priority-inbound (state→local-wins; stays 3)"
@@ -1585,8 +1517,7 @@ else
     matrix_set "priority" "inbound" "update" "FAIL"
 fi
 
-# Assignee (ticket 5) — STATE → local-wins. Local stays unassigned (Phase-2);
-# Jira re-assignment does NOT sync inbound.
+# Assignee is state: retain Phase 2's unassigned local value.
 if [ "$ASSIGNEE_SKIP" = false ]; then
     local_assignee=$(get_local_field "${LOCAL_IDS[4]}" "assignee")
     if [ -z "$local_assignee" ] || [ "$local_assignee" = "None" ]; then
@@ -1601,8 +1532,7 @@ else
     matrix_set "assignee" "inbound" "update" "SKIP"
 fi
 
-# Labels (ticket 6) — SET → union. A Jira ADD (label-e) propagates inbound; a
-# Jira REMOVE (label-b) does NOT (union only adds, never removes).
+# Labels are a set union: import Jira additions without propagating removals.
 local_tags=$(get_local_field "${LOCAL_IDS[5]}" "tags")
 label_inbound_ok=true
 if echo "$local_tags" | grep -q "label-e"; then
@@ -1623,8 +1553,7 @@ else
     matrix_set "labels" "inbound" "update" "FAIL"
 fi
 
-# Issuetype (ticket 7) — STATE (type) → local-wins. Local was set to "bug" in
-# Phase 2; local keeps it (Jira "Bug" does not override inbound).
+# Issue type is state: retain Phase 2's local "bug" value.
 local_type=$(get_local_field "${LOCAL_IDS[6]}" "ticket_type")
 if [ "$local_type" = "bug" ]; then
     pass_test "Phase3.verify-issuetype-inbound (state→local-wins; stays bug)"
@@ -1634,12 +1563,7 @@ else
     matrix_set "issuetype" "inbound" "update" "FAIL"
 fi
 
-# Comments (ticket 8) — additive class. INBOUND comment sync IS implemented
-# (epic f89d closed bug 0ee6 — the inbound differ now reads the nested `comment`
-# field): a Jira-side comment MUST flow to local. This guard was previously
-# INVERTED — it FAILED when comments synced and PASSED on the gap (matrix
-# NOT-SYNCED), locking the bug in as "expected". De-encoded here so the fix is
-# detected and a regression FAILS the probe (story 822a).
+# Comments are additive: a Jira-side comment must sync inbound.
 local_comments=$("$TICKET_CLI" show "${LOCAL_IDS[7]}" 2>/dev/null | "$PYTHON_BIN" -c "
 import sys, json
 data = json.load(sys.stdin)
@@ -1656,9 +1580,7 @@ else
     matrix_set "comments" "inbound" "update" "FAIL"
 fi
 
-# Status (ticket 9) — STATE → local-wins. Ticket 9 was NOT locally edited, yet a
-# Jira transition still does NOT sync inbound (resolve_state is unconditional).
-# Local stays "open".
+# Status is state and remains local-wins even when not edited locally.
 local_status=$(get_local_field "${LOCAL_IDS[8]}" "status")
 if [ "$local_status" = "open" ]; then
     pass_test "Phase3.verify-status-inbound (state→local-wins; stays open)"
@@ -1672,14 +1594,8 @@ fi
 # PHASE 3a: GENUINE inbound on an UNTOUCHED ticket (positive + negative control)
 # ===========================================================================
 #
-# Phase 2 does NOT touch ticket 4 (LOCAL_IDS[3]). Per the documented conflict
-# policy the ONLY fields that flow inbound are SET (labels: union ADD) and
-# additive; STATE fields (title/status/priority/assignee/type) are local-wins
-# even when local is untouched (resolve_state is unconditional). So this phase
-# runs both controls on the same untouched ticket:
-#   POSITIVE — a Jira-side label ADD must land locally (set union).
-#   NEGATIVE — a Jira-side title edit must be IGNORED locally (state local-wins).
-# Together these pin the inbound sync boundary precisely.
+# On untouched ticket 4, a Jira label addition must sync through set union while a
+# Jira title edit remains ignored under state-field local-wins.
 
 echo ""
 echo "=== PHASE 3a: Genuine inbound on untouched ticket (set-add lands; state ignored) ==="
@@ -1721,25 +1637,15 @@ if [ -n "${JIRA_KEYS[3]}" ]; then
 fi
 
 # ===========================================================================
-# PHASE 4: Status outbound negative test
+# PHASE 4: Status outbound propagation
 # ===========================================================================
 
 echo ""
 echo "=== PHASE 4: Status outbound propagation ==="
 echo ""
 
-# Bug 85a1 (Gap 8): status outbound is now first-class — local status changes
-# must propagate to Jira via REST POST /transitions. Previously this phase
-# asserted BY_DESIGN no-propagation (gated behind REBAR_RECONCILER_STATUS_GATING);
-# that gate was removed.
-#
-# Bug b859 (Part 1b, H4 fix): we transition LOCAL_IDS[2] (idx 2 — FIELD-PROBE-3
-# priority low) which Phase 3 leaves untouched. Previously this phase used
-# LOCAL_IDS[8] but Phase 3 jira_transition's it to In Progress, and Phase 3's
-# local-wins outbound pass reverted Jira back to To Do — so Phase 4's
-# transition open->in_progress could become a no-op (current-status drift) and
-# the reconciler would emit no output. Using an untouched ticket guarantees a
-# real local->Jira delta.
+# Status must propagate outbound. Use ticket 3, which Phase 3 leaves untouched, so
+# open→in_progress creates a real local-to-Jira delta.
 "$TICKET_CLI" transition "${LOCAL_IDS[2]}" open in_progress 2>/dev/null || true
 
 echo "Running reconciler for status outbound test..."
@@ -1800,9 +1706,7 @@ echo ""
 for i in 1 2 3; do
     echo "Idempotency pass ${i}..."
     reconciler_output=$(run_filtered_reconciler "$FILTER_IDS_9")
-    # Extract filtered mutation count from the filter: log line
-    # awk is portable; grep -P / -oP are GNU-only and break on macOS BSD grep.
-    # Line format: "filter: N mutations computed, M match filter (...)"
+    # Parse the filtered count with BSD-portable awk.
     filtered_count=$(echo "$reconciler_output" | awk '/^filter: [0-9]+ mutations computed, [0-9]+ match filter/ {print $5; exit}')
     filtered_count="${filtered_count:--1}"
     if [ "$filtered_count" = "0" ]; then
@@ -1816,15 +1720,8 @@ done
 # PHASE 6a: Interleaved bidirectional idempotency (N=10 mixed passes)
 # ===========================================================================
 #
-# Bug b859 (Part 4b): Phase 6 only checks no-op passes; doesn't exercise
-# the convergence path under mixed local + Jira edits. Phase 6a alternates
-# local and Jira edits on a single controlled ticket across 10 passes and
-# asserts that each pass converges to its true delta (i.e., the diff is
-# either 0 or precisely what was just edited — not phantom mutations).
-#
-# Uses LOCAL_IDS[3] (FIELD-PROBE-4 multiline desc; also used by Phase 3a
-# inbound test). The ticket is tagged so any future orphan-mirror sweep
-# preserves it.
+# Alternate local and Jira edits on ticket 4 for ten passes; each pass must converge
+# without phantom mutations. The probe tag protects it from orphan-mirror cleanup.
 
 echo ""
 echo "=== PHASE 6a: Interleaved bidirectional idempotency (N=10) ==="
@@ -1834,14 +1731,8 @@ if [ -n "${JIRA_KEYS[3]}" ] && [ -n "${LOCAL_IDS[3]}" ]; then
     # Tag the ticket so orphan sweeps skip it.
     "$TICKET_CLI" tag "${LOCAL_IDS[3]}" "probe:phase6a" 2>/dev/null || true
 
-    # EVENTUAL idempotency: after a local OR Jira edit the reconciler converges
-    # to steady state (0 pending mutations) over a SMALL number of passes — not
-    # necessarily one. Empirically a Jira-side edit settles over 2-3 passes
-    # (local-wins revert + live Jira search-index eventual consistency), so the
-    # honest assertion is "reaches 0 within K passes", which still FAILS on a
-    # genuine non-converging drift. (The earlier "<=2 in a single pass" budget
-    # was a false premise — the reconciler is eventually-, not instantly-,
-    # consistent.)
+    # Allow six passes for local-wins reversion and Jira index convergence; failure
+    # to reach zero signals drift.
     PHASE6A_MAX_SETTLE_PASSES=6
     PHASE6A_FAIL=0
     for n in $(seq 1 10); do
