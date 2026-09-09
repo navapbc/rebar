@@ -1,6 +1,6 @@
 """Prove managed-reference provenance survives migration and compaction.
 
-The real reducer replay path maintains a monotonic projection used by
+The reducer replay path maintains a monotonic projection used by
 ``should_propagate_removal`` to choose removal over inbound adoption.
 """
 
