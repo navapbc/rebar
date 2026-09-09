@@ -1,0 +1,442 @@
+name: Test Suite (mirror)
+
+# Run the full test suite on every push and PR. rebar's safety story leans on
+# "the suite catches it", so this is the gate that makes that automatic (ticket
+# coily-conch-tag / Rec 3 of the 2026-06-09 architecture review).
+#
+# Coverage: the Python tiers (unit / scripts / interface) run under pytest, plus
+# the integration tier (concurrency + reconciler —
+# network-guarded / mocked, so CI-safe) as a separate step. Live Jira validation is
+# done via manual probes (bridge check-access, reconcile dry-run), not pytest. The external
+# tier (live LLM providers — tests/external/) is excluded from the default run via
+# `-m "not integration and not external"` and runs separately with credentials via
+# the external-integration workflow.
+#
+# The lint + pip-audit + test(matrix) gate/suite is defined ONCE in the reusable
+# _build-and-test.yml and shared with gerrit-verify.yaml (the Verified gate), so the
+# post-merge (branch-head) and pre-merge (patchset) lanes cannot drift. This file adds
+# the branch-head lane plus the jobs that are specific to it (clean-install golden-path,
+# artifact provenance, and the credential-scoped live external tier).
+
+on:
+  push:
+    # every branch EXCEPT `main` and the S3-replicated feature/** (feature branches fan out
+    # redundant mirror CI that casts no Verified vote — the gerrit-verify workflow_dispatch is
+    # the sole Verified source; see fern-belief-gap). Nested depths matched by **.
+    #
+    # `main` is excluded because this lane's `concurrency` cancels in-progress runs and, on
+    # `main`, `github.ref` is the CONSTANT refs/heads/main — so every push cancelled its
+    # predecessor and GitHub rendered a healthy `main` as a trail of red X's. The branch-health
+    # signal moved to the schedule below: "is main healthy NOW", not "was every commit green".
+    # Pre-merge gating is untouched — the Verified vote runs the same reusables against the
+    # exact patchset via gerrit-verify.yaml (ticket 03ef-6fb5-158b-4abd).
+    # `tickets` is rebar's event log: every ticket write auto-pushes it, so a trigger here
+    # multiplies each comment into a CI run and starves the runner pool. It carries no code
+    # — never CI it (ticket refractive-conceptual-sunbear).
+    branches-ignore: ["feature/**", "main", "tickets"]
+  pull_request: {}
+  workflow_dispatch:
+    inputs:
+      run_external:
+        description: >-
+          Also run the LIVE external-integration tier (billable). Leave false for a plain
+          "is main healthy?" check — dispatch is now the routine on-demand health button.
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    # Every 6 hours — four "is main healthy" runs a day, a fixed cost independent of the
+    # commit rate. Minute 41 (never 0) keeps this repo off the hour boundary that every
+    # other project on the platform schedules onto.
+    - cron: "41 */6 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The lint + pip-audit + test(matrix) gate/suite, shared verbatim with the Verified gate
+  # (gerrit-verify.yaml) via the reusable workflow. No inputs => the reusable checks out the
+  # branch head (this push/PR lane); gerrit-verify passes the Gerrit refspec to check out the
+  # exact patchset. One definition, two lanes, no drift (the pattern _optionality.yml uses).
+  build-and-test:
+    uses: ./.github/workflows/_build-and-test.yml
+
+  # Mirror the exact targeted gate used by Gerrit. The scheduled main-health run skips this
+  # job because the independent weekly sweep supplies the broad drift signal.
+  mutation:
+    if: github.event_name != 'schedule'
+    uses: ./.github/workflows/_mutation.yml
+
+  # External-integration tier (tests/external/): live, billable, real-mutation
+  # tests (live Jira via the `acli` SUBPROCESS, live LLM calls). This is the ONLY
+  # job that:
+  #   * sets REBAR_RUN_EXTERNAL=1 (the env opt-in that makes tests/external/ tests
+  #     non-inert — see tests/external/conftest.py), AND
+  #   * exposes Jira / LLM credentials.
+  # The reusable `test` job sets NEITHER, so external tests are structurally
+  # unable to leak into it (bug 4a48-6dd5-aef3-4c8e). It stays in THIS file (not the
+  # reusable) because the reusable takes no secrets.
+  #
+  # Fork guard: only run on the canonical repo (owner == actor), never on a PR
+  # from a fork, so secrets are never exposed to untrusted code. Manual dispatch
+  # only — keep live mutations off the every-push/every-PR path.
+  #
+  # `run_external` opt-in: dispatching this workflow is now the routine way to ask "is main
+  # healthy?", so the live billable tier must not ride along with every such dispatch. The
+  # schedule can never reach here either (the event_name guard). External integrations are
+  # capped at once a day and their own weekly workflow (external-integration.yml) is
+  # unchanged (ticket 03ef-6fb5-158b-4abd).
+  external:
+    name: external-integration (live Jira + LLM)
+    runs-on: ubuntu-latest
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch'
+          && github.repository_owner == github.actor
+          && github.event.inputs.run_external == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-uv
+        with:
+          enable-cache: true
+      - name: Install rebar from the committed lock (dev + agents extras)
+        run: |
+          uv sync --locked --extra dev --extra agents
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+      - name: Run the external tier (live; opt-in + credential scoped)
+        # REBAR_RUN_EXTERNAL=1 lifts the default skip; each test still self-skips
+        # unless its own creds/extra are present. Attach real secrets below by
+        # wiring repository/organization secrets to these env keys, e.g.:
+        #   JIRA_URL: ${{ secrets.JIRA_URL }}
+        #   JIRA_USER: ${{ secrets.JIRA_USER }}
+        #   JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        #   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        # (Until secrets are wired, the tests self-skip on absent creds — the job
+        # still validates that the tier is reachable only here.)
+        env:
+          REBAR_RUN_EXTERNAL: "1"
+          # JIRA_URL: ${{ secrets.JIRA_URL }}
+          # JIRA_USER: ${{ secrets.JIRA_USER }}
+          # JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        # Per-test hang guard (ticket d835-1846-95d1-4d84); --timeout-method=thread because
+        # the default `signal` method cannot interrupt a worker blocked in a C-level
+        # socket/subprocess call.
+        # 600s is calibrated BY ANALOGY, not from history, and the analogy is stated so the
+        # number is auditable: this job has NEVER executed (it is gated on a workflow_dispatch
+        # input that has never been fired, and its credential env keys are all commented out
+        # below), so it has no runtime record of its own. It runs the same `-m external`
+        # selection as external-integration.yml's `external` job, which was measured at
+        # 85-120s per step, and takes that job's 600s budget.
+        run: >-
+          pytest -m external -q -p no:cacheprovider
+          --timeout=600 --timeout-method=thread
+          --basetemp="${{ runner.temp }}/rebar-basetemp-ext"
+
+  # Golden-path on a CLEAN (non-editable) install (ticket 0435): the README quickstart
+  # and the full CLI probe run against a WHEEL-installed rebar (`pip install .`), so
+  # packaging/entry-point regressions (MANIFEST, package data, console-script
+  # registration) — which the editable install in the reusable `test` job cannot catch —
+  # fail the build.
+  golden-path:
+    name: golden-path (clean install)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+      - name: Ensure jq is installed
+        run: sudo apt-get update && sudo apt-get install -y jq && jq --version
+      - name: Install rebar from a built wheel (clean, non-editable)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+      # If-present guard per ticket ee2a (_build-and-test.yml, raw-git-write gate); bug 1909-c1a7-9f20-440f,
+      # mirrored from gerrit-verify.yaml into this lane as bug e818-564e-d3b6-4eaa.
+      - name: README quickstart golden-path (against the installed rebar)
+        run: |
+          if [ ! -f scripts/check_readme_quickstart.py ]; then
+            echo "scripts/check_readme_quickstart.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          python scripts/check_readme_quickstart.py
+      # If-present guard per ticket ee2a (_build-and-test.yml, raw-git-write gate); bug 1909-c1a7-9f20-440f,
+      # mirrored from gerrit-verify.yaml into this lane as bug e818-564e-d3b6-4eaa.
+      - name: End-to-end CLI probe (against the installed rebar)
+        run: |
+          if [ ! -f scripts/probe_rebar.py ]; then
+            echo "scripts/probe_rebar.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          python scripts/probe_rebar.py </dev/null
+
+  # Artifact-provenance probe (story 6168). The job body now lives in the reusable
+  # _artifact-probe.yml (workflow_call), shared verbatim with gerrit-verify.yaml (the
+  # Verified gate) so the two lanes cannot drift (the pattern _build-and-test.yml uses).
+  # No inputs => the reusable checks out the branch head (this push/PR lane); gerrit-verify
+  # passes the Gerrit refspec to check out the exact patchset (jira-reb-1163).
+  artifact-probe:
+    uses: ./.github/workflows/_artifact-probe.yml
+
+  # Branch-health report (ticket 03ef-6fb5-158b-4abd). A scheduled lane trades per-commit
+  # attribution for a fixed cost, so it has to hand that attribution back on demand: this job
+  # publishes the verdict, the LAST KNOWN-GREEN `main` SHA, and a copy-pasteable `git bisect
+  # run` recipe using this repo's own CI reproduction. Without it the first responder to a red
+  # tick would have to reconstruct the technique under pressure across a multi-commit window.
+  #
+  # The last-known-green SHA is resolved from this workflow's OWN successful run history via
+  # the Actions API — no new state to persist, and nothing is written (the GitHub side is a
+  # read-only mirror; `main` advances only by mirror push from Gerrit). If the lookup cannot
+  # resolve one, the report says so and still passes: a missing lower bound must never turn a
+  # green `main` red.
+  main-health-report:
+    name: main health report (last known green + bisect recipe)
+    # Branch-health lanes only. A PR has its own per-commit attribution and needs no bisect
+    # window; a branch push is likewise attributable to one commit.
+    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    needs: [build-and-test, golden-path, artifact-probe]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read    # list this workflow's own runs to find the last green one
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Both the Actions-API lookup and the rendering live in scripts/main_health_report.py,
+      # not inline here: workflow YAML is unreachable from the test suite, so a quoting bug in
+      # a bisect recipe — or a lower-bound lookup that silently 403s on a missing
+      # `actions: read` scope — would first surface during an incident. The script injects the
+      # `gh` call as an injected Runner — the pattern the canary-bridge script already uses for
+      # its Actions-API reads — so every failure mode is exercised in
+      # tests/unit/test_main_health_report.py without a network.
+      #
+      # GH_TOKEN + the job-level `actions: read` above are BOTH required: the run-history
+      # endpoint 403s without the scope, and the script would then degrade to its
+      # no-lower-bound placeholder on every single run instead of visibly once.
+      - name: Publish the verdict, the last known-green SHA, and the bisect recipe
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_RESULTS: >-
+            {"build-and-test": "${{ needs.build-and-test.result }}",
+             "golden-path": "${{ needs.golden-path.result }}",
+             "artifact-probe": "${{ needs.artifact-probe.result }}"}
+        run: |
+          set -euo pipefail
+          # predates-gate-ok: this job runs only on `schedule`/`workflow_dispatch`, which
+          # always check out the default branch — never an arbitrary patchset.
+          python scripts/main_health_report.py \
+            --ref-name "$GITHUB_REF_NAME" \
+            --head-sha "$GITHUB_SHA" \
+            --jobs "$JOB_RESULTS" \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow-file test.yml >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Scheduled breadth sweep (epic 5664 S5 / Tier 2). These jobs run ONLY on the
+  # 6-hourly schedule and on-demand workflow_dispatch — never on push/PR — and cast
+  # NO Verified vote (the Gerrit gate is gerrit-verify.yaml, which invokes only the
+  # reusables, not test.yml). They add the breadth the hot-path gate deliberately
+  # omits for latency, at ZERO hot-path cost: newest + pre-release interpreters,
+  # Windows, the FULL macOS suite, a declared-lower-bound resolution, and external
+  # doc-link checking. A red sweep job is visible to the CI owner but gates no merge.
+  # Intermediate Python (3.12/3.13) is already swept by the `build-and-test` reusable
+  # on this same schedule, so it needs no dedicated job here.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  # Newest stable + pre-release interpreters (epic 5664 S5). rebar's Verified gate
+  # tops out at 3.13; this sweeps the LATEST release (3.14) plus the pre-release line
+  # (3.15 dev build, 3.14 free-threaded) so a stdlib/typing incompatibility on a newer
+  # interpreter surfaces here, off the hot path. Pre-release cells are non-blocking
+  # (`continue-on-error` per matrix flag): a not-yet-published wheel or a CPython-beta
+  # bug must not paint the sweep red. The 3.14 STABLE cell is a real signal and is not
+  # tolerated — and it installs the COMMITTED lock (`uv sync --locked`, which resolves
+  # cleanly on 3.14), NOT a re-resolution, so it is a PURE interpreter signal: it tests
+  # 3.14 against the exact dependency set the gate ships, with zero dependency-drift
+  # noise. (A `uv pip install` re-resolve pulls deps newer than the lock; ~120 of the
+  # failures that appeared that way were dependency drift, not 3.14 — see the S5 ticket
+  # for the disentangling experiment.) The pre-release cells (3.15, 3.14t) predate the
+  # lock's wheel coverage, so they re-resolve latest and stay non-blocking.
+  sweep-interpreters:
+    name: sweep (py${{ matrix.python-version }})
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.14"
+            experimental: false
+            locked: true
+          - python-version: "3.15"
+            experimental: true
+            locked: false
+          - python-version: "3.14t"
+            experimental: true
+            locked: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-uv
+        with:
+          enable-cache: true
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+      - name: Create the interpreter venv and install
+        run: |
+          if [ "${{ matrix.locked }}" = "true" ]; then
+            # Locked deps = the gate's exact set; pure interpreter signal (must-pass).
+            uv sync --locked --python "${{ matrix.python-version }}" \
+              --extra dev --extra reviewbot --extra ui
+          else
+            # Pre-release interpreters predate the lock's wheels; re-resolve latest.
+            uv venv --python "${{ matrix.python-version }}"
+            uv pip install '.[dev,reviewbot,ui]'
+          fi
+      - name: Run the default suite
+        run: >-
+          uv run --no-sync pytest -m "not integration and not external"
+          -n 4 --dist worksteal -q -p no:cacheprovider
+          --timeout=600 --timeout-method=thread
+          --basetemp="${{ runner.temp }}/rebar-basetemp-sweep-interp"
+
+  # Windows compatibility (epic 5664 S5). rebar is git- and path-heavy and the gate
+  # runs only Linux + macOS; this sweeps Windows so a path-separator / temp-dir /
+  # file-lock regression surfaces off the hot path. Non-blocking: Windows is not yet a
+  # declared support target, so a genuine incompatibility is a visible finding, never a
+  # red gate.
+  sweep-windows:
+    name: sweep (windows)
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-uv
+        with:
+          enable-cache: true
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+      - name: Create venv and install
+        run: |
+          uv venv --python 3.13
+          uv pip install ".[dev,reviewbot,ui]"
+      - name: Run the default suite
+        run: >-
+          uv run --no-sync pytest -m "not integration and not external"
+          -n 4 --dist worksteal -q -p no:cacheprovider
+          --timeout=600 --timeout-method=thread
+
+  # FULL macOS suite (epic 5664 S5). The Verified gate runs only the REDUCED macOS
+  # `platform_compat` subset (story 8d36) to keep the critical path short; this sweeps
+  # the COMPLETE default suite on macOS on the schedule, at zero hot-path cost, so a
+  # macOS-only regression outside the platform_compat seams is still caught.
+  sweep-macos-full:
+    name: sweep (macos, full suite)
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-uv
+        with:
+          enable-cache: true
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+      - name: Create venv and install
+        run: |
+          uv venv --python 3.13
+          uv pip install '.[dev,reviewbot,ui]'
+      - name: Run the FULL default suite (not integration/external)
+        run: >-
+          uv run --no-sync pytest -m "not integration and not external"
+          -n 3 --dist worksteal -q -p no:cacheprovider
+          --timeout=600 --timeout-method=thread
+          --basetemp="${{ runner.temp }}/rebar-basetemp-macos-full"
+
+  # Declared lower-bound resolution (epic 5664 S5). The committed uv.lock proves ONE
+  # resolution works; it does not prove the DECLARED floors do. This resolves the
+  # core + dev + agents dependency floors at their minimums (`--resolution
+  # lowest-direct`) on the OLDEST supported interpreter (3.11) and runs the unit tier
+  # against them, so a floor that is declared but not actually installable/working
+  # surfaces here. The floorless optional web extras (`ui`/`reviewbot`/`pricing`) are
+  # out of scope — their tests self-skip via `importorskip` — and their missing floors
+  # are tracked as separate follow-up work.
+  sweep-lower-bounds:
+    name: sweep (declared lower-bound resolution)
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-uv
+        with:
+          enable-cache: true
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+      - name: Resolve + install the DECLARED floors (lowest-direct, oldest interpreter)
+        run: |
+          uv venv --python 3.11
+          uv pip install --resolution lowest-direct '.[dev,agents]'
+      - name: Run the unit tier against the floor resolution
+        run: >-
+          uv run --no-sync pytest tests/unit -m "not integration and not external"
+          -n 4 --dist worksteal -q -p no:cacheprovider
+          --timeout=600 --timeout-method=thread
+          --basetemp="${{ runner.temp }}/rebar-basetemp-lb"
+
+  # External documentation link checking (epic 5664 S5). Broken external links in
+  # README/docs/ rot silently; this checks them on the schedule. Non-blocking: external
+  # endpoints flake and rate-limit, so a link failure is a visible finding, never a
+  # gate (`fail: false` plus `continue-on-error`). lychee is SHA-pinned — test.yml is
+  # outside the zizmor audit set, but new third-party actions are pinned regardless
+  # (epic 5664 S2 precedent).
+  sweep-doc-links:
+    name: sweep (external doc links)
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check external links in README + docs
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8  # v2.9.0
+        with:
+          args: >-
+            --no-progress --max-concurrency 4
+            README.md CONTRIBUTING.md 'docs/**/*.md'
+          fail: false

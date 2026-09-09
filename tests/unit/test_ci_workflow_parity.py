@@ -36,6 +36,9 @@ _DOCS_ACTION = _ROOT / ".github" / "actions" / "docs-gates" / "action.yml"
 # (6 concurrent slots -> 1, under the org-wide 20-job ceiling).
 _OPTIONALITY_LOOP_JOB = "optional-extras"
 _BAT_YML = _ROOT / ".github" / "workflows" / "_build-and-test.yml"
+_HISTORICAL_C57057F41 = _ROOT / "tests" / "fixtures" / "ci_workflow_parity" / "c57057f41"
+_HISTORICAL_C57057F41_BAT = _HISTORICAL_C57057F41 / "_build-and-test.yml"
+_HISTORICAL_C57057F41_TEST = _HISTORICAL_C57057F41 / "test.yml"
 _PRECOMMIT_CONFIG = _ROOT / ".pre-commit-config.yaml"
 _REUSABLE_OPTIONALITY = "./.github/workflows/_optionality.yml"
 # The reusable gate+suite workflow both CI lanes now delegate to (this refactor). Its presence
@@ -167,6 +170,10 @@ def _read(path: Path) -> str:
     return path.read_text()
 
 
+def _historical_c57057f41_workflows() -> tuple[str, str]:
+    return _read(_HISTORICAL_C57057F41_BAT), _read(_HISTORICAL_C57057F41_TEST)
+
+
 def _extras_from_install_run(run: str) -> set[str]:
     """Extract Python extras from the uv install spellings used by CI."""
     extras = set(re.findall(r"--extra\s+([A-Za-z0-9_-]+)", run))
@@ -262,20 +269,7 @@ def test_sweep_install_extra_drift_is_declared_and_actionable() -> None:
 
 def test_sweep_extra_parity_would_have_caught_c57057f41() -> None:
     """The known historical workflow drift fails without an in-tree declaration."""
-    historical_bat = f"""
-jobs:
-  test:
-    steps:
-      - name: {_BAT_TEST_INSTALL_STEP}
-        run: uv sync --extra dev --extra reviewbot --extra ui --extra grounding-terraform
-"""
-    historical_test = f"""
-jobs:
-  sweep-interpreters:
-    steps:
-      - name: {_SWEEP_INSTALL_STEP}
-        run: uv sync --extra dev --extra reviewbot --extra ui
-"""
+    historical_bat, historical_test = _historical_c57057f41_workflows()
 
     try:
         _assert_sweep_extra_parity(
