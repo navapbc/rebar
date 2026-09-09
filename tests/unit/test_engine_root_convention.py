@@ -1,34 +1,15 @@
-"""One canonical ``rebar_reconciler`` engine root for the tests tree (bug bd2d-3e31-31d9-4a66).
+"""Enforce one ``rebar_reconciler`` engine root across the test suite.
 
-THE HAZARD. The reconciler engine can exist TWICE on disk. Under a NON-editable install
-(``uv pip install '.[dev,reviewbot,ui]'`` — what the sweep lanes do) there is the CHECKOUT
-copy at ``<repo>/src/rebar/_engine`` and an INSTALLED copy in site-packages, which is what
-``rebar._engine.engine_dir()`` resolves. ``sys.modules`` is keyed by NAME, so a canonical
-``rebar_reconciler.*`` key holds exactly ONE of them and which one is decided by whichever
-test registered it first; every later test then silently operates on a module object the
-code under test does not hold. Roughly 146 sites across the tree write
-``sys.modules[name] = mod`` for these names, and only three carry a ``__file__`` guard.
+A non-editable installation exposes both the checkout engine and a site-packages copy.
+Because ``sys.modules`` keys modules by name, the first registration can bind later tests to
+a module from the wrong root. Editable installations map both paths to one directory and
+therefore hide this failure.
 
-WHY IT NEEDS ENFORCING RATHER THAN TIDYING. Under an EDITABLE install — every dev checkout
-and the merge-gating cell — the two roots are one directory, so a violation has no symptom
-at all until a non-editable lane runs. That is how bug ``ae96-72a9-8145-4c85`` reached
-``main`` red on three sweep lanes while every local run stayed green. A one-time cleanup
-restores the convention; it does not stop the 147th site from re-breaking it invisibly.
-
-THE TWO HALVES, and why each is needed:
-
-* :func:`test_no_test_module_resolves_the_installed_engine_root` is STATIC. It parses the
-  whole tests tree, so it sees every site, and — critically — it fires identically in BOTH
-  install modes. It is the half that removes the invisibility.
-* ``tests/conftest.py``'s ``_one_engine_root`` autouse guard is DYNAMIC. It reads the
-  resulting ``sys.modules`` state rather than any call site, so ``sys.modules[k] = mod``,
-  ``setdefault``, a plain ``import_module`` and a ``__path__`` append are all covered by
-  construction, whatever new spelling a future site invents. Its detector
-  (``_engine_path.foreign_engine_registrations``) is pinned below against a split-engine
-  topology this file manufactures, so it has teeth on an editable lane too.
-
-The canonical root, and why the installed copy loses given bug ``9f0b-3d48-b935-428b``, is
-recorded in ``tests/_engine_path.py``.
+``test_no_test_module_resolves_the_installed_engine_root`` statically rejects test code that
+selects the installed copy. The ``_one_engine_root`` autouse fixture in ``tests/conftest.py``
+dynamically detects foreign module and package-path registrations, including forms that a
+source scan does not recognize. The ``split_engine`` fixture keeps that detector effective in
+editable installations. ``tests/_engine_path.py`` defines the canonical checkout root.
 """
 
 from __future__ import annotations
@@ -49,10 +30,8 @@ _TESTS_ROOT = REPO_ROOT / "tests"
 # rule reads the same way it is written in a test module.
 _INSTALLED_ENGINE_OWNERS = frozenset({"rebar._engine", "_engine"})
 
-# The single admitted exception, with its reason. ``test_engine_dir.py``'s SUBJECT is
-# ``rebar._engine.engine_dir()`` itself — it asserts the production resolver returns a real
-# unpacked directory — and it neither puts that root on ``sys.path`` nor loads any
-# ``rebar_reconciler`` module from it, so it cannot seed a foreign canonical key.
+# ``test_engine_dir.py`` tests the resolver without importing from its result or adding it to
+# ``sys.path``, so it cannot register ``rebar_reconciler`` from the installed root.
 _ALLOWED: dict[str, str] = {
     "tests/unit/test_engine_dir.py": "its subject is the production resolver itself",
 }
@@ -77,12 +56,7 @@ def _installed_root_sites(tree: ast.AST) -> list[tuple[int, str]]:
 
 
 def test_no_test_module_resolves_the_installed_engine_root() -> None:
-    """Inside ``tests/``, the engine directory is the CHECKOUT copy — never the installed one.
-
-    Scanning the parsed tree (not its text) means docstrings and comments that merely
-    *discuss* the installed resolver — this file and ``tests/_engine_path.py`` both do — are
-    not mistaken for uses of it.
-    """
+    """Require checkout-root resolution and ignore resolver names found only in prose."""
     offenders: list[str] = []
     still_needed: set[str] = set()
     for module in parsed_python_files(_TESTS_ROOT):
@@ -135,12 +109,7 @@ def test_the_conftest_guard_is_wired_to_the_detector() -> None:
 
 @pytest.fixture
 def split_engine(tmp_path: Path) -> Path:
-    """A stand-in "other install" copy of the engine, in ANY install mode.
-
-    A dev checkout is editable, so the two real roots are one directory and the split cannot
-    occur there. Manufacturing it means the detector is pinned on every lane rather than only
-    on the ones that already suffer the bug.
-    """
+    """Create a distinct engine root so the detector runs in editable installations."""
     other = tmp_path / "site-packages" / "rebar" / "_engine"
     other.parent.mkdir(parents=True)
     # Skip __pycache__: megabytes of bytecode this test never executes.
