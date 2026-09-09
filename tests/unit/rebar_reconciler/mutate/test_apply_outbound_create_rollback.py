@@ -1,20 +1,8 @@
-"""RED tests for _apply_outbound_create rollback path (task dd-3 / 5b41-a748).
+"""Pin create-and-delete rollback behind the legacy route selector.
 
-When the typed leaf ``_apply_outbound_create`` attempts a create_issue call
-through ``_call_with_retry`` and the call ultimately raises, the leaf MUST
-roll back by invoking ``client.delete_issue`` through the SAME retry helper
-(so transient failures during rollback also get retried), then re-raise the
-original create exception.
-
-These tests target the typed-mutation leaf, not the legacy ``create_one``
-helper (covered separately by ``test_applier_rollback.py``).
-
-S4 T3 cutover (2863-c335): the create+delete-rollback behavior these tests pin
-is now the LEGACY path, reached ONLY under the ``REBAR_RECONCILER_CREATE_ROUTE``
-rollback toggle. The default is the coordinated write-ahead composition that NEVER
-deletes a created issue (bug 387d). Every test here pins the LEGACY selector so it
-exercises the rollback path it documents; the coordinated default is proven in
-``mutate/test_create_operation_coordinator.py``.
+After a legacy ``create_issue`` failure, ``_apply_outbound_create`` deletes through the
+same retry seam and re-raises the original exception; success never rolls back. The
+coordinated default is covered separately and never deletes a created issue (bug 387d).
 """
 
 from __future__ import annotations

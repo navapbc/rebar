@@ -1,25 +1,9 @@
-"""Held-out behavioral oracle for REB-3115 S4 T2 — the pure-decision CREATE containment.
+"""Verify pure post-create containment and its fixed write-ahead order (REB-3115).
 
-This oracle pins the OBSERVABLE contract of the new pure module
-
-``rebar_reconciler.create_containment``
-    ``contain_created(plan, known_key, *, record_key, attach_label, set_property,
-    confirm)``
-    — the post-create key slice. AFTER a create returns a Jira key it contains that key
-    onto the durable pending binding in a FIXED write-ahead order (story 9622 / bug
-    387d): ``record_key`` persists the key on the still-pending entry BEFORE any label,
-    then ``attach_label`` attaches the canonical ``rebar-id`` label, then the OPTIONAL
-    ``set_property`` enrichment, then ``confirm`` (``bind_confirm``) LAST. On ANY write
-    failure it NEVER deletes the remote issue — the key is preserved on every abort so
-    recovery can retro-attach the remaining containment. Its DECISION logic performs
-    zero I/O and reads no clock — the four injected raise-based callables are the sole
-    side-effect channels, so identical inputs yield equal outputs.
-
-Assertions are OBSERVABLE ONLY (enums / buckets / flags / keys / recorded call order)
-— never private names or source text — so a behavior-preserving refactor cannot break
-them. Every one of the six T2 ACs is covered by at least one test; recording fakes
-append each seam call to a shared list so the fixed ordering is asserted directly, and
-Cloud/DC provider labels show the containment is provider-neutral.
+``contain_created`` records the key, attaches the canonical label, optionally sets the
+property, and confirms last. Any failure retains the key and never deletes the remote
+issue. Injected recording seams prove deterministic, zero-I/O decisions and the same
+observable ordering for Cloud and DC.
 """
 
 from __future__ import annotations

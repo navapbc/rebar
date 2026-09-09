@@ -1,20 +1,8 @@
-"""Bug 4e21: Jira renders a line break at the end of every soft-wrapped source line.
+"""Preserve soft-wrapped text-to-ADF convergence (bug 4e21).
 
-``text_to_adf`` wrapped EVERY newline-delimited source line in its own ADF paragraph
-node.  Rebar descriptions are authored hard-wrapped at ~95-110 columns, so a single
-prose paragraph arrived in Jira as N sibling paragraphs -- a visible break at the end
-of each fixed-width line (confirmed live on REB-1581: 27 top-level nodes, all
-``paragraph``, one prose paragraph split across four nodes of 102/108/106/111 chars).
-
-The contract asserted here:
-  - a blank-line-delimited block of soft-wrapped prose becomes ONE paragraph whose
-    lines are joined by a single space;
-  - blank-line paragraph separation is preserved;
-  - structural lines (list items, headings, blockquotes, table rows, fenced code)
-    are NOT joined into a run-on -- they stay on their own lines;
-  - the text -> ADF -> text transform is IDEMPOTENT, which is what keeps the
-    description differ from re-emitting an update on every pass (the churn class of
-    bug 626d, bug 85a1 and the DIG-4175 plateau).
+Lines within a prose block join one paragraph, blank lines retain paragraph boundaries,
+and lists, headings, blockquotes, tables, and fenced code remain structural. The
+text-to-ADF-to-text transform is idempotent so the differ does not re-emit updates.
 """
 
 from __future__ import annotations

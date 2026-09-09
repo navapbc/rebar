@@ -1,38 +1,9 @@
-"""Regression test for Bug f058: HEAD drift tolerates benign external writers.
+"""Allow benign ticket-branch drift while rejecting competing passes (bug f058).
 
-Bug context:
-  `_apply_batch` pins the `tickets` orphan-branch HEAD before its mutation
-  loop and re-checks on each iteration. If HEAD advances, it raises
-  HeadDriftError to abort the pass. The d822 fix (PR #425) removed the
-  in-process `_file_conflict_bug_ticket` subprocess as a commit source.
-  But the drift detector still aborts on EXTERNAL writers — e.g., a
-  parallel Claude session running `rebar transition <id> ... closed`
-  triggers an auto-compact (ticket-transition.sh) which commits
-  `ticket: COMPACT <id>` to the tickets branch. The reconciler aborts
-  mid-pass even though the external commit doesn't conflict with the
-  in-flight mutations.
-
-  Empirical confirmation (ADVANCED-tier historical investigator):
-  drift SHAs `78392cd6→19da05f6` in field-probe-unassigned-1779984990
-  matched a `ticket: COMPACT 6d43-a70d-871c-4973` commit emitted by a
-  sibling Claude session — NOT a probe-created ticket.
-
-Fix:
-  Replace the unconditional raise with a tolerance check. When the
-  intervening commit's subject matches benign external patterns
-  (`ticket:`, `suggestion:`, `acquire lock`, `release lock`), refresh
-  `head_pin` and continue. Only raise HeadDriftError if the subject
-  doesn't match benign patterns (which would indicate a competing
-  reconciler pass — the original concern the detector was built for).
-
-Coverage in this file:
-  * The direct-classifier tests exercise `_drift_is_benign` in isolation.
-  * The behavioral tests drive the REAL `_apply_batch` mutation loop against
-    a REAL `tickets`-branch git repo, injecting real HEAD-advancing commits
-    between mutations (as a side effect of the mocked Jira client), and assert
-    only OBSERVABLE behavior: Jira mock call counts, the written manifest JSON,
-    the `abort_due_to_drift` stderr JSON's `mutations_completed`, and the
-    raised HeadDriftError. Nothing here inspects source text or private names.
+Classifier tests distinguish ticket, suggestion, and lock commits from unsafe drift.
+Behavioral tests drive real ``_apply_batch`` mutations and advancing branch commits:
+benign writers refresh the pin and continue, while competing drift raises
+``HeadDriftError`` loudly. Oracles use Jira calls, manifest data, and structured stderr.
 """
 
 from __future__ import annotations

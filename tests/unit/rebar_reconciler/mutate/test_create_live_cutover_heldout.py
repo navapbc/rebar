@@ -1,18 +1,9 @@
-"""HELD-OUT: the S4 T3 create cutover on the LIVE outbound path (REB-3115, AC6).
+"""Verify the S4 T3 create cutover through the live outbound batch path (REB-3115).
 
-S4 T1/T2 built the pure create + containment slices and S4 T3's earlier patch composed
-them (``create_route``) and cut over the TYPED create leaf. But production outbound
-creates do NOT flow through the typed leaf — they flow through the batch path
-``applier.apply(list)`` → ``_apply_batch`` → ``_apply_one`` → ``apply_handlers.handle_create``
-→ ``dispatch_one.create_one``. This oracle pins the cutover on THAT live path: it drives
-the real batch entry point ``applier.apply([create_dict], ...)`` and the real dispatch
-step ``apply_handlers.handle_create(mutation, ctx)`` (the SINGLE ``create_route`` selector
-consumption point) and asserts OBSERVABLE outcomes only — the create-call count, the
-forward+reverse binding, the outcome dict, ``deferred_creates``, and that the issue is
-NEVER deleted.
-
-Both routes (coordinator default + legacy rollback) run EXACTLY ONE physical create per
-mutation (no dual-send). The legacy route must stay byte-identical (it is S5's rollback).
+Real ``applier.apply`` and ``handle_create`` exercise the single route selector and expose
+create counts, bidirectional bindings, outcomes, and deferrals. Coordinator and legacy
+routes each issue one physical create without dual-send; the coordinator never deletes,
+and the legacy rollback path remains unchanged.
 """
 
 from __future__ import annotations

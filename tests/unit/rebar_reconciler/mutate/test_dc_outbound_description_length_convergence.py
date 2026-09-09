@@ -1,34 +1,8 @@
-"""DC over-length DESCRIPTION convergence (story 79d5, epic 3e73).
+"""Verify two-pass DC description convergence with every backend seam injected.
 
-Cloud has a two-pass description-convergence suite
-(``test_outbound_description_length_convergence.py``); Data Center had none. This
-is DC's, as a SEPARATE file rather than a parametrization of Cloud's, because
-Cloud's suite hardcodes Cloud-only internals with no DC equivalent — ``ADF_PATH``
-and ``_ADF_DESCRIPTION_LIMIT = 32000`` — while DC fits plain characters via
-``WikiTextCodec.fit_outbound`` at ``WIKI_DESCRIPTION_LIMIT`` with no ADF
-serialization step at all. Cloud's incident-hardened file stays BYTE-UNCHANGED.
-
-Convergence is a TWO-PASS property: the truncated description the adapter sends
-must compare equal to the body it reads back, or the differ re-emits the same
-update forever. A single-pass assertion cannot establish that — it passes against
-a bridge that re-sends the same truncated value on every pass. So each test here
-drives the oversized value through two passes and asserts on the PLAN produced by
-the second, not on the absence of an exception.
-
-THE BACKEND IS INJECTED EXPLICITLY, AND THAT IS LOAD-BEARING.
-``compute_outbound_mutations``' fallback guard is an OR —
-``if outbound_mapper is None or inbound_mapper is None or links is None:`` — so
-leaving ANY of the three unset fires the block that resolves ALL THREE from
-``select_backend(load_config())``, i.e. CLOUD. A DC test driven through that
-fallback would fit the description with Cloud's ADF-size fit while reporting DC
-convergence. All three are therefore bound to a real ``JiraDataCenterBackend``.
-
-The proof that DC's fit actually ran is VALUE-BASED, which is legitimate here (it
-is not for comments — see the sibling comment suite): DC fits PLAIN characters at
-32767, Cloud fits ADF-SERIALIZED size at 32000, and ADF's envelope overhead means
-Cloud's fit keeps strictly FEWER plain characters. Asserting the landed body is
-exactly the instance ceiling therefore FAILS if the config fallback supplied
-Cloud's mapper.
+Outbound mapper, inbound mapper, and links must all be supplied or the shared fallback
+selects Cloud. The second plan proves no repeated update. A value oracle distinguishes
+DC's 32767 plain-character limit from Cloud's smaller serialized-ADF limit of 32000.
 """
 
 from __future__ import annotations

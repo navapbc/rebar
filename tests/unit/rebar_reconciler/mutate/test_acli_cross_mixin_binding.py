@@ -1,23 +1,10 @@
-"""[P0] Real-AcliClient cross-mixin binding test (gates the acli.py split).
+"""Verify real ``AcliClient`` cross-mixin resolution through its two transport seams.
 
-acli.py is split into mixins — ``AcliClient(AcliRestMixin, AcliGraphMixin)`` —
-whose method bodies call ``self.<other_method>`` across the new module
-boundary. A wrong base order / a missing mixin would pass the mock-heavy
-field-coverage suite (which patches methods on the class directly) but fail
-live, because the REAL dispatch never resolves the unbound method.
-
-This test constructs a REAL ``AcliClient`` with ONLY the two lowest transport
-seams stubbed — ``_run`` (the ACLI subprocess seam) and
-``urllib.request.urlopen`` (the REST seam) — and asserts that one method per
-cluster actually dispatches into the expected seam. It deliberately covers the
-8 graph-mixin methods that have ZERO other test references:
-``set_relationship``, ``get_issue_links``, ``delete_issue_link``,
-``get_parent_map``, ``get_comment_map``, ``update_comment``,
-``delete_comment``, ``update_issuetype``.
-
-Behaviour-preserving: it is green on the pre-split monolith (all methods on
-AcliClient) and must stay green after the mixin reparenting (methods resolved
-via MRO).
+Only subprocess ``_run`` and REST ``urlopen`` are stubbed, so incorrect MRO binding is
+observable. Coverage includes otherwise-unreferenced ``set_relationship``,
+``get_issue_links``, ``delete_issue_link``, ``get_parent_map``, ``get_comment_map``,
+``update_comment``, ``delete_comment``, and ``update_issuetype``. The oracle works for
+both the former monolith and the split mixins.
 """
 
 from __future__ import annotations

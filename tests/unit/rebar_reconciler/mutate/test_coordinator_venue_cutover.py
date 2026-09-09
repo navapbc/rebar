@@ -1,39 +1,9 @@
-"""AC2 (rebar-ticket 67d4-ecba-cf95-4353) — venue-gated Cloud/DC verified-fake
-coordinator-cutover tests.
+"""Verify coordinator summary cutover through real Cloud and DC backend chains.
 
-RP-03 S3 T3 wired the non-create mutation families onto the S3 coordinator+fuse
-route (``route_for`` defaults ``update`` to ``coordinator``, and
-``coordinate_and_fuse`` / ``make_guarded_execute`` / ``make_coordinator_dispatch`` /
-``map_cutover_report`` in ``rebar_reconciler.batch_dispatch`` drive it). The T3
-oracle in ``test_operation_coordinator.py`` proved that pipeline against a
-venue-AGNOSTIC in-memory ``execute`` fake — it has NO Cloud-vs-DC dimension.
-
-This module is the venue-gated half AC2 asks for: **"Venue-gated Cloud/DC verified
-fakes pass before the coordinator default changes."** It drives the SAME landed
-coordinator cutover — the real ``coordinate_and_fuse`` → ``make_guarded_execute`` →
-``make_coordinator_dispatch`` → ``apply_handlers.dispatch_mutation`` → ``update_one`` →
-``client.update_issue`` chain — for a non-create SUMMARY UPDATE (the canonical case
-named in the plan) through TWO real venue backends over verified fakes:
-
-* a **Cloud** backend (``AcliClient``) whose ACLI subprocess seam
-  (``acli_subprocess._run_acli``) is stubbed, so the assertion is on the physical
-  ``jira workitem edit`` argv the Cloud wire actually received; and
-* a **DC** backend (``JiraDataCenterTransport`` under ``JiraDataCenterBackend``) whose
-  ``jira.JIRA`` client is stubbed, so the assertion is on the ``issue.update(fields=…)``
-  REST field-edit the DC wire actually received.
-
-**Interpretation (venue PARITY, not a manufactured venue DIFFERENCE).** A summary is a
-scalar string field on BOTH venues; the per-venue rich-text serialization seam
-(Cloud ADF vs DC wiki) lives on the *description* path, not summary — see
-``adapters/jira/acli.py:update_issue`` (``if field == "description": … _text_to_adf``,
-everything else ``str(value)``) and ``adapters/jira_datacenter/_issues.py:update_issue``
-(a plain ``issue.update(fields=kwargs)``). The coordinator cutover therefore delegates
-summary serialization to a lower adapter layer that is venue-agnostic FOR SUMMARY. So
-per the task's judgment call, the correct venue-gated verified fake runs the same
-cutover batch against a Cloud-configured and a DC-configured dispatch and pins PARITY:
-each venue receives EXACTLY ONE physical mutation (no dual-send), carrying the summary
-verbatim to that venue's own wire shape, with identical five-bucket
-(applied/failed/deferred/skipped/recovered) tallies from the ``CutoverReport``.
+The ``coordinate_and_fuse`` path reaches each venue's verified transport fake exactly
+once: Cloud records its ACLI argv and DC records its REST field update. Summary is scalar,
+so both wires receive it verbatim and produce identical applied, failed, deferred,
+skipped, and recovered tallies; rich-text venue differences do not apply.
 """
 
 from __future__ import annotations

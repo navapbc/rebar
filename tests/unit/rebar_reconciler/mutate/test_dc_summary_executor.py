@@ -1,24 +1,10 @@
-"""[P0] RP-03 S1 T3 — Jira DC summary executor contract (held-out oracle).
+"""Keep DC summary execution single-attempt under coordinator-owned retry.
 
-Specifies the observable contract of the Data Center summary executor defined in ticket
-c6f3-cda5-c460-4c5c, consuming the T1 seam (``operation_outcome`` / ``retry_budget``):
-
-- a DEDICATED executor client built through ``jira.JIRA(..., max_retries=0)`` that fails loud
-  unless ``client._session.max_retries == 0`` (legacy construction is untouched),
-- an injected one-attempt / no-sleep policy on ``_with_connection_retry`` used only for the
-  executor's selected calls — every legacy caller keeps three attempts with 2s/5s waits,
-- one write invocation that issues exactly GET -> PUT -> GET with no hidden repeats; a failed
-  GET or PUT ends the invocation and a successful read-back is authoritative,
-- ambiguous-PUT recovery that consumes a SEPARATE physical GET observation and maps through the
-  T1 ``decide_replay`` table (desired -> recovered; old_conclusive -> replay within budget /
-  exhausted without; failed/inconclusive -> non-replaying ``commit_unknown``),
-- no sleep and no replay in the SDK/adapter layer — classification/delay metadata is returned to
-  the shared owner instead,
-- exactly one redacted completion log per terminal/exhausted outcome, carrying ONLY the seven
-  contract fields, its message redacted through the T1 seam and capped at 512 code points, the
-  whole serialized log capped at 1,024 code points.
-
-Every clock is injected; these tests perform zero wall-clock sleep.
+The client uses ``max_retries=0`` and performs one GET→PUT→GET. An ambiguous PUT gets a
+separate observation; ``decide_replay`` then recovers, retries within budget, exhausts,
+or returns unknown. The adapter never sleeps or replays internally. Its one terminal
+seven-field log is redacted and bounded to a 512-character message and 1024 total
+characters; clocks remain injected.
 """
 
 from __future__ import annotations
