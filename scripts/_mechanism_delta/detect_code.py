@@ -1,25 +1,9 @@
-"""Python-AST mechanism detectors: ``lock`` and ``autouse_fixture``.
+"""Detect locks and autouse fixtures from Python syntax trees.
 
-Split from the other detectors by INPUT SURFACE — everything here is answered by parsing
-Python source with :mod:`ast`, so the whole module shares one file walk, one parse cache and
-one failure mode (an unparseable file is skipped, never fatal: a syntax error is the type
-checker's and the linter's finding, not this gate's).
-
-``lock``
-    A concurrency mechanism is either a lock CLASS (``ast.ClassDef`` whose name matches
-    ``.*Lock.*``) or a lock FILE (a string literal ending ``.lock``). Both are counted
-    because both are the thing a future defect is filed against: a new lock class is new
-    in-process serialisation, a new ``.lock`` filename is new on-disk serialisation, and
-    each one adds an ordering that some later code path can violate. The scan covers the
-    shipped package plus the gate tooling (``src/`` and ``scripts/``) — not ``tests/``,
-    whose lock doubles are fixtures of the mechanisms already counted here, not new surface.
-
-``autouse_fixture``
-    A ``pytest`` fixture with ``autouse=True`` applies to every test in its scope WITHOUT
-    being named by any of them, so it is invisible mechanism: it changes what the suite
-    proves while no test mentions it. Names are site-qualified (``<path>::<fixture>``)
-    because the partition rule is per definition site and fixture names repeat freely
-    across ``conftest.py`` files.
+Locks are classes matching ``.*Lock.*`` or string literals ending in ``.lock`` under
+``src`` and ``scripts``. Autouse fixtures are terminal-name ``fixture`` calls under
+``tests`` with literal ``autouse=True``. Their names use ``<path>::<fixture>``. Each scan
+skips unreadable or unparseable Python files.
 """
 
 from __future__ import annotations

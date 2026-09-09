@@ -1,25 +1,11 @@
-"""Glob + YAML mechanism detectors: ``ci_gate`` and ``test_helper``.
+"""Detect CI gates and test helpers from filename globs and workflow YAML.
 
-Split from the other detectors by INPUT SURFACE: neither of these is answered by parsing
-Python semantics. A gate script and a test helper are identified by WHERE THEY LIVE (a
-filename glob), and a workflow step by its position in a YAML document — so this module owns
-the only PyYAML dependency in the ratchet (already a dev dep, and only ever used to READ).
-
-``ci_gate``
-    Two shapes, one kind. A ``scripts/check_*.py`` file IS a gate — the repository's own
-    convention, and the shape ``make lint`` wires in — and a workflow step with a ``run:`` is
-    a gate the build runs directly. Both add a way for the build to fail that did not exist
-    before, which is exactly the surface this ratchet bounds. Note that this counts the
-    ratchet's own gate script: bounding its own epic is intended, not an accident.
-
-``test_helper``
-    ``tests/_*.py`` — the underscore prefix is how this repository marks a module that is
-    imported by tests rather than collected as one. A new shared helper is new coupling
-    across the suite: every test that grows a dependency on it inherits its assumptions.
-
-Both shapes are FILENAME-GLOB shaped, so their markers live in the matched file's first
-lines rather than beside a definition; the workflow-step shape is line-anchored to the
-step's ``- name:``/``run:``.
+``ci_gate`` sites are ``scripts/check_*.py`` paths and site-qualified workflow ``run``
+steps. A step uses its name when present. Otherwise it uses the first nonblank run line,
+truncated to 60 characters. ``test_helper`` sites are ``tests/_*.py`` paths. PyYAML parsing
+lives here. Missing directories and unreadable or malformed workflows are skipped. Glob
+markers use the matched file head. Workflow markers use the name or run line, or the line
+before it.
 """
 
 from __future__ import annotations
