@@ -208,12 +208,26 @@ vocabulary, or these silently bypass per-criterion routing.
 > prompt/schema to a fixed registry vocabulary is REJECTED: the dimension vocabulary is open
 > by design and a closed enum would make project-supplied criteria unexpressible.
 >
-> **CORRECTION (E) — the generator reproduces (A) and (C) on every re-run.**
-> `docs/experiments/calibrate_code_review_thresholds.py` reads no routing index at all
-> (neither the packaged `criteria_routing.json` nor the project overlay), so re-running it
-> reproduces the `sec` DET/ATTEST misclassification and the `project.review-phase-boundaries`
-> 0.95 row verbatim. Fixing the generator is deferred; until then, read its output against
-> the EFFECTIVE vocabulary and these corrections.
+> **CORRECTION (E) — RESOLVED 2026-09-08 (calibration 4).** The generator used to reproduce
+> (A) and (C) on every re-run: `docs/experiments/calibrate_code_review_thresholds.py` read no
+> routing index at all (neither the packaged `criteria_routing.json` nor the project overlay),
+> so it re-emitted the `sec` DET/ATTEST misclassification and the
+> `project.review-phase-boundaries` 0.95 row verbatim. It now reads BOTH through the same
+> production path the gate uses — `registry.effective_routing` and `registry.normalize_criteria`
+> — with a pure-JSON fallback for checkouts where `rebar` is not importable. Verified on the
+> code-v3 segment: the `sec` (n=8) and `documentation` (n=5) rows are gone, absorbed into
+> `security` (61 → 69) and `docs` (472 → 477), and `project.review-phase-boundaries` reports its
+> real `advisory@0.90`. Three further changes came with it:
+>
+> * every row carries its **current** posture, so the proposal reads as a DELTA
+>   (`PROMOTE` / `DEMOTE` / `RETUNE` / `ROUTE`) instead of a free-standing absolute, and an
+>   **UNROUTED** criterion is displayed distinctly from a deliberate `advisory` one;
+> * `--impact-model-version` defaults to the version the gate stamps TODAY (read from
+>   `sidecar.IMPACT_MODEL_VERSION`) rather than a hardcoded `code-v3` — the hardcoded default is
+>   how this script silently kept analysing a retired cohort after the model moved to code-v5;
+> * `--dump-newly-blocking CRIT=THR` writes the findings a proposed flip would ADD
+>   (priority in `[THR, current_threshold)`) to JSON, because the false-positive/nit rate of a
+>   threshold change is a question about finding TEXT that no validity statistic answers.
 
 ## Code-v4 friction replay at 0.54 (correctness, edge-cases, concurrency)
 
