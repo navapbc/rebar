@@ -1,23 +1,8 @@
-"""Pagination + JQL-verbatim tests for fetcher.py.
+"""Pin split-JQL pagination and verbatim query delivery.
 
-Originally task d3b8-a22b. Updated for the split-JQL contract under bug
-f6cc-b174-9e9a-435c — the fetcher now issues two queries (active +
-Done-recent) instead of one combined query.
-
-Builds a 1500-issue ACLI fixture (1000 active + 500 Done) and verifies:
-
-  * The fetcher invokes the ACLI stub with both split JQL strings verbatim:
-    ``project = DIG AND statusCategory != "Done"``
-    ``project = DIG AND statusCategory = "Done" ORDER BY updated DESC``
-  * The fetcher paginates through the working set in 100-step ``start_at``
-    increments (start_at=0, 100, 200, ..., 1400). At least 10 paginated
-    invocations must occur across both queries combined.
-
-AC-mandated source-literal tokens (grep -F greppable):
-  * ``project = DIG AND statusCategory != "Done"``
-  * ``project = DIG AND statusCategory = "Done" ORDER BY updated DESC``
-  * ``range(1, 1501)``  (the combined 1500-issue fixture builder; now
-    split as range(1, 1001) for active + range(1001, 1501) for Done)
+A 1,500-issue fixture (1,000 active and 500 recent Done) must deliver both DIG
+queries unchanged and paginate in 100-item steps for at least ten calls.
+``range(1, 1501)`` remains the combined-pool acceptance token.
 """
 
 from __future__ import annotations
@@ -32,10 +17,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[4]
 FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
 
-# Two JQL strings emitted by fetch_snapshot under the split-JQL contract
-# (bug f6cc-b174-9e9a-435c): one for the active working set, one for
-# Done issues ordered by updated DESC. Both must reach search_issues
-# verbatim; tests assert the union of jqls seen == {ACTIVE, DONE_RECENT}.
+# The active and recent-Done JQLs must both reach ``search_issues`` verbatim.
 EXPECTED_JQL_ACTIVE = 'project = DIG AND statusCategory != "Done"'
 EXPECTED_JQL_DONE_RECENT = 'project = DIG AND statusCategory = "Done" ORDER BY updated DESC'
 EXPECTED_JQLS = {EXPECTED_JQL_ACTIVE, EXPECTED_JQL_DONE_RECENT}
@@ -61,30 +43,20 @@ def fetcher():
 # Per-JQL paginated fixture (split-JQL aware, bug f6cc).
 # ---------------------------------------------------------------------------
 #
-# Pre-split, the stub used a single 1500-issue pool. Under the split-JQL
-# contract, each JQL gets its own pool so both queries can complete under
-# the 1200-issue per-query ceiling. Sizes chosen so that:
-#   * Active pool (1000): comfortably under 1200 ceiling, ≥ 10 pages of 100
-#     for the pagination-step assertion below.
-#   * Done pool (500): exercises Q2 + the _DONE_RECENT_CAP=1000 cap as a
-#     no-op (pool size 500 < cap).
-# Source-literal ``range(1, 1501)`` is kept as a greppable AC token.
+# Separate pools stay below the 1,200 per-query ceiling: 1,000 active issues
+# exercise ten 100-item pages, while 500 Done issues leave the 1,000-item cap
+# inactive. Keep ``range(1, 1501)`` as the combined-pool acceptance token.
 
 _ACTIVE_POOL = [{"key": f"DIG-{i}", "fields": {"summary": f"issue {i}"}} for i in range(1, 1001)]
 _DONE_POOL = [{"key": f"DIG-{i}", "fields": {"summary": f"issue {i}"}} for i in range(1001, 1501)]
 assert len(_ACTIVE_POOL) == 1000
 assert len(_DONE_POOL) == 500
-# Greppable AC token retained: range(1, 1501) describes the COMBINED pool
-# (1000 active + 500 done = 1500 unique issues across both queries).
+# Combined-pool token: range(1, 1501) = 1,000 active + 500 Done.
 assert len(_ACTIVE_POOL) + len(_DONE_POOL) == 1500
 
 
 class _PaginatingClient:
-    """Records every ``(jql, start_at, max_results)`` it sees and returns
-    the appropriate slice of the per-JQL pool. The JQL determines which
-    pool to slice: active JQL gets the 1000-issue active pool; Done JQL
-    gets the 500-issue Done pool. Unknown JQLs return the active pool
-    (backward-compat for any test that passes a custom JQL)."""
+    """Record calls and slice the JQL-specific pool; unknown JQLs use active."""
 
     def __init__(self):
         self.calls: list[dict] = []
@@ -119,13 +91,7 @@ def _make_paginating_acli():
 
 
 def test_fetcher_calls_acli_with_split_jqls_verbatim(tmp_path, fetcher):
-    """Every search_issues call must use one of the two split JQL strings
-    verbatim, and the union of JQLs seen must be exactly the split pair.
-
-    Required strings (bug f6cc-b174-9e9a-435c contract):
-      * ``project = DIG AND statusCategory != "Done"``
-      * ``project = DIG AND statusCategory = "Done" ORDER BY updated DESC``
-    """
+    """Send only the exact active and recent-Done JQL pair to ``search_issues``."""
     mock_acli, holder = _make_paginating_acli()
     with patch.object(fetcher, "_load_acli", return_value=mock_acli):
         try:

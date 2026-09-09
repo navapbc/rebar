@@ -1,21 +1,8 @@
-"""Tests for fetcher truncation gate (originally task cbd6-39c7-f331-4af6;
-ceiling raised from 1000 → 1200 in bug f6cc-b174-9e9a-435c).
+"""Exercise the fetcher's silent-truncation guards.
 
-Contract under test:
-  * Each JQL query has a hard ACLI per-query ceiling of 1200 issues
-    (JRACLOUD-94632; raised from the original 1000 ceiling because the
-    DIG project's working set exceeded it).
-  * If a query accumulates 1200 issues from ACLI, the fetcher MUST raise
-    ``SilentTruncationError`` rather than silently returning a truncated set.
-  * Fallback path: if ACLI returns the same ``nextPageToken`` on two
-    consecutive calls (a "same-token-twice" loop), the fetcher MUST also
-    raise ``SilentTruncationError``.
-  * Below the 1200 ceiling (e.g. 1150 issues per query), fetching
-    completes cleanly without error.
-
-The string literal ``SilentTruncationError`` appears below for the
-``grep -F 'SilentTruncationError'`` AC. The string ``same-token-twice`` and
-the ``below_ceiling`` marker also appear for the related grep ACs.
+Each JQL raises ``SilentTruncationError`` at the 1,200-item ACLI ceiling
+(JRACLOUD-94632) or when ``nextPageToken`` repeats; 1,150 items
+(``below_ceiling``) complete. ``same-token-twice`` remains greppable evidence.
 """
 
 from __future__ import annotations
@@ -31,8 +18,8 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
 ERRORS_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_errors.py"
 
-# Best-effort import of SilentTruncationError. If not yet defined, fall back to
-# a local placeholder so test collection still succeeds in the RED state.
+# Fall back to a local error class so collection survives a missing production
+# module.
 try:
     spec = importlib.util.spec_from_file_location("_rebar_reconciler_errors", ERRORS_PATH)
     assert spec is not None and spec.loader is not None
@@ -82,17 +69,7 @@ class _PaginatingStubClient:
 
 
 class _SameTokenTwiceClient:
-    """Stub that returns the same nextPageToken on consecutive calls.
-
-    Simulates ACLI's degenerate "stuck cursor" mode where the server
-    returns the same page-cursor twice in a row — the agreed-upon signal
-    for silent-truncation per JRACLOUD-94632.
-
-    The stub returns full pages forever (never shrinks below page_size)
-    and exposes ``nextPageToken`` via an attribute on the returned list
-    AND via a parallel attribute on the client itself (current fetcher
-    interface tolerates either).
-    """
+    """Return full pages forever while exposing the same cursor each call."""
 
     def __init__(self, page_size: int = 100):
         self._page_size = page_size

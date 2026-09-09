@@ -1,23 +1,9 @@
-"""Behavioral tests for the split-JQL fetcher contract (bug f6cc-b174-9e9a-435c).
+"""Exercise the two-query fetch contract.
 
-Pre-fix, ``fetcher.fetch_snapshot`` issued a single JQL
-(``project = DIG AND (resolution = Unresolved OR updated >= -1h)``) and
-hit the 1000-issue ACLI ceiling because the DIG project has > 1000
-issues spanning To Do + In Progress + Done.
-
-Post-fix, ``fetch_snapshot`` issues TWO queries in order:
-  1. ``project = DIG AND statusCategory != "Done"`` — the active working set,
-     no client-side cap (only the per-query ACLI ceiling bounds it).
-  2. ``project = DIG AND statusCategory = "Done" ORDER BY updated DESC`` — capped
-     to ``_DONE_RECENT_CAP`` (1000) most-recently-updated Done issues.
-
-These tests assert observable behavior of that contract:
-  * Both queries reach the ACLI client verbatim, in order.
-  * The Done-recent query is capped at _DONE_RECENT_CAP regardless of the
-    actual stub size, and the cap stops consumption cleanly (does NOT
-    raise SilentTruncationError).
-  * The active query is NOT capped (consumes everything the stub returns).
-  * The per-query ACLI ceiling raised from 1000 → 1200 (regression guard).
+The active JQL runs first without a client cap under the 1,200-item ACLI
+ceiling. Recent Done runs second, ordered by update time and capped at 1,000.
+Tests assert verbatim routing, order, clean cap termination, uncapped active
+consumption, and cross-query deduplication.
 """
 
 from __future__ import annotations
@@ -52,13 +38,7 @@ def _make_issue(n: int) -> dict:
 
 
 class _JqlRoutedClient:
-    """Stub Jira client whose per-JQL response size is configurable.
-
-    sizes maps each JQL to its total result count; pages are sliced
-    [start_at : start_at+max_results] from a list of synthetic issues
-    keyed DIG-0..DIG-(size-1) per JQL with a JQL-specific key prefix
-    so cross-query duplicates can be distinguished in assertions.
-    """
+    """Page configurable JQL pools with distinct ACT/DONE key prefixes."""
 
     def __init__(self, sizes: dict[str, int], page_size: int = 100):
         self._sizes = sizes
@@ -176,16 +156,7 @@ def test_active_query_uncapped_consumes_everything_under_ceiling(tmp_path, fetch
     )
 
 
-# Behavioral coverage for the three constants (_ACLI_CEILING, _DONE_RECENT_CAP,
-# JQLS) is provided by the tests above and by test_fetcher_truncation_gate.py:
-#   * _ACLI_CEILING enforcement:
-#       test_fetch_at_1200_issue_ceiling_raises_silent_truncation_error
-#       (test_fetcher_truncation_gate.py)
-#   * _DONE_RECENT_CAP enforcement:
-#       test_done_query_capped_at_done_recent_cap (above)
-#   * JQLS / query ordering:
-#       test_both_split_jqls_issued_in_order_active_then_done (above)
-# Per the behavioral testing standard, separate "constant-equals-N"
-# regression-guard tests are change-detector tests and were intentionally
-# omitted: they break on safe refactorings and add no observable-behavior
-# assurance beyond what the behavioral tests already give.
+# Behavioral tests own these constants: the truncation gate covers
+# ``_ACLI_CEILING``, the Done-cap test covers ``_DONE_RECENT_CAP``, and the
+# ordering test exercises both JQLs. Literal-equality guards would only detect
+# safe refactors, not observable regressions.
