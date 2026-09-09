@@ -86,9 +86,9 @@ CONFIG_PATHS='infra/gerrit/replication.config infra/gerrit/project.config infra/
 # Host-nginx configuration is detect-only because applying it requires validation and reload.
 EDGE_PATHS='infra/nginx/rebar.conf.template'
 # Host-nginx materializers are detect-only; this loop never invokes compose-up or reloads nginx.
-MATERIALIZER_PATHS='infra/scripts/compose-up.sh infra/scripts/materialize-opcert-guard.sh infra/scripts/materialize-mcp-upstream.sh infra/nginx/mcp-upstream.conf'
+MATERIALIZER_PATHS='infra/scripts/compose-up.sh infra/scripts/materialize-opcert-guard.sh infra/scripts/materialize-mcp-upstream.sh infra/scripts/container-cap.sh infra/scripts/docker-storage-cap.sh infra/scripts/journald-cap.sh infra/scripts/vartmp-cap.sh infra/nginx/mcp-upstream.conf'
 # Reinstall the host observability copy when its maintained sources change.
-OBS_PATHS='infra/scripts/observability.sh infra/scripts/install-observability.sh'
+OBS_PATHS='infra/scripts/observability.sh infra/scripts/install-observability.sh infra/scripts/container-cap.sh infra/scripts/docker-storage-cap.sh infra/scripts/journald-cap.sh infra/scripts/vartmp-cap.sh'
 # Reinstall the host certbot units when their source changes.
 CERTBOT_PATHS='infra/scripts/install-certbot-timer.sh'
 # Autodeploy never rewrites or reloads its own staged units while running; operators own
