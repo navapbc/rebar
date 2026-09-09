@@ -636,6 +636,8 @@ def test_config_from_env_defaults_and_token_alias(monkeypatch):
         "LLM_REVIEW_BLOCK_VALUE",
         "DEDUP_DB_PATH",
         "GERRIT_BASE_URL",
+        "GERRIT_CANONICAL_WEB_URL",
+        "CANONICAL_WEB_URL",
         "BOT_USER",
         "WEBHOOK_TOKEN",
         "RECONCILE_INTERVAL_SECONDS",
@@ -647,6 +649,7 @@ def test_config_from_env_defaults_and_token_alias(monkeypatch):
     assert cfg.llm_review_max_value == 1
     assert cfg.llm_review_block_value == -1
     assert cfg.gerrit_base_url == "http://gerrit:8080"
+    assert cfg.gerrit_canonical_web_url == "https://rebar.solutions.navateam.com"
     assert cfg.reconcile_interval_seconds == 300
     # WEBHOOK_TOKEN defaults to the bot token (ADR-0014)
     assert cfg.webhook_token == "secret-tok"
@@ -1775,11 +1778,118 @@ def test_lifespan_is_safe_by_default_without_per_test_stubs(monkeypatch, tmp_pat
             "in_flight": 0,
             "queue_depth": 0,
             "gerrit_auth": "ok",
+            "webhook_auth_rejections": 0,
+            "webhook_auth_last_rejected_age_seconds": -1,
         }
 
     # timing: hang-guard — 2s dwarfs this sub-second local lifecycle path.
     assert time.monotonic() - start < 2
     assert shutdown_drain_seconds() == 1.0
+
+
+@pytest.mark.timeout(3)
+def test_webhook_auth_rejection_is_visible_on_health(monkeypatch, tmp_path):
+    """A stale Gerrit webhook token must be visible while ordinary health is 200."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from rebar.review_bot import app as appmod
+
+    async def _idle_worker(queue, cfg):
+        await asyncio.Event().wait()
+
+    async def _idle_loop(*, config):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(appmod, "_worker", _idle_worker, raising=True)
+    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_loop, raising=True)
+    monkeypatch.setattr(appmod.app.state, "config", _cfg(tmp_path), raising=False)
+    monkeypatch.setattr(appmod, "_gerrit_auth_health", lambda _cfg: (True, "ok"), raising=True)
+
+    with TestClient(appmod.app) as client:
+        rejected = client.post("/webhook", headers={"X-Rebar-Token": "stale"}, json={})
+        health = client.get("/health")
+
+    assert rejected.status_code == 401
+    assert health.status_code == 200
+    assert health.json()["webhook_auth_rejections"] == 1
+    assert health.json()["webhook_auth_last_rejected_age_seconds"] >= 0
+
+
+@pytest.mark.timeout(3)
+def test_gerrit_internal_webhook_does_not_need_unsupported_plugin_header(monkeypatch, tmp_path):
+    """The Gerrit webhooks plugin cannot add the X-Rebar-Token header; internal origin proves it."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from rebar.review_bot import app as appmod
+
+    async def _idle_worker(queue, cfg):
+        await asyncio.Event().wait()
+
+    async def _idle_loop(*, config):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(appmod, "_worker", _idle_worker, raising=True)
+    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_loop, raising=True)
+    monkeypatch.setattr(appmod.app.state, "config", _cfg(tmp_path), raising=False)
+    monkeypatch.setattr(appmod, "_resolve_host_addresses", lambda _host: {"testclient"})
+
+    with TestClient(appmod.app) as client:
+        accepted = client.post(
+            "/webhook",
+            headers={"X-Origin-Url": "https://rebar.solutions.navateam.com/"},
+            json={"type": "comment-added"},
+        )
+        spoofed = client.post(
+            "/webhook",
+            headers={
+                "X-Origin-Url": "https://rebar.solutions.navateam.com/",
+                "X-Forwarded-For": "203.0.113.10",
+            },
+            json={"type": "comment-added"},
+        )
+        wrong_origin = client.post(
+            "/webhook",
+            headers={"X-Origin-Url": "https://evil.example.test/"},
+            json={"type": "comment-added"},
+        )
+        missing_origin = client.post("/webhook", json={"type": "comment-added"})
+
+    assert accepted.status_code == 202
+    assert accepted.json() == {"status": "accepted", "queued": True}
+    assert spoofed.status_code == 401
+    assert wrong_origin.status_code == 401
+    assert missing_origin.status_code == 401
+
+
+@pytest.mark.timeout(3)
+def test_gerrit_internal_webhook_requires_the_gerrit_service_peer(monkeypatch, tmp_path):
+    """The public edge cannot spoof the internal path with only client-controlled headers."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from rebar.review_bot import app as appmod
+
+    async def _idle_worker(queue, cfg):
+        await asyncio.Event().wait()
+
+    async def _idle_loop(*, config):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(appmod, "_worker", _idle_worker, raising=True)
+    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_loop, raising=True)
+    monkeypatch.setattr(appmod.app.state, "config", _cfg(tmp_path), raising=False)
+    monkeypatch.setattr(appmod, "_resolve_host_addresses", lambda _host: {"172.21.0.4"})
+
+    with TestClient(appmod.app) as client:
+        response = client.post(
+            "/webhook",
+            headers={"X-Origin-Url": "https://rebar.solutions.navateam.com/"},
+            json={"type": "comment-added"},
+        )
+
+    assert response.status_code == 401
 
 
 def _idle_reconcile_loop(*a, **k):

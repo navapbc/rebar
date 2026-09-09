@@ -137,6 +137,12 @@ services:
       # (`proxy_set_header X-Forwarded-Proto https`), which OVERWRITES whatever a client
       # sent — so no client can forge the value.
       FORWARDED_ALLOW_IPS: "*"
+      # Gerrit's webhooks plugin sends this public canonical URL in its built-in
+      # X-Origin-Url header; the receiver accepts that header only from the resolved
+      # compose-network Gerrit service peer.
+      # mechanism-ok: env_var GERRIT_CANONICAL_WEB_URL — 073f-b86f-42c6-456f: pins
+      # the non-secret origin value the Gerrit webhooks plugin emits for internal deliveries.
+      GERRIT_CANONICAL_WEB_URL: "https://rebar.solutions.navateam.com/"
       REBAR_SYNC_PUSH: "always"
       # Authorship signing key, CONTAINER-side path (bug beb1). fetch-secrets.sh materializes
       # the key on the HOST and exports that HOST path via env_file; that path does not exist
