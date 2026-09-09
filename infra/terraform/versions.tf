@@ -1,18 +1,11 @@
 terraform {
   required_version = ">= 1.11"
 
-  # Floor rationale (two constraints, higher wins → >= 1.11):
-  #   * >= 1.11 — terraform WRITE-ONLY arguments (`value_wo` / `value_wo_version`), which the
-  #     SSM SecureString SECRET slots use so a secret value is NEVER persisted to state
-  #     (ADR 0105 / ssm.tf, opcert.tf, auth_sso.tf).
-  #   * >= 1.10 — S3-native state locking via `use_lockfile` (no DynamoDB table needed).
-  # The >= 1.11 floor above satisfies both.
+  # Terraform >= 1.11 provides the write-only SSM values used by ssm.tf, opcert.tf, and
+  # auth_sso.tf under ADR 0105. It also satisfies >= 1.10 for S3-native `use_lockfile` locking.
   #
-  # WARNING: Terraform < 1.10 SILENTLY IGNORES `use_lockfile` and runs with NO
-  # state locking at all (no error, no warning). Concurrent applies on an old
-  # CLI would corrupt the remote state. And Terraform < 1.11 does not support
-  # write-only arguments. The required_version constraint is the only thing
-  # preventing both — do not lower it.
+  # Do not lower the floor. Versions below 1.10 ignore locking without warning and risk
+  # concurrent state corruption. Versions below 1.11 cannot parse write-only arguments.
   #
   # The bucket name matches the one created by infra/bootstrap/main.tf.
   backend "s3" {
@@ -29,8 +22,7 @@ terraform {
       # >= 5.79 — aws_ssm_parameter write-only arguments (value_wo / value_wo_version).
       version = "~> 5.79"
     }
-    # Used by the re-homed auth_host SSO stack: random_password mints the CloudFront↔Lambda
-    # origin secret (auth_host.tf); archive_file zips the auth-host Lambda bundle.
+    # auth_host uses random for its origin secret and archive for its Lambda bundle.
     random = {
       source  = "hashicorp/random"
       version = "~> 3.6"
