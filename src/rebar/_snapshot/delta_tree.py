@@ -1,51 +1,16 @@
-"""Hardlink-donor delta materialization for the content-addressed snapshot store.
+"""Build content-addressed snapshots from a hardlinked neighbouring tree.
 
-Why this exists
----------------
-:func:`~rebar._snapshot.repo_snapshot.materialize_tickets` content-addresses its entry
-as ``<store>/tickets-<sha>`` and builds it with a throwaway index +
-``git checkout-index --all``. ``checkout-index`` writes the committed blob for EVERY tree
-entry — no hardlink, no reflink, no delta against a neighbouring entry — so each build
-costs a whole fresh copy of the tree.
+Frequently advancing ticket tips rarely hit the exact-SHA cache. Reusing an adjacent
+entry and rewriting only ``git diff`` paths avoids another full copy. Changed paths are
+unlinked before a temporary-index ``checkout-index`` writes them, so published donor
+inodes remain immutable. Donor paths come from ``git ls-tree``, never a directory walk
+that would copy untracked derived files; rename/copy records are consumed safely even
+though diffs disable rename detection. Lock files in :data:`_UNSHAREABLE_BASENAMES` are
+always written fresh.
 
-The cache key is the LIVE tickets-branch tip, which advances roughly every 26 seconds
-while each commit touches a handful of files. The cache-hit branch is therefore
-effectively never taken, and the store grows by one full tree per gate resolution.
-Measured in the field: 64,483 entries, 47.2 GiB for a ~620 MiB / ~70k-blob tree.
-
-The fix, in one sentence: when the store already holds an entry for a NEIGHBOURING commit,
-clone it with **hardlinks** (which cost inodes, not bytes) and then rewrite only the paths
-that ``git diff`` says actually changed. N adjacent SHAs then consume ~ONE tree of distinct
-on-disk bytes instead of N.
-
-Mechanics that make this safe (each validated by experiment)
-------------------------------------------------------------
-* ``git checkout-index --force`` UNLINKS and recreates a path; it does not write *through*
-  an existing hardlink. We nevertheless unlink every path we are about to rewrite
-  ourselves, BEFORE git runs, so the "never mutate a published entry" guarantee is ours and
-  does not depend on a git implementation detail.
-* ``git checkout-index --force -z --stdin --prefix=<dir>/`` against a temp index that was
-  ``read-tree``-d to the target sha writes exactly the paths fed on stdin.
-* ``git diff --name-status -z <donor_sha> <sha>`` is the delta. ``D`` deletes from the
-  build; anything else is a rewrite. Rename/copy statuses carry TWO path tokens, so both
-  are consumed (we also pass ``--no-renames``, belt and braces).
-* The donor's paths are enumerated from ``git ls-tree -r``, **never** by walking the donor
-  directory. A live entry accumulates untracked files (a ``.cache.json`` per ticket dir,
-  written by reads through the pinned root — thousands of them), which are absent from the
-  committed tree; a directory-walk clone would copy them into the new entry and break the
-  "byte-matches the tree" postcondition. See :func:`_link_tree_paths`.
-
-Fail-closed policy
-------------------
-Faithfulness is the attestation basis (ADR 0005), so every doubt degrades to today's exact
-full-materialize behaviour by returning ``False``: no donor found, donor objects absent,
-``git diff``/``ls-tree`` failure, a donor that is INCOMPLETE (the janitor evicts by
-rename-then-rmtree, so an entry can vanish mid-walk — we compare what we cloned against
-``git ls-tree -r`` and discard on any mismatch), a tree containing entries we cannot
-hardlink faithfully (symlinks, gitlinks), hardlinking unsupported (cross-device
-``OSError``), or a delta that is not actually smaller than a full build.
-
-One tracked path is deliberately never shared: see :data:`_UNSHAREABLE_BASENAMES`.
+Faithfulness is the attestation basis, so every doubt returns ``False`` for full
+materialization: no usable donor or objects, failed git plumbing, incomplete or mismatched
+trees, symlinks/gitlinks, unsupported hardlinks, or a delta no smaller than the tree.
 """
 
 from __future__ import annotations
@@ -62,22 +27,17 @@ from rebar._store.gitutil import run_git
 
 _LOG = logging.getLogger(__name__)
 
-# Only plain blobs can be faithfully hardlinked: a symlink would be dereferenced by
-# ``os.link`` (POSIX defaults to follow_symlinks=True) and a gitlink has no blob at all.
-# A tree containing either falls back to a full materialization rather than risk drift.
+# Only plain blobs are safe to hardlink; symlinks dereference and gitlinks lack blobs.
+# Either kind makes the tree fall back to full materialization.
 _LINKABLE_MODES = frozenset({"100644", "100755"})
 
-# Cap the donor search: the store can hold tens of thousands of entries and each candidate
-# costs a ``git diff``. The newest entries are the ones adjacent to the sha we are building.
+# Search only the newest likely neighbours; each candidate costs a ``git diff``.
 _MAX_DONOR_CANDIDATES = 8
 
 _SHA_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 
-# Tracked files that must NEVER be hardlinked between entries, even though they are part of
-# the committed tree. ``.ticket-write.lock`` is the store's advisory write lock, and
-# ``fcntl.flock`` is scoped to the INODE — sharing one inode across two entries would make a
-# lock taken through entry A block a writer in entry B. That coupling is invisible until it
-# deadlocks, so these paths are written fresh into every entry (they are tiny).
+# Never share inode-scoped advisory lock files across entries: one entry's ``flock`` would
+# otherwise block another. These tiny tracked paths are always rewritten.
 _UNSHAREABLE_BASENAMES = frozenset({".ticket-write.lock"})
 
 
@@ -87,11 +47,9 @@ def _unshareable(paths: set[str]) -> set[str]:
 
 
 def _tree_paths(repo_root: str, sha: str) -> set[str] | None:
-    """The blob paths of the committed tree at ``sha``, or ``None`` if it is not usable.
+    """Return ``sha``'s plain-blob paths, or ``None`` when delta reuse is unsafe.
 
-    ``None`` means "do not take the delta path": either git could not read the tree (the
-    objects are absent from this clone) or the tree holds an entry we cannot hardlink
-    faithfully (symlink / gitlink / anything not a plain blob)."""
+    Missing objects, unreadable trees, symlinks, and gitlinks fail closed."""
     proc = git_run(repo_root, "ls-tree", "-r", "-z", "--full-tree", "--end-of-options", sha)
     if proc.returncode != 0:
         return None
@@ -168,21 +126,11 @@ def _diff_paths(repo_root: str, donor_sha: str, sha: str) -> tuple[set[str], set
 
 
 def _link_tree_paths(donor_tree: Path, dest_tree: Path, paths: set[str]) -> bool:
-    """Hardlink exactly ``paths`` from ``donor_tree`` into ``dest_tree``.
+    """Hardlink exactly the ``git ls-tree`` paths from donor to destination.
 
-    ``paths`` comes from ``git ls-tree`` — NEVER from walking ``donor_tree``. A live entry
-    holds untracked files as well as its committed tree: every ``show_ticket`` read through a
-    pinned root drops a ``.cache.json`` (and transient ``..cache.json.*.tmp``) into the ticket
-    dir — 4,844 of them measured inside ONE live entry. They are gitignored, so they are not
-    in the tree. Cloning by directory walk would (a) copy those extras into the new entry,
-    which then no longer byte-matches ``git ls-tree -r <sha>``, and (b) make any
-    "walk-count == tree-count" completeness check fail forever in production, silently
-    disabling the delta path while looking green on a clean fixture.
-
-    Completeness is therefore verified path-by-path against the tree listing: a missing entry
-    means the donor was partially evicted (the janitor renames then rmtree's), so we return
-    ``False`` and the caller full-materializes. A symlink or a cross-device / unsupported-FS
-    ``OSError`` is the same fail-closed answer."""
+    Never walking the donor excludes untracked caches and temporary files. A missing path
+    signals partial eviction; symlinks, cross-device links, and unsupported filesystems are
+    likewise unsafe. Each case returns ``False`` for full materialization."""
     dest_tree.mkdir(parents=True, exist_ok=True)
     made: set[Path] = set()
     for rel in paths:
@@ -241,11 +189,8 @@ def _apply_delta(
     if read.returncode != 0:
         return False
     payload = "\0".join(sorted(writes)) + "\0"
-    # Bounded by the SAME timeout as the sibling ``read-tree`` above. ``git_run`` cannot
-    # carry stdin, so the bound is applied here and a timeout is folded into the module's
-    # fail-closed shape: log a diagnostic naming the operation (so a stall is
-    # distinguishable from slow progress) and return False — the caller then falls back
-    # to a full materialization.
+    # Share the read-tree timeout, but use run_git because checkout-index needs stdin.
+    # A timeout is diagnosed and fails closed to full materialization.
     try:
         proc = run_git(
             repo_root,
@@ -289,13 +234,10 @@ def materialize_via_donor(
     entry_prefix: str,
     subdir: str,
 ) -> bool:
-    """Build ``sha``'s tree into ``dest_tree`` from a hardlinked neighbour, if possible.
+    """Build ``sha`` from a hardlinked neighbour in the published entry layout.
 
-    Returns ``True`` when ``dest_tree`` now byte-matches the committed tree at ``sha``, and
-    ``False`` (leaving ``dest_tree`` cleaned out) when the caller must full-materialize —
-    the fail-closed path for every doubt listed in the module docstring. ``entry_prefix`` +
-    ``subdir`` describe the published layout to hunt donors in
-    (``<store>/<entry_prefix><sha>/<subdir>/``)."""
+    Return ``True`` only for a byte-faithful tree; otherwise clean ``dest_tree`` and return
+    ``False`` so the caller full-materializes."""
     target_paths = _tree_paths(repo_root, sha)
     if target_paths is None:
         return False

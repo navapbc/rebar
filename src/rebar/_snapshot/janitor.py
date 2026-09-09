@@ -1,55 +1,16 @@
-"""Snapshot-cache janitor — reclamation under disk pressure (epic ``raze-vet-ditch`` S2b).
+"""Reclaim snapshot-cache disk and metadata safely off the read/populate path.
 
-Reclaiming the content-addressed snapshot cache WITHOUT corrupting concurrent readers is
-the riskiest piece. A PID+heartbeat lease was spiked and REJECTED as unsound (N readers
-per entry, PID reuse, crash-stale leases); mature systems (Gitaly, Sourcegraph gitserver,
-Bazel, ccache) lean on kernel guarantees instead. This janitor does too — it relies on the
-S2 cache's POSIX delete-on-last-close reads + touch-on-read ``mtime`` recency, and never
-takes a per-reader lease. See ``docs/adr/0005-snapshot-cache-architecture.md``.
+Readers use touch-on-read ``mtime`` and POSIX delete-on-last-close, not unsound
+PID/heartbeat leases. One GC pass holds ``<root>/gc/lock`` and evicts LRU entries by
+atomically renaming them to trash before recursive deletion, so open descriptors survive.
 
-Design:
-  * **Off the hot path.** A SINGLE background pass (Bazel moved GC to idle), never invoked
-    from populate/read. :func:`start_background_janitor` runs :func:`run_gc` on an interval.
-  * **Trigger.** Primary = a FREE-SPACE watermark (:func:`shutil.disk_usage`), backstopped
-    by the incrementally-maintained byte total (no hot-path ``du``). The watermark has TWO
-    terms and the trigger is the LARGER: an absolute free-bytes floor
-    (``free_watermark_bytes``) and a VOLUME-RELATIVE headroom percentage
-    (``free_watermark_pct``, 0 = off). The absolute floor alone is disk-size-blind — on a
-    small root volume 2 GiB free is already >90% used, i.e. past the operator's
-    disk-pressure alarm, so reclamation could only ever engage after the alarm had already
-    breached. Once a pass starts reclaiming it runs on to a slightly higher TARGET
-    (``+RECLAIM_TARGET_MARGIN_PCT``) rather than stopping the instant it clears the
-    trigger, so passes do not thrash one entry at a time along the threshold.
-    The BYTE-TOTAL backstop is the ``max_bytes`` store-size cap (0 = off): when the running
-    total exceeds it the pass evicts LRU-first down to a target ``RECLAIM_TARGET_MARGIN_PCT``
-    below the cap — the same hysteresis, mirrored. Secondary = a max-age cold-trim of
-    genuinely cold entries, independent of space.
-    The ENTRY-COUNT cap (``max_entries``) is the one term denominated in neither bytes nor
-    free space. Every other axis measures the volume or the store's size, and on a large,
-    mostly-empty volume all of them are inert: bug ``a37c-d55c-72c3-439b`` measured 13,056
-    entries under a host's store with 886 GiB free, ``max_bytes`` off and every entry inside
-    the 7-day age window — no axis could fire, while the directory-entry COUNT drove macOS
-    ``fseventsd`` to 26.3 GB RSS and >150% CPU until the host could not launch applications.
-    The harm was filesystem METADATA pressure, so the bound has to be counted, not weighed.
-    It is ON by default (``max_bytes`` shipped opt-in and that is exactly why the incident
-    happened) and uses the same hysteresis, again mirrored: an armed pass runs the store down
-    to ``RECLAIM_TARGET_MARGIN_PCT`` below the cap.
-  * **Victim selection.** LRU by the cache's touch-on-read ``mtime`` (never ``atime``),
-    skipping any entry within a short grace window.
-  * **Eviction mechanism.** ``rename(<sha>, trash/<uuid>)`` (atomic disappearance from the
-    canonical path — open fds survive) THEN ``rmtree`` the trash entry — NEVER an in-place
-    recursive delete of a live entry.
-  * **Cross-process interlock.** A single GC pass holds an exclusive ``flock`` on
-    ``<root>/gc/lock``; population stays lock-free.
-  * **Recovery.** Startup sweep clears ``tmp/*`` + ``trash/*`` and reconciles the byte total
-    via one full walk; an interrupted rename→rmtree straggler is re-drained on a later pass.
-  * **Self-heal.** A corrupt/truncated entry is detected (content-digest reverify) and
-    discarded so the next acquire re-materializes it.
-
-Tunables (free-space watermark, grace window, max-age, byte-total cap, reverify period,
-background interval)
-are configurable with documented defaults via :class:`JanitorConfig` — resolved
-``REBAR_GATE_*`` env > ``[snapshot]`` config table > default.
+Reclamation combines four pressures: the larger of absolute and volume-relative free-space
+watermarks, an optional running-byte cap, an on-by-default entry-count cap for filesystem
+metadata, and independent cold-age trimming. The first three honor a grace window and fixed
+hysteresis margin. Startup removes temporary/trash remnants and reconciles byte accounting;
+digest reverification discards corruption for rematerialization. :class:`JanitorConfig`
+resolves documented defaults through ``REBAR_GATE_*`` environment values, then
+``[snapshot]`` configuration.
 """
 
 from __future__ import annotations
@@ -78,32 +39,19 @@ DEFAULT_FREE_WATERMARK_PCT = 0  # volume-relative headroom %, 0 = off (absolute 
 DEFAULT_GRACE_SECONDS = 120  # never evict an entry used within the last 2 minutes
 DEFAULT_MAX_AGE_SECONDS = 7 * 24 * 3600  # cold-trim entries untouched for > 7 days
 DEFAULT_MAX_BYTES = 0  # store-size cap in bytes: 0 = off (opt-in)
-# Entry-count cap: ON by default (bug a37c). Sized well above any plausible working set
-# — a host resolving gates all day holds tens to low hundreds of live snapshots — and far
-# below the 13,056 entries that melted the incident host, so it bounds metadata pressure
-# without ever evicting an entry a normal workload would reuse. 0 = off (operator opt-out).
+# The default entry cap exceeds normal working sets but bounds metadata pressure far below
+# the incident's 13,056 entries. Zero is the operator opt-out.
 DEFAULT_MAX_ENTRIES = 2000
 DEFAULT_REVERIFY_SECONDS = 0  # periodic integrity reverify: 0 = off (opt-in)
 DEFAULT_INTERVAL_SECONDS = 300  # background pass cadence
 DEFAULT_MIN_FREE_GIB = 2  # hard pre-clone admission floor
 
-# FIXED internal hysteresis margin (like DEFAULT_GRACE_SECONDS / DEFAULT_INTERVAL_SECONDS this
-# is a constant of the algorithm, NOT an operator knob — it is deliberately absent from
-# _default_tunables() and from the env/[snapshot] config seam). A pass that has started
-# reclaiming keeps going until free space reaches (free_watermark_pct + this) % of the volume,
-# so it overshoots the trigger instead of stopping on it and re-firing on the next pass. The
-# byte-total cap (``max_bytes``) reuses the SAME margin in the mirror-image direction: an armed
-# pass runs the store down to (100 - this) % of the cap rather than stopping the instant it
-# drops back under it.
+# Fixed algorithmic hysteresis, deliberately not configurable. An armed pass raises free
+# space by this margin or lowers byte/count totals by its mirror, avoiding threshold thrash.
 RECLAIM_TARGET_MARGIN_PCT = 5
 
-# Upper bound for ``free_watermark_pct``. The knob is headroom to KEEP FREE, but "80" reads
-# naturally as "reclaim at 80% used" — the INVERSE — and unclamped that asks for 80% of the
-# volume to be free, making ``free < trigger`` true at every plausible level: every pass would
-# evict the whole store and every gate would re-materialize its snapshot from scratch. At >=100
-# the trigger exceeds the volume outright and reclamation never terminates usefully. Half the
-# volume is already far more headroom than a CACHE may demand, so values above this are clamped
-# (never rejected — a janitor must not fail a gate over a tunable).
+# Clamp requested free headroom so inverted expectations or values near 100 cannot evict the
+# whole cache. Clamp rather than reject because a janitor tunable must not fail a gate.
 MAX_FREE_WATERMARK_PCT = 50
 
 
@@ -183,38 +131,14 @@ def _default_tunables() -> dict[str, int]:
 
 @dataclass
 class JanitorConfig:
-    """Snapshot-cache janitor tunables (documented defaults; env/config overridable).
+    """Integer janitor settings with documented environment/config overrides.
 
-    The free-space watermark has TWO terms and reclamation triggers on the LARGER of them:
-    ``free_watermark_bytes`` (an absolute free-bytes floor) and ``free_watermark_pct`` (free
-    space as a PERCENTAGE of the volume, ``0`` = off). The percentage term exists because the
-    absolute floor is disk-size-blind: the same 2 GiB is generous headroom on a 500 GiB volume
-    and >90% used on a 30 GiB one, so on a small root volume the janitor could not engage until
-    the host was already past its disk-pressure alarm. Set the percentage to the headroom the
-    deployment's alarm expects (e.g. ``20`` to reclaim at 80% used, below an 85% alarm).
-    Reclamation is HYSTERETIC: a pass starts at the trigger and then runs on to a target
-    ``RECLAIM_TARGET_MARGIN_PCT`` points higher (a fixed internal margin, not a knob), so it
-    does not stall on the threshold and re-fire every interval.
-
-    All values are INTEGERS — including the percentage, which is whole points, not a fraction.
-
-    ``max_bytes`` is the ADR 0005 byte-total backstop: a cap on the store's own size, in bytes,
-    enforced against the incrementally-maintained running total (never a hot-path ``du``). It is
-    independent of the free-space watermark — a shared or very large volume can stay far above
-    the watermark forever while the cache itself grows without bound — and defaults to ``0``
-    (off), so no existing deployment's behaviour changes until an operator sets it.
-
-    ``max_entries`` is the METADATA-pressure bound: a cap on how many entries the store may
-    hold, independent of how many bytes they occupy. Every other axis is denominated in bytes
-    or free space and is therefore inert on a large, mostly-empty volume, which is how bug
-    ``a37c-d55c-72c3-439b`` accumulated 13,056 entries with 886 GiB free and drove the host's
-    ``fseventsd`` to 26.3 GB RSS. Unlike ``max_bytes`` it defaults ON — an opt-in bound
-    protects nobody, as that incident proved — and ``0`` is the operator's explicit off
-    switch. It is hysteretic on the same fixed margin as the byte cap.
-
-    ``max_age_seconds`` is expected to be MUCH larger than ``grace_seconds`` (cold-trim
-    age ≫ recency-protection window); a contradictory ``max_age < grace`` would let the
-    cold-trim override the grace protection."""
+    Reclamation starts at the larger absolute free-byte floor or whole-percentage headroom
+    (zero disables the percentage), then continues through a fixed hysteresis margin.
+    ``max_bytes`` independently caps the incrementally maintained store total and defaults
+    off. ``max_entries`` bounds metadata regardless of disk size, defaults on, and uses zero
+    as an explicit opt-out; both caps share the margin. ``max_age_seconds`` should greatly
+    exceed ``grace_seconds`` so cold trimming does not defeat recency protection."""
 
     free_watermark_bytes: int = DEFAULT_FREE_WATERMARK_BYTES
     free_watermark_pct: int = DEFAULT_FREE_WATERMARK_PCT
@@ -250,11 +174,9 @@ def _gc_lock_path(root: Path) -> Path:
 
 
 def _is_entry(p: Path) -> bool:
-    """A content-addressed snapshot entry: a hex-named directory (not tmp/trash/gc/locks).
+    """Identify a hex code entry or ``tickets-<sha>`` entry, excluding sidecar dirs.
 
-    Includes the pinned ticket-store entries (``tickets-<sha>``, PR #67): the ``tickets-``
-    prefix is non-hex, so strip it before the hex check — otherwise those entries are
-    invisible to GC + the byte total and leak unboundedly as the tickets branch changes."""
+    Recognizing the ticket prefix keeps those advancing entries visible to GC and accounting."""
     if not p.is_dir():
         return False
     name = p.name
@@ -278,16 +200,11 @@ def _remove_sidecars(root: Path, sha: str) -> None:
 
 # ── eviction: rename-to-trash THEN rmtree (never in-place) ──────────────────────────
 def _evict(root: Path, entry: Path) -> int:
-    """Evict ONE entry: measure it, atomically rename it into trash (it disappears from the
-    canonical path immediately; readers holding open fds keep reading), rmtree the trash
-    copy, drop the byte total, and remove sidecars. Returns the bytes reclaimed.
+    """Rename one entry to trash, delete it, remove sidecars, and return freed bytes.
 
-    "Reclaimed" means bytes that actually LEFT the disk, which since bug 8386 is not the same
-    as the entry's size: ticket entries hardlink their unchanged blobs to a neighbour, and
-    dropping one of several links to an inode frees nothing at all. Both consumers of this
-    number need the honest one — the caller credits it to ``free`` against the watermark, and
-    it is the decrement applied to the running byte total — so it is measured with
-    ``exclusive_size`` BEFORE the rename, while the links are still countable."""
+    Measure :func:`exclusive_size` before rename: shared hardlinks free nothing, while the
+    result drives both free-space progress and the running-total decrement. Open readers
+    retain their descriptors after the canonical path disappears."""
     size = _cache.exclusive_size(entry)
     sha = entry.name
     dest = _trash_dir(root) / f"{uuid.uuid4().hex}"
@@ -340,13 +257,10 @@ def _entry_digest(entry: Path) -> str:
 
 
 def reverify_entry(sha: str, root: Path | None = None) -> bool:
-    """Verify a cache entry against its stored content digest; discard it if corrupt.
+    """TOFU-check an entry digest, evicting corruption for rematerialization.
 
-    Trust-on-first-use: the first call records the digest; later calls detect drift
-    (truncation/bit-rot). On mismatch the entry is evicted (rename-to-trash) so the next
-    acquire re-materializes it. The integrity sidecar's mtime doubles as the
-    "last-reverified" timestamp (bumped on every clean check) so :func:`run_gc` can honor
-    the configured reverify PERIOD. Returns ``True`` if found corrupt + discarded."""
+    The integrity sidecar's ``mtime`` records the last clean check for periodic GC
+    revalidation. Return ``True`` only when corruption was discarded."""
     root = root or store_root()
     entry = root / sha
     if not entry.is_dir():
@@ -358,10 +272,8 @@ def reverify_entry(sha: str, root: Path | None = None) -> bool:
     except OSError:
         stored = ""
     if not stored:
-        # TOFU baseline (mtime = now). Published via a UNIQUE same-dir temp + os.replace: a
-        # plain write_text lets a concurrent reader observe a TRUNCATED integrity stamp and
-        # evict a healthy entry, and a target-derived temp would just move the race
-        # (ticket b0ac-3c0f-3f64-4344).
+        # Publish the TOFU baseline through a unique same-dir temp and os.replace; a plain
+        # write or shared temp could expose a truncated stamp and evict a healthy entry.
         atomic_write(digest_path, current)
         return False
     if current != stored:
@@ -456,16 +368,11 @@ def run_gc(
 
 
 def _space_thresholds(total: int, cfg: JanitorConfig) -> tuple[int, int]:
-    """The ``(trigger, target)`` free-byte thresholds for one pass on a ``total``-byte volume.
+    """Return free-byte ``(trigger, target)`` thresholds for a volume.
 
-    ``trigger`` is where reclamation STARTS, ``target`` where an already-running pass STOPS
-    (hysteresis). Each is the larger of the absolute floor and the volume-relative term, so
-    raising one term can never weaken the other. With ``free_watermark_pct == 0`` the
-    volume-relative term is OFF and both collapse to ``free_watermark_bytes`` — bit-identical
-    to the absolute-floor-only behaviour, which is why the margin is not applied here.
-
-    The percentage is clamped to ``MAX_FREE_WATERMARK_PCT`` so an out-of-range value cannot
-    make the trigger meet or exceed the volume, which would evict the whole store every pass."""
+    Each is the larger absolute or clamped percentage term. Zero percentage preserves the
+    absolute-only behavior with no margin; otherwise the higher target provides hysteresis
+    without allowing an out-of-range value to evict the whole store."""
     if cfg.free_watermark_pct <= 0:
         return cfg.free_watermark_bytes, cfg.free_watermark_bytes
     pct = min(cfg.free_watermark_pct, MAX_FREE_WATERMARK_PCT)
@@ -475,32 +382,21 @@ def _space_thresholds(total: int, cfg: JanitorConfig) -> tuple[int, int]:
 
 
 def _byte_thresholds(root: Path, cfg: JanitorConfig) -> tuple[int, int]:
-    """The ``(current byte total, stop-at target)`` pair for the store-size cap term.
+    """Return current and hysteretic target bytes for the store cap.
 
-    ``max_bytes <= 0`` disables the cap, and we then skip the ``byte_total`` read entirely —
-    that read takes an flock, and a disabled term must cost nothing and change nothing. The
-    target is the cap reduced by ``RECLAIM_TARGET_MARGIN_PCT`` so an armed pass overshoots the
-    cap (the mirror of the free-space hysteresis) instead of stalling on it and re-firing on
-    every subsequent pass."""
+    A nonpositive cap avoids even the locked total read; an enabled cap targets below its
+    trigger so later passes do not immediately re-fire."""
     if cfg.max_bytes <= 0:
         return 0, 0
     return _cache.byte_total(root), cfg.max_bytes * (100 - RECLAIM_TARGET_MARGIN_PCT) // 100
 
 
 def _count_thresholds(entries: list[Path], cfg: JanitorConfig) -> tuple[int, int]:
-    """The ``(live entry count, stop-at target)`` pair for the entry-count cap.
+    """Return live and hysteretic target counts for the entry cap.
 
-    ``max_entries <= 0`` disables the cap and reports ``(0, 0)``, which can never arm the
-    term — the operator's explicit opt-out restores the pre-``a37c`` behaviour bit-for-bit.
-    The live count is ``len(entries)``: the pass has ALREADY enumerated the store to sort it
-    LRU-first, so the count is free here. Nothing upstream pays for it — in particular the
-    operation-linked trigger (:mod:`rebar._snapshot.gc_trigger`) still decides with one
-    ``stat`` of its stamp sidecar and never enumerates a 13k-entry store.
-
-    The target is the cap reduced by ``RECLAIM_TARGET_MARGIN_PCT``, mirroring the byte cap, so
-    an armed pass overshoots instead of stalling one entry above the cap and re-firing every
-    pass. Integer floor division means a cap small enough that the margin rounds away (< 20)
-    targets the cap itself; that is the correct degenerate case, not a bug."""
+    A nonpositive cap returns ``(0, 0)``. Counting is free after the GC pass's LRU
+    enumeration; the operation-linked trigger still performs only one stamp ``stat``.
+    Integer rounding may collapse the margin for tiny caps, correctly targeting the cap."""
     if cfg.max_entries <= 0:
         return 0, 0
     return len(entries), cfg.max_entries * (100 - RECLAIM_TARGET_MARGIN_PCT) // 100
@@ -517,19 +413,12 @@ def _reclaim_loop(
     space_trigger: int,
     space_target: int,
 ) -> None:
-    """Walk ``entries`` LRU-first and evict, accumulating into ``res`` in place.
+    """Evict ``entries`` LRU-first and accumulate results in ``res``.
 
-    FOUR independent reclamation terms compose here: the free-space watermark, the
-    ``max_bytes`` store-size cap, the ``max_entries`` entry-count cap, and the max-age
-    cold-trim. An entry goes if the volume wants space OR the store is over its byte budget OR
-    the store holds too many entries OR the entry is genuinely cold; the grace window protects
-    a recently-used entry from the first three exactly as it always has (the cold-trim
-    deliberately overrides it, as before). All three bounded terms are hysteretic — armed at
-    their trigger, disarmed only once the pass reaches the lower/higher TARGET.
-
-    The running byte total is tracked IN-LOOP by subtracting each eviction's reclaimed bytes
-    rather than re-reading ``byte_total`` per entry: that read is an flock round-trip and this
-    is the GC path's inner loop."""
+    Free-space, byte-cap, entry-cap, and cold-age pressure compose independently. Grace
+    protects recent entries from the first three; cold trim intentionally overrides it.
+    Bounded terms disarm only at hysteretic targets. Track bytes in-loop from each eviction
+    instead of taking a locked total read per entry."""
     grace_floor = now - cfg.grace_seconds
     max_age_floor = now - cfg.max_age_seconds
     used, byte_target = _byte_thresholds(root, cfg)

@@ -1,42 +1,15 @@
-"""The OPERATION-LINKED snapshot-GC trigger — reclamation without the review-bot server.
+"""Portable, operation-linked snapshot reclamation outside the review-bot server.
 
-:func:`janitor.run_gc` had exactly one production driver: the review-bot FastAPI lifespan's
-resident thread (:func:`janitor.start_background_janitor`). Every OTHER host that resolves an
-attested gate — a laptop running ``rebar review-plan``, a CI runner, any library embedding —
-populates ``$REBAR_GATE_TMPDIR/rebar-gate-snapshots`` and never reclaims it; one developer host
-measured 64,021 entries / 47.24 GiB, append-only for the life of the machine (bug
-``undamaged-epidermic-kakarikis``). A trigger keyed to a CI provider or a daemon would not be
-portable (``project.portability``), so — exactly as compaction concluded in
-:mod:`rebar._commands.compact_trigger` — the floor has to be linked to an operation the host
-already runs: gate resolution itself.
+CLI, CI, and library gate resolution can populate the per-host store without a resident
+janitor, so every attested gate cheaply considers GC. The decision performs one stamp
+``stat``—never a store walk or ticket-store lock—and runs any pass in a detached child.
+A v2 stamped worker lock supplies cross-process single-flight, PID-reuse handling,
+fail-without-proof behavior, and a wall-clock ceiling. Sidecars live in the canonical
+``<store>/gc`` shared by all worktrees.
 
-The operator ruling on that ticket pins the shape: an operation-linked trigger is acceptable
-ONLY with the pattern that fixed bug ``0d15-59a4`` ("Sweep walks full git history per ticket
-under the store lock"). Concretely:
-
-* the trigger's decision is near-free — ONE ``stat`` of a stamp sidecar (the O(1) marker
-  discipline the enrich-drain gate settled on), never an enumeration of a store that
-  this bug measured at 64k entries;
-* it takes NO ticket-store lock in any branch — nothing here imports ``rebar._store.lock``,
-  and the pass it spawns operates on the snapshot store, which has its OWN interlocks
-  (``run_gc``'s non-blocking flock on ``<store>/gc/lock``; the byte total's flock);
-* the pass runs in a DETACHED child, so the gate that triggered it returns immediately and the
-  child outlives the (possibly ephemeral) worktree that spawned it;
-* single-flight across simultaneous hosts'-worktrees/processes via a worker-lock sidecar
-  carrying the v2 owner stamp, adjudicated by the SHARED decision table
-  (:func:`rebar._store.lock_owner.stamped_file_is_stale`) so pid-recycle qualification,
-  refuse-without-proof and the wall-clock ceiling are inherited, not re-derived.
-
-Unlike the compaction trigger's sidecars — keyed on the canonical TRACKER because worktrees
-view one store through symlinks — these sidecars live inside the snapshot store itself
-(``<store>/gc/``): the store is per-host and already canonical (``store_root()`` resolves it
-identically from every worktree), so every checkout on the host shares one clock and one lock
-by construction.
-
-The review-bot's resident janitor is untouched and remains a supplementary cadence. Overlap is
-harmless by construction: both drivers funnel into ``run_gc``, whose non-blocking flock makes
-the loser return ``skipped="locked"`` — and a skipped pass does NOT stamp (the ``run_sweep``
-lesson: a stand-aside that resets the clock goes quiet forever under contention).
+This driver and the resident janitor both enter :func:`janitor.run_gc`; its non-blocking
+store lock makes overlap harmless. Only a pass that actually ran updates the stamp, so a
+contended stand-aside does not suppress the next attempt.
 """
 
 from __future__ import annotations
@@ -88,13 +61,10 @@ def _log_path(root: Path) -> Path:
 
 
 def worker_lock_probe_path() -> Path:
-    """The worker lock's path on THIS host's store, derived read-only for diagnostics.
+    """Return this host's worker-lock path without creating the store.
 
-    ``rebar doctor``'s lock census needs to name this lock without materialising anything:
-    :func:`~rebar._snapshot.repo_snapshot.store_root` mkdirs+chmods the root and
-    :func:`_gc_dir` mkdirs the sidecar directory as side effects, so this seam composes the
-    path from :func:`~rebar._snapshot.repo_snapshot.peek_store_root` instead — gc_trigger
-    owns the sidecar layout, so the census does not re-derive it."""
+    ``rebar doctor`` uses the owner-defined layout with ``peek_store_root`` so its census
+    has no mkdir or chmod side effects."""
     from rebar._snapshot.repo_snapshot import peek_store_root
 
     return peek_store_root() / _GC_DIRNAME / _WORKER_LOCK_NAME
@@ -111,11 +81,9 @@ def record_pass(root: Path) -> None:
 
 
 def _pass_is_due(root: Path, interval_s: int) -> bool:
-    """Whether the last pass is older than *interval_s* (one ``stat`` — the whole point).
+    """Check one stamp for an overdue pass; a missing stamp is due.
 
-    A MISSING stamp reads as due: the host that never reclaimed is exactly the one that most
-    needs to. ``interval_s <= 0`` disables the trigger entirely (the off switch — the knob is
-    the janitor's own ``interval_seconds`` cadence, not a new one)."""
+    Nonpositive ``interval_s`` disables the trigger through the janitor's existing knob."""
     if interval_s <= 0:
         return False
     try:
@@ -126,11 +94,9 @@ def _pass_is_due(root: Path, interval_s: int) -> bool:
 
 
 def _acquire_worker_lock(root: Path) -> int | None:
-    """Best-effort non-blocking advisory lock: an open fd, or ``None`` if a live worker holds
-    it. NOT any ticket-store lock — a caller that cannot get it simply does not spawn. The
-    mechanism is :func:`rebar._store.stamped_lock.stamped_file_lock`, shared with the drain and
-    compaction triggers; the directory is this site's own, because ``_gc_dir`` creates
-    ``<store>/gc/`` as a side effect of deriving the path — hence the wrapped call below."""
+    """Take the shared non-blocking stamped worker lock, never a ticket-store lock.
+
+    Return its fd, or ``None`` when the sidecar cannot be created or a worker is live."""
     try:
         path = _worker_lock_path(root)
     except OSError:
@@ -155,14 +121,10 @@ def _janitor_config(repo_root: str | None) -> JanitorConfig:
 
 
 def _spawn_detached_gc(root: Path, repo_root: str | None) -> None:
-    """Detach a GC child that outlives this gate op (POSIX), via the shared detached-rebar-
-    child spawner (:func:`rebar._proc.spawn_detached`), which owns the PYTHONPATH bootstrap,
-    the ``-c`` re-entry stub, the platform detach flags, the stdio discipline (no stdin,
-    stderr to the log sink chosen here) and the durable ``cwd`` (bug ``3198-438c-72a5-470f``)
-    anchored on the store root — per-host, outside any repo, and never an ephemeral worktree
-    that can vanish mid-pass. The never-raise posture stays HERE: a detach failure must not
-    fail the gate that triggered it. ``repo_root`` rides argv as ``""`` for ``None``;
-    :func:`run_detached` coerces it back."""
+    """Spawn GC detached from the gate, using the durable store root as ``cwd``.
+
+    The shared spawner owns bootstrap, re-entry, platform flags, and stdio. Failures never
+    fail the gate; an absent ``repo_root`` crosses argv as ``""`` for :func:`run_detached`."""
     from rebar._proc import spawn_detached
 
     try:
@@ -183,20 +145,12 @@ def _spawn_detached_gc(root: Path, repo_root: str | None) -> None:
 
 
 def run_detached(root: str | os.PathLike[str], repo_root: str | None = None) -> None:
-    """Hold the worker lock and run one :func:`janitor.run_gc` pass. The child's entry point.
+    """Run the resident janitor's policy under the detached worker lock.
 
-    Runs the SAME policy the review-bot's resident janitor runs (hysteretic watermark, grace
-    window, cold-trim, ``max_bytes`` backstop, ``max_entries`` count cap), so the two drivers
-    cannot reclaim by different rules. The count cap needs no plumbing of its own here: it is a
-    :class:`~rebar._snapshot.janitor.JanitorConfig` field, so :func:`_janitor_config` already
-    carries it into the pass, and it is evaluated INSIDE ``run_gc`` from the enumeration that
-    pass performs anyway — :func:`maybe_gc`'s decision stays one ``stat`` of the stamp sidecar
-    (bug ``a37c-d55c-72c3-439b``). Overlap with that janitor is harmless: ``run_gc``'s
-    non-blocking flock makes the loser return ``skipped="locked"``.
-
-    Stamps ONLY a pass that actually ran: a stand-aside must leave the clock alone so the next
-    gate op tries again — stamping it would suppress the trigger for a full interval while the
-    store reclaimed nothing (the ``compact_trigger.run_sweep`` lesson, verbatim)."""
+    :class:`~rebar._snapshot.janitor.JanitorConfig` carries watermark, grace, cold-trim,
+    byte-cap, and entry-cap policy into :func:`janitor.run_gc`; the trigger itself remains
+    one ``stat``. The GC lock resolves overlap with the resident driver. Stamp only a pass
+    that ran, never a lock-contention skip."""
     # The shared spawner's argv carries plain strings; the detached stub hands "" through
     # for an absent repo root, so coerce it back to None here (the child's entry point).
     repo_root = repo_root or None
@@ -218,13 +172,10 @@ def run_detached(root: str | os.PathLike[str], repo_root: str | None = None) -> 
 
 
 def maybe_gc(repo_root: str | None = None) -> None:
-    """The operation-linked trigger, called on the tail of an attested gate resolution.
+    """Consider detached GC after an attested gate without raising or blocking it.
 
-    NEVER raises and never blocks the gate: its decision is one stamp ``stat`` (plus the
-    janitor-tunable resolution the gate has already paid for several times over), every branch
-    is guarded, and the pass itself happens in a detached child. It holds NO ticket-store lock
-    — this module never touches ``rebar._store.lock`` — and does not enumerate the store.
-    Windows is a v1 no-op, mirroring the compaction trigger and the enrichment drain."""
+    The trigger resolves existing janitor settings, stats one stamp, holds no ticket-store
+    lock, and never enumerates the store. Windows remains a no-op."""
     try:
         if sys.platform == "win32":  # pragma: no cover - POSIX CI
             return
@@ -236,9 +187,8 @@ def maybe_gc(repo_root: str | None = None) -> None:
         root = store_root()
         if not _pass_is_due(root, cfg.interval_seconds):
             return
-        # Don't detach a worker when one is already running: the lock is the storm control,
-        # and probing it here keeps a burst of gate ops from spawning a burst of children.
-        # The child re-acquires it for real, so losing this race is harmless.
+        # Probe the worker lock to prevent spawn storms; the child reacquires it, so a race
+        # only creates a harmless contender.
         probe = _acquire_worker_lock(root)
         if probe is None:
             return

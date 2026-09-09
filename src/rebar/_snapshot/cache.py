@@ -1,26 +1,11 @@
-"""Content-addressed snapshot cache — the read/populate path (epic ``raze-vet-ditch`` S2).
+"""Concurrent, content-addressed snapshot reads and population.
 
-The same SHA is often requested by several concurrent gates; an immutable SHA is a
-perfect cache key (no staleness), so ``<root>/<sha>/`` is content-addressed. This layer
-sits on top of the S1 materialization core (:mod:`rebar._snapshot.repo_snapshot`) and
-adds the safe-concurrent **read/populate** path:
-
-* **Single-flight** per SHA — an in-process per-SHA lock collapses concurrent same-SHA
-  requests to ONE materialization; an additional cross-process ``flock(LOCK_EX)`` on
-  ``locks/<sha>.lock`` collapses racing *processes* too. A lost race is only ever
-  *wasteful* (a redundant build of identical content), never *wrong*.
-* **Reader safety via POSIX delete-on-last-close** — eviction (the sibling janitor)
-  renames an entry away and ``rmtree``s it, NEVER deletes in place; a reader holding an
-  open fd keeps reading the evicted content, and a *new* lookup that hits ``ENOENT``/a
-  read error treats it as a miss and re-materializes (:class:`CacheMiss`).
-* **Recency by touch-on-read ``mtime``** — every cache hit ``utime``s the entry so the
-  janitor can evict LRU by ``mtime`` (NEVER ``atime``, which is unreliable under
-  ``relatime``/``noatime``). There is deliberately **no PID/heartbeat lease** anywhere.
-* **Byte accounting** — the store's running byte total is incremented atomically (under
-  an flock) when THIS caller populates an entry; the janitor reconciles/decrements it.
-
-Reclamation/eviction/disk-pressure handling is the sibling janitor story — this module
-only populates, reads, accounts, and records recency.
+An immutable SHA keys ``<root>/<sha>/``. Per-SHA thread locks plus a cross-process
+``flock`` make population single-flight; losing a race is merely redundant. Hits touch
+``mtime`` for LRU, never unreliable ``atime``, and use no PID/heartbeat leases. The
+janitor renames before deletion, so open POSIX file descriptors remain readable while
+failed new opens become :class:`CacheMiss`. A successful populater atomically adds its
+exclusive bytes; the janitor owns reclamation and reconciliation.
 """
 
 from __future__ import annotations
@@ -127,14 +112,10 @@ def add_bytes(delta: int, root: Path | None = None) -> int:
 
 
 def entry_size(path: Path) -> int:
-    """Total bytes of a materialized entry, ignoring any sharing (one walk).
+    """Return an entry's apparent bytes, counting shared hardlinks in every entry.
 
-    This is a REPORTING figure — "how big is this tree" — and it deliberately double-counts a
-    blob that several entries hardlink. It is NOT a safe basis for accounting or reclamation;
-    use :func:`exclusive_size` (what populating added / evicting frees) and
-    :func:`distinct_bytes` (what the store really occupies) for those. It stays the
-    subsystem's exported size primitive precisely because "how big is this tree" is still a
-    question worth asking — just not the one the byte total is answering."""
+    This reporting size is unsuitable for accounting or reclamation; use
+    :func:`exclusive_size` there and :func:`distinct_bytes` for store occupancy."""
     total = 0
     for dirpath, _dirnames, filenames in os.walk(path):
         for name in filenames:
@@ -146,24 +127,12 @@ def entry_size(path: Path) -> int:
 
 
 def exclusive_size(path: Path) -> int:
-    """Bytes that exist ONLY because of this entry — its files with no other hard link.
+    """Return bytes unique to this entry: files whose ``st_nlink`` is one.
 
-    This is the one figure that is correct for BOTH ends of the store's incremental
-    accounting, and the two uses are the same question asked in opposite directions:
-
-    * **Populating** an entry adds exactly the bytes whose FIRST link it created. A file the
-      builder hardlinked from a neighbour (:mod:`rebar._snapshot.delta_tree`) was already
-      counted when that neighbour was built, and has ``st_nlink > 1`` here.
-    * **Evicting** an entry frees exactly the bytes whose LAST link it removes. Dropping one
-      of ``k`` links frees NOTHING; the survivors still pin the inode.
-
-    Because each inode is therefore added once and subtracted once, the running total tracks
-    :func:`distinct_bytes` exactly, with no drift and no rounding.
-
-    An apportioned ``st_size // st_nlink`` was tried and is wrong for both: it is a sensible
-    way to divide bytes up for a report, but as an increment it credits a fraction of bytes
-    that are still on disk, so the free-space loop stops short of the watermark and the
-    ``max_bytes`` cap evicts against space it never recovered."""
+    Population thereby adds only first-link bytes and eviction subtracts only last-link
+    bytes, keeping the running total aligned with :func:`distinct_bytes`. Shared donor
+    hardlinks count zero. Apportioning ``st_size // st_nlink`` is wrong because it credits
+    bytes that remain on disk."""
     total = 0
     for dirpath, _dirnames, filenames in os.walk(path):
         for name in filenames:
@@ -203,11 +172,9 @@ def distinct_bytes(paths: Iterable[Path]) -> int:
 # Reader-safe file access.
 # --------------------------------------------------------------------------------------
 def open_in_snapshot(handle: SnapshotHandle, relpath: str, mode: str = "rb") -> IO[bytes]:
-    """Open a file under a snapshot, translating a vanished/unreadable entry into a
-    :class:`CacheMiss` (the entry was evicted mid-read — re-acquire and retry).
+    """Open a snapshot file, raising :class:`CacheMiss` if its entry is unreadable.
 
-    Open the returned fd up front and keep reading it: POSIX delete-on-last-close means
-    the content stays readable even if the janitor evicts the entry while you hold it."""
+    An already-open fd remains valid across POSIX rename-and-delete eviction."""
     target = Path(handle.path) / relpath
     try:
         return open(target, mode)
@@ -227,19 +194,16 @@ def acquire(
     repo_root: str | None = None,
     fetch: bool = True,
 ) -> SnapshotHandle:
-    """Return a :class:`SnapshotHandle` for ``ref``, single-flight populating the cache.
+    """Return a cached handle for ``ref``, populating it single-flight when absent.
 
-    ``local`` mode passes straight through to the in-place checkout (never cached, never
-    signable). ``attested`` resolves ``ref`` to an immutable SHA (one coalesced fetch),
-    then: cache hit → touch recency + return; cache miss → take the in-process + cross-
-    process single-flight locks, re-check, materialize via S1 (atomic populate), and
-    account the populated bytes exactly once."""
+    ``local`` returns the uncached, unsigned checkout. ``attested`` resolves one immutable
+    SHA, touches hits, and on a miss rechecks under thread and process locks before atomic
+    materialization and one-time byte accounting."""
     if source_mode == SOURCE_LOCAL:
         return materialize(source_mode=SOURCE_LOCAL, repo_root=repo_root)
 
-    # blobless=False: this resolution is the fetch that BACKS the materialization below
-    # (S1 is then called with fetch=False), so the blobs must come down with the commit in
-    # one RPC — a blob:none fetch here would leave the plumbing to lazy-fetch file by file.
+    # This fetch backs materialization, so request blobs now; S1 then runs with fetch=False.
+    # A blobless fetch would force the plumbing to lazy-fetch each file.
     sha = resolve_ref(ref, repo_root, fetch=fetch, blobless=False)
     root = store_root()
     dest = entry_path(sha, root)

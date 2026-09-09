@@ -1,56 +1,20 @@
-"""Faithful, lock-free git-ref snapshot materialization (epic ``raze-vet-ditch`` S1).
+"""Faithfully materialize an immutable git ref without touching the working index.
 
-The gates need a real on-disk tree at a pinned SHA, but the server's worktree is
-mutable and shared. ``git archive`` is *lossy* as an attestation basis — it drops
-``.gitattributes`` ``export-ignore`` paths, rewrites ``export-subst`` placeholders,
-omits submodule contents, and emits Git-LFS *pointer* text rather than smudged
-content. For a verdict that claims "this is the code at SHA X" we want the committed
-tree EXACTLY, so this builds it with git plumbing instead:
+Attested gates need a pinned committed tree, not the mutable server checkout or lossy
+``git archive`` output. A coalesced fetch resolves the SHA; ``read-tree`` and
+``checkout-index`` use a throwaway ``GIT_INDEX_FILE`` before atomic publication. This
+preserves committed bytes, including export-ignored and unsubstituted files, while
+different SHAs contend only during fetch. LFS pointer blobs and omitted submodule gitlinks
+are detected and surfaced on the handle.
 
-    (coalesced) ``git fetch origin`` → resolve ``ref`` to an immutable SHA →
-    ``git read-tree <sha>`` into a *temp* index (``GIT_INDEX_FILE``) →
-    ``git checkout-index --all --prefix=<tmp>/`` → atomic ``rename`` into the cache.
+Builds use a private configured/temp root outside the repository, POSIX locking with an
+atomic-mkdir fallback, and fsynced rename from ``tmp`` so readers never see partial trees;
+:func:`sweep_tmp` recovers crashes. Arbitrary-SHA fetches require the remote to allow
+reachable wants, and private-repo credential failures close with :class:`SnapshotFetchError`.
 
-Why ``read-tree`` + ``checkout-index`` (not ``git archive``):
-  * **Faithful.** ``checkout-index`` materializes the committed blob for every tree
-    entry, so ``export-ignore`` files ARE present and ``export-subst`` is NOT applied
-    (the committed bytes are preserved verbatim) — the snapshot byte-matches the tree.
-  * **Lock-free across SHAs.** The index is a throwaway file pointed at by
-    ``GIT_INDEX_FILE``; neither ``read-tree`` nor ``checkout-index`` touches the repo's
-    own ``index.lock``/``config.lock`` or working tree, so two materializations of
-    different SHAs never contend. Only the (coalesced) fetch takes repo locks.
-
-Faithfulness limits, by construction (detected + surfaced, never silently wrong):
-  * **Git-LFS** — a tracked LFS path's committed blob *is* its ~130-byte pointer text;
-    no smudge filter runs here. We DETECT pointers (magic header) and record them on
-    the handle so a gate is never handed pointer text as if it were real content.
-  * **Submodules** — a gitlink (mode ``160000``) has no blob; ``checkout-index`` does
-    not populate it. Submodule contents are intentionally OMITTED; the gitlink paths
-    are recorded on the handle.
-
-Portability + safety:
-  * No external ``tar`` is ever invoked. The temp root comes from ``REBAR_GATE_TMPDIR``
-    (overridable) else :func:`tempfile.gettempdir` — never a hardcoded ``/tmp`` — and is
-    created OUTSIDE the repo/``.git`` with ``0700`` perms. Cross-process coordination
-    uses ``fcntl.flock`` with an atomic-``mkdir`` fallback for platforms without it.
-  * Population is atomic: the tree is built under ``<root>/tmp/<uuid>/`` and ``rename``-d
-    into ``<root>/<sha>`` (fsync'd), so a reader never observes a partial tree and a
-    crash leaves only a ``tmp/`` entry that :func:`sweep_tmp` clears on startup.
-
-Fetch prerequisites (operators): fetching an *arbitrary SHA* requires the remote's
-``uploadpack.allowReachableSHA1InWant`` (else fetch a containing ref then resolve).
-A private-repo fetch with missing credentials raises a descriptive, actionable
-:class:`SnapshotFetchError` (attested mode fails closed; local mode never fetches).
-
-Filtering policy — **filter iff you will NOT materialize**. ``--filter=blob:none`` is kept
-only for *pure ref-RESOLUTION* fetches (its designed use: commits and trees) and DROPPED
-(``--no-filter``) for any fetch backing a ref we are about to materialize, because (a) git
-batches missing-blob fetches only in ``unpack-trees``' working-tree update path, which
-``read-tree`` (no ``-u``) and ``checkout-index`` never reach — so a blob-starved
-materialization degrades to ONE round-trip per file (hours on a 25k-file tree) — and (b)
-``git fetch --filter`` permanently marks the remote a promisor
-(``remote.<name>.promisor``/``.partialclonefilter``), so a clone that filters once keeps
-filtering forever. An ALREADY-latched clone is repaired by :func:`_ensure_blobs_present`.
+Pure resolution may fetch ``--filter=blob:none``. A fetch backing materialization uses
+``--no-filter`` so blobs arrive together and an ordinary clone is not latched into promisor
+mode; :func:`_ensure_blobs_present` repairs already-partial clones in one batch.
 """
 
 from __future__ import annotations
@@ -103,14 +67,9 @@ _SOURCE_MODES = (SOURCE_ATTESTED, SOURCE_LOCAL)
 
 DEFAULT_REF = "origin/main"
 
-# --------------------------------------------------------------------------------------
-# Store layout
-# --------------------------------------------------------------------------------------
-# The content-addressed snapshot store lives OUTSIDE the repo so a gate's read-only/no-git
-# tools never reach it and a snapshot is never mistaken for working-tree state. Layout:
-#   <root>/<sha>/      a materialized, immutable snapshot (entry; content-addressed)
-#   <root>/tmp/<uuid>/ an in-progress build (renamed into <sha> on success)
-# Sibling modules add <root>/locks, <root>/trash, <root>/gc for the cache + janitor.
+# Store snapshots outside the repository: ``<root>/<sha>`` is immutable and
+# content-addressed; ``<root>/tmp/<uuid>`` is an unpublished build renamed on success.
+# Sibling cache/janitor modules own ``locks``, ``trash``, and ``gc``.
 
 _STORE_DIRNAME = "rebar-gate-snapshots"
 
@@ -120,18 +79,11 @@ _ENTRY_NAME_RE = re.compile(r"\A(tickets-)?[0-9a-f]{40}\Z")
 
 
 def in_snapshot_entry(path: str | os.PathLike[str]) -> bool:
-    """True when ``path`` lies inside a published snapshot-store entry.
+    """Return whether ``path`` is structurally inside a published snapshot entry.
 
-    Entries are immutable, content-addressed trees (ADR 0005 D2): after publication
-    nothing may write inside one — reads keep adding derived files otherwise (bug
-    5c27-7926), which breaks the janitor's TOFU reverify digest and, with hardlink
-    blob-sharing between adjacent entries (bug 8386), makes any in-place write a
-    cross-entry corruption hazard. Writers of derived state (e.g. the reducer cache)
-    consult this to skip the write when the tree they were pointed at is a snapshot.
-
-    The check is structural — the store layout (``…/rebar-gate-snapshots/<entry>/…``)
-    is recognized in the path itself — so it holds in any process regardless of which
-    env/config produced the root it was handed."""
+    Published trees are immutable: derived writes would invalidate digest reverification
+    and could corrupt hardlinked neighbours. Recognizing the store layout in the path lets
+    any process suppress such writes without reproducing its environment/config root."""
     parts = Path(os.path.abspath(os.fspath(path))).parts
     return any(
         parent == _STORE_DIRNAME and _ENTRY_NAME_RE.match(child) is not None
@@ -140,10 +92,9 @@ def in_snapshot_entry(path: str | os.PathLike[str]) -> bool:
 
 
 def peek_store_root() -> Path:
-    """Where the store root IS (or would be) — the same derivation as :func:`store_root`
-    with NO side effects: nothing is created and no mode is touched, so a read-only
-    diagnostic (``rebar doctor``'s lock census) can name the path without materialising a
-    store on a host that never had one."""
+    """Derive the store root without creating it or changing permissions.
+
+    Read-only diagnostics such as ``rebar doctor`` can therefore name absent-store locks."""
     from rebar import config
 
     base = config.resolve_gate_tmpdir() or tempfile.gettempdir()
@@ -151,12 +102,10 @@ def peek_store_root() -> Path:
 
 
 def store_root() -> Path:
-    """The base directory of the content-addressed snapshot store.
+    """Return the content-addressed store root, creating it privately if absent.
 
-    ``REBAR_GATE_TMPDIR`` overrides the base (operators point it at a roomy local FS);
-    otherwise :func:`tempfile.gettempdir` is used — never a hardcoded ``/tmp``. Created
-    ``0700`` if absent. The override is resolved through the owned config seam
-    (:func:`rebar.config.resolve_gate_tmpdir`), not read from ``os.environ`` here."""
+    The owned config seam selects an operator override or :func:`tempfile.gettempdir`,
+    never a hardcoded ``/tmp``; creation uses mode ``0700``."""
     root = peek_store_root()
     root.mkdir(parents=True, exist_ok=True)
     try:
@@ -167,11 +116,9 @@ def store_root() -> Path:
 
 
 def _fetch_lock_path() -> Path:
-    """The cross-process ``git fetch`` lock file, inside the snapshot store.
+    """Return the store-owned process fetch-lock path.
 
-    The store owns this layout, so the path is computed here and handed to
-    :func:`~rebar._snapshot.git_fetch.fetch_origin` rather than that lower layer
-    importing the store back (which would close an import cycle)."""
+    Passing it to lower-level ``fetch_origin`` preserves the one-way dependency."""
     return store_root() / "locks" / "fetch.lock"
 
 
@@ -214,22 +161,12 @@ def _load_caveats(sha: str, root: Path) -> tuple[tuple[str, ...], tuple[str, ...
 # --------------------------------------------------------------------------------------
 @dataclass
 class SnapshotHandle:
-    """A read root for a code-reading gate.
+    """A gate's code and ticket read roots plus faithfulness metadata.
 
-    ``path`` is the directory the gate reads from: a materialized snapshot dir in
-    ``attested`` mode, or the in-place checkout (``repo_root``) in ``local`` mode.
-    ``sha`` is the resolved immutable commit (``None`` in local mode — the checkout may
-    be dirty). ``lfs_pointers`` / ``submodules`` record the faithfulness caveats so a
-    gate or signer is never silently handed pointer text / an empty submodule dir.
-    ``tickets_path`` is the read root for the agent's rebar TICKET tools — a separately
-    materialized, pinned copy of the ticket store (the ``tickets`` branch lives on an
-    orphan ref, so it is absent from the code snapshot ``path``). ``None`` = read the
-    in-place checkout's store (local mode); attested sets it via :func:`materialize_tickets`.
-
-    The handle owns NO resource lifetime: snapshot-store entries are a shared cache whose
-    cleanup is the janitor's (snapshot GC's) responsibility, never the handle's — a
-    per-handle release would defeat the caching (bug 8386).
-    """
+    Attested ``path`` and ``sha`` identify an immutable tree; local mode uses the possibly
+    dirty checkout and ``sha=None``. ``lfs_pointers`` and ``submodules`` expose incomplete
+    content. ``tickets_path`` separately pins the orphan ticket store in attested mode, or
+    is ``None`` for local reads. Handles own no lifetime; the janitor manages shared entries."""
 
     path: Path
     sha: str | None
@@ -252,20 +189,16 @@ def resolve_ref(
     remote: str = "origin",
     blobless: bool = True,
 ) -> str:
-    """Resolve a client ``ref`` (branch | tag | SHA) to an immutable commit SHA.
+    """Resolve a branch, tag, or SHA to an immutable commit.
 
-    When an ``origin`` remote exists and ``fetch`` is set, a locally-present full SHA skips its
-    fetch (immutable; :func:`~rebar._snapshot.git_fetch.is_present_full_sha`); any other ref
-    fetches SCOPED (:func:`~rebar._snapshot.git_fetch.scoped_fetch_target`). A SHA absent locally
-    needs ``uploadpack.allowReachableSHA1InWant``. Raises :class:`SnapshotRefError`
-    (fail-closed) if the ref never resolves, or :class:`SnapshotFetchError` for a
-    transport/auth/stall failure. ``blobless`` forwards to ``fetch_origin`` (a MATERIALIZE
-    caller passes ``blobless=False``)."""
+    A present full SHA skips fetching; other refs fetch only their scoped target. Absent SHAs
+    require reachable-want support. Resolution and transport/auth/stall failures close as
+    :class:`SnapshotRefError` and :class:`SnapshotFetchError`; materializers pass
+    ``blobless=False`` through to ``fetch_origin``."""
     root = str(repo_root) if repo_root else "."
     remote_present = fetch and has_remote(root, remote)
-    # SKIP the fetch for a locally-present full SHA (bug sawdusty-snotty-fossa; immutable, none
-    # owed); else SCOPE it to `ref` (bug lemuroid-compliant-hoopoe) so a bare all-heads fetch
-    # never pulls the tickets history. Transport/auth/stall FAILS CLOSED; is_missing_ref -> ref err.
+    # Present full SHAs are immutable and need no fetch; otherwise target only `ref`, never
+    # all heads. Transport failures close; a missing target becomes a resolution error.
     if remote_present and not is_present_full_sha(root, ref):
         try:
             fetch_origin(
@@ -354,16 +287,11 @@ def _fsync_dir(path: Path) -> None:
 # Blob top-up — make materialization independent of git's per-blob lazy fetch
 # --------------------------------------------------------------------------------------
 def _has_missing_blobs(repo_root: str, sha: str) -> bool:
-    """Cheap, OFFLINE probe: does the local object DB lack any blob of ``sha``'s tree?
+    """Probe offline for missing objects in one commit's tree.
 
-    ``git rev-list --objects --missing=print --no-object-names --no-walk <sha>`` lists the
-    commit's tree entries, prefixing each ABSENT object with ``?``. ``--missing`` turns git's
-    own lazy fetch OFF internally, so the probe never perturbs what it measures (no env guard
-    needed — and none may be used: ``GIT_NO_LAZY_FETCH`` is silently ignored before git
-    2.45); ``--no-walk`` scopes it to this ONE commit's tree, not all history. A normal clone
-    has nothing missing, so this returns ``False`` and the top-up is inherently a no-op there.
-    A probe failure reads as "nothing known to be missing" — it must never become a new way
-    for materialization to fail."""
+    ``rev-list --missing=print --no-walk`` disables lazy fetching and marks absences with
+    ``?``. A normal clone or failed probe reports no known missing blobs, so this best-effort
+    optimization cannot fail materialization."""
     probe = ["rev-list", "--objects", "--missing=print", "--no-object-names", "--no-walk"]
     # --end-of-options: the SHA is a positional, so it must never be read as an option.
     proc = git_run(repo_root, *probe, "--end-of-options", sha)
@@ -374,33 +302,21 @@ def _has_missing_blobs(repo_root: str, sha: str) -> bool:
 
 # raw-git-ok: read-oriented git helper, variable subcommand
 def _ensure_blobs_present(repo_root: str, sha: str, remote: str) -> None:
-    """Best-effort: guarantee ``sha``'s blobs are local BEFORE the plumbing runs.
+    """Best-effort batch-fetch ``sha``'s missing blobs before plumbing runs.
 
-    ``read-tree`` (without ``-u``) and ``checkout-index`` never enter ``unpack-trees``'
-    ``check_updates()`` — the only place git batches missing-blob requests (via
-    ``prefetch_cache_entries()``). So on a blob-starved partial clone each absent blob costs
-    its own sequential fetch RPC (~2 hours on a 25k-file tree). Fetching them up front in ONE
-    batched RPC is what makes the attested path INDEPENDENT of lazy fetching rather than
-    merely slow because of it. ``--no-filter`` overrides the remote's configured
-    ``partialclonefilter`` (a plain fetch silently re-applies it and refills nothing);
-    ``--refetch`` disables negotiation so an already-present commit still transfers its
-    objects instead of no-op'ing.
-
-    Deliberately BEST-EFFORT and silent on failure — ``--refetch`` needs git >= 2.36, and the
-    remote may be absent, offline, or reject our credentials. Production still has lazy fetch
-    as the fallback, so a failed top-up degrades to today's behaviour and never adds a NEW
-    failure mode. Exactly ONE fetch per materialization; a loop would defeat the point."""
+    ``read-tree`` plus ``checkout-index`` would otherwise lazy-fetch each blob separately.
+    One ``--no-filter --refetch`` RPC overrides partial-clone filtering and transfers objects
+    even for an existing commit. Unsupported git, absent remotes, or fetch failure stay silent
+    and fall back to lazy fetching; never loop or add a materialization failure mode."""
     if not _has_missing_blobs(repo_root, sha) or not has_remote(repo_root, remote):
         return
-    # SECURITY: the SHA reaches a fetch positional, so it MUST be terminated with
-    # --end-of-options — same reasoning as the targeted fetch in git_fetch.fetch_origin (without it,
-    # a value like "--upload-pack=<cmd>" would be parsed as an option and EXECUTE).
+    # SECURITY: terminate options before the SHA so an option-shaped value cannot execute
+    # through git; this mirrors git_fetch.fetch_origin's targeted fetch.
     argv = ["fetch", "--no-filter", "--refetch", "--quiet", remote, "--end-of-options", sha]
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     try:
-        # Same throughput-keyed abort and shared wall-clock backstop as fetch_origin: this
-        # OTHER materialization fetch takes the generous, tunable fetch_timeout() (not a
-        # fixed 300s cap; bug curly-open-swan). The -c pairs must precede the subcommand.
+        # Reuse fetch_origin's low-speed abort and live generous wall-clock bound; ``-c``
+        # pairs precede the subcommand.
         subprocess.run(
             ["git", "-C", repo_root, *stall_abort_args(), *argv],
             capture_output=True,
@@ -414,14 +330,11 @@ def _ensure_blobs_present(repo_root: str, sha: str, remote: str) -> None:
 
 
 def _materialize_tree(repo_root: str, sha: str, dest_tmp: Path) -> None:
-    """Faithfully write the committed tree at ``sha`` into ``dest_tmp`` via git plumbing.
+    """Write ``sha`` faithfully into ``dest_tmp`` through a throwaway git index.
 
-    Uses a throwaway index (``GIT_INDEX_FILE``) so the repo's own index/working tree is
-    never touched — this is what keeps concurrent materializations of different SHAs from
-    contending on ``index.lock``. ``GIT_TERMINAL_PROMPT=0`` is set for the same reason
-    :func:`~rebar._snapshot.git_fetch.fetch_origin` sets it — this path can drive git's
-    own (lazy) network fetch, so without it a missing credential would block on a TTY
-    prompt and hang the server."""
+    The repository index and worktree remain untouched, so SHAs materialize concurrently.
+    Disable terminal prompts because lazy fetch may reach the network and missing credentials
+    must not hang the server."""
     dest_tmp.mkdir(parents=True, exist_ok=True)
     index_file = dest_tmp.parent / (dest_tmp.name + ".index")
     env = {**os.environ, "GIT_INDEX_FILE": str(index_file), "GIT_TERMINAL_PROMPT": "0"}
@@ -454,12 +367,9 @@ def _materialize_tree(repo_root: str, sha: str, dest_tmp: Path) -> None:
 
 
 def sweep_tmp(root: Path | None = None) -> int:
-    """Remove stale in-progress build dirs under ``<root>/tmp`` (startup recovery).
+    """Remove unread stale builds and indexes from ``<root>/tmp`` at startup.
 
-    A materialization that crashed mid-build leaves a ``tmp/<uuid>/`` (and its
-    ``<uuid>.index``); these are never read by anyone, so clearing them on startup
-    reclaims the space without disrupting any published ``<sha>`` entry. Returns the
-    number of top-level tmp entries removed."""
+    Published SHA entries remain untouched; return the number of top-level items removed."""
     root = root or store_root()
     tmp = root / "tmp"
     if not tmp.is_dir():
@@ -553,9 +463,8 @@ def materialize(
                 raise
         else:
             _fsync_dir(dest.parent)
-        # Detect + persist the faithfulness caveats once, at build time (when this
-        # process's object DB definitely holds the SHA), so later cache hits are cheap
-        # and correct regardless of which clone built the entry.
+        # Persist faithfulness caveats while this builder has the SHA, keeping later cache
+        # hits cheap and independent of the clone that populated the entry.
         lfs, subs = _detect_lfs_pointers(dest), _list_submodules(root_dir, sha)
         _store_caveats(sha, store, lfs, subs)
         return SnapshotHandle(
@@ -583,25 +492,12 @@ _TRACKER_DIRNAME = ".tickets-tracker"
 def _pin_tickets_sha(
     root_dir: str, ref: str, remote: str, *, fetch: bool
 ) -> tuple[str, str] | None:
-    """Resolve the ticket-store pin from the LIVE tracker repo, or ``None`` to use the
-    caller's ``origin/<ref>`` -> local-branch chain (bug 2a6f).
+    """Return a live tracker ``(sha, object-owning repo)``, or ``None`` for ref fallback.
 
-    Returns ``(sha, source_dir)`` — ``source_dir`` being the repo that owns the objects.
-
-    ``None`` is returned whenever the tracker repo is not usable as a pin source (absent —
-    CI, a checkout-less environment — or not a git repo). Otherwise:
-
-    * ``fetch=True`` (``review-plan``, standalone ``verify-completion``, MCP): reconverge the
-      tracker with ``<remote>/<ref>`` FIRST, un-throttled, then CONFIRM the outcome — the
-      store's :func:`~rebar._store.sync.reconverge` returns ``None`` on success and on every
-      failure/early-out alike, so it carries no usable signal and we ask git directly with
-      ``merge-base --is-ancestor``. Only a confirmed at-or-ahead ``HEAD`` is pinned; anything
-      else (fetch failed, lock timeout, no remote-tracking ref) returns ``None`` so the caller
-      falls back to today's exact behaviour. That keeps "no content visible today is lost" an
-      unconditional invariant rather than one contingent on a throttle window being open.
-    * ``fetch=False`` (the close gate, which passes it for the LOCAL code ref ``HEAD``): pin
-      tracker ``HEAD`` as-is. It is still current-at-close, and never the stale mirror.
-    """
+    An absent/non-git tracker cannot pin. With ``fetch=True``, reconverge unthrottled and
+    independently confirm its HEAD contains the shared branch; any uncertainty falls back so
+    currently visible content is never lost. With ``fetch=False``, the local close gate pins
+    tracker HEAD as-is instead of a stale mirror."""
     from rebar.config import ConfigError as _ConfigError
     from rebar.config import tickets_branch as _tickets_branch
     from rebar.config import tracker_dir as _tracker_dir
@@ -612,10 +508,8 @@ def _pin_tickets_sha(
         return None
     if not os.path.isdir(tracker):
         return None
-    # Ask git, don't stat `.git` — the tracker is a standalone CLONE in a long-lived checkout
-    # (`.git` is a directory) but a linked WORKTREE of the code repo in a freshly initialized
-    # one (`.git` is a FILE). Only the clone layout can drift, but both must resolve here, and
-    # a `.git`-is-a-dir test silently excludes the worktree layout.
+    # Ask git rather than stat .git: standalone clones use a directory, linked worktrees a
+    # file, and both valid layouts must resolve.
     probe = subprocess.run(
         ["git", "-C", tracker, "rev-parse", "--git-dir"],
         capture_output=True,
@@ -669,34 +563,17 @@ def materialize_tickets(
     repo_root: str | None = None,
     fetch: bool = True,
 ) -> str:
-    """Materialize a pinned, read-only copy of the ticket store and return its ROOT path.
+    """Materialize a pinned, read-only ticket store and return its root.
 
-    The code-reading gates run their agent against an attested code snapshot, but the ticket
-    store lives on the orphan ``tickets`` branch (gitignored worktree ``.tickets-tracker/``)
-    and is therefore ABSENT from that code snapshot — so the agent's rebar ticket tools would
-    error trying to read it. This mirrors :func:`materialize` for the ticket store: resolve
-    ``ref`` to an immutable SHA (preferring ``origin/tickets`` when an origin exists so it
-    pins the shared store, not a stale local copy) and materialize that tree into
-    ``<store>/tickets-<sha>/.tickets-tracker/`` via the SAME throwaway-index +
-    build-dir + atomic-``rename`` + cache-hit-by-path pattern. The returned ROOT
-    (``<store>/tickets-<sha>``) is what a gate points its rebar ticket tools at:
-    ``config.tracker_dir(<root>)`` resolves to the ``.tickets-tracker/`` subdir holding the
-    materialized event dirs. Fails closed (no path) on error, like :func:`materialize`.
-
-    The pin is taken from the LIVE tracker repo's ``HEAD`` whenever that repo is on disk (bug
-    2a6f): the tracker is a SEPARATE repository, so the code repo's ``refs/heads/tickets`` is
-    only a mirror that advances on fetch — pinning it made the gate read an arbitrarily stale
-    store (measured in the wild at 6757 commits behind) and report recorded comments as
-    nonexistent. Tracker ``HEAD`` is the state every other rebar read sees, so the pin is
-    current-by-construction and the gate's deterministic half (which reads the live store)
-    agrees with the agent's ``show_ticket``. See :func:`_pin_tickets_sha`."""
+    The orphan ticket branch is absent from an attested code tree, so gate tools need
+    ``<store>/tickets-<sha>/.tickets-tracker``. This mirrors :func:`materialize` with a
+    throwaway index, build directory, atomic rename, and path-keyed cache; the returned parent
+    lets ``config.tracker_dir`` find the event store and failures close. Prefer the separate
+    live tracker's HEAD, which matches ordinary reads, over the code repo's fetch-dependent
+    mirror; otherwise use the shared remote then local-ref fallback."""
     root_dir = str(repo_root) if repo_root else "."
-    # Prefer <remote>/<ref> when the configured tickets remote exists (fetch first, so we
-    # pin the SHARED store, not a stale local copy — matching how the code path resolves the
-    # shared ref), else the local branch. The remote is config-resolved (sync.remote, default
-    # "origin"); a malformed config falls back to "origin". Fall back to the local branch when
-    # the remote has no such ref yet (a freshly initialized repo whose tickets branch has not
-    # been pushed): a missing remote ref must not block reading the store that exists locally.
+    # Prefer the configured remote's freshly fetched shared ref; malformed config defaults to
+    # origin. Fall back locally when a new store has not yet published that remote ref.
     from rebar.config import ConfigError as _ConfigError
     from rebar.config import tickets_remote as _tickets_remote
 
@@ -724,11 +601,8 @@ def materialize_tickets(
     store = store_root()
     dest = store / f"tickets-{sha}"
     if dest.is_dir():
-        # Cache hit — immutable by SHA (same key scheme as the code entries, namespaced by
-        # the `tickets-` prefix so it never collides with a `<sha>` code entry). Bump the
-        # entry's recency: the janitor evicts LRU by mtime, which every hit must touch
-        # (ADR 0005 D4) — mirrors ``cache.acquire``. Deferred import: ``cache`` imports
-        # THIS module, so a module-level import would be a cycle.
+        # The tickets prefix separates immutable ticket and code entries. Touch hit mtime for
+        # janitor LRU; defer the cache import to avoid its reverse module dependency.
         from rebar._snapshot.cache import touch_entry as _touch_entry
 
         _touch_entry(dest)
@@ -738,17 +612,11 @@ def materialize_tickets(
     build = tmp_parent / f"tickets-{sha[:12]}-{uuid.uuid4().hex}"
     tracker = build / _TRACKER_DIRNAME
     try:
-        # Same probe-gated, one-RPC top-up as the code path — against the already-resolved
-        # tickets remote (sync.remote), never a hardcoded "origin". Both run against
-        # `source_dir`: when the pin came from the tracker repo, only that repo is guaranteed
-        # to hold the commit's objects.
+        # Use the code path's one-RPC probe/top-up against the resolved tickets remote and
+        # object-owning source_dir, which may be the separate tracker repo.
         _ensure_blobs_present(source_dir, sha, remote)
-        # The tickets tip advances every few seconds while each commit touches a handful of
-        # files, so the cache-hit branch above almost never fires and a full checkout-index
-        # would write a whole fresh copy of the tree per resolution (47 GiB measured in the
-        # wild). Build from a hardlinked neighbouring entry when one exists, rewriting only
-        # the changed paths; the helper fails CLOSED (returns False) on any doubt, and the
-        # full materialization below is then the unchanged behaviour.
+        # Fast-moving ticket tips rarely hit cache, so reuse a hardlinked neighbour and rewrite
+        # its delta. Any doubt returns False and preserves full materialization.
         if not materialize_via_donor(
             source_dir,
             sha,
@@ -769,13 +637,9 @@ def materialize_tickets(
                 raise
         else:
             _fsync_dir(dest.parent)
-            # We WON the populate race, so account this entry's bytes exactly once. The
-            # ticket-store entries are the largest thing in the store, and without this the
-            # janitor's running byte total — and therefore its byte-total cap — simply cannot
-            # see them. Mirrors ``cache.acquire``'s add_bytes on its own populate branch; the
-            # cache-hit and lost-race paths above deliberately do NOT account (already counted
-            # / the winner counts it). Deferred import: ``cache`` imports THIS module, so a
-            # module-level import would be a cycle.
+            # The populate-race winner alone accounts this large ticket entry's exclusive
+            # bytes; hits and losers were already counted. Defer imports to avoid the cache's
+            # reverse dependency.
             from rebar._snapshot.cache import add_bytes as _add_bytes
             from rebar._snapshot.cache import exclusive_size as _exclusive_size
 
