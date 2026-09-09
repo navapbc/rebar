@@ -1,21 +1,10 @@
-"""Four-bucket comparison and the pure verdict function for the mechanism-delta ratchet.
+"""Classify mechanism changes and evaluate the ratchet without filesystem access.
 
-:class:`Counters`, :func:`compare` and ``has_regression`` are ported essentially unchanged
-from ``scripts/check_complexity_baseline.py`` because they are proven and their buckets are
-mutually exclusive:
-
-  * ``active``    — key in both the current tree and the baseline.
-  * ``new``       — key in the current tree but NOT the baseline (a mechanism was ADDED).
-  * ``increased`` — key in both with a value above its recorded one. Structurally
-    unreachable while presence values are pinned at ``1``, and kept anyway so the ported
-    contract stays whole and a future weighted value has a bucket waiting for it.
-  * ``stale``     — key in the baseline with no current definition site (a mechanism was
-    REMOVED). Removal is the direction this ratchet exists to reward, so it is an allowed
-    improvement, never a regression.
-
-:func:`evaluate` is PURE and INJECTABLE — it takes the current census, the baseline and the
-marker map as plain dicts and returns ``(exit_code, lines)``. Nothing in it touches the
-filesystem, so the whole verdict is testable without a tree.
+``compare`` assigns each key to one bucket. ``active`` is present at the recorded value.
+``new`` lacks a baseline entry. ``increased`` exceeds its baseline value and is unreachable
+for validated presence-only values. ``stale`` is below or absent from the current census and
+passes by itself. ``evaluate`` accepts the census, baseline, and harvested markers as plain
+inputs. ``drain_stale`` keeps active baseline keys without adding new keys.
 """
 
 from __future__ import annotations
@@ -89,11 +78,9 @@ def _partition(keys: list[str], markers: dict[str, str]) -> tuple[list[str], lis
 def evaluate(
     current: dict[str, int], baseline: dict[str, int], markers: dict[str, str]
 ) -> tuple[int, list[str]]:
-    """Return ``(exit_code, report_lines)`` for a census/baseline/marker triple.
+    """Return a verdict that admits exact keys with nonblank harvested marker reasons.
 
-    Exit 0 requires that every ``new``/``increased`` mechanism carries a non-blank
-    ``# mechanism-ok:`` marker for its EXACT key, and that no marker anywhere is blank.
-    ``stale`` alone always passes — a removed mechanism is the outcome the ratchet wants.
+    Every harvested marker needs a nonblank reason. A ``stale``-only census passes.
     """
     counters = compare(current, baseline)
     lines = [counters.summary]
@@ -113,10 +100,5 @@ def evaluate(
 
 
 def drain_stale(current: dict[str, int], baseline: dict[str, int]) -> dict[str, int]:
-    """Return the drained baseline for ``--update-stale`` (caller guards regressions).
-
-    Drops entries whose definition site is gone and preserves every active entry. New
-    mechanisms are NEVER folded in here: adding one is the regression this gate exists to
-    catch, and the caller refuses to write while any is present.
-    """
+    """Keep active baseline keys without adding new current keys."""
     return {key: 1 for key in baseline if key in current}

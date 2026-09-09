@@ -1,19 +1,9 @@
-"""Detectors and baseline plumbing for the mechanism-delta ratchet (ticket 9ca8-675e).
+"""Private detectors and baseline plumbing for the mechanism-delta ratchet.
 
-The seven detectors live in three modules split by INPUT SURFACE — Python AST
-(:mod:`detect_code`), the config registries (:mod:`detect_config`), globs and YAML
-(:mod:`detect_ci`) — rather than one module per kind or one module for all seven. Seven
-detectors in one file would breach both the repository's module-size and per-function
-complexity limits; splitting by surface keeps each module's file walk, parse cache and
-failure mode in one place.
-
-:data:`DETECTORS` is a FLAT ``{kind: callable}`` table, so the entrypoint dispatches with a
-single comprehension instead of a seven-branch conditional and stays near complexity 4.
-
-This is a private ``scripts/`` subpackage, deliberately: ``scripts/check_import_walk.py``
-imports every top-level ``scripts/*.py`` standalone with the scripts directory stripped from
-``sys.path``, and a subpackage is invisible to that walk. The entrypoint reaches it with the
-``sys.path.insert`` pattern its sibling scripts already use.
+``DETECTORS`` maps seven mechanism kinds to callables grouped by input surface in
+``detect_code``, ``detect_config``, and ``detect_ci``. The private subpackage stays outside
+the top-level standalone import walk. Imports depend on the entrypoint adding ``scripts/``
+to ``sys.path``.
 """
 
 from __future__ import annotations
