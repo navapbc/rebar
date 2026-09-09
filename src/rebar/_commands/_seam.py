@@ -487,7 +487,8 @@ def finalize_event(
     deliberately upstream (see :func:`append_event`) and passes.
     """
     screen_event(data)
-    _refuse_unpublishable_store(tracker)
+    if _batch_sink.get() is None:
+        _refuse_unpublishable_store(tracker)
     event.update(attribution_fields(repo_root))
     _apply_authorship(event, ticket_id, event_type, data, tracker, repo_root)
 

@@ -65,6 +65,25 @@ def _records(n: int, *, with_comment: bool) -> list[dict]:
 
 
 @pytest.mark.integration
+def test_import_checks_publishability_once_per_batch_commit(tmp_path: Path, monkeypatch) -> None:
+    dst = _fresh_repo(tmp_path, "publishable")
+    tracker = _tracker(dst)
+    n = 10
+    checks: list[str] = []
+
+    def counted_refusal(probed_tracker: str) -> None:
+        checks.append(str(probed_tracker))
+
+    monkeypatch.setattr(_seam, "_refuse_unpublishable_store", counted_refusal)
+    meta = rebar.import_tickets(_records(n, with_comment=True), repo_root=str(dst))
+
+    assert meta["created"] == n
+    assert meta["comments"] == n
+    # Pass 1 CREATEs and Pass 2d COMMENTs are each flushed as one batch for n < 256.
+    assert checks == [tracker, tracker]
+
+
+@pytest.mark.integration
 def test_benchmark_commit_count_is_ceil_per_pass(tmp_path: Path, monkeypatch) -> None:
     dst = _fresh_repo(tmp_path, "bench")
     n = 3000
