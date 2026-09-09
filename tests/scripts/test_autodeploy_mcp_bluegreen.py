@@ -1031,6 +1031,19 @@ _ENV_FILE_ONLY = frozenset(
 )
 
 
+def _compose_mcp_mem_limit() -> str:
+    text = COMPOSE_FILE.read_text().splitlines()
+    start = next((i for i, ln in enumerate(text) if re.match(r"^  mcp:\s*$", ln)), None)
+    assert start is not None, "mcp service not found in docker-compose.yml"
+    for ln in text[start + 1 :]:
+        if re.match(r"^  \S", ln) or re.match(r"^\S", ln):
+            break
+        match = re.match(r"^    mem_limit:\s*(\S+)\s*$", ln)
+        if match:
+            return match.group(1)
+    raise AssertionError("the compose `mcp:` service declares no mem_limit")
+
+
 def test_docker_run_matches_compose_mcp_service(mcp_box: dict[str, object]) -> None:
     """`mcp_run_new` must reproduce the compose `mcp:` service env/mounts EXACTLY. /health is
     auth-independent (mounted outside the auth middleware), so it cannot catch a wrong
@@ -1089,6 +1102,12 @@ def test_docker_run_matches_compose_mcp_service(mcp_box: dict[str, object]) -> N
     )
     assert "--stop-timeout 1260" in run_line, (
         f"docker run must set the 1260s stop-timeout so Docker never SIGKILLs mid-drain\n{ctx}"
+    )
+    mem_limit = _compose_mcp_mem_limit()
+    assert f"--memory {mem_limit}" in run_line, (
+        f"docker run must carry `--memory {mem_limit}` to match the compose mcp service's "
+        f"mem_limit. Without it the compose declaration binds nothing because the live mcp "
+        f"container is started by this bare docker run.\n{ctx}"
     )
 
 

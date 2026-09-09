@@ -27,8 +27,17 @@ class LLMConfigError(LLMUnavailableError):
 
 
 class GateCongestedError(LLMError):
-    """The host is at its concurrent-gate cap, so the gate was NOT started (ADR 0112
-    decision 5; story 09da-343c-1ee9-480c).
+    """The host could not take this gate, so it was NOT started (ADR 0112 decision 5; story
+    09da-343c-1ee9-480c, extended by story 48f0-f7ff-c8df-43ac).
+
+    TWO CAUSES, ONE TYPE, distinguished by :attr:`reason` (``slots_full`` / ``memory_low``).
+    Every concurrent slot is taken, or the host has less free memory than a gate needs. They
+    are deliberately not separate classes: both are the SAME operational event -- load shed
+    before any work began -- and both want the identical handling everywhere it matters (the
+    ``except LLMError`` arms, the retryable outcome, exit 11, the ``gate_congested`` error
+    code, the ``GATE_CONGESTED`` marker). A second class would have to be remembered at each
+    of those seams, and a seam that forgets it silently downgrades a refusal to a hard
+    failure. The cause an operator needs rides as structured fields instead.
 
     Deliberately NOT an :class:`LLMRunnerError`: no runner ran and nothing about the ticket
     was judged. It IS an :class:`LLMError` so that the ``except LLMError`` arms the MCP tool
@@ -41,16 +50,51 @@ class GateCongestedError(LLMError):
     exit 1: shed load that nobody retries is a dropped request, not backpressure.
     """
 
-    def __init__(self, gate: str, limit: int) -> None:
+    def __init__(
+        self,
+        gate: str,
+        limit: int,
+        *,
+        available_mib: int | None = None,
+        floor_mib: int | None = None,
+    ) -> None:
         self.gate = gate
         self.limit = limit
+        self.available_mib = available_mib
+        self.floor_mib = floor_mib
+        self.reason = "memory_low" if available_mib is not None else "slots_full"
+        if available_mib is not None:
+            detail = (
+                f"only {available_mib} MiB of host memory is available, below the "
+                f"{floor_mib} MiB floor a gate needs, so {gate} was not started"
+            )
+            advice = (
+                "Retry once the host recovers; if it does not, something is holding memory "
+                "that should have released it."
+            )
+        else:
+            detail = (
+                f"all {limit} concurrent gate slot(s) on this host are in use, so {gate} "
+                "was not started"
+            )
+            advice = "Retry later, or raise [snapshot].max_concurrent_gates if the host has room."
         super().__init__(
-            f"gate admission refused: all {limit} concurrent gate slot(s) on this host are "
-            f"in use, so {gate} was not started. This is HOST CONGESTION, not a review "
+            f"gate admission refused: {detail}. This is HOST CONGESTION, not a review "
             "result \u2014 no verdict was produced and nothing about the ticket was judged. "
-            "Retry later, or raise [snapshot].max_concurrent_gates if the host has room."
+            + advice
         )
-        self.outcome = _admission_outcome("gate_congested", gate, request_limit=limit)
+        memory_fields: dict[str, object] = (
+            {"available_mib": available_mib, "floor_mib": floor_mib}
+            if available_mib is not None
+            else {}
+        )
+        self.outcome = _admission_outcome(
+            "gate_congested",
+            gate,
+            request_limit=limit,
+            reason=self.reason,
+            **memory_fields,
+        )
 
 
 class GateScratchUnavailableError(LLMError):

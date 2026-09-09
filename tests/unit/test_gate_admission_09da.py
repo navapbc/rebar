@@ -53,10 +53,24 @@ def gate_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from rebar import _config_sources
 
     monkeypatch.setattr(_config_sources, "user_config_path", lambda: tmp_path / "absent.toml")
+    meminfo_path = tmp_path / "meminfo"
+
+    def meminfo(available_mib: int) -> Path:
+        meminfo_path.write_text(
+            f"MemTotal:       7999488 kB\n"
+            f"MemFree:         102400 kB\n"
+            f"MemAvailable:  {available_mib * 1024} kB\n"
+        )
+        monkeypatch.setattr(ga, "_MEMINFO", meminfo_path)
+        return meminfo_path
+
+    meminfo(64 * 1024)
 
     def limit(n: int) -> Path:
         (tmp_path / "rebar.toml").write_text(f"[snapshot]\nmax_concurrent_gates = {n}\n")
         return tmp_path
+
+    limit.meminfo = meminfo  # type: ignore[attr-defined]
 
     return limit
 
@@ -456,3 +470,121 @@ def test_the_operator_off_switch_is_not_reported_as_a_disarm(gate_host, capsys):
     with ga.gate_admission("plan_review", "t-1", root):
         pass
     assert _disarm_markers(capsys.readouterr().err) == []
+
+
+def test_a_gate_is_refused_when_the_host_is_below_the_memory_floor(gate_host, capsys):
+    root = gate_host(2)
+    gate_host.meminfo(ga.GATE_MIN_AVAILABLE_MIB - 1)
+    with pytest.raises(ga.GateCongestedError) as excinfo:
+        with ga.gate_admission("plan_review", "t-low", root):
+            pytest.fail("the gate ran despite the host being below the memory floor")
+    assert excinfo.value.available_mib == ga.GATE_MIN_AVAILABLE_MIB - 1
+    assert excinfo.value.floor_mib == ga.GATE_MIN_AVAILABLE_MIB
+    assert excinfo.value.reason == "memory_low"
+
+
+def test_a_gate_is_admitted_when_the_host_is_at_the_memory_floor(gate_host):
+    root = gate_host(2)
+    gate_host.meminfo(ga.GATE_MIN_AVAILABLE_MIB)
+    ran = []
+    with ga.gate_admission("plan_review", "t-ok", root):
+        ran.append(True)
+    assert ran == [True]
+
+
+def test_a_slots_full_refusal_is_still_distinguishable_from_a_memory_one(gate_host):
+    root = gate_host(1)
+    with ga.gate_admission("plan_review", "t-1", root):
+        with pytest.raises(ga.GateCongestedError) as excinfo:
+            with ga.gate_admission("plan_review", "t-2", root):
+                pass
+    assert excinfo.value.reason == "slots_full"
+    assert excinfo.value.available_mib is None
+
+
+def test_both_refusal_causes_share_the_retryable_gate_congested_code(gate_host):
+    from rebar._errors import error_code_for
+
+    root = gate_host(2)
+    gate_host.meminfo(8)
+    with pytest.raises(ga.GateCongestedError) as low:
+        with ga.gate_admission("plan_review", "t-low", root):
+            pass
+    gate_host.meminfo(64 * 1024)
+    with ga.gate_admission("plan_review", "t-hold", root):
+        with ga.gate_admission("plan_review", "t-hold2", root):
+            with pytest.raises(ga.GateCongestedError) as full:
+                with ga.gate_admission("plan_review", "t-3", root):
+                    pass
+    assert error_code_for(low.value) == error_code_for(full.value) == "gate_congested"
+    assert low.value.outcome.retryable is full.value.outcome.retryable is True
+
+
+def test_the_memory_refusal_is_retryable_and_not_a_verdict(gate_host):
+    from rebar.llm.errors import LLMError
+
+    root = gate_host(2)
+    gate_host.meminfo(16)
+    with pytest.raises(ga.GateCongestedError) as excinfo:
+        with ga.gate_admission("verify_completion", "t-low", root):
+            pass
+    error = excinfo.value
+    assert isinstance(error, LLMError)
+    assert error.outcome is not None and error.outcome.retryable is True
+    assert str(error).upper().count("INDETERMINATE") == 0
+    for verdict in ("PASS", "BLOCK", "FAIL"):
+        assert verdict not in str(error)
+
+
+def test_the_memory_refusal_announces_itself_on_the_congestion_marker(gate_host, capsys):
+    root = gate_host(2)
+    gate_host.meminfo(64)
+    with pytest.raises(ga.GateCongestedError):
+        with ga.gate_admission("plan_review", "t-low", root):
+            pass
+    lines = [
+        line for line in capsys.readouterr().err.splitlines() if line.startswith(ga.MARKER + " {")
+    ]
+    assert len(lines) == 1, lines
+    import json
+
+    body = json.loads(lines[0][len(ga.MARKER) + 1 :])
+    assert body["reason"] == "memory_low"
+    assert body["available_mib"] == 64
+    assert body["floor_mib"] == ga.GATE_MIN_AVAILABLE_MIB
+
+
+def test_a_platform_without_proc_meminfo_admits_silently(gate_host, tmp_path, capsys, monkeypatch):
+    root = gate_host(2)
+    monkeypatch.setattr(ga, "_MEMINFO", tmp_path / "definitely-absent")
+    ran = []
+    with ga.gate_admission("plan_review", "t-mac", root):
+        ran.append(True)
+    assert ran == [True]
+    assert ga.DISARMED_MARKER not in capsys.readouterr().err
+
+
+def test_an_unreadable_proc_meminfo_admits_but_announces_the_disarm(
+    gate_host, tmp_path, capsys, monkeypatch
+):
+    root = gate_host(2)
+    garbage = tmp_path / "meminfo-garbage"
+    garbage.write_text("MemTotal:  7999 kB\nSwapFree:  0 kB\n")
+    monkeypatch.setattr(ga, "_MEMINFO", garbage)
+    ran = []
+    with ga.gate_admission("plan_review", "t-broken", root):
+        ran.append(True)
+    assert ran == [True]
+    assert ga.DISARMED_MARKER in capsys.readouterr().err
+
+
+def test_the_memory_floor_applies_even_with_the_counter_switched_off(gate_host):
+    root = gate_host(0)
+    gate_host.meminfo(32)
+    with pytest.raises(ga.GateCongestedError):
+        with ga.gate_admission("plan_review", "t-off", root):
+            pass
+
+
+def test_this_project_caps_concurrent_gates_at_two() -> None:
+    assert ga.max_concurrent_gates(REPO_ROOT) == 2

@@ -60,8 +60,8 @@ _PUBLISHER_BUDGET_PER_DATAPOINT_SECONDS = 600
 
 # The tree had 30 alarms, 26 of them probe-published, when this guard was written. The floors
 # exist so a parser that silently matches NOTHING fails loudly instead of passing for free.
-_MIN_EXPECTED_ALARMS = 30
-_MIN_EXPECTED_PROBE_ALARMS = 26
+_MIN_EXPECTED_ALARMS = 31
+_MIN_EXPECTED_PROBE_ALARMS = 27
 
 _ALARM_RE = re.compile(r'resource\s+"aws_cloudwatch_metric_alarm"\s+"(?P<name>[^"]+)"\s*\{')
 

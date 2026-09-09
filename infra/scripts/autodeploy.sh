@@ -187,6 +187,9 @@ MCP_HEALTH_TIMEOUT="${MCP_HEALTH_TIMEOUT:-120}"       # readiness deadline for t
 # container when MemAvailable is below this floor. Unreadable fails OPEN (a broken probe must not
 # wedge deploys); MCP_MEM_AVAILABLE_MB overrides the /proc/meminfo reading for tests.
 MCP_MEM_MIN_MB="${MCP_MEM_MIN_MB:-1024}"
+# mechanism-ok: env_var MCP_MEM_LIMIT — story 48f0-f7ff-c8df-43ac: the live mcp container is
+# created by docker run rather than compose, so the compose mem_limit must be mirrored here.
+MCP_MEM_LIMIT="${MCP_MEM_LIMIT:-3712m}"
 MCP_RELEASES_KEEP="${MCP_RELEASES_KEEP:-1}"           # retain the newest N mcp releases (the live one)
 MCP_RELEASES_CAP="${MCP_RELEASES_CAP:-3}"             # hard cap on managed containers = the {8091,A,B} port pool
 MCP_STOP_GRACE="${MCP_STOP_GRACE:-1260}"             # `docker stop --time`: >= _mcp_health grace (1200) + margin
@@ -676,6 +679,7 @@ mcp_run_new() {
   docker run -d --name "$1" \
     --restart always \
     --label rebar.service=mcp \
+    --memory "$MCP_MEM_LIMIT" \
     --stop-timeout "$MCP_STOP_GRACE" \
     --env-file "$COMPOSE_DIR/.env" \
     -e FORWARDED_ALLOW_IPS='*' \
