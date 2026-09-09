@@ -1,13 +1,5 @@
-// Browser probe for the v3 `batch` step's visual editing (epic A, story A4): load the editor
-// on the batch-demo fixture, select the BATCH ServiceTask, and exercise the criteria-list UI
-// the editor must provide:
-//   1. RENDER — the Rebar group shows the batch finder; a "Batch criteria" ListGroup renders one
-//      collapsible item per criterion, and the security criterion's `when` overlay is visible.
-//   2. EDIT   — change criterion-0's prompt id; assert it writes back into rebar:Config.
-//   3. ADD    — click the list (+) add button; assert a new criterion appears in the config.
-//   4. REMOVE — click a criterion's (×) remove button; assert the config shrinks back.
-//   5. OVERLAY — the `if:` predicate field renders for a prompt (agent) step.
-//   6. SAVE   — persist an edit to the IR so the Python side can reload-assert.
+// Exercises batch criteria rendering, editing, addition, removal, prompt-step overlays,
+// agent-to-batch conversion and reversion, and persistence on the batch-demo fixture.
 // Usage: node browser_batch.mjs <editor-url>
 import { chromium } from "playwright";
 

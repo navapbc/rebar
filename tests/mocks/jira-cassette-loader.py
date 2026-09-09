@@ -1,32 +1,10 @@
 #!/usr/bin/env python3
-"""SDET audit P3-2: Jira VCR-cassette replay loader.
+"""Load and replay Jira HTTP interactions from JSONL cassettes without third-party dependencies.
 
-Per the audit MODIFY verdict, a live Jira tenant introduces external-dep
-flake — VCR-style cassette replay against recorded interactions is the
-recommended pattern. This module is the scaffolded minimum: load a cassette
-file (JSONL) and serve recorded responses for matching request signatures.
-
-Cassette JSONL shape (one record per line):
-  {
-    "request": {
-      "method": "GET",
-      "url": "https://example.atlassian.net/rest/api/3/issue/DIG-123",
-      "body": null
-    },
-    "response": {
-      "status_code": 200,
-      "headers": {"Content-Type": "application/json"},
-      "body_json": {"key": "DIG-123", "fields": {"summary": "x"}}
-    }
-  }
-
-Stdlib only — no `vcr.py` or `responses` package dependency. Tests should
-patch the Jira-bridge HTTP layer with `replay(...)` to get a recorded
-response by (method, url) signature.
-
-Today's scope is the SCAFFOLD only: cassette loader, signature matching,
-and a 401/Retry-After scenario sample. Live recording of cassettes from a
-real Jira tenant is a multi-day follow-up.
+Matching uses the uppercased method and URL only; request bodies are ignored.
+Each key has an ordered cursor, and replay raises ``KeyError`` when its records
+are exhausted. The direct self-test covers a 429 ``Retry-After`` response
+followed by a successful response.
 """
 
 from __future__ import annotations
