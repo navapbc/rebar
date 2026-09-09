@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline code-review threshold calibration over the code-v3 REVIEW_RESULT sidecar corpus.
+"""Offline code-review threshold calibration over a version-segmented REVIEW_RESULT sidecar corpus.
 
 Analog of docs/experiments/calibrate_plan_review_thresholds.py, adapted to the code-review
 sidecar shape (schema code_review_result_v2):
@@ -18,6 +18,29 @@ Signals:
     per-binary-subquestion "no" rate (which dimension the verifier refutes).
   * Voluntary revision-response: criterion-load drop across revision episodes of a change.
   * Surviving-priority percentiles (blocking+advisory only) = where a block threshold would bite.
+
+ROUTING-AWARE (fixes CORRECTIONS A / C / E recorded in
+docs/experiments/code-review-threshold-calibration.md). Earlier revisions of this script read
+NO routing index, so every re-run reproduced two known-wrong rows: `sec` was reported as a
+DET/attestation gate (it is an LLM synonym of `security`), and `project.review-phase-boundaries`
+was reported at the 0.95 unknown-criterion default rather than the 0.90 the project overlay
+actually sets. Both are now read from the SAME production path the gate uses --
+`registry.effective_routing` (packaged index MERGED with `.rebar/criteria_routing.json`) and
+`registry.normalize_criteria` (the `sec`->`security` / `documentation`->`docs` synonym map) --
+so the generator cannot drift from the gate again. A pure-JSON fallback keeps the script usable
+in a checkout where `rebar` is not importable. Consequences:
+
+  * criterion labels are NORMALIZED before accumulation, so synonyms are pooled with their
+    canonical criterion instead of falling to the unknown-label default;
+  * DET/attestation criteria are identified by their routing `exec == "DET"`, not by the old
+    "validity ~ 0 and something blocked" heuristic that misfired on `sec`;
+  * every row carries its CURRENT posture/threshold, so the proposal reads as a DELTA against
+    what is committed rather than as a free-standing absolute.
+
+`--dump-newly-blocking CRIT=THR` writes the findings that would become NEWLY blocking under a
+proposed threshold (priority in [THR, current_threshold)) to JSON, for content adjudication --
+the false-positive/nit rate of a proposed flip is a question about finding TEXT, which no
+validity statistic answers.
 """
 
 from __future__ import annotations
@@ -27,6 +50,7 @@ import collections
 import glob
 import json
 import os
+import re
 import statistics
 from typing import Any
 
@@ -47,6 +71,105 @@ GRADED = (
 SURFACED = ("blocking", "advisory")
 POOLS = ("blocking", "advisory", "dropped", "indeterminate")
 MIN_N = 25  # statistical-power floor for an auto-proposal
+UNROUTED_THRESHOLD = 0.95  # kernel default for a criterion with no routing entry
+
+
+def _current_impact_model_version() -> str:
+    """The impact-model version the gate stamps TODAY, read from the production constant. A
+    hardcoded default is how this script silently kept analysing a retired cohort: the model
+    moved to code-v5 while the default still said code-v3, and ADR 0036 forbids pooling the two,
+    so the mismatch produced an empty-but-plausible segment rather than an error."""
+    try:
+        from rebar.llm.code_review.sidecar import IMPACT_MODEL_VERSION  # type: ignore[import-not-found]
+    except (ImportError, ModuleNotFoundError):
+        sidecar_py = os.path.join("src", "rebar", "llm", "code_review", "sidecar.py")
+        try:
+            with open(sidecar_py) as fh:
+                src = fh.read()
+        except OSError:
+            return "code-v5"
+        m = re.search(r'^IMPACT_MODEL_VERSION\s*=\s*"([^"]+)"', src, re.M)
+        if m:
+            return m.group(1)
+        return "code-v5"
+    return str(IMPACT_MODEL_VERSION)
+
+
+def _load_routing(repo_root: str) -> dict[str, dict]:
+    """The EFFECTIVE per-criterion routing (packaged index + the project overlay's `code_review`
+    map), read through the production path so this script cannot drift from the gate. Falls back
+    to reading the two JSON files directly when `rebar` is not importable."""
+    try:
+        from rebar.llm.code_review import registry  # type: ignore[import-not-found]
+    except (ImportError, ModuleNotFoundError):
+        registry = None
+    else:
+        return dict(registry.effective_routing(repo_root))
+    out: dict[str, dict] = {}
+    packaged = os.path.join("src", "rebar", "llm", "code_review", "criteria_routing.json")
+    overlay = os.path.join(repo_root, ".rebar", "criteria_routing.json")
+    for path, key in ((packaged, None), (overlay, "code_review")):
+        try:
+            with open(path) as fh:
+                raw = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            continue
+        block = raw.get(key, {}) if key else raw
+        for k, v in (block or {}).items():
+            if not k.startswith("_") and isinstance(v, dict):
+                out.setdefault(k, {}).update(v)
+    return out
+
+
+def _synonyms() -> dict[str, str]:
+    """The model-emitted criterion-label synonym map, from the production registry when
+    importable (ticket d890-e711-156e-444b), else its committed literal value."""
+    try:
+        from rebar.llm.code_review import registry  # type: ignore[import-not-found]
+
+        return dict(registry.CRITERIA_SYNONYMS)
+    except (ImportError, ModuleNotFoundError):
+        return {"sec": "security", "documentation": "docs"}
+
+
+def _normalize_criterion(label: str) -> str:
+    try:
+        from rebar.llm.code_review import registry  # type: ignore[import-not-found]
+    except (ImportError, ModuleNotFoundError):
+        return label if label in ROUTING else SYNONYMS.get(label, label)
+    return registry.normalize_criteria([label])[0]
+
+
+ROUTING: dict[str, dict] = {}
+SYNONYMS: dict[str, str] = {}
+
+
+def _posture_label(r: dict, *, short: bool = False) -> str:
+    """The criterion's CURRENT posture as a display string. `UNROUTED` is deliberately distinct
+    from `advisory` -- an unrouted criterion only behaves advisory by falling through the default,
+    and conflating the two is what let a high-volume criterion sit unrouted unnoticed."""
+    if not r["routed"]:
+        return "UNROUTED"
+    if r["cur_blocking"]:
+        kind = "BLK" if short else "blocking"
+    else:
+        kind = "adv" if short else "advisory"
+    return f"{kind}@{r['cur_thr']:.2f}"
+
+
+def posture_of(criterion: str) -> tuple[float, bool, str]:
+    """`(current_threshold, blocking_enabled, exec_mode)` for a criterion. An UNROUTED criterion
+    reports the kernel's 0.95 unknown-label default and `exec` "-" -- which is itself a finding
+    (an unrouted high-volume criterion is a routing bug, not a deliberate posture)."""
+    e = ROUTING.get(criterion)
+    if not e:
+        return UNROUTED_THRESHOLD, False, "-"
+    thr = e.get("block_threshold")
+    return (
+        float(thr) if thr is not None else UNROUTED_THRESHOLD,
+        bool(e.get("blocking_enabled")),
+        str(e.get("exec") or "-"),
+    )
 
 
 def load(tracker: str, version: str | None) -> tuple[dict[str, list[dict]], dict[str, int]]:
@@ -83,7 +206,16 @@ def load(tracker: str, version: str | None) -> tuple[dict[str, list[dict]], dict
 
 
 def _crits(f: dict) -> list[str]:
-    return f.get("criteria") or ["<none>"]
+    """The finding's criterion labels, NORMALIZED through the synonym map before accumulation
+    (CORRECTION A): an un-normalized `sec` pools separately from `security` and then falls to the
+    unknown-label default, which is what produced the bogus DET/ATTEST row for `sec`."""
+    raw = f.get("criteria") or ["<none>"]
+    seen: list[str] = []
+    for label in raw:
+        canonical = _normalize_criterion(str(label))
+        if canonical not in seen:
+            seen.append(canonical)
+    return seen
 
 
 def pct(xs: list[float], p: float) -> float:
@@ -102,7 +234,7 @@ def _parse_block_impact_specs(specs: list[str]) -> list[tuple[str, float]]:
         if not crit or not raw:
             raise SystemExit(f"--block-impact expects CRIT=THR, got {spec!r}")
         try:
-            out.append((crit, float(raw)))
+            out.append((_normalize_criterion(crit), float(raw)))
         except ValueError:
             raise SystemExit(f"--block-impact threshold must be a number, got {raw!r}") from None
     return out
@@ -149,6 +281,43 @@ def block_impact(by_change: dict[str, list[dict]], criterion: str, thr: float) -
     }
 
 
+def newly_blocking(by_change: dict[str, list[dict]], criterion: str, thr: float) -> list[dict]:
+    """The findings that would become NEWLY blocking for ``criterion`` at ``thr`` -- priority in
+    ``[thr, current_threshold)``, i.e. exactly the set the proposed flip ADDS over what already
+    blocks today. Returns the finding TEXT plus the severity attributes, because the
+    false-positive / nit rate of a proposed threshold is a question about content that no
+    validity statistic answers; `--dump-newly-blocking` writes these out for adjudication."""
+    cur_thr, cur_blocking, _ = posture_of(criterion)
+    ceiling = cur_thr if cur_blocking else float("inf")
+    out: list[dict] = []
+    for change_key, revs in by_change.items():
+        for rev in revs:
+            for pool in SURFACED:
+                for f in rev["pools"][pool]:
+                    if not isinstance(f, dict) or criterion not in _crits(f):
+                        continue
+                    pri = float(f.get("priority") or 0.0)
+                    if not (thr <= pri < ceiling):
+                        continue
+                    attrs = (f.get("verification") or {}).get("severity_attributes", {}) or {}
+                    out.append(
+                        {
+                            "change": change_key,
+                            "criterion": criterion,
+                            "pool": pool,
+                            "priority": pri,
+                            "validity": f.get("validity"),
+                            "impact": f.get("impact"),
+                            "location": f.get("location"),
+                            "finding": f.get("finding"),
+                            "suggested_fix": f.get("suggested_fix"),
+                            "evidence": f.get("evidence"),
+                            "severity_attributes": attrs,
+                        }
+                    )
+    return sorted(out, key=lambda r: -r["priority"])
+
+
 def print_block_impact(by_change: dict[str, list[dict]], specs: list[tuple[str, float]]) -> None:
     """Print the block-impact table for each ``(criterion, threshold)`` spec."""
     print(f"block-impact over {len(by_change)} changes\n")
@@ -166,7 +335,13 @@ def print_block_impact(by_change: dict[str, list[dict]], specs: list[tuple[str, 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--tracker", default=".tickets-tracker")
-    ap.add_argument("--impact-model-version", default="code-v3")
+    ap.add_argument(
+        "--impact-model-version",
+        default=_current_impact_model_version(),
+        help="corpus segment to analyse; defaults to the version the gate CURRENTLY stamps "
+        "(%(default)s), never a hardcoded historical one -- ADR 0036 forbids pooling versions",
+    )
+    ap.add_argument("--repo-root", default=".", help="root whose .rebar/ overlay is read")
     ap.add_argument("--emit", default=None, help="write a markdown report to this path")
     ap.add_argument(
         "--block-impact",
@@ -176,9 +351,35 @@ def main() -> None:
         help="print the retrospective block-impact table for CRIT at threshold THR "
         "(repeatable) instead of the full calibration",
     )
+    ap.add_argument(
+        "--dump-newly-blocking",
+        action="append",
+        default=[],
+        metavar="CRIT=THR",
+        help="write the findings that would become NEWLY blocking for CRIT at THR "
+        "(priority in [THR, current threshold)) to JSON for content adjudication; "
+        "repeatable, paired with --dump-to",
+    )
+    ap.add_argument("--dump-to", default="newly_blocking.json")
     args = ap.parse_args()
 
+    global ROUTING, SYNONYMS
+    ROUTING = _load_routing(args.repo_root)
+    SYNONYMS = _synonyms()
+
     by_change, skipped = load(args.tracker, args.impact_model_version)
+    if args.dump_newly_blocking:
+        payload = {}
+        for criterion, thr in _parse_block_impact_specs(args.dump_newly_blocking):
+            found = newly_blocking(by_change, criterion, thr)
+            payload[f"{criterion}@{thr}"] = found
+            cur, blocking, _ = posture_of(criterion)
+            now = f"blocking@{cur}" if blocking else (f"advisory@{cur}" if criterion in ROUTING else "UNROUTED")
+            print(f"{criterion}: {now} -> blocking@{thr}  newly-blocking findings: {len(found)}")
+        with open(args.dump_to, "w") as fh:
+            json.dump(payload, fh, indent=1)
+        print(f"\ndump -> {args.dump_to}")
+        return
     if args.block_impact:
         print_block_impact(by_change, _parse_block_impact_specs(args.block_impact))
         return
@@ -267,9 +468,12 @@ def main() -> None:
                 r = subq_no[c][q] / subq_ans[c][q]
                 if r > worst_rate:
                     worst_q, worst_rate = q, r
+        cur_thr, cur_blocking, exec_mode = posture_of(c)
         rows.append(
             dict(
-                c=c, n=tot, surf=len(psurv), fire=fire, mv=mv,
+                c=c, cur_thr=cur_thr, cur_blocking=cur_blocking, exec=exec_mode,
+                routed=c in ROUTING,
+                n=tot, surf=len(psurv), fire=fire, mv=mv,
                 p_drop=p_drop, p_indet=p_indet, p_block=p_block, rr=rr,
                 elig=eligible_eps[c],
                 p75=round(pct(psurv, 75), 3), p90=round(pct(psurv, 90), 3),
@@ -279,12 +483,13 @@ def main() -> None:
         )
 
     # ---- table ----
-    hdr = (f"{'crit':<26}{'n':>5}{'surf':>5}{'fire':>6}{'mval':>6}{'drop':>6}{'indet':>6}"
+    hdr = (f"{'crit':<26}{'now':>10}{'n':>5}{'surf':>5}{'fire':>6}{'mval':>6}{'drop':>6}{'indet':>6}"
            f"{'pblk':>6}{'rev_rr':>7}{'elig':>5}{'p75':>6}{'p90':>6}{'p95':>6}{'pmax':>6}  worst_subq(no-rate)")
     print(hdr)
     print("-" * len(hdr))
     for r in rows:
-        print(f"{r['c']:<26}{r['n']:>5}{r['surf']:>5}"
+        now = _posture_label(r, short=True)
+        print(f"{r['c']:<26}{now:>10}{r['n']:>5}{r['surf']:>5}"
               f"{(r['fire'] or 0):>6.2f}{(r['mv'] or 0):>6.2f}{r['p_drop']:>6.2f}{r['p_indet']:>6.2f}"
               f"{r['p_block']:>6.2f}{(r['rr'] or 0):>7.2f}{r['elig']:>5}"
               f"{r['p75']:>6.2f}{r['p90']:>6.2f}{r['p95']:>6.2f}{r['pmax']:>6.2f}  "
@@ -301,9 +506,17 @@ def main() -> None:
     DROP_FP = 0.40  # >40% of findings dropped by the decider => FP-prone
     def classify(r: dict) -> tuple[str, str, float, str]:
         mv = r["mv"] or 0.0
-        # DET / attestation gate (validity not meaningful; posture fixed elsewhere)
-        if r["p_block"] > 0 and (r["mv"] is None or mv < 0.05):
-            return "DET/ATTEST", "n/a", 0.0, f"deterministic/attestation gate (pblk={r['p_block']}, validity~0); not LLM-tunable"
+        # DET / attestation gate: identified by its ROUTING `exec` (CORRECTION A), not by the old
+        # "something blocked and validity ~ 0" heuristic -- that heuristic classified `sec`, an
+        # ordinary LLM synonym of `security`, as a deterministic gate on every re-run. A criterion
+        # with no routing entry can still be an attestation pseudo-criterion, so the heuristic is
+        # kept as a fallback for the UNROUTED case only.
+        if r["exec"] == "DET":
+            return ("DET/ATTEST", "n/a", 0.0,
+                    "deterministic detector (exec=DET, fail_mode fixed by routing); not LLM-tunable")
+        if r["exec"] == "-" and r["p_block"] > 0 and (r["mv"] is None or mv < 0.05):
+            return ("DET/ATTEST", "n/a", 0.0,
+                    f"unrouted attestation gate (pblk={r['p_block']}, validity~0); not LLM-tunable")
         if r["n"] < MIN_N:
             return "LOW-DATA", "advisory", 0.95, f"n={r['n']} below floor; interactive review"
         if mv < 0.45 or r["p_indet"] > 0.20 or r["p_drop"] > DROP_FP:
@@ -314,12 +527,30 @@ def main() -> None:
         return "ADVISORY-KEEP", "advisory", 0.95, f"validity {mv}, drop {r['p_drop']}, rev_rr {r['rr']}; real but borderline => advisory"
 
     print("\n=== PROPOSAL (precision-first; n<%d => LOW-DATA/interactive) ===" % MIN_N)
-    print(f"{'crit':<26}{'n':>5}  {'class':<15}{'posture':<10}{'thr':>6}  rationale")
+    print("A proposal is a DELTA against what is committed; `change` is empty when the proposal")
+    print("matches the routing already in force. UNROUTED marks a criterion with no routing entry")
+    print(f"at all -- it silently takes the {UNROUTED_THRESHOLD:.2f} unknown-label default,")
+    print("which is a routing bug when the criterion carries real volume.")
+    print("the criterion carries real volume, not a deliberate advisory posture.\n")
+    print(f"{'crit':<26}{'now':>10}{'n':>5}  {'class':<15}{'posture':<10}{'thr':>6}  {'change':<22}rationale")
     proposal = []
     for r in rows:
         cls, posture, thr, rat = classify(r)
-        proposal.append((r, cls, posture, thr, rat))
-        print(f"{r['c']:<26}{r['n']:>5}  {cls:<15}{posture:<10}{thr:>6.2f}  {rat}")
+        now = _posture_label(r, short=True)
+        if cls == "DET/ATTEST":
+            change = ""
+        elif not r["routed"] and posture == "blocking":
+            change = f"ROUTE -> blk@{thr:.2f}"
+        elif posture == "blocking" and not r["cur_blocking"]:
+            change = f"PROMOTE -> blk@{thr:.2f}"
+        elif posture == "advisory" and r["cur_blocking"]:
+            change = "DEMOTE -> advisory"
+        elif posture == "blocking" and abs(thr - r["cur_thr"]) > 1e-9:
+            change = f"RETUNE {r['cur_thr']:.2f} -> {thr:.2f}"
+        else:
+            change = ""
+        proposal.append((r, cls, posture, thr, rat, change))
+        print(f"{r['c']:<26}{now:>10}{r['n']:>5}  {cls:<15}{posture:<10}{thr:>6.2f}  {change:<22}{rat}")
 
     if args.emit:
         _emit_report(args.emit, hdr_lines, rows, proposal, args.impact_model_version)
@@ -330,16 +561,20 @@ def _emit_report(path: str, hdr_lines, rows, proposal, version) -> None:
     L = [f"# Code-review threshold calibration ({version})\n"]
     L += [f"{ln}\n" for ln in hdr_lines]
     L.append("\n## Per-criterion signals\n\n")
-    L.append("| criterion | n | surf | fire | mval | drop | indet | pblk | rev_rr | elig | p75 | p90 | p95 | pmax | worst subq (no-rate) |\n")
-    L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
+    L.append("| criterion | in force | n | surf | fire | mval | drop | indet | pblk | rev_rr | elig | p75 | p90 | p95 | pmax | worst subq (no-rate) |\n")
+    L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
     for r in rows:
-        L.append(f"| {r['c']} | {r['n']} | {r['surf']} | {r['fire']} | {r['mv']} | {r['p_drop']} | "
+        now = _posture_label(r)
+        L.append(f"| {r['c']} | {now} | {r['n']} | {r['surf']} | {r['fire']} | {r['mv']} | {r['p_drop']} | "
                  f"{r['p_indet']} | {r['p_block']} | {r['rr']} | {r['elig']} | {r['p75']} | {r['p90']} | "
                  f"{r['p95']} | {r['pmax']} | {r['worst_q']} ({r['worst_rate']}) |\n")
     L.append("\n## Precision-first proposal\n\n")
-    L.append("| criterion | n | class | posture | threshold | rationale |\n|---|---|---|---|---|---|\n")
-    for r, cls, posture, thr, rat in proposal:
-        L.append(f"| {r['c']} | {r['n']} | {cls} | {posture} | {thr:.2f} | {rat} |\n")
+    L.append("| criterion | in force | n | class | posture | threshold | change | rationale |\n"
+             "|---|---|---|---|---|---|---|---|\n")
+    for r, cls, posture, thr, rat, change in proposal:
+        now = _posture_label(r)
+        L.append(f"| {r['c']} | {now} | {r['n']} | {cls} | {posture} | {thr:.2f} "
+                 f"| {change or '-'} | {rat} |\n")
     open(path, "w").write("".join(L))
 
 
