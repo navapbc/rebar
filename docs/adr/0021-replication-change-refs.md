@@ -16,8 +16,17 @@ from GitHub.
 ## Decision
 
 1. **Add one scoped push refspec** to `infra/gerrit/replication.config`:
-   `push = refs/changes/*:refs/changes/*` (non-force, no leading `+`, `mirror = false`).
-   GitHub now carries the published branch, tags, AND per-patchset change refs.
+   `push = refs/changes/*:refs/changes/*` (`mirror = false`). GitHub now carries
+   the published branch, tags, AND per-patchset change refs.
+
+   **2026-09-09 amendment (bug `jadeite-circular-roadrunner`,
+   `93e5-b934-b2ec-43d2`):** use `push = +refs/changes/*:refs/changes/*` for this
+   namespace only. CI run `34235734839` showed that a missing/lagged GitHub
+   change ref forced `checkout-gerrit-change-action` onto the Gerrit fallback,
+   which then failed HTTP 502 before repository validation. The operator accepted
+   the org-private mirror visibility trade-off and the scoped force trade-off so
+   full replication sweeps converge patchset refs and Gerrit change metadata.
+   Branch, tag, and feature-branch refspecs remain non-force.
 
 2. **Scoped to `refs/changes/*`, NOT wildcard `refs/*`.** A wildcard would also
    replicate `refs/meta/config`, whose content embeds the inbound-webhook token
@@ -32,13 +41,16 @@ from GitHub.
 
 ## Consequences
 
-- Unmerged/abandoned patchsets become visible on the public GitHub mirror as
-  `refs/changes/*` (they are already public in the public Gerrit project, so no new
-  disclosure). These refs accumulate; GitHub GC and Gerrit's own change lifecycle
-  bound them. `mirror = false` means abandoned-change ref deletions are not pruned on
+- Unmerged/abandoned patchsets become visible on the org-private GitHub mirror
+  as `refs/changes/*`, matching the operator-approved visibility boundary for
+  CI. These refs accumulate; GitHub GC and Gerrit's own change lifecycle bound
+  them. `mirror = false` means abandoned-change ref deletions are not pruned on
   GitHub — acceptable for a PoC; revisit if the mirror grows unwieldy.
-- The one-way-door contract (Gerrit sole writer, non-force, no `refs/meta/*`) is
-  preserved; only the *set of replicated data refs* widened. ADR-0010 otherwise stands.
+- The ADR-0010 one-way-door contract remains binding for published branch/tag
+  history: Gerrit is the sole writer, branch/tag/feature refs remain non-force,
+  and no `refs/meta/*` is pushed. The `refs/changes/*` namespace is the only
+  forced refspec so GitHub converges to Gerrit's patchset/change-metadata refs
+  after lag; ADR-0010 otherwise stands.
 - ADR-0014's "webhook token never replicated" property is explicitly preserved by the
   scoped refspec + `replicatePermissions = false`.
 
