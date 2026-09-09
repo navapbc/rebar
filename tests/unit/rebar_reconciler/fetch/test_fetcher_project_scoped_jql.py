@@ -1,10 +1,7 @@
-"""Bug 626d: the inbound search JQL must be scoped to the configured jira.project.
+"""Scope inbound JQLs to the validated configured ``jira.project``.
 
-Pre-fix, ``fetcher`` hardcoded ``project = DIG`` in two module constants, so the
-reconciler fetched DIG's issues regardless of ``[jira] project`` / ``JIRA_PROJECT``.
-Re-pointing the bridge at another project (e.g. REB) still pulled — and tried to
-mutate — DIG. Post-fix, the queries are built from the resolved project key via
-``jql_active`` / ``jql_done_recent``; an absent/invalid key fails closed.
+``jql_active`` and ``jql_done_recent`` build both queries; a missing or invalid
+key fails before search, preventing cross-project fetches and mutations.
 """
 
 from __future__ import annotations

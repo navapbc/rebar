@@ -1,16 +1,9 @@
-"""Frozen-artifact census replay (epic 3006-e198 derisk AC).
+"""Replay the sanitized 2026-07-03 convergence census.
 
-Replays the pure classifier over the sanitized 2026-07-03 production artifacts
-(``tests/fixtures/bridge_convergence/frozen-2026-07-03/``: bindings + snapshot +
-local states, PII/bodies stripped) and asserts EXACTLY the 7 known drift
-decisions and nothing else:
-
-  * 5× TERMINAL_TRANSITION — REB-464 / REB-456 / REB-465 / REB-466 / REB-457
-  * 1× PROBE_GET          — REB-530 (f8b5-2f30, Jira issue deleted, out of window)
-  * 1× ADOPT              — REB-532 (Jira-native, unbound)
-
-then asserts a fixed point (zero drift) after a simulated heal. This is the
-regression cell that would have caught drift classes A/B/C before they shipped.
+Across 615 binding, snapshot, and local-state cells, require five terminal
+transitions (REB-464/456/465/466/457), one bounded probe (REB-530), and one
+adoption (REB-532). A simulated heal must then reach zero drift, pinning drift
+classes A/B/C without fixture bodies or PII.
 """
 
 from __future__ import annotations
