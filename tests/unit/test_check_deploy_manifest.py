@@ -30,6 +30,13 @@ _COVERED_DERIVED = [
     "infra/scripts/reviewbot-ensure-tickets.sh",  # Dockerfile.reviewbot install
 ]
 
+_CAP_SCRIPTS = [
+    "infra/scripts/container-cap.sh",
+    "infra/scripts/docker-storage-cap.sh",
+    "infra/scripts/journald-cap.sh",
+    "infra/scripts/vartmp-cap.sh",
+]
+
 
 def _real_manifest_text() -> str:
     return gate._autodeploy_path(_REPO_ROOT).read_text(encoding="utf-8")
@@ -52,6 +59,14 @@ def test_derivation_covers_every_recurrence_class() -> None:
         assert derived[path], f"{path} derived with no source label"
     # mcp-entrypoint.sh is the 5d4c case: named BOTH by a Dockerfile directive and the glob.
     assert any("Dockerfile.mcp" in s for s in derived["infra/scripts/mcp-entrypoint.sh"])
+
+
+def test_derivation_covers_every_cap_script() -> None:
+    """ADR 0112 caps are derived, not hand-copied into a separate checker list."""
+    derived = gate.derive_paths(_REPO_ROOT)
+    for path in _CAP_SCRIPTS:
+        assert path in derived, f"{path} not derived — cap edits would miss deploy triggers"
+        assert "glob:*-cap.sh" in derived[path]
 
 
 # ─────────────────────────── RED: an omitted derived path is flagged ───────────────────────────
@@ -96,6 +111,25 @@ def test_mutation_reomitting_any_covered_path_returns_to_red(target: str) -> Non
     # Restore (mutation check is non-destructive to the real tree — we only mutated a string).
     restored = gate.parse_manifest_paths(real)
     assert target not in {path for path, _ in gate.uncovered(derived, restored, gate.EXCLUSIONS)}
+
+
+@pytest.mark.parametrize("manifest_name", ["MATERIALIZER_PATHS", "OBS_PATHS"])
+def test_red_when_a_cap_script_is_omitted_from_a_consuming_manifest(manifest_name: str) -> None:
+    """Removing a cap script from either consuming manifest fails, even if another lists it."""
+    target = "infra/scripts/docker-storage-cap.sh"
+    real = _real_manifest_text()
+    mutated = re.sub(
+        rf"^({manifest_name}=.*?)(?<![\w/-]){re.escape(target)}(?![\w/.-])",
+        lambda match: match.group(1),
+        real,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    assert mutated != real, f"{target} not present in {manifest_name} to mutate"
+
+    diagnostics = gate.check_text(mutated, _REPO_ROOT)
+
+    assert any(target in d and manifest_name in d for d in diagnostics), diagnostics
 
 
 # ─────────────────────────── the fail-safe exclusion mechanism ───────────────────────────

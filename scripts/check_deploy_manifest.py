@@ -19,7 +19,8 @@ inventory and rejects missing/extra/changed records):
    script references under ``infra/compose/Dockerfile.*`` + ``docker-compose.yml`` (what is
    baked into the running images). Catches mcp-entrypoint.sh, named in Dockerfile.mcp.
 2. **Filename conventions** — ``infra/**/materialize-*.sh``, ``infra/**/*-entrypoint.sh`` and
-   ``infra/**/compose-up.sh``. Catches the materialize-*.sh drift class.
+   ``infra/**/compose-up.sh`` and ``infra/**/*-cap.sh``. Catches the materialize-*.sh
+   drift class and ADR 0112 host cap scripts.
 
 Each derived path is cross-referenced against the UNION of autodeploy.sh's ``*_PATHS`` using
 the same git-pathspec prefix semantics autodeploy itself uses to decide "did a matching path
@@ -79,12 +80,19 @@ def _compose_dir(repo_root: Path) -> Path:
 
 def parse_manifest_paths(text: str) -> set[str]:
     """Return the UNION of every path token across all ``^[A-Z_]+_PATHS=`` assignments."""
+    return {token for tokens in parse_manifest_paths_by_name(text).values() for token in tokens}
+
+
+def parse_manifest_paths_by_name(text: str) -> dict[str, set[str]]:
+    """Return path tokens keyed by their ``*_PATHS`` manifest assignment name."""
+    manifests: dict[str, set[str]] = {}
     tokens: set[str] = set()
     for line in text.splitlines():
-        match = re.match(r"^[A-Z_]+_PATHS=(.*)$", line)
+        match = re.match(r"^([A-Z_]+_PATHS)=(.*)$", line)
         if not match:
             continue
-        rhs = match.group(1).strip()
+        name = match.group(1)
+        rhs = match.group(2).strip()
         if rhs and rhs[0] in "'\"":
             # Quoted value: take only what is inside the quotes, so a trailing shell inline
             # comment (`FOO_PATHS='a b'  # note`) never leaks its words in as fake path tokens
@@ -99,7 +107,9 @@ def parse_manifest_paths(text: str) -> set[str]:
             token = token.strip("'\"")
             if token:
                 tokens.add(token)
-    return tokens
+        manifests[name] = tokens
+        tokens = set()
+    return manifests
 
 
 def is_covered(path: str, tokens: set[str]) -> bool:
@@ -178,6 +188,7 @@ def _derive_from_conventions(repo_root: Path) -> list[tuple[str, str]]:
         "infra/**/materialize-*.sh",
         "infra/**/*-entrypoint.sh",
         "infra/**/compose-up.sh",
+        "infra/**/*-cap.sh",
     )
     for pattern in patterns:
         label = "glob:" + pattern.split("/")[-1]
@@ -215,7 +226,26 @@ def uncovered(
     ]
 
 
-def check(repo_root: Path = REPO_ROOT) -> list[str]:
+_CAP_MANIFESTS = ("MATERIALIZER_PATHS", "OBS_PATHS")
+
+
+def _cap_manifest_gaps(
+    derived: dict[str, list[str]], manifests: dict[str, set[str]], exclusions: dict[str, str]
+) -> list[tuple[str, str, list[str]]]:
+    caps = {
+        path: sources
+        for path, sources in derived.items()
+        if path.endswith("-cap.sh") and path not in exclusions
+    }
+    return [
+        (path, manifest, sources)
+        for path, sources in sorted(caps.items())
+        for manifest in _CAP_MANIFESTS
+        if not is_covered(path, manifests.get(manifest, set()))
+    ]
+
+
+def check_text(manifest_text: str, repo_root: Path = REPO_ROOT) -> list[str]:
     """Return diagnostics (empty == clean) for the deploy-manifest completeness gate."""
     diagnostics: list[str] = []
     for path, reason in sorted(EXCLUSIONS.items()):
@@ -235,13 +265,24 @@ def check(repo_root: Path = REPO_ROOT) -> list[str]:
             "vacuously (a silent empty derivation is the fail-open this gate prevents)."
         )
 
-    tokens = parse_manifest_paths(_autodeploy_path(repo_root).read_text())
+    manifests = parse_manifest_paths_by_name(manifest_text)
+    tokens = {token for paths in manifests.values() for token in paths}
     for path, sources in uncovered(derived, tokens, EXCLUSIONS):
         diagnostics.append(
             f"UNCOVERED {path} — derived from [{', '.join(sources)}] but listed in NO "
             f"autodeploy.sh *_PATHS manifest"
         )
+    for path, manifest, sources in _cap_manifest_gaps(derived, manifests, EXCLUSIONS):
+        diagnostics.append(
+            f"UNCOVERED {path} — derived from [{', '.join(sources)}] but listed in NO "
+            f"{manifest} consuming manifest"
+        )
     return diagnostics
+
+
+def check(repo_root: Path = REPO_ROOT) -> list[str]:
+    """Return diagnostics (empty == clean) for the deploy-manifest completeness gate."""
+    return check_text(_autodeploy_path(repo_root).read_text(), repo_root)
 
 
 def main(argv: list[str] | None = None) -> int:
