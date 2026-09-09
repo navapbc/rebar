@@ -414,6 +414,7 @@ def test_manifest_is_deterministic_and_selects_the_live_mapped_identity(tmp_path
     second = _build_manifest(fixture, second_output)
 
     assert first == second
+    # timing: artifact-equality — deterministic manifest JSON over the same fixture input
     assert fixture.output.read_bytes() == second_output.read_bytes()
     assert first["expected_delta"]["groups"] == 1
     assert first["expected_delta"]["removed_events"] == 3

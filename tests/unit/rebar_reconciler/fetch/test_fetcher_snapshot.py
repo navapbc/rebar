@@ -212,6 +212,7 @@ def test_fetch_snapshot_is_deterministic(tmp_path, fetcher):
     with patch.object(fetcher, "_load_acli", return_value=mock_acli2):
         path_b = fetcher.fetch_snapshot("2026-05-24-pass-03b", repo_root=tmp_path)
 
+    # timing: artifact-equality — deterministic JSON snapshots over identical stub data
     assert path_a.read_bytes() == path_b.read_bytes(), (
         "Two fetches with identical data must produce byte-identical snapshots"
     )

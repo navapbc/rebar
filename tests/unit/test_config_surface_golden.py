@@ -121,6 +121,7 @@ def test_generator_is_deterministic_and_check_clean(tmp_path: pathlib.Path) -> N
     second = tmp_path / "second.json"
     assert _run_generator("--output", str(first)).returncode == 0
     assert _run_generator("--output", str(second)).returncode == 0
+    # timing: artifact-equality — deterministic golden generator output
     assert first.read_bytes() == second.read_bytes()
     clean = _run_generator("--check", "--output", str(first))
     assert clean.returncode == 0, clean.stderr

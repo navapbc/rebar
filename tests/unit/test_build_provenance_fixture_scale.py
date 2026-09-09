@@ -23,4 +23,5 @@ def test_fixture_materializes_only_the_production_hook_boundary(tmp_path: Path) 
         text=True,
     ).stdout.splitlines()
     assert tracked == ["hatch_build.py", "pyproject.toml", "src/rebar/__init__.py"]
+    # timing: artifact-equality — same-source copy check, not independently timestamped output
     assert (tree / "hatch_build.py").read_bytes() == (_REPO_ROOT / "hatch_build.py").read_bytes()
