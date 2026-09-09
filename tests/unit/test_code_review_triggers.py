@@ -162,6 +162,15 @@ def test_concurrency_routing_posture_is_blocking():
     assert blocking_enabled is True
 
 
+def test_failover_committed_token_fires_on_fallback_diff():
+    diff = (
+        "--- a/src/rebar/llm/runner.py\n+++ b/src/rebar/llm/runner.py\n@@ -10,3 +10,4 @@\n"
+        "+    if should_fall_back(error):\n"
+        "+        return fallback_runner.run(request)\n"
+    )
+    assert "failover" in reg.content_triggered_overlays(diff)
+
+
 # ── EDGE: removing synchronization is concurrency-introducing (fires on a `-` line) ──────────
 def test_concurrency_committed_token_fires_on_removed_sync_line():
     diff = (

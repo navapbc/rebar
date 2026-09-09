@@ -49,6 +49,7 @@ OVERLAY_IDS: tuple[str, ...] = (
     "llm-prompts",  # prompt/contract/output-schema changes to LLM surfaces
     "deletion-impact",  # (content-triggered) removed def/class/signature → dangling references
     "concurrency",  # (content-triggered) threads/async/multiprocessing/locks/channels — races
+    "failover",  # (content-triggered) fallback/retry/error classification — disposition masking
     "scope-intent",  # (content-triggered) diff vs the UNION scope/AC of the commit's tickets
     "surface-parity",  # (glob-triggered) a write-op's param/guard/required-field surface changed
     # on one adapter (lib/CLI/MCP) without the siblings updated in lockstep
@@ -489,6 +490,7 @@ def content_triggered_overlays(
         fired.add("deletion-impact")
     if _has_concurrency_token(diff_text):
         fired.add("concurrency")
+    _scan_packaged_tokens(diff_text, fired)
     if _content_selects_tests(diff_text, changed_files, repo_root):
         fired.add("tests")
     _scan_project_tokens(diff_text, project_trigger_extensions(repo_root), fired)
@@ -616,6 +618,10 @@ def _scan_project_tokens(
     """Add to ``fired`` every built-in overlay id whose project ``trigger_tokens`` literal
     substring appears on an added/removed diff line body (``+++``/``---`` headers excluded)."""
     token_map = {oid: e["trigger_tokens"] for oid, e in ext.items() if e.get("trigger_tokens")}
+    _scan_token_map(diff_text, token_map, fired)
+
+
+def _scan_token_map(diff_text: str, token_map: dict[str, list[str]], fired: set[str]) -> None:
     if not token_map:
         return
     for raw in diff_text.splitlines():
@@ -627,6 +633,15 @@ def _scan_project_tokens(
         for oid, tokens in token_map.items():
             if oid not in fired and any(tok in body for tok in tokens):
                 fired.add(oid)
+
+
+def _scan_packaged_tokens(diff_text: str, fired: set[str]) -> None:
+    token_map = {
+        oid: _str_list(entry.get("trigger_tokens"))
+        for oid, entry in routing_index().items()
+        if oid in OVERLAY_IDS
+    }
+    _scan_token_map(diff_text, token_map, fired)
 
 
 def overlay_flag_key(overlay_id: str) -> str:
