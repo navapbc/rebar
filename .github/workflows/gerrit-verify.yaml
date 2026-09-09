@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Reset Verified->0 at run start (GerriScary-safe)
-        uses: lfreleng-actions/gerrit-review-action@a1c036a59b94c8ab89de26d378f6a28cc7378b13  # v1.1.2
+        uses: lfreleng-actions/gerrit-review-action@1e3eae766b3de755a2e87aa216cedebbaf9c8292  # v1.1.3
         with:
           host: ${{ vars.GERRIT_SERVER }}
           username: ${{ vars.GERRIT_SSH_USER }}
@@ -81,7 +81,7 @@ jobs:
         id: checkout-gerrit-attempt-1
         if: inputs.GERRIT_REFSPEC != ''
         continue-on-error: true
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
@@ -97,7 +97,7 @@ jobs:
         id: checkout-gerrit-attempt-2
         if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
         continue-on-error: true
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
@@ -112,7 +112,7 @@ jobs:
       - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 3
         id: checkout-gerrit-attempt-3
         if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
@@ -171,7 +171,7 @@ jobs:
         id: checkout-gerrit-attempt-1
         if: inputs.GERRIT_REFSPEC != ''
         continue-on-error: true
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
@@ -187,7 +187,7 @@ jobs:
         id: checkout-gerrit-attempt-2
         if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
         continue-on-error: true
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
@@ -202,7 +202,7 @@ jobs:
       - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 3
         id: checkout-gerrit-attempt-3
         if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
@@ -248,7 +248,7 @@ jobs:
         id: checkout-gerrit-attempt-1
         if: inputs.GERRIT_REFSPEC != ''
         continue-on-error: true
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
@@ -264,7 +264,7 @@ jobs:
         id: checkout-gerrit-attempt-2
         if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
         continue-on-error: true
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
@@ -279,7 +279,7 @@ jobs:
       - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 3
         id: checkout-gerrit-attempt-3
         if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
@@ -425,7 +425,7 @@ jobs:
         id: checkout-gerrit-attempt-1
         if: inputs.GERRIT_REFSPEC != ''
         continue-on-error: true
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
@@ -441,7 +441,7 @@ jobs:
         id: checkout-gerrit-attempt-2
         if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
         continue-on-error: true
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
@@ -456,7 +456,7 @@ jobs:
       - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 3
         id: checkout-gerrit-attempt-3
         if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
@@ -514,7 +514,7 @@ jobs:
         id: checkout-gerrit-attempt-1
         if: inputs.GERRIT_REFSPEC != ''
         continue-on-error: true
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
@@ -530,7 +530,7 @@ jobs:
         id: checkout-gerrit-attempt-2
         if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
         continue-on-error: true
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
@@ -545,7 +545,7 @@ jobs:
       - name: Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 3
         id: checkout-gerrit-attempt-3
         if: ${{ inputs.GERRIT_REFSPEC != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
           gerrit-project: ${{ inputs.GERRIT_PROJECT }}
