@@ -1,19 +1,10 @@
-"""S2 (e042) HELD-OUT oracle — reconciler operation-bindings, cross-surface.
+"""Pin reconciler operation bindings through public, cross-surface behavior.
 
-This file is withheld from the implementer. It asserts the acceptance criteria
-as OBSERVABLE behavior through the reconciler's public seams — never private
-structure — against code the implementer wrote seeing only the happy path.
-
-Contract recap (the new seam):
-    rebar_reconciler.runtime.compose_reconciler_runtime(
-        *, repo_root=None, cli_overrides=None) -> ReconcilerRuntime
-    ReconcilerRuntime.build_backend(*, transport=None) -> backend
-      - captures the composed scope/settings at COMPOSE time (no ambient
-        re-resolution on property access or at build)
-      - constructs ONLY the selected provider
-      - ``transport`` (test seam) injects a fake transport for read/map E2E
-    ReconcilerRuntime.settings -> frozen ReconcilerSettings with
-      ``tracker_dir`` (Path), ``tracker_branch`` (str), ``repo_root`` (str/Path)
+``compose_reconciler_runtime(*, repo_root=None, cli_overrides=None)`` freezes scope and
+settings. ``build_backend(transport=None)`` constructs only the selected provider and
+accepts a fake transport for read/map tests. Frozen settings expose ``tracker_dir``
+(``Path``), ``tracker_branch`` (``str``), and ``repo_root`` (``str`` or ``Path``);
+credentials stay usable for authentication but absent from representations.
 """
 
 from __future__ import annotations

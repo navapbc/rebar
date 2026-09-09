@@ -1,22 +1,9 @@
-"""Held-out: the push dirty-merge recovery must never touch the shared stash stack.
+"""Require dirty-merge recovery to leave the repository-global stash untouched (bug 2fa6).
 
-Bug 2fa6. ``git``'s stash stack is REPO-GLOBAL — every worktree of a repository pushes
-onto and pops from the same ``refs/stash``. The old recovery did
-``stash push`` → merge → ``stash pop`` inside the TICKETS worktree, so a stash created
-in a SOURCE worktree could be popped into the ticket store. That is not hypothetical:
-it dropped ``src/…`` and ``.rebar/…`` into the tracker, left the index with unmerged
-(DU) entries and no ``MERGE_HEAD``, and blocked every subsequent ticket write.
-
-The test encodes the RACE rather than the steady state, because LIFO ordering alone
-hides the bug: if nothing interleaves, a ``pop`` does pop the entry its own ``push``
-created. The failure needs a foreign entry to land on the stack BETWEEN our set-aside
-and our restore — exactly what a concurrent source-worktree ``git stash`` does. So the
-git seam injects one at that point.
-
-RED on the pre-fix code: the pop takes the foreign entry, so ``src/leak.py`` materializes
-in the tracker (and the store's own edit is left in the stash). GREEN after: the recovery
-addresses its own stash COMMIT OBJECT by sha, which no other worktree can reach, and
-``refs/stash`` is left exactly as found.
+A source worktree can add a foreign entry between the ticket worktree's set-aside and
+restore, so LIFO ``stash pop`` may import source files. This test injects that interleaving
+and requires SHA-addressed restoration of the store's own commit while ``refs/stash``
+remains exactly unchanged.
 """
 
 from __future__ import annotations

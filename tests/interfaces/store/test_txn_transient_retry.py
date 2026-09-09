@@ -1,21 +1,8 @@
-"""A transient git object-DB/ref-read fault on the TRANSITION/CLAIM ``git commit`` is
-retried, not surfaced as a hard write failure (bug childsafe-special-springtail).
+"""Retry transient ``could not parse HEAD`` failures on transition and claim commits.
 
-This is the completion of edf7/vocal-dip-robin. That fix retried the transient
-loose-object runner-FS fault on the CREATE path's ``git add`` (see
-``test_event_append_transient_retry.py``), but the SAME transient also strikes the
-READ side: a ``git commit`` on the transition/claim path resolves ``HEAD`` to set the
-new commit's parent (``parse_commit``), and when HEAD's commit object is transiently
-unreadable under a shared tracker's ``.git/objects/`` git dies with verbatim
-``fatal: could not parse HEAD`` (exit 128). It is a filesystem hiccup, not data
-corruption: a Gerrit ``recheck`` on the identical patchset passes.
-
-The transition/claim path routes through ``txn.py``'s ``_git`` → ``run_git_write``,
-which (before this fix) retried ONLY ``index.lock`` — so the transient surfaced as the
-hard ``rebar transition failed (exit 2): Error: git operation failed: fatal: could not
-parse HEAD``. These tests inject that exact stderr on the FIRST transition commit and
-assert the write self-heals on retry, while a NON-transient commit failure still fails
-immediately (no behavior change there).
+The read-side object fault occurs before the ref moves and is safe to retry through
+``txn``'s write seam. These tests fail the first commit with the exact stderr, require
+self-healing, and keep non-transient commit failures immediate.
 """
 
 from __future__ import annotations

@@ -1,18 +1,9 @@
-"""Shared harness for read-integrity-under-sync-contention tests (ed2b family).
+"""Shared harness for read integrity under sync contention.
 
-Hoisted from ``test_show_no_stall.py`` (ticket fa6e) so the generic
-reads-under-contention property suite and the original ed2b regression share ONE
-storm/CLI harness instead of duplicating it. The pieces:
-
-- ``_git`` — quiet git runner.
-- ``_rebar_cli`` — invoke the real ``rebar`` CLI in a subprocess with
-  ``REBAR_SYNC_PUSH`` set, the consumer-facing path the ed2b bug broke.
-- ``_clear_sync_throttle`` — remove the ``/tmp/.ticket-sync-<md5>`` marker so the
-  next read actually exercises the reconverge path (``ensure_fresh`` reconverges
-  at most 1/min per store; without this, later reads short-circuit to the local
-  snapshot and the property under test never runs).
-- ``build_repo_with_origin_tickets`` — repo + bare origin + pushed tickets branch,
-  the fixture body behind ``repo_with_origin_tickets`` (see ``conftest.py``).
+``_rebar_cli`` exercises the consumer-facing path with background pushes.
+``_clear_sync_throttle`` removes the per-store marker so each read reaches
+``ensure_fresh`` instead of its one-minute shortcut. ``build_repo_with_origin_tickets``
+supplies the bare-origin topology used by the bare-import fixture in ``conftest.py``.
 """
 
 from __future__ import annotations

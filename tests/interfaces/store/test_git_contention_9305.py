@@ -1,20 +1,9 @@
-"""Local git lock contention on the tickets store is absorbed automatically (bug 9305).
+"""Pin automatic absorption of local git-lock contention (bug 9305).
 
-Operator-ratified contract (2026-08-04, recorded on the ticket): concurrent rebar sessions
-contending on LOCAL git locks (``index.lock`` / ref locks) must NOT surface errors to the
-agent running the command. The store's git execution seam (``rebar._store.gitutil``) provides
-
-  * a per-store advisory lock serializing rebar's own index-mutating git ops, plus
-  * bounded, JITTERED retry/backoff on git's lock-conflict signatures,
-
-so a transient conflict self-heals silently (at most a debug/warning log) and only a
-genuinely STUCK lock — the bounded budget (tens of seconds by default) exhausted — surfaces
-one actionable error naming the lock file with holder guidance.
-
-These tests use REAL git repos in tmp dirs and a real competing lock holder — behavioral,
-not change-detectors. The budget constants are shrunk via monkeypatch where a test would
-otherwise wait out the full default budget; the default budget itself is pinned by a
-separate contract test.
+A per-store advisory lock serializes rebar index mutations, while bounded jittered retry
+covers index and ref-lock conflicts. Brief contention must self-heal; an exhausted
+tens-of-seconds budget must emit one actionable error. These behavioral tests use real
+repositories and competing processes, shrinking time only where the default is not under test.
 """
 
 from __future__ import annotations
@@ -234,26 +223,11 @@ def test_advisory_lock_serializes_against_competing_holder(tmp_path: Path) -> No
 
 
 def test_concurrent_processes_through_seam_both_succeed(tmp_path: Path) -> None:
-    """Two processes committing through the seam against the SAME repo both succeed —
-    contention among rebar's own writers is absorbed, never surfaced.
+    """Two isolated processes must both commit through the production seam.
 
-    Each writer commits its OWN PATHSPEC rather than the whole index. The advisory git-op
-    lock serializes each ``run_git_write`` CALL but not the add+commit PAIR, so with a bare
-    (whole-index) ``git commit`` this interleaving is legal:
-
-        alpha: add alpha.txt   -> index holds alpha.txt
-        beta:  add beta.txt    -> index holds alpha.txt AND beta.txt
-        alpha: commit          -> commits the WHOLE index, sweeping up beta.txt
-        beta:  commit          -> nothing staged -> "nothing to commit" -> rc=1
-
-    That rc=1 is git correctly reporting an empty commit, not a contention failure — and
-    ``git commit -q`` puts the reason on STDOUT with an EMPTY stderr, which is why the CI
-    failures arrived as a message-less ``AssertionError`` (bug mutinous-conceptual-moorhen).
-    A pathspec commit keeps each writer's commit non-empty under every interleaving, so the
-    test measures the contention policy instead of the commit ordering.
-
-    The worker also reports WHICH inner git command failed, with stdout as well as stderr,
-    so an empty-stderr failure is diagnosable from the CI log alone.
+    Each worker commits only its own pathspec, so either serialization order remains
+    non-empty. The result measures advisory-lock behavior and reports the exact failing
+    inner command, stdout, and stderr.
     """
     repo = _fresh_repo(tmp_path, "both")
     src = str(Path(__file__).resolve().parents[3] / "src")

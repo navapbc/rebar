@@ -1,16 +1,9 @@
-"""Inline-commit writes auto-push on their own (bug prone-octet-cheek).
+"""Require every inline-commit writer to auto-push (bug prone-octet-cheek).
 
-``transition`` / ``reopen`` / ``claim`` (txn.py), ``compact`` (compact.py), and
-``delete`` (delete.py) do their own locked rename+commit instead of going through
-``write_and_push``. The auto-push must still fire for each, otherwise a trailing
-status/compact/delete — the LAST write of a session, e.g. closing an epic — leaves
-its commit stranded as PUSH_PENDING (origin/tickets behind local).
-
-These pin the observable git effect against a real local bare origin: after each
-such write, with NO following append_event write to "carry" it, the local tickets
-branch must be EVEN with origin/tickets (ahead == 0). The default push policy
-(``always``) is in force (the push-policy matrix is covered by
-test_push_policy_e2e.py).
+``transition``, ``reopen``, ``claim``, ``compact``, and ``delete`` bypass
+``write_and_push``. After each final write, the local tickets branch must still be even
+with ``origin/tickets``. Real bare-origin tests exercise the default ``always`` policy
+without relying on a later write to carry the commit.
 """
 
 from __future__ import annotations
@@ -223,22 +216,12 @@ def test_compact_all_keeps_the_legacy_best_effort_push_contract(
 def test_a_write_pushing_to_the_origin_leaves_no_detached_upkeep(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A push into this module's own origin must leave nothing writing to it.
+    """A write must leave the fixture origin free of detached maintenance.
 
-    ``repo_with_origin`` copies the whole template — ``origin.git`` included — with
-    ``clone_topology_template``. At git's defaults every push into an unpinned bare
-    remote leaves a detached ``git maintenance run`` behind, which repacks and prunes
-    that object database outside any lock the tests hold: the copy walks it, and
-    ``_ahead`` fetches from it on the statement after each write (bug
-    b394-6198-6010-42f7).
-
-    ``init_repo`` itself does NOT push — measured: it leaves ``origin.git`` with no refs
-    and no receive-pack in the trace. The first push comes from the first WRITE, so this
-    guard drives a write, which is the event the pins have to survive.
-
-    Assert the mutator's ABSENCE from git's own process trace rather than asserting that
-    a copy or a fetch happened to succeed — the race is a coin flip, so a green one is
-    consistent with the mutator still existing.
+    ``repo_with_origin`` copies the template's ``origin.git``; receive-pack maintenance
+    could race both that copy and the next ``_ahead`` fetch. Drive the first push and
+    assert the mutator's absence in git's process trace, since a successful copy or fetch
+    alone would not disprove the race.
     """
     root = tmp_path / "origin-build"
     root.mkdir()
