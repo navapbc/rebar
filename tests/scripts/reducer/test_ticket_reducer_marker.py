@@ -1,18 +1,4 @@
-"""RED behavioral tests for ticket_reducer/marker.py API.
-
-These tests are RED — they test functionality that does not yet exist.
-All test functions must FAIL until ticket_reducer/marker.py is implemented.
-
-The marker module is expected to expose three callables:
-    write_marker(ticket_dir: Path) -> None
-    remove_marker(ticket_dir: Path) -> None
-    check_marker(ticket_dir: Path) -> bool
-
-The marker file is: <ticket_dir>/.archived
-
-Test: python3 -m pytest tests/scripts/test_ticket_reducer_marker.py
-All tests must return non-zero until marker.py is implemented.
-"""
+"""Behavioral coverage for the reducer's archive-marker API."""
 
 from __future__ import annotations
 
@@ -21,31 +7,23 @@ from pathlib import Path
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Import helpers — marker.py does not exist yet (RED state)
-# ---------------------------------------------------------------------------
+# Marker imports
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 
-# Ensure the scripts directory (which contains ticket_reducer package) is on sys.path
+# Make the reducer package importable.
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 
-# ---------------------------------------------------------------------------
-# Test 0 (SC8): Importability of write_marker, remove_marker, check_marker
-# ---------------------------------------------------------------------------
+# Public imports
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_marker_imports_from_package() -> None:
-    """write_marker, remove_marker, check_marker must be importable from rebar.reducer.
-
-    RED: marker.py does not exist yet — ImportError expected until implemented.
-    SC8: covers import contract for all three public functions.
-    """
+    """The reducer package exports all three marker operations."""
     from rebar.reducer import check_marker, remove_marker, write_marker
 
     assert callable(write_marker), "write_marker must be callable"
@@ -53,30 +31,19 @@ def test_marker_imports_from_package() -> None:
     assert callable(check_marker), "check_marker must be callable"
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def ticket_dir(tmp_path: Path) -> Path:
-    """Return a fresh temporary directory representing a ticket directory."""
+    """Return an empty ticket directory."""
     return tmp_path
 
 
-# ---------------------------------------------------------------------------
-# Test 1: write_marker creates .archived file
-# ---------------------------------------------------------------------------
+# Marker creation
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_write_marker_creates_file(ticket_dir: Path) -> None:
-    """Given a temp ticket dir with no .archived file, when write_marker is called,
-    then <ticket_dir>/.archived file exists on disk.
-
-    RED: marker.py does not exist yet.
-    """
+    """``write_marker`` creates ``.archived`` in the ticket directory."""
     from rebar.reducer import write_marker
 
     marker_path = ticket_dir / ".archived"
@@ -90,19 +57,13 @@ def test_write_marker_creates_file(ticket_dir: Path) -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 2: check_marker returns True after write_marker
-# ---------------------------------------------------------------------------
+# Post-write check
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_check_marker_true_after_write(ticket_dir: Path) -> None:
-    """Given a temp ticket dir where write_marker was called, when check_marker is
-    called, then it returns True.
-
-    RED: marker.py does not exist yet.
-    """
+    """``check_marker`` returns true after ``write_marker``."""
     from rebar.reducer import check_marker, write_marker
 
     write_marker(ticket_dir)
@@ -114,19 +75,13 @@ def test_check_marker_true_after_write(ticket_dir: Path) -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 3: check_marker returns False without marker
-# ---------------------------------------------------------------------------
+# Absent marker check
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_check_marker_false_without_marker(ticket_dir: Path) -> None:
-    """Given a temp ticket dir with no .archived file, when check_marker is called,
-    then it returns False.
-
-    RED: marker.py does not exist yet.
-    """
+    """``check_marker`` returns false when ``.archived`` is absent."""
     from rebar.reducer import check_marker
 
     assert not (ticket_dir / ".archived").exists(), "Pre-condition: .archived must not exist"
@@ -139,19 +94,13 @@ def test_check_marker_false_without_marker(ticket_dir: Path) -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 4: remove_marker deletes .archived file
-# ---------------------------------------------------------------------------
+# Marker removal
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_remove_marker_deletes_file(ticket_dir: Path) -> None:
-    """Given a temp ticket dir with a .archived file, when remove_marker is called,
-    then the .archived file no longer exists.
-
-    RED: marker.py does not exist yet.
-    """
+    """``remove_marker`` deletes an existing ``.archived`` file."""
     from rebar.reducer import remove_marker
 
     marker_path = ticket_dir / ".archived"
@@ -166,19 +115,13 @@ def test_remove_marker_deletes_file(ticket_dir: Path) -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 5: remove_marker is idempotent (no error when .archived absent)
-# ---------------------------------------------------------------------------
+# Idempotent removal
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_remove_marker_idempotent(ticket_dir: Path) -> None:
-    """Given a temp ticket dir with no .archived file, when remove_marker is called,
-    then no error is raised and the directory state is unchanged.
-
-    RED: marker.py does not exist yet.
-    """
+    """``remove_marker`` tolerates an absent marker."""
     from rebar.reducer import remove_marker
 
     assert not (ticket_dir / ".archived").exists(), "Pre-condition: .archived must not exist"
@@ -197,20 +140,13 @@ def test_remove_marker_idempotent(ticket_dir: Path) -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 6: write_marker error tolerance (non-existent parent dir)
-# ---------------------------------------------------------------------------
+# Write-error tolerance
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_write_marker_error_tolerance(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:  # type: ignore[type-arg]
-    """Given write_marker is called on a ticket_dir where .archived cannot be created
-    (e.g., dir is a non-existent path), when write_marker is called, then no exception
-    is raised (the function logs to stderr and returns gracefully).
-
-    RED: marker.py does not exist yet.
-    """
+    """``write_marker`` reports an unwritable path without raising."""
     from rebar.reducer import write_marker
 
     non_existent_dir = tmp_path / "does" / "not" / "exist"

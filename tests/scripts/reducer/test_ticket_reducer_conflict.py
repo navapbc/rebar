@@ -1,17 +1,4 @@
-"""Tests for reduce_ticket UUID-dedup on replay (bug 944c-374d).
-
-The reducer replays raw event files in filename order with seen-UUID dedup:
-the FIRST occurrence of a given event uuid (in filename order) applies; any
-later file carrying the same uuid is skipped. This guards against a duplicate
-event file (e.g. a COMMENT copied to a new filename with the same payload uuid)
-double-applying on replay.
-
-The pluggable reducer "strategy" was dead code (never wired into reduce_ticket)
-and was deleted; these tests exercise the actual replay semantics end-to-end via
-reduce_ticket, not a strategy object.
-
-Test: python3 -m pytest tests/scripts/test_ticket_reducer_conflict.py -q
-"""
+"""Replay coverage for first-event-wins UUID deduplication."""
 
 from __future__ import annotations
 
@@ -43,12 +30,7 @@ def _write_event(
     env_id: str = "00000000-0000-4000-8000-000000000001",
     author: str = "Test User",
 ) -> Path:
-    """Write a well-formed event JSON file and return its path.
-
-    Filename embeds the timestamp first so two files sharing the same payload
-    ``uuid`` but different timestamps get distinct filenames yet the same
-    in-payload event uuid — the exact duplicate-UUID scenario under test.
-    """
+    """Write an event file, allowing one payload UUID at distinct timestamps."""
     filename = f"{timestamp}-{uuid}-{event_type}.json"
     payload = {
         "timestamp": timestamp,
@@ -68,19 +50,13 @@ _COMMENT_UUID = "22222222-2222-4222-8222-222222222222"
 _STATUS_UUID = "33333333-3333-4333-8333-333333333333"
 
 
-# ---------------------------------------------------------------------------
-# Test 1: a duplicate-UUID COMMENT file applies exactly once
-# ---------------------------------------------------------------------------
+# Duplicate comments
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_duplicate_uuid_comment_applies_once(tmp_path: Path, reducer: ModuleType) -> None:
-    """A COMMENT event copied to a second filename (same uuid) appears ONCE.
-
-    RED before the dedup fix: filename-order replay double-applies the second
-    file, so the comment shows up twice.
-    """
+    """A repeated COMMENT UUID applies once."""
     ticket_dir = tmp_path / "tkt-dup-comment"
     ticket_dir.mkdir()
 
@@ -116,19 +92,13 @@ def test_duplicate_uuid_comment_applies_once(tmp_path: Path, reducer: ModuleType
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 2: a duplicate STATUS event does not self-fork the status
-# ---------------------------------------------------------------------------
+# Duplicate statuses
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_duplicate_uuid_status_does_not_self_fork(tmp_path: Path, reducer: ModuleType) -> None:
-    """A STATUS event duplicated under a second filename resolves to one status.
-
-    Re-applying the same STATUS uuid must not be treated as two distinct envs /
-    a fork; the net status is just the single transition.
-    """
+    """A repeated STATUS UUID produces one transition, not a fork."""
     ticket_dir = tmp_path / "tkt-dup-status"
     ticket_dir.mkdir()
 
@@ -162,9 +132,7 @@ def test_duplicate_uuid_status_does_not_self_fork(tmp_path: Path, reducer: Modul
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 3: distinct-UUID multi-event tickets are unchanged by dedup
-# ---------------------------------------------------------------------------
+# Distinct events
 
 
 @pytest.mark.unit
@@ -199,9 +167,7 @@ def test_distinct_uuid_events_unchanged(tmp_path: Path, reducer: ModuleType) -> 
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 4: a SNAPSHOT + a post-snapshot duplicate pair applies once
-# ---------------------------------------------------------------------------
+# Snapshot interaction
 
 
 @pytest.mark.unit
@@ -209,12 +175,7 @@ def test_distinct_uuid_events_unchanged(tmp_path: Path, reducer: ModuleType) -> 
 def test_snapshot_plus_post_snapshot_duplicate_applies_once(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """A post-snapshot COMMENT duplicated under a second filename applies once.
-
-    The dedup lives AFTER the snapshot-source-uuid skip, so it composes cleanly
-    with compaction: the snapshot restores compiled state, and the duplicated
-    post-snapshot event still applies exactly once.
-    """
+    """A post-snapshot COMMENT duplicated by UUID applies once."""
     ticket_dir = tmp_path / "tkt-snap"
     ticket_dir.mkdir()
 

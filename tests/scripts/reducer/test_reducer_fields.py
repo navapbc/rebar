@@ -1,9 +1,4 @@
-"""Scalar fields: priority / assignee / tags and COMMENT body coercion
-
-Split from the former monolithic tests/scripts/test_ticket_reducer.py along
-reducer-concern seams. The module-under-test fixture (`reducer`) lives in
-conftest.py; event-writing helpers (`_write_event`, `_UUID*`) in _events.py.
-"""
+"""Exercise scalar defaults, path-derived IDs, tags, and comment-body coercion."""
 
 from __future__ import annotations
 
@@ -13,9 +8,7 @@ from types import ModuleType
 import pytest
 from _events import _UUID, _write_event
 
-# ---------------------------------------------------------------------------
-# Tests: priority and assignee fields in reducer output
-# ---------------------------------------------------------------------------
+# Priority and assignee fields
 
 _UUID4 = "11111111-2222-3333-4444-555555555555"
 
@@ -112,9 +105,7 @@ def test_reducer_assignee_defaults_to_none_when_absent(tmp_path: Path, reducer: 
     )
 
 
-# ---------------------------------------------------------------------------
-# Test: trailing-slash path must not produce empty ticket_id (b146-4802)
-# ---------------------------------------------------------------------------
+# A trailing slash still yields the directory ticket ID
 
 
 @pytest.mark.unit
@@ -143,19 +134,13 @@ def test_reduce_ticket_trailing_slash_produces_correct_ticket_id(
     )
 
 
-# ---------------------------------------------------------------------------
-# Test: CREATE event with tags field populates state.tags
-# ---------------------------------------------------------------------------
+# CREATE copies explicit tags
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_create_event_with_tags(tmp_path: Path, reducer: ModuleType) -> None:
-    """Given a CREATE event with tags in data, reducer must populate state['tags'].
-
-    Without the fix: ticket-reducer.py currently ignores tags in CREATE events.
-    This test will FAIL until the reducer is updated to read tags from event data.
-    """
+    """CREATE copies an explicit tag list into reducer state."""
     ticket_dir = tmp_path / "tkt-tags"
     ticket_dir.mkdir()
 
@@ -179,19 +164,13 @@ def test_create_event_with_tags(tmp_path: Path, reducer: ModuleType) -> None:
     assert state["tags"] == ["CLI_user"], f"Expected tags=['CLI_user'], got {state.get('tags')!r}"
 
 
-# ---------------------------------------------------------------------------
-# Test: CREATE event without tags field initializes state.tags to empty list
-# ---------------------------------------------------------------------------
+# CREATE defaults missing tags
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_create_event_without_tags(tmp_path: Path, reducer: ModuleType) -> None:
-    """Given a CREATE event without a tags field, reducer must initialize state['tags'] to [].
-
-    GREEN: the reducer already initializes tags to [] for tickets without tags.
-    This test verifies backward compatibility.
-    """
+    """CREATE initializes missing tags to an empty list for legacy events."""
     ticket_dir = tmp_path / "tkt-no-tags"
     ticket_dir.mkdir()
 
@@ -214,21 +193,13 @@ def test_create_event_without_tags(tmp_path: Path, reducer: ModuleType) -> None:
     assert state["tags"] == [], f"Expected tags=[], got {state.get('tags')!r}"
 
 
-# ---------------------------------------------------------------------------
-# Test: COMMENT handler must coerce ADF dict body to string
-# When Jira sync writes a COMMENT event with an ADF dict as the body field,
-# the reducer must store it as a string so downstream consumers don't receive a dict.
-# ---------------------------------------------------------------------------
+# Jira ADF mappings become string comment bodies
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_comment_adf_dict_body_coerced_to_string(tmp_path: Path, reducer: ModuleType) -> None:
-    """COMMENT event with ADF dict body must store body as string, not dict.
-
-    Without the fix: currently fails because reducer stores data.get('body', '') verbatim,
-    passing through the ADF dict without coercion.
-    """
+    """Serialize an ADF mapping so downstream comment bodies stay strings."""
     ticket_dir = tmp_path / "tkt-adf-comment"
     ticket_dir.mkdir()
 
@@ -263,11 +234,7 @@ def test_comment_adf_dict_body_coerced_to_string(tmp_path: Path, reducer: Module
     )
 
 
-# ---------------------------------------------------------------------------
-# Test: COMMENT handler round-trips embedded JSON in body
-# When a comment body contains a JSON-serialized string (e.g. a CHECKPOINT log),
-# the round-trip through reduce_ticket must preserve the body as-is.
-# ---------------------------------------------------------------------------
+# Embedded JSON strings round-trip unchanged
 
 
 @pytest.mark.unit
@@ -275,12 +242,7 @@ def test_comment_adf_dict_body_coerced_to_string(tmp_path: Path, reducer: Module
 def test_comment_body_with_embedded_json_survives_round_trip(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """COMMENT body containing embedded JSON must survive reduce_ticket round-trip unchanged.
-
-    This covers the case where agents write structured data (e.g. CHECKPOINT JSON)
-    as comment bodies. The reducer must not alter string bodies that happen to contain
-    JSON content.
-    """
+    """Preserve an already-string JSON comment body byte-for-byte."""
     ticket_dir = tmp_path / "tkt-json-comment"
     ticket_dir.mkdir()
 
@@ -312,12 +274,7 @@ def test_comment_body_with_embedded_json_survives_round_trip(
     )
 
 
-# ---------------------------------------------------------------------------
-# Test: COMMENT handler must coerce falsy non-string bodies
-# The old guard used `if _raw_body else ""` which treats {} as falsy and
-# silently converts it to "" instead of json.dumps({}) = "{}".
-# Fix: use explicit `is None` check to distinguish None from other falsy values.
-# ---------------------------------------------------------------------------
+# Falsy non-null mappings retain their structure
 
 
 @pytest.mark.unit
@@ -325,13 +282,7 @@ def test_comment_body_with_embedded_json_survives_round_trip(
 def test_comment_empty_dict_body_coerced_to_json_string(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """COMMENT event with empty dict body {} must be coerced to '{}', not ''.
-
-    Without the fix: current code uses `if _raw_body else ""` which treats {} as falsy
-    and returns '' instead of json.dumps({}) = '{}'. This imprecision loses
-    the structural indicator that a non-null body was present (6bc8-91bc).
-    Fix: replace `if _raw_body else ""` with explicit `is None` guard.
-    """
+    """Serialize a non-null empty mapping as ``{}`` rather than an empty string."""
     ticket_dir = tmp_path / "tkt-empty-dict-body"
     ticket_dir.mkdir()
 

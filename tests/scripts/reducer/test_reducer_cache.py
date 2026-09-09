@@ -1,9 +1,4 @@
-"""Reduction cache: hit / miss / invalidation + warm-cache performance
-
-Split from the former monolithic tests/scripts/test_ticket_reducer.py along
-reducer-concern seams. The module-under-test fixture (`reducer`) lives in
-conftest.py; event-writing helpers (`_write_event`, `_UUID*`) in _events.py.
-"""
+"""Exercise reduction-cache hits, invalidation dimensions, and warm-read bounds."""
 
 from __future__ import annotations
 
@@ -16,28 +11,13 @@ from types import ModuleType
 import pytest
 from _events import _UUID, _UUID2, _UUID3, _write_event
 
-# ---------------------------------------------------------------------------
-# Test 12: Cache hit — second call with no file changes returns cached state
-# ---------------------------------------------------------------------------
+# Test 12: unchanged input hits the cache
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_cache_hit_returns_cached_state(tmp_path: Path, reducer: ModuleType) -> None:
-    """Calling reduce_ticket twice with no file changes must serve from cache.
-
-    Without the fix: ticket-reducer.py does not yet implement caching. The assert on
-    .cache.json existing will fail because the current implementation never
-    writes a cache file.
-
-    Setup: write a CREATE event, call reduce_ticket() once (expected to warm
-    the cache and write .cache.json), then call reduce_ticket() again without
-    modifying any files.
-
-    Asserts:
-      - .cache.json exists in the ticket directory after the first call
-      - Second call returns the same state as first (cache hit — same dir_hash)
-    """
+    """An unchanged directory returns identical state from the written cache."""
     ticket_dir = tmp_path / "tkt-cache-hit"
     ticket_dir.mkdir()
 
@@ -74,27 +54,13 @@ def test_cache_hit_returns_cached_state(tmp_path: Path, reducer: ModuleType) -> 
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 13: Cache miss on directory listing change (file addition)
-# ---------------------------------------------------------------------------
+# Test 13: adding an event invalidates the cache
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_cache_miss_on_directory_listing_change(tmp_path: Path, reducer: ModuleType) -> None:
-    """Adding an event file between calls must invalidate the cache.
-
-    Without the fix: without caching, the test structure is valid but the cache-miss
-    detection mechanism doesn't exist. Once caching is implemented, a new
-    file changes the dir_hash → cache miss → recompute.
-
-    Setup: write a CREATE event, call reduce_ticket() (warms cache), write a
-    STATUS event, call reduce_ticket() again.
-
-    Asserts:
-      - Second call returns updated state reflecting the STATUS event
-      - .cache.json exists (written after first call — after first call)
-    """
+    """Adding an event invalidates the cache and returns the updated state."""
     ticket_dir = tmp_path / "tkt-cache-miss"
     ticket_dir.mkdir()
 
@@ -141,31 +107,13 @@ def test_cache_miss_on_directory_listing_change(tmp_path: Path, reducer: ModuleT
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 14: Cache invalidated on file deletion
-# ---------------------------------------------------------------------------
+# Test 14: deletion invalidates cache
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_cache_invalidated_on_file_deletion(tmp_path: Path, reducer: ModuleType) -> None:
-    """Deleting an event file between calls must invalidate the cache.
-
-    Without the fix: without caching, the second call already sees 0 comments because
-    the file is gone. However, the assertion that .cache.json is UPDATED
-    after the recompute will fail since no cache file is ever written.
-
-    This is critical for w21-q0nn compaction: cache must detect file
-    DELETIONS, not just additions.
-
-    Setup: write CREATE + STATUS + COMMENT events, call reduce_ticket()
-    (warm cache), delete the COMMENT file, call reduce_ticket() again.
-
-    Asserts:
-      - Second call returns state with 0 comments (deletion detected, recomputed)
-      - .cache.json exists after first call
-      - .cache.json is updated after second call (recompute after cache miss)
-    """
+    """Deleting an event invalidates and rewrites the cache with current state."""
     ticket_dir = tmp_path / "tkt-cache-delete"
     ticket_dir.mkdir()
 
@@ -235,9 +183,7 @@ def test_cache_invalidated_on_file_deletion(tmp_path: Path, reducer: ModuleType)
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 15: Warm cache 200 tickets under 500ms
-# ---------------------------------------------------------------------------
+# Test 15: 200 warm reads
 
 
 @pytest.mark.unit
@@ -248,15 +194,7 @@ def test_cache_invalidated_on_file_deletion(tmp_path: Path, reducer: ModuleType)
     reason="Wall-clock benchmark skipped on CI runners (use @pytest.mark.benchmark exclusion)",
 )
 def test_warm_cache_200_tickets_under_500ms(tmp_path: Path, reducer: ModuleType) -> None:
-    """200 warm-cache reduce_ticket() calls must complete in under 500ms.
-
-    Setup: create 200 ticket directories each with a CREATE event, warm the
-    cache by calling reduce_ticket() on each (first pass), then time the
-    second pass (all cache hits).
-
-    Marked @pytest.mark.benchmark so this test can be excluded from standard
-    unit runs on constrained CI runners: pytest -m "not benchmark".
-    """
+    """Two hundred warm reads complete within 500 ms outside CI."""
     ticket_dirs: list[Path] = []
     for i in range(200):
         ticket_dir = tmp_path / f"tkt-{i:04d}"
@@ -288,9 +226,7 @@ def test_warm_cache_200_tickets_under_500ms(tmp_path: Path, reducer: ModuleType)
     assert elapsed < 0.5, f"200 warm-cache calls took {elapsed:.3f}s, must be < 0.5s"
 
 
-# ---------------------------------------------------------------------------
-# Test 16: Warm cache 1000 tickets under 2s
-# ---------------------------------------------------------------------------
+# Test 16: 1,000 warm reads
 
 
 @pytest.mark.unit
@@ -301,15 +237,7 @@ def test_warm_cache_200_tickets_under_500ms(tmp_path: Path, reducer: ModuleType)
     reason="Wall-clock benchmark skipped on CI runners (use @pytest.mark.benchmark exclusion)",
 )
 def test_warm_cache_1000_tickets_under_2s(tmp_path: Path, reducer: ModuleType) -> None:
-    """1000 warm-cache reduce_ticket() calls must complete in under 2 seconds.
-
-    Setup: create 1000 ticket directories each with a CREATE event, warm the
-    cache by calling reduce_ticket() on each (first pass), then time the
-    second pass (all cache hits).
-
-    Marked @pytest.mark.benchmark so this test can be excluded from standard
-    unit runs on constrained CI runners: pytest -m "not benchmark".
-    """
+    """One thousand warm reads complete within two seconds outside CI."""
     ticket_dirs: list[Path] = []
     for i in range(1000):
         ticket_dir = tmp_path / f"tkt-{i:04d}"
@@ -341,28 +269,13 @@ def test_warm_cache_1000_tickets_under_2s(tmp_path: Path, reducer: ModuleType) -
     assert elapsed < 2.0, f"1000 warm-cache calls took {elapsed:.3f}s, must be < 2.0s"
 
 
-# ---------------------------------------------------------------------------
-# Test 17: Cache miss on same-filename content change (file overwrite)
-# ---------------------------------------------------------------------------
+# Test 17: same-name content changes invalidate the cache
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_cache_miss_on_same_filename_content_change(tmp_path: Path, reducer: ModuleType) -> None:
-    """Overwriting an event file with different content (same filename) must invalidate cache.
-
-    This test guards against the filename-only hash bug: if the cache hash
-    covers only filenames and not file sizes, an in-place overwrite of an
-    event file will silently return stale state.
-
-    Setup: write a CREATE event with title "Original title", call
-    reduce_ticket() (warms cache), then overwrite the same CREATE event
-    file with a different title. Call reduce_ticket() again.
-
-    Asserts:
-      - First call returns the original title.
-      - Second call (after overwrite) returns the updated title — cache miss.
-    """
+    """An in-place content-and-size change invalidates an unchanged filename."""
     ticket_dir = tmp_path / "tkt-content-change"
     ticket_dir.mkdir()
 
@@ -409,27 +322,13 @@ def test_cache_miss_on_same_filename_content_change(tmp_path: Path, reducer: Mod
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 17b: Cache miss on same-SIZE in-place content rewrite (bug 1d76-b6d1)
-# ---------------------------------------------------------------------------
+# Test 17b: equal-size rewrites invalidate by modification time
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_cache_miss_on_same_size_inplace_rewrite(tmp_path: Path, reducer: ModuleType) -> None:
-    """A same-byte-length in-place rewrite of an event file must invalidate cache.
-
-    Regression guard for bug 1d76-b6d1: the dir-hash keyed on filename+size only
-    cannot detect an equal-length overwrite (as produced by a git checkout/rebase
-    of the tickets branch or an fsck-recover cherry-pick), so reads served stale
-    state. The fix folds st_mtime_ns into the hash.
-
-    Setup: write a CREATE event with a title, warm the cache, then overwrite the
-    same file in place with a DIFFERENT title of the SAME byte length and bump
-    its mtime (as a checkout would). The next read must reflect the new title.
-    Also asserts the cache still HITS on an unchanged dir (no read-path
-    regression).
-    """
+    """An equal-size rewrite changes mtime and invalidates without breaking hits."""
     ticket_dir = tmp_path / "tkt-same-size-rewrite"
     ticket_dir.mkdir()
 

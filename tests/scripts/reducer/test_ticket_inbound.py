@@ -1,25 +1,7 @@
-"""RED tests for inbound-relationship derivation (ticket show completeness).
+"""Inbound-link and child derivation tests.
 
-These tests are RED — they exercise functionality that does not yet exist.
-The module under test is expected to expose, from the ``ticket_reducer``
-package::
-
-    find_inbound_relationships(ticket_id: str, tracker_dir: str) -> dict
-
-Contract:
-  - Returns ``{"ticket_id": str, "inbound_links": list, "children": list}``.
-  - ``inbound_links`` is a sorted list of ``{"from_id": str, "relation": str}``
-    for every *other* ticket whose net-active LINK event targets ``ticket_id``.
-  - ``children`` is a sorted list of ticket IDs whose ``parent_id == ticket_id``.
-  - The subject ticket never appears in its own inbound results.
-  - Source tickets in terminal ``deleted`` state are not surfaced.
-  - A reciprocal ``relates_to`` already present on the subject's own outgoing
-    deps is NOT duplicated into ``inbound_links``.
-  - Candidates are pre-filtered to tickets whose event files mention the ID; a
-    ticket that merely mentions the ID in prose (e.g. a comment) but holds no
-    structured link/parent to it is NOT reported.
-
-Run: python3 -m pytest tests/scripts/test_ticket_inbound.py -x
+Results contain sorted, net-active structural relationships while excluding
+self-links, inactive sources, reciprocal duplicates, and prose-only mentions.
 """
 
 from __future__ import annotations
@@ -37,9 +19,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 
-# ---------------------------------------------------------------------------
-# Fixtures / helpers
-# ---------------------------------------------------------------------------
+# Fixtures
 
 # 16-hex-style canonical IDs (xxxx-xxxx-xxxx-xxxx) — match the production ID
 # shape so substring prefiltering behaves exactly as it would in real corpora.
@@ -135,11 +115,6 @@ def _write_comment(tracker_dir: Path, ticket_id: str, body: str, timestamp: int 
     }
     with open(ticket_dir / f"{timestamp}-comment-{ticket_id}-COMMENT.json", "w") as f:
         json.dump(comment_event, f)
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit

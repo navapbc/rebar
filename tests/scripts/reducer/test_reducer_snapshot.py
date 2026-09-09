@@ -1,9 +1,4 @@
-"""SNAPSHOT restore / dedup and compaction integration
-
-Split from the former monolithic tests/scripts/test_ticket_reducer.py along
-reducer-concern seams. The module-under-test fixture (`reducer`) lives in
-conftest.py; event-writing helpers (`_write_event`, `_UUID*`) in _events.py.
-"""
+"""SNAPSHOT restoration, deduplication, and compaction-cache tests."""
 
 from __future__ import annotations
 
@@ -14,19 +9,13 @@ from types import ModuleType
 import pytest
 from _events import _UUID, _UUID2, _UUID3, _write_event
 
-# ---------------------------------------------------------------------------
-# Test 18: SNAPSHOT event restores compiled state
-# ---------------------------------------------------------------------------
+# Test 18: restore compiled SNAPSHOT state.
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_snapshot_event_restores_compiled_state(tmp_path: Path, reducer: ModuleType) -> None:
-    """A SNAPSHOT event with compiled_state in data must restore that state directly.
-
-    Without the fix: ticket-reducer.py does not yet handle SNAPSHOT events. The reducer
-    will either ignore the event or raise, causing this test to fail.
-    """
+    """Restore `compiled_state` directly from a SNAPSHOT event."""
     ticket_dir = tmp_path / "tkt-snapshot-basic"
     ticket_dir.mkdir()
 
@@ -63,18 +52,13 @@ def test_snapshot_event_restores_compiled_state(tmp_path: Path, reducer: ModuleT
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 19: SNAPSHOT + post-snapshot events applied correctly
-# ---------------------------------------------------------------------------
+# Test 19: apply post-SNAPSHOT events.
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_snapshot_plus_post_snapshot_events_applied(tmp_path: Path, reducer: ModuleType) -> None:
-    """A STATUS event after a SNAPSHOT (not in source_event_uuids) must be applied.
-
-    Without the fix: SNAPSHOT handling not yet implemented.
-    """
+    """Apply a later STATUS absent from `source_event_uuids`."""
     ticket_dir = tmp_path / "tkt-snapshot-post"
     ticket_dir.mkdir()
 
@@ -118,9 +102,7 @@ def test_snapshot_plus_post_snapshot_events_applied(tmp_path: Path, reducer: Mod
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 20: SNAPSHOT deduplicates events in source_event_uuids
-# ---------------------------------------------------------------------------
+# Test 20: deduplicate SNAPSHOT source events.
 
 
 @pytest.mark.unit
@@ -128,10 +110,7 @@ def test_snapshot_plus_post_snapshot_events_applied(tmp_path: Path, reducer: Mod
 def test_snapshot_deduplicates_events_in_source_event_uuids(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """An event whose uuid is listed in source_event_uuids must be skipped.
-
-    Without the fix: SNAPSHOT handling and deduplication not yet implemented.
-    """
+    """Skip events listed in the SNAPSHOT's `source_event_uuids`."""
     ticket_dir = tmp_path / "tkt-snapshot-dedup"
     ticket_dir.mkdir()
 
@@ -180,19 +159,13 @@ def test_snapshot_deduplicates_events_in_source_event_uuids(
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 21: SNAPSHOT-only ticket returns compiled state (no CREATE needed)
-# ---------------------------------------------------------------------------
+# Test 21: reduce a SNAPSHOT-only ticket.
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_snapshot_only_ticket_returns_compiled_state(tmp_path: Path, reducer: ModuleType) -> None:
-    """A ticket with only a SNAPSHOT event (no CREATE) must return the compiled_state.
-
-    Without the fix: SNAPSHOT handling not yet implemented; reducer currently returns None
-    when no CREATE event is found.
-    """
+    """Return compiled state from a SNAPSHOT-only ticket."""
     ticket_dir = tmp_path / "tkt-snapshot-only"
     ticket_dir.mkdir()
 
@@ -225,9 +198,7 @@ def test_snapshot_only_ticket_returns_compiled_state(tmp_path: Path, reducer: Mo
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 22: Cache invalidation after compaction (file deletion + SNAPSHOT)
-# ---------------------------------------------------------------------------
+# Test 22: invalidate cache after compaction.
 
 
 @pytest.mark.unit
@@ -235,16 +206,7 @@ def test_snapshot_only_ticket_returns_compiled_state(tmp_path: Path, reducer: Mo
 def test_cache_invalidation_after_compaction_file_deletion(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """After compaction (old files deleted, SNAPSHOT written), cache must invalidate.
-
-    Setup: write CREATE + 3 STATUS events, call reduce_ticket() to warm cache,
-    then delete those 4 files and write a SNAPSHOT event (simulating compaction).
-    Call reduce_ticket() again and assert the result matches the SNAPSHOT state.
-
-    Without the fix: SNAPSHOT handling not yet implemented. Even if cache invalidation works
-    (file count change triggers cache miss), the reducer will fail on the
-    SNAPSHOT event type.
-    """
+    """Invalidate warm state after event files are replaced by a SNAPSHOT."""
     ticket_dir = tmp_path / "tkt-compact-cache"
     ticket_dir.mkdir()
 
@@ -331,9 +293,7 @@ def test_cache_invalidation_after_compaction_file_deletion(
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 23: Integration — warm cache before compaction returns correct state after
-# ---------------------------------------------------------------------------
+# Test 23: integrate warm-cache compaction.
 
 
 @pytest.mark.integration
@@ -341,19 +301,7 @@ def test_cache_invalidation_after_compaction_file_deletion(
 def test_integ_cache_warm_before_compaction_returns_correct_state_after(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """Warm cache before compaction must be invalidated after compaction runs.
-
-    Setup: write CREATE + 3 STATUS events, warm the cache via reduce_ticket(),
-    then simulate compaction (delete all event files, write a SNAPSHOT event).
-    Call reduce_ticket() again and verify that:
-      - The cache was invalidated (file count changed: 4 events → 1 SNAPSHOT)
-      - The returned state reflects the SNAPSHOT compiled_state (not the cached state)
-
-    This validates the end-to-end contract between the caching mechanism
-    (w21-f8tg: directory listing hash) and SNAPSHOT handling (w21-vz2h):
-    compaction changes both the file count AND the filenames, guaranteeing
-    a cache miss via the dir_hash check.
-    """
+    """Return compacted SNAPSHOT state instead of the pre-compaction cache."""
     ticket_dir = tmp_path / "tkt-compact-cache"
     ticket_dir.mkdir()
 

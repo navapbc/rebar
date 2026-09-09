@@ -1,9 +1,4 @@
-"""Core event reduction (CREATE / STATUS / COMMENT, ordering, corrupt-skip, error states)
-
-Split from the former monolithic tests/scripts/test_ticket_reducer.py along
-reducer-concern seams. The module-under-test fixture (`reducer`) lives in
-conftest.py; event-writing helpers (`_write_event`, `_UUID*`) in _events.py.
-"""
+"""Core CREATE, STATUS, COMMENT, ordering, and corrupt-event reduction tests."""
 
 from __future__ import annotations
 
@@ -16,9 +11,7 @@ from types import ModuleType
 import pytest
 from _events import _UUID, _UUID2, _UUID3, _write_event
 
-# ---------------------------------------------------------------------------
-# Test 1: reducer compiles a single CREATE event to ticket state
-# ---------------------------------------------------------------------------
+# Test 1: compile CREATE state.
 
 
 @pytest.mark.unit
@@ -57,9 +50,7 @@ def test_reducer_compiles_single_create_event_to_state(tmp_path: Path, reducer: 
     assert state["deps"] == []
 
 
-# ---------------------------------------------------------------------------
-# Test 2: reducer sorts events by filename (lexicographic = chronological)
-# ---------------------------------------------------------------------------
+# Test 2: sort events lexically by filename.
 
 
 @pytest.mark.unit
@@ -67,16 +58,9 @@ def test_reducer_compiles_single_create_event_to_state(tmp_path: Path, reducer: 
 def test_reducer_orders_events_by_filename_not_insertion_order(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """Events must be processed in filename-lexicographic order regardless of write order.
+    """Apply filename order despite reversed filesystem insertion order.
 
-    We write the LATER event (t2=1742605300) first and the EARLIER event
-    (t1=1742605200) second — simulating a reversed filesystem insertion order.
-    The reducer must still apply t1 before t2.
-
-    We verify ordering by writing two CREATE events with the same uuid but
-    different timestamps and titles; only the first (t1) must win as CREATE.
-    Then a STATUS event at t2 carries the "expected_order_verified" marker we
-    assert on.
+    The earlier CREATE supplies the title before the later STATUS closes it.
     """
     ticket_dir = tmp_path / "tkt-order"
     ticket_dir.mkdir()
@@ -120,19 +104,13 @@ def test_reducer_orders_events_by_filename_not_insertion_order(
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 3: reducer skips corrupt JSON with a warning, does not raise
-# ---------------------------------------------------------------------------
+# Test 3: skip corrupt JSON without raising.
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_reducer_skips_corrupt_json_with_warning(tmp_path: Path, reducer: ModuleType) -> None:
-    """Given one valid CREATE event and one malformed JSON file, the reducer
-    must return valid state from the good event and must NOT raise an exception.
-    It should log a warning (any mechanism is acceptable — the test only
-    verifies that no exception propagates and valid state is returned).
-    """
+    """Retain valid CREATE state when a malformed event is present."""
     ticket_dir = tmp_path / "tkt-corrupt"
     ticket_dir.mkdir()
 
@@ -163,9 +141,7 @@ def test_reducer_skips_corrupt_json_with_warning(tmp_path: Path, reducer: Module
     assert state["ticket_type"] == "bug"
 
 
-# ---------------------------------------------------------------------------
-# Test 4: reducer returns None for ticket with no CREATE event
-# ---------------------------------------------------------------------------
+# Test 4: reject a ticket without CREATE.
 
 
 @pytest.mark.unit
@@ -173,10 +149,7 @@ def test_reducer_skips_corrupt_json_with_warning(tmp_path: Path, reducer: Module
 def test_reducer_returns_none_for_ticket_with_no_create_event(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """Given a ticket directory that contains only STATUS events (no CREATE),
-    reduce_ticket must return None (or raise TicketNotFoundError — either
-    signals that the ticket cannot be compiled to state).
-    """
+    """Return None or NotFound when STATUS has no preceding CREATE."""
     ticket_dir = tmp_path / "tkt-no-create"
     ticket_dir.mkdir()
 
@@ -202,29 +175,23 @@ def test_reducer_returns_none_for_ticket_with_no_create_event(
         )
 
 
-# ---------------------------------------------------------------------------
-# Test 5: reducer handles empty ticket directory gracefully
-# ---------------------------------------------------------------------------
+# Test 5: handle an empty ticket directory.
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_reducer_handles_empty_ticket_dir(tmp_path: Path, reducer: ModuleType) -> None:
-    """Given an existing but empty .tickets-tracker/<ticket_id>/ directory,  # tickets-boundary-ok
-    reduce_ticket must return None without crashing.
-    """
+    """Return None for an empty tracker ticket directory.  # tickets-boundary-ok"""
     ticket_dir = tmp_path / "tkt-empty"
     ticket_dir.mkdir()
 
-    # Directory exists but contains no event files
+    # Empty directory, no event files.
     state = reducer.reduce_ticket(ticket_dir)
 
     assert state is None, "reduce_ticket must return None for an empty ticket directory"
 
 
-# ---------------------------------------------------------------------------
-# Test 6: STATUS event updates ticket status (new STATUS contract)
-# ---------------------------------------------------------------------------
+# Test 6: apply a matching STATUS transition.
 
 
 @pytest.mark.unit
@@ -232,12 +199,7 @@ def test_reducer_handles_empty_ticket_dir(tmp_path: Path, reducer: ModuleType) -
 def test_reducer_compiles_status_event_to_correct_status(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """Given a CREATE event followed by a STATUS event, the reducer must update status.
-
-    The STATUS event data includes both 'status' (target) and 'current_status'
-    (optimistic concurrency proof). When current_status matches the current
-    compiled status, the transition must be applied.
-    """
+    """Apply STATUS when its optimistic `current_status` matches compiled state."""
     ticket_dir = tmp_path / "tkt-status"
     ticket_dir.mkdir()
 
@@ -269,9 +231,7 @@ def test_reducer_compiles_status_event_to_correct_status(
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 7: STATUS event with current_status mismatch flags conflict
-# ---------------------------------------------------------------------------
+# Test 7: resolve a mismatched STATUS fork.
 
 
 @pytest.mark.unit
@@ -279,17 +239,9 @@ def test_reducer_compiles_status_event_to_correct_status(
 def test_reducer_applies_multiple_status_events_current_status_mismatch_resolves_fork(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """STATUS event where current_status doesn't match compiled status triggers fork detection.
+    """Resolve a mismatched STATUS by UUID tie-break without storing conflicts.
 
-    The new behavior (DD SC7): when current_status in the event doesn't match the
-    compiled state's status, a fork is detected and resolved via lexical UUID tie-break
-    on parent_status_uuid rather than accumulating into state['conflicts'].
-
-    Both chains have no parent_status_uuid (empty string tie — incoming wins by <= rule),
-    so the incoming event's target_status ("closed") is applied.
-
-    Expected: state is not None, status is resolved (no 'conflicts' key), and
-    'conflicts' is not in state.
+    Empty parent UUIDs let the incoming event win and close the ticket.
     """
     ticket_dir = tmp_path / "tkt-conflict"
     ticket_dir.mkdir()
@@ -336,20 +288,9 @@ def test_reducer_applies_multiple_status_events_current_status_mismatch_resolves
 def test_reducer_fork_with_empty_existing_uuid_lets_incoming_win(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """Bug e60b-e698: when state.parent_status_uuid is empty (no prior fork
-    winner has been recorded — e.g. the first fork after CREATE), the
-    incoming event MUST win regardless of its UUID's lexical ordering. The
-    previous condition ``incoming_uuid <= existing_uuid`` evaluated False for
-    any non-empty incoming vs an empty existing (because any string > ""), so
-    the existing-wins branch fired and state.status stayed at the loser's
-    value. Fix added a `not existing_uuid` guard so empty-existing → incoming
-    wins unconditionally.
+    """Let an incoming fork win when the existing parent UUID is empty.
 
-    This test directly exercises the empty-existing case: a CREATE leaves
-    state.parent_status_uuid="" (default). A STATUS event with
-    current_status='in_progress' (mismatched) and target='closed' triggers
-    fork resolution; without the fix, status stays 'open'; with the fix,
-    status becomes 'closed'.
+    The winning event closes the ticket and becomes the comparison anchor.
     """
     ticket_dir = tmp_path / "tkt-empty-existing-uuid"
     ticket_dir.mkdir()
@@ -388,9 +329,7 @@ def test_reducer_fork_with_empty_existing_uuid_lets_incoming_win(
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 8: COMMENT event accumulates in comments list
-# ---------------------------------------------------------------------------
+# Test 8: accumulate one COMMENT.
 
 
 @pytest.mark.unit
@@ -398,13 +337,7 @@ def test_reducer_fork_with_empty_existing_uuid_lets_incoming_win(
 def test_reducer_compiles_comment_event_to_comments_list(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """Given a CREATE + COMMENT event, the reducer must append to the comments list.
-
-    Each comment in state['comments'] must include at minimum:
-      - 'body': the comment text
-      - 'author': the event author
-      - 'timestamp': the event timestamp
-    """
+    """Append COMMENT body, author, and timestamp to compiled state."""
     ticket_dir = tmp_path / "tkt-comment"
     ticket_dir.mkdir()
 
@@ -442,9 +375,7 @@ def test_reducer_compiles_comment_event_to_comments_list(
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 9: Multiple COMMENT events accumulate in chronological order
-# ---------------------------------------------------------------------------
+# Test 9: preserve COMMENT chronology.
 
 
 @pytest.mark.unit
@@ -499,9 +430,7 @@ def test_reducer_accumulates_multiple_comments(tmp_path: Path, reducer: ModuleTy
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 10: Ghost ticket directory (zero valid events) returns error state dict
-# ---------------------------------------------------------------------------
+# Test 10: surface an all-corrupt ghost ticket.
 
 
 @pytest.mark.unit
@@ -509,20 +438,7 @@ def test_reducer_accumulates_multiple_comments(tmp_path: Path, reducer: ModuleTy
 def test_reducer_returns_error_state_for_ticket_dir_with_zero_valid_events(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """A ticket dir containing only corrupt JSON files (no parseable events) must
-    return an error state dict — not None, and must not raise.
-
-    Ghost prevention: zero-valid-events → error state, not crash.
-    The returned dict must have status='error'.
-
-    # ("returns None if … dir is empty") to differentiate two cases:
-    #   - Empty dir (no files at all)     → None  (Tests 4 and 5)
-    #   - Corrupt-only dir (no parseable events) → error dict (this test)
-    # Story w21-o72z done-definition: ghost tickets must surface as errors,
-    # not silently disappear. The updated module docstring now documents this
-    # distinction. Returning None for corrupt-only dirs would make ghost
-    # tickets invisible to operators, which the story explicitly forbids.
-    """
+    """Return status=error, rather than None or raising, for corrupt-only input."""
     ticket_dir = tmp_path / "tkt-ghost"
     ticket_dir.mkdir()
 
@@ -541,26 +457,15 @@ def test_reducer_returns_error_state_for_ticket_dir_with_zero_valid_events(
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 11: Corrupt CREATE event marks ticket as fsck_needed
-# ---------------------------------------------------------------------------
+# Test 11: corrupt CREATE needs fsck.
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_reducer_flags_corrupt_create_as_fsck_needed(tmp_path: Path, reducer: ModuleType) -> None:
-    """A CREATE event missing required fields (ticket_type) must not silently corrupt state.
+    """Return status=fsck_needed for a parseable CREATE missing `ticket_type`.
 
-    The reducer must return a dict with status='fsck_needed' rather than None
-    or raising an exception. It must also not block all operations — the
-    returned dict must be a non-None, non-raising result.
-
-    # NOTE (w21-o72z): 'fsck_needed' is a new sentinel value introduced by
-    # this story to distinguish structurally-corrupt-but-parseable CREATE events
-    # (missing required fields) from fully-unparseable corrupt JSON (status='error',
-    # Test 10). The sentinel signals: "this ticket exists but needs manual
-    # inspection before it can be safely used." The implementer must use
-    # exactly 'fsck_needed' as the status string for this case.
+    This distinguishes structural corruption from unparseable status=error input.
     """
     ticket_dir = tmp_path / "tkt-fsck"
     ticket_dir.mkdir()
@@ -603,9 +508,7 @@ def test_reducer_flags_corrupt_create_as_fsck_needed(tmp_path: Path, reducer: Mo
     )
 
 
-# ---------------------------------------------------------------------------
-# Corrupt-event skip behavior tests
-# ---------------------------------------------------------------------------
+# Corrupt-event resilience.
 
 
 @pytest.mark.unit
@@ -659,14 +562,7 @@ def test_reducer_skips_corrupt_json_event_and_returns_valid_state(
 def test_reducer_emits_warning_for_corrupt_event(
     tmp_path: Path, reducer: ModuleType, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Reducer logs a WARNING (named logger) for corrupt event files.
-
-    Per the error-handling convention (epic ring-gun-jot) the reducer is library code:
-    it emits the corrupt-event diagnostic via ``logging.getLogger(__name__)``, not an
-    unconditional stderr print. The record surfaces on stderr only once an entrypoint
-    installs the handler (CLI/MCP); here we assert the log RECORD is emitted, which
-    ``caplog`` captures regardless of handler configuration.
-    """
+    """Log corrupt-event warnings through the named library logger."""
     ticket_dir = tmp_path / "tkt-corrupt-warn"
     ticket_dir.mkdir()
 

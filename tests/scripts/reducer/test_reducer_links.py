@@ -1,9 +1,4 @@
-"""LINK / UNLINK event handling, same-second ordering, alias-target normalization
-
-Split from the former monolithic tests/scripts/test_ticket_reducer.py along
-reducer-concern seams. The module-under-test fixture (`reducer`) lives in
-conftest.py; event-writing helpers (`_write_event`, `_UUID*`) in _events.py.
-"""
+"""LINK/UNLINK reduction, cancellation ordering, and target normalization."""
 
 from __future__ import annotations
 
@@ -14,10 +9,7 @@ from types import ModuleType
 import pytest
 from _events import _UUID, REPO_ROOT, _write_event
 
-# ---------------------------------------------------------------------------
-# Tests: LINK / UNLINK event handling (vwoo)
-# These tests MUST FAIL until ticket-reducer.py is extended to handle LINK/UNLINK.
-# ---------------------------------------------------------------------------
+# LINK and UNLINK reduction.
 
 _LINK_UUID = "11112222-3333-4444-5555-666677778888"
 _LINK_UUID2 = "aaaabbbb-cccc-dddd-eeee-ffff00001111"
@@ -68,9 +60,7 @@ def test_reducer_compiles_link_event_into_deps_list(tmp_path: Path, reducer: Mod
 def test_reducer_link_event_with_target_key_instead_of_target_id(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """LINK events using 'target' key (legacy format) are accepted and normalized
-    to 'target_id' in the compiled state. All 112 existing LINK events on disk use
-    'target' rather than 'target_id'. Fix for ticket 9e0f-0828."""
+    """Normalize the legacy `target` field to compiled `target_id`."""
     ticket_dir = tmp_path / "tkt-link-legacy"
     ticket_dir.mkdir()
 
@@ -147,12 +137,9 @@ def test_reducer_compiles_multiple_link_events(tmp_path: Path, reducer: ModuleTy
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_reducer_unlink_event_removes_dep_entry(tmp_path: Path, reducer: ModuleType) -> None:
-    """A LINK event followed by an UNLINK event with matching link_uuid removes
-    the dep entry — state['deps'] is empty after the UNLINK.
+    """Remove a dependency when UNLINK names its LINK UUID.
 
-    We verify using two ticket dirs: one with LINK only (must show 1 dep) and one
-    with LINK + UNLINK (must show 0 deps). This ensures the test cannot pass unless
-    LINK events are actually processed.
+    The LINK-only control proves processing precedes cancellation.
     """
     # Dir A: LINK only — must produce 1 dep (proves LINK is processed)
     dir_link_only = tmp_path / "tkt-unlink-removes-link-only"
@@ -394,29 +381,13 @@ def test_reducer_deps_in_snapshot_not_duplicated(tmp_path: Path, reducer: Module
     assert state["ticket_id"] == "tkt-link-nodupe"
 
 
-# ---------------------------------------------------------------------------
-# same-second LINK + UNLINK sort order (jwan)
-# LINK must always replay before UNLINK at the same Unix-second timestamp,
-# even when the UNLINK filename UUID sorts alphabetically before the LINK UUID.
-# ---------------------------------------------------------------------------
+# Same-second LINK-before-UNLINK ordering.
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_same_second_link_unlink_sort_order(reducer: ModuleType, tmp_path: Path) -> None:
-    """When LINK and UNLINK share the same Unix-second timestamp, LINK must
-    replay before UNLINK so the dep is correctly cancelled.
-
-    Bug scenario (jwan): If filenames sort lexicographically as
-    UNLINK < LINK (because UNLINK's UUID precedes LINK's UUID alphabetically),
-    the reducer processes UNLINK first — the link_uuid is not yet in deps,
-    so UNLINK is a no-op, then LINK adds the dep. The dep appears active when
-    it should be cancelled.
-
-    Fix: sort key must be (timestamp_segment, event_type_order, full_name)
-    with LINK=0, UNLINK=1, so LINK always processes before UNLINK at the same
-    second.
-    """
+    """Replay same-second LINK before UNLINK despite reverse UUID sort order."""
     ticket_dir = tmp_path / "tkt-same-sec"
     ticket_dir.mkdir()
 
@@ -463,9 +434,7 @@ def test_same_second_link_unlink_sort_order(reducer: ModuleType, tmp_path: Path)
     )
 
 
-# ---------------------------------------------------------------------------
-# Test: LINK event alias target normalizes to canonical UUID (bug 8fc3-d3b1)
-# ---------------------------------------------------------------------------
+# Canonicalize LINK alias targets.
 
 _ALIAS_TARGET_UUID = "abcd-1234-5678-abcd"
 
@@ -475,19 +444,7 @@ _ALIAS_TARGET_UUID = "abcd-1234-5678-abcd"
 def test_reducer_link_event_alias_target_normalizes_to_canonical_uuid(
     tmp_path: Path, reducer: ModuleType
 ) -> None:
-    """LINK event with a short-hex (alias-form) target_id is resolved to the full
-    canonical UUID during reduce_ticket when tracker_dir context is available.
-
-    Without the fix: process_link stores the verbatim short-hex value ("abcd-1234")
-    so deps[0]["target_id"] == "abcd-1234" (not the canonical UUID).
-
-    With the fix: reduce_ticket derives tracker_dir and passes it through
-    replay_events -> process_link -> resolve_ticket_id, so the stored
-    target_id equals the canonical UUID "abcd-1234-5678-abcd".
-
-    RED before fix: assertion `dep['target_id'] == 'abcd-1234-5678-abcd'` fails
-    because target_id is still "abcd-1234".
-    """
+    """Resolve a short LINK target to its canonical UUID using tracker context."""
     # Build a 2-ticket tracker
     tracker_dir = tmp_path / "tracker-alias-resolve"
     tracker_dir.mkdir()
@@ -521,11 +478,7 @@ def test_reducer_link_event_alias_target_normalizes_to_canonical_uuid(
         data={"relation": "blocks", "target_id": "abcd-1234"},
     )
 
-    # Pre-assertion gate: confirm ticket_resolver.resolve_ticket_id is importable and
-    # actually maps the short-hex alias to the canonical UUID when called directly.
-    # This makes a resolver import/resolution failure unambiguous — the test will
-    # skip with a clear reason rather than appearing to test the reducer when the
-    # underlying resolver path is silently bypassed by the `except Exception` fallback.
+    # Prove the resolver seam maps the alias before reducer integration.
     try:
         import importlib
         import sys as _sys

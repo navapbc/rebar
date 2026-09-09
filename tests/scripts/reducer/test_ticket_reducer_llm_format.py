@@ -1,26 +1,4 @@
-"""RED tests for ticket_reducer/llm_format.py (to_llm package integration).
-
-These tests are RED — they test functionality that does not yet exist:
-    ticket_reducer/llm_format.py has not been created yet.
-
-All test functions MUST FAIL before ticket_reducer/llm_format.py is implemented.
-
-Tests:
-  (1) test_to_llm_importable_from_package
-      — from rebar.reducer.llm_format import to_llm; assert callable(to_llm)
-  (2) test_to_llm_key_mapping_via_package
-      — same key-mapping assertions as test_ticket_llm_format.py, but importing
-        from the package (not importlib); verifies the module re-exports the
-        correct public interface.
-  (3) test_to_llm_omits_none_via_package
-      — None values and empty lists are omitted by the package-imported to_llm.
-  (4) test_to_llm_importable_from_top_level_package
-      — from rebar.reducer import to_llm (tests __init__.py re-export).
-
-Run: python3 -m pytest tests/scripts/test_ticket_reducer_llm_format.py
-All tests must return non-zero until ticket_reducer/llm_format.py is created and
-ticket_reducer/__init__.py re-exports to_llm.
-"""
+"""Package-import coverage for reducer LLM formatting."""
 
 from __future__ import annotations
 
@@ -35,51 +13,25 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 
-# ---------------------------------------------------------------------------
-# Test 1: to_llm is importable from rebar.reducer.llm_format sub-module
-# ---------------------------------------------------------------------------
+# Submodule import
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_to_llm_importable_from_package() -> None:
-    """from rebar.reducer.llm_format import to_llm must succeed and return a callable.
-
-    RED: ticket_reducer/llm_format.py does not exist yet; the import will raise
-    ModuleNotFoundError until the module is created.
-    """
+    """The submodule exports a callable ``to_llm``."""
     from rebar.reducer.llm_format import to_llm
 
     assert callable(to_llm), "to_llm imported from rebar.reducer.llm_format must be callable"
 
 
-# ---------------------------------------------------------------------------
-# Test 2: to_llm key mapping via package import
-# ---------------------------------------------------------------------------
+# Key mapping
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_to_llm_key_mapping_via_package() -> None:
-    """to_llm imported from rebar.reducer.llm_format must produce the expected
-    abbreviated key mapping for all documented fields.
-
-    Key mapping contract (mirrors ticket-llm-format.py):
-        ticket_id   → id
-        ticket_type → t
-        title       → ttl
-        status      → st
-        author      → au
-        parent_id   → pid
-        priority    → pr
-        assignee    → asn
-        description → desc
-        comments    → cm
-        deps        → dp
-        conflicts   → cf
-
-    RED: ticket_reducer/llm_format.py does not exist yet.
-    """
+    """The package implementation applies every documented key mapping."""
     from rebar.reducer.llm_format import to_llm
 
     state = {
@@ -115,19 +67,13 @@ def test_to_llm_key_mapping_via_package() -> None:
     assert result.get("cf") == ["file.py"], "conflicts must be mapped to 'cf'"
 
 
-# ---------------------------------------------------------------------------
-# Test 3: to_llm omits None values and empty lists via package import
-# ---------------------------------------------------------------------------
+# Omission rules
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_to_llm_omits_none_via_package() -> None:
-    """to_llm imported from rebar.reducer.llm_format must omit None values,
-    empty lists, and the created_at / env_id fields.
-
-    RED: ticket_reducer/llm_format.py does not exist yet.
-    """
+    """Package ``to_llm`` omits None values, empty lists, and metadata."""
     from rebar.reducer.llm_format import to_llm
 
     state = {
@@ -169,22 +115,13 @@ def test_to_llm_omits_none_via_package() -> None:
     assert "dp" not in result, "deps=[] must be omitted (empty list)"
 
 
-# ---------------------------------------------------------------------------
-# Test 4: to_llm importable from top-level ticket_reducer package (__init__.py re-export)
-# ---------------------------------------------------------------------------
+# Top-level re-export
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_to_llm_importable_from_top_level_package() -> None:
-    """from rebar.reducer import to_llm must succeed and return a callable.
-
-    This tests that ticket_reducer/__init__.py re-exports to_llm from the
-    llm_format sub-module, making it accessible as ticket_reducer.to_llm.
-
-    RED: ticket_reducer/__init__.py does not yet re-export to_llm; the import
-    will raise ImportError until __init__.py is updated.
-    """
+    """The reducer package re-exports the submodule's ``to_llm`` object."""
     from rebar.reducer import to_llm
 
     assert callable(to_llm), "to_llm imported from rebar.reducer (top-level) must be callable"
