@@ -1,20 +1,8 @@
-"""Comment-state enrichment tests (Action viability, bug 8b25 follow-on).
+"""Verify paged comment enrichment and its safe per-ticket fallback.
 
-The live comment fetch previously issued one ``acli comment list`` per
-commented ticket every pass (~1-2s each, fleet-wide). A pre-differ enrichment
-now issues ONE paged ``POST /rest/api/3/search/jql`` with fields=["comment"]
-and merges the comment field into each snapshot entry, so the differ dedups
-comments WITHOUT a per-ticket round-trip. The per-ticket get_comments fallback
-is kept only for entries the search omits; the never-emit-blind invariant
-stays intact.
-
-Contracts under test:
-  1. enrichment lets _diff_comments dedup without client.get_comments being
-     called (snapshot-carried path);
-  2. a ticket absent from the search enrichment falls back to get_comments;
-  3. a search failure → per-ticket fallback + warning, snapshot still written.
-
-All tests use mock clients; no live Jira calls.
+One search populates snapshot comments for deduplication without repeated reads. Omitted
+tickets and failed searches fall back to ``get_comments``; failures also warn while the
+snapshot remains writable. Mock clients keep the suite independent of live Jira.
 """
 
 from __future__ import annotations

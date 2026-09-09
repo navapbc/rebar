@@ -1,18 +1,9 @@
-"""creation_channel for the Jira reconciler (story e622, epic jira-reb-977).
+"""Preserve Jira creation provenance on tickets and placeholder identities.
 
-The inbound Jira materialization path assembles CREATE data directly (bypassing
-composer.create_core), so it must stamp a validated ``creation_channel="jira"`` —
-on the ticket AND on any placeholder identity it mints. Outbound bind/push must
-never rewrite genesis provenance. And a legacy full-log Jira CREATE (no recorded
-channel) is inferred to ``jira`` ONLY under the exact three-signal predicate
-(``jira-*`` id + author == env_id == "reconciler"); every near miss projects
-``unknown`` with no inference marker.
-
-Observable oracle only: persisted CREATE.data + reduced ticket state. Reconciler
-modules are spec-loaded by path (hyphenated engine dir can't be normal-imported),
-mirroring test_inbound_leaf_bodies.py.
-
-``-k`` selectors: inbound_recorded, outbound, legacy_positive, legacy_negative.
+Inbound materialization stamps validated ``creation_channel="jira"``; outbound binding
+never rewrites genesis. Legacy logs infer Jira only from the exact ``jira-*`` id plus
+``author == env_id == "reconciler"`` predicate, while every near miss remains unknown.
+Persisted create data and reduced state are the observable oracle.
 """
 
 from __future__ import annotations

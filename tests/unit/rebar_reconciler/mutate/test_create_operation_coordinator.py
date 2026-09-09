@@ -1,22 +1,9 @@
-"""Held-out behavioral oracle for REB-3115 S4 T3 (2863-c335) — full CREATE coordination.
+"""Verify full create coordination, route selection, and crash recovery (REB-3115).
 
-Pins the OBSERVABLE contract of the S4 T3 cutover:
-
-``rebar_reconciler.create_route``
-    ``create_route()`` — the SINGLE rollback selector (default coordinator, one legacy
-    value, no dual-send);
-    ``coordinate_full_create(...)`` — the pure-decision composition of
-    ``coordinate_create`` then ``contain_created`` that ALSO derives the
-    create-before-link / parent-before-child gate (``dependents_released``); and
-    ``should_hold_dependent(outcome)`` — the dependent gate predicate.
-
-The crash-restart convergence oracle drives the FULL coordinated create across FRESH
-"process" restarts with a fault injected at each write-ahead cut point, over BOTH a
-Cloud- and a DC-flavored stateful provider, and asserts EXACTLY ONE physical remote
-create survives and EXACTLY ONE confirmed forward+reverse binding results (AC1) — with
-ZERO search on the keyed-recovery cuts (AC2). A known-key post-create failure aborts to
-``safety_aborted`` with the key preserved and NO delete seam ever invoked. Assertions
-are OBSERVABLE ONLY (enums / buckets / counts / keys / gate verdicts).
+One selector prevents dual-send; ``coordinate_full_create`` composes creation,
+containment, and the dependent-release gate. Faults at every write-ahead cut across
+fresh Cloud/DC providers converge to one remote create and one bidirectional binding.
+Keyed recovery does not search; post-create aborts preserve the key and never delete.
 """
 
 from __future__ import annotations

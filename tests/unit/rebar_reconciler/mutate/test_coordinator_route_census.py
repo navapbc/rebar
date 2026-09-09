@@ -1,25 +1,9 @@
-"""HELD-OUT census: REB-3115 S5 T1 — typed route ownership + fallback poison.
+"""Census single typed ownership and poison obsolete mutation fallbacks (REB-3115).
 
-After the S3/S4 family cutovers, every supported Cloud/DC mutation must have EXACTLY
-ONE typed coordinator/adapter owner, and the obsolete production fallbacks (generic
-whole-operation retry, ``_best_effort`` write-swallowing, class-name/duck dispatch,
-duplicate SDK/adapter retry) must be UNREACHABLE from production.
-
-This oracle proves the ACs by OBSERVABLE behaviour, using explicit protocol fakes (AC5)
-rather than any production fallback path:
-
-- AC1 — every supported ``(direction, action)`` in ``mutation._VALID_COMBINATIONS`` with
-  a typed leaf dispatches to EXACTLY ONE owner (no dual-send), on the typed path and on
-  the live batch path.
-- AC2 — a valid-but-unowned combo (inbound delete / inbound probe) raises a typed,
-  provider-neutral ``UnknownActionError`` BEFORE any effect (zero writes).
-- AC3/AC4 — the removed constructs are ABSENT from the source (duck/class-name dispatch,
-  the obsolete whole-operation retry around ``delete_issue``) AND the legacy create core
-  is never reached from a production create.
-- AC6 — neither create route deletes a remote issue; rollback is code/routing reversion
-  + remote RE-OBSERVATION, never a remote delete.
-
-The protocol fake mirrors ``mutate/test_create_live_cutover_heldout.py``.
+Each supported Cloud/DC combination dispatches once on typed and live batch paths.
+Unowned inbound delete or probe raises provider-neutral ``UnknownActionError`` before
+effects. Explicit protocol fakes keep duck/class dispatch, swallowed writes, duplicate
+retry, legacy create fallback, and remote-delete rollback unreachable.
 """
 
 from __future__ import annotations

@@ -1,37 +1,9 @@
-"""DC over-length COMMENT convergence (story 79d5, epic 3e73).
+"""Verify two-pass DC comment convergence through its injected sanitizer.
 
-Cloud has a two-pass comment-convergence suite
-(``test_outbound_comment_length_convergence.py``); Data Center had none. This is
-DC's, as a SEPARATE file rather than a parametrization of Cloud's, because
-Cloud's suite hardcodes ``comment_limits.truncate_comment_body`` — a Cloud-only
-module DC has no equivalent of (DC fits via ``WikiTextCodec.fit_outbound``).
-Cloud's incident-hardened file stays BYTE-UNCHANGED.
-
-Convergence is a TWO-PASS property: the truncated body the adapter sends must
-compare equal to the body it reads back, or the differ re-emits the same add on
-every pass. A single-pass assertion cannot establish that, so each test here runs
-two passes and asserts on the PLAN the second produces.
-
-WHY THIS SUITE CALLS ``_diff_comments`` DIRECTLY. ``compute_outbound_mutations``
-accepts no ``sanitizer`` at all, and forwards none when it calls
-``_diff_comments`` — so ``_resolve_sanitizer(None)`` falls back to
-``select_backend(load_config()).sanitizer``, i.e. CLOUD's, no matter which mapper
-a caller injects. A DC comment-convergence test driven through
-``compute_outbound_mutations`` would therefore converge against Cloud's
-truncation while reporting DC convergence. ``_diff_comments`` already accepts
-``sanitizer=`` (the ticket-21ca injection seam), so DC's path is reachable with NO
-production change; threading a sanitizer through ``compute_outbound_mutations`` is
-a separate question and deliberately not answered here.
-
-WHY THE PROOF-OF-PATH IS AN IDENTITY/RECORDING CHECK AND NOT A VALUE CHECK. A
-value-based discriminator is IMPOSSIBLE for comments: DC's
-``WikiTextCodec.fit_outbound`` and Cloud's ``comment_limits.truncate_comment_body``
-truncate at the SAME 32767 limit, compute ``keep`` the same way, and append a
-BYTE-IDENTICAL suffix (" … [truncated by reconciler]"). Any assertion on the
-resulting string passes under EITHER sanitizer — a test that cannot fail. So this
-suite wraps the injected DC sanitizer in a recorder and asserts the recorder
-observed the call, and that the object it delegates to IS the DC backend's own
-sanitizer. That is what goes red when the injection is removed.
+Tests call ``_diff_comments`` directly because the higher-level fallback selects Cloud.
+The second plan proves marker-safe fitted text is not re-emitted. DC and Cloud produce
+the same 32767-character value, so a recorder—not value comparison—proves the DC
+``WikiTextCodec.fit_outbound`` path ran.
 """
 
 from __future__ import annotations

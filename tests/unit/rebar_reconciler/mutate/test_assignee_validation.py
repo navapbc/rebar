@@ -1,9 +1,7 @@
-"""RED tests for bug 06a5: client-side assignee pre-validation.
+"""Prevalidate assignees before invoking ACLI (bug 06a5).
 
-Mirrors the Gap 8 pattern (transition_issue_by_name pre-validates against
-/rest/api/3/issue/{key}/transitions) for assignee outbound mutations:
-pre-validate against /rest/api/3/user/assignable/search so a bogus
-assignee raises BEFORE the ACLI subprocess silently exit-0s.
+Issue- and project-scoped assignable-user searches accept exact or normalized identities
+and reject fuzzy or bogus matches before a subprocess can report false success.
 """
 
 from __future__ import annotations

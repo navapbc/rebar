@@ -1,19 +1,9 @@
-"""Regression tests for bug 1788-6149-e788-463f.
+"""Keep typed mutation batches JSON-safe and fail closed (bug 1788-6149-e788-463f).
 
-`applier.apply(list[Mutation], pass_id, repo_root)` previously crashed with
-'Mutation' object has no attribute 'get' when fed Mutation dataclass
-instances — the polymorphic dispatch fell through to `_apply_batch` which
-calls `.get()` on each element.
-
-These tests stub `_apply_batch` and assert observable behavior:
-  1. list-of-Mutation reaches _apply_batch as list-of-DICT (no Mutation
-     instances leak through).
-  2. Each dict has the keys _apply_batch expects (action / fields / key /
-     local_id / follow_on / direction) and ONLY JSON-serializable values.
-  3. Empty payload.fields preserves the empty dict (does not truthy-fall
-     through to the whole payload).
-  4. Inbound typed Mutations raise TypeError rather than silently routing
-     through outbound batch handlers (fail-closed guard).
+Outbound ``Mutation`` objects reach ``_apply_batch`` as dictionaries containing its
+expected action, fields, key, local-id, follow-on, and direction values. Empty fields
+remain empty. Inbound typed mutations raise ``TypeError`` instead of entering outbound
+handlers.
 """
 
 import importlib.util

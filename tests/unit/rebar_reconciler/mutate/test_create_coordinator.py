@@ -1,24 +1,9 @@
-"""Held-out behavioral oracle for REB-3115 S4 T1 — the pure-decision CREATE coordinator.
+"""Verify the pure first-create coordinator and replay-safe ambiguity handling.
 
-This oracle pins the OBSERVABLE contract of the new pure module
-
-``rebar_reconciler.create_coordinator``
-    ``coordinate_create(plan, *, persist_pending, create_execute, observe)``
-    — the FIRST create slice. It durably persists the
-    pending-binding intent BEFORE any create call, issues EXACTLY ONE physical
-    create, and on an ambiguous create completion (timeout / connection-loss)
-    re-observes via a replay-safe seam and either RECOVERS or retains-pending and
-    DEFERS — never blind-replaying a second create. It captures the returned Jira
-    key in a typed ``CreateOutcome`` and NEVER deletes a successfully-created remote
-    issue (there is no delete seam at all). Its DECISION logic performs zero I/O and
-    reads no clock — the three injected callables are the sole side-effect channels,
-    so identical inputs yield equal outputs.
-
-Assertions are OBSERVABLE ONLY (enums / buckets / counts / keys) — never private
-names or source text — so a behavior-preserving refactor cannot break them. Every
-one of the six ACs is covered by at least one test; two tests drive Cloud- and
-DC-flavored STATEFUL fakes that record provider call counts and assert NO delete is
-ever issued on any path.
+``coordinate_create`` persists pending intent before exactly one physical create.
+Ambiguous completion is re-observed and either recovered or retained pending and
+deferred, never blindly replayed or deleted. Injected seams keep decisions free of I/O
+and clocks; stateful Cloud/DC fakes expose counts, keys, and outcomes.
 """
 
 from __future__ import annotations

@@ -1,23 +1,9 @@
-"""Shared, credential-free harness for the RP-03 S5 coordinator taxonomy suites.
+"""Provide the credential-free harness shared by both coordinator taxonomy suites.
 
-This module is imported (not collected) by the two coordinator taxonomy test files in
-this directory:
-
-* ``test_reconciler_coordinator.py`` — the ``coordinate_and_fuse`` bucket/fuse taxonomy
-  (scenarios 1-6) plus venue parity;
-* ``test_reconciler_coordinator_taxonomy.py`` — the create / restart / partial / delivery
-  scenarios (7-10) whose real home is a layer around the coordinator.
-
-It centralises the frozen-clock retry budget, the scripted ``execute`` double, the plan
-builders, the ticket bindings, and the REAL Cloud/DC verified-fake wiring reused from
-``tests/unit/rebar_reconciler/mutate/test_coordinator_venue_cutover.py``. Keeping it here
-as a sibling ``*_harness.py`` — which pytest's prepend import mode puts on ``sys.path``,
-and where the unit tier's ``rebar_reconciler`` engine bridge (``tests/unit/conftest.py`` +
-``tests/unit/rebar_reconciler/conftest.py``) already resolves ``from rebar_reconciler import
-…`` — lets both suites share ONE harness instead of inventing bespoke ones.
-
-Everything is credential-free: no network, no real Jira, a frozen clock, no wall-clock
-sleep.
+``test_reconciler_coordinator.py`` and ``test_reconciler_coordinator_taxonomy.py`` reuse
+its frozen-clock retry budget, scripted executor, plans, bindings, and real Cloud/DC
+verified fakes. The sibling location uses pytest's existing engine namespace bridge.
+Nothing performs I/O or wall-clock sleep.
 """
 
 from __future__ import annotations
