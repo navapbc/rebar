@@ -1,13 +1,9 @@
-"""Ephemeral authoritative-state workspace for a trusted op-cert gate job (story ee0b).
+"""Disposable authoritative workspace for a trusted op-cert job.
 
-The load-bearing security property: the worker fetches authoritative state ITSELF — never trusts
-the client. It clones the review remote's code, checks out its ``main`` tip (that sha becomes the
-signed ``merged_log_commit``), and mounts the tickets branch from the tickets remote as a rebar
-tracker worktree, so ``review_plan`` / ``verify_completion`` read state the client cannot influence.
-
-Store-read-only: the workspace runs with ``REBAR_SYNC_PUSH=off`` AND every git remote removed, so a
-gate's ``sign=True`` SIGNATURE append lands ONLY in this discarded clone — never on the shared
-tickets branch. The workspace is deleted after the job.
+The worker fetches review ``main`` and the tickets branch itself, mounts the
+tracker, and signs against that state rather than client input. Pushes are
+disabled and all remotes are removed, so signature events remain in the
+discarded clone.
 """
 
 from __future__ import annotations
@@ -20,23 +16,13 @@ from rebar import config as _config
 from rebar._snapshot.git_fetch import stall_abort_args
 from rebar.opcert_service.config import OpcertServiceConfig
 
-#: Wall-clock bound (seconds) on every git subprocess in this module — :func:`_git` is its only
-#: git seam, so this transitively bounds the two network fetches in :func:`_populate` too. An
-#: unbounded git call blocks the worker forever on a stuck remote or a hung credential helper
-#: (bug 747f measured a ~2.1-hour hang on such a path). 300s rather than the 30s used by
-#: ``src/rebar/_store/push.py`` / ``src/rebar/_store/sync.py``: those bound an INCREMENTAL
-#: ref-sized op against an already-warm clone, whereas this module fetches COLD into a fresh
-#: ``mkdtemp`` and its fetches are not even shallow — 747f's "legitimately minutes on a cold
-#: clone" profile, for which it adopted the same 300s bound.
+#: Bound every Git call through the module's sole seam. Cold full fetches may
+#: legitimately take minutes, hence 300 seconds. Transport stall detection aborts
+#: dead connections sooner.
 _GIT_TIMEOUT = 300
 
-#: Write-lock acquisition budget (seconds × attempts) for the boot-time ensure sweep in
-#: :func:`_populate`. The review-bot's autodeploy health check is ``HEALTH_TIMEOUT=30``
-#: (autodeploy config), so the sweep must not be able to spend the ``write_lock`` default of
-#: 30s × 2 = 60s waiting on a contended lock — that alone can fail a deploy with no orphaned
-#: lock involved (bug e43f, split out of castoff-tigerseye-ammonite). The sweep is idempotent
-#: and re-runs on the next boot, so a contended lock is safely SKIPPED here rather than waited
-#: out. Mirrors the MCP-boot budget in ``src/rebar/mcp_server.py`` (5s × 1).
+#: Boot-time ensures get one five-second lock attempt, keeping deployment health
+#: checks below 30 seconds. A skipped idempotent sweep runs again next boot.
 _ENSURE_BOOT_TIMEOUT = 5
 _ENSURE_BOOT_ATTEMPTS = 1
 
@@ -57,17 +43,10 @@ class Workspace:
 
 # raw-git-ok: disposable sandbox repo, not the tracker
 def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
-    """Run one git command in ``cwd``, bounded by :data:`_GIT_TIMEOUT`.
+    """Run bounded Git in ``cwd``.
 
-    A ``subprocess.TimeoutExpired`` is neither an ``OSError`` nor a ``CalledProcessError`` and
-    would bypass :func:`_git_ok`'s ``WorkspaceError`` conversion, so it is converted here — this
-    is the module's only git seam.
-
-    A ``fetch`` additionally gets the throughput-keyed stall abort (task 851e): the wall clock
-    above cannot tell a dead-air transfer from a slow cold clone, so without it a wedged remote
-    holds this worker for the full 300s. Armed HERE rather than at the two call sites because
-    this seam is where the argv is built, and only for ``fetch`` because the options configure
-    the curl transport — a local ``config``/``worktree`` call has no transport to tune."""
+    Convert timeouts to :class:`WorkspaceError`. Fetches also receive throughput
+    stall guards. Local Git operations do not."""
     prefix = stall_abort_args() if args and args[0] == "fetch" else []
     try:
         return subprocess.run(
@@ -138,11 +117,8 @@ def _populate(root: str, cfg: OpcertServiceConfig) -> Workspace:
     _git_ok(tracker, "config", "user.name", "rebar-opcert")
     _git_ok(tracker, "config", "commit.gpgsign", "false")
 
-    # Converge the freshly-mounted tracker into a writable rebar store (`.env-id` marker etc.),
-    # mirroring reviewbot-ensure-tickets.sh. Idempotent — a no-op once converged. A SHORT
-    # write-lock budget (bug e43f): this runs on the review-bot boot path behind a 30s deploy
-    # health check, so a contended lock must SKIP the sweep (it re-runs next boot) rather than
-    # burn write_lock's 60s default and fail the deploy on its own.
+    # Converge the mounted tracker with a short boot lock budget. The idempotent
+    # sweep may skip contention and retry on the next boot.
     from rebar._store.ensures import run_ensures
 
     for _ in run_ensures(tracker, timeout=_ENSURE_BOOT_TIMEOUT, attempts=_ENSURE_BOOT_ATTEMPTS):

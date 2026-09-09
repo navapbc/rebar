@@ -1,22 +1,11 @@
-"""FastAPI ASGI app — the trusted op-cert gate service (story ee0b).
+"""Trusted FastAPI shell for asynchronous op-cert gate jobs.
 
-WHAT THIS IS. A thin HTTP shell over the FastAPI-free job core (:mod:`rebar.opcert_service.jobs`),
-mirroring ``rebar.review_bot.app``'s software pattern: an ACK-fast async job API backed by an
-in-process ``asyncio.Queue`` drained by a SINGLE background worker under a bounded per-run timeout.
-Gate runs take 30s-minutes, so no synchronous request holds the socket: ``POST /opcert/jobs``
-validates + enqueues + returns 202 ``{job_id}``; ``GET /opcert/jobs/{job_id}`` returns the record.
+``POST /opcert/jobs`` validates and queues a bounded single-worker job. ``GET``
+returns its record, so long gates never hold requests open. API Gateway supplies
+SigV4 authentication, and ``X-Opcert-Guard`` provides defense in depth before
+enqueueing. Importing this module intentionally requires the ``reviewbot`` extra.
 
-AUTHN. Endpoint SigV4 is terminated at API Gateway (the deploy story); the app additionally
-requires a shared-secret header ``X-Opcert-Guard`` == ``REBAR_OPCERT_GUARD`` as defense in depth
-(same posture as ``review_bot``'s ``?token=`` check; a header rather than a query param because API
-Gateway injects static request headers on the integration). A missing/mismatched guard is 403
-BEFORE any work is enqueued.
-
-IMPORTABILITY CONTRACT. ``fastapi`` is imported at module top here on purpose — so
-``import rebar.opcert_service.app`` requires the ``reviewbot`` extra, while ``import rebar`` (and
-``import rebar.opcert_service``) does NOT pull FastAPI.
-
-RUN. ``uvicorn rebar.opcert_service.app:app --host 0.0.0.0 --port 8080``.
+Run with ``uvicorn rebar.opcert_service.app:app --host 0.0.0.0 --port 8080``.
 """
 
 from __future__ import annotations
@@ -56,14 +45,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.signer = compose_signer(app.state.config)
     app.state.queue = asyncio.Queue()
     app.state.jobs = {}
-    # An app-OWNED executor, not the event loop's default one (bug c89f). ``asyncio.to_thread``
-    # would offload onto the loop's DEFAULT executor, and the loop's teardown joins that executor
-    # via ``loop.shutdown_default_executor()`` with NO timeout — so an in-flight job wedged
-    # shutdown for its FULL remaining duration (measured: a 12s job -> a 12.01s shutdown; a 30s
-    # job -> 30.02s; up to ``DEFAULT_JOB_TIMEOUT_SECONDS`` = 900s in production). Owning the
-    # executor lets shutdown ABANDON the orphaned thread instead of joining it. Cancelling the
-    # task is NOT sufficient on its own: the await unwinds immediately, but the OS thread stays
-    # registered with whichever executor ran it.
+    # Use an app-owned executor. Loop teardown joins its default executor without
+    # a bound, while cancellation cannot stop an active OS thread. Ownership lets
+    # shutdown abandon a wedged job instead of waiting up to the job timeout.
     app.state.executor = concurrent.futures.ThreadPoolExecutor(
         max_workers=WORKER_COUNT, thread_name_prefix="opcert-job"
     )
@@ -74,10 +58,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         for task in tasks:
             task.cancel()
-        # Bound the cancel + await, mirroring ``review_bot.app``: a task slow to honor
-        # cancellation must not hang shutdown without an upper bound. ``gather`` with
-        # ``return_exceptions=True`` collects each task's CancelledError as a result rather than
-        # re-raising, so this never propagates out of the lifespan.
+        # Give cancelled workers a bounded grace period. Collect ``CancelledError``
+        # values so lifespan shutdown never propagates them.
         if tasks:
             with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
                 await asyncio.wait_for(

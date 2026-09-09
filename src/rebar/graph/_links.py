@@ -89,12 +89,9 @@ def _is_active_link(source_id: str, target_id: str, relation: str, tracker_dir: 
     if any(tid == target_id and rel == relation for tid, rel in active_links.values()):
         return True
 
-    # ── SNAPSHOT fallback (f5a8) ──────────────────────────────────────────────
-    # ticket-compact.sh bakes LINK events into a SNAPSHOT compiled_state.deps[]
-    # and deletes the original *-LINK.json files.  When no active LINK file was
-    # found above, scan any *-SNAPSHOT.json for a matching dep entry.  A link
-    # cancelled post-compaction will have an UNLINK event on disk (not compacted)
-    # — subtract those via cancelled_uuids before trusting a SNAPSHOT dep.
+    # Compaction moves LINKs into SNAPSHOT deps and deletes their files. If no
+    # active LINK remains, accept a matching snapshot unless a later UNLINK
+    # cancelled it.
     for snap_path in sorted(_glob.glob(os.path.join(ticket_dir, "*-SNAPSHOT.json"))):
         try:
             with open(snap_path, encoding="utf-8") as fh:
@@ -124,26 +121,13 @@ def _write_link_event(
     tracker_dir: str,
     provenance: str | None = None,
 ) -> None:
-    """Write a single LINK event to source_id's directory (no cycle check, no idempotency).
+    """Append one LINK to ``source_id`` through the canonical locked write seam.
 
-    Routes through the ONE canonical locked write path — the shared leaf-write seam
-    ``rebar._commands._seam.append_event`` → ``rebar._store.event_append.write_and_push``.
-    The seam composes the canonical envelope (real ``author`` + ``env_id``, monotonic
-    HLC tick) and the store core owns the dual-leg fcntl+mkdir lock, atomic rename,
-    rebase guard, commit, and best-effort push. Previously this function hand-rolled
-    its own ``flock`` + ``git add``/``commit`` + push-retry loop — a second write path
-    that diverged from the store core (wrong author/env_id sentinels, weaker lock, no
-    rebase guard). See epic ``clumsy-jab-yacht`` / story ``scabby-slur-junk``.
-
-    Raises :class:`rebar._commands._seam.CommandError` on a genuine commit failure
-    (e.g. rebase-in-progress guard, exit 75); the push step is best-effort and never
-    raises. Callers tolerate this: ``link_core`` documents "Raises CommandError" and
-    the reconciler's inbound applier wraps ``rebar.link`` in a non-fatal try/except.
-
-    ``provenance`` (ticket 6536-367c) is the caused_by attribution marker —
-    ``"explicit"`` (operator/agent-supplied) or ``"derived"`` (blame auto-derivation) —
-    written into the event data only when set, so every other relation (and every
-    pre-marker event) keeps its exact prior payload shape and reads as unknown.
+    This helper performs neither cycle nor idempotency checks. The shared path
+    owns envelope and HLC construction, dual locking, atomic rename, rebase
+    protection, commit, and best-effort push. Commit failures raise
+    :class:`rebar._commands._seam.CommandError`. Push failures do not. Optional
+    ``provenance`` records caused-by attribution without changing unmarked payloads.
     """
     from pathlib import Path
 
@@ -219,36 +203,15 @@ def add_dependency(
     *,
     on_outcome: Callable[[dict], None] | None = None,
 ) -> dict | None:
-    """Add a dependency from source_id to target_id with cycle check.
+    """Add a validated, cycle-safe dependency idempotently.
 
-    Raises CyclicDependencyError if adding this dependency would create a cycle.
-    Raises ValueError if relation is not in CANONICAL_RELATIONS.
-    Writes a LINK event to the source ticket's directory.
-    Idempotent: if a net-active LINK with the same (target_id, relation) already exists,
-    this is a no-op (exits cleanly without writing a duplicate event).
-    For relates_to: also writes a reciprocal LINK event in target_id's directory.
-
-    Returns the REDIRECT record when hierarchy escalation moved either endpoint, else
-    None. stdout is NOT the only channel any more: the CLI still gets the printed
-    record, but the library facade suppresses stdout (composer.link_core(quiet=True))
-    because rebar-mcp speaks MCP-over-stdio and a stray print would corrupt the
-    JSON-RPC stream. Returning it lets those callers report the substitution instead
-    of silently recording a different edge (bug 1803-df54-18bb-4881).
-
-    ``on_outcome`` (ticket 6bda-9d58-8546-4638) is the PARALLEL wrote-vs-noop channel:
-    the ``dict | None`` return above is a consumed contract (REDIRECT record or not)
-    that cannot distinguish a fresh write from the idempotent no-op, so when a
-    callable is given it is invoked exactly once, just before return, with
-    ``{"wrote", "source", "target", "relation"}`` (resolved endpoints). The return
-    value's type and meaning are unchanged.
+    The source stores the LINK. ``relates_to`` also writes its reciprocal.
+    Hierarchy promotion returns a REDIRECT record, printed only by CLI callers
+    after persistence. ``on_outcome`` receives exactly one resolved wrote/no-op
+    record. Invalid relations and cycles raise their documented errors.
     """
-    # Steps 0–1: validate relation grammar + resolve hierarchy promotion, composing
-    # the machine-readable REDIRECT record — but DEFER emitting it to stdout until
-    # AFTER the durable LINK commit below (bug hulky-bag-aisle). The emit previously
-    # ran here, before the write — so a reader closing the pipe early
-    # (`rebar link ... | head`) raised BrokenPipeError and aborted the function
-    # before it committed, silently losing the link (exit status masked by the
-    # pipe). Durable data first, user-facing chatter second.
+    # Resolve grammar and hierarchy promotion now, but emit a REDIRECT only after
+    # the LINK is durable so a broken stdout pipe cannot lose the write.
     resolved_source, resolved_target, redirect_record = _resolve_link_endpoints(
         source_id, target_id, tracker_dir, relation
     )
@@ -350,23 +313,12 @@ def remove_dependency(
     tracker_dir: str,
     relation: str,
 ) -> None:
-    """Remove the net-active ``(target_id, relation)`` link — ``add_dependency``'s mirror.
+    """Remove one active ``(target_id, relation)`` through the shared lock.
 
-    The RELATION-SCOPED removal seam (bug e39f): links are written keyed on
-    ``(target_id, relation)`` (see ``add_dependency``'s idempotency), so a pair can
-    hold several relations at once; this removes exactly the named relation's most
-    recent net-active LINK by writing an UNLINK event through the same shared
-    locked write seam, leaving any other relation the pair holds untouched. For
-    ``relates_to`` the reciprocal link in ``target_id``'s directory is removed too
-    (mirroring the reciprocal write).
-
-    Raises ValueError if ``relation`` is not in ``CANONICAL_RELATIONS``.
-    Raises :class:`rebar._commands._seam.CommandError` when either ticket is
-    missing or no net-active ``(target_id, relation)`` link exists.
-
-    The net-effective LINK/UNLINK replay lives in ``rebar._commands.unlink``
-    (lazily imported, mirroring ``_write_link_event``'s lazy seam import) so this
-    seam and the CLI's ``unlink`` can never disagree about which link is removed.
+    Other relations between the pair remain. ``relates_to`` removes its reciprocal.
+    Invalid relations raise ``ValueError``. Missing tickets or links raise
+    :class:`rebar._commands._seam.CommandError`. CLI and library callers share the
+    canonical UNLINK replay in ``rebar._commands.unlink``.
     """
     if relation not in CANONICAL_RELATIONS:
         canonical_list = ", ".join(sorted(CANONICAL_RELATIONS))
