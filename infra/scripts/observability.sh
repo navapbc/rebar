@@ -77,6 +77,7 @@ DATA_MOUNT="${DATA_MOUNT:-/var/gerrit}"
 # Overridable for the tests exactly as DATA_MOUNT is; the production default is the
 # terraform `gate_scratch_mount` variable and must stay in step with it.
 GATE_SCRATCH_MOUNT="${GATE_SCRATCH_MOUNT:-/var/lib/rebar/gate-scratch}"
+GATE_SCRATCH_VOLUME_ID_FILE="${GATE_SCRATCH_VOLUME_ID_FILE:-/var/lib/rebar/gate-scratch-volume-id}"
 NS="rebar/host"
 
 # --- WHOLE-PROBE DEADLINE (bug 9313-1fac-9f32-4b07) -------------------------
@@ -385,6 +386,32 @@ logger -t rebar-health "gate scratch ${GATE_SCRATCH_MOUNT} mounted=${scratch_mou
 if [ "$scratch_mounted" -eq 0 ]; then
   logger -t rebar-health \
     "gate scratch volume ${GATE_SCRATCH_MOUNT} is NOT mounted — rebar gate admission refuses every plan-review and completion-verifier run rather than writing to the ROOT filesystem; see infra/runbooks/review-bot-ops.md"
+fi
+
+scratch_volume_id="${GATE_SCRATCH_VOLUME_ID:-$(head -n 1 "$GATE_SCRATCH_VOLUME_ID_FILE" 2>/dev/null || true)}"
+scratch_volume_probe="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)/scripts/assert_volumes_in_service.py"
+if [ ! -f "$scratch_volume_probe" ]; then
+  scratch_volume_probe="/usr/local/bin/rebar-assert-volumes-in-service.py"
+fi
+if [ -n "$scratch_volume_id" ]; then
+  scratch_volume_value="-1"
+  if [ -f "$scratch_volume_probe" ]; then
+    scratch_volume_value="$(
+      python3 "$scratch_volume_probe" --metric-value --volume-id "$scratch_volume_id" \
+        --mount "$GATE_SCRATCH_MOUNT" 2>/dev/null
+    )" || scratch_volume_value="-1"
+    case "$scratch_volume_value" in
+      1) scratch_volume_value="1" ;;
+      0) scratch_volume_value="0" ;;
+      *) scratch_volume_value="-1" ;;
+    esac
+  fi
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name gate_scratch_volume_in_service --unit Count --value "$scratch_volume_value" \
+    --dimensions InstanceId="$IID",VolumeId="$scratch_volume_id",mount="$GATE_SCRATCH_MOUNT" \
+    2>/dev/null || true
+  logger -t rebar-health \
+    "gate scratch volume ${scratch_volume_id} at ${GATE_SCRATCH_MOUNT} in_service=${scratch_volume_value}"
 fi
 
 # Used-percent follows 2's convention: a READING, not a delta, published only when df

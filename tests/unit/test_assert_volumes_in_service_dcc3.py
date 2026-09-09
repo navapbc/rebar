@@ -29,6 +29,7 @@ from assert_volumes_in_service import (  # noqa: E402
     attachments_from_plan,
     classify,
     parse_host_mounts,
+    volume_in_service_metric_value,
 )
 
 #: `lsblk -P -o NAME,SERIAL,MOUNTPOINT` as the production host reports it. Two shapes matter:
@@ -109,6 +110,26 @@ def test_the_assertion_passes_once_the_volume_is_mounted(tmp_path: Path) -> None
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert NOT_IN_SERVICE not in result.stdout
+
+
+def test_metric_value_is_one_when_the_expected_volume_backs_the_expected_mount() -> None:
+    fixed = REAL_HOST_REPORT.replace(
+        'NAME="nvme2n1" SERIAL="vol06780b8557d1416b7" MOUNTPOINT=""',
+        'NAME="nvme2n1" SERIAL="vol06780b8557d1416b7" MOUNTPOINT="/var/lib/rebar/gate-scratch"',
+    )
+
+    assert volume_in_service_metric_value(SCRATCH_VOLUME, "/var/lib/rebar/gate-scratch", fixed) == 1
+
+
+def test_metric_value_is_zero_when_the_expected_volume_is_attached_but_unmounted() -> None:
+    assert (
+        volume_in_service_metric_value(
+            SCRATCH_VOLUME,
+            "/var/lib/rebar/gate-scratch",
+            REAL_HOST_REPORT,
+        )
+        == 0
+    )
 
 
 # ── the join itself: the serial normalisation is the load-bearing detail ─────────────────
