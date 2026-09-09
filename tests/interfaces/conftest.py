@@ -69,25 +69,17 @@ def _rebar_repo_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
             _git("config", "user.name", "Test", cwd=repo)
             mp.chdir(repo)
             rebar.init_repo(repo_root=str(repo))
-            # Give the CODE branch a root commit so the suite-wide attested/``ref=HEAD``
-            # gate default (tests/conftest.py) can resolve a snapshot: an unborn HEAD
-            # fails ref resolution before any gate op reaches its subject under test.
+            # Seed CODE so attested ``ref=HEAD`` snapshots resolve. An unborn HEAD
+            # fails before a gate reaches its subject.
             _git("commit", "--allow-empty", "-q", "-m", "init", cwd=repo)
-            # The template must be VIRGIN, asserted HERE rather than only in a test.
-            # Several tests assert on emptiness (session-log counts in
-            # queries/test_recent_session_logs.py and lifecycle/test_session_log_capture.py)
-            # and hold only because nothing seeds the template; pre-warming it with
-            # tickets — the obvious next optimisation — would silently invert them.
-            # At construction this fires once per worker before any test runs and covers
-            # every consumer, whereas a test-level check protects only runs that select
-            # that test (a narrowed `pytest tests/interfaces/store` would have none).
-            # It must sit INSIDE this context: it needs REBAR_ROOT and cwd pinned at the
-            # template, and the post-build assertions below run after the context exits.
+            # Keep the per-worker template ticket-free while REBAR_ROOT and cwd are
+            # pinned. Pre-warming would invert session-log emptiness tests. Checking at
+            # construction also protects narrowed suites that omit the invariant test.
             assert rebar.list_tickets() == [], "template must be built with no tickets"
         finally:
             _cfg.reset_config_cache()
 
-    # Prove the pinning took effect rather than assuming it.
+    # Verify the tracker was created on ``tickets``.
     tracker = repo / ".tickets-tracker"
     assert tracker.is_dir(), f"template built without a tracker at {tracker}"
     branch = subprocess.run(
@@ -97,9 +89,7 @@ def _rebar_repo_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
         text=True,
     ).stdout.strip()
     assert branch == "tickets", f"template tracker on branch {branch!r}, expected 'tickets'"
-    # The template must stay VIRGIN. Tests assert on emptiness (e.g. session-log
-    # counts), and those assertions hold only because nothing is pre-seeded here.
-    # Pre-warming this template with tickets would silently invert them.
+    # Empty-state tests also require no pre-seeded ``.rebar`` state.
     assert not (repo / ".rebar").exists(), "template must not carry .rebar state"
     return repo
 

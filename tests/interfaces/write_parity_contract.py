@@ -1,20 +1,10 @@
-"""Transport-agnostic write-op parity contract — the single source of oracle cases.
+"""Transport-neutral write parity contract for the shared conformance oracle.
 
-This is the contract table for the Pattern-B conformance oracle in
-``test_write_parity_oracle.py``. ONE table of rows, each executed through EVERY
-adapter (library / CLI / MCP) against a fresh store and classified
-``ACCEPTED`` / ``REJECTED(code)`` / ``PARAM_NOT_EXPOSED``. The oracle asserts
-every adapter agrees with a row's transport-agnostic expectation; a per-adapter
-strict-xfail records a KNOWN, ticketed divergence, so the suite is
-GREEN until the gap is closed — at which point the classification flips, the
-xfail becomes an xpass, and the strict marker fails, forcing its removal.
-
-The contract asserts BEHAVIOR — including the runtime conditional-required rules
-(``close_class`` required to close a bug; a reason-required disposition refuses
-without ``reason``) — which shape/signature comparison cannot express. Setup is
-performed adapter-neutrally through the library; only the final op under test is
-driven through the adapter, so a setup failure never masquerades as a parity
-divergence.
+Every row runs through library, CLI, and MCP against a fresh store and must
+match one ``ACCEPTED`` / ``REJECTED(code)`` / ``PARAM_NOT_EXPOSED`` result. A
+populated strict xfail marks a ticketed surface gap and fails on convergence.
+Rows cover runtime rules that signature comparison cannot. Adapter-neutral setup
+isolates the final operation.
 """
 
 from __future__ import annotations
@@ -30,21 +20,17 @@ ACCEPTED = "ACCEPTED"
 REJECTED = "REJECTED"
 PARAM_NOT_EXPOSED = "PARAM_NOT_EXPOSED"
 
-# Per-adapter plumbing that is NOT part of the write contract: each surface wires
-# these differently (the library returns an alias, the MCP layer stamps a
-# _creation_channel, both bind a repo_root), so they must never register as a
-# parity divergence. The create-baseline row is the negative control — create
-# succeeds identically on all three despite this internal variation.
+# Adapter-bound plumbing is outside the contract. The create baseline proves
+# these surface-specific arguments do not cause false divergence.
 ADAPTER_BOUND_INTERNALS = ("source", "return_alias", "_creation_channel", "repo_root")
 
 
 @dataclass(frozen=True)
 class Result:
-    """A row's classification for one adapter.
+    """One adapter classification.
 
-    ``kind`` is ACCEPTED / REJECTED / PARAM_NOT_EXPOSED. ``code`` is the shared
-    engine exit code on a REJECTED outcome (10 for optimistic-concurrency), so a
-    rejection's identity — not merely its presence — is compared across adapters.
+    ``kind`` is ACCEPTED, REJECTED, or PARAM_NOT_EXPOSED. ``code`` identifies a
+    rejected engine outcome across surfaces.
     """
 
     kind: str
@@ -53,19 +39,13 @@ class Result:
 
 @dataclass(frozen=True)
 class Case:
-    """One transport-agnostic contract row.
+    """One transport-neutral operation case.
 
-    ``op`` is the write op under test (``create`` / ``claim`` / ``transition`` /
-    ``link``). ``setup_type`` is the ticket type created
-    for the subject; ``pre_in_progress`` moves it to in_progress first (via the
-    library, gate-free) so a close/close-gate row starts from a real work state.
-    ``gate`` enables the claim or close gate for the row so a force-bypass row is
-    non-vacuous. ``inputs`` are the reason-carrying params threaded to the op.
-    ``expected`` is what a fully-parity surface must do; ``expected_status`` is
-    the post-op effect asserted on ACCEPTED. ``unmutated_status`` is the status a
-    REJECTED row must LEAVE the subject in — the store-invariance guard proving a
-    refusal applied no partial write. ``xfail`` maps an adapter name to
-    the ticket whose landing will close its known divergence.
+    ``op`` names the final write. ``setup_type`` and ``pre_in_progress`` define
+    its subject. ``gate`` makes bypass cases non-vacuous. ``inputs`` reach the
+    operation, ``expected`` and ``expected_status`` describe accepted effects,
+    and ``unmutated_status`` proves rejection is atomic. ``xfail`` maps a surface
+    to its divergence ticket.
     """
 
     id: str
@@ -82,9 +62,8 @@ class Case:
     xfail: dict = field(default_factory=dict)
 
 
-# A plan body that clears the plan-review readiness floor, so a claim/start-work
-# gate blocks on the ATTESTATION (which --force bypasses) rather than on missing
-# plan structure.
+# Keep claim-gate subjects structurally reviewable so the attestation, not plan
+# readiness, is what ``--force`` bypasses.
 _DESC = (
     "A sufficiently detailed plan body for the parity oracle subject.\n\n"
     "## Approach\nDo the thing carefully.\n\n"
@@ -100,7 +79,7 @@ _GATE_KEY = {
 
 
 def _commit(repo: Path) -> None:
-    """Give the CODE branch a commit so a gate's ref=HEAD snapshot resolves."""
+    """Seed CODE so a ``ref=HEAD`` gate snapshot resolves."""
     subprocess.run(
         ["git", "commit", "--allow-empty", "-q", "-m", "oracle"],
         cwd=str(repo),
@@ -115,18 +94,10 @@ def _enable_gate(repo: Path, gate: str) -> None:
 
 # ── The contract table ────────────────────────────────────────────────────────
 CASES: list[Case] = [
-    # Positive control AND negative control for adapter-bound internals: create
-    # succeeds identically on all three surfaces even though each threads its own
-    # ADAPTER_BOUND_INTERNALS (library return_alias, MCP _creation_channel, a
-    # bound repo_root) — so that per-surface plumbing produces NO false
-    # divergence. Contract params exclude those internals (asserted in the oracle).
+    # Create proves acceptance and that adapter-bound plumbing adds no false drift.
     Case(id="create-baseline", op="create", expected=Result(ACCEPTED)),
-    # Negative control: an optimistic-concurrency rejection shares ONE identity
-    # (exit 10) across all three surfaces — proves the harness detects agreement
-    # on a rejection, not just on acceptance. This row deliberately OMITS
-    # pre_in_progress, leaving the subject OPEN, so the executor's fixed
-    # current="in_progress" is the wrong current status and every surface returns
-    # the same exit-10 rejection. unmutated_status asserts it stays open.
+    # Leave the subject open but request current="in_progress". Every surface must
+    # return exit 10 without changing it.
     Case(
         id="concurrency-wrong-current",
         op="transition",
@@ -207,10 +178,8 @@ CASES: list[Case] = [
         expected_status="closed",
     ),
     # ── caused_by link-time validation ───────────────────────────────────────
-    # A caused_by target with no commit referencing it is refused on every surface
-    # (the oracle's fixture repo HAS a commit, so the scan reaches a real verdict
-    # rather than degrading to "history unreadable"), and the force reason bypasses
-    # it identically on every surface.
+    # A commitless caused_by target is rejected everywhere. Its reasoned bypass
+    # must also agree across surfaces.
     Case(
         id="caused-by-commitless-target",
         op="link",
@@ -238,7 +207,7 @@ CASES: list[Case] = [
 
 # ── Execution ─────────────────────────────────────────────────────────────────
 def _to_result(outcome) -> Result:
-    """Map an adapter Outcome to the contract classification."""
+    """Classify an adapter outcome."""
     if outcome.ok:
         return Result(ACCEPTED)
     if outcome.is_param_gap:
@@ -247,12 +216,10 @@ def _to_result(outcome) -> Result:
 
 
 def execute(adapter, case: Case, repo: Path) -> tuple[Result, str | None]:
-    """Run one case through one adapter against ``repo``; return (result, subject).
+    """Run a case through one adapter and return its result and subject.
 
-    Setup (ticket creation, the pre-work move, a culprit ticket) goes through the
-    library so it is adapter-neutral; only the op under test is driven through
-    ``adapter``. The returned subject id lets the oracle assert the ACCEPTED
-    effect (resulting status).
+    Library-only setup isolates the final surface operation. The subject lets
+    callers verify accepted effects.
     """
     _commit(repo)
     if case.gate:
@@ -285,9 +252,7 @@ def execute(adapter, case: Case, repo: Path) -> tuple[Result, str | None]:
     elif case.op == "claim":
         outcome = adapter.claim(tid, **inputs)
     else:
-        # Every transition case drives current="in_progress": the pre_in_progress
-        # rows are genuinely there, while the concurrency control leaves the
-        # subject OPEN so "in_progress" is deliberately the wrong current status,
-        # yielding the shared optimistic-concurrency rejection (exit 10).
+        # Prepared rows are in progress. The open control must reject this current
+        # value with exit 10.
         outcome = adapter.transition(tid, "in_progress", case.target, **inputs)
     return _to_result(outcome), tid
