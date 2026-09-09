@@ -1754,7 +1754,8 @@ def test_reconcile_once_times_out_a_hung_review_and_continues(monkeypatch, tmp_p
     assert result == {"scanned": 1, "reviewed": 0}
 
 
-@pytest.mark.timeout(3)
+# Covers autouse fixture setup too; keep enough headroom for cold imports under CI coverage.
+@pytest.mark.timeout(30)
 def test_lifespan_is_safe_by_default_without_per_test_stubs(monkeypatch, tmp_path):
     """The ordinary TestClient lifespan path must be prompt and use the test drain bound."""
     pytest.importorskip("fastapi")

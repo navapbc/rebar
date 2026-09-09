@@ -21,6 +21,7 @@ holds the invariant that value has to satisfy.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -58,6 +59,23 @@ def _ini() -> dict[str, object]:
     root = Path(__file__).resolve().parents[2]
     text = (root / "pyproject.toml").read_text(encoding="utf-8")
     return tomllib.loads(text)["tool"]["pytest"]["ini_options"]
+
+
+def _timeout_marker_seconds(path: Path, test_name: str) -> int | float | None:
+    module = ast.parse(path.read_text(encoding="utf-8"))
+    for node in module.body:
+        if isinstance(node, ast.FunctionDef) and node.name == test_name:
+            for decorator in node.decorator_list:
+                if (
+                    isinstance(decorator, ast.Call)
+                    and isinstance(decorator.func, ast.Attribute)
+                    and decorator.func.attr == "timeout"
+                    and decorator.args
+                    and isinstance(decorator.args[0], ast.Constant)
+                    and isinstance(decorator.args[0].value, int | float)
+                ):
+                    return decorator.args[0].value
+    return None
 
 
 def test_the_budget_clears_the_slowest_legitimate_test_with_headroom() -> None:
@@ -100,3 +118,21 @@ def test_the_budget_is_still_a_real_hang_guard() -> None:
         "main thread and cannot fire while a worker is blocked in a C-level call, which is "
         "the exact hang shape this suite exercises."
     )
+
+
+def test_review_bot_lifespan_marker_covers_autouse_setup() -> None:
+    """The local marker must not be tighter than cold autouse fixture setup.
+
+    The marker wraps setup/call/teardown, not only the measured TestClient body. Under coverage
+    a cold import in an autouse fixture can exceed a tiny marker; with timeout_method=thread
+    pytest-timeout kills the whole xdist worker, surfacing as "worker gwN crashed" instead of a
+    timeout failure on the real culprit.
+    """
+    root = Path(__file__).resolve().parents[2]
+    seconds = _timeout_marker_seconds(
+        root / "tests" / "unit" / "test_review_bot.py",
+        "test_lifespan_is_safe_by_default_without_per_test_stubs",
+    )
+
+    assert seconds is not None
+    assert seconds >= 30
