@@ -694,12 +694,10 @@ def test_valid_six_candidate_batch_survives_the_request_budget() -> None:
 
 
 def test_output_budget_scales_with_the_batchs_candidate_count() -> None:
-    """The batch output budget is a FUNCTION of the batch size, not a constant (ticket d147).
+    """Each batch candidate adds one verdict allowance to the output budget.
 
-    The flat 1024-token cap it replaces was sized for a single verdict, so a full batch's reply
-    was truncated — and a truncated reply is rejected wholesale, abstaining every candidate in
-    it. Pinning the shape (strictly increasing, one verdict's allowance per added candidate)
-    rather than the literal numbers keeps this test about the defect and not about the constant.
+    This monotonic shape prevents a complete reply from being truncated and rejected without
+    pinning numeric constants.
     """
     budgets = [_batch_output_token_limit(n) for n in range(1, _CANDIDATES_PER_CALL + 1)]
     assert budgets == sorted(budgets) and len(set(budgets)) == len(budgets)

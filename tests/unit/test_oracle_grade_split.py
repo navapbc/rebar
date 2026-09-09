@@ -1,13 +1,8 @@
-"""ac_unverifiable oracle-kind grade split (story large-sleepful-needlefish, plan-v3).
+"""Pin the ``ac_unverifiable`` grade split across oracle defect kinds.
 
-The hard floor for ac_unverifiable is keyed on WHICH oracle defect the finding names:
-missing_oracle / broken_oracle keep the 0.85 auto-high; underspecified_oracle (56% of the
-calibration-3 floor-driven sample) scores below every blocking threshold and never floors.
-The closed grade set is enforced at verification-parse time by the Pydantic Literal;
-legacy plan-v2 sidecars are read as-is (ADR 0036 segmentation is the back-compat seam).
-
-Proving command:
-    .venv/bin/pytest tests/unit/test_oracle_grade_split.py -v
+``missing_oracle`` and ``broken_oracle`` retain the 0.85 floor, while
+``underspecified_oracle`` remains below blocking thresholds. Pydantic parsing enforces the closed
+grade set, and legacy plan-v2 sidecars remain readable through ADR 0036 compatibility.
 """
 
 from __future__ import annotations

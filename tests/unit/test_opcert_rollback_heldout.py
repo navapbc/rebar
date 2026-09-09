@@ -1,14 +1,9 @@
-"""Independent held-out rollback regression for the op-cert merge-gate (story 4214, Option B).
+"""Held-out rollback oracle for op-cert key-era validation.
 
-NOT shown to the implementer. This is the orchestrator's own oracle for the CVE-2026-44544-style
-rollback: a holder of a REVOKED environment key freshly signs+stores a cert (storage anchor S falls
-AFTER the key's revocation) but backdates the bound `merged_log_commit` to a pre-revocation commit.
-The gate must judge key-era-validity at S (the introducing commit of the envelope-bearing SIGNATURE
-event) — NOT at the self-chosen `merged_log_commit` — so the revoked key must FAIL as
-`key_not_valid_at_era`. A control case (same cert, key NOT revoked) must PASS, isolating that the
-failure is caused by revocation-before-storage, not by anything else.
-
-Real ssh-keygen + a real rebar store + the real `rebar verify-opcert` subprocess (exit codes).
+A revoked key stores a newly signed certificate after revocation while backdating
+``merged_log_commit``. The merge gate must judge the key at the envelope-bearing signature event's
+storage anchor and return ``key_not_valid_at_era``. An unrevoked control isolates that rule. Tests
+use ``ssh-keygen``, a git-backed store, and the ``rebar verify-opcert`` subprocess.
 """
 
 from __future__ import annotations

@@ -1,14 +1,6 @@
-"""Held-out adversarial/robustness oracle for op-cert storage (keystone e4df). NOT shown to the
-implementation subagent.
-
-* compaction survival — an op-cert stored on a ticket survives a compact→SNAPSHOT round-trip
-  (the reducer's attestations fold preserves the envelope + bound fields);
-* legacy-HMAC → None — `opcert_from_record` returns None for a plain HMAC `sign_manifest` record;
-* additive invariance — a legacy HMAC record is byte-unchanged (no `envelope`/bound keys), so
-  older clones preserve-and-ignore;
-* fold-through — an op-cert survives further post-signature events (a comment) in a full reduce.
-
-Real ssh-keygen + a real rebar store.
+"""Held-out op-cert storage oracles cover compaction survival, legacy HMAC mapping to ``None``,
+byte-preserving additive compatibility, and reduction through later events. Tests use
+``ssh-keygen`` and a git-backed store.
 """
 
 from __future__ import annotations

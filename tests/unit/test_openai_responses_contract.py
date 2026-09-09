@@ -1,25 +1,9 @@
-"""Contract tests for the OpenAI Chat-Completions vs Responses API migration (story b612-1edb).
+"""Compare OpenAI Chat Completions and Responses through production ``infer_model`` dispatch.
 
-The migration ticket (`upbeat-illadvised-springtail`, 155c-218b) needs a behavioural diff between
-`openai-chat:` and `openai-responses:` before any provider is flipped. These tests ARE that
-instrument: the identical assertions run against BOTH prefixes (the parametrize ids are the diff),
-driving REAL pydantic-ai model construction — `infer_model` performs its production prefix→class
-dispatch and genuinely builds `OpenAIChatModel` / `OpenAIResponsesModel` — against a stub server
-that speaks both wire protocols. Only the socket is faked.
-
-Injection mechanism (deliberate, and different from test_openai_compatible_provider.py): the
-`monkeypatch.setattr(httpx, "AsyncHTTPTransport", ...)` seam used there only works because rebar's
-`_build_openai` constructs that transport explicitly; stock pydantic-ai construction builds a bare
-`AsyncClient` and never reads the module attribute. So each test builds ONE explicit production
-`OpenAIProvider(base_url=…, api_key=…, http_client=AsyncClient(transport=MockTransport(…)))` and
-hands it to `infer_model(model_string, provider_factory=…)` — the same `provider_factory` hook
-rebar's own `ProviderSession.model_for` uses in production. Nothing is monkeypatched.
-
-Scope note (plan-reviewed): the 429 case pins the DEFAULT retry surface of the stack the tests
-construct (no pydantic-ai model-layer retry; the openai SDK's own max_retries=2 underneath;
-`ModelHTTPError` with the status) across both APIs. It is NOT a claim about
-`ProviderSession._build_openai`'s transport — that builder cannot construct `openai-responses:` at
-all today, which is recorded as a constraint on the ticket, not tested here.
+Identical request and streaming assertions exercise both prefixes against one stub transport
+supplied through an explicit ``OpenAIProvider`` and the production provider factory. The 429 cases
+pin no model-layer retry, two SDK retries, and ``ModelHTTPError``.
+``ProviderSession._build_openai`` cannot construct Responses models and remains outside this scope.
 """
 
 from __future__ import annotations

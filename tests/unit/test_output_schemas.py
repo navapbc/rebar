@@ -1,14 +1,7 @@
-"""RP-06 S7 — the public review-output narrowness contract (AC4).
+"""Pin narrow public schemas for plan-review status, verdict, and code-review outputs.
 
-Proves that the cross-gate cutover kept the PUBLIC response schemas NARROW — ``review-plan``
-(``plan_review_verdict``), ``review-plan --status`` (``plan_review_status``), and the
-code-review outputs (``code_review_verdict`` / ``review_result``) — while the reducer-IGNORED
-internal journal (the kernel's ``unit_trace`` record) retains a VERSIONED internal trace.
-
-The public surface must never grow per-unit discovery/trace/debug fields; those live only in
-the journal, stamped with ``DISCOVERY_NAMESPACE_VERSION`` so the internal trace can evolve
-without touching the frozen public shape. Assertions are on observable contracts: the schemas'
-declared top-level property sets and the shape of the real ``unit_trace`` record.
+Per-unit trace and debug fields remain only in the reducer-ignored, versioned ``unit_trace``
+journal record. Tests assert public top-level properties and the emitted internal record.
 """
 
 from __future__ import annotations

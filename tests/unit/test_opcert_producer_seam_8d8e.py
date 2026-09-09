@@ -1,25 +1,10 @@
-"""Producer-signing seam repoint (story 8d8e, epic 6d0d — fork A: uniform producer signing).
+"""Contract tests for the ``signing.sign_manifest`` op-cert producer seam.
 
-The signing seam ``signing.sign_manifest(ticket_id, manifest, *, kind=…)`` now MINTS a
-``rebar.opcert.v1`` DSSE op-cert with the environment's auto-generated Ed25519 key (expand phase:
-write-new envelopes, read-both envelopes + legacy HMAC). These tests pin the happy paths and the
-mechanical invariants the ACs enumerate:
-
-  * dependency-gate round-trip (the e4df contract asserted behaviorally),
-  * key genesis + permissions + git-ignore + verify-side-never-creates,
-  * plan-review PASS → envelope SIGNATURE event that ``verify_signature`` certifies + never-sign
-    guards,
-  * drift-refresh / resign re-sign as op-certs,
-  * the ``rebar sign`` CLI + library seam emit envelopes,
-  * a completion-verifier manifest signs as an op-cert through the same seam,
-  * expand-phase read-both (legacy HMAC + envelope coexist, kind-keyed),
-  * ``REBAR_OPCERT_ENV_ID`` principal override,
-  * schema + ``SignResultOut`` admit the envelope shape,
-  * read-path dispatch (``verify_attestation_record``),
-  * consumer regressions (``rebar sign`` render, ``signature_findings``).
-
-Held-out adversarial cases (concurrent first-sign race, verify-never-creates under contention,
-read-both coexistence, ssh-keygen-unavailable degrade) live in a separate held-out module.
+The seam emits Ed25519-signed ``rebar.opcert.v1`` envelopes for plan reviews, completion
+verification, CLI calls, and library calls. Coverage includes dependency gating, key creation,
+permissions, ignore rules, non-signing guards, drift re-signing, legacy HMAC coexistence, principal
+overrides, schemas, dispatch, and consumer rendering. Held-out tests cover concurrent genesis,
+verification without creation, read-both coexistence, and unavailable ``ssh-keygen`` handling.
 """
 
 from __future__ import annotations

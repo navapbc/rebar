@@ -1,14 +1,9 @@
-"""Happy-path spec for op-cert storage on a ticket (keystone e4df / behavioral-winsome-blacklemur).
+"""Happy-path specification for op-cert storage.
 
-The ONLY tests the implementation subagent sees. Pins the approved Option-A design:
-* `signing.sign_opcert_manifest(...)` writes an envelope-bearing SIGNATURE event, and the ticket's
-  reduced `attestations[<kind>]` record then carries the encoded DSSE `envelope` + bound
-  `material_fingerprint`/`merged_log_commit`;
-* `opcert.opcert_from_record(record)` round-trips that envelope, which verifies against a pinned
-  keyring.
-
-Held-out (compaction survival, legacy-HMAC → None, additive-field invariance) lives in
-`test_opcert_storage_heldout.py`. Real ssh-keygen + a real rebar store (git-backed).
+``signing.sign_opcert_manifest`` writes an envelope-bearing signature event whose reduced kind
+record retains the DSSE envelope, material fingerprint, and merged-log commit.
+``opcert.opcert_from_record`` reconstructs and verifies it against a pinned keyring. Adversarial
+compatibility cases remain in ``test_opcert_storage_heldout.py``.
 """
 
 from __future__ import annotations
