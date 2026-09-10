@@ -148,14 +148,14 @@ def test_cli_lock_allows_pure_shrink_against_base(tmp_path: Path) -> None:
 
 def test_module_size_lock_fails_closed_on_fetch_failure() -> None:
     """The module-size gate must NOT warn-and-continue when it cannot fetch main to
-    verify the limit lock; it must fail closed. Assert the workflow no longer contains
-    the warn-and-continue text for that fetch path."""
+    verify the limit lock; it must fail closed. Retry notices are allowed, but the
+    final exhausted path must be an error that exits nonzero."""
     text = WORKFLOW_PATH.read_text(encoding="utf-8")
-    assert "could not fetch main to verify the module-size limit lock" not in text or (
-        "::warning::could not fetch main to verify the module-size limit lock" not in text
+    final_error = (
+        'echo "::error::could not fetch main to verify the module-size limit lock; failing closed."'
     )
-    # The offending warn-and-continue string must be gone entirely.
-    assert "::warning::could not fetch main to verify the module-size limit lock" not in text
+    assert final_error in text
+    assert text.index(final_error) < text.index("exit 1", text.index(final_error))
 
 
 @pytest.mark.allow_unharnessed_subprocess(
