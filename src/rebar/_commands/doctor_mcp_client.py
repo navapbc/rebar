@@ -26,10 +26,18 @@ import tomllib
 # The MCP server entry these clients are expected to declare for rebar.
 SERVER_NAME = "rebar"
 
-# The canonical per-client bearer env-var names. Single source of truth for the
-# "stale name" comparison; they match the box-side names in
-# infra/runbooks/mcp-client-pats.md and the committed examples/mcp-clients/ configs.
+# The canonical project-scoped bearer env-var names. Codex keeps its dedicated PAT;
+# Copilot and Claude share the machine-local CLI alias whose value is the existing
+# claude server-side PAT slot. The name comparison intentionally checks client
+# config names, not server-side token_env names.
 CANONICAL_PAT_ENV: dict[str, str] = {
+    "codex": "MCP_CLIENT_PAT_CODEX",
+    "copilot": "MCP_CLIENT_PAT_CLI",
+    "claude": "MCP_CLIENT_PAT_CLI",
+}
+
+# Existing user-level configs remain valid during the expand/contract migration.
+_LEGACY_USER_PAT_ENV: dict[str, str] = {
     "codex": "MCP_CLIENT_PAT_CODEX",
     "copilot": "MCP_CLIENT_PAT_COPILOT",
     "claude": "MCP_CLIENT_PAT_CLAUDE",
@@ -39,13 +47,19 @@ CANONICAL_PAT_ENV: dict[str, str] = {
 CLIENT_ORDER: tuple[str, ...] = ("codex", "copilot", "claude")
 
 # Home-relative config locations. Project-local configs (Codex's ``.codex/config.toml``
-# in a trusted project, Claude Code's project ``.mcp.json``) are deliberately NOT
-# scanned: doctor cannot know which project the operator will launch the client from,
-# and guessing would produce findings about a config the client may never read.
+# and Claude/Copilot's project ``.mcp.json``) are deliberately NOT scanned:
+# doctor cannot know which project the operator will launch the client from, and
+# guessing would produce findings about a config the client may never read.
 _CONFIG_RELPATH: dict[str, str] = {
     "codex": ".codex/config.toml",
     "copilot": ".copilot/mcp-config.json",
     "claude": ".claude.json",
+}
+
+_PROJECT_CONFIG_RELPATH: dict[str, str] = {
+    "codex": ".codex/config.toml",
+    "copilot": ".mcp.json",
+    "claude": ".mcp.json",
 }
 
 KIND_PAT_UNRESOLVABLE = "pat-unresolvable"
@@ -83,7 +97,10 @@ _DURABLE_ADVICE = (
 
 
 def scan_mcp_clients(
-    *, home: Path | None = None, env: Mapping[str, str] | None = None
+    *,
+    home: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Diagnose every supported MCP client's rebar credential wiring.
 
@@ -94,10 +111,11 @@ def scan_mcp_clients(
     Never raises for a missing, unreadable or malformed config.
     """
     base = Path.home() if home is None else Path(home)
+    project = Path.cwd() if cwd is None else Path(cwd)
     environ: Mapping[str, str] = os.environ if env is None else env
     findings: list[dict[str, Any]] = []
     for client in CLIENT_ORDER:
-        findings.extend(_scan_client(client, base, environ))
+        findings.extend(_scan_client(client, base, project, environ))
     return findings
 
 
@@ -150,9 +168,21 @@ def _finding(client: str, severity: str, kind: str, detail: str, **extra: Any) -
 # ---------------------------------------------------------------------------
 
 
-def _scan_client(client: str, home: Path, env: Mapping[str, str]) -> list[dict[str, Any]]:
+def _scan_client(
+    client: str, home: Path, cwd: Path, env: Mapping[str, str]
+) -> list[dict[str, Any]]:
     """Scan one client end to end, degrading every fault into a finding."""
-    canonical = CANONICAL_PAT_ENV[client]
+    project_path = cwd / _PROJECT_CONFIG_RELPATH[client]
+    if project_path.is_file():
+        return _scan_path(
+            client,
+            project_path,
+            env,
+            canonical=CANONICAL_PAT_ENV[client],
+            accepted={CANONICAL_PAT_ENV[client]},
+            scope="project",
+        )
+
     path = home / _CONFIG_RELPATH[client]
     if not path.is_file():
         return [
@@ -160,11 +190,32 @@ def _scan_client(client: str, home: Path, env: Mapping[str, str]) -> list[dict[s
                 client,
                 SEVERITY_UNAVAILABLE,
                 KIND_CONFIG_MISSING,
-                f"no MCP client config at {path}; {client} is not configured for rebar on "
-                "this machine (a project-local config, if you use one, is not scanned)",
+                f"no MCP client config at {path} or {project_path}; {client} is not "
+                "configured for rebar in this project or on this machine",
                 path=str(path),
             )
         ]
+    accepted = {_LEGACY_USER_PAT_ENV[client], CANONICAL_PAT_ENV[client]}
+    return _scan_path(
+        client,
+        path,
+        env,
+        canonical=_LEGACY_USER_PAT_ENV[client],
+        accepted=accepted,
+        scope="user",
+    )
+
+
+def _scan_path(
+    client: str,
+    path: Path,
+    env: Mapping[str, str],
+    *,
+    canonical: str,
+    accepted: set[str],
+    scope: str,
+) -> list[dict[str, Any]]:
+    """Scan one concrete config path."""
     data, error = _load_config(client, path)
     if error is not None:
         return [
@@ -179,7 +230,7 @@ def _scan_client(client: str, home: Path, env: Mapping[str, str]) -> list[dict[s
     name, problem = _referenced_env_var(client, data)
     if problem is not None or name is None:
         return [_problem_finding(client, problem or KIND_PAT_NOT_REFERENCED, path, canonical)]
-    return _credential_findings(client, name, canonical, path, env)
+    return _credential_findings(client, name, canonical, accepted, path, env, scope)
 
 
 def _load_config(client: str, path: Path) -> tuple[Any, str | None]:
@@ -279,8 +330,10 @@ def _credential_findings(
     client: str,
     name: str,
     canonical: str,
+    accepted: set[str],
     path: Path,
     env: Mapping[str, str],
+    scope: str,
 ) -> list[dict[str, Any]]:
     """The two headline checks, reported INDEPENDENTLY.
 
@@ -289,14 +342,14 @@ def _credential_findings(
     only one would leave the other cause of an omitted server unaddressed.
     """
     findings: list[dict[str, Any]] = []
-    if name != canonical:
+    if name not in accepted:
         findings.append(
             _finding(
                 client,
                 SEVERITY_ERROR,
                 KIND_STALE_PAT_ENV_NAME,
                 f"the {client} MCP config at {path} reads the rebar bearer PAT from "
-                f"{name}, which is not this project's canonical variable for {client}; "
+                f"{name}, which is not an accepted {scope}-scoped variable for {client}; "
                 f"migrate the config and your environment to {canonical}",
                 path=str(path),
                 env_var=name,
@@ -325,9 +378,9 @@ def _credential_findings(
                 SEVERITY_OK,
                 KIND_OK,
                 f"the {client} MCP config at {path} reads the rebar bearer PAT from "
-                f"{canonical}, which is set in this environment",
+                f"{name}, which is set in this environment",
                 path=str(path),
-                env_var=canonical,
+                env_var=name,
             )
         )
     return findings
