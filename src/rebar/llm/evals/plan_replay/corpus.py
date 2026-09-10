@@ -155,19 +155,20 @@ def _load_ticket_events(tracker_path: str) -> dict[str, dict[str, list[dict[str,
 
 def _reconstruct_material(
     ticket_events: dict[str, list[dict[str, Any]]], review_ts: int
-) -> tuple[str, str, list[Any], str | None, str | None, list[str], bool]:
+) -> tuple[str, str, str, list[Any], str | None, str | None, list[str], bool]:
     """Replay CREATE + EDITs up to ``review_ts`` (inclusive), oldest-first, into the
-    reconstructed ``(ticket_type, description, file_impact, file_impact_scope,
+    reconstructed ``(ticket_type, title, description, file_impact, file_impact_scope,
     no_file_impact_reason, children, create_found)`` state as of the review.
 
     ``create_found=False`` (no recoverable CREATE event) is a RECONSTRUCTION FAILURE,
     distinct from a ticket that genuinely has an empty description — the caller must
     not attempt fingerprint matching against the resulting empty material, which would
     conflate "we can't tell" with "the material changed" (or worse, a spurious match)."""
-    creates = ticket_events.get("CREATE", [])
+    creates = [e for e in ticket_events.get("CREATE", []) if e["ts"] <= review_ts]
     create_found = bool(creates)
     create_data = creates[0]["data"] if creates else {}
     ticket_type = create_data.get("ticket_type", "")
+    title = create_data.get("title", "")
     description = create_data.get("description", "")
     file_impact: list[Any] = []
     file_impact_scope: str | None = None
@@ -181,6 +182,8 @@ def _reconstruct_material(
             continue
         if "description" in fields:
             description = fields["description"]
+        if "title" in fields:
+            title = fields["title"]
 
     # file_impact / file_impact_scope / no_file_impact_reason are written EXCLUSIVELY by
     # FILE_IMPACT events (rebar._commands.leaf.set_file_impact), never by EDIT's `fields` —
@@ -195,6 +198,7 @@ def _reconstruct_material(
 
     return (
         ticket_type,
+        title,
         description,
         file_impact,
         file_impact_scope,
@@ -207,11 +211,12 @@ def _reconstruct_material(
 def _build_context(
     ticket_id: str,
     ticket_type: str,
+    title: str,
     description: str,
     file_impact: list[Any],
     file_impact_scope: str | None,
     no_file_impact_reason: str | None,
-    children: list[str],
+    children: list[dict[str, Any]],
 ) -> PlanContext:
     state: dict[str, Any] = {"file_impact": file_impact}
     if file_impact_scope == "none":
@@ -220,10 +225,10 @@ def _build_context(
     return PlanContext(
         ticket_id=ticket_id,
         ticket_type=ticket_type,
-        title="",
+        title=title,
         description=description,
         state=state,
-        children=[{"ticket_id": c} for c in children],
+        children=children,
     )
 
 
@@ -244,23 +249,54 @@ def _child_ids(reviewed_related_material: Any) -> list[str]:
     ]
 
 
+def _child_materials(
+    child_ids: list[str],
+    all_events: dict[str, dict[str, list[dict[str, Any]]]],
+    review_ts: int,
+) -> tuple[list[dict[str, Any]], bool]:
+    children: list[dict[str, Any]] = []
+    reconstructed = True
+    for child_id in child_ids:
+        child_events = all_events.get(child_id, {})
+        _ttype, title, description, _impact, _scope, _reason, _children, create_found = (
+            _reconstruct_material(child_events, review_ts)
+        )
+        if not create_found:
+            reconstructed = False
+            children.append({"ticket_id": child_id, "canonical_id": child_id})
+            continue
+        children.append(
+            {
+                "ticket_id": child_id,
+                "canonical_id": child_id,
+                "title": str(title or ""),
+                "description": str(description or ""),
+            }
+        )
+    return children, reconstructed
+
+
 def _build_sidecar_row(
     store_name: str,
     ticket_id: str,
     ticket_events: dict[str, list[dict[str, Any]]],
+    all_events: dict[str, dict[str, list[dict[str, Any]]]],
     review_event: dict[str, Any],
 ) -> dict[str, Any]:
     data = review_event["data"]
     review_ts = review_event["ts"]
 
-    ttype, description, file_impact, scope, reason, _, create_found = _reconstruct_material(
+    ttype, title, description, file_impact, scope, reason, _, create_found = _reconstruct_material(
         ticket_events, review_ts
     )
-    children = _child_ids(data.get("reviewed_related_material"))
+    child_ids = _child_ids(data.get("reviewed_related_material"))
+    children, children_reconstructed = _child_materials(child_ids, all_events, review_ts)
     signed_fingerprint = data.get("material_fingerprint", "")
 
     if create_found:
-        ctx = _build_context(ticket_id, ttype, description, file_impact, scope, reason, children)
+        ctx = _build_context(
+            ticket_id, ttype, title, description, file_impact, scope, reason, children
+        )
         generation = _match_generation(ctx, signed_fingerprint)
     else:
         # No recoverable CREATE event: reconstruction failed, not "the material is
@@ -275,11 +311,13 @@ def _build_sidecar_row(
         "schema": data.get("schema"),
         "verdict": data.get("verdict"),
         "ticket_type": ttype,
+        "title": title,
         "description": description,
         "file_impact": file_impact,
         "file_impact_scope": scope,
         "no_file_impact_reason": reason,
         "children": children,
+        "children_reconstructed": children_reconstructed,
         "material_fingerprint": signed_fingerprint,
         "verified": generation is not None,
         "generation": generation,
@@ -295,7 +333,7 @@ def _rows_for_store(store_name: str, tracker_path: str) -> list[dict[str, Any]]:
         for review_event in by_type.get("REVIEW_RESULT", []):
             if review_event["data"].get("schema") not in _SCHEMAS:
                 continue
-            rows.append(_build_sidecar_row(store_name, ticket_id, by_type, review_event))
+            rows.append(_build_sidecar_row(store_name, ticket_id, by_type, events, review_event))
     return rows
 
 
