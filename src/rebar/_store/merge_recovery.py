@@ -1,33 +1,10 @@
-"""One merge-abort recovery toolkit for the tickets store.
+"""Provide shared tools for recoverable tickets-branch merge aborts.
 
-Two callers reconverge the tickets branch by merging the remote ref, and BOTH have to
-survive the same handful of recoverable merge aborts: :mod:`rebar._store.sync`
-(``reconverge``, the read/write freshness path) and :mod:`rebar._store.push_recovery`
-(the non-fast-forward push retry). Their merge CONTROL FLOWS are genuinely different —
-sync unions, handles unrelated histories, restores from HEAD and warns; push_recovery
-sets the dirty tree aside as a stash COMMIT, rides out transport faults and raises
-strict-mode reason codes — so they are deliberately NOT fused into one merge function.
-What they share is the recovery TOOLKIT, and that is what lives here:
-
-* parsing the paths git names in an abort message (:func:`untracked_overwrite_paths`,
-  :func:`local_change_paths`);
-* relocating those paths into the durable quarantine (:func:`quarantine_untracked`);
-* restoring tracked files git says have local changes (:func:`restore_local_changes`).
-
-Before this module the parser and the quarantine PATH arithmetic lived in ``sync`` and
-``push_recovery`` reached sideways for them, while the quarantine MOVER was written
-TWICE — and the two copies had already drifted: only push_recovery's verified that a
-named path is genuinely UNTRACKED (``??``) before moving it. Bugs
-``small-delicious-loris`` (6ccc) and ``sulfuryl-suicidal-osprey`` (573a) are that one
-defect landing in the two paths one at a time. The single mover here keeps the STRICTER
-shape, so the fence now covers every caller.
-
-**The git seam is a parameter, not an import.** Every function that shells out takes
-``git`` — any ``(path, *args) -> CompletedProcess`` callable. That is what lets both
-callers keep their own seam: ``sync`` hands its module-level ``_git`` (patched by name in
-its tests), and ``push_recovery`` hands the late-bound ``core._git`` that the ~25
-``push._git`` monkeypatch sites depend on. Neither loses its patch point, and this module
-imports from neither.
+:mod:`rebar._store.sync` and :mod:`rebar._store.push_recovery` keep separate merge control
+flows. This module parses paths named by Git, quarantines verified untracked paths, and restores
+eligible tracked changes. The single quarantine mover checks every path for ``??`` before any
+move. Each operation accepts the caller's Git runner so both modules retain their patch points
+without importing one another.
 """
 
 from __future__ import annotations

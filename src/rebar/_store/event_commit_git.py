@@ -1,24 +1,15 @@
-"""The git verbs the locked event-commit issues — bounded and retry-composed.
+"""Bounded Git verbs for locked event commits.
 
-The second of the three concerns the store's write path is split into. Every git child
-that ``_store/event_append.py`` launches WHILE HOLDING the store's MKDIR write lock is
-issued from here, so the whole lock-held git surface carries one wall-clock bound and one
-retry policy instead of a per-call-site assortment.
+Every Git child launched by ``event_append.py`` while holding the store write
+lock passes through this module. :func:`_run_git` applies one wall-clock bound and
+returns timeout as a failed process result. The add, commit, remove, restore, and
+unstage verbs compose shared index-lock recovery with transient filesystem retry
+from ``gitutil.py``.
 
-Two layers:
-
-- :func:`_run_git` — the single ``subprocess`` entry point, bounded by :data:`_GIT_TIMEOUT`
-  and folding a hung git into a synthetic FAILED result rather than a new exception type.
-- the verbs (:func:`_git_add`, :func:`_git_commit`, :func:`_git_rm`,
-  :func:`_git_commit_paths`, :func:`_restore_paths`, :func:`_unstage`) — each composing the
-  SHARED retries from ``_store/gitutil.py``: index.lock contention + stale-lock reclaim
-  (:func:`_with_index_lock_retry`) around the runner-FS transient fault retry
-  (:func:`_with_transient_fault_retry`).
-
-``gitutil`` owns the retry machinery, shared with the claim/transition path
-(``_commands/txn.py``); this module is the event-commit path's own verb set built on top of
-it. Callers import these names into ``event_append`` and call them by BARE NAME, so the
-module-global lookup stays monkeypatch-visible for the store test suite.
+The claim and transition writer shares that retry machinery through
+``_commands/txn.py``. ``event_append`` re-exports these names and calls them
+through module globals so established monkeypatch seams continue to observe both
+normal and recovery paths.
 """
 
 from __future__ import annotations
@@ -37,34 +28,25 @@ from rebar._store.gitutil import (
 _GIT_ADD_ATTEMPTS = 3
 
 
-# git's index.lock self-healing (constants + ``_is_index_lock_error`` +
-# ``_reclaim_if_stale_index_lock`` + ``_with_index_lock_retry``) now lives in the SHARED
-# ``rebar._store.gitutil`` so the claim/transition write path (txn.py) self-heals through the
-# same implementation (bug fix-indexlock-retry). Imported at module top; ``_INDEX_LOCK_STALE_S``
-# is re-exported there for tests. ``_git_add`` below composes gitutil's index.lock retry with
-# gitutil's runner-FS transient retry (:func:`_with_transient_fault_retry`).
+# Shared ``gitutil`` index-lock recovery serves event, claim, and transition
+# writers. ``_git_add`` composes it with transient filesystem retry
+# (bug fix-indexlock-retry).
 
 
-# Bound every lock-held git child (c2ba). These run INSIDE ``lock.write_lock`` holding the
-# store's MKDIR write lock, so a stuck/contended tracker volume would otherwise hold that lock
-# indefinitely — the residue that made the review-bot ``stop_grace_period`` unprovable and, on a
-# SIGKILL mid-write, orphaned the lock (the 2026-07-31 autodeploy incident). ``_store/push.py``
-# already bounds its git calls with the SAME ``_GIT_TIMEOUT``; this closes the inconsistency.
+# Bound every Git child that runs while holding the store lock (c2ba). This avoids
+# orphaned locks after a stalled volume or forced process stop and matches push.
 _GIT_TIMEOUT = 30
 
 
 # raw-git-ok: locked store seam internal
 def _run_git(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    """``subprocess.run`` a git command (captured, text) bounded by :data:`_GIT_TIMEOUT`.
+    """Run captured text Git with :data:`_GIT_TIMEOUT`.
 
-    The single entry point for event_append's lock-held git invocations, so every one carries
-    the same wall-clock bound as ``push.py``. The timeout fold — a hung git becomes a
-    synthetic FAILED result (returncode 124) rather than a raise, so the existing
-    returncode-inspecting callers and their retry wrappers fail the write cleanly, unwinding
-    out of ``write_lock`` — is now the SHARED :func:`gitutil.run_git_bounded`; this shim only
-    adapts the historical ``argv``-list signature its ~15 call sites pass. A genuine
-    ``OSError`` (e.g. git not on PATH) still propagates unchanged, preserving the best-effort
-    helpers' ``except OSError`` behavior."""
+    This adapter preserves the historical argument-list interface while delegating
+    to :func:`gitutil.run_git_bounded`. Timeout returns code ``124`` so callers and
+    retry wrappers unwind the write lock through existing result handling. Launch
+    ``OSError`` exceptions still propagate for best-effort callers to catch.
+    """
     if argv[:2] == ["git", "-C"]:
         return run_git_bounded(argv[2], *argv[3:], timeout=_GIT_TIMEOUT)
     return run_git_bounded(None, *argv[1:], timeout=_GIT_TIMEOUT)
@@ -74,16 +56,13 @@ def _run_git(argv: list[str]) -> subprocess.CompletedProcess[str]:
 def _git_add(
     tracker: str, relpaths: list[str], *, attempts: int = _GIT_ADD_ATTEMPTS
 ) -> subprocess.CompletedProcess[str]:
-    """``git -C tracker add -- <relpaths>``, retrying transient object-DB AND index.lock
-    failures.
+    """Stage *relpaths* with transient and index-lock recovery.
 
-    On success or a NON-transient failure returns immediately (behavior unchanged — a
-    real pathspec/permission/UU error still surfaces on the first attempt). On a transient
-    runner-FS signature the identical add is retried up to *attempts* times with a short
-    backoff by the shared :func:`_with_transient_fault_retry`, because re-adding the same
-    paths is idempotent and the fault clears on retry; index.lock contention is ridden out
-    (and a stale lock reclaimed) by :func:`_with_index_lock_retry`. Returns the final
-    :class:`subprocess.CompletedProcess`."""
+    Success and nontransient path, permission, or unmerged errors return on the
+    first attempt. Idempotent adds retry transient object-store failures up to
+    *attempts*. The outer index-lock helper waits for contention and reclaims stale
+    locks. Return the final :class:`subprocess.CompletedProcess`.
+    """
 
     return _with_index_lock_retry(
         tracker,
@@ -97,20 +76,14 @@ def _git_add(
 
 # raw-git-ok: locked store seam internal
 def _git_commit(tracker: str, commit_msg: str) -> subprocess.CompletedProcess[str]:
-    """``git -C tracker commit -q --no-verify -m <msg>``, riding out two transients:
-    index.lock contention (and reclaiming a stale lock) via :func:`_with_index_lock_retry`,
-    and the runner-FS git faults via :func:`_with_transient_fault_retry` — the
-    ``could not parse HEAD`` READ fault (``git commit`` parses HEAD to set the new commit's
-    parent) and the object-DB temp-create WRITE fault (``git commit`` also WRITES the new
-    tree + commit loose objects — the same blip that strikes ``git add``, whose unretried
-    commit once dropped a concurrent locked write). Composed index.lock-OUTER /
-    runner-FS-INNER — the same gitutil retries the transition/claim path uses. A
-    non-lock, non-transient failure (including a genuine "nothing to commit" / UU wedge)
-    surfaces immediately, unchanged — the caller's UU-recovery path still handles it.
+    """Commit with index-lock and transient filesystem recovery.
 
-    ``_AUTOMAINT_OFF`` is injected so git does NOT run its post-commit auto-maintenance repack
-    INSIDE this bounded commit (bd66); the caller runs maintenance as an explicit deferred
-    step (:func:`gitutil.run_auto_maintenance`) under the same write lock."""
+    The outer helper handles index contention and stale locks. The inner retry
+    covers transient HEAD reads and loose-object writes. Other failures, including
+    an empty or unmerged index, return immediately for caller recovery.
+    ``_AUTOMAINT_OFF`` keeps repacking outside this bounded commit. The caller runs
+    deferred maintenance under the same write lock (bd66).
+    """
     return _with_index_lock_retry(
         tracker,
         lambda: _with_transient_fault_retry(
@@ -209,19 +182,14 @@ def _unstage(tracker: str | os.PathLike, relative_path: str) -> None:
 def run_auto_maintenance(
     tracker: str | os.PathLike[str], *, timeout: float = _LOCAL_GIT_TIMEOUT
 ) -> subprocess.CompletedProcess | None:
-    """Run git's auto-maintenance as an EXPLICIT, BEST-EFFORT step (bd66).
+    """Run explicit best-effort Git auto-maintenance after commit (bd66).
 
-    ``git -C tracker maintenance run --auto`` — the SAME maintenance ``git commit`` would have
-    run itself (suppressed there by :data:`gitutil._AUTOMAINT_OFF`), now issued deliberately
-    AFTER the commit so the commit's tight ``_GIT_TIMEOUT`` never charges an O(store) repack.
-    ``--auto`` preserves git's threshold check, so it is a cheap no-op until the store actually
-    needs a repack. Runs FOREGROUND (ADR 0051's ``maintenance.autoDetach=false``, so the caller
-    MUST hold the store write lock to keep the repack serialised with writes) and is bounded by
-    the roomier ``_LOCAL_GIT_TIMEOUT`` watchdog — a hung repack fails this step cleanly.
-
-    BEST-EFFORT BY CONTRACT: the write has already SUCCEEDED and is durable, so a maintenance
-    failure or timeout MUST NEVER fail the write — the loose objects simply persist and the next
-    write's maintenance retries. Returns the git result (or ``None`` if git could not launch)."""
+    ``--auto`` preserves Git's threshold, while the longer local watchdog bounds a
+    possible store-wide repack outside the commit timeout. ADR 0051 requires the
+    caller to hold the write lock during this foreground step. A durable write does
+    not fail when maintenance fails or times out. Return the Git result, or ``None``
+    when Git cannot launch.
+    """
     try:
         return run_git_bounded(tracker, "maintenance", "run", "--auto", timeout=timeout)
     except OSError:

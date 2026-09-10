@@ -1,30 +1,20 @@
-"""Idempotent per-environment ensure-registry (School B: desired-state convergence).
+"""Idempotent desired-state ensures for initialized stores.
 
-rebar's init-time ``_migrate_*``/``_ensure_*`` steps historically ran only at
-``init``/re-init, so a config fix shipped *after* a store was initialized never
-reached that store unless someone re-inited (the ``gc.auto=0`` legacy-store gap).
-This module makes those steps first-class **ensure units**: check-then-act,
-safe-to-re-run, drift-correcting (Ansible/Puppet ``changed``/``ok``; K8s
-level-triggered reconcile) — *not* an ordered version ledger (that A-tier ledger
-is future work; see ``docs/migrations.md``).
+Ensure units replace init-only correction steps with repeatable check-then-act
+operations. They are not an ordered migration ledger. See ``docs/migrations.md``.
+Each unit has a stable identifier and returns :class:`EnsureOutcome`, with no
+change when its state is already converged.
 
-Each unit has a **stable, immutable id** and a ``callable(tracker) -> EnsureOutcome``
-that is a no-op when already converged. :func:`run_ensures` runs ALL units
-unconditionally under the store write lock (concurrent sweeps serialize; a second
-sweep on a converged store makes zero git commits), catches a raising unit
-(skip-and-continue → ``failed``), and rewrites the git-ignored ``.ensure-applied``
-marker with the ids of the NON-failed (``ok``/``changed``) units via an atomic
-temp+rename. The marker is a *hint* for the write-path pending-nudge and the
-``rebar fsck`` ``ensures: N/M applied`` line — it NEVER gates whether a unit runs
-(units are always re-run and self-check).
+:func:`run_ensures` executes every unit under the store write lock. Concurrent
+sweeps serialize, failures are recorded and skipped, and a converged sweep makes
+no Git commit. An atomic rewrite of the ignored ``.ensure-applied`` marker records
+all nonfailed identifiers. The marker informs the write-path warning and the
+``rebar fsck`` applied count, but never controls execution.
 
-The content/config unit *implementations* live in
-:mod:`rebar._commands._init_ensures` (they own the ``.gitignore``/``.gitattributes``
-content constants) and stay re-exported from :mod:`rebar._commands.init`, which is the
-name :func:`_registry` and the docs reach them by; ``untrack-runtime-markers`` is
-defined in ``init`` itself (it has no content template and reads that module's
-``_UNTRACK_BATCH``). :func:`run_ensures` lazy-imports them so the hot-path helpers here
-(:func:`registry_ids`, :func:`applied_ids`) never pull ``init`` into a write path.
+Content-backed units live in :mod:`rebar._commands._init_ensures` and remain
+re-exported from :mod:`rebar._commands.init`. That module also owns
+``untrack-runtime-markers``. Lazy imports keep ``registry_ids`` and
+``applied_ids`` independent of the init command on write paths.
 """
 
 from __future__ import annotations
@@ -38,11 +28,9 @@ from typing import Any, Literal
 
 from rebar._store import fsutil
 
-# Late-bound through the module (never `from ... import canonical_tracker`): this
-# module is first imported LAZILY on the write path, so a by-value import executed
-# while a test holds `lock.canonical_tracker` monkeypatched captures the patch
-# permanently — monkeypatch teardown restores `lock`, not a copy already bound here
-# (bug d720-fc72: the whole ensure sweep then converged the wrong tracker).
+# Resolve ``canonical_tracker`` through the module at call time. A by-value import
+# can retain a test monkeypatch after teardown and direct ensures to the wrong store
+# (bug d720-fc72).
 from rebar._store import lock as _lock
 from rebar._store.compat import StoreIncompatibleError
 
@@ -68,10 +56,9 @@ class EnsureOutcome:
     detail: str = ""
 
 
-# The STABLE, IMMUTABLE id set — persisted in ``.ensure-applied`` and consulted by
-# the pending-hint (WS2) + the ``fsck`` N/M line (WS3) WITHOUT importing ``init``.
-# Renaming an id silently re-pends every store, so ``_registry()`` is asserted to
-# cover exactly this set by ``tests`` (registry-drift guard).
+# Stable identifiers persist in ``.ensure-applied`` and support the pending hint
+# and ``fsck`` count without importing ``init``. Tests require ``_registry()`` to
+# cover this exact set because renaming an identifier makes every store pending.
 REGISTRY_IDS: tuple[str, ...] = (
     "env-id",
     "gc-config",
@@ -150,21 +137,16 @@ def run_ensures(
     timeout: int | None = None,
     attempts: int | None = None,
 ) -> list[EnsureOutcome]:
-    """Run EVERY ensure unit unconditionally under the store write lock and rewrite
-    ``.ensure-applied`` with the non-failed ids. Returns the per-unit outcomes.
+    """Run every ensure under the write lock and return each outcome.
 
-    Never raises — with ONE deliberate exception (story 21dd): a unit that raises is
-    caught (skip-and-continue → ``failed`` and excluded from the marker); a write-lock
-    acquisition failure is logged and treated like a whole-sweep no-op (init/boot never
-    abort on ensure trouble). The sole propagated error is
-    :class:`~rebar._store.compat.StoreIncompatibleError` (raised by the store-compat gate
-    inside ``lock.acquire()``): it is re-raised so the fail-closed guarantee is not
-    swallowed on the ensure-sweep path (init / MCP-boot / ``fsck --repair`` must refuse an
-    incompatible store, not log a benign sweep no-op).
+    Unit failures become ``failed`` outcomes and are omitted from
+    ``.ensure-applied``. Lock acquisition or unexpected sweep failures are logged
+    as no-ops so init and boot continue. The store compatibility gate is the only
+    propagated exception, which keeps init, MCP boot, and ``fsck --repair``
+    fail-closed for an incompatible store.
 
-    ``timeout``/``attempts`` bound the write-lock acquisition; ``None`` keeps
-    ``write_lock``'s defaults. A caller that must not block (e.g. MCP boot) passes a
-    SHORT budget so a contended lock skips the sweep rather than delaying it.
+    ``timeout`` and ``attempts`` bound lock acquisition. ``None`` preserves the
+    lock defaults, while latency-sensitive callers can supply a shorter budget.
     """
     tracker = _lock.canonical_tracker(tracker)
     lock_kwargs: dict[str, Any] = {}
@@ -187,25 +169,17 @@ def run_ensures(
     except _lock.LockTimeout as exc:
         logger.warning("run_ensures: write lock unavailable, skipping sweep: %s", exc)
     except StoreIncompatibleError:
-        # Story 21dd (fail-closed integrity): the write-lock gate fired on a store this
-        # rebar cannot interpret. StoreIncompatibleError subclasses Exception, so the
-        # broad handler below would SWALLOW it into a no-op — turning the fail-closed
-        # gate into a silent bypass at MCP boot / `fsck --repair`. Re-raise so the
-        # caller (init/CLI → non-zero, MCP boot → CommandError) fails closed.
+        # Preserve the compatibility gate across the broad recovery handler below.
+        # Callers must reject a store this build cannot interpret (story 21dd).
         raise
     except Exception as exc:  # noqa: BLE001 — an ensure sweep must never abort its caller
         logger.warning("run_ensures: unexpected error, skipping sweep: %s", exc)
     return outcomes
 
 
-# ── WS2: write-path pending-hint (Rails CheckPending, hardened) ──────────────
-#
-# An existing store must learn it is behind the registry WITHOUT hot-path cost. On
-# a covered write (see event_append.write_and_push) we compute the pending unit set
-# ONCE per process per store (cached below), and — only when something is pending —
-# emit a single, rate-limited WARNING that names the pending units and points at
-# `rebar fsck --repair`. It is best-effort and fail-silent: a write must NEVER fail
-# because of it. A converged store caches the empty set and does zero further reads.
+# A covered write computes pending units once per process and store. When any remain, it emits
+# one rate-limited warning that names them and recommends ``rebar fsck --repair``. Failures never
+# block the write. A converged store performs no later marker reads.
 
 # Cache of pending id sets, keyed by canonical tracker path (registry is static per
 # process, so `.ensure-applied` is read at most once per store per process).
