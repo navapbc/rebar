@@ -1,17 +1,8 @@
-"""MCP response-payload budgets (bug 494b-2dd3-e9d3-4fb0).
+"""MCP response budgets shared by workflow and list tool bodies.
 
-One home for the "how big may an MCP tool result be" question and the two answers rebar
-gives to it, extracted from ``rebar.mcp_server`` when that module reached the 800-LOC cap.
-The cluster is a real call-graph seam: both bounds measure through :func:`_payload_bytes`
-and nothing else in the server calls them — they reach the tool bodies only as the
-``cap_workflow_payload`` / ``bound_list_payload`` handles on the shared tool context.
-
-The two answers differ on purpose:
-
-* a workflow payload is TRUNCATED and flagged (``truncated: true``) — the bulk is step
-  output the caller can re-read, and the envelope still says what it is;
-* a LIST is REFUSED — a shortened list cannot be told from a complete one, so truncating
-  it would hand the caller a confidently wrong answer.
+Workflow bulk is safely re-readable, so oversized results are flagged and truncated.
+Oversized lists are refused because a partial list is indistinguishable from a complete
+answer. Both policies measure through the same payload-sizing seam.
 """
 
 from __future__ import annotations
@@ -72,21 +63,12 @@ def _cap_workflow_payload(payload: dict) -> dict:
     return capped
 
 
-# The SAME ~25K-token client budget the workflow cap enforces, applied to the LIST read
-# surface (bug 494b-2dd3-e9d3-4fb0). Measured live on 2026-08-28, one unfiltered
-# `list_tickets` returned 94,541,551 bytes over 177 seconds: the server never errors, so
-# the client is left to die however it dies -- "Transport closed" on one client, a
-# silently truncated result on another -- and none of them can tell "too big" from
-# "server died".
+# Lists share the workflow's ~25K-token client budget. Refusal replaces ambiguous
+# transport failure or silent truncation for very large whole-store reads.
 _LIST_TOKEN_BUDGET_BYTES = _WORKFLOW_TOKEN_BUDGET_BYTES
 
-#: The remedy named in the refusal, PER TOOL, so it travels with the error.
-#:
-#: Per-tool because a remedy the tool cannot execute is worse than no remedy at all:
-#: ``ready_tickets`` takes only ``sort`` and ``full`` -- it has NO filter parameters -- so
-#: telling its caller to "narrow the query with status/has_tag" names arguments the tool
-#: would reject, turning the refusal into a dead end. ``ready`` is inherently a
-#: whole-store question; when the answer no longer fits, the scoped tool is ``next_batch``.
+#: Give each refusal an executable remedy. ``ready_tickets`` cannot filter, so its
+#: remedy redirects to conflict-aware ``next_batch`` rather than naming invalid args.
 _LIST_REMEDIES: dict[str, str] = {
     "list_tickets": (
         "Narrow the query with one of status, ticket_type, priority, parent, has_tag, "
@@ -111,30 +93,11 @@ _DEFAULT_LIST_REMEDY = _LIST_REMEDIES["list_tickets"]
 
 
 def _wire_bytes(rows: list[_Row]) -> int:
-    """The size of the payload the CLIENT actually receives for a list tool.
+    """Measure the validated list payload exactly as the client receives it.
 
-    Sizing the raw reducer dicts UNDER-ESTIMATES on THREE independent axes, and an
-    under-estimating bound is worse than none: it passes a payload that still overruns.
-    Between the reducer and the socket the rows pass through
-
-    1. ``TicketStateOut.model_validate`` -- which, because the model DECLARES defaults
-       (``description``, ``comments``, ``deps``, ``inbound_deps``, ``file_impact``,
-       ``file_impact_scope``, ``no_file_impact_reason``, ``plan_review_health``,
-       ``cross_session_warning``), RE-ADDS every one the lean projection just dropped, as
-       an explicit ``null``/``[]``/``""``;
-    2. :func:`rebar._mcp_errors.js_safe_result` -- which rewrites each JS-unsafe 19-digit
-       nanosecond integer (``created_at``, ``updated_at``, every nested ``signed_at``) as a
-       QUOTED string, and a quoted string is two bytes LONGER than the bare int; and
-    3. **FastMCP emits the result TWICE.** A ``CallToolResult`` for a list tool carries BOTH
-       ``structuredContent`` (the whole ``{"result": [...]}`` object) AND one ``content``
-       text block PER ROW, each ``json.dumps(row, indent=2)``. Measured on this store's row
-       shape the two halves together are **2.08x** the structured object alone, so a bound
-       that measured only ``structuredContent`` would pass a payload roughly twice the
-       budget -- the same "passes something that still overruns" failure axes 1 and 2 cause.
-
-    So the bound is measured here on the post-validation, post-``js_safe_result`` rows, over
-    BOTH halves of the emitted result, rather than on the reducer output. Callers therefore
-    hand this the VALIDATED rows, not the raw ones.
+    Model defaults and quoted JS-unsafe integers enlarge reducer rows, while FastMCP
+    emits both structured content and an indented text block per row. Callers therefore
+    pass post-validation rows; this sizes both post-``js_safe_result`` wire halves.
     """
     import json
 

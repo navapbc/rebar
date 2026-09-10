@@ -1,43 +1,14 @@
-"""Shared ticket-ID resolution primitives (stdlib-only leaf).
+"""Shared, stdlib-only ticket identifier resolution.
 
-The single resolution seam Python CLIs and the library use, so every surface
-accepts the same ID forms. The forms to WRITE are the alias (preferred), the
-8-hex two-quad short id, the full 16-hex canonical id, and the Jira issue key
-(e.g. ``REB-310``).
+All surfaces accept aliases (preferred for prose), two-quad and canonical IDs, and
+Jira keys. Unique four-hex prefixes remain compatible but are deprecated because
+they collide and create accidental citations; speculative scanners use ``quiet=True``.
+Direct directory resolution rejects unsafe user path segments before filesystem joins.
 
-Shorter unique prefixes (down to 4 characters) still resolve, but a bare
-single-quad 4-hex prefix is DEPRECATED as a reference form and should not be
-used in new prose, docs, or tooling: with a large store those fragments collide
-constantly, so they resolve ambiguously to nothing and, worse, turn any text
-that merely CONTAINS one into an accidental ticket citation. Resolution of
-existing short forms is unchanged — this is compatibility behavior, not a
-recommendation. Scanners that resolve candidates the user never supplied should
-pass ``quiet=True`` (see :func:`resolve_ticket_id`).
-
-This is a **top-of-tree leaf**: it imports only stdlib + ``rebar._alias`` (itself
-a stdlib-only leaf) and NOTHING from ``rebar.reducer`` / ``rebar._engine_support``
-/ ``rebar._commands`` / ``rebar.llm``.  It therefore sits BELOW both the pure
-event-replay layer (``rebar.reducer``) and the higher read layer
-(``rebar._engine_support``), so both can depend on it downward without a package
-cycle — the same pattern ``rebar._alias`` uses.  Historically this lived in
-``rebar._engine_support.resolver``, which forced the reducer to reach UP into
-``_engine_support`` via a function-local import (a layering inversion + import
-cycle); moving the primitive here removes that back-edge.  ``rebar._engine_support
-.resolver`` now re-exports these names, so its public surface is unchanged.
-
-Alias lookup is done IN-PROCESS (Tier E E6.5a — replacing the
-``ticket-alias-resolve.py`` subprocess): the alias scan reads each ticket's
-CREATE event (and the latest SNAPSHOT, for compacted tickets) and matches a
-stored ``data.alias`` or a backfilled ``compute_alias`` — the same single-source
-alias helper (``rebar._alias``) the create path uses, so stored-at-create and
-backfilled-at-resolve aliases stay in lock-step.
-
-Jira-key lookup consults the reconciler's **binding store** reverse index
-(``.tickets-tracker/.bridge_state/bindings.json`` → ``reverse: {jira_key →
-local_id}``), which is the authoritative Jira↔rebar mapping. (Historically the
-resolver scanned ``data.jira_key`` on CREATE/SNAPSHOT events, but that field is
-never written — the live mapping is the binding store — so that path was dead and
-has been replaced.)
+This leaf sits below reducer and engine-support layers, which re-export it without a
+cycle. In-process alias lookup reads CREATE/latest SNAPSHOT data and shares the alias
+backfill algorithm with creation. Jira keys resolve through the authoritative binding
+store reverse index rather than unwritten event fields.
 """
 
 from __future__ import annotations

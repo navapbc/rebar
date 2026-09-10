@@ -1,24 +1,10 @@
-"""Typed output models for the rebar MCP server (FastMCP outputSchema).
+"""Shared FastMCP output-schema models.
 
-Extracted from ``rebar.mcp_server`` so the per-cluster tool registrars
-(``_mcp_reads`` / ``_mcp_writes`` / ``_mcp_llm``) can share one definition of the
-output models WITHOUT importing ``mcp_server`` (which would form an import cycle).
-This module imports only ``pydantic`` — it is a leaf
-with no ``rebar.*`` edges, so it never participates in an import cycle.
-
-Each model mirrors a ``src/rebar/schemas/*.schema.json`` file and is kept
-permissive (``extra="allow"``, non-core fields optional) so the evolving
-event-sourced shapes never break a tool. FastMCP resolves a tool's return
-annotation via ``eval`` against the DEFINING module's globals, so each registrar
-imports the model names it annotates with at its own module level (they become
-module globals there) — that is why these live at module level (not inside a
-function) and why ``from __future__ import annotations`` is required so the ``|``
-unions resolve on every supported Python.
-
-The ``mcp`` extra guarantees ``pydantic``; guarded so a bare
-``import rebar.mcp_server`` (or ``import rebar._mcp_models``) without the extra
-still succeeds — the model names degrade to ``None`` and ``build_server`` reaches
-its friendly install message before any tool is registered.
+This Pydantic-only leaf avoids registrar/server import cycles. Permissive models mirror
+the JSON schemas without breaking on additive event fields. Registrars import annotated
+models into their own globals because FastMCP evaluates return annotations there. Without
+the MCP extra, guarded imports degrade model names to ``None`` until server setup emits its
+installation guidance.
 """
 
 from __future__ import annotations
@@ -47,15 +33,10 @@ try:
             return data
 
     class _OmitUnsetOut(_Out):
-        """Drop the named fields from the serialized dump when they were never set.
+        """Omit named unset fields whose schema type does not admit null.
 
-        Bug 3a02: a schema property whose canonical type admits NO null — a bare
-        ``string``, an enum ``$ref``, or ``const: true`` — has ABSENCE as its only
-        "unset" signal.  Declaring such a property is what makes it visible in the
-        published ``outputSchema``, but a declared field with a ``None`` default would
-        put an explicit ``null`` on the wire, and that null makes the payload violate
-        the very schema the declaration mirrors.  Listing it here keeps the declaration
-        and restores absence as the unset form, so the emitted bytes are unchanged.
+        Fields remain declared in ``outputSchema`` without serializing a default
+        ``None`` that would violate it; absence stays their sole unset signal.
         """
 
         _omit_when_unset: ClassVar[tuple[str, ...]] = ()
@@ -146,18 +127,10 @@ try:
         plan_review_health: PlanReviewHealthAvailableOut | PlanReviewHealthUnavailableOut | None = (
             None
         )
-        # Story 734d: the cross-session holder-naming advisory. Same reasoning as
-        # description_warning — an MCP client reads only the tool result, so an
-        # advisory that lives solely on the server's stderr is undeliverable here.
-        # Present (non-null) only when the ticket's live claim is held by a
-        # DIFFERENT session than the acting one; advisory, never a gate.
+        # Deliver the non-gating holder advisory in-band only for another session's claim.
         cross_session_warning: str | None = None
-        # Bug 3a02: the remaining canonical `ticket_state.schema.json` properties, now
-        # DECLARED rather than riding as undeclared `extra="allow"` pass-throughs. The
-        # reducer already emits every one of them, so this documents the published
-        # outputSchema without changing what goes on the wire. All are optional and
-        # default to null/empty — absence is meaningful (an unset provenance or close
-        # field must never be reported as a fabricated value).
+        # Declare canonical ticket-state properties in the schema without fabricating
+        # absent provenance or disposition values; reducer wire data is unchanged.
         author: str | None = None
         env_id: str | None = None
         bridge_project: str | None = None
@@ -167,10 +140,7 @@ try:
         reverts: list = []
         attestations: dict = {}
         preconditions_summary: dict = {}
-        # Nanosecond epoch stamps. Declared `int | str` (never bare `int`) because
-        # rebar._mcp_errors.js_safe_result rewrites a JS-unsafe integer as its exact
-        # decimal string (bug 6fe7) and FastMCP re-validates the result against this
-        # model — an `int`-only annotation would coerce it back to a lossy bare number.
+        # Accept decimal strings so FastMCP validation preserves JS-safe nanosecond stamps.
         created_at: int | str | None = None
         updated_at: int | str | None = None
         last_reopened_at: int | str | None = None
@@ -284,16 +254,11 @@ try:
         suggestions: list = []
 
     class PushStatusOut(_Out):
-        """Whether this store's ticket events reached the ``sync.remote``.
+        """Durable delivery state for ticket events sent to ``sync.remote``.
 
-        Bug ``vapoury-attack-lamb``: the tickets-branch push is best-effort and, on
-        failure, WARNS — but an MCP client reads only the tool result, so a rejected push
-        was undeliverable on this surface. Measured against a real declining origin, the
-        ``comment_ticket`` tool returned ``{"result": "ok"}`` with two commits stranded.
-        Read from the durable marker ``rebar._store.push_state`` writes, so it also
-        reports a failure from a DETACHED (``sync.push=async``) push whose own stderr went
-        to ``/dev/null``, and keeps reporting it on later calls until a push lands.
-        ``state`` is ``"ok"`` or ``"pending"``; the rest are present only when pending.
+        This exposes best-effort and detached push failures that stderr cannot deliver to
+        MCP clients, retaining ``pending`` until a later push lands. Other fields appear
+        only for pending state; otherwise ``state`` is ``ok``.
         """
 
         state: str
@@ -304,26 +269,13 @@ try:
         since: float | None = None
 
     class WriteAckOut(_Out):
-        """The shared ack for write tools that previously returned a bare ``"ok"``.
-
-        FastMCP already derived ``{"result": <str>}`` from their ``-> str`` annotation, so
-        this is a strict SUPERSET of the shape clients see today: ``result`` is unchanged
-        and ``push_status`` is added.
-        """
+        """Preserve the existing ``result`` acknowledgement and add delivery status."""
 
         result: str
         push_status: PushStatusOut | None = None
-        # Ticket 594b: the save-time description-cap notice. Same reasoning as
-        # push_status — an MCP client reads only the tool result, so a warning that
-        # exists solely on the server's stderr is undeliverable on this surface.
-        # Present (non-null) only when the write put the description over
-        # verify.max_ticket_description_chars while the plan-review start-work gate
-        # is enabled; advisory, and the write still succeeded.
+        # In-band advisory when a successful write crosses the gated description cap.
         description_warning: str | None = None
-        # Story 734d: the cross-session holder-naming advisory. Same reasoning as
-        # description_warning — present (non-null) only when the ticket's live
-        # claim is held by a DIFFERENT session than the acting one; advisory, and
-        # the write still succeeded.
+        # In-band advisory when another session holds the live claim; the write succeeded.
         cross_session_warning: str | None = None
 
     class FileImpactItemOut(_Out):
@@ -341,9 +293,7 @@ try:
         push_status: PushStatusOut | None = None
         #: Advisory save-time description-cap notice (ticket 594b); see WriteAckOut.
         description_warning: str | None = None
-        #: Advisory create-time same-title duplicate notice (ticket eac3): non-null when
-        #: another create inside the recency window carries the same normalized title —
-        #: the ticket was still created; the text names the candidate and its status.
+        #: Successful-create advisory naming a recent same-title candidate and its status.
         duplicate_warning: str | None = None
 
     class ClaimResultOut(_Out):
@@ -353,10 +303,8 @@ try:
         push_status: PushStatusOut | None = None
 
     class GateResultOut(_OmitUnsetOut):
-        # Shared by check_ac and quality_check. Bug 3a02 declares the gate-specific
-        # metrics the canonical gate_result schema defines: check_ac emits
-        # `criteria_count`, quality_check emits the other four, and each tool has
-        # always put its own metrics on the wire as undeclared extras.
+        # Shared gate schema: check_ac emits criteria_count; quality_check emits the
+        # other metrics. Declaring them documents the existing wire shape.
         verdict: str
         reason: str
         passed: bool | None = None
@@ -385,18 +333,12 @@ try:
         store_integrity: list[dict]
 
     class FsckOut(_Out):
-        """Structured ``fsck`` report (mirrors ``src/rebar/schemas/fsck.schema.json``).
+        """Structured fsck report matching the canonical schema.
 
-        ``returncode`` carries the COMPLETED run's exit code as data (0 = clean,
-        1 = issues found); it is absent from the CLI's own ``--output json`` payload,
-        hence optional here.
-
-        ``issue_count`` is the COUNTED subset of ``issues`` — it AGREES with the exit
-        code (bug 29c3-b025-04d7-454e). Each item in ``issues`` carries an additive
-        ``counted`` boolean: report-only kinds (``push_pending``,
-        ``status_fork_resolved``, ``tracker_dirty_tmp_event``, ``warn``) are
-        ``counted=False`` and excluded from ``issue_count`` while still present in
-        ``issues``, so a consumer wanting the old total can compute ``len(issues)``."""
+        Optional ``returncode`` is completed-run data. ``issue_count`` includes only
+        issues marked ``counted`` and therefore agrees with that code; report-only items
+        remain in ``issues`` and the legacy total is ``len(issues)``.
+        """
 
         issues: list[dict]
         fixed: list[str]
@@ -469,10 +411,8 @@ try:
         attached: int
 
     class SignResultOut(_Out):
-        # Contract phase (story 8f1d): the
-        # dual-shape window is closed — `sign_manifest` mints ONLY the op-cert record, so envelope/
-        # principal are required and the legacy HMAC fields (signature/key_id) are retired
-        # (kept nullable only so a reader tolerates a pre-contract record).
+        # Fresh signatures are op-certs with required envelope/principal; nullable legacy
+        # HMAC fields only tolerate older records.
         ticket_id: str
         manifest: list[str] = []
         algorithm: str
@@ -502,17 +442,12 @@ try:
         # Gate-code provenance: the rebar version+SHA that produced the attestation
         # (audit-only, epic jira-reb-596). None for pre-stamp / unsigned records.
         rebar_version: str | None = None
-        # Which key certified an op-cert (bug c21f): own_key / pinned_environment /
-        # envelope_key. The signing ENVIRONMENT is not a gate under current policy, so
-        # this makes the weaker envelope_key basis visible rather than silent. None when
-        # no trust root was reached (unsigned/legacy record, or a pre-key-selection refusal).
+        # Expose own, pinned-environment, or envelope-key trust; None means no trust root.
         trust_basis: str | None = None
 
     class PlanReviewStatusOut(_Out):
-        # The read-only plan-review attestation currency verdict, mirroring the
-        # dict rebar.llm.plan_review_status returns (the same answer the claim gate
-        # would give). verified_at_sha / signed_at are None when no readable
-        # certified attestation exists.
+        # Read-only claim-gate currency verdict; timestamps are absent without a
+        # readable certified attestation.
         ok: bool
         verdict: str
         reason: str
@@ -520,10 +455,8 @@ try:
         signed_at: int | str | None = None  # str: JS-safe wire form (bug 6fe7)
 
     class VerifyCompletionStatusOut(_Out):
-        # The completion-verifier close-gate analog of PlanReviewStatusOut, mirroring
-        # rebar.llm.verify_completion_status: a read-only, no-LLM attestation currency
-        # read. verdict is 'certified' when a valid completion-verifier attestation
-        # exists, else 'unsigned'; verified_at_sha / signed_at are None when none does.
+        # Read-only close-gate currency: certified for a valid completion attestation,
+        # otherwise unsigned with absent timestamps.
         ok: bool
         verdict: str
         reason: str
@@ -531,11 +464,9 @@ try:
         signed_at: int | str | None = None  # str: JS-safe wire form (bug 6fe7)
 
     class GateRunOut(_Out):
-        # The durable handle for an async gate run started by review_plan_start /
-        # verify_completion_start, returned by those tools and by the gate_status poll
-        # (bug d80d Phase 2). extra=allow carries the poll-only fields (verdict / error /
-        # durable / findings) a settled run adds. status is running / passed / failed /
-        # attaching / unknown.
+        # Async gate handle shared by starters and polling; permissive extras carry
+        # settled verdict, error, durable, and findings data. Status is running,
+        # passed, failed, attaching, or unknown.
         job_id: str
         status: str
         ticket_id: str | None = None
@@ -560,20 +491,14 @@ try:
         backends: list[GroundingBackendOut] = []
 
     class WorkflowRunOut(_Out):
-        # One permissive model for both get_workflow_status and get_workflow_result
-        # (extra=allow covers the fields each adds: steps vs outputs/terminal_output;
-        # those per-call fields are the documented PERMISSIVE_OMISSIONS in the drift gate).
+        # Shared permissive status/result model; extras distinguish steps from outputs.
         run_id: str
         status: str
         ticket_id: str | None = None
         workflow_name: str | None = None
 
-    # NOTE: transition/reopen return {ticket_id, from, to, newly_unblocked}; the
-    # `from` key is a Python reserved word, so those tools return a plain dict
-    # (FastMCP serializes it correctly) rather than a typed model. They therefore
-    # advertise no outputSchema by design — a documented exemption pinned in
-    # tests/interfaces/test_mcp_output_schema_coverage.py. Their CLI/library JSON
-    # is still pinned to transition_result by test_schema_outputs.py.
+    # Transition/reopen use plain dictionaries because ``from`` is reserved. Their
+    # missing outputSchema is intentional; CLI/library JSON remains schema-pinned.
 except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     PlanReviewHealthTargetOut = PlanReviewHealthAvailableOut = None  # type: ignore[assignment,misc]
     PlanReviewHealthUnavailableOut = None  # type: ignore[assignment,misc]

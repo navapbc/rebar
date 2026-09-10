@@ -248,19 +248,10 @@ class CompactConfig:
         1_800_000_000_000,
         "Keeps events newer than this nanosecond horizon outside compaction snapshots.",
     )
-    # Legacy signature-mirror retirement (epic dark-acme-lumen, tasks 352b/7ed9). The
-    # legacy single-slot ``state['signature']`` mirror was a back-compat projection of the
-    # most-recent attestation; the kind-keyed ``state['attestations']`` map is now
-    # authoritative and every in-tree consumer reads it. New SNAPSHOTs UNCONDITIONALLY omit
-    # the legacy ``signature`` mirror (hardcoded never-emit) — the former CONTRACT-phase
-    # rollback toggle ``emit_legacy_signature_mirror`` has been REMOVED. The mirror is still
-    # re-derived IN MEMORY on every replay (reducer ``process_signature``), so signature
-    # verification keeps working on a compacted ticket; only persistence into new snapshots
-    # is gone. See docs/migrations.md "Legacy signature-mirror retirement".
-    # The OPERATION-LINKED compaction trigger: the compaction floor for stores with no CI and
-    # no cron. async detaches a worker after a close, always folds inline (tests/CI), off
-    # disables it. trigger_interval_s bounds the last-sweep staleness arm (6 h, matching the
-    # scheduled sweep). Rationale: rebar._commands.compact_trigger; keys: docs/config.md.
+    # New snapshots omit the retired single-slot signature mirror; replay still derives
+    # it in memory from authoritative kind-keyed attestations. Operation-linked compaction
+    # covers stores without CI/cron: async detaches after close, always folds inline, and
+    # off disables it. The interval bounds sweep staleness (default six hours).
     trigger: str = _documented(
         "async",
         "Selects asynchronous, inline, or disabled compaction after qualifying write operations.",
@@ -512,13 +503,9 @@ class ReconcilerConfig:
         "off",
         "Selects which Jira clients receive rich-text payloads instead of plain text.",
     )
-    # Wall-clock ceiling, in seconds, on ONE pandoc invocation in the Data Center
-    # wiki renderer (story 5c0e). One corpus body span pandoc's jira reader for
-    # 13.5 minutes at 95.8% CPU, and pypandoc's high-level API sets no timeout at
-    # all, so without this a single field can stall a reconcile indefinitely. The
-    # 10s default is >30x the observed ~0.3s per-field render and ~80x below that
-    # hang, so it cannot fire on healthy input. On expiry the unit degrades to its
-    # original Markdown — echo-safe, and no other unit is affected.
+    # Bound one Data Center Pandoc conversion so a pathological field cannot stall a
+    # reconcile. Ten seconds clears healthy ~0.3s renders; expiry falls back only that
+    # field to its echo-safe original Markdown.
     dc_pandoc_timeout_s: float = _documented(
         10.0,
         "Limits one Data Center Pandoc conversion to this many seconds before Markdown fallback.",
@@ -548,18 +535,14 @@ class ReconcilerConfig:
         False,
         "Bypasses the reconciler identifier write guard and can permit identifier corruption.",
     )
-    # Convergence circuit breaker (epic 3006-e198): refuse a pass whose ACTING
-    # decisions (terminal-transition / retire / adopt) exceed this fraction of the
-    # binding population. 2026-07-03 census measured 1.14% acting — 8.8× headroom.
+    # Refuse a pass when terminal-transition, retire, and adopt decisions exceed this
+    # fraction of bindings; 0.10 retains 8.8× headroom over the measured 1.14%.
     max_acting_fraction: float = _documented(
         0.10,
         "Refuses a pass when acting decisions exceed this fraction of bound tickets.",
     )
-    # Convergence rollout retired (story d6bd): the per-binding baseline is now
-    # ALWAYS dual-written AND ALWAYS consumed as the outbound field differ's
-    # arbitration ancestor (ADR 0026). The former rollout flags
-    # (baseline_dual_write / baseline_consumer_swap) ran clean in prod and were
-    # removed — the always-on behavior is hardcoded, no config surface remains.
+    # Per-binding baselines are always dual-written and consumed as outbound-field
+    # arbitration ancestors; the completed rollout has no remaining config switch.
 
     # --- Data Center connection settings (story J6, epic e369) ---
     # Vendor-neutral (not Cloud's ACLI-driven ``[tool.rebar.jira]``): a future

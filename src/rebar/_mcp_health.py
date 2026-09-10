@@ -1,30 +1,9 @@
-"""Health, in-flight instrumentation, and bounded graceful shutdown for the rebar
-MCP HTTP transport (ADR deft-evolutive-mosasaur / docs/adr/0104-mcp-on-box.md).
+"""MCP health, certified-op instrumentation, and graceful shutdown (ADR 0104).
 
-``mcp_server.py`` sits at its 800-LOC module cap, so the box-facing concerns the ADR
-adds — a ``/health`` endpoint exposing an ``in_flight`` gauge, instrumentation of the
-certified LLM tools that feeds it, and a bounded SIGTERM grace window so a retiring
-container lets an in-flight op finish — live here and are wired in from
-``build_server``/``main`` via :func:`wire_health` and :func:`run_mcp`.
-
-Design notes:
-
-* The gauge counts ONLY the certified, long-running LLM tools
-  (:data:`CERTIFIED_TOOLS`) — ``review_plan``/``verify_completion``/``review_code``/
-  ``scan_spec`` — never trivial reads, so the autodeploy retire check
-  (panicky-sylphish-foxterrier) waits on billable work rather than idle traffic.
-* ``/health`` is a FastMCP ``custom_route`` — a Starlette route on the app OUTSIDE the
-  SDK ``RequireAuthMiddleware`` and the DNS-rebinding transport-security guard — so an
-  unauthenticated container HEALTHCHECK/probe still gets 200 even when auth is enabled.
-  That exemption is also why a 200 alone proves nothing about the MCP request path, so
-  ``/health`` additionally reports the STARTUP HANDSHAKE: one real ``initialize`` driven
-  through this server's own session manager inside the ASGI lifespan, before uvicorn
-  accepts a connection. That handshake cluster now lives in
-  :mod:`rebar._mcp_startup_handshake` and is re-exported here (:func:`install_startup_handshake`,
-  bug vaccinated-flavorous-solenodon).
-* The grace window is a MODULE constant (:data:`DEFAULT_SHUTDOWN_GRACE_SECONDS`), the
-  ``review_bot/config.py`` budget precedent, deliberately NOT a rebar config key so it
-  does not ripple into ``MCP_ENV_VARS`` / ``server.json`` / the env-var docs generators.
+The in-flight gauge counts only billable certified tools so SIGTERM retirement can
+drain them. Unauthenticated ``/health`` remains outside auth/transport middleware and
+therefore also reports a real startup ``initialize`` handshake; HTTP 200 alone is not
+request-path proof. Shutdown grace is a module constant rather than config surface.
 """
 
 from __future__ import annotations
@@ -85,24 +64,11 @@ class MCPRetiringError(RuntimeError):
 
 
 class InFlightGauge:
-    """Thread-safe counter of in-flight certified tool calls.
+    """Thread-safe count and retirement gate for certified tool calls.
 
-    The ``mcp`` SDK calls a sync tool body DIRECTLY inside the ASGI request coroutine, so
-    :meth:`track` USED to run on the event-loop thread (bug f643 /
-    ``superior-trifling-dunlin`` — believing otherwise is exactly what let that bug ship).
-    Since :func:`offload_sync_tools` (bug ``dewy-rotatable-tarsier``) it runs on an anyio
-    worker thread instead, because leaving those bodies on the loop stopped the server
-    answering every other request for the length of the call. Either way the lock is what
-    makes this safe, and it was always required: the gauge is READ and acted on from other
-    threads — notably the SIGTERM drain path, which polls :attr:`value` while in-flight
-    calls mutate it. :meth:`track` only counts a call whose tool name is in
-    :data:`CERTIFIED_TOOLS`; any other name is a no-op context so instrumentation can
-    be applied uniformly.
-
-    Once :meth:`begin_draining` is called (on SIGTERM, bug 2f46) the gauge is CLOSED to NEW
-    certified intake: :meth:`track` raises :class:`MCPRetiringError` for a certified tool
-    instead of counting it, so a burst arriving mid-drain cannot push the gauge back above 0
-    and re-pin the retiring port. Calls already in flight are unaffected and drain normally.
+    Tool bodies run on workers while the SIGTERM path reads the count elsewhere, so a
+    lock protects all state. Non-certified names are no-ops. Once draining begins, new
+    certified calls raise :class:`MCPRetiringError`; already-counted calls finish.
     """
 
     def __init__(self) -> None:
@@ -193,41 +159,9 @@ def instrument_certified_tools(mcp: Any, gauge: InFlightGauge) -> None:
         tool.fn = _wrap_tool_fn(tool.fn, gauge, name)
 
 
-# ── Keep long tool bodies OFF the event loop ─────────────────────────────────
-# THE DEFECT THIS FIXES (bug dewy-rotatable-tarsier). Every rebar MCP tool is a plain
-# ``def``, and the SDK calls a sync tool body DIRECTLY inside the ASGI request coroutine
-# (``fastmcp/utilities/func_metadata.py``: ``if fn_is_async: await fn(...) else: fn(...)``).
-# On the stdio transport that was harmless — one client, one process. Behind the shared
-# HTTP transport it is not: a tool call occupies the uvicorn event loop for its whole
-# duration, so the server answers NOTHING else meanwhile — not ``initialize``, not
-# ``tools/list``, not even the unauthenticated ``/health`` route.
-#
-# MEASURED on the deployed box: a ``CallToolRequest`` began at 21:03:00.590 and the process
-# logged nothing at all for 3m56s; at 21:06:56.275 six ``/health`` responses and five 401s
-# completed within 5 MILLISECONDS of each other — a backlog draining the instant the loop was
-# released. From outside, that window is `http=000` after 70s and 401s taking 12s / 28s / 50s
-# / 63s, against a 0.25s steady state. rebar's own budgets make this routine rather than
-# exotic: AGENTS.md documents ``review_plan`` at 15-20 MINUTES and a completion-verifier close
-# at 9-11 minutes, and one unfiltered ``list_tickets`` has been measured at 177 seconds.
-#
-# It reads as a STARTUP bug because a redeploy makes every agent reconnect at once, so the
-# first client to ``initialize`` after a cutover is the one most likely to land behind another
-# client's long tool call. The handshake itself is not slow: a cold authenticated
-# ``initialize`` fired at the cutover instant measures 30 ms.
-#
-# THE FIX is the one this codebase already applied to the sibling service — ticket c2ba
-# (``melting-resting-serpent``) moved the review-bot's ``emit_code_review_artifact`` off the
-# event loop with ``asyncio.to_thread`` "so the drain bound can actually fire"
-# (infra/compose/docker-compose.yml). Same defect, same remedy: run each sync tool body on a
-# worker thread and mark the tool async so the SDK awaits it.
-#
-# ``anyio.to_thread.run_sync`` is used rather than ``asyncio.to_thread`` because the SDK's
-# transport runs under anyio, and because it COPIES THE CALLER'S CONTEXTVARS into the worker
-# thread (verified). That is load-bearing here and not incidental: ``run_http_with_grace``
-# binds the box's op-cert signer as a ContextVar inside the serving thread, and the certified
-# tools mint op-certs from it — a thread that did not inherit that context would sign under
-# the wrong environment. It also carries anyio's default 40-slot thread limiter, which bounds
-# how many tool bodies can run at once instead of letting an unbounded fan-out spawn threads.
+# FastMCP otherwise runs sync tools on the ASGI loop, making health and initialize wait
+# behind multi-minute calls. AnyIO workers preserve signer ContextVars and apply their
+# bounded thread limiter while leaving the event loop responsive.
 
 
 def _thread_offloaded(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -257,17 +191,12 @@ def _thread_offloaded(fn: Callable[..., Any]) -> Callable[..., Any]:
 
 
 def offload_sync_tools(mcp: Any) -> int:
-    """Run every SYNC tool body on a worker thread; return how many were moved.
+    """Move every synchronous tool to a worker and return the count.
 
-    Applied to every tool, not just :data:`CERTIFIED_TOOLS`: the gauge only needs to see
-    billable work, but the event loop is blocked by ANY slow body, and the 177-second
-    ``list_tickets`` that motivated this is an ordinary read.
-
-    MUST run AFTER :func:`instrument_certified_tools`, which installs a SYNC gauge wrapper
-    and FAILS LOUD on a certified tool already marked async — reversing the order would
-    leave the certified tools uninstrumented (or trip that guard). Composing this way also
-    means the gauge is incremented on the worker thread rather than the event-loop thread;
-    that is safe, and is exactly what :class:`InFlightGauge`'s lock has always been for."""
+    Ordinary reads can block too, so this covers all tools. It must run after certified
+    instrumentation, whose synchronous wrapper fails loud if ordering is reversed; the
+    gauge lock makes worker-thread increments safe.
+    """
 
     manager = getattr(mcp, "_tool_manager", None)
     if manager is None:
@@ -284,27 +213,11 @@ def offload_sync_tools(mcp: Any) -> int:
 
 
 def store_status() -> dict[str, Any]:
-    """Whether this server can actually reach a ticket store — ``{path, present, expected}``.
+    """Report ``{path, present, expected}`` for this server's ticket store.
 
-    ``/health`` used to report only ``in_flight``, so a container with NO ticket store at all
-    passed both the container HEALTHCHECK and the blue-green readiness gate. That is how a
-    deployed server spent weeks answering every tracker query as though the store were merely
-    empty (bugs kilted-nuclear-bronco / mobile-groovy-badger) with nothing in the pipeline able
-    to notice.
-
-    ``expected`` is the load-bearing field, and it is why this reports rather than fails.
-    A missing store is only a FAULT for a deployment that declared it has one; for a deployment
-    that never configured a tracker dir it is just a fact about that deployment. Keying the
-    readiness gate on ``present AND expected`` means this can ship to a box that currently has
-    no store without marking a working container unhealthy, and becomes strict on its own the
-    moment a tracker dir is configured — no flag day, no second change.
-
-    Never raises for an ordinary resolution fault: a health probe that can fail is worse than
-    one that reports a degraded field, so those are reported as ``present: False`` with the
-    error text. The ONE deliberate exception is ``RemovedInputError`` (a ``BaseException``),
-    raised when a retired load-bearing input such as ``TICKETS_TRACKER_DIR`` is still set
-    (``_config_sources.py:130``); that must fail the server hard rather than be reported as a
-    merely-degraded store, and it is re-raised explicitly below.
+    Missing storage is a readiness fault only when an override declares it expected.
+    Ordinary resolution failures become degraded data with error text so probes remain
+    reportable; :class:`RemovedInputError` alone fails the server hard.
     """
     from rebar import config as _config
     from rebar._deprecations import RemovedInputError
@@ -312,22 +225,12 @@ def store_status() -> dict[str, Any]:
     expected = False
     path = ""
     try:
-        # `expected` is deliberately read from the ENV OVERRIDE alone, not from the parsed
-        # config. Two reasons: a health probe must not be able to fail (or block) on config
-        # parsing, and `check_config_ownership` reserves `load_config` to approved seams. The
-        # deployment surface that matters here sets REBAR_TRACKER_DIR explicitly
-        # (infra/compose/docker-compose.yml), so this covers it. A project that instead
-        # declares a non-default `tracker.dir` in config reports expected=False and simply
-        # does not get the strict readiness gate -- it degrades to the old behaviour rather
-        # than misreporting.
+        # Read expectedness from the deployment env override so health never parses or
+        # blocks on config; config-only tracker paths retain non-strict readiness.
         expected = bool(_config.tracker_dir_override())
         path = str(_config.tracker_dir())
     except RemovedInputError:
-        # A removed, still-set, load-bearing input must fail hard rather than be reported as
-        # a merely-degraded store. RemovedInputError subclasses BaseException precisely so it
-        # sails through broad handlers, so this re-raise is redundant TODAY — it is here so
-        # the intent survives a future widening of the handler below, which is the same
-        # reason the boot sweep carries one.
+        # Removed load-bearing inputs must fail hard, even if the handler later widens.
         raise
     except Exception as exc:  # noqa: BLE001 - see docstring: the probe never raises
         return {"path": path, "present": False, "expected": expected, "error": str(exc)}
@@ -335,18 +238,11 @@ def store_status() -> dict[str, Any]:
 
 
 def run_startup_store_sweep() -> None:
-    """Best-effort ensure-sweep at boot, and say so when there is no store.
+    """Run the idempotent ensure registry at boot, best-effort.
 
-    Lives here rather than in ``mcp_server`` because it is the same concern as
-    :func:`store_status`: what this server can see of its ticket store at startup, and
-    whether that is reportable. (Extracting it also keeps ``mcp_server`` under the
-    module-size cap, which this function's own logging pushed it over.)
-
-    Converges a store that is behind the idempotent registry. ``run_ensures`` acquires and
-    RELEASES its own store write lock internally (a SHORT budget, so a contended lock skips
-    rather than delays boot) — it is NOT held across ``build_server().run()``, which runs
-    under no lock. Log-and-continue: a missing store, an import error, or a sweep failure
-    never aborts boot.
+    The sweep owns a short-lived lock and skips contention rather than delaying service;
+    no lock survives into serving. Missing stores, imports, and sweep failures log and
+    continue, while removed load-bearing inputs still abort startup.
     """
     from rebar._deprecations import RemovedInputError
 
@@ -418,10 +314,8 @@ def wire_health(mcp: Any, gauge: InFlightGauge | None = None) -> InFlightGauge:
     return gauge
 
 
-# The serving/shutdown runtime (run_mcp -> run_http_with_grace -> make_sigterm_handler ->
-# drain_then_exit) lives in _mcp_serving to keep this module under the 800-LOC cap. Re-export
-# it so `from rebar._mcp_health import run_mcp` (and the tests' monkeypatch paths) keep working.
-# Imported at the END so _mcp_serving can import the gauge/handshake primitives defined above.
+# Re-export the serving runtime for compatibility. Importing last lets it depend on the
+# gauge and handshake primitives above without a cycle.
 from rebar._mcp_serving import (  # noqa: E402
     drain_then_exit,
     make_sigterm_handler,
