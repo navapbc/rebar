@@ -216,7 +216,7 @@ def _build_context(
     file_impact: list[Any],
     file_impact_scope: str | None,
     no_file_impact_reason: str | None,
-    children: list[dict[str, Any]],
+    children: list[str],
 ) -> PlanContext:
     state: dict[str, Any] = {"file_impact": file_impact}
     if file_impact_scope == "none":
@@ -228,7 +228,7 @@ def _build_context(
         title=title,
         description=description,
         state=state,
-        children=children,
+        children=[{"ticket_id": c} for c in children],
     )
 
 
@@ -290,12 +290,12 @@ def _build_sidecar_row(
         ticket_events, review_ts
     )
     child_ids = _child_ids(data.get("reviewed_related_material"))
-    children, children_reconstructed = _child_materials(child_ids, all_events, review_ts)
+    children_material, children_reconstructed = _child_materials(child_ids, all_events, review_ts)
     signed_fingerprint = data.get("material_fingerprint", "")
 
     if create_found:
         ctx = _build_context(
-            ticket_id, ttype, title, description, file_impact, scope, reason, children
+            ticket_id, ttype, title, description, file_impact, scope, reason, child_ids
         )
         generation = _match_generation(ctx, signed_fingerprint)
     else:
@@ -316,7 +316,8 @@ def _build_sidecar_row(
         "file_impact": file_impact,
         "file_impact_scope": scope,
         "no_file_impact_reason": reason,
-        "children": children,
+        "children": child_ids,
+        "children_material": children_material,
         "children_reconstructed": children_reconstructed,
         "material_fingerprint": signed_fingerprint,
         "verified": generation is not None,

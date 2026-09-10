@@ -551,8 +551,9 @@ def test_build_corpus_persists_child_title_and_description_at_review(tmp_path):
     cache_file = tmp_path / "cache" / f"{manifest['content_hash']}.jsonl"
     row = json.loads(cache_file.read_text(encoding="utf-8"))
     assert row["title"] == "T"
+    assert row["children"] == [child_id]
     assert row["children_reconstructed"] is True
-    assert row["children"] == [
+    assert row["children_material"] == [
         {
             "ticket_id": child_id,
             "canonical_id": child_id,
@@ -591,7 +592,8 @@ def test_build_corpus_marks_child_material_unreconstructed_when_child_create_mis
     cache_file = tmp_path / "cache" / f"{manifest['content_hash']}.jsonl"
     row = json.loads(cache_file.read_text(encoding="utf-8"))
     assert row["children_reconstructed"] is False
-    assert row["children"] == [{"ticket_id": child_id, "canonical_id": child_id}]
+    assert row["children"] == [child_id]
+    assert row["children_material"] == [{"ticket_id": child_id, "canonical_id": child_id}]
 
 
 def test_build_corpus_ignores_create_after_the_review(tmp_path):
