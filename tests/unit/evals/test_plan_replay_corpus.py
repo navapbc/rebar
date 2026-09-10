@@ -69,10 +69,15 @@ class TrackerBuilder:
         fname = f"{ts}-{ev_uuid}-{event_type}.json"
         (d / fname).write_text(json.dumps({"data": data}))
 
-    def create(self, ticket_id: str, *, description: str, ts: int | None = None) -> int:
+    def create(
+        self, ticket_id: str, *, description: str, title: str = "T", ts: int | None = None
+    ) -> int:
         ts = ts or _next_ts()
         self._write_event(
-            ticket_id, ts, "CREATE", {"ticket_type": "story", "description": description}
+            ticket_id,
+            ts,
+            "CREATE",
+            {"ticket_type": "story", "title": title, "description": description},
         )
         _run_git(self.path, "add", "-A")
         _run_git(self.path, "commit", "-q", "-m", f"create {ticket_id}")
@@ -506,3 +511,79 @@ def test_build_corpus_reconstructs_declared_no_file_impact_from_file_impact_even
 
     assert manifest["row_count"] == 1
     assert manifest["verified_count"] == 1
+
+
+# ── child material for container-criterion replay ─────────────────────────────
+def test_build_corpus_persists_child_title_and_description_at_review(tmp_path):
+    """Container criteria are faithful only when a sidecar row carries each reviewed child's
+    at-review title and description. Child material is replayed from CREATE + EDIT history up to
+    the parent review timestamp; post-review child edits must not leak into the fixture."""
+    tracker = TrackerBuilder(tmp_path / "store")
+    parent_id = "0000-0000-0000-0020"
+    child_id = "0000-0000-0000-0021"
+    tracker.create(child_id, title="Child initial", description="Initial child plan.")
+    tracker.edit(
+        child_id,
+        fields={"title": "Child at review", "description": "Child plan at review."},
+    )
+    tracker.create(parent_id, description="Parent plan.")
+
+    ctx = _ctx(parent_id, "Parent plan.", children=[child_id])
+    fp = material_fingerprint(ctx)
+    tracker.review_result(
+        parent_id,
+        data={
+            "schema": "plan_review_result_v2",
+            "ticket_id": parent_id,
+            "verdict": "PASS",
+            "material_fingerprint": fp,
+            "reviewed_related_material": [{"role": "child", "canonical_id": child_id}],
+        },
+    )
+    tracker.edit(
+        child_id,
+        fields={"title": "Child after review", "description": "Post-review child plan."},
+    )
+
+    manifest = corpus.build_corpus({"main": str(tracker.path)}, cache_dir=tmp_path / "cache")
+
+    assert manifest["verified_count"] == 1
+    cache_file = tmp_path / "cache" / f"{manifest['content_hash']}.jsonl"
+    row = json.loads(cache_file.read_text(encoding="utf-8"))
+    assert row["children"] == [
+        {
+            "ticket_id": child_id,
+            "canonical_id": child_id,
+            "title": "Child at review",
+            "description": "Child plan at review.",
+        }
+    ]
+
+
+def test_build_corpus_marks_container_row_unverified_when_child_material_unrecoverable(tmp_path):
+    """If a review names a child but that child's CREATE event is not recoverable, the row is not
+    faithful enough for container replay and must be withheld rather than verified with a
+    title/description-less roster."""
+    tracker = TrackerBuilder(tmp_path / "store")
+    parent_id = "0000-0000-0000-0022"
+    child_id = "0000-0000-0000-0023"
+    tracker.create(parent_id, description="Parent plan.")
+
+    ctx = _ctx(parent_id, "Parent plan.", children=[child_id])
+    fp = material_fingerprint(ctx)
+    tracker.review_result(
+        parent_id,
+        data={
+            "schema": "plan_review_result_v2",
+            "ticket_id": parent_id,
+            "verdict": "PASS",
+            "material_fingerprint": fp,
+            "reviewed_related_material": [{"role": "child", "canonical_id": child_id}],
+        },
+    )
+
+    manifest = corpus.build_corpus({"main": str(tracker.path)}, cache_dir=tmp_path / "cache")
+
+    assert manifest["row_count"] == 1
+    assert manifest["verified_count"] == 0
+    assert manifest["unverified_count"] == 1

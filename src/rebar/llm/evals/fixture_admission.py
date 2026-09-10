@@ -87,9 +87,6 @@ def run_admission(
         raise ValueError("epochs must be >= 1")
 
     from rebar.llm.evals import eval_solver
-    from rebar.llm.plan_review.container_stage import CONTAINER_CRITERIA
-
-    container_criteria = frozenset(CONTAINER_CRITERIA)
 
     manifest = Path(manifest_path)
     out = Path(out_dir)
@@ -124,32 +121,6 @@ def run_admission(
                     predicted="",
                     observed="skipped",
                     reason="not-inline-admissible",
-                    ticket_id=None,
-                    review_event_uuid="",
-                )
-            )
-            continue
-        if criterion in container_criteria:
-            # A container criterion (G3/G4/decomp-shape) is scored over a (parent, children,
-            # roster) decomposition whose rubric reads each child's LIVE title/description
-            # (G3's coverage discharge cannot fire on a title-only roster). The sidecar corpus
-            # persists children as bare ticket-id STRINGS only (corpus._child_ids), with no
-            # per-child material, so a rehydrated container case would run the finder over an
-            # IMPOVERISHED roster — an admit/drift verdict UNFAITHFUL to the historical review
-            # (whose finder saw full child state via context_assembly.show_ticket). Until the
-            # corpus captures per-child title/description, scope container criteria OUT the way
-            # ISF/packaged ones are skipped: never dispatch, admit nothing, and record it as
-            # container-material-unrecoverable so the run stays auditable. Mark it processed so
-            # a resume run REPLACES this row rather than appending a duplicate.
-            processed.add(criterion)
-            drift_entries.append(
-                DriftEntry(
-                    criterion=criterion,
-                    case_id=prompt_id,
-                    direction="",
-                    predicted="",
-                    observed="skipped",
-                    reason="container-material-unrecoverable",
                     ticket_id=None,
                     review_event_uuid="",
                 )
@@ -320,6 +291,21 @@ def _rehydrate_candidate(
             ticket_id=None,
             review_event_uuid=review_event_uuid,
         )
+    if _is_container_criterion(criterion) and not _children_are_replayable(
+        material.get("children")
+    ):
+        return DriftEntry(
+            criterion=criterion,
+            case_id=case_id,
+            direction=direction,
+            predicted=expect,
+            observed="unavailable",
+            reason="unrecoverable-material",
+            ticket_id=str(material.get("ticket_id"))
+            if material.get("ticket_id") is not None
+            else None,
+            review_event_uuid=review_event_uuid,
+        )
     case: dict[str, Any] = {
         "id": case_id,
         "corpus": fixture_emit._CORPUS,
@@ -329,12 +315,8 @@ def _rehydrate_candidate(
     }
     children = material.get("children")
     if children:
-        # The sidecar corpus stores a review's child list as bare ticket-id STRINGS
-        # (`corpus._child_ids`), but the container eval path (`pass1_container`,
-        # `build_sibling_roster`) consumes `{ticket_id, ...}` DICTS — the same shape
-        # `corpus._build_context` builds for the production fingerprint. Normalize here so a
-        # container criterion (G3/G4/decomp-shape) rehydrates into a runnable case instead of
-        # crashing the finder on the first agent-tier case.
+        # Non-container historical rows may carry bare ids. Container criteria are guarded
+        # above and only reach this point with title/description-bearing child dicts.
         case["children"] = [c if isinstance(c, dict) else {"ticket_id": c} for c in children]
     ticket_id = material.get("ticket_id")
     return _RehydratedCase(
@@ -343,6 +325,25 @@ def _rehydrate_candidate(
         ticket_id=str(ticket_id) if ticket_id is not None else None,
         review_event_uuid=review_event_uuid,
     )
+
+
+def _is_container_criterion(criterion: str) -> bool:
+    from rebar.llm.plan_review.container_stage import CONTAINER_CRITERIA
+
+    return criterion in CONTAINER_CRITERIA
+
+
+def _children_are_replayable(children: Any) -> bool:
+    if not isinstance(children, list) or not children:
+        return False
+    for child in children:
+        if not isinstance(child, dict):
+            return False
+        if not child.get("ticket_id"):
+            return False
+        if not isinstance(child.get("title"), str) or not isinstance(child.get("description"), str):
+            return False
+    return True
 
 
 def _run_case_epochs(
