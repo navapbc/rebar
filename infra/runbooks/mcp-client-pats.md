@@ -37,6 +37,11 @@ the box, not baked into the rsync'd source tree:
 Both materialized files are gitignored and `rsync`-excluded, so no secret is ever committed and a
 re-materialize is not clobbered by `rsync --delete`.
 
+For project-scoped developer clients, Claude Code and GitHub Copilot CLI may share a local
+`MCP_CLIENT_PAT_CLI` environment variable whose value is the existing claude PAT. That alias is
+client-side only: it does not add an SSM parameter or a `token_env` record. Codex continues to use
+`MCP_CLIENT_PAT_CODEX`.
+
 ## Provisioning (first time)
 
 1. Generate a bearer PAT for each client (a long, high-entropy random token).
@@ -52,6 +57,8 @@ re-materialize is not clobbered by `rsync --delete`.
    the new token set.
 4. Wire each client locally: copy `mcp-clients.local.example.json` (repo-root, committed
    placeholder) to `mcp-clients.local.json` (gitignored) and fill in the real PATs + box host.
+   For this repository's project-scoped config, publish `MCP_CLIENT_PAT_CLI` with the claude PAT
+   value for Claude/Copilot and `MCP_CLIENT_PAT_CODEX` with the codex PAT value.
 
 These MCP client PATs are **not** GitHub Actions repository secrets. If the same rotation window
 also touches a mirrored secret such as `ANTHROPIC_API_KEY`, `JIRA_API_TOKEN`,
@@ -68,6 +75,10 @@ therefore **no-ops on a value-only rotation**. The operator must drive it:
 2. **Re-materialize** on the box: re-run `infra/scripts/fetch-secrets.sh` (rewrites `.env` +
    `mcp-static-tokens.json`).
 3. **Restart / replace the `rebar-mcp` process/container** (the ADR 0104 blue-green swap).
+4. On macOS developer machines, refresh both shell and GUI launch environments; GUI-launched
+   processes do not source shell startup files, so a helper such as `~/bin/refresh-mcp-pats.sh`
+   should also run `launchctl setenv MCP_CLIENT_PAT_CLI ...` and
+   `launchctl setenv MCP_CLIENT_PAT_CODEX ...` without printing values.
 
 Step 3 is **mandatory**: the `static` verifier loads its token set **once at `__init__`**
 (`StaticBearerVerifier.__init__` → `_load_static_tokens`; there is **no per-request re-read**), so

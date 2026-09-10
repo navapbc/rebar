@@ -1,0 +1,17 @@
+{
+  "$comment": [
+    "Project-scoped rebar MCP entry for Claude Code and GitHub Copilot CLI.",
+    "Both clients read this workspace .mcp.json and expand MCP_CLIENT_PAT_CLI",
+    "from the environment; no bearer value is stored in the repository.",
+    "MCP_CLIENT_PAT_CLI is a machine-local alias to the existing claude PAT slot."
+  ],
+  "mcpServers": {
+    "rebar": {
+      "type": "http",
+      "url": "https://rebar.solutions.navateam.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${MCP_CLIENT_PAT_CLI}"
+      }
+    }
+  }
+}

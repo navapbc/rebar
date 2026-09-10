@@ -159,8 +159,10 @@ def _isolated_mcp_client_home(_empty_mcp_client_home, monkeypatch):
 
     original = doctor_mcp_client.scan_mcp_clients
 
-    def _scan_isolated(*, home=None, env=None):
-        return original(home=_empty_mcp_client_home if home is None else home, env=env)
+    def _scan_isolated(*, home=None, env=None, cwd=None):
+        isolated = _empty_mcp_client_home if home is None else home
+        isolated_cwd = _empty_mcp_client_home if cwd is None else cwd
+        return original(home=isolated, env=env, cwd=isolated_cwd)
 
     monkeypatch.setattr(doctor_mcp_client, "scan_mcp_clients", _scan_isolated)
 

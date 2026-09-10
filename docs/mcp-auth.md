@@ -280,11 +280,14 @@ Keep `auth_resource_server_url` the **external** `…/mcp/` URL regardless of th
 it drives the served RFC 9728 PRM `resource` and the `WWW-Authenticate` URL, not the proxy
 target (§5).
 
-**Per-client bearer PATs.** Each client presents its own PAT; the server holds only SHA-256
-digests (§3 `static`). The three PATs are delivered as box secrets and referenced by env-var
+**Per-client bearer PATs.** Each server-side PAT slot is delivered as a box secret and the server
+holds only SHA-256 digests (§3 `static`). The three on-box slots are referenced by env-var
 **name** (`token_env`, never a literal) — env vars `MCP_CLIENT_PAT_COPILOT`,
-`MCP_CLIENT_PAT_CODEX`, `MCP_CLIENT_PAT_CLAUDE`. The full provisioning + operator-driven
-rotation model (SSM SecureStrings → on-box materialization → `static`-verifier restart) lives
+`MCP_CLIENT_PAT_CODEX`, `MCP_CLIENT_PAT_CLAUDE`. A project-scoped client may use a different
+local env-var name if it carries the same bearer value; in this repository, Claude Code and
+GitHub Copilot CLI use local `MCP_CLIENT_PAT_CLI` as an alias to the existing claude PAT value,
+while Codex keeps `MCP_CLIENT_PAT_CODEX`. The full provisioning + operator-driven rotation model
+(SSM SecureStrings → on-box materialization → `static`-verifier restart) lives
 in [`../infra/runbooks/mcp-client-pats.md`](../infra/runbooks/mcp-client-pats.md); do not
 duplicate PATs anywhere else. A `mcp-static-tokens.json` with a record per populated client:
 
@@ -318,9 +321,9 @@ env-var **name** only; no secret is written to a config file. The three config s
 
 | Client | Config file | PAT reference | Endpoint |
 |---|---|---|---|
-| GitHub Copilot CLI | `~/.copilot/mcp-config.json` | `headers.Authorization` bearer, `$MCP_CLIENT_PAT_COPILOT` | `https://<box>/mcp/` |
-| Codex | `~/.codex/config.toml` (`[mcp_servers.rebar]`) | `bearer_token_env_var = "MCP_CLIENT_PAT_CODEX"` | `https://<box>/mcp/` |
-| Claude Code | project `.mcp.json` (or `~/.claude.json`), or `--header` | `headers.Authorization` bearer, `${MCP_CLIENT_PAT_CLAUDE}` | `https://<box>/mcp/` |
+| GitHub Copilot CLI | project `.mcp.json` (or `~/.copilot/mcp-config.json`) | `headers.Authorization` bearer, `${MCP_CLIENT_PAT_CLI}` in this repo | `https://<box>/mcp/` |
+| Codex | project `.codex/config.toml` (or `~/.codex/config.toml`) | `bearer_token_env_var = "MCP_CLIENT_PAT_CODEX"` | `https://<box>/mcp/` |
+| Claude Code | project `.mcp.json` (or `~/.claude.json`), or `--header` | `headers.Authorization` bearer, `${MCP_CLIENT_PAT_CLI}` in this repo | `https://<box>/mcp/` |
 
 > **Static-header gotcha (all clients, most visible in Claude Code).** A static
 > `Authorization` header takes **precedence** and does **not** fall back to OAuth if the
