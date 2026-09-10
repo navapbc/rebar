@@ -26,22 +26,23 @@ import tomllib
 # The MCP server entry these clients are expected to declare for rebar.
 SERVER_NAME = "rebar"
 
-# The canonical per-client bearer env-var names. Single source of truth for the
-# "stale name" comparison; they match the box-side names in
-# infra/runbooks/mcp-client-pats.md and the committed examples/mcp-clients/ configs.
+# The canonical client-side bearer env-var names. Codex keeps its dedicated PAT;
+# Copilot and Claude share the machine-local CLI alias whose value is the existing
+# claude server-side PAT slot. The name comparison intentionally checks client
+# config names, not server-side token_env names.
 CANONICAL_PAT_ENV: dict[str, str] = {
     "codex": "MCP_CLIENT_PAT_CODEX",
-    "copilot": "MCP_CLIENT_PAT_COPILOT",
-    "claude": "MCP_CLIENT_PAT_CLAUDE",
+    "copilot": "MCP_CLIENT_PAT_CLI",
+    "claude": "MCP_CLIENT_PAT_CLI",
 }
 
 # Deterministic report order (Codex first — the client this diagnostic was written for).
 CLIENT_ORDER: tuple[str, ...] = ("codex", "copilot", "claude")
 
 # Home-relative config locations. Project-local configs (Codex's ``.codex/config.toml``
-# in a trusted project, Claude Code's project ``.mcp.json``) are deliberately NOT
-# scanned: doctor cannot know which project the operator will launch the client from,
-# and guessing would produce findings about a config the client may never read.
+# and Claude/Copilot's project ``.mcp.json``) are deliberately NOT scanned:
+# doctor cannot know which project the operator will launch the client from, and
+# guessing would produce findings about a config the client may never read.
 _CONFIG_RELPATH: dict[str, str] = {
     "codex": ".codex/config.toml",
     "copilot": ".copilot/mcp-config.json",

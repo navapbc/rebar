@@ -50,19 +50,21 @@ EXAMPLES = REPO_ROOT / "examples" / "mcp-clients"
 # The external endpoint the deps (esok edge + avians PATs) landed: nginx TLS edge →
 # loopback rebar-mcp, DNS-rebinding allowlist names this host.
 EXPECTED_URL = "https://rebar.solutions.navateam.com/mcp/"
+RUN_CLIENT_BINARY_TESTS = os.environ.get("REBAR_RUN_MCP_CLIENT_BINARY_TESTS") == "1"
 
-# The per-client PAT env var names avians materializes on the box (see
-# infra/runbooks/mcp-client-pats.md). The client configs reference these by name.
+# The project-scoped client PAT env var names. Codex keeps the dedicated codex
+# slot; Claude Code and Copilot CLI share the operator-provisioned local CLI
+# alias, whose value is the existing claude server-side PAT.
 PAT_ENV = {
-    "copilot": "MCP_CLIENT_PAT_COPILOT",
+    "copilot": "MCP_CLIENT_PAT_CLI",
     "codex": "MCP_CLIENT_PAT_CODEX",
-    "claude": "MCP_CLIENT_PAT_CLAUDE",
+    "claude": "MCP_CLIENT_PAT_CLI",
 }
 # Distinct high-entropy TEST tokens (never real secrets) the loopback verifier accepts.
 TEST_PATS = {
-    "copilot": "test-pat-copilot-6f2a9c1e4b7d8a3f5e0c",
+    "copilot": "test-pat-cli-shared-6f2a9c1e4b7d8a3f5e0c",
     "codex": "test-pat-codex-1a2b3c4d5e6f7a8b9c0d",
-    "claude": "test-pat-claude-9e8d7c6b5a4f3e2d1c0b",
+    "claude": "test-pat-cli-shared-6f2a9c1e4b7d8a3f5e0c",
 }
 
 MCP_HEADERS = {
@@ -101,24 +103,24 @@ def _expand_env(value: str, env: dict[str, str]) -> str:
 
 
 def load_copilot() -> tuple[str, str]:
-    """Return (url, raw Authorization header) from the committed copilot config."""
-    doc = json.loads((EXAMPLES / "copilot" / "mcp-config.json").read_text())
+    """Return (url, raw Authorization header) from the committed project config."""
+    doc = json.loads((REPO_ROOT / ".mcp.json").read_text())
     entry = doc["mcpServers"]["rebar"]
     assert entry["type"] == "http"
     return entry["url"], entry["headers"]["Authorization"]
 
 
 def load_claude() -> tuple[str, str]:
-    """Return (url, raw Authorization header) from the committed claude config."""
-    doc = json.loads((EXAMPLES / "claude" / ".mcp.json").read_text())
+    """Return (url, raw Authorization header) from the committed project config."""
+    doc = json.loads((REPO_ROOT / ".mcp.json").read_text())
     entry = doc["mcpServers"]["rebar"]
     assert entry["type"] == "http"
     return entry["url"], entry["headers"]["Authorization"]
 
 
 def load_codex() -> tuple[str, str]:
-    """Return (url, bearer env var NAME) from the committed codex config."""
-    doc = tomllib.loads((EXAMPLES / "codex" / "config.toml").read_text())
+    """Return (url, bearer env var NAME) from the committed project codex config."""
+    doc = tomllib.loads((REPO_ROOT / ".codex" / "config.toml").read_text())
     entry = doc["mcp_servers"]["rebar"]
     return entry["url"], entry["bearer_token_env_var"]
 
@@ -169,7 +171,10 @@ def live_server(tmp_path_factory):
         "task", "olm client-config smoke ticket", repo_root=str(store)
     )
 
-    records = [{"name": c, "client_id": c, "scopes": [], "token_env": PAT_ENV[c]} for c in PAT_ENV]
+    records = [
+        {"name": "codex", "client_id": "codex", "scopes": [], "token_env": PAT_ENV["codex"]},
+        {"name": "claude", "client_id": "claude", "scopes": [], "token_env": PAT_ENV["claude"]},
+    ]
     tokens_file = tmp / "static-tokens.json"
     tokens_file.write_text(json.dumps({"tokens": records}))
 
@@ -274,13 +279,13 @@ def test_absent_or_invalid_bearer_is_401(live_server):
 @pytest.mark.parametrize(
     ("relpath", "client"),
     [
-        ("copilot/mcp-config.json", "copilot"),
-        ("codex/config.toml", "codex"),
-        ("claude/.mcp.json", "claude"),
+        ("../../.mcp.json", "copilot"),
+        ("../../.codex/config.toml", "codex"),
+        ("../../.mcp.json", "claude"),
     ],
 )
 def test_no_secret_committed(relpath, client):
-    text = (EXAMPLES / relpath).read_text()
+    text = (EXAMPLES / relpath).resolve().read_text()
     # The PAT env var name is referenced.
     assert PAT_ENV[client] in text
     # No TEST/real PAT literal, and no inline bearer secret token.
@@ -302,15 +307,20 @@ def _mask_home(tmp_path):
     return home
 
 
-@pytest.mark.skipif(shutil.which("copilot") is None, reason="copilot CLI not installed")
+@pytest.mark.skipif(
+    shutil.which("copilot") is None or not RUN_CLIENT_BINARY_TESTS,
+    reason="copilot CLI not installed or binary project-config canary not requested",
+)
 def test_copilot_cli_loads_committed_config(tmp_path):
     home = _mask_home(tmp_path)
-    (home / ".copilot").mkdir()
-    shutil.copy(EXAMPLES / "copilot" / "mcp-config.json", home / ".copilot" / "mcp-config.json")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    shutil.copy(REPO_ROOT / ".mcp.json", proj / ".mcp.json")
     env = subprocess_env({"HOME": str(home), PAT_ENV["copilot"]: TEST_PATS["copilot"]})
     proc = subprocess.run(
         ["copilot", "mcp", "get", "rebar"],
         env=env,
+        cwd=str(proj),
         capture_output=True,
         text=True,
         timeout=60,
@@ -321,15 +331,21 @@ def test_copilot_cli_loads_committed_config(tmp_path):
     assert EXPECTED_URL in proc.stdout
 
 
-@pytest.mark.skipif(shutil.which("codex") is None, reason="codex CLI not installed")
+@pytest.mark.skipif(
+    shutil.which("codex") is None or not RUN_CLIENT_BINARY_TESTS,
+    reason="codex CLI not installed or binary project-config canary not requested",
+)
 def test_codex_cli_loads_committed_config(tmp_path):
     codex_home = tmp_path / "codex-home"
     codex_home.mkdir()
-    shutil.copy(EXAMPLES / "codex" / "config.toml", codex_home / "config.toml")
+    proj = tmp_path / "proj"
+    (proj / ".codex").mkdir(parents=True)
+    shutil.copy(REPO_ROOT / ".codex" / "config.toml", proj / ".codex" / "config.toml")
     env = subprocess_env({"CODEX_HOME": str(codex_home), PAT_ENV["codex"]: TEST_PATS["codex"]})
     proc = subprocess.run(
-        ["codex", "mcp", "list"],
+        ["codex", "mcp", "get", "rebar"],
         env=env,
+        cwd=str(proj),
         capture_output=True,
         text=True,
         timeout=60,
@@ -340,12 +356,15 @@ def test_codex_cli_loads_committed_config(tmp_path):
     assert PAT_ENV["codex"] in proc.stdout
 
 
-@pytest.mark.skipif(shutil.which("claude") is None, reason="claude CLI not installed")
+@pytest.mark.skipif(
+    shutil.which("claude") is None or not RUN_CLIENT_BINARY_TESTS,
+    reason="claude CLI not installed or binary project-config canary not requested",
+)
 def test_claude_cli_loads_committed_config(tmp_path):
     home = _mask_home(tmp_path)
     proj = tmp_path / "proj"
     proj.mkdir()
-    shutil.copy(EXAMPLES / "claude" / ".mcp.json", proj / ".mcp.json")
+    shutil.copy(REPO_ROOT / ".mcp.json", proj / ".mcp.json")
     env = subprocess_env({"HOME": str(home), PAT_ENV["claude"]: TEST_PATS["claude"]})
     proc = subprocess.run(
         ["claude", "mcp", "list"],

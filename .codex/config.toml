@@ -58,3 +58,12 @@ include_only = [
 # host's read-only origin/main mirror — the same pattern Copilot (~/.copilot/
 # mcp-config.json) and Claude Code (~/.claude.json) already use. See AGENTS.md
 # §"Navigating the codebase" for the mirror semantics.
+
+# Project-scoped remote-HTTP MCP entry for the rebar server. Codex keeps its
+# dedicated PAT env var; GUI-launched clients need that env var published by
+# the machine-local refresh helper before startup.
+[mcp_servers.rebar]
+url = "https://rebar.solutions.navateam.com/mcp/"
+bearer_token_env_var = "MCP_CLIENT_PAT_CODEX"
+# The remote endpoint can cold-start around the TLS edge/container handoff.
+startup_timeout_sec = 120
