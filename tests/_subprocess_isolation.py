@@ -52,8 +52,6 @@ _HARNESS_NAMES = frozenset({"tmp_path", "tmp_path_factory"})
 _REPO_ROOT_NAMES = frozenset({"REPO_ROOT", "_REPO_ROOT"})
 #: Expressions that carry the ambient (harness-provided) environment forward.
 _AMBIENT_ENV_NAMES = frozenset({"environ", "subprocess_env"})
-#: Names/attributes whose presence in argv escapes the harness sandbox entirely.
-_HOME_ESCAPE_NAMES = frozenset({"home", "mkdtemp", "TemporaryDirectory"})
 _ROOT_ENV_KEY = "REBAR_ROOT"
 #: Cheap byte pre-filter: only ~35% of test modules can possibly spawn anything.
 _PREFILTER_TOKENS = (b"subprocess", b"os.system", b"os.popen", b"pytest.main")
@@ -301,20 +299,50 @@ class _Scanner(ast.NodeVisitor):
 
     def _check_home_escape(self, node: ast.Call, callee: str, argv: list[ast.expr]) -> None:
         for element in argv:
-            names = _referenced_names(element)
-            literals = {n.value for n in ast.walk(element) if isinstance(n, ast.Constant)}
-            if not (names & _HOME_ESCAPE_NAMES or ("environ" in names and "HOME" in literals)):
+            if not any(self._is_real_home_escape(n) for n in ast.walk(element)):
                 continue
             self._record(
                 node,
                 callee,
                 "hazard",
-                f"`{callee}` derives a child path from the real HOME or an ad-hoc temp dir "
-                f"(`Path.home()`, `os.environ['HOME']`, `mkdtemp`, `TemporaryDirectory`) "
-                f"rather than from the harness; those roots outlive the test and are shared "
-                f"across xdist workers. Fix: use `tmp_path`, else mark it {_MARK_HINT}.",
+                f"`{callee}` derives a child path from the real HOME "
+                f"(`Path.home()`, `os.environ['HOME']`) rather than from the harness; "
+                f"that root outlives the test and is shared across xdist workers. "
+                f"Fix: use `tmp_path`, else mark it {_MARK_HINT}.",
             )
             return
+
+    def _is_real_home_escape(self, node: ast.AST) -> bool:
+        return self._is_path_home_call(node) or self._is_os_environ_home_subscript(node)
+
+    def _is_path_home_call(self, node: ast.AST) -> bool:
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            return False
+        if node.func.attr != "home":
+            return False
+        receiver = _dotted(node.func.value)
+        if receiver is None:
+            return False
+        if receiver == "pathlib.Path" or self._functions.get(receiver) == "pathlib.Path":
+            return True
+        if "." not in receiver:
+            return False
+        head, rest = receiver.split(".", 1)
+        return self._modules.get(head) == "pathlib" and rest == "Path"
+
+    def _is_os_environ_home_subscript(self, node: ast.AST) -> bool:
+        if not isinstance(node, ast.Subscript):
+            return False
+        key = node.slice
+        if not (isinstance(key, ast.Constant) and key.value == "HOME"):
+            return False
+        dotted = _dotted(node.value)
+        if dotted == "environ" and self._functions.get("environ") == "os.environ":
+            return True
+        if dotted is None or "." not in dotted:
+            return False
+        head, rest = dotted.split(".", 1)
+        return self._modules.get(head) == "os" and rest == "environ"
 
     def _record(self, node: ast.Call, callee: str, kind: str, reason: str) -> None:
         enclosing = self._enclosing
