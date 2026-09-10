@@ -1,28 +1,15 @@
-"""Docker generator metrics, including the bytes ``docker system df`` cannot see (story 9183).
+"""Docker metrics include bytes absent from ``docker system df`` (story 9183).
 
-The 2026-09-02 outage is the whole argument for this file. ``/var/lib/docker`` held 17G — 16G
-of it ``overlay2`` across 67 layer directories — while ``docker system df`` reported ~9.5 GB
-and ZERO dangling images. Roughly **6.5 GB of orphaned overlay2 was invisible to Docker's own
-accounting**, so four rounds of prune-based reclamation had a combined ceiling of ~1.06 GB
-against a 29 GB problem. Any cap or alarm built on ``docker system df`` alone is blind to
-exactly the bytes that caused the incident.
+During 2026-09-02, filesystem use exceeded Docker's ledger by about 6.5 GB, beyond prune's
+reach. ``observability.sh`` therefore subtracts every recognized ledger row from the Docker
+root's apparent bytes and publishes the nonnegative residue as ``docker_unaccounted_bytes``.
+Whole-root parity covers BuildKit and alternate storage-driver trees; allocated bytes would
+misclassify filesystem overhead.
 
-So ``observability.sh`` takes TWO INDEPENDENT measurements of the same bytes — the filesystem
-(``du``) and Docker's ledger (``docker system df``) — and publishes their difference as
-``docker_unaccounted_bytes``. These tests drive the real script over stubbed ``docker``,
-``find`` and ``aws``.
-
-"OF THE SAME BYTES" is the load-bearing half, and patchset 1 of this change got it wrong:
-it differenced a ``du`` of ``overlay2`` alone against a ledger that also counted the build
-cache, so the subtrahend spanned bytes the minuend never did. Both sides are now the WHOLE
-Docker root against the WHOLE ledger — a set neither the storage driver nor a future engine
-row can quietly move out from under. Two tests below pin that choice against each of the
-narrower formulations, and each would fail under the other.
-
-The other load-bearing property is SILENCE: a probe that could not measure publishes NOTHING
-rather than a plausible ``0``. Every one of these alarms is ``treat_missing_data = "breaching"``
-(bug 3276 defect 2), so silence pages — while a fabricated ``0`` would read as a healthy,
-empty Docker root on a box whose disk is filling.
+Filesystem and ledger measurements fail independently. An unreadable source suppresses only
+its derived metrics rather than fabricating zero, so breaching missing-data policy pages.
+Separate storage and BuildKit gauges use their own caps and publish unclamped percentages.
+Tests run the real script through ``docker``, ``find``, and ``aws`` stubs.
 """
 
 from __future__ import annotations
@@ -105,12 +92,10 @@ def _environment(
     _stub(bin_dir, "logger", "exit 0")
     _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 0')
     _stub(bin_dir, "journalctl", "exit 0")
-    # `timeout` is absent on stock macOS: drop the duration and exec the wrapped command,
-    # the same portability stub tests/unit/test_autodeploy_prune.py already uses.
+    # Model macOS without `timeout` by executing the wrapped command.
     _stub(bin_dir, "timeout", 'shift\nexec "$@"')
 
-    # `docker system df` is the LEDGER half. `docker stats`/`ps` keep §2d alive so the whole
-    # script still runs; they are not what these tests are about.
+    # `docker system df` supplies the ledger; stats/ps only keep §2d running.
     df_body = "exit 1" if df_rows is None else f'printf "{df_rows}"; exit 0'
     _stub(
         bin_dir,
@@ -199,18 +184,12 @@ def _one(log: Path, metric: str) -> int:
     return values[0]
 
 
-# --------------------------------------------------------------------------------------
-# The crux: bytes Docker's own accounting cannot see
-# --------------------------------------------------------------------------------------
+# Bytes absent from Docker's ledger
 
 
 def test_the_incident_shape_is_reported_as_unaccounted_bytes(tmp_path: Path) -> None:
-    """16 GiB of overlay2 against a ~9.5 GB ledger must surface the ~6.5 GB residue.
-
-    This is the 2026-09-02 measurement replayed. ``docker system df`` said 9.529GB with zero
-    dangling images, so no prune could reach the difference — and nothing published it, which
-    is why five hours went into ``du``.
-    """
+    """Replay the incident: 17 GiB root minus the ~9.5 GB ledger exposes prune-invisible
+    residue."""
     env, aws_log = _environment(
         tmp_path,
         df_rows=_df_rows("9.529GB", "0B", "0B", "0B"),
@@ -220,7 +199,7 @@ def test_the_incident_shape_is_reported_as_unaccounted_bytes(tmp_path: Path) -> 
     assert _run(env).returncode == 0
     unaccounted = _one(aws_log, "docker_unaccounted_bytes")
     assert unaccounted == 17 * GIB - 9_529_000_000
-    # ~7.7 GiB: far above the 2 GiB alarm threshold, and utterly invisible to `docker prune`.
+    # ~8.1 GiB, above the 2 GiB alarm and invisible to prune.
     assert unaccounted > 6 * GIB
 
 
@@ -245,11 +224,7 @@ def test_unaccounted_bytes_use_apparent_not_allocated_root_size(tmp_path: Path) 
 
 
 def test_unaccounted_bytes_are_clamped_at_zero(tmp_path: Path) -> None:
-    """The ledger may legitimately exceed a `du` of overlay2 (shared layers, other dirs).
-
-    A negative "unaccounted" would be nonsense, and a negative datapoint against a
-    ``GreaterThanThreshold`` alarm reads as reassuring — worse than nonsense.
-    """
+    """Clamp negative residue to zero; a negative GreaterThanThreshold metric implies health."""
     env, aws_log = _environment(
         tmp_path,
         df_rows=_df_rows("12GB", "0B", "0B", "0B"),
@@ -261,12 +236,7 @@ def test_unaccounted_bytes_are_clamped_at_zero(tmp_path: Path) -> None:
 
 
 def test_the_ledger_sums_every_row_docker_accounts_for(tmp_path: Path) -> None:
-    """Every ledger row is bytes Docker KNOWS about, so every row is subtracted.
-
-    Including ``Local Volumes``. The minuend is a ``du`` of the WHOLE Docker root, and
-    ``.../volumes`` is inside it, so leaving that row out of the subtrahend would report
-    every byte of every named volume as unreachable residue.
-    """
+    """Subtract every recognized ledger row, including volumes inside the whole-root minuend."""
     env, aws_log = _environment(
         tmp_path,
         df_rows=_df_rows("4GB", "1GB", "3GB", "2GB"),
@@ -278,16 +248,8 @@ def test_the_ledger_sums_every_row_docker_accounts_for(tmp_path: Path) -> None:
 
 
 def test_a_build_cache_is_not_reported_as_unreachable_residue(tmp_path: Path) -> None:
-    """BuildKit cache bytes are ACCOUNTED bytes, so they belong in the subtrahend.
-
-    This is the pin against the other candidate fix for the patchset-1 finding — narrowing the
-    ledger to Images + Containers and keeping an overlay2 minuend. On this daemon the moby
-    BuildKit worker is backed by the graphdriver's own layer store (moby
-    ``builder/builder-next/controller.go`` hands ``GraphDriver`` and ``LayerStore`` to
-    ``snapshot.NewSnapshotter``), so cache snapshots sit INSIDE ``overlay2``: dropping the
-    Build Cache row would republish a fully prunable 4 GB cache as "bytes prune cannot reach"
-    and page, on a 2 GiB threshold, every time a build ran.
-    """
+    """Subtract BuildKit cache because its graphdriver snapshots live inside overlay2;
+    otherwise prunable cache becomes false residue."""
     env, aws_log = _environment(
         tmp_path,
         df_rows=_df_rows("6GB", "0B", "0B", "4GB"),
@@ -301,16 +263,8 @@ def test_a_build_cache_is_not_reported_as_unreachable_residue(tmp_path: Path) ->
 def test_the_residue_survives_a_daemon_that_stores_layers_outside_overlay2(
     tmp_path: Path,
 ) -> None:
-    """The two sides span the Docker ROOT, not one storage driver's subdirectory.
-
-    This is the pin against the OTHER candidate fix — widening the ``du`` to overlay2 plus
-    buildkit — and against patchset 1's overlay2-only minuend. With the containerd snapshotter
-    enabled (``features.containerd-snapshotter``) the layer bytes live under
-    ``/var/lib/docker/containerd`` and ``overlay2`` is essentially empty, so BOTH of those
-    formulations clamp to 0 and the incident metric reads "perfectly healthy" forever on a box
-    with 7.5 GiB of residue. Measuring the whole root is what makes the answer independent of
-    which subdirectory this engine happens to use.
-    """
+    """Measure the whole root so residue remains visible when containerd stores layers outside
+    overlay2."""
     env, aws_log = _environment(
         tmp_path,
         df_rows=_df_rows("9.529GB", "0B", "0B", "0B"),
@@ -359,21 +313,15 @@ def test_an_unparseable_size_in_a_known_row_publishes_no_residue(tmp_path: Path)
 
 
 def test_an_unknown_ledger_row_does_not_take_the_metric_off_the_air(tmp_path: Path) -> None:
-    """``docker system df``'s row set has grown before; a fifth type must not be fatal.
-
-    Failing the whole read on a Type this does not recognise would let a future engine's
-    presentation change silently retire the one metric the 2026-09-02 incident turned on. The
-    residue then under-reports by that row instead — visible, bounded, and recoverable.
-    """
+    """Ignore unknown row types so future output cannot retire the metric; residue then
+    over-reports by the unknown row."""
     rows = _df_rows("6GB", "0B", "0B", "0B") + "Content Store|17 furlongs\\n"
     env, aws_log = _environment(tmp_path, df_rows=rows, du_total=10 * GB, du_overlay2=10 * GB)
     assert _run(env).returncode == 0
     assert _one(aws_log, "docker_unaccounted_bytes") == 4 * GB
 
 
-# --------------------------------------------------------------------------------------
-# Per-generator usage against the caps
-# --------------------------------------------------------------------------------------
+# Per-generator caps
 
 
 def test_storage_and_buildkit_are_published_against_their_own_caps(tmp_path: Path) -> None:
@@ -392,18 +340,13 @@ def test_storage_and_buildkit_are_published_against_their_own_caps(tmp_path: Pat
     assert _one(aws_log, "docker_storage_bytes") == 10 * GIB
     assert _one(aws_log, "docker_storage_used_percent") == 50  # 10 of 20 GiB
     assert _one(aws_log, "docker_buildkit_cache_bytes") == 5 * GIB
-    # BuildKit is AT its cap while the whole budget reads a comfortable 50%: one alarm
-    # structurally cannot answer for the other.
+    # BuildKit can reach its cap while total storage remains at 50%.
     assert _one(aws_log, "docker_buildkit_cache_used_percent") == 100
     assert _one(aws_log, "docker_du_ok") == 1
 
 
 def test_the_docker_metrics_carry_no_dimensions(tmp_path: Path) -> None:
-    """Dimensionless on BOTH sides, following ``root_disk_used_percent`` (§2b).
-
-    CloudWatch keys a metric by namespace+name+dimensions, so a dimension on only one side
-    silently never matches and the alarm sits on ``INSUFFICIENT_DATA`` forever.
-    """
+    """Keep metric and alarm dimensionless; asymmetry leaves CloudWatch in INSUFFICIENT_DATA."""
     env, aws_log = _environment(tmp_path)
     assert _run(env).returncode == 0
     for line in aws_log.read_text().splitlines():
@@ -415,17 +358,12 @@ def test_the_docker_metrics_carry_no_dimensions(tmp_path: Path) -> None:
         assert "--dimensions" not in parts, line
 
 
-# --------------------------------------------------------------------------------------
-# Silence, not a plausible zero
-# --------------------------------------------------------------------------------------
+# Measurement silence
 
 
 def test_a_failed_du_publishes_nothing_at_all(tmp_path: Path) -> None:
-    """A `du` that could not run must not be reported as an empty Docker root.
-
-    ``docker_du_ok=0`` carries the pageable staleness state; a fabricated ``0`` for the
-    storage readings would instead read as perfect health on a box that is filling.
-    """
+    """On filesystem failure, publish ``docker_du_ok=0`` and suppress storage metrics instead
+    of false zeros."""
     env, aws_log = _environment(tmp_path, du_total=None, du_overlay2=None)
     assert _run(env).returncode == 0
     assert _one(aws_log, "docker_du_ok") == 0
@@ -448,13 +386,8 @@ def test_a_failed_docker_system_df_publishes_no_ledger_derived_metric(tmp_path: 
 
 
 def test_an_unreadable_overlay2_suppresses_nothing_at_all(tmp_path: Path) -> None:
-    """The overlay2 read is a DIAGNOSTIC BREADCRUMB and nothing is derived from it.
-
-    It names the subtree during an incident (16G of the 17G on 2026-09-02) and it goes into the
-    ``rebar-health`` log line, but the published residue is the whole root against the whole
-    ledger. Under patchset 1 an unreadable overlay2 took the incident metric off the air; it no
-    longer can.
-    """
+    """Overlay2 is diagnostic only; unreadability must not suppress whole-root storage or
+    residue metrics."""
     env, aws_log = _environment(tmp_path, du_overlay2=None)
     assert _run(env).returncode == 0
     assert _one(aws_log, "docker_storage_bytes") == 17 * GIB
@@ -473,15 +406,8 @@ def test_an_unreadable_docker_root_publishes_no_residue(tmp_path: Path) -> None:
 
 
 def test_a_budget_overrun_publishes_its_true_ratio(tmp_path: Path) -> None:
-    """Both percents must be able to exceed 100 (bug ``b380-3dfc-99fc-4a0e``).
-
-    ``builder.gc.maxUsedSpace`` is a best-effort reclamation target, not a hard wall: on
-    2026-09-05 this host's build cache sat at 5.875 GB against a 5.00 GiB cap — ~109% — while
-    ``docker_buildkit_cache_used_percent`` published a clamped 100 and the operator read the
-    pinned ceiling as the cap working. A budget metric must be able to say 109. The companion
-    ``*_bytes`` gauges carry the magnitude too, but nobody alarms on those, and an operator
-    comparing a percentage to a threshold cannot see a ceiling that is silently applied.
-    """
+    """Publish both percentages unclamped: best-effort targets can be exceeded, and 100 would
+    hide breach magnitude (bug ``b380-3dfc-99fc-4a0e``)."""
     env, aws_log = _environment(
         tmp_path,
         df_rows=_df_rows("1GB", "0B", "0B", str(12 * GIB) + "B"),
@@ -499,15 +425,8 @@ def test_a_budget_overrun_publishes_its_true_ratio(tmp_path: Path) -> None:
 
 
 def test_a_missing_cap_script_still_publishes_the_raw_byte_readings(tmp_path: Path) -> None:
-    """The caps and the readings come from different places, and only one can be missing.
-
-    ``observability.sh`` reads the budget from its sibling ``docker-storage-cap.sh`` so that
-    "percent of cap" can never mean a different cap than the one the daemon enforces. If that
-    file is absent — a partial deploy — the percentages are genuinely underivable, but the raw
-    byte readings are not: they are measured, not configured. Publishing them keeps the
-    unaccounted-bytes alarm (the one no cap participates in) working on a host whose caps
-    could not be read, and `set -u` must not turn the missing budget into a crashed probe.
-    """
+    """An absent cap script must not crash `set -u`; suppress only percentages while preserving
+    measured bytes and the cap-independent residue alarm."""
     env, aws_log = _environment(tmp_path, env_extra={"DOCKER_CAP_SH": str(tmp_path / "absent.sh")})
     assert _run(env).returncode == 0
     assert _one(aws_log, "docker_storage_bytes") == 17 * GIB

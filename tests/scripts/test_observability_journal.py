@@ -1,26 +1,12 @@
-"""journald usage against its ceiling, published as metrics (story e956-b1c3-45b9-4016).
+"""journald usage metrics (story e956-b1c3-45b9-4016).
 
-``/var/log`` was 1.8G of the 28G root working set on 2026-09-02, 1.7G of it the journal, and the
-only signal was ``rebar-root-disk-pressure`` — "root disk high", which cannot name the
-generator. ``observability.sh`` §2g publishes the journal's size, its percent of the configured
-ceiling, and a heartbeat saying whether that ceiling is actually in force.
+``observability.sh`` §2g measures exactly the journal tree governed by ``SystemMaxUse``,
+publishes its size and unclamped percent, and reports whether the running daemon read the
+drop-in. Size and cap readings fail independently. Measurement failure stays silent rather
+than becoming zero, so breaching missing-data alarms page; the heartbeat still publishes
+every tick, including zero, reserving absence for probe failure.
 
-Two properties carry this file, both inherited from story 9183:
-
-**Both sides span the same bytes.** 9183's patchset 1 differenced a ``du`` of ``overlay2``
-against a ledger that also counted the build cache, and the residue was systematically wrong.
-The same rule applies to a ratio: ``SystemMaxUse`` governs the journal files under
-``/var/log/journal``, so the numerator must be a ``du`` of exactly that tree — not of
-``/var/log``, which the ceiling does not bound.
-
-**Silence, never a fabricated 0.** A probe that could not measure publishes NOTHING, and every
-alarm is ``treat_missing_data = "breaching"`` (bug 3276 defect 2), so the silence pages. A 0
-would read as an empty journal on a box that is filling. The heartbeat is the deliberate
-exception: it is published on EVERY tick including the 0 path (bug bff5), so its ABSENCE means
-the probe is dead rather than the ceiling being fine.
-
-The tests drive the REAL ``observability.sh`` and the REAL ``journald-cap.sh`` over PATH stubs
-and a fake ``/proc``: no systemd, no journald, no AWS, no CI provider.
+Tests run the real scripts through PATH and fake-``/proc`` stubs.
 """
 
 from __future__ import annotations
@@ -101,8 +87,7 @@ def _environment(
     _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 0')
     _stub(bin_dir, "journalctl", "exit 0")
     _stub(bin_dir, "docker", "exit 1")
-    # `timeout` is absent on stock macOS: drop the duration and exec the wrapped command, the
-    # same portability stub tests/unit/test_autodeploy_prune.py already uses.
+    # Model macOS without `timeout` by executing the wrapped command.
     _stub(bin_dir, "timeout", 'shift\nexec "$@"')
     _stub(
         bin_dir,
@@ -116,8 +101,7 @@ def _environment(
         """,
     )
 
-    # `du` records EVERY path it is asked about, so a test can pin that the journal reading is
-    # taken over the tree the ceiling governs and not over a wider one.
+    # Record each `du` path so tests pin measurement to the governed tree.
     journal_body = (
         "exit 1" if journal_bytes is None else f'printf "{journal_bytes}\\t$1\\n"; exit 0'
     )
@@ -191,9 +175,7 @@ def _one(log: Path, metric: str) -> int:
     return values[0]
 
 
-# --------------------------------------------------------------------------------------
-# The reading, and the byte set it is taken over
-# --------------------------------------------------------------------------------------
+# Governed-tree reading
 
 
 def test_the_journal_size_and_its_percent_of_the_ceiling_are_published(tmp_path: Path) -> None:
@@ -204,13 +186,8 @@ def test_the_journal_size_and_its_percent_of_the_ceiling_are_published(tmp_path:
 
 
 def test_the_percent_is_measured_over_the_tree_the_ceiling_governs(tmp_path: Path) -> None:
-    """``SystemMaxUse`` bounds the journal files under ``/var/log/journal`` and nothing else.
-
-    A numerator taken over ``/var/log`` would count rotated syslog, nginx access logs and every
-    other consumer against a ceiling that does not bound them, and the ratio would be about no
-    quantity at all — the same defect as 9183's mismatched minuend and subtrahend, in ratio
-    form.
-    """
+    """Measure only ``/var/log/journal``, which ``SystemMaxUse`` governs; wider ``/var/log``
+    would invalidate the ratio."""
     env, _, du_log = _environment(tmp_path)
     assert _run(env).returncode == 0
     measured = du_log.read_text().split()
@@ -219,25 +196,19 @@ def test_the_percent_is_measured_over_the_tree_the_ceiling_governs(tmp_path: Pat
 
 
 def test_a_ceiling_overrun_publishes_its_true_ratio(tmp_path: Path) -> None:
-    """The percent is the ONLY reading that can say the ceiling did not hold, so it must be able
-    to say 200 (bug ``b380-3dfc-99fc-4a0e``). It used to clamp to 100, which made "exactly at the
-    ceiling" and "at twice the ceiling" the same datapoint and turned a breach into what an
-    operator reads as a healthy pinned ceiling. ``SystemMaxUse`` is journald's own best-effort
-    target, not a hard wall, so the overrun is a real state and not an impossible one."""
+    """Publish the unclamped ratio because ``SystemMaxUse`` is best-effort and real overruns
+    must differ from exactly 100% (bug ``b380-3dfc-99fc-4a0e``)."""
     env, aws_log, _ = _environment(tmp_path, journal_bytes=6 * GIB, cap=3 * GIB)
     assert _run(env).returncode == 0
     assert _one(aws_log, "journal_used_percent") == 200
     assert _one(aws_log, "journal_bytes") == 6 * GIB
 
 
-# --------------------------------------------------------------------------------------
-# Silence, never a fabricated 0
-# --------------------------------------------------------------------------------------
+# Measurement silence
 
 
 def test_an_unmeasurable_journal_publishes_nothing_rather_than_zero(tmp_path: Path) -> None:
-    """A 0 would read as an empty journal on a filling box. Both alarms are
-    ``treat_missing_data = "breaching"``, so the silence pages instead."""
+    """Publish silence, not false zero, when sizing fails; breaching missing-data alarms page."""
     env, aws_log, _ = _environment(tmp_path, journal_bytes=None)
     assert _run(env).returncode == 0
     assert _values(aws_log, "journal_bytes") == []
@@ -245,8 +216,7 @@ def test_an_unmeasurable_journal_publishes_nothing_rather_than_zero(tmp_path: Pa
 
 
 def test_the_size_is_still_published_when_the_ceiling_is_unreadable(tmp_path: Path) -> None:
-    """The two readings are independently gated: losing the cap must not also take the
-    magnitude off the air, since ``journal_bytes`` is what an operator sizes the problem with."""
+    """Size and cap fail independently; an unreadable cap must not suppress the magnitude gauge."""
     env, aws_log, _ = _environment(tmp_path)
     env["JOURNAL_MAX_USE_BYTES"] = "0"
     assert _run(env).returncode == 0
@@ -254,9 +224,7 @@ def test_the_size_is_still_published_when_the_ceiling_is_unreadable(tmp_path: Pa
     assert _values(aws_log, "journal_used_percent") == []
 
 
-# --------------------------------------------------------------------------------------
-# The heartbeat: is the ceiling we measure against the one journald actually read?
-# --------------------------------------------------------------------------------------
+# Cap heartbeat
 
 
 def test_the_heartbeat_is_one_when_the_running_journald_postdates_the_dropin(
@@ -268,28 +236,24 @@ def test_the_heartbeat_is_one_when_the_running_journald_postdates_the_dropin(
 
 
 def test_the_heartbeat_is_zero_when_the_daemon_predates_the_dropin(tmp_path: Path) -> None:
-    """The state story 9183 shipped and could not see: the ceiling is on disk, the running
-    daemon never read it, and every other reading looks perfectly healthy.
-
-    ``journal_used_percent`` is computed against a cap that is NOT the one in force here, so
-    without this heartbeat the whole ratio is quietly about the wrong denominator.
-    """
+    """Report zero when journald predates the drop-in; otherwise the percentage quietly uses a
+    cap not in force."""
     env, aws_log, _ = _environment(tmp_path, journald_postdates_dropin=False)
     assert _run(env).returncode == 0
     assert _one(aws_log, "journal_cap_in_effect") == 0
 
 
 def test_the_heartbeat_is_published_even_with_no_dropin_installed(tmp_path: Path) -> None:
-    """Bug bff5's rule: a value on EVERY tick, including the failing path, so that ABSENCE
-    means the probe, the timer or the host is dead — not that the ceiling is fine."""
+    """Publish zero without a drop-in so absence remains reserved for probe, timer, or host
+    failure (bug bff5)."""
     env, aws_log, _ = _environment(tmp_path, dropin_installed=False)
     assert _run(env).returncode == 0
     assert _one(aws_log, "journal_cap_in_effect") == 0
 
 
 def test_the_heartbeat_survives_an_unmeasurable_journal(tmp_path: Path) -> None:
-    """The heartbeat and the size reading fail independently: a ``du`` that cannot run must not
-    also silence the answer to "is the ceiling in force"."""
+    """Heartbeat and size fail independently; unreadable journal size must not suppress cap
+    state."""
     env, aws_log, _ = _environment(tmp_path, journal_bytes=None)
     assert _run(env).returncode == 0
     assert _one(aws_log, "journal_cap_in_effect") == 1
