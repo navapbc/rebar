@@ -1,25 +1,7 @@
-"""343b gap 5: `provider_provenance` must reach a PRODUCTION verdict payload.
+"""Verify provider provenance reaches signed verdict sidecar payloads.
 
-`tests/unit/test_verdict_provenance.py` pins the record's SHAPE and the sidecar's persistence of
-it, and all of it passed while production sidecars recorded nothing. MEASURED on a real
-`rebar review-plan` run: the written REVIEW_RESULT sidecar had `model: claude-sonnet-4-6` and
-`provider_provenance: ABSENT`.
-
-WHY THOSE TESTS MISSED IT — the failure mode this file exists to prevent. Every one of them hands
-`build_payload` a verdict dict that ALREADY contains `provider_provenance`. That proves the
-persist step and nothing else. The production question — does the verdict that REACHES
-`build_payload` ever carry the key — was never asked. A constructed input validated the half of
-the contract that was already working.
-
-So the rule here: assert on the verdict produced by the REAL assembly path, and on the REAL
-production wiring. Two distinct things must both hold, because the bug lived in the gap between
-them:
-
-  1. `finalize_verdict` must PROPAGATE a provenance record it is given, and
-  2. the gate YAML must actually PASS one — the runner already stamps the record onto the verify
-     step's outputs, and nothing was carrying it forward.
-
-A test for (1) alone would have passed against the broken tree.
+Tests cover verdict assembly and gate workflow wiring separately, then compose them through the
+coach path. Every coach branch must forward the observed runner record.
 """
 
 from __future__ import annotations
@@ -97,13 +79,7 @@ def test_finalize_verdict_propagates_a_provenance_record() -> None:
 
 
 def test_plan_review_yaml_wires_provenance_into_every_coach_arm() -> None:
-    """(2) THE MISSING WIRE, and the assertion that would have caught this bug.
-
-    `RunnerAgentStep.run` returns the runner result verbatim as step outputs, and the runner
-    already stamps `provider_provenance` onto it — so `steps.verify.outputs.provider_provenance`
-    existed all along and simply was not passed on. The coach step is duplicated across a
-    branch's two arms, so BOTH must wire it; wiring one is how half a fix ships.
-    """
+    """Verify every plan-review coach branch forwards verifier provenance."""
     arms = _steps_using(_PLAN_REVIEW_YAML, "plan_review_coach")
     assert len(arms) >= 2, f"expected both coach arms, found {len(arms)}"
     for arm in arms:
@@ -159,12 +135,7 @@ def test_completion_gate_carries_provenance_from_its_verify_step() -> None:
 
 
 def test_a_real_coach_verdict_survives_into_the_sidecar_payload(tmp_path) -> None:
-    """THE END-TO-END ORACLE — the one test whose absence let this ship.
-
-    It deliberately does NOT hand-build a verdict. It runs the real coach op, takes whatever
-    verdict comes out, and feeds THAT to the real `build_payload`. That composition is the
-    production path, and it is the only assertion here that fails if either half regresses.
-    """
+    """Verify a coach-produced verdict preserves provenance through ``build_payload``."""
     from rebar.llm.plan_review import sidecar
     from rebar.llm.plan_review.workflow_ops import plan_review_coach
     from rebar.llm.workflow.executor import StepContext
@@ -198,16 +169,7 @@ def test_a_real_coach_verdict_survives_into_the_sidecar_payload(tmp_path) -> Non
 
 
 def test_a_verdict_no_model_produced_does_not_invent_provenance() -> None:
-    """The honest-value rule for the three sites where NO LLM ran (the DET short-circuit, the
-    verify-failure recovery, and the outage degrade).
-
-    Those sites hold `cfg` and already report `model=cfg.model`, so synthesizing a record from it
-    is the obvious move — and it is WRONG. `provenance_for` documents that a recomputed record can
-    diverge from the one that actually drove the run, and here nothing ran at all. A cfg-derived
-    record would make the verdict claim a provider served it when none did, which is the exact
-    misattribution this record was introduced to remove. Omit the key instead; the sidecar already
-    tolerates absence.
-    """
+    """Verify verdicts omit provenance when no model call produced an observed record."""
     from rebar.llm.plan_review import orchestrator
     from rebar.llm.plan_review.det_floor import PlanContext
 

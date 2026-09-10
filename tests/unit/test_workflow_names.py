@@ -1,16 +1,8 @@
-"""Config-as-artifact gate for GitHub Actions workflow naming (ticket b550).
+"""Verify GitHub Actions workflows use deliberate display names and filename extensions.
 
-The Actions UI lists workflows by their ``name:`` field, so a lowercase or
-filename-echoing ``name:`` is a discoverability wart. This test pins every
-workflow file to a descriptive, Title-Case display name (the "locked table")
-and enforces the ecosystem-standard extension convention:
-
-* filenames are ``.yml`` — the sole allowed ``.yaml`` is ``gerrit-verify.yaml``,
-  whose name is load-bearing (Gerrit's gerrit-to-platform plugin dispatches CI
-  by matching the filename substring ``verify`` + ``gerrit``; renaming it — incl.
-  the extension surface — is off-limits);
-* every workflow present must appear in the locked table, so a newly-added
-  workflow with no deliberate ``name:`` fails here until it is named.
+Display names use Title Case and filenames use ``.yml``. ``gerrit-verify.yaml`` remains the sole
+exception because Gerrit dispatch matches its name. The locked table requires every workflow to
+declare a reviewed display name.
 """
 
 from __future__ import annotations

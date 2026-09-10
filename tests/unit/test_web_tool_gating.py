@@ -1,15 +1,7 @@
-"""Web access for web-flagged AGENT criteria (bug ff64-ca12-7132-40e7, bug 129e-2d88-cce2-492c).
+"""Verify web-enabled agent criteria receive a tool independently of provider name.
 
-ff64 gave the T1 prior-art criterion a web-search tool, attached only when the resolved model
-string started with ``anthropic``. 129e: the production review bot moved to Bedrock, so
-``resolved`` became ``bedrock:us.anthropic.claude-opus-4-8`` — and T1, a BLOCKING criterion whose
-routing declares ``"web": true``, silently ran with no grounding tool at all. The same MODEL
-through a different PROVIDER lost a capability because of how its name was spelled.
-
-The fix, pinned here: web access is attached on EVERY provider (the provider's native tool where
-its profile supports it, an in-process fallback where it does not), the decision consults no
-provider-name string, and the signed verdict's provenance records the outcome AND the route so a
-future silent withdrawal cannot hide. No test makes a live web/model call.
+Provider profiles select native or in-process routes, and signed provenance records the outcome.
+Tests make no model or web requests.
 """
 
 from __future__ import annotations
@@ -223,16 +215,10 @@ def _agent_kwargs(monkeypatch, tmp_path, *, model: str, web: bool) -> dict:
     monkeypatch.setattr(structured_run_mod, "_import_pydantic_ai", lambda: _CaptureAgent)
     # The real anthropic-path model construction needs a key present (never called).
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-never-used")
-    # The bedrock path builds a real BedrockProvider (only the Agent is doubled), and that
-    # construction resolves BOTH a region and credentials — so without pinning each, this
-    # case reads the host's ambient AWS config and passes on a developer box while failing
-    # in CI, which has neither. MEASURED both arms:
-    #   * no region  -> LLMConfigError from build_bedrock_provider's boto3 pre-check;
-    #   * no creds   -> botocore reaches for IMDS and trips the network-forbidden fixture.
-    # Region goes on the field, not via REBAR_LLM_BEDROCK_REGION: that env var is read only
-    # by LLMConfig's env/table factory, not by this direct construction. Credentials go via
-    # botocore's env provider, which short-circuits the IMDS lookup. No client call is ever
-    # made, so neither value is used.
+    # Bedrock provider construction resolves region and credentials before the capture double runs.
+    # Pin both inputs so host AWS settings and metadata lookup cannot affect the test.
+    # ``LLMConfig`` receives the region directly. Botocore reads credentials from its environment
+    # provider.
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test-key-never-used")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test-secret-never-used")
     cfg = LLMConfig(model=model, repo_path=str(tmp_path), bedrock_region_name="us-east-1")

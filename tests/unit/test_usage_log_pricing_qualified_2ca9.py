@@ -1,16 +1,8 @@
-"""Bug 2ca9: usage-log pricing silently dropped provider-qualified rows.
+"""Verify provider-qualified usage rows resolve through genai-prices.
 
-Epic 061c made model strings provider-qualified and ``agent_call.py`` records
-``model=ran_model`` verbatim, so a stored row's model became ``anthropic:claude-...``.
-``_price_row`` passed that STORED string through as genai-prices' ``model_ref``, which
-resolves a BARE id — so every Anthropic and OpenAI row raised ``LookupError`` (the
-unknown-model signal), got caught, and became "unpriced" with no warning. Only the
-``bedrock:`` form happened to resolve, which biased the epic's own provider cost
-comparison in the wrong direction: Bedrock was the only arm being measured at all.
-
-These tests run against the REAL genai-prices (the ``pricing`` extra, present in the dev
-env via pydantic-ai) because the defect IS the real library's resolution behaviour — a
-stub that accepts whatever it is handed cannot see it.
+Stored model names include provider qualifiers, while pricing expects bare model identifiers.
+These tests call genai-prices because a permissive test double would not exercise its lookup
+behavior.
 """
 
 from __future__ import annotations
@@ -115,36 +107,21 @@ def test_translation_is_registry_membership_not_a_colon_split():
     )
 
 
-# NON-VACUITY (bug 8a5e, same rot class as bug 34c2). The guard below used to read exactly
-# one file, `usage_log.py`, which today contains ZERO string-parsing calls of any kind — the
-# predicate has no denominator, so it cannot distinguish "clean" from "aimed at the wrong
-# file". That is survivable only by accident: `_pricing_model_ref` still happens to live in
-# `usage_log.py`, and the day a split moves the pricing path into a sibling this guard goes
-# silently hollow exactly as its four siblings in bug 8a5e did.
-#
-# The repair is the one proven on bug 34c2: derive the scan POPULATION rather than pin it,
-# and assert the population still holds the function the criterion governs.
+# The absence guard scans every module that defines a pricing-path function.
+# Deriving that population keeps the guard effective when pricing code moves.
 
-#: The functions AC4 governs. The scan POPULATION is derived from where these are DEFINED
-#: rather than from a hardcoded filename, so relocating them re-aims the guard automatically
-#: — a filename pin is exactly what rotted this guard's four siblings in bug 8a5e.
+#: Pricing-path functions governed by the qualifier-parsing guard.
+#: Their definition sites determine the scan population.
 _PRICING_FUNCS = {"_pricing_model_ref", "_price_row"}
 
 _BANNED_PARSE_METHODS = {"startswith", "endswith", "split", "partition", "removeprefix"}
 
 
 def _pricing_path_sources(pkg_dir: pathlib.Path) -> dict[str, str]:
-    """``{module name: source}`` for every module in `pkg_dir` that DEFINES a pricing-path
-    function.
+    """Return sources for modules that define pricing-path functions.
 
-    Derived, not pinned: a split that moves `_pricing_model_ref` into a sibling moves the
-    guard with it. Deliberately narrower than "everything usage_log imports" — the wider
-    package legitimately parses ':' in places this criterion does not govern (provider
-    registries, capability tables), and a guard that fires on those is a guard that gets
-    deleted.
-
-    Parameterised on the package directory so the teeth test below can drive the same
-    derivation over a throwaway package.
+    Definition-based discovery follows module moves while excluding unrelated provider parsing.
+    The directory parameter lets relocation tests exercise the same discovery path.
     """
     sources: dict[str, str] = {}
     for path in sorted(pkg_dir.glob("*.py")):
@@ -197,11 +174,10 @@ def test_usage_log_does_not_prefix_match_or_colon_split_provider_names():
 
 
 def test_the_colon_split_guard_scans_the_module_that_builds_the_pricing_ref():
-    """ANTI-VACUITY (bug 8a5e). The guard above polices an ABSENCE, so it passes both when
-    the code is clean and when it is aimed at a file the pricing logic has left. Assert the
-    POPULATION: the scanned sources must still define ``_pricing_model_ref``, the function
-    AC4 is actually about. A split that moves it outside the walk fails here instead of
-    silently disarming the guard."""
+    """Require the scan population to contain ``_pricing_model_ref``.
+
+    This prevents the absence guard from passing after pricing logic moves outside its scope.
+    """
     sources = _pricing_path_sources(_usage_log_pkg())
     holders = sorted(
         name
@@ -220,14 +196,9 @@ def test_the_colon_split_guard_scans_the_module_that_builds_the_pricing_ref():
 
 
 def test_the_colon_split_guard_follows_the_pricing_path_into_a_sibling(tmp_path):
-    """TEETH for the derived scan. A synthetic-source test proves the offender predicate
-    works but cannot detect the guard being aimed at the wrong FILE — the whole defect class
-    here. So drive the real derivation over a throwaway package shaped like the relocation we
-    fear: the pricing ref builder has moved out of ``usage_log.py`` into a sibling, and the
-    sibling does the banned inline colon split.
+    """Verify discovery follows a moved pricing builder and detects qualifier parsing.
 
-    Also pins the sanctioned-delegate carve-out: ``config.split_provider_qualifier`` doing the
-    same split must stay legal, or the guard would ban the very helper it demands callers use.
+    The sanctioned ``config.split_provider_qualifier`` delegate remains allowed.
     """
     (tmp_path / "usage_log.py").write_text(
         "from rebar.llm.pricing_ref import _pricing_model_ref\n\n__all__ = ['_pricing_model_ref']\n"

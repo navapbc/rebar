@@ -1,22 +1,7 @@
-"""Behavioral oracle for a2c7 (coal-trainsick-heifer) — the whole-store verify-identity gate's
-runtime shape.
+"""Verify authenticated authorship checks have bounded call shape without timing assertions.
 
-Two independent, behavior-preserving performance fixes on the authenticated-authorship
-merge-gate, expressed as observable call-graph facts (not timings):
-
-  Fix #1 — Advisory mode (``require_authenticated`` OFF) is report-only: the gate's exit code is
-  unconditionally 0 and no enforcement can trigger, so the per-event git era-verify
-  (``verify_authorship_at_commit``) MUST NOT run at all. With enforcement ON it MUST still run
-  (the gate still enforces).
-
-  Fix #4 — With enforcement ON, the era-verify resolves each keyring record's / event's
-  introducing commit via the batched position map built once in ``cli()``, NOT a full-history
-  ``git log`` per keyring record (``resolve_event_commit``). The verdict is IDENTICAL either
-  way (a signed CREATE stays ``verified`` → exit 0); only the number of git subprocesses drops.
-
-The last test pins Fix #4's behavior-preservation directly on
-``verify_authorship_at_commit``: injecting a ``position_resolver`` yields the same Verdict as
-the per-event resolver, while calling ``resolve_event_commit`` zero times.
+Advisory mode skips era verification because it cannot enforce. Enforcement mode builds one
+position map and preserves per-event verdicts without repeated history walks.
 """
 
 from __future__ import annotations

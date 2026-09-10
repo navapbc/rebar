@@ -1,16 +1,8 @@
-"""Acceptance-test coverage the completion verifier flagged as MISSING for the op-cert merge-gate
-(story 4214 / Option B, era-at-storage-anchor).
+"""Verify operation-certificate merge-gate constraints through public outcomes.
 
-Every test asserts OBSERVABLE behaviour — `rebar verify-opcert` subprocess exit codes / verdict
-strings, or a public verifier verdict — never internals. The harness (real ssh-keygen, a real rebar
-store, the real `rebar verify-opcert` subprocess) mirrors the sibling op-cert suites.
-
-Coverage added here:
-* the `merged_log_commit` binding constraint (off-history commit rejected; plaintext-mirror
-  invariance);
-* rollback sub-cases (grandfathered rotation PASSES; kill-switch revocation FAILS all certs;
-  fail-closed on an unresolvable storage anchor);
-* the `rebar trusted-env add|revoke` helper stamping the tickets-branch tip log position.
+Coverage includes storage-anchor binding, plaintext mirror invariance, rotation, revocation,
+unresolved anchors, and trusted-environment helpers. Tests use ssh-keygen and a repository-backed
+ticket store.
 """
 
 from __future__ import annotations

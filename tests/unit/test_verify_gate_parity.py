@@ -1,16 +1,7 @@
-"""Tests for the Verified-gate parity drift-guard (jira-reb-1163).
+"""Verify the Gerrit vote job covers every unconditional mirrored workflow gate.
 
-The Gerrit ``Verified`` vote is cast by ``.github/workflows/gerrit-verify.yaml``'s
-``vote`` job, which aggregates the run conclusion of the jobs listed in its ``needs``.
-The push/PR "mirror" lanes (``test.yml``, ``optionality.yml``, ``verify-identity.yml``,
-``prompt-eval.yml``) each define the unconditional jobs that gate ``main`` post-merge.
-
-If a job gates ``main`` post-merge but is ABSENT from ``vote.needs``, a change that
-breaks it earns ``Verified +1`` pre-merge yet reddens ``main`` after it lands
-(green-verify / red-main). ``scripts/check_verify_gate_parity.py`` fails the build when
-``vote.needs`` is not a superset of every such gating job. These tests exercise that
-guard on synthetic workflow pairs (drift + parity-complete) and assert the REAL repo is
-in parity.
+The parity checker rejects missing ``vote.needs`` dependencies and validates the repository
+workflow set.
 """
 
 from __future__ import annotations

@@ -1,15 +1,7 @@
-"""Pass-2 with ZERO Pass-1 findings: the request must not solicit verifications.
+"""Verify an empty finding batch requests an empty verification array.
 
-The verify step always makes one aggregate call, even when Pass-1 produced nothing. The
-request it carries must agree with the index domain it was built from: an empty batch lists
-no finding, so asking for "one verification per finding" solicits indices that cannot exist.
-Every index a verifier then returns falls outside ``range(len(findings))`` and is classified
-``unexpected`` by :func:`reshape_verifications` — an ERROR log plus a contract-violation
-record stamped into the signed verdict's coverage, on a review that is otherwise clean.
-
-The focused prerequisite verifier already states the empty-case contract explicitly
-(``prerequisite_workflow_ops.plan_review_prerequisite_verify_inputs``); the general Pass-2
-request is the seam that does not.
+The request and its index domain must agree so clean reviews do not produce unexpected-index
+contract violations.
 """
 
 from __future__ import annotations
