@@ -879,6 +879,23 @@ def test_autodeploy_mcp_run_new_passes_the_bedrock_region() -> None:
         )
 
 
+def test_autodeploy_mcp_run_new_trusts_the_edge_forwarded_proto() -> None:
+    """The blue-green `docker run` must trust nginx's forwarded scheme like compose."""
+    body = _mcp_run_new_body()
+    m = re.search(
+        r"-e\s+FORWARDED_ALLOW_IPS=(?P<quote>['\"]?)(?P<value>[^'\"\\\s]+)(?P=quote)",
+        body,
+    )
+    assert m, (
+        "mcp_run_new must pass FORWARDED_ALLOW_IPS; docker-compose.yml declares it for "
+        "the same service and autodeploy is what actually starts the container"
+    )
+    assert m.group("value") == "*", (
+        "mcp_run_new's FORWARDED_ALLOW_IPS must be exactly '*' — a pinned bridge-gateway "
+        f"address can drift and silently re-open the scheme downgrade; got {m.group('value')!r}"
+    )
+
+
 # ------------------------------------------------------- MCP edge: no scheme downgrade
 # Regression guard for fernlike-toothsome-hen (79b2-6ebc-6c1d-4125), a P1 security bug:
 # the documented client URL `https://<box>/mcp/` answered `307` with
