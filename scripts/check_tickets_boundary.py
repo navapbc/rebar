@@ -1,40 +1,18 @@
 #!/usr/bin/env python3
-"""Tickets-store boundary gate (bug 0514-92e0-e6c4-4304).
+"""Reject store paths that bypass the relocatable tracker configuration.
 
-The ticket store is RELOCATABLE: ``rebar.config.tracker_dir()`` resolves it through the
-``REBAR_TRACKER_DIR`` override and the ``tracker.dir`` config key, where an absolute value
-relocates the store entirely (EV-3b). Shipped code that instead COMPOSES a store path from the
-literal ``.tickets-tracker`` silently ignores that configuration — it reads and writes a
-directory the operator never named. That is how ``bridge_status`` came to fail on the deployed
-MCP server while the very same server served 2763 tickets from the configured store.
+``rebar.config.tracker_dir()`` honors ``REBAR_TRACKER_DIR`` and ``tracker.dir``. The AST gate
+therefore flags a ``.tickets-tracker`` literal used in:
 
-WHAT IS FLAGGED — only PATH COMPOSITION, never prose. A string literal containing
-``.tickets-tracker`` fails the gate when it appears in one of four composing positions:
+1. a ``/`` path join;
+2. an ``os.path.join`` argument;
+3. a ``Path(...)`` argument; or
+4. a constant bound to the bare directory name.
 
-  1. a ``/`` path join          ``repo_root / ".tickets-tracker"``
-  2. an ``os.path.join`` arg    ``os.path.join(root, ".tickets-tracker")``
-  3. a ``Path(...)`` argument   ``Path(".tickets-tracker/.bridge_state/x.json")``
-  4. a name bound to the bare   ``TRACKER_DIR = ".tickets-tracker"``
-     dir name (a dir-name constant, which is composed at its consumers)
-
-Docstrings, comments, error text, and argparse help are NOT flagged: they compose nothing, and
-flagging them would train contributors to mark noise. Comments never reach the AST at all, so
-they are excluded structurally rather than by heuristic.
-
-SANCTION — ``# tickets-boundary-ok: <reason>``, with a MANDATORY reason. The bare marker was
-already a documented convention (``docs/architecture.md``) but nothing enforced it, so it had
-been applied as a rubber stamp: 7 of the 13 defects this gate was written to drain carried one.
-Requiring a reason is what converts it from a stamp into a claim someone can review. The
-vocabulary deliberately mirrors ``# raw-git-ok: <reason>`` (``scripts/check_raw_git_writes.py``),
-which sanctions raw git WRITES; this one sanctions boundary-crossing store-path LAYOUT.
-
-A marker is honoured on the offending line, on the line above it, or on the enclosing
-``def``/assignment statement's first line — the same placement latitude the raw-git-write gate
-allows, so a composition split across lines can still be marked readably.
-
-Legitimately marked shapes, for orientation: the default name inside a resolver (that IS the
-fallback the resolver exists to provide), and a path built inside a temp/snapshot directory the
-code itself just created (not the configured store at all).
+Docstrings, comments, errors, and help text are excluded because they do not compose paths.
+Sanction a legitimate layout use with ``# tickets-boundary-ok: <reason>`` on the expression,
+preceding line, or enclosing definition/assignment. Empty reasons fail. Legitimate examples
+include the resolver's own default and paths inside a newly created temporary snapshot.
 """
 
 from __future__ import annotations

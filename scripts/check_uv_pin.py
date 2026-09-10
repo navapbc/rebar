@@ -1,40 +1,22 @@
 #!/usr/bin/env python3
-"""Single-source gate for the uv version pin [rebar:56b7-b21a-c8ab-4afc].
+"""Keep the uv version pin exact, single-sourced, and manifest-free.
 
-``astral-sh/setup-uv`` was once SHA-pinned at every call site, but the action still resolved
-and downloaded uv through a remote manifest. rebar now owns a repository-local setup action
-that reads the exact ``[tool.uv] required-version`` from ``pyproject.toml`` and downloads the
-version-pinned release artifact directly, guarded by committed SHA-256 checksums.
+The repository-local setup action reads ``[tool.uv] required-version`` from
+``pyproject.toml`` and downloads checksummed, versioned release artifacts. This gate rejects:
 
-This gate keeps that contract single-sourced and manifest-free by failing the build on the
-ways it can be defeated:
+1. a missing or ranged ``required-version``;
+2. per-call ``version`` or ``version-file`` overrides;
+3. a root ``uv.toml`` that shadows ``[tool.uv]``;
+4. use of the manifest-backed upstream ``astral-sh/setup-uv`` action;
+5. a missing/weakened local action or incomplete supported-runner checksums; and
+6. Docker images whose uv reference is floating, absent-tagged, templated, or a bare opaque
+   digest.
 
-1. **Removed** — the ``[tool.uv] required-version`` key is gone, so there is no repository pin.
-2. **Loosened to a range** — ranges are not an unambiguous exact pin for every reader.
-3. **Overridden per call site** — a ``version`` or ``version-file`` input would silently diverge
-   that job from ``pyproject.toml``.
-4. **Shadowed by a root uv.toml** — uv treats ``uv.toml`` as a replacement for ``[tool.uv]``.
-5. **Bypassed through the upstream action** — any workflow using ``astral-sh/setup-uv`` regains
-   the manifest fetch.
-6. **Weakened local action** — the committed action must exist, avoid manifest endpoints, and
-   carry the exact checksums for every supported runner asset.
-7. **Ignored by the container builds** — a Dockerfile that pulls uv from a tag this gate
-   cannot read as the exact pin installs whatever upstream published most recently, which uv
-   then rejects against ``required-version``. That covers a FLOATING tag
-   (``ghcr.io/astral-sh/uv:latest``, or no tag at all), a build-ARG template
-   (``uv:${UV_VERSION}``) that resolves only at build time, and a bare ``@sha256:`` digest —
-   immutable, but OPAQUE: it never says which uv version it holds, and agreement with
-   ``required-version``, not immutability, is the property under test, so for uv a digest is
-   accepted only alongside a matching tag. This is the shape that took production down
-   [rebar:febd-6b13-1976-43be]: CI honoured the pin while all three images did not, so every
-   build died with "Required uv version ``==0.12.7`` does not match the running version
-   ``0.12.9``" the moment ``:latest`` moved — a time bomb armed by an upstream release, with
-   no change to this repository. The images must therefore name the EXACT
-   ``required-version`` as their tag, and no Dockerfile may resolve any image from
-   ``:latest``.
+Every uv container reference must carry the exact required version as its tag. A digest is
+accepted only alongside that matching tag, and no Dockerfile image may use ``:latest``.
 
-Stdlib + PyYAML only, with no CI provider required: it runs from ``make lint`` on a developer
-laptop exactly as it runs in CI, which is the portability contract every gate here holds to.
+The standard-library/PyYAML check has no CI-provider dependency and runs identically through
+``make lint`` or a local shell.
 """
 
 from __future__ import annotations

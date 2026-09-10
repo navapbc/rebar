@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-"""Keep the environment contract in ``server.json`` aligned with code.
+"""Keep ``server.json`` environment records aligned with ``MCP_ENV_VARS``.
 
-MCP clients read ``server.json`` before installation. The
-``rebar.mcp_server.MCP_ENV_VARS`` inventory defines the supported names and
-descriptions. The manifest contract marks every declared variable as optional,
-so each canonical ``isRequired`` value is ``false``.
-
-This checker compares complete records and rejects missing names, extra names,
-changed fields, and duplicate names.
+Clients read the manifest before installation. The code inventory supplies each supported
+name and description; every canonical ``isRequired`` value is ``false``. Complete-record
+comparison rejects missing, extra, changed, or duplicate names.
 
 Regeneration command
 

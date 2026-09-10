@@ -1,54 +1,24 @@
 #!/usr/bin/env python3
-"""Generate ``docs/env-vars.md`` — the canonical registry of environment variables
-read under ``src/rebar`` (audit maintainability #3).
+"""Generate the canonical ``docs/env-vars.md`` registry from shipped environment reads.
 
-The registry is DERIVED (like ``reviewers/index.json``): a CI drift gate regenerates it
-and fails the build on any diff, so a new env-var read cannot ship undocumented.
+The drift gate compares this derived output so new reads cannot ship undocumented. Recognized
+patterns are:
 
-Scope is defined RELATIVE to an explicit, enumerated set of read patterns (documented in
-the generated file's header). Within ``os.environ`` the scan is now FAIL-CLOSED: every
-attribute access on ``os.environ`` must be classified, and an unclassified one raises
-``UnrecognisedEnvironAccess`` rather than being silently walked past (bug: a
-``os.environ.pop("K")`` read used to drop ``K`` from the registry while the drift gate
-stayed green, because the generator and the committed doc were blind in the same way).
+1. literal-key ``os.environ`` subscripts and get/pop/setdefault/``__getitem__`` calls, plus
+   ``os.getenv``;
+2. classified whole-mapping reads/writes, which name no variable and register nothing; and
+3. project helpers in ``KNOWN_ENV_HELPERS``, whose literal key argument is attributed at each
+   call site.
 
-  1. Key-bearing stdlib reads — the accessor returns the current value of ONE named
-     variable, so its string-literal key is registered: the ``os.environ["X"]``
-     subscript, ``os.environ.get/pop/setdefault("X", …)``
-     (``KEY_BEARING_ENVIRON_ATTRS``), and ``os.getenv("X", …)``.
-  2. Bulk/whole-mapping accesses (``BULK_ENVIRON_ATTRS``) — ``os.environ.copy()``,
-     ``.items()``, ``.keys()``, ``.values()``, … name no single variable, so they are
-     ALLOWED and register nothing.
-  3. Project env-read helpers (``KNOWN_ENV_HELPERS``): the string-literal env-name
-     argument is resolved at each call site (one level through the shim). This half is
-     now FAIL-CLOSED too: a function whose own body reads the environment under a key
-     DERIVED FROM ONE OF ITS OWN PARAMETERS is an env-read helper — its effective variable
-     names live at its CALL SITES — so if its name is missing from ``KNOWN_ENV_HELPERS``
-     the scan raises ``UnregisteredEnvReadHelper`` instead of walking silently past every
-     call site (bug: ``_gate_str_pref`` was unregistered, so ``REBAR_GATE_REF`` and
-     ``REBAR_GATE_SOURCE`` were absent from the registry while ``--check`` stayed green —
-     its own internal ``os.environ.get(env_name)`` landed in the ``dynamic`` list, which is
-     indistinguishable from a REGISTERED helper's internal read). Remediate by adding a row
-     to ``KNOWN_ENV_HELPERS`` giving the position of the helper's env-name argument.
+The scan fails closed for an unclassified ``os.environ`` attribute, an env-read helper missing
+from the table, or a table row whose helper is absent from the shipped tree. Non-literal keys
+and keys derived from runtime state are reported as dynamic. Tests are outside the scan root;
+passing the mapping wholesale has no key to register; and ``getattr`` string indirection is
+not statically visible.
 
-Deliberately NOT recognised (and why):
-  * reads under ``tests/`` — outside the scan root by design; the registry documents the
-    shipped ``src/rebar`` surface, not test fixtures.
-  * non-literal keys (``os.environ.get(name)``) — the concrete name only exists at
-    runtime, so these are REPORTED in the ``dynamic`` list instead of dropped.
-  * ``os.environ`` passed by reference into another callable (``dict(os.environ)``,
-    ``f(os.environ)``) — a bulk handoff with no literal key, indistinguishable from the
-    allowed whole-mapping accesses; nothing to register.
-  * ``getattr(os.environ, "get")(…)`` and similar string-indirection — not statically
-    resolvable at all; a fail-closed AST scan cannot see it, so it is out of scope rather
-    than pretended-covered.
-  * a key derived from a runtime source that is NOT a parameter — ``os.environ.get(m.group(1))``
-    for a regex match ``m``, a name computed from file contents, and so on. This is the
-    boundary the helper rule deliberately does NOT cross: no table row could ever name such a
-    variable, because no call site carries it, so the read stays genuinely dynamic and is
-    REPORTED in the ``dynamic`` list rather than demanded to be registered.
-
-Alias/deprecation status is read from ``rebar._deprecations.REGISTRY`` (``kind == "env"``).
+Environment aliases come from ``rebar._deprecations.REGISTRY``. Config-resolved aliases and
+derived ``REBAR_MCP_*`` variables from ``MCP_ENV_VARS`` are unioned explicitly because they
+have no literal read site.
 
 Usage:
     python scripts/gen_env_registry.py            # regenerate docs/env-vars.md
@@ -69,67 +39,31 @@ DOC_PATH = REPO_ROOT / "docs" / "env-vars.md"
 
 
 class UnrecognisedEnvironAccess(RuntimeError):
-    """Raised when ``os.environ`` is touched through an attribute the scan cannot classify.
-
-    Fail-closed by design: an unknown accessor might be a key-bearing read (whose variable
-    would then be silently missing from the registry while ``--check`` stayed green), so the
-    generator refuses to emit a registry it knows to be incomplete. Fix by classifying the
-    attribute into ``KEY_BEARING_ENVIRON_ATTRS`` or ``BULK_ENVIRON_ATTRS`` below.
-    """
+    """An ``os.environ`` attribute is neither key-bearing nor a whole-mapping operation."""
 
 
 class UnregisteredEnvReadHelper(RuntimeError):
-    """Raised when a function reads the environment under a key derived from its OWN parameter
-    but is missing from ``KNOWN_ENV_HELPERS``.
+    """An env-read helper derives its key from a parameter but has no helper-table row.
 
-    Fail-closed by design, and kept DISTINCT from ``UnrecognisedEnvironAccess`` so the two
-    seams stay separately diagnosable. Such a function's effective variable names exist only
-    at its CALL SITES, so an unregistered helper is not an error the old scan could see — it
-    was INVISIBLE: every call site was walked past and the helper's own internal read landed
-    in the ``dynamic`` list, looking exactly like a registered helper's, so the drift gate
-    stayed green over a registry it knew nothing was missing from (measured: ``_gate_str_pref``
-    cost ``REBAR_GATE_REF`` and ``REBAR_GATE_SOURCE``). Fix by adding a row to
-    ``KNOWN_ENV_HELPERS`` giving the 0-indexed position of the env-name argument.
+    Its concrete names exist only at call sites, so the row must give the zero-based key
+    argument position. This failure remains distinct from an unknown ``os.environ`` accessor.
     """
 
 
 class StaleEnvReadHelperRow(RuntimeError):
-    """Raised when ``KNOWN_ENV_HELPERS`` carries a row whose helper has no definition under the
-    shipped scan root.
+    """A helper-table row has no definition under the shipped scan root.
 
-    Fail-closed by design, and kept DISTINCT from ``UnregisteredEnvReadHelper`` so the two
-    directions of the table's invariant stay separately diagnosable: that one validates
-    tree -> table (a helper missing a row), this one validates table -> tree (a row missing its
-    helper). Without it a row is UNFALSIFIABLE — deleting the helper's ``def`` produces no
-    signal from the generator, the drift gate, or the ownership gate, while the dead row keeps
-    publishing its name into ``docs/env-vars.md`` and keeps exempting its (now meaningless)
-    callee shape from ``scripts/check_config_ownership.py``'s shim seam. Fix by DELETING the
-    row; this seam deliberately validates only — pruning the table on the author's behalf would
-    silently discard a row whose helper was merely renamed.
+    This is the table-to-tree half of the invariant. Delete or re-key the row explicitly;
+    automatic pruning could hide a rename and retain a false ownership exemption.
     """
 
 
-# ``os.environ.<attr>(...)`` accessors that RETURN the current value of ONE named variable.
-# Their first positional argument is the variable name, so it is registered exactly like the
-# ``os.environ["X"]`` subscript. ``pop``/``setdefault`` also mutate, but the read is what the
-# registry cares about.
-# ``__getitem__`` is here, not in the bulk set below: an explicit ``os.environ.__getitem__("X")``
-# call is an ast.Call, NOT an ast.Subscript, so the subscript branch never sees it — treating it
-# as a whole-mapping access would silently drop X, which is the very hole this scan closes.
+# Accessors whose first argument names one readable variable. ``__getitem__`` is included
+# because an explicit call is an ``ast.Call``, not the subscript shape handled separately.
 KEY_BEARING_ENVIRON_ATTRS: frozenset[str] = frozenset({"get", "pop", "setdefault", "__getitem__"})
 
-# Whole-mapping ``MutableMapping`` members: they name no single variable, so they are allowed
-# and register nothing. Each is here for a concrete reason:
-#   copy/items/keys/values — bulk reads of the whole mapping (``copy`` occurs under src/rebar
-#     today, for building a child-process environment).
-#   update/clear/popitem  — bulk WRITES/removals; nothing readable is named by a literal
-#     (``popitem`` returns an arbitrary pair, not a requested variable).
-#   __contains__/__iter__/__len__ — dunder forms reached only through explicit attribute
-#     access; membership/iteration/length name no single variable.
-#   __setitem__/__delitem__ — key-bearing but WRITE-only: they set or remove rather than
-#     return a value, and the registry documents readable surface. (The ``os.environ["X"] = v``
-#     Store subscript is registered by the Subscript branch; that predates this bug and is
-#     left as-is deliberately.) The READ dunder ``__getitem__`` is key-bearing — see above.
+# Whole-mapping reads, writes, iteration, and write-only dunders name no readable variable and
+# register nothing. Store-context ``os.environ["X"] = value`` remains handled as a subscript.
 BULK_ENVIRON_ATTRS: frozenset[str] = frozenset(
     {
         "copy",
@@ -148,26 +82,15 @@ BULK_ENVIRON_ATTRS: frozenset[str] = frozenset(
 )
 
 
-# helper name -> 0-indexed position of the env-name argument.
-# Signatures verified against the current tree; extend by adding a row here. That claim is
-# ENFORCED by ``_raise_for_stale_rows`` below — a row whose helper has no definition under the
-# shipped scan root aborts the run (measured: the RP-04 config-ownership cutover drained
-# ``_rebar_env``, ``_env_int``, ``_str_pref`` and ``_int_pref`` out of the tree, and all four
-# rows survived here for free, publishing four names into docs/env-vars.md that named nothing
-# and exempting ``_int_pref(...)`` from the ownership gate entirely).
+# Helper name -> zero-based env-name argument position. Missing helpers and stale rows both
+# abort, so this table must stay bidirectionally aligned with the shipped tree.
 KNOWN_ENV_HELPERS: dict[str, int] = {
     "_llm_str": 2,  # llm/config.py: (table, cli, env_name, ...)
     "_llm_str_source": 2,  # llm/config.py: (table, cli, env_name, ...) -> (value, source)
     "_llm_int": 2,  # llm/config.py: (table, cli, env_name, ...)
-    # Omitting this one cost four undocumented vars (bug b00f): a helper absent from this table
-    # is not an error, it is INVISIBLE — the scan walks past every call and the drift gate stays
-    # green, so a clean `--check` proves agreement with the generator, never completeness.
     "_llm_float": 2,  # llm/config.py: (table, cli, env_name, ...)
     "_int_env": 0,  # review_bot/config.py
     "_str_env": 0,  # opcert_service/config.py: os.environ.get(name)
-    # Found by the fail-closed helper rule below rather than by hand. ``_gate_str_pref`` is the
-    # MEASURED loss that motivated it: its two call-site literals REBAR_GATE_REF and
-    # REBAR_GATE_SOURCE were absent from the committed registry while `--check` stayed green.
     "_gate_str_pref": 0,  # _config_resolvers.py: (env_name, file_key, default, root=None)
     "read_secret_env": 0,  # config.py: (env_name)
     "_env_truthy": 0,  # llm/config.py: (name)
@@ -257,11 +180,7 @@ def _scan_module(tree: ast.Module, rel: str, reads: Reads, dynamic: Dynamic) -> 
     return offenders
 
 
-# --------------------------------------------------------------------------- #
-# The fail-closed HELPER seam. Mirrors the ``os.environ``-attribute seam above: there, an
-# accessor the scan cannot classify aborts the run; here, a function that reads the
-# environment under a key supplied by its CALLERS must be registered or the run aborts.
-# --------------------------------------------------------------------------- #
+# Fail closed when a function derives an environment key from a caller-supplied parameter.
 
 FuncDef = ast.FunctionDef | ast.AsyncFunctionDef
 # (helper name, module path relative to the repo root, line of its ``def``).
@@ -481,14 +400,10 @@ def _env_aliases() -> dict[str, str]:
 def render(root: Path = DEFAULT_SCAN_ROOT) -> str:
     reads, dynamic = scan(root)
     aliases = _env_aliases()
-    # Env-channel aliases are resolved through the config alias table
-    # (config.py::_LEGACY_ENV_ALIASES), not a direct os.environ call the scanner sees, so
-    # union them in explicitly — they are real, settable config surface.
+    # Config aliases have no literal read, so add their real, settable surface explicitly.
     for alias_name in aliases:
         reads.setdefault(alias_name, set()).add("src/rebar/config.py (alias resolver)")
-    # The REBAR_MCP_* gate vars are DERIVED from mcp config keys (env REBAR_MCP_<KEY_UPPER>),
-    # not read through a literal os.environ call the AST scanner can see, so union them in
-    # from the canonical MCP_ENV_VARS list — they are real, settable config surface.
+    # Derived REBAR_MCP_* keys likewise come from the canonical MCP_ENV_VARS inventory.
     from rebar.mcp_server import MCP_ENV_VARS
 
     for entry in MCP_ENV_VARS:

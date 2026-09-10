@@ -1,27 +1,17 @@
 #!/usr/bin/env python3
-"""ShellCheck gate for standalone shell scripts [rebar:fe4e-54a5-3c3a-4901].
+"""Run the required ShellCheck gate over standalone ``*.sh`` files.
 
-Workflow ``run:`` blocks are already linted: ``make lint`` runs actionlint, which
-embeds ShellCheck for every ``.github/workflows/**`` step. Standalone ``*.sh``
-files had no such gate — this closes that hole.
+Actionlint already checks workflow ``run:`` blocks; this covers repository shell scripts.
 
-Severity is ``warning``, not ``error``, and that choice is load-bearing. The
-motivating defect is **SC2115**::
+The severity floor is ``warning`` because destructive-glob check SC2115 is a warning::
 
     rm -rf "${dir}"/*
     #  warning: Use "${var:?}" to ensure this never expands to /* . [SC2115]
 
-SC2115 is emitted at ``warning``. A gate configured at ``-S error`` would run
-green over the exact line that expanded to ``rm -rf /*`` on a contributor
-workstation and destroyed ``/opt/homebrew`` and ``/Applications``. Lowering this
-threshold silently re-opens that hole, so treat ``-S warning`` as the contract.
+Using ``-S error`` would miss the exact unsafe expansion this gate must reject.
 
-ShellCheck comes from ``shellcheck-py``, pinned exactly in pyproject's ``[dev]``
-extra and installed by ``make install``. It is therefore a REQUIRED tool, not an
-optional one: a missing binary FAILS rather than skipping, matching the stance
-tests/unit/workflow/test_bridge_provider_wrappers_heldout.py already takes
-("shellcheck-py is a required test dependency, not an optional skip"). A gate
-that silently skips is indistinguishable from a gate that passes.
+``shellcheck-py`` is pinned in the ``dev`` extra and installed by ``make install``. A missing
+binary fails the gate; it never degrades to a skip.
 """
 
 from __future__ import annotations

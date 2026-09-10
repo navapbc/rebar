@@ -1,47 +1,24 @@
 #!/usr/bin/env python3
-"""State-exposure gate for SSM SecureString secrets [rebar:eb67-b96c-dcf0-4f86].
+"""Reject SSM ``SecureString`` values that Terraform would persist in state.
 
-An ``aws_ssm_parameter`` written with a plaintext ``value`` argument persists that value in
-CLEARTEXT in the remote terraform state -- the AWS provider reads the live value into
-``attributes.value`` on every refresh/import, even when ``lifecycle { ignore_changes = [value] }``
-stops terraform WRITING it. For a ``SecureString`` secret that collapses the whole secret tier to
-whoever can read the state backend (bug eb67: 23 secrets in cleartext in the prod state).
+The AWS provider refreshes a plaintext ``value`` into ``attributes.value`` even when
+``ignore_changes = [value]`` prevents writes. ADR 0105 instead uses the write-only pair
+``value_wo`` and ``value_wo_version``, which is never stored in state.
 
-The structural fix (ADR 0105) is terraform WRITE-ONLY arguments: ``value_wo`` (+ its required
-``value_wo_version``) is, by provider design, NEVER stored to state. This gate enforces that every
-operator-seeded ``SecureString`` secret uses write-only args and none reintroduces the
-persisted-secret antipattern.
+For each ``aws_ssm_parameter`` whose type is ``SecureString``, violations are:
 
-The rule, per ``aws_ssm_parameter`` resource of ``type = "SecureString"``:
+* a literal, ``var.*``, or ``local.*`` ``value``;
+* any ``insecure_value``;
+* ``ignore_changes`` covering ``value``;
+* only one member of the write-only pair; or
+* no value source.
 
-  * VIOLATION -- a quoted string-LITERAL ``value = "..."`` (a seeded secret whose value would land
-    in state). This is the exact bug shape (``value = "CHANGEME"`` + ``ignore_changes = [value]``).
-  * VIOLATION -- ``value = var.<x>`` / ``value = local.<x>`` (an unquoted VARIABLE- or
-    LOCAL-sourced value): a real secret that terraform reads into ``attributes.value`` and persists
-    to state exactly like a string literal. Unquoted does NOT mean generated.
-  * VIOLATION -- ``insecure_value = "..."`` on a SecureString: the provider stores
-    ``insecure_value`` to state as PLAINTEXT (it exists precisely to opt out of encryption), so it
-    is never a valid value source for a secret.
-  * VIOLATION -- ``lifecycle { ignore_changes = [value] }`` on a SecureString (the tell-tale of a
-    value terraform refreshes into state but pretends not to own).
-  * VIOLATION -- ``value_wo`` without ``value_wo_version`` (or vice-versa): the provider requires
-    the pair, and a lone ``value_wo`` never triggers the write.
-  * VIOLATION -- no value source at all (neither ``value`` nor ``value_wo`` nor ``insecure_value``):
-    an invalid resource that would fail apply, and usually a half-done migration.
-  * ALLOWED -- ``value_wo`` + ``value_wo_version`` (the write-only fix).
-  * ALLOWED -- ``value = <generated expression>`` (an unquoted reference that is NOT ``var.``/
-    ``local.``, such as ``random_password.x.result``) with NO ``ignore_changes`` on value: a
-    terraform-GENERATED value whose secret already lives in state via the source resource, so
-    ``value_wo`` gives no net benefit. This is a deliberately different case (e.g.
-    ``opcert_origin_guard``) and out of scope.
+The complete write-only pair is allowed. A generated expression such as
+``random_password.x.result`` is also allowed when ``ignore_changes`` does not cover it, because
+its source already resides in state. Non-secret ``String``/``StringList`` parameters are ignored.
 
-This is a HERMETIC static check -- it parses HCL text only, never contacts AWS, and never reads or
-prints a secret value. It is the SSM-secret analogue of ``scripts/check_templatefile_escapes.py``
-and is wired into ``make lint`` the same way. Brace matching for a parameter block is HCL-aware
-(braces inside strings, comments, and heredocs do not truncate the body -- see ``_block_body``).
-
-Non-secret ``String``/``StringList`` params (e.g. ``jira-url``, ``jira-project``) are not secrets
-and are ignored entirely.
+This hermetic static check reads HCL text without contacting AWS or exposing secret values.
+Block matching accounts for braces inside strings, comments, and heredocs.
 """
 
 from __future__ import annotations

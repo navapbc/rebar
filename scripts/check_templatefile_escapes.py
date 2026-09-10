@@ -1,30 +1,14 @@
 #!/usr/bin/env python3
-"""Escape gate for files consumed by Terraform's ``templatefile()`` [rebar:dd30-f10d-69f3-4c36].
+"""Check interpolation escapes in files consumed by Terraform ``templatefile()``.
 
-``templatefile()`` interpolates the **whole** file as an HCL template. Shell (``#``), JS
-(``//``) and every other comment syntax is invisible to it: a comment line is template text
-like any other. ``$${`` is the escape for a literal ``${``; an unescaped ``${name}`` is an
-interpolation whose root identifier must resolve against the call's variable map.
+Terraform interprets the entire file, including shell or JavaScript comments. ``$${`` emits a
+literal ``${``; an unescaped interpolation is valid only when its root resolves through the
+call's variable map or a Terraform builtin. Terraform evaluates the whole configuration even
+with ``-target``.
 
-The motivating defect (bug dd30) is exactly that gap. Commit ``ef1a7e66a65d`` added explanatory
-comments to ``infra/terraform/user_data.sh`` that escaped the FIRST mention of a bash brace
-expansion as ``$${...}`` and left the "reduces to" half unescaped::
-
-    # PARAMS is consumed below as $${!PARAMS[@]} / $${PARAMS[$name]}, which templatefile
-    # reduces to ${!PARAMS[@]} / ${PARAMS[$name]}.   <-- interpolated, not text
-
-Terraform then parsed ``!PARAMS[@]`` as an HCL expression and rejected the ``!``, which broke
-**every** terraform operation on the repo — ``-target`` does not help, because terraform
-evaluates the entire configuration before honouring it.
-
-**ShellCheck cannot catch this class.** The file is valid bash; the breakage is in a different
-consumer. That is the whole reason this gate exists alongside ``check_shellcheck.py``.
-
-The rule is deliberately **declared-variable-aware**, not a blanket ban on ``${``. The same file
-contains four unescaped ``${data_volume_id}`` references that are legitimate and load-bearing —
-``data_volume_id`` is the one variable ``main.tf`` passes. A gate that rejected every ``${``
-would reject the feature along with the defect. So: an interpolation is a finding when its root
-identifier is neither a declared variable of that call site nor a Terraform builtin.
+This declared-variable-aware rule permits intended inputs such as ``${data_volume_id}`` while
+rejecting undeclared shell expansions, including those written in comments. ShellCheck cannot
+cover this cross-language consumer contract because the source may still be valid shell.
 """
 
 from __future__ import annotations

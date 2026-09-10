@@ -1,39 +1,15 @@
 #!/usr/bin/env python3
-"""Dependency-advisory gate: lane-aware pip-audit verdicts + advisory escalation.
+"""Apply lane-aware pip-audit verdicts and scheduled advisory escalation.
 
-Bug 63e8-9235-220f-4201. rebar commits its `uv.lock`, so the moment an advisory is
-published against a PINNED transitive dependency, a gating `pip-audit` reddens EVERY
-change in flight — authored by people who neither caused the advisory nor can fix it.
-That is what happened with click 8.2.1 / PYSEC-2026-2132: six changes across five work
-streams went red at once and each author independently started diagnosing it.
+Gerrit follows "if you touch it, you own it": blocking advisories fail ``Verified`` only
+when the change edits ``uv.lock``, a dependency declaration, or a requirements/constraints
+file. Otherwise they remain visible without blocking the unrelated change. Branch/scheduled
+main and release lanes always block; the main lane also escalates through ``advisory-alert``.
 
-The fix is not to weaken the scan (it found a real advisory in the shipped environment)
-but to route the verdict by LANE:
-
-* **Gerrit verify — "if you touch it, you own it."** A blocking advisory fails the
-  Verified gate only when the change under review TOUCHES THE DEPENDENCY MAP (`uv.lock`
-  / a `pyproject.toml` dependency declaration / a requirements or constraints file). An
-  author already editing the dependency map is in position to resolve the finding and is
-  the right owner. A change that leaves the dependency map alone is NEVER blocked by an
-  advisory — it is reported as advisory output and the job stays green.
-* **Branch / scheduled `main`** — always blocking, so a known-vulnerable pin surfaces
-  loudly on the lane whose trigger is "the world changed", not "someone pushed". The
-  mirror casts no Gerrit vote, so this red blocks no merge and no submit; what it blocks
-  is a RELEASE (below), and it escalates to a ticket via `advisory-alert`.
-* **Release** — always blocking. A release never ships on a known-vulnerable pin.
-
-Severity bar (the prevailing OSS convention): **CRITICAL and HIGH fail; MEDIUM warns;
-LOW is tracked.** pip-audit itself carries NO severity — its `VulnerabilityResult` is
-(id, description, fix_versions, aliases, published) — so severity is enriched from OSV
-(`database_specific.severity`) through the injected runner. **An advisory with no
-severity attached is treated as HIGH, i.e. it FAILS.** That fallback is deliberate and
-is the documented behaviour (docs/dependency-advisory-runbook.md): an unrated advisory
-must never be silently ignored, and because OSV enrichment is fail-soft, an enrichment
-outage makes the gate STRICTER, never weaker.
-
-Remediation — including when `override-dependencies` is the correct instrument, and why
-`constraint-dependencies` cannot express it — is in the runbook, which every failure
-message here links to.
+CRITICAL/HIGH findings fail, MEDIUM warns, and LOW is tracked. pip-audit has no severity, so
+OSV supplies it through the injected runner. Missing severity falls back to HIGH, making an
+enrichment outage stricter rather than weaker. Remediation guidance is in
+``docs/dependency-advisory-runbook.md``, linked by every failure.
 """
 
 from __future__ import annotations
@@ -48,10 +24,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-# Same sibling-import repair as `canary_bridge.py` (bug 291e-7b48-3f24-41c6): `alert_dedup`
-# lives next to this file, so the bare import resolves only when `scripts/` already leads
-# sys.path. Derive the directory from `__file__` so it holds under every invocation style;
-# the membership check keeps it idempotent.
+# Put this script's directory first so its bare sibling import works from every invocation path.
 _SCRIPTS_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
@@ -188,15 +161,7 @@ def is_db_unreachable(text: str) -> bool:
 
 
 def _retry_sleep(seconds: float) -> None:
-    """The default retry sleeper: a patchable indirection over ``time.sleep``.
-
-    Deliberately a named function rather than ``sleeper=time.sleep`` in the
-    signature. A default expression is evaluated ONCE at import, capturing whatever
-    ``time.sleep`` was then, so a test patching ``time.sleep`` afterwards could not
-    reach it and really slept the 5s + 10s backoff (ticket 5ea3-76e5-480a-4464).
-    Resolving ``time.sleep`` at CALL time keeps the seam patchable while leaving
-    production behaviour byte-identical.
-    """
+    """Resolve ``time.sleep`` at call time so tests can patch the retry seam."""
     time.sleep(seconds)
 
 

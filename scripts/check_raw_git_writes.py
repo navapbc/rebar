@@ -1,106 +1,41 @@
 #!/usr/bin/env python3
-"""Raw-git-write lint: keep store writes on the sanctioned seams.
+"""Keep ticket-store git mutations on the sanctioned write seams.
 
-Policy [rebar:d37e-4f64-3265-4f30]: every git mutation against the ticket
-store (and its mirrors) must go through one of the two sanctioned write
-seams — (1) the store seam: the locked write transactions and event appends
-(``rebar.tickets`` / ``rebar._store.event_append`` / ``rebar._commands.txn``),
-whose internals legitimately issue raw git; or (2) the reconciler seam:
-``rebar_reconciler/git_adapter.py`` and ``_ref_lock.py``. Multiple production
-bugs came from write paths that bypassed those seams with raw
-``git add/commit/rm`` — including inside workflow YAML.
+Store mutations belong in locked transactions/event appends under ``rebar.tickets``,
+``rebar._store.event_append``, and ``rebar._commands.txn``, or in the reconciler transaction
+implemented by ``git_adapter.py`` and the ref-lock modules.
 
-Two deterministic layers, each matched to what is statically decidable:
+Layer P scans Python under ``src/`` and ``scripts/``:
 
-- **Layer P** (Python, AST) over ``src/`` and ``scripts/`` ``*.py``:
-  - R1: a raw ``subprocess`` invocation whose argv carries ``git`` plus a
-    mutation verb at the git SUBCOMMAND position (so ``remote add`` /
-    ``worktree add`` never fire). Argv is resolved by LOCAL INTRA-FUNCTION
-    TRACKING (inline list literal; a local list variable built from literals
-    incl. ``.append``/``.extend``; a constant shell string), and — fail-closed
-    — an OPAQUE argv (a bare parameter or non-literal expression) fires as
-    ``unresolvable-argv``.
-  - R2: a CALL to a shared git wrapper BY NAME (``run_git``, ``run_git_write``,
-    ``_run_git``, ``_git``) passing a mutation verb resolved by the same
-    tracking. The name is taken from the CALLABLE, which for an attribute call
-    is the ATTRIBUTE — so ``core._git(...)``, ``self._git(...)`` and
-    ``mod.run_git(...)`` are linted exactly like a bare ``_git(...)``,
-    whatever the receiver. That covers the late-binding idiom where a module
-    object is passed down as a parameter (``rebar_reconciler/_ref_lock_push.py``)
-    to keep ``monkeypatch.setattr(mod, "_git", ...)`` working across a module
-    boundary. The verb is resolved by the same tracking:
-    a string literal anywhere in the arguments including nested
-    list literals, a local list passed plain or splatted, or — fail-closed —
-    an opaque argv forwarded to the wrapper (``unresolvable-argv-wrapper``).
-    Sibling wrapper names (``_git_ok``/``_git_fetch``/``_git_push``) are NOT
-    in the name set: their bodies fire the opaque class at the wrapper
-    internal and take a delegation marker, sanctioning callers transitively.
-    Any fresh thin wrapper's body fires fail-closed the same way.
-  - R3: a COMPOSITION of the reconciler seam's MUTATION PRIMITIVES made from
-    outside the write seam itself. R1/R2 enforce the MECHANISM rule ("no raw
-    subprocess git"); R3 enforces the PROTOCOL rule ("tracker mutations go
-    through the atomic transaction"). The seam's primitives — ``add``,
-    ``commit``, ``commit_tree``, ``read_tree``, ``rm_cached``, ``update_ref``
-    and ``write_tree`` in ``git_adapter.py`` — are sanctioned exports, so
-    before R3 any caller could compose them into a hand-rolled non-atomic
-    stage+commit and every individual call passed. R3 binds on the RECEIVER,
-    not the bare attribute: ``add``/``commit`` are ubiquitous method names, so
-    a call fires only where the receiver resolves to a git-adapter module —
-    the module's own name (``git_adapter.add(…)``, ``pkg.git_adapter.add(…)``),
-    an ``as``-alias, a name bound by a dynamic module loader
-    (``ga = _load("….git_adapter", "git_adapter.py")``), or a primitive
-    ``from``-imported out of a git-adapter module. Read/query exports never
-    fire, and neither does ``commit_email`` — despite the name it is
-    ``git log -1 --format=%ae``, a read.
-- **Layer W** (workflows + shell, cwd-aware within-step) over
-  ``.github/workflows/*.yml`` run-blocks and ``scripts/*.sh``: a git mutation
-  verb fires ONLY when the same step/script block establishes tracker
-  context — ``cd`` into a path containing ``.tickets-tracker``,
-  ``git -C <tracker-path>``, or a ``working-directory:`` naming it. Ordinary
-  repo commits in workflows (docs/artifacts) never fire.
+* R1 finds subprocess argv whose git subcommand is a mutation; ``remote add`` and
+  ``worktree add`` therefore do not match. It resolves literals, locally built lists
+  (including append/extend), and constant shell strings. An unresolved whole argv fails
+  closed as ``unresolvable-argv``.
+* R2 applies the same resolution to named wrappers (``run_git``, ``run_git_write``,
+  ``_run_git``, ``_git``), including attribute calls and nested/plain/splatted local lists.
+  Opaque forwarding fails closed as ``unresolvable-argv-wrapper``. More specific sibling
+  wrappers are sanctioned at their opaque wrapper body, which covers their callers.
+* R3 rejects composition of reconciler mutation primitives outside its transaction. It binds
+  receiver aliases, qualified module names, dynamic module loads, and primitive from-imports;
+  read/query exports and the read-only ``commit_email`` do not match.
 
-R3's SANCTIONED ENTRY SET is the reconciler write-seam modules themselves —
-``git_adapter.py`` (where the primitives are defined), ``_ref_lock.py`` and
-``_ref_lock_push.py`` (the ref-lock transaction they are composed under).
-They are matched by EXACT REPO-RELATIVE PATH, never by file name: a name-based
-exemption would let anyone opt out of this gate by adding a file called
-``git_adapter.py`` to an unrelated package, which for a rule whose whole value
-is precision is a hole, not a convenience. (The receiver binding above is
-name-based on purpose — there, the module's name is evidence that a call is a
-git call. Here the name would be a claim of trust, which must be earned by
-residency.) RESIDUAL, stated
-plainly: this is a per-FILE trust boundary, coarser than the per-FUNCTION
-``# raw-git-ok:`` markers inside ``git_adapter.py``, so a non-atomic
-composition ADDED inside one of those three files would be sanctioned without
-a marker. That is accepted deliberately — those files are the transaction, and
-a locked selective-commit helper (see ticket 11a9-b11b-e93d-4832) belongs in
-them — but it is a widening, not a free win.
+Layer W scans workflow run blocks and shell scripts. A mutation matches only when that same
+block establishes tracker context through ``cd``, ``git -C``, or ``working-directory``;
+ordinary repository commits are outside the rule.
 
-Sanction is a single INLINE MARKER with a MANDATORY reason — no external
-allowlist file: ``# raw-git-ok: <reason>`` on the offending line, on the
-enclosing function (the line above ``def``, the ``def`` line, or the first
-body line), or anywhere in the workflow step / shell block. A marker without
-a reason fails the lint. One marker vocabulary covers all three rules, so the
-``marker-without-reason`` violation applies to R3 unchanged. This is
-deliberately a different marker from ``# tickets-boundary-ok``
-(boundary-crossing READ/layout sanction); this one sanctions raw WRITES.
+R3 trusts exactly the repo-relative reconciler seam files ``git_adapter.py``, ``_ref_lock.py``,
+and ``_ref_lock_push.py``. This intentional per-file boundary means a new composition inside
+one of those transaction modules needs no per-function marker.
 
-ACCEPTED RESIDUAL: argv construction that crosses function boundaries or is
-computed dynamically (beyond the local intra-function tracking) resolves as
-the fail-closed opaque-argv class when the WHOLE argv reaches a wrapper name
-or a raw subprocess call unresolved; a resolved argv list whose HEAD is a
-non-literal expression (``sys.executable``, a path variable) is treated as
-non-git — laundering the ``git`` program name itself through a
-cross-function variable is accepted residual (local scalar assignments like
-``prog = "git"`` ARE tracked); and tracker targeting laundered through a
-variable in Layer W remains undetectable statically. The lint
-deterministically catches the literal, local-variable/splat, and
-opaque-forwarding shapes — which cover every historical bypass and the
-codebase's own write idioms.
+Sanction a finding with ``# raw-git-ok: <reason>`` on its line, enclosing function, or
+workflow/shell block. Empty reasons fail. This write sanction is distinct from the
+``# tickets-boundary-ok`` layout sanction.
 
-Bootstrap: ``--report`` prints the full hit inventory (marked hits with
-their reasons, unmarked hits as pending) and exits 0 — the authoritative
-disposition list for wiring this lint into enforcement.
+Accepted residuals are a git program name laundered through a cross-function/non-literal list
+head and workflow tracker targeting hidden in a variable. Locally assigned scalar program
+names are tracked, while an otherwise unresolved whole argv still fails closed.
+
+``--report`` prints marked and pending hits as the enforcement inventory and exits zero.
 """
 
 from __future__ import annotations

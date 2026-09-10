@@ -1,37 +1,25 @@
-"""Deterministic import walk over the installed ``rebar`` package and ``scripts/`` (37b9).
+"""Deterministically import the installed ``rebar`` package and top-level scripts.
 
-Operator ruling (adjudicated on 5bca-4ca9): the import/packaging-regression class is
-deterministically measurable, so it gets a deterministic check, not an LLM review criterion.
-CI's wheel probe (.github/workflows/_artifact-probe.yml) runs this inside the clean
-base-wheel venv; it is equally runnable locally with no CI dependency
-(project.portability)::
+The clean-wheel probe runs this command, which is equally usable without CI::
 
     python scripts/check_import_walk.py            # both legs
     make import-walk                               # the same, via the venv
 
-Two legs, both all-failures (never fail-fast on the first broken module):
+Both legs collect every failure instead of failing fast:
 
-* **installed-package leg** — walks every module under the *installed* ``rebar`` package
-  (``pkgutil.walk_packages``) and imports each. This catches subpackage import breakage
-  (cinderlike-faulty-yucker) and module-scope heavy-dep imports that previously only
-  reddened the optionality lane post-merge (0582-74a2, where the static ``_HEAVY``
-  allowlist was stale — a real import walk needs no such list to stay current).
+* The installed-package leg imports the package root and every module found by
+  ``pkgutil.walk_packages``. It catches broken subpackages and module-scope optional
+  dependencies without a static module allowlist.
 * **scripts/ leg** — imports each top-level ``scripts/*.py`` in an ISOLATED child process
-  with the scripts directory and the CWD stripped from ``sys.path``. That is the standalone
-  file-path contract from tests/unit/test_scripts_import_convention.py: a script must
-  resolve its bare sibling imports through its own ``__file__``-derived insert. Isolation
-  matters — one script's ``sys.path.insert`` leaking into the next module's import is
-  exactly what hid the ``alert_dedup`` escape (spinal-grayish-perch) from the full test
-  session while subset runs failed.
+  after stripping the scripts directory, CWD, and empty path from ``sys.path``. Each script
+  must therefore resolve bare sibling imports through its own ``__file__``-derived insert,
+  and one script cannot leak a path adjustment into the next.
 
 Skip policy — every skip is EXPLICIT and carries a recorded reason:
 
-* ``EXPECTED_OPTIONAL`` (installed leg) — sanctioned lazy-boundary modules that import an
-  optional extra's package at module scope by design (nothing in core imports them). Each
-  entry names the ONE top-level dep the module may lack; the module is still attempted, and
-  is recorded as a skip only when it raises ``ModuleNotFoundError`` for exactly that dep
-  while the dep is absent. Any other failure — or a failure while the dep IS installed —
-  is a real failure. Additions require a reason (the table shape enforces it).
+* ``EXPECTED_OPTIONAL`` names the one dependency each sanctioned lazy-boundary module may
+  lack. A skip requires that exact absent dependency and matching ``ModuleNotFoundError``;
+  every other failure is real. Each entry requires a reason.
 * ``SCRIPTS_SKIPS`` (scripts leg) — scripts whose import-time side effects make importing
   them unsafe. Additions require a reason.
 """
@@ -74,9 +62,7 @@ class Skip:
     reason: str
 
 
-# Installed-leg expected-optional table. Verified empirically on the base wheel (only
-# pyyaml/jsonschema/referencing installed): exactly these three of the 453 walked modules
-# fail, each with ModuleNotFoundError for the dep named here.
+# Installed-leg exceptions: each module may lack only its named dependency on the base wheel.
 EXPECTED_OPTIONAL: dict[str, ExpectedOptional] = {
     "rebar._mcp_auth": ExpectedOptional(
         dep="mcp",

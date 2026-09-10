@@ -1,61 +1,35 @@
 #!/usr/bin/env python3
-"""Shrink-only mechanism-delta ratchet (ticket 9ca8-675e-4dfb-427d, unblacked-loveless-toad).
+"""Shrink-only ratchet for repository mechanisms.
 
-56% of sampled fixes add a new mechanism (a lock, a knob, an env var, a gate script, a
-fixture, a helper, a flag) against 30% that are pure logic fixes, so the surface that
-produces future defect classes grows with every fix cycle — and nothing in the repository
-pushed back on that growth. This is the counter-pressure: a shrink-only ratchet over a
-committed per-``(kind, name)`` baseline, modelled directly on
-``scripts/check_complexity_baseline.py``, whose four-bucket ``compare()`` and
-``has_regression`` are ported essentially unchanged because they are proven.
+The committed per-``(kind, name)`` baseline counters the tendency for fixes to add locks,
+configuration, flags, gates, fixtures, and helpers. It does not forbid growth: ``--check``
+rejects only new or increased mechanisms that lack an exact, reasoned marker. Removed
+mechanisms are ``stale`` and always pass, making this a ratchet rather than a freeze.
 
-The gate does NOT forbid new mechanisms. It forbids UNJUSTIFIED ones: a new mechanism fails
-``--check`` until an author either removes it or writes down, at the definition site, why it
-had to exist. Removal is always allowed (it buckets as ``stale``), which is the asymmetry
-that makes it a ratchet rather than a freeze.
+Seven kinds partition the surface: ``lock``, ``env_var``, ``config_key``,
+``feature_flag``, ``ci_gate``, ``autouse_fixture``, and ``test_helper``. Each definition
+site yields exactly one entry:
 
-The seven kinds
----------------
-``lock``, ``env_var``, ``config_key``, ``feature_flag``, ``ci_gate``, ``autouse_fixture``,
-``test_helper``. They PARTITION the surface: every definition site yields exactly ONE
-``(kind, name)`` entry. Two consequences are load-bearing rather than incidental:
+* ``feature_flag`` owns boolean-coerced ``_SECTIONS`` entries; ``config_key`` owns the
+  non-boolean remainder.
+* Both use section-qualified ``<section>.<key>`` names so repeated keys remain distinct.
 
-  * ``feature_flag`` claims the boolean-coerced ``_SECTIONS`` entries and ``config_key``
-    claims only the non-boolean remainder. Counting a boolean key as both would demand two
-    justifications for one definition site, which a per-kind marker cannot express.
-  * ``config_key``/``feature_flag`` names are SECTION-QUALIFIED (``<section>.<key>``), never
-    the bare key. ``_SECTIONS`` repeats key names across sections — ``allow_insecure`` in
-    both ``reconciler`` and ``jira``, ``threshold`` in both ``ticket_clarity`` and
-    ``compact`` — so a bare-key baseline would silently merge four definition sites into two
-    entries, and a fifth could then be added for free.
+At the definition site, add a comment whose body is
+``mechanism-ok: <kind> <name> — <reason or ticket id>``.
 
-The marker
-----------
-::
+The marker admits only that exact key; a blank reason is an error. Placement follows the
+detection shape in ``scripts/_mechanism_delta/markers.py``.
 
-    # mechanism-ok: <kind> <name> — <reason or ticket id>
+The read-only check uses only the standard library and PyYAML and has no CI-provider
+dependency. Exit contract:
 
-It admits EXACTLY the ``(kind, name)`` it names, never its whole kind. A blank reason is
-itself an error — an unexplained marker is indistinguishable from a rubber stamp. Placement
-follows the detection shape (see ``scripts/_mechanism_delta/markers.py``).
-
-Portability
------------
-Stdlib plus PyYAML (already a dev dep, read-only). No CI provider is required or assumed:
-``--check`` runs identically from ``make lint``, a pre-commit hook, or a bare shell, so a
-checkout with no CI at all still gets the gate (``project.portability``).
-
-Exit-code contract
-------------------
-  * ``--check`` — prints the complexity baseline's summary shape
+* ``--check`` prints
     ``active=<A> new=<N> increased=<I> stale=<S>``, then one detail line per unadmitted
-    regression and one per admitted mechanism. Exits 0 only when every ``new``/``increased``
-    mechanism carries a non-blank marker for its exact key and no marker anywhere is blank.
-    ``stale>0`` alone always passes — a REMOVED mechanism is the outcome the ratchet wants.
-  * ``--update-stale`` — drops baseline entries whose definition site is gone and rewrites
-    canonical sorted JSON. REFUSES to write (nonzero, baseline byte-identical) while any
-    UNADMITTED mechanism is new or increased, so it can never bless a regression into the
-    baseline; marker-admitted mechanisms do not block the stale-entry drain.
+  regression and admitted mechanism. It exits zero only when every new/increased key has a
+  non-blank marker and no marker is blank; stale entries alone pass.
+* ``--update-stale`` drops missing definitions and writes canonical sorted JSON. It leaves
+  the baseline byte-identical and exits nonzero for any unadmitted growth; marker-admitted
+  growth does not prevent draining stale entries.
 """
 
 from __future__ import annotations

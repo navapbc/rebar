@@ -1,41 +1,17 @@
 #!/usr/bin/env python3
-"""Repo-root-from-package-location gate (bug ``impressive-doddering-alpinegoat``, c0b9).
+"""Reject repository roots derived from an installed package's location.
 
-Sibling of ``check_repo_root_from_tracker.py``. That gate drains one spelling of the
-repo-root-resolution defect CLASS — deriving the code root from the STORE path
-(``dirname(<tracker>)``). This gate drains the OTHER spelling — deriving the code root from
-the PACKAGE LOCATION, ``Path(__file__).resolve().parents[N]``.
-
-``Path(__file__).resolve().parents[N]`` is the repo root ONLY under an editable install, where
-the package lives inside the checkout. Under a non-editable / wheel install the package lives
-in ``site-packages``, so the same expression climbs to ``<venv>/lib/pythonX`` — a directory
-with no ``.git`` and no ``src/rebar``. Code that then treats it as a checkout silently
-reconciles the wrong tree (bug c0b9: the reconciler resolved
-``repo_root = <venv>/lib/python3.13`` on a non-editable CI leg).
-
-RESOLVE the code root through the ONE validated resolver, never re-derive it from the package
-location:
+``Path(__file__).resolve().parents[N]`` can identify a checkout only under an editable
+install; from a wheel it climbs within ``site-packages``. Use the validated resolver::
 
     from rebar import config
     config.reconciler_repo_root()   # REBAR_ROOT > validated package root > cwd toplevel > error
 
-WHAT IS FLAGGED — only the COMPOSING expression, never prose. The SUBSCRIPT root-climb
-``<X>.parents[<n>]`` where ``<X>`` is ``Path(__file__)`` or ``Path(__file__).resolve()``
-(``.absolute()`` too). The singular ``Path(__file__).parent`` package-relative idiom — 50+
-legitimate sites locating package data / sibling modules — is a DIFFERENT construct (an
-attribute access, not a ``.parents[...]`` subscript) and is NOT flagged. Docstrings and
-comments compose nothing and never reach the AST, so they are never flagged.
-
-SANCTION — ``# pkg-root-ok: <reason>`` (mandatory reason), honoured on the offending line,
-the line above, or the enclosing statement's first line. Used for a genuine package-location
-derivation that is NOT a checkout root, e.g. ``__main__.py``'s ``parents[3]`` package parent
-prepended to ``sys.path`` (install-location-relative by design, not a repo root).
-
-SEAM — ``# pkg-root-seam: <reason>`` exempts THE single validated resolver,
-``config.reconciler_repo_root``, whose step-2 ``parents[2]`` candidate is used ONLY after
-``_is_repo_checkout`` confirms it is a real checkout. Every reconciler surface routes repo-root
-resolution through that resolver, so the raw construct exists in exactly one validated place.
-A bare marker with no reason is itself reported.
+The AST gate flags ``Path(__file__)[.resolve()|.absolute()].parents[N]`` but not the
+package-relative ``.parent`` attribute or prose. ``# pkg-root-ok: <reason>`` sanctions a
+genuine install-location derivation on the expression, preceding line, or enclosing statement.
+``# pkg-root-seam: <reason>`` is reserved for ``config.reconciler_repo_root``, whose candidate
+must pass checkout validation. Either marker without a reason is reported.
 """
 
 from __future__ import annotations

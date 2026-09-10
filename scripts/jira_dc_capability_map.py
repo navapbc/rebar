@@ -1,36 +1,19 @@
 #!/usr/bin/env python3
-"""Map the pinned Jira Data Center harness's capabilities via an agentic LLM run.
+"""Map the pinned Jira Data Center harness through an agentic LLM run.
 
-Ticket 259b-b7da-a346-4785: an on-demand, `workflow_dispatch`-only CI job that boots the
-digest-pinned Jira DC harness (`tests/external/live_jira_dc/`) and interrogates it with an
-Opus agent so we DECLARE the DC environment contract instead of discovering it live, one
-question at a time, over ~35-minute CI round trips.
-
-**This is an AUTHORING tool, not a test-path component.** It runs once per image re-pin,
-its output is a structured artifact (a candidate environment contract + the raw
-request/response evidence behind every answer) that a HUMAN reviews before any of it is
-committed as data consumed elsewhere. It never runs on push/PR/schedule (see the workflow),
-and the agent is instructed to REPORT findings, never to fix the harness, the repo, or
-rebar's own config — the only thing it may mutate is scratch state inside the ephemeral,
-throwaway Jira DC container itself (which the calling workflow destroys after the run).
+This on-demand, ``workflow_dispatch``-only authoring tool runs after an image re-pin. It emits
+a candidate environment contract plus raw request/response evidence for human review; no
+output becomes runtime data automatically. The agent reports rather than fixes findings and
+may mutate only scratch state in the disposable Jira container.
 
 Usage (inside CI, after the harness at ``JIRA_DC_BASE_URL`` answers ``/rest/api/2/serverInfo``):
 
     python scripts/jira_dc_capability_map.py --output-dir /tmp/jira-dc-map
 
-Requires the ``[agents]`` extra and a model credential the framework can resolve
-(``ANTHROPIC_API_KEY`` by default; see ``docs/llm-framework.md``). Mints its own admin
-Personal Access Token via ``POST /rest/pat/latest/tokens`` (mirroring
-``tests/external/live_jira_dc/conftest.py``'s ``jira_dc_pat`` fixture) — no token is
-supplied or stored outside this process.
-
-Lives under ``scripts/`` (not ``src/rebar/``) because it is project-specific CI tooling for
-mapping ONE throwaway Jira Data Center image, not a capability the shipped library offers
-its consumers: it must never count against the library's module-size budget or the
-clean-core optionality gate, and it imports internal reconciler modules
-(``rebar_reconciler.adapters.jira*``) that are not part of rebar's public surface. It DOES
-import the public ``rebar.llm`` framework as a library, per the ticket's instruction to
-reuse rebar's own agentic LLM runtime rather than hand-rolling a client.
+It requires the ``[agents]`` extra and a framework-supported model credential. The process
+mints its own short-lived admin PAT and does not persist it externally. This project-specific
+tool stays under ``scripts/`` so its internal reconciler imports do not become library surface
+or affect clean-core optionality; it reuses the public ``rebar.llm`` framework.
 """
 
 from __future__ import annotations
@@ -49,21 +32,14 @@ from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# The Epic-field readiness vocabulary is SHARED with the live harness fixture and the
-# deterministic probe (bugs 9790-cafa-dffa-462e / 941b-f049-5f29-4410). This script imports
-# it for its DISCRIMINATOR only (`customfield_count`) — it must NOT call
-# `await_required_fields`, which is post-create-only and would deadlock here (see
-# `epic_field_report_problem`). It lives next to this file; the insert is defensive so the
-# import also works when this script is invoked from elsewhere.
+# Reuse only the shared Epic-field inventory discriminator. The post-create readiness wait
+# would deadlock before this agent creates the project that provisions those fields.
 _SCRIPTS_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 import jira_dc_field_readiness  # noqa: E402
 
-# Reach the vendored reconciler engine the same way every live_jira_dc conftest does: the
-# engine lives at <repo>/src/rebar/_engine and is not importable as `rebar_reconciler` unless
-# that directory is put on sys.path first. `tests/_engine_path.py` is the single place that
-# layout is encoded, so it — not a re-derived parent-count — is reused here.
+# Reuse the test suite's single engine-layout resolver before importing vendored reconciler code.
 _TESTS_DIR = _REPO_ROOT / "tests"
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
@@ -72,10 +48,7 @@ from _engine_path import engine_dir  # noqa: E402
 if str(engine_dir()) not in sys.path:
     sys.path.insert(0, str(engine_dir()))
 
-# The four hardcoded vocabularies + the five length-limit constants this job maps against —
-# imported LIVE from their single source-of-truth modules (never a frozen copy pasted into
-# this script), because the whole point of the mapping run is to diff the CURRENT map against
-# the instance. A copy here would silently drift from what the reconciler actually ships.
+# Import live vocabularies and limits so the map compares the harness with what ships now.
 from rebar_reconciler.adapters.jira.adf import _ADF_DESCRIPTION_LIMIT  # noqa: E402
 from rebar_reconciler.adapters.jira.comment_limits import _JIRA_COMMENT_MAX_CHARS  # noqa: E402
 from rebar_reconciler.adapters.jira_family.rich_text import WIKI_DESCRIPTION_LIMIT  # noqa: E402
@@ -99,18 +72,10 @@ _DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 def harness_image_digest(dockerfile: Path | None = None) -> str | None:
-    """Read the harness image digest from the ONE place that decides which image is
-    built: the vendored Dockerfile's ``FROM`` line — never a second, hand-copied literal
-    that could drift from the first. ``dockerfile`` defaults to the real vendored harness
-    Dockerfile, resolved relative to the repo root; pass an override to make this
-    derivation testable against a fixture.
+    """Read the image digest from the vendored Dockerfile's authoritative ``FROM`` line.
 
-    Deliberately does not raise: this runs mid-way through a long, billable live CI run,
-    and this value is metadata about the run, not something the run depends on — an
-    aborted run over a missing/malformed pin would throw away the evidence the run exists
-    to collect. A missing Dockerfile or a ``FROM`` line without an ``@sha256:`` digest
-    both report as "no digest" (``None``) rather than falling back to a remembered value,
-    which would silently mislabel the artifact just as badly as the bug this replaces.
+    Missing files or pins return ``None`` instead of aborting an expensive evidence run or
+    mislabeling its artifact with a copied fallback. ``dockerfile`` permits fixture coverage.
     """
     path = dockerfile if dockerfile is not None else _HARNESS_DOCKERFILE
     try:
@@ -515,7 +480,7 @@ def _instructions(base_url: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────
-# Post-run validation of the Epic-field half of the report (bug 4a6d-5bbc-44f4-4a56)
+# Post-run validation of the Epic-field evidence.
 # ─────────────────────────────────────────────────────────────────────────────────────
 
 #: The contract fields whose absence this validation refuses to take on trust.
@@ -523,12 +488,10 @@ _EPIC_FIELD_KEYS = ("epic_link_field_id", "epic_name_field_id")
 
 
 def _last_field_inventory(evidence: list[dict[str, Any]]) -> tuple[int, object] | None:
-    """The most recent USABLE ``GET /rest/api/2/field`` in the evidence log.
+    """Return the latest usable field inventory, or ``None`` when none was captured.
 
-    "Usable" is exactly ``jira_dc_field_readiness``'s definition — a 200 whose body is a
-    list of field dicts. A 401/503 or an error string is skipped rather than counted as an
-    empty inventory, so a transport failure never masquerades as "this instance has no
-    custom fields". Returns ``None`` when the run captured no usable field read at all.
+    The shared discriminator accepts only a successful list of field records, so transport
+    errors cannot masquerade as an empty custom-field inventory.
     """
     for entry in reversed(evidence):
         if str(entry.get("method", "")).upper() != "GET":
@@ -546,34 +509,14 @@ def _last_field_inventory(evidence: list[dict[str, Any]]) -> tuple[int, object] 
 
 
 def epic_field_report_problem(result: dict[str, Any], evidence: list[dict[str, Any]]) -> str | None:
-    """Why the run's Epic-field answer cannot be vouched for — or ``None`` if it can.
+    """Explain why the recorded Epic-field answer is unverified, or return ``None``.
 
-    THE DEFECT THIS CLOSES (bug 4a6d-5bbc-44f4-4a56). This script's report is the authority
-    a human uses to update ``_REQUIRED_FIELDS`` / ``_PROJECT_TEMPLATE`` in
-    ``tests/external/live_jira_dc/conftest.py``. ``Epic Link``/``Epic Name`` are GreenHopper
-    custom fields provisioned on the FIRST Jira Software project create, not at plugin start
-    (run 30981084637 — bug 941b-f049-5f29-4410). An agent that read ``/rest/api/2/field``
-    before creating its first project therefore sees a perfectly healthy instance with 27
-    system fields and zero ``customfield_*`` entries, and can truthfully report "no Epic Link
-    id" — which a reader will read as "this image dropped the Epic fields". The report does
-    not fail, so nothing makes them notice.
-
-    THE DISCRIMINATOR IS THE INVENTORY, NOT THE CLOCK, so this is a post-run check on
-    recorded evidence and NOT a pre-run wait. A pre-run ``await_required_fields`` would wait
-    for a thing only the agent's own project creates can produce — the deadlock 941b landed
-    to remove — and that module bans the call site in terms.
-
-    * Epic ids reported **and** non-empty → nothing to check.
-    * An id reported absent while the inventory holds **other** ``customfield_*`` entries →
-      provisioning demonstrably happened, so the absence is a real degrade. Accepted.
-    * An id reported absent while the inventory holds **zero** ``customfield_*`` entries, or
-      while no usable field read was captured at all → the claim is indistinguishable from
-      "no Jira Software project existed yet". UNVERIFIED; the caller fails the job.
-
-    A null optional dumps OUT of the structured payload entirely (``model_dump
-    (exclude_none=True)`` in ``rebar.llm.findings.finalize_outcome``), so "reported absent"
-    means a missing key just as much as an explicit ``None`` or ``""`` — all three are read
-    the same way here.
+    Jira provisions Epic fields on the first Software project creation. Therefore this
+    post-run check uses captured inventory rather than a pre-run wait: absent Epic ids are
+    credible only after other ``customfield_*`` entries prove provisioning occurred. Zero
+    custom fields or no usable inventory leaves the claim unverified and fails the caller.
+    Missing keys, ``None``, and empty strings all count as absent because null optionals may be
+    omitted from the structured payload.
     """
     absent = [key for key in _EPIC_FIELD_KEYS if not result.get(key)]
     if not absent:
@@ -682,12 +625,8 @@ def main(argv: list[str] | None = None) -> int:
     exit_code = 0
     result: dict[str, Any] | None = None
     try:
-        # A standalone, one-off "local mode" gate session (rebar.llm.gate_source), the
-        # sanctioned seam for a NEW agentic operation outside the review/verify gates
-        # (see rebar.llm.gate_context.assert_gated). This op does not read repo files or ticket
-        # state for its OWN purpose (see the system prompt), so `local` (the in-place
-        # checkout, no snapshot materialization) is the right mode — never `attested`,
-        # which would fetch/materialize a snapshot this op has no use for.
+        # This standalone operation uses the sanctioned local gate source: it needs neither
+        # repository/ticket material nor the snapshot and attestation that would accompany it.
         handle = gate_source.resolve_gate_handle(
             ref=None, source="local", repo_root=str(_REPO_ROOT), fetch=False
         )
@@ -699,10 +638,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"::error::the mapping run failed: {exc}", file=sys.stderr)
         exit_code = 1
     finally:
-        # Bug 4a6d-5bbc-44f4-4a56: an answer that declares the Epic fields absent is only
-        # believable if the recorded inventory shows provisioning already happened. Checked
-        # HERE, on the evidence the run captured, because the fields' precondition is the
-        # agent's own first project create — nothing before the run could have produced them.
+        # Validate absence against post-create evidence, because this run creates the
+        # project that satisfies the fields' provisioning precondition.
         epic_problem = None if result is None else epic_field_report_problem(result, _EVIDENCE)
         if epic_problem is not None:
             print(f"::error::{epic_problem}", file=sys.stderr)
@@ -718,10 +655,7 @@ def main(argv: list[str] | None = None) -> int:
                     "model": cfg.model,
                     "rest_call_count": len(_EVIDENCE),
                     "run_succeeded": result is not None,
-                    # "verified" | "unverified" | "not_run" — recorded in the artifact
-                    # itself, so a human reading capability_map.json out of the CI zip
-                    # (where the ::error:: annotation is not attached) still learns that
-                    # the Epic-field answer was refused.
+                    # Persist verification status because downloaded artifacts omit CI annotations.
                     "epic_field_report": (
                         "not_run"
                         if result is None

@@ -1,61 +1,23 @@
 #!/usr/bin/env python3
-"""Drift gate: the MCP tool surface vs the ``rebar`` library facade.
+"""Detect drift between MCP tools and the ``rebar`` library facade.
 
-WHY THIS EXISTS
----------------
-rebar ships ONE store behind three surfaces — the library (``import rebar``), the CLI, and
-the MCP server. The MCP tools are thin closures over the library facade (``rebar.__all__``),
-but NOTHING cross-checks the two: a library function can gain a parameter, lose one, or be
-renamed while its MCP tool keeps the old shape, and every existing gate stays green. The MCP
-reference generator (``scripts/gen_mcp_reference.py``) only documents what the registrars
-expose; it never looks at the library at all. So the two surfaces can drift silently, and an
-agent driving rebar over MCP gets a capability the library grew months ago — or does not.
+The committed ``tests/unit/mcp_library_parity_manifest.json`` classifies every tool as:
 
-This gate pins the correspondence in a COMMITTED manifest
-(``tests/unit/mcp_library_parity_manifest.json``) and fails the build when either side moves
-away from it. Every tool is classified by how it reaches the facade:
+* ``exact`` when its name is a facade symbol;
+* ``co_names`` when its closure calls a differently named facade symbol; or
+* ``mcp_only`` when it has no library counterpart.
 
-    exact     the tool name IS a facade symbol (``show_ticket`` -> ``rebar.show_ticket``)
-    co_names  the closure calls a facade symbol under a different tool name
-              (``claim_ticket`` -> ``rebar.claim``)
-    mcp_only  no library counterpart at all — legitimately MCP-shaped (``gate_status``)
+Tools with a counterpart must retain parameter parity. The manifest's category-level
+normalization removes ``repo_root``, which the server resolves rather than exposing to MCP
+callers. ``mcp_only`` tools have no signature comparison, but their shape remains recorded.
 
-NORMALIZATION (why a raw parameter diff would be useless)
---------------------------------------------------------
-Every exact-match tool omits the library's ``repo_root`` parameter, because the MCP server
-resolves the store root from its own environment rather than from the caller. That is a
-CATEGORY-LEVEL rule, not per-tool drift: diffing raw parameter sets would flag all 35
-exact-match tools and the gate would be noise. The rule is therefore recorded ONCE, under
-the manifest's ``normalization`` key, and applied during comparison.
+Legitimate parameter differences require a ``divergence`` object with a kind and non-empty
+reason. Descriptor coherence is checked independently: every divergence needs a reason,
+``exact``/``co_names`` require a non-null ``library_symbol``, and ``mcp_only`` requires null.
 
-Parameter parity is required for every tool that HAS a counterpart — ``exact`` and ``co_names``
-alike. A ``co_names`` correspondence is heuristic only while it is being DERIVED; once it is
-written into the committed manifest a human has reviewed it, and from then on it is a claim
-that the tool and the facade function are the same operation, so an unexplained parameter
-difference is drift. ``mcp_only`` tools have no counterpart and nothing to compare, so they are
-held to no signature contract; the manifest still records their shape.
-
-DECLARED DIVERGENCE
--------------------
-A tool whose parameters legitimately differ from its counterpart's carries a ``divergence``
-block with a ``kind`` and a NON-EMPTY ``reason``. An empty or absent reason is an UNDECLARED
-divergence and fails — that is the whole point: the gate accepts justified difference, never
-silent difference.
-
-The manifest is also checked for coherence ON ITS OWN TERMS, because a human hand-edits it to
-write those reasons and a bad edit must fail loudly rather than quietly disabling a check:
-
-* a ``divergence`` block ALWAYS needs a non-empty ``reason``, on ANY entry — not only on the
-  ``exact`` entries whose parameters are compared, and not only when the surfaces differ;
-* ``correspondence`` and ``library_symbol`` must agree — ``exact``/``co_names`` name a facade
-  counterpart so the symbol cannot be null, and ``mcp_only`` asserts there is none so the
-  symbol must be null.
-
-To fix a failure: run ``python scripts/check_mcp_library_parity.py --update`` from the repo
-root to rewrite the manifest from the live surfaces, then review the diff. ``--update``
-carries existing ``divergence`` declarations forward and writes an EMPTY-reason stub for any
-newly-diverging tool, so a fresh divergence still fails ``--check`` until a human writes the
-justification into the manifest.
+Run ``python scripts/check_mcp_library_parity.py --update`` from the repository root, then
+review the manifest diff. The update preserves existing divergence declarations and emits an
+empty-reason stub for a new one, which keeps ``--check`` failing until it is justified.
 """
 
 from __future__ import annotations
@@ -153,21 +115,10 @@ def _shipped(obj: Any) -> bool:
 
 
 def _facade_function(facade: Any, symbol: str) -> Any:
-    """The SHIPPED implementation behind a facade name.
+    """Return the shipped implementation, even when a test has rebound the facade symbol.
 
-    ``rebar.<symbol>`` is a plain module attribute, so a harness can rebind it — the unit
-    tier's autouse ``_no_real_session_log_writes`` fixture replaces
-    ``rebar.append_session_log`` with a ``(*_args, **_kwargs)`` stub for the whole tier. A
-    gate that read the signature straight off the facade would then report the STUB's
-    parameters and fail on a repository that has not drifted at all. So when the bound
-    attribute is not one of rebar's own definitions, recover it from the submodule that
-    defines it (the defining module is the one whose name matches ``__module__``, which
-    keeps the resolution deterministic when a name is re-exported).
-
-    If the recovery finds nothing, this RAISES rather than falling back to the stand-in.
-    Returning the stand-in would make the gate measure something rebar does not ship and
-    then report parity it never verified — a silently wrong basis is worse than a loud
-    failure. It should never trigger; if it does, the gate's basis is broken and must show.
+    A non-shipped facade value is recovered from the defining ``rebar.*`` submodule. Missing
+    recovery raises instead of measuring a stand-in that the package does not ship.
     """
     obj = getattr(facade, symbol)
     if _shipped(obj):
@@ -288,13 +239,7 @@ _SYMBOL_REQUIRED = frozenset({"exact", "co_names"})
 
 
 def _validate_symbol_pairing(name: str, entry: dict) -> list[str]:
-    """``correspondence`` and ``library_symbol`` must agree with each other.
-
-    ``exact``/``co_names`` both ASSERT a facade counterpart, so a null symbol is incoherent;
-    ``mcp_only`` asserts there is none, so a symbol is equally incoherent. The manifest is
-    hand-editable (a human writes divergence reasons into it), and either mismatch silently
-    disables a check rather than tripping one — so it must fail loudly.
-    """
+    """Require a symbol for ``exact``/``co_names`` and null for ``mcp_only``."""
     correspondence = entry.get("correspondence")
     symbol = entry.get("library_symbol")
     if correspondence in _SYMBOL_REQUIRED and not symbol:
@@ -311,13 +256,9 @@ def _validate_symbol_pairing(name: str, entry: dict) -> list[str]:
 
 
 def _validate_divergence(name: str, entry: dict) -> list[str]:
-    """A ``divergence`` block ALWAYS needs a non-empty ``reason``, wherever it appears.
+    """Require every divergence declaration to carry a non-empty reason.
 
-    Checked independently of ``correspondence`` and of whether the surfaces currently
-    differ: a declaration with no justification is malformed on ANY entry, exactly as a bare
-    ``# read-via:`` marker is an error in ``scripts/check_config_reads.py``. Without this the
-    mandatory-reason convention would only hold on the ``exact`` entries whose parameters the
-    gate compares, and an empty reason could sit unnoticed on every other tool.
+    This applies independently of correspondence type and current surface equality.
     """
     if "divergence" not in entry:
         return []

@@ -1,22 +1,8 @@
 #!/bin/sh
-# Install Gerrit's commit-msg hook (the Change-Id stamper) SAFELY, from anywhere.
-#
-# Bug 84aa. The command this replaces —
-#
-#     curl -sLo "$(git rev-parse --git-path hooks/commit-msg)" <url>
-#
-# — is worktree-unsafe. Hooks live in the git COMMON dir, so from inside a linked
-# worktree `--git-path hooks/commit-msg` resolves to the MAIN checkout's
-# `.git/hooks/commit-msg` and the curl overwrites the shared, pre-commit-managed
-# wrapper for EVERY worktree at once. `.pre-commit-config.yaml` documents the intended
-# arrangement (pre-commit MIGRATION mode: the wrapper at `commit-msg` chained to the
-# Gerrit stamper at `commit-msg.legacy`) and warns that dropping it "would drop the
-# Change-Id stamp and break every push to Gerrit". The failure is silent at commit time
-# and only surfaces at `git push gerrit`, possibly in a different worktree.
-#
-# This script is cwd-independent (it resolves the common dir deliberately),
-# non-destructive (it never writes over a hook it did not put there), and idempotent
-# (already-working Change-Id stamping is a no-op).
+# Safely install Gerrit's Change-Id hook from any directory or linked worktree.
+# Hooks share the git common directory; when pre-commit owns `commit-msg`, its migration
+# chain expects the Gerrit stamper at `commit-msg.legacy`. This installer resolves that common
+# directory, preserves unknown hooks, and is idempotent when either target already stamps IDs.
 #
 # Usage:   scripts/install-gerrit-hook.sh
 # Env:     REBAR_GERRIT_HOOK_URL     override the download URL

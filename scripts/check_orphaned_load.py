@@ -1,66 +1,32 @@
 #!/usr/bin/env python3
-"""On-demand detector for orphaned high-CPU compute processes [rebar:f3d9-ecd8-df72-4fa1].
-
-Agents legitimately spawn CPU saturation workers to reproduce timing-dependent
-failures. The defect this check exists for is that the workers outlive the
-investigation: on 2026-08-22 three sessions spawned ``python -c "while True:
-pass"`` load generators, none of which were reaped. Thirty-eight of them
-reparented to PID 1 and ran for **four days** at roughly 1341% combined CPU on a
-six-performance-core host, driving load average to 58 until applications could no
-longer launch.
+"""Report orphaned high-CPU helpers without modifying the process table.
 
 Two signals together identify that shape, and neither alone is sufficient:
 
-* **PPID == 1** — the spawning harness exited without reaping the child, so
-  nothing associates the process with the finished investigation. Plenty of
-  legitimate daemons are also reparented to PID 1, which is why this is only half
-  the test.
-* **accumulated CPU time > 3600 seconds** — the leaked batch had burned roughly
-  138,000 CPU-seconds (38 processes x ~40% CPU x 4 days). An idle reparented
-  daemon rarely passes an hour of *CPU* time in its whole life, so an hour
-  separates the two populations by more than an order of magnitude at both ends.
-  ``--min-cpu-seconds`` moves the line for hosts that run legitimate long-lived
-  compute under PID 1.
+* ``PPID == 1`` shows that the spawner exited without reaping the child.
+* Accumulated CPU above 3,600 seconds separates the observed leaked workers
+  (about 138,000 CPU-seconds over four days) from ordinary idle daemons.
 
-**System-owned executables and GUI app bundles are excluded by default, and that is
-load-bearing.**
-PPID 1 means something weaker on a desktop OS than the plain reading suggests:
-every ``launchd``-managed daemon is parented to PID 1 by design, and they
-legitimately accumulate days of CPU. Measured on the affected host, the
-unfiltered contract flagged **33** processes, of which **29** were system
-daemons — WindowServer at 111.6h, the Virtualization VM at 86.7h, JamfDaemon,
-Terminal. A report that is 88% known-good noise gets skimmed and ignored, which
-means the unfiltered check would not have surfaced the incident it exists for.
-Excluding ``_SYSTEM_PATH_PREFIXES`` leaves **4**, one of which is a genuine hit
-of the target class: an orphaned agent-job script
-(``/bin/bash ~/.claude/jobs/*/tmp/watch-tracker.sh``, 3.0h of CPU at PPID 1) that
-the noise was burying. User desktop applications installed as ``.app`` bundles
-under ``/Applications`` are launchd-parented by the same OS mechanism and are not
-agent-spawned helpers. ``--include-system`` opts these default suppressions back
-in, and the suppressed count is always printed rather than silently dropped.
+``--min-cpu-seconds`` adjusts the threshold for hosts with legitimate long-lived compute.
 
-The report remains a triage list, not a verdict: what identifies a leak is its
-command line — an ad-hoc ``python -c``, a helper from a finished investigation —
-so read the commands, not just the count.
+Because launchd/init also parents legitimate daemons to PID 1, system-owned paths and macOS
+``.app/Contents/MacOS`` executables are suppressed by default. The measured unfiltered set
+contained 29 system daemons among 33 candidates. ``--include-system`` restores all suppressed
+records, and the report always states the suppressed count.
 
-**Deliberately an on-demand command, not a gate.** It reports on live host state,
-which is not a property of the tree under review, so wiring it into ``make lint``
-or CI would make the build depend on whatever else the workstation happens to be
-running. It is a plain command with no CI-provider dependency
-(``project.portability``)::
+The output is a triage list: inspect each command line before acting.
+
+It is deliberately on demand, not a gate, because live host state is not a property of the
+reviewed tree. It has no CI-provider dependency::
 
     python scripts/check_orphaned_load.py
     python scripts/check_orphaned_load.py --min-cpu-seconds 600
 
-Exit status is 0 when nothing is flagged and 1 when at least one process is. It
-is strictly READ-ONLY: it inspects the process table and never signals, kills, or
-spawns anything. Reclaiming a flagged batch is an operator decision — see
-``docs/orphaned-processes.md`` for the teardown guidance.
+Exit status is zero when nothing is flagged and one otherwise. The command is read-only: it
+never signals, kills, or spawns. Teardown remains an operator decision documented in
+``docs/orphaned-processes.md``.
 
-The process-inspection seam (``list_processes``) is injectable via ``main``'s
-``lister`` argument precisely so tests can feed synthetic records: a test that
-spawned a real unbounded CPU burner to have something to detect would reproduce
-the defect this check exists to catch.
+Tests inject ``list_processes`` through ``main(lister=...)`` rather than spawning load.
 """
 
 from __future__ import annotations
@@ -75,23 +41,11 @@ from dataclasses import dataclass
 #: Parent PID of a process whose spawner exited without reaping it.
 ORPHAN_PPID = 1
 
-#: CPU-seconds an orphan must exceed to be reported. See the module docstring for
-#: the arithmetic: the incident's workers were ~2 orders of magnitude above this,
-#: and a legitimate reparented daemon is well below it.
+#: One CPU-hour separates the observed leaked workers from ordinary reparented daemons.
 DEFAULT_MIN_CPU_SECONDS = 3600
 
-#: Path prefixes owned by the OS vendor or by managed-endpoint software, whose
-#: processes are parented to PID 1 by ``launchd``/``init`` as a matter of design.
-#: Chosen from the 29 daemons measured on the affected host, not from guesswork:
-#: ``/System/`` (WindowServer, Finder, WindowManager, driver extensions, the
-#: Virtualization VM), ``/usr/libexec/`` (opendirectoryd, syspolicyd, logd),
-#: ``/usr/sbin/`` (cfprefsd, notifyd, bluetoothd), and the JAMF endpoint-management
-#: path. ``/usr/bin/`` and ``/Library/Apple/`` are the remaining vendor-owned
-#: locations on the same footing; ``/sbin/`` and ``/usr/lib/systemd/`` are their
-#: Linux analogues, included by the same rule though this host could not exhibit
-#: them. Deliberately NOT here: ``/opt/homebrew/``, ``/usr/local/``,
-#: ``/Applications/`` and anything under a user's home — those are exactly where a
-#: leaked helper lives.
+#: OS and managed-endpoint prefixes whose processes launchd/init legitimately reparents.
+#: Home, Homebrew, and local paths remain visible; GUI bundles are classified separately.
 _SYSTEM_PATH_PREFIXES = (
     "/System/",
     "/usr/libexec/",
@@ -103,8 +57,7 @@ _SYSTEM_PATH_PREFIXES = (
     "/Library/Application Support/JAMF/",
 )
 
-#: Operator-owned desktop apps launchd reparents to PID 1 by design. They may burn
-#: more than an hour of CPU without being a leaked agent helper.
+#: macOS GUI bundles are launchd-owned even when installed by the operator.
 _GUI_APP_PREFIXES = ("/Applications/",)
 
 #: ``ps`` output spec. Field order matches ``_parse_ps_line``; ``command=`` is last

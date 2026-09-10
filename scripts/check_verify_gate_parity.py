@@ -1,29 +1,13 @@
 #!/usr/bin/env python3
-"""CI drift-guard: the Gerrit ``Verified`` gate must depend on every job that gates main.
+"""Keep Gerrit's ``Verified`` vote aligned with every job that gates main.
 
-WHY THIS EXISTS
----------------
-The Gerrit ``Verified`` vote is THE landable CI gate (AGENTS.md: "build/test/lint/
-typecheck"). It is cast by ``.github/workflows/gerrit-verify.yaml``'s ``vote`` job,
-which folds the run conclusion of the jobs in its ``needs`` into a single +1/-1
-(via im-open/workflow-conclusion). The push/PR "mirror" lanes each define the
-unconditional jobs that gate ``main`` post-merge.
+The ``vote`` job in ``gerrit-verify.yaml`` folds its ``needs`` into the landable vote. This
+gate requires those dependencies to include every unconditional gating job in the push/PR
+mirror lanes, preventing a change from passing pre-merge while making main red afterward.
 
-If a job gates ``main`` post-merge but is ABSENT from ``vote.needs``, a change that
-breaks it earns ``Verified +1`` pre-merge yet reddens ``main`` after it lands — the
-green-verify / red-main hole (jira-reb-1163: ``artifact-probe`` and ``eval-discipline``
-gated main but were never in ``vote.needs``). Nothing structurally forbade the drift.
-
-This PARITY gate fails the build when ``vote.needs`` is NOT a superset of every
-unconditional gating job across the mirror lanes below. Style mirrors the
-prompt-index / server.json / criteria-routing drift gates in ``_build-and-test.yml``.
-
-To fix a failure: add the reported job(s) to ``vote.needs`` in ``gerrit-verify.yaml``
-(and make sure the job actually RUNS in that lane — e.g. by calling the shared reusable
-workflow with the Gerrit patchset inputs, the way ``build-and-test`` / ``optionality``
-do). If a job legitimately must not gate the Verified vote (e.g. it only runs on a
-manual ``workflow_dispatch`` / ``schedule``, never on the push/PR critical path), add it
-to ``EXCLUDED_JOBS`` below with a one-line justification.
+Add missing jobs to ``vote.needs`` and ensure they run with the Gerrit patchset inputs.
+Jobs confined to manual or scheduled, non-critical lanes belong in ``EXCLUDED_JOBS`` with a
+justification.
 """
 
 from __future__ import annotations

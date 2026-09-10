@@ -1,61 +1,28 @@
 #!/usr/bin/env python3
-"""Repo/config-root-from-tracker gate (bug auspicial-friended-merganser, 2ec7-be89-9b01-496a).
+"""Reject repository/config roots composed from the relocatable ticket-store path.
 
-The ticket store is RELOCATABLE: ``REBAR_TRACKER_DIR`` (and the ``tracker.dir`` config key)
-can move it OUT of the checkout entirely — the deployed MCP server runs exactly that topology
-(store at ``/var/gerrit/site/mcp-tickets``, code at ``/app``). Code that derives the
-repo/config root as ``os.path.dirname(tracker)`` is therefore correct ONLY for a co-located
-store: on a relocated one the tracker's parent is a directory with no ``rebar.toml``, so every
-config read there silently resolves an EMPTY config. That is how the ``transition
-open -> in_progress`` plan-review start-work gate came to read its flag as OFF and stop
-enforcing on the deployed server, and how clarity/compaction config was silently ignored.
-
-The store is RELOCATABLE — RESOLVE the code root, never compose it from the store path:
+``REBAR_TRACKER_DIR`` and ``tracker.dir`` may place the store outside the checkout, so its
+parent cannot safely locate ``rebar.toml``. Resolve the code root instead::
 
     from rebar import config
     config.repo_root(repo_root)       # explicit repo_root > REBAR_ROOT > git toplevel of cwd
     config.repo_root_or_none()        # same, but None instead of raising when cwd is gone
 
-or thread the in-scope ``repo_root`` parameter (``None`` == discover) down to the config read.
+Alternatively, thread the in-scope ``repo_root`` parameter to the config read.
 
-WHAT IS FLAGGED — only the COMPOSING expression, never prose. A call of the shape
-``os.path.dirname(<store>)`` (also ``dirname(...)`` / ``_os.path.dirname(...)``) where
-``<store>`` is:
+The AST gate flags ``os.path.dirname(<store>)`` (including bare and ``_os`` aliases) when the
+store is:
 
-  1. the name ``tracker``                       ``os.path.dirname(tracker)``
-  2. a ``*.tracker_dir(...)`` resolver call      ``os.path.dirname(reads.tracker_dir())``
-  3. any of the above wrapped in a path-normaliser — ``str(...)``, ``os.path.realpath(...)``,
-     ``os.path.abspath(...)`` (and bare ``realpath``/``abspath``) — which name the SAME
-     directory, e.g. ``os.path.dirname(os.path.realpath(tracker))``
-  4. ``StorePaths(<tracker>).canonical`` — the resolved store path — wrapped or bare, e.g.
-     ``os.path.dirname(StorePaths(tracker).canonical)``
+1. the name ``tracker``;
+2. a ``*.tracker_dir(...)`` call;
+3. either form wrapped by ``str``, ``realpath``, or ``abspath``; or
+4. a wrapped or bare ``StorePaths(<tracker>).canonical``.
 
-The wrappers in cases 3–4 merely normalise the path — they name the same directory — so they
-compose the store's parent exactly as the bare form does. ``str()`` was the variant the
-enumerated ``auspicial-friended-merganser`` list missed (composer.py / _store/sync.py); the
-``realpath()``/``abspath()`` family and the ``StorePaths(...).canonical`` spelling (the
-``feisty-intense-mandrill`` blind spot) are unwrapped by ``flowered-basaltic-beagle`` so the
-gate is airtight for the WHOLE class: the only places allowed to derive a root from a tracker
-are the shared seam and the sanctioned store-repo sites below.
-
-Docstrings, comments, and error text are NOT flagged — they compose nothing, and comments never
-reach the AST at all.
-
-SANCTION — ``# repo-root-ok: <reason>``, with a MANDATORY reason, honoured on the offending
-line, the line above, or the enclosing statement's first line (mirrors
-``# tickets-boundary-ok:`` / ``# raw-git-ok:``). The sanctioned store-repo sites are the
-``_store/sync.py`` ``tickets_branch`` / ``tickets_remote`` reads in ``reconverge``, which name
-the branch and remote of the STORE's own git repo (``git -C tracker``) with no code
-``repo_root`` in scope — the store's parent genuinely IS the right root there. No CONFIG-root
-site is allowlisted.
-
-SEAM — ``# repo-root-seam: <reason>`` exempts THE single canonical helper that resolves the
-store's own git-repo root from a tracker (``rebar._proc.store_repo_root``). Every legitimate
-store-repo site routes through that helper instead of hand-rolling ``dirname(...tracker...)``,
-so the composing expression exists in exactly one place. This marker is DISTINCT from
-``# repo-root-ok`` precisely so the "no deferred config-root site behind a marker" invariant
-keeps counting only ``# repo-root-ok`` sanctions. A bare marker with no reason is itself
-reported.
+These wrappers preserve the directory, and prose is excluded structurally. A reasoned
+``# repo-root-ok:`` marker sanctions only genuine store-repository derivations such as the
+store branch/remote reads; no config-root site is allowed. The distinct reasoned
+``# repo-root-seam:`` marker is reserved for ``rebar._proc.store_repo_root`` so deferred-site
+counting still covers only sanctions. Both markers reject empty reasons.
 """
 
 from __future__ import annotations
@@ -80,12 +47,8 @@ SCAN_ROOT = "src"
 #: dirname callees that compose a parent path. ``_os`` is an occasional local alias.
 _DIRNAME_CALLEES = {"os.path.dirname", "dirname", "_os.path.dirname"}
 
-#: one-arg callees that merely NORMALISE a path without changing which directory it names,
-#: so ``dirname(str(tracker))`` / ``dirname(os.path.realpath(tracker))`` compose the store's
-#: parent exactly as ``dirname(tracker)`` does. ``str()`` was the auspicial-friended-merganser
-#: miss; the ``realpath``/``abspath`` family is the flowered-basaltic-beagle design-judgment
-#: subset — now that every legitimate store-repo site routes through the shared seam, these
-#: are unwrapped so no direct spelling can smuggle the construct past the gate.
+#: One-argument wrappers that preserve the store directory and must be unwrapped before
+#: matching ``dirname(<store>)``.
 _STORE_WRAPPER_CALLEES = {
     "str",
     "os.path.realpath",
