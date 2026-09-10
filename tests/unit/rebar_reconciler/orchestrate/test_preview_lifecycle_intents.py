@@ -66,6 +66,7 @@ def test_pass_outcomes_section_is_versioned_and_ignorable() -> None:
     assert all(section["tally"][bucket] == 0 for bucket in OUTCOME_BUCKETS)
     assert section["outcomes"] == []
     assert section["fuse_state"] == []
+    assert section["fuse_state_truncated"] == 0
     assert section["degraded"] is False
 
 
@@ -223,3 +224,23 @@ def test_pass_outcomes_bounds_the_fuse_state_collection() -> None:
     ]
     section = manifest_renderer.render_pass_outcomes([], fuse_decisions=decisions)
     assert len(section["fuse_state"]) <= manifest_renderer._MAX_PASS_OUTCOMES
+    assert section["fuse_state_truncated"] == 2000 - manifest_renderer._MAX_PASS_OUTCOMES
+
+
+def test_pass_outcomes_fuse_state_truncation_counts_non_none_elisions() -> None:
+    kept = manifest_renderer._MAX_PASS_OUTCOMES
+    decisions = [None] + [
+        FuseDecision(
+            scope=FailureScope.endpoint.value,
+            reason="endpoint_fuse_open",
+            retry_not_before="2026-02-01T00:01:00Z",
+            provider="jira",
+            endpoint=f"/rest/{n}",
+        )
+        for n in range(kept + 2)
+    ]
+
+    section = manifest_renderer.render_pass_outcomes([], fuse_decisions=decisions)
+
+    assert len(section["fuse_state"]) == kept
+    assert section["fuse_state_truncated"] == 2
