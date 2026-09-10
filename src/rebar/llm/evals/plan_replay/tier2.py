@@ -171,17 +171,14 @@ def _reconstruct_child(
     review_ts: int,
 ) -> dict[str, Any] | None:
     """One child's reconstructed material as of ``review_ts`` -- ``None`` when no
-    recoverable CREATE event exists for it (skipped, never fabricated). ``title`` isn't
-    tracked by ``corpus._reconstruct_material`` (only ``description``/``ticket_type``/
-    ``file_impact`` are), so it's read directly off the CREATE event body here."""
+    recoverable CREATE event exists for it (skipped, never fabricated)."""
     events = events_by_ticket.get(child_id)
     if not events:
         return None
     creates = events.get("CREATE", [])
     if not creates:
         return None
-    title = creates[0]["data"].get("title", "")
-    ttype, description, file_impact, _scope, _reason, _children, create_found = (
+    ttype, title, description, file_impact, _scope, _reason, _children, create_found = (
         corpus._reconstruct_material(events, review_ts)
     )
     if not create_found:
