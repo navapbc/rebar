@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""snapshot_lagfree_refresh.py — refresh scoped keys from the PRIMARY store (bug f449).
+"""snapshot_lagfree_refresh.py — refresh clobber-risk keys from the PRIMARY store.
 
 Why this exists
 ---------------
@@ -23,25 +23,30 @@ only robust fix is to arbitrate on LAG-FREE remote state.
 What this module does
 ---------------------
 ``get_issue_by_rest`` is a primary-store GET (immediately consistent, no index lag). For the
-actively-SCOPED bound keys of a pass, ``refresh_scoped_snapshot`` direct-GETs each key and
-``overlay_lagfree_scalars`` MERGES the mirrored scalar fields into the existing snapshot
-entry — preserving the enrichment (parent / comment / issuelinks) the fetcher layers on
-AFTER the base fields (so we merge, never wholesale-replace). The overlay mutates
+actively-SCOPED bound keys of a pass — plus the ambiguous bound keys in an unscoped pass
+where local still equals the baseline but the search snapshot does not — ``refresh_scoped_snapshot``
+direct-GETs each key and ``overlay_lagfree_scalars`` MERGES the mirrored scalar fields into
+the existing snapshot entry — preserving the enrichment (parent / comment / issuelinks) the
+fetcher layers on AFTER the base fields (so we merge, never wholesale-replace). The overlay mutates
 ``ctx.curr_snapshot`` in place before the differs run, so BOTH differs and the later
 ``_advance_baselines`` (all of which read ``ctx.curr_snapshot``) see the lag-free state.
 
 Scope and cost
 --------------
-Guarded to SCOPED passes (``selection_ids`` / ``filter_local_ids``) so the direct-GET volume
-is bounded by the pass's working set. Full unscoped production passes are left unchanged here
-and are covered by a follow-up (ambiguous-candidate-key refresh, ticket 6e5d). A transport
-error or a 404 leaves the entry untouched — the pass defers, exactly as the existing
-bound-but-absent direct-GET seam does.
+Scoped passes (``selection_ids`` / ``filter_local_ids``) refresh only their working set.
+Full unscoped production passes refresh only ambiguous clobber-risk candidates: confirmed
+bindings present in the fetched snapshot whose local mirrored scalar is unchanged since its
+baseline while the search snapshot's value differs from that baseline. That keeps the
+direct-GET volume bounded to the risk set rather than every binding; the candidate scan walks
+the already-loaded local ticket working set, cheaply prefilters raw snapshot/baseline equality,
+and only canonicalizes rows that can actually be ambiguous. A transport error or a 404 leaves
+the entry untouched — the pass defers, exactly as the existing bound-but-absent direct-GET seam
+does.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -53,6 +58,13 @@ if TYPE_CHECKING:
 # comment, issuelinks, labels, ...) is left as the search snapshot produced it.
 _LAGFREE_SCALAR_FIELDS: tuple[str, ...] = (
     "summary",
+    "description",
+    "priority",
+    "status",
+    "assignee",
+)
+_CANONICAL_MIRRORED_FIELDS: tuple[str, ...] = (
+    "title",
     "description",
     "priority",
     "status",
@@ -97,18 +109,17 @@ def overlay_lagfree_scalars(
 
 
 def refresh_scoped_snapshot(ctx: Any) -> None:
-    """Bug f449: refresh the actively-scoped bound keys from the primary store.
+    """Refresh clobber-risk bound keys from the primary store.
 
     Runs at the top of the diff phase — after ``_load_snapshots`` populated
     ``ctx.curr_snapshot`` and ``bind_operation_runtime`` resolved ``ctx.runtime_transport``,
-    and before both differs and ``_advance_baselines`` read the snapshot. No-ops for an
-    unscoped pass (bounded cost; see follow-up 6e5d) or when no transport is available (a
-    partial test ``ctx``). ``ctx`` is the shared ``reconcile._PassContext`` (typed ``Any`` so
-    this module holds no import edge back to reconcile.py).
+    and before both differs and ``_advance_baselines`` read the snapshot. Scoped passes
+    refresh the scoped key set; unscoped passes refresh only ambiguous keys where a stale
+    search result could trigger an inbound clobber. No-ops when no transport is available
+    (a partial test ``ctx``). ``ctx`` is the shared ``reconcile._PassContext`` (typed
+    ``Any`` so this module holds no import edge back to reconcile.py).
     """
     scoped_ids = getattr(ctx, "selection_ids", None) or getattr(ctx, "filter_local_ids", None)
-    if not scoped_ids:
-        return
     client = getattr(ctx, "runtime_transport", None)
     if client is None:
         return
@@ -116,10 +127,104 @@ def refresh_scoped_snapshot(ctx: Any) -> None:
     curr_snapshot = getattr(ctx, "curr_snapshot", None)
     if binding_store is None or not curr_snapshot:
         return
-    scoped_keys = []
+    jira_keys = []
+    if scoped_ids:
+        jira_keys = _scoped_jira_keys(scoped_ids, binding_store, curr_snapshot)
+    else:
+        jira_keys = _unscoped_ambiguous_jira_keys(ctx, binding_store, curr_snapshot)
+    if jira_keys:
+        overlay_lagfree_scalars(curr_snapshot, jira_keys, client)
+
+
+def _scoped_jira_keys(
+    scoped_ids: Iterable[str], binding_store: Any, curr_snapshot: Mapping[str, Any]
+) -> list[str]:
+    jira_keys = []
     for local_id in scoped_ids:
         jira_key = binding_store.get_jira_key(local_id)
         if jira_key and jira_key in curr_snapshot:
-            scoped_keys.append(jira_key)
-    if scoped_keys:
-        overlay_lagfree_scalars(curr_snapshot, scoped_keys, client)
+            jira_keys.append(jira_key)
+    return jira_keys
+
+
+def _unscoped_ambiguous_jira_keys(
+    ctx: Any, binding_store: Any, curr_snapshot: Mapping[str, Any]
+) -> list[str]:
+    get_baseline = getattr(binding_store, "get_baseline", None)
+    inbound_mapper = _inbound_mapper_for(ctx)
+    if get_baseline is None or inbound_mapper is None:
+        return []
+    candidates = []
+    for local_ticket in getattr(ctx, "local_tickets", None) or []:
+        if not isinstance(local_ticket, dict):
+            continue
+        local_id = local_ticket.get("ticket_id") or local_ticket.get("id")
+        if not local_id or _is_pending_binding(binding_store, local_id):
+            continue
+        jira_key = binding_store.get_jira_key(local_id)
+        raw_baseline = get_baseline(local_id)
+        if not jira_key or jira_key not in curr_snapshot or not local_ticket or not raw_baseline:
+            continue
+        if not _raw_remote_differs_from_baseline(curr_snapshot[jira_key], raw_baseline):
+            continue
+        if _is_ambiguous_snapshot_candidate(
+            local_ticket,
+            curr_snapshot[jira_key],
+            raw_baseline,
+            inbound_mapper,
+        ):
+            candidates.append(jira_key)
+    return candidates
+
+
+def _inbound_mapper_for(ctx: Any) -> Any:
+    backend = getattr(ctx, "runtime_backend", None)
+    inbound_mapper = getattr(backend, "inbound", None)
+    if inbound_mapper is not None:
+        return inbound_mapper
+    try:
+        from rebar.config import compose_config
+        from rebar_reconciler._backend_registry import select_backend
+
+        return select_backend(compose_config()).inbound
+    except Exception:  # noqa: BLE001 — partial test ctx: no mapper means safe no-op
+        return None
+
+
+def _is_pending_binding(binding_store: Any, local_id: str) -> bool:
+    is_pending = getattr(binding_store, "is_pending", None)
+    return bool(is_pending(local_id)) if is_pending is not None else False
+
+
+def _raw_remote_differs_from_baseline(
+    snapshot_entry: Mapping[str, Any], raw_baseline: Mapping[str, Any]
+) -> bool:
+    return any(
+        field in snapshot_entry
+        and field in raw_baseline
+        and snapshot_entry.get(field) != raw_baseline.get(field)
+        for field in _LAGFREE_SCALAR_FIELDS
+    )
+
+
+def _is_ambiguous_snapshot_candidate(
+    local_ticket: dict[str, Any],
+    snapshot_entry: dict[str, Any],
+    raw_baseline: dict[str, Any],
+    inbound_mapper: Any,
+) -> bool:
+    from rebar_reconciler.outbound_field_diff import (
+        _local_matches_baseline,
+        _remote_matches_baseline,
+    )
+
+    canonical_remote = inbound_mapper.map_remote_to_local(snapshot_entry)
+    canonical_baseline = inbound_mapper.map_remote_to_local(raw_baseline)
+    for field in _CANONICAL_MIRRORED_FIELDS:
+        if _local_matches_baseline(
+            field,
+            local_ticket,
+            canonical_baseline,
+        ) and not _remote_matches_baseline(field, canonical_remote, canonical_baseline):
+            return True
+    return False
