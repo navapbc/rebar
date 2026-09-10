@@ -5,16 +5,19 @@
     "",
     "This file is a COMMITTED, PLACEHOLDER-ONLY template. Copy it to 'mcp-clients.local.json'",
     "(gitignored — NEVER committed) and replace each REPLACE_WITH_* placeholder with the real",
-    "per-client bearer PAT. The real PATs are the same values seeded into the SSM SecureStrings",
+    "project/client bearer PAT. The real PATs are the same values seeded into the SSM SecureStrings",
     "/rebar/prod/mcp-client-pat-{copilot,codex,claude} that fetch-secrets.sh materializes on the",
     "box; keep them out of source control. Each client presents its PAT as an",
     "'Authorization: Bearer <PAT>' header to the nginx /mcp/ TLS edge, which the box's 'static'",
-    "verifier authenticates. See infra/runbooks/mcp-client-pats.md for provisioning + rotation."
+    "verifier authenticates. clients.cli is the shared local source for MCP_CLIENT_PAT_CLI (Claude Code + GitHub Copilot CLI). See infra/runbooks/mcp-client-pats.md for provisioning + rotation."
   ],
   "url": "https://REPLACE_WITH_BOX_HOST/mcp/",
   "clients": {
-    "copilot": { "authorization": "Bearer REPLACE_WITH_COPILOT_PAT" },
-    "codex": { "authorization": "Bearer REPLACE_WITH_CODEX_PAT" },
-    "claude": { "authorization": "Bearer REPLACE_WITH_CLAUDE_PAT" }
+    "cli": {
+      "authorization": "Bearer REPLACE_WITH_CLAUDE_OR_CLI_PAT"
+    },
+    "codex": {
+      "authorization": "Bearer REPLACE_WITH_CODEX_PAT"
+    }
   }
 }

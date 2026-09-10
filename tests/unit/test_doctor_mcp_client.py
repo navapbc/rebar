@@ -74,7 +74,9 @@ def test_canonical_name_and_set_variable_is_clean(tmp_path):
     it — the one outcome that makes the diagnostic worse than nothing.
     """
     _write_codex(tmp_path)
-    findings = dmc.scan_mcp_clients(home=tmp_path, env={dmc.CANONICAL_PAT_ENV["codex"]: FAKE_PAT})
+    findings = dmc.scan_mcp_clients(
+        home=tmp_path, cwd=tmp_path, env={dmc.CANONICAL_PAT_ENV["codex"]: FAKE_PAT}
+    )
     kinds = _kinds(findings)
     assert dmc.KIND_PAT_UNRESOLVABLE not in kinds
     assert dmc.KIND_STALE_PAT_ENV_NAME not in kinds
@@ -89,7 +91,7 @@ def test_unset_variable_reports_pat_unresolvable_naming_the_variable(tmp_path):
     operator has no signal at all to act on.
     """
     _write_codex(tmp_path)
-    findings = dmc.scan_mcp_clients(home=tmp_path, env={})
+    findings = dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={})
     unresolvable = [f for f in findings if f["kind"] == dmc.KIND_PAT_UNRESOLVABLE]
     assert len(unresolvable) == 1
     assert unresolvable[0]["client"] == "codex"
@@ -103,7 +105,9 @@ def test_empty_variable_counts_as_unresolvable(tmp_path):
     one; passing it would let doctor certify a box that cannot connect.
     """
     _write_codex(tmp_path)
-    findings = dmc.scan_mcp_clients(home=tmp_path, env={dmc.CANONICAL_PAT_ENV["codex"]: "   "})
+    findings = dmc.scan_mcp_clients(
+        home=tmp_path, cwd=tmp_path, env={dmc.CANONICAL_PAT_ENV["codex"]: "   "}
+    )
     assert dmc.KIND_PAT_UNRESOLVABLE in _kinds(findings)
 
 
@@ -115,7 +119,7 @@ def test_stale_env_name_reported_and_names_the_canonical_variable(tmp_path):
     operator is told something is wrong but not what to change it to.
     """
     _write_codex(tmp_path, env_var="REBAR_CODEX_PAT")
-    findings = dmc.scan_mcp_clients(home=tmp_path, env={})
+    findings = dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={})
     stale = [f for f in findings if f["kind"] == dmc.KIND_STALE_PAT_ENV_NAME]
     assert len(stale) == 1
     assert dmc.CANONICAL_PAT_ENV["codex"] in stale[0]["detail"]
@@ -129,7 +133,7 @@ def test_stale_env_name_fires_even_when_the_stale_variable_resolves(tmp_path):
     they follow the documented (canonical) setup on a new machine.
     """
     _write_codex(tmp_path, env_var="REBAR_CODEX_PAT")
-    findings = dmc.scan_mcp_clients(home=tmp_path, env={"REBAR_CODEX_PAT": FAKE_PAT})
+    findings = dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={"REBAR_CODEX_PAT": FAKE_PAT})
     kinds = _kinds(findings)
     assert dmc.KIND_STALE_PAT_ENV_NAME in kinds
     assert dmc.KIND_PAT_UNRESOLVABLE not in kinds
@@ -142,7 +146,7 @@ def test_stale_and_unresolvable_are_reported_independently(tmp_path):
     would send the operator round the loop twice.
     """
     _write_codex(tmp_path, env_var="REBAR_CODEX_PAT")
-    kinds = _kinds(dmc.scan_mcp_clients(home=tmp_path, env={}))
+    kinds = _kinds(dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={}))
     assert dmc.KIND_STALE_PAT_ENV_NAME in kinds
     assert dmc.KIND_PAT_UNRESOLVABLE in kinds
 
@@ -153,7 +157,7 @@ def test_missing_config_degrades_to_a_finding_not_an_exception(tmp_path):
     ``doctor`` runs on every developer box; an exception here would take the whole
     command down for anyone who does not use all three clients.
     """
-    findings = dmc.scan_mcp_clients(home=tmp_path, env={})
+    findings = dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={})
     assert {f["client"] for f in findings} == set(dmc.CLIENT_ORDER)
     assert all(f["kind"] == dmc.KIND_CONFIG_MISSING for f in findings)
     assert all(f["severity"] == dmc.SEVERITY_UNAVAILABLE for f in findings)
@@ -177,7 +181,7 @@ def test_malformed_config_degrades_to_a_finding_not_an_exception(tmp_path, relpa
     path = tmp_path / relpath
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body)
-    findings = dmc.scan_mcp_clients(home=tmp_path, env={})
+    findings = dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={})
     unreadable = [f for f in findings if f["kind"] == dmc.KIND_CONFIG_UNREADABLE]
     assert len(unreadable) == 1
     assert str(path) in unreadable[0]["detail"]
@@ -192,7 +196,9 @@ def test_config_without_a_rebar_entry_is_reported(tmp_path):
     path = tmp_path / ".codex" / "config.toml"
     path.parent.mkdir(parents=True)
     path.write_text('[mcp_servers.other]\nurl = "https://example.invalid/mcp/"\n')
-    assert dmc.KIND_SERVER_ABSENT in _kinds(dmc.scan_mcp_clients(home=tmp_path, env={}))
+    assert dmc.KIND_SERVER_ABSENT in _kinds(
+        dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={})
+    )
 
 
 @pytest.mark.parametrize("client", ["copilot", "claude"])
@@ -205,7 +211,9 @@ def test_header_clients_resolve_both_dollar_forms(tmp_path, client):
     canonical = dmc.CANONICAL_PAT_ENV[client]
     template = "Bearer ${name}" if client == "copilot" else "Bearer ${{{name}}}"
     _write_header_client(tmp_path, client, env_var=canonical, template=template)
-    kinds = _kinds(dmc.scan_mcp_clients(home=tmp_path, env={canonical: FAKE_PAT}), client)
+    kinds = _kinds(
+        dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={canonical: FAKE_PAT}), client
+    )
     assert kinds == [dmc.KIND_OK]
 
 
@@ -216,10 +224,10 @@ def test_header_clients_report_a_stale_name(tmp_path):
     hide behind Copilot or Claude Code instead of Codex.
     """
     _write_header_client(tmp_path, "copilot", env_var="SOME_OTHER_PAT", template="Bearer ${name}")
-    findings = dmc.scan_mcp_clients(home=tmp_path, env={"SOME_OTHER_PAT": FAKE_PAT})
+    findings = dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={"SOME_OTHER_PAT": FAKE_PAT})
     stale = [f for f in findings if f["kind"] == dmc.KIND_STALE_PAT_ENV_NAME]
     assert [f["client"] for f in stale] == ["copilot"]
-    assert dmc.CANONICAL_PAT_ENV["copilot"] in stale[0]["detail"]
+    assert "MCP_CLIENT_PAT_COPILOT" in stale[0]["detail"]
 
 
 def test_literal_bearer_in_config_is_reported_without_echoing_it(tmp_path):
@@ -229,7 +237,7 @@ def test_literal_bearer_in_config_is_reported_without_echoing_it(tmp_path):
     artifact that captures them: the diagnostic would become the leak.
     """
     _write_header_client(tmp_path, "claude", env_var="ignored", template="Bearer " + FAKE_PAT)
-    findings = dmc.scan_mcp_clients(home=tmp_path, env={})
+    findings = dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={})
     literal = [f for f in findings if f["kind"] == dmc.KIND_PAT_LITERAL]
     assert len(literal) == 1
     assert FAKE_PAT not in json.dumps(findings)
@@ -254,7 +262,7 @@ def test_no_credential_value_reaches_findings_or_rendered_text(tmp_path):
         dmc.CANONICAL_PAT_ENV["copilot"]: FAKE_PAT,
         dmc.CANONICAL_PAT_ENV["claude"]: FAKE_PAT,
     }
-    findings = dmc.scan_mcp_clients(home=tmp_path, env=env)
+    findings = dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env=env)
     blob = json.dumps(findings) + "\n".join(dmc.render_text(findings))
     assert FAKE_PAT not in blob
     # The diagnostic is only useful if it names the variables it checked.
@@ -268,7 +276,7 @@ def test_render_text_emits_a_header_and_one_line_per_finding(tmp_path):
     The caller prints these lines verbatim; a silent render would make an unconfigured
     box indistinguishable from a check that never ran.
     """
-    findings = dmc.scan_mcp_clients(home=tmp_path, env={})
+    findings = dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={})
     lines = list(dmc.render_text(findings))
     assert lines[0] == "doctor: mcp clients"
     assert len(lines) == len(findings) + 1
@@ -283,7 +291,7 @@ def test_headline_findings_classify_as_blocking_severity(tmp_path):
     server at all.
     """
     _write_codex(tmp_path, env_var="REBAR_CODEX_PAT")
-    assert dmc.has_blocking_mcp_client(dmc.scan_mcp_clients(home=tmp_path, env={}))
+    assert dmc.has_blocking_mcp_client(dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={}))
 
 
 def test_healthy_and_unconfigured_boxes_do_not_classify_as_blocking(tmp_path):
@@ -292,9 +300,13 @@ def test_healthy_and_unconfigured_boxes_do_not_classify_as_blocking(tmp_path):
     A predicate that fired on an absent config would make every box that does not run
     all three clients look broken.
     """
-    assert not dmc.has_blocking_mcp_client(dmc.scan_mcp_clients(home=tmp_path, env={}))
+    assert not dmc.has_blocking_mcp_client(
+        dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={})
+    )
     _write_codex(tmp_path)
-    healthy = dmc.scan_mcp_clients(home=tmp_path, env={dmc.CANONICAL_PAT_ENV["codex"]: FAKE_PAT})
+    healthy = dmc.scan_mcp_clients(
+        home=tmp_path, cwd=tmp_path, env={dmc.CANONICAL_PAT_ENV["codex"]: FAKE_PAT}
+    )
     assert not dmc.has_blocking_mcp_client(healthy)
 
 
@@ -306,4 +318,79 @@ def test_env_defaults_to_the_process_environment(monkeypatch, tmp_path):
     """
     _write_codex(tmp_path)
     monkeypatch.setenv(dmc.CANONICAL_PAT_ENV["codex"], FAKE_PAT)
-    assert _kinds(dmc.scan_mcp_clients(home=tmp_path)) == [dmc.KIND_OK]
+    assert _kinds(dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path)) == [dmc.KIND_OK]
+
+
+def test_project_config_takes_precedence_over_user_level_config(tmp_path):
+    """A project ``.mcp.json`` should be diagnosed with the project-scope CLI alias.
+
+    The expand/contract cutover keeps legacy user-level names valid, but once a
+    project config exists it is the config the client will use from that checkout.
+    """
+    _write_header_client(tmp_path, "copilot", env_var=dmc.CANONICAL_PAT_ENV["copilot"])
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "rebar": {
+                        "type": "http",
+                        "url": "https://example.invalid/mcp/",
+                        "headers": {
+                            "Authorization": f"Bearer ${{{dmc.CANONICAL_PAT_ENV['copilot']}}}"
+                        },
+                    }
+                }
+            }
+        )
+    )
+
+    findings = dmc.scan_mcp_clients(
+        home=tmp_path, cwd=project, env={dmc.CANONICAL_PAT_ENV["copilot"]: FAKE_PAT}
+    )
+
+    assert _kinds(findings, "copilot") == [dmc.KIND_OK]
+
+
+def test_project_config_rejects_legacy_user_level_env_name(tmp_path):
+    """Project-scope ``.mcp.json`` accepts only the shared CLI alias."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "rebar": {
+                        "type": "http",
+                        "url": "https://example.invalid/mcp/",
+                        "headers": {"Authorization": "Bearer ${MCP_CLIENT_PAT_COPILOT}"},
+                    }
+                }
+            }
+        )
+    )
+
+    findings = dmc.scan_mcp_clients(
+        home=tmp_path, cwd=project, env={"MCP_CLIENT_PAT_COPILOT": FAKE_PAT}
+    )
+
+    stale = [f for f in findings if f["client"] == "copilot"]
+    assert [f["kind"] for f in stale] == [dmc.KIND_STALE_PAT_ENV_NAME]
+    assert dmc.CANONICAL_PAT_ENV["copilot"] in stale[0]["detail"]
+
+
+@pytest.mark.parametrize(
+    ("client", "legacy"),
+    [
+        ("copilot", "MCP_CLIENT_PAT_COPILOT"),
+        ("claude", "MCP_CLIENT_PAT_CLAUDE"),
+    ],
+)
+def test_legacy_user_level_configs_remain_accepted(tmp_path, client, legacy):
+    """Existing user-level configs should not become stale until removed."""
+    _write_header_client(tmp_path, client, env_var=legacy)
+
+    findings = dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={legacy: FAKE_PAT})
+
+    assert _kinds(findings, client) == [dmc.KIND_OK]

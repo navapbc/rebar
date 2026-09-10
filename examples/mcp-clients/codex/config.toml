@@ -21,3 +21,5 @@
 [mcp_servers.rebar]
 url = "https://rebar.solutions.navateam.com/mcp/"
 bearer_token_env_var = "MCP_CLIENT_PAT_CODEX"
+# Allow the remote endpoint enough time for cold starts / TLS-edge handoff.
+startup_timeout_sec = 120
