@@ -1,9 +1,9 @@
 # yaml-language-server: $schema=https://github.com/navapbc/rebar/schemas/workflow.v3.schema.json
 #
-# Four-pass code review: recall can escalate from base to overlays, but verification,
-# decision, and coaching remain deterministic. `union.cap` sets the escalation limit;
-# criteria routing owns thresholds and posture. Topology runs assemble, trigger, two
-# recall rounds, merge, verify, decide, then coach.
+# Four-pass code review: recall can escalate from base to overlays; the scripted decision
+# remains deterministic, and escalation cannot change its verdict. `union.cap` sets the
+# escalation limit; criteria routing owns thresholds and posture. Topology runs assemble,
+# trigger, two recall rounds, merge, verify, decide, then coach.
 schema_version: "3"
 name: code-review
 description: Four-pass code-review gate — base + two-round overlay escalation into the kernel.

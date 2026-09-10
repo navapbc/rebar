@@ -231,7 +231,7 @@ def _resolve_one(expr: str, state: RunState, secrets: Mapping[str, str]) -> Any:
 
 
 def resolve_value(value: Any, state: RunState, secrets: Mapping[str, str]) -> Any:
-    """Recursively resolve step/input and environment expressions in ``value``.
+    """Recursively resolve step/input, secret, and environment expressions in ``value``.
 
     A whole-string expression preserves its raw type; embedded values become text.
     """

@@ -2,8 +2,8 @@
 
 LLM criteria run a Pass-1 finder; DET criteria scan a disposable repository.
 Context-dependent container/G3/G4/ISF finders raise :class:`PreviewError`.
-Synchronous previews are bounded, while :func:`preview_or_job` preserves timed-out
-work for polling. Overlay authoring couples routing and activation atomically.
+:func:`preview_or_job` bounds response latency and preserves timed-out work for
+polling. Overlay authoring couples routing and activation atomically.
 """
 
 from __future__ import annotations
@@ -69,10 +69,11 @@ def preview_criterion(
     """Preview an existing or inline criterion.
 
     ``DET`` uses grounding; other tiers use Pass-1. Unknown or context-dependent
-    criteria raise :class:`PreviewError`. Timeout returns a no-fire timed-out verdict.
+    criteria raise :class:`PreviewError`. Timeout classifies late work as no-fire but
+    does not bound direct-call latency.
     """
-    # Bound the call so the editor stays responsive; preview_or_job retains a timed-out
-    # worker for polling.
+    # Executor shutdown can wait for a timed-out worker. preview_or_job owns bounded
+    # response latency and retains that worker for polling.
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(_run_preview_core, request, repo_root=repo_root, runner=runner)
         try:
