@@ -285,6 +285,20 @@ def test_sweep_extra_parity_would_have_caught_c57057f41() -> None:
     assert "gating-only" in message
 
 
+def test_module_size_gate_retries_trusted_main_fetch_before_failing_closed() -> None:
+    """A transient trusted-main fetch failure must not redden Verified on the first try."""
+    body = _step_run(_read(_BAT_YML), "test", "Module-size gate")
+
+    assert "for attempt in 1 2 3; do" in body
+    assert "fetch_main_rc=0" in body
+    assert "sleep 2" in body
+    assert 'if [ "$fetch_main_rc" -eq 0 ]; then' in body
+    assert "could not fetch main to verify the module-size limit lock; failing closed" in body
+    assert body.index("for attempt in 1 2 3; do") < body.index(
+        "could not fetch main to verify the module-size limit lock; failing closed"
+    )
+
+
 def test_matrix_keeps_every_test_tier_but_collects_coverage_once() -> None:
     """Every cell runs both tiers; only primary Ubuntu traces coverage and policy."""
     import yaml
