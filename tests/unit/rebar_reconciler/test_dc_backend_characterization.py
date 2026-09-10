@@ -1,44 +1,12 @@
-"""Characterization of the Jira DATA CENTER backend — pins VALUES, not shapes
-(rebar-ticket cedc-58d1-f6d1-428e, epic 3e73-72b5-cff2-40f0).
+"""Characterize Jira Data Center with literal values, not structural shapes.
 
-The Cloud sibling ``test_backend_characterization.py`` is a byte-for-byte safety
-net, but it hard-binds ``_backend()`` to ``JiraBackend``, so none of it runs
-against Data Center. DC's only unit-level backend coverage
-(``test_backend_contract.py``) asserts presence and SHAPE — "the result is a
-dict", "the expected keys are present" — and would pass with EVERY VALUE wrong.
-This module closes that gap: every assertion here is one a wrong-but-well-formed
-value fails.
-
-WHY A SIBLING FILE AND NOT A PARAMETRIZATION OF THE CLOUD MODULE
-----------------------------------------------------------------
-The plan said to try the parametrization first and treat a split as the fallback.
-It was tried, and rejected on two concrete grounds:
-
-1. *It hides the Cloud pins it is supposed to preserve.* Parametrizing the Cloud
-   module's ``_backend()`` seam over both vendors turns each golden literal into a
-   per-vendor lookup — ``"assignee": "me@example.com"`` becomes
-   ``{"jira": ..., "jira-datacenter": ...}[vendor]``. Cloud's pin is no longer a
-   value a reviewer can read off the assertion, which is precisely the property
-   that made it a safety net.
-2. *Where the adapters legitimately diverge, a parameter is not enough.* The
-   create-path description is the clearest case: Cloud's ``_map_local_to_jira_fields``
-   does NOT fit it at all, while DC's ``_map_local_to_dc_fields`` fits it through
-   ``WikiTextCodec``. That needs a per-vendor BRANCH, not a per-vendor value — at
-   which point the "one parametrized test" is two tests wearing one hat.
-
-A third, mechanical reason, and the decisive one in hindsight: the Cloud module is
-373 LOC and the CI module-size gate is a hard 800. This module is ~715 LOC on its
-own, so folding the two together would blow the cap outright — the split is not a
-stylistic preference, it is the only shape that fits.
-
-Splitting also makes AC9 ("Cloud's existing assertions still pass UNEDITED")
-provable by inspection: ``test_backend_characterization.py`` is not touched by this
-change at all.
-
-WHERE CLOUD AND DC LEGITIMATELY DIVERGE, THIS MODULE ASSERTS THE DIVERGENCE.
-Nothing here claims parity the adapters do not have; the tests named
-``..._diverges_from_cloud`` pin the difference itself, so a future change that
-accidentally makes DC behave like Cloud goes red.
+The Cloud suite binds a different backend, while the shared contract tests would
+accept wrong-but-well-formed values. These tests therefore pin DC mappings, limits,
+identity formats, and rich-text results directly. Vendor differences are explicit:
+for example, DC fits descriptions through ``WikiTextCodec`` where Cloud does not.
+Keeping a sibling module preserves readable Cloud literals, leaves that suite
+untouched, and avoids combining two large modules beyond the size gate. Tests named
+``..._diverges_from_cloud`` intentionally reject accidental parity.
 """
 
 from __future__ import annotations
@@ -54,79 +22,23 @@ from rebar_reconciler.outbound_comments import _decorate_outbound_comment
 
 from .backend_support import FakeTransport
 
-# ===========================================================================
-# MUTATION LEDGER — every pin in this module was mutation-checked
-# (rebar-ticket cedc-58d1-f6d1-428e, AC8).
-#
-# A characterization suite's own credibility is the risk it carries: DC's
-# pre-existing coverage asserted shape and would have passed with every value
-# wrong. So each pin here was verified by PERTURBING the value it pins — one map
-# entry, or one boundary by one character — in a working tree, running the pin,
-# and confirming it went red for the RIGHT reason (an ``AssertionError``, never an
-# ``AttributeError``/``ImportError``, which would prove nothing). The mutation is
-# then reverted and leaves no artifact of its own, which is why this block exists:
-# it is the committed, diff-reviewable record. The same ledger is recorded as a
-# comment on the ticket.
-#
-# MUTATED: LOCAL_PRIORITY_TO_JIRA[1] "High" -> "Higher"; FAILED:
-#   test_dc_create_path_maps_every_key_by_value,
-#   test_dc_create_path_priority_map_pins_every_level,
-#   test_dc_map_fields_to_remote_maps_every_priority_plus_unmapped_default
-# MUTATED: LOCAL_STATUS_TO_JIRA["in_progress"] "In Progress" -> "In progress";
-#   FAILED: test_dc_create_path_maps_every_key_by_value,
-#   test_dc_create_path_status_map_pins_every_state,
-#   test_dc_map_fields_to_remote_maps_every_status_plus_unmapped_default
-# MUTATED: JIRA_SUMMARY_MAX_CHARS 254 -> 253; FAILED:
-#   test_dc_sanitize_summary_at_inclusive_limit_is_untruncated,
-#   test_dc_sanitize_summary_one_over_limit_truncates_with_marker
-# MUTATED: JIRA_LABEL_MAX_CHARS 255 -> 254; FAILED:
-#   test_dc_sanitize_label_pins_the_shared_token_rules
-# MUTATED: _LOCAL_TO_JIRA_TYPE["story"] "Story" -> "Storey"; FAILED:
-#   test_dc_create_path_maps_every_key_by_value,
-#   test_dc_create_path_issuetype_map_pins_every_type
-# MUTATED: _map_local_to_dc_fields assignee `ticket.get("assignee") or ""` ->
-#   `ticket.get("assignee", "")`; FAILED:
-#   test_dc_create_path_coerces_explicit_none_to_empty_string
-# MUTATED: _map_local_to_dc_fields description `codec.fit_outbound(...)` ->
-#   unfitted passthrough; FAILED:
-#   test_dc_create_path_fits_description_through_the_wiki_codec,
-#   test_dc_create_path_description_fit_diverges_from_cloud
-# MUTATED: WIKI_DESCRIPTION_LIMIT 32767 -> 32766; FAILED:
-#   test_dc_rich_text_constants_pinned,
-#   test_dc_sanitize_description_at_inclusive_limit_is_untruncated,
-#   test_dc_sanitize_comment_at_inclusive_limit_is_untruncated,
-#   test_dc_map_fields_to_remote_leaves_an_at_limit_description_untouched,
-#   test_dc_create_path_leaves_an_at_limit_description_untouched
-# MUTATED: _WIKI_TRUNCATION_SUFFIX " … [truncated by reconciler]" ->
-#   " … [truncated by reconcilers]"; FAILED:
-#   test_dc_sanitize_description_one_over_limit_truncates_with_marker,
-#   test_dc_sanitize_comment_one_over_limit_truncates_with_marker,
-#   test_dc_create_path_fits_description_through_the_wiki_codec
-# MUTATED: OutboundFieldMapper description guard `isinstance(value, str)` -> `True`
-#   AND WikiTextCodec.fit_outbound non-str `return text` -> `return str(text)`;
-#   FAILED: test_dc_map_fields_to_remote_passes_non_string_description_untouched
-# MUTATED: OutboundFieldMapper status default "To Do" -> "Todo"; FAILED:
-#   test_dc_map_fields_to_remote_maps_every_status_plus_unmapped_default
-# MUTATED: JiraIdentityConvention _CANONICAL_PREFIX "rebar-id:" -> "rebar-id=";
-#   FAILED: test_dc_identity_format_label_uses_canonical_colon_form
-# MUTATED: DEFAULT_RESOLVED_STATUSES {"Resolved","Done","Cancelled"} ->
-#   {"Resolved","Done","Canceled"}; FAILED:
-#   test_dc_default_resolved_statuses_pinned
-#   (constant and test both RETIRED by task 549c; entry kept as the record)
-#
-# TWO MUTATIONS INITIALLY SURVIVED, and fixing them changed the suite. Recorded
-# because a mutation ledger that only lists successes is not evidence:
-#
-#   1. WIKI_DESCRIPTION_LIMIT 32767 -> 32766 survived, because the at-limit pins
-#      built their inputs from the IMPORTED constant, so the mutation moved the
-#      test's own boundary along with the code's. Fixed by pinning against the
-#      module-local LITERAL ``WIKI_LIMIT`` (see its comment) — after which the same
-#      mutation kills five pins.
-#   2. The mapper's `isinstance(value, str)` guard could not be killed on its own,
-#      nor could WikiTextCodec.fit_outbound's non-str early return: the two guards
-#      are REDUNDANT on the DC path. Only removing BOTH is observable, which is how
-#      that mutation is recorded above and explained on the pin itself.
-# ===========================================================================
+# Mutation ledger (cedc-58d1-f6d1-428e, AC8). Each perturbation failed by
+# assertion in the named value/boundary pins:
+# - priority ``High`` -> ``Higher`` and status ``In Progress`` -> ``In progress``:
+#   create-path, exhaustive-map, and reverse-map tests;
+# - summary 254 -> 253 and label 255 -> 254: inclusive-limit/token tests;
+# - story ``Story`` -> ``Storey``: create and exhaustive issue-type tests;
+# - assignee ``get(...) or ""`` -> ``get(..., "")``: explicit-None coercion;
+# - description fit -> passthrough: WikiText fitting and Cloud-divergence tests;
+# - wiki limit 32767 -> 32766: literal constants plus all inclusive-limit pins;
+# - suffix ``… [truncated by reconciler]`` -> plural: exact truncation pins;
+# - both non-string guards removed: non-string description preservation;
+# - status default ``To Do`` -> ``Todo``: status/default mapping;
+# - identity prefix ``rebar-id:`` -> ``rebar-id=``: canonical label format;
+# - resolved ``Cancelled`` -> ``Canceled``: the now-retired default-status pin.
+# The wiki-limit mutation initially survived because tests imported the production
+# boundary; module-local ``WIKI_LIMIT`` now kills it. Either non-string guard alone is
+# redundant, so their observable mutation deliberately removes both.
 
 #: DC's plain-character rich-text cap and the exact marker ``WikiTextCodec``
 #: appends to a truncated value, both spelled out as LITERALS rather than
@@ -388,18 +300,9 @@ def test_dc_fit_comment_is_the_send_path_fit():
     assert sanitizer.fit_comment(body) == landed[: len(landed) - len(decoration)]
 
 
-# ---------------------------------------------------------------------------
-# AC3 — the SHARED ``OutboundFieldMapper.map_fields_to_remote`` driven through
-# ``WikiTextCodec``. That shared body is currently exercised only through
-# ``AdfCodec`` (test_rich_text_seam_heldout.py), so a regression in the DC
-# composition would reach DC users with nothing to catch it.
-#
-# Deliberately NOT an ordering assertion. ``WikiTextCodec.normalize_outbound`` is
-# the IDENTITY, so ``normalize_outbound(fit_outbound(v)) == fit_outbound(v)`` for
-# every ``v`` and swapping the two calls is unobservable on the DC path — an
-# ordering pin written here could not fail. Ordering stays ``AdfCodec``'s to pin.
-# What the DC path CAN pin is that the fit is applied at all, and its exact value.
-# ---------------------------------------------------------------------------
+# AC3 drives the shared mapper through ``WikiTextCodec`` and asserts exact fitting.
+# It deliberately does not assert call order: normalization is identity on DC, so
+# swapping normalization and fitting is unobservable; ``AdfCodec`` owns that pin.
 
 
 def test_dc_map_fields_to_remote_fits_description_to_the_wiki_value():

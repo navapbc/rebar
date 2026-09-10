@@ -1,22 +1,10 @@
-"""HELD-OUT: the DC transport's whole-project readers must page (bug 9263).
+"""Require every Data Center whole-project reader to use one shared pager (bug 9263).
 
-THE DEFECT. `get_issuelinks_map` and `get_comment_map` each called
-`self.search_issues(f"project = {project_key}")` with no offset loop, taking the default
-`max_results=50`. Beyond 50 issues, links and comments were silently invisible: issues past
-the first page appeared to have NO links (so the differ can emit spurious link creations and
-cannot detect removals at all) and their comments never synced. Nothing raised; the pass
-converged and reported success.
-
-THIS IS THE THIRD INSTANCE OF ONE DEFECT CLASS, and the reason it exists is the point.
-`get_parent_map` had exactly this bug and was fixed alone, in place, instead of sweeping every
-`search_issues` caller — leaving these two behind, and a third (`fetcher._iter_pages`, bug
-deac) found later. So the fix here is not "page these two": it is ONE shared pager that all
-three route through, plus a STRUCTURAL test that fails the build if a fourth caller ever
-takes the default again. A hand-rolled loop repeated four times is what produced this ticket.
-
-The client shape below — serving N issues while capping EVERY page BELOW the requested size —
-is a lowered `jira.search.views.default.max`, the documented DC hardening, and is the shape
-that caught the original `get_parent_map` bug.
+Default ``search_issues`` returns only 50 items, making later links, comments, or parents
+silently invisible. ``get_issuelinks_map``, ``get_comment_map``, and ``get_parent_map``
+must all traverse the shared pager; a structural census prevents a new direct caller.
+The fake server caps every page below the requested size, matching
+``jira.search.views.default.max``, so a short page cannot be mistaken for exhaustion.
 """
 
 from __future__ import annotations
@@ -314,35 +302,12 @@ def test_all_three_whole_project_readers_exist_and_page(method: str) -> None:
     assert len(result) == 250, f"{method} recovered {len(result)} of 250"
 
 
-# ===========================================================================
-# OFFSET-STALL (ticket 18a4-9df8-6373-4d9f) — the runaway-pagination sibling
-# ===========================================================================
-#
-# THE DEFECT, second axis. Everything above hardens the PAGE-SIZE axis: a server that
-# caps pages below the requested size must not be read as exhausted. This section covers
-# the OFFSET axis, which that fix left open: `_paged_search`'s only loop exit is
-# `if not batch: break`, and nothing verifies the server HONOURED `startAt`. A DC instance
-# that ignores/repeats `startAt` re-serves the same non-empty page forever, so the exit is
-# unreachable — measured on the unguarded pager: 26 calls (harness cap), requesting offsets
-# [0, 3, 6, 9, 12, ...] while receiving page 1 every time, `out` growing without bound.
-#
-# Same defect class as bug cabc (Cloud's `acli_graph` cursor spin, fixed by ab7f in
-# 30c522cde9 with `RunawayPaginationError`) and `fetcher._iter_pages` (offset-stall guard at
-# fetcher.py:336-344, bug deac). Those two are the cited authority for the contract asserted
-# here: a paged whole-project read whose server stops advancing is a TRUNCATED read, and it
-# must abort LOUDLY rather than return a silent partial.
-#
-# WHY THE GUARD IS STRICTER THAN `fetcher._iter_pages`'s. fetcher returns cleanly (no raise)
-# when the repeated page is SHORT, reasoning that a client which returns fewer items than
-# asked and then repeats itself "has nothing further to give". That reasoning does NOT
-# transfer to DC. This pager exists (bug 9263) precisely because a hardened DC caps EVERY
-# page below the requested size via `jira.search.views.default.max` — so on DC a short page
-# is the NORMAL case WITH more to give, and adopting fetcher's short-page branch would
-# silently return 20 of 250: the exact 92%-loss defect this pager was built to refuse. Hence
-# both page shapes below are parameterized and BOTH must raise.
-#
-# The guard cannot false-positive: a `startAt`-honouring server serves DIFFERENT issues at
-# each offset, which is what `_PageCappingClient` above proves (250/250, raising nothing).
+# Offset-stall guard (18a4-9df8-6373-4d9f): a server that repeats a non-empty
+# ``startAt`` page would otherwise grow the result forever. Repetition means the read
+# is truncated and must fail loudly. Unlike the generic fetcher, DC cannot accept a
+# repeated short page as exhaustion because ``jira.search.views.default.max`` normally
+# caps every page below the requested size. Both full and capped repeated pages must
+# raise; an offset-honoring server returns distinct issues and completes normally.
 
 import importlib.util  # noqa: E402
 import json as _json  # noqa: E402

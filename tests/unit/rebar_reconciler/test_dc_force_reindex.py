@@ -1,16 +1,10 @@
-"""Offline oracle for ``_dc_support.force_issue_reindex`` (bug 2c60, epic REB-3115).
+"""Pin best-effort synchronous Data Center issue reindexing (bug 2c60).
 
-The live rich-text DC lane flaked because Jira DC's Lucene index is eventually consistent
-with an UNBOUNDED background-reindex latency (ADR 0037 §3): on the ephemeral CI instance under
-load the reindex thread was starved and a just-pushed ``description`` never became visible to
-the JQL SEARCH the reconcile pass reads from, even within 240s. The robust fix does not widen a
-timeout — it forces a synchronous per-issue reindex through the admin
-``IssueIndexingService`` REST resource so the search reflects the write deterministically.
-
-This module pins that helper's OBSERVABLE CONTRACT harness-free, so the fix has teeth without a
-1.5h live run: given a working id read it must POST to ``/rest/api/2/reindex/issue`` for that
-issue's numeric id, and given a failed id read it must NOT reindex (and never raise) so the
-caller degrades to its existing wait rather than crashing the lane.
+After a successful numeric-id read, ``force_issue_reindex`` must POST that id to
+``/rest/api/2/reindex/issue`` so search observes a preceding write without widening an
+unbounded Lucene wait. A failed id read must issue no reindex request and must not raise;
+the caller then falls back to its existing wait. The helper uses the supplied authenticated
+request seam and never owns or exposes credentials.
 """
 
 from __future__ import annotations

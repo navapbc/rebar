@@ -1,20 +1,10 @@
-"""HELD-OUT pin on the Data Center 429 / ``Retry-After`` policy (story S2, epic e369).
+"""Pin Data Center's opt-in, bounded ``Retry-After`` policy.
 
-Jira Data Center has a built-in per-user token bucket. Before this story a 429 propagated as a
-hard failure on the first occurrence, on an instance that was merely asking rebar to slow down.
-
-THE VERSION/DEFAULT NUMBERS ARE LABELLED, NOT ASSERTED. "8.6+", "DC only" and "off by default"
-carry their provenance in `retry.py`'s comment on `_RETRY_AFTER_JITTER`: one is confirmed live
-against the harness, the rest are explicitly marked UNVERIFIED. None of them is load-bearing for
-this code, because the retry keys off the PRESENCE of a `Retry-After` header rather than off any
-assumption about the limiter's configuration.
-
-THE CONSTRAINT THAT SHAPES EVERYTHING HERE: ``_with_connection_retry`` is the single choke point
-for ALL transport call sites INCLUDING ``create_issue``, ``add_comment`` and ``add_label``. A 429
-can arrive AFTER the server began a write, and nothing in the response distinguishes that from
-rejection at the gate — so a blanket 429 retry would reintroduce the duplicate-issue class bug
-[rebar:21fc-51d7-90ca-4a03] just fixed. The retry is therefore a per-call OPT-IN that DEFAULTS TO
-OFF, and the tests below spend most of their effort on the default rather than on the happy path.
+Retry eligibility follows the header, not assumed Jira versions or limiter defaults.
+Because ``_with_connection_retry`` also serves non-idempotent writes, blanket 429 replay
+could duplicate issues or comments. Retries therefore default off and are enabled only by
+callers whose operation is safe; tests cover the default, bounded delay, and header-driven
+read retry.
 """
 
 from __future__ import annotations

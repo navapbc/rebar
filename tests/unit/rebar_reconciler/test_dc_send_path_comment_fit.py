@@ -1,28 +1,10 @@
-"""Bug b9b4-f460-2d54-4872 — DC outbound comments must be LENGTH-FITTED on the SEND path.
+"""Pin comment fitting on the real Data Center send path (bug b9b4).
 
-On Jira Data Center the outbound comment send path applied no length fit at all:
-``JiraDataCenterBackend.add_comment`` was a bare delegate to the transport, and the
-transport's ``_CommentsMixin.add_comment`` hands ``body`` straight to the jira client.
-Bug 6afc established that an over-length comment rejection does not land and is
-re-emitted on every pass (the outbound comment-sync loop); DC's ceiling is
-deployment-resolved (``comment_max_chars()``, bug 049e), so an unfitted body is MORE
-likely to be rejected there, not less.
-
-This suite drives the REAL DC send path — the real ``JiraDataCenterTransport``
-(``_links.py`` mixins) under the real ``JiraDataCenterBackend`` — stubbing ONLY the
-jira client, and asserts on the body the client actually receives (the wire value):
-
-* an over-ceiling RECONCILER_MARKER-decorated body lands within the ceiling with the
-  marker intact (the fit must reuse ``fit_preserving_marker`` — bug 5931's Cloud fix —
-  so the loop-breaker marker is never the part that gets cut);
-* the differ's dedup key (``sanitizer.fit_comment``) equals the marker-stripped body
-  that actually landed — the convergence requirement commit e339 restored for Cloud
-  (``fit_comment_as_sent``): if the key and the send disagree, an over-length comment
-  can never match on the next pass and re-posts forever;
-* in-limit and unlimited-ceiling bodies pass through byte-identical.
-
-The ceiling is injected via ``_DCSanitizer(comment_max_chars=...)`` — the bug-049e
-test seam — so no process config is consulted.
+With only the Jira client stubbed, tests capture the wire body. Over-limit text must
+fit the deployment ceiling while preserving ``RECONCILER_MARKER``; the differ's
+``fit_comment`` key must equal the marker-stripped body that landed so the next pass
+converges. In-limit and unlimited bodies remain byte-identical. The ceiling is injected
+through ``_DCSanitizer`` rather than process configuration.
 """
 
 from __future__ import annotations

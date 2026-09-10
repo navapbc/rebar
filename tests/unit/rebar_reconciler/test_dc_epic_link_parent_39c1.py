@@ -1,43 +1,13 @@
-"""The outbound parent can never reach Data Center: the two gates are disjoint (ticket 39c1).
+"""Pin the intersection of outbound-parent emission and Data Center apply (ticket 39c1).
 
-THE DEFECT, as two policies that are each defensible alone.
-
-  * THE EMIT SIDE WANTS AN EPIC PARENT. ``outbound_field_diff._resolve_local_parent`` omits the
-    parent field entirely unless the local parent's ``ticket_type`` is ``epic`` — bug 8b25's
-    hierarchy guard, because Jira Cloud permits only Epic parents.
-  * THE APPLY SIDE WANTS A SUB-TASK CHILD. ``JiraDataCenterTransport.set_parent`` declines with
-    ``NotImplementedError`` for any child that is not a sub-task, correctly refusing to write
-    ``fields.parent`` where DC would silently no-op it.
-
-A DC sub-task's parent is a STANDARD issue, which imports as local ``ticket_type`` ``"task"``. So
-the one child shape the apply side accepts can only have a parent shape the emit side refuses. The
-sets never intersect and NO reconcile pass can emit an outbound parent-set that DC would accept.
-Confirmed live before this module existed (ticket 39c1-2a32-b564-4b4b):
-``test_outbound_clear_parent_round_trips`` — the local parent was detached and DC still carried
-``fields.parent``.
-
-THE FIX UNDER TEST is option B, recorded on the ticket: teach the DC apply side the EPIC LINK, and
-leave the emit gate untouched. That intersects the sets on the shape the emit gate already prefers,
-and it keeps bug 8b25's Cloud behaviour unchanged by not editing a line of it.
-
-THE MECHANISM, AND THE ROUTE THAT WAS REFUTED. Epic membership on DC is not ``fields.parent`` at
-all — it is the "Epic Link" custom field, whose ``customfield_NNNNN`` id differs per instance.
-Change 1302 wrote it through the Agile API (``add_issues_to_epic`` under
-``agile_rest_path="greenhopper"``), reasoning from the transport's own docstring. **A live
-harness run refuted that**: DC 8.17.1 answers ``POST /rest/greenhopper/1.0/epic/{key}/issue``
-with HTTP 404 "null for uri" — the endpoint does not exist, so it was never the epic-ID-versus-KEY
-ambiguity that had been anticipated. The Epic Link is an ordinary custom field, so these cells pin
-an ordinary field update instead, with the id DISCOVERED BY NAME rather than hardcoded.
-
-Whether that write takes effect against DC 8.17.1 is settled on the live harness, not here — per
-this epic's rule that the harness is the arbiter, and because 1302 had 2047 green unit tests.
-
-WHY THE LAST CELL MATTERS INDEPENDENTLY. This is the FIFTH instance of "Cloud has the translation,
-DC never got its half" (d067, 8d68, 751e, 2b16/88d9), and every one was a SILENT success: no
-traceback, no alert, the pass reports OK. ``dispatch_one`` swallows ``set_parent``'s exception, so
-even the loud decline is invisible. A parent that genuinely cannot be represented must therefore
-surface an ATTRIBUTED signal — that cell carries value even if the platform refuses the Epic Link
-write outright.
+The shared differ emits only epic parents, while DC's former apply path accepted only
+sub-task parents; neither valid policy could reach the other. Non-sub-task epic
+membership must use the instance-discovered ``Epic Link`` custom field, never
+``fields.parent``, which DC silently ignores. The earlier GreenHopper
+``add_issues_to_epic`` route is deliberately rejected because DC 8.17.1 returns 404.
+Sub-task writes retain their separate parent-field path and readback. Missing or
+unusable Epic Link metadata must decline with an attributed signal because dispatch
+softens the exception.
 """
 
 from __future__ import annotations
@@ -57,24 +27,14 @@ class _FakeIssue:
 
 
 class _FakeClient:
-    """A ``jira.JIRA``-shaped double recording which write path the transport chose.
+    """Record the DC parent-write path selected by the transport.
 
-    ``subtask`` decides the issue type the transport reads back. ``epic_calls`` records
-    ``add_issues_to_epic`` calls — the REFUTED Agile-API route, kept on the double precisely so a
-    cell can assert it is NOT taken. ``field_calls`` counts field-discovery round trips.
-
-    ``epic_link_name`` lets a cell simulate an instance where "Epic Link" cannot be discovered
-    (Jira Software absent, or a renamed field), which must DECLINE rather than fall back to
-    ``fields.parent``.
-
-    **THE DOUBLE APPLIES SUB-TASK PARENT WRITES, and that is now load-bearing** (bug
-    1a9f-50c0-e7a5-4fda). This fake used to return a fixed payload that never reflected a write,
-    which was harmless while ``set_parent`` trusted the status code. It no longer does: DC
-    answers a sub-task ``fields.parent`` write with 204 and ignores it, so the transport verifies
-    by reading the field back. A double that never reflects the write is indistinguishable from
-    the platform bug, and would make this module's sub-task cell fail for a reason that has
-    nothing to do with what it asserts (routing, not persistence). Modelling the write keeps the
-    cell about its own subject.
+    ``subtask`` controls readback shape; ``epic_calls`` exposes the prohibited Agile
+    route; ``field_calls`` records Epic Link discovery and cache reuse.
+    ``epic_link_name`` models
+    missing metadata, which must decline without falling back to ``fields.parent``.
+    Sub-task field writes update the fake's payload so the production readback verifies
+    routing rather than failing on an inert double.
     """
 
     def __init__(self, *, subtask: bool, epic_link_name: str | None = "Epic Link") -> None:
@@ -129,16 +89,10 @@ def _transport(client: _FakeClient) -> JiraDataCenterTransport:
 
 
 def test_epic_parent_on_a_non_subtask_is_written_as_an_epic_link() -> None:
-    """THE DEFECT. A non-sub-task child with an epic parent must be written, not declined.
+    """Write an emitted epic parent through Epic Link for a non-sub-task.
 
-    This is the exact shape the emit gate produces — it emits ONLY for an epic parent — and the
-    exact shape the apply side refuses today, which is why no parent ever reaches DC. Pre-fix this
-    raises ``NotImplementedError``, so the RED message names the decline rather than an absent
-    attribute.
-
-    The assertion is on the EPIC LINK call, not merely on "no exception": writing ``fields.parent``
-    for a non-sub-task would satisfy a no-exception oracle while DC silently no-ops it, which is the
-    failure mode the original decline was written to prevent. Do not weaken this to a raises-check.
+    Assert the custom-field update itself: no-exception or ``fields.parent`` would pass
+    while preserving DC's silent no-op failure.
     """
     client = _FakeClient(subtask=False)
 
@@ -295,13 +249,7 @@ def test_subtask_parent_still_uses_fields_parent() -> None:
 
 
 def test_the_emit_gate_and_dc_apply_now_overlap() -> None:
-    """THE TICKET'S HEADLINE AC: the two gates must intersect for at least one real configuration.
-
-    Composed rather than asserted about one side, because each side in isolation looks correct and
-    the defect is only visible where they meet. The emit gate is driven for real — an EPIC parent,
-    which is the only shape it ever emits — and the resulting parent key is handed to the DC apply
-    side, which must accept it.
-    """
+    """Compose the real epic-only emit gate with DC apply and require acceptance."""
     from rebar_reconciler.outbound_field_diff import _resolve_local_parent
 
     class _Bindings:

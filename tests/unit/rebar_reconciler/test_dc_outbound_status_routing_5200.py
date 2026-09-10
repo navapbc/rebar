@@ -1,33 +1,10 @@
-"""DIAGNOSIS repro: the OUTBOUND status never reaches a transition on Data Center (ticket 5200).
+"""Pin outbound Data Center status routing through workflow transitions.
 
-WHY THIS EXISTS, AND WHY 7f93 DID NOT COVER IT. Bug 7f93 fixed
-``JiraDataCenterTransport.transition_issue_by_name`` so a destination STATUS name
-(``"In Progress"``) resolves to the transition that reaches it (``Start Progress``). That fixed
-the INBOUND cell, whose setup calls ``transition_issue_by_name`` DIRECTLY. It cannot fix the
-OUTBOUND cell, because the outbound apply path never calls that method at all.
-
-THE OUTBOUND PATH, end to end:
-  * ``dispatch_apply_phases._OUTBOUND_BATCH_ALLOWLIST`` (``dispatch_apply_phases.py:41``)
-    contains ``"status"``, so ``_update_one_filter_fields`` KEEPS it;
-  * ``dispatch_one._update_one_scalar_update`` (``dispatch_one.py:646``) forwards the whole
-    allowlisted dict as ``client.update_issue(issue_key, **fields)``;
-  * on Cloud, ``adapters/jira/acli.py:170-183`` pops ``status`` out of the kwargs and routes it
-    to ``transition_issue`` -> ``transition_issue_by_name``. That is where the status→transition
-    translation lives — in the ACLI transport, NOT in the shared dispatch path;
-  * on Data Center, ``adapters/jira_datacenter/transport.py:248-255`` pops ONLY ``assignee`` and
-    puts everything else into ``issue.update(fields=kwargs)`` — a REST field EDIT. ``status`` is
-    not an editable field in Jira; it is only reachable through a transition.
-
-So the DC transport is missing the status→transition routing its Cloud sibling has, and the
-outbound status is submitted as if it were a text field.
-
-THIS MODULE STARTED AS A DIAGNOSIS ARTEFACT AND IS NOW THE REGRESSION PIN (bug d067 fixed).
-``JiraDataCenterTransport.update_issue`` now pops ``status`` and routes it through
-``transitions.route_status_to_transition``. The first test, which used to PIN the defect, is
-inverted with its intent preserved; the second lost its ``xfail(strict=True)`` marker. The
-rest guard the ways a naive fix goes wrong: dropping the co-submitted editable fields,
-turning an illegal-from-here transition into a pass-fatal error (in both of the shapes Jira
-serves it), and over-broadening that softening until a real outage is hidden.
+The shared dispatcher passes ``status`` to ``update_issue``. Unlike an editable field,
+status must be removed from that payload and routed through
+``transitions.route_status_to_transition``; destination-name resolution alone does not
+fix this transport boundary. Tests also preserve co-submitted editable fields, soften
+only Jira's illegal-from-here transition responses, and continue surfacing real outages.
 """
 
 from __future__ import annotations
@@ -85,19 +62,10 @@ def _transport() -> JiraDataCenterTransport:
 
 
 def test_the_dc_transport_never_edits_status_as_a_field() -> None:
-    """INVERTED (bug d067 fixed). ``update_issue(key, status=...)`` must not field-EDIT.
+    """Require transition probing without leaking ``status`` into field edits.
 
-    THIS TEST USED TO PIN THE DEFECT, and its inversion is the point. It formerly asserted
-    ``edited_fields == [{"status": "In Progress"}]`` and ``transitions_probed == []`` — the
-    exact mechanism behind the live cell's ``fields.status.name is 'To Do'`` — so that the
-    diagnosis was falsifiable in one file: fix the routing and this test fails while the
-    xfail below turns green, and the pair says exactly what moved. That is what happened.
-
-    The intent worth keeping is the NEGATIVE half, so it is kept as a negative: the assertion
-    that no ``status`` key ever reaches the REST field-edit payload, and that the transitions
-    endpoint IS probed. It is not the same claim as the test below (which pins WHICH
-    transition fires); this one would still catch a fix that routed the transition correctly
-    but ALSO left `status` in the field edit — a partial fix Jira would keep rejecting.
+    This negative oracle catches a partial fix that transitions correctly but still sends
+    Jira's non-editable ``status`` field.
     """
     transport = _transport()
     transport.update_issue("DIG-1", status="In Progress")

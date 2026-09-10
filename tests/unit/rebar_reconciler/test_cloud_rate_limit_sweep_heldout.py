@@ -1,127 +1,20 @@
-"""HELD-OUT enumerated 429 sweep for the Cloud (ACLI) adapter — story 2127.
+"""Held-out per-member census of Cloud (ACLI) 429 behavior.
 
-DC gained a per-member 429 sweep in epic e369 (``test_dc_rate_limit_retry_heldout.py``);
-Cloud never had one. This module ports the PROPERTY, not the test: DC has a single
-``_with_connection_retry`` choke point, whereas Cloud's mutations traverse FOUR distinct
-429 behaviours across two levels, and TWO of them retry a 429 on purpose. So a single
-attempt-count assertion is meaningless unless it names the BOUNDARY it measures at — this
-module asserts a PER-LAYER property, enumerated per member (an ellipsis is how the next
-mutation silently inherits a retry).
+Cloud mutations cross four boundaries: pooled REST and bare ``urlopen`` make one
+attempt; the ACLI subprocess and ``dispatch_one._call_with_retry`` perform bounded
+``Retry-After`` retries; reporter and comment apply phases explicitly remain
+single-attempt. The tables below assign every mutation its transport seam, dispatch
+level, attempt policy, and duplicate-write disposition, while ``_NON_MUTATING``
+accounts for every read, helper, and constructor so new members cannot inherit a
+policy silently.
 
-The four Cloud 429 behaviours (verified against the tree, current line numbers):
-
-  * DIRECT pooled REST — ``AcliRestMixin._rest_urlopen_with_retry`` (acli_rest.py:36) does
-    NOT retry ``urllib.error.HTTPError`` (its docstring, acli_rest.py:50): exactly ONE
-    attempt.
-  * BARE ``urllib.request.urlopen`` — ``acli_cli_ops.update_priority`` (acli_cli_ops.py:396,
-    urlopen at :437) bypasses ``_rest_urlopen_with_retry`` entirely, so it has no retry of
-    its own either: exactly ONE attempt.
-  * ACLI SUBPROCESS — ``acli_subprocess._run_acli`` (acli_subprocess.py) DELIBERATELY
-    retries a 429 via ``_rate_limit_backoff`` honouring ``Retry-After``
-    (``test_run_acli_429_retries_with_rate_limit_backoff`` pins this): a BOUNDED retry, NOT
-    one attempt.
-  * DISPATCH WRAPPER — ``dispatch_one._call_with_retry`` (dispatch_one.py:71) adds a 429
-    retry ON TOP (its 429/``Retry-After`` branch, dispatch_one.py:115-118), honouring
-    ``Retry-After``: a BOUNDED retry, NOT one attempt. The explicitly NON-retrying apply
-    phases (``dispatch_apply_phases._update_one_apply_reporter`` :96 /
-    ``_update_one_dispatch_comments`` :147) do the opposite: one attempt.
-
-============================================================================================
-PER-MEMBER CLASSIFICATION TABLE (the AC1 repo artifact; mirrored onto ticket 2127).
-Two axes: TRANSPORT SEAM (subprocess | pooled-REST | bare-urlopen) and DISPATCH LEVEL
-(retrying ``_call_with_retry`` | non-retrying ``dispatch_apply_phases`` | none / direct).
-"Dup-write safe?" is the duplicate-write assessment (AC7) for members that reach a mutation
-through a KNOWN deliberate retry — the authoritative repo artifact, not a tracker-only note.
-
-Per member — ``seam`` / ``dispatch level`` / ``429 attempts`` / ``Dup-write safe? [reason]``:
-
-  create_issue
-    subprocess / _call_with_retry (create_one) / bounded retry
-    Dup-safe: YES — JQL rebar-id dedup in create_one precedes the write, so a retried
-    create cannot duplicate.
-  update_issue (field-edit leg)
-    subprocess / _call_with_retry / bounded retry
-    Dup-safe: YES — ``workitem edit`` is idempotent (last-write-wins on the same fields).
-  update_issue (priority leg)
-    bare-urlopen / _call_with_retry / one attempt
-    Dup-safe: N/A — bare urlopen never retries a 429 itself.
-  update_issue (status leg)
-    pooled-REST (transition) / _call_with_retry / one attempt
-    Dup-safe: N/A — REST leg one-attempt; transition is idempotent anyway (target state).
-  add_comment
-    subprocess / non-retrying (dispatch_comments) / one attempt
-    Dup-safe: N/A — single-attempt by design (9622): a comment has no idempotency key, so
-    it is NOT retried.
-  transition_issue_by_name
-    pooled-REST / _call_with_retry / one attempt
-    Dup-safe: N/A — REST one-attempt; POST /transitions idempotent (moves to a target state).
-  unassign_issue
-    pooled-REST / _call_with_retry / one attempt
-    Dup-safe: N/A — one attempt; idempotent (accountId=null).
-  set_parent
-    pooled-REST / _call_with_retry / one attempt
-    Dup-safe: N/A — one attempt; idempotent (sets parent key).
-  delete_issue
-    subprocess / direct (applier) / bounded retry
-    Dup-safe: YES — delete is idempotent (404-on-gone treated as success by delete_issue's
-    own handler).
-  set_issue_property / set_entity_property
-    pooled-REST / _call_with_retry / one attempt
-    Dup-safe: N/A — one attempt; PUT property is idempotent.
-  set_reporter
-    pooled-REST / non-retrying (apply_reporter) / one attempt
-    Dup-safe: N/A — one attempt; soft-degrades on HTTPError.
-  update_priority (graph method)
-    pooled-REST / _call_with_retry / one attempt
-    Dup-safe: N/A — one attempt; PUT priority idempotent.
-  update_issuetype
-    pooled-REST / _call_with_retry / one attempt
-    Dup-safe: N/A — one attempt; PUT issuetype idempotent.
-  delete_comment
-    pooled-REST / _call_with_retry / one attempt
-    Dup-safe: N/A — one attempt; DELETE idempotent.
-  add_label / _add_label_impl
-    subprocess / _call_with_retry / bounded retry
-    Dup-safe: YES — ``labelsToAdd`` is additive + idempotent (re-adding a label is a no-op).
-  remove_label / _remove_label_impl
-    subprocess / _call_with_retry / bounded retry
-    Dup-safe: YES — ``labelsToRemove`` is target-specific + idempotent (removing an absent
-    label no-ops).
-  update_comment
-    subprocess / _call_with_retry / bounded retry
-    Dup-safe: YES — comment UPDATE targets a fixed comment id (last-write-wins), not append.
-  set_relationship
-    subprocess / _call_with_retry / bounded retry
-    Dup-safe: PARTIAL — a retried ``link create`` CAN create a duplicate link; the differ
-    de-dups links by (type, other_key) on the next pass, so a dup is self-healing but
-    transiently visible. Tracked: no new bug — pre-existing + differ-guarded.
-  delete_issue_link
-    subprocess / _call_with_retry / bounded retry
-    Dup-safe: YES — delete-by-id idempotent (404 == gone).
-
-NON-MUTATING names from the Step-0 enumeration (reads / helpers / ctor), each excluded with
-a reason — see ``test_enumeration_completeness_and_dc_crosscheck`` below, which asserts every
-name the Step-0 command returns is accounted for.
-
-Step-0 enumeration command (AC2 completeness; raw output recorded in the test below):
-
-    git grep -nE "^(    )?def [_a-z]" -- \
-      src/rebar/_engine/rebar_reconciler/adapters/jira/acli.py \
-      src/rebar/_engine/rebar_reconciler/adapters/jira/acli_graph.py \
-      src/rebar/_engine/rebar_reconciler/adapters/jira/acli_rest.py \
-      src/rebar/_engine/rebar_reconciler/adapters/jira/acli_cli_ops.py
-============================================================================================
-
-MUTATION CHECK (AC final bullet), recorded RED/GREEN in the change description:
-  * pooled-REST / bare-urlopen one-attempt sweep: make one member retry once at the urlopen
-    boundary → the ``== 1`` attempt assertion goes RED.
-  * subprocess-seam bounded-retry sweep: cap ``_run_acli``'s attempt loop at one (or re-raise
-    on a 429 exit without looping) → the retry/attempt-count assertion goes RED.
-  * dispatch-wrapped path: unbound the retry in ``_call_with_retry`` → the bounded-retry
-    assertion goes RED; and drop ``Retry-After`` honouring → the delay assertion goes RED.
-  * non-retrying apply-phases sweep: add a second transport call inside
-    ``_update_one_apply_reporter`` / ``_update_one_dispatch_comments`` → the ``== 1``
-    assertion goes RED.
+Deliberately retried operations are idempotent or deduplicated: creates use the
+``rebar-id`` lookup, edits target stable fields or ids, label operations are set-like,
+and deletes tolerate absence. Relationship creation can duplicate transiently but the
+differ reconverges; comment creation has no idempotency key and therefore stays
+single-attempt. The boundary tests and enumeration check reject missing members,
+unbounded retries, ignored ``Retry-After``, and accidental retries on non-retrying
+paths.
 """
 
 from __future__ import annotations
