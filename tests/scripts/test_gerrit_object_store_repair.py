@@ -18,6 +18,7 @@ _JGIT_MATERIALIZER = _REPO / "infra" / "scripts" / "materialize-gerrit-jgit-conf
 _JGIT_CONFIG = _REPO / "infra" / "compose" / "jgit.config"
 _COMPOSE = _REPO / "infra" / "compose" / "docker-compose.yml"
 _RUNBOOK = _REPO / "infra" / "runbooks" / "gerrit-object-store-repair.md"
+_REFSPEC_GUARD = _REPO / "infra" / "scripts" / "validate-gerrit-repair-refspecs.sh"
 
 
 def test_jgit_config_disables_receive_autogc_in_versioned_infra() -> None:
@@ -88,8 +89,40 @@ def test_repair_runbook_is_backup_first_and_connectivity_verified() -> None:
     assert "create-snapshot" in text
     assert "git fetch" in text
     assert "--prune" not in text
-    assert "refs/remotes/github/main" in text
+    assert "refs/recovery/github/main" in text
     assert "chown -R 1000:1000" in text
     assert "fsck --full --connectivity-only --no-dangling --strict" in text
     assert "refs/changes" in text
     assert "cat-file -t" in text
+
+
+def test_repair_runbook_uses_quarantine_and_post_repair_checks() -> None:
+    text = _RUNBOOK.read_text()
+    assert "refs/recovery/github/main" in text
+    assert "+refs/heads/*:refs/heads/*" not in text
+    assert "validate-gerrit-repair-refspecs.sh" in text
+    assert "expected old/new main SHAs" in text
+    assert "replication start --all --wait" in text
+    assert "--merged-reachability" in text
+    assert "delete refs/recovery/github/*" in text
+
+
+def test_repair_refspec_guard_rejects_direct_branch_destinations() -> None:
+    result = subprocess.run(
+        ["bash", str(_REFSPEC_GUARD), "+refs/heads/*:refs/heads/*"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "refs/heads/*" in result.stderr
+
+
+def test_repair_refspec_guard_allows_quarantine_destinations() -> None:
+    result = subprocess.run(
+        ["bash", str(_REFSPEC_GUARD), "refs/heads/main:refs/recovery/github/main"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0

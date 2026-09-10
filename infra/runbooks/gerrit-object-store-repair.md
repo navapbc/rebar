@@ -23,24 +23,44 @@ blob <sha>` or a full connectivity check reports missing objects in
      --description "pre-repair Gerrit object-store backup $(date -u +%FT%TZ)"
    ```
 
-3. Run `git fetch` from the GitHub mirror into a remote-tracking ref as uid 1000. Do
-   not prune or overwrite all live `refs/heads/*`; the repair only needs to import
+3. Record the current live branch state before importing any objects:
+
+   ```sh
+   sudo -u ec2-user git --git-dir=/var/gerrit/site/git/rebar.git rev-parse refs/heads/main
+   git ls-remote https://github.com/navapbc/rebar.git refs/heads/main
+   ```
+
+   Treat those as the expected old/new main SHAs for the repair. If they differ,
+   write both values into the incident ticket before continuing so the post-repair
+   checks can prove the live branch was not moved backwards.
+
+4. Validate the planned mirror-recovery refspec. The fetch must import recovery
+   objects into the quarantine namespace `refs/recovery/github/*`; it must never
+   write directly to `refs/heads/*`:
+
+   ```sh
+   infra/scripts/validate-gerrit-repair-refspecs.sh \
+     refs/heads/main:refs/recovery/github/main
+   ```
+
+5. Run `git fetch` from the GitHub mirror into the quarantine namespace as uid 1000.
+   Do not prune or overwrite live `refs/heads/*`; the repair only needs to import
    missing objects:
 
    ```sh
    sudo -u ec2-user git --git-dir=/var/gerrit/site/git/rebar.git \
      fetch https://github.com/navapbc/rebar.git \
-       refs/heads/main:refs/remotes/github/main
+       refs/heads/main:refs/recovery/github/main
    ```
 
-4. Normalize ownership if any command may have run as root. Normalize the whole bare
+6. Normalize ownership if any command may have run as root. Normalize the whole bare
    repository, not just `objects/`, because fetch writes repo-root metadata too:
 
    ```sh
    chown -R 1000:1000 /var/gerrit/site/git/rebar.git
    ```
 
-5. Verify the named object and the whole repository, including change refs and meta refs:
+7. Verify the named object and the whole repository, including change refs and meta refs:
 
    ```sh
    sudo -u ec2-user git --git-dir=/var/gerrit/site/git/rebar.git cat-file -t "$MISSING_BLOB"
@@ -50,7 +70,28 @@ blob <sha>` or a full connectivity check reports missing objects in
      fsck --full --connectivity-only --no-dangling --strict
    ```
 
-6. Retry the blocked push once. If it fails with another missing object, stop and record the
+8. Trigger Gerrit-to-GitHub replication and verify the mirror caught up:
+
+   ```sh
+   ssh -i /root/.ssh/gerrit_admin -p 29418 admin@localhost replication start --all --wait
+   rebar mirror-guard --replication --merged-reachability 50
+   ```
+
+   The merged-reachability check is the noolbenger invariant: every recent Gerrit
+   change marked MERGED must have its current revision reachable from `refs/heads/main`.
+
+9. Only after the named object, full fsck, replication, and merged-reachability checks
+   pass, delete refs/recovery/github/* so quarantine refs do not become a long-lived
+   alternate reachability root. If any step aborts, delete the quarantine refs before
+   handing off:
+
+   ```sh
+   sudo -u ec2-user git --git-dir=/var/gerrit/site/git/rebar.git \
+     for-each-ref --format='delete %(refname)' refs/recovery/github |
+     sudo -u ec2-user git --git-dir=/var/gerrit/site/git/rebar.git update-ref --stdin
+   ```
+
+10. Retry the blocked push once. If it fails with another missing object, stop and record the
    new object id and timestamp on the incident ticket before changing anything else.
 
 ## Prevention
