@@ -580,3 +580,43 @@ def test_doctor_cli_mcp_client_scan_is_hermetic(
         f"expected only config-missing in an isolated home, got "
         f"{[(f.get('kind'), f.get('path')) for f in findings]}"
     )
+
+
+def test_doctor_cli_mcp_client_scan_uses_repo_root_for_project_config(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``doctor_cli`` must scan the resolved repo root, not the process cwd.
+
+    The command can be invoked with an explicit ``repo_root`` while the process is
+    elsewhere. Project-scoped MCP configs belong to that repo root; falling back to
+    ``Path.cwd()`` would silently miss the config the clients use for this checkout.
+    """
+    proj = _proj(tmp_path, "[mapping.projects.STUB]\n")
+    (proj / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "rebar": {
+                        "type": "http",
+                        "url": "https://example.invalid/mcp/",
+                        "headers": {"Authorization": "Bearer ${MCP_CLIENT_PAT_CLI}"},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    rc = doctor.doctor_cli(["--output", "json"], repo_root=str(proj))
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    project_paths = {
+        f.get("path")
+        for f in payload["mcp_client_findings"]
+        if f.get("client") in {"copilot", "claude"}
+    }
+    assert project_paths == {str(proj / ".mcp.json")}

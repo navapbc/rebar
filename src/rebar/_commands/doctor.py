@@ -465,7 +465,7 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
 
     # MCP client-config diagnostics: pure, stdlib-only, and read from the operator's home
     # rather than the store, so they too stay outside `findings` / the repair loop.
-    mcp_client_findings = doctor_mcp_client.scan_mcp_clients()
+    mcp_client_findings = doctor_mcp_client.scan_mcp_clients(cwd=repo_root)
 
     pre_oid = ""
     if do_repair and not dry_run and findings:
