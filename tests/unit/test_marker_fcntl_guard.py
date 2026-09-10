@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import multiprocessing
 import os
-import threading
-import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -11,6 +11,38 @@ from rebar._store import lock_kernel
 from rebar.reducer import marker
 
 pytestmark = pytest.mark.unit
+
+
+def _write_marker_while_body_open(
+    ticket_dir: str,
+    entered: Any,
+    release_first: Any,
+    events: Any,
+) -> None:
+    real_open = open
+
+    def delaying_open(path: object, *args: object, **kwargs: object):
+        handle = real_open(path, *args, **kwargs)
+        if os.fspath(path).endswith(marker.ARCHIVE_MARKER_NAME):
+            events.send("first-has-lock")
+            entered.set()
+            assert release_first.wait(timeout=5)
+        return handle
+
+    marker.open = delaying_open  # type: ignore[attr-defined]
+    marker.write_marker(ticket_dir)
+    events.send("first-done")
+
+
+def _remove_marker_after_writer_enters(
+    ticket_dir: str,
+    entered: Any,
+    events: Any,
+) -> None:
+    assert entered.wait(timeout=5)
+    events.send("second-started")
+    marker.remove_marker(ticket_dir)
+    events.send("second-done")
 
 
 def test_write_and_remove_marker_return_when_no_lock_primitive(
@@ -46,45 +78,52 @@ def test_no_primitive_fallback_does_not_release_unacquired_lock(
 
 
 def test_marker_lock_serializes_posix_access(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    """The real locking path remains blocking: contender enters only after release."""
-    entered = threading.Event()
-    release_first = threading.Event()
-    finished = threading.Event()
-    events: list[str] = []
-    real_open = open
+    """The POSIX locking path blocks a separate process until the holder releases."""
+    if lock_kernel.fcntl is None:
+        pytest.skip("POSIX fcntl lock primitive is not available")
+    try:
+        ctx = multiprocessing.get_context("spawn")
+    except ValueError:
+        pytest.skip("spawn context is required for this POSIX lock test")
 
-    def delaying_open(path: object, *args: object, **kwargs: object):
-        handle = real_open(path, *args, **kwargs)
-        if os.fspath(path).endswith(marker.ARCHIVE_MARKER_NAME):
-            events.append("first-has-lock")
-            entered.set()
-            assert release_first.wait(timeout=5)
-        return handle
+    entered = ctx.Event()
+    release_first = ctx.Event()
+    event_rx, event_tx = ctx.Pipe(duplex=False)
+    first_process = ctx.Process(
+        target=_write_marker_while_body_open,
+        args=(str(tmp_path), entered, release_first, event_tx),
+    )
+    second_process = ctx.Process(
+        target=_remove_marker_after_writer_enters,
+        args=(str(tmp_path), entered, event_tx),
+    )
+    try:
+        first_process.start()
+        second_process.start()
+        event_tx.close()
 
-    def first() -> None:
-        marker.write_marker(str(tmp_path))
-        events.append("first-done")
+        assert event_rx.poll(timeout=5)
+        assert event_rx.recv() == "first-has-lock"
+        assert event_rx.poll(timeout=5)
+        assert event_rx.recv() == "second-started"
+        assert not event_rx.poll(timeout=0.2)
 
-    def second() -> None:
-        entered.wait(timeout=5)
-        marker.remove_marker(str(tmp_path))
-        events.append("second-done")
-        finished.set()
+        release_first.set()
+        first_process.join(timeout=5)
+        second_process.join(timeout=5)
 
-    monkeypatch.setattr(marker, "open", delaying_open, raising=False)
-    first_thread = threading.Thread(target=first)
-    second_thread = threading.Thread(target=second)
-    first_thread.start()
-    second_thread.start()
-
-    assert entered.wait(timeout=5)
-    time.sleep(0.1)
-    assert events == ["first-has-lock"]
-    release_first.set()
-    first_thread.join(timeout=5)
-    second_thread.join(timeout=5)
-
-    assert finished.is_set()
-    assert events == ["first-has-lock", "first-done", "second-done"]
+        assert first_process.exitcode == 0
+        assert second_process.exitcode == 0
+        assert event_rx.poll(timeout=5)
+        assert event_rx.recv() == "first-done"
+        assert event_rx.poll(timeout=5)
+        assert event_rx.recv() == "second-done"
+    finally:
+        release_first.set()
+        for process in (first_process, second_process):
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+        event_rx.close()
