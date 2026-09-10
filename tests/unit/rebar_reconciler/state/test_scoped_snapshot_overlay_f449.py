@@ -164,6 +164,11 @@ class _PassthroughOutboundMapper:
         return (None, False, False)
 
 
+class _Backend:
+    inbound = _IdentityInboundMapper()
+    outbound = _PassthroughOutboundMapper()
+
+
 class _BindingStore:
     def __init__(self, reverse: dict[str, str]) -> None:
         self._reverse = reverse
@@ -225,11 +230,31 @@ def test_overlay_prevents_the_inbound_clobber() -> None:
 class _CtxBindingStore:
     """Forward (local_id -> jira_key) binding store used by the orchestrator."""
 
-    def __init__(self, forward: dict[str, str]) -> None:
+    def __init__(
+        self,
+        forward: dict[str, str],
+        *,
+        baselines: dict[str, dict[str, Any]] | None = None,
+        states: dict[str, str] | None = None,
+    ) -> None:
         self._forward = forward
+        self._baselines = baselines or {}
+        self._states = states or {}
 
     def get_jira_key(self, local_id: str) -> str | None:
         return self._forward.get(local_id)
+
+    def get_baseline(self, local_id: str) -> dict[str, Any] | None:
+        return self._baselines.get(local_id)
+
+    def all_bindings(self) -> dict[str, dict[str, Any]]:
+        return {
+            local_id: {
+                "jira_key": jira_key,
+                "state": self._states.get(local_id, "confirmed"),
+            }
+            for local_id, jira_key in self._forward.items()
+        }
 
 
 class _Ctx:
@@ -243,21 +268,30 @@ class _Ctx:
         runtime_transport: Any = None,
         binding_store: Any = None,
         curr_snapshot: Any = None,
+        local_tickets: Any = None,
+        runtime_backend: Any = None,
     ) -> None:
         self.selection_ids = selection_ids
         self.filter_local_ids = filter_local_ids
         self.runtime_transport = runtime_transport
         self.binding_store = binding_store
         self.curr_snapshot = curr_snapshot
+        self.local_tickets = [] if local_tickets is None else local_tickets
+        self.runtime_backend = runtime_backend
 
 
-def test_orchestrator_noops_for_an_unscoped_pass() -> None:
-    """No selection_ids and no filter_local_ids -> never GET (bounded-cost guard)."""
+def test_orchestrator_noops_for_an_unscoped_pass_with_no_ambiguous_keys() -> None:
+    """Unscoped refresh only GETs keys where a stale snapshot could clobber local."""
     snapshot = {"REB-1": _vendor(description="OLD body")}
     client = _FreshClient({"REB-1": _vendor(description="NEW body")})
     ctx = _Ctx(
         runtime_transport=client,
-        binding_store=_CtxBindingStore({"loc-1": "REB-1"}),
+        runtime_backend=_Backend(),
+        binding_store=_CtxBindingStore(
+            {"loc-1": "REB-1"},
+            baselines={"loc-1": _vendor(description="BASELINE body")},
+        ),
+        local_tickets=[_local(ticket_id="loc-1", description="LOCAL edit")],
         curr_snapshot=snapshot,
     )
 
@@ -360,3 +394,67 @@ def test_orchestrator_uses_filter_local_ids_when_selection_ids_absent() -> None:
 
     assert client.calls == ["REB-1"]
     assert snapshot["REB-1"]["description"] == "NEW body"
+
+
+def test_unscoped_orchestrator_refreshes_only_ambiguous_candidates() -> None:
+    """A full pass direct-GETs only baseline-unchanged locals whose search snapshot
+    diverges from that baseline, bounding GET volume to the clobber-risk set."""
+    snapshot = {
+        "REB-1": _vendor(description="OLD body", summary="A"),
+        "REB-2": _vendor(description="OLD remote edit", summary="B"),
+        "REB-3": _vendor(description="BASELINE body", summary="C"),
+    }
+    client = _FreshClient(
+        {
+            "REB-1": _vendor(description="NEW body", summary="A"),
+            "REB-2": _vendor(description="REMOTE body", summary="B"),
+            "REB-3": _vendor(description="BASELINE body", summary="C"),
+        }
+    )
+    ctx = _Ctx(
+        runtime_transport=client,
+        runtime_backend=_Backend(),
+        binding_store=_CtxBindingStore(
+            {"loc-1": "REB-1", "loc-2": "REB-2", "loc-3": "REB-3"},
+            baselines={
+                "loc-1": _vendor(description="NEW body", summary="A"),
+                "loc-2": _vendor(description="BASELINE body", summary="B"),
+                "loc-3": _vendor(description="BASELINE body", summary="C"),
+            },
+        ),
+        local_tickets=[
+            _local(ticket_id="loc-1", title="A", description="NEW body"),
+            _local(ticket_id="loc-2", title="B", description="LOCAL edit"),
+            _local(ticket_id="loc-3", title="C", description="BASELINE body"),
+        ],
+        curr_snapshot=snapshot,
+    )
+
+    refresh_scoped_snapshot(ctx)
+
+    assert client.calls == ["REB-1"]
+    assert snapshot["REB-1"]["description"] == "NEW body"
+    assert snapshot["REB-2"]["description"] == "OLD remote edit"
+    assert snapshot["REB-3"]["description"] == "BASELINE body"
+
+
+def test_unscoped_orchestrator_prevents_stale_inbound_clobber() -> None:
+    """The unscoped candidate overlay gives the inbound differ lag-free state before it
+    can mirror the stale search value over the unchanged local field."""
+    snapshot = {"REB-1": _vendor(description="OLD body", summary="NEW title")}
+    ctx = _Ctx(
+        runtime_transport=_FreshClient(
+            {"REB-1": _vendor(description="NEW body", summary="NEW title")}
+        ),
+        runtime_backend=_Backend(),
+        binding_store=_CtxBindingStore(
+            {"loc-1": "REB-1"},
+            baselines={"loc-1": _vendor(description="NEW body", summary="NEW title")},
+        ),
+        local_tickets=[_local(ticket_id="loc-1", description="NEW body", title="NEW title")],
+        curr_snapshot=snapshot,
+    )
+
+    refresh_scoped_snapshot(ctx)
+
+    assert _inbound(snapshot) == []
