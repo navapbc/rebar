@@ -1,60 +1,23 @@
-"""Atomic file writes: temp-in-same-dir + ``os.replace`` (crash-atomic on one filesystem).
+"""Crash-atomic file writes using a unique sibling and ``os.replace``.
 
-Low-level module — keep imports acyclic, and import sibling store helpers lazily when
-needed. It consolidates the many inline "write a temp file, then
-rename it over the target" sites (the HLC cache, ``rebar.toml``, the ticket-event
-staging in ``txn``/``compact``, the reducer/graph caches, the snapshot sidecars, prompt
-authoring, agent scratch) behind one call, so the crash-atomicity contract lives in
-exactly one place.
+This low-level module gives caches, configuration, event staging, sidecars, prompts,
+and agent scratch one write contract. Sibling lock helpers are imported lazily to keep
+dependencies acyclic. ``mkstemp`` uses ``O_EXCL`` to create an exclusive temporary file
+beside the target. ``os.replace`` then publishes it atomically on the same filesystem,
+so readers observe either complete version.
+Failure before replacement preserves the target and removes the temporary file.
 
-Guarantees
-----------
-* **Crash-atomic on the same filesystem.** The temp is created (via ``mkstemp`` — a
-  unique, ``O_EXCL`` name) in the SAME directory as ``path`` and published with
-  ``os.replace``, an atomic rename on one filesystem — so a concurrent reader / the
-  replayer never observes a torn or partial ``path``: it sees either the old file or
-  the new one, whole. A failure before the rename leaves ``path`` untouched and the
-  temp is removed.
-* **Text or bytes.** ``mode="w"`` writes ``str`` (encoded with ``encoding``, and with
-  newline translation DISABLED so the on-disk bytes equal ``data`` exactly, even on
-  Windows); ``mode="wb"`` writes ``bytes`` verbatim.
-* **Durability (opt-in).** ``fsync=True`` fsyncs the file before the rename AND the
-  containing directory after it, so both the data and the rename survive a power loss
-  (this is what the agent-scratch writer needs). Default OFF — the crash-ATOMICITY
-  above holds without it, and the event log / HLC cache never paid for an fsync.
-* **Permissions.** The published file's mode is ``permissions`` when given, else the
-  umask-derived mode a plain ``open(path, "w")`` would yield (``mkstemp``'s 0o600 is
-  overridden, so a migrated ``open``-based site keeps its usual 0o644).
+Text mode disables newline translation and applies the requested encoding. Binary
+mode writes bytes unchanged. Optional ``fsync`` persists both file content and the
+directory rename across power loss. Without it, replacement remains crash-atomic
+but not power-loss durable. Explicit permissions override the default mode derived
+from the process umask. The parent directory must already exist.
 
-The parent directory must already exist (callers that need it created still do so).
-
-Why the temp name must NOT come from the target (ticket b0ac-3c0f-3f64-4344)
----------------------------------------------------------------------------
-A temp whose name is derived from the TARGET (``<target>.tmp``) — or from the PID
-(``<target>.<pid>.tmp``, unique across processes but SHARED by every thread of one
-process, and the MCP server is threaded) — is the SAME pathname for every concurrent
-writer of that target. The first ``os.replace`` consumes it; the second raises
-``FileNotFoundError``, which a best-effort ``except`` swallows, and that writer is
-**silently lost**. ``mkstemp`` gives each writer its own exclusively-created name, so both land.
-The audited sites, all now routed here:
-
-===================================================  ============================
-Site                                                 Was
-===================================================  ============================
-``llm/workflow/completion_verdict_cache``            target-derived (fixed 89981d8e)
-``review_bot/reconcile._write_cursor``               target-derived ``.tmp``
-``_config_writer.write_jira_config``                 target-derived ``.tmp``
-``_cli._suggest_mapping_write``                      target-derived ``.tmp``
-``_opcert_signing._derive_opcert_pub``               pid-derived ``.tmp``
-``_snapshot/janitor.reverify_entry``                 no temp (torn reads)
-``llm/workflow/completion_banking`` (bank upsert)    no temp (torn reads)
-===================================================  ============================
-
-The audit's negative result is worth keeping: every module-level cache and
-``functools.lru_cache`` under ``src/rebar`` was checked and **none is root-unkeyed** —
-they key on an absolute path, the repo root, or a stat token, and the two store-state
-``lru_cache``\\ s are explicitly repo-root + overlay-signature keyed. So the defect class
-is confined to temp-file NAMING; no cache needed re-keying.
+Temporary names must not derive from the target or process identifier (ticket
+b0ac-3c0f-3f64-4344). Concurrent threads would share that path, allowing one
+replacement to consume another writer's temporary file. Exclusive ``mkstemp``
+names preserve every writer. The audit found no root-unkeyed module or LRU cache,
+so the defect class was limited to temporary-file naming.
 """
 
 from __future__ import annotations

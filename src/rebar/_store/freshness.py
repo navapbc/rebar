@@ -1,47 +1,25 @@
-"""Is this clone's ticket store fresh enough for a GATE to certify against?
+"""Determine whether a clone's ticket store can support certification.
 
-Bug ``cibophobic-moist-guineafowl`` (``b928-3ab6-5985-417b``). Under sustained
-contention on ``origin/tickets`` a clone can spend hours neither publishing its own
-writes nor adopting the remote's — the starvation root cause recorded on that ticket.
-Every write still SIGNALS the condition (``push_status: final-push-rejected`` plus the
-durable ``rebar-push-pending`` marker, operator decision B4 on ``vapoury-attack-lamb``),
-and that contract is deliberately unchanged here: a write that cannot reach the shared
-store still returns, never raises.
+Contention can leave a clone unable to publish its writes or adopt the shared
+branch (bug ``cibophobic-moist-guineafowl``). Writes still return after recording
+``final-push-rejected`` and the durable push-pending marker. Refusing all writes
+would turn degraded delivery into an outage.
 
-What went wrong is on the READ side, and it is a different kind of harm. On 2026-08-28 a
-ticket carrying a valid ``completion-verifier`` attestation read as ``unsigned`` through
-a clone that had not received the write. A gate that answers from such a store does not
-merely answer LATE — it answers WRONG, and then mints (or withholds) an operation
-certificate on the strength of it. A late comment is an inconvenience; a wrong
-certification is a corrupted audit trail.
+Gate reads require a stricter posture. A stale clone once reported an existing
+completion attestation as unsigned, which could produce an incorrect operation
+certificate. Gate-critical reads therefore check local freshness before deciding.
+No network request is required.
 
-So the gate-critical read paths assert freshness before they decide. The alternative that
-was considered and REJECTED is blanket write-refusal when the push is failing: that turns
-a degraded-but-usable system into an outage — during the four-hour starvation window every
-session would have been write-blocked, while the thing actually at risk (certification)
-is a small minority of operations.
+- ``push-pending`` means this clone has committed events absent from the shared
+  store.
+- ``behind`` means HEAD is an ancestor of the fetched remote-tracking ref. A gate
+  does not perform the writer adoption that would repair this state.
+- ``diverged`` means neither history contains the other, including histories
+  without a common ancestor.
 
-**Staleness is defined LOCALLY — no network.** A gate must not acquire a dependency on the
-remote being reachable, and every signal needed is already on disk:
-
-* ``push-pending`` — :mod:`rebar._store.push_state`'s durable marker is set, meaning a
-  terminal delivery failure is outstanding: this clone holds committed ticket events that
-  the shared store has never seen. Anything this gate certifies is certified against a view
-  other readers do not have.
-* ``behind`` — HEAD is a strict ancestor of the already-fetched remote-tracking ref. The
-  clone's own git dir proves it is reading an out-of-date view; no fetch is needed to know
-  it. ``fsck``'s ``_tracker_sync_status`` deliberately stays silent here because a WRITER
-  ff-adopts on its next push — but a gate is a pure READER and never triggers that
-  adoption, so for this purpose it is the sharpest signal there is.
-* ``diverged`` — neither ref is an ancestor of the other (or there is no common ancestor).
-  ``fsck`` already counts this as an integrity issue.
-
-**The probe fails OPEN; the gate fails CLOSED on a PROVEN stale verdict.** Those are not in
-tension, they are the only defensible split. A diagnostic that cannot read its own inputs
-must not be able to convince a healthy store that it is broken — that is
-:func:`rebar._store.push_state.read_status`'s posture and this module keeps it. But once
-staleness is established, the gate refuses, because a gate that cannot trust its input has
-no business certifying with it.
+The diagnostic fails open when it cannot read its inputs so a broken probe cannot
+block a healthy store. A proven stale verdict makes the gate fail closed because
+its input cannot support certification.
 """
 
 from __future__ import annotations

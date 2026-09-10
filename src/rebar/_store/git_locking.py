@@ -1,43 +1,21 @@
-"""The tickets store's git LOCK-CONTENTION policy — one module, one concern.
+"""Apply the ticket store's Git lock-contention policy.
 
-Split out of :mod:`rebar._store.gitutil` (which was 2 lines under the 800-LOC hard cap)
-along the seam its own docstring already drew: ``gitutil`` RUNS a git subprocess, this
-module decides what happens when git's OWN locks are contended. Every symbol here is one of
-three things — the advisory ``flock``s rebar takes before it touches a store, the bounded
-retry it rides a git lock conflict out with, or the stale-lock reclamation between those
-retries — and nothing here runs a git subprocess itself (the retried invocation arrives as
-a callable).
+``gitutil`` runs Git processes, while this module coordinates the advisory locks,
+bounded retries, and stale-lock reclamation around supplied callables. It launches
+no Git process. ``_resolve_tracker_git_dir`` locates per-worktree and common lock
+files. ``gitutil`` re-exports it for fsck and bridge repair. The dependency points
+from ``gitutil`` into this stdlib-based module, with ``git_outcome`` supplying the
+marker registry.
 
-``_resolve_tracker_git_dir`` travels with them: it is how every lock file's PATH is found
-(``<git-dir>/rebar-git-op.lock``, ``<common-dir>/rebar-fetch.lock``, ``<git-dir>/index.lock``),
-and it was the ONE tracker filesystem primitive this layer needs. ``gitutil`` re-exports it,
-so its existing importers (fsck, fsck_recover, bridge_repair) are unchanged.
+Concurrent agents make index and ref lock conflicts expected. The policy from bug
+9305-b42c serializes rebar's index mutations behind a kernel-released advisory
+lock, then retries Git lock signatures with a bounded jittered backoff. Only
+index locks receive conservative stale reclamation. Exhaustion produces one
+diagnostic naming the contended lock and its remedy.
 
-Stdlib only at module level apart from :mod:`rebar._store.git_outcome` (the marker registry),
-and it imports NOTHING from ``gitutil`` — the dependency runs one way, ``gitutil`` -> here.
-
-**Blocking policy under local git lock contention (bug 9305-b42c, operator-ratified):
-bounded jittered retry plus per-store advisory serialization.** rebar is
-driven by many concurrent local agent processes, so git-lock conflicts (``index.lock`` /
-ref locks) on the shared tickets store are the normal case, not an anomaly. The policy,
-chosen against the OSS research recorded on ticket 9305 (git lockfile.c's jittered
-backoff; JGit's own-fair-lock-before-the-file-lock; Mercurial's bounded wait; Bazel's
-"print the holder, never parse it") and applied consistently at this seam:
-
-* rebar's OWN index-mutating git ops on a store are serialized behind a per-store
-  advisory ``flock`` (:func:`_store_git_op_lock`) — non-blocking when uncontended (zero
-  added latency), kernel-released on holder death (no staleness logic to get wrong);
-* a git lock-conflict signature is ridden out with a bounded, JITTERED backoff
-  (:func:`_with_index_lock_retry`; total budget ~tens of seconds — see
-  :func:`_lock_retry_budget_s`), resolving transient contention silently (debug log only);
-* only a genuinely STUCK lock — the budget exhausted — surfaces, and then as ONE
-  actionable error naming the contended lock file with holder guidance
-  (:func:`_augment_lock_exhaustion`), never as raw git stderr alone.
-
-Chosen over block-forever (cargo/Bazel) because rebar's callers are unattended agents
-with their own deadlines, and over fail-fast because the observed conflicts resolve on
-retry. Not config-tunable: no store/git config surface exists, and inert one-off config
-keys are a known defect class here; tests tune the module-level constants.
+Bounded waiting suits unattended callers better than indefinite blocking, while
+retry handles contention better than immediate failure. The policy has no config
+surface. Tests adjust its module constants.
 """
 
 from __future__ import annotations
@@ -385,18 +363,14 @@ _reclaim_probe: Callable[[], None] | None = None
 
 
 def _reclaim_if_stale_index_lock(tracker: str, *, force: bool = False) -> None:
-    """Remove the tracker's git ``index.lock`` ONLY IF provably stale (mtime age >
-    ``_INDEX_LOCK_STALE_S``). Best-effort and safe: a young/live lock (age <= threshold,
-    or unstat-able, or absent) is LEFT in place — removing a lock a live peer holds can
-    corrupt the index. Uses the shared git-dir resolution so the same lock path is meant.
+    """Remove ``index.lock`` only when its staleness is proven.
 
-    ``force=True`` bypasses the age gate: the caller HOLDS the exclusive store write lock, so
-    no live rebar peer can hold ``index.lock`` — any present lock is provably an orphan left by
-    an abnormally-terminated git (SIGKILL/OOM/FS-fault). The age gate exists only to protect
-    UNLOCKED contexts from a live peer's lock; under the write lock a YOUNG orphan would
-    otherwise wedge every write for the full 300s threshold (the Mode B catastrophic cascade).
-    The device+inode identity re-validation below is STILL applied under force, so a TOCTOU
-    replacement is never removed."""
+    Unlocked callers require age beyond ``_INDEX_LOCK_STALE_S``. Missing, unreadable,
+    or younger locks remain because deleting a peer's lock can corrupt the index.
+    ``force=True`` is for callers already holding the exclusive store write lock,
+    which proves that any Git index lock is orphaned and avoids the Mode B delay.
+    Both modes revalidate device and inode before removal so a replacement survives.
+    """
     git_dir = _resolve_tracker_git_dir(tracker)
     if not git_dir:
         return
@@ -410,10 +384,8 @@ def _reclaim_if_stale_index_lock(tracker: str, *, force: bool = False) -> None:
         return  # young/live lock (unlocked context) → never reclaim
     if _reclaim_probe is not None:
         _reclaim_probe()
-    # Re-validate identity (device+inode) AND age at the moment of removal: a peer may
-    # have removed our stale lock and dropped a fresh LIVE one at the same path in the
-    # window since the stat above (the TOCTOU). Only unlink if it is STILL the same file
-    # AND still stale — otherwise abort, leaving the peer's fresh lock intact.
+    # Revalidate device, inode, and age at removal. If a peer replaced or refreshed
+    # the file during the TOCTOU window, preserve its lock.
     try:
         st2 = os.stat(lock_file)
     except OSError:
@@ -428,12 +400,8 @@ def _reclaim_if_stale_index_lock(tracker: str, *, force: bool = False) -> None:
         pass
 
 
-# Test seam: a callable (default ``None`` = disabled) invoked after EVERY ``run_once()``
-# attempt inside ``_with_index_lock_retry`` with ``(attempt_number, result)`` — the initial
-# pre-loop call fires as attempt 1, each in-loop retry as 2, 3, …. It lets a test count the
-# real attempts and release a planted lock ONLY after the first failure is confirmed (a
-# deterministic alternative to timer-based lock release). Production leaves this ``None`` so
-# the call is skipped and behavior is unchanged.
+# Tests use this disabled-by-default seam to observe every attempt and release a
+# planted lock after a confirmed failure without timer-based coordination.
 _retry_probe: Callable[[int, subprocess.CompletedProcess], None] | None = None
 
 
@@ -443,26 +411,18 @@ def _with_index_lock_retry(
     *,
     force_reclaim: bool = False,
 ) -> subprocess.CompletedProcess:
-    """Run *run_once* (an index-mutating git invocation), retrying ONLY the index.lock
-    contention signature with a bounded backoff. On success or a NON-lock failure the
-    result is returned immediately (behavior unchanged — a real error still surfaces at
-    once). Between lock retries a provably-stale lock is reclaimed; a young lock that
-    never releases exhausts the attempts and its final failing result is returned. This
-    is the composition seam: a caller that also retries a DIFFERENT signature (e.g.
-    event_append's object-DB ``git add`` retry) passes its own inner loop as *run_once*.
+    """Run one index-mutating Git callable with bounded lock retry.
 
-    ``force_reclaim=True`` (passed by the store-write git helpers, which hold the exclusive
-    write lock) reclaims a stranded index.lock regardless of age — under the write lock the
-    lock is provably an orphan, so a YOUNG one is cleared on the first retry instead of
-    wedging every write for the 300s stale threshold (the Mode B cascade).
+    Success or a non-lock failure returns immediately. Git lock signatures retry
+    under the per-store advisory lock with jittered exponential backoff. Only a
+    stale index lock is reclaimed. Callers can compose another retry policy inside
+    *run_once* for a different signature.
 
-    Bug 9305: the whole run (initial attempt + retries) holds the per-store advisory git-op
-    lock, serializing rebar's own writers; the backoff is jittered exponential-with-cap to a
-    ~tens-of-seconds budget (up from ~2s) and also retries git's REF-lock conflict signature
-    (:func:`_is_git_lock_error`; only index.lock gets stale reclamation). A lock signature
-    that survives the whole budget gets rebar's actionable guidance folded into its
-    ``stderr`` (:func:`_augment_lock_exhaustion`); a transient one self-heals with at most a
-    debug log."""
+    ``force_reclaim=True`` serves store writers that hold the exclusive write lock,
+    which proves a remaining index lock is orphaned regardless of age. Bug 9305
+    extends the budget to tens of seconds and includes ref-lock conflicts. A final
+    conflict receives actionable stderr from :func:`_augment_lock_exhaustion`.
+    """
     with _store_git_op_lock(tracker):
         result = run_once()
         if _retry_probe is not None:

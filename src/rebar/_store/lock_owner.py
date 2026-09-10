@@ -1,18 +1,9 @@
-"""Ownership stamps and staleness adjudication for rebar's stamped locks.
+"""Determine whether stamped lock owners are provably gone.
 
-Split out of :mod:`rebar._store.lock` (bug larval-tribal-tigermoth), which had reached the
-800-LOC module cap. The seam is the existing call graph, not an arbitrary cut: everything
-here answers ONE question — "who owns this mkdir lock, and is that owner provably gone?" —
-and :mod:`rebar._store.lock` keeps the acquisition machinery (the fcntl leg,
-:func:`~rebar._store.lock._acquire_mkdir`, ``LockHandle``, ``acquire``/``write_lock``).
-The dependency runs one way, ``lock`` -> ``lock_owner``; nothing here imports ``lock``.
-
-The v2 stamp shape, the boot-id host identity, and the refusal-without-proof rule are
-documented in :mod:`rebar._store.lock`'s module docstring, which remains the narrative home
-for the dual-window lock contract. :func:`_stamp_is_stale` below carries the full
-decision table; :func:`_mkdir_lock_is_stale` and :func:`stamped_file_is_stale` are the
-two readers that feed it, for the mkdir lock dir and for a single-file lock respectively
-(the latter added by bug knavish-stimulated-bluebottle for the enrichment drain lock).
+This module owns v2 and legacy stamp parsing, host and PID identity, and conservative
+staleness decisions. :mod:`rebar._store.lock` owns acquisition and imports this module.
+This module never imports ``lock``. :func:`_stamp_is_stale` serves mkdir and stamped file
+locks.
 """
 
 from __future__ import annotations
@@ -32,47 +23,23 @@ logger = logging.getLogger(__name__)
 # INSIDE .ticket-write.lock.d/, which is gitignored, so it never surfaces untracked.
 _MKDIR_OWNER_FILE = "owner"
 
-# Wall-clock backstop for the refuse-without-proof branches of _mkdir_lock_is_stale (bug
-# yaw-gravel-linen). Those branches correctly decline to reclaim a lock whose owner MIGHT be
-# live, but with no upper bound in time an absent/foreign/malformed/unprobeable stamp wedges
-# the store FOREVER — the CLASS behind the 2026-07-31 incident, of which castoff-tigerseye-
-# ammonite fixed only one instance. Honour such a stamp until this ceiling, then reclaim, so
-# the store can never wedge permanently (9305 rec #1). git gc's gc.pid uses 12h as its
-# "very generous" bound (builtin/gc.c); rebar holds the write lock only for a single event
-# append (seconds), so 1h is ~1000x margin over normal hold time yet bounds the wedge. This
-# is a BACKSTOP, never a timer on its own: it is applied ONLY where there is no positive
-# liveness signal that is actually PROOF — see _mkdir_lock_is_stale for the one branch where
-# a live-pid probe is unqualified and therefore does not override it.
+# One-hour backstop for decisions without proof of liveness. Rebar normally holds this lock
+# for seconds. Positive liveness always overrides the ceiling.
 _MKDIR_LOCK_STALE_CEILING_S = 3600
 
-# The v2 owner-stamp line prefix. Deliberately colon-free so an OLDER rebar parsing it with
-# the legacy ``host, sep, pid = stamp.partition(":")`` finds no separator and declines to act,
-# rather than mis-deriving "this host + a dead pid" (forward compatibility).
+# Colon-free v2 prefix that makes legacy ``partition(":")`` readers refuse the stamp.
 _STAMP_V2_PREFIX = "rebar-lock v2"
 # Placeholder for a field this platform cannot supply (e.g. no /proc). Explicit so a
 # reader can tell "unknown" apart from "missing/malformed" (bug castoff-tigerseye-ammonite).
 _STAMP_UNKNOWN = "-"
 
-# Ambient operation label for the v2 stamp (camerashy-erectable-frog). A holder that is
-# OPTIONAL housekeeping — a compaction sweep — is safe to interrupt, but a blocked writer
-# timing out on the store lock saw only a bare pid and could not tell the sweep apart from a
-# mystery hang mid-write (whose safe response is the opposite: wait). This contextvar lets the
-# sweep TAG its lock acquisitions descriptively: `operation_label(...)` sets it, `_owner_stamp`
-# reads it and appends an `op=<label>` field. The carrier is a contextvar, not a threaded
-# `acquire` parameter, because the label is read synchronously in the SAME process/thread that
-# later calls `lock.acquire` (the sweep folds inline), so it is in scope at the acquisition —
-# including the per-ticket `lock.acquire` inside `compact_txn._compact_locked`, which need not
-# be modified for the label to reach the stamp. The label is DESCRIPTIVE ONLY: staleness and
-# reclamation never read it.
+# Ambient descriptive ``op=<label>`` stamp field. A context variable reaches nested compaction
+# acquisitions without changing acquisition APIs. Reclamation never reads the label.
 _operation_label: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "rebar_lock_operation_label", default=None
 )
 
-# Known interruptible operation labels → the remedy an operator can act on without a code
-# search. The compaction sweep's own guarantee (compact_trigger.run_sweep) is that a skipped
-# sweep is a no-op for correctness — the events stay live and the next trigger re-folds them —
-# so terminating it loses no data. The phrasing "safe to interrupt" / "loses no data" is what a
-# LockTimeout surfaces when the holder is labelled with one of these operations.
+# Operator remedies for optional work whose interruption preserves events.
 _INTERRUPTIBLE_REMEDIES: dict[str, str] = {
     "compact-sweep": (
         "this holder is a compaction sweep (optional housekeeping) and is safe to interrupt: "
@@ -123,12 +90,9 @@ _PID_NS_PATH = "/proc/self/ns/pid"
 
 
 def _read_boot_id() -> str | None:
-    """This kernel boot's id (``/proc/sys/kernel/random/boot_id``), stripped.
+    """Return the current kernel boot ID, or ``None`` when unavailable.
 
-    Stable for the life of one booted kernel and shared by every container on it —
-    which is exactly the identity the hostname failed to provide (a container runtime
-    re-rolls the hostname on each recreate; bug castoff-tigerseye-ammonite). Returns
-    ``None`` where the kernel does not expose it (macOS, non-Linux). Never raises."""
+    The value is shared by containers on one boot. This function never raises."""
     try:
         with open(_BOOT_ID_PATH, encoding="utf-8") as fh:
             return fh.read().strip() or None
@@ -137,11 +101,9 @@ def _read_boot_id() -> str | None:
 
 
 def _read_pid_namespace_id() -> str | None:
-    """Identifier for this process's pid namespace (the inode of ``/proc/self/ns/pid``).
+    """Return this process's PID namespace inode, or ``None`` when unavailable.
 
-    Two processes sharing this value can probe each other's pids; across different
-    values ``os.kill(pid, 0)`` is meaningless (the number names a different process, or
-    nothing). Returns ``None`` where unavailable. Never raises."""
+    Matching identifiers permit meaningful PID probes. This function never raises."""
     try:
         return str(os.stat(_PID_NS_PATH).st_ino)
     except (OSError, ValueError):  # never raise: identity is best-effort
@@ -149,12 +111,10 @@ def _read_pid_namespace_id() -> str | None:
 
 
 def _process_start_time(pid: int) -> str | None:
-    """*pid*'s start time (field 22 of ``/proc/<pid>/stat``), or ``None`` if unknown.
+    """Return Linux stat field 22 for *pid*, or ``None`` when unavailable.
 
-    Qualifies the pid probe: a pid number can be recycled, so "alive" alone does not
-    mean the stamped owner is alive. The comm field (field 2) is parenthesised and may
-    itself contain spaces and parens, so parsing starts after its LAST ``')'``; field 22
-    is then the 20th whitespace-separated field of the remainder. Never raises."""
+    The value distinguishes recycled PIDs. Parsing starts after the final ``)`` because the
+    command field may contain spaces or parentheses. This function never raises."""
     try:
         with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as fh:
             raw = fh.read()
@@ -171,33 +131,25 @@ def _process_start_time(pid: int) -> str | None:
 
 
 def _host_identity() -> str:
-    """The identity of the *physical host* this process runs on.
+    """Return a colon-free host identity for the v2 stamp.
 
-    ``boot-<boot id>`` when the kernel exposes one, else ``name-<hostname>``. The boot
-    id is what makes a container recreate recognisable as the same host (bug
-    castoff-tigerseye-ammonite) while still distinguishing genuinely different hosts
-    sharing a filesystem (bug yaw-gravel-linen). Guaranteed colon-free so the v2 stamp
-    stays unparseable to a legacy reader."""
+    A boot ID identifies container recreations on one kernel. The hostname is the fallback
+    when no boot ID is available."""
     boot_id = _read_boot_id()
     raw = f"boot-{boot_id}" if boot_id else f"name-{socket.gethostname()}"
     return raw.replace(":", "_")
 
 
 def _owner_stamp() -> str:
-    """Identity written into a freshly-acquired mkdir lock (v2, colon-free)::
+    """Build a colon-free v2 ownership stamp.
+
+    Format::
 
         rebar-lock v2 host=<host-identity> ns=<pid-ns-id> pid=<pid> start=<start-time>
 
-    Unknown ``ns``/``start`` are written as ``-``. The absence of any ``:`` is load
-    bearing: an older rebar splits the stamp on ``:``, finds no separator, and refuses
-    to reclaim — instead of decoding a bogus host/pid pair (bug
-    castoff-tigerseye-ammonite).
-
-    When an :func:`operation_label` context is active, an extra colon-free ``op=<label>``
-    field is appended (camerashy-erectable-frog) so a blocked writer's timeout can name the
-    holder — e.g. a compaction sweep — rather than only its pid. The field is optional and
-    descriptive: an older reader ignores it (unknown fields are tolerated) and staleness logic
-    never reads it."""
+    Unknown namespace or start values use ``-``. Legacy readers refuse this colon-free form.
+    An active :func:`operation_label` adds an optional descriptive field that staleness logic
+    ignores."""
     pid = os.getpid()
     ns = _read_pid_namespace_id() or _STAMP_UNKNOWN
     start = _process_start_time(pid) or _STAMP_UNKNOWN
@@ -323,12 +275,10 @@ def _pid_alive(pid: int) -> bool:
 
 
 def _legacy_stamp_is_stale(stamp: str) -> bool:
-    """Pre-v2 ``<hostname>:<pid>`` stamp: reclaimable only when the hostname matches
-    ours AND the pid parses AND that pid is dead. Every malformed shape (empty, no
-    colon, empty host, empty pid, non-numeric pid, extra colons, a torn mid-write read)
-    and every foreign hostname returns False — never reclaim on anything short of proof
-    (bug yaw-gravel-linen). Unchanged from the original implementation; kept as the
-    fallback so locks stamped by an older rebar are still handled exactly as before."""
+    """Return whether a legacy ``<hostname>:<pid>`` stamp proves its owner dead.
+
+    Reclamation requires a matching hostname, numeric PID, and failed liveness probe.
+    Malformed or foreign stamps remain held."""
     host, sep, pid_s = stamp.partition(":")
     if not sep or host != socket.gethostname():
         return False
@@ -340,23 +290,11 @@ def _legacy_stamp_is_stale(stamp: str) -> bool:
 
 
 def _mkdir_lock_is_stale(lock_dir: str, *, fcntl_held: bool = False) -> bool:
-    """Whether a held mkdir lock is provably orphaned and may be reclaimed.
+    """Return whether a mkdir lock is provably orphaned.
 
-    Reads the stamp out of *lock_dir*'s owner file and hands it to
-    :func:`_stamp_is_stale`, which carries the decision table. An unreadable owner file
-    is table row 1 (refuse, subject to the ceiling). ``unrecognised_via_ceiling=False``
-    keeps this leg's legacy routing: a non-v2 stamp is adjudicated by
-    :func:`_legacy_stamp_is_stale`, because the mkdir lock genuinely has a pre-v2
-    ``<host>:<pid>`` dialect still in the wild.
-
-    Set *fcntl_held* only when the caller already holds the exclusive kernel leg for this
-    same tracker — see :func:`rebar._store.lock._acquire_mkdir` for why that is proof
-    rather than a hint. The name is POSIX-era: the flag denotes the PLATFORM's exclusive
-    leg (``fcntl.flock`` where ``fcntl`` exists, ``msvcrt.locking`` on Windows), and
-    :mod:`rebar._store.lock_kernel` carries the per-platform argument for why each earns
-    the same conclusion. A platform with neither primitive raises there rather than
-    reaching the mkdir leg, so this is never set with nothing held.
-    """
+    Unreadable owner files use the age ceiling. Non-v2 stamps use legacy adjudication.
+    *fcntl_held* means the caller holds this tracker's platform-exclusive kernel leg, which
+    proves that a same-host prior owner is gone."""
     try:
         with open(os.path.join(lock_dir, _MKDIR_OWNER_FILE), encoding="utf-8") as fh:
             stamp = fh.read().strip()
@@ -366,23 +304,11 @@ def _mkdir_lock_is_stale(lock_dir: str, *, fcntl_held: bool = False) -> bool:
 
 
 def stamped_file_is_stale(path: str) -> bool:
-    """Whether a stamped single-FILE lock at *path* is provably orphaned.
+    """Return whether a stamped single-file lock is provably orphaned.
 
-    The file-shaped sibling of :func:`_mkdir_lock_is_stale`, for locks whose ownership
-    stamp is the file's own contents rather than a separate owner file inside a lock dir
-    — today ``.rebar/enrich-drain.lock`` (bug knavish-stimulated-bluebottle). It answers
-    with the SAME decision table, so the pid-recycle qualification, the
-    refuse-without-proof branches and the wall-clock ceiling are inherited rather than
-    forked into a second heuristic.
-
-    Two arguments are fixed for this shape. ``fcntl_held=False``: a file lock has no
-    kernel leg to hold, so there is never that proof. ``unrecognised_via_ceiling=True``:
-    unlike the mkdir lock, this shape has no legacy ``<host>:<pid>`` dialect — it was
-    unstamped entirely before the fix — so unrecognised content means "an orphan from
-    before stamping", and routing it through the ceiling is what lets an already-leaked
-    lock be reclaimed instead of wedging forever. A vanished file reports not-stale; the
-    caller simply retries the create.
-    """
+    This applies the shared decision table to ``.rebar/enrich-drain.lock``. The file has no
+    kernel leg or legacy stamp dialect, so unreadable or unrecognized content uses the age
+    ceiling. A vanished file reports not stale."""
     try:
         with open(path, encoding="utf-8") as fh:
             stamp = fh.read().strip()
@@ -398,48 +324,14 @@ def _stamp_is_stale(
     fcntl_held: bool,
     unrecognised_via_ceiling: bool,
 ) -> bool:
-    """Whether the holder named by *stamp* is provably gone. THE staleness authority.
+    """Return whether *stamp* proves that its holder is gone.
 
-    *artifact_path* is the lock artifact (dir or file) whose mtime measures the hold age
-    for the ceiling; *fcntl_held* is the caller's exclusive-fcntl-leg proof (see
-    :func:`_mkdir_lock_is_stale`); *unrecognised_via_ceiling* selects the routing for a
-    stamp that is not v2, and is the ONLY thing it selects. The decision table:
-
-    1. Owner file absent or unreadable → False (a bash-style lock, or one seen in the
-       window between ``mkdir`` and the stamp write) — UNLESS the dir has out-aged
-       :data:`_MKDIR_LOCK_STALE_CEILING_S`, the wall-clock backstop that stops an
-       unprovable stamp wedging the store forever (9305 rec #1). Handled by the callers
-       above, which cannot produce a stamp to pass here.
-    2. Not a v2 stamp → with *unrecognised_via_ceiling* False, exactly the legacy
-       behaviour (:func:`_legacy_stamp_is_stale`); with it True, no proof of ownership,
-       so the age ceiling decides (the row-1 treatment).
-    3. v2 stamp with missing/malformed fields → False, or reclaim past the age ceiling.
-    4. v2 stamp from a different :func:`_host_identity` → the genuine foreign-host /
-       shared-filesystem case: we cannot observe that host's processes and our own locks
-       prove nothing about its kernel, so no pid, no namespace and no ``fcntl_held`` can
-       license a reclaim (bug yaw-gravel-linen) — refused until the age ceiling, then
-       reclaimed so a shared-filesystem orphan cannot wedge forever.
-    5. Same host and the pid namespaces are comparable (stamped ``ns`` equals ours,
-       including both being unknown) → probe the pid, QUALIFIED BY START TIME and by the
-       kernel fcntl leg. Dead pid ⇒ stale. If this caller holds the fcntl leg and the
-       stamped pid is a DIFFERENT process, the mkdir artifact is stale immediately: a live
-       owner would still hold that kernel lock, so reaching this point proves it is not
-       the owner. Without that fcntl proof, a live pid whose start time is known on both
-       sides and differs ⇒ the number was recycled by an unrelated process and the true
-       owner is gone ⇒ stale. Live pid whose start time is CORROBORATED (both known and
-       equal) ⇒ False, and the ceiling does NOT apply: that is a positive liveness signal
-       and breaking a lock on a timer alone over a live owner is forbidden ("never on a
-       timer alone"). Live pid whose current start time is UNAVAILABLE (no ``/proc``:
-       every macOS probe) ⇒ the verdict is unqualified — a bare pid-NUMBER match, not
-       proof of the stamped owner — so, absent fcntl proof, this is a refuse-without-proof
-       branch and carries the ceiling like the others (bug larval-tribal-tigermoth).
-    6. Same host, namespaces NOT comparable (different, or exactly one unknown) — the
-       container-recreate case, where the stamped pid is not probeable at all → stale
-       iff *fcntl_held*, else refused until the age ceiling.
-
-    Non-numeric pid on an otherwise same-host/same-namespace stamp is likewise a
-    no-liveness-signal refusal and reclaims past the ceiling.
-    """
+    Callers apply the age ceiling when no stamp can be read. Unrecognized stamps use either
+    legacy adjudication or the ceiling according to *unrecognised_via_ceiling*. Invalid v2 and
+    foreign-host stamps use the ceiling. A different PID namespace requires *fcntl_held* or
+    the ceiling. Within a comparable namespace, a dead PID, a different PID under the held
+    kernel leg, or a mismatched known start time proves staleness. An unavailable start time
+    uses the ceiling. A corroborated start time remains held regardless of age."""
 
     fields = _parse_v2_stamp(stamp)
     if fields is None:
@@ -454,9 +346,8 @@ def _stamp_is_stale(
 
     stamped_ns = None if fields["ns"] == _STAMP_UNKNOWN else fields["ns"]
     if stamped_ns != _read_pid_namespace_id():
-        # Same host, different (or unknowable) pid namespace: the stamped pid number is
-        # meaningless to us, so the fcntl proof is the only positive evidence — and, short
-        # of it, the age ceiling backstops the wedge.
+        # Another PID namespace is not probeable. The held kernel leg proves abandonment on
+        # this host. Otherwise only the age ceiling permits reclamation.
         return fcntl_held or _mkdir_lock_age_exceeds_ceiling(artifact_path)
 
     try:
@@ -468,19 +359,11 @@ def _stamp_is_stale(
     stamped_start = None if fields["start"] == _STAMP_UNKNOWN else fields["start"]
     current_start = _process_start_time(pid)
     if fcntl_held and pid != os.getpid():
-        # The caller already holds the kernel fcntl leg for this same-host v2 stamp.
-        # A different live process still owning the write lock would be holding that leg,
-        # so reaching this point proves the mkdir artifact is orphaned. Keep the
-        # same-process case conservative because POSIX fcntl locks are process-scoped:
-        # another thread in this process can reacquire the fcntl leg while a sibling
-        # thread legitimately owns the mkdir leg.
+        # Holding the kernel leg proves a different process no longer owns this lock. The
+        # same-process case stays conservative because POSIX locks are process scoped.
         return True
     if current_start is None:
-        # UNQUALIFIED live-pid verdict (bug larval-tribal-tigermoth). `_process_start_time`
-        # reads /proc, so on a platform without it (macOS) it ALWAYS returns None — the
-        # recycled-pid discriminator below is then unsatisfiable BY CONSTRUCTION. Without
-        # the fcntl proof above, this remains a refuse-without-proof branch and takes the
-        # same ceiling backstop.
+        # A running PID without a start time does not prove ownership, so the ceiling applies.
         return _mkdir_lock_age_exceeds_ceiling(artifact_path)
     if stamped_start is not None and stamped_start != current_start:
         # The pid is live but it is a DIFFERENT process wearing a recycled number.
