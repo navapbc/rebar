@@ -1,30 +1,16 @@
-"""One git failure classifier for the tickets store's git operations.
+"""Classify Git failures by marker and ticket-store operation.
 
-Before this module the same git stderr was classified at five sites with five private
-marker tables, and the SAME text got different verdicts at each. ``cannot lock ref``
-alone carries three deliberately different, bug-hardened verdicts. So the tables live
-HERE — one registry, one place to add a marker — while the VERDICTS stay per-operation:
-the registry is keyed ``(marker, operation)``, never ``marker`` alone.
+One registry replaces private marker tables whose verdicts had drifted. Marker
+strings are shared, but judgments remain operation-specific because text such as
+``cannot lock ref`` represents several distinct outcomes. Most rules map a
+substring or regular expression to :class:`GitKind` for one operation. Structural
+rules receive the complete outcome when command shape and return code also matter.
+:func:`is_cas_mismatch` uses that form for ``update-ref``.
 
-Two entry kinds:
-
-* a **marker row** — the common case: a substring (or regex) of the failure text maps to
-  a :class:`GitKind` for one operation;
-* a **structural predicate** — registered for an operation and handed the whole outcome
-  object, because some verdicts are not marker-based at all.
-  :func:`is_cas_mismatch` (the reconciler's ``update-ref`` discriminator) is the proof
-  case: it reads the command SHAPE and the EXIT CODE, which no ``(marker, operation) ->
-  kind`` table can express.
-
-What this module deliberately does NOT do is merge the divergent verdicts. Collapsing
-``cannot lock ref`` into one kind would re-open bug 4afc (only ``stale info`` is the
-``--force-with-lease`` signal) and bug ebee (``fatal error in commit_refs`` is a GitHub
-5xx ref-transaction fault, not lease movement). The consolidation is of the marker
-STRINGS, not of the judgements made from them.
-
-The synthetic rc-124 timeout RESULT is a different construct with a different owner:
-:func:`rebar._store.gitutil.run_git_bounded` builds it, because that is where the shared
-runner lives. Only the marker row that RECOGNISES it lives here.
+The classifier preserves distinctions required by bug 4afc and bug ebee.
+``stale info`` identifies lease movement, while server transaction failures do
+not. :func:`rebar._store.gitutil.run_git_bounded` owns construction of synthetic
+timeout result code ``124``. This module owns only its recognition marker.
 """
 
 from __future__ import annotations
@@ -94,17 +80,10 @@ TRANSIENT_HEAD_MARKERS: tuple[str, ...] = ("could not parse head",)
 # The name in the message carries no information, so the marker matches the fault.
 # Deliberately does NOT cover git's CORRUPT-object signatures, which are real damage.
 TRANSIENT_OBJECT_MARKERS: tuple[str, ...] = ("bad object",)
-# The WRITE-side members of the same family, all transient runner-FS hiccups (NOT data
-# faults): the loose-object temp create under ``.git/objects/`` intermittently fails (ENOENT
-# on Linux, EINVAL on macOS) — bugs vocal-dip-robin / brainy-floral-globefish — and git's
-# lockfile-commit of the INDEX itself (``read-cache.c`` ``write_locked_index`` via
-# ``commit_lock_file``, emitted by ``git add`` / ``git write-tree`` / a commit's
-# pre-ref-update index prep) intermittently fails with ``unable to write new index file``,
-# which a production ``rebar create`` surfaced as a hard write requiring an operator retry
-# (bug scary-fiscal-grunion). The pre-ref-update marker is deliberately the ONLY index-write
-# phrase here: git's POST-ref-update failure is the DISTINCT ``repository has been updated,
-# but unable to write new_index file`` (underscore), which this substring cannot match — so a
-# match provably means HEAD had not moved and retrying cannot duplicate a committed event.
+# These transient write markers cover loose-object creation and index preparation
+# before ref update. The distinct post-update ``new_index`` message does not match,
+# so retry cannot duplicate an event whose ref already moved. See bugs
+# vocal-dip-robin, brainy-floral-globefish, and scary-fiscal-grunion.
 TRANSIENT_WRITE_MARKERS: tuple[str, ...] = (
     "unable to create temporary file",
     "failed to insert into database",
@@ -112,12 +91,9 @@ TRANSIENT_WRITE_MARKERS: tuple[str, ...] = (
     "unable to write new index file",
 )
 
-# Bug 2a76: the bare token ``rejected`` in the non-FF pattern is NOT specific to a
-# non-fast-forward — git prints ``! [remote rejected] … (pre-receive hook declined)`` for
-# EVERY server-side decline. Those are PERMANENT: a fetch+merge cannot fix them, so
-# classifying them as non-fast-forward burned all three retries and reported only "failed
-# after 3 retries". The fix is the SUBTRACTIVE exclusion shape proven in _ref_lock (bug
-# 4afc): a broad marker counts only when nothing names a non-mergeable cause.
+# ``rejected`` also appears for permanent server policy failures. Exclude those
+# causes before classifying non-fast-forward so fetch and merge retries are reserved
+# for mergeable failures (bugs 2a76 and 4afc).
 POLICY_DECLINE_MARKERS: tuple[str, ...] = (
     "hook declined",  # pre-receive / update hook (incl. GitHub push protection GH013)
     "push declined",
@@ -129,9 +105,8 @@ POLICY_DECLINE_MARKERS: tuple[str, ...] = (
 )
 NON_FF_RE = re.compile(r"non-fast-forward|rejected|fetch first", re.IGNORECASE)
 
-# Bug f61c: a TRANSPORT fault is not a permanent rule violation. Same SUBTRACTIVE shape:
-# a policy decline can never be transport-retriable, and ambiguity resolves to TERMINAL
-# rather than to a retry loop that provably cannot converge.
+# Transport failures can retry, but policy declines cannot. Subtractive matching
+# resolves ambiguous text to terminal instead of an ineffective retry (bug f61c).
 TRANSPORT_RETRIABLE_MARKERS: tuple[str, ...] = (
     "server certificate verification failed",  # runner CA bundle unresolved
     "ssl certificate problem",
@@ -213,26 +188,22 @@ def is_git_lock(text: str) -> bool:
     return REF_LOCK_MARKER in low or (GENERIC_LOCK_MARKER in low and "file exists" in low)
 
 
-# The concurrent ref compare-and-swap mismatch a RACING ref-updating fetch leaves behind:
-# ``cannot lock ref '<ref>': is at <new> but expected <old>``. A peer advanced the
-# remote-tracking ref between this fetch's negotiation and its ref update, so re-reading and
-# retrying converges (bug agrologic-oval-bobolink). Distinct from a stuck ``<name>.lock``
-# create conflict (:func:`is_git_lock`), which is a still-HELD lock file, not ref MOVEMENT —
-# the two are DIFFERENT outcomes (a lock file is ridden out where it lives; the CAS mismatch
-# is serialized by the common-dir fetch lock and bounded-retried by the fetch callers).
+# A racing fetch reports this CAS mismatch when a peer moves the remote-tracking
+# ref between negotiation and update. Fetch callers serialize and retry that outcome.
+# A held lock file remains a separate :func:`is_git_lock` result
+# (bug agrologic-oval-bobolink).
 _REF_CAS_MISMATCH_RE = re.compile(
     r"cannot lock ref.*\bis at\b.*\bbut expected\b", re.IGNORECASE | re.DOTALL
 )
 
 
 def is_ref_cas_mismatch(text: str) -> bool:
-    """True for the concurrent ref compare-and-swap mismatch (``cannot lock ref '<ref>':
-    is at <new> but expected <old>``) that two uncoordinated ref-updating fetches produce.
+    """Return whether concurrent fetches produced a ref CAS mismatch.
 
-    A CAS mismatch is a STRICT SUBSET of :func:`is_git_lock` (both carry ``cannot lock
-    ref``), so a caller that needs to tell "ref MOVED under me, re-read and retry" apart from
-    "a ``<name>.lock`` is still HELD" must test THIS predicate first/explicitly — the fetch
-    paths do exactly that before falling through to the generic lock handling."""
+    The ``is at <new> but expected <old>`` form is a strict subset of
+    :func:`is_git_lock`. Fetch paths test it first to distinguish ref movement,
+    which requires reread and retry, from a held lock file.
+    """
     return _REF_CAS_MISMATCH_RE.search(text) is not None
 
 
@@ -300,10 +271,10 @@ def is_invalid_object(text: str) -> bool:
 
 
 def is_lease_mismatch(text: str) -> bool:
-    """The ``--force-with-lease`` lease MOVED, not merely a rejection.
+    """Return whether a ``--force-with-lease`` lease moved.
 
-    ``stale info`` is conclusive; a broader marker counts only when nothing names a
-    non-lease cause, so ambiguity fails closed per the documented posture (bug 4afc).
+    ``stale info`` is conclusive. Broader rejection markers count only when no
+    non-lease cause is present, so ambiguity fails closed (bug 4afc).
     """
     return classify_text(text, operation=LEASE_PUSH).kind is GitKind.CAS_MISMATCH
 
@@ -311,19 +282,13 @@ def is_lease_mismatch(text: str) -> bool:
 def is_cas_mismatch(
     exc: subprocess.CalledProcessError, ref_name: str = "refs/heads/tickets"
 ) -> bool:
-    """Return True iff *exc* is an ``update-ref`` compare-and-swap old-sha mismatch.
+    """Return whether *exc* is an ``update-ref`` old-SHA CAS mismatch.
 
-    ``git update-ref <ref> <new> <old>`` (create-only or advance) reports a CAS
-    old-sha mismatch as **exit 128**; the delete form ``git update-ref -d <ref>
-    <old>`` reports it as **exit 1**. Both carry ``cannot lock ref '<ref>'`` in
-    stderr, so we accept exit 128 OR an exit-1 ``cannot lock ref`` — a strict superset
-    that never misclassifies an unrelated failure. We discriminate on the command
-    shape (an ``update-ref`` invocation naming *ref_name*) so an unrelated exit-128
-    from some other git command is not treated as a retryable race.
-
-    This is the registry's ``ref-cas`` STRUCTURAL predicate: it reads the command shape
-    and the exit code, which no ``(marker, operation) -> kind`` table can express. Moved
-    here verbatim from ``_advisory_lock``, which re-exports it under the same name.
+    Create and advance mismatches exit ``128``. Delete mismatches exit ``1`` with
+    ``cannot lock ref``. Requiring an ``update-ref`` command that names *ref_name*
+    prevents unrelated failures from becoming retryable races. This structural
+    rule uses command shape and exit code, which marker rows cannot express.
+    ``_advisory_lock`` re-exports the predicate.
     """
     args = exc.cmd or []
     is_update_ref = "update-ref" in args and ref_name in args

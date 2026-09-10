@@ -1,42 +1,23 @@
-"""Hybrid Logical Clock for event ordering (P2.1, epic snappy-weed-ruin).
+"""Hybrid Logical Clock for causally ordered event filenames.
 
-rebar orders replay by the ``${timestamp_ns}`` filename prefix. Under wall-clock
-skew two agents editing the same field resolved by *last wall-clock writer* — a
-silent clobber (invariant I8 admitted EDIT/COMMENT interleaving was only
-"best-effort"). This module closes that gap with a single-integer Hybrid Logical
-Clock, the design git-bug ships (a persisted Lamport clock, re-seeded by
-witnessing ``max`` over the durable history; the local file is a disposable
-cache, the authoritative value rides in git).
+Replay sorts the integer timestamp prefix. Wall-clock skew could otherwise let a
+causally later edit sort first. :func:`next_tick` returns
+``max(cache, ticket_event_prefixes, physical_now()) + 1``. The ticket witness
+orders fetched peer events correctly, while the physical component preserves
+approximate time order across unrelated clones.
 
-**The tick.** :func:`next_tick` returns
-``max(cache, max(prefix of the TARGET ticket's events), physical_now()) + 1`` —
-a single monotonic integer that tracks wall-clock ns (so order still follows real
-time across unrelated clones) but never ties/inverts for causally-related events
-from one actor (the ``+1`` floor). Witnessing the *ticket's own* ``max(prefix)``
-is what gives cross-clone causal correctness: a clone that pulled another's event
-sorts strictly after it, regardless of clock skew.
+Legacy nanosecond and HLC prefixes remain plain 19-digit integers until about year
+2286. Reducers compare them numerically, and older string-ordering clients retain
+the same width. Values exceed 2^53, so ``jq`` must not parse them.
 
-**Single integer, no width hazard.** There is no second fixed-width field, so
-legacy 19-digit ns names and new HLC names are *both plain integers*; ordering
-compares them as integers (``reducer._sort``). ``physical_now()`` is 19 digits
-until ~year 2286 and the ``+1`` floor never advances ~10^9× past wall-clock, so
-the width stays 19 — older clones that still string-compare order correctly too.
-The prefix is >2^53, so **jq must never touch it** (it parses as float64 and
-rounds); P1.0 already keeps jq out of the event path.
+The ignored ``.rebar/hlc.state`` is a per-clone high-water cache. Durable event
+history remains authoritative, making missing or lost cache writes safe. A single
+global cache and local lock provide stronger monotonicity than per-ticket caches.
+The per-ticket witness supplies the causal floor after fetch.
 
-**Disposable cache, not source of truth.** ``.rebar/hlc.state`` (gitignored,
-rebuildable) is one per-clone high-water-mark; the per-ticket witness supplies the
-causal floor a global cache alone would miss right after a fetch. A missing,
-stale, or race-lost cache is still correct because the tick is re-derived from the
-durable log — the local-lock RMW is a fast path, not a correctness dependency.
-Do **not** "fix" the global-cache / per-ticket-witness asymmetry by making the
-cache per-ticket: that would weaken the monotonicity the single local lock gives.
-
-**Operation.** The RMW is best-effort: any error falls back to ``physical_now()``
-so a write never fails on the clock. ``REBAR_HLC_NOW`` injects the physical
-source for the skewed-clock tests. The dedicated ``.rebar/hlc.lock`` is
-acquired and released *inside* ``next_tick`` only — never held across the store
-write lock, so there is no lock-ordering hazard.
+Clock errors fall back to ``physical_now()`` so event writes continue.
+``REBAR_HLC_NOW`` injects skewed test time. ``next_tick`` holds
+``.rebar/hlc.lock`` only for its read-modify-write and never across the store lock.
 """
 
 from __future__ import annotations

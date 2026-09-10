@@ -1,50 +1,25 @@
-"""The single canonical event-byte serializer for the tickets store (P1.0).
+"""Canonical JSON and SHA-256 serialization for the ticket store.
 
-Every writer that emits an event file MUST route its serialization through
-:func:`canonical_bytes` (or :func:`canonical_str`) so the committed bytes are
-**byte-identical regardless of which writer produced them** — the property the
-HLC/signature/tag-convergence work (P2.x) rests on. Before this helper, the
-canonical form was duplicated inline in ``event_append.py`` while seven other
-live writers emitted plain unsorted ``json.dumps`` — diverging bytes for the same
-logical event.
+Every event writer uses :func:`canonical_bytes` or :func:`canonical_str` so
+equivalent events produce identical committed bytes. The event form is
+``json.dumps(event, ensure_ascii=False, separators=(",", ":"), sort_keys=True)``
+encoded as UTF-8 with no trailing newline. ``jq`` is excluded because it can
+round nanosecond timestamps above 2^53 and corrupt the ordering key.
+``tests/unit/test_canonical.py`` pins the byte contract and structure.
+``tests/interfaces/store/test_canonical_event_bytes.py`` checks every producer.
 
-**The canonical form.** ``json.dumps(event, ensure_ascii=False,
-separators=(",", ":"), sort_keys=True)`` with NO trailing newline — sorted keys,
-compact separators, real UTF-8 (not ``\\uXXXX``). This is byte-equal to
-``jq -S -c '.'`` *only* with ``ensure_ascii=False`` (non-ASCII like ``世界``
-diverges otherwise). Parity is asserted Python↔Python, **never** Python↔jq: jq
-parses the >2^53 ns ``timestamp`` as float64 and rounds it (jq ≤1.6 on parse,
-jq-1.7 under arithmetic), which would both break parity and corrupt the ordering
-key — so jq is kept out of the event path entirely (the TUF/sigstore lesson:
-"canonicalization across implementations is a footgun; standardize on one").
+This stdlib-only, lock-free module remains safe to import from transaction, link,
+and delete writers that already hold their own lock. Re-serialization is
+replay-safe because reducers consume parsed keys rather than source bytes.
 
-Parity is pinned by ``tests/unit/test_canonical.py`` (the byte contract + the
-structural guard) and ``tests/interfaces/store/test_canonical_event_bytes.py``
-(every committed event file, written by any live producer, equals
-``canonical_bytes`` of its own parsed content).
+Signing, workflow hashing, reconciler manifests, and provenance ledgers share
+this canonical JSON and content-hash seam. Keyword-only options make intentional
+encoding differences explicit while preserving positional call bytes.
 
-This module is deliberately **lock-free and dependency-free** (stdlib ``json`` +
-``hashlib`` only): the txn/link/delete paths rename+commit inline under their own
-lock and must be able to import the serializer without pulling in the write lock.
-Re-serialization is replay-safe — the reducer reads parsed keys, not raw bytes,
-so routing an existing writer through this helper never changes replay behavior.
-
-**Beyond the event path — the one true canonical-JSON/hash home.** This is also
-the single seam for the other "sorted-key compact JSON (+ sha256)" sites that had
-each reimplemented it inline (signing, workflow content-hash, reconciler manifest
-+ provenance ledger). Two encoding axes are exposed as **additive, keyword-only**
-parameters so a caller that deliberately diverges does so *explicitly* (a named
-param with a cited consumer) rather than via a silent copy — and so the existing
-positional callers ``canonical_str(event)`` / ``canonical_bytes(event)`` keep
-their exact bytes untouched:
-
-- ``ascii_only`` (``ensure_ascii``) — default ``False`` (literal UTF-8, the
-  canonical event form). ``ascii_only=True`` reproduces a site that relied on the
-  stdlib ``ensure_ascii=True`` default (``\\uXXXX`` escapes): the reconciler
-  manifest (``mutation.serialize_manifest``) and provenance ledger
-  (``conflict_resolver._hash_value``).
-- ``default`` — the ``json.dumps`` fallback serializer for non-JSON-native values
-  (e.g. ``default=str`` for the provenance ledger, which hashes arbitrary values).
+- ``ascii_only`` defaults to literal UTF-8. ``True`` emits ``\\uXXXX`` escapes
+  for ``mutation.serialize_manifest`` and ``conflict_resolver._hash_value``.
+- ``default`` supplies the ``json.dumps`` fallback for values outside native JSON,
+  including ``default=str`` in the provenance ledger.
 """
 
 from __future__ import annotations

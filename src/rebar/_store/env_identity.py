@@ -1,47 +1,27 @@
-"""Environment identity (``.env-id``) — minting, the re-identification guard, and
-the store-wide divergence report.
+"""Mint and diagnose the ignored ``.env-id`` environment identity.
 
-``.env-id`` is a per-environment uuid that is **git-ignored local state** and is
-**stamped into every event** this environment writes. It is also the ``principal`` of
-every op-cert attestation (ADR 0044): an attestation is verified against the LOCAL
-op-cert key, so a certificate whose principal is some *other* environment can never be
-verified here — the key that signed it is not in this store.
+Every event carries this environment's identifier, which is also the principal of
+its op-cert attestations under ADR 0044. Verification uses the local op-cert key,
+so attestations from another environment do not verify here. Re-cloning a tracker
+copies events but omits this ignored state, which can surface later as a store-wide
+``foreign_key`` verdict (bug gold-distinct-lacewing).
 
-That makes a re-clone of the tracker a silent identity change. A fresh clone carries the
-events but not the git-ignored local state, so ``.env-id`` is absent and the naive
-"mint one if missing" rule invents a NEW identity while the store is full of events (and
-attestations) belonging to the old one. Nothing fails at that moment; the loss surfaces
-much later as a ``foreign_key`` verdict at a claim gate, and it reads as a per-ticket
-problem when it is store-wide (bug gold-distinct-lacewing).
+This module applies three minting policies.
 
-This module is the single place that decides how loud a mint is:
+- **Genesis:** Mint without a warning when the store has no events.
+- **Populated store:** Mint and warn on stderr with prior identifiers,
+  attestation consequences, and state that can be carried over.
+- **Acknowledged mint:** ``REBAR_ALLOW_ENV_REIDENTIFY=1`` reduces that warning to
+  one note without gating the operation.
 
-* **Genesis** — no events in the store ⇒ mint silently. First-time ``rebar init`` is
-  unchanged.
-* **Into a populated store** — mint, and warn loudly to stderr, naming the prior
-  environment id(s), the attestation consequence, and the state to carry over.
-* **Override** — ``REBAR_ALLOW_ENV_REIDENTIFY=1`` acknowledges that and quietens the
-  warning to a one-line note. It gates nothing.
+Minting proceeds because the store cannot distinguish a re-clone from an
+additional collaborator, which requires its own identity. The environment
+variable reaches CLI, MCP boot, and library ensure paths. A CLI flag would not.
 
-It **warns rather than refuses** because the store cannot tell a re-clone from a second
-clone collaborating on a shared tickets branch, and the latter is a first-class workflow
-that legitimately needs its own identity (refusing broke
-``tests/integration/test_concurrency_regression.py::
-test_two_clone_union_deterministic_replay_and_fork_tiebreak``). Only the operator knows
-which case it is, so the mint proceeds and the operator is told.
-
-The override is an environment variable rather than a CLI flag because the mint happens
-inside the ensure registry, which runs from the CLI, the MCP server's boot path and the
-library alike; a flag on ``rebar init`` would cover only one of the three.
-
-:func:`divergence_report` is the durable half: it detects a re-identification that already
-happened, and is scoped by AUTHOR precisely because several env ids in one store is the
-healthy multi-clone shape — see its docstring.
-
-None of this is a migration: prior events stay stamped with the environment that actually
-wrote them (they are history, not corruption), and no attestation is re-homed. Making an
-old attestation verifiable again requires publishing per-environment op-cert PUBLIC keys
-into the store — a trust-model change that needs its own ADR and is out of scope here.
+:func:`divergence_report` detects completed re-identification and scopes its
+signal by author so normal multi-clone stores do not warn. Existing events keep
+their original identity and attestations are not re-homed. Cross-environment key
+publication would change the trust model and remains outside this module.
 """
 
 from __future__ import annotations
@@ -205,16 +185,12 @@ def mint_env_id(tracker: str | os.PathLike) -> str:
 
 
 def mint_env_id_guarded(tracker: str | os.PathLike) -> EnsureOutcome:
-    """Mint ``.env-id`` if absent, never SILENTLY over another environment's events.
+    """Mint a missing ``.env-id`` and warn over another environment's events.
 
-    The shared decision point behind both the ensure unit and fresh-init's local-file
-    bootstrap, so the two cannot drift into disagreeing about when a mint is loud.
-
-    It mints in every case. Refusing was tried and is wrong: a second clone mounting a
-    shared tickets branch is a first-class workflow (``tests/integration/
-    test_concurrency_regression.py::test_two_clone_union_deterministic_replay_and_fork_tiebreak``
-    is exactly that), and a store cannot distinguish it from a re-clone. So the mint
-    proceeds and the operator — who CAN tell them apart — is told, loudly, once.
+    This shared decision keeps the ensure unit and fresh-init bootstrap aligned.
+    Minting never refuses because an additional collaborating clone also requires
+    a distinct identity. The operator receives one warning when prior events make
+    the two cases indistinguishable.
     """
     root = os.fspath(tracker)
     if not os.path.isdir(root):
@@ -234,10 +210,7 @@ def mint_env_id_guarded(tracker: str | os.PathLike) -> EnsureOutcome:
 
 
 def ensure_env_id_unit(tracker: str) -> EnsureOutcome:
-    """Ensure the store carries a stable ``.env-id`` (ensure-registry unit).
-
-    Check-then-act: no-ops on a store that already has one, and mints loudly rather than
-    silently when the store already holds another environment's events."""
+    """Ensure a stable ``.env-id``, warning when prior events use another identity."""
     return mint_env_id_guarded(_realpath(tracker))
 
 
@@ -246,20 +219,13 @@ def _realpath(p: str) -> str:
 
 
 def divergence_report(current: str, seen: set[tuple[str, str]]) -> str | None:
-    """The ``fsck`` line for an environment that has written under more than one identity,
-    or None. ``seen`` is the store's ``(env_id, author)`` pairs.
+    """Return the ``fsck`` line for one author using multiple identities.
 
-    The DETECTOR for a re-identification that already happened — including one that
-    predates the mint warning, or one the operator acknowledged and then forgot.
-
-    Scoped by AUTHOR, which is what makes it a signal rather than noise. A store shared by
-    several clones always holds several env ids; that is the healthy topology, and
-    reporting it would fire on every well-formed team store until nobody read the line.
-    What is NOT healthy is one author writing under two identities: either their tracker
-    was re-cloned, or they moved machines. Both mean that author's own attestations are
-    dead here, which is precisely the loss this check exists to surface — and the authors
-    "here" are read from the store itself (whoever writes under the current env id), so
-    no configuration is consulted.
+    ``seen`` contains ``(env_id, author)`` pairs. Author scoping distinguishes
+    re-identification from a healthy store shared by multiple clones. The authors
+    associated with ``current`` come from store events, so this check needs no
+    configured identity. It also catches older or acknowledged identity changes
+    whose attestations no longer verify in this environment.
     """
     if not current:
         return None  # not yet identified — the mint warning's business, not the detector's

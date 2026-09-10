@@ -1,30 +1,9 @@
-"""Push-recovery for the tickets branch: the stash/dirty-tree set-aside and the
-non-fast-forward fetch-and-merge dance, extracted from :mod:`.push`.
+"""Recover tickets-branch pushes after dirty trees or non-fast-forward rejection.
 
-These are the B (dirty working-tree recovery) and C (non-fast-forward recovery) subtrees
-of :func:`push.push_tickets_branch`. They form one call-graph cluster whose only edge into
-the rest of ``push`` is ``push_tickets_branch``'s single call to
-:func:`_recover_non_fast_forward`; every other function here has exactly one caller inside
-the cluster.
-
-The ``core`` parameter
-----------------------
-
-Every function here takes the calling :mod:`rebar._store.push` **module object** as its
-first argument and resolves ``core._git`` and ``core.logger`` through it at **call time**.
-That is load-bearing, not ceremony: ``push._git`` is monkeypatched at ~25 sites across the
-push test suite, and 8 of the 9 recovery functions shell out through it. A module-level
-``from .push import _git`` here would BOTH create an import cycle AND bind the real ``_git``
-before those patches are installed — the tests would keep asserting on a fake while this
-code ran REAL git against the tracker. Late-binding through ``core`` keeps the patch point
-working across the module boundary, exactly as
-:mod:`rebar._engine.rebar_reconciler._ref_lock_push` does. ``logger`` is read from ``core``
-too, so the operator-facing evidence stays on the ``rebar._store.push`` logger where it has
-always been emitted (the store-epoch warning tests pin that logger name).
-
-The dependency runs one way — ``push -> push_recovery`` — with no import cycle: ``push``
-hands itself (and, for the write lock, the ``lock`` module) down, and this module imports
-NOTHING from ``push``.
+This call-graph cluster is entered through :func:`_recover_non_fast_forward`. Each function
+accepts the calling ``push`` module and resolves ``core._git`` and ``core.logger`` at call time.
+That preserves monkeypatch points and the established logger while avoiding an import cycle.
+The dependency remains one-way from ``push`` to this module.
 """
 
 from __future__ import annotations
@@ -45,32 +24,22 @@ from rebar._store.push_classify import (
     _transport_backoff,
 )
 
-# The untracked-overwrite recovery is PARITY with sync.py's reconverge (variant (a),
-# loris/1757, generalized by wolverine/1767). The whole toolkit — parser, quarantine path
-# arithmetic AND the mover — now lives in the neutral `merge_recovery` owner, which takes
-# the git runner as a PARAMETER; that is what lets this module keep handing it the
-# late-bound `core._git` seam the ~25 `push._git` monkeypatch sites depend on (see the
-# module docstring) instead of forking a second mover, as it had to before.
+# :mod:`merge_recovery` owns the parser, quarantine paths, and mover shared with sync.
+# Passing late-bound ``core._git`` preserves the push test seam.
 
-# Bounded wait for the write lock around the push-retry merge (attempts=1, like sync.py's
-# reconverge). A timeout means another writer holds the lock, so we skip the merge and
-# leave the push pending rather than racing.
+# Bounded write-lock wait around the recovery merge. A timeout leaves the push pending instead
+# of racing another writer.
 _PUSH_MERGE_LOCK_TIMEOUT = 15
 
 
 # raw-git-ok: locked store seam internal
 def _stash_create(core: ModuleType, base_path: str) -> str | None:
-    """Record the dirty working tree as a stash COMMIT OBJECT, off the shared stack.
+    """Capture tracked dirty state in a stash commit outside the shared stack.
 
-    ``git stash create`` writes the stash commit and prints its sha WITHOUT touching
-    ``refs/stash``. That is the whole point (bug 2fa6): the stash stack is REPO-GLOBAL,
-    shared by every worktree, so a ``stash push``/``pop`` pair here could — and did — pop an
-    entry created on a source branch, dropping ``src/…`` into the store and stranding the
-    index. A commit addressed by sha is unreachable from another worktree's pop. Unlike
-    ``stash push``, ``create`` does NOT clean the working tree; the caller resets. This
-    tracker recovery only sets aside tracked modifications; untracked files remain in the
-    working tree and are handled by the merge-overwrite quarantine path if they collide.
-    Returns the sha, ``""`` when the tree was already clean, or ``None`` on git failure."""
+    ``git stash create`` does not touch ``refs/stash`` or clean the tree. This recovery
+    only sets aside tracked modifications; untracked files remain in the
+    working tree for quarantine if they collide. Return the SHA, ``""`` for a clean tree, or
+    ``None`` on Git failure."""
     cp = core._git(base_path, "stash", "create", "push_tickets_branch:auto-stash")
     if cp.returncode != 0:
         return None
@@ -79,11 +48,9 @@ def _stash_create(core: ModuleType, base_path: str) -> str | None:
 
 # raw-git-ok: locked store seam internal
 def _restore_stash(core: ModuleType, base_path: str, stash_sha: str) -> None:
-    """Re-apply the stash commit built by :func:`_stash_create`, repairing a conflict.
+    """Apply the exact commit from :func:`_stash_create` and repair conflicts.
 
-    ``git stash apply <sha>`` names the commit explicitly, so it can only ever restore
-    OUR OWN recorded tree — there is no stack to consult and nothing to ``drop``
-    afterwards."""
+    Addressing the SHA avoids the shared stash stack and requires no later drop."""
     if not stash_sha:
         return  # nothing was stashed (clean tree)
     applied = core._git(base_path, "stash", "apply", "--quiet", stash_sha)
@@ -94,21 +61,12 @@ def _restore_stash(core: ModuleType, base_path: str, stash_sha: str) -> None:
 def _resolve_conflicted_apply(
     core: ModuleType, base: str, applied: subprocess.CompletedProcess
 ) -> None:
-    """Repair a ``git stash apply`` that applied-with-conflict (bug 6818).
+    """Repair an unmerged index left by ``git stash apply``.
 
-    When the post-merge HEAD brings the upstream copy of a file in cleanly but the
-    stashed edit touches the same region, the apply writes conflict markers and leaves an
-    unmerged (UU) index entry — wedging the tracker (reconcile fail-closes on the markers;
-    every ``git commit`` refuses the unmerged path). A clean apply never reaches here.
-
-    The old code ASSUMED every conflicted path was reconciler-regenerable
-    (``.bridge_state/prev_snapshot.json``, ``bindings.json``, ``get_rotation.json`` — rebuilt
-    on the reconciler's next pass) and blind-restored it from HEAD. Bug 2fa6 disproved that,
-    so the assumption is ENFORCED: each path is classified against what the branch tracks and
-    the buckets diverge in :func:`~rebar._store.gitutil.discard_unmerged_paths` — a
-    tracked path is restored from HEAD (the reconciler rebuilds it), while a path the
-    branch does not track CANNOT be ticket data and is removed. Foreign paths are logged
-    rather than vanishing silently: their presence means source files reached the tracker."""
+    A clean apply returns unchanged. Conflicted branch-tracked files such as
+    ``get_rotation.json`` are regenerable and restored from HEAD. Foreign paths cannot be
+    ticket data, so they are logged and removed through
+    :func:`~rebar._store.gitutil.discard_unmerged_paths`."""
     if applied.returncode == 0 and not core._git(base, "ls-files", "-u").stdout.strip():
         return  # genuinely clean apply — nothing to repair
     unmerged = sorted(set(core._git(base, "diff", "--name-only", "--diff-filter=U").stdout.split()))
@@ -251,18 +209,11 @@ def _merge_with_transport_retry(
     merge_target: str,
     sleep_fn: Callable[[float], None] | None,
 ) -> subprocess.CompletedProcess:
-    """Run the recovery merge, riding out a transport fault raised from INSIDE the merge.
+    """Run the recovery merge with bounded transient-fault retries.
 
-    Bug f61c: the checkout is a ``blob:none`` partial clone, so ``git merge`` itself does
-    on-demand promisor fetches. Run 31420498173 died as
-    ``merge-recovery-blocked: ... server certificate verification failed`` together with
-    ``could not fetch ... from promisor remote`` — a TRANSPORT fault wearing the merge
-    reason. The transient runner-FS faults (``could not parse HEAD`` / ``bad object`` / a
-    loose-object temp-create blip) abort the merge before it writes anything and clear on
-    retry the same way, so they earn the same bounded retry rather than the terminal
-    abort-and-warn path. A genuine merge conflict is neither, and stays terminal on the
-    first failure.
-    """
+    Partial clones may fetch promisor objects during merge. Transport and transient filesystem
+    failures therefore abort and retry with backoff. A merge conflict remains terminal on the
+    first failure."""
     for transport_attempt in range(1, _MAX_TRANSPORT_ATTEMPTS + 1):
         merge = core._git(
             base_path,
@@ -350,12 +301,9 @@ def _fetch_for_recovery(
     branch: str,
     sleep_fn: Callable[[float], None] | None,
 ) -> subprocess.CompletedProcess:
-    """Fetch the remote branch for merge recovery, riding out transient transport faults.
+    """Fetch the recovery branch with bounded retries for transport faults.
 
-    Bug f61c: run 31420498173 lost recovery to `merge-recovery-blocked: ... server
-    certificate verification failed`, so the fetch leg needs the same bounded transport
-    retry as the push leg — a blob:none partial clone also fetches on demand here.
-    """
+    This gives partial-clone fetches the same transient-failure policy as pushes."""
     refspec = f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"
     for transport_attempt in range(1, _MAX_TRANSPORT_ATTEMPTS + 1):
         fetch = core._git(base_path, "fetch", remote, refspec)
@@ -384,17 +332,12 @@ def _recover_non_fast_forward(
     strict: bool,
     sleep_fn: Callable[[float], None] | None = None,
 ) -> bool | None:
-    """Fetch and merge a genuine non-fast-forward rejection.
+    """Back off, fetch, and merge a non-fast-forward rejection.
 
-    ``True`` means a clean merge, ``False`` means a retryable local recovery
-    failure, and ``None`` preserves the default path's terminal best-effort stop.
-    """
-    # Bug baldish-regainable-steed: back off FIRST, then re-fetch and recompute the merge, so
-    # a lost CAS race gets a window to converge instead of re-colliding with the same
-    # concurrent writer. The sleep must sit BEFORE the fetch (order: SLEEP -> fetch -> merge)
-    # so the caller's next push immediately follows a merge of freshly-fetched state rather
-    # than staler pre-sleep state. Placing it after the merge (bug ebee's original) made each
-    # retry push state captured before the sleep — staler, not fresher.
+    ``True`` reports a clean merge. ``False`` reports a retryable local recovery failure.
+    ``None`` preserves the terminal best-effort stop."""
+    # Sleep before fetching so a concurrent CAS writer can land. Fetching and then merging
+    # ensures the next push uses state observed after the wait.
     _cas_backoff(attempt, sleep_fn)
     fetch = _fetch_for_recovery(core, base_path, remote, branch, sleep_fn)
     if fetch.returncode != 0:

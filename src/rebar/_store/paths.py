@@ -1,41 +1,10 @@
-"""ONE derivation of every store-relative path (story ``6f18-05de-beaf-42be``).
+"""Derive every store-relative path from the canonical tracker.
 
-Five modules independently answered "where is ``.rebar`` for this store?", and three of them
-carried the SAME defect in turn: a bare ``dirname`` that stops at the CALLER. A ``make
-worktree`` worktree's ``.tickets-tracker`` is a SYMLINK to the canonical store while its
-``.rebar`` is a real per-worktree directory, so an unresolved ``dirname`` keys every sidecar
-on the *view* instead of the *store*. Each copy was fixed one site per ticket — bug
-``da68-fc7c-068c-4c53`` (``nuclear-calm-heron``, the enrich drain lock and log),
-``93a9-66cf-e681-4f49`` (``intangible-ladyish-vicuna``, the compaction worker lock, sweep
-stamp and log) and ``conscious-weighable-spittlebug`` (the enrichment gate marker) — which is
-the signature of a construct that has no owner: the same bug keeps re-entering by imitation.
-
-The defect defeated each sidecar differently, and that variety is the argument for one owner:
-
-* the drain/worker **locks stopped excluding anything** — two worktree views of one store each
-  took "the" lock and drained (or compacted) the SAME queue concurrently;
-* the sweep **stamp stopped being a store-wide clock** — a view read its own empty stamp and
-  re-fired a sweep the store had just had;
-* the gate **marker asserted quiet for a store another worktree had just made noisy**, and a
-  mutation's clear unlinked the WRONG file, leaving the stale claim standing until its TTL;
-* the **logs** were written into — and deleted with — an ephemeral worktree.
-
-**The resolution lives INSIDE the derivation, not at the call sites.** That is the whole point:
-a caller cannot defeat an invariant it never gets to express. Every path here is derived from
-:attr:`StorePaths.canonical` — the tracker resolved through symlinks by
-:func:`rebar._store.lock.canonical_tracker`, the very same resolution the store write lock
-uses — so a caller reaching the store through a symlink lands on exactly the paths a caller
-holding its real path does.
-
-Resolution **never raises**. These derivations run on best-effort background paths (the tail of
-a close, the drain gate on ordinary writes), where a background concern must not fail the
-operation that triggered it; an ``OSError`` degrades to the raw tracker value, which is the
-pre-existing behaviour. This module is a low-level leaf — it imports nothing from
-``rebar.llm`` or ``rebar._commands``, and it reaches
-:mod:`rebar._store.lock` lazily THROUGH THE MODULE so that a test holding
-``monkeypatch.setattr(lock, "canonical_tracker", ...)`` is honoured at call time (the
-late-binding discipline :mod:`rebar._store.ensures` documents) and so importing this module
-cannot cycle.
+Worktree tracker symlinks must share locks, stamps, markers, and logs with the underlying store.
+:class:`StorePaths` therefore resolves the tracker before deriving its sibling ``.rebar``
+directory. Resolution failures fall back to the supplied tracker and never raise. The lock
+module is imported lazily through its module object, which avoids a cycle and preserves
+call-time monkeypatching of ``canonical_tracker``.
 """
 
 from __future__ import annotations
@@ -78,11 +47,8 @@ def _rebar_dir(tracker: str | os.PathLike[str]) -> str:
 #: right (the rule ``scripts/check_raw_git_writes.py`` enforces for ``# raw-git-ok:``).
 _STORE_PATH_OK_RE = re.compile(r"#\s*store-path-ok:(.*)$")
 
-#: The atoms that, IN CONJUNCTION with the ``.rebar`` literal, constitute the tracker-sibling
-#: derivation this module owns. The bare literal is deliberately NOT the signature: roughly
-#: three dozen sites legitimately join ``.rebar`` to an explicit ``repo_root`` (prompts,
-#: scratch, the usage log, run snapshots), and those carry no symlink hazard. Only a
-#: parent-of-the-tracker step makes it THIS construct.
+#: A tracker-parent operation combined with ``.rebar`` identifies the owned sibling derivation.
+#: The literal alone remains valid when joined to an explicit repository root.
 _PARENT_ATOMS = ("os.path.dirname(", ".parent")
 
 

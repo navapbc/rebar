@@ -1,37 +1,24 @@
-"""The locked event-commit transaction for the tickets store — and its self-heal.
+"""Locked event transactions and commit recovery for the ticket store.
 
-In-process replacement for the bash write path
-``ticket-append-event.sh`` -> ``write_commit_event`` -> ``_flock_stage_commit``: takes
-a fully-composed event dict (the seam already builds ``{timestamp, uuid,
-event_type, env_id, author, data}``), and under the unified write lock does the atomic
-rename + ``git add`` + ``git commit``. ``write_and_push`` additionally runs the
-best-effort push.
+The in-process write path accepts a composed event, then atomically renames,
+stages, and commits it under the unified write lock. :func:`write_and_push` adds
+a best-effort push.
 
-**Split by concern.** The write path's two leaf concerns live in their own modules and
-are re-exported here so every existing import path and monkeypatch target keeps working:
+Pre-lock validation, canonical serialization, and staging live in
+``event_prepare.py``. Bounded Git verbs with shared retry policy live in
+``event_commit_git.py``. Both remain re-exported here to preserve imports and
+monkeypatch targets. This module owns the lock bodies, batch rollback, push and
+enrichment handoffs, and recovery from unmerged or missing index objects.
+Recovery calls ``_git_add`` through this module so one test patch observes both
+the initial add and recovery add.
 
-- ``_store/event_prepare.py`` — pre-lock validation + CANONICAL serialisation + staging
-  (:data:`EVENT_TYPES`, :class:`StoreError`, :func:`event_filename`,
-  :func:`_prepare_event`). Runs before any lock; holds the byte-parity contract.
-- ``_store/event_commit_git.py`` — the bounded, retry-composed git verbs every lock-held
-  git child is issued through (:func:`_run_git`, :func:`_git_add`, :func:`_git_commit`, …).
+This is the local ticket-store writer. The Jira reconciler is a client whose
+inbound batcher is not the local batch API. See ``docs/architecture.md`` under
+"Two writers, one store".
 
-What REMAINS here is the transaction itself — the three ``lock.write_lock`` bodies, batch
-rollback, and the push / enrichment-drain hand-off — together with the commit-failure
-SELF-HEAL (:func:`_recover_from_unmerged`, :func:`_recover_from_invalid_object`). The
-self-heal stays with the transaction deliberately: it re-issues ``_git_add`` on its retry
-path, and the store suite patches ``event_append._git_add`` ONCE expecting both the
-happy-path add and the recovery re-add to observe it through this single module global.
-
-**Scope — this is the LOCAL ticket-store write path.** The Jira reconciler
-(``rebar_reconciler/``) is a separate *client* of this store; its inbound
-commit-batcher is a Jira-sync internal, NOT the general local batch-write API. Do
-not conflate the two — see ``docs/architecture.md`` "Two writers, one store".
-
-Exit-code parity (surfaced as ``StoreError.returncode`` -> the seam's ``CommandError``):
-``1`` lock timeout / atomic-rename failure / git-commit failure (distinct stderr each),
-``75`` rebase/merge guard. Mirrors ``_flock_stage_commit`` (which maps its internal
-2/3 to an external return 1).
+``StoreError.returncode`` preserves the former shell contract. Code ``1`` covers
+lock timeout, rename failure, and commit failure with distinct diagnostics. Code
+``75`` denotes the rebase or merge guard.
 """
 
 from __future__ import annotations
@@ -103,34 +90,28 @@ _log = logging.getLogger(__name__)
 
 
 def _deferred_maintenance(tracker: str | os.PathLike) -> None:
-    """Run git's auto-maintenance as an explicit deferred step after a successful lock-held
-    commit (bd66), still UNDER the caller's write lock.
+    """Run best-effort Git maintenance after commit under the caller's lock.
 
-    The lock-held commit runs with git's auto-maintenance suppressed (``_AUTOMAINT_OFF``) so
-    its tight ``_GIT_TIMEOUT`` covers only the O(1) commit, never an O(store) repack. This
-    replays the maintenance ADR 0051 wants FOREGROUND — but as a distinct step on the roomier
-    ``_LOCAL_GIT_TIMEOUT`` watchdog, and serialised under the SAME write lock (so calls MUST
-    stay inside the ``write_lock`` body). BEST-EFFORT: the write is already durable, so a
-    maintenance failure/timeout never fails the write."""
+    Commits suppress automatic maintenance so ``_GIT_TIMEOUT`` covers only the
+    commit. This foreground step uses the longer local watchdog while preserving
+    ADR 0051 serialization. The durable write survives maintenance failure.
+    """
     run_auto_maintenance(tracker)
 
 
 def delete_events(tracker: str | os.PathLike, relpaths: Iterable[str], commit_msg: str) -> int:
-    """Delete committed event files under the write lock, pathspec-scoped.
+    """Delete selected committed events under the unified write lock.
 
-    The retention-prune counterpart to :func:`stage_and_commit`. Sidecar prunes remove
-    older reducer-ignored events, and — like every other store write — they MUST serialize
-    through the unified write lock rather than racing it with a raw ``git rm`` + whole-index
-    ``git commit``. This acquires :func:`rebar._store.lock.write_lock`, checks the rebase
-    guard, ``git rm``s exactly *relpaths*, and commits ONLY those paths
-    (:func:`_git_commit_paths` — never a whole-index commit that could commit a concurrent
-    writer's staged event under this message), riding out index.lock contention via the
-    shared retry. On a commit failure the staged deletions are restored to HEAD.
+    Retention prunes check the rebase guard, apply ``git rm`` to exactly
+    *relpaths*, and use a pathspec commit so unrelated staged events cannot enter
+    the prune commit. Shared retry handles index-lock contention. Commit failure
+    restores every deletion to HEAD.
 
-    Returns the number of paths deleted (``0`` for an empty list — a no-op that takes no
-    lock and makes no commit). Raises :class:`StoreError` (1), :class:`RebaseGuard` (75),
-    or :class:`LockTimeout` (1), same as the canonical writer; callers wanting the
-    best-effort sidecar posture keep their own ``try``/``except``."""
+    Return the number deleted. An empty input acquires no lock and commits nothing.
+    Raise :class:`StoreError` or :class:`LockTimeout` with code ``1`` and
+    :class:`RebaseGuard` with code ``75``. Sidecar callers own any best-effort
+    exception policy.
+    """
     tracker = _lock.canonical_tracker(tracker)
     _ensure_initialized(tracker)
     paths = [r for r in relpaths if r]
@@ -185,19 +166,13 @@ def stage_and_commit(
                 raise StoreError("Error: atomic rename failed", 1) from exc
             add = _git_add(tracker, [staged.relative_path])
             if add.returncode != 0:
-                # Check add's return code BEFORE running commit (audit 2.2): the commit
-                # below commits the whole index, so running it after a failed add could
-                # sweep unrelated staged residue in under THIS write's message. Reset the
-                # index as well as unlinking the worktree file so the (possibly partially)
-                # staged event cannot leak into the next successful write's commit.
+                # Check add before the whole-index commit. On failure, reset both
+                # index and worktree state so no partial event enters a later commit.
                 _unstage(tracker, staged.relative_path)
                 _silent_unlink(staged.final_path)
                 staged.unpublish()
-                # Surface git's real stderr. The create path historically hid it behind
-                # this generic message, leaving intermittent CI git races (bug edf7 —
-                # "could not parse HEAD" / index.lock contention) undiagnosable; the
-                # transition path (txn.py) already includes stderr. The recognizable
-                # phrase is kept as a substring for anything matching on it.
+                # Preserve the established error phrase while appending Git diagnostics
+                # needed to distinguish HEAD parsing and index-lock failures (bug edf7).
                 add_err = (add.stderr or add.stdout).strip()
                 raise StoreError(
                     "Error: git commit failed while holding lock"
@@ -206,15 +181,12 @@ def stage_and_commit(
                 )
             commit = _git_commit(tracker, commit_msg)
             if commit.returncode != 0:
-                # A pre-existing unmerged (UU) index entry — e.g. a stranded stash/merge
-                # conflict on a reconciler-regenerable .bridge_state/* file (bug 6818) —
-                # makes git refuse the commit entirely. Self-heal regenerable paths to
-                # HEAD and retry; surface an actionable error for a non-regenerable one.
+                # An existing unmerged index entry blocks every commit. Restore
+                # regenerable bridge state and retry, but diagnose ticket data (bug 6818).
                 healed, detail = _recover_from_unmerged(tracker, [staged.relative_path], commit_msg)
                 if not healed and detail is None:
-                    # A poisoned index (an index entry whose object VANISHED — a gc repack or
-                    # a partial write under pressure) makes git refuse this AND every later
-                    # commit until the whole index is reset to HEAD (bug 4c1c / Mode D).
+                    # A missing staged object poisons later commits until the index is
+                    # rebuilt from HEAD (bug 4c1c, Mode D).
                     healed = _recover_from_invalid_object(
                         tracker, [staged.relative_path], commit_msg, commit.stderr or commit.stdout
                     )
@@ -371,11 +343,8 @@ def write_and_push(
 
     canonical = _lock.canonical_tracker(tracker)
     push.push_tickets_branch(canonical)
-    # Best-effort, fail-silent write-path nudge that an existing store is behind the
-    # idempotent ensure-registry (epic odd-vortex-elbow / WS2). This is the single
-    # choke point through which _seam.append_event (comment/tag/edit/link/set_*/sign)
-    # and the composer create/edit/revert path funnel; the nudge NEVER affects the
-    # (already-committed) write. Lazy import so the read path stays untouched.
+    # Warn when the store trails the ensure registry at the shared append and
+    # composer choke point. This lazy, best-effort nudge cannot affect the commit.
     try:
         from rebar._store import ensures as _ensures
 
@@ -391,11 +360,10 @@ def write_and_push(
 def batch_write_and_push(
     tracker: str | os.PathLike, items: Iterable[tuple[str, dict[str, Any]]]
 ) -> int:
-    """Batched commit (:func:`batch_stage_and_commit`), then ONE best-effort push.
+    """Commit one batch under one lock, then perform one best-effort push.
 
-    The bulk analogue of :func:`write_and_push`: instead of one push per event, the
-    whole batch commits under a single lock and a single push follows. An empty batch
-    commits nothing and skips the push. Returns the number of events committed."""
+    Empty input commits and pushes nothing. Return the number of committed events.
+    """
     n = batch_stage_and_commit(tracker, items)
     if n:
         from rebar._store import push
@@ -405,13 +373,11 @@ def batch_write_and_push(
 
 
 def _rollback_batch(tracker: str, renamed: list[_staging.StagedEvent]) -> None:
-    """Undo a failed batch: unstage every already-published event from the index and
-    unlink it from the worktree, so a partial batch leaves NO phantom event (neither
-    staged nor committable by the next write) and no orphaned worktree file.
+    """Remove every published event from a failed batch.
 
-    Ticket 021d: a directory this batch itself published is then removed too, once its own
-    event is gone — otherwise rolling back a failed create would re-create exactly the
-    empty-ticket-directory debris the staging path exists to prevent."""
+    Unstage and unlink each event so no later commit captures it. Then remove any
+    ticket directory created by the batch after its event is gone (ticket 021d).
+    """
     for staged in renamed:
         _unstage(tracker, staged.relative_path)
     for staged in renamed:
@@ -448,17 +414,12 @@ _REGENERABLE_PREFIX = ".bridge_state/"
 def _recover_from_unmerged(
     tracker: str, event_relpaths: list[str], commit_msg: str
 ) -> tuple[bool, str | None]:
-    """Recover a commit that ``git`` refused because of a PRE-EXISTING unmerged (UU)
-    index entry (bug 6818). A stranded stash/merge conflict leaves an unmerged index
-    that blocks EVERY ``git commit``, wedging all store writes.
+    """Recover a commit blocked by an existing unmerged index entry (bug 6818).
 
-    Returns ``(healed, detail)``:
-    - ``(True, None)`` — every unmerged path was reconciler-regenerable OR FOREIGN to the
-      tickets branch; they were cleared and the event commit was retried successfully.
-    - ``(False, <actionable message>)`` — a path the branch DOES track is unmerged (real
-      ticket data, never auto-discarded); the caller raises with that message.
-    - ``(False, None)`` — no unmerged paths (the commit failed for another reason) or
-      the retry still failed; the caller raises the generic error.
+    Clear reconciler-regenerable or branch-foreign paths and retry. Return
+    ``(True, None)`` on success. Return ``(False, detail)`` for tracked ticket
+    data that requires operator resolution. Return ``(False, None)`` when no
+    unmerged path exists or the retry fails.
     """
     unmerged = _run_git(
         ["git", "-C", tracker, "diff", "--name-only", "--diff-filter=U"]
@@ -467,8 +428,8 @@ def _recover_from_unmerged(
         return (False, None)
     regen = [p for p in unmerged if p.startswith(_REGENERABLE_PREFIX)]
     rest = [p for p in unmerged if p not in regen]
-    # A path the tickets branch does not track CANNOT be ticket data (bug 2fa6), so discard
-    # it like a regenerable one rather than wedging every store write on it.
+    # A branch-foreign path cannot be ticket data, so discard it with regenerable
+    # state instead of blocking all writes (bug 2fa6).
     foreign = [p for p in rest if path_is_foreign_to_branch(tracker, p)]
     ticket_data = [p for p in rest if p not in foreign]
     if ticket_data:
@@ -480,8 +441,8 @@ def _recover_from_unmerged(
         )
     discard_unmerged_paths(tracker, regen, foreign)
     _git_add(tracker, list(event_relpaths))
-    # Same runner-FS transient self-heals as _git_commit — this UU-recovery commit reads
-    # HEAD and writes loose objects too, and must not lose a resolved write to a blip.
+    # Apply the commit path's transient retry because recovery also reads HEAD and
+    # writes loose objects.
     retry = _with_transient_fault_retry(
         lambda: _run_git(
             ["git", "-C", tracker, *_AUTOMAINT_OFF, "commit", "-q", "--no-verify", "-m", commit_msg]
@@ -490,20 +451,16 @@ def _recover_from_unmerged(
     return (retry.returncode == 0, None)
 
 
-# git ``write-tree`` refuses the commit with this signature when an index entry references
-# an object that is MISSING from the object DB (``git commit`` builds a tree from the index's
-# cached shas, and only ``write-tree`` verifies each blob EXISTS — corrupt CONTENT is not
-# re-read at commit, so the trigger is a vanished object, not a garbled one). The markers
-# themselves live in the shared registry as the INVALID_OBJECT kind — a kind of its own
-# precisely because its action is the RECOVERY below, not the terminal FATAL default.
+# ``write-tree`` rejects an index entry whose object is absent from the object
+# database. The shared classifier gives this signature its own kind because it
+# invokes the recovery below instead of the terminal failure path.
 _INVALID_OBJECT_MARKERS = git_outcome.INVALID_OBJECT_MARKERS
 
 
 def _is_invalid_object_error(text: str) -> bool:
-    """True when git refused the commit because an index entry names a MISSING object.
+    """Return whether Git rejected a commit for a missing indexed object.
 
-    A lookup against :mod:`rebar._store.git_outcome`; equivalently
-    ``classify(result, operation=git_outcome.COMMIT).kind is GitKind.INVALID_OBJECT``.
+    This delegates to the shared :mod:`rebar._store.git_outcome` classifier.
     """
     return git_outcome.is_invalid_object(text or "")
 
@@ -519,31 +476,22 @@ def _staged_index_paths(tracker: str) -> list[str]:
 def _recover_from_invalid_object(
     tracker: str, event_relpaths: list[str], commit_msg: str, commit_stderr: str
 ) -> bool:
-    """Self-heal a commit git refused because the index references a MISSING object (bug
-    4c1c / Mode D (residual of ac26) — the enrich-prune ``invalid object … Error building trees``
-    cascade). A loose object that vanished between ``git add`` and ``git commit`` — a
-    background gc repack, or a partial object write under FS/memory pressure — poisons the
-    SHARED index, and because the failed commit leaves that entry staged, EVERY subsequent
-    write's commit fails identically until it is dropped (proven cascade). The per-path
-    ``_unstage`` cannot clear it: the poison belongs to an EARLIER write's path, not the
-    current one, so each writer unstages the wrong path and the poison persists.
+    """Recover a commit whose index references a missing object (bug 4c1c).
 
-    Reset the WHOLE index to HEAD (``read-tree HEAD`` drops any poisoned entries regardless
-    of which path they belong to, and touches ONLY the index — every worktree event file
-    stays on disk, so no committed data is lost), re-stage THIS write's file(s) — which
-    REGENERATES a missing object from the intact worktree file when the vanished object was
-    this very write's — and retry the commit. Serialized under the write lock, the vanishing
-    write is the first to hit its own poison, so it self-heals before any peer sees it.
+    A vanished loose object can leave an earlier path staged and make every later
+    commit fail. Per-path unstage cannot remove an entry owned by that earlier
+    write. Under the write lock, ``read-tree HEAD`` rebuilds the entire index
+    without changing worktree event files. Re-stage this write to regenerate its
+    object, then retry the commit.
 
-    Returns ``True`` iff the retry committed; a non-invalid-object failure returns ``False``
-    immediately (left for the caller to raise), leaving the index untouched."""
+    Return ``True`` only when the retry commits. A different failure returns
+    ``False`` without changing the index.
+    """
     if not _is_invalid_object_error(commit_stderr):
         return False
-    # A poisoned index is an ANOMALY worth RECORDING, never a routine path: in the wild this
-    # signature is as often a leaked GIT_INDEX_FILE or an external writer as it is a vanished
-    # object, and a *recurring* heal points at hardware or a bug — so surface every heal
-    # instead of silently papering over it. Capture the staged set first (ls-files reads the
-    # index directly, so it is safe on a poisoned index) to name any file the reset orphans.
+    # Record every recovery because this signature can indicate a leaked index,
+    # external writer, vanished object, or recurring storage fault. Capture staged
+    # paths directly from the index so the warning can name reset orphans.
     staged_before = _staged_index_paths(tracker)
     # HEAD must exist for read-tree HEAD; the cascade only arises after prior writes, so it
     # always does. If it somehow doesn't, the retry commit simply fails → the caller raises.

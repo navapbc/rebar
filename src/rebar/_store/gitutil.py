@@ -1,36 +1,17 @@
-"""One shared ``git`` subprocess wrapper.
+"""Provide shared Git subprocess and ticket-store filesystem helpers.
 
-A leaf helper (stdlib only at module level — no ``rebar.*`` import at all) that
-consolidates the dozen hand-rolled ``_git()`` wrappers that had
-drifted into a different signature/return/error contract each. Every wrapper ran
-the identical shape underneath — ``subprocess.run(["git", "-C", cwd, *args],
-capture_output=True, text=True, …)`` — so :func:`run_git` is that shape once, and
-each call site keeps its OWN return/error contract by adapting the returned
-:class:`subprocess.CompletedProcess` locally (inspect ``returncode``/``stdout``,
-raise its own exception, translate a timeout, …).
+:func:`run_git` consolidates store Git wrappers while leaving each caller to
+interpret :class:`subprocess.CompletedProcess`. Argument lists are never executed
+with ``shell=True``. Results are returned without redaction because callers own
+diagnostic formatting and secret removal.
 
-It also owns the tracker's shared FILESYSTEM primitives — ``_ticket_dirs`` and
-``_dir_is_archived`` (``_resolve_tracker_git_dir`` moved to
-:mod:`rebar._store.git_locking`, which anchors every lock path on it, and is
-re-exported here). They previously lived in
-``rebar._commands.fsck_repair``, which inverted the layering: this store-layer module had to
-defer-import a command-layer *repair* module to answer 'where is the tracker's git dir', and
-seven consumers reached into 'repair' for helpers that have nothing to do with repairing
-(ticket b432-c9dc-c1b4-4a45). They are stdlib-only here; ``_dir_is_archived``'s reducer import
-stays function-local so this module keeps its no-module-level-``rebar.*`` property.
-
-NEVER ``shell=True`` — argv is a list, so a git argument can never be reinterpreted
-by a shell. This helper does not redact: it returns the ``CompletedProcess``
-verbatim, and any token/secret redaction stays where it already lives — in the
-caller that formats ``stderr`` into a message.
-
-**The git lock-contention policy lives in :mod:`rebar._store.git_locking`** (bounded
-jittered retry + per-store advisory ``flock`` serialization, bug 9305-b42c): the
-advisory locks, :func:`~rebar._store.git_locking._with_index_lock_retry` and the stale
-``index.lock`` reclamation, together with the research and the reasoning that chose
-them. :func:`run_git_write` composes that policy with the transient runner-FS retry
-below; the names are re-exported here because callers and tests read them from this
-module.
+This module also owns ``_ticket_dirs`` and ``_dir_is_archived``. Moving those
+filesystem primitives out of command-layer repair code restores store-layer
+dependency direction (ticket b432-c9dc-c1b4-4a45). The reducer import remains
+function-local. :mod:`rebar._store.git_locking` owns lock paths, advisory locking,
+bounded jittered retry, and stale index-lock recovery. Re-exported names preserve
+existing callers and tests. :func:`run_git_write` composes that policy with the
+transient filesystem retry defined here.
 """
 
 from __future__ import annotations
@@ -158,22 +139,12 @@ def run_git_bounded(
     env: Mapping[str, str] | None = None,
     runner: Callable[..., subprocess.CompletedProcess] | None = None,
 ) -> subprocess.CompletedProcess:
-    """:func:`run_git` with the watchdog timeout FOLDED INTO a synthetic failed result.
+    """Run Git with timeout folded into a failed result with code ``124``.
 
-    This is the ONE place rebar's store builds git's rc-124 "timed out" outcome. Before it
-    the same three-line ``try/except TimeoutExpired`` lived in four modules with three
-    different timeout constants, and only one classifier treated the result as retriable —
-    the drift this seam exists to make impossible. A hung git therefore fails the op
-    cleanly (unwinding out of any lock the caller holds) rather than raising a
-    :class:`subprocess.TimeoutExpired` the returncode-inspecting callers do not expect.
-
-    The marker that RECOGNISES this result lives in :mod:`rebar._store.git_outcome` (it is
-    a TRANSPORT-retriable row); constructing it lives here, where the shared runner is.
-    ``check`` is always ``False``: a caller wanting an exception inspects the returncode.
-
-    ``runner`` lets a module hand in ITS OWN late-bound ``run_git`` global so a test that
-    patches ``<module>.run_git`` by name still intercepts the call — folding the timeout
-    here must not quietly relocate a module's monkeypatch seam.
+    This is the sole constructor of the store's synthetic timeout outcome. A hung
+    process therefore unwinds caller locks through existing return-code handling.
+    :mod:`rebar._store.git_outcome` owns its transport-retry marker. ``check``
+    remains false. A supplied late-bound *runner* preserves module monkeypatch seams.
     """
     invoke = run_git if runner is None else runner
     try:
@@ -183,15 +154,8 @@ def run_git_bounded(
         return subprocess.CompletedProcess(argv, 124, "", f"git timed out after {timeout}s")
 
 
-# The three runner-FS transient marker tables moved to :mod:`rebar._store.git_outcome`,
-# which owns every git marker string in the store; the reasoning that chose each one travels
-# with them. Re-exported here under their historical names because callers and tests read
-# them from this module.
-#   READ-side HEAD parse  — bug childsafe-special-springtail
-#   READ-side object DB   — bug wrongful-chemic-squeaker
-#   WRITE-side temp create — bugs vocal-dip-robin / brainy-floral-globefish, moved out of
-#                            event_append by bug unheedful-custodial-bluebottle so EVERY
-#                            caller of the shared write seam inherits the same self-heal
+# ``git_outcome`` owns transient HEAD-read, object-read, and object-write markers.
+# Historical re-exports preserve callers and give every write path the same recovery.
 _TRANSIENT_HEAD_MARKERS = git_outcome.TRANSIENT_HEAD_MARKERS
 _TRANSIENT_OBJECT_MARKERS = git_outcome.TRANSIENT_OBJECT_MARKERS
 _TRANSIENT_WRITE_MARKERS = git_outcome.TRANSIENT_WRITE_MARKERS
@@ -251,13 +215,9 @@ def _with_transient_fault_retry(
     return result
 
 
-# Watchdog bound for the index-mutating store git ops routed through run_git_write
-# (txn/compact/delete add/commit/rm). WATCHDOG-grade, not a latency budget (9305 research
-# §2: "bounding a local git call is defensible watchdog-grade, not latency-grade"):
-# deliberately NOT copied from the 30s/300s network values — these are small local
-# add/commits on the tickets tree (sub-second normally), so 120s distinguishes "wedged
-# fs/lock" from "slow" with ~100x margin while still freeing the store write lock a hung
-# mount would otherwise hold forever. event_append keeps its own 30s (_GIT_TIMEOUT there).
+# This watchdog bounds local index mutations rather than response latency. Its
+# 120-second margin distinguishes a wedged filesystem from an ordinary small commit
+# while releasing the write lock eventually. Network and event-append bounds differ.
 _LOCAL_GIT_TIMEOUT = 120
 
 
@@ -268,30 +228,18 @@ def run_git_write(
     check: bool = False,
     timeout: float = _LOCAL_GIT_TIMEOUT,
 ) -> subprocess.CompletedProcess:
-    """``run_git`` for an index-MUTATING op (``add``/``commit``/``reset``…), self-healing
-    git's ``.git/index.lock`` / ref-lock contention AND the transient runner-FS git faults
-    (the ``could not parse HEAD`` / ``bad object`` READ faults and the loose-object
-    temp-create WRITE fault), serialized behind the per-store advisory git-op lock (bug 9305).
-    Runs the op and, ONLY on a git lock-conflict signature, reclaims a provably-stale
-    index.lock, backs off (jittered, bounded), and retries (see
-    :func:`_with_index_lock_retry`); ONLY on a transient runner-FS signature, backs
-    off and retries the identical (idempotent) op (see :func:`_with_transient_fault_retry`).
-    The two compose — the lock conflict is the OUTER retry, the runner-FS transient the
-    INNER — so each self-heals without interfering. A success or any OTHER failure returns
-    at once, so a genuine error is unchanged; a lock conflict that outlives the bounded
-    budget returns ONE actionable error naming the lock file. Each attempt is bounded by
-    the :data:`_LOCAL_GIT_TIMEOUT` watchdog, folded into a synthetic rc-124 result (the
-    ``event_append._run_git`` shape) so a hung filesystem fails the op cleanly instead of
-    hanging the caller. ``check=True`` raises :class:`subprocess.CalledProcessError` on the
-    final non-zero exit (default ``False`` so callers that inspect ``returncode`` / raise
-    their own error get the result verbatim).
+    """Run a store Git operation with bounded write-path recovery.
 
-    Safe to route ANY tracker git op through: a read op never produces a lock or an
-    object-write signature, so it simply never trips either retry.
+    An outer retry handles index and ref lock contention under the per-store
+    advisory lock (bug 9305). An inner retry handles idempotent transient HEAD,
+    object-read, and object-write failures. Success and unrelated errors return
+    immediately. Exhausted lock contention adds an actionable diagnostic. Each
+    attempt uses ``_LOCAL_GIT_TIMEOUT``, with timeout folded into result code ``124``.
 
-    ``timeout`` overrides the :data:`_LOCAL_GIT_TIMEOUT` watchdog for callers that declare
-    their own module-level bound (e.g. the s3 doctor's) — the bound travels with the caller
-    rather than being silently replaced when it adopts this seam."""
+    ``check=True`` raises :class:`subprocess.CalledProcessError` for the final
+    failure. Read operations can also use this seam because they do not match write
+    recovery signatures. Callers may override the watchdog with *timeout*.
+    """
 
     def _bounded_once() -> subprocess.CompletedProcess:
         return run_git_bounded(tracker, *args, timeout=timeout)
@@ -310,28 +258,16 @@ def run_git_write(
     return result
 
 
-# ── deferred auto-maintenance (bd66) ─────────────────────────────────────────────────────
-# git >= 2.47 runs ``git maintenance run --auto`` FOREGROUND at the end of ``git commit`` (ADR
-# 0051 forces it foreground so the repack serialises UNDER the store write lock). On a mature
-# store past git's ``gc.auto`` threshold that inline repack is O(store), charged to the commit's
-# tight bound (event_append's 30s ``_GIT_TIMEOUT``, c2ba), which SIGKILLs it mid-repack and loses
-# the write. The fix SPLITS the two: this flag tuple suppresses auto-maintenance on the O(1)
-# lock-held commit; ``event_commit_git.run_auto_maintenance`` replays it under the write lock.
+# Git 2.47 can run foreground auto-maintenance after commit. Suppress that
+# store-wide work inside the short commit bound, then replay it under the write lock
+# through ``event_commit_git.run_auto_maintenance`` (ADR 0051, bug bd66).
 _AUTOMAINT_OFF: tuple[str, ...] = ("-c", "gc.auto=0", "-c", "maintenance.auto=false")
 
 
-# ── stranded-index classification (bug 2fa6) ────────────────────────────────────────────
-# The tickets branch has a KNOWN SHAPE: per-ticket event directories (several id styles —
-# `b636-f31a-d590-4642`, `jira-reb-1001`) plus a small set of store dotfiles. Rather than
-# pattern-match those styles, ASK THE BRANCH: a path whose top-level component is absent from
-# HEAD's tree does not belong to the store at all.
-#
-# This matters because a stranded unmerged index blocks EVERY store write. Before this, the
-# recovery had only two buckets — reconciler-regenerable (discard) and everything-else
-# (refuse as ticket data) — so paths that were NEITHER wedged the store until a human
-# intervened with raw git. That happened when a `git stash pop` in the tickets worktree
-# applied a stash created in a SOURCE worktree (the stash stack is shared across worktrees),
-# dropping `src/…` and `.rebar/…` into the store.
+# Classify stranded paths by asking whether HEAD tracks their top-level component.
+# This avoids guessing ticket identifier shapes. A source-worktree stash can place
+# foreign paths in the shared tracker index, where treating them as ticket data would
+# block every store write (bug 2fa6).
 
 
 def path_is_foreign_to_branch(tracker: str, path: str) -> bool:
