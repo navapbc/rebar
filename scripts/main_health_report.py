@@ -119,6 +119,8 @@ def render(
     """
     if jobs and all(result == "success" for result in jobs.values()):
         return _render_green(ref_name=ref_name, head_sha=head_sha)
+    if not jobs or any(result in {"cancelled", "skipped"} for result in jobs.values()):
+        return _render_unavailable(ref_name=ref_name, head_sha=head_sha, jobs=jobs)
     return _render_red(
         ref_name=ref_name,
         head_sha=head_sha,
@@ -126,6 +128,19 @@ def render(
         last_green_sha=last_green_sha,
         last_green_url=last_green_url,
     )
+
+
+def _render_unavailable(*, ref_name: str, head_sha: str, jobs: dict[str, str]) -> str:
+    lines = [
+        f"## `{ref_name}` health is UNAVAILABLE at `{head_sha}`",
+        "",
+        "This run did not produce a complete branch-health reading. Treat it as neither",
+        "healthy nor unhealthy; rerun the scheduled or manual health lane to obtain a verdict.",
+    ]
+    if jobs:
+        lines += ["", "| job | result |", "| --- | --- |"]
+        lines += [f"| {name} | {result} |" for name, result in sorted(jobs.items())]
+    return "\n".join(lines)
 
 
 def _render_green(*, ref_name: str, head_sha: str) -> str:

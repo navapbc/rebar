@@ -50,7 +50,7 @@ def test_green_run_names_its_own_sha_as_the_new_last_known_green(report: ModuleT
     assert "git bisect" not in out, "a green run has nothing to bisect"
 
 
-def test_a_cancelled_or_skipped_gate_is_never_reported_as_green(report: ModuleType) -> None:
+def test_a_cancelled_or_skipped_gate_reports_unavailable(report: ModuleType) -> None:
     for unproven in ("cancelled", "skipped"):
         out = report.render(
             ref_name="main",
@@ -58,7 +58,8 @@ def test_a_cancelled_or_skipped_gate_is_never_reported_as_green(report: ModuleTy
             jobs={**_ALL_GREEN, "golden-path": unproven},
             last_green_sha="0f0f0f0f",
         )
-        assert "RED" in out, f"a {unproven} gate is unproven, not passing"
+        assert "UNAVAILABLE" in out, f"a {unproven} gate is unavailable, not red or green"
+        assert "GREEN" not in out and "RED" not in out
 
 
 def test_an_empty_job_set_is_not_treated_as_green(report: ModuleType) -> None:

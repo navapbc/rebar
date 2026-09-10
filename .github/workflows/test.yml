@@ -34,7 +34,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: test-${{ github.ref }}
+  # Keep redundant work bounded within each event/ref lane, but do not let an on-demand
+  # main-health dispatch cancel the scheduled reading (or vice versa).
+  group: test-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
