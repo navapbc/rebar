@@ -367,7 +367,8 @@ def render_pass_outcomes(
     """
     all_outcomes = list(outcomes)
     kept = all_outcomes[:_MAX_PASS_OUTCOMES]
-    all_fuse = list(fuse_decisions)
+    all_fuse = [d for d in fuse_decisions if d is not None]
+    kept_fuse = all_fuse[:_MAX_PASS_OUTCOMES]
     return {
         "schema_version": _PASS_OUTCOMES_SCHEMA_VERSION,
         "observation_version": _observation_version_dict(observation_version),
@@ -375,7 +376,6 @@ def render_pass_outcomes(
         "degraded": bool(degraded),
         "outcomes": [_pass_outcome_entry(o) for o in kept],
         "outcomes_truncated": max(0, len(all_outcomes) - len(kept)),
-        "fuse_state": [
-            _fuse_decision_dict(d) for d in all_fuse[:_MAX_PASS_OUTCOMES] if d is not None
-        ],
+        "fuse_state": [_fuse_decision_dict(d) for d in kept_fuse],
+        "fuse_state_truncated": max(0, len(all_fuse) - len(kept_fuse)),
     }
