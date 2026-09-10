@@ -153,6 +153,28 @@ def test_bad():
     assert "hazard" in _kinds(source)
 
 
+def test_cherry_picking_home_from_os_environ_is_a_hazard():
+    source = """
+import os
+import subprocess
+
+def test_bad():
+    subprocess.run(["python", "-c", "pass", os.environ["HOME"]])
+"""
+    assert "hazard" in _kinds(source)
+
+
+def test_imported_environ_home_subscript_is_a_hazard():
+    source = """
+import subprocess
+from os import environ
+
+def test_bad():
+    subprocess.run(["python", "-c", "pass", environ["HOME"]])
+"""
+    assert "hazard" in _kinds(source)
+
+
 def test_popen_is_detected_like_run():
     source = """
 import subprocess
@@ -283,6 +305,31 @@ def test_ok(repo):
     assert _kinds(source) == []
 
 
+def test_home_escape_ignores_unrelated_local_names():
+    source = """
+import subprocess
+
+def test_ok(tmp_path):
+    home = tmp_path / "home"
+    mkdtemp = tmp_path / "mkdtemp"
+    TemporaryDirectory = tmp_path / "TemporaryDirectory"
+    subprocess.run(["python", "-c", "pass", str(home), str(mkdtemp), str(TemporaryDirectory)])
+"""
+    assert _findings(source) == []
+
+
+def test_tmp_path_rooted_mkdtemp_argument_is_accepted():
+    source = """
+import subprocess
+import tempfile
+
+def test_ok(tmp_path):
+    child = tempfile.mkdtemp(dir=tmp_path)
+    subprocess.run(["python", "-c", "pass", child])
+"""
+    assert _findings(source) == []
+
+
 def test_the_nested_pytest_funnel_is_exempt():
     """tests/_nested_pytest.py is the one sanctioned nested-pytest launcher; it already
     pins --basetemp under the caller's tmp_path."""
@@ -313,12 +360,20 @@ def _fake_item(path: Path, name: str, markers: list):
     class _Item:
         def __init__(self):
             self.path = path
+            self.fspath = path
             self.name = name
             self.nodeid = f"{path}::{name}"
+            self._added_markers = []
 
         def iter_markers(self, marker_name):
             assert marker_name == guard.MARKER_NAME
             return [_Marker(a) for a in markers]
+
+        def get_closest_marker(self, marker_name):
+            return None
+
+        def add_marker(self, marker):
+            self._added_markers.append(marker)
 
     return _Item()
 
@@ -404,6 +459,28 @@ def test_a_marker_without_a_real_reason_is_rejected(tmp_path, args):
     assert "reason" in reason.lower()
 
 
+_HELPER_HAZARD_MODULE = """
+import subprocess
+
+REPO_ROOT = "/repo"
+
+
+def launch_from_helper():
+    subprocess.run(["python", "-c", "pass"], cwd=REPO_ROOT)
+
+
+def test_uses_helper():
+    launch_from_helper()
+"""
+
+
+def test_module_level_helper_hazard_honors_file_level_opt_out(tmp_path):
+    module = tmp_path / "test_helper_hazard.py"
+    module.write_text(_HELPER_HAZARD_MODULE)
+    item = _fake_item(module, "test_uses_helper", [("module helper intentionally escapes",)])
+    assert guard.unharnessed_subprocess_reason([item]) is None
+
+
 # ---------------------------------------------------------------------------
 # wiring and the live tier
 # ---------------------------------------------------------------------------
@@ -418,10 +495,33 @@ def test_a_controller_side_failure_raises_usage_error_not_pytest_fail():
     """From the xdist controller a pytest.fail() escapes as a 20-line INTERNALERROR and
     buries the message. tests/conftest.py:264-274 already records this for arm (c):
     'a guard whose whole value is a clear message must not look like a crash.'"""
-    text = CONFTEST.read_text(encoding="utf-8")
-    assert "_subprocess_isolation" in text, "the guard is not called from conftest"
-    segment = text[max(0, text.index("_subprocess_isolation") - 2000) :]
-    assert "UsageError" in segment, "the guard's failure path must raise pytest.UsageError"
+    import sys
+
+    class _Config:
+        def getoption(self, _name, default=None):
+            return default
+
+    class _LiveJira:
+        @staticmethod
+        def unconfined_live_jira_reason(config, items):
+            return None
+
+    class _SubprocessIsolation:
+        @staticmethod
+        def unharnessed_subprocess_reason(items):
+            return "subprocess guard violation"
+
+    spec = importlib.util.spec_from_file_location("_root_conftest_under_test", CONFTEST)
+    assert spec is not None and spec.loader is not None
+    conftest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(conftest)
+    item = _fake_item(REPO_ROOT / "tests" / "unit" / "test_bad.py", "test_bad", [])
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setitem(sys.modules, "_live_jira_confinement", _LiveJira)
+        monkeypatch.setitem(sys.modules, "_subprocess_isolation", _SubprocessIsolation)
+        with pytest.raises(pytest.UsageError, match="subprocess guard violation"):
+            conftest.pytest_collection_modifyitems(_Config(), [item])
 
 
 def test_the_live_unit_tier_collects_clean(tmp_path):
