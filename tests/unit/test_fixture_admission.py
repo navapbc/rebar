@@ -72,6 +72,7 @@ def sidecar_row(
     ticket_id: str,
     description: str,
     children: list[dict] | None = None,
+    children_material: list[dict] | None = None,
     verified: bool = True,
 ) -> dict[str, Any]:
     """A verified plan-review sidecar corpus row (``corpus.py:_build_sidecar_row`` shape):
@@ -81,6 +82,7 @@ def sidecar_row(
         "ticket_id": ticket_id,
         "description": description,
         "children": children or [],
+        "children_material": children_material or [],
         "ticket_type": "task",
         "file_impact": [],
         "verified": verified,
@@ -273,10 +275,18 @@ def test_container_criterion_admits_with_rehydrated_child_material(tmp_path, mon
     }
     material = {
         "uuid-c-fire": sidecar_row(
-            "uuid-c-fire", ticket_id="t-cf", description="parent plan A", children=[child_fire]
+            "uuid-c-fire",
+            ticket_id="t-cf",
+            description="parent plan A",
+            children=["child-a"],
+            children_material=[child_fire],
         ),
         "uuid-c-pass": sidecar_row(
-            "uuid-c-pass", ticket_id="t-cp", description="parent plan B", children=[child_pass]
+            "uuid-c-pass",
+            ticket_id="t-cp",
+            description="parent plan B",
+            children=["child-c"],
+            children_material=[child_pass],
         ),
         "uuid-fire": sidecar_row("uuid-fire", ticket_id="t-fire", description="fire plan"),
         "uuid-pass": sidecar_row("uuid-pass", ticket_id="t-pass", description="pass plan"),

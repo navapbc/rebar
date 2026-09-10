@@ -291,9 +291,9 @@ def _rehydrate_candidate(
             ticket_id=None,
             review_event_uuid=review_event_uuid,
         )
-    if _is_container_criterion(criterion) and not _children_are_replayable(
-        material.get("children")
-    ):
+    is_container = _is_container_criterion(criterion)
+    container_children = material.get("children_material")
+    if is_container and not _children_are_replayable(container_children):
         return DriftEntry(
             criterion=criterion,
             case_id=case_id,
@@ -313,7 +313,7 @@ def _rehydrate_candidate(
         "expect": expect,
         "input": str(material.get("description") or ""),
     }
-    children = material.get("children")
+    children = container_children if is_container else material.get("children")
     if children:
         # Non-container historical rows may carry bare ids. Container criteria are guarded
         # above and only reach this point with title/description-bearing child dicts.
