@@ -1,27 +1,11 @@
 #!/usr/bin/env python3
-"""Render the branch-health run summary for the scheduled `main` CI lane.
+"""Render the scheduled ``main`` branch-health summary.
 
-Branch CI on the GitHub mirror runs on a SCHEDULE rather than on every push to `main`
-(ticket 03ef-6fb5-158b-4abd): Gerrit's `Verified` gate already tests every patchset before it
-lands, so the mirror's job is to answer "is `main` healthy NOW", not "was every commit green".
-Running it per-push meant a ref-keyed, cancel-in-progress concurrency group cancelled each run
-with the next, and GitHub renders a cancelled run as a red X — a healthy `main` looked broken.
-
-The schedule buys that back at the cost of ATTRIBUTION: one red tick now covers every commit
-since the last green one. This module is how that cost is paid back. It renders:
-
-* on GREEN — the head SHA, named as the new last-known-green lower bound, so the value is
-  discoverable before an incident rather than only during one;
-* on RED — the per-job verdicts, the last-known-green SHA resolved from this workflow's own
-  successful run history, and a copy-pasteable ``git bisect start``/``git bisect run`` pair
-  wired to this repo's own CI reproduction, so the first responder does not have to
-  reconstruct the technique under pressure.
-
-It lives here rather than inline in the workflow so the suite can drive it: workflow YAML is
-not reachable from a test, and a shell-quoting bug in a recipe nobody has exercised — or a
-lower-bound lookup that silently 403s — is exactly the failure that only shows up at 2am. The
-GitHub API call is injected as a ``Runner`` (the pattern ``scripts/canary_bridge.py`` uses) so
-every failure mode is exercised without a network.
+Gerrit verifies each patchset before submission, while the GitHub mirror checks the
+combined branch on a schedule. A green report records the head SHA as the next lower
+bound. A red report lists job results, resolves the newest successful run, and provides
+the repository CI command for ``git bisect``. Failed lookups remain visible and never
+fail the reporting job. An injected ``Runner`` keeps API failure paths testable.
 """
 
 from __future__ import annotations
@@ -32,33 +16,22 @@ import subprocess
 import sys
 from collections.abc import Callable, Mapping
 
-# (argv) -> (returncode, stdout, stderr) — the seam the tests replace.
+# Injectable command result with return code, stdout, and stderr.
 Runner = Callable[[list[str]], tuple[int, str, str]]
 
-# The reproduction the responder runs at each bisect step. It mirrors what CI does — install
-# from the committed lock, then the check-only gates, then the default suite — so a bisect
-# converges on the same verdict the scheduled run produced.
+# Reproduce the scheduled gate from the committed lock at each bisect step.
 BISECT_PAYLOAD = (
     "uv sync --locked --extra dev "
     '&& PATH="$PWD/.venv/bin:$PATH" make check '
     '&& PATH="$PWD/.venv/bin:$PATH" make test'
 )
 
-# Shown in place of a SHA when the lower bound could not be established. It is a VISIBLE
-# placeholder on purpose: a plausible-but-wrong bound would send the bisect through commits
-# that were never green.
+# Keep an unresolved lower bound visible instead of inventing a green commit.
 NO_LOWER_BOUND = "<a commit you know was green>"
 
 
 def _default_runner(argv: list[str]) -> tuple[int, str, str]:
-    """Run ``argv`` and return ``(returncode, stdout, stderr)``.
-
-    ``argv`` is opaque to the raw-git-write gate only because this is the INJECTABLE seam;
-    its sole caller is :func:`resolve_last_green`, which builds exactly one command — a
-    read-only ``gh api .../actions/workflows/<file>/runs`` REST query. This module invokes no
-    git subcommand at all and never touches the ticket store: it runs on a CI runner, reads
-    one endpoint, and writes Markdown to stdout.
-    """
+    """Run the injected read-only ``gh api`` query and return its three result fields."""
     proc = subprocess.run(  # raw-git-ok: read-only `gh api` seam; never a git subcommand
         argv, capture_output=True, text=True, check=False
     )
@@ -72,12 +45,10 @@ def resolve_last_green(
     workflow_file: str,
     branch: str,
 ) -> tuple[str, str]:
-    """Return ``(sha, run_url)`` for the newest successful run of this workflow on ``branch``.
+    """Return the newest successful run or empty fields when lookup data is unusable.
 
-    FAIL-SOFT BY CONTRACT. Every failure mode — the API call erroring (403 from a missing
-    ``actions: read`` scope, 5xx, rate limit, timeout), an empty run history, or a malformed
-    body — returns ``("", "")``. The caller renders a visible placeholder instead. A report
-    describing a failure must never itself fail the run, and must never invent a bound.
+    API failures, empty history, and malformed responses fail softly. The caller displays
+    the missing lower bound instead of inventing one.
     """
     query = f"branch={branch}&status=success&per_page=1"
     returncode, stdout, stderr = runner(
@@ -111,12 +82,7 @@ def render(
     last_green_sha: str = "",
     last_green_url: str = "",
 ) -> str:
-    """Return the Markdown run summary for one branch-health run.
-
-    ``jobs`` maps each gating job's name to its GitHub result string (``success``,
-    ``failure``, ``cancelled``, ``skipped``). The run is green only when every gating job
-    succeeded, so a cancelled or skipped gate is treated as unproven, never as passing.
-    """
+    """Render Markdown and require every gating job to report ``success`` for green."""
     if not jobs:
         return _render_unavailable(ref_name=ref_name, head_sha=head_sha, jobs=jobs)
     if all(result == "success" for result in jobs.values()):

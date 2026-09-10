@@ -1,25 +1,12 @@
 #!/usr/bin/env python3
-"""Release-time preflight guards, extracted as importable + testable helpers.
+"""Provide testable release preflight guards for the publishing workflow.
 
-The release workflow makes several irreversible moves (publishing to PyPI, tagging
-the MCP registry) and each one has a precondition that, if silently violated, ships a
-broken or divergent release. Historically those preconditions lived as inline shell in
-`.github/workflows/release.yml`, where they could not be unit-tested and drifted from
-their intent. This module lifts three of them into small, pure, individually testable
-helpers so the workflow can call them (or `main`) and CI can exercise every branch:
-
-* `check_version_lockstep` — the version stamped on the release must match `pyproject`
-  AND the MCP `server.json` (top-level *and* every packaged entry). A drift here means
-  the artifact and its registry metadata disagree.
-* `is_ancestor` — the tag/commit being released must descend from `origin/main`, so a
-  release can never be cut from an orphaned or stale ref.
-* `check_env_protection` — the `pypi` GitHub Environment must actually gate deploys
-  (required reviewers + a branch policy restricting deploys to `main`); an unprotected
-  environment lets any branch publish.
-
-Each helper returns a list of human-readable failure strings (empty == compliant) so
-callers can aggregate/report; `main` wires them to a CLI that prints failures to stderr
-and exits 0 (ok) / 1 (failure).
+The guards require version lockstep across ``pyproject.toml`` plus the top-level and
+package versions in ``server.json``. They also require an MCP Registry description of at
+most 100 characters, release ancestry from ``origin/main``, and a protected ``pypi``
+environment restricted to ``main``. Validation guards return failure strings.
+``is_ancestor`` returns a Boolean and raises on other Git errors. The CLI writes failures
+to stderr and exits with zero only when its selected check passes.
 """
 
 from __future__ import annotations
@@ -34,12 +21,7 @@ import tomllib
 
 
 def check_version_lockstep(version: str, pyproject_text: str, server_json: dict) -> list[str]:
-    """Assert `pyproject` and `server.json` all agree on `version` (lockstep).
-
-    Returns a list of failure strings; an empty list means every observed version
-    equals `version`. An empty/missing `packages` list is treated as malformed (a
-    server.json with nothing to release cannot be in lockstep) and fails.
-    """
+    """Report version mismatches and reject an absent or empty package list."""
     failures: list[str] = []
 
     pyproject = tomllib.loads(pyproject_text)
@@ -72,13 +54,10 @@ MCP_REGISTRY_DESCRIPTION_MAX_LEN = 100
 
 
 def check_mcp_registry_description(server_json: dict) -> list[str]:
-    """Assert `server.json`'s top-level `description` fits the MCP Registry schema.
+    """Report a missing or overlength top-level MCP Registry description.
 
-    The registry (registry.modelcontextprotocol.io) rejects a publish with a
-    `body.description` longer than `MCP_REGISTRY_DESCRIPTION_MAX_LEN` chars (a 422 at
-    publish time, AFTER PyPI has already published — see the 0.13.0 release incident).
-    Returns a list of failure strings; an empty list means the description is short
-    enough to publish.
+    The registry rejects an overlength description after the PyPI publish step, so this
+    guard must run before publishing.
     """
     description = server_json.get("description")
     if description is None:
@@ -92,11 +71,7 @@ def check_mcp_registry_description(server_json: dict) -> list[str]:
 
 
 def is_ancestor(sha: str, ref: str, *, cwd: str | Path | None = None) -> bool:
-    """Return True iff `sha` is an ancestor of (or equal to) `ref`.
-
-    Runs `git merge-base --is-ancestor <sha> <ref>`: exit 0 => ancestor (True), exit 1
-    => not an ancestor (False). Any other exit status is a real git error and raises.
-    """
+    """Return ancestry for exit codes zero and one, and raise on other Git failures."""
     result = subprocess.run(
         ["git", "merge-base", "--is-ancestor", sha, ref],
         cwd=cwd,
@@ -117,12 +92,7 @@ def is_ancestor(sha: str, ref: str, *, cwd: str | Path | None = None) -> bool:
 
 
 def check_env_protection(env: dict, branch_policies: dict | None = None) -> list[str]:
-    """Assert the `pypi` GitHub Environment actually gates deploys.
-
-    Returns a list of failure strings; an empty list means the environment requires
-    reviewers, restricts deploys via a branch policy, and (when `branch_policies` is
-    provided) allows exactly the `main` branch.
-    """
+    """Require reviewers and a deployment policy that allows only ``main``."""
     failures: list[str] = []
 
     rules = env.get("protection_rules") or []

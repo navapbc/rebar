@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """Reconstruct operator-visible rebar gate durations from Codex rollout logs.
 
-The probe is read-only: it scans Codex JSONL rollouts and a rebar tracker, links yielded
-cells and PTY polls to their originating shell command, then matches that interval to the
-ticket's gate sidecar. Completion output also decomposes the close using sidecar metrics
-and tracker event timestamps, explicitly distinguishing direct measurements from inferred
-residuals.
+This read-only probe links yielded cells and PTY polls to their shell commands, then
+matches each interval with the ticket gate sidecar. Close reports distinguish sidecar
+and tracker timestamp measurements from inferred residuals.
 
 Frozen 2026-08-23 analysis::
 
@@ -16,9 +14,9 @@ Frozen 2026-08-23 analysis::
       --provider-prefix bedrock: \
       --current-since 2026-08-22T00:00:00Z
 
-By default the log roots are ``~/.codex/sessions`` and
-``~/.codex/archived_sessions`` and the tracker is ``.tickets-tracker``. Time bounds and
-provider filtering are opt-in. Malformed records are counted and skipped.
+The default log roots are ``~/.codex/sessions`` and ``~/.codex/archived_sessions``.
+The default tracker is ``.tickets-tracker``. Time bounds and provider filters are
+optional. Malformed records are counted and skipped.
 """
 
 from __future__ import annotations
@@ -36,8 +34,7 @@ if _SCRIPTS_DIR not in sys.path:
 
 import rebar_duration_probe_support as support  # noqa: E402
 
-# Keep the small import surface used by the focused synthetic tests available from the
-# executable module. The implementation lives in the support module so it can be reused.
+# Re-export the support-module surface used by focused synthetic tests.
 DEFAULT_LOG_ROOTS = support.DEFAULT_LOG_ROOTS
 ProbeConfig = support.ProbeConfig
 Invocation = support.Invocation
