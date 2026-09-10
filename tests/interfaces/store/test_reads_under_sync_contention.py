@@ -1,11 +1,11 @@
 """Require every store read to be complete or loud under sync contention.
 
-``show``, ``list``, ``search``, and ``ready`` share ``ensure_fresh``: a held write lock
+``show``, ``list``, ``search``, and ``ready`` share ``ensure_fresh``. A held write lock
 must yield the local snapshot after the two-second reconverge ledge, not the 15-second
 writer timeout. Exit-zero payloads must match each surface's JSON shape and carry ticket
-identity; nonzero is an acceptable loud failure. An in-process deadline detects ledge
-regressions without interpreter-startup noise, while a separate subprocess limit guards
-only against a true hang.
+identity. A nonzero result is an acceptable loud failure. An in-process deadline detects
+ledge regressions without interpreter-startup noise, while a separate subprocess limit
+guards only against a true hang.
 """
 
 from __future__ import annotations
@@ -133,9 +133,9 @@ def test_reads_complete_or_error_under_write_burst(repo_with_origin_tickets, mon
 
 
 def test_reads_complete_promptly_while_write_lock_is_held(repo_with_origin_tickets):
-    """Hold the write lock while every real CLI surface reads.
+    """Hold the write lock while each CLI store-read surface reads.
 
-    The in-process assertion measures reconverge without startup slack; subprocess calls
+    The in-process assertion measures reconverge without startup slack. Subprocess calls
     use an independent liveness bound and must return the local snapshot rather than hang.
     """
     repo, tracker, tid = repo_with_origin_tickets

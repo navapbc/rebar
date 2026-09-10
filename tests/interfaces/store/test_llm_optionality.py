@@ -1,7 +1,7 @@
 """Require the LLM stack to remain optional across library, CLI, and MCP.
 
 Public operations stay lazy-imported and an exhaustive discovered matrix prevents omissions.
-Without ``[agents]``, each surface follows its typed, non-billable degradation contract;
+Without ``[agents]``, each surface follows its typed, non-billable degradation contract.
 ``review_code`` remains fail-safe. Offline tests always cover import cleanliness and exercise
 missing-extra behavior only when the runtime is absent.
 """
@@ -48,7 +48,7 @@ def _gate_source_local(monkeypatch: pytest.MonkeyPatch) -> None:
 # The guard below discovers public operations and rejects omissions from this matrix.
 OPERATIONS = ("review_code", "scan_epics_for_spec", "verify_completion")
 
-# ``review_code`` is the fail-safe exception: missing runtime returns a valid
+# ``review_code`` is the fail-safe exception. A missing runtime returns a valid
 # INDETERMINATE result with ``coverage.llm_unavailable``, never PASS or a raise.
 _FAIL_SAFE = frozenset({"review_code"})
 
@@ -211,7 +211,7 @@ def test_mcp_operations_error_cleanly_when_gated_on_but_extra_absent(
 ) -> None:
     """With MCP gating enabled, missing runtime follows each tool's explicit contract.
 
-    ``scan_spec`` raises transport-wrapped ``LLMError``; gate-shaped tools return
+    ``scan_spec`` raises transport-wrapped ``LLMError``. Gate-shaped tools return
     structured degradation. Both identify ``[agents]`` without billing or silent success."""
     import asyncio
 
@@ -220,7 +220,7 @@ def test_mcp_operations_error_cleanly_when_gated_on_but_extra_absent(
     monkeypatch.setenv("REBAR_MCP_ALLOW_LLM", "1")
     srv = _build_mcp()
     epic = _seed(rebar_repo)
-    # Supply a real range so ``review_code`` reaches runner preflight, not range resolution.
+    # Supply a commit range so ``review_code`` reaches runner preflight, not range resolution.
     _two_commits(rebar_repo)
     # Contract A raises typed ``LLMError``. Fail-safe ``review_code`` and structured
     # ``verify_completion`` follow Contract B instead.
@@ -230,22 +230,22 @@ def test_mcp_operations_error_cleanly_when_gated_on_but_extra_absent(
     for name, args in forced.items():
         with pytest.raises(Exception) as exc:
             _unwrap(asyncio.run(srv.call_tool(name, args)))
-        # The gate is open; any error must therefore identify the missing extra.
+        # The gate is open. Any error must therefore identify the missing extra.
         msg = str(exc.value).lower()
         assert "agents" in msg and "disabled" not in msg, str(exc.value)
 
-    # Contract B returns structured degradation without raising or billing; its classifier
+    # Contract B returns structured degradation without raising or billing. Its classifier
     # disposition lets the close gate fail closed.
     verdict = _unwrap(asyncio.run(srv.call_tool("verify_completion", {"ticket_id": epic})))
     assert isinstance(verdict, dict), verdict
-    # Human detail belongs in ``message``; ``error`` is the shared vocabulary code.
+    # Human detail belongs in ``message``. ``error`` is the shared vocabulary code.
     assert verdict.get("error") == "llm_unavailable", verdict
     msg = str(verdict.get("message", "")).lower()
     assert "agents" in msg and "disabled" not in msg, verdict
     assert verdict.get("resolution_class"), verdict  # classifier disposition present, not silent
 
 
-# Discover runner-backed operations; reject omissions from this matrix.
+# Discover runner-backed operations. Reject omissions from this matrix.
 def test_optionality_matrix_covers_every_public_operation() -> None:
     """Require each exported callable with a ``runner`` seam to appear in ``OPERATIONS``.
 

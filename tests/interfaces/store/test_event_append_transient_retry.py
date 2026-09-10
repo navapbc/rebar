@@ -1,7 +1,7 @@
 """Pin retries for transient git object-database writes.
 
 Linux ENOENT and macOS EINVAL variants share the ``unable to create temporary file``
-marker. The first ``git add`` or commit must self-heal on single and batched write paths;
+marker. The first ``git add`` or commit must self-heal on single and batched write paths.
 non-transient failures must still surface immediately.
 """
 
@@ -55,7 +55,7 @@ def test_macos_einval_matches_via_errno_independent_prefix() -> None:
 # HEAD has not moved, so the shared transient-write retry is safe.
 _TRANSIENT_INDEX_WRITE_STDERR = "fatal: unable to write new index file"
 
-# Post-ref-update failure: HEAD already moved, so retry could duplicate the event.
+# A post-ref-update failure occurs after HEAD moves. Retrying could duplicate the event.
 # Its ``new_index file`` spelling intentionally avoids the transient marker.
 _POST_REF_INDEX_WRITE_STDERR = (
     "fatal: repository has been updated, but unable to write\nnew_index file."

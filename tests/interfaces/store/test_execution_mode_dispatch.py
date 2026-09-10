@@ -89,8 +89,8 @@ def test_single_turn_runner_builds_agent_with_no_tools(rebar_repo: Path, monkeyp
     monkeypatch.setattr(runner_mod, "cache_settings_for", lambda caps, *, execution_mode: None)
     monkeypatch.setattr(structured_run_mod, "_import_pydantic_ai", lambda: object)
     monkeypatch.setattr(anthropic_model_mod, "_pai_model", lambda cfg: "anthropic:fake")
-    # Disable the ambient loopback-proxy bypass; it imports the real Anthropic model against
-    # the empty ``pydantic_ai`` stub.
+    # Disable the ambient loopback-proxy bypass. That path imports the Anthropic model while
+    # the ``pydantic_ai`` stub is empty.
     monkeypatch.setattr(anthropic_model_mod, "_local_proxy_bypass_base_url", lambda: None)
 
     # Stub ``ProviderSession`` and select its lazy model-string path so provider construction
