@@ -100,6 +100,40 @@ checklist first; all of it is readable from the API with no shell.
 especially an `impaired` check, a pinned CPU, OOM kills in the console, or connection refused —
 means a different fault; do not grow the volume.
 
+### If it matches the 2026-09-05 memory-wedge signature instead
+
+A second no-shell outage on 2026-09-05 looked like the disk-full failure only after SSM was
+already gone. Its order was different: TLS stopped completing, then SSM died, then TCP timed out,
+while EC2 status checks stayed healthy. The actionable lesson is that a shell-free recovery
+runbook must diagnose from off-box run-up data, not from commands issued after the host is wedged.
+
+Use the host memory series first. `infra/scripts/observability.sh` publishes
+`mem_available_percent`, `mem_used_percent`, `mem_probe_ok`, `container_memory_rss_bytes`,
+`container_stats_ok`, and `container_stats_unparsed_rows` to CloudWatch. The current alarm set
+includes `rebar-host-memory-low`, `rebar-mem-signal-absent-while-probe-alive`, and
+`rebar-memory-probe-not-ok`; these are the useful run-up/page signals for a future recurrence.
+A twenty-minute run-up with falling `mem_available_percent`, rising `mem_used_percent`, and a
+large `container_memory_rss_bytes` contributor is evidence for memory exhaustion even when SSM is
+already `ConnectionLost`.
+
+Discriminate memory from the alternatives before acting:
+
+- `CPUUtilization` pinned high, CPU credits exhausted, or sustained surplus-credit growth points
+  at CPU throttling/queueing rather than memory. The 2026-09-05 incident had falling CPU.
+- `StatusCheckFailed` or either EC2 status check impaired is a host/hypervisor problem, not this
+  application-level wedge. The 2026-09-05 status checks stayed `0`.
+- `EBSIOBalance%` / `EBSByteBalance%` near zero indicates storage burst exhaustion. They stayed
+  well above zero on 2026-09-05.
+- `root_disk_used_percent` crossing threshold, followed by a truncated host series, is the
+  root-disk path documented above. The 2026-09-05 root disk was below the pressure threshold.
+
+`NetworkIn COLLAPSES` to a few KB per five-minute period is a surviving hypervisor-published
+corroborator that the host stopped transacting. Use it to date the failure window and to decide
+which metric periods to inspect, but **do not page on NetworkIn collapse alone**: deploys,
+maintenance, and quiet periods can also reduce traffic, and it does not identify the exhausted
+resource. The 2026-09-05 23:13 NetworkIn spike remains unattributed; record it as a lead unless a
+specific workload is proven from independent logs.
+
 ---
 
 ## Act — snapshot, grow, reboot (no shell required)
