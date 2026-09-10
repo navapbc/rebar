@@ -50,7 +50,7 @@ def test_green_run_names_its_own_sha_as_the_new_last_known_green(report: ModuleT
     assert "git bisect" not in out, "a green run has nothing to bisect"
 
 
-def test_a_cancelled_or_skipped_gate_is_never_reported_as_green(report: ModuleType) -> None:
+def test_a_cancelled_or_skipped_gate_reports_unavailable(report: ModuleType) -> None:
     for unproven in ("cancelled", "skipped"):
         out = report.render(
             ref_name="main",
@@ -58,11 +58,38 @@ def test_a_cancelled_or_skipped_gate_is_never_reported_as_green(report: ModuleTy
             jobs={**_ALL_GREEN, "golden-path": unproven},
             last_green_sha="0f0f0f0f",
         )
-        assert "RED" in out, f"a {unproven} gate is unproven, not passing"
+        assert "UNAVAILABLE" in out, f"a {unproven} gate is unavailable, not red or green"
+        assert "GREEN" not in out and "RED" not in out
+
+
+def test_failure_still_renders_red_when_another_gate_is_cancelled(report: ModuleType) -> None:
+    out = report.render(
+        ref_name="main",
+        head_sha="badbad0000",
+        jobs={**_ALL_GREEN, "golden-path": "cancelled", "artifact-probe": "failure"},
+        last_green_sha="900d900d00",
+    )
+    assert "RED" in out
+    assert "UNAVAILABLE" not in out
+    assert "| artifact-probe | failure |" in out
+    assert "| golden-path | cancelled |" in out
+
+
+def test_other_incomplete_gate_results_report_unavailable(report: ModuleType) -> None:
+    for unproven in ("neutral", "timed_out", "action_required", "stale"):
+        out = report.render(
+            ref_name="main",
+            head_sha="abc123def456",
+            jobs={**_ALL_GREEN, "golden-path": unproven},
+            last_green_sha="0f0f0f0f",
+        )
+        assert "UNAVAILABLE" in out, f"a {unproven} gate is incomplete, not red or green"
+        assert "GREEN" not in out and "RED" not in out
 
 
 def test_an_empty_job_set_is_not_treated_as_green(report: ModuleType) -> None:
     out = report.render(ref_name="main", head_sha="abc123def456", jobs={})
+    assert "UNAVAILABLE" in out
     assert "GREEN" not in out, "no observed gate results cannot mean 'healthy'"
 
 
