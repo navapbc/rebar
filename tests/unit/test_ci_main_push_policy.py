@@ -76,6 +76,15 @@ def _crons(name: str) -> list[str]:
     return [entry["cron"] for entry in schedule]
 
 
+def _render_group(template: str, *, event_name: str, ref: str) -> str:
+    """Tiny evaluator for the workflow concurrency context used by this policy test."""
+    return (
+        template.replace("${{ github.event_name }}", event_name)
+        .replace("${{ github.ref }}", ref)
+        .replace("${{ github.workflow }}", "Test Suite (mirror)")
+    )
+
+
 def _push_matches_branch(on_block: dict[str, Any], branch: str) -> bool:
     """Would a push to ``refs/heads/<branch>`` trigger a workflow with this ``on:`` block?
 
@@ -189,6 +198,24 @@ def test_every_changed_workflow_can_be_dispatched_on_demand(name: str) -> None:
 
 
 # --- AC7/AC8: the remediation recipe -----------------------------------------------------
+
+
+def test_scheduled_and_manual_main_health_runs_do_not_cancel_each_other() -> None:
+    concurrency = _load("test.yml")["concurrency"]
+    group = concurrency["group"]
+    ref = "refs/heads/main"
+    assert _render_group(group, event_name="schedule", ref=ref) != _render_group(
+        group, event_name="workflow_dispatch", ref=ref
+    )
+    assert concurrency["cancel-in-progress"] is True
+
+
+def test_redundant_main_health_runs_are_still_bounded_per_event() -> None:
+    group = _load("test.yml")["concurrency"]["group"]
+    ref = "refs/heads/main"
+    assert _render_group(group, event_name="workflow_dispatch", ref=ref) == _render_group(
+        group, event_name="workflow_dispatch", ref=ref
+    )
 
 
 def test_main_health_report_is_a_caller_level_job_that_survives_failure() -> None:
