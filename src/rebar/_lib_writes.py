@@ -1,21 +1,8 @@
-"""rebar library — write path (ticket genesis and the status lifecycle).
+"""Library wrappers for ticket genesis and optimistic status transitions.
 
-The wrapper bodies for the public write/mutation surface, split out of the
-``rebar`` package facade (``__init__.py``) so that facade stays a thin re-export
-namespace (ticket S3 / 4532). ``rebar.<name>`` re-exports every public function
-here.
-
-This module was itself split by concern once it reached the 800-line cap (ticket
-4631-5598-7127-4a56). What remains is ticket genesis (``create_ticket`` / ``idea``)
-and the optimistic-concurrency status lifecycle (``transition`` / ``claim`` /
-``reopen``) — the ticket's own state machine. The other five concerns moved to:
-
-* ``rebar._lib_mutations`` — leaf writes (holds ``_python_leaf``), session logs,
-  store maintenance;
-* ``rebar._lib_identity`` — identity entities, key material, manifest signing.
-
-Both are re-exported below, so every pre-split import path still resolves:
-``rebar.<name>``, ``rebar._lib_writes.<name>``, and ``rebar._python_leaf``.
+The package facade re-exports this public API. Leaf mutations and ``_python_leaf``
+live in ``_lib_mutations``; identity and signing live in ``_lib_identity``. Both
+remain re-exported here so pre-split ``rebar`` and ``_lib_writes`` imports resolve.
 """
 
 from __future__ import annotations
@@ -285,39 +272,16 @@ def transition(
     ref: str | None = None,
     repo_root=None,
 ) -> TransitionResult:
-    """Transition a ticket's status with optimistic concurrency.
+    """Transition status with optimistic concurrency and configured gates.
 
-    Raises :class:`ConcurrencyError` if the ticket's actual status no longer
-    matches ``current_status`` (engine exit code 10), and :class:`RebarError`
-    for other failures. Raises :class:`rebar.config.ConfigError` (re-exported as
-    :class:`rebar.ConfigError`) when the rebar config cannot be read while
-    resolving a ``verify.*`` gate — an unreadable config is an ERROR, not a
-    silent fall-back to the gate's default (operator ruling 39f8-ae7c). This
-    changed in that ruling: previously an unreadable config fail-OPENed the
-    opt-in gates and the transition proceeded.
-
-    ``force`` is the single force-bypass surface, shaped exactly like :func:`claim`'s:
-    ``force: str | None`` where the value IS the audit reason. ``None`` means "not
-    forcing"; any string forces (an empty string is recorded as ``"(no reason given)"``),
-    bypassing whichever gate THIS transition hits — the start-work plan-review gate on
-    ``* -> in_progress`` OR the completion-verification close gate on ``* -> closed`` —
-    and is recorded in the audit comment. Forcing a close leaves the ticket
-    closed-without-signature (the durable "validation did not pass" signal). ``force``
-    bypasses GATES generally — including any gate added in the future — but it does
-    **not** waive the unresolved-children close prohibition: that is a ticket-system
-    invariant, not a gate, and no ``force`` value can close a ticket while any child
-    remains non-closed.
-
-    ``reason`` is ONLY the close_reason for a reason-required administrative close
-    (``--class obsolete``/``wontfix``, and — absent a live replacement link —
-    ``not_a_bug``/``escalated``): it persists as the ``close_reason`` key and is signed
-    into the disposition attestation. It no longer doubles as the force-bypass note (that
-    is ``force``'s value). ``close_class`` is the REQUIRED bounded classification enum when
-    closing a ``bug``; ignored for non-bug transitions. ``caused_by`` on a bug close draws a
-    best-effort ``caused_by`` link from the (now-closed) bug to the given culprit
-    change/ticket, overriding git-blame auto-derivation; ignored for non-bug transitions.
-    ``ref`` is the git ref whose committed tree the completion close gate verifies (and
-    signs against); ``None`` means HEAD (today's behavior).
+    A stale ``current_status`` raises :class:`ConcurrencyError`; unreadable gate
+    config fails closed, and other command failures raise :class:`RebarError`.
+    ``force=None`` keeps gates enforced; any supplied string bypasses the encountered
+    gate as its audit reason, with ``""`` recorded as ``"(no reason given)"``. It never
+    bypasses the open-children invariant, and a forced close has no completion
+    signature. ``reason`` is only an eligible administrative close reason. Bug closes
+    use ``close_class`` and optional ``caused_by``; ``ref`` selects the tree verified
+    and signed by the close gate.
     """
     # In-process (Tier E E3): resolve the id, then run the shared transition core
     # (ticket-transition.sh was retired from this path). The structured result
@@ -390,28 +354,14 @@ def transition(
 def claim(
     ticket_id: str, *, assignee=None, force: str | None = None, repo_root=None
 ) -> ClaimResult:
-    """Atomically claim an OPEN ticket: move it to ``in_progress`` and set its
-    assignee in one locked critical section.
+    """Atomically move an open ticket to ``in_progress`` and assign it.
 
-    Raises :class:`ConcurrencyError` (engine exit code 10) if the ticket is not
-    ``open`` — i.e. someone else already claimed it — and :class:`RebarError` for
-    other failures. This is the optimistic-concurrency primitive parallel agents
-    use to grab work without double-assignment. Raises
-    :class:`rebar.config.ConfigError` (re-exported as :class:`rebar.ConfigError`)
-    when the rebar config cannot be read while resolving the plan-review claim
-    gate — an unreadable config is an ERROR, not a silent fall-back to the gate's
-    default (operator ruling 39f8-ae7c; previously the claim fail-OPENed and
-    proceeded).
-
-    When the plan-review claim gate is enabled
-    (``verify.require_plan_review_for_claim``), a non-bug/non-session_log claim
-    requires a fresh certified plan-review attestation; pass ``force="<reason>"``
-    to bypass the gate with an audit comment. ``None`` means no force; an empty supplied
-    string is a present force and records the audit-safe ``"(no reason given)"`` placeholder.
+    A concurrent claim raises :class:`ConcurrencyError`; unreadable plan-gate config
+    fails closed, and other failures raise :class:`RebarError`. When enabled, the gate
+    requires a fresh certificate. ``force=None`` enforces it; any supplied string is
+    an audited bypass reason, with ``""`` recorded as ``"(no reason given)"``.
     """
-    # In-process (Tier E E3): resolve the id, then run the shared claim core
-    # (ticket-claim.sh was retired from this path). Returns the structured result
-    # {ticket_id, status, assignee}.
+    # Resolve in process and return the shared core's structured claim result.
     from rebar._commands import transition as _transition
     from rebar._commands._seam import CommandError
     from rebar._commands.txn import ConcurrencyMismatch
@@ -426,9 +376,7 @@ def claim(
             stderr=f"Error: ticket '{ticket_id}' not found\n",
         )
     try:
-        # Pass assignee THROUGH (don't coerce None→""): None is the "unspecified"
-        # sentinel that triggers the ticket.default_assignee fallback in claim_compute,
-        # while an explicit "" clears the assignee without falling back (story c36c).
+        # Preserve ``None`` for the configured default; explicit empty clears assignment.
         return cast(
             "ClaimResult",
             _transition.claim_compute(
@@ -453,17 +401,10 @@ def claim(
 
 
 def reopen(ticket_id: str, *, repo_root=None) -> TransitionResult:
-    """Reopen a closed ticket (closed -> open) — a thin convenience over
-    :func:`transition`, still optimistic-concurrency (raises ConcurrencyError if
-    the ticket is not currently ``closed``).
+    """Reopen a closed ticket with an optimistic parent-first cascade.
 
-    Carries the PARENT-FIRST CASCADE (bug cranial-sulfur-peafowl): if the ticket has a
-    ``closed`` parent, that parent is reopened first — recursively up the chain — before
-    the ticket itself, so a reopen can never leave a closed parent holding a non-closed
-    child. A parent that is already ``open`` / ``in_progress`` / ``blocked`` (or absent)
-    is left alone. Like the ``open -> in_progress`` cascade it is sequential and
-    fail-fast, not transactional: a parent failure aborts the child and is re-raised
-    naming the parent (a raced parent still surfaces as ConcurrencyError / exit 10), and
-    a parent already reopened is not rolled back if the child then fails. See
-    ``docs/concurrency.md`` §I4a."""
+    Closed ancestors reopen recursively before the child; other parent states remain.
+    The cascade is sequential and fail-fast, so a parent failure aborts the child and
+    completed ancestor reopens are not rolled back.
+    """
     return transition(ticket_id, "closed", "open", repo_root=repo_root)

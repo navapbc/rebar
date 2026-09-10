@@ -14,36 +14,36 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 
 | Tool | Summary |
 |------|---------|
-| `audit_trail` | The full audit read surface for a ticket (story 46f0): its FULL retained plan-review sidecar history (newest-first), its completion attestation + sidecar record, and the associated code reviews (``code_review`` tickets that link ``relates_to`` this ticket, each with its own retained sidecar history). Best-effort aggregation over the observability sidecars — individual reader failures degrade to ``[]`` / ``None`` rather than raising. Always available (a read tool, so it is served even under ``REBAR_MCP_READONLY=1``). |
+| `audit_trail` | Read a ticket's complete plan, completion, and code-review audit trail. |
 | `bridge_check_access` | Run the six-step live Jira capability check and return its typed verdict. |
 | `bridge_fsck` | Offline bridge audit -> {unknown_event_types, binding_drift, store_integrity}. |
 | `bridge_preview` | Compute proposed Jira changes without applying them. |
-| `bridge_projects_list` | Return the store's bridge-projects sync mapping ``{key: {"repos": [...]}}``. |
+| `bridge_projects_list` | Read the store's ``{project: {"repos": [...]}}`` sync mapping without an LLM. |
 | `bridge_status` | Read the durable bridge status snapshot and optional freshness assertion. |
 | `check_ac` | Check the ticket has an Acceptance Criteria block ({verdict, criteria_count, reason, passed}). |
 | `clarity_check` | Score ticket clarity (score / verdict / threshold / passed). |
-| `explain_criterion` | Explain a plan-review criterion — its authoring-guide section (epic cite-stone-sea / WS10) — OR print an author-facing prose guide when ``criterion_id`` is a guide name (``plan`` = how to write a passing plan; ``review`` = how to pass code review; ``commit-trailer`` = the required ``rebar-ticket:`` commit-trailer format). A pure registry/guide READ (no LLM, so it is NOT gated on REBAR_MCP_ALLOW_LLM); the SAME shared lookup as the `rebar explain` CLI. On failure returns a structured error ``{error, kind, message}`` (kind ∈ unknown-id / malformed-registry / missing-file). |
+| `explain_criterion` | Read a plan criterion or an author guide without an LLM. |
 | `fsck` | Check ticket-store integrity (JSON validity, CREATE presence, lock cleanup). Set recover=True to run the recovery path. _(the recover path is gated by `REBAR_MCP_READONLY` (plain fsck is read-only))_ |
-| `gate_status` | Poll an async gate run started by review_plan_start / verify_completion_start. |
+| `gate_status` | Poll an async plan-review or completion run without executing it. |
 | `get_file_impact` | Get the file-impact array (consumed by next-batch conflict scheduling). |
 | `get_verify_commands` | Get the DD-level verify-commands array for a ticket. |
 | `get_workflow_result` | Read a workflow run's outputs via replay -> {run_id, status, terminal_step, terminal_output, outputs, error}. The terminal step's output is the run result. |
 | `get_workflow_status` | Read a workflow run's current status via replay (no execution) -> {run_id, ticket_id, workflow_name, status, terminal_step, error, steps}. |
 | `grounding_info` | The STATIC code-grounding oracle integration contract (epic 8f6c): the closed dimension-ID vocabulary + version, the reference kinds, the closed abstain-reason enum (+ outcome/job/tier vocabularies), and the available backends with their detected availability/version. A fast, deterministic, repo-independent discovery surface (no repo is scanned). Takes no args. |
-| `list_tickets` | List tickets as a JSON array, with optional filters. |
+| `list_tickets` | List tickets with optional lifecycle, hierarchy, tag, and readiness filters. |
 | `next_batch` | Next parallel batch of unblocked tickets under an epic's hierarchy. |
-| `plan_review_status` | Is this ticket's plan-review attestation current RIGHT NOW? Read-only. |
+| `plan_review_status` | Report plan-certificate currency using the exact claim-gate check. |
 | `quality_check` | Check ticket dispatch readiness ({verdict, line_count, keyword_count, ac_items, file_impact, reason, passed}). |
-| `ready_tickets` | List tickets ready to work (all blockers closed). ``sort`` orders by ``priority\|created\|updated\|id\|status`` (prefix ``-`` for descending; unset values sort last). |
+| `ready_tickets` | List tickets whose blockers are closed, optionally sorted. |
 | `recent_session_logs` | The newest session_log tickets, newest first (by created_at; default limit 5). session_logs are hidden from list_tickets; this is the type-specific read that surfaces them. |
 | `render_workflow` | Render a workflow (a .rebar/workflows/<name> name or a file path) to a read-only Mermaid flowchart (TEXT; the host renders it to SVG, never committed). Large graphs degrade to a text outline. Read tool, always available. |
-| `search` | Search titles/descriptions/comments/tags with bounded discovery results. |
+| `search` | Search ticket prose and tags with bounded discovery results. |
 | `show_ticket` | Show compiled ticket state (accepts full id, short id, or alias). Includes the computed ``inbound_deps`` (inbound edges: other tickets linking TO this one, with the source's status) alongside the stored outgoing ``deps``. |
 | `summary` | One-line-per-ticket summary [{ticket_id, alias, status, title, blocking_summary}]. |
 | `ticket_deps` | Show the dependency graph for a ticket. |
 | `validate` | Repo-wide quality health check (JSON report: score, critical/major/ minor issues, warnings, suggestions). Takes no ticket id. |
-| `verify_completion_status` | Is this ticket's completion-verifier attestation current RIGHT NOW? Read-only. |
-| `verify_signature` | Certify a ticket's verified-steps manifest against its signature. |
+| `verify_completion_status` | Report durable completion-certificate currency without an LLM or network. |
+| `verify_signature` | Verify a ticket manifest against an op-cert or legacy signature. |
 
 ## LLM-gated (`REBAR_MCP_ALLOW_LLM`)
 
@@ -52,11 +52,11 @@ Registered by `register_llm_tools` and always present, but each makes a live, bi
 | Tool | Summary |
 |------|---------|
 | `review_code` | Run the gate-backed LLM code review of a git range (base..head) -> an aggregated review_result dict (findings carry agreement + reviewers). |
-| `review_plan` | Run the plan-review gate on a ticket -> a plan_review_verdict dict {verdict: "PASS"\|"BLOCK"\|"INDETERMINATE", blocking[], advisory[], coaching[], indeterminate[], coverage, signature?, source, verified_at_sha, ...}. A deterministic Layer-1 floor (P1-P11) plus a four-pass (find -> verify -> decide -> coach) review of the ticket's whole plan — the inverse of verify_completion. On a non-blocking PASS it signs a plan-review attestation (so a subsequent claim passes the gate when enabled) and emits the REVIEW_RESULT sidecar; in READONLY mode it runs a pure read (no sign, no sidecar). |
-| `review_plan_start` | Start the plan-review gate ASYNC; returns {job_id, ticket_id, gate_type, status:'running'} IMMEDIATELY (in ms) — the review runs on a background daemon thread, so it OUTLIVES the client's request deadline. This is the timeout-proof way to run the gate: unlike the sync ``review_plan`` (which the ~60s client deadline can cut off with a ``-32001`` while the server keeps running), the caller gets a durable handle instead of a timeout, then POLLS — ``plan_review_status(ticket_id)`` for the durable attestation verdict, or ``gate_status(job_id)`` for the run handle (running -> passed/failed) plus ``findings.readable`` for the REVIEW_RESULT sidecar receipt. PREFER this for a long review; the sync ``review_plan`` remains the dedup-protected fallback. |
+| `review_plan` | Review a whole plan through the P1-P11 find/verify/decide/coach passes. |
+| `review_plan_start` | Start plan review and immediately return ``{job_id, ticket_id, gate_type, status: "running"}``. |
 | `scan_spec` | Batch-scan the store's open epics against a specification -> a review_result dict (gaps/conflicts/overlaps), epics evaluated in batches. |
-| `verify_completion` | Verify a ticket's completion requirements are met -> a completion_verdict dict {verdict: "PASS"\|"FAIL", findings[], summary?, target, reviewers, runner, model, trace_id, source, verified_at_sha, signable}. Checks every acceptance/success/close criterion + definition of done (for bugs, that the bug is resolved) against the implementation; on FAIL, each finding carries the failing criterion, an explanation, and a source-code citation. In READONLY mode this runs a pure read (no sign, no sidecar); a writable server records (see below). |
-| `verify_completion_start` | Start the completion-verifier gate ASYNC; returns {job_id, ticket_id, gate_type, status:'running'} IMMEDIATELY (in ms) — the verification runs on a background daemon thread, so it OUTLIVES the client's request deadline. The timeout-proof way to run the close gate: the caller gets a durable handle instead of the ``-32001`` the sync ``verify_completion`` risks, then POLLS — ``verify_completion_status(ticket_id)`` for the durable attestation verdict, or ``gate_status(job_id)`` for the run handle (running -> passed/failed). PREFER this for a long verification; sync ``verify_completion`` is the dedup-protected fallback. |
+| `verify_completion` | Verify applicable criteria and return a cited ``{verdict: PASS\|FAIL, findings, target, reviewers, runner, model, trace_id, source, verified_at_sha, signable}`` result. |
+| `verify_completion_start` | Start completion verification and immediately return ``{job_id, ticket_id, gate_type, status: "running"}``. |
 
 ## Write-gated (`REBAR_MCP_READONLY`)
 
@@ -87,7 +87,7 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `set_file_impact` | Record file impact (list of {path, reason}) for conflict-aware next-batch scheduling. |
 | `set_verify_commands` | Record DD-level verify commands (list of {dd_id, dd_text, command}). |
 | `sign_manifest` | Sign a manifest of verified steps as an asymmetric op-cert. |
-| `sign_review` | Cheaply (re)persist the plan-review attestation for an already-computed, still-valid PASS verdict from the latest REVIEW_RESULT sidecar -> {ok, signed, ticket_id, verdict, reason, signature?}. WITHOUT re-running the multi-pass LLM review (no LLM, no network). _(hybrid: in the LLM registrar, but write-gated (`REBAR_MCP_READONLY`) — it persists a signature event, not a billable LLM call)_ |
+| `sign_review` | Persist a current PASS sidecar without an LLM and return ``{ok, signed, ticket_id, verdict, reason, signature?}``. _(hybrid: in the LLM registrar, but write-gated (`REBAR_MCP_READONLY`) — it persists a signature event, not a billable LLM call)_ |
 | `tag_ticket` | Add a tag to a ticket. |
 | `transition_ticket` | Transition a ticket's status (optimistic concurrency). Returns the engine result {ticket_id, from, to, newly_unblocked}. |
 | `unlink_tickets` | Remove a link between two tickets, optionally selecting its relation. |

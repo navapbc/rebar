@@ -1,33 +1,10 @@
-"""In-process singleflight de-duplication for long-running MCP gate ops (bug d80d).
+"""Process-local singleflight for long-running, billable MCP gates.
 
-THE PROBLEM. ``review_plan`` / ``verify_completion`` over the MCP server run a 15-20
-minute billable LLM gate. The MCP *client* SDK abandons the request at 60s with an
-opaque ``-32001``; the server keeps running and signs its attestation. The documented
-agent reflex to ``-32001`` is to re-invoke — which, with no de-duplication, starts a
-SECOND billable LLM pass while the first is still in flight, multiplying cost without
-bound under a retry loop (bug d80d AC #2).
-
-THE FIX (Phase 1, no wire change). A process-local singleflight registry
-(golang ``singleflight`` semantics): a second concurrent caller for the same
-``(gate, ticket, resolved-basis-SHA, variant, readonly)`` key ATTACHES to the same
-in-flight computation and receives the SAME verdict instead of launching a second
-run. The key is purged on completion, so a legitimate re-run after the prior one
-finishes proceeds normally; a defensive max-age sweep evicts a wedged/crashed
-leader's key so a LATER caller starts a fresh run rather than attaching to a dead
-one. (A leader's ``finally`` releases already-attached followers on any exception;
-only a hard process kill skips it, and that tears down the followers too — so a
-follower cannot outlive its leader in a live process.) Default-on with the
-kill-switch ``REBAR_MCP_DEDUP=0``.
-
-WHY THREADS, NOT ASYNCIO. The MCP server runs every synchronous tool body on its own
-anyio worker thread (``rebar._mcp_health.offload_sync_tools``), and the certified-tool
-in-flight gauge + SIGTERM drain REQUIRE those bodies to stay ``def`` — making a
-certified tool ``async def`` trips a fail-loud guard and blinds the drain
-(``_mcp_health.instrument_certified_tools``). So the two overlapping gate calls are
-concurrent *threads*, and this registry collapses them with a ``threading`` primitive
-(a follower blocks on the leader's ``Event``). Keeping the tool bodies sync preserves
-the gauge; the registry adds the de-dup underneath it. This is a leaf module (no
-``rebar.*`` import at module load) so it never participates in an import cycle.
+Concurrent calls sharing gate, canonical ticket, resolved basis SHA, variant, and
+readonly mode attach to one result. Completion purges the key; a max-age sweep frees
+crashed leaders. The default-on ``REBAR_MCP_DEDUP=0`` kill switch bypasses attachment.
+Threading events match FastMCP's synchronous worker bodies and preserve certified-tool
+gauge instrumentation without module-level rebar imports.
 """
 
 from __future__ import annotations
@@ -41,19 +18,16 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any
 
-# Defensive ceiling (NOT required for correctness — purge-on-completion is). A changed
-# ticket/base resolves to a different SHA => a different key, so a stale key can only
-# ever come from a leader that crashed WITHOUT running its finally. 40 min is 2x the
-# documented 15-20 min gate duration, so a live run is never swept.
+# Reclaim only leaders that missed completion cleanup; 40 minutes is twice the normal
+# gate window, and changed bases naturally produce different keys.
 _MAX_AGE_SECONDS: float = 40 * 60
 
 
 def dedup_enabled() -> bool:
-    """Is in-flight de-duplication active? Default-ON; ``REBAR_MCP_DEDUP=0`` disables it.
+    """Return whether default-on dedup is active; false-like env values disable it.
 
-    The kill-switch is an env read (not a config gate) on purpose: it is a
-    break-glass to turn the behaviour change off instantly without a config edit, and
-    this leaf module must not import ``rebar.config`` (import-cycle hygiene)."""
+    The environment kill switch changes behavior immediately without importing config.
+    """
     raw = os.environ.get("REBAR_MCP_DEDUP")  # read-via: subsystem-kill-switch
     if raw is None:
         return True
@@ -61,11 +35,7 @@ def dedup_enabled() -> bool:
 
 
 def new_job_id() -> str:
-    """A globally-unique, time-sortable job handle (``{ns-timestamp}-{uuid4hex}``).
-
-    Mirrors ``rebar.llm.workflow.executor.new_run_id`` so the async surface (Phase 2)
-    can key its git-ignored ``.rebar/gate_runs/<job_id>`` index the same way
-    ``run_workflow`` keys ``.rebar/workflow_runs/<run_id>``."""
+    """Return a unique, time-sortable ``{ns-timestamp}-{uuid4hex}`` gate handle."""
     return f"{time.time_ns()}-{uuid.uuid4().hex}"
 
 
@@ -134,10 +104,8 @@ class _Inflight:
 _registry: dict[str, _Inflight] = {}
 _lock = threading.Lock()
 
-# A forced / dedup-disabled start owns a PRIVATE registry entry keyed on its own job_id under
-# this prefix. The prefix contains a NUL, which a hex ``compute_key`` digest never does, so a
-# standalone key can never collide with (be attached-to by) a content-keyed run — yet the entry
-# is still visible to ``is_job_active`` and swept by the same max-age ceiling (bug d80d).
+# Forced and dedup-disabled jobs use NUL-prefixed private keys that cannot collide with
+# hex content keys, yet remain visible to activity checks and stale sweeping.
 _STANDALONE_KEY_PREFIX = "standalone\x00"
 
 
@@ -158,21 +126,17 @@ def seed_stale_entry(dedup_key: str) -> None:
 
 
 def active_job_id(dedup_key: str) -> str | None:
-    """The job_id of the current in-flight run for ``dedup_key``, or ``None``.
-
-    Used by the Phase-2 async surface so a ``*_start`` for an already-running key
-    returns the existing handle instead of launching a second run."""
+    """Return the live job for a key so duplicate async starts share its handle."""
     with _lock:
         hit = _registry.get(dedup_key)
         return hit.job_id if hit is not None and not hit.done else None
 
 
 def is_job_active(job_id: str) -> bool:
-    """True iff ``job_id`` names a run that is still in flight in THIS process.
+    """Whether this process still owns an in-flight ``job_id``.
 
-    The Phase-2 handle poll (``gate_status``) uses it to tell a live run from one
-    whose daemon already settled: an inactive job whose durable index still reads
-    ``running`` is a crashed leader (settled to a failed diagnostic by ``gate_status``)."""
+    Pollers treat an inactive job whose durable index says running as a crashed leader.
+    """
     with _lock:
         return any(e.job_id == job_id and not e.done for e in _registry.values())
 
@@ -186,14 +150,11 @@ def _sweep_locked() -> None:
 
 
 def _register_standalone(job_id: str) -> tuple[_Inflight, str]:
-    """Register a UNIQUE, un-attachable in-flight entry for a forced / dedup-disabled start.
+    """Register a private but observable forced or dedup-disabled run.
 
-    A forced (``force=True``) or ``REBAR_MCP_DEDUP=0`` start must never attach to, or be
-    attached-to by, another caller — but it MUST still be observable as active for its full
-    15-20 min daemon lifetime, or a status poll of it reports a settled job while the gate is
-    still running (bug d80d). Keying the entry on the fresh ``job_id`` (never a content hash)
-    keeps it private to this run yet visible to :func:`is_job_active`, and the same max-age
-    sweep reclaims it if the leader crashes without its ``finally``."""
+    Its fresh job-key prevents attachment, while activity polling and stale cleanup still
+    cover the daemon's lifetime.
+    """
     with _lock:
         entry = _Inflight(job_id=job_id, started_monotonic=time.monotonic())
         _registry[f"{_STANDALONE_KEY_PREFIX}{job_id}"] = entry
@@ -332,16 +293,12 @@ def begin_gate_job(
     force: bool = False,
     repo_root: str | None = None,
 ) -> GateJobHandle:
-    """Reserve (or attach to) a singleflight slot WITHOUT running work in the caller.
+    """Reserve or attach to a slot without running work in the caller.
 
-    The Phase-2 ``*_start`` tools call this, then spawn the background daemon ONLY when
-    the returned handle ``is_new`` (the leader). A concurrent ``*_start`` for the same
-    key gets ``is_new=False`` and the EXISTING run's ``job_id``, so a duplicate start —
-    the very retry a client-side ``-32001`` timeout provokes — shares one billable run
-    instead of launching a second. ``force=True`` (or the ``REBAR_MCP_DEDUP=0``
-    kill-switch) always gets its OWN job and never attaches — but it still registers a
-    private, un-attachable entry so its in-flight run stays observable to
-    :func:`is_job_active` for the daemon's whole lifetime (bug d80d)."""
+    Only a handle with ``is_new`` spawns the daemon; duplicate starts receive the live
+    job ID. Forced or dedup-disabled starts get private, unattachable jobs that remain
+    observable for their full lifetime.
+    """
     if force or not dedup_enabled():
         job_id = new_job_id()
         entry, key = _register_standalone(job_id)

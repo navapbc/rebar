@@ -1,18 +1,12 @@
-"""Op-cert signer health for the rebar MCP server (bug 879b-9bf0-86fd-4a6b).
+"""Serve-degraded op-cert signer health for the MCP server.
 
-The SERVE-DEGRADED counterpart to :mod:`rebar._mcp_health`'s store/handshake surfaces:
-the ONE same-environment op-cert failure the derived public key cannot otherwise catch —
-a bound startup signer whose PUBLIC key is not the pinned trusted-environment key that
-*required-environment* verify checks against. It is surfaced as a ``/health`` ``opcert``
-field and a boot WARNING, and NEVER aborts boot: those are valid signed attestations that
-only fail an advisory environment-binding check (ADR 0104 decision 3), so — exactly like
-``store_status`` / ``run_startup_store_sweep`` — the signal is a reported field, not a
-failure.
+This detects the same-environment failure a derived key cannot: a bound startup
+signer's public key differs from its principal's pinned trusted-environment key.
+Health and startup-warning surfaces report the mismatch without aborting service
+because environment binding remains advisory (ADR 0104 decision 3).
 
-Lives beside :mod:`rebar._mcp_health` (which sits at its 800-LOC module cap once the
-startup-handshake subsystem landed) rather than inside it; ``_mcp_health`` imports the
-three entry points it wires (``_OPCERT_STATUS_ATTR``, :func:`opcert_signing_status`,
-:func:`run_startup_opcert_check`) into ``register_health_route`` / ``run_mcp``.
+The size-capped :mod:`rebar._mcp_health` module wires this module's status constant,
+:func:`opcert_signing_status`, and :func:`run_startup_opcert_check`.
 """
 
 from __future__ import annotations
@@ -24,22 +18,14 @@ _OPCERT_STATUS_ATTR = "_rebar_opcert_status"
 
 
 def opcert_signing_status(binding: Any, repo_root: str | None = None) -> dict[str, Any]:
-    """Whether the box's bound startup op-cert signer's public key matches the pinned
-    trusted-environment key for its principal — ``{bound, expected, env_id?, matched?}``.
+    """Compare a bound signer's public-key body with its principal's active pins.
 
-    This is the ONE same-environment failure the derived-key verify path cannot catch (bug 879b):
-    a private key that signs valid op-certs but whose PUBLIC half is not the published/pinned key
-    that *required-environment* verify checks against. Everything else about a signable key is
-    already validated at composition (``compose_startup_opcert_binding``) or re-derivable from the
-    private key on demand, so a "can we derive a pub?" probe would be redundant — the pinned-key
-    match is the only non-redundant signal.
-
-    ``expected`` gates strictness exactly like :func:`rebar._mcp_health.store_status`: it is True
-    only when this deployment OPTED INTO pinning by shipping ``.rebar/trusted_environments.yaml``.
-    Required-environment binding is advisory/deferred today (ADR 0104 decision 3), so a deployment
-    that has not configured pinning is never marked degraded. NEVER raises: any resolution fault is
-    reported as an ``error`` field (and surfaces as degraded, see :func:`opcert_signer_degraded`)
-    rather than aborting the probe."""
+    Returns ``{bound, expected, env_id?, matched?, error?}``. ``expected`` is true
+    only when trusted-environment configuration opts into pinning, so its absence
+    never degrades service. Composition already validates signability; this probe
+    covers the non-redundant pinned-key match. Other resolution faults populate
+    ``error`` instead of raising; removed inputs still fail hard.
+    """
     from rebar._deprecations import RemovedInputError
     from rebar._opcert_signing import _read_opcert_pub, _ssh_pub_body
     from rebar.attest.trusted_env import load_trusted_environments, trusted_env_keyring
@@ -91,10 +77,11 @@ def opcert_signer_degraded(status: dict[str, Any]) -> bool:
 
 
 def run_startup_opcert_check(binding: Any, repo_root: str | None = None) -> None:
-    """Boot-time SERVE-DEGRADED surface for bug 879b: log a WARNING (naming the principal) when
-    the bound startup signer's public key is not the pinned trusted-environment key. NEVER raises
-    and NEVER aborts boot — the op-cert-signer sibling of
-    :func:`rebar._mcp_health.run_startup_store_sweep`."""
+    """Warn with the principal when a bound signer misses its pinned key.
+
+    The check otherwise serves degraded and never aborts boot; removed inputs still
+    fail hard, matching :func:`rebar._mcp_health.run_startup_store_sweep`.
+    """
     from rebar._deprecations import RemovedInputError
 
     try:

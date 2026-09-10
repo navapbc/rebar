@@ -1,17 +1,8 @@
-"""rebar raw-input config resolution -- file discovery, TOML parsing, env overrides.
+"""Raw config discovery, cached TOML parsing, and environment overrides.
 
-Extracted from :mod:`rebar.config` (a pure structural split; no behavior change). This
-is the raw-input resolution layer: repo-root and config-file location, the mtime-keyed
-TOML parse cache, project/user config discovery, and the ``REBAR_<SECTION>_<KEY>``
-env-override layer. The typed loader, precedence
-merge, and the public ``load_config`` / ``tracker_dir`` surface stay in
-:mod:`rebar.config`, which re-exports every name here so the public API is unchanged
-(``from rebar.config import X`` still works).
-
-This module is a LEAF: it imports only stdlib, the siblings :mod:`rebar._config_schema`
-and :mod:`rebar._deprecations`, and :mod:`rebar._config_resolvers` (whose below-seam
-resolvers it re-exports in its import block) -- never :mod:`rebar.config`, so there
-is no cycle. The logger is named ``"rebar.config"`` so config log tests still match.
+Typed loading and precedence remain in ``rebar.config``, which re-exports this API.
+This acyclic leaf imports only stdlib and config siblings, including the owned
+resolvers re-exported below. Its logger retains the public ``rebar.config`` name.
 """
 
 from __future__ import annotations
@@ -21,20 +12,8 @@ import os
 import subprocess
 from pathlib import Path
 
-# --------------------------------------------------------------------------- #
-# Re-export of the below-seam OWNED RESOLVERS (story 1a33).
-#
-# The RP-04 config-ownership resolvers (tickets d074 / 9515 / 1b07 + the reconciler
-# JIRA family) moved WHOLESALE to the sibling :mod:`rebar._config_resolvers` -- a
-# separate concern from the raw-input resolution above, and the split that put this
-# module back under the module-size cap. They are re-exported HERE, and through here by
-# :mod:`rebar.config`, so ``rebar._config_sources.<name>`` and ``rebar.config.<name>``
-# keep resolving exactly as before.
-#
-# The sibling carries NO module-level ``rebar`` import (it reaches the raw-input helpers
-# above through a lazy in-body import, preserving their late binding), so importing it
-# here does not cycle regardless of which module is imported first.
-# --------------------------------------------------------------------------- #
+# Re-export owned below-seam resolvers here and through ``rebar.config``. Their
+# module uses lazy attribute lookups, preserving late binding without an import cycle.
 from rebar._config_resolvers import _DEFAULT_ABSENT_RETIRE_GRACE as _DEFAULT_ABSENT_RETIRE_GRACE
 from rebar._config_resolvers import _gate_str_pref as _gate_str_pref
 from rebar._config_resolvers import _positive_int as _positive_int
@@ -241,18 +220,12 @@ def _deep_merge(base: dict, overlay: dict) -> dict:
 
 
 def llm_config_file_pointer() -> Path | None:
-    """The ``REBAR_LLM_CONFIG_FILE`` pointer as a path, or ``None`` when unset/blank.
+    """Return the explicit LLM config path, or ``None`` when unset or blank.
 
-    Raises :class:`ConfigError` naming the variable when it points at something that is
-    not a readable file. Fail-loud is the point: an environment that asked for a specific
-    file and silently got the checkout's would send the operator debugging the wrong config.
-
-    The read below is a string LITERAL ``os.environ.get("REBAR_LLM_CONFIG_FILE")`` on
-    purpose. ``scripts/gen_env_registry.py`` — the generator behind the CI doc-drift gate
-    for ``docs/env-vars.md`` — statically scans for a string-literal argument, so a name
-    built with an f-string or read through a variable resolves fine at runtime but is
-    invisible to that scanner and silently escapes the documented env-var registry. Do not
-    "tidy" this into an indirection (same rule as ``llm/model_classes.py::_env_override``)."""
+    An unreadable target raises :class:`ConfigError` rather than silently selecting
+    discovered config. Keep the environment name literal: the documentation registry
+    finds it through static scanning.
+    """
     raw = os.environ.get("REBAR_LLM_CONFIG_FILE")
     if raw is None or not raw.strip():
         return None
@@ -263,17 +236,11 @@ def llm_config_file_pointer() -> Path | None:
 
 
 def layer_llm_config_file(discovered: dict) -> dict:
-    """The ``[llm]`` table of the :func:`llm_config_file_pointer` file LAYERED over the
-    already-discovered ``llm`` section (deep — see :func:`_deep_merge`), or ``discovered``
-    unchanged when the pointer is unset.
+    """Deep-layer an explicitly pointed ``[llm]`` table over discovered settings.
 
-    Layering rather than REPLACING (which is what ``KUBECONFIG`` / ``AWS_CONFIG_FILE`` /
-    ``DOCKER_CONFIG`` do) is deliberate: an environment overriding one key must not have to
-    restate the whole config, because that duplication drifts more readily than precedence
-    subtlety does. The pointed file is an ordinary rebar config — a ``[llm]`` table, or
-    ``[tool.rebar.llm]`` when it is named ``pyproject.toml`` — so a file with no such table
-    (including an empty one) is a clean no-op, which is what makes it usable to make model
-    resolution hermetic in tests."""
+    A ``pyproject.toml`` pointer reads ``[tool.rebar.llm]``. Unset pointers and files
+    without the table are no-ops, while one-key overlays retain discovered siblings.
+    """
     path = llm_config_file_pointer()
     if path is None:
         return discovered

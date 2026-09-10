@@ -1,22 +1,14 @@
-"""rebar — event-sourced ticket system with a Jira reconciler.
+"""Public facade for rebar's git-backed ticket system and Jira reconciler.
 
-Three interfaces over one implementation:
-  * CLI:     the ``rebar`` console script (rebar.cli)
-  * Library: this package — in-process reads and writes over the git-backed store
-  * MCP:     the ``rebar-mcp`` console script (rebar.mcp_server)
+The ``rebar`` and ``rebar-mcp`` console scripts expose the same implementation as
+this in-process API. Ticket and bridge operations enter through this facade;
+``rebar.reducer`` and ``rebar.graph`` remain available for bulk reads.
 
-Ticket reads, writes, and explicit bridge operations run through the package facade.
-The reducer and graph APIs (``rebar.reducer`` / ``rebar.graph``) are re-exported
-for callers that want in-process bulk reads.
-
-This module is a **thin public-API namespace** (ticket S3 / 4532): the wrapper
-bodies live in topical ``_lib_*`` submodules and are re-exported here, so the
-``rebar`` import surface is unchanged while each unit stays under the module-size
-cap. The split (all under the cap):
-  * ``rebar._lib_writes`` — lifecycle + mutations + signing (holds ``_python_leaf``)
-  * ``rebar._lib_gates``  — quality gates, file-impact/verify-commands, grounding
-  * ``rebar._lib_reads``  — queries, export/import, fsck (holds ``_json_or``)
-  * ``rebar._lib_ops``    — workflow runs, explicit bridge ops, bridge-mapping audit
+Implementations live in size-bounded topical modules without changing imports:
+``_lib_writes`` owns lifecycle, mutations, signing, and ``_python_leaf``;
+``_lib_gates`` owns quality gates and grounding; ``_lib_reads`` owns queries,
+import/export, fsck, and ``_json_or``; and ``_lib_ops`` owns workflows and explicit
+bridge operations.
 """
 
 from __future__ import annotations
@@ -26,17 +18,13 @@ import logging
 
 from rebar import config
 
-# The config-fault exception (raised when rebar.toml cannot be read while resolving a
-# verify.* gate — operator ruling 39f8-ae7c: an unreadable config is an ERROR, not a
-# silent fall-back to the gate's default). Re-exported so library callers can catch
-# ``rebar.ConfigError`` next to ``rebar.RebarError`` without importing rebar.config.
+# Re-export config-read failures so verify.* gates fail closed and callers can catch
+# ``rebar.ConfigError`` beside ``rebar.RebarError``.
 from rebar._config_coercion import ConfigError
 from rebar._engine import engine_dir
 
-# Exception types live in the stdlib-only leaf ``rebar._errors`` (item 9.3) so readers
-# such as ``rebar._reads`` can source them downward instead of reaching UP into this
-# facade. Re-exported here for back-compat: ``rebar.RebarError`` /
-# ``from rebar import RebarError`` (and ``ConcurrencyError``) are unchanged.
+# Exceptions live in the stdlib-only ``_errors`` leaf; re-exporting them preserves
+# the established ``rebar.RebarError`` and ``from rebar import …`` imports.
 from rebar._errors import (
     KNOWN_ERROR_CODES,
     ConcurrencyError,
@@ -101,10 +89,8 @@ from rebar._lib_reads import (
 )
 from rebar._lib_warn import CrossSessionWarning
 
-# ── Public API re-exports (thin facade over the topical ``_lib_*`` submodules) ──
-# Every name below stays importable as ``rebar.<name>`` with its identical
-# signature. The private helpers ``_python_leaf`` / ``_json_or`` are re-exported
-# too (redundant ``as`` aliases mark them as deliberate re-exports for the linter).
+# Preserve the public ``rebar.<name>`` signatures. Redundant aliases mark deliberate
+# re-exports, including the private compatibility helpers.
 from rebar._lib_writes import (
     _python_leaf as _python_leaf,
 )
@@ -145,17 +131,11 @@ from rebar._native import (
     to_llm,
 )
 
-# Bug vapoury-attack-lamb: the tickets-branch push is best-effort and warns on failure —
-# but a library embedder gets the NullHandler installed below, so that warning goes
-# nowhere and a rejected push is invisible in-process. This is the read side of the
-# durable marker ``rebar._store.push_state`` records: it needs no logging handler and no
-# git subprocess, so an embedder can check delivery after a write.
+# Best-effort ticket pushes may be hidden by the library NullHandler. Expose their
+# durable, subprocess-free status so embedders can check delivery after writes.
 from rebar._store.push_state import read_status as push_status
 
-# Library hygiene — quiet by default. Attach a NullHandler to the ``rebar`` root logger
-# so importing rebar as a library never emits to stderr or warns about a missing
-# handler. Entrypoints install a real stderr handler via
-# ``rebar._logging.install_stderr_handler``. See ``rebar._logging`` for the convention.
+# Imports stay quiet; entrypoints replace this with the configured stderr handler.
 logging.getLogger("rebar").addHandler(logging.NullHandler())
 
 try:

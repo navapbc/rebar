@@ -1,15 +1,8 @@
-"""Read-tool registrar for the rebar MCP server.
+"""Register the MCP server's always-available read tools.
 
-``register_read_tools(mcp, ctx)`` registers the always-available read tools on a
-FastMCP server. Split out of ``rebar.mcp_server.build_server`` (which was a single
-~700-LOC function) as a pure structural refactor — the tool names, signatures,
-docstrings, and outputSchemas are behaviour-identical to their in-line originals.
-
-The tools capture shared handles off ``ctx`` (a ``SimpleNamespace`` built in
-``build_server``): the ``_readonly`` gate helper plus the payload-budget helpers.
-They are rebound to their original local names below so the tool bodies are
-copied verbatim. Output models are imported at module level (FastMCP resolves a
-tool's return annotation against THIS module's globals).
+Split from ``build_server`` to keep its composition root small. The registrar
+captures read-only and payload-budget helpers from ``ctx``; module-level output
+models let FastMCP resolve return annotations.
 """
 
 from __future__ import annotations
@@ -171,40 +164,29 @@ def _register_plan_review_tools(mcp, annotations) -> None:
 
     @mcp.tool(annotations=annotations["READ_ONLY"])
     def plan_review_status(ticket_id: str) -> PlanReviewStatusOut:
-        """Is this ticket's plan-review attestation current RIGHT NOW? Read-only.
+        """Report plan-certificate currency using the exact claim-gate check.
 
-        The MCP mirror of `rebar review-plan <id> --status`: it delegates to
-        `rebar.llm.plan_review_status`, which runs the EXACT local check the claim
-        gate runs — NO LLM and NO network, never a billable review — so the answer
-        is precisely what a `claim` would decide.
-
-        Returns {ok, verdict, reason, verified_at_sha, signed_at}. `verdict` is
-        'certified' when current, else one of stale-code / stale-head /
-        stale-material / stale-reopened / stale-pin-drift / stale-pin-missing / stale-store /
-        unsigned / wrong-kind / not-closed / malformed-pin / malformed-phase /
-        incompatible-phase / unverifiable-material / error, and `reason` NAMES what
-        changed. `verified_at_sha` is the code anchor the plan was reviewed against
-        and `signed_at` the sign timestamp; both are null when no readable certified
-        attestation exists. Use it to answer "should I re-gate before I implement?"
-        without provoking a claim refusal."""
+        This read uses no LLM or network. It returns ``{ok, verdict, reason,
+        verified_at_sha, signed_at}``; current is ``certified``, otherwise
+        ``stale-code``, ``stale-head``, ``stale-material``, ``stale-reopened``,
+        ``stale-pin-drift``, ``stale-pin-missing``, ``stale-store``, ``unsigned``,
+        ``wrong-kind``, ``not-closed``, ``malformed-pin``, ``malformed-phase``,
+        ``incompatible-phase``, ``unverifiable-material``, or ``error``. ``reason``
+        names the drift; the SHA and timestamp are null without a readable certificate.
+        """
         import rebar.llm
 
         return PlanReviewStatusOut.model_validate(rebar.llm.plan_review_status(ticket_id))
 
     @mcp.tool(annotations=annotations["READ_ONLY"])
     def verify_completion_status(ticket_id: str) -> VerifyCompletionStatusOut:
-        """Is this ticket's completion-verifier attestation current RIGHT NOW? Read-only.
+        """Report durable completion-certificate currency without an LLM or network.
 
-        The close-gate analog of `plan_review_status`: it delegates to
-        `rebar.llm.verify_completion_status`, a local HMAC verify of the
-        `completion-verifier` attestation — NO LLM and NO network, never a billable
-        re-run — so a caller can poll a `verify_completion` / `verify_completion_start`
-        run's DURABLE outcome without re-charging.
-
-        Returns {ok, verdict, reason, verified_at_sha, signed_at}. `verdict` is
-        'certified' when a valid attestation exists, else 'unsigned'; `verified_at_sha`
-        is the code anchor it was verified against and `signed_at` the sign timestamp,
-        both null when none exists."""
+        This local close-gate check lets callers poll completion runs without another
+        charge. It returns ``{ok, verdict, reason, verified_at_sha, signed_at}``;
+        ``verdict`` is ``certified`` or ``unsigned``; its SHA and timestamp are
+        null when no certificate exists.
+        """
         import rebar.llm
 
         return VerifyCompletionStatusOut.model_validate(
@@ -213,39 +195,29 @@ def _register_plan_review_tools(mcp, annotations) -> None:
 
     @mcp.tool(annotations=annotations["READ_ONLY"])
     def gate_status(job_id: str) -> GateRunOut:
-        """Poll an async gate run started by review_plan_start / verify_completion_start.
+        """Poll an async plan-review or completion run without executing it.
 
-        Reads the durable run handle via replay of the local `.rebar/gate_runs` index
-        (no LLM, no execution) -> {job_id, status, ticket_id, gate_type, verdict?,
-        error?, durable?, findings?}. `status` is 'running' while the background gate is in flight,
-        then 'passed' / 'failed'; a stale running handle is settled to 'failed' with
-        a diagnostic error; 'attaching' if a duplicate start attached to an
-        in-flight run whose index record has not landed yet (keep polling); 'unknown' if
-        the job_id is unrecognised. For a plan-review or completion job `durable` carries
-        the gate's own signed-attestation currency (the same answer plan_review_status /
-        verify_completion_status give), so a caller can confirm the verdict actually
-        persisted. For a plan-review job, `findings.readable` says whether this run's
-        REVIEW_RESULT sidecar is readable yet; callers must not read latest findings until
-        it is true."""
+        Replaying the local gate index returns ``{job_id, status, ticket_id,
+        gate_type, verdict?, error?, durable?, findings?}``. Status is ``running``,
+        then ``passed`` or ``failed``; stale runs fail diagnostically, ``attaching``
+        awaits a duplicate's index record, and ``unknown`` marks an unrecognized ID.
+        ``durable`` reports signed-certificate currency. Read plan findings only after
+        ``findings.readable`` is true.
+        """
         import rebar.llm
 
         return GateRunOut.model_validate(rebar.llm.gate_run_status(job_id))
 
 
 def _register_bridge_projects_read(mcp, ann) -> None:
-    """Register the ``bridge_projects_list`` read tool.
-
-    Its own registrar rather than another nested ``def`` inside ``register_read_tools``:
-    every nested function raises that already-large function's cyclomatic complexity, which
-    the shrink-only complexity baseline gate caps.
-    """
+    """Register the bridge-project read without raising the main registrar's complexity."""
 
     @mcp.tool(annotations=ann["READ_ONLY"])
     def bridge_projects_list() -> dict:
-        """Return the store's bridge-projects sync mapping ``{key: {"repos": [...]}}``.
+        """Read the store's ``{project: {"repos": [...]}}`` sync mapping without an LLM.
 
-        The projects key set IS the store's sync list; each entry names the repos its
-        tickets belong to. A pure store READ (no LLM)."""
+        Its project keys are the sync list; each value names that project's repositories.
+        """
         import rebar
 
         return rebar.bridge_projects_list()
@@ -264,11 +236,10 @@ def _ready_discovery_row(row: dict) -> dict:
 
 
 def _discovery_rows(rows, *, full: bool) -> list[dict]:
-    """Project a ready-work discovery list to its closed default shape, unless ``full``.
+    """Project ready work to the lean discovery shape unless ``full=True``.
 
-    The default answers only "what can I work on next?" and keeps the MCP budget from
-    depending on ``TicketStateOut`` defaults. ``full=True`` remains the explicit
-    previous full-state shape.
+    The default answers what is next without depending on ``TicketStateOut`` defaults;
+    full mode preserves the previous complete shape.
     """
     return list(rows) if full else [_ready_discovery_row(row) for row in rows]
 
@@ -299,13 +270,13 @@ def register_read_tools(mcp, ctx) -> None:
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def explain_criterion(criterion_id: str) -> dict:
-        """Explain a plan-review criterion — its authoring-guide section (epic cite-stone-sea /
-        WS10) — OR print an author-facing prose guide when ``criterion_id`` is a guide name
-        (``plan`` = how to write a passing plan; ``review`` = how to pass code review;
-        ``commit-trailer`` = the required ``rebar-ticket:`` commit-trailer format). A pure
-        registry/guide READ (no LLM, so it is NOT gated on REBAR_MCP_ALLOW_LLM); the SAME shared
-        lookup as the `rebar explain` CLI. On failure returns a structured error
-        ``{error, kind, message}`` (kind ∈ unknown-id / malformed-registry / missing-file)."""
+        """Read a plan criterion or an author guide without an LLM.
+
+        Guide names are ``plan`` (passing plans), ``review`` (code review), and
+        ``commit-trailer`` (the required ``rebar-ticket:`` format), using the same
+        lookup as ``rebar explain``. Failures return ``{error, kind, message}``, where
+        kind is ``unknown-id``, ``malformed-registry``, or ``missing-file``.
+        """
         from rebar.llm.plan_review import registry
 
         try:
@@ -340,27 +311,14 @@ def register_read_tools(mcp, ctx) -> None:
         sort: str | None = None,
         full: bool = False,
     ) -> list[TicketStateOut]:
-        """List tickets as a JSON array, with optional filters.
+        """List tickets with optional lifecycle, hierarchy, tag, and readiness filters.
 
-        ``exclude_deleted`` drops tickets whose reduced status is ``deleted``.
-        delete writes STATUS(deleted)+ARCHIVED, so the default list already hides
-        tombstones via archived-exclusion; ``exclude_deleted`` only changes
-        results when combined with ``include_archived=True``. Each item carries a
-        ``children_count``; ``min_children`` keeps tickets with >= N direct
-        children, and ``blocking_state`` ("unblocked"/"blocked") filters by
-        readiness (all blockers closed vs an open blocker).
-
-        The list is **lean by default** — the bodies (``description``, ``comments``)
-        AND the signature material (``authorship_ledger``, ``attestations``,
-        ``signature``, ``keyring``) are omitted, because on a mature store those four
-        signature fields alone are ~88% of a list's bytes. Pass ``full=True`` for the
-        complete ticket shape (or use ``show_ticket`` for a single ticket, which is
-        unchanged and still carries every field).
-
-        **Bounded.** A result over the MCP response budget is REFUSED with a structured
-        ``response_too_large`` error naming the match count, the size, and the filters
-        to narrow with — never a silently shortened list, and never a bare transport
-        close (bug 494b-2dd3-e9d3-4fb0).
+        Archived exclusion already hides deleted tombstones; ``exclude_deleted`` matters
+        with ``include_archived=True``. Rows carry ``children_count`` and can require a
+        minimum. The default omits bodies and signature material; ``full=True`` restores
+        complete state, while ``show_ticket`` remains the single-ticket alternative.
+        Oversize results fail with structured ``response_too_large`` details and narrowing
+        filters; they are never truncated or dropped by the transport.
         """
         return _bound_list_payload(
             [
@@ -391,13 +349,12 @@ def register_read_tools(mcp, ctx) -> None:
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def audit_trail(ticket_id: str) -> dict:
-        """The full audit read surface for a ticket (story 46f0): its FULL retained
-        plan-review sidecar history (newest-first), its completion attestation + sidecar
-        record, and the associated code reviews (``code_review`` tickets that link
-        ``relates_to`` this ticket, each with its own retained sidecar history). Best-effort
-        aggregation over the observability sidecars — individual reader failures degrade to
-        ``[]`` / ``None`` rather than raising. Always available (a read tool, so it is served
-        even under ``REBAR_MCP_READONLY=1``)."""
+        """Read a ticket's complete plan, completion, and code-review audit trail.
+
+        Plan and related code-review sidecar histories are newest-first; completion
+        includes its attestation and sidecar. Individual sidecar failures degrade to
+        ``[]`` or ``None``. This read remains available under ``REBAR_MCP_READONLY=1``.
+        """
         from rebar.audit.read import audit_trail as _audit_trail
 
         return _audit_trail(ticket_id)
@@ -406,25 +363,14 @@ def register_read_tools(mcp, ctx) -> None:
     def ready_tickets(
         sort: str | None = None, full: bool = False
     ) -> list[ReadyTicketSummaryOut | TicketStateOut]:
-        """List tickets ready to work (all blockers closed). ``sort`` orders by
-        ``priority|created|updated|id|status`` (prefix ``-`` for descending;
-        unset values sort last).
+        """List tickets whose blockers are closed, optionally sorted.
 
-        Discovery-shaped by default: each row carries only ticket id, alias, title,
-        type, status, priority, and blocking summary. Pass ``full=True`` for the
-        complete ``TicketStateOut`` shape.
-
-        **BREAKING (pre-1.0), story 98b8-5f08-1569-45cc.** This tool previously returned
-        the FULL ticket shape and had no ``full`` flag, so the lean default narrows a
-        published contract. It was narrowed deliberately rather than left alone: it is
-        the one discovery surface that disagreed with the others on its default shape,
-        and on this store its 61 ready rows weigh 693,556 bytes of which ~88% is
-        signature material a caller choosing a ticket never reads. Migration: pass
-        ``full=True``, or read the single ticket with ``show_ticket``, which is
-        unchanged. See ``docs/release-notes.md``.
-
-        **Bounded**, like ``list_tickets``. Its refusal names ``next_batch(epic_id)``
-        rather than filters, because this tool accepts none (bug 494b-2dd3-e9d3-4fb0).
+        The lean default returns id, alias, title, type, status, priority, and blocking
+        summary; ``full=True`` restores the pre-1.0 ``TicketStateOut`` contract, or use
+        ``show_ticket`` for one item. See ``docs/release-notes.md``. Like ``list_tickets``,
+        oversize results are refused; because this tool has no filters, the remedy names
+        ``next_batch(epic_id)``. Sort keys are ``priority|created|updated|id|status``;
+        prefix ``-`` for descending, with unset values last.
         """
         model = TicketStateOut if full else ReadyTicketSummaryOut
         return _bound_list_payload(
@@ -446,21 +392,15 @@ def register_read_tools(mcp, ctx) -> None:
         include_archived: bool = False,
         sort: str | None = None,
     ) -> list[SearchResultOut]:
-        """Search titles/descriptions/comments/tags with bounded discovery results.
+        """Search ticket prose and tags with bounded discovery results.
 
-        ``query`` accepts field predicates — ``status:``/``type:``/``priority:``/
-        ``assignee:``/``tag:``/``parent:`` (comma = OR within a field; ``priority``
-        accepts ``<``/``<=``/``>``/``>=`` and ``n..m`` ranges) and ``-``/``not:``
-        negation; an unknown ``field:`` degrades to a literal substring. ``sort``
-        orders by ``priority|created|updated|id|status`` (``-`` prefix = descending;
-        unset values last).
-
-        **Bounded** — the word in the first line is now enforced rather than asserted. A
-        result over the MCP response budget is REFUSED with a structured
-        ``response_too_large`` error naming the match count, the size, and how to narrow;
-        ``search`` rows are already projected by ``project_search_result``, so an ordinary
-        query is far under budget, but an unfiltered one was previously as unbounded as
-        ``list_tickets`` (bug 494b-2dd3-e9d3-4fb0)."""
+        Queries support ``status:``, ``type:``, ``priority:``, ``assignee:``, ``tag:``,
+        and ``parent:``; commas mean field-local OR, priorities accept comparisons and
+        ``n..m``, and ``-``/``not:`` negate. Unknown fields become literal text. Sort by
+        ``priority|created|updated|id|status``; prefix ``-`` for descending, with unset
+        values last. Oversize results return ``response_too_large`` with count, size,
+        and narrowing guidance rather than truncating.
+        """
         return _bound_list_payload(
             [
                 SearchResultOut.model_validate(t)
@@ -569,20 +509,16 @@ def register_read_tools(mcp, ctx) -> None:
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def verify_signature(ticket_id: str, kind: str | None = None) -> VerifySignatureResultOut:
-        """Certify a ticket's verified-steps manifest against its signature.
+        """Verify a ticket manifest against an op-cert or legacy signature.
 
-        Shape-aware verify (an asymmetric op-cert envelope against the signer's Ed25519
-        public key, or a legacy record) returning {ticket_id, verified, verdict, reason,
-        manifest, ...}. verdict is 'certified' (steps match), 'mismatch' (altered/invalid),
-        'foreign_key' (no usable signer key, or the opt-in verify.require_environment
-        restriction excludes its signer), or 'unsigned'. The SIGNING ENVIRONMENT is not
-        itself a gate (bug c21f): a cert minted elsewhere certifies when its signature
-        verifies, and `trust_basis` names which key was used. Read-only.
-
-        `kind` selects which attestation to verify (epic dark-acme-lumen): omitted verifies
-        the most-recent signature (back-compatible); an explicit kind (e.g. 'plan-review' /
-        'completion-verifier') verifies that kind strictly. The full per-kind set is on the
-        ticket-state `attestations` field via show_ticket."""
+        Returns ``{ticket_id, verified, verdict, reason, manifest, ...}``: ``certified``
+        matches, ``mismatch`` is altered or invalid, ``foreign_key`` lacks an allowed
+        key, and ``unsigned`` lacks a signature. Outside the opt-in environment
+        restriction, signer environment alone is not a gate; ``trust_basis`` names the
+        accepted key. Omitted ``kind`` checks the latest signature; an explicit
+        ``plan-review`` or ``completion-verifier`` kind is strict. ``show_ticket``
+        exposes every attestation.
+        """
         return VerifySignatureResultOut.model_validate(rebar.verify_signature(ticket_id, kind=kind))
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])

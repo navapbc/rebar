@@ -1,30 +1,10 @@
-"""Central registry + signalling for rebar's user-facing deprecations.
+"""Registry and signalling for every user-facing deprecation.
 
-This module is the **single source of truth** for every deprecated user-facing
-surface — env vars, config keys, CLI flags, library aliases, and MCP tools —
-replacing the old DOC-ONLY prose table that used to live in ``config.py``. Each
-entry records where it is going and *when*:
-
-* ``key``         — a unique, stable id string (``"<kind>:<name>"``).
-* ``kind``        — one of ``env`` / ``cfg`` / ``cli`` / ``lib`` / ``mcp``.
-* ``name``        — the human name of the deprecated surface (used in the message).
-* ``replacement`` — the canonical thing to use instead.
-* ``remove_in``   — the release the surface is scheduled to be removed in
-  (e.g. ``"v1.0.0"``); ``None`` for a **permanent** alias.
-* ``permanent``   — ``True`` for an ergonomic rename kept forever (no removal
-  planned), ``False`` for a scheduled removal.
-
-Every runtime deprecation signal in rebar routes through :func:`warn_deprecated`,
-which looks the key up here and **raises** if it is absent — so a new deprecated
-surface that skips the registry is caught by
-``tests/unit/test_deprecation_registry.py`` (which also source-scans for raw
-``is deprecated`` / ``DeprecationWarning`` emissions bypassing this helper).
-
-The message wording depends on ``permanent``: a scheduled entry says
-"…is deprecated; use <replacement> (scheduled for removal in <remove_in>)";
-a permanent entry says "…is a permanent alias of <replacement>" and NEVER claims
-to be "deprecated" (resolving the historical contradiction where permanent
-ergonomic renames still warned "deprecated").
+Each env, config, CLI, library, or MCP entry has a stable key, replacement, removal
+horizon, and permanence flag. All runtime signals route through
+:func:`warn_deprecated`; missing registry entries fail loudly and raw bypasses are
+source-scanned. Scheduled entries announce removal, while permanent aliases never
+describe themselves as deprecated.
 """
 
 from __future__ import annotations
@@ -72,73 +52,19 @@ def _permanent(kind: str, name: str, replacement: str) -> Deprecation:
 # add a deprecation, add a row here AND route its warning through warn_deprecated;
 # the completeness test fails otherwise.
 _ENTRIES: tuple[Deprecation, ...] = (
-    # ── active deprecation aliases ────────────────────────────────────────────
-    # ADR 0116 retired the remaining env/config aliases by clean pre-1.0 removal.
-    # No permanent env/cfg alias rows remain.
-    # ── removed scheduled surfaces (historical record) ─────────────────────────
-    # NOTE (DE7): the first pre-1.0 breaking removal dropped the scheduled env
-    # aliases REBAR_PUSH / TICKETS_TRACKER_DIR / REBAR_MCP_ALLOW_RECONCILE_LIVE, the
-    # config surface verify.require_verdict_for_close + the flat .rebar/config.conf
-    # reader, the CLI --verdict-hash flag, and the lib edit_ticket(tags=...) alias +
-    # rebar.list_epics() function.
-    # NOTE (this pass, ticket 5899): the second breaking removal dropped the env
-    # alias REBAR_LLM_MAX_ITERS (use REBAR_LLM_MAX_STEPS), the accepted-but-ignored
-    # config value reconciler.lock_backend='file' (the whole key is gone — the ref
-    # backend is the only backend), the CLI list-epics subcommand + --no-sync alias
-    # (use `list --type=epic …` / --no-pull), and the MCP list_epics tool (use
-    # list_tickets(ticket_type='epic', …)).
-    # NOTE (this pass, ticket 828b): the fourth breaking removal dropped the library
-    # aliases `rebar.transition(force_close=...)` and `rebar.transition(force=True)`
-    # (use `force="<reason>"`) and the hosted OpenAI `openai-chat:` fallback (hosted
-    # OpenAI now resolves to `openai-responses:`; custom endpoints still use Chat).
-    # NOTE (pre-1.0 pass #3, ticket 6cc4 — operator-approved early removal,
-    # 2026-08-12): the same third breaking window dropped the deprecated bare env
-    # REBAR_LLM_MODEL (use the [tool.rebar.llm.model_classes] slots, or the per-class
-    # REBAR_LLM_<CLASS>_MODEL variables). UNLIKE the review surfaces above this one IS
-    # tombstoned — it is an `env` input, the kind the tombstone registry covers — and
-    # at `error` behaviour, matching REBAR_LLM_MAX_ITERS: silently ignoring a still-set
-    # model id would quietly change which model every operation runs. The CONFIG key
-    # `[tool.rebar.llm].model` is NOT removed; it stays the top-level model knob.
-    # NOTE (pre-1.0 pass #3, ticket 97d4 — operator-approved early removal,
-    # 2026-08-12): the third breaking removal dropped the single-pass review op's
-    # three PUBLIC entry points — the CLI verb `rebar review`, the library
-    # `rebar.llm.review_ticket`, and the MCP `review_ticket` tool (use
-    # `rebar review-plan` / `rebar.llm.review_plan` / the `review_plan` tool). They
-    # were removed AHEAD of their recorded remove_in=v1.0.0 by operator ruling, the
-    # same lever DE7 and the 5899 pass used. The ENGINE
-    # `rebar.llm.operations._review_ticket_impl` STAYS — the workflow-parity harness
-    # and the eval solver still call it. No TOMBSTONE row: the tombstone registry
-    # only covers env/cfg/file inputs, so a removed CLI verb / library function /
-    # MCP tool simply stops existing, exactly as list-epics and list_epics did.
-    # NOTE (pre-1.0 pass #3, ticket f408 — operator-approved early removal,
-    # 2026-08-12): the same window dropped the two deprecated config keys
-    # `jira.resolved_statuses` and `reconciler.resolved_statuses` (deprecated by task
-    # 549c, which executed the deprecation half and left the removal half blocked on
-    # sign-off — now given). They configured the inbound absence probe, whose last
-    # consumer went with task f020; resolved/unresolved discrimination is
-    # outbound-owned per ADR 0028, so there is NO replacement key — operators simply
-    # delete the line. Both are tombstoned, with their auto-derived env twins, at
-    # `warn` behaviour: they are INERT (nothing read them, and the behaviour they
-    # configured no longer exists), so the load-bearing test that puts a tombstone at
-    # `error` is not met. This deliberately does NOT follow the 6cc4 REBAR_LLM_MODEL
-    # `error` choice above, whose rationale — silently ignoring it would change which
-    # model every operation runs — is exactly the load-bearing argument that does not
-    # transfer here. It follows the inert-cfg precedent instead: `code_health.enabled`,
-    # `code_health.analyzers`, `reconciler.lock_backend`, `reconciler.lock_max_retries`.
+    # No active aliases remain after ADR 0116. Pre-1.0 removals covered legacy push,
+    # tracker, MCP-reconcile, close-gate, flat-config, CLI, list-epic, transition-force,
+    # and hosted OpenAI spellings. LLM step/model env inputs fail loud because ignoring
+    # them changes execution; removed review surfaces simply disappear, while inert
+    # resolved-status and code-health/lock knobs warn with no replacement.
 )
 
 REGISTRY: dict[str, Deprecation] = {d.key: d for d in _ENTRIES}
 
 
-# ── Tombstone registry (story 36c7): fail-LOUD for REMOVED inputs ─────────────
-# Distinct from the alias registry above (which still HONORS the old surface). A
-# tombstone names an input that has been fully REMOVED. When one is still set —
-# an env var, a TOML key, or a legacy config file — rebar must not silently ignore
-# it: an operationally-load-bearing removed input (store location, write/sync gate,
-# auth, security, lifecycle policy) FAILS LOUD (``behavior="error"`` → a targeted
-# migration error + non-zero exit), while an operationally-inert one WARNs and
-# continues (``behavior="warn"``). This is a SEPARATE vocabulary from ``_KINDS`` —
-# do not overload it.
+# Tombstones cover fully removed env, config, and file inputs. Load-bearing inputs
+# fail with a migration error; inert inputs warn. This vocabulary is separate from
+# still-honored deprecation kinds.
 _TOMBSTONE_KINDS = frozenset({"env", "cfg", "file"})
 _TOMBSTONE_BEHAVIORS = frozenset({"error", "warn"})
 
@@ -229,10 +155,7 @@ _TOMBSTONE_REGISTRY: tuple[RemovedInput, ...] = (
     # it fed was designed but never populated, so the key never had behaviour to
     # preserve; it is dropped with no replacement (its env twin is tombstoned above).
     _tomb("cfg", "code_health.analyzers", "", "warn"),
-    # cfg, warn — the advertised code-health off switch that never switched anything.
-    # It had zero read sites, so structural metrics evaluated regardless of it; per the
-    # operator ruling on bug a573-00ea-2bf6-4eb1 it is dropped rather than wired, with no
-    # replacement (its env twin is tombstoned above).
+    # This unwired off switch had no effect; warn and remove it without replacement.
     _tomb("cfg", "code_health.enabled", "", "warn"),
     # cfg, warn — the retired inbound absence-probe status sets (task 549c deprecated,
     # task f408 removed under operator sign-off). No replacement: resolved/unresolved
@@ -312,19 +235,10 @@ def warn_deprecated_cfg_keys(
     renames: Container[str] = (),
     logger: logging.Logger | None = None,
 ) -> None:
-    """WARN for each deprecated-but-still-HONORED config key in ``keys``.
+    """Warn for registered, still-honored keys not handled as renames.
 
-    The third of the three retirement stages a config key can be in, and the only one that
-    changes nothing about how the key is parsed:
-
-    * RENAME  — handled by the caller's alias table; the value moves to the canonical key.
-    * REMOVAL — :func:`raise_or_warn_cfg_key`; the key is dropped (or raises).
-    * DEPRECATION (here) — the key still coerces and validates exactly as before and merely
-      announces its removal horizon, so the caller MUST fall through to normal coercion.
-
-    This registry is the single source of truth, which is why the caller passes its section's
-    ``renames`` in rather than keeping a parallel list of deprecated-but-honored keys that
-    would have to be kept in sync with :data:`REGISTRY`.
+    Unlike renamed or removed keys, these continue through normal coercion after
+    announcing their horizon. Caller-supplied ``renames`` avoids a parallel registry.
     """
     for key in keys:
         if f"cfg:{sect}.{key}" in REGISTRY and key not in renames:

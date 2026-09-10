@@ -1,35 +1,11 @@
-"""rebar below-seam config RESOLVERS -- the RP-04 config-ownership entry points.
+"""Owned config resolvers below the raw-input composition seam.
 
-Split out of :mod:`rebar._config_sources` (a pure structural split; no behavior change).
-That module is the RAW-INPUT resolution layer -- repo-root and config-file location, the
-mtime-keyed TOML parse cache, project/user config discovery, and the
-``REBAR_<SECTION>_<KEY>`` env-override layer. THIS module is the other concern the source
-already drew in-file: the below-seam OWNED RESOLVERS the RP-04 config-ownership cutover
-introduced (tickets d074, 9515, 1b07, plus the reconciler JIRA family). Each one OWNS an
-ambient env / ``[snapshot]``-config-table / ``load_config`` read that used to sit BELOW the
-composition seam in a ``_store`` / ``_snapshot`` / ``_cli`` / ``_commands`` / ``llm`` /
-reconciler helper; every below-seam caller now RECEIVES the resolved value from here.
-
-``rebar._config_sources`` re-exports every name defined here, and ``rebar.config`` re-exports
-them in turn, so the public import surface is unchanged (``from rebar.config import X`` and
-``rebar._config_sources.X`` both still work).
-
-This module is a LEAF with NO module-level ``rebar`` import:
-
-* it keeps the re-export in :mod:`rebar._config_sources` acyclic, and
-* it keeps the stdlib-only reconciler engine able to import it.
-
-The raw-input names one resolver needs (:func:`_snapshot_table`) are therefore reached
-through a LAZY in-body ``from rebar import _config_sources`` and called as module
-attributes at CALL time -- the same ``_config_sources.__dict__`` slot a module-global
-lookup used before the split, so a ``monkeypatch.setattr`` on that module still steers
-this code. Binding them eagerly at import time is the exact regression the sibling
-``config.py`` split shipped (a patched ``repo_root`` silently stopped applying). The
-reconciler family likewise imports ``rebar.config`` lazily in-body.
-
-Env-name string LITERALS stay verbatim in these bodies: ``scripts/gen_env_registry.py``
-scans for them statically, and ``scripts/check_config_ownership.py`` classifies this file
-as a composition root by its BASENAME, so the reads here are owned, not below-seam.
+``_config_sources`` owns discovery, TOML parsing, and raw environment overlays;
+this stdlib-only leaf resolves those inputs for store, snapshot, CLI, command, LLM,
+and reconciler callers. It has no module-level ``rebar`` import, keeping engine use
+acyclic. Lazy module-attribute lookups preserve late monkeypatch binding, while both
+``_config_sources`` and ``rebar.config`` re-export this API. Environment-name literals
+remain visible here for the registry and ownership scanners.
 """
 
 from __future__ import annotations
@@ -39,17 +15,8 @@ import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
-# --------------------------------------------------------------------------- #
-# Below-seam config resolvers (RP-04 config-ownership cutover, ticket d074).
-# These OWN the ambient env / [snapshot]-config-table reads that previously sat
-# BELOW the seam in the _store / _snapshot / _io helpers. Each below-seam caller
-# now RECEIVES the resolved value from here (re-exported via ``rebar.config``)
-# instead of reading ``os.environ`` itself. Every read is LIVE per call (never
-# import-time bound) so a mid-operation override — e.g. the ``REBAR_SYNC_PUSH``
-# toggle a bulk import drives — is still observed. This is the composition/raw-input
-# seam the config-ownership gate treats as OWNED, so the env-name literals stay
-# visible to ``gen_env_registry`` here.
-# --------------------------------------------------------------------------- #
+# Store and snapshot helpers receive these live values instead of reading the
+# environment below the seam. Literal names remain discoverable by the registry scan.
 
 
 def _positive_int(raw: str | None, default: int) -> int:
@@ -84,17 +51,12 @@ def resolve_stall_attempts(default: int) -> int:
 
 
 def resolve_fetch_timeout(default: int) -> int:
-    """Materialization-fetch wall-clock backstop:
-    ``REBAR_SNAPSHOT_FETCH_TIMEOUT_SECONDS`` over the module default (live per call).
+    """Resolve the live materialization-fetch wall-clock backstop.
 
-    This ceiling is NOT the guard against a wedged remote — the throughput-keyed
-    stall-abort (:func:`resolve_stall_abort_limits`) is, and it trips a dead connection in
-    seconds regardless of this value. The wall clock only backstops a hang the low-speed
-    check cannot see (a pre-transport wedge that moves zero bytes, e.g. a stuck credential
-    helper). So it is deliberately GENEROUS and TUNABLE: a large/cold store whose HONEST
-    ``--no-filter`` transfer legitimately runs minutes must not be cut off purely because a
-    fixed 300s wall clock elapsed (bug curly-open-swan). A malformed/non-positive knob falls
-    back to ``default`` rather than disarming the backstop."""
+    ``REBAR_SNAPSHOT_FETCH_TIMEOUT_SECONDS`` covers pre-transport hangs that the
+    throughput stall guard cannot see. It stays tunable and generous for honest cold
+    ``--no-filter`` transfers; malformed or non-positive values use ``default``.
+    """
     return _positive_int(os.environ.get("REBAR_SNAPSHOT_FETCH_TIMEOUT_SECONDS"), default)
 
 
@@ -265,27 +227,16 @@ def resolve_gate_max_concurrent(default: int, root: str | os.PathLike[str] | Non
     return default if value < 0 else value
 
 
-# --------------------------------------------------------------------------- #
-# Below-seam CLI/command resolvers (RP-04 config-ownership cutover, ticket 9515).
-# These OWN the ambient env reads that previously sat BELOW the composition seam in
-# the ``_cli`` / ``_commands`` helpers. Each below-seam caller now RECEIVES the
-# resolved value from here (re-exported via ``rebar.config``) instead of reading
-# ``os.environ`` itself. All are entry-time (the CLI resolves each once at entry), so
-# a plain resolver is correct. Leaf-safe: they touch only stdlib, so this module keeps
-# its no-``rebar.config``-import invariant. The env-name literals stay visible to
-# ``gen_env_registry`` here.
-# --------------------------------------------------------------------------- #
+# CLI and command entrypoints resolve these environment values once, preserving the
+# stdlib-only leaf and literal names required by the registry scan.
 
 
 def repo_root_or_none(explicit: str | os.PathLike[str] | None = None) -> str | None:
-    """Repo root with precedence ``explicit`` > ``REBAR_ROOT`` > git toplevel of cwd,
-    or ``None`` when NONE resolve — the NOT-FOUND signal the init bootstraps need.
+    """Resolve ``explicit`` then ``REBAR_ROOT`` then cwd's Git root, else ``None``.
 
-    Mirrors :func:`repo_root`'s precedence but REPORTS not-found instead of defaulting
-    to ``Path.cwd()`` (both init call sites must distinguish "no repo" to emit the
-    "not a git repository" error / return ``None``). ``explicit`` and ``REBAR_ROOT`` are
-    realpath-normalized; the git toplevel is returned verbatim. Owns the ``REBAR_ROOT``
-    read at the composition seam."""
+    The nullable result lets init distinguish no repository from a cwd fallback.
+    Explicit and environment paths are realpath-normalized; Git output is verbatim.
+    """
     if explicit:
         return os.path.realpath(str(explicit))
     env = os.environ.get("REBAR_ROOT")
@@ -306,26 +257,20 @@ def repo_root_or_none(explicit: str | os.PathLike[str] | None = None) -> str | N
 
 
 def resolve_otlp_endpoint(explicit: str | None = None) -> str:
-    """The OTLP trace-sink endpoint: an explicit ``--otlp-endpoint`` wins, else the
-    standard ``OTEL_EXPORTER_OTLP_ENDPOINT`` env var, else ``""`` (no sink). Owns the
-    env read for :func:`rebar._cli._llm_eval_commands`'s config-init snippet."""
+    """Resolve an explicit OTLP sink, then ``OTEL_EXPORTER_OTLP_ENDPOINT``, else ``""``."""
     return explicit or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT") or ""
 
 
 def resolve_detected_by(explicit: str | None = None) -> str | None:
-    """The detection-channel value: an explicit param wins (an explicit empty string
-    SUPPRESSES the env default), else the ``REBAR_DETECTED_BY`` env var, else ``None``.
-    Owns the env read for :func:`rebar._commands.composer`'s detection-channel capture;
-    the caller still strips/normalizes and drops an empty result."""
+    """Resolve an explicit detection channel, then ``REBAR_DETECTED_BY``, else ``None``.
+
+    An explicit empty string suppresses the environment default.
+    """
     return explicit if explicit is not None else os.environ.get("REBAR_DETECTED_BY")
 
 
 def resolve_os_actor(tracker: str | os.PathLike[str]) -> str:
-    """The audit actor for a store operation: the git ``user.email`` configured for the
-    ``tracker`` dir (``git -C <tracker> config user.email``), else ``$USER``, else
-    ``"unknown"``. Shared owned seam for the ``_actor`` helpers in
-    :mod:`rebar._commands.bridge_repair` and :mod:`rebar._commands.tracker_maintenance`
-    — it TAKES the tracker dir so each caller keeps its dir-scoped identity."""
+    """Resolve the tracker's Git email, then ``USER``, then ``"unknown"`` for audits."""
     try:
         result = subprocess.run(
             ["git", "-C", str(tracker), "config", "user.email"],
@@ -340,19 +285,8 @@ def resolve_os_actor(tracker: str | os.PathLike[str]) -> str:
     return os.environ.get("USER") or "unknown"
 
 
-# --------------------------------------------------------------------------- #
-# Below-seam LLM-subsystem resolvers (RP-04 config-ownership cutover, ticket 1b07).
-# These OWN the ambient env / ``[snapshot]``-config-table reads that previously sat BELOW
-# the composition seam in the ``llm`` / ``llm/plan_review`` / ``llm/workflow`` helpers.
-# Each below-seam caller now RECEIVES the resolved value from here (re-exported via
-# ``rebar.config``) instead of reading ``os.environ`` itself. Every read is LIVE per call
-# (never import-time bound) so a mid-operation override — the gate ``ref``/``source``, the
-# plan-review budget, the usage-log sink, the preview timeout an operator flips per run — is
-# still observed. This is the composition seam the config-ownership gate treats as OWNED, so
-# the env-name literals stay visible to ``gen_env_registry`` here. Callers pass any subsystem
-# default constant (``DEFAULT_REF`` / ``SOURCE_ATTESTED`` / …) so this leaf module keeps its
-# stdlib-only, no-``rebar``-import invariant.
-# --------------------------------------------------------------------------- #
+# LLM callers receive live environment/config preferences from this owned seam and
+# supply their own defaults, keeping this module stdlib-only and scanner-visible.
 
 
 def _gate_str_pref(
@@ -483,20 +417,11 @@ def resolve_jira_probe_scope(env: Mapping[str, str] | None) -> tuple[str, str, s
 
 
 def snapshot_repo_root(explicit: str | os.PathLike[str] | None = None) -> str:
-    """The directory whose git object DB a snapshot operation reads.
+    """Resolve the Git object database used by snapshot-backed operations.
 
-    ``explicit`` always wins — a caller that names a tree must never be silently redirected
-    to a different one. Otherwise this resolves the CONFIGURED root (``REBAR_ROOT``, then the
-    git toplevel of the cwd) and only then falls back to ``"."``.
-
-    That last fallback used to be the whole implementation, and it was an outage: the deployed
-    MCP server runs with cwd ``/app``, a source copy whose ``.git`` is excluded by
-    ``.dockerignore``, while ``REBAR_ROOT`` names a healthy checkout. Every attested-source tool
-    (``review_plan``, ``scan_spec``, ``verify_completion``, ``review_code``) calls through
-    without an explicit root, so all of them resolved refs against a directory with no object
-    DB and failed with ``cannot resolve ref 'origin/main' to a commit in '.'`` — including for
-    a full SHA the configured checkout demonstrably contained. Ticket
-    fatherly-incoherent-mare.
+    An explicit tree wins; otherwise use ``REBAR_ROOT``, cwd's Git root, then ``.``.
+    This keeps deployed MCP tools off a source-only cwd when a healthy checkout is
+    configured.
     """
     if explicit:
         return str(explicit)

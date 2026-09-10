@@ -1,22 +1,9 @@
-"""MCP structured-error delivery (ticket 8a31).
+"""Structured MCP errors and shared JSON wire-shape protection.
 
-When an MCP tool fails with a known rebar exception, this module wraps it into an
-``McpEnvelopeError`` carrying a structured ``error_envelope`` dict (the SAME shape
-the CLI emits), so the driving agent can branch on machine-readable error codes
-instead of parsing prose. The envelope is delivered on ``ToolError.__cause__``.
-
-It also owns the sibling wire-shape guard (bug 6fe7): :func:`install_js_safe_guard`,
-which keeps JS-unsafe integers (rebar's 19-digit nanosecond timestamps) off the
-JSON-RPC wire as bare numbers. Both guards live here because they share one seam —
-rebinding ``mcp.tool`` so every subsequently registered tool body is wrapped.
-
-The wire-shape half is NOT MCP-only any more. Bug e127 extended the same rule to the
-CLI ``--output json`` surface, which had the identical exposure (``jq``/``node`` round
-19-digit nanosecond timestamps silently). The CLI emitters import :func:`js_safe_result`
-and :func:`js_safe_dumps` from here rather than duplicating the traversal, so ONE
-implementation defines rebar's JSON wire form for out-of-range integers on every surface.
-The module keeps its name and every existing call site keeps its behaviour; only the set
-of importers grew.
+Known rebar failures become CLI-shaped envelopes on ``ToolError.__cause__``. A guard
+on the same ``mcp.tool`` registration seam converts JS-unsafe integers, including
+nanosecond timestamps, to exact decimal strings. CLI JSON emitters reuse that traversal
+so all JSON surfaces preserve out-of-range values.
 """
 
 from __future__ import annotations
@@ -138,57 +125,20 @@ def install_error_guard(mcp) -> None:
     mcp.tool = guarded_tool
 
 
-# --- JS-safe integer range (bug 6fe7) -------------------------------------------------
-#
-# RFC 8259 s6 only guarantees interoperability for JSON numbers in the IEEE-754 binary64
-# exactly-representable integer range; every supported MCP client is JavaScript and parses
-# bare JSON numbers into a double. rebar stamps NANOSECOND timestamps (`created_at`,
-# `updated_at`, `timestamp`, `signed_at`), which are 19 digits — far outside that range —
-# so a client either SILENTLY TRUNCATES them (plain `JSON.parse`: ...032001 -> ...032000)
-# or, when it parses losslessly into a BigInt (GitHub Copilot CLI), dies re-stringifying
-# the tool result with `TypeError: Do not know how to serialize a BigInt`.
-#
-# rebar already reached this conclusion for its own store — see
-# `rebar._store.canonical` and `rebar._store.hlc` ("jq must never touch it (it parses as
-# float64 and rounds)") — but the MCP surface never generalized the rule. It is
-# generalized here: an out-of-range integer goes on the wire as its EXACT decimal string,
-# so `int(wire_value) == stored_value` holds with no rounding, scaling or dropped fields.
+# JSON interoperability guarantees only binary64-safe integers. Emit larger values,
+# notably 19-digit timestamps, as exact decimal strings to avoid rounding and BigInt
+# re-serialization failures.
 _JS_MAX_SAFE_INT = (2**53) - 1
 _JS_MIN_SAFE_INT = -((2**53) - 1)
 
 
 def js_safe_result(value):
-    """Return ``value`` with every JS-unsafe integer replaced by its exact decimal string.
+    """Recursively stringify integers outside JavaScript's exact range.
 
-    Recurses through dicts, lists/tuples and pydantic models, because the implicated
-    fields are nested: `TicketStateOut` declares NO timestamp fields (it inherits
-    ``extra="allow"`` from ``_Out``) so `created_at`/`updated_at` pass through undeclared,
-    and more hide inside raw ``list[dict]`` fields (`comments`) and inside
-    ``attestations.<kind>.signed_at`` / ``signature.signed_at``.
-
-    Deliberate non-conversions:
-
-    * ``bool`` is a subclass of ``int`` in Python and must keep its JSON boolean type, so
-      it is matched FIRST.
-    * In-range integers (``priority``, counts) keep their JSON number type — only values
-      outside the safe range change shape.
-    * floats, ``str``, ``None`` and everything else are returned untouched.
-    * ``mcp.*`` model instances (``CallToolResult``, content blocks, ``Image``) are left
-      alone: FastMCP's ``_convert_to_content`` dispatches on their concrete types, so
-      dumping them to dicts would change the transport shape.
-
-    A pydantic model is returned as its dumped ``dict``. FastMCP derives BOTH the
-    ``content`` text block and ``structuredContent`` from the SAME returned object
-    (``convert_result`` -> ``_convert_to_content`` and ``output_model.model_validate`` in
-    ``mcp/server/fastmcp/utilities/func_metadata.py``), so transforming the return value
-    fixes both, and re-validating a dict against the tool's declared output model keeps
-    its ``outputSchema`` contract intact.
-
-    Caveat, deliberately out of scope: a field DECLARED as ``int`` on an output model
-    would be coerced back to ``int`` by that ``model_validate``, re-emitting a bare
-    number. Every field implicated in this bug is undeclared (``extra="allow"``) or lives
-    inside a raw ``list[dict]``, so none is affected; a future declared 64-bit-int field
-    would need its own ``str``-typed annotation.
+    Booleans and safe integers retain their JSON types; other scalars and concrete
+    ``mcp.*`` models remain untouched. Pydantic outputs become transformed dictionaries,
+    covering FastMCP's text and structured forms while preserving output validation.
+    Future fields declared as ``int`` need a string annotation to avoid re-coercion.
     """
     if isinstance(value, bool):
         return value
@@ -208,29 +158,19 @@ def js_safe_result(value):
 
 
 def js_safe_dumps(value, **kwargs) -> str:
-    """``json.dumps`` with every JS-unsafe integer replaced by its exact decimal string.
+    """Dump a JS-safe result while preserving each caller's JSON options.
 
-    The emitter-side convenience over :func:`js_safe_result`, used by the CLI
-    ``--output json`` writers (bug e127) so each call site stays a single expression and
-    keeps its own ``indent`` / ``separators`` / ``ensure_ascii`` / ``default`` options.
-    The MCP surface does NOT go through here — it transforms the RETURN VALUE via
-    :func:`install_js_safe_guard` and lets FastMCP serialize — so this wrapper adds a
-    second entry point without touching the existing one.
+    CLI writers use this helper; MCP transforms return values before FastMCP serializes.
     """
     return json.dumps(js_safe_result(value), **kwargs)
 
 
 def install_js_safe_guard(mcp) -> None:
-    """Install the JS-safe-integer result guard on the MCP server instance.
+    """Wrap subsequently registered MCP tools with :func:`js_safe_result`.
 
-    Uses the SAME ``mcp.tool``-rebinding seam as :func:`install_error_guard` (and composes
-    with it), so every subsequently registered tool body has its return value passed
-    through :func:`js_safe_result` before FastMCP serializes it. That is the only place
-    the fix can live and still hold for a real stdio/HTTP client: ``FastMCP.__init__``
-    already captured ``self.call_tool`` in the lowlevel handler's closure, so rebinding
-    ``mcp.call_tool`` after ``build_server()`` would work in-process and ship broken.
-
-    Must be called AFTER ``mcp`` is constructed but BEFORE tool registration.
+    This composes with the error guard on the ``mcp.tool`` seam; rebinding captured
+    ``call_tool`` later would not protect real transports. Install after construction
+    and before tool registration.
     """
     orig_tool = mcp.tool
 

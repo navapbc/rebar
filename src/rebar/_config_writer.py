@@ -1,23 +1,8 @@
-"""The config WRITE path — rebar's only writer of a rebar-owned ``rebar.toml``.
+"""Sole writer for rebar-owned ``rebar.toml`` files (ADR 0070).
 
-Split out of ``rebar.config`` (rebar-ticket a66c-9329-e9c9-4aec), which had reached the
-locked module-size cap with no headroom left. ``config.py`` is otherwise entirely a
-READ/RESOLVE module — repo-root and config-file discovery, the layered precedence stack,
-the resolution caches, and the owned composition-root accessors. Exactly two symbols write
-a file, and they form a closed call cluster on a seam the call graph already had:
-
-  * :func:`_emit_toml` — the small, self-contained TOML emitter, whose ONLY caller is
-  * :func:`write_jira_config` — the read-whole / mutate / re-emit / atomic-replace writer
-    for the ``[jira]`` table of a rebar-owned ``rebar.toml``.
-
-Nothing in the read path calls either one, and the pair only calls names ``config.py``
-already imported from its siblings — so the cluster lifts out whole. The design of record
-for this write path is ADR 0070.
-
-``rebar.config`` RE-EXPORTS both names, including the private ``_emit_toml``: the module is
-public surface and ``from rebar.config import X`` (and the module-attribute form
-``_config.write_jira_config`` used by ``rebar._cli._jira_onboard``) must keep working.
-``tests/unit/test_config_writer_surface.py`` pins that contract.
+The closed write cluster reads, mutates, emits, and atomically replaces the Jira
+table; config discovery and resolution remain in ``rebar.config``. That public module
+re-exports both ``write_jira_config`` and private compatibility helper ``_emit_toml``.
 """
 
 from __future__ import annotations
@@ -219,22 +204,8 @@ def write_jira_config(
     :class:`InsecureUrlError` (a ``ConfigError`` subclass) if ``url`` is a non-https
     scheme, before writing anything — the wizard never persists a cleartext url (bug
     bdb8)."""
-    # Resolve repo-root and project-config DISCOVERY through the composition root
-    # (``rebar.config``) rather than binding ``rebar._config_sources`` directly here. Two
-    # reasons, and the first is load-bearing:
-    #
-    #  * These names were looked up in ``rebar.config``'s namespace at CALL time while this
-    #    function lived there, and callers patch them AS MODULE ATTRIBUTES on that module —
-    #    ``tests/interfaces/facades/test_bridge_vocabulary_heldout.py`` does exactly that
-    #    (``monkeypatch.setattr(config, "repo_root", …)``) to redirect the write into a tmp
-    #    root. Importing the siblings straight into THIS module would rebind them at import
-    #    time, silently ignore that patch, and write outside the intended root.
-    #  * ``config.py`` is the composition root that owns config discovery; a below-seam
-    #    module RECEIVING that composition (rather than re-deriving it) is the same rule
-    #    ``compose_config`` / ``mcp_gate`` state for every other consumer.
-    #
-    # The import is function-local because ``rebar.config`` imports THIS module at its top
-    # to re-export the write path — a module-level import here would be a cycle.
+    # Resolve through the composition root at call time so module-attribute patches still
+    # redirect writes. The local import also avoids the re-export cycle.
     from rebar import config as _config
 
     base = _config.repo_root(root)

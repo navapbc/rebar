@@ -1,14 +1,8 @@
-"""Compute deterministic adjective-noun-noun aliases from ticket IDs.
+"""Deterministic legacy and genesis aliases derived from ticket IDs.
 
-Stdlib-only leaf (imports no ``rebar`` subpackage) so both ``rebar.reducer``
-(``_processors`` create path) and ``rebar._engine_support.resolver`` (read-time
-backfill) import it directly — breaking the former ``reducer ↔ _engine_support``
-lazy-import cycle. Moved here from ``rebar/reducer/_alias.py``.
-
-Used as a read-time fallback for tickets created before the alias feature
-shipped (their CREATE event has no `data.alias`). Mirrors the algorithm in
-`ticket-alias-compute.py` so legacy tickets surface the same alias they
-would have been assigned at creation.
+This stdlib-only leaf avoids a reducer/engine-support import cycle. Its legacy
+algorithm matches ``ticket-alias-compute.py`` so tickets without a persisted CREATE
+alias receive the same read-time backfill.
 """
 
 from __future__ import annotations
@@ -30,28 +24,17 @@ _WARNED_MISSING_V2: bool = False
 
 
 def _wordlist_path() -> str:
-    """Resolve the bundled wordlist path (self-resolved; not a user knob).
-
-    This module lives at ``<rebar>/_alias.py`` (a top-of-tree, stdlib-only leaf so
-    both ``rebar.reducer`` and ``rebar._engine_support.resolver`` can import it
-    without a package cycle); the bundled wordlist ships
-    with the engine at ``<rebar>/_engine/resources/ticket-wordlist.txt``. The
-    in-process library and engine subprocesses resolve to this same path (engine
-    subprocesses no longer receive a TICKET_WORDLIST_PATH handoff)."""
+    """Resolve the bundled engine wordlist without a user or child-env override."""
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.normpath(os.path.join(here, "_engine", "resources", "ticket-wordlist.txt"))
 
 
 def _load() -> tuple[list[str], list[str]]:
-    """Load and cache the (adjs, nouns) tuple. Mirrors the file-format and
-    fallback behaviour of ticket-alias-compute.py so backfilled aliases match
-    aliases stored at creation time byte-for-byte.
+    """Cache legacy adjective/noun sections using the creation-time file format.
 
-    When the wordlist file cannot be opened, emits a one-shot WARN to stderr
-    (matching the shell helper's "FALLBACK" stderr signal) and returns empty
-    lists — caller then falls back to the 8-hex alias. Silent fallback hides
-    a real misconfiguration; the diagnostic is printed exactly once per
-    process to avoid log flood under bulk invocation."""
+    An unreadable wordlist warns once per process and returns empty lists, which
+    selects the compatible eight-hex fallback without flooding bulk runs.
+    """
     global _WORDS_CACHE, _WARNED_MISSING
     if _WORDS_CACHE is not None:
         return _WORDS_CACHE
@@ -151,18 +134,12 @@ def _load_v2() -> tuple[list[str], list[str]]:
 
 
 def compute_genesis_alias(ticket_id: str) -> str | None:
-    """Deterministic ``adjective-adjective-animal`` alias for a NEW ticket id.
+    """Return a persisted ``adjective-adjective-animal`` alias for a new ticket.
 
-    Used only at ticket-creation time (the create composer), where ids are always
-    full 16-hex; the alias is persisted onto the CREATE event, so a ticket keeps
-    this format for life. Legacy tickets are unaffected — their read-time backfill
-    still goes through :func:`compute_alias` (adjective-noun-noun).
-
-    Indexes deterministically off the hex id: adjective from hex[0:4], a second
-    adjective from hex[4:8] (bumped to the next word if it collides with the
-    first, so the two adjectives differ), animal from hex[8:12]. Returns ``None``
-    for a too-short (<12 hex) id, and an up-to-8-char hex fallback if the wordlist
-    is unavailable.
+    The first three four-hex groups select both adjectives and the animal; a
+    duplicate adjective advances once. Fewer than 12 hex characters returns
+    ``None``, and an unavailable wordlist yields up to eight hex characters.
+    Legacy read-time aliases continue through :func:`compute_alias`.
     """
     hex_id = ticket_id.replace("-", "")
     if len(hex_id) < 12:

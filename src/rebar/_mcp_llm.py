@@ -1,16 +1,8 @@
-"""LLM-tool registrar for the rebar MCP server.
+"""Register rebar's LLM-backed MCP tools.
 
-``register_llm_tools(mcp, ctx)`` registers the ``REBAR_MCP_ALLOW_LLM``-gated agent
-tools (review_code, scan_spec, verify_completion, review_plan). Split
-out of ``rebar.mcp_server.build_server`` as a pure structural refactor — names,
-signatures, docstrings, and gating are behaviour-identical to the in-line originals.
-
-The tools are always REGISTERED (so they appear in ``list_tools()``); each guards at
-CALL time on ``_allow_llm`` — a live, billable LLM call is refused with a clear error
-unless enabled. ``review_plan`` additionally reads ``_readonly`` to decide whether to
-sign/emit the sidecar. Both helpers are captured off ``ctx`` and rebound to their
-original local names so the tool bodies are copied verbatim. Every tool returns a
-plain ``dict`` (a model-produced result), so no output models are imported here.
+Tools remain discoverable but reject live, billable calls unless
+``REBAR_MCP_ALLOW_LLM`` is enabled. Read-only context suppresses review artifacts and
+signatures. Model-produced results stay plain dictionaries without output-model imports.
 """
 
 from __future__ import annotations
@@ -26,16 +18,11 @@ from rebar._opcert_binding import spawn_context_daemon
 
 
 def _structured_llm_failure(exc: Exception) -> dict:
-    """Convert a raised ``LLMError`` into a STRUCTURED MCP tool RESULT (story
-    authorial-hated-blackbear) rather than letting it propagate as an opaque FastMCP tool
-    error. The driving agent can then branch on ``retryable`` (retry vs. escalate) instead of
-    string-parsing an error. Carries the classifier disposition (``resolution_class`` /
-    ``diagnostic``) when the raised error had one attached (mamba's run seam / preflight).
+    """Turn an ``LLMError`` into a machine-actionable MCP result.
 
-    The ``error`` code is derived from the shared ``error_code_for`` classifier so this second
-    LLM-tier failure site honours the same taxonomy as the generic MCP guard (bug
-    dbca-97ac-ad96-4d6d): a genuine outage stays ``llm_unavailable``, while a workflow
-    caller-input / not-found error carried on an ``LLMError`` subtype gets its precise code."""
+    The shared taxonomy supplies the precise error code; an attached failure outcome
+    contributes resolution class, retryability, and diagnostic instead of opaque prose.
+    """
     from rebar._errors import error_code_for
     from rebar.llm.failure import outcome_of
 
@@ -50,28 +37,22 @@ def _structured_llm_failure(exc: Exception) -> dict:
 
 
 def _with_attestation(result, classify) -> dict:
-    """Attach the shared passed-but-unsigned classification to a ``review_plan`` result.
+    """Attach the shared persisted-attestation classification to a plan result.
 
-    A PASS whose attestation failed to persist is NOT a success — the signature the claim
-    gate consumes was never written — but MCP has no exit code to say so the way the CLI's
-    exit 11 does. The classifier lives below both surfaces
-    (``rebar.llm.plan_review.resign``); this rides its verdict on the payload as
-    ``attestation`` so a driving agent branches on ``retryable``/``recovery_tool`` rather
-    than parsing English (ticket ammonic-amoral-nabarlek)."""
+    MCP has no CLI-style exit 11, so a PASS without the claim-gate signature carries
+    structured retryability and recovery-tool fields instead of appearing successful.
+    """
     if isinstance(result, dict):
         result["attestation"] = classify(result).as_dict()
     return result
 
 
 def _record_verify_completion(result, ticket_id: str, *, readonly: bool):
-    """Record a standalone MCP ``verify_completion`` run on the ticket — or NOTHING in
-    read-only mode. Symmetric with ``review_plan``'s read-only behaviour.
+    """Record a completion verdict, or perform no store write in read-only mode.
 
-    A read-only server must not mutate the store, so recording (which emits the
-    ``COMPLETION_VERDICT`` sidecar, itself an ``append_event``) is SKIPPED ENTIRELY rather than
-    merely left unsigned — a ``READ_ONLY_OPEN_WORLD`` tool performs no writes. A writable server
-    records via the shared producer: an attested PASS signs the reusable attestation and the
-    sidecar captures PASS/FAIL. The recording outcome rides on the result's ``record`` field."""
+    Writable runs emit the PASS/FAIL sidecar and sign reusable attested PASS results;
+    the structured recording outcome is returned in ``record``.
+    """
     if not isinstance(result, dict):
         return result
     if readonly:
@@ -89,12 +70,11 @@ def _record_verify_completion(result, ticket_id: str, *, readonly: bool):
 
 
 def _review_plan_body(ticket_id: str, ref, source, force: bool, *, readonly: bool) -> dict:
-    """The complete synchronous ``review_plan`` computation — the unit the singleflight
-    de-duplicates. Behaviour is identical to the former in-line tool body: run the
-    gate, convert an ``LLMError`` to a structured result, then attach the
-    passed-but-unsigned classification. Extracted to module level so the sync tool body
-    can hand this whole closure to :func:`run_gate_singleflight` and every attached
-    caller shares ONE run's verdict (and ONE signature/sidecar)."""
+    """Run the synchronous plan unit shared by singleflight callers.
+
+    It structures LLM failures and classifies signature persistence so one run produces
+    one verdict, signature, and sidecar for every attached caller.
+    """
     import rebar.llm
     from rebar.llm.plan_review.resign import classify_plan_review_attestation
 
@@ -157,15 +137,12 @@ def _plan_review_sidecar_fields(gate_type: str, result: Any) -> dict[str, Any]:
 def _spawn_gate_daemon(
     handle: GateJobHandle, gate_type: str, ticket_id: str, work: Callable[[], Any]
 ) -> None:
-    """Run ``work`` on a background **daemon thread** (mirrors ``run_workflow``), recording
-    a terminal status to the durable ``.rebar/gate_runs`` index in a ``finally`` so a
-    poller always settles — even if the gate raises before producing a verdict — and
-    releasing any singleflight followers via ``handle.complete``.
+    """Run gate work on a daemon and always settle its index and followers.
 
-    DURABILITY IS LIMITED, exactly like ``run_workflow``: the daemon does not survive the
-    MCP process exiting and there is no reaper, so a process death mid-run leaves the index
-    at ``running`` — which ``gate_status`` settles to a failed diagnostic record (the gate's
-    own attestation, read via the ``durable`` field, remains the authoritative verdict)."""
+    ``spawn_context_daemon`` carries the bound signer context. The daemon cannot
+    survive process exit; ``gate_status`` converts a stranded running index to failure,
+    while any signed gate attestation remains authoritative.
+    """
     import rebar.llm
 
     def _bg() -> None:
@@ -207,10 +184,11 @@ def _start_gate_job(
     force: bool,
     work: Callable[[], Any],
 ) -> dict:
-    """Reserve a singleflight slot, record a ``running`` handle, and (only as the leader)
-    spawn the background gate. Returns ``{job_id, ticket_id, gate_type, status:"running"}``
-    in milliseconds. A concurrent ``*_start`` for the same key ATTACHES — it shares the
-    in-flight ``job_id`` and does NOT launch a second billable run (bug d80d Phase 2)."""
+    """Reserve a slot and let only its leader record and spawn the gate.
+
+    Return ``{job_id, ticket_id, gate_type, status: "running"}`` immediately;
+    duplicate starts attach to its ID without launching another billable run.
+    """
     import rebar.llm
 
     handle = begin_gate_job(
@@ -222,10 +200,8 @@ def _start_gate_job(
         readonly=readonly,
         force=force,
     )
-    # Only the LEADER writes the ``running`` handle and spawns the daemon. A follower
-    # (``is_new=False``) attaches to the in-flight run and must NOT re-record: the index is
-    # last-writer-wins, so a follower writing ``running`` + a fresh ``started_at`` could
-    # clobber a leader daemon's already-written TERMINAL record (bug d80d Phase 2 advisory).
+    # Followers neither spawn nor rewrite the last-writer-wins index, which could replace
+    # an already-terminal leader record with a fresh running value.
     if handle.is_new:
         rebar.llm.record_gate_run(
             {
@@ -246,12 +222,7 @@ def _start_gate_job(
 
 
 def _register_gate_start_tools(mcp, ann, allow_llm, readonly) -> None:
-    """Register the async ``*_start`` gate tools (bug d80d Phase 2).
-
-    A module-level registrar rather than two more nested ``def``\\s inside
-    ``register_llm_tools``: each nested tool costs that already-near-ceiling function a
-    McCabe point (the shrink-only complexity ratchet caps it), so the Phase-2 pair lives
-    here — the same factoring ``_mcp_reads`` uses for ``_register_plan_review_tools``."""
+    """Register async gate starters outside the complexity-capped main registrar."""
 
     @mcp.tool(annotations=ann["READ_ONLY_OPEN_WORLD"])
     async def review_plan_start(
@@ -260,34 +231,21 @@ def _register_gate_start_tools(mcp, ann, allow_llm, readonly) -> None:
         source: str | None = None,
         force: bool = False,
     ) -> dict:
-        """Start the plan-review gate ASYNC; returns {job_id, ticket_id, gate_type,
-        status:'running'} IMMEDIATELY (in ms) — the review runs on a background daemon
-        thread, so it OUTLIVES the client's request deadline. This is the timeout-proof
-        way to run the gate: unlike the sync ``review_plan`` (which the ~60s client
-        deadline can cut off with a ``-32001`` while the server keeps running), the
-        caller gets a durable handle instead of a timeout, then POLLS —
-        ``plan_review_status(ticket_id)`` for the durable attestation verdict, or
-        ``gate_status(job_id)`` for the run handle (running -> passed/failed) plus
-        ``findings.readable`` for the REVIEW_RESULT sidecar receipt. PREFER this for a
-        long review; the sync ``review_plan`` remains the dedup-protected fallback.
+        """Start plan review and immediately return
+        ``{job_id, ticket_id, gate_type, status: "running"}``.
 
-        A duplicate ``review_plan_start`` for the same ticket+basis while a run is in
-        flight ATTACHES to it — same ``job_id``, no second billable pass (bug d80d).
-        ``force=True`` starts a fresh run (bypasses de-dup). The verdict persists to the
-        durable event log (the signed attestation); the ``.rebar/gate_runs`` index is a
-        local handle only. DURABILITY IS LIMITED like ``run_workflow``: the daemon does
-        not survive the process exiting and there is no reaper.
-
-        DISABLED unless REBAR_MCP_ALLOW_LLM=1 (it makes live, billable LLM calls)."""
+        Prefer this timeout-proof path, then poll ``plan_review_status`` for the durable
+        attestation or ``gate_status`` for run state and sidecar readability. Duplicate
+        ticket/basis starts share a job; ``force=True`` creates a fresh one. The local
+        index and daemon do not survive process exit. Requires ``REBAR_MCP_ALLOW_LLM=1``.
+        """
         if not allow_llm():
             raise ValueError(
                 "review_plan_start is disabled: it makes live, billable LLM calls. "
                 "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
             )
         ro = readonly()
-        # ``_start_gate_job`` resolves the basis SHA via ``begin_gate_job`` (a git shell-out)
-        # and writes the run index — both BLOCKING. Offload off the event loop so a concurrent
-        # request is not stalled (this tool is ``async def`` but must not block the loop).
+        # Basis resolution and index writes block, so keep them off the event loop.
         import anyio.to_thread  # deferred: keep this module importable with core deps only
 
         return await anyio.to_thread.run_sync(
@@ -311,28 +269,15 @@ def _register_gate_start_tools(mcp, ann, allow_llm, readonly) -> None:
         ref: str | None = None,
         source: str | None = None,
     ) -> dict:
-        """Start the completion-verifier gate ASYNC; returns {job_id, ticket_id,
-        gate_type, status:'running'} IMMEDIATELY (in ms) — the verification runs on a
-        background daemon thread, so it OUTLIVES the client's request deadline. The
-        timeout-proof way to run the close gate: the caller gets a durable handle
-        instead of the ``-32001`` the sync ``verify_completion`` risks, then POLLS —
-        ``verify_completion_status(ticket_id)`` for the durable attestation verdict, or
-        ``gate_status(job_id)`` for the run handle (running -> passed/failed). PREFER
-        this for a long verification; sync ``verify_completion`` is the dedup-protected
-        fallback.
+        """Start completion verification and immediately return
+        ``{job_id, ticket_id, gate_type, status: "running"}``.
 
-        ``graph`` is the SAME tri-state as sync ``verify_completion``: unspecified
-        (``None``) uses the ticket-type default (an epic verifies its whole subtree),
-        while an explicit ``True``/``False`` forces subtree/own-criteria. Passing the
-        tri-state through unchanged also keeps the de-dup variant key identical to the
-        sync tool's, so a start and its sync equivalent ATTACH to one another's run.
-
-        A duplicate ``verify_completion_start`` for the same ticket+basis while a run is
-        in flight ATTACHES to it — same ``job_id``, no second billable pass (bug d80d).
-        The verdict persists to the durable event log; the ``.rebar/gate_runs`` index is
-        a local handle only, with the same limited durability as ``run_workflow``.
-
-        DISABLED unless REBAR_MCP_ALLOW_LLM=1 (it makes live, billable LLM calls)."""
+        Prefer this path, then poll ``verify_completion_status`` for the durable verdict
+        or ``gate_status`` for run state. ``graph=None`` uses the type default; booleans
+        force subtree or own-criteria verification and share the sync dedup key. Duplicate
+        starts attach to one job. Local daemon/index durability ends with the process.
+        Requires ``REBAR_MCP_ALLOW_LLM=1``.
+        """
         if not allow_llm():
             raise ValueError(
                 "verify_completion_start is disabled: it makes a live, billable LLM call. "
@@ -432,52 +377,25 @@ def register_llm_tools(mcp, ctx) -> None:
         ref: str | None = None,
         source: str | None = None,
     ) -> dict:
-        """Verify a ticket's completion requirements are met -> a completion_verdict dict
-        {verdict: "PASS"|"FAIL", findings[], summary?, target, reviewers, runner, model,
-        trace_id, source, verified_at_sha, signable}. Checks every acceptance/success/close
-        criterion + definition of done (for bugs, that the bug is resolved) against the
-        implementation; on FAIL, each finding carries the failing criterion, an explanation,
-        and a source-code citation. In READONLY mode this runs a pure read (no sign, no
-        sidecar); a writable server records (see below).
+        """Verify applicable criteria and return a cited ``{verdict: PASS|FAIL,
+        findings, target, reviewers, runner, model, trace_id, source, verified_at_sha,
+        signable}`` result.
 
-        ``graph`` is a tri-state: unspecified (``None``) uses the ticket-type default
-        (an epic verifies its whole subtree; other types verify only their own criteria),
-        while an explicit ``True``/``False`` forces subtree/own-criteria verification —
-        so ``graph=False`` on an epic verifies just the epic's own criteria.
-
-        ``source=attested`` (default) verifies a snapshot pinned at ``ref`` (default
-        ``origin/main``) — reproducible, branch-independent — and records ``verified_at_sha``;
-        ``source=local`` verifies the in-place checkout (never signed). ``REBAR_ROOT`` only
-        locates the object DB. (The CLI close gate verifies attested HEAD; this tool defaults
-        to origin/main for distributed verification of merged code.)
-
-        RECORDS ITS RESULT ON THE TICKET unless the server is read-only: an attested,
-        certifiable PASS SIGNS a completion-verifier attestation (which a later same-``ref``
-        close REUSES to skip a duplicate, billable verifier run), and both PASS and FAIL emit
-        the COMPLETION_VERDICT sidecar. Recording is best-effort — its outcome rides on the
-        result's ``record`` field (``{signed, cause, sidecar_written, error}``) and never
-        changes the verdict. A ``local`` verdict is never signed.
-
-        IN-FLIGHT DE-DUPLICATION (bug d80d): a second concurrent call for the same
-        ticket + basis + variant while a verify is already running ATTACHES to that run and
-        shares its verdict — it does NOT start a second billable LLM pass — so a
-        client-side ``-32001`` timeout followed by a retry no longer double-charges. Disable
-        with ``REBAR_MCP_DEDUP=0``. For a long verify, prefer ``verify_completion_start`` +
-        poll (see its docstring) so the caller gets a durable job handle instead of a
-        transport timeout.
-
-        DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes a live, billable LLM call and reaches
-        the network + filesystem. Needs the 'agents' extra + a model API key. Returns a plain
-        dict and advertises NO outputSchema by design — the result is model-produced, so it is
-        a documented NO_SCHEMA_EXEMPT and is not auto-driven in CI."""
+        ``graph=None`` uses the type default (epics include descendants); booleans force
+        subtree or own criteria. Attested source defaults to ``origin/main`` and can sign;
+        local source cannot. Writable servers best-effort record every sidecar and sign a
+        reusable attested PASS, reporting that outcome in ``record``; readonly servers do
+        neither. Concurrent identical calls share one run; prefer
+        ``verify_completion_start`` for a durable client handle. Requires the agents extra,
+        model credentials, and ``REBAR_MCP_ALLOW_LLM=1``. The model result intentionally
+        has no output schema.
+        """
         if not _allow_llm():
             raise ValueError(
                 "verify_completion is disabled: it makes a live, billable LLM call. "
                 "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
             )
-        # The tool body stays SYNC (the certified-tool in-flight gauge + SIGTERM drain
-        # require it — _mcp_health.instrument_certified_tools fails loud on an async
-        # certified tool); the singleflight de-dups concurrent worker threads underneath.
+        # Stay synchronous so certified-op instrumentation can gauge worker-thread calls.
         ro = _readonly()
         return run_gate_singleflight(
             "verify_completion",
@@ -497,60 +415,27 @@ def register_llm_tools(mcp, ctx) -> None:
         source: str | None = None,
         force: bool = False,
     ) -> dict:
-        """Run the plan-review gate on a ticket -> a plan_review_verdict dict
-        {verdict: "PASS"|"BLOCK"|"INDETERMINATE", blocking[], advisory[], coaching[],
-        indeterminate[], coverage, signature?, source, verified_at_sha, ...}. A deterministic
-        Layer-1 floor (P1-P11) plus a four-pass (find -> verify -> decide -> coach) review of the
-        ticket's whole plan — the inverse of verify_completion. On a non-blocking PASS it signs a
-        plan-review attestation (so a subsequent claim passes the gate when enabled) and emits
-        the REVIEW_RESULT sidecar; in READONLY mode it runs a pure read (no sign, no sidecar).
+        """Review a whole plan through the P1-P11 find/verify/decide/coach passes.
 
-        When the ticket is UNCHANGED and already carries a still-valid plan-review
-        attestation, the review SHORT-CIRCUITS (no LLM call) and reuses it; pass
-        ``force=True`` to bypass that and force a full re-review.
+        Returns ``{verdict: PASS|BLOCK|INDETERMINATE, blocking, advisory, coaching,
+        indeterminate, coverage, signature?, source, verified_at_sha}``.
 
-        NOT-CLAIMABLE FAST-FAIL (no LLM): if the ticket cannot be claimed yet — status
-        ``closed``/``idea``/``blocked``, or ``open`` but still blocked by an unclosed
-        dependency — it returns an unsigned INDETERMINATE verdict (``coverage.llm_ran=false``,
-        an ``indeterminate`` finding ``ticket-not-claimable``) instead of a billable review,
-        since the review's only product is a claim attestation the ticket cannot use yet.
-        ``in_progress`` tickets are never fast-failed and ``force=True`` bypasses this too.
-
-        ``source=attested`` (default) reviews a snapshot pinned at ``ref`` (default
-        ``origin/main``) and binds that SHA into the attestation so the claim gate re-hashes the
-        SAME basis; ``source=local`` reviews the in-place checkout. ``REBAR_ROOT`` only locates
-        the object DB.
-
-        PASSED-BUT-UNSIGNED: a PASS whose attestation failed to persist is NOT a success — a
-        subsequent ``claim`` still fails the gate, because the signature the gate consumes was
-        never written. Every result therefore carries ``attestation``
-        {signed, retryable, cause, error, recovery_tool, message}: branch on
-        ``attestation.retryable`` (do NOT proceed to ``claim``) and call the tool named by
-        ``attestation.recovery_tool`` — ``sign_review`` for a transient sign failure (cheap, no
-        LLM), or ``review_plan`` again when ``cause`` is ``plan_changed`` /
-        ``relation_unreadable`` / ``sidecar_lost`` (the last meaning nothing durable survived,
-        so there is nothing to re-sign). ``cause`` is ``signed``/``skipped`` when nothing is
-        wrong.
-
-        IN-FLIGHT DE-DUPLICATION (bug d80d): a second concurrent call for the same
-        ticket + basis while a review is already running ATTACHES to that run and shares its
-        verdict — it does NOT start a second billable LLM review — so a client-side ``-32001``
-        timeout followed by a retry no longer double-charges. ``force=True`` bypasses de-dup
-        (a forced fresh review must not attach); disable entirely with ``REBAR_MCP_DEDUP=0``.
-        For a long review, prefer ``review_plan_start`` + ``plan_review_status`` poll (see
-        those docstrings) so the caller gets a durable job handle instead of a timeout.
-
-        DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes live, billable LLM calls and reaches
-        the network + filesystem. Needs the 'agents' extra + a model API key. Returns a plain
-        dict and advertises NO outputSchema by design (model-produced result; NO_SCHEMA_EXEMPT)."""
+        A writable PASS signs the claim attestation and emits REVIEW_RESULT; readonly is
+        pure. Unchanged valid attestations short-circuit unless ``force=True``. Tickets
+        that cannot be claimed fast-fail unsigned and without an LLM, except in-progress
+        or forced work. Attested source binds the reviewed SHA; local reads the checkout.
+        A PASS is unusable until ``attestation.signed``: follow its structured retry and
+        recovery tool instead of claiming. Concurrent identical reviews share one run;
+        force bypasses dedup, and ``review_plan_start`` is preferred for long calls.
+        Requires the agents extra, model credentials, and ``REBAR_MCP_ALLOW_LLM=1``; the
+        model result intentionally has no output schema.
+        """
         if not _allow_llm():
             raise ValueError(
                 "review_plan is disabled: it makes live, billable LLM calls. "
                 "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
             )
-        # The tool body stays SYNC (see verify_completion): the singleflight de-dups
-        # concurrent worker threads while the certified-tool gauge keeps counting billable
-        # work. force=True bypasses de-dup, mirroring the gate's own force short-circuit bypass.
+        # Stay synchronous for certified-op gauging; force bypasses review reuse and dedup.
         ro = _readonly()
         return run_gate_singleflight(
             "plan_review",
@@ -565,18 +450,12 @@ def register_llm_tools(mcp, ctx) -> None:
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def sign_review(ticket_id: str) -> dict:
-        """Cheaply (re)persist the plan-review attestation for an already-computed, still-valid
-        PASS verdict from the latest REVIEW_RESULT sidecar -> {ok, signed, ticket_id, verdict,
-        reason, signature?}. WITHOUT re-running the multi-pass LLM review (no LLM, no network).
+        """Persist a current PASS sidecar without an LLM and return
+        ``{ok, signed, ticket_id, verdict, reason, signature?}``.
 
-        The recovery path (ticket middle-actinium-thrush) for a review_plan that computed a
-        signable PASS but failed to persist the signature the claim gate consumes. REFUSES
-        (ok=False) with a reason when there is no PASS sidecar, or the plan changed since the
-        review (stale — run review_plan for a fresh verdict). NEVER signs a non-PASS / degraded /
-        stale verdict.
-
-        Unlike review_plan this is NOT gated on REBAR_MCP_ALLOW_LLM (it makes no LLM call), but it
-        WRITES a SIGNATURE event, so it is disabled in REBAR_MCP_READONLY mode."""
+        Missing, stale, degraded, and non-PASS sidecars are refused with a reason.
+        LLM enablement is unnecessary, but readonly mode disables this signature write.
+        """
         if _readonly():
             raise ValueError(
                 "sign_review is disabled: it writes a SIGNATURE event (readonly mode)."
