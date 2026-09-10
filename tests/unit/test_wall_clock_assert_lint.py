@@ -1,17 +1,7 @@
-"""Wall-clock upper-bound assert lint (ticket 1e95-fc5c-bca8-44c7).
+"""Verify the code-review detector rejects upper-bound wall-clock assertions.
 
-DET code-review gate over ``tests/**``: an upper-bound wall-clock assert
-(``assert elapsed < N`` and kin) is the proven CI flake class under runner
-contention (bugs 19d7, 5e94, edfe, 85c3). Two escapes:
-
-- ``# timing: hang-guard — <reason>`` on the assert (reason mandatory), or
-- the perf-lane CI-exclusion guard ``@pytest.mark.skipif(os.environ.get("CI")
-  == "true", ...)`` on the enclosing test (the bare ``@pytest.mark.benchmark``
-  marker is NOT an escape — no CI invocation filters it out).
-
-These tests drive the lint against synthetic trees under tmp_path; the
-fixtures deliberately contain live upper-bound asserts, so this module is the
-lint's EXCLUDED_FILES fixture corpus (the check_comment_hygiene.py idiom).
+A documented hang-guard comment or the CI exclusion marker permits intentional bounds. This
+fixture module is excluded because it contains the detector's synthetic examples.
 """
 
 from __future__ import annotations

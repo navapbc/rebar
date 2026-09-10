@@ -1,20 +1,8 @@
-"""The step-budget diagnostic must separate a runaway loop from genuine breadth (a89d).
+"""Verify run-shape diagnostics distinguish repeated tool-call cycles from breadth.
 
-A step-budget exhaustion looks identical in the raw counters whether the agent did a lot
-of legitimate work or span in a loop, and the step count provably cannot tell them apart:
-``runner.py`` sets ``request_limit = ceil(max_iter/2)`` against
-``tool_calls_limit = max(8, max_iter)``, so a one-tool-call-per-turn loop trips the request
-ceiling first — exactly like careful sequential work does.
-
-``run_shape`` therefore reduces each tool call to a ``tool_name:sha256(args)[:8]``
-signature and summarizes the sequence. The arguments are HASHED, never recorded, so the
-module's stated privacy contract (prompts, tool arguments and tool results are excluded
-from the durable gate-error record) is preserved — a digest plus the tool name, which is a
-fixed vocabulary, carries the signal without the content.
-
-This mattered: on the real 9fd4 investigation the summary read
-``tool_calls=475 distinct=451 max_consecutive_repeat=1``, which refuted a loop hypothesis
-that the counters alone could not have settled.
+Signatures combine tool names with argument hashes, preserving repetition signals without
+storing arguments. Windowed diversity covers multi-call cycles that consecutive-repeat counts
+miss.
 """
 
 from __future__ import annotations
@@ -127,17 +115,8 @@ def test_no_tool_calls_yields_zeroed_signals() -> None:
     assert summary["top_repeated_tool_calls"] == []
 
 
-# ---------------------------------------------------------------------------
-# 70bc: the windowed distinct-ratio — the cycle-blind-spot fix.
-#
-# max_consecutive_repeat only sees the degenerate 1-cycle (a call repeated
-# back-to-back). A k-cycle with k >= 2 has NO adjacent duplicates, so a real
-# 4-call loop scores 1 while a healthy exploratory run scores 5. The windowed
-# distinct-ratio (set cardinality over the trailing REPETITION_WINDOW calls,
-# divided by REPETITION_WINDOW) is order-insensitive and catches every cycle
-# length. Below the window the field is None: too small a sample to accuse a
-# loop, so consumers can never trip on short runs.
-# ---------------------------------------------------------------------------
+# Windowed distinct ratios detect multi-call cycles that consecutive-repeat counts miss.
+# Runs shorter than REPETITION_WINDOW report None to avoid classifying small samples.
 
 
 def test_a_4_cycle_trips_the_windowed_distinct_ratio() -> None:

@@ -1,10 +1,7 @@
-"""The uv-pin gate must FAIL on skew, not merely pass on the happy tree [rebar:56b7-b21a-c8ab-4afc].
+"""Verify the uv-pin gate rejects supported skew and reports the offending location.
 
-A guard that can only ever pass has validated nothing. Each test here builds a minimal tree,
-introduces exactly ONE way the single-sourced, local-action pin can be defeated, and asserts the
-checker rejects it and names the offending location — so the gate's failing state is proven
-rather than assumed. The happy-path test additionally runs against this repository's real root,
-so the gate and the tree it governs cannot drift apart silently.
+Synthetic trees prove failure states. A repository check keeps the guarded configuration aligned
+with the checker.
 """
 
 from __future__ import annotations
@@ -321,13 +318,9 @@ def test_make_lint_invokes_the_gate() -> None:
 
 
 def test_real_repository_dockerfiles_do_not_float_the_uv_tag() -> None:
-    """AC1/AC3 -- no container build may resolve uv from a moving upstream tag.
+    """Verify Dockerfiles pin uv to the repository-required version.
 
-    ``:latest`` moved to 0.12.9 while ``[tool.uv] required-version`` stayed at 0.12.7, and
-    ``uv sync`` reads that key itself: every image build died with "Required uv version
-    `==0.12.7` does not match the running version `0.12.9`". The defect is a TIME BOMB by
-    construction -- it fires when upstream publishes, with no change to this repository -- so
-    the tree itself, not only a fixture, must be asserted free of floating toolchain tags.
+    This prevents upstream tag changes from breaking image builds without a repository change.
     """
     offenders = [
         f"{path}:{number}"

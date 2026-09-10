@@ -1,18 +1,7 @@
-"""The Data Center setup documentation, checked against the repo (story J8, epic e369).
+"""Check repository-verifiable Data Center setup documentation without a Jira harness.
 
-The half of J8's "the documented commands have been executed" criterion that needs NO
-live instance. A typo'd extra name or a config block that no longer selects the DC
-backend is a documentation defect fully discoverable from the repository, so making it
-wait on a Dockerized Jira would leave a cheap check unmade — and, on a workstation
-without the harness, unmade indefinitely.
-
-WHY THIS IS NOT IN ``tests/external/live_jira_dc/``. It was, briefly, and that was
-wrong: every test in that directory inherits the session-scoped autouse
-``_jira_dc_harness_ready`` fixture, which waits out the full 20-minute readiness budget
-and then raises when no harness answers. An unmarked test there does not run
-harness-free — it blocks for 20 minutes and errors (measured: 1208s). The live half of
-the criterion stays in ``test_user_guide_commands.py``; this is the half that can be
-answered from the repo alone.
+These tests validate install extras and TOML backend selection. Instance-backed command
+coverage remains in ``test_user_guide_commands.py``.
 """
 
 from __future__ import annotations

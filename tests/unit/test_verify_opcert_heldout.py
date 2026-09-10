@@ -1,13 +1,8 @@
-"""Held-out oracle for the op-cert merge-gate (story 4214). NOT shown to the implementer.
+"""Verify operation-certificate enforcement, advisory, and grandfathering outcomes.
 
-* enforced + missing cert → exit 1;
-* enforced + foreign (non-pinned) cert → exit 1;
-* no required environment → advisory (exit 0) even with a missing cert;
-* grandfathered ticket (closed before the `--since` boundary) → exit 0 despite a missing cert;
-* the shipped `verify-identity.yml` gains a `rebar verify-opcert` step;
-* the workflow carries a CI-trigger audit comment enumerating every `on:` trigger.
-
-Real ssh-keygen + a real rebar store + the real `rebar verify-opcert` subprocess.
+Missing, foreign, and stale material must fail when enforcement applies. The workflow runs
+``rebar verify-opcert`` for every audited trigger. Tests use ssh-keygen and a repository-backed
+ticket store.
 """
 
 from __future__ import annotations
@@ -197,15 +192,10 @@ def test_grandfathered_ticket_passes_without_cert(
     assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
 
 
-# NOTE (fail-closed on an unresolvable anchor — LLM-Review security finding, verify_opcert.py):
-# a CLOSED ticket whose terminal close-STATUS event has been compacted into a SNAPSHOT has an
-# unresolvable enforcement anchor. The fix does NOT drop it from scope (that was fail-OPEN); it
-# leaves close_commit=None and lets `_is_enforced(None, since_ref, tracker)` FAIL CLOSED (its
-# documented + separately-tested contract: `commit_sha is None → return True`). We deliberately do
-# NOT add an end-to-end test here: reliably forcing `compact()` to fold the *terminal* STATUS event
-# is env/threshold-dependent and would yield a flaky-or-vacuous test (worse than none). The
-# behaviour is covered by (a) this code path routing to `_is_enforced`, and (b) that function's own
-# fail-closed test in the identity suite.
+# A compacted close event leaves no resolvable enforcement anchor.
+# `_is_enforced` treats a missing anchor as enforced so verification fails closed.
+# Function-level coverage pins this rule because compacting the terminal event in this fixture
+# would depend on environment-sensitive thresholds.
 
 
 # ---- authoritative material: self-reported material is not trusted (security regression) ------

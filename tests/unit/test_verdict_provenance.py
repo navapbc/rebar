@@ -1,11 +1,7 @@
-"""S5 (343b): signed verdicts stamp provider, endpoint, tier and effective capabilities.
+"""Verify signed verdicts record provider provenance beside the model identifier.
 
-A signed gate verdict used to record only a model STRING, so a verdict produced behind an
-opaque gateway still claimed it came from ``anthropic:claude-opus-4-8``. These tests pin the
-ADDITIVE ``provider_provenance`` object written alongside that string by all THREE sidecars.
-
-Assertions are on OBSERVABLE payload contents, never on internal names, so a behaviour-
-preserving rename/extraction does not break them.
+The additive record contains provider, endpoint host, tier, and effective capabilities.
+Assertions target serialized payload values so internal refactoring does not weaken the contract.
 """
 
 from __future__ import annotations
@@ -51,9 +47,7 @@ def test_provenance_record_carries_provider_model_tier_and_capabilities() -> Non
 
 # ── HELD OUT from the implementer ─────────────────────────────────────────────────────────
 def test_custom_endpoint_is_best_effort_and_records_host_only() -> None:
-    """HELD OUT. A configured base_url means rebar is talking to an endpoint it does not
-    vouch for, so the tier drops to ``best_effort`` and the HOST is recorded — never the
-    full URL, which can carry a path, a port-scoped secret, or credentials."""
+    """Verify a configured endpoint records ``best_effort`` tier and only its hostname."""
     rec = _provenance(
         provider="openai",
         model="openai:local-model",
@@ -67,11 +61,7 @@ def test_custom_endpoint_is_best_effort_and_records_host_only() -> None:
 
 
 def test_credentials_in_base_url_never_reach_the_record() -> None:
-    """HELD OUT — the security oracle. ``urlparse(...).hostname`` strips userinfo;
-    ``.netloc`` RETAINS ``user:secret@`` and is the wrong accessor (note runner.py uses
-    ``.netloc`` for a truthiness check — copying that here would leak). The whole record is
-    serialized and searched, so a credential smuggled into ANY field is caught, not just
-    endpoint_host."""
+    """Verify serialized provenance excludes credentials embedded in an endpoint URL."""
     rec = _provenance(
         provider="openai",
         model="openai:gpt-4o",
@@ -104,19 +94,14 @@ def test_api_key_is_never_carried_in_the_record() -> None:
     ],
 )
 def test_first_class_providers_are_tiered_first_class(provider, model, expected_tier) -> None:
-    """HELD OUT. Bedrock is first-class as of this epic, so a Bedrock verdict must NOT be
-    tiered best_effort — the whole point of the field is letting a consumer reject an
-    off-tier verdict, which is worthless if the tiering is wrong."""
+    """Verify Bedrock uses the ``first_class`` tier expected by verdict consumers."""
     rec = _provenance(provider=provider, model=model, base_url=None, caps=CAPS)
     assert rec["tier"] == expected_tier
     assert rec["provider"] == provider
 
 
 def test_capabilities_are_the_passed_record_not_a_recomputation() -> None:
-    """HELD OUT. `runner.run()` resolves caps ONCE and the object-vs-string distinction there
-    is load-bearing (it caused a prior regression). Provenance must stamp THAT record; a
-    second `capabilities_for` call could silently diverge from what actually drove the run.
-    A deliberately unusual record proves the values were carried, not re-derived."""
+    """Verify provenance carries the resolved capability record without recomputing it."""
     odd = ModelCapabilities(
         native_structured_output=False,
         prompt_cache_style="bedrock",
@@ -130,10 +115,8 @@ def test_capabilities_are_the_passed_record_not_a_recomputation() -> None:
         "prompt_cache_style": "bedrock",
         "supports_thinking": True,
         "supports_temperature": False,
-        # Bug 129e. `_provenance` here passes no `web`, i.e. the request did not attach web
-        # access — so the record must say "off" and must NOT leak the model's native-tool
-        # capability as if it had been used. `native_web_search=True` above is deliberately
-        # contradictory for exactly that reason.
+        # `_provenance` received no web attachment, so the record must report `off`
+        # even when the model profile supports native web search.
         "web_access": "off",
     }
 
@@ -158,14 +141,7 @@ def _credentialed_provenance():
 
 
 def test_no_credential_material_in_the_persisted_completion_payload() -> None:
-    """343b AC: no credential material from `base_url` or `api_key` appears anywhere in the
-    PERSISTED sidecar payload.
-
-    This asserts the PAYLOAD, not the provenance record. They are different artifacts: the record
-    is one key inside a payload that also carries model, runner, coverage and findings, and the
-    configured `api_key` flows near that path independently — so a record-only assertion would
-    pass even if a credential leaked through some OTHER field. The whole payload is serialized and
-    searched."""
+    """Verify serialized completion payloads exclude endpoint and API-key credentials."""
     from rebar.llm import completion_sidecar
 
     verdict = {
@@ -187,14 +163,7 @@ def test_no_credential_material_in_the_persisted_completion_payload() -> None:
 
 
 def test_legacy_payload_without_provenance_still_builds_and_signs() -> None:
-    """343b AC: a legacy payload lacking `provider_provenance` still loads and its signature
-    verifies.
-
-    This is the whole justification for the additive-only design. NOTE the signing seam: the
-    payload is NOT what gets signed — signing binds (ticket_id, manifest), a list of "key: value"
-    lines — so "the signature still verifies" is a claim about the MANIFEST. A verdict carrying no
-    provenance must therefore (1) still build a valid payload, and (2) still produce a signable
-    manifest, with the absence read as "unknown, legacy" rather than as an error."""
+    """Verify payloads without provenance still build and produce verifiable manifests."""
     from rebar.llm import completion_sidecar
 
     legacy = {
@@ -213,15 +182,8 @@ def test_legacy_payload_without_provenance_still_builds_and_signs() -> None:
     assert payload.get("provider_provenance") is None
 
 
-# ── bug 7fe2: a `gateway/*` provider must not sign as first_class ─────────────────────────
-#
-# `KNOWN_PROVIDER_NAMES` (config.py) admits five `gateway/*` qualifiers, and they carry NO
-# `base_url` — the gateway URL is resolved inside pydantic-ai from its own env/api-key. The
-# tier was derived SOLELY from `base_url`, so every byte could traverse Pydantic's AI Gateway
-# (an intermediary that can rewrite the request — the Vercel AI Gateway has been documented
-# silently downgrading Anthropic's 1-hour prompt cache) while the SIGNED verdict claimed
-# `first_class`. The two-tier field exists so an attestation consumer can reject an off-tier
-# verdict; a wrong tier makes it worthless.
+# Gateway tiering uses membership in the admitted provider registry.
+# Unrecognized gateway-shaped names receive no gateway semantics.
 
 
 def _gateway_provider_names() -> list[str]:
@@ -239,26 +201,18 @@ def test_the_gateway_provider_family_is_non_empty() -> None:
 
 
 def test_the_enumerated_gateway_set_matches_the_config_registry_exactly() -> None:
-    """THE DRIFT PIN, and the reason the tier rule can be pure MEMBERSHIP.
+    """Verify the enumerated gateway set matches the admitted provider registry.
 
-    `capabilities._GATEWAY_PROVIDER_NAMES` restates the `gateway/*` members of
-    `config.KNOWN_PROVIDER_NAMES` instead of filtering them out of it, because filtering would
-    itself need the prefix test that f184's attested criterion bans inside `capabilities.py`
-    (and that epic 061c's registry-membership decision bans generally). Restating is only safe
-    if the two cannot drift, so a sixth gateway added to the registry fails HERE until it is
-    listed — which is a loud build failure rather than a verdict silently signed `first_class`.
-
-    This test may use `startswith`; the ban is on `capabilities.py`, not on its tests."""
+    This keeps membership-based tiering synchronized without prefix logic in
+    ``capabilities.py``.
+    """
     from rebar.llm.capabilities import _GATEWAY_PROVIDER_NAMES
 
     assert set(_GATEWAY_PROVIDER_NAMES) == set(_gateway_provider_names())
 
 
 def test_an_unadmitted_gateway_lookalike_is_not_granted_gateway_semantics() -> None:
-    """The membership dividend. Under prefix matching any string beginning `gateway/` — a typo,
-    a hand-edited config, a future name rebar does not model — silently acquired gateway
-    semantics. Under membership it does not, and `KNOWN_PROVIDER_NAMES` is the single upstream
-    gate that stops such a qualifier being configurable at all."""
+    """Verify an unadmitted ``gateway/`` lookalike receives no gateway semantics."""
     from rebar.llm.capabilities import _GATEWAY_PROVIDER_NAMES
     from rebar.llm.config import KNOWN_PROVIDER_NAMES
 
@@ -282,9 +236,7 @@ def test_gateway_provider_without_base_url_is_best_effort(provider: str) -> None
 
 
 def test_gateway_tier_is_not_decided_by_the_provider_names_shape() -> None:
-    """Contrast case: the rule is set MEMBERSHIP, not name shape. No amount of the token
-    'gateway' in a provider name downgrades a direct provider — including a bare `gateway`, a
-    name that merely contains it, and one that ends with it."""
+    """Verify provider name shape does not change tier without gateway membership."""
     for direct in ("mygateway", "openai-gateway", "gateway", "gateway-anthropic"):
         rec = _provenance(provider=direct, model=f"{direct}:m", base_url=None, caps=CAPS)
         assert rec["tier"] == "first_class", f"{direct} is not an enumerated gateway qualifier"
@@ -304,15 +256,11 @@ def test_direct_providers_with_no_base_url_stay_first_class(provider: str) -> No
 def test_gateway_endpoint_host_stays_none_unless_a_base_url_was_actually_configured(
     provider: str,
 ) -> None:
-    """THE RECORDED DECISION for this bug: `endpoint_host` is NOT back-filled with a guessed
-    gateway hostname.
+    """Verify gateway provenance omits ``endpoint_host`` when no ``base_url`` was observed.
 
-    pydantic-ai resolves the gateway URL from `PYDANTIC_AI_GATEWAY_BASE_URL` / `PAIG_BASE_URL`
-    or infers it from the API KEY (`providers/gateway.py`), none of which this seam observes.
-    Synthesising `gateway.pydantic.dev` here would put an UNVERIFIED fact into a SIGNED record
-    — the precise failure mode the tier field exists to prevent. The intermediary is instead
-    named by the `provider` field (`gateway/anthropic`) and flagged by `tier`, both of which
-    are observed. When a `base_url` IS configured, the real host is recorded as before."""
+    Provider and tier identify the intermediary without placing an inferred hostname in the
+    signed record.
+    """
     rec = _provenance(provider=provider, model=f"{provider}:m", base_url=None, caps=CAPS)
     assert rec["endpoint_host"] is None
     assert rec["provider"].startswith("gateway/"), "the record still names the intermediary"
@@ -341,10 +289,7 @@ def test_gateway_credentials_in_a_configured_base_url_never_reach_the_record() -
     assert rec["endpoint_host"] == "gw.internal"
 
 
-# ── 8274: bedrock region provenance — the resolved region + its source enter the record ────
-# rebar resolves the Bedrock region itself (REBAR_LLM_BEDROCK_REGION > AWS_DEFAULT_REGION >
-# AWS_REGION > boto3/profile; `bedrock_model.resolve_bedrock_region`); the verdict records
-# WHICH source supplied it so an operator can tell a knob-set run from an env-inherited one.
+# Bedrock provenance records the resolved region and the source that supplied it.
 
 
 def _strip_region_env(monkeypatch) -> None:
@@ -368,9 +313,7 @@ def test_bedrock_record_carries_the_region_and_the_rebar_knob_as_source(monkeypa
 
 @pytest.mark.parametrize("source", ["repo-config", "cli"])
 def test_bedrock_record_carries_the_configured_regions_true_origin(monkeypatch, source) -> None:
-    """cda8: a knob value that came from the config-file table (or the CLI) is labeled by its
-    TRUE origin — `bedrock_region_source`, resolved by the SAME `LLMConfig.from_env` pass that
-    produced the value and threaded by the runner — never blanket-labeled as the env var."""
+    """Verify a configured Bedrock region retains its resolved configuration source."""
     _strip_region_env(monkeypatch)
     rec = _provenance(
         provider="bedrock",
@@ -424,10 +367,10 @@ def test_bedrock_record_names_the_env_var_that_supplied_the_region(
 def test_bedrock_record_omits_region_keys_when_only_a_profile_could_resolve(
     monkeypatch,
 ) -> None:
-    """When nothing in rebar's chain resolves, the keys are ABSENT — not None, not a guess.
-    This seam never imports boto3, so a profile-resolved region is unobservable here, and
-    synthesising one would put an unverified fact into a signed record (the endpoint_host
-    rule)."""
+    """Verify region fields stay absent when rebar does not resolve a region.
+
+    Profile-derived values are outside this path and must not be inferred.
+    """
     _strip_region_env(monkeypatch)
     rec = _provenance(
         provider="bedrock",

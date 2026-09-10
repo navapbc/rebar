@@ -1,16 +1,7 @@
-"""A change with known issues is held in Gerrit WIP, not in a comment (ticket e30d-b5e7-f4de-4f91).
+"""Verify contributor guidance uses Gerrit WIP state for changes with known issues.
 
-Change 1727 carried five known review defects. The hold was recorded in ticket comments and
-a session log, and a peer session — correctly following the standing "both votes green =>
-Submit" rule — submitted it anyway. The gap was mechanical, not disciplinary: nothing in the
-contribution flow told an author how to make a hold *enforceable*, and Gerrit's own WIP state
-(which blocks submit) went unmentioned everywhere.
-
-So the rule has to be present on all three surfaces an author or agent actually reads, and
-losing it from any one of them is the regression this module exists to catch. The guide
-assertion deliberately goes through the packaged registry mapping rather than the file path:
-reading the path directly would still pass if the guide stopped being packaged, and
-``rebar explain review`` is the surface that actually has to carry the rule.
+Every author-facing surface must describe the enforceable hold, including the packaged
+``rebar explain review`` mapping.
 """
 
 from pathlib import Path

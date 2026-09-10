@@ -1,13 +1,7 @@
-"""Happy-path spec for the op-cert merge-gate CLI (story 4214 / unfair-mindless-halcyon).
+"""Verify a valid required-environment completion certificate passes ``rebar verify-opcert``.
 
-The ONLY tests the implementation subagent sees. Pins the approved design: `rebar verify-opcert`
-walks the merged log, and a CLOSED ticket carrying a valid required-environment
-`completion-verifier` op-cert (pinned in `.rebar/trusted_environments.yaml`) PASSES the gate.
-
-Held-out (missing cert → exit 1, foreign cert → exit 1, advisory when no required env,
-grandfathered ticket, the workflow-file step + CI-trigger audit) lives in the held-out companion.
-
-Real ssh-keygen + a real rebar store + the real `rebar verify-opcert` subprocess (exit codes).
+Companion coverage handles rejection, advisory, grandfathering, workflow integration, and trigger
+auditing. Tests use ssh-keygen and a repository-backed ticket store.
 """
 
 from __future__ import annotations

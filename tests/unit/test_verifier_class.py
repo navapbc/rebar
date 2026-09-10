@@ -1,10 +1,7 @@
-"""The verifier paths resolve the `standard` class, not an equality heuristic (task 172e).
+"""Verify verifier paths resolve the configured ``standard`` model class.
 
-MEASURED defect this replaces: `resolve_verifier_model` downgraded ONLY when `cfg.model` was
-EXACTLY the bare `"claude-opus-4-8"`. Provider-qualifying the SAME model
-(`anthropic:claude-opus-4-8`) — or using any Bedrock id — read as "the operator chose this", so
-Pass-2/Pass-4 silently inherited the frontier model, losing both the cost downgrade and (on a model
-that rejects sampling params) greedy decoding.
+Resolution must not depend on one bare model identifier because provider-qualified and Bedrock
+model names require the same cost and decoding policy.
 """
 
 from __future__ import annotations
