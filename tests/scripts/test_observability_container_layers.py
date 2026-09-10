@@ -1,33 +1,16 @@
-"""Writable container layers, published as metrics (story ``910b-2d43-4482-4c64``).
+"""Writable container-layer metrics (story ``910b-2d43-4482-4c64``).
 
-Writable container layers are the part of ``/var/lib/docker`` no image or build-cache prune can
-reach: each container's overlay2 ``upperdir``. On 2026-09-02 nothing measured them, so the only
-signal was ``rebar-root-disk-pressure`` — "root disk high", which cannot name a generator.
-``observability.sh`` §2i publishes their size, the exited-container subset, that size against
-the share, and **two** heartbeats.
+Each overlay2 ``upperdir`` is writable data unreachable by image or cache pruning.
+``observability.sh`` §2i publishes total and exited-container bytes, percent of the reaper-held
+share, and two heartbeats without a second ``docker system df`` walk.
 
-Four properties carry this file:
+Unmeasurable sizes stay silent rather than becoming zero; the breaching missing-data policy
+then pages. Both heartbeats publish every tick, including zero, reserving absence for probe,
+timer, or host failure. ``container_reaper_active`` reports whether cleanup bounds debris;
+``container_quota_enforceable`` separately reports whether a hard ceiling is possible and
+is deliberately unalarmed; zero is expected until ``rootflags=pquota`` is enabled.
 
-**Silence, never a fabricated 0.** A probe that could not size writable layers publishes
-NOTHING, and ``rebar-container-writable-usage-high`` is ``treat_missing_data = "breaching"``
-(bug 3276 defect 2) so the silence pages. A 0 would read as "no writable layers at all" on a box
-that is filling.
-
-**The heartbeats publish on EVERY tick, including their 0 path** (bug bff5), so their ABSENCE
-means the probe, the timer or the host is dead rather than the reaper being fine.
-
-**The two heartbeats answer different questions, and only one is alarmed.**
-``container_reaper_active`` says whether anything is bounding the debris at all — a dead timer
-leaves usage reading nominal while nothing enforces anything, which is the S4 finding this
-story was told to expect. ``container_quota_enforceable`` says whether a HARD per-container
-ceiling is even possible on this host, and is deliberately unalarmed because its honest value
-is 0 until a reboot enables ``rootflags=pquota``.
-
-**One ``docker system df``, not two.** The Containers row rides the same daemon walk §2f already
-pays for; §2i adds no second one.
-
-The tests drive the REAL ``observability.sh`` and the REAL ``container-cap.sh`` over PATH stubs:
-no docker daemon, no systemd, no XFS, no AWS, no CI provider.
+Tests run the real scripts through PATH stubs without Docker, systemd, XFS, AWS, or CI.
 """
 
 from __future__ import annotations
@@ -65,8 +48,7 @@ _OFFSET_VARIABLES = (
 
 
 def _share_bytes() -> int:
-    """The share as ``docker-storage-cap.sh`` states it — never a literal here, so a test cannot
-    keep passing while the published percentage and the enforced share drift apart."""
+    """Read the enforced share from ``docker-storage-cap.sh`` to prevent ratio drift."""
     out = subprocess.run(
         ["bash", str(CAP_SCRIPT), "--print-env"], capture_output=True, text=True, check=True
     ).stdout
@@ -90,11 +72,9 @@ def _df_rows(
     volumes: str = "0B",
     build_cache: str = "1GB",
 ) -> str:
-    """The rows ``docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}'`` emits.
+    """Render Docker's three-column rows.
 
-    ``containers=None`` drops the Containers row entirely (an engine rendering §2i cannot read);
-    ``reclaimable=None`` drops only the third field, modelling an OLDER engine whose format
-    string yielded two columns.
+    ``containers=None`` removes Containers; ``reclaimable=None`` models older two-column output.
     """
     lines = [f"Images|{images}|0B (0%)"]
     if containers is not None:
@@ -139,8 +119,7 @@ def _environment(
     _stub(bin_dir, "journalctl", "exit 0")
     _stub(bin_dir, "timeout", 'shift\nexec "$@"')
     _stub(bin_dir, "du", 'printf "1024\\t$1\\n"; exit 0')
-    # `systemctl is-active` decides the reaper heartbeat; `xfs_quota state -p` decides the quota
-    # reading. Both are driven through the REAL container-cap.sh, not stubbed away.
+    # The real cap script derives reaper and quota heartbeats from these stubs.
     _stub(bin_dir, "systemctl", f"exit {0 if reaper_active else 3}")
     enforcement = "ON" if quota_enforced else "OFF"
     _stub(
@@ -150,9 +129,7 @@ def _environment(
         f"  Enforcement: {enforcement}\nSTATE\nexit 0",
     )
 
-    # A heredoc, NOT `printf`: the Reclaimable column renders "256MB (100%)", and printf would
-    # read the `%)` as a conversion and swallow the row — which is how the fixture silently
-    # stopped modelling the thing under test the first time this was written.
+    # Use a heredoc because `printf` treats the Reclaimable value's `%)` as a conversion.
     df_body = "exit 1" if df_rows is None else f"cat <<'DF'\n{df_rows}\nDF\nexit 0"
     docker_log = tmp_path / "docker-calls.log"
     _stub(
@@ -167,8 +144,7 @@ def _environment(
         """,
     )
 
-    # A reaper is "in force" only when its units are the ones container-cap.sh renders AND the
-    # timer is running — so the healthy case has to install them, exactly as the box does.
+    # Reaper health requires rendered units and a running timer, so install healthy fixtures.
     unit_dir = tmp_path / "units"
     if reaper_active:
         _install_units(unit_dir)
@@ -181,8 +157,7 @@ def _environment(
             "PATH": f"{bin_dir}:{env['PATH']}",
             "AWS_LOG": str(aws_log),
             "REPL_LOG": str(tmp_path / "replication.log"),
-            # The reaper units are absent in tmp, so `--check-active` answers on the timer stub
-            # plus the rendered-unit comparison exactly as it does on the box.
+            # `--check-active` combines the timer stub with rendered-unit state here.
             "CONTAINER_UNIT_DIR": str(tmp_path / "units"),
             **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
         }
@@ -246,16 +221,13 @@ def _lines_for(log: Path, metric: str) -> list[str]:
     ]
 
 
-# --------------------------------------------------------------------------------------
-# The readings
-# --------------------------------------------------------------------------------------
+# Readings
 
 
 def test_the_writable_layer_size_and_the_exited_subset_are_both_published(
     tmp_path: Path,
 ) -> None:
-    """The total answers "how big"; the exited subset answers "is this debris or is it the live
-    services", which is the difference between a cleanup task and an application problem."""
+    """Total bytes size the problem; exited bytes distinguish debris from live services."""
     env, aws_log = _environment(tmp_path, df_rows=_df_rows(containers="512MB", reclaimable="256MB"))
     _run(env)
     assert _one(aws_log, "container_writable_bytes") == 512_000_000
@@ -263,9 +235,7 @@ def test_the_writable_layer_size_and_the_exited_subset_are_both_published(
 
 
 def test_the_percentage_is_measured_against_the_share_the_reaper_holds(tmp_path: Path) -> None:
-    """Both sides of the ratio must span the same bytes (the §2f/§2g/§2h rule): the numerator is
-    the daemon's own SizeRw sum, not a ``du`` of overlay2, which would count image layers
-    against a share that does not bound them."""
+    """Use Docker's SizeRw bytes over the reaper-held share; overlay2 ``du`` includes images."""
     share = _share_bytes()
     env, aws_log = _environment(
         tmp_path, df_rows=_df_rows(containers=f"{share // 2}", reclaimable="0B")
@@ -275,11 +245,8 @@ def test_the_percentage_is_measured_against_the_share_the_reaper_holds(tmp_path:
 
 
 def test_a_share_overrun_publishes_its_true_ratio(tmp_path: Path) -> None:
-    """The reaper CANNOT reclaim a running container's writable layer at all, so the live set
-    can sit arbitrarily far above this share and nothing on the box will bring it down. That is
-    precisely the condition this percentage exists to report, and clamping it to 100 (bug
-    ``b380-3dfc-99fc-4a0e``) made it unable to distinguish "at the share" from "at three times
-    the share" — the second is an incident, the first is the design."""
+    """Report the unclamped ratio because unreapable running layers can exceed the share
+    arbitrarily (bug ``b380-3dfc-99fc-4a0e``)."""
     share = _share_bytes()
     env, aws_log = _environment(
         tmp_path, df_rows=_df_rows(containers=f"{share * 3}", reclaimable="0B")
@@ -290,9 +257,7 @@ def test_a_share_overrun_publishes_its_true_ratio(tmp_path: Path) -> None:
 
 
 def test_the_metrics_are_dimensionless_on_the_publishing_side(tmp_path: Path) -> None:
-    """CloudWatch keys a metric by namespace+name+dimensions, so a dimension on only one side
-    silently never matches and the alarm sits at INSUFFICIENT_DATA forever. The alarms in
-    monitoring_autodeploy.tf declare none."""
+    """Metrics and alarms must both be dimensionless or CloudWatch stays in INSUFFICIENT_DATA."""
     env, aws_log = _environment(tmp_path)
     _run(env)
     for metric in (
@@ -306,9 +271,7 @@ def test_the_metrics_are_dimensionless_on_the_publishing_side(tmp_path: Path) ->
             assert "--dimensions" not in line, f"{metric} was published with a dimension: {line}"
 
 
-# --------------------------------------------------------------------------------------
-# Silence, never a fabricated 0
-# --------------------------------------------------------------------------------------
+# Measurement failures stay silent
 
 
 @pytest.mark.parametrize(
@@ -322,8 +285,7 @@ def test_the_metrics_are_dimensionless_on_the_publishing_side(tmp_path: Path) ->
 def test_an_unmeasurable_writable_footprint_publishes_nothing(
     tmp_path: Path, rows: str | None, why: str
 ) -> None:
-    """``treat_missing_data = "breaching"`` turns this silence into a page. A 0 would read as an
-    empty container set on a box that is filling — bug 3276 defect 2, in metric form."""
+    """Publish silence, not false zero, when sizing fails; breaching missing-data then pages."""
     env, aws_log = _environment(tmp_path, df_rows=rows)
     _run(env)
     assert _values(aws_log, "container_writable_bytes") == [], why
@@ -331,36 +293,29 @@ def test_an_unmeasurable_writable_footprint_publishes_nothing(
 
 
 def test_a_two_column_rendering_still_publishes_the_total(tmp_path: Path) -> None:
-    """The debris figure and the total fail INDEPENDENTLY. An engine rendering that costs us the
-    Reclaimable column must not also cost us the size an operator sizes the problem with."""
+    """Total and reclaimable bytes fail independently; missing Reclaimable preserves total."""
     env, aws_log = _environment(tmp_path, df_rows=_df_rows(containers="512MB", reclaimable=None))
     _run(env)
     assert _one(aws_log, "container_writable_bytes") == 512_000_000
     assert _values(aws_log, "container_exited_bytes") == []
 
 
-# --------------------------------------------------------------------------------------
-# The heartbeats
-# --------------------------------------------------------------------------------------
+# Heartbeats
 
 
 @pytest.mark.parametrize("reaper_active", [True, False])
 def test_the_reaper_heartbeat_publishes_on_every_tick_including_its_zero_path(
     tmp_path: Path, reaper_active: bool
 ) -> None:
-    """Bug ``bff5``: a heartbeat that only publishes when healthy makes "dead" and "fine"
-    indistinguishable. This is the reading that pre-empts the finding S4's plan review raised —
-    a byte cap enforced by a timer with no liveness signal can silently stop existing while
-    usage reads nominal."""
+    """Publish reaper health every tick, including zero, so absence means probe failure
+    (bug ``bff5``)."""
     env, aws_log = _environment(tmp_path, reaper_active=reaper_active)
     _run(env)
     assert _one(aws_log, "container_reaper_active") == (1 if reaper_active else 0)
 
 
 def test_the_reaper_heartbeat_is_published_even_when_the_daemon_is_gone(tmp_path: Path) -> None:
-    """It reports on the REAPER, not on Docker. Losing the size reading must not also take the
-    "is anything bounding this" answer off the air — they are separate failures with separate
-    remediations."""
+    """Reaper health is independent of Docker sizing and survives daemon failure."""
     env, aws_log = _environment(tmp_path, df_rows=None, reaper_active=True)
     _run(env)
     assert _one(aws_log, "container_reaper_active") == 1
@@ -370,19 +325,15 @@ def test_the_reaper_heartbeat_is_published_even_when_the_daemon_is_gone(tmp_path
 def test_the_quota_reading_reports_the_regime_the_box_is_actually_in(
     tmp_path: Path, enforced: bool
 ) -> None:
-    """0 means no per-container ceiling is POSSIBLE here, so the reaper is the whole story and
-    the percentage above is measured against a share only a timer holds. It is published without
-    an alarm on purpose: enabling the quota needs ``rootflags=pquota`` and a reboot, so an alarm
-    would page continuously and be muted within a day."""
+    """Report hard-quota enforceability; zero is expected until ``rootflags=pquota``, and the
+    metric is deliberately unalarmed."""
     env, aws_log = _environment(tmp_path, quota_enforced=enforced)
     _run(env)
     assert _one(aws_log, "container_quota_enforceable") == (1 if enforced else 0)
 
 
 def test_the_probe_never_reaps(tmp_path: Path) -> None:
-    """The probe calls ``container-cap.sh`` twice every five minutes. If either read mode had a
-    destructive side effect, the observability timer would be deleting containers on a schedule
-    nobody reviewed as destructive."""
+    """All observer-invoked cap-script modes stay read-only; this timer never removes containers."""
     env, _ = _environment(tmp_path)
     _run(env)
     log = tmp_path / "docker-calls.log"

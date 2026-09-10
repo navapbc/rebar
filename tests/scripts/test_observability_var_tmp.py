@@ -1,27 +1,12 @@
-"""``/var/tmp`` usage against its budget, published as metrics (story ``2ba3-bf77-1303-4b2d``).
+"""``/var/tmp`` budget metrics (story ``2ba3-bf77-1303-4b2d``).
 
-``/var/tmp`` was 3.6G of the 28G root working set on 2026-09-02, and the only signal was
-``rebar-root-disk-pressure`` — "root disk high", which cannot name the generator.
-``observability.sh`` §2h publishes the tree's size, its percent of the configured budget, and
-**two** heartbeats — because unlike journald (§2g) this generator is held by two mechanisms of
-very different strength and an operator needs to know which one the box actually has.
+``observability.sh`` §2h publishes exact-tree size, unclamped budget percent, cleanup activity,
+and hard-quota enforcement. Size and budget fail independently. Unmeasurable size stays silent
+rather than becoming zero, so breaching missing-data alarms page; both heartbeats still publish
+every tick, including zero, reserving absence for probe failure. Because this unplanned tree can
+stall the probe, its ``du`` is wall-clock bounded and timeout yields silence.
 
-Three properties carry this file:
-
-**Silence, never a fabricated 0.** A probe that could not measure publishes NOTHING, and
-``rebar-var-tmp-usage-high`` is ``treat_missing_data = "breaching"`` (bug 3276 defect 2) so the
-silence pages. A 0 would read as an empty ``/var/tmp`` on a box that is filling.
-
-**The heartbeats publish on EVERY tick, including their 0 path** (bug bff5), so their ABSENCE
-means the probe, the timer or the host is dead rather than the ceiling being fine.
-
-**Every reading is BOUNDED.** Twelve unbounded journal rescans in this same probe took Gerrit
-off the air for 41 minutes on 2026-09-04 (bug 1205). ``/var/tmp`` is by definition a tree nobody
-planned the size of, so its ``du`` runs through the script's own ``bounded`` wrapper and a
-timeout is reported as silence.
-
-The tests drive the REAL ``observability.sh`` and the REAL ``vartmp-cap.sh`` over PATH stubs:
-no systemd, no XFS, no AWS, no CI provider.
+Tests run the real scripts through PATH stubs without systemd, XFS, AWS, or CI.
 """
 
 from __future__ import annotations
@@ -119,8 +104,7 @@ def _environment(
         """,
     )
 
-    # `du` records EVERY path it is asked about, so a test can pin which tree the reading is
-    # taken over.
+    # Record each `du` path so tests pin measurement to the governed tree.
     var_tmp_body = (
         "exit 1" if var_tmp_bytes is None else f'printf "{var_tmp_bytes}\\t$1\\n"; exit 0'
     )
@@ -142,8 +126,7 @@ def _environment(
     unit_dir = tmp_path / "units"
     unit_dir.mkdir()
     if cleanup_active:
-        # `--check-active` compares the installed drop-in against what the cap script renders,
-        # so the fixture renders it rather than hand-writing a copy that could drift.
+        # Render the real drop-in so `--check-active` detects configuration drift.
         rendered = subprocess.run(
             [
                 "bash",
@@ -205,9 +188,7 @@ def _one(log: Path, metric: str) -> int:
     return values[0]
 
 
-# --------------------------------------------------------------------------------------
-# The reading
-# --------------------------------------------------------------------------------------
+# Reading
 
 
 def test_the_var_tmp_size_and_its_percent_of_the_budget_are_published(tmp_path: Path) -> None:
@@ -218,10 +199,8 @@ def test_the_var_tmp_size_and_its_percent_of_the_budget_are_published(tmp_path: 
 
 
 def test_the_percent_is_measured_over_the_tree_the_budget_governs(tmp_path: Path) -> None:
-    """The budget is about ``/var/tmp``. A numerator taken over ``/var`` would count the Gerrit
-    site tree and the whole Docker root against a ceiling that does not bound them, and the
-    ratio would be about no quantity at all — story 9183's mismatched minuend and subtrahend,
-    in ratio form."""
+    """Measure ``/var/tmp`` alone; wider ``/var`` would compare ungoverned bytes with this
+    budget."""
     env, _, du_log = _environment(tmp_path)
     assert _run(env).returncode == 0
     measured = du_log.read_text().split()
@@ -230,25 +209,19 @@ def test_the_percent_is_measured_over_the_tree_the_budget_governs(tmp_path: Path
 
 
 def test_a_budget_overrun_publishes_its_true_ratio(tmp_path: Path) -> None:
-    """``/var/tmp`` has no writer-enforced ceiling on this box — the budget is held by a
-    5-minute reaper that a fast writer outruns — so being over it is the expected failure, not
-    an impossible state. The percent used to clamp to 100 (bug ``b380-3dfc-99fc-4a0e``), which
-    made the one reading deployed to detect that failure incapable of reporting it."""
+    """Publish the unclamped ratio because the five-minute reaper is not a writer-enforced
+    ceiling and can be outrun (bug ``b380-3dfc-99fc-4a0e``)."""
     env, aws_log, _ = _environment(tmp_path, var_tmp_bytes=9 * GIB, cap=4 * GIB)
     assert _run(env).returncode == 0
     assert _one(aws_log, "var_tmp_used_percent") == 225
     assert _one(aws_log, "var_tmp_bytes") == 9 * GIB
 
 
-# --------------------------------------------------------------------------------------
-# Silence, never a fabricated 0
-# --------------------------------------------------------------------------------------
+# Measurement silence
 
 
 def test_an_unmeasurable_var_tmp_publishes_nothing_rather_than_zero(tmp_path: Path) -> None:
-    """A 0 would read as an empty ``/var/tmp`` on a filling box, and
-    ``rebar-var-tmp-usage-high`` is ``treat_missing_data = "breaching"`` so the silence pages
-    instead."""
+    """Publish silence, not zero, when sizing fails; the breaching missing-data alarm pages."""
     env, aws_log, _ = _environment(tmp_path, var_tmp_bytes=None)
     assert _run(env).returncode == 0
     assert _values(aws_log, "var_tmp_bytes") == []
@@ -256,8 +229,7 @@ def test_an_unmeasurable_var_tmp_publishes_nothing_rather_than_zero(tmp_path: Pa
 
 
 def test_the_size_is_still_published_when_the_budget_is_unreadable(tmp_path: Path) -> None:
-    """Independently gated: losing the budget must not also take the MAGNITUDE off the air,
-    since ``var_tmp_bytes`` is what an operator sizes the problem with."""
+    """Size and budget fail independently; an unreadable budget must not suppress magnitude."""
     env, aws_log, _ = _environment(tmp_path)
     env["VAR_TMP_MAX_BYTES"] = "0"
     assert _run(env).returncode == 0
@@ -265,16 +237,14 @@ def test_the_size_is_still_published_when_the_budget_is_unreadable(tmp_path: Pat
     assert _values(aws_log, "var_tmp_used_percent") == []
 
 
-# --------------------------------------------------------------------------------------
-# The two heartbeats: WHICH mechanism is holding the line?
-# --------------------------------------------------------------------------------------
+# Enforcement heartbeats
 
 
 def test_the_cleanup_heartbeat_is_published_on_every_tick_including_its_zero_path(
     tmp_path: Path,
 ) -> None:
-    """The heartbeat rule (bug bff5). If the 0 path published nothing, "the cleanup stopped"
-    and "the probe stopped" would be the same signal — and only one of them is survivable."""
+    """Publish cleanup state every tick, including zero, so absence identifies probe failure
+    rather than cleanup failure (bug bff5)."""
     active, aws_active, _ = _environment(tmp_path / "on", cleanup_active=True)
     assert _run(active).returncode == 0
     assert _one(aws_active, "var_tmp_cleanup_active") == 1
@@ -287,9 +257,8 @@ def test_the_cleanup_heartbeat_is_published_on_every_tick_including_its_zero_pat
 def test_the_hard_quota_heartbeat_reports_the_regime_the_box_is_actually_in(
     tmp_path: Path,
 ) -> None:
-    """This is the metric that keeps the whole story honest. The reaper is a mitigation with a
-    fill-rate assumption; only an ENFORCED XFS project quota is a ceiling. Publishing which one
-    is live means nobody has to take a runbook's word for it."""
+    """Distinguish best-effort cleanup from an enforced XFS project quota by publishing the
+    active regime."""
     without, aws_without, _ = _environment(tmp_path / "no-quota", quota_enforced=False)
     assert _run(without).returncode == 0
     assert _one(aws_without, "var_tmp_hard_quota_in_effect") == 0
@@ -300,8 +269,8 @@ def test_the_hard_quota_heartbeat_reports_the_regime_the_box_is_actually_in(
 
 
 def test_the_heartbeats_survive_a_var_tmp_that_cannot_be_measured(tmp_path: Path) -> None:
-    """The size and the heartbeats fail independently: a ``du`` that times out must not also
-    take "is anything bounding this tree" off the air."""
+    """Heartbeat and size reads fail independently; failed ``du`` must not suppress
+    enforcement state."""
     env, aws_log, _ = _environment(tmp_path, var_tmp_bytes=None, cleanup_active=True)
     assert _run(env).returncode == 0
     assert _values(aws_log, "var_tmp_bytes") == []
@@ -309,16 +278,12 @@ def test_the_heartbeats_survive_a_var_tmp_that_cannot_be_measured(tmp_path: Path
     assert _one(aws_log, "var_tmp_hard_quota_in_effect") == 0
 
 
-# --------------------------------------------------------------------------------------
-# Bounding — the 2026-09-04 lesson (bug 1205)
-# --------------------------------------------------------------------------------------
+# Wall-clock bound
 
 
 def test_the_var_tmp_walk_is_wall_clock_bounded(tmp_path: Path) -> None:
-    """Twelve unbounded journal rescans in this same probe took Gerrit off the air for 41
-    minutes. ``/var/tmp`` is by definition a tree nobody planned the size of, so its walk must
-    not be able to hold the 5-minute timer open. A bound that fires reports SILENCE, which
-    pages — never a truncated number, which does not."""
+    """Bound the unplanned ``/var/tmp`` walk to one timer tick; timeout yields pageable silence,
+    never a partial size (bug 1205)."""
     env, aws_log, _ = _environment(tmp_path)
     bin_dir = tmp_path / "bin"
     # A `timeout` that always reports the timeout exit status, without running the command.
