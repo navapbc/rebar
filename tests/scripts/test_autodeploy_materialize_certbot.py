@@ -135,3 +135,89 @@ def test_autodeploy_skips_certbot_on_unrelated_change(tmp_path: Path) -> None:
         "autodeploy must NOT re-materialize the certbot timer when only an unrelated file "
         f"changed. rc={result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
+
+
+def test_autodeploy_bootstrap_clone_is_bounded(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    state = tmp_path / "state"
+    state.mkdir()
+    deploy_repo = tmp_path / "deploy"
+    (deploy_repo / "infra" / "compose").mkdir(parents=True)
+    mirror = tmp_path / "mirror"
+    timeout_log = tmp_path / "timeout-log"
+
+    _stub(bin_dir, "flock", "exit 0")
+    _stub(
+        bin_dir,
+        "timeout",
+        f"""
+        echo "$@" >> "{timeout_log}"
+        exit 124
+        """,
+    )
+    _stub(
+        bin_dir,
+        "git",
+        """
+        if [ "$1" = "clone" ]; then
+          sleep 30
+        fi
+        exit 0
+        """,
+    )
+
+    env = subprocess_env()
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env.update(
+        {
+            "STATE_DIR": str(state),
+            "DEPLOY_REPO": str(deploy_repo),
+            "COMPOSE_DIR": str(deploy_repo / "infra" / "compose"),
+            "MIRROR_DIR": str(mirror),
+            "FETCH_TIMEOUT": "7",
+        }
+    )
+    result = subprocess.run(
+        ["bash", str(AUTODEPLOY)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "AUTODEPLOY_ERROR" in result.stderr
+    assert "mirror-clone-failed" in result.stderr
+    assert timeout_log.read_text().strip().startswith("7 git clone -q")
+
+
+def test_certbot_renew_service_renders_finite_start_timeout(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    unit_dir = tmp_path / "systemd"
+    unit_dir.mkdir()
+    webroot = tmp_path / "webroot"
+
+    for tool in ("certbot", "nginx", "systemctl"):
+        _stub(bin_dir, tool, "exit 0")
+
+    env = subprocess_env()
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env["UNIT_DIR"] = str(unit_dir)
+    env["WEBROOT"] = str(webroot)
+
+    result = subprocess.run(
+        ["bash", str(AUTODEPLOY.parents[0] / "install-certbot-timer.sh")],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    service = (unit_dir / "certbot-renew.service").read_text()
+    assert result.returncode == 0, result.stderr
+    assert "Type=oneshot" in service
+    assert "TimeoutStartSec=" in service

@@ -480,8 +480,8 @@ flock -n 9 || { log "another deploy holds the lock; skipping"; exit 0; }
 if [ ! -d "$MIRROR_DIR/.git" ]; then
   log "bootstrapping mirror clone at $MIRROR_DIR from $MIRROR_URL"
   mkdir -p "$(dirname "$MIRROR_DIR")"
-  if ! git clone -q "$MIRROR_URL" "$MIRROR_DIR" 2>/dev/null; then
-    err mirror-clone-failed "git clone $MIRROR_URL -> $MIRROR_DIR failed"; exit 1
+  if ! timeout "$FETCH_TIMEOUT" git clone -q "$MIRROR_URL" "$MIRROR_DIR" 2>/dev/null; then
+    err mirror-clone-failed "git clone $MIRROR_URL -> $MIRROR_DIR timed out/failed"; exit 1
   fi
 fi
 remote_url="$(git -C "$MIRROR_DIR" remote get-url "$MIRROR_REMOTE" 2>/dev/null || true)"

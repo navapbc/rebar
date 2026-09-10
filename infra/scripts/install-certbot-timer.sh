@@ -11,7 +11,12 @@ set -euo pipefail
 
 DOMAIN="${1:-${DOMAIN:-rebar.solutions.navateam.com}}"
 EMAIL="${2:-${EMAIL:-joeoakhart@navapbc.com}}"
-WEBROOT="/var/www/certbot"
+# mechanism-ok: env_var WEBROOT — a008-88cf-056e-44fb: render-target seam for certbot
+# renewal unit tests; production keeps the host nginx webroot default.
+WEBROOT="${WEBROOT:-/var/www/certbot}"
+# mechanism-ok: env_var UNIT_DIR — a008-88cf-056e-44fb: render-target seam so tests assert the
+# generated certbot-renew.service without writing /etc/systemd/system.
+UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
 
 # 1. Ensure nginx and its webroot.
 command -v nginx >/dev/null 2>&1 || dnf install -y nginx
@@ -40,7 +45,7 @@ certbot certonly \
   --keep-until-expiring
 
 # 4. Renew twice daily; reload nginx only after a renewal.
-cat >/etc/systemd/system/certbot-renew.service <<'UNIT'
+cat >"${UNIT_DIR}/certbot-renew.service" <<'UNIT'
 [Unit]
 Description=Renew Let's Encrypt certificates (rebar)
 After=network-online.target
@@ -49,9 +54,10 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/env certbot renew --quiet --deploy-hook "systemctl reload nginx"
+TimeoutStartSec=600
 UNIT
 
-cat >/etc/systemd/system/certbot-renew.timer <<'UNIT'
+cat >"${UNIT_DIR}/certbot-renew.timer" <<'UNIT'
 [Unit]
 Description=Run certbot renew twice daily (rebar)
 
