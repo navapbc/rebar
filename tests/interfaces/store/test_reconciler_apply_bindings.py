@@ -2,7 +2,7 @@
 
 ``reconcile_once`` builds one ``ReconcilerRuntime`` and forwards its backend transport to
 ``applier.apply(client=...)``, avoiding ambient ``_load_acli`` resolution. The oracle
-asserts the observable client; split-install identity has a companion regression.
+asserts the observable client. Split-install identity has a companion regression.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ def test_reconcile_once_threads_composed_runtime_transport_into_apply(monkeypatc
     """A pass composes one runtime and the apply phase receives its captured transport."""
     reconcile = _load("rebar_reconciler.reconcile", "reconcile.py")
     # Patch the runtime already resolved by ``reconcile``. Non-editable installs can expose
-    # checkout and site-packages copies under one key; loading by path would patch an unused
+    # checkout and site-packages copies under one key. Loading by path would patch an unused
     # copy and leave apply with ``client=None``.
     runtime = reconcile._runtime
 

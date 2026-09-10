@@ -1,9 +1,9 @@
 """Pin automatic absorption of local git-lock contention (bug 9305).
 
 A per-store advisory lock serializes rebar index mutations, while bounded jittered retry
-covers index and ref-lock conflicts. Brief contention must self-heal; an exhausted
-tens-of-seconds budget must emit one actionable error. These behavioral tests use real
-repositories and competing processes, shrinking time only where the default is not under test.
+covers index and ref-lock conflicts. Brief contention must self-heal. An exhausted
+tens-of-seconds budget must emit one actionable error. These tests create repositories and
+competing processes, shrinking time only where the default is not under test.
 """
 
 from __future__ import annotations

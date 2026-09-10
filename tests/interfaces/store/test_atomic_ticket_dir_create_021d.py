@@ -2,7 +2,7 @@
 
 Creation stages the directory and first event until the write lock can publish them
 together. Interrupting at that lock must leave neither a visible ticket directory nor
-``fsck`` debris; the shape-independent injection models termination at the former
+``fsck`` debris. The shape-independent injection models termination at the former
 vulnerable boundary.
 """
 

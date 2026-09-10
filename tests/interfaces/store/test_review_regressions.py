@@ -1,8 +1,8 @@
-"""Pin three store correctness regressions from the E0–E4 review.
+"""Pin three store correctness regressions from the E0 through E4 review.
 
-Delete must roll back and report commit failure; transition must unstage and remove an
-orphaned event after commit failure; and auto-init must check the configured tracker root
-that initialization writes.
+Delete must roll back and report commit failure. Transition must unstage and remove an
+orphaned event after commit failure. Auto-init must check the configured tracker root that
+initialization writes.
 """
 
 from __future__ import annotations

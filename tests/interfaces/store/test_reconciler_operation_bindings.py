@@ -3,8 +3,8 @@
 ``compose_reconciler_runtime(*, repo_root=None, cli_overrides=None)`` freezes scope and
 settings. ``build_backend(transport=None)`` constructs only the selected provider and
 accepts a fake transport for read/map tests. Frozen settings expose ``tracker_dir``
-(``Path``), ``tracker_branch`` (``str``), and ``repo_root`` (``str`` or ``Path``);
-credentials stay usable for authentication but absent from representations.
+(``Path``), ``tracker_branch`` (``str``), and ``repo_root`` (``str`` or ``Path``).
+Credentials stay usable for authentication but absent from representations.
 """
 
 from __future__ import annotations

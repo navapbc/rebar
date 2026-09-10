@@ -2,7 +2,7 @@
 
 ``transition``, ``reopen``, ``claim``, ``compact``, and ``delete`` bypass
 ``write_and_push``. After each final write, the local tickets branch must still be even
-with ``origin/tickets``. Real bare-origin tests exercise the default ``always`` policy
+with ``origin/tickets``. Bare-origin tests exercise the default ``always`` policy
 without relying on a later write to carry the commit.
 """
 
@@ -218,7 +218,7 @@ def test_a_write_pushing_to_the_origin_leaves_no_detached_upkeep(
 ) -> None:
     """A write must leave the fixture origin free of detached maintenance.
 
-    ``repo_with_origin`` copies the template's ``origin.git``; receive-pack maintenance
+    ``repo_with_origin`` copies the template's ``origin.git``. Receive-pack maintenance
     could race both that copy and the next ``_ahead`` fetch. Drive the first push and
     assert the mutator's absence in git's process trace, since a successful copy or fetch
     alone would not disprove the race.

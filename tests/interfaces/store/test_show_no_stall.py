@@ -65,8 +65,8 @@ def test_cli_show_complete_or_erroring_under_write_burst(repo_with_origin_ticket
         rebar.create_ticket("task", f"burst target {i}", repo_root=str(repo)) for i in range(3)
     ]
 
-    # One round is the measured detection floor: F3/F6 fail on ticket zero, and the full
-    # F1–F7 matrix reproduces the six-round detection set without five redundant rounds.
+    # One round is the measured detection floor. F3 and F6 fail on ticket zero, and the full
+    # F1 through F7 matrix reproduces the six-round detection set without five redundant rounds.
     for round_no in range(1):
         # Burst of writes (each spawns a background push to origin under =always).
         for i, t in enumerate(ids):
