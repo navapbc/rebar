@@ -1,10 +1,25 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import os
+import sys
 from pathlib import Path
 from typing import Any
+
+import pytest
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised by Windows collection.
+    fcntl = None
+
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32" or fcntl is None,
+    reason=(
+        "POSIX-only fcntl leg regression; native Windows lock coverage lives in "
+        "tests/unit/store/test_windows_exclusive_leg.py"
+    ),
+)
 
 
 def _parse_block(block: Any) -> Any:
@@ -53,6 +68,7 @@ def test_mcp_log_session_reclaims_dead_compact_sweep_stamp_after_fcntl(
     )
 
     fd = os.open(lock_file, os.O_CREAT | os.O_RDWR)
+    assert fcntl is not None
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     finally:
