@@ -23,11 +23,8 @@ from typing import cast
 
 import tomllib
 
-# Sibling-module import: scripts/ is not a package, so a bare `import
-# mutation_sandbox` resolves only when this file is RUN as a script. The
-# import-walk gate (ticket 37b9) imports every scripts/*.py as a module, where
-# that shape raises ModuleNotFoundError — and tests/scripts/conftest.py inserts
-# scripts/ process-wide, so a subset test run hides it. Use the documented insert.
+# ``scripts`` is not a package. Add its directory for both direct execution and the
+# repository import walk, without relying on test-suite path mutation.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mutation_sandbox
 
@@ -584,15 +581,10 @@ def execute_shard(root: Path, shard: Shard, artifact_dir: Path, label: str) -> R
         "no:randomly",
         f"--basetemp={basetemp}",
     )
-    # Sandbox BOTH shard-test-executing subprocesses. The baseline pytest below and the
-    # `mutmut run` further down are the only two that execute shard code; `mutmut
-    # results`/`show` are reporting and touch no test code. Sandboxing only the baseline
-    # would leave `mutmut run` — the path the 2026-08-26 incident took — unprotected.
-    # bwrap --bind requires each SRC to exist, and _prepare_config only renders
-    # config text — it does not create basetemp. Create it before wrapping.
+    # Sandbox both subprocesses that execute shard code. Reporting commands do not run it.
+    # Create the pytest base directory before ``bwrap`` binds its writable paths.
     basetemp.mkdir(parents=True, exist_ok=True)
-    # sys.prefix is deliberately absent: a writable venv would let a mutant drop
-    # executable code into site-packages that later un-sandboxed phases import.
+    # Exclude ``sys.prefix`` so mutants cannot write code into the shared environment.
     sandbox_allow = (root, basetemp)
     env = mutation_sandbox.sandbox_env(env)
     clean = _run(
@@ -661,11 +653,7 @@ def _diagnose_non_killed(root: Path, head: RunResults, artifact_dir: Path) -> st
     mutants = [name for name, status in head.statuses.items() if status != "killed"]
     if not mutants:
         return "stable"
-    # This re-runs MUTATED code, so it is sandboxed exactly like the two calls in
-    # execute_shard. It is the most dangerous of the three: it re-runs the mutants that
-    # were NOT killed, and a mutant that deletes a tree while the assertions still pass
-    # — or that the subprocess timeout stopped rather than a test — lands in precisely
-    # that set. Leaving it unwrapped left the 2026-08-26 path live (`724c-b5fd`).
+    # Survivor diagnosis executes mutated code and therefore uses the same sandbox.
     basetemp = root / ".mutation-pytest"
     basetemp.mkdir(parents=True, exist_ok=True)
     sandbox_allow = (root, basetemp)

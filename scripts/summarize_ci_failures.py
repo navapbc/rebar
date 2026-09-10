@@ -1,32 +1,16 @@
 #!/usr/bin/env python3
-"""summarize_ci_failures.py — render a triage summary of a run's non-successful jobs.
+"""Render a comment-only triage summary for unsuccessful Gerrit CI jobs.
 
-WHY THIS EXISTS
----------------
-The Gerrit ``Verified`` vote helper preserves the original
-``lfreleng-actions/gerrit-review-action`` message shape:
+The ``Verified`` vote links to the run but does not distinguish test failures, cancelled
+jobs, timeouts, or transport faults. This script combines job conclusions with check-run
+annotations because GitHub can encode a timeout as ``conclusion: cancelled``. The verify
+workflow posts the result as a review comment without changing the vote.
 
-    MESSAGE="${STATUS}: ${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}"
-
-So a ``Verified -1`` reads exactly ``CANCELLED: <run URL>`` no matter what went wrong. A job
-that hit its ``timeout-minutes`` and a job that failed on stale-base version skew produce a
-byte-identical vote, even though the first needs no author action and the second needs a
-rebase. Whoever picks the change up has to open the run and read job conclusions by hand.
-
-This script turns the run's own job list into a short summary that
-``.github/workflows/gerrit-verify.yaml`` posts as a comment-only review beside the vote. It
-changes nothing about WHEN the gate votes +1/-1 — only what an operator can see without
-opening the run.
-
-Distinguishing a timeout from a plain cancellation needs the check-run annotations: GitHub
-records a timed-out job as ``conclusion: cancelled`` and explains itself only in the
-annotation text ("The job has exceeded the maximum execution time of 30m0s"). Jobs and
-annotations are therefore both inputs.
-
-Inputs (env vars):
+Inputs:
   JOBS_JSON         GitHub list-jobs-for-a-run payload (``{"jobs": [...]}``) or a bare list
   ANNOTATIONS_JSON  optional ``{"<job id>": [{"message": ...}, ...]}`` map
-Output (stdout): the summary, or nothing at all when every job succeeded.
+Output:
+  stdout            summary text, or nothing when every job succeeded
 """
 
 from __future__ import annotations
@@ -37,8 +21,7 @@ import sys
 from datetime import datetime
 from typing import Any
 
-# GitHub's wording when a job exceeds `timeout-minutes`. Matched case-insensitively on a
-# substring so a change to the duration suffix ("of 30m0s") cannot break detection.
+# Match GitHub's timeout wording without depending on its duration suffix.
 TIMEOUT_MARKER = "exceeded the maximum execution time"
 TRANSPORT_MARKERS = (
     "error: rpc failed; http 5",
@@ -53,7 +36,7 @@ TRANSPORT_MARKERS = (
     "early eof",
 )
 
-# Conclusions that say nothing useful on their own and so are worth explaining.
+# Conclusions that require explanatory review text.
 REPORTABLE = ("failure", "cancelled", "timed_out")
 
 HEADER = "CI did not pass. Jobs that did not succeed:"
@@ -90,13 +73,10 @@ def format_duration(started_at: str | None, completed_at: str | None) -> str:
 
 
 def sanitize(text: str) -> str:
-    """Strip characters that could break out of the remote shell's single-quoted argument.
+    """Keep printable ASCII while removing remote shell quoting metacharacters.
 
-    The summary is sent as ``gerrit review <change>,<ps> --message '<summary>'`` over ssh, and
-    job names are NOT fully trusted: matrix job names derive from ``.github/mutation-shards.toml``,
-    which a patchset controls. A single quote in a job name would otherwise terminate the
-    quoting and let the rest of the name be parsed as arguments to ``gerrit review``. Drop the
-    quoting metacharacters outright and keep only printable ASCII plus newline.
+    Patchsets control matrix job names, which enter a single-quoted ``gerrit review``
+    message. Removing quotes and backslashes prevents argument injection.
     """
     stripped = text.replace("'", "").replace("\\", "")
     return "".join(ch for ch in stripped if ch == "\n" or (" " <= ch <= "~"))
@@ -118,11 +98,7 @@ def _is_transport_fault(job: dict[str, Any], annotations: list[dict[str, Any]]) 
 
 
 def describe_job(job: dict[str, Any], annotations: list[dict[str, Any]]) -> str:
-    """Render one non-successful job as a single triage line.
-
-    The three outcomes are worded differently on purpose: `timed out` and `cancelled` share
-    the `cancelled` conclusion in GitHub's API but mean opposite things to an author.
-    """
+    """Render one job while distinguishing timeout, cancellation, and failure."""
     conclusion = str(job.get("conclusion") or "")
     name = sanitize(str(job.get("name") or "(unnamed job)"))
 
@@ -167,8 +143,7 @@ def summarize(
         summary += f"\n\n{FOOTER_TIMEOUT}"
     if "INFRASTRUCTURE/TRANSPORT FAULT" in summary:
         summary += f"\n\n{FOOTER_TRANSPORT}"
-    # Final guard: sanitize the whole message, not just the job names, so no field that
-    # reaches the remote `gerrit review` command can carry shell-quoting metacharacters.
+    # Sanitize the assembled message so every remote-shell input follows the same rule.
     return sanitize(summary)
 
 
@@ -185,7 +160,7 @@ def _load_jobs(raw: str) -> list[dict[str, Any]]:
 if __name__ == "__main__":
     jobs = _load_jobs(os.environ.get("JOBS_JSON", ""))
     raw_annotations = os.environ.get("ANNOTATIONS_JSON", "").strip()
-    # NB: not named `annotations` — that is the module-level `__future__` import.
+    # Avoid shadowing the module-level ``annotations`` future feature.
     job_annotations = json.loads(raw_annotations) if raw_annotations else {}
     text = summarize(jobs, job_annotations)
     if text:

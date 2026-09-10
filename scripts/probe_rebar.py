@@ -1,29 +1,18 @@
 #!/usr/bin/env python3
-"""Reusable end-to-end PROBE for the rebar ticket system (port of probe-rebar.sh).
+"""Exercise the rebar CLI through a reusable end-to-end probe.
 
-Exercises every CLI command and a broad set of edge cases against the REAL rebar
-engine, asserting exit codes and output invariants, then prints a PASS/FAIL
-summary.
-
-CONTINUE-ON-FAILURE IS THE DESIGN (the shell original deliberately omitted
-``set -e``): a failing assertion increments the fail counter and the probe keeps
-going, so one regression cannot mask the rest of the surface. The harness exits
-non-zero iff any assertion failed. Do not convert assertion helpers to raise.
-
-SAFETY: by default the probe runs in an ISOLATED temporary tracker (its own
-REBAR_ROOT), so it never touches this project's real tickets and is safe to run
-repeatedly. It still drives the project's installed ``rebar`` (the live engine).
-Set PROBE_LIVE=1 to instead exercise the project's real store — in that mode the
-probe snapshots the existing ticket set, only removes the tickets it creates,
-and verifies the store is unchanged at the end.
+Assertions accumulate failures and execution continues so one regression cannot hide
+later results. The process exits nonzero when any assertion fails. By default, the probe
+uses a temporary ``REBAR_ROOT`` and the configured rebar executable. ``PROBE_LIVE=1``
+uses the project store, removes only tickets created by the probe, and verifies that the
+ticket set is unchanged afterward.
 
 Usage:
-  python scripts/probe_rebar.py                # isolated tracker (recommended)
+  python scripts/probe_rebar.py                # isolated tracker
   REBAR=/path/to/rebar python scripts/probe_rebar.py
-  PROBE_LIVE=1 python scripts/probe_rebar.py   # against the real project store
-  PROBE_INJECT_FAIL=1 python scripts/probe_rebar.py  # harness self-test: one
-      deliberately failing assertion; the probe must continue past it, report
-      it in the summary, and exit non-zero.
+  PROBE_LIVE=1 python scripts/probe_rebar.py   # against the project store
+  PROBE_INJECT_FAIL=1 python scripts/probe_rebar.py  # inject one failing assertion
+      and require the probe to continue, report it, and exit nonzero.
 
 Exit: 0 if all checks pass, 1 otherwise.
 """
@@ -144,11 +133,7 @@ def _last_id() -> str:
 
 
 def _show_json(tid: str) -> dict:
-    """Clean `show` for value extraction (the shell's `$RB show X | jq ...`).
-
-    Parse failures return {} so the following assertion FAILS and the probe
-    CONTINUES — the jq-pipeline analogue (empty output, not a raised error).
-    """
+    """Parse ``show`` or return an empty mapping so later assertions can continue."""
     cp = subprocess.run([RB, "show", tid], capture_output=True, text=True, check=False)
     try:
         doc = json.loads(cp.stdout)
@@ -199,15 +184,14 @@ def _setup() -> tuple[str, str, str]:
         _git("config", "user.email", "probe@example.com", cwd=root)
         _git("config", "user.name", "probe", cwd=root)
         _git("commit", "-q", "--allow-empty", "-m", "init", cwd=root)
-        # Explicit init: auto-init is TTY-gated by design, so under a
-        # non-interactive stdin the first `create` would otherwise fail.
+        # Initialize explicitly because automatic initialization requires a TTY.
         subprocess.run([RB, "init", "--silent"], cwd=root, check=True)
     root = str(Path(root).resolve())
     os.environ["REBAR_ROOT"] = root
     tracker = os.path.join(root, ".tickets-tracker")
     pre_ids = _ticket_dirs(tracker) if os.environ.get("PROBE_LIVE") == "1" else ""
     os.chdir(root)
-    # Skip the network sync (both directions) in isolated/probe runs (no remote).
+    # Disable both sync directions because the probe repository has no remote.
     os.environ["REBAR_SYNC_PULL"] = "off"
     os.environ["REBAR_SYNC_PUSH"] = "off"
     return mode, tracker, pre_ids
@@ -232,7 +216,7 @@ def mk(*create_args: str) -> str:
 
 # raw-git-ok: disposable sandbox repo, not the tracker
 def _cleanup(tracker: str, pre_ids: str) -> None:
-    # Remove only the tickets this probe created; leave pre-existing ones intact.
+    # Remove only tickets created by this probe.
     if _CREATED and os.path.isdir(tracker):
         subprocess.run(
             ["git", "rm", "-r", "--quiet", *_CREATED],
@@ -262,8 +246,7 @@ def _cleanup(tracker: str, pre_ids: str) -> None:
 def _probe() -> None:  # deliberately one linear probe script
     section("create — types, fields, and validation")
     if os.environ.get("PROBE_INJECT_FAIL") == "1":
-        # Harness self-test: a deliberately failing assertion. The probe must
-        # CONTINUE past this, run every remaining section, and exit non-zero.
+        # Confirm that one failed assertion does not stop later probe sections.
         run_rb("--help")
         assert_contains("no-such-needle-for-selftest", "self-test injected failure")
     epic = mk(
@@ -307,8 +290,7 @@ def _probe() -> None:  # deliberately one linear probe script
     assert_contains('"error": "ticket_not_found"', "show missing JSON envelope")
 
     section("edit — each field + validation")
-    # `--tags` was removed from `edit` (it whole-field-clobbered, racing concurrent
-    # tag deltas); the convergent surface is `--set-tags` / `--add-tag` / `--remove-tag`.
+    # Exercise the convergent tag-delta surface instead of the removed ``--tags`` edit.
     run_rb(
         "edit",
         bug,
@@ -343,8 +325,7 @@ def _probe() -> None:  # deliberately one linear probe script
     assert_eq(1, len(_list_json("--has-tag=alpha")), "list --has-tag filter")
 
     section("links — relations, cycle, self, invalid, unlink")
-    # Exercise each relation on the same pair, clearing between iterations so the
-    # inverse blocking relations (blocks/depends_on) don't legitimately form a cycle.
+    # Clear each relation before testing the next so inverse blockers do not form a cycle.
     relations = ("blocks", "depends_on", "relates_to", "duplicates", "supersedes")
     for rel in (*relations, "discovered_from"):
         run_rb("link", task, bug, rel)
@@ -397,20 +378,17 @@ def _probe() -> None:  # deliberately one linear probe script
     section("close guards — bug --class vocabulary, story/epic verdict-hash")
     rbug = mk("bug", "PROBE: reason-guard bug")
     assert_rc(0, "create fresh bug")
-    # Bug close requires a bounded --class <value> (ticket ed13): no class ->
-    # reject; invalid class -> reject; a value from the closed vocabulary -> close.
+    # Bug closure requires a value from the bounded ``--class`` vocabulary.
     run_rb("transition", rbug, "open", "closed")
     assert_rc_ne(0, "bug close requires --class")
     run_rb("transition", rbug, "open", "closed", "--class=bogus")
     assert_rc_ne(0, "bug close rejects invalid --class")
     run_rb("transition", rbug, "open", "closed", "--class=regression")
     assert_rc(0, "bug close with valid --class")
-    # Verdict-hash close gate is OPT-IN (default off, since 0.2.0): story/epic
-    # close succeeds without --verdict-hash. Enforcement when enabled is covered
-    # by the GAP-9 test.
+    # The optional verdict-hash gate is disabled in this probe configuration.
     run_rb("transition", story, "open", "closed")
     assert_rc(0, "story close succeeds by default (verdict gate opt-in)")
-    # EPIC's only child (STORY) is now closed, so the children guard allows it.
+    # Close the epic only after its sole child is closed.
     run_rb("transition", epic, "open", "closed")
     assert_rc(0, "epic close succeeds (child already closed)")
 
@@ -477,7 +455,7 @@ def _probe() -> None:  # deliberately one linear probe script
     assert_rc(0, "exists by alias")
     run_rb("exists", "no-such-xyz")
     assert_rc_ne(0, "exists absent -> non-zero")
-    # Fresh OPEN epic + child for epic-scoped reads (the earlier epic was closed).
+    # Create an open subtree for epic-scoped read commands.
     epic2 = mk("epic", "PROBE: open epic")
     mk("task", "PROBE: batch child", "--parent", epic2)
     run_rb("next-batch", epic2)
@@ -523,8 +501,7 @@ def _probe() -> None:  # deliberately one linear probe script
     assert_contains('"store_integrity"', "bridge fsck store-integrity shape")
 
     section("lifecycle --output json — create/claim/transition/reopen/delete result shapes")
-    # Parse STDOUT ONLY: `create` prints an advisory warning to STDERR, which the
-    # merged OUT capture would fold in and break JSON parsing.
+    # Parse stdout because advisory stderr is not part of the JSON document.
     run_rb("create", "task", "PROBE: lifecycle json", "--output", "json")
     assert_rc(0, "create --output json")
     assert_contains('"id"', "create json has id")
@@ -534,7 +511,7 @@ def _probe() -> None:  # deliberately one linear probe script
     except (ValueError, KeyError):
         lcid = ""
     if lcid:
-        # Not created via mk(): track explicitly so cleanup removes the tombstone.
+        # Track this direct creation for cleanup.
         _CREATED.append(lcid)
     run_rb("claim", lcid, "--assignee", "probe", "-o", "json")
     assert_rc(0, "claim -o json")
@@ -552,22 +529,9 @@ def _probe() -> None:  # deliberately one linear probe script
     section("single-reducer parity — show == list == search shape (bug f026)")
     show_keys = sorted(_show_json(task).keys())
     list_keys = sorted(next((x for x in _list_json() if x.get("ticket_id") == task), {}).keys())
-    # `list` and `show` are deliberately NOT identical key sets — each carries
-    # fields the other omits, BY DESIGN:
-    #   - `show` adds the per-ticket computed fields `digest_freshness`,
-    #     `inbound_deps` (computed inbound edges, bug 05cb) and
-    #     `plan_review_health`, which no list row carries.
-    #   - `show` also keeps everything the LEAN list projection drops: the bulky
-    #     bodies (`comments`, `description`) AND the signature material
-    #     (`authorship_ledger`, `attestations`, `signature`, `keyring`), which on
-    #     a mature store is ~88% of a lean row's bytes (story 98b8-5f08-1569-45cc).
-    #     Opt back in with `list --full`.
-    #   - `list` surfaces `managed_refs`, which `show` omits.
-    # The lean drop set is intersected with what `show` actually emits, because
-    # some of those fields are materialised only once a ticket HAS signature
-    # material — an empty tracker's `show` carries no `authorship_ledger`, and a
-    # field absent from both sides cannot appear in the difference.
-    # Assert the exact symmetric difference in BOTH directions so drift is caught.
+    # ``show`` adds computed fields and retains bodies plus signature material omitted
+    # by lean ``list``. ``list`` alone adds ``managed_refs``. Intersect optional signature
+    # fields with the emitted show row, then assert the exact difference in both directions.
     show_only_computed = {"digest_freshness", "inbound_deps", "plan_review_health"}
     lean_dropped = {
         "comments",
@@ -642,7 +606,7 @@ def main() -> int:
     try:
         _probe()
     finally:
-        # Summary first, cleanup after — the shell's trap-EXIT ordering.
+        # Print results before cleanup to match the original shell probe ordering.
         print("\n────────────────────────────────────────")
         print(f"PROBE RESULT: {PASS} passed, {FAIL} failed (mode: {mode})")
         _cleanup(tracker, pre_ids)

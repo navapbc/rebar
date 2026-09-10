@@ -1,21 +1,12 @@
 #!/usr/bin/env python3
-"""Re-target a rebar ticket store from one Jira project to another (bug 626d).
+"""Retarget a rebar ticket store to another Jira project.
 
-Changing ``[jira] project`` only governs where NEW (unbound) tickets are created.
-A store that previously synced to another project keeps that project's **bindings**
-(``.bridge_state/bindings.json``) and a stale remote **snapshot**
-(``.bridge_state/prev_snapshot.json``), so the reconciler keeps targeting the old
-project's issues. Since bug 626d the outbound applier *refuses* such cross-project
-writes (fail-closed) — so to actually sync to the new project you must clear that
-legacy bind-state and let every local ticket re-create fresh in the new project.
-
-This tool clears the bridge bind-state (and, with ``--strip-tags``, the residual
-``dso-id:jira-<old>-*`` id tags). It is **dry-run by default** — it reports what it
-would change and writes nothing until you pass ``--apply``.
-
-Validated on a clone of the store (2026-06-25): clearing bindings + prev_snapshot
-dropped a dry-run plan from 1415 mutations (1017 targeting the old project) to 398
-clean outbound creates with **0** old-project targets.
+Changing ``[jira] project`` does not replace existing bindings or the previous remote
+snapshot. The outbound applier rejects those stale cross-project writes. This tool clears
+the bind state so tickets can be created in the configured project. ``--strip-tags`` also
+removes residual ``dso-id:jira-<old>-*`` tags. The default dry run reports changes without
+writing. ``--apply`` writes them after creating a sibling backup unless ``--no-backup`` is
+set.
 
 Usage:
     # report only (no writes):
@@ -24,9 +15,8 @@ Usage:
     # apply (clears bind-state); add --strip-tags to also remove dso-id:jira-* tags:
     python scripts/retarget_jira_project.py --tracker-dir .tickets-tracker --apply
 
-After applying, run `rebar bridge preview` and confirm 0 mutations target
-the old project before enabling live sync. The bind-state files are backed up to a
-sibling ``.bridge_state.bak-<label>`` directory unless --no-backup is given.
+After applying, run ``rebar bridge preview`` and confirm that no mutation targets the old
+project before enabling synchronization.
 """
 
 from __future__ import annotations
@@ -40,8 +30,7 @@ import sys
 from pathlib import Path
 
 _EMPTY_BINDINGS = {"version": 1, "bindings": {}, "reverse": {}}
-# A residual id tag baked onto local tickets by a prior sync, e.g.
-# "dso-id:jira-dig-5673"; we strip any dso-id:jira-<proj>-<n> tag.
+# Match residual Jira ID tags such as ``dso-id:jira-dig-5673``.
 _ID_TAG_PATTERN = r'"(dso-id:jira-[a-z]+-\d+)"'
 
 
@@ -53,11 +42,7 @@ def _load_bindings(path: Path) -> dict:
 
 
 def _scan_id_tags(tracker_dir: Path) -> dict[str, list[str]]:
-    """Return {ticket_id: [stale id tags]} by replaying each ticket's tag state.
-
-    Cheap heuristic: scan event JSON for tag strings matching the id-tag pattern.
-    Used only to report/■strip; the authoritative removal goes through `rebar untag`.
-    """
+    """Find stale ID tags for reporting before removal through ``rebar untag``."""
     found: dict[str, set[str]] = {}
     for ticket_dir in tracker_dir.iterdir():
         if not ticket_dir.is_dir() or ticket_dir.name.startswith("."):
@@ -67,7 +52,7 @@ def _scan_id_tags(tracker_dir: Path) -> dict[str, list[str]]:
                 text = event.read_text()
             except OSError:
                 continue
-            # Collect quoted id-tag tokens (robust to event nesting).
+            # Quoted token matching works at any event nesting depth.
             for m in re.finditer(_ID_TAG_PATTERN, text, re.IGNORECASE):
                 found.setdefault(ticket_dir.name, set()).add(m.group(1))
     return {k: sorted(v) for k, v in found.items()}
