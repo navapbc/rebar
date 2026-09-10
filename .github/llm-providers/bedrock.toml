@@ -1,41 +1,16 @@
-# AWS Bedrock arm of the external suite's provider matrix (story f124).
+# AWS Bedrock arm of the external provider matrix. It uses the Anthropic arm's Claude families,
+# so differences between those arms isolate the provider rather than the model.
 #
-# The SAME Claude models as the anthropic arm, reached through Bedrock, so a difference between
-# the two arms is a PROVIDER difference and not a model difference.
-#
-# Only INFERENCE-PROFILE ids (the `us.` / `global.` prefix) are invokable — a bare on-demand
-# `anthropic.claude-*` id returns `ValidationException: … on-demand throughput isn't supported`.
-# The suffixes are NOT uniform: MEASURED in account 896586841071 / us-east-1 (story 1aa2),
-# `us.anthropic.claude-sonnet-4-6` and `us.anthropic.claude-haiku-4-5-20251001-v1:0` invoke while
-# `us.anthropic.claude-sonnet-4-6-v1:0` and `us.anthropic.claude-haiku-4-5-v1:0` do not exist.
-# Take any new id VERBATIM from `aws bedrock list-inference-profiles --region <region>`.
-#
-# Credential: the AMBIENT AWS chain, never a rebar-managed key. In CI that is GitHub OIDC role
-# assumption (infra/runbooks/bedrock-ci-oidc.md); locally it is AWS_PROFILE / env keys.
-#
-# REGION IS NOT EXPRESSIBLE HERE and is not optional: `[llm.model_classes]` carries model ids
-# only, boto3 resolves NO region from IMDS (MEASURED, ticket a574), and `build_bedrock_provider`
-# raises a typed LLMConfigError when none resolves. The workflow therefore sets BOTH
-# AWS_DEFAULT_REGION and REBAR_LLM_BEDROCK_REGION as job env.
+# Only inference-profile IDs (`us.` or `global.`) are invokable, and their suffixes are not
+# uniform. Copy new IDs verbatim from `aws bedrock list-inference-profiles --region <region>`.
+# Credential: the ambient AWS chain (OIDC in CI; profiles or environment keys locally).
+# Region is not expressible here, so workflows set both `AWS_DEFAULT_REGION` and
+# `REBAR_LLM_BEDROCK_REGION`.
 
-# `[llm] model` is set as well as the classes, and it is LOAD-BEARING rather than redundant.
-# `cfg.model` is a SECOND resolution path the class table cannot reach: config.py:575 reads it
-# from `REBAR_LLM_MODEL`/`model` falling back to DEFAULT_MODEL, which is the bare literal
-# "claude-opus-4-8" and so infers provider `anthropic`. Any op that resolves `cfg.model` instead
-# of naming a class — and several do — would call direct Anthropic on EVERY arm, which is exactly
-# the "ambient default" this overlay exists to remove. MEASURED on a live matrix run
-# [rebar:f124-f14a-fd62-4973]: three such
-# tests called `model=anthropic:claude-opus-4-8` on the bedrock and openai arms and failed with
-# "Could not resolve authentication method", because those arms deliberately blank
-# ANTHROPIC_API_KEY.
-#
-# THAT BLANKING IS SCOPED TO THIS PROVIDER MATRIX AND NOTHING ELSE. It exists so an arm named
-# `bedrock` cannot silently be served by direct Anthropic and score as a green Bedrock run — an
-# isolation property of the MATRIX. It is NOT a statement that direct Anthropic is unwanted in
-# normal local/CI operation: there, the direct-Anthropic arm is an APPROVED fallback and
-# `ANTHROPIC_API_KEY` is expected to be present and VALID (operator decision, 2026-08-07, on
-# [rebar:2876-7958-8dee-4882]). Read this comment as "blanked HERE", never as "blanked
-# everywhere"; the project config `rebar.toml` configures the fallback arm accordingly.
+# Keep the provider-qualified scalar model and every class slot explicit because some callers
+# resolve `cfg.model` outside the class table. The provider matrix blanks `ANTHROPIC_API_KEY` for
+# this arm so direct Anthropic cannot masquerade as Bedrock; that isolation is matrix-specific,
+# while ordinary operation may retain the approved direct-Anthropic fallback.
 [llm]
 model = "bedrock:us.anthropic.claude-opus-4-8"
 
