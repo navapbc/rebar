@@ -89,7 +89,31 @@ def _git_output(repo: Path, *args: str) -> str | None:
         capture_output=True,
         text=True,
     )
-    return completed.stdout if completed.returncode == 0 else None
+    if completed.returncode == 0:
+        return completed.stdout
+    if (repo / "HEAD").is_file() and (repo / "objects").is_dir():
+        bare_completed = subprocess.run(
+            ["git", "--git-dir", str(repo), *args],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if bare_completed.returncode == 0:
+            return bare_completed.stdout
+    return None
+
+
+def _path_rewrites(source: Path, destination: Path) -> list[_PathRewrite]:
+    """Return path rewrites for Git's native and slash-normalized spellings."""
+    pairs: dict[bytes, bytes] = {}
+    resolved_source = source.resolve()
+    resolved_destination = destination.resolve()
+    for src, dst in (
+        (str(resolved_source), str(resolved_destination)),
+        (resolved_source.as_posix(), resolved_destination.as_posix()),
+    ):
+        pairs[os.fsencode(src)] = os.fsencode(dst)
+    return list(pairs.items())
 
 
 def _template_may_have_remotes(template: Path) -> bool:
@@ -149,7 +173,7 @@ def _local_sibling_rewrites(template: Path, destination: Path) -> list[_PathRewr
             source_signature = _refs_signature(source_remote)
             if source_signature is None or _refs_signature(copied_remote) != source_signature:
                 continue
-            rewrites[os.fsencode(url)] = os.fsencode(copied_remote.resolve())
+            rewrites.update(_path_rewrites(source_remote, copied_remote))
     return list(rewrites.items())
 
 
@@ -250,7 +274,7 @@ def clone_topology_template(template: Path, destination: Path) -> Path:
         assert_store_self_contained(repo)
 
     rewrites: list[_PathRewrite] = [
-        (os.fsencode(template.resolve()), os.fsencode(destination.resolve())),
+        *_path_rewrites(template, destination),
         *_local_sibling_rewrites(template, destination),
     ]
     shutil.copytree(template, destination, symlinks=True)
