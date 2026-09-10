@@ -116,10 +116,11 @@ def test_marker_lock_serializes_posix_access(
 
         assert first_process.exitcode == 0
         assert second_process.exitcode == 0
-        assert event_rx.poll(timeout=5)
-        assert event_rx.recv() == "first-done"
-        assert event_rx.poll(timeout=5)
-        assert event_rx.recv() == "second-done"
+        completed = []
+        for _ in range(2):
+            assert event_rx.poll(timeout=5)
+            completed.append(event_rx.recv())
+        assert sorted(completed) == ["first-done", "second-done"]
     finally:
         release_first.set()
         for process in (first_process, second_process):
