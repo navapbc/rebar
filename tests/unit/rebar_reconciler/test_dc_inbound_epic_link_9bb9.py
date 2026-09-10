@@ -21,12 +21,10 @@ _EPIC_FIELD_ID = "customfield_10008"
 
 
 class _FakeClient:
-    """A ``jira.JIRA``-shaped double serving both ``search_issues`` and ``fields()``.
+    """Serve issue search and Epic Link metadata discovery independently.
 
-    ``fields_ok`` controls whether ``fields()`` (the instance's field-metadata endpoint, used to
-    discover the Epic Link custom field id BY NAME) succeeds at all; ``has_epic_link`` controls
-    whether the discovered field list actually names one — the "no Epic Link field" instance
-    shape the acceptance criteria call out separately from a hard failure.
+    ``fields_ok`` models endpoint failure; ``has_epic_link`` models a successful field
+    list without an Epic Link entry.
     """
 
     def __init__(

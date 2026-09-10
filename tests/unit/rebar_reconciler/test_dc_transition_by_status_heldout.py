@@ -1,20 +1,10 @@
-"""HELD-OUT pin on transition-by-DESTINATION-STATUS resolution (bug 7f93, epic e369).
+"""Pin transition lookup by destination status, not transition name (bug 7f93).
 
-A Jira transition's NAME is not its destination STATUS name. Jira's classic workflow offers
-``Start Progress`` (-> status ``In Progress``) and ``Done`` (-> status ``Done``), while every
-production caller passes a STATUS name: ``LOCAL_STATUS_TO_JIRA["in_progress"] == "In Progress"``,
-which that map is documented to hold ("Local status string -> Jira workflow state name").
-
-Matching only on the transition's own name therefore missed, raised ``ValueError``, and got
-SOFT-FAILED into ``bridge_alerts`` by ``apply_handlers.record_backstop_failure`` — the pass exited
-0 with no traceback and the status never changed. Measured live by the J11 harness
-(ticket 5200-e04e-246e-4aae):
-``outbound status did not reach DC: fields.status.name is 'To Do'``, alongside the transport's own
-``no transition named 'In Progress' is available ... (available: ['Done', 'Start Progress'])``.
-
-THE PARTIAL-FAILURE SHAPE IS WHY THIS NEEDED A UNIT PIN AS WELL AS THE LIVE CELL. ``Done`` is both
-a transition name and a status name on that workflow, so ``closed`` synced by coincidence while
-``in_progress`` did not. A test that only exercised ``closed`` would have been green throughout.
+Callers pass workflow states such as ``In Progress``, which may be reached by a
+transition named ``Start Progress``. Exact transition-name matches still take precedence;
+ambiguous destinations are rejected and unavailable destinations may soften. Tests include
+the misleading ``Done`` case, where transition and status names coincide, plus the distinct
+name that exposed the defect.
 """
 
 from __future__ import annotations

@@ -1,35 +1,12 @@
-"""An EMPTY outbound assignee must actually UNASSIGN on Jira Cloud (bug 6a74).
+"""Pin Jira Cloud's positive empty-assignee unassign contract (bug 6a74).
 
-PARITY CHARACTERIZATION. This is the Cloud mirror of the Data Center pins
-``test_dc_unassign_751e.py::test_empty_outbound_assignee_actually_unassigns`` and
-``::test_unassign_co_submitted_with_an_editable_field_does_both``.
-
-THE SHAPE OF THE DEFECT BEING GUARDED. The shared outbound differ resolves an empty local
-assignee to the EMPTY STRING (``outbound_differ._assignee_resolver`` returns ``("", True,
-False)``), and ``assignee`` is in ``dispatch_apply_phases._OUTBOUND_BATCH_ALLOWLIST``, so
-``client.update_issue(key, assignee="")`` is what the ACLI transport receives. Forwarding that
-verbatim to ACLI as ``--assignee ""`` is NOT an unassign instruction: ACLI silently no-ops and
-exits 0, so the assignee stays put and the pass reports success. Bug 85a1 (Fix D7) fixed this
-by popping an empty assignee and routing it to ``unassign_issue`` (REST PUT ``/assignee`` with
-``{"accountId": null}``).
-
-WHY THIS FILE EXISTS. The only Cloud coverage of that fix was NEGATIVE
-(``mutate/test_assignee_validation.py::test_update_issue_transient_error_propagates_does_not_unassign``,
-which pins the fail-open behaviour when the REST call errors). Nothing asserted the POSITIVE
-path, so a regression that re-forwarded ``--assignee ""`` would restore the original
-silent-success defect with every Cloud test still green. DC has had that positive pin since
-751e; Cloud did not.
-
-THE ORACLE IS POSITIVE ABOUT ABSENCE, like its DC sibling. It is not enough that no exception
-was raised — a silent success is the whole character of this defect — and it is not enough
-that a stubbed ``unassign_issue`` was called. These tests capture the REAL REST request the
-production ``unassign_issue`` builds and require its body to carry Cloud's unassign sentinel
-``{"accountId": null}``, while separately requiring that no ``--assignee`` flag ever reaches
-the ACLI argv.
-
-DETERMINISM. Nothing spawns a subprocess or touches the network: the ACLI subprocess seam
-(``acli_subprocess._run_acli``), the REST write seam (``_rest_urlopen_with_retry``) and the
-assignable-search read seam (``_direct_rest_get``) are all replaced by recorders.
+The differ sends ``assignee=""``; forwarding that as ``--assignee ""`` silently
+does nothing. The transport must instead issue the real Cloud unassign request,
+``PUT /assignee`` with ``{"accountId": null}``, and must never place an empty
+``--assignee`` flag in ACLI argv. Assertions inspect the resulting REST body and argv,
+not merely calls or exceptions, because silent success is the guarded failure mode.
+Subprocess, REST, and assignable-search seams are deterministic recorders. This is the
+Cloud counterpart to the Data Center positive pins in ``test_dc_unassign_751e.py``.
 """
 
 from __future__ import annotations

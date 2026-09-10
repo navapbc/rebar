@@ -1,35 +1,11 @@
-"""A DC sub-task reparent returns 204 and does nothing, so the write must be read back.
+"""Verify Data Center sub-task parent writes by reading the field back (bug 1a9f).
 
-Bug 1a9f-50c0-e7a5-4fda, under epic e369-a449-4773-48fb.
-
-THE DEFECT, and why no status code can detect it.
-
-``set_parent``'s sub-task branch writes ``fields.parent`` and Data Center answers **HTTP 204**.
-The parent does not move. A read-back of the same field returns the value it had before the
-write. This is accept-and-ignore: the API reports success and silently discards the change.
-
-That was established against the pinned DC 8.17.1 image by raw REST, with no rebar transport in
-the path, and is recorded with its evidence ids in ``docs/jira-dc-capability-map.md``. It is not
-an inference from a red cell — the live cells and the raw-REST probe agree, and a search-index
-lag cannot explain a direct field read returning the old value.
-
-WHY THIS IS THE DANGEROUS BRANCH. Every core caller swallows ``set_parent``'s failure
-(``dispatch_one`` warns and continues), so the ONLY place an ignored write is observable is the
-unchanged field itself. Nothing downstream can tell that the mutation did not happen: the
-transport saw a 2xx, the dispatcher saw no exception, and the pass reports success. This is the
-same silent-success class as the rest of this epic, except here the platform is the one lying.
-
-THE FIX UNDER TEST. The sub-task branch verifies its own write by reading the field back, and
-raises when the parent did not move. ``NotImplementedError`` specifically, because
-``dispatch_one`` classifies that as ``outbound-parent-unrepresentable`` rather than the retryable
-``outbound-parent-failed`` — and a retry cannot help here. DC will ignore the next write for the
-same reason it ignored this one, so a retryable classification would spin forever against a
-platform that is behaving exactly as designed.
-
-WHY READ-BACK RATHER THAN AN UP-FRONT DECLINE. The ticket permits either. Declining hardcodes a
-belief about one Jira version into the transport; read-back states the requirement — *the parent
-must actually move* — and keeps working unchanged if a future DC honours the write. It also
-reports what really happened per attempt instead of refusing categorically.
+DC 8.17.1 can return 204 while ignoring ``fields.parent``. Since dispatch softens the
+transport failure, status alone creates silent success; the direct readback must show the
+requested parent. An unchanged value raises ``NotImplementedError`` so dispatch classifies
+the relation as unrepresentable rather than retryable—repeating an accepted-but-ignored
+write cannot help. Readback preserves compatibility if a future DC version honors the
+operation instead of hardcoding a version-wide decline.
 """
 
 from __future__ import annotations

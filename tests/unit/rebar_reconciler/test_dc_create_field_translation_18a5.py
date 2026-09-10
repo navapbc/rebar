@@ -1,37 +1,11 @@
-"""The DC outbound CREATE posts rebar's own field names to Jira and 400s.
+"""Pin Data Center create-payload translation (bug 18a5).
 
-Bug 18a5-2bd8-3e56-4bd8, under epic e369-a449-4773-48fb.
-
-THE DEFECT, proven live rather than reasoned about.
-
-``JiraDataCenterTransport.create_issue`` takes the caller's dict and splats it straight into
-``client.create_issue(**fields)``. But ``dispatch_one`` hands it a payload carrying BOTH
-schemas: the differ's Jira-shaped keys (``summary``, ``issuetype``, ``status``) AND the
-bridge-shaped keys it adds for the Cloud client (``title``, ``ticket_type``), with everything
-else passed through untouched. Cloud's ``AcliClient.create_issue`` EXTRACTS the handful of
-fields it needs and ignores the rest, so the extra keys are harmless there. Data Center forwards
-all of them as Jira field ids, and Jira rejects the request:
-
-    HTTP 400  POST /rest/api/2/issue
-      Field 'ticket_type' cannot be set. It is not on the appropriate screen, or unknown.
-      Field 'title'       cannot be set. It is not on the appropriate screen, or unknown.
-      Field 'status'      cannot be set. It is not on the appropriate screen, or unknown.
-
-The whole create fails, so no issue exists, so no binding is written, and ``get_jira_key``
-returns ``None`` — which is how this surfaced, three steps downstream of the fault.
-
-THIS IS THE SEVENTH "CLOUD HAS THE TRANSLATION, DC NEVER GOT ITS HALF" (after d067, 8d68, 751e,
-2b16, 88d9, 39c1). ``update_issue``'s own docstring in this module already names the shape for
-the status→transition seam: the translation lives PER TRANSPORT. The create path is the same
-seam, still missing.
-
-``status`` deserves its own mention: it is not a rejected NAME, it is not settable at create at
-all — a Jira status is reached by a workflow transition. Cloud omits it from the create payload
-entirely, and so must DC.
-
-WHY THESE ARE UNIT TESTS. The live cell is the acceptance evidence and it costs ~37 minutes per
-run. The translation itself is a pure function of the payload, so its boundaries belong here
-where they cost milliseconds; the harness proves the create actually binds.
+The dispatcher supplies both bridge and Jira field names. DC must translate title and
+ticket type, wrap Jira object-valued fields, omit nulls and bridge-only keys, fit the
+summary, and exclude ``status`` because workflow state is not settable at creation.
+Forwarding the mixed payload directly makes Jira reject ``title``, ``ticket_type``, and
+``status`` and prevents binding. Unit tests cover the pure translation boundaries; the
+live harness covers the resulting create and binding.
 """
 
 from __future__ import annotations

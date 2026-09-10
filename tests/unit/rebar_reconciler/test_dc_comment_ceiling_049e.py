@@ -1,30 +1,10 @@
-"""Bug 049e-9fac-a821-4ea2 — DC's comment ceiling is ADMIN-CONFIGURABLE, so rebar
-must not hardcode the default.
+"""Pin Jira Data Center's configurable comment ceiling (bug 049e).
 
-Jira Data Center governs comment length with the advanced setting
-``jira.text.field.character.limit`` (Jira's own ``jpm.xml``: default 32767, scope
-"Description, Environment, Comments and Text custom fields", ``0`` = unlimited,
-documented maximum 2147483647; JRASERVER-28519 records 7.0.0 making 32767 the
-default). rebar truncated at the compiled-in 32767, so on an instance where an
-administrator RAISED the limit — or set it to ``0`` — rebar silently dropped text
-Jira would have accepted in full.
-
-These tests pin the four observable behaviours of the fix, always on the RESULTING
-BODY (length + content), never on "no exception raised":
-
-* a ceiling configured UPWARD is honored — the body is returned whole (the RED test);
-* ``0`` means unlimited;
-* a ceiling configured DOWNWARD is honored;
-* with nothing configured the default is still the stock 32767.
-
-Plus the decoupling AC: ``sanitize_comment`` must no longer route through the
-DESCRIPTION fitter (``WikiTextCodec.fit_outbound``), so a future format-aware change
-to description fitting cannot silently retarget comments (Cloud is the cautionary
-case — its description fitter measures ADF-SERIALIZED size).
-
-Every expected length here is a MODULE-LOCAL LITERAL, deliberately not derived from
-the constant under test: an expectation imported from the code under test moves with
-that code and can never fail.
+``jira.text.field.character.limit`` defaults to 32767, accepts lower or higher
+limits, and uses ``0`` for unlimited. Tests assert exact resulting bodies for all
+four cases with module-local literal expectations, so production constants cannot
+move the oracle. ``sanitize_comment`` must also remain independent of the
+description-oriented ``WikiTextCodec.fit_outbound`` path.
 """
 
 from __future__ import annotations

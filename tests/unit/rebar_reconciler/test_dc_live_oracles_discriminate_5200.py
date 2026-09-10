@@ -1,28 +1,11 @@
-"""MUTATION CHECKS for the three J11 live oracles repaired under ticket 5200.
+"""Keep repaired J11 live oracles discriminating without the DC harness.
 
-WHY THESE EXIST AT ALL. The DC harness image is linux/amd64-only and does not boot on an
-arm64 workstation (three measured attempts, each over an hour — see the suite's README), and a
-module under ``tests/external/live_jira_dc/`` without a harness skipif burns a 20-minute budget
-and then errors (measured 1208s). So a repaired live oracle CANNOT be shown to work by running
-it. The suite's answer, established by
-``test_inbound_assignee_oracle_discriminates_5200.py``, is to keep each oracle's discriminating
-logic in ``_dc_support`` and drive it here, harness-free, RED and GREEN. Each oracle is run
-VERBATIM — imported, not paraphrased — because a paraphrase can stay red while the live cell
-has quietly gone vacuous, which is this epic's signature failure mode.
-
-THE THREE GAPS, all found by an independent verification pass over the story's 18 acceptance
-criteria:
-
-  1. Inbound cell ``08-assign`` could not fail in EITHER half. It assigned the harness admin to
-     an issue that ``bound_dc_issue`` already delivers assigned to the project lead (the admin),
-     and then asserted only that the local ``.assignee`` was TRUTHY — a field the fixture's own
-     binding pass had already populated. Both the mutation and the oracle were no-ops.
-  2. Row 1 OUTBOUND had NO TEST. ``grep -rn "rebar-id:\\|properties/local_id" tests/external/``
-     returned nothing, so the provenance markers an outbound create plants were unasserted in
-     both label and entity-property form.
-  3. The pagination cell measured its PRECONDITION with ``_paged_search`` — the very fix it
-     exists to guard (ticket 9263) — so a re-truncation failed the precondition under a message
-     that read "NOT a pagination defect".
+The live image cannot run on this host, so tests import each oracle's actual
+``_dc_support`` logic rather than paraphrasing it. They guard three vacuity failures:
+the inbound assignment cell reused an already-assigned value and asserted only truthiness;
+outbound creation never asserted either ``rebar-id:`` provenance marker; and pagination
+measured its precondition through the pager under test, misclassifying truncation as index
+lag. Harness-free RED/GREEN checks ensure those exact live oracles expose each defect.
 """
 
 from __future__ import annotations
@@ -189,33 +172,13 @@ def _property_ok(local_id: str) -> tuple[int, dict[str, Any]]:
 
 
 def test_the_writer_emits_the_COLON_label_form_and_nothing_emits_the_hyphen(support: Any) -> None:
-    """WHICH FORM ROW 1 ASSERTS, pinned to the WRITERS rather than to a reading of them.
+    """Census the canonical colon-form provenance writers.
 
-    Both forms exist in this codebase (see the exclusion list in ``inbound_differ.py`` about bug
-    ``eadb``), and only one is written. All three writers emit ``rebar-id:<local_id>``:
-    ``dispatch_one.py`` (the outbound create this row is about),
-    ``apply_inbound_events.py`` (the inbound-create write-back) and
-    ``binding_recovery.py`` (pending-binding recovery). The hyphen form is READ-ONLY legacy.
-    Asserted as source text because a label literal is a string, which is precisely the thing a
-    semantic reference search cannot see.
-
-    The writer list is keyed on FILE NAME, so it pins each writer's location as well as its
-    behaviour and must be retargeted whenever one moves. Recovery moved out of
-    ``binding_store.py`` into ``binding_recovery.py`` in RP-02 S3 (``polarized-servile-jenny``),
-    which is why the third entry changed. The write-back likewise moved out of
-    ``apply_inbound_records.py`` into ``apply_inbound_events.py`` when that module was split at
-    its concern boundary (ticket ``6f51-f8a4-b4fb-450c``, ``uncommon-variable-cockatiel``),
-    which is why the second entry changed; the census itself is unweakened, and a grep for the
-    literal across ``src/`` still finds exactly these three writers. The per-writer line numbers
-    this docstring used to carry were already stale and have been dropped rather than refreshed —
-    naming the module is enough to find the call site, and a line number here goes stale on every
-    unrelated edit above it.
-
-    Source-text matching is inherently coupled to WHERE the literal is written, so this is not
-    the only oracle for it. The BEHAVIOURAL twin lives in
-    ``state/test_binding_recovery.py::test_keyed_pending_recovery_performs_no_search``, which
-    drives recovery against a recording client and asserts the label it actually emits. If this
-    census and that test ever disagree, the behavioural one is right.
+    ``dispatch_one.py``, ``apply_inbound_events.py``, and ``binding_recovery.py`` must
+    emit ``rebar-id:<local_id>``; the hyphen form is read-only legacy. File-based source
+    checks catch string literals that semantic references cannot and must be retargeted
+    if a writer moves. The recording-client recovery test is the behavioral authority if
+    it ever disagrees with this location-sensitive census.
     """
     writers = ("dispatch_one.py", "apply_inbound_events.py", "binding_recovery.py")
     for name in writers:
@@ -342,10 +305,7 @@ class _ClampingSearch:
 
 
 def _truncating_paged_search(server: _ClampingSearch) -> list[dict[str, Any]]:
-    """``_paged_search`` AS IT BEHAVED WHEN TRUNCATING — advance by the REQUESTED size and stop
-    on a short page. This is the historical bug, restated so the fake server can be shown
-    capable of exposing it: a precondition that cannot see truncation cannot misreport it
-    either, and gap 3 is precisely that it CAN."""
+    """Model the old pager: advance by requested size and stop on a capped short page."""
     status, body = server("/rest/api/2/search?jql=project%3DRBJ&startAt=0&maxResults=100")
     assert status == 200
     issues = body["issues"]
@@ -375,13 +335,10 @@ def test_the_raw_count_sees_every_issue_a_clamped_search_withholds(support: Any)
 
 
 def test_the_old_precondition_fails_on_the_very_defect_it_disclaimed(support: Any) -> None:
-    """GAP 3 IN ONE ASSERTION. Same server, same seeded count, two measurements.
+    """Prove the old precondition hides the pagination defect it disclaims.
 
-    ``_paged_search`` truncating is EXACTLY what the pagination cell exists to catch. Measured
-    through it, the precondition reports 50 of 201, trips, and says "the index is lagging
-    further than this suite allows. NOT a pagination defect" — actively misdirecting the reader
-    away from the defect. Measured through raw REST it reports 201, the precondition holds, and
-    the cell reaches the assertion that names the truncation.
+    The broken pager reports 50 of 201 and blames index lag; raw REST reports all 201 so
+    the cell reaches the assertion that identifies truncation.
     """
     server = _ClampingSearch(total=201, clamp=50)
     target = 201
@@ -420,18 +377,9 @@ def test_the_raw_count_surfaces_a_failed_request_instead_of_counting_zero(suppor
     assert "HTTP 503" in str(excinfo.value)
 
 
-# ===========================================================================
-# GAP 4 — row 12 OUTBOUND: rebar writing a parent onto a DC issue
-# ===========================================================================
-#
-# The fourth gap in criterion 11, found after the first three were closed: row 12 had no
-# OUTBOUND test at all. It looked covered because `test_outbound_clear_parent_round_trips`
-# (row 13 outbound) asserts a parent IS present — but that parent came from issue CREATION
-# (`extra={"parent": {"key": parent}}`), never from a rebar write.
-#
-# Everything below is harness-free. The DC transport is driven with a fake pycontribs client,
-# which is how the rest of `tests/unit/rebar_reconciler/` exercises it, so the CONTRACT claims
-# in the live cell's docstring are executable rather than asserted in prose.
+# Row 12 outbound needs its own write oracle: the neighboring clear-parent test only
+# observes a parent supplied during issue creation. The harness-free fake drives the DC
+# transport so both parent-write paths remain executable contracts.
 
 
 class _FakeIssue:
@@ -514,25 +462,12 @@ def test_dc_set_parent_WRITES_fields_parent_for_a_subtask() -> None:
 
 
 def test_dc_set_parent_USES_A_DIFFERENT_PATH_for_the_non_subtask_case() -> None:
-    """CONTRACT, HALF TWO: epic and sub-task are DIFFERENT PATHS — they do not collapse into
-    one already-covered case, which is why row 12 outbound needed a cell rather than an
-    amended criterion.
+    """Keep epic and sub-task parent writes on distinct DC paths.
 
-    REWRITTEN (ticket 39c1), and the reason matters more than the edit. This cell used to
-    assert `pytest.raises(NotImplementedError)`, which was correct while the epic case was
-    declined. Change 1311 makes it WRITE the instance-discovered "Epic Link" custom field
-    instead (the Agile-API route change 1302 tried was refuted live by harness run
-    30840572608 — DC 8.17.1 404s on the greenhopper epic path).
-
-    **It would have kept passing if left alone, and that is the point.** This module's client
-    double had no `fields()`, so after 1311 the epic path declined because the double could not
-    enumerate fields — NOT because epic membership is a different field. The assertion would
-    have stayed green while testing nothing about the contract it names: the same vacuous-oracle
-    class as the `08-assign` cell this very story had to repair. The double now carries
-    `fields()` because the real client does.
-
-    The INTENT is unchanged: the two paths must remain distinguishable, and a non-sub-task must
-    never get a `fields.parent` write, which DC silently no-ops.
+    A non-sub-task uses the instance-discovered Epic Link custom field; the GreenHopper
+    route is refuted by DC 8.17.1's 404. The fake exposes ``fields()`` so discovery is real
+    rather than a vacuous decline. No non-sub-task may receive ``fields.parent``, which DC
+    silently ignores.
     """
     issue = _FakeIssue("RBJ-9", subtask=False)
 

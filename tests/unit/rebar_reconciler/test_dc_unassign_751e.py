@@ -1,38 +1,11 @@
-"""An EMPTY outbound assignee must actually UNASSIGN on Jira Data Center (bug 751e).
+"""Pin Data Center's empty-assignee vendor contract (bug 751e).
 
-THE DEFECT. The shared outbound differ resolves an empty local assignee to the EMPTY
-STRING, not ``None`` (``outbound_differ._assignee_resolver`` returns ``("", True, False)``
-when ``not assignee``), and ``assignee`` is in
-``dispatch_apply_phases._OUTBOUND_BATCH_ALLOWLIST``, so ``client.update_issue(key,
-assignee="")`` is what the DC transport receives. The transport used to forward that empty
-string VERBATIM to ``pycontribs``' ``assign_issue``, which is not an unassign instruction on
-that library at all — so the DC assignee silently stayed put and the pass reported success.
-
-THE VENDOR CONTRACT, VERIFIED AT RUNTIME against ``jira==3.10.5`` (not read off a docstring
-— this epic has been bitten by name-based assumptions about this library before). Probing
-``JIRA.assign_issue`` with a recording session and ``_is_cloud=False`` produced:
-
-  * ``None``  -> PUT ``issue/<key>/assignee`` ``{"name": None}``  <- DC's UNASSIGNED
-  * ``-1``    -> PUT ``{"name": -1}``    <- DC's "Automatic" (project default assignee)
-  * ``"-1"``  -> PUT ``{"name": "-1"}``  <- likewise "Automatic", NOT unassigned
-  * ``""``    -> falls through ``_get_user_id`` to ``search_users(user="")``, and then
-                 EITHER raises ``JIRAError("No matching user found for: ''")`` when the
-                 search is empty, OR — the worse mode story 5200's J11 cell flagged —
-                 PUTs ``{"name": "<whatever the search returned first>"}``, assigning an
-                 ARBITRARY user.
-
-So the sentinel that means "unassigned" on Data Center is ``None`` — ``-1``/``"-1"`` are a
-DIFFERENT operation and would be the wrong fix.
-
-WHY THE FAKE MODELS pycontribs RATHER THAN IMPORTING IT. ``jira`` is declared only by the
-``[jira-datacenter]`` extra and is deliberately ABSENT from the default test selection (see
-``.github/workflows/_optionality.yml``), so :class:`_FakeJiraClient` reproduces
-``JIRA._get_user_id``'s three-value passthrough and its ``search_users`` fallback exactly as
-transcribed above.
-
-THE ORACLE IS POSITIVE ABOUT ABSENCE. Every assertion here reads the resulting ``assignee``
-FIELD on the fake issue and requires it to be empty. None of them settle for "no exception
-was raised" — a silent success is the entire character of this defect.
+The differ supplies ``assignee=""``, but ``jira==3.10.5`` uses ``None`` for
+unassigned. ``-1`` and ``"-1"`` select the automatic project assignee; ``""`` performs
+user search and may fail or choose an arbitrary user. The transport must therefore map
+empty input to ``None``. The default suite omits the optional Jira package, so the fake
+reproduces its passthrough and search fallback. Assertions inspect the resulting assignee
+field—absence of an exception cannot detect the guarded silent failure.
 """
 
 from __future__ import annotations
@@ -129,13 +102,7 @@ def _transport(**kwargs: Any) -> tuple[JiraDataCenterTransport, _FakeJiraClient]
 
 @pytest.mark.parametrize("empty", ["", None])
 def test_empty_outbound_assignee_actually_unassigns(empty: Any) -> None:
-    """The bug's core oracle: an empty desired assignee leaves the field EMPTY.
-
-    Before the fix, ``empty=""`` reached ``search_users(user="")``, which found nobody and
-    raised — the transport turned that into ``AssigneeNotFoundError`` and the assignee
-    stayed ``"alice"``. The assertion is on the resulting FIELD, not on the absence of an
-    exception.
-    """
+    """Require an empty desired assignee to leave the resulting field empty."""
     transport, client = _transport()
     assert client.assignee == "alice", "precondition: the issue starts assigned"
 

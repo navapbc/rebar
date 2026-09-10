@@ -1,16 +1,9 @@
-"""Unified reconciler exception taxonomy (epic 5ca8 / romp-swath-wince).
+"""Pin the reconciler's canonical exception identity and retry metadata.
 
-Before this story, ``acli``/``acli_subprocess`` and ``applier``/``batch_dispatch`` each defined
-their OWN ``RetryExhaustedError`` with a DIFFERENT base class, so ``except RetryExhaustedError``
-against one import silently MISSED the one the other retry loop raised (exception identity drives
-control flow — a latent reliability bug). These tests pin the unification:
-
-* ONE canonical type in ``_errors`` (``is``-identity across both public surfaces);
-* caught by the acli path's ``except RuntimeError`` AND the batch path's ``except Exception`` AND
-  ``except ReconcilerError``;
-* both retry loops CHAIN the cause (``__cause__``) and populate ``last_exception``/``attempts``.
-
-No grep/glob/substring heuristics — pure object-identity / isinstance / ``__cause__`` assertions.
+Both public surfaces must expose the same ``RetryExhaustedError`` from ``_errors`` with
+the required ``RuntimeError`` and ``ReconcilerError`` ancestry. Each retry loop chains its
+cause and records ``last_exception`` and ``attempts``. Oracles use identity, MRO, and
+``__cause__`` rather than source-text heuristics.
 """
 
 from __future__ import annotations
