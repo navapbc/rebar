@@ -20,13 +20,12 @@
 # human-visible tripwire; aws_lambda_function.bedrock_spend_cap is the one that
 # actually stops spend.
 #
-# ADOPTING THE LIVE RESOURCES
+# HISTORY
 #
 # This stack was deployed via the CLI first so the cap was protecting the
-# account the same day, then reconciled into Terraform. The `import` blocks at
-# the bottom adopt those live resources — the first `terraform apply` binds
-# them to state rather than trying to create duplicates and failing on
-# EntityAlreadyExists. Delete the import blocks once the apply has run.
+# account the same day, then reconciled into Terraform with `import` blocks.
+# Those blocks have served their purpose and been removed; everything here is
+# now managed normally.
 # ---------------------------------------------------------------------------
 
 variable "bedrock_daily_cap_usd" {
@@ -230,11 +229,11 @@ resource "aws_budgets_budget" "bedrock_daily" {
   dynamic "notification" {
     for_each = [50, 80, 100]
     content {
-      comparison_operator        = "GREATER_THAN"
-      threshold                  = notification.value
-      threshold_type             = "PERCENTAGE"
-      notification_type          = "ACTUAL"
-      subscriber_sns_topic_arns  = [aws_sns_topic.bedrock_spend_cap_alerts.arn]
+      comparison_operator       = "GREATER_THAN"
+      threshold                 = notification.value
+      threshold_type            = "PERCENTAGE"
+      notification_type         = "ACTUAL"
+      subscriber_sns_topic_arns = [aws_sns_topic.bedrock_spend_cap_alerts.arn]
     }
   }
 }
@@ -427,60 +426,4 @@ resource "aws_lambda_permission" "bedrock_spend_cap_tick" {
   function_name = aws_lambda_function.bedrock_spend_cap.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.bedrock_spend_cap_tick.arn
-}
-
-# --- adopt the already-deployed resources (delete after the first apply) -----
-import {
-  to = aws_iam_policy.bedrock_spend_cap_deny
-  id = "arn:aws:iam::896586841071:policy/BedrockDailySpendCapDeny"
-}
-
-import {
-  to = aws_sns_topic.bedrock_spend_cap_alerts
-  id = "arn:aws:sns:us-east-1:896586841071:bedrock-spend-cap-alerts"
-}
-
-import {
-  to = aws_sns_topic_policy.bedrock_spend_cap_alerts
-  id = "arn:aws:sns:us-east-1:896586841071:bedrock-spend-cap-alerts"
-}
-
-import {
-  to = aws_budgets_budget.bedrock_daily
-  id = "896586841071:bedrock-daily-500"
-}
-
-import {
-  to = aws_iam_role.bedrock_spend_cap
-  id = "bedrock-spend-cap-lambda"
-}
-
-import {
-  to = aws_iam_role_policy.bedrock_spend_cap
-  id = "bedrock-spend-cap-lambda:bedrock-spend-cap"
-}
-
-import {
-  to = aws_cloudwatch_log_group.bedrock_spend_cap
-  id = "/aws/lambda/bedrock-spend-cap"
-}
-
-import {
-  to = aws_lambda_function.bedrock_spend_cap
-  id = "bedrock-spend-cap"
-}
-
-import {
-  to = aws_cloudwatch_event_rule.bedrock_spend_cap_tick
-  id = "bedrock-spend-cap-tick"
-}
-
-import {
-  to = aws_cloudwatch_event_target.bedrock_spend_cap_tick
-  id = "bedrock-spend-cap-tick/lambda"
-}
-
-import {
-  to = aws_lambda_permission.bedrock_spend_cap_tick
-  id = "bedrock-spend-cap/events-tick"
 }
