@@ -29068,8 +29068,6 @@
       "target_id": "e7e4-bbb9-81ef-4e32"
     },
     "ae1b-b2a0-a080-4b4e|06e0-fb68-657a-4ea1|relates_to": {
-      "confirmed_at": 1786977709969219020,
-      "confirmed_pass": "2026-08-17T14-33-36",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014033946506,
       "link_id": "49707",
@@ -29079,8 +29077,6 @@
       "target_id": "06e0-fb68-657a-4ea1"
     },
     "ae1b-b2a0-a080-4b4e|1d3c-547d-f0cf-426c|relates_to": {
-      "confirmed_at": 1786977709969216536,
-      "confirmed_pass": "2026-08-17T14-33-36",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014033948058,
       "link_id": "49706",
@@ -29090,8 +29086,6 @@
       "target_id": "1d3c-547d-f0cf-426c"
     },
     "ae1b-b2a0-a080-4b4e|fade-ea90-7564-4715|relates_to": {
-      "confirmed_at": 1786977709969221104,
-      "confirmed_pass": "2026-08-17T14-33-36",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014033949270,
       "link_id": "49709",
