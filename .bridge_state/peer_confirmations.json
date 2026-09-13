@@ -12952,8 +12952,6 @@
       "target_id": "c5ca-b32b-5e9e-4053"
     },
     "47a0-7019-da4b-40e0|83d3-61d9-fc59-424b|depends_on": {
-      "confirmed_at": 1787377095067560745,
-      "confirmed_pass": "2026-08-22T05-35-36",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014030958885,
       "link_id": "50092",
@@ -12974,8 +12972,6 @@
       "target_id": "a4bd-4ca8-c44f-49bb"
     },
     "47a0-7019-da4b-40e0|f6e9-a5fd-e908-4b82|depends_on": {
-      "confirmed_at": 1787377095067563319,
-      "confirmed_pass": "2026-08-22T05-35-36",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014030960047,
       "link_id": "50093",
