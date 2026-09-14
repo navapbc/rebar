@@ -40202,8 +40202,6 @@
       "target_id": "jira-reb-1003"
     },
     "f6e9-a5fd-e908-4b82|248f-ac00-18db-4259|depends_on": {
-      "confirmed_at": 1787071709856288221,
-      "confirmed_pass": "2026-08-18T16-34-32",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014035870570,
       "link_id": "50095",
@@ -40213,8 +40211,6 @@
       "target_id": "248f-ac00-18db-4259"
     },
     "f6e9-a5fd-e908-4b82|47a0-7019-da4b-40e0|blocks": {
-      "confirmed_at": 1787071709856286367,
-      "confirmed_pass": "2026-08-18T16-34-32",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014038565850,
       "link_id": "50093",
