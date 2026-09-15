@@ -298,6 +298,27 @@ def test_no_secret_committed(relpath, client):
         assert '"token"' not in text and "token_sha256" not in text
 
 
+# ── Serena entry: a prebuilt binary, never a launch-time git build ─────────────────
+def test_serena_entry_is_prebuilt_not_git_build():
+    """The project `serena` entry must launch an installed binary, not `uvx --from git+`.
+
+    Copilot sandboxes MCP servers. A `uvx --from git+...` launcher re-resolves the git ref
+    and rebuilds on every start, and uv's build shells out to `git init`, which cannot read
+    `~/.gitconfig` inside that sandbox (`exit status: 128`, `Operation not permitted`). uv
+    aborts before the child reads stdin, so every session start fails with `the server
+    closed its input stream (broken pipe)` on `initialize`. Pinning the entry to the
+    `uv tool install`ed binary keeps git and the network off the startup path entirely.
+    """
+    entry = json.loads((REPO_ROOT / ".mcp.json").read_text())["mcpServers"]["serena"]
+    assert entry["type"] == "local"
+    assert entry["command"].endswith("/bin/serena")
+    assert "start-mcp-server" in entry["args"]
+    # The regression this test exists for: no git-build launcher, in any field.
+    serialized = json.dumps(entry)
+    assert "uvx" not in serialized
+    assert "git+" not in serialized
+
+
 # ── AC oracle 2: each client CLI accepts the committed config + lists `rebar` ───────
 def _mask_home(tmp_path):
     """A scratch HOME so a client CLI reads only the config we plant (no user config)."""

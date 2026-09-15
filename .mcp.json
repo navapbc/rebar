@@ -3,7 +3,14 @@
     "Project-scoped rebar MCP entry for Claude Code and GitHub Copilot CLI.",
     "Both clients read this workspace .mcp.json and expand MCP_CLIENT_PAT_CLI",
     "from the environment; no bearer value is stored in the repository.",
-    "MCP_CLIENT_PAT_CLI is a machine-local alias to the existing claude PAT slot."
+    "MCP_CLIENT_PAT_CLI is a machine-local alias to the existing claude PAT slot.",
+    "serena is the local code-navigation server. It points at an already-installed",
+    "binary rather than `uvx --from git+...`: Copilot sandboxes MCP servers, and a",
+    "uvx git build runs `git init`, which cannot read ~/.gitconfig inside that",
+    "sandbox, so the server died before initialize. Install it once per machine with",
+    "`uv tool install --from git+https://github.com/oraios/serena serena-agent`",
+    "(upgrade with `uv tool upgrade serena-agent`), and provision the read-only",
+    "origin/main mirror at ~/.rebar-serena-mirror (see AGENTS.md)."
   ],
   "mcpServers": {
     "rebar": {
@@ -12,6 +19,20 @@
       "headers": {
         "Authorization": "Bearer ${MCP_CLIENT_PAT_CLI}"
       }
+    },
+    "serena": {
+      "type": "local",
+      "tools": [
+        "*"
+      ],
+      "command": "${HOME}/.local/share/uv/tools/serena-agent/bin/serena",
+      "args": [
+        "start-mcp-server",
+        "--context",
+        "ide-assistant",
+        "--project",
+        "${HOME}/.rebar-serena-mirror"
+      ]
     }
   }
 }

@@ -108,6 +108,41 @@ copilot mcp add --transport http rebar https://rebar.solutions.navateam.com/mcp/
 
 Verify from this repository: `copilot mcp get rebar` (or `copilot mcp list`) lists the `rebar` server as repository/workspace-scoped and its URL. From a non-project directory, `rebar` should not appear once the old user-level entry is removed.
 
+### Serena (local code navigation)
+
+The same project `.mcp.json` declares the `serena` server that `AGENTS.md` §"Navigating the
+codebase" mandates for semantic navigation. Two per-machine prerequisites have to exist before
+it will start, because the entry deliberately references an already-installed binary rather
+than building one at launch:
+
+```sh
+uv tool install --from git+https://github.com/oraios/serena serena-agent   # once per machine
+uv tool upgrade serena-agent                                               # to move to a newer serena
+```
+
+That install produces `~/.local/share/uv/tools/serena-agent/bin/serena`, which is the
+`command` the entry names via `${HOME}`. The second prerequisite is the read-only
+`origin/main` mirror at `~/.rebar-serena-mirror` (a `git worktree` of this repository) that
+the entry passes as `--project`; Serena indexes the mirror, not the checkout you are editing.
+
+**Do not replace the command with `uvx --from git+https://github.com/oraios/serena`.** `uvx`
+re-resolves the git ref and rebuilds on every launch, and Copilot sandboxes MCP servers, so
+uv's build shells out to a `git init` that cannot read `~/.gitconfig` inside that sandbox:
+
+```
+╰─▶ process didn't exit successfully: `git init` (exit status: 128)
+    fatal: unable to access '/Users/<you>/.gitconfig': Operation not permitted
+```
+
+uv aborts, the child never reads stdin, and the client reports `the server closed its input
+stream (broken pipe)` on `initialize` — every session, on every start.
+`test_serena_entry_is_prebuilt_not_git_build` in
+[`tests/interfaces/facades/test_mcp_client_configs.py`](../tests/interfaces/facades/test_mcp_client_configs.py)
+guards the committed entry against that regression.
+
+Verify from this repository: `copilot mcp list` lists `serena` under `Workspace servers`; run
+from a non-project directory it should not appear at all.
+
 ## Codex
 
 Config file: `~/.codex/config.toml` (or a trusted project's `.codex/config.toml`). Codex reads a
