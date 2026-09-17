@@ -225,7 +225,7 @@ worktree:  ## Create a fresh worktree from origin/main + provision its venv & ho
 	@# created from this checkout inherits it automatically.
 	@if [ -z "$(name)" ]; then \
 		echo "usage: make worktree name=<branch> [dir=<path>]"; \
-		echo "  Creates a worktree at <path> (default ../<branch>) branched from a freshly-"; \
+		echo "  Creates a worktree at <path> (default .rebar/worktrees/<branch>) branched from a freshly-"; \
 		echo "  fetched origin/main, then provisions .venv + editable install + the pre-commit gate."; \
 		exit 2; \
 	fi
@@ -237,7 +237,7 @@ worktree:  ## Create a fresh worktree from origin/main + provision its venv & ho
 	@# which reads as a code problem, not an environment one). `set -e` makes the line
 	@# abort; the per-step handlers make the failure name itself.
 	@set -e; \
-	target_dir="$(if $(dir),$(dir),../$(name))"; \
+	target_dir="$(if $(dir),$(dir),.rebar/worktrees/$(name))"; \
 	echo "→ git fetch origin"; \
 	git fetch origin || { \
 		echo "ERROR: 'git fetch origin' failed — cannot branch from a current origin/main."; \

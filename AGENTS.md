@@ -438,7 +438,7 @@ The full recipe — Gerrit access setup, feature branches for multi-story work, 
 handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rules:
 
 - **Work in a fresh worktree branched from current `origin/main`**, not the main checkout
-  (`git fetch origin && git worktree add ../<name> -b <branch> origin/main`; or
+  (`git fetch origin && git worktree add .rebar/worktrees/<name> -b <branch> origin/main`; or
   `make worktree name=<branch>` to also provision the venv). `cd` into it and run every
   subsequent command — edits, gates, `rebar`, the ticket close, and `git` — from inside it.
 - **Two remotes (split residency):** `origin` → GitHub (the code mirror **and** the `tickets`

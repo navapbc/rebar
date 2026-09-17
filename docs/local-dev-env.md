@@ -111,11 +111,12 @@ export AWS_DEFAULT_REGION=us-east-1             # a region must resolve; Bedrock
 > `ANTHROPIC_API_KEY` instead — see "Running your local gates on AWS Bedrock" below.
 
 > **Starting a NEW worktree? One command does the whole setup.** `make worktree name=<branch>`
-> creates a fresh worktree at `../<branch>` (override with `dir=<path>`) branched from a
-> freshly-fetched `origin/main`, then provisions its `.venv` on the **pinned** interpreter
-> (`make venv`, see above) and runs the canonical `make install` inside it — the one-command
-> form of the manual "fresh worktree + local venv" sequence this repo mandates. Then `cd ../<branch> && source .venv/bin/activate` and
-> export your provider credentials (AWS by default — see the note above).
+> creates a fresh worktree at `.rebar/worktrees/<branch>` (override with `dir=<path>`)
+> branched from a freshly-fetched `origin/main`, then provisions its `.venv` on the
+> **pinned** interpreter (`make venv`, see above) and runs the canonical `make install`
+> inside it — the one-command form of the manual "fresh worktree + local venv" sequence
+> this repo mandates. Then `cd .rebar/worktrees/<branch> && source .venv/bin/activate`
+> and export your provider credentials (AWS by default — see the note above).
 
 > **Signing your ticket writes (per-clone identity).** Every clone that writes non-exempt
 > tickets should own its **own** identity + SSH signing key (never the shared bot). One-time

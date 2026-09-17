@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,7 @@ def _write_stub(path: Path, body: str) -> Path:
 def _run_worktree(
     tmp_path: Path,
     *,
+    include_dir: bool = True,
     fetch_exit: int = 0,
     worktree_add_exit: int = 0,
     venv_exit: int = 0,
@@ -97,14 +99,12 @@ def _run_worktree(
 
     env = subprocess_env()
     env["PATH"] = f"{stub_bin}{os.pathsep}{env['PATH']}"
+    command = ["make", "worktree", f"name={BRANCH}", f"MAKE={stub_make}"]
+    if include_dir:
+        command.insert(3, f"dir={tmp_path / 'worktree'}")
+
     return subprocess.run(
-        [
-            "make",
-            "worktree",
-            f"name={BRANCH}",
-            f"dir={tmp_path / 'worktree'}",
-            f"MAKE={stub_make}",
-        ],
+        command,
         cwd=tmp_path,
         env=env,
         check=False,
@@ -180,3 +180,41 @@ def test_successful_provisioning_still_succeeds(tmp_path: Path) -> None:
         "venv",
         "install",
     ]
+
+
+def test_default_worktree_path_stays_inside_repo_sandbox(tmp_path: Path) -> None:
+    result = _run_worktree(tmp_path, include_dir=False)
+
+    combined = result.stdout + result.stderr
+    outside_default = tmp_path.parent / BRANCH
+    try:
+        assert result.returncode == 0, combined
+        assert f"worktree add .rebar/worktrees/{BRANCH} -b {BRANCH} origin/main" in (
+            tmp_path / "git-args.txt"
+        ).read_text(encoding="utf-8")
+        assert "/bin/sh: branch:" not in combined
+        assert not outside_default.exists()
+    finally:
+        shutil.rmtree(outside_default, ignore_errors=True)
+
+
+def test_worktree_recipe_does_not_feed_make_comments_to_shell() -> None:
+    makefile = MAKEFILE.read_text(encoding="utf-8").splitlines()
+    recipe_start = next(
+        index for index, line in enumerate(makefile) if line.startswith("worktree:")
+    )
+    next_target = next(
+        index
+        for index, line in enumerate(makefile[recipe_start + 1 :], start=recipe_start + 1)
+        if line and not line.startswith(("\t", " "))
+    )
+    recipe_lines = makefile[recipe_start + 1 : next_target]
+
+    hazardous_pairs = [
+        (line, following)
+        for line, following in pairwise(recipe_lines)
+        if line.rstrip().endswith("\\") and following.strip().startswith("@#")
+    ]
+
+    assert hazardous_pairs == []
+    assert '\ttarget_dir="$(if $(dir),$(dir),.rebar/worktrees/$(name))"; \\' in recipe_lines
