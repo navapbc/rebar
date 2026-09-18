@@ -48,6 +48,7 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TF_DIR = REPO_ROOT / "infra" / "terraform"
 COMPOSE = REPO_ROOT / "infra" / "compose" / "docker-compose.yml"
+AUTODEPLOY = REPO_ROOT / "infra" / "scripts" / "autodeploy.sh"
 
 #: The host path the whole slice agrees on. Terraform's default, the compose bind, the
 #: observability probe and the runbooks must all name it; a mismatch between any two of them
@@ -254,6 +255,18 @@ def _review_bot_service() -> dict:
     return doc["services"]["review-bot"]
 
 
+def _mcp_service() -> dict:
+    doc = yaml.safe_load(COMPOSE.read_text())
+    return doc["services"]["mcp"]
+
+
+def _autodeploy_mcp_run_new() -> str:
+    src = AUTODEPLOY.read_text()
+    match = re.search(r"^mcp_run_new\(\) \{\n(?P<body>.*?)^\}", src, re.MULTILINE | re.DOTALL)
+    assert match is not None
+    return match.group("body")
+
+
 def test_review_bot_snapshot_store_and_clone_tmp_both_move_to_scratch() -> None:
     """AC3. Two env vars, because the two consumers read two different names.
 
@@ -284,6 +297,30 @@ def test_gate_admission_knows_the_compose_configured_dedicated_path() -> None:
     env = _review_bot_service()["environment"]
     assert env["REBAR_GATE_TMPDIR"] == SCRATCH_MOUNT
     assert str(ga._CANONICAL_GATE_SCRATCH_MOUNT) == SCRATCH_MOUNT
+
+
+def test_mcp_snapshot_store_and_clone_tmp_both_move_to_scratch() -> None:
+    """MCP runs certified gates too, so it needs the same scratch routing as review-bot."""
+    env = _mcp_service()["environment"]
+    assert env["REBAR_GATE_FREE_WATERMARK_PCT"] == "20"
+    assert env["REBAR_GATE_TMPDIR"] == SCRATCH_MOUNT
+    assert env["TMPDIR"] == SCRATCH_MOUNT
+
+
+def test_mcp_scratch_bind_carries_the_declaration_marker_into_the_container() -> None:
+    volumes = _mcp_service()["volumes"]
+    parent = str(Path(SCRATCH_MOUNT).parent)
+    assert any(str(v).startswith(f"{parent}:{parent}") for v in volumes), volumes
+
+
+def test_autodeploy_mcp_run_new_routes_gate_scratch_to_the_parent_bind() -> None:
+    body = _autodeploy_mcp_run_new()
+    assert "-e REBAR_GATE_FREE_WATERMARK_PCT=20" in body
+    assert f"-e REBAR_GATE_TMPDIR={SCRATCH_MOUNT}" in body
+    assert f"-e TMPDIR={SCRATCH_MOUNT}" in body
+
+    parent = str(Path(SCRATCH_MOUNT).parent)
+    assert f'-v "{parent}:{parent}"' in body
 
 
 # ── observability: the metric behind the alarms ──────────────────────────────────────

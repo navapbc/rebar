@@ -471,6 +471,15 @@ services:
       REBAR_MCP_AUTH_STATIC_TOKENS_FILE: "/run/secrets/mcp-static-tokens.json"
       # Let the certified LLM tools run (the box drives review_plan/verify_completion/… ).
       REBAR_MCP_ALLOW_LLM: "1"
+      # MCP runs the same certified gates as review-bot, so ADR 0112's scratch-volume
+      # routing applies here too: both tmpdir variables are required, and the bind below
+      # is the parent so the root-side declaration marker remains visible.
+      # mechanism-ok: env_var REBAR_GATE_FREE_WATERMARK_PCT — ce66-59ef-d6d7-4c7a
+      REBAR_GATE_FREE_WATERMARK_PCT: "20"
+      # mechanism-ok: env_var REBAR_GATE_TMPDIR — ce66-59ef-d6d7-4c7a
+      REBAR_GATE_TMPDIR: "/var/lib/rebar/gate-scratch"
+      # mechanism-ok: env_var TMPDIR — ce66-59ef-d6d7-4c7a
+      TMPDIR: "/var/lib/rebar/gate-scratch"
       # Op-cert signing identity (mirrors opcert): the env id + Ed25519 key the certified
       # tools sign under, materialized outside the app and bind-mounted below.
       REBAR_OPCERT_ENV_ID: "${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}"
@@ -566,6 +575,9 @@ services:
       # reason: a `docker compose down -v` must not throw away a multi-GB blobless clone and
       # force every gate to fail again until it re-converges.
       - gerrit_mcp_code:/var/gerrit/site/mcp-code
+      # ADR 0112 gate scratch: parent bind, not mount-point bind, so the declaration marker
+      # beside gate-scratch and the proof marker inside it are both visible to the container.
+      - /var/lib/rebar:/var/lib/rebar
     # Liveness: the container HEALTHCHECK in Dockerfile.mcp hits loopback /health; declare
     # it here too so `docker compose ps` reflects health and a redeploy waits on it.
     healthcheck:
