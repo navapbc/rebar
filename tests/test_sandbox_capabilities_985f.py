@@ -51,6 +51,41 @@ def test_pytest_scrubs_command_scope_git_identity(monkeypatch: pytest.MonkeyPatc
     assert not has_value
 
 
+def test_configure_repo_git_identity_does_not_mutate_os_environ(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from _sandbox_capabilities import configure_repo_git_identity
+
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "user.email")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "ambient@example.invalid")
+    before = subprocess_env()
+
+    configure_repo_git_identity(repo, email="local@example.invalid", name="Local Test")
+
+    if subprocess_env() != before:
+        pytest.fail("configure_repo_git_identity mutated os.environ")
+    env = subprocess_env()
+    email = subprocess.run(
+        ["git", "-C", str(repo), "config", "--local", "user.email"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    ).stdout.strip()
+    name = subprocess.run(
+        ["git", "-C", str(repo), "config", "--local", "user.name"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    ).stdout.strip()
+    assert email == "local@example.invalid"
+    assert name == "Local Test"
+
+
 def test_semgrep_settings_probe_reports_unavailable_against_denial_stub(tmp_path: Path) -> None:
     from _sandbox_capabilities import semgrep_settings_file_probe
 

@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import configure_repo_git_identity
 
 _TMP_EVENT_NAME = ".tmp-event-orphan1234"
 _TMP_EVENT_BYTES = b'{"half": "written event bytes'
@@ -27,8 +28,7 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
 def _new_tickets_repo(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-q", "-b", "tickets", str(path)], check=True)
-    _git(path, "config", "user.email", "t@t")
-    _git(path, "config", "user.name", "t")
+    configure_repo_git_identity(path, email="t@t", name="t")
 
 
 def _commit_all(repo: Path, message: str) -> str:
@@ -117,8 +117,7 @@ def _clean_clone(tmp_path: Path) -> Path:
     _write(origin, _DEL_WORKTREE, '{"e": "create-a"}')
     _commit_all(origin, "base")
     subprocess.run(["git", "clone", "-q", "-b", "tickets", str(origin), str(tracker)], check=True)
-    _git(tracker, "config", "user.email", "t@t")
-    _git(tracker, "config", "user.name", "t")
+    configure_repo_git_identity(tracker, email="t@t", name="t")
     return tracker
 
 
@@ -247,7 +246,7 @@ def test_doctor_repair_heals_the_seeded_wedge_end_to_end(
     doctor = _patch_doctor(monkeypatch, tracker)
     pre_head = _git(tracker, "rev-parse", "HEAD").stdout.strip()
 
-    rc = doctor.doctor_cli(["--repair", "--output", "json"])
+    rc = doctor.doctor_cli(["--repair", "--output", "json"], repo_root=tracker)
     payload = json.loads(capsys.readouterr().out)
 
     # class 1 restored from HEAD — bytes back, byte-identical to the committed copy.
@@ -306,7 +305,7 @@ def test_doctor_repair_is_idempotent_on_a_clean_store(
     doctor = _patch_doctor(monkeypatch, tracker)
     pre_head = _git(tracker, "rev-parse", "HEAD").stdout.strip()
 
-    rc = doctor.doctor_cli(["--repair"])
+    rc = doctor.doctor_cli(["--repair"], repo_root=tracker)
     capsys.readouterr()
 
     assert rc == 0
@@ -328,7 +327,7 @@ def test_class3_only_store_gets_no_mutation_and_no_backup_ref(
     reconverged = []
     monkeypatch.setattr(doctor, "_reconverge", lambda *_a: reconverged.append(True))
 
-    doctor.doctor_cli(["--repair"])
+    doctor.doctor_cli(["--repair"], repo_root=tracker)
     out = capsys.readouterr().out
 
     assert "tracker-dirty-tmp-event" in out
@@ -374,7 +373,7 @@ def test_repair_lock_discipline_two_windows(
     monkeypatch.setattr(doctor, "_reconverge", probing_reconverge)
 
     findings = doctor.scan_dirty(tracker_s)
-    doctor.run_repair(findings, tracker_s)
+    doctor.run_repair(findings, tracker_s, repo_root=tracker)
 
     assert lock_state == {"checkout": True, "quarantine": True, "reconverge": False}
     statuses = {f["kind"]: f.get("repair_status") for f in findings}
@@ -394,7 +393,7 @@ def test_unclassified_stray_retired_is_left_in_place(
     _write(tracker, stray, '{"only": "copy"}')
     doctor = _patch_doctor(monkeypatch, tracker)
 
-    doctor.doctor_cli(["--repair"])
+    doctor.doctor_cli(["--repair"], repo_root=tracker)
     capsys.readouterr()
 
     assert (tracker / stray).read_text(encoding="utf-8") == '{"only": "copy"}'
@@ -415,7 +414,7 @@ def test_no_backup_ref_means_no_mutation(
     monkeypatch.setattr(doctor, "_dirty_backup_ref", lambda _t: None)
     before = _git(tracker, "status", "--porcelain", "-uall").stdout
 
-    rc = doctor.doctor_cli(["--repair", "--output", "json"])
+    rc = doctor.doctor_cli(["--repair", "--output", "json"], repo_root=tracker)
     payload = json.loads(capsys.readouterr().out)
 
     assert rc == 1
@@ -451,7 +450,7 @@ def test_failed_mutations_are_unrepairable_and_fail_the_run(
 
     monkeypatch.setattr(doctor, "run_git", failing_checkout)
 
-    rc = doctor.doctor_cli(["--repair", "--output", "json"])
+    rc = doctor.doctor_cli(["--repair", "--output", "json"], repo_root=tracker)
     payload = json.loads(capsys.readouterr().out)
 
     assert rc == 1
