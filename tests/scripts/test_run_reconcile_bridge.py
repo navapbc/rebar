@@ -9,31 +9,17 @@ from pathlib import Path
 
 import pytest
 from _git_upkeep import init_bare_remote
+from _sandbox_capabilities import scrub_ambient_git_config as _scrub_ambient_git_config
 from _subprocess_env import SubprocessEnv, subprocess_env
 
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
-_GIT_CONFIG_INJECTION_PREFIXES = (
-    "GIT_CONFIG_COUNT",
-    "GIT_CONFIG_KEY_",
-    "GIT_CONFIG_VALUE_",
-    "GIT_CONFIG_PARAMETERS",
-)
-
 
 def scrub_ambient_git_config(env: dict[str, str]) -> None:
-    """Drop command-scope git config injected by the ambient host.
-
-    Agent harnesses on dev hosts export GIT_CONFIG_COUNT/KEY_n/VALUE_n (for
-    example safe.bareRepository=explicit), which every inherited-environment
-    git subprocess silently honors.  The bridge fixtures must be held out
-    from that ambient state.
-    """
-    for name in list(env):
-        if name.startswith(_GIT_CONFIG_INJECTION_PREFIXES):
-            del env[name]
+    """Compatibility wrapper for the shared ambient git-config scrub."""
+    _scrub_ambient_git_config(env)
 
 
 def _git_env() -> SubprocessEnv:

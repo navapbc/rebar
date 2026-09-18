@@ -143,6 +143,13 @@ if _TESTS_DIR not in sys.path:
 # become hard errors instead. Lives in tests/_extra_guard.py so it is directly testable;
 # imported here because a conftest is the earliest hook that runs before any test module.
 import _extra_guard  # noqa: E402  (needs _TESTS_DIR on sys.path, set just above)
+from _sandbox_capabilities import (  # noqa: E402
+    collect_counted_skips_from_worker,
+    configure_semgrep_settings_file,
+    publish_counted_skips,
+    report_counted_skips,
+    scrub_ambient_git_config,
+)
 
 _extra_guard.install()
 
@@ -157,6 +164,9 @@ def pytest_configure(config: pytest.Config) -> None:
     ``.github/git-version-floor.txt``, shared with the contributor docs and the CI gate.
     """
     import _git_floor
+
+    scrub_ambient_git_config(os.environ)
+    configure_semgrep_settings_file(_REPO_ROOT)
 
     violation = _git_floor.floor_violation()
     if violation is not None:
@@ -906,6 +916,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    publish_counted_skips(session.config)
     if _PORCELAIN_AT_START is None:
         return
     after = _repo_porcelain(_REPO_ROOT)
@@ -923,3 +934,11 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         print(msg)
     # Escalate the run to a failure so CI catches it even if every test "passed".
     session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def pytest_testnodedown(node: Any, error: object | None) -> None:
+    collect_counted_skips_from_worker(node.config, getattr(node, "workeroutput", {}))
+
+
+def pytest_terminal_summary(terminalreporter: Any, exitstatus: int, config: pytest.Config) -> None:
+    report_counted_skips(terminalreporter, config)

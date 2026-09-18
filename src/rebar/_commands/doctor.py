@@ -349,7 +349,8 @@ def run_repair(
     findings: list[dict[str, Any]], tracker: str, *, repo_root=None
 ) -> tuple[list[dict[str, Any]], str]:
     """Repair every finding under the write lock. Returns (findings, pre_oid)."""
-    with owned_repair_pause("doctor", repo_root, in_flight_probe=_reconciler_in_flight):
+    pause_root = repo_root if repo_root is not None else tracker
+    with owned_repair_pause("doctor", pause_root, in_flight_probe=_reconciler_in_flight):
         # NO outer write lock. Every event write already takes the tracker write lock
         # for itself (append_event -> write_and_push -> stage_and_commit -> write_lock),
         # and that lock is NOT re-entrant: an outer hold made each inner acquisition

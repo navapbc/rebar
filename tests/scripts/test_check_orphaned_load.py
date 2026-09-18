@@ -30,6 +30,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from _sandbox_capabilities import process_table_probe, record_counted_skip
 
 pytestmark = pytest.mark.scripts
 
@@ -169,12 +170,18 @@ def test_help_exits_zero(gate: ModuleType) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_real_adapter_reads_live_process_table_without_raising(gate: ModuleType) -> None:
+def test_real_adapter_reads_live_process_table_without_raising(
+    gate: ModuleType, pytestconfig: pytest.Config
+) -> None:
     """Covers the real ``ps`` parsing path the injected seam bypasses.
 
     Read-only by construction: it lists processes and asserts shape. It never
     spawns a load generator and never signals anything.
     """
+    probe = process_table_probe()
+    if not probe.available:
+        record_counted_skip(pytestconfig, "sandbox ps unavailable")
+        pytest.skip(f"sandbox ps unavailable: {probe.reason}")
     records = gate.list_processes()
     assert isinstance(records, list)
     assert records, "the live process table is never empty"
