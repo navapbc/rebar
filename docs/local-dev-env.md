@@ -32,6 +32,45 @@ consumers that must agree: `tests/conftest.py` (the suite preflight), the
 `tests/unit/test_git_version_floor.py` (which fails if any consumer drifts, and fails
 if a merge-tree regression ever acquires skip machinery).
 
+## Prerequisite — pandoc 3.9 on arm64 macOS
+
+**arm64 macOS hosts need `PYPANDOC_PANDOC` pointed at a system pandoc 3.9
+before running the wiki renderer tests.** The pinned `pypandoc-binary==1.17`
+wheel advertises a `macosx_11_0_arm64` wheel, but its bundled
+`pypandoc/files/pandoc` payload is an x86_64 Mach-O executable. On arm64 macOS
+that binary fails with `Bad CPU type in executable`; pypandoc logs that probe
+failure and continues, so the unusable venv copy is harmless as long as another
+working candidate is configured.
+
+The version matters: ADR 0095 pins this renderer path to pandoc 3.9 because the
+`jira` writer's byte-level escaping changes between pandoc releases. `PATH`
+ordering is **not** sufficient: pypandoc probes every candidate and keeps the
+highest version it can execute, so a Homebrew pandoc 3.11 still wins even if a
+3.9 directory appears earlier on `PATH`. `PYPANDOC_PANDOC` is the override that
+replaces the candidate list, which is why it can select pandoc 3.9 even when a
+higher version is installed elsewhere.
+
+Homebrew may ship a newer formula, so install the upstream 3.9 arm64 release
+directly and export `PYPANDOC_PANDOC` from the shell that runs the tests:
+
+```sh
+mkdir -p "$HOME/.local/pandoc-3.9"
+curl -L https://github.com/jgm/pandoc/releases/download/3.9/pandoc-3.9-arm64-macOS.zip \
+  -o "$HOME/.local/pandoc-3.9/pandoc-3.9-arm64-macOS.zip"
+unzip -q "$HOME/.local/pandoc-3.9/pandoc-3.9-arm64-macOS.zip" \
+  -d "$HOME/.local/pandoc-3.9"
+export PYPANDOC_PANDOC="$HOME/.local/pandoc-3.9/pandoc-3.9-arm64/bin/pandoc"
+"$PYPANDOC_PANDOC" --version | head -1     # pandoc 3.9
+file "$PYPANDOC_PANDOC"                    # Mach-O 64-bit executable arm64
+```
+
+One test still fails after this setup, and it is a known defect rather than a
+mistake in your environment:
+`test_wiki_render_hardening.py::test_the_installed_pandoc_matches_the_legacy_fixture_provenance`
+compares your pandoc against a frozen `darwin-arm64` fingerprint that was
+recorded from the bundled x86_64 payload, so no genuine arm64 binary can match
+it. Tracked as `9119-3f7b-22c0-4421`.
+
 ## Prerequisite — provision the venv on the Python CI tests
 
 **Create the venv with `make venv`, not `python3 -m venv`.** `make venv` asks uv for the

@@ -3,7 +3,7 @@
 The renderer's contract is "convert only what converts losslessly": structurally-safe
 units go through pandoc, everything else is emitted byte-for-byte.
 
-These tests NEVER ``importorskip`` and never monkeypatch pandoc. The ``wiki`` extra is
+These tests NEVER skip on import and never monkeypatch pandoc. The ``wiki`` extra is
 installed in dev/CI, and the pin assertions below are the point — a silently absent or
 drifted pandoc must FAIL, not skip. The two fallback tests that need pandoc to be
 missing simulate only the renderer's own probe, not the binary.
