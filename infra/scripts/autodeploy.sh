@@ -80,7 +80,11 @@ BOT_PATHS='src/rebar/ infra/compose/Dockerfile.reviewbot pyproject.toml infra/co
 # SSM materialization sources trigger both consumers; value-only rotation remains operator-driven.
 SECRETS_PATHS='infra/scripts/fetch-secrets.sh infra/terraform/ssm.tf'
 # MCP image sources include its baked entrypoint; shared sources independently trigger both services.
-MCP_PATHS='src/rebar infra/compose/Dockerfile.mcp infra/scripts/mcp-entrypoint.sh infra/compose/docker-compose.yml uv.lock pyproject.toml'
+# autodeploy.sh itself is a source because mcp_run_new()'s inline `docker run` argv (the mcp
+# container's ENTIRE construction) lives here, so a change to that function must force an mcp roll
+# on the next tick — otherwise a body-only edit is silent until an unrelated MCP_PATHS commit
+# happens to trigger one (bug 2d65-32dd-28b9-43ef).
+MCP_PATHS='src/rebar infra/compose/Dockerfile.mcp infra/scripts/mcp-entrypoint.sh infra/scripts/autodeploy.sh infra/compose/docker-compose.yml uv.lock pyproject.toml'
 # Gerrit configuration and materializers are detect-only because applying them touches or restarts Gerrit.
 CONFIG_PATHS='infra/gerrit/replication.config infra/gerrit/project.config infra/gerrit/gerrit_to_platform.ini.template infra/gerrit/materialize-g2p-config.sh infra/gerrit/materialize-deploy-key.sh infra/compose/gerrit.config infra/compose/jgit.config infra/scripts/materialize-gerrit-jgit-config.sh'
 # Host-nginx configuration is detect-only because applying it requires validation and reload.
@@ -480,6 +484,41 @@ mcp_retire_sweep() {
 exec 9>"$LOCK"
 flock -n 9 || { log "another deploy holds the lock; skipping"; exit 0; }
 
+# ── self-update guard ────────────────────────────────────────────────────────
+# A component roll rsyncs the mirror over $DEPLOY_REPO, which on the box overwrites THIS running
+# script's own file. bash keeps executing the body it already parsed, so a container-constructing
+# function edited in the SAME commit (e.g. mcp_run_new) would build the container from the STALE
+# body while every marker reports success and no later tick corrects it (bug 2d65-32dd-28b9-43ef).
+# Snapshot the running body now — under the single-flight lock, before any rsync — then re-exec
+# the freshly installed script once a source sync changes it, so the rolls run the NEW body. The
+# snapshot is a byte copy of this same path, so the content-equality guard re-execs AT MOST ONCE
+# (after re-exec the installed body equals the snapshot, and the mirror sync is idempotent); the
+# bounded generation carried across exec is a hard stop should that invariant ever break.
+SELF_PATH="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)/$(basename "${BASH_SOURCE[0]:-$0}")"
+SELF_SNAPSHOT="$(mktemp "$STATE_DIR/.autodeploy-self.XXXXXX" 2>/dev/null || true)"
+if [ -z "$SELF_SNAPSHOT" ]; then
+  err self-update-snapshot-failed "mktemp failed while preparing the autodeploy self-update guard; refusing to continue with stale-body protection disabled"
+  exit 1
+fi
+if ! cp "$SELF_PATH" "$SELF_SNAPSHOT" 2>/dev/null; then
+  err self-update-snapshot-failed "cp $SELF_PATH -> $SELF_SNAPSHOT failed; refusing to continue with stale-body protection disabled"
+  rm -f "$SELF_SNAPSHOT"
+  exit 1
+fi
+trap 'rm -f "$SELF_SNAPSHOT"' EXIT
+reexec_if_self_changed() {
+  local max=2 gen="${AUTODEPLOY_REEXEC_GEN:-0}"
+  [ -n "$SELF_SNAPSHOT" ] && [ -f "$SELF_PATH" ] || return 0
+  cmp -s "$SELF_SNAPSHOT" "$SELF_PATH" && return 0   # body unchanged: nothing to re-apply
+  if [ "$gen" -ge "$max" ]; then
+    err self-update-reexec-capped "installed autodeploy.sh still differs after ${gen} re-exec(s); NOT re-execing again; continuing with the current body to avoid a loop"
+    return 0
+  fi
+  log "installed autodeploy.sh changed under a running tick; re-exec (generation $((gen + 1))) so the component rolls run the new body"
+  rm -f "$SELF_SNAPSHOT"
+  AUTODEPLOY_REEXEC_GEN="$((gen + 1))" exec bash "$SELF_PATH"
+}
+
 # Bootstrap an HTTPS-only mirror.
 if [ ! -d "$MIRROR_DIR/.git" ]; then
   log "bootstrapping mirror clone at $MIRROR_DIR from $MIRROR_URL"
@@ -654,7 +693,7 @@ fi
 # already-exhausted and killing a review on the first busy tick. The MCP self-heal runs before
 # the ordinary no-op exit so a dead live backend does not stay pinned behind nginx until a future
 # source-changing deploy.
-if [ "$TARGET" = "$DEPLOYED" ]; then
+if [ "$TARGET" = "$DEPLOYED" ] && [ "$mcp_deployed" = "$TARGET" ] && [ "$bot_deployed" = "$TARGET" ]; then
   rm -f "$DEFER_FILE"
   reclaim_under_pressure
   mcp_self_heal_live_backend || exit 1
@@ -664,7 +703,14 @@ if [ "$TARGET" = "$DEPLOYED" ]; then
   exit 0
 fi
 
-log "main advanced $DEPLOYED -> $TARGET; computing component deltas"
+if [ "$TARGET" != "$DEPLOYED" ]; then
+  log "main advanced $DEPLOYED -> $TARGET; computing component deltas"
+else
+  # Global marker is current but a component marker is behind — e.g. an operator reset a single
+  # component marker to force a re-roll. Reaching the component deltas below (instead of the
+  # up-to-date exit above) is what makes that recovery take effect (bug 2d65-32dd-28b9-43ef).
+  log "main current at $TARGET but a component marker is behind; computing component deltas"
+fi
 mcp_self_heal_live_backend || exit 1
 
 # Signal Gerrit configuration changes for manual application.
@@ -743,6 +789,7 @@ deploy_review_bot() {
   if ! rsync -a --delete "${RSYNC_EXCLUDES[@]}" "$MIRROR_DIR/" "$DEPLOY_REPO/" 2>/dev/null; then
     err rsync-failed "rsync $MIRROR_DIR -> $DEPLOY_REPO failed"; record_backoff_failure; exit 1
   fi
+  reexec_if_self_changed   # a body change to this script just landed on disk; run it, not the stale parse
   # Preserve the excluded secret file's owner while normalizing the source copy.
   env_owner="$(stat -c '%U:%G' "$DEPLOY_REPO/infra/compose/.env" 2>/dev/null || true)"
   chown -R 502:502 "$DEPLOY_REPO" 2>/dev/null || true
@@ -813,6 +860,7 @@ if ! mcp_backoff_active && mcp_delta; then
   if ! rsync -a --delete "${RSYNC_EXCLUDES[@]}" "$MIRROR_DIR/" "$DEPLOY_REPO/" 2>/dev/null; then
     err mcp-rsync-failed "rsync $MIRROR_DIR -> $DEPLOY_REPO failed"; record_mcp_backoff_failure; exit 1
   fi
+  reexec_if_self_changed   # a body change to this script just landed on disk; run it, not the stale parse
   # Refresh both rsync-excluded SSM artifacts before building; failure preserves the live upstream.
   if ! ENV_FILE="$COMPOSE_DIR/.env" bash "$DEPLOY_REPO/infra/scripts/fetch-secrets.sh" >/dev/null 2>&1; then
     err mcp-secrets-fetch-failed "fetch-secrets.sh failed (SSM unreachable / param missing); .env left intact; mcp deploy aborted (old container stays live)"
