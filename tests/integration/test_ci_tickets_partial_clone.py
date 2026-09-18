@@ -269,22 +269,55 @@ def _assert_historical_blob_missing(repo: Path, server: TicketServer) -> None:
     assert result.returncode != 0, "historical payload unexpectedly exists in blobless client"
 
 
-def _guard_script(path: Path, job: str) -> str:
+def _guard_scripts(path: Path, job: str, env_name: str) -> tuple[str, str | None]:
     workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
-    matches = [
+    standalone_pack_scripts = [
         str(step.get("run", ""))
         for step in workflow["jobs"][job]["steps"]
         if "git count-objects -v" in str(step.get("run", ""))
         and "rebar verify-identity" not in str(step.get("run", ""))
     ]
-    assert len(matches) == 1
-    return matches[0]
+    assert len(standalone_pack_scripts) == 1
+    guard_script = standalone_pack_scripts[0]
+    if env_name in guard_script:
+        return guard_script, None
+    judge_scripts = [
+        str(step.get("run", ""))
+        for step in workflow["jobs"][job]["steps"]
+        if env_name in str(step.get("run", "")) and "exit 1" in str(step.get("run", ""))
+    ]
+    assert len(judge_scripts) == 1
+    return guard_script, judge_scripts[0]
 
 
 def _run_guard(repo: Path, workflow: Path, job: str, env_name: str, limit: int) -> int:
+    guard_script, judge_script = _guard_scripts(workflow, job, env_name)
     env = subprocess_env({env_name: str(limit)})
-    result = _run(["bash", "-c", _guard_script(workflow, job)], cwd=repo, env=env, check=False)
-    return result.returncode
+    if judge_script is None:
+        result = _run(["bash", "-c", guard_script], cwd=repo, env=env, check=False)
+        return result.returncode
+
+    github_output = repo / "github-output.txt"
+    result = _run(
+        ["bash", "-c", guard_script],
+        cwd=repo,
+        env=env | {"GITHUB_OUTPUT": str(github_output)},
+        check=False,
+    )
+    if result.returncode:
+        return result.returncode
+    outputs = dict(
+        line.split("=", 1)
+        for line in github_output.read_text(encoding="utf-8").splitlines()
+        if "=" in line
+    )
+    judged = _run(
+        ["bash", "-c", judge_script],
+        cwd=repo,
+        env=env | {"SIZE_PACK_KIB": outputs.get("size_pack_kib", "")},
+        check=False,
+    )
+    return judged.returncode
 
 
 def test_named_origin_filter_is_negotiated_and_omits_blob(
