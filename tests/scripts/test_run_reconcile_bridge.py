@@ -9,17 +9,12 @@ from pathlib import Path
 
 import pytest
 from _git_upkeep import init_bare_remote
-from _sandbox_capabilities import scrub_ambient_git_config as _scrub_ambient_git_config
+from _sandbox_capabilities import scrub_ambient_git_config
 from _subprocess_env import SubprocessEnv, subprocess_env
 
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
-
-
-def scrub_ambient_git_config(env: dict[str, str]) -> None:
-    """Compatibility wrapper for the shared ambient git-config scrub."""
-    _scrub_ambient_git_config(env)
 
 
 def _git_env() -> SubprocessEnv:
