@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _subprocess_env import subprocess_env
 
 _GIT_CONFIG_INJECTION_PREFIXES = (
     "GIT_CONFIG_COUNT",
@@ -42,6 +43,22 @@ def scrub_ambient_git_config(env: MutableMapping[str, str]) -> None:
     for name in list(env):
         if name.startswith(_GIT_CONFIG_INJECTION_PREFIXES):
             del env[name]
+
+
+def configure_repo_git_identity(
+    repo: Path, *, email: str = "t@example.invalid", name: str = "T"
+) -> None:
+    """Write a repo-local git identity for a caller-owned repository."""
+    env = subprocess_env()
+    scrub_ambient_git_config(env)
+    for key, value in (("user.email", email), ("user.name", name)):
+        subprocess.run(
+            ["git", "-C", str(repo), "config", "--local", key, value],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+        )
 
 
 def semgrep_settings_file_probe(

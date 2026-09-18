@@ -18,6 +18,7 @@ import pytest
 from _helpers import (
     _write_ticket,
 )
+from _sandbox_capabilities import configure_repo_git_identity
 
 
 def _tracker(tmp_path: Path) -> Path:
@@ -362,10 +363,10 @@ def test_repair_force_writes_the_pre_repair_tag_and_repoints_it(
     _write_ticket(tracker, "story-s", parent_id="epic-e", ticket_type="story")
     _seed_link(tracker, "epic-e", "story-s", "depends_on")
 
+    cp = run_git(str(tracker), "init", "-q", check=False)
+    assert cp.returncode == 0, (("init", "-q"), cp.stderr)
+    configure_repo_git_identity(tracker)
     for args in (
-        ("init", "-q"),
-        ("config", "user.email", "t@example.invalid"),
-        ("config", "user.name", "T"),
         ("add", "-A"),
         ("commit", "-q", "-m", "seed"),
     ):
@@ -389,7 +390,7 @@ def test_repair_force_writes_the_pre_repair_tag_and_repoints_it(
     assert not _tag_oid(), "the tag must not exist before any repair run"
 
     pre_oid_1 = _head()
-    _f1, reported_1 = doctor.run_repair(doctor.scan(str(tracker)), str(tracker))
+    _f1, reported_1 = doctor.run_repair(doctor.scan(str(tracker)), str(tracker), repo_root=tracker)
     assert reported_1 == pre_oid_1, (reported_1, pre_oid_1)
     assert _tag_oid() == pre_oid_1, "tag must be written at the pre-run OID"
 
@@ -401,7 +402,7 @@ def test_repair_force_writes_the_pre_repair_tag_and_repoints_it(
     assert pre_oid_2 != pre_oid_1, "fixture precondition: HEAD must move between runs"
 
     _seed_link(tracker, "epic-e", "story-s", "depends_on", suffix="9")
-    _f2, reported_2 = doctor.run_repair(doctor.scan(str(tracker)), str(tracker))
+    _f2, reported_2 = doctor.run_repair(doctor.scan(str(tracker)), str(tracker), repo_root=tracker)
     assert reported_2 == pre_oid_2, (reported_2, pre_oid_2)
     assert _tag_oid() == pre_oid_2, "a second run must RE-POINT the tag, not fail"
 
@@ -442,10 +443,10 @@ def _git_backed(tracker: Path) -> None:
     """
     from rebar._store.gitutil import run_git
 
+    cp = run_git(str(tracker), "init", "-q", check=False)
+    assert cp.returncode == 0, (("init", "-q"), cp.stderr)
+    configure_repo_git_identity(tracker)
     for args in (
-        ("init", "-q"),
-        ("config", "user.email", "t@example.invalid"),
-        ("config", "user.name", "T"),
         ("add", "-A"),
         ("commit", "-q", "-m", "seed"),
     ):
@@ -484,7 +485,7 @@ def test_run_repair_does_not_hold_a_lock_that_blocks_its_own_writes(
     assert len(findings) == 1, findings
 
     started = time.monotonic()
-    doctor.run_repair(findings, str(tracker))
+    doctor.run_repair(findings, str(tracker), repo_root=tracker)
     elapsed = time.monotonic() - started
 
     assert findings[0]["repair_status"] == "repaired", findings[0]
@@ -537,7 +538,7 @@ def test_json_output_carries_the_documented_finding_fields(
     assert "repair_status" not in finding, "a read-only pass must not report a repair"
 
     # ── repair pass ───────────────────────────────────────────────────────────
-    rc = doctor.doctor_cli(["--repair", "--output", "json"])
+    rc = doctor.doctor_cli(["--repair", "--output", "json"], repo_root=tracker)
     repaired = json.loads(capsys.readouterr().out)
 
     assert rc == 0, "exit 0 once nothing is outstanding"
@@ -611,7 +612,7 @@ def test_repair_refuses_while_a_reconciler_pass_is_in_flight(
     before = _event_count(tracker)
 
     with pytest.raises(CommandError, match="reconciler pass is in flight"):
-        doctor.run_repair(findings, str(tracker))
+        doctor.run_repair(findings, str(tracker), repo_root=tracker)
 
     assert _event_count(tracker) == before, "a refused repair must write no events"
     assert graph._is_active_link("epic-e", "story-s", "depends_on", str(tracker)), (
@@ -656,7 +657,7 @@ def test_unrepairable_finding_leaves_its_edge_and_the_run_continues(
     monkeypatch.setattr(composer, "tracker_dir", lambda _repo_root=None: tracker)
     monkeypatch.setattr(doctor, "_reconciler_in_flight", lambda *_a, **_k: False)
 
-    rc = doctor.doctor_cli(["--repair", "--output", "json"])
+    rc = doctor.doctor_cli(["--repair", "--output", "json"], repo_root=tracker)
     payload = json.loads(capsys.readouterr().out)
     by_source = {f["source"]: f for f in payload["findings"]}
 
