@@ -9093,6 +9093,15 @@
       "source_id": "3276-2f81-8c75-4ddd",
       "target_id": "3e92-b7f4-dede-4c17"
     },
+    "3276-2f81-8c75-4ddd|ce66-59ef-d6d7-4c7a|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1789702846254102762,
+      "link_id": "51112",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "3276-2f81-8c75-4ddd",
+      "target_id": "ce66-59ef-d6d7-4c7a"
+    },
     "3289-7fe4-2fea-4c35|3388-96e8-e14e-4221|depends_on": {
       "confirmed_at": 1787441768014003310,
       "confirmed_pass": "2026-08-22T23-32-19",
@@ -22839,6 +22848,15 @@
       "source_id": "87d8-8bb6-5226-4a5b",
       "target_id": "6ed2-24e5-6985-4faa"
     },
+    "8806-198c-e2d6-46ce|9753-647b-2f85-40ef|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1789699607318256351,
+      "link_id": "51111",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "8806-198c-e2d6-46ce",
+      "target_id": "9753-647b-2f85-40ef"
+    },
     "8840-011f-5b6d-41ab|jira-reb-596|parent": {
       "confirmed_at": 1786807014032792634,
       "confirmed_pass": "2026-08-15T14-49-02",
@@ -25320,6 +25338,15 @@
       "source": "snapshot",
       "source_id": "9752-41a8-c188-4934",
       "target_id": "ed7e-2298-bee1-47d3"
+    },
+    "9753-647b-2f85-40ef|8806-198c-e2d6-46ce|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1789699607318273253,
+      "link_id": "51111",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "9753-647b-2f85-40ef",
+      "target_id": "8806-198c-e2d6-46ce"
     },
     "978d-1d5d-8287-47bc|2eca-0a1d-45c2-4e38|blocks": {
       "direction": "snapshot",
@@ -33393,6 +33420,15 @@
       "source": "snapshot",
       "source_id": "ce5a-6a9f-5422-45f6",
       "target_id": "3d13-2a68-b720-4296"
+    },
+    "ce66-59ef-d6d7-4c7a|3276-2f81-8c75-4ddd|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1789702846255248424,
+      "link_id": "51112",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "ce66-59ef-d6d7-4c7a",
+      "target_id": "3276-2f81-8c75-4ddd"
     },
     "ce6b-cffa-6450-4fa5|eb64-844b-ab7a-4915|depends_on": {
       "direction": "snapshot",
