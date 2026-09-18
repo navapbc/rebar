@@ -28,15 +28,45 @@ aws ssm send-command --region us-east-1 --instance-ids i-00880b2c7f13527c5 \
 ```
 
 `/opt/rebar` is a *copy* of `main` (not a git checkout) that `autodeploy.sh` keeps in
-sync (ADR-0026). The `autodeploy.sh` **body** auto-updates in place via that same
-`BOT_PATHS` rsync, like any other source — but a commit touching *only* `autodeploy.sh`
-(no `BOT_PATHS` path) triggers no deploy, so it will not rsync itself until the next
-bot-path deploy; to make such a script-only change live now, hand-deploy it (update the
-mirror at `/var/lib/rebar/mirror`, then install the new `infra/scripts/autodeploy.sh`
-into `/opt/rebar`, preserving `502:502`). Separately, the **installer**
-(`install-autodeploy.sh`) and the `rebar-autodeploy.{service,timer}` unit files *are*
-deliberately excluded from in-run re-materialization (self-modification race), so those
-always require a hand-deploy.
+sync (ADR-0026). The `autodeploy.sh` **body** auto-updates in place via the same
+`rsync -a --delete` that every component roll runs, and `infra/scripts/autodeploy.sh`
+is a member of `MCP_PATHS`, so a commit touching *only* `autodeploy.sh` now triggers a
+deploy (an mcp roll) on its own rather than staying dormant until an unrelated bot-path
+or mcp-path commit — no hand-deploy is needed for a script-only change.
+
+> **Silent stale-body failure mode (bug `2d65-32dd-28b9-43ef`) — fixed, but know the
+> symptom.** Within one tick the order is: rsync the mirror over `/opt/rebar` (which
+> overwrites this very running script), *then* perform the component rolls. bash keeps
+> executing the body it already **parsed at start**, so before the fix a commit that
+> changed a container-constructing function (e.g. `mcp_run_new`) was auto-installed on
+> the box yet the container was still built from the **previous** body — while every
+> marker and log line reported success (`mcp redeployed + healthy`, `deploy complete`),
+> `/opt/rebar/infra/scripts/autodeploy.sh` and all of `deployed-sha` /
+> `mcp-deployed-sha` / `bot-deployed-sha` read the merged commit, and no later tick
+> corrected it (the component marker was already stamped to the target, so the delta
+> was empty forever). The fix re-execs the freshly installed script once, immediately
+> after each source-sync rsync, so the rolls run the **new** body in the same tick;
+> `MCP_PATHS` now also includes `autodeploy.sh` so a body-only change is not silent.
+>
+> **If you suspect a component is running a stale body anyway** (e.g. on an
+> unpatched box, or to force a re-roll), reset **both** the global and the component
+> marker to the parent commit, then start the unit — resetting *only* the component
+> marker does nothing, because the up-to-date early exit returns before component
+> deltas are computed when the global marker already reads the target:
+>
+> ```sh
+> parent=<the-parent-commit-sha>
+> echo "$parent" | sudo tee /var/lib/rebar/deployed-sha /var/lib/rebar/mcp-deployed-sha
+> sudo systemctl start rebar-autodeploy.service
+> ```
+>
+> (Reachability of the component deltas when the global marker is current is also
+> fixed now, so a lone `mcp-deployed-sha` reset takes effect on a patched box — but
+> resetting both is the safe, version-independent recovery.)
+
+Separately, the **installer** (`install-autodeploy.sh`) and the
+`rebar-autodeploy.{service,timer}` unit files *are* deliberately excluded from in-run
+re-materialization (self-modification race), so those always require a hand-deploy.
 
 ---
 
