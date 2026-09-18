@@ -7,9 +7,11 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +38,7 @@ class CapabilityProbe:
 
 
 ProcessRunner = Callable[..., subprocess.CompletedProcess[str]]
+SemLockFactory = Callable[[int, int, int, str, bool], object]
 
 
 def scrub_ambient_git_config(env: MutableMapping[str, str]) -> None:
@@ -157,6 +160,26 @@ def process_table_probe(
     if not completed.stdout.strip():
         return CapabilityProbe(False, "process table probe returned no rows")
     return CapabilityProbe(True)
+
+
+def posix_named_semaphore_probe_with_factory(
+    factory: SemLockFactory,
+) -> CapabilityProbe:
+    """Probe whether CPython can create the POSIX semaphore backing multiprocessing."""
+    name = f"/rebar-{os.getpid()}-{uuid.uuid4().hex[:16]}"
+    try:
+        factory(1, 1, 1, name, True)
+    except OSError as exc:
+        return CapabilityProbe(False, f"POSIX named semaphore unavailable: {exc}")
+    return CapabilityProbe(True)
+
+
+@cache
+def posix_named_semaphore_probe() -> CapabilityProbe:
+    """Probe whether multiprocessing synchronization primitives can be constructed."""
+    import _multiprocessing
+
+    return posix_named_semaphore_probe_with_factory(_multiprocessing.SemLock)
 
 
 def _counter_on(config: pytest.Config, attr: str) -> Counter[str]:

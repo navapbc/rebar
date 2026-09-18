@@ -77,6 +77,7 @@ def test_no_primitive_fallback_does_not_release_unacquired_lock(
     assert marker.check_marker(str(tmp_path)) is False
 
 
+@pytest.mark.requires_posix_named_semaphore
 def test_marker_lock_serializes_posix_access(
     tmp_path: Path,
 ) -> None:

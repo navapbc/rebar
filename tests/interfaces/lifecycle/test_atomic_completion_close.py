@@ -392,6 +392,7 @@ def test_relevant_receipt_drift_rejects_without_closing(rebar_repo: Path) -> Non
     assert rebar.show_ticket(ticket, repo_root=str(rebar_repo))["status"] == "in_progress"
 
 
+@pytest.mark.requires_posix_named_semaphore
 def test_two_processes_publish_at_most_one_equivalent_same_ticket_bundle(
     rebar_repo: Path,
 ) -> None:

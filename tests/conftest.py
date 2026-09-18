@@ -146,7 +146,9 @@ import _extra_guard  # noqa: E402  (needs _TESTS_DIR on sys.path, set just above
 from _sandbox_capabilities import (  # noqa: E402
     collect_counted_skips_from_worker,
     configure_semgrep_settings_file,
+    posix_named_semaphore_probe,
     publish_counted_skips,
+    record_counted_skip,
     report_counted_skips,
     scrub_ambient_git_config,
 )
@@ -202,6 +204,24 @@ def pytest_configure(config: pytest.Config) -> None:
         "MANDATORY — `--strict-markers` validates the marker NAME only, so the reason "
         "rule is enforced in tests/_subprocess_isolation.py.",
     )
+    config.addinivalue_line(
+        "markers",
+        "requires_posix_named_semaphore: test needs multiprocessing primitives backed "
+        "by POSIX named semaphores; skipped with counted sandbox-compatibility "
+        "accounting when that capability is denied.",
+    )
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Skip tests requiring POSIX named semaphores when the host denies them."""
+    if item.get_closest_marker("requires_posix_named_semaphore") is None:
+        return
+    probe = posix_named_semaphore_probe()
+    if probe.available:
+        return
+    reason = probe.reason or "POSIX named semaphore unavailable"
+    record_counted_skip(item.config, reason)
+    pytest.skip(reason)
 
 
 class _CountedSkipXdistHooks:
