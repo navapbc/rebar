@@ -37,7 +37,16 @@ jobs:
         with:
           filter: blob:none
           fetch-depth: 0
-      - name: Fail closed if the blobless checkout pack exceeds its limit
+      # mechanism-ok: ci_gate .github/workflows/verify-identity.yml::Measure the blobless checkout pack — f5ac-391c-ec70-4fa9: not a new gate. The pre-existing pack budget was split into a measure half and a judge half so the verdict stops pre-empting the authorship verification; the judging step keeps the original name and the same fail-closed limit, so this is one gate in two steps, not a second gate.
+      - name: Measure the blobless checkout pack
+        # MEASURED HERE, JUDGED LAST. The measurement must happen before the `tickets` branch
+        # is fetched below, because that fetch adds the event-log history to the object
+        # database — measuring afterwards would silently change the quantity under budget.
+        # The verdict is deferred to the job's final step so that a budget overage cannot
+        # abort the authorship verification this job exists to perform (ticket
+        # f5ac-391c-ec70-4fa9). A non-numeric reading is a broken measurement rather than a
+        # budget overage, so it still fails immediately.
+        id: measure-pack
         shell: bash
         run: |
           set -euo pipefail
@@ -46,10 +55,7 @@ jobs:
             echo "::error::git count-objects did not report a numeric size-pack" >&2
             exit 1
           fi
-          if (( size_pack > REBAR_CHECKOUT_PACK_LIMIT_KIB )); then
-            echo "::error::checkout pack is ${size_pack} KiB; limit is ${REBAR_CHECKOUT_PACK_LIMIT_KIB} KiB" >&2
-            exit 1
-          fi
+          echo "size_pack_kib=${size_pack}" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -90,3 +96,22 @@ jobs:
         # Same merged-log walk; posture + grandfather boundary from rebar.toml
         # (verify.require_environment, verify.opcert_enforce_since) — no CI variable.
         run: rebar verify-opcert
+      - name: Fail closed if the blobless checkout pack exceeds its limit
+        # LAST on purpose, and `always()` so it reports even when authorship above failed.
+        # This is the same fail-closed budget on the same measured value as before; only the
+        # point at which the job aborts has moved, so an overage no longer prevents the
+        # authorship gate from producing its verdict (ticket f5ac-391c-ec70-4fa9).
+        if: ${{ always() }}
+        shell: bash
+        env:
+          SIZE_PACK_KIB: ${{ steps.measure-pack.outputs.size_pack_kib }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SIZE_PACK_KIB:-}" ]]; then
+            echo "::error::the checkout pack was never measured; treating as a failed budget check" >&2
+            exit 1
+          fi
+          if (( SIZE_PACK_KIB > REBAR_CHECKOUT_PACK_LIMIT_KIB )); then
+            echo "::error::checkout pack is ${SIZE_PACK_KIB} KiB; limit is ${REBAR_CHECKOUT_PACK_LIMIT_KIB} KiB" >&2
+            exit 1
+          fi
