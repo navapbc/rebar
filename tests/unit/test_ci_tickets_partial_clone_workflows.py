@@ -106,14 +106,22 @@ def test_pack_guard_contract(path: Path, job: str, limit_name: str, limit: int) 
     workflow = _workflow(path)
     job_def = workflow["jobs"][job]
     assert int((job_def.get("env") or {}).get(limit_name)) == limit
-    guards = [
-        step for step in job_def["steps"] if "git count-objects -v" in str(step.get("run", ""))
+    measure_scripts = [
+        str(step.get("run", ""))
+        for step in job_def["steps"]
+        if "git count-objects -v" in str(step.get("run", ""))
     ]
-    assert guards, f"{path.name}:{job} has no executable pack-size guard"
-    script = "\n".join(str(step["run"]) for step in guards)
-    assert re.search(r"^size_pack=.*git count-objects -v", script, re.MULTILINE)
-    assert limit_name in script
-    assert re.search(r"\bexit 1\b", script)
+    assert measure_scripts, f"{path.name}:{job} has no executable pack-size guard"
+    measuring_script = "\n".join(measure_scripts)
+    assert re.search(r"^size_pack=.*git count-objects -v", measuring_script, re.MULTILINE)
+
+    job_script = "\n".join(str(step.get("run", "")) for step in job_def["steps"])
+    assert limit_name in job_script
+    assert re.search(
+        rf"\(\(\s*(?:SIZE_PACK_KIB|size_pack)\s*>\s*{re.escape(limit_name)}\s*\)\)",
+        job_script,
+    )
+    assert re.search(r"\bexit 1\b", job_script)
 
 
 def test_gerrit_verify_has_no_tickets_pack_gate() -> None:
