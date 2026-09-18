@@ -508,6 +508,23 @@ make test      # default test suite (excludes integration + external), -n 4 --di
 make format    # the ONLY target that rewrites files
 ```
 
+### Sandboxed agent hosts without POSIX named semaphores
+
+Some local agent sandboxes deny POSIX named semaphore creation. rebar probes that
+capability by attempting the same CPython semaphore operation that backs
+`multiprocessing` synchronization primitives; it does not infer from machine names,
+users, or environment-variable names. When the probe is denied, exactly the tests
+whose contract is process-level `multiprocessing` behavior are skipped and counted in
+pytest's terminal summary as `sandbox compatibility skips`.
+
+The hosted verification lanes still run those tests normally because their runners
+provide POSIX named semaphores, so this local skip restores a real `make test` /
+`make verify` verdict under the sandbox without reducing hosted-gate coverage. Worker
+count is unrelated: pytest-xdist starts successfully under the sandbox, all known
+semaphore denials are test-level `multiprocessing` construction failures, and
+`PYTEST_WORKERS=1` still invokes xdist because `make test` passes
+`-n $(PYTEST_WORKERS)`.
+
 **`make verify` is what must pass before `git push gerrit`, and it costs minutes, not
 seconds.** `make check` and `make lint` are check-only gates over the *source text*; a large
 family of this repo's invariants — the ratchets' baseline-vs-tree comparisons, the public-API

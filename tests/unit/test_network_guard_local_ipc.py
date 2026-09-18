@@ -68,6 +68,7 @@ def _child(ready: mp.synchronize.Event, finish: mp.synchronize.Event) -> None:
     finish.wait(30)
 
 
+@pytest.mark.requires_posix_named_semaphore
 def test_network_guard_allows_forkserver_multiprocessing() -> None:
     """Report replication: a ``forkserver`` child must start under the guard.
 

@@ -147,6 +147,7 @@ def test_a_live_holder_is_reported_but_is_not_a_finding(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 @pytest.mark.scripts
+@pytest.mark.requires_posix_named_semaphore
 def test_a_contended_fcntl_leg_reads_as_held(tmp_path: Path) -> None:
     """Held/free for the kernel leg comes from the same non-blocking probe ``acquire``
     uses, so a leg held by ANOTHER process reads as held rather than free."""
