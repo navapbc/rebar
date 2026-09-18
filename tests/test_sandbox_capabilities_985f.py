@@ -195,22 +195,18 @@ def test_sandbox_skip_summary_aggregates_across_xdist_workers(pytester: pytest.P
         import sys
         sys.path.insert(0, {str(Path(__file__).parent)!r})
         from _sandbox_capabilities import (
+            CapabilityProbe,
             publish_counted_skips,
             record_counted_skip,
             report_counted_skips,
         )
 
-        def pytest_configure(config):
-            config.addinivalue_line('markers', 'worker_a')
-            config.addinivalue_line('markers', 'worker_b')
+        def forced_process_table_probe():
+            return CapabilityProbe(False, 'forced unavailable for aggregation test')
 
         def pytest_runtest_setup(item):
-            workerid = getattr(item.config, 'workerinput', {{}}).get('workerid')
-            if item.get_closest_marker('worker_a') and workerid == 'gw0':
-                record_counted_skip(item.config, 'sandbox ps unavailable')
-                import pytest
-                pytest.skip('sandbox ps unavailable')
-            if item.get_closest_marker('worker_b') and workerid == 'gw1':
+            probe = forced_process_table_probe()
+            if not probe.available:
                 record_counted_skip(item.config, 'sandbox ps unavailable')
                 import pytest
                 pytest.skip('sandbox ps unavailable')
@@ -228,15 +224,12 @@ def test_sandbox_skip_summary_aggregates_across_xdist_workers(pytester: pytest.P
     )
     pytester.makepyfile(
         test_one="""
-        import pytest
-        @pytest.mark.worker_a
         def test_a(): pass
-        @pytest.mark.worker_b
         def test_b(): pass
         """
     )
 
-    result = pytester.runpytest("-n", "2", "-q")
+    result = pytester.runpytest("-n", "2", "--dist=each", "-q")
 
-    result.assert_outcomes(skipped=2)
-    result.stdout.fnmatch_lines(["*sandbox compatibility skips: 2*", "*sandbox ps unavailable: 2*"])
+    result.assert_outcomes(skipped=4)
+    result.stdout.fnmatch_lines(["*sandbox compatibility skips: 4*", "*sandbox ps unavailable: 4*"])
