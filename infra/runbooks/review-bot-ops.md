@@ -68,6 +68,47 @@ Separately, the **installer** (`install-autodeploy.sh`) and the
 `rebar-autodeploy.{service,timer}` unit files *are* deliberately excluded from in-run
 re-materialization (self-modification race), so those always require a hand-deploy.
 
+## MCP code workspace freshness
+
+The MCP server has its own persistent code checkout at `/var/gerrit/site/mcp-code`
+(`gerrit_mcp_code` volume). It is separate from `/opt/rebar` and from autodeploy's
+`/var/lib/rebar/mirror`; attested gates resolve code refs in this workspace.
+
+The MCP container entrypoint refreshes that checkout on the MCP server's own lifecycle:
+while holding the checkout lock it refuses a dirty tree, fetches `origin main`, and
+fast-forwards to `origin/main`. Missing or unresolvable checkouts are still re-cloned.
+Dirty, diverged, or unreachable workspaces fail loud and are left untouched rather than
+reset under a gate that may be reading them.
+
+Check drift from the host with:
+
+```bash
+docker compose exec mcp sh -lc '
+  cd "$MCP_CODE_DIR" &&
+  git fetch origin main &&
+  printf "HEAD=%s\norigin/main=%s\n" "$(git rev-parse HEAD)" "$(git rev-parse origin/main)" &&
+  git rev-list --left-right --count HEAD...origin/main
+'
+```
+
+The final line is `<ahead> <behind>`. A healthy workspace normally reports `0 0`.
+
+Break-glass manual fast-forward, only after confirming `git status --porcelain` is empty:
+
+```bash
+docker compose exec mcp sh -lc '
+  cd "$MCP_CODE_DIR" &&
+  test -z "$(git status --porcelain)" &&
+  git fetch origin main &&
+  git merge --ff-only origin/main &&
+  git rev-list --left-right --count HEAD...origin/main
+'
+```
+
+Do not reset or clean this checkout as recovery. If it is dirty or diverged, preserve it
+and investigate the writer; the entrypoint's refusal is the safety boundary that prevents
+a silent workspace rewrite during attested gate reads.
+
 ---
 
 ## Manually re-run a review (`/rerun`)
