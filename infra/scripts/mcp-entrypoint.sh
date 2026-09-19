@@ -151,12 +151,55 @@ clone_code() {
   with_dir_lock "$code_dir" "code checkout" clone_code_locked
 }
 
+code_workspace_distance() {
+  git -C "${MCP_CODE_DIR}" rev-list --left-right --count HEAD...origin/main
+}
+
+emit_code_workspace_state() {
+  sha="$(git -C "${MCP_CODE_DIR}" rev-parse --verify HEAD)"
+  distance="$(code_workspace_distance)"
+  set -- $distance
+  ahead="$1"
+  behind="$2"
+  echo "mcp: code checkout at ${sha}; distance from origin/main: ahead ${ahead}, behind ${behind}" >&2
+}
+
+refresh_code() {
+  if ! dir_is_safe "${MCP_CODE_DIR:-}"; then
+    echo "mcp: refusing to refresh the code checkout — MCP_CODE_DIR is not a safe absolute path" >&2
+    return 1
+  fi
+  code_dir="$(normalize_dir "${MCP_CODE_DIR}")"
+  with_dir_lock "$code_dir" "code checkout" refresh_code_locked
+}
+
+refresh_code_locked() {
+  if ! code_repo_present; then
+    return 1
+  fi
+  if [ -n "$(git -C "${MCP_CODE_DIR}" status --porcelain)" ]; then
+    echo "mcp: dirty code checkout — refusing to refresh" >&2
+    return 1
+  fi
+  if ! git -C "${MCP_CODE_DIR}" fetch origin main; then
+    echo "mcp: code checkout origin/main unreachable — refusing to refresh" >&2
+    return 1
+  fi
+  emit_code_workspace_state
+  if ! git -C "${MCP_CODE_DIR}" merge --ff-only origin/main; then
+    echo "mcp: diverged code checkout — refusing to refresh" >&2
+    return 1
+  fi
+  emit_code_workspace_state
+}
+
 # Clear and clone while holding the checkout-directory lock.
 clone_code_locked() {
   # Recheck after waiting for a peer.
   if code_repo_present; then
-    echo "mcp: code checkout was cloned by another container" >&2
-    return 0
+    echo "mcp: code checkout was cloned by another container; refreshing" >&2
+    refresh_code_locked
+    return $?
   fi
   code_rc=0
   if clear_dir "$code_dir"; then
@@ -174,7 +217,8 @@ clone_code_locked() {
 
 provision_code() {
   if code_repo_present; then
-    return 0
+    refresh_code
+    return $?
   fi
   [ -e "${MCP_CODE_DIR}/.git" ] &&
     echo "mcp: unusable code checkout (no resolvable HEAD) — re-cloning" >&2
