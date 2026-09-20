@@ -14,6 +14,7 @@ import subprocess
 import textwrap
 import time
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -193,7 +194,7 @@ def store_copy(
     jira_dc_pat: str,
     jira_dc_base_url: str,
     monkeypatch: pytest.MonkeyPatch,
-) -> Path:
+) -> Iterator[Path]:
     """Build an isolated, no-remote store copy mapped to four scratch projects.
 
     Archive the outer and tracker repositories, scrub bindings, run ensures, then scrub and
@@ -201,7 +202,14 @@ def store_copy(
     unset so copied production tickets cannot flood the create plan; its scoped scenario
     sets it locally. The unknown project is also scenario-local to avoid polluting fan-out.
     """
-    from _dc_fixtures import fetch_tickets, run_git, scrub_bridge_state
+    from _dc_fixtures import (
+        extract_store_snapshot,
+        fetch_tickets,
+        reclaim,
+        run_git,
+        scrub_bridge_state,
+        store_copy_entries,
+    )
     from _dc_support import CLOUD_CREDENTIAL_VARS, source_repo_root
 
     from rebar._store.ensures import run_ensures
@@ -223,10 +231,14 @@ def store_copy(
     _init(work, "main")
     (work / ".gitignore").write_text(".tickets-tracker/\n")
 
-    # Extract a snapshot of the live tickets branch into the inner store repo.
+    # Extract a bounded snapshot of the live tickets branch into the inner store repo.
     fetch_tickets(source)
-    archive = run_git(["git", "archive", "FETCH_HEAD"], cwd=source).stdout
-    subprocess.run(["tar", "-x", "-C", str(tracker)], input=archive, check=True)
+    listing = (
+        run_git(["git", "ls-tree", "--name-only", "FETCH_HEAD"], cwd=source)
+        .stdout.decode("utf-8")
+        .split()
+    )
+    extract_store_snapshot(source, tracker, store_copy_entries(listing))
 
     scrub_bridge_state(tracker)
     _init(tracker, "tickets")
@@ -275,7 +287,8 @@ def store_copy(
     rebar.bridge_projects_set(legacy_key, ["rebar-legacy"], repo_root=str(work))
     # Leave legacy_default unset so scrubbed production tickets cannot flood the create plan.
     # Its one scenario sets it locally and scopes every pass to that ticket.
-    return work
+    yield work
+    reclaim(work)
 
 
 # ---------------------------------------------------------------------------
