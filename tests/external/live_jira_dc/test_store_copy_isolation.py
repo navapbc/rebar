@@ -79,12 +79,14 @@ def test_the_working_repo_is_isolated_from_this_project(dc_store_copy_repo: Path
 @_skip
 @_skip_no_extra
 def test_the_store_copy_is_complete_and_scrubbed(dc_store_copy_repo: Path) -> None:
-    """The copy is REAL (count matches the source) and carries no bindings.
+    """The copy is REAL (it matches the selected slice exactly) and carries no bindings.
 
-    Counting against the source rather than asserting a bare `> 0` is what catches a PARTIAL
-    extraction — the failure a floor check waves through. And the count is read from the
-    filesystem, NOT from the pass's `scanned` number: `scanned` is `len(curr_snapshot)`, the
-    count of REMOTE Jira issues, which says nothing about the local store.
+    Counting against the slice the fixture chose, rather than asserting a bare `> 0`, is what
+    catches a PARTIAL extraction — the failure a floor check waves through. The slice is
+    bounded (bug 25e0: an unbounded copy exhausted the runner disk), so the comparison is
+    against the entries the fixture selected, not the whole branch. And the count is read from
+    the filesystem, NOT from the pass's `scanned` number: `scanned` is `len(curr_snapshot)`,
+    the count of REMOTE Jira issues, which says nothing about the local store.
     """
     tracker = dc_store_copy_repo / ".tickets-tracker"
     copied = {p.name for p in tracker.iterdir() if _is_ticket_entry(p.name)}
