@@ -89,16 +89,22 @@ class FakeCE:
         spend: float | None = None,
         error: ClientError | None = None,
         results_by_time: list[dict] | None = None,
+        pages: list[dict] | None = None,
     ) -> None:
         self.spend = float(0) if spend is None else spend
         self.error = error
         self.results_by_time = results_by_time
+        self.pages = pages
         self.calls = 0
+        self.requests: list[dict] = []
 
     def get_cost_and_usage(self, **kwargs):
         self.calls += 1
+        self.requests.append(kwargs)
         if self.error:
             raise self.error
+        if self.pages is not None:
+            return self.pages[self.calls - 1]
         if self.results_by_time is not None:
             return {"ResultsByTime": self.results_by_time}
         return {
@@ -1011,21 +1017,21 @@ def test_refresh_rates_derives_rates_from_positive_cost_and_quantity(
                 {
                     "Groups": [
                         {
-                            "Keys": ["USE1-model-input-tokens"],
+                            "Keys": ["Amazon Bedrock", "USE1-model-input-tokens"],
                             "Metrics": {
                                 "UnblendedCost": {"Amount": str(first_charge)},
                                 "UsageQuantity": {"Amount": str(first_quantity)},
                             },
                         },
                         {
-                            "Keys": ["USE1-model-output-tokens"],
+                            "Keys": ["Amazon Bedrock", "USE1-model-output-tokens"],
                             "Metrics": {
                                 "UnblendedCost": {"Amount": str(output_charge)},
                                 "UsageQuantity": {"Amount": str(output_quantity)},
                             },
                         },
                         {
-                            "Keys": ["USE1-zero-quantity-input-tokens"],
+                            "Keys": ["Amazon Bedrock", "USE1-zero-quantity-input-tokens"],
                             "Metrics": {
                                 "UnblendedCost": {"Amount": str(float(len("guard")))},
                                 "UsageQuantity": {"Amount": str(float(len("")))},
@@ -1036,14 +1042,14 @@ def test_refresh_rates_derives_rates_from_positive_cost_and_quantity(
                 {
                     "Groups": [
                         {
-                            "Keys": ["USE1-model-input-tokens"],
+                            "Keys": ["Amazon Bedrock", "USE1-model-input-tokens"],
                             "Metrics": {
                                 "UnblendedCost": {"Amount": str(second_charge)},
                                 "UsageQuantity": {"Amount": str(second_quantity)},
                             },
                         },
                         {
-                            "Keys": ["USE1-zero-charge-input-tokens"],
+                            "Keys": ["Amazon Bedrock", "USE1-zero-charge-input-tokens"],
                             "Metrics": {
                                 "UnblendedCost": {"Amount": str(float(len("")))},
                                 "UsageQuantity": {"Amount": str(float(len("guard")))},
@@ -1063,6 +1069,217 @@ def test_refresh_rates_derives_rates_from_positive_cost_and_quantity(
         / (first_quantity + second_quantity),
         "USE1-model-output-tokens": output_charge / output_quantity,
     }
+
+
+def test_refresh_rates_queries_all_bedrock_services_grouped_by_service(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_ce = FakeCE(results_by_time=[])
+    module = load_handler(monkeypatch, FakeAWS(ce=fake_ce), stub_rates=False)
+
+    module._refresh_rates()
+
+    request = fake_ce.requests[0]
+    assert request["Filter"] == {
+        "Dimensions": {"Key": "SERVICE", "Values": module.BEDROCK_SERVICE_VALUES}
+    }
+    assert request["GroupBy"] == [
+        {"Type": "DIMENSION", "Key": "SERVICE"},
+        {"Type": "DIMENSION", "Key": "USAGE_TYPE"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "usage_type",
+    [
+        "USE1-MP:InputTokenCount-Units",
+        "USE1-MP:USE1_InputTokenCount-Tokens",
+        "USE1-MP:USE1_ImageTokenCount-Units",
+    ],
+)
+def test_marketplace_rate_key_skips_malformed_or_unknown_usage_types(
+    monkeypatch: pytest.MonkeyPatch,
+    usage_type: str,
+):
+    module = load_handler(monkeypatch, FakeAWS())
+
+    assert (
+        module._marketplace_rate_key("Claude Sonnet 4.5 (Amazon Bedrock Edition)", usage_type)
+        is None
+    )
+
+
+def test_refresh_rates_bridges_claude_marketplace_and_preserves_legacy_bedrock(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    claude_cost = float(len("claude-cost"))
+    claude_quantity = float(len("claude-quantity"))
+    legacy_cost = float(len("legacy"))
+    legacy_quantity = float(len("quantity"))
+    fake_aws = FakeAWS(
+        ce=FakeCE(
+            results_by_time=[
+                {
+                    "Groups": [
+                        {
+                            "Keys": [
+                                "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
+                                "USE1-MP:USE1_InputTokenCount-Units",
+                            ],
+                            "Metrics": {
+                                "UnblendedCost": {"Amount": str(claude_cost)},
+                                "UsageQuantity": {"Amount": str(claude_quantity)},
+                            },
+                        },
+                        {
+                            "Keys": [
+                                "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
+                                "USE1-MP:USE1_OutputTokenCount-Units",
+                            ],
+                            "Metrics": {
+                                "UnblendedCost": {"Amount": str(claude_cost)},
+                                "UsageQuantity": {"Amount": str(claude_quantity)},
+                            },
+                        },
+                        {
+                            "Keys": [
+                                "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
+                                "USE1-MP:USE1_CacheReadInputTokenCount-Units",
+                            ],
+                            "Metrics": {
+                                "UnblendedCost": {"Amount": str(claude_cost)},
+                                "UsageQuantity": {"Amount": str(claude_quantity)},
+                            },
+                        },
+                        {
+                            "Keys": [
+                                "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
+                                "USE1-MP:USE1_CacheWriteInputTokenCount-Units",
+                            ],
+                            "Metrics": {
+                                "UnblendedCost": {"Amount": str(claude_cost)},
+                                "UsageQuantity": {"Amount": str(claude_quantity)},
+                            },
+                        },
+                        {
+                            "Keys": ["Amazon Bedrock", "USE1-model-input-tokens"],
+                            "Metrics": {
+                                "UnblendedCost": {"Amount": str(legacy_cost)},
+                                "UsageQuantity": {"Amount": str(legacy_quantity)},
+                            },
+                        },
+                    ]
+                }
+            ]
+        )
+    )
+    module = load_handler(monkeypatch, fake_aws, stub_rates=False)
+
+    rates = module._refresh_rates()
+
+    expected_claude_rate = pytest.approx(claude_cost / (claude_quantity / 1000))
+    assert rates["USE1-Claude Sonnet 4.5-input-tokens"] == expected_claude_rate
+    assert rates["USE1-Claude Sonnet 4.5-output-tokens"] == expected_claude_rate
+    assert rates["USE1-Claude Sonnet 4.5-cache-read-input-token-count"] == expected_claude_rate
+    assert rates["USE1-Claude Sonnet 4.5-cache-write-input-token-count"] == expected_claude_rate
+    assert rates["USE1-model-input-tokens"] == legacy_cost / legacy_quantity
+
+
+def test_refresh_rates_converts_marketplace_raw_tokens_to_thousand_token_units(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_aws = FakeAWS(
+        ce=FakeCE(
+            results_by_time=[
+                {
+                    "Groups": [
+                        {
+                            "Keys": [
+                                "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
+                                "USE1-MP:USE1_InputTokenCount-Units",
+                            ],
+                            "Metrics": {
+                                "UnblendedCost": {"Amount": "2"},
+                                "UsageQuantity": {"Amount": "2000"},
+                            },
+                        },
+                    ]
+                },
+            ]
+        )
+    )
+    module = load_handler(monkeypatch, fake_aws, stub_rates=False)
+
+    rates = module._refresh_rates()
+
+    assert rates["USE1-Claude Sonnet 4.5-input-tokens"] == 1
+
+
+def test_refresh_rates_reads_all_cost_explorer_pages(monkeypatch: pytest.MonkeyPatch):
+    fake_ce = FakeCE(
+        pages=[
+            {
+                "ResultsByTime": [
+                    {
+                        "Groups": [
+                            {
+                                "Keys": [
+                                    "Amazon Bedrock",
+                                    "USE1-model-input-tokens",
+                                ],
+                                "Metrics": {
+                                    "UnblendedCost": {"Amount": "3"},
+                                    "UsageQuantity": {"Amount": "2"},
+                                },
+                            },
+                        ]
+                    },
+                ],
+                "NextPageToken": "next-page",
+            },
+            {
+                "ResultsByTime": [
+                    {
+                        "Groups": [
+                            {
+                                "Keys": [
+                                    "Amazon Bedrock",
+                                    "USE1-model-input-tokens",
+                                ],
+                                "Metrics": {
+                                    "UnblendedCost": {"Amount": "5"},
+                                    "UsageQuantity": {"Amount": "6"},
+                                },
+                            },
+                        ]
+                    },
+                ],
+            },
+        ]
+    )
+    module = load_handler(monkeypatch, FakeAWS(ce=fake_ce), stub_rates=False)
+
+    rates = module._refresh_rates()
+
+    assert rates["USE1-model-input-tokens"] == 1
+    assert fake_ce.calls == 2
+    assert "NextPageToken" not in fake_ce.requests[0]
+    assert fake_ce.requests[1]["NextPageToken"] == "next-page"
+
+
+def test_rate_for_claude_sonnet_45_uses_marketplace_empirical_rate(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = load_handler(monkeypatch, FakeAWS())
+    expected_rate = float(len("empirical")) / 1000
+
+    rate = module._rate_for(
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "InputTokenCount",
+        {"USE1-Claude Sonnet 4.5-input-tokens": expected_rate},
+    )
+
+    assert rate == module.MeteredRate(rate=expected_rate, source="empirical")
 
 
 def test_normalise_strips_stacked_single_and_no_prefixes(monkeypatch: pytest.MonkeyPatch):
@@ -1337,6 +1554,55 @@ def test_ce_spend_today_returns_zero_when_ce_has_no_results(
     spend = module._ce_spend_today(TODAY)
 
     assert spend == float(0)
+
+
+def test_ce_spend_today_queries_all_bedrock_services(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_ce = FakeCE(results_by_time=[])
+    module = load_handler(monkeypatch, FakeAWS(ce=fake_ce), stub_ce=False)
+
+    module._ce_spend_today(TODAY)
+
+    assert fake_ce.requests[0]["Filter"] == {
+        "Dimensions": {"Key": "SERVICE", "Values": module.BEDROCK_SERVICE_VALUES}
+    }
+
+
+def test_ce_spend_today_reads_all_cost_explorer_pages(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_ce = FakeCE(
+        pages=[
+            {
+                "ResultsByTime": [
+                    {
+                        "Total": {
+                            "UnblendedCost": {"Amount": "3"},
+                        }
+                    },
+                ],
+                "NextPageToken": "next-page",
+            },
+            {
+                "ResultsByTime": [
+                    {
+                        "Total": {
+                            "UnblendedCost": {"Amount": "5"},
+                        }
+                    },
+                ],
+            },
+        ]
+    )
+    module = load_handler(monkeypatch, FakeAWS(ce=fake_ce), stub_ce=False)
+
+    spend = module._ce_spend_today(TODAY)
+
+    assert spend == 8
+    assert fake_ce.calls == 2
+    assert "NextPageToken" not in fake_ce.requests[0]
+    assert fake_ce.requests[1]["NextPageToken"] == "next-page"
 
 
 def test_is_attached_returns_false_with_no_targets(monkeypatch: pytest.MonkeyPatch):
