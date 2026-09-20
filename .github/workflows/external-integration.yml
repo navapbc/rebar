@@ -606,8 +606,14 @@ jobs:
         # tests/external/live_jira_dc/README.md § Readiness.
         # Per-test hang guard (ticket d835-1846-95d1-4d84); see the live-LLM lane above for the
         # rationale and why --timeout-method=thread is the load-bearing half.
-        # 900s for this lane. The step ran 2384-2635s over 63 tests across recent green runs —
-        # a ~41s mean per test — so 900s is ~22x that mean. It ALSO has to clear the
+        # 900s for this lane. Measured on the last fully green run of this job (run
+        # 33137402410, job 98740362395, 2026-08-28): the step ran 6252.74s over 76 tests
+        # (`74 passed, 1 skipped, 1 xfailed ... in 6252.74s (1:44:12)`) — a ~82s mean per
+        # test — so 900s is ~10.9x that mean. Re-measure from a green run's own summary line
+        # rather than carrying these numbers forward: an earlier revision of this comment
+        # claimed 2384-2635s over 63 tests, and that stale range read a perfectly normal
+        # 6748s run as "2.6x over budget, hung" and got it cancelled (bug
+        # 2277-7043-1f63-4f5c). It ALSO has to clear the
         # field-readiness wait documented above, which runs INSIDE a test and is therefore
         # charged to the per-test budget: JIRA_DC_FIELD_READY_TIMEOUT defaults to 120s and
         # README.md documents raising it to 300s, so 900s keeps a 3x margin over the
@@ -620,8 +626,17 @@ jobs:
         # DC-harness job — rendered-HTML fidelity (?expand=renderedFields), state-based
         # echo-safety, and the both-sides settled-conflict alert — not a new job. Keep new
         # tests/external/live_jira_dc/ modules under this glob rather than enumerating modules.
+        # -v (not -q) is the STREAMING half of this step's observability, and is load-bearing
+        # for a lane this long. Under -q pytest writes one newline-less dot per test onto a
+        # single line, and GitHub Actions' log reader stamps a line only when it reads a
+        # COMPLETE line — so nothing at all surfaces until the process exits. Measured on the
+        # green run above: its entire ~1,688-line step log carries exactly ONE distinct
+        # timestamp, 05:00:16, the final second of a 6252.74s step. That silence is what made
+        # a healthy run indistinguishable from a hang. This is NOT a Python buffering problem:
+        # PYTHONUNBUFFERED=1 changes nothing, while -v streams one line per test at the true
+        # cadence. -rA and --durations=25 are END-OF-RUN reporters and cannot substitute.
         run: >-
-          pytest -m external tests/external/live_jira_dc -q -rA --durations=25
+          pytest -m external tests/external/live_jira_dc -v -rA --durations=25
           --timeout=900 --timeout-method=thread
           -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
 
