@@ -226,6 +226,7 @@ def degraded_metered_spend(module, total: float):
         return types.SimpleNamespace(total=total, degraded=True, failures=(failure,))
     return spend_type(
         total=total,
+        metered_estimated=False,
         degraded=True,
         failures=(
             module.MeteredFailure(
@@ -279,6 +280,7 @@ def load_handler(
 def run_handler(module, spend: float) -> dict:
     module._metered_spend = lambda day_start, now, rates: module.MeteredSpend(
         total=spend,
+        metered_estimated=False,
         degraded=False,
         failures=(),
     )
@@ -903,6 +905,75 @@ def test_dry_run_warning_matches_deployed_notify_only_behavior(
     assert_policy_attached(fake_aws, attached=False)
 
 
+def test_estimated_seed_warning_threads_payload_state_and_notification(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    seed_rate = WARN_THRESHOLD
+    fake_aws = FakeAWS(
+        cloudwatch=FakeCloudWatch(
+            pages=[token_metric_page("target-model")],
+            values_by_id={"q0": [1000]},
+        )
+    )
+    module = load_handler(monkeypatch, fake_aws)
+    module.SEED_RATES = {"target-model": {"input": seed_rate}}
+
+    result = module.handler({}, None)
+
+    assert result["metered_estimated"] is True
+    assert fake_aws.ssm.state["metered_estimated"] is True
+    assert [m["Subject"] for m in fake_aws.sns.published] == ["Bedrock daily spend WARNING"]
+    assert "estimated" in fake_aws.sns.published[0]["Message"]
+
+
+def test_estimated_fallback_trip_threads_payload_state_and_notification(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_aws = FakeAWS(
+        cloudwatch=FakeCloudWatch(
+            pages=[token_metric_page("unpriced-model")],
+            values_by_id={"q0": [2000]},
+        )
+    )
+    module = load_handler(monkeypatch, fake_aws)
+    module.SEED_RATES = {}
+
+    result = module.handler({}, None)
+
+    assert result["metered_estimated"] is True
+    assert fake_aws.ssm.state["metered_estimated"] is True
+    assert [m["Subject"] for m in fake_aws.sns.published] == [
+        f"Bedrock daily cap TRIPPED — {module.UNKNOWN_RATE_PER_1K * 2:,.2f} >= {THRESHOLD:,.2f}"
+    ]
+    assert "estimated" in fake_aws.sns.published[0]["Message"]
+
+
+def test_estimated_metered_signal_respects_ce_interval_when_not_near_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    state = {
+        "ce_day": TODAY.isoformat(),
+        "ce_spend": float(0),
+        "ce_last_poll": FixedDateTime.now(dt.timezone.utc).isoformat(),
+    }
+    fake_aws = FakeAWS(
+        ssm=FakeSSM(state),
+        ce=FakeCE(spend=THRESHOLD),
+        cloudwatch=FakeCloudWatch(
+            pages=[token_metric_page("target-model")],
+            values_by_id={"q0": [1000]},
+        ),
+    )
+    module = load_handler(monkeypatch, fake_aws, stub_ce=False)
+    module.SEED_RATES = {"target-model": {"input": float(len("rate"))}}
+
+    result = module.handler({}, None)
+
+    assert result["metered_estimated"] is True
+    assert fake_aws.ce.calls == len("")
+    assert result["effective_source"] == "metered"
+
+
 def test_seed_for_missing_output_rate_falls_back_to_observed_input(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -911,7 +982,7 @@ def test_seed_for_missing_output_rate_falls_back_to_observed_input(
 
     rate = module._rate_for("model", "OutputTokenCount", {"USE1-model-input-tokens": 2})
 
-    assert rate == 2 * module.TOKEN_METRICS["OutputTokenCount"][1]
+    assert rate.rate == 2 * module.TOKEN_METRICS["OutputTokenCount"][1]
 
 
 def test_rate_for_unpriced_model_uses_fail_closed_fallback(
@@ -922,7 +993,7 @@ def test_rate_for_unpriced_model_uses_fail_closed_fallback(
 
     rate = module._rate_for("unpriced-model", "OutputTokenCount", {})
 
-    assert rate == module.UNKNOWN_RATE_PER_1K * module.TOKEN_METRICS["OutputTokenCount"][1]
+    assert rate.rate == module.UNKNOWN_RATE_PER_1K * module.TOKEN_METRICS["OutputTokenCount"][1]
 
 
 def test_refresh_rates_derives_rates_from_positive_cost_and_quantity(
@@ -1056,7 +1127,7 @@ def test_rate_for_uses_override_pin_before_model_id(monkeypatch: pytest.MonkeyPa
         {"USE1-TitanEmbeddingV2-Text-input-tokens": pinned_rate},
     )
 
-    assert rate == pinned_rate
+    assert rate.rate == pinned_rate
 
 
 def test_rate_for_ignores_empty_usage_fragment_and_keeps_more_specific_match(
@@ -1076,7 +1147,7 @@ def test_rate_for_ignores_empty_usage_fragment_and_keeps_more_specific_match(
         },
     )
 
-    assert rate == specific_rate
+    assert rate.rate == specific_rate
 
 
 def test_rate_for_uses_seed_when_empirical_rates_do_not_match(
@@ -1092,7 +1163,103 @@ def test_rate_for_uses_seed_when_empirical_rates_do_not_match(
         {"USE1-other-model-input-tokens": seed_rate * 2},
     )
 
-    assert rate == seed_rate
+    assert rate.rate == seed_rate
+
+
+def test_estimated_rate_for_labels_each_resolution_source(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = load_handler(monkeypatch, FakeAWS())
+    exact_rate = float(len("exact"))
+    seed_rate = float(len("seed"))
+    input_rate = float(len("input"))
+    module.SEED_RATES = {"seed-model": {"input": seed_rate}}
+
+    exact = module._rate_for(
+        "exact-model",
+        "InputTokenCount",
+        {"USE1-exact-model-input-tokens": exact_rate},
+    )
+    seed = module._rate_for("seed-model", "InputTokenCount", {})
+    scaled = module._rate_for(
+        "scaled-model",
+        "OutputTokenCount",
+        {"USE1-scaled-model-input-tokens": input_rate},
+    )
+    module.SEED_RATES = {}
+    fallback = module._rate_for("unpriced-model", "InputTokenCount", {})
+
+    assert (exact.rate, exact.source) == (exact_rate, "empirical")
+    assert (seed.rate, seed.source) == (seed_rate, "seed")
+    assert (scaled.rate, scaled.source) == (
+        input_rate * module.TOKEN_METRICS["OutputTokenCount"][1],
+        "empirical_scaled",
+    )
+    assert (fallback.rate, fallback.source) == (module.UNKNOWN_RATE_PER_1K, "fallback")
+
+
+def test_estimated_metered_spend_tracks_estimated_and_non_estimated_sources(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_aws = FakeAWS(
+        cloudwatch_by_region={
+            "seed-region": FakeCloudWatch(
+                pages=[token_metric_page("seed-model")],
+                values_by_id={"q0": [1000]},
+            ),
+            "fallback-region": FakeCloudWatch(
+                pages=[token_metric_page("unpriced-model")],
+                values_by_id={"q0": [1000]},
+            ),
+            "empirical-region": FakeCloudWatch(
+                pages=[token_metric_page("empirical-model")],
+                values_by_id={"q0": [1000]},
+            ),
+            "scaled-region": FakeCloudWatch(
+                pages=[token_metric_page("scaled-model", "OutputTokenCount")],
+                values_by_id={"q0": [1000]},
+            ),
+        }
+    )
+    module = load_handler(
+        monkeypatch,
+        fake_aws,
+        regions=("seed-region", "fallback-region", "empirical-region", "scaled-region"),
+    )
+    seed_rate = float(len("seed"))
+    empirical_rate = float(len("empirical"))
+    input_rate = float(len("input"))
+    module.SEED_RATES = {"seed-model": {"input": seed_rate}}
+
+    estimated = module._metered_spend(
+        FixedDateTime.now(dt.timezone.utc),
+        FixedDateTime.now(dt.timezone.utc),
+        {
+            "USE1-empirical-model-input-tokens": empirical_rate,
+            "USE1-scaled-model-input-tokens": input_rate,
+        },
+    )
+    module.REGIONS = ["empirical-region", "scaled-region"]
+    non_estimated = module._metered_spend(
+        FixedDateTime.now(dt.timezone.utc),
+        FixedDateTime.now(dt.timezone.utc),
+        {
+            "USE1-empirical-model-input-tokens": empirical_rate,
+            "USE1-scaled-model-input-tokens": input_rate,
+            "USE1-unpriced-model-input-tokens": module.UNKNOWN_RATE_PER_1K,
+        },
+    )
+
+    assert estimated is not None
+    assert estimated.total == (
+        seed_rate
+        + module.UNKNOWN_RATE_PER_1K
+        + empirical_rate
+        + input_rate * module.TOKEN_METRICS["OutputTokenCount"][1]
+    )
+    assert estimated.metered_estimated is True
+    assert non_estimated is not None
+    assert non_estimated.metered_estimated is False
 
 
 def test_metered_spend_ignores_non_token_and_non_model_series_then_reports_zero(
