@@ -354,7 +354,14 @@ def _ce_spend_today(day: dt.date) -> float:
     results = resp.get("ResultsByTime", [])
     if not results:
         return float(0)
-    return float(results[0]["Total"]["UnblendedCost"]["Amount"])
+    # A present period carrying no Total means no billed Bedrock spend, not a
+    # transport failure: report zero rather than raising past the ClientError
+    # fallback the caller relies on.
+    total = results[0].get("Total") or {}
+    amount = total.get("UnblendedCost", {}).get("Amount")
+    if amount is None:
+        return float(0)
+    return float(amount)
 
 
 # --------------------------------------------------------------------------
@@ -490,7 +497,11 @@ def handler(event, context):
     )
     # Always take a fresh authoritative read when the meter says we are close;
     # that is exactly the moment a stale CE number is most expensive to trust.
-    if due or metered is None or metered * 5 >= THRESHOLD_USD * 4:
+    # An unavailable meter does not force a read: it cannot say we are close,
+    # and polling on it would bypass CE_MIN_INTERVAL_SECONDS on every tick for
+    # as long as the CloudWatch outage lasts.
+    near_threshold = metered is not None and metered * 5 >= THRESHOLD_USD * 4
+    if due or near_threshold:
         try:
             ce_spend = _ce_spend_today(day)
             state["ce_spend"] = ce_spend
@@ -561,12 +572,18 @@ def handler(event, context):
     # --- enforce -----------------------------------------------------------
     if any_attached and spend < THRESHOLD_USD and not signal_unavailable:
         touched = _apply(attach=False)
-        _notify(
-            "Bedrock daily cap released",
-            f"New UTC day ({day}); Bedrock spend is {spend:,.2f}, under the "
-            f"{THRESHOLD_USD:,.2f} cap. Deny policy detached from:\n  "
-            + "\n  ".join(touched or ["(nothing — see logs)"]),
-        )
+        if touched:
+            _notify(
+                "Bedrock daily cap released",
+                f"New UTC day ({day}); Bedrock spend is {spend:,.2f}, under the "
+                f"{THRESHOLD_USD:,.2f} cap. Deny policy detached from:\n  "
+                + "\n  ".join(touched),
+            )
+        else:
+            # _apply is a no-op under DRY_RUN, so the deny is still attached:
+            # announcing a release here would contradict the deny_attached this
+            # same invocation reports.
+            log.warning("release skipped notification; nothing was detached")
     elif spend >= THRESHOLD_USD and not attached:
         first_trip = not any_attached
         touched = _apply(attach=True)

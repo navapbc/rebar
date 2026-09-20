@@ -1099,3 +1099,71 @@ def test_unavailable_meter_uses_ce_when_ce_has_reached_cap(
     assert result["metered_status"] == "unavailable"
     assert result["effective_source"] == "ce"
     assert result["deny_attached"] is True
+
+
+def test_ce_spend_today_empty_total_returns_zero(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = load_handler(
+        monkeypatch,
+        FakeAWS(ce=FakeCE(results_by_time=[{"Total": {}}])),
+        stub_ce=False,
+    )
+
+    spend = module._ce_spend_today(TODAY)
+
+    assert spend == float(0)
+
+
+def test_unavailable_meter_respects_ce_min_interval(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    state = {
+        "ce_day": TODAY.isoformat(),
+        "ce_spend": float(0),
+        "ce_last_poll": FixedDateTime.now(dt.timezone.utc).isoformat(),
+    }
+    fake_aws = FakeAWS(ssm=FakeSSM(state), ce=FakeCE(spend=float(0)))
+    module = load_handler(monkeypatch, fake_aws, stub_ce=False)
+
+    run_handler_with_unavailable_meter(module)
+    result = run_handler_with_unavailable_meter(module)
+
+    assert result["metered_status"] == "unavailable"
+    assert fake_aws.ce.calls == len("")
+
+
+def test_unavailable_meter_polls_ce_after_interval(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    state = {
+        "ce_day": TODAY.isoformat(),
+        "ce_spend": float(0),
+        "ce_last_poll": (
+            FixedDateTime.now(dt.timezone.utc) - dt.timedelta(hours=len("xx"))
+        ).isoformat(),
+    }
+    fake_aws = FakeAWS(ssm=FakeSSM(state), ce=FakeCE(spend=float(0)))
+    module = load_handler(monkeypatch, fake_aws, stub_ce=False)
+
+    result = run_handler_with_unavailable_meter(module)
+
+    assert result["metered_status"] == "unavailable"
+    assert result["ce_status"] == "available"
+    assert fake_aws.ce.calls == len("x")
+
+
+def test_dry_run_release_does_not_publish_detach_notification(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_aws = FakeAWS()
+    module = load_handler(monkeypatch, fake_aws, dry_run=True)
+    fake_aws.iam.role_policies = {"api": {"arn:test:deny"}, "worker": {"arn:test:deny"}}
+    fake_aws.iam.group_policies = {"admins": {"arn:test:deny"}}
+
+    result = run_handler(module, THRESHOLD - len("x"))
+
+    assert result["deny_attached"] is True
+    assert_policy_attached(fake_aws, attached=True)
+    subjects = [published["Subject"] for published in fake_aws.sns.published]
+    assert "Bedrock daily cap released" not in subjects
