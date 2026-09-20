@@ -70,8 +70,10 @@ balancer, KMS-CMK state encryption, tighter ingress) is explicitly out of scope
   need Docker locally only if you want to build/test images).
 - An **Anthropic API key** (the review-bot makes live, billable LLM calls).
 - The **`nava-rebar[agents]`** extra installed in the review-bot image — this pulls
-  the `rebar.llm` review kernel (`pip install .[agents,reviewbot]`, baked by
-  `infra/compose/Dockerfile.reviewbot`).
+  the `rebar.llm` review kernel. The image installs with
+  `uv sync --locked --no-dev --extra agents --extra reviewbot --extra bedrock`
+  (pinned uv `0.12.7`), baked by `infra/compose/Dockerfile.reviewbot`; `--locked`
+  refuses a drifted `uv.lock`, so the image runs the dependency set CI verified.
 - A workstation with `gh` (GitHub CLI), `git`, the AWS CLI, and an SSH key you'll
   register as the Gerrit admin.
 
@@ -208,9 +210,11 @@ the import-not-recreate mechanics, and the name-preservation tradeoff.
 > admin bootstrap. See ADR-0007 (receiver) + ADR-0008 (secrets); files under
 > `infra/compose/`, `infra/nginx/`, `infra/scripts/`.
 
-The compose stack (`infra/compose/docker-compose.yml`) runs **two containers** —
-Gerrit (`gerritcodereview/gerrit:3.14.1`, publishes arm64) and the rebar review-bot
-(`Dockerfile.reviewbot`, `pip install .[agents,reviewbot]`). **nginx is NOT in the
+The compose stack (`infra/compose/docker-compose.yml`) runs **four services** — Gerrit
+(`gerritcodereview/gerrit:3.14.1`, publishes arm64), the rebar review-bot
+(`Dockerfile.reviewbot`,
+`uv sync --locked --no-dev --extra agents --extra reviewbot --extra bedrock`), the
+`opcert` signer, and the `mcp` server. **nginx is NOT in the
 stack** — it runs as a host package so host certbot can manage the cert and reload it
 (ADR-0007).
 
