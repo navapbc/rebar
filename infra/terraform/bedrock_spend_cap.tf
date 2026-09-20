@@ -213,6 +213,26 @@ resource "aws_sns_topic_policy" "bedrock_spend_cap_alerts" {
           StringEquals = { "aws:SourceAccount" = local.bedrock_cap_account_id }
         }
       },
+      # Cost Anomaly Detection publishes as `costalerts.amazonaws.com`, which is a DIFFERENT
+      # service principal from Budgets above — neither grant implies the other. The live
+      # anomaly subscription `bedrock-anomaly-alerts` (frequency IMMEDIATE) delivers to this
+      # topic, so dropping this statement would revoke its publish rights. It would also fail
+      # SILENTLY: the denial happens at the topic, so the subscription keeps reporting healthy
+      # while no alert ever arrives. Codified here so `terraform apply` stops proposing to
+      # remove a grant the account actually depends on.
+      #
+      # Deliberately carries NO `aws:SourceAccount` condition, because that is what the live
+      # policy carries and this statement exists to stop an apply from changing delivery, not
+      # to change it. Adding the condition would be a confused-deputy hardening whose failure
+      # mode is the silent one above, so it belongs in its own change that can verify an
+      # anomaly alert still lands.
+      {
+        Sid       = "AllowCostAlerts"
+        Effect    = "Allow"
+        Principal = { Service = "costalerts.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = aws_sns_topic.bedrock_spend_cap_alerts.arn
+      },
     ]
   })
 }
