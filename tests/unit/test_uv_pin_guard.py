@@ -22,7 +22,9 @@ GATE = REPO_ROOT / "scripts" / "check_uv_pin.py"
 #: assertions bind to this exact `path:line` so they name the offender rather than matching
 #: the always-emitted trailer summary, which mentions every failure mode by construction.
 SVC_DOCKERFILE = Path("infra") / "compose" / "Dockerfile.svc"
+COMPOSE_FILE = Path("docker-compose.yml")
 UV_LINE = 3
+COMPOSE_IMAGE_LINE = 3
 DIGEST = "sha256:" + "0" * 64
 
 
@@ -531,3 +533,69 @@ def test_dockerfile_templated_build_stage_reference_is_allowed(tree: Path) -> No
     )
     result = _run(tree)
     assert result.returncode == 0, result.stderr
+
+
+def test_real_repository_compose_files_are_discovered_once() -> None:
+    """The Compose scanner covers every committed Compose file without glob duplicates."""
+    paths = [path.relative_to(REPO_ROOT) for path in _gate_module()._compose_files(REPO_ROOT)]
+    assert paths == [
+        Path("docker-compose.langfuse.yml"),
+        Path("infra") / "compose" / "docker-compose.yml",
+        Path("tests") / "external" / "live_jira_dc" / "docker-compose.yml",
+    ]
+    assert len(paths) == len(set(paths))
+
+
+def test_compose_file_discovery_skips_generated_and_vendor_dirs(tmp_path: Path) -> None:
+    """Compose discovery uses the same skip policy as Dockerfile discovery."""
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    for dirname in [".git", ".venv", "node_modules", "__pycache__"]:
+        skipped = tmp_path / dirname
+        skipped.mkdir()
+        (skipped / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+
+    paths = [path.relative_to(tmp_path) for path in _gate_module()._compose_files(tmp_path)]
+    assert paths == [Path("docker-compose.yml")]
+
+
+@pytest.mark.parametrize(
+    ("image", "expected_detail"),
+    [
+        ("redis", "names no tag"),
+        ("redis:latest", "FLOATING :latest tag"),
+        ("'redis:7' # exact tag", None),
+        (f"redis@{DIGEST}", None),
+        ("redis:${REDIS_VERSION:-1.2.3}", None),
+        ("redis:${REDIS_VERSION:-latest}", "FLOATING :latest tag"),
+        ("redis:${REDIS_VERSION}", "does not name a literal default"),
+        ("ghcr.io/astral-sh/uv:0.12.9", "installs uv 0.12.9"),
+        (f"ghcr.io/astral-sh/uv@{DIGEST}", "pins uv by digest alone"),
+    ],
+)
+def test_compose_image_pin_cases(tree: Path, image: str, expected_detail: str | None) -> None:
+    """Compose ``image:`` references are checked by the same per-image rule as Dockerfiles."""
+    (tree / COMPOSE_FILE).write_text(
+        f"services:\n  app:\n    image: {image}\n",
+        encoding="utf-8",
+    )
+
+    findings = _gate_module().check_compose_images(tree)
+
+    if expected_detail is None:
+        assert findings == []
+        return
+    assert len(findings) == 1
+    assert findings[0].location == f"{COMPOSE_FILE}:{COMPOSE_IMAGE_LINE}"
+    assert expected_detail in findings[0].detail
+
+
+def test_check_repo_includes_compose_images(tree: Path) -> None:
+    """The public gate must fail when only a Compose image floats."""
+    (tree / COMPOSE_FILE).write_text(
+        "services:\n  app:\n    image: redis:latest\n",
+        encoding="utf-8",
+    )
+    result = _run(tree)
+    assert result.returncode == 1
+    assert f"{COMPOSE_FILE}:{COMPOSE_IMAGE_LINE}" in result.stderr
+    assert "redis:latest" in result.stderr
