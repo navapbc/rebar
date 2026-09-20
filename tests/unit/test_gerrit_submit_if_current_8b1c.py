@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
 from rebar.review_bot.config import ReceiverConfig
@@ -206,6 +208,31 @@ def test_safe_submit_refuses_abbreviated_revision_prefix(monkeypatch):
     assert safe_submit.main(["2764", "--revision", "deadbeef", "--hashtag", ""]) == 2
 
     assert all(not path.endswith("/submit") for _, path, _ in calls)
+
+
+def test_safe_submit_names_missing_git_credential(monkeypatch, capsys):
+    safe_submit = _safe_submit_module()
+
+    def missing_credential(*_args, **_kwargs):
+        raise subprocess.CalledProcessError(
+            128,
+            ["git", "credential", "fill"],
+            stderr="fatal: unable to get password from user\n",
+        )
+
+    monkeypatch.setattr(safe_submit.subprocess, "run", missing_credential)
+
+    assert (
+        safe_submit.main(
+            ["2764", "--revision", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "--hashtag", ""]
+        )
+        == 4
+    )
+
+    err = capsys.readouterr().err
+    assert "missing Gerrit credential for rebar.solutions.navateam.com" in err
+    assert "unable to get password from user" in err
+    assert "CalledProcessError" not in err
 
 
 def test_safe_submit_returns_stale_when_submit_races_to_409(monkeypatch, capsys):
