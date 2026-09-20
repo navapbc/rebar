@@ -1451,7 +1451,9 @@ pre-sign drift guard resolves the **same** ref for its fresh-SHA read, so a fixe
 tree is immutable — is a stable no-op rather than being spuriously treated as drift. The close
 therefore lands **signed** even though HEAD is elsewhere. Absent `--ref`, close first pins
 the invoking worktree's HEAD to a concrete SHA and verifies/signs that pinned tree; `--ref`
-changes which tree is pinned, not whether pinning happens.
+changes which tree is pinned, not whether pinning happens. A completion attestation's
+`verified_at_sha` can therefore legitimately be older than current HEAD, because it records
+the tree verified at close entry while main may advance before the attestation is read.
 
 **Stacked-epic recipe.** When landing a stack where each story is its own commit, close each story
 against **its own commit** — `rebar transition <story-id> closed --ref <story-sha>` (or check that
