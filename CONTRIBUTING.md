@@ -686,17 +686,21 @@ Gerrit-gated; see §3). Any resulting fix lands as an ordinary Gerrit change (§
   advisory-DB fetch error is retried and, if still failing, is an infra issue
   (comment `recheck`), not a vulnerability.
 
-**Dependency updates use security *alerts only*, not version-bump PRs.** GitHub
+**Dependency updates use security *alerts* plus advisory version-bump PRs.** GitHub
 Dependabot security **alerts** are enabled to surface vulnerable deps, and
-`.github/dependabot.yml` configures **GitHub-Actions version-update PRs** (monthly).
+`.github/dependabot.yml` configures **two** version-update ecosystems:
+**GitHub-Actions** (monthly, grouped as `github-actions`) and **uv** (weekly, grouped
+as `uv-lock`), the latter updating the committed `uv.lock` that `make install`, CI and
+the reviewbot/opcert images consume. Major `mcp` bumps are ignored until
+`bared-nickel-insect` lands; patch and security updates stay enabled.
 Because PRs cannot merge on the mirror, these are **advisory notifications**: a
 maintainer reads the proposed bump, lands the equivalent change through Gerrit, and
 closes the PR (the lockdown bot exempts `dependabot[bot]` so its PRs aren't
-auto-closed). There is intentionally **no `pip` ecosystem entry** — rebar's core
-deps are unpinned `>=`, so version-update PRs there would be noise. When an alert
-(or a `pip-audit` failure) tells you to bump a dependency, **land the bump through
-Gerrit** like any other change (§2): edit the pin in `pyproject.toml`, commit with
-a `rebar-ticket:` trailer, and push to `refs/for/main`.
+auto-closed). There is intentionally **no `pip` ecosystem entry** — published metadata
+retains unpinned `>=` minimums, so version-update PRs there would change nothing. When
+an alert (or a `pip-audit` failure) tells you to bump a dependency, **land the bump
+through Gerrit** like any other change (§2): edit the pin in `pyproject.toml`, commit
+with a `rebar-ticket:` trailer, and push to `refs/for/main`.
 
 > **Reporting a vulnerability.** See [`SECURITY.md`](SECURITY.md) for private
 > disclosure — do not open a public issue for a security report.
