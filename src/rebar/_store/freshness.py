@@ -11,7 +11,10 @@ certificate. Gate-critical reads therefore check local freshness before deciding
 No network request is required.
 
 - ``push-pending`` means this clone has committed events absent from the shared
-  store.
+  store. The marker recording that is durable and is cleared only by a
+  rebar-performed push, so it is checked against observable git state before it
+  is reported: HEAD level with the remote-tracking ref falsifies the claim, and
+  the stale marker is discharged rather than reported.
 - ``behind`` means HEAD is an ancestor of the fetched remote-tracking ref. A gate
   does not perform the writer adoption that would repair this state.
 - ``diverged`` means neither history contains the other, including histories
@@ -93,6 +96,68 @@ def _ref_divergence(tracker: str, remote_ref: str) -> tuple[str, int] | None:
     return ("behind", behind)
 
 
+def _head_is_level_with(tracker: str, remote_ref: str) -> bool:
+    """Whether HEAD and ``remote_ref`` name the SAME commit. Never raises.
+
+    Proof that this clone has nothing undelivered: every local commit is contained in a
+    revision the remote acknowledged. Purely local, like :func:`_ref_divergence` — no
+    ``fetch``. A remote-tracking ref that lags the true remote can only UNDERSTATE how far
+    ahead the clone is, so equality here cannot hold while genuinely undelivered commits
+    exist; the worst a stale ref can do is withhold this proof and keep a marker set.
+
+    Returns ``False`` for an unresolvable or never-fetched ref: absence of evidence of
+    delivery, never evidence of delivery.
+    """
+    from rebar._store.gitutil import run_git
+
+    # raw-git-ok: read-only oid probe on the tracker, mirroring _ref_divergence above
+    def _oid(rev: str) -> str | None:
+        cp = run_git(
+            tracker, "rev-parse", "--verify", f"{rev}^{{commit}}", check=False, timeout=_GIT_TIMEOUT
+        )
+        out = (cp.stdout or "").strip()
+        return out if cp.returncode == 0 and out else None
+
+    try:
+        head = _oid("HEAD")
+        return head is not None and head == _oid(remote_ref)
+    except Exception:  # an unreadable probe proves nothing, so it proves nothing
+        logger.debug("could not compare HEAD with %s", remote_ref, exc_info=True)
+        return False
+
+
+def _pending_reconciled(tracker: str, remote_ref: str | None) -> bool:
+    """Whether a push-pending marker has been FALSIFIED by observable git state, clearing
+    it when so. Never raises.
+
+    The marker claims this clone holds committed ticket events the shared store never
+    received. HEAD level with the remote-tracking ref contradicts that claim, and the
+    marker is then a stale diagnostic that would otherwise block every gate in this clone
+    forever, because only a rebar-performed push clears it (``push.py``) — a hand-run
+    ``git push`` delivers the events and leaves the marker set.
+
+    This holds for EVERY recorded reason, not only push-leg ones.
+    :func:`push_state.record_failure` deliberately also records the commit leg's
+    ``stage-failed`` / ``commit-lock-timeout`` / ``commit-failed``, where HEAD never
+    advanced; there the claim is false a fortiori, since a write that never became a commit
+    left nothing to deliver. Discharging a commit-leg marker on unrelated delivery evidence
+    is the marker's own documented rule ("a later successful push clears the marker either
+    way"), not a new liberty taken here.
+
+    Clearing on exact equality is the shape taken from the one clear outside the push path,
+    ``_commands/completion_delivery.py:297-301``, which clears only when
+    ``local_oid == remote_oid`` because "a different local HEAD can belong to a concurrent
+    writer whose delivery outcome we do not own". The comparand there is the revision the
+    remote just accepted; here it is the remote-tracking ref, since this probe never fetches.
+    """
+    if remote_ref is None or not _head_is_level_with(tracker, remote_ref):
+        return False
+    from rebar._store import push_state
+
+    push_state.clear(tracker)  # never raises; a failed clear leaves the marker, not an error
+    return True
+
+
 def resolve_tracker(repo_root: Any = None) -> str | None:
     """This repo's tracker path for a gate's freshness probe, or ``None`` to let the probe
     discover it. Best-effort: an unresolvable root must degrade to the default discovery
@@ -155,6 +220,8 @@ def store_freshness(tracker: str | os.PathLike[str] | None = None) -> dict[str, 
                 "ticket events written elsewhere are not in this clone's view"
             )
     elif pending:
+        if _pending_reconciled(tracker, remote_ref):
+            return result
         verdict = "push-pending"
         result["unpushed"] = str(status.get("unpushed", "unknown"))
         result["reason"] = (
