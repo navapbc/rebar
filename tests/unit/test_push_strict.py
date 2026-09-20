@@ -359,6 +359,79 @@ def test_persistent_transport_failure_stops_on_a_bounded_budget(
     assert all(delay > 0 for delay in slept)
 
 
+_MISSING_CREDENTIAL_STDERR = "fatal: unable to get password from user"
+
+
+def test_missing_credential_failure_is_not_reported_as_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-interactive auth failure is actionable credential state, not a network fault."""
+    tracker = tmp_path / ".tickets-tracker"
+    _common(monkeypatch, tracker)
+    push_calls = 0
+
+    def credentialless_git(_base: str, *args: str, **_kwargs: object):
+        nonlocal push_calls
+        if args[:2] == ("remote", "get-url"):
+            return _completed(args, out="https://github.com/navapbc/rebar.git\n")
+        if args and args[0] == "push":
+            push_calls += 1
+            return _completed(args, 128, err=_MISSING_CREDENTIAL_STDERR)
+        if args[:2] == ("rev-list", "--count"):
+            return _completed(args, out="1\n")
+        return _completed(args)
+
+    monkeypatch.setattr(push, "_git", credentialless_git)
+
+    error = _delivery_error(
+        lambda: push.push_tickets_branch(str(tracker), strict=True, sleep_fn=lambda _d: None),
+        "push-missing-credential",
+    )
+    assert "unable to get password from user" in str(error)
+    assert push_calls == 1
+
+
+def test_push_env_keeps_git_config_except_blank_helper_reset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The push child inherits Git config, except a credential-hostile empty helper reset.
+
+    The 48bd incident shape set ``credential.helper=`` through ``GIT_CONFIG_*`` without
+    providing any replacement credential source. That command-line blank masks the repository's
+    own helper. The tickets push must preserve unrelated command-line config while removing
+    only that empty reset so lower-precedence repository helpers can run.
+    """
+    tracker = tmp_path / ".tickets-tracker"
+    _common(monkeypatch, tracker)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "3")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "credential.interactive")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "never")
+    monkeypatch.setenv("GIT_CONFIG_KEY_1", "credential.helper")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_1", "")
+    monkeypatch.setenv("GIT_CONFIG_KEY_2", "user.name")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_2", "Joe Oakhart")
+    observed_env: dict[str, str] = {}
+
+    def recording_git(_base: str, *args: str, **kwargs: object):
+        if args[:2] == ("remote", "get-url"):
+            return _completed(args, out="https://github.com/navapbc/rebar.git\n")
+        if args and args[0] == "push":
+            observed_env.update(kwargs["env"])  # type: ignore[arg-type]
+            return _completed(args)
+        return _completed(args)
+
+    monkeypatch.setattr(push, "_git", recording_git)
+
+    push.push_tickets_branch(str(tracker), strict=True)
+
+    assert observed_env["GIT_CONFIG_COUNT"] == "2"
+    assert [
+        (observed_env[f"GIT_CONFIG_KEY_{i}"], observed_env[f"GIT_CONFIG_VALUE_{i}"])
+        for i in range(2)
+    ] == [("credential.interactive", "never"), ("user.name", "Joe Oakhart")]
+    assert observed_env["PRE_COMMIT_ALLOW_NO_CONFIG"] == "1"
+
+
 @pytest.mark.parametrize(
     ("stderr", "retriable"),
     [
@@ -373,6 +446,7 @@ def test_persistent_transport_failure_stops_on_a_bounded_budget(
         ("remote: Internal Server Error", False),
         ("fatal: unable to access remote: rate limit exceeded", False),
         ("! [remote rejected] HEAD -> tickets (non-fast-forward)", False),
+        (_MISSING_CREDENTIAL_STDERR, False),
     ],
 )
 def test_transport_classifier_is_subtractive(stderr: str, retriable: bool) -> None:

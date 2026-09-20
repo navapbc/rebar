@@ -29,6 +29,7 @@ class GitKind(Enum):
     LOCK = "lock"
     TRANSIENT_FS = "transient-fs"
     TRANSPORT = "transport"
+    MISSING_CREDENTIAL = "missing-credential"
     NON_FF = "non-ff"
     CAS_MISMATCH = "cas-mismatch"
     POLICY_DECLINE = "policy-decline"
@@ -126,6 +127,13 @@ TRANSPORT_RETRIABLE_MARKERS: tuple[str, ...] = (
     # The synthetic rc-124 result gitutil.run_git_bounded builds for a watchdog timeout.
     # Recognised HERE; CONSTRUCTED there (two constructs, two owners).
     "git timed out after",
+)
+
+MISSING_CREDENTIAL_MARKERS: tuple[str, ...] = (
+    "unable to get password from user",
+    "could not read username",
+    "terminal prompts disabled",
+    "could not read password",
 )
 
 MULTI_BUNDLE_MARKERS: tuple[str, ...] = ("multiple bundles", "multiple updates for ref")
@@ -245,9 +253,14 @@ def is_non_fast_forward(text: str) -> bool:
 
 def is_transport_retriable(text: str) -> bool:
     """A TRANSIENT transport fault worth another attempt. False for a policy decline."""
-    if is_policy_decline(text):
+    if is_policy_decline(text) or is_missing_credential(text):
         return False
     return _any(text, TRANSPORT_RETRIABLE_MARKERS) is not None
+
+
+def is_missing_credential(text: str) -> bool:
+    """Git reached an authenticated remote with no non-interactive credential source."""
+    return _any(text, MISSING_CREDENTIAL_MARKERS) is not None
 
 
 def is_multi_bundle(text: str) -> bool:
@@ -343,6 +356,7 @@ _RULES: dict[str, tuple[_Rule, ...]] = {
     ),
     PUSH: (
         _row(is_policy_decline, GitKind.POLICY_DECLINE, POLICY_DECLINE_MARKERS[0]),
+        _row(is_missing_credential, GitKind.MISSING_CREDENTIAL, MISSING_CREDENTIAL_MARKERS[0]),
         _row(is_non_fast_forward, GitKind.NON_FF, "non-fast-forward"),
         _row(is_transport_retriable, GitKind.TRANSPORT, "transport"),
         _row(is_dirty_working_tree, GitKind.DIRTY_WD, "would be overwritten"),

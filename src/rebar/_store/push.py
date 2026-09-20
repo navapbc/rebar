@@ -22,7 +22,7 @@ from collections.abc import Callable, Sequence
 
 from rebar._optional import OptionalDependencyError
 from rebar._store import push_recovery, push_state
-from rebar._store.gitutil import run_git, run_git_bounded
+from rebar._store.gitutil import credential_git_env, run_git, run_git_bounded
 from rebar._store.push_classify import (
     _MAX_RETRIES,
     PushDeliveryError,
@@ -239,7 +239,7 @@ def push_tickets_branch(
     remote_ref = f"{remote}/{branch}"
     _require_s3_helper_if_s3_url(remote_url.stdout.strip())
 
-    push_env = {**os.environ, "PRE_COMMIT_ALLOW_NO_CONFIG": "1"}
+    push_env = credential_git_env({**os.environ, "PRE_COMMIT_ALLOW_NO_CONFIG": "1"})
     stderr = ""
     fifth_merge_clean = False
     healed_once = False

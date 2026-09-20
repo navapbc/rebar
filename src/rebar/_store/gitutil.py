@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 from collections.abc import Callable, Mapping
 
@@ -39,6 +40,69 @@ from rebar._store.git_locking import (  # noqa: F401  (compat re-export — see 
 )
 
 logger = logging.getLogger(__name__)
+
+
+# mechanism-ok: env_var GIT_CONFIG_COUNT — bug 48bd: inspect inherited Git command config
+# to remove only empty credential-helper resets from authenticated housekeeping Git children.
+_GIT_CONFIG_ENTRY_RE = re.compile(r"^GIT_CONFIG_(KEY|VALUE)_(\d+)$")
+
+
+def credential_git_env(env: Mapping[str, str]) -> dict[str, str]:
+    """Return *env* with credential-hostile empty helper resets removed.
+
+    rebar's tickets push and Gerrit submit helpers inherit the caller's Git configuration
+    because credential setup is deliberately operator-owned. One command-line config shape is
+    hostile without providing an alternative credential source: ``credential.helper=`` through
+    ``GIT_CONFIG_*``. It has command-line precedence and resets lower-precedence helpers,
+    including the repository-local ``!gh auth git-credential`` helper. When no command-line
+    helper or auth header replaces it, drop only that empty reset so repository/system helpers
+    can run; preserve every other command-line Git config entry.
+    """
+    cleaned = dict(env)
+    count_text = env.get("GIT_CONFIG_COUNT")
+    if count_text is None:
+        return cleaned
+    try:
+        count = int(count_text)
+    except ValueError:
+        return cleaned
+
+    entries: list[tuple[str, str]] = []
+    has_empty_helper_reset = False
+    has_command_line_credential_source = False
+    for index in range(count):
+        key_name = f"GIT_CONFIG_KEY_{index}"
+        value_name = f"GIT_CONFIG_VALUE_{index}"
+        key = env.get(key_name)
+        value = env.get(value_name, "")
+        if key is None:
+            return cleaned
+        normal_key = key.lower()
+        if normal_key == "credential.helper":
+            if value == "":
+                has_empty_helper_reset = True
+            else:
+                has_command_line_credential_source = True
+        elif normal_key.startswith("http.") and normal_key.endswith(".extraheader") and value:
+            has_command_line_credential_source = True
+        entries.append((key, value))
+
+    if not has_empty_helper_reset or has_command_line_credential_source:
+        return cleaned
+
+    remaining = [
+        (key, value)
+        for key, value in entries
+        if not (key.lower() == "credential.helper" and value == "")
+    ]
+    for name in list(cleaned):
+        if name == "GIT_CONFIG_COUNT" or _GIT_CONFIG_ENTRY_RE.match(name):
+            del cleaned[name]
+    cleaned["GIT_CONFIG_COUNT"] = str(len(remaining))
+    for index, (key, value) in enumerate(remaining):
+        cleaned[f"GIT_CONFIG_KEY_{index}"] = key
+        cleaned[f"GIT_CONFIG_VALUE_{index}"] = value
+    return cleaned
 
 
 # ── Tracker filesystem primitives ────────────────────────────────────────────

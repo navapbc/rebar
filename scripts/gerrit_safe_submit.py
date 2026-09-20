@@ -13,18 +13,25 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from rebar._store.gitutil import credential_git_env
+
 BASE_URL = "https://rebar.solutions.navateam.com"
 SESSION_ENV = ("REBAR_SESSION_ID", "COPILOT_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "SESSION_ID")
 
 
 def _credential(host: str) -> tuple[str, str]:
-    proc = subprocess.run(
-        ["git", "credential", "fill"],
-        input=f"protocol=https\nhost={host}\n\n",
-        text=True,
-        capture_output=True,
-        check=True,
-    )
+    try:
+        proc = subprocess.run(
+            ["git", "credential", "fill"],
+            input=f"protocol=https\nhost={host}\n\n",
+            text=True,
+            capture_output=True,
+            check=True,
+            env=credential_git_env(os.environ),
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+        raise RuntimeError(f"git credential fill failed for {host}: {detail}") from None
     fields = dict(line.split("=", 1) for line in proc.stdout.splitlines() if "=" in line)
     user = fields.get("username")
     password = fields.get("password")
@@ -80,7 +87,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     host = urllib.parse.urlparse(args.base_url).hostname or "rebar.solutions.navateam.com"
-    user, password = _credential(host)
+    try:
+        user, password = _credential(host)
+    except RuntimeError as exc:
+        print(f"missing Gerrit credential for {host}: {exc}", file=sys.stderr)
+        return 4
     auth = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
     change = urllib.parse.quote(args.change, safe="")
 

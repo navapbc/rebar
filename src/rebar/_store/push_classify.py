@@ -47,6 +47,7 @@ def _raise_if_strict(
 # Policy declines stay terminal while non-fast-forward and transport failures retain distinct
 # recovery paths. These aliases remain because the push loop imports them.
 _is_policy_decline = git_outcome.is_policy_decline
+_is_missing_credential = git_outcome.is_missing_credential
 _is_non_fast_forward = git_outcome.is_non_fast_forward
 
 
@@ -143,7 +144,12 @@ def _retry_transport_or_stop(
         )
         _transport_backoff(transport_attempts, sleep_fn)
         return True
-    reason = "push-policy-declined" if _is_policy_decline(stderr) else "push-transport-failed"
+    if _is_policy_decline(stderr):
+        reason = "push-policy-declined"
+    elif _is_missing_credential(stderr):
+        reason = "push-missing-credential"
+    else:
+        reason = "push-transport-failed"
     _raise_if_strict(strict, reason, stderr, base_path, remote_ref)
     logger.warning(
         "tickets branch push failed (exit %s): %s%s",
