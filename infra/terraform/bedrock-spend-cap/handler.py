@@ -62,6 +62,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass
 
 import boto3
 from botocore.exceptions import ClientError
@@ -277,9 +278,36 @@ def _rate_for(model_id: str, metric_name: str, rates: dict) -> float:
 # --------------------------------------------------------------------------
 # metered spend (fast signal)
 # --------------------------------------------------------------------------
-def _metered_spend(day_start: dt.datetime, now: dt.datetime, rates: dict) -> float | None:
+@dataclass(frozen=True)
+class MeteredFailure:
+    region: str
+    exception_class: str
+
+
+@dataclass(frozen=True)
+class MeteredSpend:
+    total: float
+    degraded: bool
+    failures: tuple[MeteredFailure, ...]
+
+
+def _record_metered_failure(
+    failures: list[MeteredFailure],
+    *,
+    region: str,
+    operation: str,
+    exc: ClientError,
+) -> None:
+    exception_class = exc.__class__.__name__
+    failures.append(MeteredFailure(region=region, exception_class=exception_class))
+    log.error("CloudWatch %s unavailable in %s (%s): %s", operation, region, exception_class, exc)
+
+
+def _metered_spend(day_start: dt.datetime, now: dt.datetime, rates: dict) -> MeteredSpend | None:
     total = float(0)
     found_series = False
+    contributed = False
+    failures: list[MeteredFailure] = []
     for region in REGIONS:
         cw = boto3.client("cloudwatch", region_name=region)
         queries, meta = [], {}
@@ -314,8 +342,8 @@ def _metered_spend(day_start: dt.datetime, now: dt.datetime, rates: dict) -> flo
                         }
                     )
         except ClientError as exc:
-            log.error("CloudWatch metric listing unavailable in %s: %s", region, exc)
-            return None
+            _record_metered_failure(failures, region=region, operation="metric listing", exc=exc)
+            continue
 
         for batch_start in range(0, len(queries), 100):
             batch = queries[batch_start : batch_start + 100]
@@ -327,18 +355,20 @@ def _metered_spend(day_start: dt.datetime, now: dt.datetime, rates: dict) -> flo
                     ScanBy="TimestampAscending",
                 )
             except ClientError as exc:
-                log.error("CloudWatch metric data unavailable in %s: %s", region, exc)
-                return None
+                _record_metered_failure(failures, region=region, operation="metric data", exc=exc)
+                continue
             for result in resp.get("MetricDataResults", []):
                 units_1k = sum(result.get("Values", []) or []) / 1000
                 if units_1k <= 0:
                     continue
                 model_id, metric_name = meta[result["Id"]]
                 total += units_1k * _rate_for(model_id, metric_name, rates)
+                contributed = True
+    if failures and not contributed:
+        return None
     if not found_series:
         log.info("CloudWatch Bedrock token metrics found no per-model series")
-        return float(0)
-    return total
+    return MeteredSpend(total=total, degraded=bool(failures), failures=tuple(failures))
 
 
 # --------------------------------------------------------------------------
@@ -500,7 +530,8 @@ def handler(event, context):
     # An unavailable meter does not force a read: it cannot say we are close,
     # and polling on it would bypass CE_MIN_INTERVAL_SECONDS on every tick for
     # as long as the CloudWatch outage lasts.
-    near_threshold = metered is not None and metered * 5 >= THRESHOLD_USD * 4
+    metered_total = None if metered is None else metered.total
+    near_threshold = metered_total is not None and metered_total * 5 >= THRESHOLD_USD * 4
     if due or near_threshold:
         try:
             ce_spend = _ce_spend_today(day)
@@ -524,15 +555,19 @@ def handler(event, context):
             spend = THRESHOLD_USD
             effective_source = "metered_unavailable"
     else:
-        metered_status = "available"
-        if ce_spend is not None and ce_spend > metered:
+        metered_status = "degraded" if metered.degraded else "available"
+        if ce_spend is not None and ce_spend > metered.total:
             spend = ce_spend
             effective_source = "ce"
         else:
-            spend = metered
+            spend = metered.total
             effective_source = "metered"
-    signal_unavailable = metered_status == "unavailable" or ce_status == "unavailable"
-    metered_text = "unavailable" if metered is None else f"{metered:,.2f}"
+    signal_unavailable = (
+        metered_status == "unavailable"
+        or (metered is not None and metered.degraded)
+        or ce_status == "unavailable"
+    )
+    metered_text = "unavailable" if metered_total is None else f"{metered_total:,.2f}"
     ce_text = "unavailable" if ce_spend is None else f"{ce_spend:,.2f}"
     attached = _is_attached()
     any_attached = attached or _has_any_attachment()
@@ -540,7 +575,7 @@ def handler(event, context):
         "day=%s metered=%s ce=%s effective=%.4f threshold=%.2f attached=%s "
         "metered_status=%s ce_status=%s effective_source=%s",
         day,
-        "unavailable" if metered is None else f"{metered:.4f}",
+        "unavailable" if metered_total is None else f"{metered_total:.4f}",
         "unavailable" if ce_spend is None else f"{ce_spend:.4f}",
         spend,
         THRESHOLD_USD,
@@ -576,8 +611,7 @@ def handler(event, context):
             _notify(
                 "Bedrock daily cap released",
                 f"New UTC day ({day}); Bedrock spend is {spend:,.2f}, under the "
-                f"{THRESHOLD_USD:,.2f} cap. Deny policy detached from:\n  "
-                + "\n  ".join(touched),
+                f"{THRESHOLD_USD:,.2f} cap. Deny policy detached from:\n  " + "\n  ".join(touched),
             )
         else:
             # _apply is a no-op under DRY_RUN, so the deny is still attached:
@@ -606,7 +640,7 @@ def handler(event, context):
     _save_state(state)
     return {
         "day": day.isoformat(),
-        "metered_usd": None if metered is None else round(metered, 4),
+        "metered_usd": None if metered_total is None else round(metered_total, 4),
         "metered_status": metered_status,
         "ce_usd": None if ce_spend is None else round(ce_spend, 4),
         "ce_status": ce_status,
