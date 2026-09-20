@@ -163,24 +163,40 @@ def invalid_commit_shas(shas: list[str], repo_root: str) -> list[str]:
     return invalid
 
 
-def upstream_branch_refs(repo_root: str) -> list[str]:
-    """Remote-tracking refs for the checkout's CURRENT branch (``origin/main`` and peers).
+def _excluded_upstream_branch(repo_root: str) -> str:
+    """The ticket event-log branch name that :func:`upstream_branch_refs` must never walk.
 
-    Named by branch rather than taken wholesale from ``refs/remotes/``: rebar's default
-    layout puts the ticket event log on a ``tickets`` branch of the same repository, whose
-    remote-tracking ref is emphatically not code history. Empty on a detached HEAD, in a
-    non-repo, or when nothing tracks this branch — the caller then walks HEAD alone,
+    Resolved through the same :func:`rebar.config.tickets_branch` accessor every other git
+    path uses, so a repo that renames its event-log branch stays excluded. A ConfigError (or
+    any other resolution failure) falls back to the schema default rather than propagating:
+    the caller is a best-effort history scan, and excluding the default name is the SAFE
+    direction — the alternative would be walking one commit per ticket event.
+    """
+    try:
+        from rebar.config import tickets_branch
+
+        return tickets_branch(repo_root) or "tickets"
+    except Exception:  # noqa: BLE001 — a scan must not fail on unreadable config
+        return "tickets"
+
+
+def upstream_branch_refs(repo_root: str) -> list[str]:
+    """Remote-tracking CODE refs under ``refs/remotes/`` (``origin/main`` and peers).
+
+    Selected by EXCLUDING the ticket event-log branch rather than by matching the local
+    branch name. rebar's default layout puts the ticket event log on a ``tickets`` branch of
+    the same repository, whose remote-tracking ref is emphatically not code history — that
+    exclusion is the whole reason this is not ``--all``, and naming it directly is what the
+    rule is actually for. Matching the LOCAL branch name was a proxy for it that silently
+    dropped the correct remote ref whenever the checkout's branch was named differently from
+    the branch the commit landed on (a throwaway worktree, or a clone left on ``master``),
+    which made the close gate's stale-clone path reject work that had demonstrably shipped
+    (bug piercing-grained-elver). ``refs/remotes/<remote>/HEAD`` is dropped as well: it is a
+    symbolic alias for a ref already in the list.
+
+    Empty in a non-repo or when nothing is fetched — the caller then walks HEAD alone,
     exactly as before.
     """
-    branch = subprocess.run(
-        ["git", "-C", str(repo_root), "symbolic-ref", "--short", "-q", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    name = branch.stdout.strip()
-    if branch.returncode != 0 or not name:
-        return []
     listed = subprocess.run(
         ["git", "-C", str(repo_root), "for-each-ref", "--format=%(refname)", "refs/remotes/"],
         capture_output=True,
@@ -189,8 +205,19 @@ def upstream_branch_refs(repo_root: str) -> list[str]:
     )
     if listed.returncode != 0:
         return []
-    suffix = f"/{name}"
-    return [ref for ref in listed.stdout.split() if ref.endswith(suffix)]
+    excluded = _excluded_upstream_branch(repo_root)
+    refs: list[str] = []
+    for ref in listed.stdout.split():
+        # refs/remotes/<remote>/<branch...>: drop the first three components to get the
+        # branch, which keeps a slash-bearing branch name (``origin/feature/tickets``) intact.
+        parts = ref.split("/", 3)
+        if len(parts) != 4:
+            continue
+        branch = parts[3]
+        if branch == excluded or branch == "HEAD":
+            continue
+        refs.append(ref)
+    return refs
 
 
 def referencing_commits(
@@ -221,15 +248,18 @@ def referencing_commits(
     callers ask different questions. The default walks HEAD only: that is the close gate's
     long-standing contract ("a commit reachable from your worktree's current HEAD"), and
     widening it would silently accept work sitting elsewhere. The ``caused_by`` guard opts
-    IN, adding the remote-tracking refs for the checkout's OWN branch, because its question
-    is "did this ticket ever ship a commit?" and a checkout that is fetched but never
-    checked out — the shape of every server-side clone, including the rebar MCP server's —
-    holds the referencing commit on ``refs/remotes/<remote>/<branch>`` while HEAD still
-    points at the clone-time commit (bug ambitious-creative-ovenbird).
+    IN, adding the remote-tracking CODE refs, because its question is "did this ticket ever
+    ship a commit?" and a checkout that is fetched but never checked out — the shape of every
+    server-side clone, including the rebar MCP server's — holds the referencing commit on
+    ``refs/remotes/<remote>/<branch>`` while HEAD still points at the clone-time commit (bug
+    ambitious-creative-ovenbird). Branch identity is deliberately NOT part of that question:
+    selecting by the local branch name dropped the correct remote ref whenever the two names
+    differed (bug piercing-grained-elver).
 
     It is deliberately NOT ``--all``. rebar's default store layout keeps the ticket event
     log on a ``tickets`` BRANCH OF THE SAME REPOSITORY, so ``--all`` would walk one commit
-    per ticket event — the wrong history, and an unbounded amount of it.
+    per ticket event — the wrong history, and an unbounded amount of it. That branch is what
+    :func:`upstream_branch_refs` excludes by name.
     """
     from rebar._commands.verify_commit import extract_ticket_refs
     from rebar._engine_support.resolver import build_resolver_scan_index, resolve_ticket_id

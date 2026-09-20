@@ -394,6 +394,36 @@ def test_file_impact_close_fetches_before_rejecting_stale_clone(
     assert _status(tid, rebar_repo) == "closed"
 
 
+def test_file_impact_close_succeeds_when_local_and_remote_branch_names_differ(
+    rebar_repo: Path, tmp_path: Path, monkeypatch
+) -> None:
+    """The referencing commit is on ``origin/main`` while the clone sits on ``master``.
+
+    Selecting upstream refs by the LOCAL branch name found nothing ending in ``/master``
+    and the gate rejected a ticket whose work had demonstrably shipped.
+    """
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", PASS)
+    tid = _make(rebar_repo)
+    _set_impact(tid, rebar_repo)
+    subprocess.run(["git", "branch", "-M", "master"], cwd=rebar_repo, check=True)
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=upstream, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=upstream, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=upstream, check=True)
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-q", "-m", f"work\n\nrebar-ticket: {tid}"],
+        cwd=upstream,
+        check=True,
+    )
+    subprocess.run(["git", "remote", "add", "origin", str(upstream)], cwd=rebar_repo, check=True)
+
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+
+    assert _status(tid, rebar_repo) == "closed"
+
+
 def test_file_impact_close_distinguishes_refreshed_absence(
     rebar_repo: Path, tmp_path: Path, monkeypatch
 ) -> None:
