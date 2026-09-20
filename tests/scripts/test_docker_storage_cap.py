@@ -48,6 +48,9 @@ def _bindir(
     tmp_path: Path,
     *,
     server_version: str = "25.0.3",
+    buildkit_version: str = "0.13.2",
+    buildkit_keep_bytes: str = "5GiB",
+    buildkit_small_rule_bytes: str = "790.6MiB",
     dockerd_validate_exit: int = 0,
     systemctl_active: bool = True,
     systemctl_reload_exit: int = 0,
@@ -58,12 +61,42 @@ def _bindir(
     bindir.mkdir(exist_ok=True)
     calls = tmp_path / "calls.log"
     calls.write_text("")  # each stub set starts from a clean argv log
+    # `docker` dispatches on the subcommand because the script asks it three different
+    # questions: the Engine version, the BuildKit version behind the default builder, and
+    # BuildKit's effective keep-bytes. An empty stub answer is the "unreadable" case.
+    #
+    # `buildx inspect` answers the last two, and its GC-policy block is reproduced with the
+    # shape a real daemon prints: one `Keep Bytes:` per rule, led by the NARROW filtered
+    # rule#0 whose number is far smaller than the catch-all rules. That ordering is the whole
+    # reason the script compares the largest rather than the first. `buildx du` reports cache
+    # USAGE and carries no keep-bytes at all, which is why it cannot answer this question.
     _stub(
         bindir,
         "docker",
         f"""
         echo "docker $*" >> "{calls}"
-        printf '%s\\n' "{server_version}"
+        case "$1 $2" in
+          "buildx inspect")
+            [ -n "{buildkit_version}" ] && printf ' Buildkit:  v%s\\n' "{buildkit_version}"
+            if [ -n "{buildkit_keep_bytes}" ]; then
+              printf 'GC Policy rule#0:\\n'
+              printf ' Filters:       type==source.local,type==exec.cachemount\\n'
+              printf ' Keep Duration: 48h0m0s\\n'
+              printf ' Keep Bytes:    {buildkit_small_rule_bytes}\\n'
+              printf 'GC Policy rule#1:\\n'
+              printf ' Keep Bytes:    {buildkit_keep_bytes}\\n'
+              printf 'GC Policy rule#2:\\n'
+              printf ' Keep Bytes: {buildkit_keep_bytes}\\n'
+            fi
+            ;;
+          "buildx du")
+            printf 'Shared:\\t\\t1.425GB\\n'
+            printf 'Total:\\t\\t1.0GB\\n'
+            ;;
+          *)
+            printf '%s\\n' "{server_version}"
+            ;;
+        esac
         """,
     )
     _stub(
@@ -195,16 +228,16 @@ def test_a_buildkit_share_larger_than_the_budget_is_refused(tmp_path: Path) -> N
 
 
 # --------------------------------------------------------------------------------------
-# Engine-version-dependent rendering
+# BuildKit-version-dependent rendering
 # --------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("version", ["25.0.3", "26.1.4", "28.0.0"])
-def test_modern_engines_get_max_used_space(tmp_path: Path, version: str) -> None:
-    """>= 25.0 honours ``maxUsedSpace``; ``defaultKeepStorage`` is deprecated there."""
+@pytest.mark.parametrize("version", ["0.13.0", "0.13.2", "0.14.1", "1.0.0"])
+def test_modern_buildkit_gets_max_used_space(tmp_path: Path, version: str) -> None:
+    """>= 0.13 honours ``maxUsedSpace``; ``defaultKeepStorage`` is deprecated there."""
     result = _run(
         tmp_path,
-        ["--print-json", "--engine-version", version],
+        ["--print-json", "--buildkit-version", version],
         daemon_json=tmp_path / "daemon.json",
     )
     assert result.returncode == 0, result.stderr
@@ -214,12 +247,12 @@ def test_modern_engines_get_max_used_space(tmp_path: Path, version: str) -> None
     assert "defaultKeepStorage" not in gc
 
 
-@pytest.mark.parametrize("version", ["24.0.7", "23.0.1", "20.10.25"])
-def test_older_engines_get_default_keep_storage(tmp_path: Path, version: str) -> None:
-    """< 25.0 does not know ``maxUsedSpace``, and an unknown key is silently ignored."""
+@pytest.mark.parametrize("version", ["0.12.6", "0.12.0", "0.11.6"])
+def test_older_buildkit_gets_default_keep_storage(tmp_path: Path, version: str) -> None:
+    """< 0.13 does not know ``maxUsedSpace``, and an unknown key is silently ignored."""
     result = _run(
         tmp_path,
-        ["--print-json", "--engine-version", version],
+        ["--print-json", "--buildkit-version", version],
         daemon_json=tmp_path / "daemon.json",
     )
     assert result.returncode == 0, result.stderr
@@ -229,25 +262,52 @@ def test_older_engines_get_default_keep_storage(tmp_path: Path, version: str) ->
     assert "maxUsedSpace" not in gc
 
 
-def test_the_engine_version_is_probed_when_not_supplied(tmp_path: Path) -> None:
-    """No ``--engine-version`` means ask the daemon, not assume."""
-    bindir, _ = _bindir(tmp_path, server_version="24.0.7")
+def test_a_modern_engine_with_old_buildkit_gets_the_legacy_schema(tmp_path: Path) -> None:
+    """Bug 3057, reproduced exactly.
+
+    The host ran Engine 25.0.16 — comfortably past the old ``>= 25.0`` discriminator — with
+    BuildKit 0.12.6 behind it. ``maxUsedSpace`` is a BuildKit 0.13 key, so that BuildKit
+    ignored it silently: the file said 5 GiB, the cap did not exist, and the box read healthy
+    for eleven days. The Engine version must not decide this.
+    """
+    bindir, _ = _bindir(tmp_path, server_version="25.0.16", buildkit_version="0.12.6")
+    result = _run(tmp_path, ["--print-json"], bindir=bindir, daemon_json=tmp_path / "daemon.json")
+    assert result.returncode == 0, result.stderr
+    gc = _builder_gc(result.stdout)
+    assert gc["defaultKeepStorage"] == str(5 * 1024**3)
+    assert "maxUsedSpace" not in gc
+
+
+def test_a_modern_engine_with_modern_buildkit_still_gets_the_modern_schema(
+    tmp_path: Path,
+) -> None:
+    """The fix is a correction to the discriminator, not a blanket downgrade."""
+    bindir, _ = _bindir(tmp_path, server_version="25.0.16", buildkit_version="0.13.2")
+    result = _run(tmp_path, ["--print-json"], bindir=bindir, daemon_json=tmp_path / "daemon.json")
+    assert result.returncode == 0, result.stderr
+    gc = _builder_gc(result.stdout)
+    assert gc["maxUsedSpace"] == str(5 * 1024**3)
+    assert "defaultKeepStorage" not in gc
+
+
+def test_the_buildkit_version_is_probed_when_not_supplied(tmp_path: Path) -> None:
+    """No ``--buildkit-version`` means ask the daemon, not assume."""
+    bindir, calls = _bindir(tmp_path, buildkit_version="0.12.6")
     result = _run(tmp_path, ["--print-json"], bindir=bindir, daemon_json=tmp_path / "daemon.json")
     assert result.returncode == 0, result.stderr
     assert "defaultKeepStorage" in _builder_gc(result.stdout)
+    assert "buildx inspect" in calls.read_text()
 
 
-def test_an_unreadable_engine_version_renders_the_modern_schema_and_says_so(
+def test_an_unreadable_buildkit_version_renders_the_modern_schema_and_says_so(
     tmp_path: Path,
 ) -> None:
     """Failure disposition: degrade to the modern schema plus a loud log, never to silence."""
-    bindir, _ = _bindir(tmp_path)
-    _stub(bindir, "docker", "exit 1")
-    _stub(bindir, "dockerd", 'case "$*" in *--version*) exit 1 ;; esac\nexit 0')
+    bindir, _ = _bindir(tmp_path, buildkit_version="")
     result = _run(tmp_path, ["--print-json"], bindir=bindir, daemon_json=tmp_path / "daemon.json")
     assert result.returncode == 0, result.stderr
     assert "maxUsedSpace" in _builder_gc(result.stdout)
-    assert "version" in result.stderr.lower()
+    assert "buildkit version" in result.stderr.lower()
 
 
 # --------------------------------------------------------------------------------------
@@ -269,7 +329,7 @@ def test_the_merge_preserves_unrelated_daemon_configuration(tmp_path: Path) -> N
     )
     result = _run(
         tmp_path,
-        ["--print-json", "--engine-version", "25.0.3"],
+        ["--print-json", "--buildkit-version", "0.13.2"],
         daemon_json=daemon_json,
     )
     assert result.returncode == 0, result.stderr
@@ -287,7 +347,7 @@ def test_a_missing_daemon_json_is_created_rather_than_treated_as_an_error(
     """A box that never had a ``daemon.json`` is the ordinary first-boot case."""
     result = _run(
         tmp_path,
-        ["--print-json", "--engine-version", "25.0.3"],
+        ["--print-json", "--buildkit-version", "0.13.2"],
         daemon_json=tmp_path / "absent" / "daemon.json",
     )
     assert result.returncode == 0, result.stderr
@@ -299,7 +359,7 @@ def test_print_json_never_writes_anything(tmp_path: Path) -> None:
     daemon_json = tmp_path / "daemon.json"
     daemon_json.write_text('{"log-driver": "journald"}')
     before = daemon_json.read_text()
-    _run(tmp_path, ["--print-json", "--engine-version", "25.0.3"], daemon_json=daemon_json)
+    _run(tmp_path, ["--print-json", "--buildkit-version", "0.13.2"], daemon_json=daemon_json)
     assert daemon_json.read_text() == before
     assert not list(tmp_path.glob("daemon.json.bak*"))
 
@@ -428,6 +488,141 @@ def test_a_daemon_started_after_the_policy_is_reported_in_effect(tmp_path: Path)
     assert "IS in effect" in result.stderr, result.stderr
     assert "is NOT in effect" not in result.stderr
     assert "systemctl reload" not in calls.read_text()
+
+
+# --------------------------------------------------------------------------------------
+# IN FORCE is not ENFORCING THIS NUMBER, and that gap is bug 3057
+# --------------------------------------------------------------------------------------
+# A daemon that started after the file was written has READ the file. It has not necessarily
+# honoured the space key inside it: BuildKit ignores a key it does not recognise, silently.
+# On the host that produced this bug every activation signal was true — file installed,
+# daemon newer, config valid — while BuildKit enforced its own default instead of the 5 GiB
+# share. Only reading the effective policy back can tell those two states apart.
+
+
+def test_a_mismatching_effective_policy_is_reported_as_not_enforced(tmp_path: Path) -> None:
+    """The 3057 state: everything reads installed, and the enforced ceiling is something else."""
+    daemon_json = tmp_path / "daemon.json"
+    assert _run(tmp_path, ["--install"], daemon_json=daemon_json).returncode == 0
+
+    bindir, _ = _bindir(tmp_path, systemctl_active=True, buildkit_keep_bytes="5.588GiB")
+    result = _run(
+        tmp_path,
+        ["--install"],
+        bindir=bindir,
+        daemon_json=daemon_json,
+        env_extra={"DOCKER_PROC_DIR": str(_proc_dir(tmp_path, started_at=time.time() + 60))},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "does NOT match" in result.stderr, result.stderr
+    assert "5.588GiB" in result.stderr
+
+
+def test_a_matching_effective_policy_produces_no_mismatch_warning(tmp_path: Path) -> None:
+    """The healthy case stays quiet about mismatches, so the warning keeps its meaning."""
+    daemon_json = tmp_path / "daemon.json"
+    assert _run(tmp_path, ["--install"], daemon_json=daemon_json).returncode == 0
+
+    bindir, _ = _bindir(tmp_path, systemctl_active=True, buildkit_keep_bytes="5GiB")
+    result = _run(
+        tmp_path,
+        ["--install"],
+        bindir=bindir,
+        daemon_json=daemon_json,
+        env_extra={"DOCKER_PROC_DIR": str(_proc_dir(tmp_path, started_at=time.time() + 60))},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "does NOT match" not in result.stderr, result.stderr
+    assert "IS being enforced" in result.stderr
+
+
+def test_an_unreadable_effective_policy_is_reported_as_unverified(tmp_path: Path) -> None:
+    """Not readable is reported as unverified — never as agreement."""
+    daemon_json = tmp_path / "daemon.json"
+    assert _run(tmp_path, ["--install"], daemon_json=daemon_json).returncode == 0
+
+    bindir, _ = _bindir(tmp_path, systemctl_active=True, buildkit_keep_bytes="")
+    result = _run(
+        tmp_path,
+        ["--install"],
+        bindir=bindir,
+        daemon_json=daemon_json,
+        env_extra={"DOCKER_PROC_DIR": str(_proc_dir(tmp_path, started_at=time.time() + 60))},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "UNVERIFIED" in result.stderr, result.stderr
+    assert "IS being enforced" not in result.stderr
+
+
+def test_the_narrow_filtered_gc_rule_is_not_mistaken_for_the_cap(tmp_path: Path) -> None:
+    """BuildKit prints its SMALLEST rule first, and it is not the ceiling.
+
+    A real `docker buildx inspect` leads with rule#0 — the filtered local/cachemount/git
+    policy — whose keep-bytes is a fraction of the catch-all rules that follow. Reading the
+    first one would compare the configured share against a sub-policy and cry mismatch on a
+    correctly configured host, so the ceiling the cache can actually reach is the largest.
+    """
+    daemon_json = tmp_path / "daemon.json"
+    assert _run(tmp_path, ["--install"], daemon_json=daemon_json).returncode == 0
+
+    bindir, _ = _bindir(
+        tmp_path,
+        systemctl_active=True,
+        buildkit_keep_bytes="5GiB",
+        buildkit_small_rule_bytes="790.6MiB",
+    )
+    result = _run(
+        tmp_path,
+        ["--install"],
+        bindir=bindir,
+        daemon_json=daemon_json,
+        env_extra={"DOCKER_PROC_DIR": str(_proc_dir(tmp_path, started_at=time.time() + 60))},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "does NOT match" not in result.stderr, result.stderr
+    assert "IS being enforced" in result.stderr
+    assert "790.6MiB" not in result.stderr, result.stderr
+
+
+def test_the_effective_policy_is_read_from_inspect_not_du(tmp_path: Path) -> None:
+    """`docker buildx du` reports cache USAGE and carries no keep-bytes at all.
+
+    Asking it for the effective policy silently yields nothing, which degrades every host to
+    UNVERIFIED — safe, but blind to exactly the bug this readback exists to catch.
+    """
+    daemon_json = tmp_path / "daemon.json"
+    assert _run(tmp_path, ["--install"], daemon_json=daemon_json).returncode == 0
+
+    bindir, calls = _bindir(tmp_path, systemctl_active=True, buildkit_keep_bytes="5.588GiB")
+    result = _run(
+        tmp_path,
+        ["--install"],
+        bindir=bindir,
+        daemon_json=daemon_json,
+        env_extra={"DOCKER_PROC_DIR": str(_proc_dir(tmp_path, started_at=time.time() + 60))},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "does NOT match" in result.stderr, result.stderr
+    assert "buildx inspect" in calls.read_text()
+
+
+def test_the_effective_policy_readback_never_restarts_docker(tmp_path: Path) -> None:
+    """A mismatch is reported to an operator, never acted on by bouncing the daemon."""
+    daemon_json = tmp_path / "daemon.json"
+    assert _run(tmp_path, ["--install"], daemon_json=daemon_json).returncode == 0
+
+    bindir, calls = _bindir(tmp_path, systemctl_active=True, buildkit_keep_bytes="5.588GiB")
+    result = _run(
+        tmp_path,
+        ["--install"],
+        bindir=bindir,
+        daemon_json=daemon_json,
+        env_extra={"DOCKER_PROC_DIR": str(_proc_dir(tmp_path, started_at=time.time() + 60))},
+    )
+    assert result.returncode == 0, result.stderr
+    log = calls.read_text()
+    assert "systemctl restart" not in log, log
+    assert "systemctl reload" not in log, log
 
 
 def test_an_unreadable_daemon_start_time_fails_closed(tmp_path: Path) -> None:
