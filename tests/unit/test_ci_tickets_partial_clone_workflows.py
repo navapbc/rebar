@@ -61,7 +61,7 @@ def _is_checkout_v7(uses: object) -> bool:
             "canary",
             {"fetch-depth": 0, "persist-credentials": True, "ref": "main"},
         ),
-        (_VERIFY, "verify-identity", {"fetch-depth": 0}),
+        (_VERIFY, "verify-identity", {"fetch-depth": 1, "ref": "${{ github.ref }}"}),
     ],
 )
 def test_checkout_filter_and_preserves_inputs(
@@ -95,10 +95,20 @@ def test_identity_fetch_is_blobless_and_full_history() -> None:
     assert '"https://github.com/${{ github.repository }}"' in command
 
 
+def test_standalone_identity_checkout_unshallows_only_the_code_ref() -> None:
+    script = _normalized_script(_step(_VERIFY, "verify-identity", "Fetch full code ref history"))
+    assert "--filter=blob:none" in script
+    assert "--unshallow" in script
+    assert "+${GITHUB_REF}:${dest_ref}" in script
+    assert "refs/heads/*" in script
+    assert "refs/pull/*" in script
+    assert "refs/heads/*:refs/remotes/origin/*" not in script
+
+
 @pytest.mark.parametrize(
     ("path", "job", "limit_name", "limit"),
     [
-        (_VERIFY, "verify-identity", "REBAR_CHECKOUT_PACK_LIMIT_KIB", 563200),
+        (_VERIFY, "verify-identity", "REBAR_CHECKOUT_PACK_LIMIT_KIB", 102400),
     ],
 )
 def test_pack_guard_contract(path: Path, job: str, limit_name: str, limit: int) -> None:

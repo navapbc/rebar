@@ -28,20 +28,57 @@ jobs:
     name: verify-identity (authenticated-authorship gate)
     runs-on: ubuntu-latest
     env:
-      # `REBAR_CHECKOUT_PACK_LIMIT_KIB` is temporarily 563200 for the ~481 MiB blobless tickets
-      # pack. Safe compaction cannot reduce the pack below 100 MiB. Restore 102400 after the pack
-      # measures below that limit as tracked by `0894-b9b8-6590-4904`.
-      REBAR_CHECKOUT_PACK_LIMIT_KIB: 563200
+      # `REBAR_CHECKOUT_PACK_LIMIT_KIB` is the deliberate 102400 KiB (100 MiB) ceiling for the
+      # CODE checkout pack, not for the append-only `tickets` event log.
+      #
+      # WHAT IS MEASURED: `git count-objects -v` size-pack after a blobless checkout of the
+      # triggering code ref has been deepened to full history through a NARROW refspec. The
+      # separate `tickets` fetch below has not run yet, so the append-only event-log branch is
+      # absent from the object database and cannot dominate the budget.
+      #
+      # WHY THIS CHECKOUT SHAPE: `actions/checkout` with `fetch-depth: 0` fetches all heads,
+      # including `tickets`, before this job can measure. Instead, checkout starts shallow at the
+      # triggering ref and the next step unshallows only that ref with `--filter=blob:none`.
+      # `rebar verify-opcert` needs full code history for its merged-log-commit ancestry check,
+      # while `rebar verify-identity` and the rest of the op-cert walk read full tickets history
+      # from the mounted `.tickets-tracker` worktree.
+      #
+      # WHY 100 MiB: a local full-history, single-branch, blobless main clone measured 23285 KiB
+      # on 2026-09-20. 102400 KiB leaves more than 4x headroom for code-history growth while
+      # still catching accidental broadening of the checkout shape. The guard below fails closed
+      # on an unmeasurable or non-numeric reading.
+      REBAR_CHECKOUT_PACK_LIMIT_KIB: 102400
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.ref }}
           filter: blob:none
-          fetch-depth: 0
+          fetch-depth: 1
+      # mechanism-ok: ci_gate .github/workflows/verify-identity.yml::Fetch full code ref history — bc25-1351-dd0e-4909: keeps the code checkout full-history for verify-opcert while replacing actions/checkout's all-heads fetch with a narrow blobless unshallow that excludes the tickets event log from the pack measurement.
+      - name: Fetch full code ref history
+        # Keep the code checkout full-history without fetching every branch. A full-history
+        # actions/checkout fetch uses the all-heads refspec, which would import `tickets` before
+        # the pack measurement. This narrow unshallow gives `verify-opcert` the code ancestry it
+        # needs and leaves the event log absent until the explicit mount below.
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/heads/*) dest_ref="refs/remotes/origin/${GITHUB_REF#refs/heads/}" ;;
+            refs/pull/*) dest_ref="refs/remotes/origin/${GITHUB_REF#refs/}" ;;
+            *) dest_ref="$GITHUB_REF" ;;
+          esac
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch --filter=blob:none --no-tags --unshallow origin "+${GITHUB_REF}:${dest_ref}"
+          else
+            git fetch --filter=blob:none --no-tags origin "+${GITHUB_REF}:${dest_ref}"
+          fi
       # mechanism-ok: ci_gate .github/workflows/verify-identity.yml::Measure the blobless checkout pack — f5ac-391c-ec70-4fa9: not a new gate. The pre-existing pack budget was split into a measure half and a judge half so the verdict stops pre-empting the authorship verification; the judging step keeps the original name and the same fail-closed limit, so this is one gate in two steps, not a second gate.
       - name: Measure the blobless checkout pack
         # MEASURED HERE, JUDGED LAST. The measurement must happen before the `tickets` branch
-        # is fetched below, because that fetch adds the event-log history to the object
-        # database — measuring afterwards would silently change the quantity under budget.
+        # is fetched below, because that fetch adds the event-log history to the object database.
+        # Measuring afterwards would silently change the budget from "code checkout" to "code
+        # checkout plus append-only ticket store".
         # The verdict is deferred to the job's final step so that a budget overage cannot
         # abort the authorship verification this job exists to perform (ticket
         # f5ac-391c-ec70-4fa9). A non-numeric reading is a broken measurement rather than a
