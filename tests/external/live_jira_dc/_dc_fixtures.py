@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +27,105 @@ from _child_diag import assert_child_ran_clean
 # rather than silently dropping the store-copy cells' coverage.
 FETCH_ATTEMPTS = 3
 FETCH_BACKOFF_SECONDS = 2.0
+
+#: How many ticket directories a store copy carries. The fixtures need a REAL, representative
+#: store -- not a byte-complete replica of every ticket ever written -- and copying the whole
+#: branch made peak disk track total store size, which exhausted the runner (bug 25e0). The
+#: store grows monotonically, so an unbounded copy gets worse every week; a cap does not.
+STORE_COPY_TICKET_LIMIT = 200
+
+#: A canonical four-quad ticket id. Everything else in the store's ticket namespace is a
+#: bridge-named directory, and those are exactly what a Jira rehearsal exercises, so they all
+#: travel rather than being thinned by the sample.
+CANONICAL_ID_RE = re.compile(r"[0-9a-f]{4}(?:-[0-9a-f]{4}){3}")
+
+
+def _is_ticket_entry(name: str) -> bool:
+    """Whether a bare store entry is a ticket rather than a dot-prefixed marker.
+
+    This mirrors ``_dc_support.is_ticket_entry`` rather than importing it: that sibling probes
+    live Jira at import time, and the slice policy below is driven by repo-tier tests where
+    network access is forbidden. ``test_dc_store_copy_bounded_25e0`` pins the two rules
+    together so they cannot drift apart.
+    """
+    return not name.startswith(".")
+
+
+def store_copy_entries(
+    listing: Sequence[str], *, limit: int = STORE_COPY_TICKET_LIMIT
+) -> list[str]:
+    """Bounded, deterministic slice of a tickets branch to copy.
+
+    Every non-ticket entry (store metadata) and every bridge-named directory travels, because
+    the copy cannot converge or reconcile without them. Canonical-id tickets are sampled at an
+    even stride so the slice spans the store's whole history instead of one contiguous era, and
+    so its size -- the thing that exhausted the runner -- stops tracking the store's.
+    """
+    tickets = sorted(e for e in listing if _is_ticket_entry(e))
+    canonical = [e for e in tickets if CANONICAL_ID_RE.fullmatch(e)]
+    carried = [e for e in tickets if not CANONICAL_ID_RE.fullmatch(e)]
+    if limit > 0 and len(canonical) > limit:
+        stride = len(canonical) // limit
+        canonical = canonical[::stride][:limit]
+    others = sorted(e for e in listing if not _is_ticket_entry(e))
+    return others + sorted(carried + canonical)
+
+
+def extract_store_snapshot(source: Path | str, tracker: Path, entries: Sequence[str]) -> None:
+    """Stream ``git archive`` into ``tar -x`` for exactly ``entries``.
+
+    Capturing the archive first held the whole snapshot in memory on top of the copy on disk;
+    a pipe keeps the fixture's memory cost constant regardless of how large the slice is.
+    """
+    with subprocess.Popen(
+        ["git", "archive", "FETCH_HEAD", "--", *entries],
+        cwd=str(source),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as archive:
+        assert archive.stdout is not None
+        try:
+            # NOT check=True. When git archive fails it writes nothing, so tar reads an empty
+            # stream — and the two tars disagree about that: BSD tar (macOS) exits 0, GNU tar
+            # (Linux) exits 2 with "This does not look like a tar archive". Raising on tar
+            # first would surface that message on Linux and hide git's, which is the one that
+            # says WHY, so collect tar's status and let git's be reported first.
+            with subprocess.Popen(
+                ["tar", "-x", "-C", str(tracker)],
+                stdin=archive.stdout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            ) as extract:
+                archive.stdout.close()
+                _, extract_stderr = extract.communicate()
+                extract_status = extract.wait()
+        finally:
+            archive.stdout.close()
+        # Read inside the context: leaving it closes the pipes, and git's message is the whole
+        # point of reporting a failed archive at all.
+        archive.wait()
+        failure = (archive.stderr.read() if archive.stderr else b"").decode("utf-8", "replace")
+        status = archive.returncode
+    if status != 0:
+        raise RuntimeError(
+            f"git archive of {len(entries)} entries failed in {source} "
+            f"(exit {status}): {failure.strip() or '<git wrote no stderr>'}"
+        )
+    if extract_status != 0:
+        detail = extract_stderr.decode("utf-8", "replace").strip()
+        raise RuntimeError(
+            f"tar extraction of {len(entries)} entries failed into {tracker} "
+            f"(exit {extract_status}): {detail or '<tar wrote no stderr>'}"
+        )
+
+
+def reclaim(work: Path) -> None:
+    """Delete a finished store copy so concurrent modules do not sum their peaks.
+
+    ``tmp_path`` retains recent runs by design, so without this the copies of every module in
+    a session coexist on the runner's disk.
+    """
+    shutil.rmtree(work, ignore_errors=True)
 
 
 def run_git(
@@ -130,7 +231,7 @@ def dc_store_copy_repo(
     jira_dc_pat: str,
     jira_dc_base_url: str,
     monkeypatch,
-) -> Path:
+) -> Iterator[Path]:
     """Create a scrubbed ticket-store copy in the same two-repository layout as production.
 
     The gitignored ``.tickets-tracker`` is its own ``tickets`` repository because reconciler
@@ -168,18 +269,18 @@ def dc_store_copy_repo(
     (work / ".gitignore").write_text(".tickets-tracker/\n")
 
     fetch_tickets(source)
-    archive = run_git(["git", "archive", "FETCH_HEAD"], cwd=source).stdout
-    subprocess.run(["tar", "-x", "-C", str(tracker)], input=archive, check=True)
-
-    # Derive expected entries from the archive's own FETCH_HEAD. The live tickets branch may
-    # advance concurrently, so a later fetch would compare different snapshots.
     listing = (
         run_git(["git", "ls-tree", "--name-only", "FETCH_HEAD"], cwd=source)
         .stdout.decode("utf-8")
         .split()
     )
+    # Derive the slice from the archive's own FETCH_HEAD. The live tickets branch may advance
+    # concurrently, so a later fetch would extract and census different snapshots.
+    entries = store_copy_entries(listing)
+    extract_store_snapshot(source, tracker, entries)
+
     (work / ".j11-expected-entries.json").write_text(
-        json.dumps(sorted(e for e in listing if is_ticket_entry(e)))
+        json.dumps(sorted(e for e in entries if is_ticket_entry(e)))
     )
     (work / INHERITED_ENV_FILE).write_text(json.dumps(inherited_env, sort_keys=True))
 
@@ -229,7 +330,8 @@ def dc_store_copy_repo(
     monkeypatch.setenv("REBAR_ROOT", str(work))
     for cloud_var in CLOUD_CREDENTIAL_VARS:
         monkeypatch.delenv(cloud_var, raising=False)
-    return work
+    yield work
+    reclaim(work)
 
 
 @pytest.fixture
