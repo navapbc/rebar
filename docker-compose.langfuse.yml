@@ -110,7 +110,12 @@ services:
       start_period: 1s
 
   minio:
-    image: docker.io/minio/minio:latest
+    # MinIO is no longer published on Docker Hub: `docker.io/minio/minio` returns 404
+    # "object not found" from the Hub API and 401 from the registry, which is the
+    # `pull access denied for minio/minio` failure that made Live External red. quay.io is
+    # MinIO's supported registry. Pinned to a release tag rather than `latest` so the
+    # scheduled run cannot change images underneath us, matching every other image here.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     restart: always
     entrypoint: sh
     command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
