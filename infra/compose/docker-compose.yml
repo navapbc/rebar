@@ -1,8 +1,10 @@
 # ---------------------------------------------------------------------------
 # rebar Gerrit + review-bot compose stack (epic d251 / story S2).
 #
-# Runs the two containers on the AL2023 arm64 box: Gerrit (the code-review server)
-# and the rebar review-bot (the FastAPI webhook receiver). nginx is NOT in this
+# Runs four containers on the AL2023 arm64 box: `gerrit` (the code-review server),
+# `review-bot` (the FastAPI webhook receiver), `opcert` (the FastAPI trusted
+# operation-certificate signing gate) and `mcp` (the remote MCP server that serves
+# certified tracker ops). nginx is NOT in this
 # stack — it runs as a HOST package (dnf nginx + host certbot) and proxies to the
 # published container ports (see infra/nginx/rebar.conf.template and
 # infra/scripts/install-certbot-timer.sh, and ADR-0007).
