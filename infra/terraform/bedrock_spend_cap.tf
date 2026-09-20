@@ -39,14 +39,16 @@ variable "bedrock_daily_cap_usd" {
     Lowering this below normal daily spend would deny production Bedrock calls
     during ordinary operation. Change it with that in mind.
   EOT
+  default     = 500
 }
 
 variable "bedrock_warn_threshold_usd" {
   type        = number
   description = <<-EOT
     Notify-only threshold for warning operators before the hard Bedrock spend
-    cap is reached. The value is supplied outside the public tree.
+    cap is reached.
   EOT
+  default     = 300
 }
 
 variable "bedrock_cap_seed_rates" {
@@ -56,13 +58,19 @@ variable "bedrock_cap_seed_rates" {
   }))
   description = <<-EOT
     Published Bedrock per-token rates for models with no billing history in
-    this account. Values are supplied outside the public tree.
+    this account.
   EOT
+  default = {
+    "claude-haiku-4-5"  = { input = 0.0011, output = 0.0055 }
+    "claude-sonnet-4-6" = { input = 0.0033, output = 0.0165 }
+    "claude-opus"       = { input = 0.0055, output = 0.0275 }
+  }
 }
 
 variable "bedrock_cap_unknown_rate_per_1k" {
   type        = number
   description = "Fail-closed fallback per-token rate for unpriced models."
+  default     = 0.075
 }
 
 variable "bedrock_cap_target_roles" {
