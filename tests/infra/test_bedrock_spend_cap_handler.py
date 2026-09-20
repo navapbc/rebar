@@ -166,11 +166,13 @@ class FakeAWS:
         iam: FakeIAM | None = None,
         ce: FakeCE | None = None,
         cloudwatch: FakeCloudWatch | None = None,
+        cloudwatch_by_region: dict[str, FakeCloudWatch] | None = None,
     ) -> None:
         self.ssm = ssm or FakeSSM()
         self.iam = iam or FakeIAM()
         self.ce = ce or FakeCE()
         self.cloudwatch = cloudwatch or FakeCloudWatch()
+        self.cloudwatch_by_region = cloudwatch_by_region or {}
         self.sns = FakeSNS()
 
     def client(self, service: str, **kwargs):
@@ -181,7 +183,7 @@ class FakeAWS:
         if service == "ce":
             return self.ce
         if service == "cloudwatch":
-            return self.cloudwatch
+            return self.cloudwatch_by_region.get(kwargs.get("region_name"), self.cloudwatch)
         if service == "sns":
             return self.sns
         raise AssertionError(service)
@@ -206,6 +208,34 @@ def client_error(operation: str) -> ClientError:
     )
 
 
+def token_metric_page(model_id: str = "model", metric_name: str = "InputTokenCount") -> dict:
+    return {
+        "Metrics": [
+            {
+                "MetricName": metric_name,
+                "Dimensions": [{"Name": "ModelId", "Value": model_id}],
+            }
+        ]
+    }
+
+
+def degraded_metered_spend(module, total: float):
+    failure = types.SimpleNamespace(region="degraded-region", exception_class="ClientError")
+    spend_type = getattr(module, "MeteredSpend", None)
+    if spend_type is None:
+        return types.SimpleNamespace(total=total, degraded=True, failures=(failure,))
+    return spend_type(
+        total=total,
+        degraded=True,
+        failures=(
+            module.MeteredFailure(
+                region=failure.region,
+                exception_class=failure.exception_class,
+            ),
+        ),
+    )
+
+
 def load_handler(
     monkeypatch: pytest.MonkeyPatch,
     fake_aws: FakeAWS,
@@ -213,6 +243,7 @@ def load_handler(
     dry_run=False,
     stub_ce=True,
     stub_rates=True,
+    regions: tuple[str, ...] = ("test-region",),
 ):
     module_name = f"bedrock_spend_cap_under_test_{id(fake_aws)}"
     monkeypatch.setitem(
@@ -227,7 +258,7 @@ def load_handler(
     monkeypatch.setenv("TARGET_GROUPS", "admins")
     monkeypatch.setenv("STATE_PARAM", "/state")
     monkeypatch.setenv("SNS_TOPIC_ARN", "arn:test:sns")
-    monkeypatch.setenv("REGIONS", "test-region")
+    monkeypatch.setenv("REGIONS", ",".join(regions))
     monkeypatch.setenv("UNKNOWN_RATE_PER_1K", str(float(len("fallback"))))
     monkeypatch.setenv("DRY_RUN", "true" if dry_run else "false")
 
@@ -246,7 +277,11 @@ def load_handler(
 
 
 def run_handler(module, spend: float) -> dict:
-    module._metered_spend = lambda day_start, now, rates: spend
+    module._metered_spend = lambda day_start, now, rates: module.MeteredSpend(
+        total=spend,
+        degraded=False,
+        failures=(),
+    )
     return module.handler({}, None)
 
 
@@ -394,6 +429,118 @@ def test_metered_spend_returns_unavailable_when_cloudwatch_data_fails(
     assert result is None
 
 
+def test_metered_spend_preserves_partial_total_when_later_region_listing_fails(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    first_rate = float(len("first"))
+    later_rate = float(len("later"))
+    fake_aws = FakeAWS(
+        cloudwatch_by_region={
+            "first-region": FakeCloudWatch(
+                pages=[token_metric_page("first-model")],
+                values_by_id={"q0": [1000]},
+            ),
+            "broken-region": FakeCloudWatch(list_error=client_error("ListMetrics")),
+            "later-region": FakeCloudWatch(
+                pages=[token_metric_page("later-model")],
+                values_by_id={"q0": [1000]},
+            ),
+        }
+    )
+    module = load_handler(
+        monkeypatch,
+        fake_aws,
+        regions=("first-region", "broken-region", "later-region"),
+    )
+
+    result = module._metered_spend(
+        FixedDateTime.now(dt.timezone.utc),
+        FixedDateTime.now(dt.timezone.utc),
+        {
+            "USE1-first-model-input-tokens": first_rate,
+            "USE1-later-model-input-tokens": later_rate,
+        },
+    )
+
+    assert result is not None
+    assert isinstance(result, module.MeteredSpend)
+    assert result.total == first_rate + later_rate
+    assert result.degraded is True
+    assert [failure.region for failure in result.failures] == ["broken-region"]
+
+
+def test_metered_spend_preserves_partial_total_when_later_region_data_fails(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    first_rate = float(len("first"))
+    later_rate = float(len("later"))
+    fake_aws = FakeAWS(
+        cloudwatch_by_region={
+            "first-region": FakeCloudWatch(
+                pages=[token_metric_page("first-model")],
+                values_by_id={"q0": [1000]},
+            ),
+            "broken-region": FakeCloudWatch(
+                pages=[token_metric_page("broken-model")],
+                data_error=client_error("GetMetricData"),
+            ),
+            "later-region": FakeCloudWatch(
+                pages=[token_metric_page("later-model")],
+                values_by_id={"q0": [1000]},
+            ),
+        }
+    )
+    module = load_handler(
+        monkeypatch,
+        fake_aws,
+        regions=("first-region", "broken-region", "later-region"),
+    )
+
+    result = module._metered_spend(
+        FixedDateTime.now(dt.timezone.utc),
+        FixedDateTime.now(dt.timezone.utc),
+        {
+            "USE1-first-model-input-tokens": first_rate,
+            "USE1-later-model-input-tokens": later_rate,
+        },
+    )
+
+    assert result is not None
+    assert isinstance(result, module.MeteredSpend)
+    assert result.total == first_rate + later_rate
+    assert result.degraded is True
+    assert [failure.region for failure in result.failures] == ["broken-region"]
+
+
+def test_metered_spend_records_degraded_region_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    fake_aws = FakeAWS(
+        cloudwatch_by_region={
+            "broken-region": FakeCloudWatch(list_error=client_error("ListMetrics")),
+            "later-region": FakeCloudWatch(
+                pages=[token_metric_page("later-model")],
+                values_by_id={"q0": [1000]},
+            ),
+        }
+    )
+    module = load_handler(monkeypatch, fake_aws, regions=("broken-region", "later-region"))
+
+    result = module._metered_spend(
+        FixedDateTime.now(dt.timezone.utc),
+        FixedDateTime.now(dt.timezone.utc),
+        {"USE1-later-model-input-tokens": float(len("rate"))},
+    )
+
+    assert result is not None
+    assert result.total == float(len("rate"))
+    assert [failure.region for failure in result.failures] == ["broken-region"]
+    assert [failure.exception_class for failure in result.failures] == ["ClientError"]
+    assert "broken-region" in caplog.text
+    assert "ClientError" in caplog.text
+
+
 def test_metered_spend_prices_known_and_unknown_model_tokens(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -436,12 +583,14 @@ def test_metered_spend_prices_known_and_unknown_model_tokens(
         {"USE1-claude-sonnet-4-6-input-tokens": known_rate},
     )
 
-    assert result == (
+    assert result is not None
+    assert result.total == (
         known_units_1k * known_rate
         + unknown_units_1k
         * module.UNKNOWN_RATE_PER_1K
         * module.TOKEN_METRICS["OutputTokenCount"][1]
     )
+    assert result.degraded is False
 
 
 def test_unavailable_metered_signal_trips_unattached_cap(
@@ -545,6 +694,48 @@ def test_due_ce_read_can_determine_effective_spend(
     assert result["effective_source"] == "ce"
 
 
+def test_degraded_partial_meter_below_near_threshold_respects_ce_interval(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    partial = THRESHOLD * 0.7
+    state = {
+        "ce_day": TODAY.isoformat(),
+        "ce_spend": float(0),
+        "ce_last_poll": FixedDateTime.now(dt.timezone.utc).isoformat(),
+    }
+    fake_aws = FakeAWS(ssm=FakeSSM(state), ce=FakeCE(spend=THRESHOLD))
+    module = load_handler(monkeypatch, fake_aws, stub_ce=False)
+    module._metered_spend = lambda day_start, now, rates: degraded_metered_spend(module, partial)
+
+    result = module.handler({}, None)
+
+    assert fake_aws.ce.calls == len("")
+    assert result["metered_usd"] == round(partial, 4)
+    assert result["effective_source"] == "metered"
+    assert f"metered={partial:.4f}" in caplog.text
+
+
+def test_degraded_partial_meter_at_near_threshold_polls_ce(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    partial = THRESHOLD * 0.8
+    state = {
+        "ce_day": TODAY.isoformat(),
+        "ce_spend": float(0),
+        "ce_last_poll": FixedDateTime.now(dt.timezone.utc).isoformat(),
+    }
+    fake_aws = FakeAWS(ssm=FakeSSM(state), ce=FakeCE(spend=float(0)))
+    module = load_handler(monkeypatch, fake_aws, stub_ce=False)
+    module._metered_spend = lambda day_start, now, rates: degraded_metered_spend(module, partial)
+
+    result = module.handler({}, None)
+
+    assert fake_aws.ce.calls == len("x")
+    assert result["metered_usd"] == round(partial, 4)
+    assert result["effective_source"] == "metered"
+
+
 def test_not_due_and_not_near_threshold_skips_ce_read(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -577,6 +768,44 @@ def test_near_threshold_metered_signal_forces_ce_read(
 
     assert fake_aws.ce.calls == len("x")
     assert result["effective_source"] == "ce"
+
+
+def test_degraded_partial_meter_can_attach(monkeypatch: pytest.MonkeyPatch):
+    state = {
+        "ce_day": TODAY.isoformat(),
+        "ce_spend": float(0),
+        "ce_last_poll": FixedDateTime.now(dt.timezone.utc).isoformat(),
+    }
+    fake_aws = FakeAWS(ssm=FakeSSM(state), ce=FakeCE(spend=float(0)))
+    module = load_handler(monkeypatch, fake_aws, stub_ce=False)
+    module._metered_spend = lambda day_start, now, rates: degraded_metered_spend(module, THRESHOLD)
+
+    result = module.handler({}, None)
+
+    assert fake_aws.ce.calls == len("x")
+    assert result["deny_attached"] is True
+    assert_policy_attached(fake_aws, attached=True)
+
+
+def test_degraded_partial_meter_cannot_release(monkeypatch: pytest.MonkeyPatch):
+    state = {
+        "ce_day": TODAY.isoformat(),
+        "ce_spend": float(0),
+        "ce_last_poll": FixedDateTime.now(dt.timezone.utc).isoformat(),
+    }
+    fake_aws = FakeAWS(ssm=FakeSSM(state), ce=FakeCE(spend=float(0)))
+    module = load_handler(monkeypatch, fake_aws, stub_ce=False)
+    fake_aws.iam.role_policies = {"api": {"arn:test:deny"}, "worker": {"arn:test:deny"}}
+    fake_aws.iam.group_policies = {"admins": {"arn:test:deny"}}
+    module._metered_spend = lambda day_start, now, rates: degraded_metered_spend(
+        module, THRESHOLD - len("x")
+    )
+
+    result = module.handler({}, None)
+
+    assert result["deny_attached"] is True
+    assert_policy_attached(fake_aws, attached=True)
+    assert fake_aws.sns.published == []
 
 
 def test_metered_signal_can_determine_effective_spend_when_it_exceeds_ce(
@@ -890,7 +1119,9 @@ def test_metered_spend_ignores_non_token_and_non_model_series_then_reports_zero(
         FixedDateTime.now(dt.timezone.utc), FixedDateTime.now(dt.timezone.utc), {}
     )
 
-    assert result == float(0)
+    assert result is not None
+    assert result.total == float(0)
+    assert result.degraded is False
 
 
 def test_metered_spend_skips_zero_value_series(monkeypatch: pytest.MonkeyPatch):
@@ -922,7 +1153,9 @@ def test_metered_spend_skips_zero_value_series(monkeypatch: pytest.MonkeyPatch):
         {"USE1-paid-model-input-tokens": rate},
     )
 
-    assert result == rate
+    assert result is not None
+    assert result.total == rate
+    assert result.degraded is False
 
 
 def test_ce_spend_today_returns_zero_when_ce_has_no_results(
@@ -1151,6 +1384,26 @@ def test_unavailable_meter_polls_ce_after_interval(
     assert result["metered_status"] == "unavailable"
     assert result["ce_status"] == "available"
     assert fake_aws.ce.calls == len("x")
+
+
+def test_metered_spend_cloudwatch_failure_before_any_series_reports_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_aws = FakeAWS(
+        cloudwatch_by_region={
+            "broken-region": FakeCloudWatch(list_error=client_error("ListMetrics")),
+            "later-region": FakeCloudWatch(pages=[]),
+        }
+    )
+    module = load_handler(monkeypatch, fake_aws, regions=("broken-region", "later-region"))
+
+    result = module._metered_spend(
+        FixedDateTime.now(dt.timezone.utc),
+        FixedDateTime.now(dt.timezone.utc),
+        {"USE1-later-model-input-tokens": float(len("later"))},
+    )
+
+    assert result is None
 
 
 def test_dry_run_release_does_not_publish_detach_notification(
