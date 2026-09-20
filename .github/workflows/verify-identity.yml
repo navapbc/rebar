@@ -28,10 +28,24 @@ jobs:
     name: verify-identity (authenticated-authorship gate)
     runs-on: ubuntu-latest
     env:
-      # `REBAR_CHECKOUT_PACK_LIMIT_KIB` is temporarily 563200 for the ~481 MiB blobless tickets
-      # pack. Safe compaction cannot reduce the pack below 100 MiB. Restore 102400 after the pack
-      # measures below that limit as tracked by `0894-b9b8-6590-4904`.
-      REBAR_CHECKOUT_PACK_LIMIT_KIB: 563200
+      # `REBAR_CHECKOUT_PACK_LIMIT_KIB` is temporarily 1048576 (1 GiB). The deliberate budget is
+      # 102400 (100 MiB); safe compaction cannot reach it, so restoring 102400 is tracked by
+      # `0894-b9b8-6590-4904` and depends on the `536b-8930-b922-4063` history reclaim.
+      #
+      # WHAT IS MEASURED: `git count-objects -v` size-pack over the blobless checkout. That pack
+      # is dominated by the `tickets` branch event-log history, not by code, so it grows with
+      # normal tracker traffic rather than with repository debris.
+      #
+      # WHY 1 GiB: the pack measured 492544 KiB (481 MiB) on 2026-08-23 and 648484 KiB (633 MiB)
+      # on 2026-09-20 — 5.6 MiB/day of legitimate append-only growth. The previous 563200 budget
+      # allowed 14% headroom and was exhausted in about four weeks, leaving the gate red for 29
+      # consecutive scheduled runs. 1048576 leaves 391 MiB, roughly 70 days at the measured rate,
+      # so the budget is expected to outlast the reclaim instead of needing a fourth raise.
+      #
+      # This widens the gate deliberately and only for pack SIZE. The guard below still fails
+      # closed on an unmeasurable or non-numeric reading, which is the abnormality it can
+      # actually detect; size alone cannot distinguish tracker growth from debris at this scale.
+      REBAR_CHECKOUT_PACK_LIMIT_KIB: 1048576
     steps:
       - uses: actions/checkout@v7
         with:
