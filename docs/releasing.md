@@ -588,12 +588,14 @@ volunteering to test a pre-release.
 - A **lockfile for optional extras** — revisit post-1.0.
 
 ### Dependency updates — Dependabot advisory PRs
-`.github/dependabot.yml` runs GitHub-Actions version updates monthly and uv updates
-weekly, the uv entry maintaining the committed `uv.lock`. Because PRs cannot merge
-here, its PRs are **advisory**: the maintainer reads the diff and
-lands the bump via a Gerrit change. This is the pip/pydantic GitHub-native shape,
-deliberately *not* the bespoke Gerrit-pushing bot some Gerrit peers run. See that
-file's header for the full rationale.
+`.github/dependabot.yml` runs GitHub-Actions version updates monthly (grouped as
+`github-actions`) and uv updates weekly (grouped as `uv-lock`), the uv entry
+maintaining the committed `uv.lock` that `make install`, CI, and the reviewbot and
+opcert images consume. Major `mcp` bumps are ignored until `bared-nickel-insect`
+lands; patch and security updates stay enabled. Because PRs cannot merge here, its
+PRs are **advisory**: the maintainer reads the diff and lands the bump via a Gerrit
+change, deliberately *not* the bespoke Gerrit-pushing bot some Gerrit peers run. See
+that file's header for the full rationale.
 
 ---
 
