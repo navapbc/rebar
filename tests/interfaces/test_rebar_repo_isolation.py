@@ -50,6 +50,25 @@ def test_fully_fixed_copy_is_self_contained(rebar_repo: Path) -> None:
         assert root in (p.resolve(), *p.resolve().parents)
 
 
+def test_copy_rewrites_readonly_linked_worktree_git_pointer(
+    _rebar_repo_template: Path, tmp_path: Path
+) -> None:
+    """A Windows copy may preserve the read-only bit on a linked-worktree .git file."""
+    source = _clone_template(_rebar_repo_template, tmp_path / "readonly-source")
+    tracker_git = source / ".tickets-tracker/.git"
+    original_mode = tracker_git.stat().st_mode
+    tracker_git.chmod(original_mode & ~0o222)
+    try:
+        copied = _clone_template(source, tmp_path / "readonly-copy")
+    finally:
+        tracker_git.chmod(original_mode)
+
+    assert_store_self_contained(copied)
+    copied_marker = copied / ".tickets-tracker/.git"
+    assert str(copied.resolve()) in copied_marker.read_text(encoding="utf-8")
+    assert copied_marker.stat().st_mode & 0o222 == 0
+
+
 def test_half_fixed_copy_is_rejected(_rebar_repo_template: Path, tmp_path: Path) -> None:
     """Reject a copy whose worktree ``.git`` changed but ``gitdir`` stayed stale.
 

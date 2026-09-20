@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 import uuid
 from pathlib import Path
@@ -196,7 +197,21 @@ def _rewrite_embedded_paths(topology: Path, rewrites: list[_PathRewrite]) -> Non
         for source, destination in rewrites:
             rewritten = rewritten.replace(source, destination)
         if rewritten != data:
-            path.write_bytes(rewritten)
+            _write_rewritten_path(path, rewritten, original=data)
+
+
+def _write_rewritten_path(path: Path, data: bytes, *, original: bytes) -> None:
+    try:
+        path.write_bytes(data)
+    except PermissionError:
+        if not (path.name == ".git" and original.startswith(b"gitdir:")):
+            raise
+        mode = path.stat().st_mode
+        path.chmod(mode | stat.S_IWUSR)
+        try:
+            path.write_bytes(data)
+        finally:
+            path.chmod(mode)
 
 
 def _remint_store_identities(topology: Path) -> None:
