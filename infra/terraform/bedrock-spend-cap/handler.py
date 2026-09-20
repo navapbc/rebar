@@ -99,6 +99,21 @@ RATE_OVERRIDES = json.loads(os.environ.get("RATE_OVERRIDES", "{}"))
 # global) so the seed errs high rather than low.
 SEED_RATES = json.loads(os.environ.get("SEED_RATES", "{}"))
 
+BEDROCK_SERVICE_VALUES = [
+    "Amazon Bedrock",
+    "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
+    "Claude Sonnet 4.6 (Amazon Bedrock Edition)",
+    "Claude Haiku 4.5 (Amazon Bedrock Edition)",
+    "Claude Opus 4.7 (Amazon Bedrock Edition)",
+]
+BEDROCK_EDITION_SUFFIX = " (Amazon Bedrock Edition)"
+MARKETPLACE_TOKEN_SUFFIXES = {
+    "InputTokenCount": "input-tokens",
+    "OutputTokenCount": "output-tokens",
+    "CacheReadInputTokenCount": "cache-read-input-token-count",
+    "CacheWriteInputTokenCount": "cache-write-input-token-count",
+}
+
 # CloudWatch token metric -> (candidate usage-type suffixes that bill it, the
 # multiplier to apply to the model's input rate when none of those suffixes has
 # an observed rate of its own).
@@ -179,6 +194,30 @@ def _normalise(text: str) -> str:
     return re.sub(r"[^a-z0-9]", "", text)
 
 
+def _marketplace_rate_key(service: str, usage_type: str) -> tuple[str, float] | None:
+    if not service.endswith(BEDROCK_EDITION_SUFFIX):
+        return None
+    usage_body = usage_type.rsplit(":", 1)[-1]
+    try:
+        region, token_units = usage_body.split("_", 1)
+    except ValueError:
+        return None
+    if not token_units.endswith("-Units"):
+        return None
+    token_kind = token_units[: -len("-Units")]
+    suffix = MARKETPLACE_TOKEN_SUFFIXES.get(token_kind)
+    if suffix is None:
+        return None
+    model_label = service.removesuffix(BEDROCK_EDITION_SUFFIX)
+    return f"{region}-{model_label}-{suffix}", 1000
+
+
+def _rate_key_for_ce_group(service: str, usage_type: str) -> tuple[str, float] | None:
+    if service == "Amazon Bedrock":
+        return usage_type, 1
+    return _marketplace_rate_key(service, usage_type)
+
+
 def _refresh_rates() -> dict:
     """Derive per-token rates per usage type from this account's own bills."""
     end = dt.datetime.now(dt.timezone.utc).date()
@@ -187,18 +226,25 @@ def _refresh_rates() -> dict:
         TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
         Granularity="MONTHLY",
         Metrics=["UnblendedCost", "UsageQuantity"],
-        Filter={"Dimensions": {"Key": "SERVICE", "Values": ["Amazon Bedrock"]}},
-        GroupBy=[{"Type": "DIMENSION", "Key": "USAGE_TYPE"}],
+        Filter={"Dimensions": {"Key": "SERVICE", "Values": BEDROCK_SERVICE_VALUES}},
+        GroupBy=[
+            {"Type": "DIMENSION", "Key": "SERVICE"},
+            {"Type": "DIMENSION", "Key": "USAGE_TYPE"},
+        ],
     )
     totals: dict[str, list[float]] = {}
     for period in resp.get("ResultsByTime", []):
         for group in period.get("Groups", []):
-            usage_type = group["Keys"][0]
+            service, usage_type = group["Keys"]
+            rate_key = _rate_key_for_ce_group(service, usage_type)
+            if rate_key is None:
+                continue
+            usage_type, divisor = rate_key
             cost = float(group["Metrics"]["UnblendedCost"]["Amount"])
             qty = float(group["Metrics"]["UsageQuantity"]["Amount"])
             acc = totals.setdefault(usage_type, [float(0), float(0)])
             acc[0] += cost
-            acc[1] += qty
+            acc[1] += qty * divisor
 
     rates = {
         usage_type: cost / qty for usage_type, (cost, qty) in totals.items() if qty > 0 and cost > 0
@@ -401,7 +447,7 @@ def _ce_spend_today(day: dt.date) -> float:
         TimePeriod={"Start": day.isoformat(), "End": (day + dt.timedelta(days=1)).isoformat()},
         Granularity="DAILY",
         Metrics=["UnblendedCost"],
-        Filter={"Dimensions": {"Key": "SERVICE", "Values": ["Amazon Bedrock"]}},
+        Filter={"Dimensions": {"Key": "SERVICE", "Values": BEDROCK_SERVICE_VALUES}},
     )
     results = resp.get("ResultsByTime", [])
     if not results:
