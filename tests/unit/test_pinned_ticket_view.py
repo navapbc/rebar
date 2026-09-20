@@ -46,6 +46,16 @@ def _git(repo: str | Path, *args: str, stdin: str | None = None) -> str:
     return proc.stdout.strip()
 
 
+def _git_rc(repo: str | Path, *args: str) -> int:
+    """Exit status of a git command that is expected to fail in some cases."""
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], check=False, capture_output=True, text=True
+    ).returncode
+
+
+_OID_RE = re.compile(r"[0-9a-f]{40,64}")
+
+
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "repo"
@@ -647,31 +657,65 @@ def _object_root(tracker: str) -> Path:
     return root if root.is_absolute() else Path(tracker) / root
 
 
+def _assert_blob_unreadable(tracker: str, blob_oid: str) -> None:
+    """Assert the setup reached its end state: this one object is gone.
+
+    Checking the end state instead of git's storage representation is what stops these
+    routes failing on their own setup when git stores an object other than as expected.
+    """
+    assert _git_rc(tracker, "cat-file", "-e", blob_oid) != 0, (
+        f"{blob_oid} is still readable after setup: another loose copy or pack still "
+        "provides it, so the missing-object condition was never established"
+    )
+
+
 def _drop_loose(tracker: str, object_root: Path, blob_oid: str) -> None:
-    """Make a LOOSE object unreadable by deleting its file."""
-    loose = object_root / blob_oid[:2] / blob_oid[2:]
-    assert loose.is_file(), f"expected {blob_oid} to be loose; got {loose}"
-    loose.unlink()
+    """Remove the loose copy of a blob, the shape `_freeze_gc` constructs."""
+    (object_root / blob_oid[:2] / blob_oid[2:]).unlink(missing_ok=True)
+    _assert_blob_unreadable(tracker, blob_oid)
+
+
+def _pack_oids(tracker: str, idx: Path) -> set[str]:
+    """Object ids stored in one pack, read from its index."""
+    oids = set()
+    for line in _git(tracker, "verify-pack", "-v", str(idx)).splitlines():
+        head = line.split(" ", 1)[0]
+        if _OID_RE.fullmatch(head):
+            oids.add(head)
+    return oids
 
 
 def _drop_packed(tracker: str, object_root: Path, blob_oid: str) -> None:
-    """Make only the selected packed blob unreadable.
+    """Remove a PACKED blob from every pack holding it, keeping the rest readable.
 
-    A single-object pack keeps commits and trees available when the loose copy and pack
-    are removed.
+    Each containing pack is rebuilt without the blob before it is deleted, so commits and
+    trees that shared a pack with it stay readable.
     """
     pack_dir = object_root / "pack"
     pack_dir.mkdir(parents=True, exist_ok=True)
-    before = set(pack_dir.glob("pack-*"))
-    prefix = _git(tracker, "pack-objects", str(pack_dir / "pack"), stdin=f"{blob_oid}\n")
-    assert prefix, "git pack-objects wrote no pack"
-    _drop_loose(tracker, object_root, blob_oid)
-    # The pack is now the only source; if this fails the shape was never established.
-    _git(tracker, "cat-file", "-e", blob_oid)
-    written = set(pack_dir.glob("pack-*")) - before
-    assert written, "no new pack file appeared"
-    for path in written:
-        path.unlink()
+    assert _git(tracker, "pack-objects", str(pack_dir / "pack"), stdin=f"{blob_oid}\n"), (
+        "git pack-objects wrote no pack"
+    )
+    # An absent loose copy is this route's own premise -- git already packed the blob --
+    # rather than a setup failure.
+    (object_root / blob_oid[:2] / blob_oid[2:]).unlink(missing_ok=True)
+    assert _git_rc(tracker, "cat-file", "-e", blob_oid) == 0, "packing lost the blob"
+    for idx in sorted(pack_dir.glob("pack-*.idx")):
+        oids = _pack_oids(tracker, idx)
+        if blob_oid not in oids:
+            continue
+        keep = oids - {blob_oid}
+        if keep:
+            # Rebuild first: pack-objects reads the survivors out of the pack being replaced.
+            _git(
+                tracker,
+                "pack-objects",
+                str(pack_dir / "pack"),
+                stdin="".join(f"{oid}\n" for oid in sorted(keep)),
+            )
+        for sibling in pack_dir.glob(f"{idx.stem}.*"):
+            sibling.unlink()
+    _assert_blob_unreadable(tracker, blob_oid)
 
 
 @pytest.mark.parametrize(("shape", "drop"), [("loose", _drop_loose), ("packed", _drop_packed)])
@@ -697,6 +741,33 @@ def test_tree_listed_ticket_blob_missing_from_object_database_fails_closed(
     with PinnedTicketView.at_oid(tracker, tracker_head(tracker)) as view:
         # Match the ticket's own path, not just the generic phrase: that is what
         # distinguishes "this blob is gone" from "some other object is gone".
+        with pytest.raises(PinnedTicketViewError, match=re.escape(create_path.as_posix())):
+            view.show_ticket(ticket)
+
+
+def test_packed_drop_route_survives_a_blob_git_already_packed(repo: Path) -> None:
+    """The packed route must survive the one storage shape it exists to cover.
+
+    It used to borrow the loose route's `assert loose.is_file()`, so any packer that got
+    to the blob first failed the setup rather than the behaviour under test.
+    """
+    rebar.create_ticket("task", "warm the tracker", repo_root=str(repo))
+    tracker = _tracker(repo)
+    _freeze_gc(tracker)
+
+    ticket = rebar.create_ticket("task", "already packed", repo_root=str(repo))
+    create_path = next(Path(tracker, ticket).glob("*-CREATE.json")).relative_to(tracker)
+    blob_oid = _git(tracker, "rev-parse", f"HEAD:{create_path.as_posix()}")
+    object_root = _object_root(tracker)
+
+    # Do what a packer does behind the test's back, before the route under test runs.
+    _git(tracker, "pack-objects", str(object_root / "pack" / "pack"), stdin=f"{blob_oid}\n")
+    (object_root / blob_oid[:2] / blob_oid[2:]).unlink()
+    assert _git_rc(tracker, "cat-file", "-e", blob_oid) == 0, "setup did not pack the blob"
+
+    _drop_packed(tracker, object_root, blob_oid)
+
+    with PinnedTicketView.at_oid(tracker, tracker_head(tracker)) as view:
         with pytest.raises(PinnedTicketViewError, match=re.escape(create_path.as_posix())):
             view.show_ticket(ticket)
 
