@@ -2698,6 +2698,86 @@ def test_exited_live_backend_is_not_reaped(mcp_box: dict[str, object]) -> None:
     )
 
 
+def test_port_ping_pong_prefers_running_live_backend_over_exited_historical_binding(
+    mcp_box: dict[str, object],
+) -> None:
+    """Port A -> B -> A leaves an exited historical HostConfig binding on the live port.
+
+    The running backend that currently owns nginx's live port is authoritative; an older exited
+    container with the same historical HostConfig binding must not be mistaken for /mcp.
+    """
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    # Old port-A release, stopped after the port-B deploy; its HostConfig still says 8092.
+    _seed_container(  # type: ignore[arg-type]
+        mcp_box["dstate"],
+        "rebar-mcp-c0b1ad2e8e92-8092",
+        8092,
+        state="exited",
+        image="compose-mcp:" + "c" * 40,
+    )
+    # Current port-A release after ping-ponging back; this is the real live backend.
+    _seed_container(  # type: ignore[arg-type]
+        mcp_box["dstate"],
+        "rebar-mcp-e84e4c5e9439-8092",
+        8092,
+        state="running",
+        image=f"compose-mcp:{_TARGET}",
+    )
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    cmds = _commands_eventually(mcp_box, "rm rebar-mcp-c0b1ad2e8e92-8092")
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+    markers = _markers(result, "AUTODEPLOY_ERROR")
+
+    assert result.returncode == 0, f"a no-op tick with a healthy live backend is normal\n{ctx}"
+    assert not any("mcp-live-backend-down" in m for m in markers), (
+        f"a healthy RUNNING backend on the live port must outrank historical HostConfig "
+        f"bindings from exited containers\n{ctx}"
+    )
+    assert any(c == "rm rebar-mcp-c0b1ad2e8e92-8092" for c in cmds), (
+        f"the stale exited colliding container must be reaped once it is not the live "
+        f"identity\n{ctx}"
+    )
+    assert not any(c == "start rebar-mcp-c0b1ad2e8e92-8092" for c in cmds), (
+        f"self-heal must not restart the historical container while the live backend is "
+        f"healthy\n{ctx}"
+    )
+    assert not any(
+        "rebar-mcp-e84e4c5e9439-8092" in c for c in cmds if c.startswith(("rm ", "rm-f ", "stop "))
+    ), f"the current running live backend must not be disturbed\n{ctx}"
+
+
+def test_exited_live_backend_without_running_owner_still_emits_down_marker(
+    mcp_box: dict[str, object],
+) -> None:
+    """If no running backend owns nginx's port, HostConfig fallback still finds the dead one."""
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    _seed_container(  # type: ignore[arg-type]
+        mcp_box["dstate"],
+        "rebar-mcp-dead-8092",
+        8092,
+        state="exited",
+        image=f"compose-mcp:{_TARGET}",
+    )
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    cmds = _commands(mcp_box)
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+    markers = _markers(result, "AUTODEPLOY_ERROR")
+
+    assert result.returncode == 0, f"successful self-heal keeps the no-op tick green\n{ctx}"
+    assert any("mcp-live-backend-down" in m for m in markers), (
+        f"the fallback must still report a genuinely dead live backend\n{ctx}"
+    )
+    assert "start rebar-mcp-dead-8092" in cmds, (
+        f"the dead live backend must still be restarted in place\n{ctx}"
+    )
+
+
 def test_exited_live_backend_signals_that_the_serving_backend_is_down(
     mcp_box: dict[str, object],
 ) -> None:
