@@ -183,7 +183,9 @@ def _is_lock_timeout_error(exc: Exception) -> bool:
     return getattr(exc, "returncode", None) == 1 and str(exc).startswith("flock:")
 
 
-def _append_sidecar_retrying(ticket_id: str, payload: dict[str, Any], tracker, repo_root) -> None:
+def _append_sidecar_retrying(
+    ticket_id: str, payload: dict[str, Any], tracker, repo_root
+) -> int | None:
     """Append a ``COMPLETION_VERDICT`` event, RETRYING once on write-lock contention.
 
     A ``LockTimeout`` (raw, or wrapped by ``append_event`` into a ``CommandError``) is
@@ -196,8 +198,7 @@ def _append_sidecar_retrying(ticket_id: str, payload: dict[str, Any], tracker, r
     last_exc: Exception | None = None
     for _ in range(_SIDECAR_WRITE_ATTEMPTS):
         try:
-            append_event(ticket_id, EVENT_TYPE, payload, tracker, repo_root=repo_root)
-            return
+            return append_event(ticket_id, EVENT_TYPE, payload, tracker, repo_root=repo_root)
         except SecretScreenRefused:
             # A write-time secret-screen REFUSAL is DETERMINISTIC, not transient contention: a
             # retry would refuse identically. Propagate immediately so the caller can surface it
@@ -225,6 +226,7 @@ def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None
     from rebar import config as _config
     from rebar._commands._seam import SecretScreenRefused, warn_secret_screen_refused
 
+    verdict["sidecar_emitted"] = False
     try:
         tracker = _config.tracker_dir(repo_root)
         payload = build_payload(
@@ -233,7 +235,9 @@ def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None
             repo_root=repo_root,
             verifier_version=verifier_version(repo_root),
         )
-        _append_sidecar_retrying(payload["ticket_id"], payload, tracker, repo_root)
+        reviewed_at = _append_sidecar_retrying(payload["ticket_id"], payload, tracker, repo_root)
+        if isinstance(reviewed_at, int) and not isinstance(reviewed_at, bool):
+            verdict["sidecar_reviewed_at"] = reviewed_at
     except SecretScreenRefused:
         warn_secret_screen_refused(str(verdict.get("ticket_id", "?")), EVENT_TYPE)
         return False
@@ -242,6 +246,7 @@ def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None
         # the close, but the failure itself is a real signal worth a stderr diagnostic.
         logger.warning("COMPLETION_VERDICT sidecar emit failed; continuing", exc_info=True)
         return False
+    verdict["sidecar_emitted"] = True
     return True
 
 
@@ -364,6 +369,39 @@ def latest_pass_record(ticket_id: str, *, repo_root=None) -> dict[str, Any] | No
     except Exception:
         logger.warning(
             "COMPLETION_VERDICT PASS sidecar read failed; treating as no prior record",
+            exc_info=True,
+        )
+        return None
+
+
+def latest_verdict_timestamp(ticket_id: str, *, repo_root=None) -> int | None:
+    """Return the newest ``COMPLETION_VERDICT`` filename timestamp for ``ticket_id``.
+
+    The timestamp is the filename's ns prefix
+    (``<ts_ns>-<uuid>-COMPLETION_VERDICT.json``), so this needs no JSON parse.
+    Best-effort and never raises, matching the sidecar's observability posture.
+    """
+    try:
+        from rebar import config as _config
+        from rebar._engine_support.resolver import resolve_ticket_dir_name
+
+        tracker = str(_config.tracker_dir(repo_root))
+        rid = resolve_ticket_dir_name(ticket_id, tracker)
+        ticket_dir = os.path.join(tracker, rid)
+        files = sorted(
+            f
+            for f in os.listdir(ticket_dir)
+            if f.endswith(f"-{EVENT_TYPE}.json") and not f.startswith(".")
+        )
+        if not files:
+            return None
+        prefix = files[-1].split("-", 1)[0]
+        return int(prefix)
+    except FileNotFoundError:
+        return None
+    except Exception:
+        logger.warning(
+            "COMPLETION_VERDICT sidecar timestamp read failed; treating as none",
             exc_info=True,
         )
         return None

@@ -122,8 +122,8 @@ def _terminal_from_result(result: Any) -> tuple[str, Any]:
     return "passed", verdict
 
 
-def _plan_review_sidecar_fields(gate_type: str, result: Any) -> dict[str, Any]:
-    if gate_type != "plan_review" or not isinstance(result, dict):
+def _gate_sidecar_fields(gate_type: str, result: Any) -> dict[str, Any]:
+    if gate_type not in {"plan_review", "verify_completion"} or not isinstance(result, dict):
         return {}
     out: dict[str, Any] = {}
     if "sidecar_emitted" in result:
@@ -164,7 +164,7 @@ def _spawn_gate_daemon(
                 "error": str(error) if error is not None else None,
                 "finished_at": time.time(),
             }
-            record.update(_plan_review_sidecar_fields(gate_type, result))
+            record.update(_gate_sidecar_fields(gate_type, result))
             rebar.llm.record_gate_run(record)
             handle.complete(result=result, error=error)
 

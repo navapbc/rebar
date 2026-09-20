@@ -35,7 +35,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple, Protocol
 
 from rebar import _mcp_inflight as _inflight
 
@@ -50,7 +50,18 @@ _PLAN_REVIEW = "plan_review"
 _VERIFY_COMPLETION = "verify_completion"
 _TERMINAL_STATUSES = {"passed", "failed"}
 _REVIEW_RESULT = "REVIEW_RESULT"
+_COMPLETION_VERDICT = "COMPLETION_VERDICT"
 _STALE_RUNNING_ERROR = "async gate daemon stopped before recording a terminal result"
+
+
+class _LatestTimestampReader(Protocol):
+    def __call__(self, ticket_id: str, *, repo_root: str | None = None) -> int | None: ...
+
+
+class _SidecarSpec(NamedTuple):
+    sidecar_type: str
+    schemas: frozenset[str]
+    latest_timestamp: _LatestTimestampReader
 
 
 def _repo_root(repo_root: str | None) -> Path:
@@ -151,21 +162,55 @@ def _job_started_at_ns(rec: dict[str, Any]) -> int | None:
     return _int_or_none(prefix)
 
 
-def _latest_review_result_timestamp(ticket_id: str, repo_root: str | None) -> int | None:
-    try:
-        from rebar.llm.plan_review import sidecar
+def _latest_plan_review_timestamp(ticket_id: str, *, repo_root: str | None = None) -> int | None:
+    from rebar.llm.plan_review import sidecar
 
-        return sidecar.latest_review_timestamp(ticket_id, repo_root=repo_root)
+    return sidecar.latest_review_timestamp(ticket_id, repo_root=repo_root)
+
+
+def _latest_completion_verdict_timestamp(
+    ticket_id: str, *, repo_root: str | None = None
+) -> int | None:
+    from rebar.llm import completion_sidecar
+
+    return completion_sidecar.latest_verdict_timestamp(ticket_id, repo_root=repo_root)
+
+
+_GATE_SIDECARS: dict[str, _SidecarSpec] = {
+    _PLAN_REVIEW: _SidecarSpec(
+        _REVIEW_RESULT,
+        frozenset({"plan_review_result_v1", "plan_review_result_v2"}),
+        _latest_plan_review_timestamp,
+    ),
+    _VERIFY_COMPLETION: _SidecarSpec(
+        _COMPLETION_VERDICT,
+        frozenset({"completion_verifier_pass_v1", "completion_verifier_fail_v1"}),
+        _latest_completion_verdict_timestamp,
+    ),
+}
+
+
+def _latest_review_result_timestamp(
+    ticket_id: str, repo_root: str | None, latest_timestamp: _LatestTimestampReader
+) -> int | None:
+    try:
+        return latest_timestamp(ticket_id, repo_root=repo_root)
     except Exception:
         logger.warning(
-            "gate_runs: REVIEW_RESULT sidecar timestamp read failed for %s",
+            "gate_runs: sidecar timestamp read failed for %s",
             ticket_id,
             exc_info=True,
         )
         return None
 
 
-def _has_review_result_timestamp(ticket_id: str, reviewed_at: int, repo_root: str | None) -> bool:
+def _has_review_result_timestamp(
+    ticket_id: str,
+    reviewed_at: int,
+    repo_root: str | None,
+    sidecar_type: str,
+    schemas: frozenset[str],
+) -> bool:
     try:
         from rebar import config as _config
         from rebar._engine_support.resolver import resolve_ticket_dir_name
@@ -179,19 +224,16 @@ def _has_review_result_timestamp(ticket_id: str, reviewed_at: int, repo_root: st
             if (
                 f.name.startswith(".")
                 or not f.name.startswith(prefix)
-                or not f.name.endswith(f"-{_REVIEW_RESULT}.json")
+                or not f.name.endswith(f"-{sidecar_type}.json")
             ):
                 continue
             event = json.loads(f.read_text(encoding="utf-8"))
             payload = event.get("data") if isinstance(event, dict) else None
-            return isinstance(payload, dict) and payload.get("schema") in (
-                "plan_review_result_v1",
-                "plan_review_result_v2",
-            )
+            return isinstance(payload, dict) and payload.get("schema") in schemas
         return False
     except Exception:
         logger.warning(
-            "gate_runs: REVIEW_RESULT sidecar existence read failed for %s",
+            "gate_runs: sidecar existence read failed for %s",
             ticket_id,
             exc_info=True,
         )
@@ -201,11 +243,12 @@ def _has_review_result_timestamp(ticket_id: str, reviewed_at: int, repo_root: st
 def _review_result_status(
     rec: dict[str, Any], status: str, ticket_id: str, repo_root: str | None
 ) -> dict[str, Any] | None:
-    if str(rec.get("gate_type") or "") != _PLAN_REVIEW:
+    spec = _GATE_SIDECARS.get(str(rec.get("gate_type") or ""))
+    if spec is None:
         return None
     reviewed_at = _int_or_none(rec.get("sidecar_reviewed_at"))
     out: dict[str, Any] = {
-        "sidecar_type": _REVIEW_RESULT,
+        "sidecar_type": spec.sidecar_type,
         "readable": False,
         "reason": "",
         "reviewed_at": reviewed_at,
@@ -214,9 +257,13 @@ def _review_result_status(
     if status not in _TERMINAL_STATUSES:
         out["reason"] = f"run-{status}"
         return out
-    out["latest_reviewed_at"] = _latest_review_result_timestamp(ticket_id, repo_root)
+    out["latest_reviewed_at"] = _latest_review_result_timestamp(
+        ticket_id, repo_root, spec.latest_timestamp
+    )
     if reviewed_at is not None:
-        if _has_review_result_timestamp(ticket_id, reviewed_at, repo_root):
+        if _has_review_result_timestamp(
+            ticket_id, reviewed_at, repo_root, spec.sidecar_type, spec.schemas
+        ):
             out["readable"] = True
             out["reason"] = "current-review-result-sidecar"
         else:
