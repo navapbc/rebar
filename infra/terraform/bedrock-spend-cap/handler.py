@@ -63,6 +63,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 import boto3
 from botocore.exceptions import ClientError
@@ -224,7 +225,16 @@ def _seed_for(model_id: str, metric_name: str) -> float | None:
     return None
 
 
-def _rate_for(model_id: str, metric_name: str, rates: dict) -> float:
+RateSource = Literal["empirical", "seed", "empirical_scaled", "fallback"]
+
+
+@dataclass(frozen=True)
+class MeteredRate:
+    rate: float
+    source: RateSource
+
+
+def _rate_for(model_id: str, metric_name: str, rates: dict) -> MeteredRate:
     """Best per-token rate for one model and token direction.
 
     Resolution order, most trustworthy first:
@@ -261,18 +271,18 @@ def _rate_for(model_id: str, metric_name: str, rates: dict) -> float:
 
     exact = _match(suffixes)
     if exact is not None:
-        return exact
+        return MeteredRate(rate=exact, source="empirical")
 
     seed = _seed_for(model_id, metric_name)
     if seed is not None:
-        return seed
+        return MeteredRate(rate=seed, source="seed")
 
     base = _match(TOKEN_METRICS["InputTokenCount"][0])
     if base is not None:
-        return base * mult
+        return MeteredRate(rate=base * mult, source="empirical_scaled")
 
     log.warning("no rate for model=%s metric=%s; using fail-closed fallback", model_id, metric_name)
-    return UNKNOWN_RATE_PER_1K * mult
+    return MeteredRate(rate=UNKNOWN_RATE_PER_1K * mult, source="fallback")
 
 
 # --------------------------------------------------------------------------
@@ -287,6 +297,7 @@ class MeteredFailure:
 @dataclass(frozen=True)
 class MeteredSpend:
     total: float
+    metered_estimated: bool
     degraded: bool
     failures: tuple[MeteredFailure, ...]
 
@@ -305,6 +316,7 @@ def _record_metered_failure(
 
 def _metered_spend(day_start: dt.datetime, now: dt.datetime, rates: dict) -> MeteredSpend | None:
     total = float(0)
+    metered_estimated = False
     found_series = False
     contributed = False
     failures: list[MeteredFailure] = []
@@ -362,13 +374,23 @@ def _metered_spend(day_start: dt.datetime, now: dt.datetime, rates: dict) -> Met
                 if units_1k <= 0:
                     continue
                 model_id, metric_name = meta[result["Id"]]
-                total += units_1k * _rate_for(model_id, metric_name, rates)
+                metered_rate = _rate_for(model_id, metric_name, rates)
+                total += units_1k * metered_rate.rate
+                metered_estimated = metered_estimated or metered_rate.source in {
+                    "seed",
+                    "fallback",
+                }
                 contributed = True
     if failures and not contributed:
         return None
     if not found_series:
         log.info("CloudWatch Bedrock token metrics found no per-model series")
-    return MeteredSpend(total=total, degraded=bool(failures), failures=tuple(failures))
+    return MeteredSpend(
+        total=total,
+        metered_estimated=metered_estimated,
+        degraded=bool(failures),
+        failures=tuple(failures),
+    )
 
 
 # --------------------------------------------------------------------------
@@ -531,6 +553,7 @@ def handler(event, context):
     # and polling on it would bypass CE_MIN_INTERVAL_SECONDS on every tick for
     # as long as the CloudWatch outage lasts.
     metered_total = None if metered is None else metered.total
+    metered_estimated = False if metered is None else metered.metered_estimated
     near_threshold = metered_total is not None and metered_total * 5 >= THRESHOLD_USD * 4
     if due or near_threshold:
         try:
@@ -567,7 +590,12 @@ def handler(event, context):
         or (metered is not None and metered.degraded)
         or ce_status == "unavailable"
     )
-    metered_text = "unavailable" if metered_total is None else f"{metered_total:,.2f}"
+    if metered_total is None:
+        metered_text = "unavailable"
+    else:
+        metered_text = f"{metered_total:,.2f}"
+        if metered_estimated:
+            metered_text += " (estimated)"
     ce_text = "unavailable" if ce_spend is None else f"{ce_spend:,.2f}"
     attached = _is_attached()
     any_attached = attached or _has_any_attachment()
@@ -637,10 +665,12 @@ def handler(event, context):
                 "the policy from the principals above.",
             )
 
+    state["metered_estimated"] = metered_estimated
     _save_state(state)
     return {
         "day": day.isoformat(),
         "metered_usd": None if metered_total is None else round(metered_total, 4),
+        "metered_estimated": metered_estimated,
         "metered_status": metered_status,
         "ce_usd": None if ce_spend is None else round(ce_spend, 4),
         "ce_status": ce_status,
