@@ -1,16 +1,21 @@
 # `REBAR_LLM_CONFIG_FILE` overlays — one per live provider
 
 Each `*.toml` here is a **layered config-file overlay** for `REBAR_LLM_CONFIG_FILE`: it sets
-**only** `[llm.model_classes]`, so pointing the variable at one repoints the three model classes
-(`trivial` / `standard` / `frontier`) at that provider and **changes nothing else** — the pointer
-deep-merges over the discovered config rather than replacing it
-(`src/rebar/_config_sources.py`, `docs/local-dev-env.md`).
+**exactly** `[llm] model` plus `[llm.model_classes]`, so pointing the variable at one repoints
+both the ambient default model and the three model classes (`trivial` / `standard` / `frontier`)
+at that provider and **changes nothing else** — the pointer deep-merges over the discovered
+config rather than replacing it (`src/rebar/_config_sources.py`, `docs/local-dev-env.md`).
+
+The scalar `[llm] model` is not redundant with the class table: some callers resolve `cfg.model`,
+which the class table cannot override, and its bare default infers Anthropic — so an overlay that
+set only the classes would leak direct-Anthropic selection into another provider's arm.
 
 These files exist so the provider is a **declared, reviewable artefact** instead of a heredoc
 inside a CI step. `.github/workflows/external-integration.yml`'s `external-llm` job carries one
 matrix arm per file and sets `REBAR_LLM_CONFIG_FILE` to it; `tests/unit/test_ci_provider_matrix.py`
-parses both the workflow and these files and fails if an arm's file is missing, sets anything
-outside `[llm.model_classes]`, or fails to actually repoint every class.
+parses both the workflow and these files and fails if an arm's file is missing, sets any key
+other than `[llm] model` and `[llm.model_classes]`, leaves `model` unqualified with the arm's
+provider, or fails to actually repoint every class.
 
 The deprecated bare `REBAR_LLM_MODEL` is deliberately **not** used: it cannot express a per-class
 model, so it could not select a provider for all three classes at once (ADR 0057).
