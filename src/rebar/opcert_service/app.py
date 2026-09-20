@@ -61,11 +61,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Give cancelled workers a bounded grace period. Collect ``CancelledError``
         # values so lifespan shutdown never propagates them.
         if tasks:
+            # asyncio.timeout, never asyncio.wait_for: on Python 3.11 wait_for CONSUMES an
+            # external cancellation when its child completes in the same event-loop turn
+            # (CPython issue 86296), which strands shutdown here. Same reason as _worker's.
             with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
-                await asyncio.wait_for(
-                    asyncio.gather(*tasks, return_exceptions=True),
-                    timeout=_shutdown_cancel_seconds(app),
-                )
+                async with asyncio.timeout(_shutdown_cancel_seconds(app)):
+                    await asyncio.gather(*tasks, return_exceptions=True)
         # ABANDON whatever is still running. ``wait=False`` is the whole point: a thread cannot be
         # force-cancelled, so waiting here would reintroduce the unbounded join this fix removes.
         # ``cancel_futures=True`` drops work that never started.

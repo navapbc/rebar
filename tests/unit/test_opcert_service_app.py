@@ -32,6 +32,27 @@ pytestmark = pytest.mark.unit
 GUARD = "shared-secret-value"
 
 
+# Teardown bound for a worker task. The tests below deliberately race worker cancellation
+# against job completion, and the failure they exist to catch is a worker that IGNORES
+# cancellation and returns to `queue.get()`. A bare `await worker` in teardown therefore
+# hangs FOREVER on exactly the failure being tested: pytest's `timeout_method = "thread"`
+# then expires the test with `os._exit(1)`, killing the whole xdist worker
+# ("node down: Not properly terminated") and DESTROYING the assertion message that named
+# the real cause. Bounding the join lets that assertion surface instead.
+# mechanism-ok: test_helper _join_worker — bounded teardown join, bug 68a9-2a6c-d9aa-49ad
+async def _join_worker(worker: asyncio.Task, bound: float = 5.0) -> None:
+    """Await a cancelled worker under a bound, so a wedged task fails the test rather than
+    hanging it.
+
+    `asyncio.wait` is the only primitive that bounds this. It does NOT cancel what it waits
+    on and it returns once the bound expires. `asyncio.timeout` and `asyncio.wait_for` both
+    cancel the inner await and then wait for that cancellation to be honoured -- which is
+    precisely what a worker that swallows cancellation never does, so they hang forever on
+    the exact failure being guarded against.
+    """
+    await asyncio.wait({worker}, timeout=bound)
+
+
 def _fake_completed(**kwargs):
     fields = jobs.new_record("", kwargs["ticket_id"], kwargs["kind"])
     fields.pop("job_id")
@@ -155,7 +176,10 @@ def test_matching_guard_is_accepted(client, monkeypatch):
     assert resp.status_code == 202
 
 
-@pytest.mark.timeout(2)
+# 30s, not the 2s this carried: teardown below is bounded at 5s, so the budget only has
+# to clear that bound plus CI scheduling slack. A budget under the teardown bound turns a
+# reported assertion into an os._exit(1) worker kill (see the module note above).
+@pytest.mark.timeout(30)
 def test_worker_records_job_timeout(monkeypatch):
     """A job that exceeds its configured bound records the timeout contract."""
     from rebar.opcert_service import app as app_module
@@ -197,13 +221,13 @@ def test_worker_records_job_timeout(monkeypatch):
             assert record["kind"] == "plan-review"
         finally:
             worker.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await worker
+            await _join_worker(worker)
 
     asyncio.run(drive())
 
 
-@pytest.mark.timeout(2)
+# 30s, not the 2s this carried: see the note on test_worker_records_job_timeout.
+@pytest.mark.timeout(30)
 def test_worker_cancellation_survives_job_completion_race(monkeypatch):
     """Shutdown must finish when a job completion collides with worker cancellation."""
     from rebar.opcert_service import app as app_module
@@ -246,8 +270,51 @@ def test_worker_cancellation_survives_job_completion_race(monkeypatch):
         finally:
             if not worker.done():
                 worker.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await worker
+            await _join_worker(worker)
+
+    asyncio.run(drive())
+
+
+@pytest.mark.timeout(30)
+def test_join_worker_bounds_a_task_that_ignores_cancellation():
+    """Teardown must not hang on the very failure these tests exist to catch.
+
+    Regression for bug 68a9-2a6c-d9aa-49ad. A bare `await worker` in teardown hangs forever
+    when the worker swallows cancellation, and `timeout_method = "thread"` then expires the
+    test with os._exit(1) -- killing the xdist worker and erasing the assertion that named
+    the cause. The join must come back bounded so that assertion is what gets reported.
+    """
+
+    async def drive():
+        swallowing = True
+        absorbed = 0
+
+        async def swallows_cancellation():
+            nonlocal absorbed
+            while True:
+                try:
+                    await asyncio.sleep(3600)
+                except asyncio.CancelledError:
+                    if not swallowing:
+                        raise
+                    absorbed += 1
+
+        task = asyncio.create_task(swallows_cancellation())
+        await asyncio.sleep(0)
+        task.cancel()
+
+        await _join_worker(task, bound=0.2)
+
+        # Structural proof that the join is bounded, with no wall-clock budget to flake under
+        # runner contention: it came back while the worker is STILL RUNNING. An unbounded join
+        # could only return once the worker finished, and this worker never does.
+        assert not task.done(), "join returned only because the worker finished"
+        assert absorbed >= 1, "the task under test never swallowed a cancellation"
+
+        swallowing = False
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
     asyncio.run(drive())
 
