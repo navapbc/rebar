@@ -9,11 +9,12 @@ The repository-local setup action reads ``[tool.uv] required-version`` from
 3. a root ``uv.toml`` that shadows ``[tool.uv]``;
 4. use of the manifest-backed upstream ``astral-sh/setup-uv`` action;
 5. a missing/weakened local action or incomplete supported-runner checksums; and
-6. Docker images whose uv reference is floating, absent-tagged, templated, or a bare opaque
-   digest.
+6. Docker/Compose images whose uv reference is floating, absent-tagged, templated, or a bare
+   opaque digest.
 
 Every uv container reference must carry the exact required version as its tag. A digest is
-accepted only alongside that matching tag, and no Dockerfile image may use ``:latest``.
+accepted only alongside that matching tag, and no Dockerfile or Compose image may use
+``:latest``.
 
 The standard-library/PyYAML check has no CI-provider dependency and runs identically through
 ``make lint`` or a local shell.
@@ -57,9 +58,16 @@ DOCKERFILE_IMAGE_PATTERN = re.compile(
     r"^\s*(?:FROM\s+(?:--\S+\s+)*(?P<from>\S+)|COPY\s+(?:--\S+\s+)*--from=(?P<copy>\S+))",
     re.IGNORECASE,
 )
+COMPOSE_IMAGE_PATTERN = re.compile(
+    r"^\s*image:\s*(?P<image>\"[^\"]+\"|'[^']+'|[^#\s]+)(?:\s+#.*)?\s*$"
+)
 
 #: A build ARG / environment interpolation anywhere in an image reference: `$TAG`, `${TAG}`.
 TEMPLATED_REFERENCE_PATTERN = re.compile(r"\$\{?[A-Za-z_]")
+COMPOSE_INTERPOLATION_PATTERN = re.compile(
+    r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::-(?P<default>[^}]+))?\}"
+)
+SKIPPED_SCAN_DIRS = frozenset({".git", ".venv", "node_modules", "__pycache__"})
 POWERSHELL_SCOPED_VARIABLE_PATTERN = re.compile(r"\$(?P<name>[A-Za-z_][A-Za-z0-9_]*):")
 POWERSHELL_SCOPES = frozenset(
     {
@@ -388,18 +396,33 @@ def _is_registry_reference(reference: str) -> bool:
     A build ARG is NOT excluded here. ``COPY --from=$BUILDER`` carries no separator and is
     already excluded as a stage name, while ``ghcr.io/astral-sh/uv:${UV_VERSION}`` does carry
     one and must reach the uv check rather than being silently skipped; whether an
-    unresolvable template is a finding is decided per image in ``_check_dockerfile_reference``.
+    unresolvable template is a finding is decided per image in ``_check_image_reference``.
     """
     return any(character in reference for character in "/:@")
 
 
 def _dockerfiles(root: Path) -> list[Path]:
-    skipped = {".git", ".venv", "node_modules", "__pycache__"}
     return sorted(
         path
         for path in root.glob("**/Dockerfile*")
-        if path.is_file() and not skipped.intersection(path.relative_to(root).parts)
+        if path.is_file() and not SKIPPED_SCAN_DIRS.intersection(path.relative_to(root).parts)
     )
+
+
+def _compose_files(root: Path) -> list[Path]:
+    paths: set[Path] = set()
+    for pattern in (
+        "**/docker-compose*.yml",
+        "**/docker-compose*.yaml",
+        "**/compose*.yml",
+        "**/compose*.yaml",
+    ):
+        paths.update(
+            path
+            for path in root.glob(pattern)
+            if path.is_file() and not SKIPPED_SCAN_DIRS.intersection(path.relative_to(root).parts)
+        )
+    return sorted(paths)
 
 
 def _check_uv_reference(
@@ -434,9 +457,7 @@ def _check_uv_reference(
     return None
 
 
-def _check_dockerfile_reference(
-    location: str, reference: str, version: str | None
-) -> Finding | None:
+def _check_image_reference(location: str, reference: str, version: str | None) -> Finding | None:
     """Assert one image reference is exactly pinned, and uv-pinned to ``version``.
 
     A tag templated from a build ARG (``uv:${UV_VERSION}``) resolves only at build time, so
@@ -473,6 +494,32 @@ def _check_dockerfile_reference(
     return _check_uv_reference(location, reference, tag, digest, version)
 
 
+def _strip_optional_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _resolve_compose_reference(location: str, reference: str) -> tuple[str | None, Finding | None]:
+    missing_default: list[str] = []
+
+    def replace(match: re.Match[str]) -> str:
+        default = match.group("default")
+        if default is None:
+            missing_default.append(match.group(0))
+            return match.group(0)
+        return default
+
+    resolved = COMPOSE_INTERPOLATION_PATTERN.sub(replace, reference)
+    if missing_default or TEMPLATED_REFERENCE_PATTERN.search(resolved):
+        return None, Finding(
+            location,
+            f"'{reference}' does not name a literal default for every Compose interpolation, "
+            "so this gate cannot prove the image is exactly pinned",
+        )
+    return resolved, None
+
+
 def check_dockerfiles(root: Path) -> list[Finding]:
     """Assert every Dockerfile image is exactly pinned, and uv matches ``required-version``."""
     version = _required_version(root)
@@ -486,7 +533,31 @@ def check_dockerfiles(root: Path) -> list[Finding]:
             reference = match.group("from") or match.group("copy")
             if not _is_registry_reference(reference):
                 continue
-            finding = _check_dockerfile_reference(f"{relative}:{number}", reference, version)
+            finding = _check_image_reference(f"{relative}:{number}", reference, version)
+            if finding is not None:
+                findings.append(finding)
+    return findings
+
+
+def check_compose_images(root: Path) -> list[Finding]:
+    """Assert every Compose ``image:`` reference is exactly pinned."""
+    version = _required_version(root)
+    findings: list[Finding] = []
+    for path in _compose_files(root):
+        relative = path.relative_to(root)
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            match = COMPOSE_IMAGE_PATTERN.match(line)
+            if match is None:
+                continue
+            location = f"{relative}:{number}"
+            reference, interpolation_finding = _resolve_compose_reference(
+                location, _strip_optional_quotes(match.group("image"))
+            )
+            if interpolation_finding is not None:
+                findings.append(interpolation_finding)
+                continue
+            assert reference is not None
+            finding = _check_image_reference(location, reference, version)
             if finding is not None:
                 findings.append(finding)
     return findings
@@ -500,6 +571,7 @@ def check_repo(root: Path) -> list[Finding]:
         + check_local_action(root)
         + check_workflows(root)
         + check_dockerfiles(root)
+        + check_compose_images(root)
     )
 
 
@@ -517,10 +589,10 @@ def main(argv: list[str] | None = None) -> int:
         f"\ncheck_uv_pin: {len(findings)} finding(s). uv must be pinned exactly ONCE, as "
         '[tool.uv] required-version = "==X.Y.Z" in pyproject.toml, and every workflow must '
         f"install it through {LOCAL_SETUP_UV_ACTION} without version overrides or manifest "
-        f"fetches. Every Dockerfile must name {UV_IMAGE_REPOSITORY} with that same exact "
-        "version as its TAG (a digest may accompany the tag but never replace it, and a "
-        "build-ARG template is not a provable pin), and no Dockerfile may resolve any image "
-        "from a floating :latest tag.",
+        f"fetches. Every Dockerfile and Compose image: key must name {UV_IMAGE_REPOSITORY} "
+        "with that same exact version as its TAG (a digest may accompany the tag but never "
+        "replace it, and a build-ARG/defaultless Compose template is not a provable pin), "
+        "and no Dockerfile or Compose image may resolve any image from a floating :latest tag.",
         file=sys.stderr,
     )
     return 1
