@@ -20,7 +20,12 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-from rebar._commands import doctor_locks, doctor_mapping, doctor_mcp_client
+from rebar._commands import (
+    doctor_build_freshness,
+    doctor_locks,
+    doctor_mapping,
+    doctor_mcp_client,
+)
 from rebar._commands._repair_pause import owned_repair_pause
 from rebar._commands._seam import CommandError, tracker_dir
 from rebar._engine_support.output import OutputFormatError, parse_output
@@ -387,6 +392,7 @@ def _print_text(
     lock_faults: list[dict[str, Any]],
     mapping_findings: list[dict[str, Any]],
     mcp_client_findings: list[dict[str, Any]],
+    build_freshness_findings: list[dict[str, Any]],
 ) -> None:
     if pre_oid:
         print(f"doctor: pre-tag {PRE_REPAIR_TAG} @ {pre_oid[:12]}")
@@ -420,6 +426,9 @@ def _print_text(
     # the store, so there is nothing here for --repair to convert. Joined rather than
     # looped: render_text always emits its header line, so this never prints a blank.
     print("\n".join(doctor_mcp_client.render_text(mcp_client_findings)))
+    # Build-freshness findings join locks, mapping and client config OUTSIDE the repair
+    # loop: they describe an out-of-process updater on the operator's box, not the store.
+    print("\n".join(doctor_build_freshness.render_text(build_freshness_findings)))
 
 
 def doctor_cli(argv: list[str], *, repo_root=None) -> int:
@@ -467,6 +476,12 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
     # rather than the store, so they too stay outside `findings` / the repair loop.
     mcp_client_findings = doctor_mcp_client.scan_mcp_clients(cwd=repo_root)
 
+    # Global-build freshness: read from the operator's HOME and from git, never from the
+    # store, so these too stay outside `findings` / the repair loop. The detector is
+    # local by design — the incident it exists to catch is precisely one where the remote
+    # alert path could not deliver.
+    build_freshness_findings = doctor_build_freshness.scan_build_freshness(repo_root=repo_root)
+
     pre_oid = ""
     if do_repair and not dry_run and findings:
         try:
@@ -486,6 +501,7 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
                     "lock_findings": lock_faults,
                     "mapping_findings": mapping_findings,
                     "mcp_client_findings": mcp_client_findings,
+                    "build_freshness_findings": build_freshness_findings,
                 }
             )
         )
@@ -498,6 +514,7 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
             lock_faults=lock_faults,
             mapping_findings=mapping_findings,
             mcp_client_findings=mcp_client_findings,
+            build_freshness_findings=build_freshness_findings,
         )
 
     outstanding = _outstanding(findings)
@@ -510,5 +527,7 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
     # store-health gate depend on whichever client configs happen to sit on the box
     # running it. They are reported (text + JSON) and severity-classified via
     # doctor_mcp_client.has_blocking_mcp_client, which a caller that DOES want to gate on
-    # client wiring can apply to `mcp_client_findings` itself.
+    # client wiring can apply to `mcp_client_findings` itself. Build-freshness findings
+    # are excluded on identical grounds — they describe a HOME-sourced updater, and
+    # `doctor_build_freshness.has_stale_build` is their equivalent seam.
     return 1 if outstanding or lock_faults or blocking_mapping else 0

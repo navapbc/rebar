@@ -167,6 +167,25 @@ def test_dirty_build_still_compares_on_its_commit(
     assert drift.build_sha == old
 
 
+def test_detect_drift_accepts_an_explicit_build_sha(repo: Path) -> None:
+    """The published build path can measure a build this process is not running."""
+    old, tip = _shas(repo)
+
+    drift = build_drift.detect_drift(tip, str(repo), build_sha=old)
+
+    assert drift is not None
+    assert drift.build_sha == old
+    assert drift.pinned_sha == tip
+    assert drift.commits_behind == 2
+
+
+def test_resolve_commit_accepts_the_dirty_build_suffix(repo: Path) -> None:
+    """The direct resolver and drift detector share the same build-sha grammar."""
+    old, _tip = _shas(repo)
+
+    assert build_drift.resolve_commit(f"{old}-dirty", str(repo)) == old
+
+
 def test_git_failure_is_silent(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     """An unavailable git binary is provenance-unavailable, not a gate failure."""
     old, tip = _shas(repo)

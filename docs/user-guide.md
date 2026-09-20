@@ -588,6 +588,19 @@ report-only):
   check degrades to a single **`unavailable`** finding (a zero exit) — the same convention
   `rebar metrics` uses — so `doctor` stays fully portable and never blocks on Jira.
 
+## `doctor` also reports local build-freshness state when it is available
+
+`rebar doctor` includes a build-freshness section for hosts that expose updater state under the supported local reader path. The section reports whether that state can name a rebar source repository and published build SHA, then compares that build with the ref the updater tracks.
+
+The section has two signals:
+
+- **`reject-streak`**: the updater state reports a consecutive-rejection counter at or above its alert threshold, default **3**.
+- **`build-stale`**: the published build is more than **25** commits behind the tracked ref.
+
+Both signals are **advisory**. They are printed in text and JSON but stay out of `doctor`'s exit code and out of `--repair`, on the same grounds as the HOME-sourced MCP-client findings. They describe the operator's box, not the store, so gating store health on them would make the exit depend on whichever updater state happens to sit on the machine running it. A caller that wants to gate has `doctor_build_freshness.has_stale_build`.
+
+When the updater state is absent, incomplete, or cannot name an available source repository, the section prints `unavailable`. That means `doctor` cannot measure build freshness for this host. It does not diagnose the ticket store.
+
 ## Archived tickets: maintenance scopes to the active store
 
 `rebar archive` folds the ticket's entire live log into a SNAPSHOT **inline, right before
