@@ -15,6 +15,7 @@ editable installations. ``tests/_engine_path.py`` defines the canonical checkout
 from __future__ import annotations
 
 import ast
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -160,3 +161,46 @@ def test_detector_accepts_the_canonical_root_and_the_test_shadow_package() -> No
 def test_engine_root_of_ignores_paths_outside_any_engine_tree() -> None:
     assert engine_root_of(_TESTS_ROOT / "conftest.py") is None
     assert engine_root_of(engine_dir() / "rebar_reconciler" / "runtime.py") == engine_dir()
+
+
+def test_detector_reports_a_foreign_root_while_os_name_is_rebound(
+    split_engine: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The detector must not depend on ``os.name`` telling the truth.
+
+    Rebinding ``os.name`` to ``"nt"`` is the supported way to exercise a Windows branch,
+    and ``tests/unit/test_enrich_drain.py`` does exactly that. Because ``os`` is one shared
+    module object the rebinding is process-wide, and ``pathlib.Path.__new__`` dispatches on
+    the live value, so every ``Path(...)`` built while it holds becomes a ``WindowsPath``
+    and raises ``NotImplementedError`` on POSIX. ``monkeypatch`` undoes its rebinding LAST
+    of the function-scoped fixtures, so the ``_one_engine_root`` teardown guard runs while
+    the rebinding is still in force (bug ``f46c-8a93-2eb9-4913``).
+    """
+    foreign = split_engine / "rebar_reconciler" / "runtime.py"
+    expected = os.path.realpath(foreign)
+    probe = type(sys)("rebar_reconciler.runtime")
+    probe.__file__ = str(foreign)
+    monkeypatch.setattr(os, "name", "nt")
+
+    offenders = foreign_engine_registrations({"rebar_reconciler.runtime": probe})
+
+    assert offenders == [("rebar_reconciler.runtime", expected)]
+
+
+def test_detector_accepts_a_non_engine_path_while_os_name_is_rebound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The clean path must survive the rebinding too, not just the reporting one.
+
+    This is the case the guard actually hits after every test: a ``__file__`` that is not an
+    engine file at all, missing the path cache and so reaching the resolver afresh.
+    """
+    shadow = tmp_path / "rebar_reconciler" / "__init__.py"
+    shadow.parent.mkdir(parents=True)
+    shadow.touch()
+    probe = type(sys)("rebar_reconciler")
+    probe.__file__ = str(shadow)
+    probe.__path__ = [str(shadow.parent)]
+    monkeypatch.setattr(os, "name", "nt")
+
+    assert foreign_engine_registrations({"rebar_reconciler": probe}) == []
