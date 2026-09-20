@@ -112,6 +112,20 @@ def running_build_sha() -> str | None:
         return None
 
 
+def resolve_commit(ref: str, repo_root: str | None) -> str | None:
+    """The full sha ``ref`` names in the target repo, or ``None`` when it names nothing.
+
+    Exposed because :func:`detect_drift` answers ``None`` for both "not behind" and
+    "cannot measure", and a caller diagnosing a build it is not running needs to tell
+    those apart -- a pointer at a garbage-collected or foreign commit is a fault, while
+    being level with the ref is health. Read-only and best-effort, like every probe here.
+    """
+    root = _resolve_repo_root(repo_root)
+    if not root:
+        return None
+    return _git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], root)
+
+
 def _resolve_repo_root(repo_root: str | None) -> str | None:
     try:
         from rebar import config as _root_config
@@ -123,16 +137,23 @@ def _resolve_repo_root(repo_root: str | None) -> str | None:
         return repo_root
 
 
-def detect_drift(pinned_sha: str | None, repo_root: str | None) -> BuildDrift | None:
-    """Return a :class:`BuildDrift` when the running build is a STRICT ancestor of
+def detect_drift(
+    pinned_sha: str | None, repo_root: str | None, *, build_sha: str | None = None
+) -> BuildDrift | None:
+    """Return a :class:`BuildDrift` when the measured build is a STRICT ancestor of
     ``pinned_sha`` in the target repo, else ``None``.
+
+    ``build_sha`` names the build to measure, defaulting to the one executing this
+    process. Supplying it lets the same ancestry walk answer for a build this process is
+    NOT running -- notably the global build an out-of-process updater publishes, which is
+    the only build whose staleness a stalled-updater check cares about.
 
     ``None`` covers every "cannot prove drift" case as well as the healthy ones: no build
     provenance, no pinned SHA (a ``local``-source gate pins nothing), either SHA absent
     from the target repo (notably: gate code and target are different repositories), git
     unavailable, and the build being at or ahead of the pinned ref.
     """
-    raw = running_build_sha()
+    raw = build_sha if build_sha is not None else running_build_sha()
     if not raw or not pinned_sha:
         return None
     dirty = raw.endswith(_DIRTY_SUFFIX)

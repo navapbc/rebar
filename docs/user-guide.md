@@ -588,6 +588,35 @@ report-only):
   check degrades to a single **`unavailable`** finding (a zero exit) — the same convention
   `rebar metrics` uses — so `doctor` stays fully portable and never blocks on Jira.
 
+## `doctor` also reports whether your global build is fresh
+
+Some hosts run an out-of-process updater that keeps a **global** `rebar` / `rebar-mcp`
+aligned to `origin/main`. When that updater stalls, every gate on the box keeps running —
+against a build that silently predates the tree it is reading. `rebar doctor` reports two
+**independent** signals so the stall is visible from the host itself:
+
+- **`reject-streak`** — the updater's own consecutive-rejection counter at or above its
+  alert threshold (default **3**).
+- **`build-stale`** — the published build more than **25** commits behind `origin/main`.
+  A healthy hourly updater sits at 0–2; the two recorded incidents reached ~48 and ~195.
+
+Both are **advisory**: they are printed in text and JSON but stay out of `doctor`'s exit
+code and out of `--repair`, on the same grounds as the HOME-sourced MCP-client findings —
+they describe the operator's box, not the store, so gating store health on them would make
+the exit depend on whichever updater happens to sit on the machine running it. A caller
+that *does* want to gate has `doctor_build_freshness.has_stale_build`.
+
+**The detector is local on purpose.** The incident that motivated it ran 122 consecutive
+failed updates and drifted 201 commits while its alert fired every hour and could not
+deliver — the SNS topic sat in another account with no policy permitting the publish. A
+detector whose only route to an operator is a remote sink is silent in exactly the
+conditions worth detecting, so this one reads local disk and reports through a command the
+operator already runs. Both thresholds are module constants rather than config keys, and
+are overridable per call; the scan needs no configuration surface.
+
+**Absent is not broken.** On a box running no such updater the section prints a single
+`unavailable` finding and nothing else, the same convention `rebar metrics` uses.
+
 ## Archived tickets: maintenance scopes to the active store
 
 `rebar archive` folds the ticket's entire live log into a SNAPSHOT **inline, right before
