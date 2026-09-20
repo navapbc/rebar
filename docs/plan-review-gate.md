@@ -1449,8 +1449,9 @@ requirement that was never evaluated.
 **specific commit** instead of HEAD: the gate verifies, and signs against, that ref's tree. The
 pre-sign drift guard resolves the **same** ref for its fresh-SHA read, so a fixed commit — whose
 tree is immutable — is a stable no-op rather than being spuriously treated as drift. The close
-therefore lands **signed** even though HEAD is elsewhere. Absent `--ref`, behavior is unchanged
-(verify at HEAD, drift-check against `head_sha`).
+therefore lands **signed** even though HEAD is elsewhere. Absent `--ref`, close first pins
+the invoking worktree's HEAD to a concrete SHA and verifies/signs that pinned tree; `--ref`
+changes which tree is pinned, not whether pinning happens.
 
 **Stacked-epic recipe.** When landing a stack where each story is its own commit, close each story
 against **its own commit** — `rebar transition <story-id> closed --ref <story-sha>` (or check that
