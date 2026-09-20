@@ -440,9 +440,23 @@ def _emitter_skips_unbalanced(
     prompt_id = criterion_prompt_id(criterion_id)
     manifest_path = repo_root / ".rebar" / "fixture_heal_manifests" / f"{prompt_id}.jsonl"
     out_dir = repo_root / ".rebar" / "fixture_heal_emit_preview" / prompt_id
+    _ensure_heal_work_dirs(manifest_path, output_dirs=(out_dir,))
     fixture_selection.write_manifest(rows, manifest_path)
     report = fixture_emit.emit_specs(manifest_path, out_dir)
     return criterion_id in report.skipped_unbalanced
+
+
+def _ensure_heal_work_dirs(
+    manifest_path: Path,
+    *,
+    output_dirs: Sequence[Path] = (),
+    output_files: Sequence[Path] = (),
+) -> None:
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    for output_dir in output_dirs:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    for output_file in output_files:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
 
 
 def _run_admission(
@@ -452,6 +466,7 @@ def _run_admission(
     ledger_path: Path,
     cap_usd: float,
 ):
+    from rebar.llm import gate_source
     from rebar.llm.config import LLMConfig
     from rebar.llm.evals import eval_solver, fixture_admission, fixture_selection
     from rebar.llm.runner import get_runner
@@ -460,30 +475,39 @@ def _run_admission(
     manifest_path = repo_root / ".rebar" / "fixture_heal_manifests" / f"{prompt_id}.jsonl"
     spec_dir = repo_root / ".rebar" / "evals"
     drift_path = repo_root / ".rebar" / "fixture_heal_drift.md"
-    fixture_selection.write_manifest(rows, manifest_path)
-    runner = get_runner(LLMConfig.from_env(repo_root=str(repo_root)))
-
-    def solve(pid: str, case: dict) -> fixture_admission.CaseOutcome:
-        output = eval_solver.run_case(pid, case, runner=runner, repo_root=str(repo_root))
-        # The inline-criterion case runner does not surface a priceable per-call usage row
-        # today (the ran-model string it would carry is not resolvable by the pricer — the
-        # bedrock-region pricing gap, tracked as follow-up). Reporting no rows is honest, not
-        # a claim of zero spend: the heal loop charges the pre-flight ESTIMATE per attempt
-        # (see `_record_spend`), so the budget cap still fails CLOSED.
-        return fixture_admission.CaseOutcome(fired=bool(output.get("findings")), usage_rows=[])
-
-    material_index = _material_index(repo_root)
-    return fixture_admission.run_admission(
+    _ensure_heal_work_dirs(
         manifest_path,
-        material_index=material_index,
-        solver=solve,
-        out_dir=spec_dir,
-        drift_path=drift_path,
-        ledger_path=ledger_path,
-        cap_usd=cap_usd,
-        reserve_usd=0.0,
-        repo_root=str(repo_root),
+        output_dirs=(spec_dir,),
+        output_files=(drift_path, ledger_path),
     )
+    fixture_selection.write_manifest(rows, manifest_path)
+    handle = gate_source.resolve_gate_handle(ref=None, source=None, repo_root=str(repo_root))
+
+    with gate_source.gate_read_root(handle):
+        config = gate_source.apply_handle(LLMConfig.from_env(repo_root=str(repo_root)), handle)
+        runner = get_runner(config)
+
+        def solve(pid: str, case: dict) -> fixture_admission.CaseOutcome:
+            output = eval_solver.run_case(pid, case, runner=runner, repo_root=str(repo_root))
+            # The inline-criterion case runner does not surface a priceable per-call usage row
+            # today (the ran-model string it would carry is not resolvable by the pricer — the
+            # bedrock-region pricing gap, tracked as follow-up). Reporting no rows is honest,
+            # not a claim of zero spend: the heal loop charges the pre-flight ESTIMATE per
+            # attempt (see `_record_spend`), so the budget cap still fails CLOSED.
+            return fixture_admission.CaseOutcome(fired=bool(output.get("findings")), usage_rows=[])
+
+        material_index = _material_index(repo_root)
+        return fixture_admission.run_admission(
+            manifest_path,
+            material_index=material_index,
+            solver=solve,
+            out_dir=spec_dir,
+            drift_path=drift_path,
+            ledger_path=ledger_path,
+            cap_usd=cap_usd,
+            reserve_usd=0.0,
+            repo_root=str(repo_root),
+        )
 
 
 def _material_index(repo_root: Path) -> dict[str, dict[str, Any]]:

@@ -15,6 +15,8 @@ import json
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -341,6 +343,147 @@ def test_production_attempter_classifies_failed_reproduce(tmp_path, monkeypatch)
 
     assert result.outcome == AttemptOutcome.FAILED_REPRODUCE
     assert result.reason == "non-reproducing"
+
+
+def test_production_attempter_creates_heal_work_dirs_before_manifest_write(
+    tmp_path, monkeypatch
+) -> None:
+    from rebar.llm import gate_source
+    from rebar.llm import runner as runner_mod
+    from rebar.llm.evals import fixture_admission, fixture_emit, fixture_selection
+    from rebar.llm.evals.fixture_mining import heal as heal_mod
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    rows = [{"criterion": "project.c1"}]
+    manifest_dir = repo / ".rebar" / "fixture_heal_manifests"
+    manifest_path = manifest_dir / "plan-review-project-c1.jsonl"
+    calls: list[Path] = []
+
+    def write_manifest(_rows, path):
+        calls.append(Path(path))
+        with Path(path).open("w", encoding="utf-8") as handle:
+            handle.write("{}\n")
+
+    @contextmanager
+    def gate_read_root(_handle):
+        yield
+
+    monkeypatch.setattr(fixture_selection, "write_manifest", write_manifest)
+    monkeypatch.setattr(
+        fixture_emit,
+        "emit_specs",
+        lambda _manifest, _out_dir: type("Report", (), {"skipped_unbalanced": set()})(),
+    )
+
+    assert not manifest_dir.exists()
+    assert heal_mod._emitter_skips_unbalanced("project.c1", rows, repo) is False
+    assert manifest_path in calls
+    manifest_path.unlink()
+    manifest_dir.rmdir()
+    assert not manifest_dir.exists()
+
+    monkeypatch.setattr(heal_mod, "_material_index", lambda _repo: {})
+    monkeypatch.setattr(
+        fixture_admission,
+        "run_admission",
+        lambda *_args, **_kwargs: type("Summary", (), {})(),
+    )
+    monkeypatch.setattr(
+        gate_source,
+        "resolve_gate_handle",
+        lambda ref, source, repo_root: object(),
+    )
+    monkeypatch.setattr(gate_source, "gate_read_root", gate_read_root)
+    monkeypatch.setattr(gate_source, "apply_handle", lambda config, _handle: config)
+    monkeypatch.setattr(runner_mod, "get_runner", lambda _config: object())
+
+    heal_mod._run_admission("project.c1", rows, repo, repo / "ledger.jsonl", 1.0)
+
+    assert calls == [manifest_path, manifest_path]
+
+
+def test_production_attempter_runs_agentic_admission_inside_gate_read_root(
+    tmp_path, monkeypatch
+) -> None:
+    from rebar.llm import gate_source
+    from rebar.llm import runner as runner_mod
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.evals import eval_solver, fixture_admission, fixture_selection
+    from rebar.llm.evals.fixture_mining import heal as heal_mod
+
+    @dataclass(frozen=True)
+    class Handle:
+        source: str = "attested"
+        path: Path = Path("snapshot")
+        tickets_path: str | None = None
+        sha: str = "abc123"
+        signable: bool = True
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    handle = Handle(path=tmp_path / "snapshot")
+    rows = [{"criterion": "project.c1"}]
+    gate_depth = 0
+    handle_applied = False
+    runner_configs: list[LLMConfig] = []
+
+    def resolve_gate_handle(ref, source, repo_root):
+        assert ref is None
+        assert source is None
+        assert repo_root == str(repo)
+        return handle
+
+    @contextmanager
+    def gate_read_root(resolved_handle):
+        nonlocal gate_depth
+        assert resolved_handle == handle
+        gate_depth += 1
+        try:
+            yield
+        finally:
+            gate_depth -= 1
+
+    def apply_handle(config, resolved_handle):
+        nonlocal handle_applied
+        assert resolved_handle == handle
+        handle_applied = True
+        return LLMConfig(runner="fake", repo_path=str(handle.path))
+
+    def get_runner(config):
+        runner_configs.append(config)
+        return object()
+
+    def run_admission(_manifest_path, *, solver, **_kwargs):
+        assert os.environ.get("REBAR_GATE_ALLOW_UNGATED") is None
+        solver("plan-review-project-c1", {"input": "plan text"})
+        assert gate_depth == 1
+        assert len(runner_configs) == 1
+        assert runner_configs[0].runner == "fake"
+        assert runner_configs[0].repo_path == str(handle.path)
+        assert handle_applied is True
+        return type("Summary", (), {})()
+
+    def run_case(*_args, **_kwargs):
+        if gate_depth != 1:
+            raise RuntimeError(
+                "agentic filesystem tools was attempted OUTSIDE the repo-snapshot gate process"
+            )
+        return {}
+
+    monkeypatch.delenv("REBAR_GATE_ALLOW_UNGATED", raising=False)
+    monkeypatch.setattr(fixture_selection, "write_manifest", lambda _rows, path: None)
+    monkeypatch.setattr(heal_mod, "_material_index", lambda _repo: {})
+    monkeypatch.setattr(gate_source, "resolve_gate_handle", resolve_gate_handle)
+    monkeypatch.setattr(gate_source, "gate_read_root", gate_read_root)
+    monkeypatch.setattr(gate_source, "apply_handle", apply_handle)
+    monkeypatch.setattr(runner_mod, "get_runner", get_runner)
+    monkeypatch.setattr(eval_solver, "run_case", run_case)
+    monkeypatch.setattr(fixture_admission, "run_admission", run_admission)
+
+    heal_mod._run_admission("project.c1", rows, repo, repo / "ledger.jsonl", 1.0)
+
+    assert len(runner_configs) == 1
 
 
 # ── Gate-finding oracle (2615 PS3 LLM-Review BLOCK) ──────────────────────────────────────
