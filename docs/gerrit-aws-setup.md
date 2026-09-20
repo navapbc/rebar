@@ -213,7 +213,8 @@ the import-not-recreate mechanics, and the name-preservation tradeoff.
 The compose stack (`infra/compose/docker-compose.yml`) runs **four services** — Gerrit
 (`gerritcodereview/gerrit:3.14.1`, publishes arm64), the rebar review-bot
 (`Dockerfile.reviewbot`,
-`uv sync --locked --no-dev --extra agents --extra reviewbot --extra bedrock`), the
+`uv sync --locked --no-dev --extra agents --extra reviewbot --extra bedrock`, with
+`pyproject.toml:353-356` pinning the required uv version to `==0.12.7`), the
 `opcert` signer, and the `mcp` server. **nginx is NOT in the
 stack** — it runs as a host package so host certbot can manage the cert and reload it
 (ADR-0007).
