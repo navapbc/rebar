@@ -280,8 +280,21 @@ mcp_port_of() {
   docker inspect -f '{{json .HostConfig.PortBindings}}' "$1" 2>/dev/null \
     | sed -nE 's/.*"8091\/tcp":[^]]*"HostPort":"([0-9]+)".*/\1/p' | head -1
 }
+mcp_running_port_of() {
+  docker port "$1" 8091/tcp 2>/dev/null | sed -E 's/.*:([0-9]+)$/\1/' | head -1
+}
 # The port the /mcp/ upstream include currently points at (the LIVE backend).
 mcp_live_port() { sed -nE 's/.*server[[:space:]]+127\.0\.0\.1:([0-9]+);.*/\1/p' "$MCP_UPSTREAM_FILE" 2>/dev/null | head -1; }
+# Return the running managed container currently bound to a host port, or nothing.
+mcp_running_backend_on_port() {
+  local want n
+  want="$1"
+  [ -n "$want" ] || return 0
+  while read -r n; do
+    [ -n "$n" ] || continue
+    [ "$(mcp_running_port_of "$n")" = "$want" ] && { echo "$n"; return 0; }
+  done < <(mcp_managed)
+}
 # Return the image serving a known managed port, or nothing when unresolved.
 mcp_image_on_port() {
   local want n
@@ -443,8 +456,9 @@ mcp_retire_graceful() {
 
 # Drain old running backends and reap exited ones; cap overflow emits a marker, never force-kills.
 mcp_retire_sweep() {
-  local live live_img n p img count running
+  local live live_img live_name n p img count running
   live="$(mcp_live_port)"
+  live_name="$(mcp_live_backend_name)"
   live_img="$(mcp_image_on_port "$live")"
   while read -r n; do
     [ -n "$n" ] || continue
@@ -452,7 +466,7 @@ mcp_retire_sweep() {
     running=false
     [ "$(docker inspect -f '{{.State.Running}}' "$n" 2>/dev/null)" = "true" ] && running=true
     # Retain the named live backend regardless of container state so restart can recover it.
-    if [ -n "$live" ] && [ "$p" = "$live" ]; then
+    if [ -n "$live_name" ] && [ "$n" = "$live_name" ]; then
       # Report a down live backend through the existing deploy-error alarm path.
       [ "$running" = true ] || err mcp-live-backend-down \
         "live mcp backend $n on port $p is NOT running; /mcp is failing. Retained (never reaped: nginx still points here); awaiting restart/redeploy"
@@ -632,6 +646,8 @@ mcp_live_backend_name() {
   local live n p
   live="$(mcp_live_port)"
   [ -n "$live" ] || return 0
+  n="$(mcp_running_backend_on_port "$live")"
+  [ -n "$n" ] && { echo "$n"; return 0; }
   while read -r n; do
     [ -n "$n" ] || continue
     p="$(mcp_port_of "$n")"
