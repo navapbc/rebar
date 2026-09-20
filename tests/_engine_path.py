@@ -50,6 +50,7 @@ must not reach for it.
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Iterable, Mapping
 from functools import cache, lru_cache
@@ -63,17 +64,25 @@ _ENGINE_MARKER: tuple[str, str] = ("rebar", "_engine")
 #: ``sys.modules`` keys that name an engine module (the package itself, or a submodule).
 _CANONICAL_PREFIX = "rebar_reconciler"
 
+# Resolved ONCE at import, with ``os.path`` only, and never recomputed. Import happens at
+# collection, long before any test rebinds ``os.name``; a lazily-resolved equivalent would
+# be computed on its first CALL, which for the post-test guard can fall inside a rebind
+# window where ``Path`` is unusable (see :func:`_engine_root_str`).
+# tests/_engine_path.py -> tests -> <repo>
+_REPO_ROOT_STR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+_ENGINE_DIR_STR = os.path.join(_REPO_ROOT_STR, "src", "rebar", "_engine")
+_CANONICAL_ENGINE_ROOT_STR = os.path.realpath(_ENGINE_DIR_STR)
+
 
 @lru_cache(maxsize=1)
 def repo_root() -> Path:
-    # tests/_engine_path.py -> tests -> <repo>
-    return Path(__file__).resolve().parents[1]
+    return Path(_REPO_ROOT_STR)
 
 
 @lru_cache(maxsize=1)
 def engine_dir() -> Path:
     """The ONE canonical engine root for the tests tree: the checkout's copy."""
-    return repo_root() / "src" / "rebar" / "_engine"
+    return Path(_ENGINE_DIR_STR)
 
 
 def acli_path() -> Path:
@@ -85,6 +94,27 @@ def is_canonical_key(name: str) -> bool:
     return name == _CANONICAL_PREFIX or name.startswith(_CANONICAL_PREFIX + ".")
 
 
+def _engine_root_str(path: str | Path) -> str | None:
+    """:func:`engine_root_of` as pure strings, for the post-test guard.
+
+    Deliberately builds NO ``Path``. ``pathlib.Path.__new__`` dispatches on the LIVE
+    value of ``os.name``, and a test that rebinds it to ``"nt"`` (the supported way to
+    exercise a Windows branch — ``tests/unit/test_enrich_drain.py`` does it twice) turns
+    every later ``Path(...)`` into a ``WindowsPath``, which raises ``NotImplementedError``
+    on POSIX. The guard runs during teardown, and ``monkeypatch`` undoes its rebinding
+    LAST of the function-scoped fixtures, so the guard is still inside the ``"nt"``
+    window and cannot rely on ``os.name`` being honest (bug ``f46c-8a93-2eb9-4913``).
+
+    ``os.path`` and ``os.sep`` are bound once at interpreter start from the REAL platform,
+    so they keep telling the truth no matter what ``os.name`` is rebound to.
+    """
+    parts = os.path.realpath(os.fspath(path)).split(os.sep)
+    for index in range(len(parts) - 1):
+        if (parts[index], parts[index + 1]) == _ENGINE_MARKER:
+            return os.sep.join(parts[: index + 2])
+    return None
+
+
 def engine_root_of(path: str | Path) -> Path | None:
     """The ``.../rebar/_engine`` root ``path`` lives under, or ``None``.
 
@@ -93,22 +123,22 @@ def engine_root_of(path: str | Path) -> Path | None:
     holders of a ``rebar_reconciler.*`` key. Only engine files are subject to the
     single-root rule, because only they exist twice.
     """
-    parts = Path(path).resolve().parts
-    for index in range(len(parts) - 1):
-        if (parts[index], parts[index + 1]) == _ENGINE_MARKER:
-            return Path(*parts[: index + 2])
-    return None
+    root = _engine_root_str(path)
+    return None if root is None else Path(root)
 
 
 @cache
-def _foreign_root(path: str) -> Path | None:
+def _foreign_root(path: str) -> str | None:
     """The engine root of ``path`` when it is an engine file from a NON-canonical copy.
 
+    Returns a STRING rather than a ``Path`` so the whole guard path stays free of
+    ``pathlib`` — see :func:`_engine_root_str` for why that matters.
+
     Cached on the path STRING: the guard re-reads the same few dozen ``__file__`` values
-    after every one of ~19k tests, and each miss costs a ``Path.resolve()`` syscall.
+    after every one of ~19k tests, and each miss costs a ``realpath`` syscall.
     """
-    root = engine_root_of(path)
-    if root is None or root == engine_dir().resolve():
+    root = _engine_root_str(path)
+    if root is None or root == _CANONICAL_ENGINE_ROOT_STR:
         return None
     return root
 
@@ -139,7 +169,7 @@ def foreign_engine_registrations(
 def _module_offences(name: str, module: object) -> Iterable[tuple[str, str]]:
     file_name = getattr(module, "__file__", None)
     if file_name and _foreign_root(str(file_name)) is not None:
-        yield (name, str(Path(file_name).resolve()))
+        yield (name, os.path.realpath(file_name))
     for entry in getattr(module, "__path__", ()) or ():
         if _foreign_root(str(entry)) is not None:
-            yield (f"{name}.__path__", str(Path(entry).resolve()))
+            yield (f"{name}.__path__", os.path.realpath(entry))
