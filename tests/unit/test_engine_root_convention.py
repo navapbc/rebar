@@ -204,3 +204,21 @@ def test_detector_accepts_a_non_engine_path_while_os_name_is_rebound(
     monkeypatch.setattr(os, "name", "nt")
 
     assert foreign_engine_registrations({"rebar_reconciler": probe}) == []
+
+
+def test_engine_root_of_returns_none_for_a_non_engine_path_while_os_name_is_rebound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The PUBLIC resolver's ``None`` branch must be Path-free too, not just the guard's.
+
+    :func:`foreign_engine_registrations` reaches the string-only ``_engine_root_str``, so
+    the two rebinding tests above never exercise :func:`engine_root_of` itself. That
+    matters because ``engine_root_of`` is the one caller that still builds a ``Path`` —
+    ``None if root is None else Path(root)`` — and under a rebound ``os.name`` only the
+    ``None`` arm is reachable without raising. A non-engine path is what the teardown
+    guard hits after every test, so pin that arm directly (bug ``f46c-8a93-2eb9-4913``).
+    """
+    outside = _TESTS_ROOT / "conftest.py"
+    monkeypatch.setattr(os, "name", "nt")
+
+    assert engine_root_of(outside) is None
