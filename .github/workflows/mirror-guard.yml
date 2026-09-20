@@ -3,17 +3,19 @@ name: Mirror Guard
 # Ticket a774 (epic b744) — continuous guardian for the Gerrit->GitHub mirror lock.
 #
 # After the WS7 cutover, GitHub `main` is a read-only mirror that only advances via Gerrit's
-# replication deploy key. This scheduled job verifies REPLICATION HEALTH: it FAILS
-# (-> GitHub notification) only when Gerrit-vs-GitHub `main` SHA divergence PERSISTS across
-# the in-run re-sample window (~2 extra samples, 45s apart), i.e. replication has stalled and
-# GitHub `main` has fallen behind/ahead of Gerrit. Expected ~15s post-submit replication lag
-# self-clears within that window instead of redding the run.
+# replication deploy key. This scheduled job verifies REPLICATION HEALTH in 2 ways: Gerrit-vs-
+# GitHub `main` SHA equality, and reachability of recent Gerrit MERGED revisions from the live
+# GitHub `main` tip. It FAILS (-> GitHub notification) only when SHA divergence or an unreachable
+# merged revision PERSISTS across the in-run re-sample window (~2 extra samples, 45s apart), i.e.
+# replication has stalled and GitHub `main` has fallen behind/ahead of Gerrit. Expected ~15s
+# post-submit replication lag self-clears within that window instead of redding the run.
 #
-# It runs `python -m rebar.mirror_guard --replication` through a thin exit-code wrapper. Both
-# reads are cheap and need no elevated auth: the Gerrit `main` SHA is read anonymously, and the
-# GitHub `main` SHA is a public-repo read (the Actions-native GITHUB_TOKEN is passed only to lift
-# API rate limits). So this runs on the default token with no fine-grained PAT. Exit 1 is a real
-# divergence; exit 2 is an IO/unreachable state where the mirror could not be checked.
+# It runs `python -m rebar.mirror_guard --replication --merged-reachability` through a thin
+# exit-code wrapper. These reads are cheap and need no elevated auth: the Gerrit `main` SHA and
+# merged-change refs are read anonymously, and the GitHub `main` SHA is a public-repo read (the
+# Actions-native GITHUB_TOKEN is passed only to lift API rate limits). So this runs on the default
+# token with no fine-grained PAT. Exit 1 is a real divergence; exit 2 is an IO/unreachable state
+# where the mirror could not be checked.
 #
 # NOTE: the lock-ruleset-drift check (`--ruleset`) is intentionally NOT run here — it needs
 # `administration:read`, which the default GITHUB_TOKEN cannot be granted. Ruleset drift is
