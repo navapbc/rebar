@@ -165,7 +165,7 @@ def test_merged_reachability_check_fetches_change_refs_and_checks_ancestry(monke
     monkeypatch.setattr(mirror_guard, "fetch_gerrit_merged_changes", lambda *a, **k: [change])
     monkeypatch.setattr(mirror_guard, "_git", fake_git)
 
-    v = mirror_guard.merged_reachability_check(limit=1)
+    v = mirror_guard.merged_reachability_check(limit=1, destination_ref="HEAD")
 
     assert v["healthy"] is True
     assert calls == [
@@ -204,7 +204,7 @@ def test_merged_reachability_check_reports_merged_revision_not_on_main(monkeypat
     monkeypatch.setattr(mirror_guard, "fetch_gerrit_merged_changes", lambda *a, **k: [change])
     monkeypatch.setattr(mirror_guard, "_git", fake_git)
 
-    v = mirror_guard.merged_reachability_check(limit=1)
+    v = mirror_guard.merged_reachability_check(limit=1, destination_ref="HEAD")
 
     assert v["healthy"] is False
     assert v["unreachable"] == [
@@ -216,6 +216,160 @@ def test_merged_reachability_check_reports_merged_revision_not_on_main(monkeypat
             "reason": "not ancestor of main",
         }
     ]
+
+
+def test_merged_reachability_resamples_revision_submitted_after_checkout(monkeypatch) -> None:
+    """A revision merged during the guard run is reachable on sample 2."""
+    change = {
+        "_number": 2997,
+        "subject": "Merged change 2997",
+        "current_revision": "revision-2997",
+        "revisions": {
+            "revision-2997": {
+                "fetch": {
+                    "anonymous http": {
+                        "url": "https://rebar.solutions.navateam.com/rebar",
+                        "ref": "refs/changes/97/2997/1",
+                    }
+                }
+            }
+        },
+    }
+    github_tips = iter(["checkout-time-main", "main-after-2997"])
+    merge_targets: list[str] = []
+    sleeps: list[float] = []
+
+    def fake_git(*args: str):
+        rc = 0
+        if args[:2] == ("merge-base", "--is-ancestor"):
+            merge_targets.append(args[3])
+            rc = 0 if args[3] == "main-after-2997" else 1
+        return type("CP", (), {"returncode": rc, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(mirror_guard, "fetch_gerrit_merged_changes", lambda *a, **k: [change])
+    monkeypatch.setattr(mirror_guard, "fetch_github_main_sha", lambda *a, **k: next(github_tips))
+    monkeypatch.setattr(mirror_guard, "_git", fake_git)
+    monkeypatch.setattr(mirror_guard, "_sleep", lambda seconds: sleeps.append(seconds))
+
+    verdicts, code = mirror_guard.run(
+        check_replication=False,
+        check_ruleset=False,
+        check_merged_reachability=True,
+        github_token="t",
+        lag_attempts=3,
+        lag_delay_seconds=5.0,
+        merged_limit=1,
+    )
+
+    assert code == 0
+    assert verdicts[0]["healthy"] is True
+    assert verdicts[0]["reason"] == (
+        "all 1 checked merged change revision(s) are reachable from main "
+        "(transient replication lag converged after 2 samples)"
+    )
+    assert verdicts[0]["samples"] == 2
+    assert sleeps == [5.0]
+    assert merge_targets == ["checkout-time-main", "main-after-2997"]
+
+
+def test_merged_reachability_refetches_main_instead_of_resampling_frozen_head(
+    monkeypatch,
+) -> None:
+    """Frozen HEAD stays stale; the re-fetched GitHub tip is healthy."""
+    change = {
+        "_number": 2994,
+        "subject": "Merged change 2994",
+        "current_revision": "revision-2994",
+        "revisions": {
+            "revision-2994": {
+                "fetch": {
+                    "anonymous http": {
+                        "url": "https://rebar.solutions.navateam.com/rebar",
+                        "ref": "refs/changes/94/2994/1",
+                    }
+                }
+            }
+        },
+    }
+    merge_targets: list[str] = []
+    sleeps: list[float] = []
+
+    def fake_git(*args: str):
+        rc = 0
+        if args[:2] == ("merge-base", "--is-ancestor"):
+            merge_targets.append(args[3])
+            rc = 0 if args[3] == "main-after-2994" else 1
+        return type("CP", (), {"returncode": rc, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(mirror_guard, "fetch_gerrit_merged_changes", lambda *a, **k: [change])
+    monkeypatch.setattr(mirror_guard, "fetch_github_main_sha", lambda *a, **k: "main-after-2994")
+    monkeypatch.setattr(mirror_guard, "_git", fake_git)
+    monkeypatch.setattr(mirror_guard, "_sleep", lambda seconds: sleeps.append(seconds))
+
+    verdicts, code = mirror_guard.run(
+        check_replication=False,
+        check_ruleset=False,
+        check_merged_reachability=True,
+        github_token="t",
+        lag_attempts=3,
+        lag_delay_seconds=5.0,
+        merged_limit=1,
+    )
+
+    assert code == 0
+    assert verdicts[0]["healthy"] is True
+    assert verdicts[0]["samples"] == 1
+    assert sleeps == []
+    assert merge_targets == ["main-after-2994"]
+
+
+def test_merged_reachability_stays_unhealthy_when_revision_never_reaches_main(
+    monkeypatch,
+) -> None:
+    change = {
+        "_number": 3001,
+        "subject": "Merged change 3001",
+        "current_revision": "revision-3001",
+        "revisions": {
+            "revision-3001": {
+                "fetch": {
+                    "anonymous http": {
+                        "url": "https://rebar.solutions.navateam.com/rebar",
+                        "ref": "refs/changes/01/3001/1",
+                    }
+                }
+            }
+        },
+    }
+    merge_targets: list[str] = []
+    sleeps: list[float] = []
+
+    def fake_git(*args: str):
+        if args[:2] == ("merge-base", "--is-ancestor"):
+            merge_targets.append(args[3])
+            return type("CP", (), {"returncode": 1, "stdout": "", "stderr": ""})()
+        return type("CP", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(mirror_guard, "fetch_gerrit_merged_changes", lambda *a, **k: [change])
+    monkeypatch.setattr(mirror_guard, "fetch_github_main_sha", lambda *a, **k: "main-without-3001")
+    monkeypatch.setattr(mirror_guard, "_git", fake_git)
+    monkeypatch.setattr(mirror_guard, "_sleep", lambda seconds: sleeps.append(seconds))
+
+    verdicts, code = mirror_guard.run(
+        check_replication=False,
+        check_ruleset=False,
+        check_merged_reachability=True,
+        github_token="t",
+        lag_attempts=3,
+        lag_delay_seconds=5.0,
+        merged_limit=1,
+    )
+
+    assert code == 1
+    assert verdicts[0]["healthy"] is False
+    assert verdicts[0]["samples"] == 3
+    assert sleeps == [5.0, 5.0]
+    assert merge_targets == ["main-without-3001", "main-without-3001", "main-without-3001"]
 
 
 # --- Contractual: CLI runner exit codes ------------------------------------

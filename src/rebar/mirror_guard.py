@@ -14,12 +14,13 @@ Actions workflow (primary) and a box CloudWatch probe (secondary, replication on
 **stdlib-only** (rebar core's contract — no boto3/requests): pure verdict functions plus thin
 ``urllib`` I/O and a CLI.
 
-The CLI/``run()`` replication path provides the transient-lag evaluation window **in-process**:
-a diverged sample is re-taken (default 3 samples, 45s apart) before the check is declared
-unhealthy, so expected post-submit replication lag (~15s) self-heals within one invocation.
-This makes the window portable across schedulers — any cron that can run the CLI gets lag
-absorption, with no dependency on a specific CI/alarm product. The box CloudWatch alarm
-remains the secondary pager for *sustained* divergence.
+The CLI/``run()`` replication and merged-reachability paths provide the transient-lag
+evaluation window **in-process**: a diverged/unreachable sample is re-taken (default 3
+samples, 45s apart) before the check is declared unhealthy, so expected post-submit
+replication lag (~15s) self-heals within one invocation. This makes the window portable
+across schedulers — any cron that can run the CLI gets lag absorption, with no dependency
+on a specific CI/alarm product. The box CloudWatch alarm remains the secondary pager for
+*sustained* divergence.
 
 Verdict schema (both checks): ``{"check": str, "healthy": bool, "reason": str, ...}``.
 CLI exit codes: ``0`` all healthy · ``1`` unhealthy (divergence/drift) · ``2`` fetch/IO error.
@@ -250,14 +251,37 @@ def _revision_fetch(change: dict[str, Any]) -> tuple[str | None, str | None]:
     return anon.get("url"), anon.get("ref")
 
 
+def _github_repo_git_url(repo: str) -> str:
+    return f"https://github.com/{repo}.git"
+
+
+def _fetch_github_main_for_reachability(repo: str, github_token: str | None) -> str:
+    github_sha = fetch_github_main_sha(repo, github_token)
+    fetched = _git("fetch", "--quiet", "--no-tags", _github_repo_git_url(repo), "main")
+    if fetched.returncode != 0:
+        raise ValueError(f"fetch GitHub main failed: {fetched.stderr.strip()[-500:]}")
+    return github_sha
+
+
 def merged_reachability_check(
     base_url: str = GERRIT_BASE_URL,
     *,
     limit: int = 100,
-    destination_ref: str = "HEAD",
+    destination_ref: str | None = None,
+    repo: str = GITHUB_REPO,
+    github_token: str | None = None,
 ) -> dict[str, Any]:
-    """Fetch recent merged patch-set refs and prove each is an ancestor of ``destination_ref``."""
+    """Fetch recent merged patch-set refs and prove each is an ancestor of ``destination_ref``.
+
+    When ``destination_ref`` is omitted, re-fetch the live GitHub ``main`` tip and compare
+    against that SHA rather than the checkout-time ``HEAD`` snapshot.
+    """
     unreachable: list[dict[str, Any]] = []
+    target_ref = (
+        _fetch_github_main_for_reachability(repo, github_token)
+        if destination_ref is None
+        else destination_ref
+    )
     changes = fetch_gerrit_merged_changes(base_url, limit=limit)
     for change in changes:
         revision = change.get("current_revision")
@@ -286,7 +310,7 @@ def merged_reachability_check(
                 }
             )
             continue
-        if _git("merge-base", "--is-ancestor", "FETCH_HEAD", destination_ref).returncode != 0:
+        if _git("merge-base", "--is-ancestor", "FETCH_HEAD", target_ref).returncode != 0:
             unreachable.append(
                 {
                     "number": number,
@@ -346,6 +370,35 @@ def _replication_check_with_lag_tolerance(
     return verdict
 
 
+def _merged_reachability_check_with_lag_tolerance(
+    base_url: str,
+    repo: str,
+    github_token: str | None,
+    *,
+    limit: int = 100,
+    attempts: int = 3,
+    delay_seconds: float = 45.0,
+) -> dict[str, Any]:
+    total_attempts = max(1, attempts)
+    verdict: dict[str, Any] = {}
+    for sample in range(1, total_attempts + 1):
+        verdict = merged_reachability_check(
+            base_url, limit=limit, repo=repo, github_token=github_token
+        )
+        if verdict["healthy"]:
+            if sample > 1:
+                verdict["reason"] = (
+                    f"{verdict['reason']} "
+                    f"(transient replication lag converged after {sample} samples)"
+                )
+            verdict["samples"] = sample
+            return verdict
+        if sample < total_attempts:
+            _sleep(delay_seconds)
+    verdict["samples"] = total_attempts
+    return verdict
+
+
 def run(
     *,
     check_replication: bool,
@@ -376,7 +429,16 @@ def run(
         if check_ruleset:
             verdicts.append(ruleset_verdict(fetch_github_ruleset(repo, token=github_token)))
         if check_merged_reachability:
-            verdicts.append(merged_reachability_check(base_url, limit=merged_limit))
+            verdicts.append(
+                _merged_reachability_check_with_lag_tolerance(
+                    base_url,
+                    repo,
+                    github_token,
+                    limit=merged_limit,
+                    attempts=lag_attempts,
+                    delay_seconds=lag_delay_seconds,
+                )
+            )
     except (
         urllib.error.URLError,
         TimeoutError,
@@ -415,13 +477,13 @@ def main(argv: list[str] | None = None) -> int:
         "--lag-attempts",
         type=int,
         default=3,
-        help="max replication samples before declaring divergence (lag tolerance)",
+        help="max samples before declaring divergence/unreachable revision (lag tolerance)",
     )
     parser.add_argument(
         "--lag-delay",
         type=float,
         default=45.0,
-        help="seconds to wait between replication samples",
+        help="seconds to wait between lag-tolerance samples",
     )
     parser.add_argument(
         "--merged-limit",
