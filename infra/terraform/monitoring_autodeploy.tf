@@ -639,7 +639,7 @@ resource "aws_cloudwatch_metric_alarm" "docker_buildkit_cache_high" {
   alarm_name        = "rebar-docker-buildkit-cache-high"
   alarm_description = <<-EOT
     BuildKit's cache is above 85% of ITS OWN share of the Docker budget. A GENERATOR alarm: it
-    fires while the volume is still comfortable — at 85% of the root disk the box is already
+    fires while the volume is still comfortable - at 85% of the root disk the box is already
     an incident. The cache is capped by the daemon's builder.gc policy
     (/etc/docker/daemon.json, from infra/scripts/docker-storage-cap.sh), so a cache above its
     cap means that policy is not in force. LOADED is not EFFECTIVE: the right number in
@@ -647,7 +647,7 @@ resource "aws_cloudwatch_metric_alarm" "docker_buildkit_cache_high" {
     BuildKit SILENTLY ignores a space key it does not recognise, so both can hold while the
     enforced ceiling is BuildKit's default. That key is a BUILDKIT feature, not an Engine one
     (maxUsedSpace at BuildKit >= 0.13, defaultKeepStorage below), and the Engine version does
-    not imply the BuildKit version — bug 3057: Engine 25.0.16, BuildKit 0.12.6. Re-run
+    not imply the BuildKit version - bug 3057: Engine 25.0.16, BuildKit 0.12.6. Re-run
     docker-storage-cap.sh --install; it reports effective keep-bytes and warns on mismatch.
     Metric: rebar/host:docker_buildkit_cache_used_percent (observability.sh 2f).
   EOT
