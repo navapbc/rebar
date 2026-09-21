@@ -194,6 +194,13 @@ def _normalise(text: str) -> str:
     return re.sub(r"[^a-z0-9]", "", text)
 
 
+def _strip_billing_region(body: str) -> str:
+    prefix, separator, rest = body.partition("-")
+    if separator and re.fullmatch(r"[A-Z]{2,4}[0-9]?", prefix):
+        return rest
+    return body
+
+
 def _marketplace_rate_key(service: str, usage_type: str) -> tuple[str, float] | None:
     if not service.endswith(BEDROCK_EDITION_SUFFIX):
         return None
@@ -273,7 +280,13 @@ def _seed_for(model_id: str, metric_name: str) -> float | None:
         if needle not in model_id:
             continue
         if metric_name == "OutputTokenCount":
-            return prices.get("output")
+            output = prices.get("output")
+            if output is not None:
+                return output
+            base = prices.get("input")
+            if base is None:
+                return None
+            return base * TOKEN_METRICS["OutputTokenCount"][1]
         base = prices.get("input")
         if base is None:
             return None
@@ -318,8 +331,7 @@ def _rate_for(model_id: str, metric_name: str, rates: dict) -> MeteredRate:
             if hit is None:
                 continue
             # Strip the "USE1-" style region prefix and the direction suffix.
-            body = usage_type[: -len(hit)].rstrip("-")
-            body = body.split("-", 1)[1] if "-" in body else body
+            body = _strip_billing_region(usage_type[: -len(hit)].rstrip("-"))
             norm = _normalise(body)
             if not norm:
                 continue
