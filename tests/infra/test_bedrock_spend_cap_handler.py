@@ -980,7 +980,7 @@ def test_estimated_metered_signal_respects_ce_interval_when_not_near_threshold(
     assert result["effective_source"] == "metered"
 
 
-def test_seed_for_missing_output_rate_falls_back_to_observed_input(
+def test_seed_for_missing_output_rate_uses_input_seed_before_observed_input(
     monkeypatch: pytest.MonkeyPatch,
 ):
     module = load_handler(monkeypatch, FakeAWS())
@@ -988,7 +988,10 @@ def test_seed_for_missing_output_rate_falls_back_to_observed_input(
 
     rate = module._rate_for("model", "OutputTokenCount", {"USE1-model-input-tokens": 2})
 
-    assert rate.rate == 2 * module.TOKEN_METRICS["OutputTokenCount"][1]
+    assert rate == module.MeteredRate(
+        rate=float(len("seed")) * module.TOKEN_METRICS["OutputTokenCount"][1],
+        source="seed",
+    )
 
 
 def test_rate_for_unpriced_model_uses_fail_closed_fallback(
@@ -1280,6 +1283,79 @@ def test_rate_for_claude_sonnet_45_uses_marketplace_empirical_rate(
     )
 
     assert rate == module.MeteredRate(rate=expected_rate, source="empirical")
+
+
+def test_rate_for_strips_only_known_region_prefix(monkeypatch: pytest.MonkeyPatch):
+    module = load_handler(monkeypatch, FakeAWS())
+    prefixed_rate = float(len("prefixed"))
+    no_prefix_rate = float(len("no-prefix"))
+    truncated_rate = float(len("short"))
+
+    prefixed = module._rate_for(
+        "alpha-beta",
+        "InputTokenCount",
+        {"USE1-alpha-beta-input-tokens": prefixed_rate},
+    )
+    no_prefix = module._rate_for(
+        "alpha-beta",
+        "InputTokenCount",
+        {
+            "beta-input-tokens": truncated_rate,
+            "alpha-beta-input-tokens": no_prefix_rate,
+        },
+    )
+
+    assert prefixed == module.MeteredRate(rate=prefixed_rate, source="empirical")
+    assert no_prefix == module.MeteredRate(rate=no_prefix_rate, source="empirical")
+
+
+def test_rate_for_preserves_meaningful_leading_model_segment(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = load_handler(monkeypatch, FakeAWS())
+    family_rate = float(len("family"))
+    truncated_rate = float(len("short"))
+
+    rate = module._rate_for(
+        "family-variant",
+        "InputTokenCount",
+        {
+            "variant-input-tokens": truncated_rate,
+            "family-variant-input-tokens": family_rate,
+        },
+    )
+
+    assert rate == module.MeteredRate(rate=family_rate, source="empirical")
+
+
+def test_seed_for_output_without_output_uses_input_multiplier(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = load_handler(monkeypatch, FakeAWS())
+    module.SEED_RATES = {"target-model": {"input": 2.0}}
+
+    rate = module._rate_for("target-model", "OutputTokenCount", {})
+
+    assert rate == module.MeteredRate(rate=10.0, source="seed")
+
+
+def test_seed_for_cache_metrics_still_derive_from_input_seed(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = load_handler(monkeypatch, FakeAWS())
+    base = 2.0
+    module.SEED_RATES = {"target-model": {"input": base}}
+
+    read_rate = module._rate_for("target-model", "CacheReadInputTokenCount", {})
+    write_rate = module._rate_for("target-model", "CacheWriteInputTokenCount", {})
+    output_rate = module._rate_for("target-model", "OutputTokenCount", {})
+
+    assert read_rate == module.MeteredRate(rate=base / 10, source="seed")
+    assert write_rate == module.MeteredRate(rate=base * 5 / 4, source="seed")
+    assert output_rate == module.MeteredRate(
+        rate=base * module.TOKEN_METRICS["OutputTokenCount"][1],
+        source="seed",
+    )
 
 
 def test_normalise_strips_stacked_single_and_no_prefixes(monkeypatch: pytest.MonkeyPatch):
