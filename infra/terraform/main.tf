@@ -111,8 +111,10 @@ resource "aws_instance" "gerrit" {
 
   # Pin the AMI: a new SSM-published AMI id must NOT force-replace the running
   # instance on every apply. Replacement is an explicit, deliberate action.
+  # Ignore only the provider's legacy `user_data` hash: the actual boot payload
+  # remains managed through `user_data_base64` above.
   lifecycle {
-    ignore_changes = [ami]
+    ignore_changes = [ami, user_data]
   }
 
   tags = {
