@@ -244,12 +244,18 @@ def test_tool_timeout_cancels_an_async_tool():
     """A hung ASYNC tool is cancelled at ~tool_timeout (bounded liveness); the run
     continues (a soft tool error goes back to the model — no exception raised)."""
     pydantic_ai.models.ALLOW_MODEL_REQUESTS = True
+    cancelled = False
     try:
         agent = Agent(_tool_calling_model(), tool_timeout=0.3)
 
         @agent.tool_plain
         async def slow() -> str:
-            await asyncio.sleep(5.0)
+            nonlocal cancelled
+            try:
+                await asyncio.sleep(5.0)
+            except asyncio.CancelledError:
+                cancelled = True
+                raise
             return "never"
 
         t0 = time.monotonic()
@@ -257,8 +263,9 @@ def test_tool_timeout_cancels_an_async_tool():
         elapsed = time.monotonic() - t0
     finally:
         pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
-    # timing: hang-guard — cancellation proof; the 5s sleep is the failure mode
-    assert elapsed < 2.0  # cancelled well before the 5s sleep
+    assert cancelled  # direct cancellation proof; wall time is only a liveness guard
+    # timing: hang-guard — abort-before-sleep proof; the 5s sleep is the failure mode
+    assert elapsed < 4.5  # cancelled before the 5s sleep completed
     assert "done" in str(result.output)  # the run recovered, not aborted
 
 
