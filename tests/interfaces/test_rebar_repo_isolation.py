@@ -28,8 +28,15 @@ import rebar
 from rebar import signing
 
 
-def _rewrite(path: Path, old: str, new: str) -> None:
-    path.write_text(path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+def _rewrite(path: Path, old: Path, new: Path) -> None:
+    old_resolved, new_resolved = old.resolve(), new.resolve()
+    text = path.read_text(encoding="utf-8")
+    for old_text, new_text in (
+        (str(old_resolved), str(new_resolved)),
+        (old_resolved.as_posix(), new_resolved.as_posix()),
+    ):
+        text = text.replace(old_text, new_text)
+    path.write_text(text, encoding="utf-8")
 
 
 def _tickets_ref(repo: Path) -> str:
@@ -65,7 +72,7 @@ def test_copy_rewrites_readonly_linked_worktree_git_pointer(
 
     assert_store_self_contained(copied)
     copied_marker = copied / ".tickets-tracker/.git"
-    assert str(copied.resolve()) in copied_marker.read_text(encoding="utf-8")
+    assert copied.resolve().as_posix() in copied_marker.read_text(encoding="utf-8")
     assert copied_marker.stat().st_mode & 0o222 == 0
 
 
@@ -76,10 +83,10 @@ def test_half_fixed_copy_is_rejected(_rebar_repo_template: Path, tmp_path: Path)
     worktree topology exposes it.
     """
     dest = tmp_path / "half"
-    shutil.copytree(_rebar_repo_template, dest, symlinks=True)
-    src_s, dst_s = str(_rebar_repo_template.resolve()), str(dest.resolve())
-    _rewrite(dest / _WORKTREE_POINTERS[0], src_s, dst_s)  # .tickets-tracker/.git only
-    # gitdir deliberately left stale.
+    _clone_template(_rebar_repo_template, dest)
+    dst_s = str(dest.resolve())
+    _rewrite(dest / _WORKTREE_POINTERS[1], dest, _rebar_repo_template)
+    # .tickets-tracker/.git points at the copy; gitdir deliberately points back at the source.
 
     # The weaker check that MUST NOT be used: it is green on this broken store.
     common = subprocess.run(
@@ -103,12 +110,7 @@ def test_bare_worktree_repair_is_destructive_and_is_rejected(
     private sacrificial source instead of the shared session template.
     """
     sacrificial = tmp_path / "sacrificial"
-    shutil.copytree(_rebar_repo_template, sacrificial, symlinks=True)
-    src_s, sac_s = str(_rebar_repo_template.resolve()), str(sacrificial.resolve())
-    for rel in _WORKTREE_POINTERS:
-        p = sacrificial / rel
-        if p.exists():
-            _rewrite(p, src_s, sac_s)
+    _clone_template(_rebar_repo_template, sacrificial)
     assert_store_self_contained(sacrificial)
 
     dest = tmp_path / "repaired"
@@ -120,7 +122,7 @@ def test_bare_worktree_repair_is_destructive_and_is_rejected(
         assert_store_self_contained(dest)
 
     # It also redirects the source tracker into the copy.
-    assert str(dest.resolve()) in (sacrificial / _WORKTREE_POINTERS[0]).read_text(
+    assert dest.resolve().as_posix() in (sacrificial / _WORKTREE_POINTERS[0]).read_text(
         encoding="utf-8"
     ), "expected bare repair to redirect the SOURCE store into the copy"
 
