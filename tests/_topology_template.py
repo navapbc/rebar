@@ -209,9 +209,24 @@ def _write_rewritten_path(path: Path, data: bytes, *, original: bytes) -> None:
         mode = path.stat().st_mode
         path.chmod(mode | stat.S_IWUSR)
         try:
-            path.write_bytes(data)
+            _rewrite_in_place(path, data)
         finally:
             path.chmod(mode)
+
+
+def _rewrite_in_place(path: Path, data: bytes) -> None:
+    """Replace ``path``'s contents without recreating the file.
+
+    ``write_bytes`` opens ``"wb"``, which maps to Win32 ``CREATE_ALWAYS``. That is refused
+    with ``ERROR_ACCESS_DENIED`` on a file carrying ``FILE_ATTRIBUTE_HIDDEN``, and Git for
+    Windows marks a linked worktree's ``.git`` pointer hidden. ``os.chmod`` on Windows only
+    toggles the read-only attribute, so clearing the read-only bit cannot lift that refusal --
+    which is why the retry here used to fail identically to the first attempt. ``"r+b"`` maps
+    to ``OPEN_EXISTING``, which carries no such restriction.
+    """
+    with path.open("r+b") as handle:
+        handle.write(data)
+        handle.truncate()
 
 
 def _remint_store_identities(topology: Path) -> None:
