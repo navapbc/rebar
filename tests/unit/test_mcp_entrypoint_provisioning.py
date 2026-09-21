@@ -501,7 +501,7 @@ def test_a_concurrent_reclone_is_not_interleaved(tmp_path: Path) -> None:
         f"a container must not clone while a peer holds the lock; git calls={run.git_calls}"
     )
     assert peer_work.exists(), "the peer's in-flight clone must not be cleared out from under it"
-    assert "timed out waiting" in run.stderr
+    assert "could not acquire the tickets re-clone lock within 2 seconds" in run.stderr
     assert run.returncode != 0
 
 
@@ -587,7 +587,7 @@ def test_the_ensure_step_does_not_run_while_a_peer_holds_the_store_lock(
         "the ensure step writes into the shared store (it takes rebar's write lock there), so "
         f"it must not run while a peer holds the store lock; ensure_calls={run.ensure_calls}"
     )
-    assert "timed out waiting for the tickets ensure lock" in run.stderr, (
+    assert "could not acquire the tickets ensure lock within 2 seconds" in run.stderr, (
         f"the ensure step must contend for the store lock and time out: {run.stderr}"
     )
     # Liveness: the soft posture still emits the terminal line even though ensure was skipped,
@@ -628,7 +628,7 @@ def test_the_code_checkout_is_not_cloned_while_a_peer_holds_its_lock(
     assert peer_work.exists(), (
         "the peer's in-flight code clone must not be cleared out from under it"
     )
-    assert "timed out waiting for the code checkout lock" in run.stderr
+    assert "could not acquire the code checkout lock within 2 seconds" in run.stderr
     assert run.returncode != 0
 
 

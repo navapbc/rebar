@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 from _git_upkeep import init_bare_remote
@@ -70,10 +73,62 @@ def _tree_snapshot(repo: Path) -> dict[str, bytes | str]:
     return snapshot
 
 
+def _path_with_failing_flock(tmp_path: Path) -> str:
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir(exist_ok=True)
+    fake_flock = fake_bin / "flock"
+    fake_flock.write_text("#!/bin/sh\necho fake flock invoked >&2\nexit 127\n")
+    fake_flock.chmod(0o755)
+    return f"{fake_bin}{os.pathsep}{os.environ['PATH']}"
+
+
+def _wait_for_file(path: Path, *, timeout_s: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if path.exists():
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"timed out waiting for {path}")
+
+
+def _kill_pid(pid: int) -> None:
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def _run_with_dir_lock(
+    lock_dir: Path,
+    label: str,
+    *command: str,
+    env_overrides: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    env = subprocess_env(env_overrides)
+    return subprocess.run(
+        [
+            "/bin/sh",
+            str(_ENTRYPOINT),
+            "--with-dir-lock",
+            str(lock_dir),
+            label,
+            *command,
+        ],
+        check=False,
+        cwd=_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
 def _run_provision(
     code_dir: Path,
     remote: Path,
     tmp_path: Path,
+    *,
+    env_overrides: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     ensure_script = tmp_path / "ensure-store.sh"
@@ -84,14 +139,215 @@ def _run_provision(
         REBAR_TRACKER_DIR=str(tmp_path / "tracker"),
         MCP_ENSURE_SCRIPT=str(ensure_script),
     )
+    if env_overrides is not None:
+        env = env.with_overrides(env_overrides)
     return subprocess.run(
-        ["sh", str(_ENTRYPOINT), "--provision-only"],
+        ["/bin/sh", str(_ENTRYPOINT), "--provision-only"],
         check=False,
         cwd=_ROOT,
         env=env,
         capture_output=True,
         text=True,
     )
+
+
+def test_with_dir_lock_uses_python_fcntl_when_flock_binary_unavailable(
+    tmp_path: Path,
+) -> None:
+    result = _run_with_dir_lock(
+        tmp_path / "lock",
+        "test",
+        "/bin/sh",
+        "-c",
+        "exit 0",
+        env_overrides={"PATH": _path_with_failing_flock(tmp_path)},
+    )
+
+    assert (result.returncode, "fake flock invoked" in result.stderr) == (0, False)
+
+
+def test_with_dir_lock_serializes_concurrent_holders(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "lock"
+    lock_dir.mkdir()
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    worker = tmp_path / "worker.sh"
+    worker.write_text(
+        "#!/bin/sh\n"
+        'active="$1/active"\n'
+        'if ! mkdir "$active" 2>/dev/null; then echo overlap >> "$1/overlap"; fi\n'
+        'echo enter >> "$1/log"\n'
+        "sleep 0.3\n"
+        'rmdir "$active"\n'
+    )
+    worker.chmod(0o755)
+    command = [
+        "/bin/sh",
+        str(_ENTRYPOINT),
+        "--with-dir-lock",
+        str(lock_dir),
+        "test",
+        str(worker),
+        str(state_dir),
+    ]
+
+    first = subprocess.Popen(
+        command,
+        cwd=_ROOT,
+        env=subprocess_env(MCP_RECLONE_LOCK_WAIT="5"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    second = subprocess.Popen(
+        command,
+        cwd=_ROOT,
+        env=subprocess_env(MCP_RECLONE_LOCK_WAIT="5"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    first_stdout, first_stderr = first.communicate(timeout=10)
+    second_stdout, second_stderr = second.communicate(timeout=10)
+
+    assert (
+        first.returncode,
+        second.returncode,
+        (state_dir / "overlap").exists(),
+        first_stdout,
+        first_stderr,
+        second_stdout,
+        second_stderr,
+    ) == (0, 0, False, "", "", "", "")
+
+
+def test_with_dir_lock_times_out_on_genuine_contention(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "lock"
+    lock_dir.mkdir()
+    ready = tmp_path / "ready"
+    holder = subprocess.Popen(
+        [
+            "/bin/sh",
+            str(_ENTRYPOINT),
+            "--with-dir-lock",
+            str(lock_dir),
+            "test",
+            "/bin/sh",
+            "-c",
+            f": > {ready}; sleep 2",
+        ],
+        cwd=_ROOT,
+        env=subprocess_env(MCP_RECLONE_LOCK_WAIT="5"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        _wait_for_file(ready)
+        contended = _run_with_dir_lock(
+            lock_dir,
+            "test",
+            "/bin/sh",
+            "-c",
+            "exit 0",
+            env_overrides={"MCP_RECLONE_LOCK_WAIT": "0"},
+        )
+    finally:
+        if holder.poll() is None:
+            holder.wait(timeout=5)
+
+    assert (
+        contended.returncode,
+        "could not acquire the test lock within 0 seconds" in contended.stderr,
+        "lock mechanism unavailable" in contended.stderr,
+    ) == (1, True, False)
+
+
+def test_with_dir_lock_releases_after_holder_process_dies(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "lock"
+    lock_dir.mkdir()
+    ready = tmp_path / "ready"
+    child_pid = tmp_path / "child.pid"
+    holder = subprocess.Popen(
+        [
+            "/bin/sh",
+            str(_ENTRYPOINT),
+            "--with-dir-lock",
+            str(lock_dir),
+            "test",
+            "/bin/sh",
+            "-c",
+            f"echo $$ > {child_pid}; : > {ready}; exec sleep 60",
+        ],
+        cwd=_ROOT,
+        env=subprocess_env(MCP_RECLONE_LOCK_WAIT="5"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        _wait_for_file(ready)
+        _kill_pid(holder.pid)
+        holder.wait(timeout=5)
+        result = _run_with_dir_lock(
+            lock_dir,
+            "test",
+            "/bin/sh",
+            "-c",
+            "exit 0",
+            env_overrides={"MCP_RECLONE_LOCK_WAIT": "2"},
+        )
+    finally:
+        if child_pid.exists():
+            _kill_pid(int(child_pid.read_text().strip()))
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_with_dir_lock_returns_wrapped_status_and_closes_fd(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "lock"
+
+    failed = _run_with_dir_lock(lock_dir, "test", "/bin/sh", "-c", "exit 37")
+    reacquired = _run_with_dir_lock(lock_dir, "test", "/bin/sh", "-c", "exit 0")
+
+    assert (failed.returncode, reacquired.returncode, reacquired.stderr) == (37, 0, "")
+
+
+def test_with_dir_lock_reports_unavailable_mechanism_not_timeout(tmp_path: Path) -> None:
+    result = _run_with_dir_lock(
+        tmp_path / "lock",
+        "test",
+        "/bin/sh",
+        "-c",
+        "exit 0",
+        env_overrides={"PATH": "/nonexistent"},
+    )
+
+    assert (
+        result.returncode,
+        "lock mechanism unavailable for the test lock" in result.stderr,
+        "could not acquire" in result.stderr,
+    ) == (1, True, False)
+
+
+def test_clean_code_workspace_refresh_does_not_require_flock_binary(tmp_path: Path) -> None:
+    source, remote = _init_remote(tmp_path)
+    checkout = tmp_path / "code"
+    _clone(remote, checkout)
+    remote_tip = _advance(source)
+
+    result = _run_provision(
+        checkout,
+        remote,
+        tmp_path,
+        env_overrides={"PATH": _path_with_failing_flock(tmp_path)},
+    )
+
+    assert (
+        result.returncode,
+        _head(checkout),
+        "fake flock invoked" in result.stderr,
+    ) == (0, remote_tip, False)
 
 
 def test_clean_code_workspace_behind_origin_main_fast_forwards(tmp_path: Path) -> None:

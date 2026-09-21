@@ -66,18 +66,76 @@ clear_tracker_dir() {
 # the deploy mutex. Lock the directory's persistent inode: sibling files are container-local,
 # while files inside the directory would be cleared. Calls are sequential and non-nested;
 # fd 9 is always closed while the command's soft-failure status is preserved.
+# mechanism-ok: lock with_dir_lock — 5967-b043-0a4e-4971 portable MCP volume lock without flock(1).
+acquire_dir_lock() {
+  adl_label="$1"
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "mcp: lock mechanism unavailable for the ${adl_label} lock — python3 is not on PATH" >&2
+    return 2
+  fi
+  python3 - "$MCP_RECLONE_LOCK_WAIT" "$adl_label" <<'PY'
+import errno
+import sys
+import time
+
+try:
+    import fcntl
+except ImportError:
+    print(
+        f"mcp: lock mechanism unavailable for the {sys.argv[2]} lock — "
+        "Python fcntl module is unavailable",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
+wait_text = sys.argv[1]
+label = sys.argv[2]
+try:
+    wait_seconds = float(wait_text)
+except ValueError:
+    print(
+        f"mcp: lock mechanism unavailable for the {label} lock — "
+        f"invalid MCP_RECLONE_LOCK_WAIT={wait_text}",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
+deadline = time.monotonic() + wait_seconds
+while True:
+    try:
+        fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        raise SystemExit(0)
+    except OSError as exc:
+        if exc.errno not in (errno.EACCES, errno.EAGAIN):
+            detail = exc.strerror or str(exc)
+            print(
+                f"mcp: lock mechanism unavailable for the {label} lock — "
+                f"fcntl.flock failed: {detail}",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            print(
+                f"mcp: could not acquire the {label} lock within {wait_text} seconds",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        time.sleep(min(0.05, remaining))
+PY
+}
+
 with_dir_lock() {
   wdl_dir="$1"
   wdl_label="$2"
   shift 2
   exec 9<"$wdl_dir"
-  if ! flock -w "$MCP_RECLONE_LOCK_WAIT" 9; then
-    echo "mcp: timed out waiting for the ${wdl_label} lock" >&2
+  if ! acquire_dir_lock "$wdl_label"; then
     exec 9<&-
     return 1
   fi
   wdl_rc=0
-  "$@" || wdl_rc=$?
+  (exec 9<&-; "$@") || wdl_rc=$?
   exec 9<&-
   return "$wdl_rc"
 }
@@ -273,6 +331,12 @@ provision_store() {
 }
 
 # Tests and operators may run provisioning synchronously; normal startup backgrounds it.
+if [ "${1:-}" = "--with-dir-lock" ]; then
+  shift
+  with_dir_lock "$@"
+  exit $?
+fi
+
 if [ "${1:-}" = "--provision-only" ]; then
   provision_store
   exit $?
