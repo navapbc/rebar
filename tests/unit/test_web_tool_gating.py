@@ -6,14 +6,17 @@ Tests make no model or web requests.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
+import pathlib
 from importlib import resources
 from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
 
+from rebar.llm import capabilities as capabilities_mod
 from rebar.llm import structured_run as structured_run_mod
 from rebar.llm.capabilities import (
     ModelCapabilities,
@@ -77,9 +80,103 @@ def test_web_capability_bounds_both_routes():
     # The local arm's own bound rides the DuckDuckGo tool (max_uses is native-only), so assert
     # the local tool was configured rather than default-constructed.
     local_impl = tool.local.function.__self__  # DuckDuckGoSearchTool behind the Tool
-    assert local_impl.max_results is not None and local_impl.max_results > 0, (
+    assert local_impl.max_results == capabilities_mod._LOCAL_WEB_SEARCH_MAX_RESULTS, (
         "local search results must be bounded per call"
     )
+
+
+def _fake_ddgs_class(exception: Exception):
+    from ddgs.ddgs import DDGS
+
+    class FakeDDGS(DDGS):
+        instances: ClassVar[list[FakeDDGS]] = []
+
+        def __init__(self):
+            self.calls: list[tuple[tuple, dict]] = []
+            FakeDDGS.instances.append(self)
+
+        def text(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            raise exception
+
+    return FakeDDGS
+
+
+def _run_local_web_search(monkeypatch, fake_ddgs):
+    import ddgs.ddgs as ddgs_mod
+    from pydantic_ai.common_tools import duckduckgo as upstream_duckduckgo
+
+    monkeypatch.setattr(ddgs_mod, "DDGS", fake_ddgs)
+    monkeypatch.setattr(upstream_duckduckgo, "DDGS", fake_ddgs)
+    tool = capabilities_mod.web_search_capabilities(web=True)[0]
+    local_impl = tool.local.function.__self__
+    return local_impl, asyncio.run(tool.local.function("prior art for a new integration"))
+
+
+def _validate_duckduckgo_results(results):
+    from pydantic import TypeAdapter
+    from pydantic_ai.common_tools.duckduckgo import DuckDuckGoResult
+
+    return TypeAdapter(list[DuckDuckGoResult]).validate_python(results)
+
+
+def test_local_web_search_no_results_exception_returns_empty_list(monkeypatch):
+    from ddgs.exceptions import DDGSException
+
+    fake_ddgs = _fake_ddgs_class(DDGSException("No results found."))
+    local_impl, results = _run_local_web_search(monkeypatch, fake_ddgs)
+
+    assert results == []
+    assert _validate_duckduckgo_results(results) == []
+    assert type(local_impl.client).__name__ == "RebarBoundaryDDGS"
+    assert isinstance(local_impl.client._delegate, fake_ddgs)
+    assert fake_ddgs.instances[0].calls
+
+
+def test_local_web_search_ddgs_failure_returns_single_unavailable_sentinel(monkeypatch):
+    from ddgs.exceptions import DDGSException
+
+    fake_ddgs = _fake_ddgs_class(DDGSException("backend refused"))
+    local_impl, results = _run_local_web_search(monkeypatch, fake_ddgs)
+
+    assert len(results) == 1
+    assert results[0]["title"] == "WEB_SEARCH_UNAVAILABLE"
+    assert results[0]["href"] == ""
+    assert "DDGSException" in results[0]["body"]
+    assert "backend refused" in results[0]["body"]
+    assert "Prior art could not be verified." in results[0]["body"]
+    assert _validate_duckduckgo_results(results) == results
+    assert type(local_impl.client).__name__ == "RebarBoundaryDDGS"
+
+
+def test_local_web_search_non_ddgs_failure_returns_single_unavailable_sentinel(monkeypatch):
+    from httpx import ConnectError
+
+    fake_ddgs = _fake_ddgs_class(ConnectError("offline"))
+    _local_impl, results = _run_local_web_search(monkeypatch, fake_ddgs)
+
+    assert len(results) == 1
+    assert results[0]["title"] == "WEB_SEARCH_UNAVAILABLE"
+    assert results[0]["href"] == ""
+    assert "ConnectError" in results[0]["body"]
+    assert "offline" in results[0]["body"]
+    assert "Prior art could not be verified." in results[0]["body"]
+    assert _validate_duckduckgo_results(results) == results
+
+
+def test_local_web_search_sentinel_serializes_to_model_visible_title_and_href(monkeypatch):
+    from httpx import ConnectError
+    from pydantic import TypeAdapter
+    from pydantic_ai.common_tools.duckduckgo import DuckDuckGoResult
+
+    fake_ddgs = _fake_ddgs_class(ConnectError("socket closed"))
+    _local_impl, results = _run_local_web_search(monkeypatch, fake_ddgs)
+
+    adapter = TypeAdapter(list[DuckDuckGoResult])
+    serialized = json.loads(adapter.dump_json(adapter.validate_python(results)))
+    assert len(serialized) == 1
+    assert serialized[0]["title"] == "WEB_SEARCH_UNAVAILABLE"
+    assert serialized[0]["href"] == ""
 
 
 def test_the_decision_takes_no_model_or_provider_input():
@@ -346,3 +443,43 @@ def test_t1_rubric_still_forbids_fabricated_citations_and_frames_results_as_untr
     text = _t1_rubric()
     assert "fabricate" in text
     assert "untrusted" in text
+
+
+def test_t1_rubric_grants_only_unverified_authority_to_the_local_failure_sentinel():
+    text = resources.files("rebar.llm").joinpath("reviewers/plan_review_T1.md").read_text()
+    lower = text.lower()
+
+    assert "WEB_SEARCH_UNAVAILABLE" in text
+    assert "exactly one record" in lower
+    assert "title exactly `WEB_SEARCH_UNAVAILABLE`" in text
+    assert 'href exactly `""`' in text
+    assert "rebar-issued local-tool failure notice" in lower
+    assert "prior art unverified" in lower
+    assert "only authority" in lower
+    assert "untrusted third-party data" in lower
+
+
+def test_t1_rubric_treats_zero_results_as_unverified_not_absent():
+    text = _t1_rubric()
+
+    assert "zero results" in text
+    assert "not evidence that no prior art exists" in text
+    assert "prior art unverified" in text
+    assert "cannot alone support a no-prior-art conclusion" in text
+
+
+def test_adr_0063_records_the_local_failure_boundary_reargument():
+    text = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "docs/adr/0063-web-search-capability-security-posture.md"
+    ).read_text()
+    lower = text.lower()
+
+    assert "adds no fetcher" in lower
+    assert "no page bodies" in lower
+    assert "does not raise `max_results`" in text
+    assert "asserts no domain filtering" in lower
+    assert "at most one rebar-authored record" in lower
+    assert "prior art UNVERIFIED" in text
+    assert "never manufacture prior art" in lower
+    assert "turn a block into a pass" in lower

@@ -135,6 +135,18 @@ _LOCAL_WEB_SEARCH_MAX_RESULTS = 5
 """Result records one local search may return — the local analogue of the bound above, since
 `max_uses` rides the native tool and so does not reach the local route."""
 
+_WEB_SEARCH_UNAVAILABLE_TITLE = "WEB_SEARCH_UNAVAILABLE"
+_WEB_SEARCH_UNAVAILABLE_BODY_SUFFIX = "Prior art could not be verified."
+_DDGS_NO_RESULTS_MESSAGE = "No results found."
+
+
+def _web_search_unavailable_result(exc: Exception) -> dict[str, str]:
+    return {
+        "title": _WEB_SEARCH_UNAVAILABLE_TITLE,
+        "href": "",
+        "body": f"{type(exc).__name__}: {exc}. {_WEB_SEARCH_UNAVAILABLE_BODY_SUFFIX}",
+    }
+
 
 def web_search_capabilities(*, web: bool):
     """Return web-search capability for a web-enabled request, otherwise ``None``.
@@ -147,14 +159,33 @@ def web_search_capabilities(*, web: bool):
     """
     if not web:
         return None
+    from ddgs.ddgs import DDGS
+    from ddgs.exceptions import DDGSException
     from pydantic_ai.capabilities import WebSearch
     from pydantic_ai.common_tools.duckduckgo import duckduckgo_search_tool
     from pydantic_ai.native_tools import WebSearchTool
 
+    class RebarBoundaryDDGS(DDGS):
+        _delegate: DDGS
+
+        def __init__(self, delegate: DDGS) -> None:
+            self._delegate = delegate
+
+        def text(self, *args: Any, **kwargs: Any):
+            try:
+                return self._delegate.text(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001 - web faults must not abort the gate
+                if isinstance(exc, DDGSException) and str(exc) == _DDGS_NO_RESULTS_MESSAGE:
+                    return []
+                return [_web_search_unavailable_result(exc)]
+
     return [
         WebSearch(
             native=WebSearchTool(max_uses=_WEB_SEARCH_MAX_USES),
-            local=duckduckgo_search_tool(max_results=_LOCAL_WEB_SEARCH_MAX_RESULTS),
+            local=duckduckgo_search_tool(
+                duckduckgo_client=RebarBoundaryDDGS(DDGS()),
+                max_results=_LOCAL_WEB_SEARCH_MAX_RESULTS,
+            ),
         )
     ]
 

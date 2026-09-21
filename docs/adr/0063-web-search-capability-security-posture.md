@@ -39,6 +39,12 @@ load-bearing content and are reproduced verbatim so the source comment can colla
    are untrusted data and forbids fabricated citations. Injected text cannot mint a finding shape
    the contract rejects, and cannot reach a tool the run was not given.
 
+The local DuckDuckGo failure boundary is inside that same contract. It adds no fetcher, returns no page bodies, does not raise `max_results`, and asserts no domain filtering, so volume is unchanged.
+It narrows shape on failure to at most one rebar-authored record
+(`title: WEB_SEARCH_UNAVAILABLE`, `href: ""`) instead of letting a local transport fault abort the
+review. The only authority granted to that record is "prior art UNVERIFIED": it can weaken a T1
+conclusion, never manufacture prior art or turn a BLOCK into a PASS.
+
 ### Accepted limitation — DOMAIN CONTROLS deliberately NOT used
 
 This is a real tradeoff, not an omission:
