@@ -1,7 +1,8 @@
 # Detect Terraform drift for affected pull requests and scheduled or manual branch checks. A
-# nonempty plan identifies unapplied HCL or infrastructure drift. Applies remain manual. The plan
-# job assumes the scoped OIDC read role and uses `-lock=false`, so it requires neither a static AWS
-# key nor a state-lock write.
+# nonempty plan identifies unapplied HCL or infrastructure drift. Applies remain manual and go
+# through `scripts/terraform_prod.py`, which enforces tracked-branch currency before it lets an
+# operator plan or apply the production root. The plan job assumes the scoped OIDC read role and
+# uses `-lock=false`, so it requires neither a static AWS key nor a state-lock write.
 #
 # Separate formatting and planning jobs ensure a formatting failure does not suppress the drift
 # result. Before planning, scheduled and manual runs require the checkout to equal the tracked

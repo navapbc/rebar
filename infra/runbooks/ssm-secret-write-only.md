@@ -72,11 +72,11 @@ Two independent ways to rotate; pick per situation:
    cleartext copy in the state history. Leave `value_wo_version` unchanged.
 
 2. **Terraform-driven rotation (when you want the apply to push the value)** — set the new value as
-   `value_wo` and **increment `value_wo_version`** (e.g. `1` → `2`) in the resource, then
-   `terraform apply`. The provider re-sends `value_wo` **only because the version changed**, so the
-   new value is written to AWS while still never touching state. Never commit a real secret as
-   `value_wo` in git — this path is for operator-local apply only; the committed value stays
-   `CHANGEME`.
+   `value_wo` and **increment `value_wo_version`** (e.g. `1` → `2`) in the resource, then plan and
+   apply through `scripts/terraform_prod.py` from the repository root. The provider re-sends
+   `value_wo` **only because the version changed**, so the new value is written to AWS while still
+   never touching state. Never commit a real secret as `value_wo` in git — this path is for
+   operator-local apply only; the committed value stays `CHANGEME`.
 
 Either way the value never lands in terraform state.
 
@@ -143,11 +143,11 @@ This is the deferred operator work (a `task` linked `discovered_from` `finedrawn
 it **after** the `value_wo` code change lands, and coordinate with the separate `rubied` apply that
 seeds the 4 new MCP-PAT SSM params so the scrub covers those too.
 
-1. **Apply the migration.** `terraform apply` the `value_wo` change. On this **first** apply,
-   `value_wo_version` goes absent → `1` for each migrated slot, so the provider sends
-   `value_wo = "CHANGEME"` once and **resets every migrated secret to the placeholder**. This is the
-   intended, safe reset — you are about to rotate these secrets regardless. `user_data.sh`'s
-   `CHANGEME` fail-fast prevents a boot on a placeholder in the gap.
+1. **Apply the migration.** Use `scripts/terraform_prod.py` to plan and apply the `value_wo`
+   change. On this **first** apply, `value_wo_version` goes absent → `1` for each migrated slot,
+   so the provider sends `value_wo = "CHANGEME"` once and **resets every migrated secret to the
+   placeholder**. This is the intended, safe reset — you are about to rotate these secrets
+   regardless. `user_data.sh`'s `CHANGEME` fail-fast prevents a boot on a placeholder in the gap.
 
 2. **Re-seed / rotate in the same window.** For every affected slot, generate a **new** value
    (rotation — the old values were exposed in cleartext state) and `aws ssm put-parameter --overwrite`
