@@ -154,9 +154,9 @@ terraform apply        # creates rebar-tfstate-<aws-account-id> (versioned, encr
 
 # (b) Main stack — uses the S3 backend the bootstrap created
 cd ../terraform
-terraform init         # backend "s3" points at rebar-tfstate-<aws-account-id>
-terraform plan
-terraform apply        # network, instance role, DLM, the 7 SSM placeholders,
+python3 ../../scripts/terraform_prod.py plan --out ../../.rebar/scratch/<session>/plan.tfplan
+python3 ../../scripts/terraform_prod.py apply ../../.rebar/scratch/<session>/plan.tfplan
+                       # network, instance role, DLM, the 7 SSM placeholders,
                        # EC2 instance + EBS data volume + EIP + DNS record
 ```
 

@@ -332,12 +332,17 @@ State lives in the S3 backend `rebar-tfstate-896586841071`
 (`infra/terraform/versions.tf`) with **S3-native lock** (`use_lockfile`, requires
 Terraform >= 1.10 — an older CLI silently runs with NO locking). Always:
 
-1. `terraform init` against the real backend (no `-backend=false`).
-2. `terraform plan -out plan.tfplan` — and **read it**. For S7, confirm the plan
-   does NOT propose destroying/replacing S1-owned resources (instance, data
-   volume, DLM, IAM roles); S7 should only add the SNS topic/subscription and the
-   alarms, and read the data sources.
-3. `terraform apply plan.tfplan` (apply the saved plan, not a fresh one, so what
-   you reviewed is exactly what runs).
+1. Run the mediated production wrapper from the repository root:
+   `python3 scripts/terraform_prod.py plan --out .rebar/scratch/<session>/plan.tfplan`
+   (append Terraform selectors after `--`, for example `-- -target=...`). It runs
+   `terraform init`, refuses any tree other than the fetched `origin/main` tip, and writes
+   a sidecar tying the saved plan to that exact commit.
+2. **Read the saved plan output before applying.** For S7, confirm the plan does NOT
+   propose destroying/replacing S1-owned resources (instance, data volume, DLM, IAM roles);
+   S7 should only add the SNS topic/subscription and the alarms, and read the data sources.
+3. Apply through the same wrapper:
+   `python3 scripts/terraform_prod.py apply .rebar/scratch/<session>/plan.tfplan`. It
+   rechecks `origin/main` currency and refuses to apply a plan produced from a different
+   commit or Terraform root, so what you reviewed is exactly what runs.
 4. Never run two applies concurrently — the lock serializes them; if you see a
    lock error, someone else is applying. Wait, don't `-lock=false`.

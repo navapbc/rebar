@@ -58,10 +58,11 @@ the reusable **`infra/terraform/modules/sso-gate`** module (edge-gate source und
 `infra/terraform/auth/edge-gate/`, sharing `auth/lib/cookie.js` with the auth host so
 sign/verify can never drift). To protect a distribution, add one module block + one
 `lambda_function_association` on its `default_cache_behavior` — see
-`infra/terraform/modules/sso-gate/README.md` for the copy-paste shape — and
-`terraform apply` from `infra/terraform`. The new gate reuses the same cookie, so a
-user already signed in elsewhere reaches it without re-auth. (rebar currently runs no
-gate instance — the auth host + module are staged for the first rebar subdomain.)
+`infra/terraform/modules/sso-gate/README.md` for the copy-paste shape — then plan and apply from
+the repository root with `python3 scripts/terraform_prod.py plan --out <plan>` and
+`python3 scripts/terraform_prod.py apply <plan>`. The new gate reuses the same cookie, so a user
+already signed in elsewhere reaches it without re-auth. (rebar currently runs no gate instance —
+the auth host + module are staged for the first rebar subdomain.)
 
 ## Secrets
 
@@ -88,7 +89,8 @@ so you rotate it **out-of-band** and then force consumers to pick it up:
    aws ssm put-parameter --name /auth-solutions/COOKIE_SIGNING_SECRET \
      --type SecureString --value "$(openssl rand -base64 36 | tr -d '/+=' | head -c 48)" \
      --overwrite --region us-east-1
-   cd infra/terraform && terraform apply -replace=aws_lambda_function.auth_host
+   python3 scripts/terraform_prod.py plan --out <plan> -- -replace=aws_lambda_function.auth_host
+   python3 scripts/terraform_prod.py apply <plan>
    ```
    The auth host reads the key from SSM at runtime and caches it for the life of each
    warm container (no TTL — see `getSecrets()` in `auth/auth-host/index.js`), so the
@@ -109,7 +111,8 @@ aws ssm put-parameter --name /auth-solutions/GOOGLE_CLIENT_SECRET \
   --type SecureString --value 'NEW_SECRET' --overwrite --region us-east-1
 ```
 Both old and new secrets are valid during the overlap, so sign-in keeps working; to
-force immediate pickup, `cd infra/terraform && terraform apply -replace=aws_lambda_function.auth_host`.
+force immediate pickup, plan/apply through `scripts/terraform_prod.py` with
+`-- -replace=aws_lambda_function.auth_host`.
 Then delete the old secret in the Google console.
 
 ## Incident response — revoke all access now
@@ -121,8 +124,8 @@ sign-ins then fail at `/authorize`.
 
 ## Deploy & verify
 
-Deploy from `infra/terraform` (`terraform apply`; provider is us-east-1, a Lambda@Edge
-requirement). CloudFront + Lambda@Edge propagate asynchronously (minutes).
+Deploy through `scripts/terraform_prod.py`; provider is us-east-1, a Lambda@Edge requirement.
+CloudFront + Lambda@Edge propagate asynchronously (minutes).
 
 **Prerequisite:** the Google OAuth client must keep
 `https://auth.solutions.navateam.com/_callback` as an Authorized redirect URI, or
