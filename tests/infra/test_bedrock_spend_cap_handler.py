@@ -1180,7 +1180,10 @@ def test_refresh_rates_bridges_claude_marketplace_and_preserves_legacy_bedrock(
 
     rates = module._refresh_rates()
 
-    expected_claude_rate = pytest.approx(claude_cost / (claude_quantity / 1000))
+    # Marketplace quantity is in units of 1,000,000 tokens; the rate table is per 1,000,
+    # so the quantity is scaled UP by 1,000. Asserting cost / (quantity / 1000) here would
+    # merely restate the implementation -- which is how a 1,000,000x error passed review.
+    expected_claude_rate = pytest.approx(claude_cost / (claude_quantity * 1000))
     assert rates["USE1-Claude Sonnet 4.5-input-tokens"] == expected_claude_rate
     assert rates["USE1-Claude Sonnet 4.5-output-tokens"] == expected_claude_rate
     assert rates["USE1-Claude Sonnet 4.5-cache-read-input-token-count"] == expected_claude_rate
@@ -1188,9 +1191,21 @@ def test_refresh_rates_bridges_claude_marketplace_and_preserves_legacy_bedrock(
     assert rates["USE1-model-input-tokens"] == legacy_cost / legacy_quantity
 
 
-def test_refresh_rates_converts_marketplace_raw_tokens_to_thousand_token_units(
+def test_refresh_rates_prices_marketplace_million_token_units_at_list_price(
     monkeypatch: pytest.MonkeyPatch,
 ):
+    """A marketplace rate must come out at the published $/1,000-token price.
+
+    The figures below are this account's real 2026-09-21 Cost Explorer row for
+    `Claude Sonnet 4.6 (Amazon Bedrock Edition)` input tokens: $11.1250 over a
+    quantity of 3.3712, i.e. $3.30 per unit. $3.30 is the per-MILLION-token list
+    price, which is what fixes the unit: quantity is in millions, so the derived
+    per-1,000-token rate must be $0.0033.
+
+    Under the previous scaling this returned 3300.0 -- a thousand dollars per
+    thousand tokens -- and tripped a $500 daily cap after ~152,000 tokens while
+    real spend was $0.
+    """
     fake_aws = FakeAWS(
         ce=FakeCE(
             results_by_time=[
@@ -1202,8 +1217,8 @@ def test_refresh_rates_converts_marketplace_raw_tokens_to_thousand_token_units(
                                 "USE1-MP:USE1_InputTokenCount-Units",
                             ],
                             "Metrics": {
-                                "UnblendedCost": {"Amount": "2"},
-                                "UsageQuantity": {"Amount": "2000"},
+                                "UnblendedCost": {"Amount": "11.1250"},
+                                "UsageQuantity": {"Amount": "3.3712"},
                             },
                         },
                     ]
@@ -1215,7 +1230,7 @@ def test_refresh_rates_converts_marketplace_raw_tokens_to_thousand_token_units(
 
     rates = module._refresh_rates()
 
-    assert rates["USE1-Claude Sonnet 4.5-input-tokens"] == 1
+    assert rates["USE1-Claude Sonnet 4.5-input-tokens"] == pytest.approx(0.0033, rel=1e-4)
 
 
 def test_refresh_rates_reads_all_cost_explorer_pages(monkeypatch: pytest.MonkeyPatch):

@@ -37,8 +37,14 @@ right for this account rather than right for the public rate card. (The AWS
 Price List API was evaluated and rejected: its `model` dimension for
 AmazonBedrock still tops out at Claude 3, and no usagetype mentions anthropic.)
 
-Usage types look like the Bedrock model id plus token direction, and UsageQuantity is
-in units of 1,000 tokens.
+Usage types look like the Bedrock model id plus token direction. UsageQuantity
+is NOT in the same unit for both services Bedrock bills through: the legacy
+`Amazon Bedrock` service meters in units of 1,000 tokens, while the marketplace
+`... (Amazon Bedrock Edition)` services meter in units of 1,000,000 tokens.
+The rate table is $/1,000 tokens throughout, so every quantity is converted to
+that unit before a rate is derived from it. Getting this wrong is not a rounding
+error -- it is a factor of a million, and it lands on the side that trips the
+cap at a thousandth of the real spend.
 
 A model that has never been billed in the rate window has no empirical rate.
 Its tokens are priced at UNKNOWN_RATE_PER_1K, which is set deliberately HIGH so
@@ -107,6 +113,10 @@ BEDROCK_SERVICE_VALUES = [
     "Claude Opus 4.7 (Amazon Bedrock Edition)",
 ]
 BEDROCK_EDITION_SUFFIX = " (Amazon Bedrock Edition)"
+# Marketplace-billed Bedrock models are metered in units of 1,000,000 tokens, while the
+# rate table -- and the legacy `Amazon Bedrock` service -- work in units of 1,000. Scale
+# marketplace quantities onto the rate table's unit before deriving cost/quantity.
+MARKETPLACE_TOKENS_PER_RATE_UNIT = 1000
 MARKETPLACE_TOKEN_SUFFIXES = {
     "InputTokenCount": "input-tokens",
     "OutputTokenCount": "output-tokens",
@@ -216,12 +226,12 @@ def _marketplace_rate_key(service: str, usage_type: str) -> tuple[str, float] | 
     if suffix is None:
         return None
     model_label = service.removesuffix(BEDROCK_EDITION_SUFFIX)
-    return f"{region}-{model_label}-{suffix}", 1000
+    return f"{region}-{model_label}-{suffix}", MARKETPLACE_TOKENS_PER_RATE_UNIT
 
 
 def _rate_key_for_ce_group(service: str, usage_type: str) -> tuple[str, float] | None:
     if service == "Amazon Bedrock":
-        return usage_type, 1
+        return usage_type, 1  # already metered in units of 1,000 tokens
     return _marketplace_rate_key(service, usage_type)
 
 
@@ -260,12 +270,12 @@ def _refresh_rates() -> dict:
                 rate_key = _rate_key_for_ce_group(service, usage_type)
                 if rate_key is None:
                     continue
-                usage_type, quantity_divisor = rate_key
+                usage_type, quantity_scale = rate_key
                 cost = float(group["Metrics"]["UnblendedCost"]["Amount"])
                 qty = float(group["Metrics"]["UsageQuantity"]["Amount"])
                 acc = totals.setdefault(usage_type, [float(0), float(0)])
                 acc[0] += cost
-                acc[1] += qty / quantity_divisor
+                acc[1] += qty * quantity_scale
 
     rates = {
         usage_type: cost / qty for usage_type, (cost, qty) in totals.items() if qty > 0 and cost > 0
