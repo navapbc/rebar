@@ -171,7 +171,10 @@ def _redispatch_script() -> str:
 
 
 def _run_redispatch(
-    tmp_path: Path, gh_body: str, extra_env: dict[str, str] | None = None
+    tmp_path: Path,
+    gh_body: str,
+    extra_env: dict[str, str] | None = None,
+    extra_stubs: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Execute the re-dispatch step with a stubbed ``gh`` (and ``sleep``) on PATH.
 
@@ -190,6 +193,10 @@ def _run_redispatch(
         f'#!/usr/bin/env bash\nprintf "%s\\n" "$1" >> "{tmp_path / "slept"}"\n', encoding="utf-8"
     )
     sleep_stub.chmod(0o755)
+    for name, body in (extra_stubs or {}).items():
+        stub = bin_dir / name
+        stub.write_text("#!/usr/bin/env bash\n" + body + "\n", encoding="utf-8")
+        stub.chmod(0o755)
 
     script = tmp_path / "redispatch.sh"
     script.write_text("#!/usr/bin/env bash\n" + _redispatch_script() + "\n", encoding="utf-8")
@@ -224,6 +231,26 @@ _DISABLED_422 = (
 def test_redispatch_treats_a_disabled_workflow_422_as_a_benign_no_op(tmp_path: Path) -> None:
     """A disabled-workflow 422 is benign because the hourly schedule restarts the loop."""
     completed = _run_redispatch(tmp_path, _DISABLED_422)
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    combined = completed.stdout + completed.stderr
+    assert "::warning::" in combined
+    assert "::error::" not in combined
+
+
+def test_redispatch_downgrade_survives_a_failing_external_command(tmp_path: Path) -> None:
+    """The benign-422 verdict must be decided by BUILTINS, never by a second process.
+
+    Bug a11a: CI took the fatal branch on a disabled-workflow 422 whose `dispatch_out`
+    demonstrably carried both tokens, which is only reachable if the `grep` pipeline
+    deciding the verdict returned non-zero -- under `set -o pipefail` that reds an
+    already-converged pass, the exact outcome bug 8aed's downgrade exists to prevent.
+    The ultimate trigger for that one non-zero was never reproduced; this oracle pins the
+    PROPERTY that makes the trigger irrelevant, by shadowing `grep` with one that always
+    fails. A step that shells out to decide fails here deterministically; a step that
+    matches with builtins never consults it.
+    """
+    completed = _run_redispatch(tmp_path, _DISABLED_422, extra_stubs={"grep": "exit 1"})
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
     combined = completed.stdout + completed.stderr
