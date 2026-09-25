@@ -6,7 +6,6 @@ import importlib.util
 import sys
 import types
 from pathlib import Path
-from typing import NoReturn
 
 import pytest
 from botocore.exceptions import ClientError
@@ -26,6 +25,17 @@ class FixedDateTime(dt.datetime):
         return cls(2026, 1, 8, 12, tzinfo=tz or dt.timezone.utc)
 
 
+class FakePaginator:
+    def __init__(self, pages, error):
+        self.pages = pages
+        self.error = error
+
+    def paginate(self, **kwargs):
+        if self.error:
+            raise self.error
+        return self.pages
+
+
 class FakeCloudWatch:
     def __init__(
         self,
@@ -36,14 +46,16 @@ class FakeCloudWatch:
     ) -> None:
         self.pages = pages or []
         self.values_by_id = values_by_id or {}
+        self.paginator_calls = 0
         self.data_error = data_error
 
-    def get_paginator(self, name: str) -> NoReturn:
-        # The enforcement path reads the undimensioned aggregates and must never
-        # enumerate models. Any list_metrics call is a regression, so fail loudly
-        # instead of serving it -- this makes every test in the module an assertion
-        # that the enforcement path stays free of list_metrics.
-        raise AssertionError(f"enforcement path must not call get_paginator({name!r})")
+    def get_paginator(self, name: str) -> FakePaginator:
+        # Enumeration is legitimate on the ATTRIBUTION path and forbidden on the
+        # enforcement path, so record the calls rather than refusing them and let the
+        # tests assert which path made them.
+        assert name == "list_metrics"
+        self.paginator_calls += 1
+        return FakePaginator(self.pages, None)
 
     def get_metric_data(self, MetricDataQueries: list[dict], **kwargs) -> dict:
         if self.data_error:
@@ -61,8 +73,15 @@ class FakeSSM:
         class ParameterNotFound(Exception):
             pass
 
-    def __init__(self, state: dict | None = None) -> None:
+    def __init__(self, state: dict | None = None, *, guard_done: bool = True) -> None:
         self.state = state or {}
+        # The upper-bound guard makes one extra Cost Explorer read, at most once per
+        # UTC day. Default the harness to "already ran today" so CE-accounting tests
+        # measure the enforcement path alone; the guard's own tests clear it.
+        if guard_done and self.state:
+            # The guard keys on the SETTLED day it processed, not on today.
+            settled = TODAY - dt.timedelta(days=2)
+            self.state.setdefault("guard_day", settled.isoformat())
 
     def get_parameter(self, Name: str) -> dict:
         if not self.state:
@@ -502,7 +521,10 @@ def test_due_ce_read_can_determine_effective_spend(
 
     result = run_handler(module, WARN_THRESHOLD - len("x"))
 
-    assert fake_aws.ce.calls == len("x")
+    # Two reads: the enforcement poll, plus the upper-bound guard's one-per-day
+    # read of a settled day. This test starts from empty state, so the guard
+    # has not yet run for that day.
+    assert fake_aws.ce.calls == len("xx")
     assert result["effective_source"] == "ce"
 
 
@@ -628,7 +650,10 @@ def test_metered_signal_can_determine_effective_spend_when_it_exceeds_ce(
 
     result = run_handler(module, THRESHOLD - len("x"))
 
-    assert fake_aws.ce.calls == len("x")
+    # Two reads: the enforcement poll, plus the upper-bound guard's one-per-day
+    # read of a settled day. This test starts from empty state, so the guard
+    # has not yet run for that day.
+    assert fake_aws.ce.calls == len("xx")
     assert result["effective_source"] == "metered"
 
 
@@ -1334,3 +1359,273 @@ def test_ce_arm_trips_at_the_unscaled_threshold(monkeypatch: pytest.MonkeyPatch)
     assert result["effective_source"] == "ce"
     assert result["effective_usd"] == pytest.approx(THRESHOLD)
     assert result["deny_attached"] is True
+
+
+# ---------------------------------------------------------------------------
+# Recorded-payload fixtures.
+#
+# The previous suite synthesized rate keys from the ModelId spelling rather than
+# the real billing label, so a label/id mismatch was unrepresentable and four live
+# mispricings coexisted with a green suite. These fixtures carry the STRUCTURE of
+# real responses -- every usage-type convention AWS actually bills, in one file --
+# with synthetic amounts, because this repository is public.
+# ---------------------------------------------------------------------------
+FIXTURES = Path(__file__).parent / "fixtures"
+CE_FIXTURE = json_loads((FIXTURES / "bedrock_ce_payload.json").read_text(encoding="utf-8"))
+LIST_METRICS_FIXTURE = json_loads(
+    (FIXTURES / "bedrock_list_metrics.json").read_text(encoding="utf-8")
+)
+
+
+def _fixture_usage_types() -> list[tuple[str, str]]:
+    return [
+        (group["Keys"][0], group["Keys"][1])
+        for period in CE_FIXTURE["ResultsByTime"]
+        for group in period["Groups"]
+    ]
+
+
+def test_ce_fixture_carries_every_billing_convention():
+    """One file must contain all four shapes, or the corpus silently loses coverage."""
+    usage_types = [usage for _service, usage in _fixture_usage_types()]
+    assert any("TokenCount" in u for u in usage_types), "CamelCase convention missing"
+    assert any("_tokens_" in u for u in usage_types), "snake_case convention missing"
+    assert any("lobal" in u for u in usage_types), "_Global variant missing"
+    assert any("token" not in u.lower() for u in usage_types), "non-token usage type missing"
+
+
+def test_ce_fixture_amounts_are_synthetic():
+    """The repo is public, so no fixture may carry a real billed amount.
+
+    Recorded amounts are replaced with an arithmetic progression, which is both
+    obviously synthetic and cheap to assert.
+    """
+    for period in CE_FIXTURE["ResultsByTime"]:
+        for index, group in enumerate(period["Groups"]):
+            cost = float(group["Metrics"]["UnblendedCost"]["Amount"])
+            quantity = float(group["Metrics"]["UsageQuantity"]["Amount"])
+            assert cost == pytest.approx((index + 1) * 11)
+            assert quantity == pytest.approx((index + 1) * 2)
+
+
+def test_ce_fixture_includes_the_services_the_retired_allowlist_omitted(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = load_handler(monkeypatch, FakeAWS())
+    services = {service for service, _usage in _fixture_usage_types()}
+    omitted = [s for s in services if "Opus 4.8" in s or "Opus 5" in s or "Rerank" in s]
+    assert omitted, "fixture should carry services the old allowlist could not see"
+    for service in omitted:
+        assert module.is_bedrock_service(service)
+
+
+def test_every_recorded_model_is_priced_by_the_ceiling(monkeypatch: pytest.MonkeyPatch):
+    """No ModelId in the recorded corpus may fall through to a fallback.
+
+    There is no fallback path left -- pricing is a dict lookup on the metric name --
+    so this asserts the recorded token metrics are exactly the four CEILING covers,
+    and that a non-token metric such as SearchUnits is knowingly excluded rather than
+    silently priced.
+    """
+    module = load_handler(monkeypatch, FakeAWS())
+    token_metrics, other_metrics = set(), set()
+    for entry in LIST_METRICS_FIXTURE["Metrics"]:
+        name = entry["MetricName"]
+        (token_metrics if name in module.CEILING else other_metrics).add(name)
+
+    assert token_metrics == set(module.CEILING), "recorded token metrics differ from CEILING"
+    # SearchUnits is real Bedrock usage with no token direction: Cohere Rerank bills
+    # it and publishes no token metric at all. It is covered by the Cost Explorer arm,
+    # never by the metered arm, and that is a deliberate division rather than a gap.
+    assert "SearchUnits" in other_metrics
+
+    model_ids = {e["Dimensions"][0]["Value"] for e in LIST_METRICS_FIXTURE["Metrics"]}
+    assert len(model_ids) >= len("a dozen live models"[:12]), "fixture lost ModelId coverage"
+
+
+# ---------------------------------------------------------------------------
+# Upper-bound invariant guard. Warn-only, and it must stay that way: a guard that
+# can attach the deny turns a monitoring fault into a production outage.
+# ---------------------------------------------------------------------------
+SETTLED = TODAY - dt.timedelta(days=2)
+
+
+def _guard_module(monkeypatch, fake_aws, metered_total: float):
+    module = load_handler(monkeypatch, fake_aws, stub_ce=False)
+    module._metered_spend = lambda day_start, now: module.MeteredSpend(
+        total=metered_total, degraded=False, failures=(), saw_datapoints=True
+    )
+    return module
+
+
+def test_guard_warns_when_the_estimate_falls_below_settled_billing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_aws = FakeAWS(ssm=FakeSSM({"ce_day": "old"}, guard_done=False), ce=FakeCE(spend=THRESHOLD))
+    module = _guard_module(monkeypatch, fake_aws, metered_total=float(1))
+
+    module._guard_upper_bound_invariant(SETTLED, {})
+
+    assert fake_aws.sns.published, "a violated upper bound must raise a warning"
+    subject = fake_aws.sns.published[0]["Subject"]
+    assert "upper-bound" in subject.lower() or "VIOLATED" in subject
+
+
+def test_guard_is_silent_when_the_estimate_is_above_settled_billing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_aws = FakeAWS(ssm=FakeSSM({"ce_day": "old"}, guard_done=False), ce=FakeCE(spend=THRESHOLD))
+    module = _guard_module(monkeypatch, fake_aws, metered_total=THRESHOLD * 2)
+
+    module._guard_upper_bound_invariant(SETTLED, {})
+
+    assert fake_aws.sns.published == []
+
+
+def test_guard_skips_days_below_the_noise_floor(monkeypatch: pytest.MonkeyPatch):
+    """Near-idle days are rounding, not signal."""
+    tiny = THRESHOLD * 0.01
+    fake_aws = FakeAWS(ssm=FakeSSM({"ce_day": "old"}, guard_done=False), ce=FakeCE(spend=tiny))
+    module = _guard_module(monkeypatch, fake_aws, metered_total=float(0))
+
+    module._guard_upper_bound_invariant(SETTLED, {})
+
+    assert fake_aws.sns.published == []
+
+
+def test_guard_never_touches_iam(monkeypatch: pytest.MonkeyPatch):
+    """A monitoring fault must not be able to deny production Bedrock."""
+    fake_aws = FakeAWS(ssm=FakeSSM({"ce_day": "old"}, guard_done=False), ce=FakeCE(spend=THRESHOLD))
+    module = _guard_module(monkeypatch, fake_aws, metered_total=float(1))
+    before_roles = dict(fake_aws.iam.role_policies)
+    before_groups = dict(fake_aws.iam.group_policies)
+
+    module._guard_upper_bound_invariant(SETTLED, {})
+
+    assert fake_aws.iam.role_policies == before_roles
+    assert fake_aws.iam.group_policies == before_groups
+    assert fake_aws.iam.attached == [] if hasattr(fake_aws.iam, "attached") else True
+
+
+def test_guard_runs_at_most_once_per_settled_day(monkeypatch: pytest.MonkeyPatch):
+    fake_aws = FakeAWS(ssm=FakeSSM({"ce_day": "old"}, guard_done=False), ce=FakeCE(spend=THRESHOLD))
+    module = _guard_module(monkeypatch, fake_aws, metered_total=THRESHOLD * 2)
+    state: dict = {}
+
+    module._guard_upper_bound_invariant(SETTLED, state)
+    calls_after_first = fake_aws.ce.calls
+    module._guard_upper_bound_invariant(SETTLED, state)
+
+    assert state["guard_day"] == SETTLED.isoformat()
+    assert fake_aws.ce.calls == calls_after_first, "guard should be idempotent within a day"
+
+
+# ---------------------------------------------------------------------------
+# Per-model attribution. Diagnostics only: enforcement is ModelId-independent by
+# design, and nothing here may feed the decision.
+# ---------------------------------------------------------------------------
+def _attribution_lines(caplog) -> list[str]:
+    return [r.message for r in caplog.records if r.message.startswith("attribution ")]
+
+
+def _cloudwatch_with_models() -> FakeCloudWatch:
+    return FakeCloudWatch(
+        pages=[
+            {
+                "Metrics": [
+                    {
+                        "MetricName": "InputTokenCount",
+                        "Dimensions": [
+                            {"Name": "ModelId", "Value": "us.anthropic.claude-opus-4-8"}
+                        ],
+                    }
+                ]
+            }
+        ],
+        values_by_id={"a0": [float(len("tokens"))]},
+    )
+
+
+def test_attribution_is_silent_on_a_normal_tick(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    fake_aws = FakeAWS(cloudwatch=_cloudwatch_with_models())
+    module = load_handler(monkeypatch, fake_aws)
+    with caplog.at_level("INFO"):
+        run_handler(module, float(1))
+
+    assert _attribution_lines(caplog) == []
+    # The enforcement path must not enumerate models.
+    assert fake_aws.cloudwatch.paginator_calls == 0
+
+
+def test_attribution_is_logged_on_the_trip_path(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    fake_aws = FakeAWS(cloudwatch=_cloudwatch_with_models())
+    module = load_handler(monkeypatch, fake_aws)
+    with caplog.at_level("INFO"):
+        run_handler(module, THRESHOLD)
+
+    lines = _attribution_lines(caplog)
+    assert lines, "a trip should say which models were running"
+    assert "claude-opus-4-8" in lines[0]
+    assert "tokens=" in lines[0]
+    # No prices in the diagnostic: enforcement pricing and attribution stay separate.
+    assert "usd" not in lines[0].lower()
+    assert fake_aws.cloudwatch.paginator_calls > 0
+
+
+def test_attribution_failure_cannot_change_the_enforcement_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A diagnostic that can break enforcement is worse than no diagnostic."""
+    broken = FakeCloudWatch(pages=[], values_by_id={})
+    broken.get_paginator = lambda name: (_ for _ in ()).throw(client_error("ListMetrics"))
+    fake_aws = FakeAWS(cloudwatch=broken)
+    module = load_handler(monkeypatch, fake_aws)
+
+    result = run_handler(module, THRESHOLD)
+
+    assert result["deny_attached"] is True
+
+
+# ---------------------------------------------------------------------------
+# Terraform and README: the consumers the enforcement change left describing a
+# design that no longer exists.
+# ---------------------------------------------------------------------------
+TF_PATH = Path(__file__).resolve().parents[2] / "infra" / "terraform" / "bedrock_spend_cap.tf"
+README_PATH = (
+    Path(__file__).resolve().parents[2] / "infra" / "terraform" / "bedrock-spend-cap" / "README.md"
+)
+
+
+def test_list_metrics_is_granted_for_attribution():
+    tf = TF_PATH.read_text(encoding="utf-8")
+    statement = tf[tf.index('Sid    = "ReadSpendSignals"') :][:600]
+    for action in ("ce:GetCostAndUsage", "cloudwatch:GetMetricData", "cloudwatch:ListMetrics"):
+        assert action in statement, f"{action} missing from ReadSpendSignals"
+
+
+def test_readme_no_longer_documents_the_deleted_pricing_layer():
+    readme = README_PATH.read_text(encoding="utf-8")
+    for gone in (
+        "Prices are derived from this account's own bills",
+        "bedrock_cap_seed_rates",
+        "UNKNOWN_RATE_PER_1K",
+        "a published seed rate",
+    ):
+        assert gone not in readme, f"README still documents {gone!r}"
+
+
+def test_readme_states_the_upper_bound_and_its_cost():
+    # Collapse whitespace first: these assert CONTENT, and a prose reflow should not
+    # be able to fail them.
+    readme = " ".join(README_PATH.read_text(encoding="utf-8").split())
+    assert "upper bound on real spend, not an estimate of it" in readme
+    assert "priced at a ceiling rate for its direction" in readme
+    # The accepted over-estimate must be stated, not left for a reader to discover
+    # when an embedding job trips the cap.
+    assert "trip the cap well below the configured dollar figure" in readme
+    # And the measured band stays out of a public repo.
+    assert "local-only" in readme

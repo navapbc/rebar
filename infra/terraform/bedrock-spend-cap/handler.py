@@ -371,6 +371,117 @@ def _apply(attach: bool) -> list[str]:
     return touched
 
 
+# The invariant guard re-prices a SETTLED day and compares it against what Cost
+# Explorer actually billed. Settled matters: CE lags 8-24h, so comparing today would
+# read zero for hours and manufacture a violation every morning.
+GUARD_SETTLED_DAYS_AGO = 2
+# Below this, the ratio is dominated by rounding rather than by pricing: a day with
+# cents of spend can swing the comparison arbitrarily. Expressed against the cap so
+# it scales with the configured ceiling instead of being an unexplained constant.
+GUARD_FLOOR_FRACTION = 0.05
+
+
+def _guard_upper_bound_invariant(day: dt.date, state: dict) -> None:
+    """Warn if the ceiling estimate ever falls BELOW settled billing.
+
+    The whole safety argument is that ceiling pricing over-estimates, so the cap
+    cannot fire late on the metered arm. That holds only while no model bills above
+    its ceiling. A price rise or a pricier new model breaks it silently, and in the
+    dangerous direction, so it needs a monitor rather than an assumption.
+
+    Warn-only by construction: this function never touches IAM. A guard fault must
+    not be able to deny production Bedrock.
+    """
+    if state.get("guard_day") == day.isoformat():
+        return
+    try:
+        actual = _ce_spend_today(day)
+        start = dt.datetime.combine(day, dt.time.min, tzinfo=dt.timezone.utc)
+        metered = _metered_spend(start, start + dt.timedelta(days=1))
+    except ClientError as exc:
+        log.warning("upper-bound guard could not read its signals: %s", exc)
+        return
+    state["guard_day"] = day.isoformat()
+    if metered is None or metered.degraded:
+        log.info("upper-bound guard skipped %s: metered signal incomplete", day)
+        return
+    if actual < THRESHOLD_USD * GUARD_FLOOR_FRACTION:
+        log.info("upper-bound guard skipped %s: settled spend below the noise floor", day)
+        return
+    if metered.total >= actual:
+        log.info(
+            "upper-bound guard ok for %s: estimate %.4f >= actual %.4f", day, metered.total, actual
+        )
+        return
+    _notify(
+        "Bedrock cap upper-bound invariant VIOLATED",
+        f"On {day} (UTC) the ceiling-priced estimate came to {metered.total:,.2f} while "
+        f"Cost Explorer billed {actual:,.2f}.\n\n"
+        "The estimate is supposed to be an upper bound on real spend. Reading BELOW "
+        "actual means some model now bills above its CEILING entry, so the metered arm "
+        "will fire LATE. Re-derive CEILING from the trailing 60 days of Cost Explorer "
+        "and raise the affected direction.",
+    )
+
+
+def _log_model_attribution(day_start: dt.datetime, now: dt.datetime) -> None:
+    """Log per-model token counts, for the warn and trip paths only.
+
+    Enforcement is deliberately ModelId-independent, so nothing here feeds the
+    decision -- this exists purely to answer "which model is running away" once a
+    human is already looking. Prices are not involved and no matching is performed.
+    """
+    for region in REGIONS:
+        try:
+            cw = boto3.client("cloudwatch", region_name=region)
+            queries, meta = [], {}
+            for page in cw.get_paginator("list_metrics").paginate(Namespace="AWS/Bedrock"):
+                for metric in page.get("Metrics", []):
+                    name = metric["MetricName"]
+                    dims = metric.get("Dimensions", [])
+                    if name not in CEILING or len(dims) != 1 or dims[0]["Name"] != "ModelId":
+                        continue
+                    qid = f"a{len(queries)}"
+                    meta[qid] = (dims[0]["Value"], name)
+                    queries.append(
+                        {
+                            "Id": qid,
+                            "MetricStat": {
+                                "Metric": {
+                                    "Namespace": "AWS/Bedrock",
+                                    "MetricName": name,
+                                    "Dimensions": dims,
+                                },
+                                "Period": 3600,
+                                "Stat": "Sum",
+                            },
+                            "ReturnData": True,
+                        }
+                    )
+            for batch_start in range(0, len(queries), 100):
+                resp = cw.get_metric_data(
+                    MetricDataQueries=queries[batch_start : batch_start + 100],
+                    StartTime=day_start,
+                    EndTime=now,
+                    ScanBy="TimestampAscending",
+                )
+                for result in resp.get("MetricDataResults", []):
+                    tokens = sum(result.get("Values") or [])
+                    if tokens <= 0:
+                        continue
+                    model_id, metric_name = meta[result["Id"]]
+                    log.info(
+                        "attribution region=%s model=%s metric=%s tokens=%.0f",
+                        region,
+                        model_id,
+                        metric_name,
+                        tokens,
+                    )
+        except ClientError as exc:
+            # Diagnostics must never change the enforcement outcome.
+            log.warning("attribution unavailable in %s: %s", region, exc)
+
+
 def _notify(subject: str, message: str) -> None:
     if not sns:
         return
@@ -450,6 +561,8 @@ def handler(event, context):
         else:
             spend = metered.total
             effective_source = "metered"
+    _guard_upper_bound_invariant(day - dt.timedelta(days=GUARD_SETTLED_DAYS_AGO), state)
+
     signal_unavailable = (
         metered_status == "unavailable"
         or (metered is not None and metered.degraded)
@@ -510,6 +623,7 @@ def handler(event, context):
         and state.get("warned_day") != day.isoformat()
     ):
         state["warned_day"] = day.isoformat()
+        _log_model_attribution(day_start, now)
         _notify(
             "Bedrock daily spend WARNING",
             f"Bedrock spend for {day} (UTC) reached {spend:,.2f} — "
@@ -548,6 +662,7 @@ def handler(event, context):
         if not first_trip:
             log.warning("deny was only partially attached; re-applied to: %s", touched)
         if first_trip:
+            _log_model_attribution(day_start, now)
             _notify(
                 f"Bedrock daily cap TRIPPED — {spend:,.2f} >= {THRESHOLD_USD:,.2f}",
                 f"Bedrock spend for {day} (UTC) reached {spend:,.2f}.\n"

@@ -1,0 +1,1502 @@
+{
+  "ResultsByTime": [
+    {
+      "TimePeriod": {
+        "Start": "2026-01-01",
+        "End": "2026-01-02"
+      },
+      "Groups": [
+        {
+          "Keys": [
+            "AWS Lambda",
+            "Lambda-GB-Second"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "11.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "2.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-DeepSeek-R1-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "22.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "4.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-DeepSeek-R1-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "33.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "6.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-Guardrail-WordPolicyUnitsConsumed"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "44.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "8.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-Llama3-3-70B-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "55.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "10.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-Llama3-3-70B-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "66.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "12.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-Mistral-Large-3-675b-Instruct-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "77.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "14.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-Mistral-Large-3-675b-Instruct-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "88.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "16.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-Nova2.0Lite-cache-read-input-token-count"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "99.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "18.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-Nova2.0Lite-cache-write-input-token-count"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "110.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "20.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-Nova2.0Lite-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "121.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "22.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-Nova2.0Lite-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "132.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "24.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-NovaLite-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "143.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "26.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-NovaLite-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "154.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "28.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-NovaPro-cache-read-input-token-count"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "165.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "30.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-NovaPro-cache-write-input-token-count"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "176.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "32.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-NovaPro-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "187.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "34.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-NovaPro-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "198.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "36.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-PixtralLarge2502-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "209.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "38.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-PixtralLarge2502-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "220.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "40.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-TitanEmbeddingV2-Text-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "231.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "42.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-deepseek.v3.2-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "242.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "44.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-deepseek.v3.2-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "253.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "46.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-gpt-oss-120b-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "264.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "48.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-gpt-oss-120b-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "275.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "50.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-gpt-oss-20b-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "286.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "52.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USE1-gpt-oss-20b-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "297.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "54.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USW2-Nova2.0Lite-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "308.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "56.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USW2-Nova2.0Lite-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "319.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "58.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USW2-NovaLite-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "330.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "60.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USW2-NovaLite-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "341.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "62.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USW2-NovaMicro-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "352.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "64.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USW2-NovaMicro-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "363.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "66.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USW2-NovaPro-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "374.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "68.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USW2-NovaPro-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "385.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "70.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USW2-minimax.minimax-m2.5-input-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "396.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "72.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Bedrock",
+            "USW2-minimax.minimax-m2.5-output-tokens"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "407.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "74.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Amazon Simple Storage Service",
+            "DataTransfer-In-Bytes"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "418.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "76.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude 3 Haiku (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_InputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "429.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "78.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude 3 Haiku (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_OutputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "440.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "80.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Haiku 4.5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_CacheReadInputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "451.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "82.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Haiku 4.5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_CacheWriteInputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "462.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "84.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Haiku 4.5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_InputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "473.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "86.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Haiku 4.5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_OutputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "484.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "88.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Haiku 4.5 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_InputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "495.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "90.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Haiku 4.5 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_OutputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "506.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "92.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_CacheReadInputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "517.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "94.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_CacheWriteInputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "528.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "96.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_InputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "539.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "98.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_OutputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "550.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "100.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.7 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_cache_read_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "561.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "102.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.7 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_cache_write_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "572.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "104.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.7 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_input_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "583.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "106.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.7 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_output_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "594.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "108.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.8 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_cache_read_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "605.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "110.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.8 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_cache_write_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "616.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "112.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.8 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_input_tokens_global_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "627.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "114.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.8 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_input_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "638.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "116.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.8 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_output_tokens_global_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "649.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "118.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.8 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_output_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "660.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "120.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.8 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_cache_read_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "671.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "122.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.8 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_cache_write_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "682.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "124.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.8 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_input_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "693.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "126.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 4.8 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_output_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "704.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "128.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_cache_read_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "715.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "130.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_cache_write_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "726.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "132.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_input_tokens_global_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "737.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "134.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_input_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "748.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "136.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_output_tokens_global_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "759.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "138.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_output_tokens_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "770.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "140.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 5 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_cache_read_tokens_global_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "781.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "142.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 5 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_cache_write_tokens_global_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "792.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "144.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 5 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_input_tokens_global_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "803.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "146.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Opus 5 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_output_tokens_global_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "814.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "148.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_CacheReadInputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "825.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "150.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_CacheWriteInputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "836.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "152.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_InputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "847.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "154.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_OutputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "858.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "156.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_InputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "869.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "158.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_OutputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "880.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "160.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.6 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_CacheReadInputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "891.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "162.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.6 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_CacheWriteInputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "902.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "164.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.6 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_InputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "913.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "166.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.6 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_InputTokenCount_Global-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "924.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "168.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.6 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_OutputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "935.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "170.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.6 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_OutputTokenCount_Global-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "946.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "172.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.6 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_CacheReadInputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "957.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "174.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.6 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_CacheWriteInputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "968.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "176.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.6 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_InputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "979.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "178.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 4.6 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_OutputTokenCount-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "990.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "180.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 5 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_input_tokens_global_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "1001.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "182.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Claude Sonnet 5 (Amazon Bedrock Edition)",
+            "USW2-MP:USW2_output_tokens_global_standard-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "1012.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "184.0000",
+              "Unit": "N/A"
+            }
+          }
+        },
+        {
+          "Keys": [
+            "Cohere Rerank v3.5 (Amazon Bedrock Edition)",
+            "USE1-MP:USE1_search_units-Units"
+          ],
+          "Metrics": {
+            "UnblendedCost": {
+              "Amount": "1023.0000",
+              "Unit": "USD"
+            },
+            "UsageQuantity": {
+              "Amount": "186.0000",
+              "Unit": "N/A"
+            }
+          }
+        }
+      ],
+      "Total": {},
+      "Estimated": false
+    }
+  ]
+}

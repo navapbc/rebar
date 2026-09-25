@@ -301,6 +301,11 @@ resource "aws_iam_role_policy" "bedrock_spend_cap" {
         # None of these support resource-level permissions.
         Action = [
           "ce:GetCostAndUsage",
+          # Enumeration is NOT on the enforcement path -- that reads the four
+          # undimensioned aggregates and needs no listing. This is for the per-model
+          # attribution logged on the warn and trip paths only, which answers "which
+          # model is running away" once a human is already looking.
+          "cloudwatch:ListMetrics",
           "cloudwatch:GetMetricData",
         ]
         Resource = "*"

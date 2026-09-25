@@ -38,21 +38,43 @@ Enforcement runs on `max(cost_explorer, priced_tokens)`, evaluated every 5
 minutes. Five minutes is therefore the enforcement granularity: it bounds how
 much a runaway can spend between breaching the cap and being denied.
 
-**Prices are derived from this account's own bills**, not a hardcoded table.
-Cost Explorer grouped by `USAGE_TYPE` returns both cost and usage quantity, so
-`cost / quantity` is the exact blended per-token rate actually charged — after
-whatever region, tier, and discount apply. That rate table refreshes daily and
-cannot go stale. (The AWS Price List API was evaluated and rejected: its `model`
-dimension for `AmazonBedrock` still tops out at Claude 3, and no `usagetype`
-mentions `anthropic`.)
+**Every token is priced at a ceiling rate for its direction**, set at 1.25x the
+highest rate this account has ever been billed for that direction. The figure the
+cap reports is therefore an **upper bound on real spend, not an estimate of it**,
+and the metered arm cannot fire late.
 
-Models with no billing history fall back, in order:
+There is no derived rate table and no per-model matching. An earlier design
+derived rates from Cost Explorer and matched them to CloudWatch ModelIds by
+substring and suffix heuristics; that produced four distinct mispricings in twelve
+days, two of which reached production, because AWS bills one model family under
+several label conventions. A single ceiling per direction removes the class:
+there is nothing left to match.
 
-1. a published seed rate (`local.bedrock_cap_seed_rates`) — currently the Claude
-   family, which has never been billed on this account;
-2. the model's observed input rate scaled by direction;
-3. `UNKNOWN_RATE_PER_1K`, set above any real Bedrock rate so an unpriced model
-   **fails closed** — tripping early rather than slipping under.
+The cost is precision, in the safe direction. A model much cheaper than the
+priciest is over-priced by the ratio between them — on this account the cheapest
+models are two orders of magnitude below the ceiling, and a couple bill nothing
+at all for cache writes. So **a large embedding or small-model batch job can trip
+the cap well below the configured dollar figure.** That is accepted: erring early
+is correct for a circuit breaker. If it ever bites in practice, the remedy is an
+exact-match `{ModelId: rate}` override table defaulting to the ceiling — equality
+only, never substring matching, so it cannot reopen the class above.
+
+In practice the metered arm has run between roughly 1.1x and 1.9x of settled
+billing, so the effective cap sits somewhere below the configured figure rather
+than on it, varying with the day's model mix. The measured distribution is in the
+operator's local-only notes; it is deliberately not reproduced here, because this
+repository is public.
+
+`THRESHOLD_USD` is **not** scaled up to compensate. Raising it to centre the
+metered arm would raise it for the Cost Explorer arm too, and that arm is real
+billed dollars — the authoritative signal would then trip late, which is the
+failure this design exists to remove. Unscaled, Cost Explorer trips at exactly
+the configured cap and the metered arm trips early.
+
+A daily guard re-prices a settled day and compares it against Cost Explorer for
+that same day, warning if the estimate ever falls *below* actual, which is the
+upper-bound property being violated. It only warns: it cannot attach or detach
+the deny policy, so a guard fault cannot cause an outage.
 
 Cost Explorer charges per request, so it is polled hourly rather than every
 tick. It is always re-read once the metered estimate passes 80% of the cap,

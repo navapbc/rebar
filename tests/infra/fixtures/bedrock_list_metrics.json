@@ -1,0 +1,774 @@
+{
+  "Metrics": [
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "EstimatedTPMQuotaUsage",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "amazon.titan-embed-text-v2:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "amazon.titan-embed-text-v2:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationLatency",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "amazon.titan-embed-text-v2:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "Invocations",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "amazon.titan-embed-text-v2:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "EstimatedTPMQuotaUsage",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "cohere.rerank-v3-5:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationLatency",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "cohere.rerank-v3-5:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "Invocations",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "cohere.rerank-v3-5:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "SearchUnits",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "cohere.rerank-v3-5:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "EstimatedTPMQuotaUsage",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-2-lite-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-2-lite-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationLatency",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-2-lite-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "Invocations",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-2-lite-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "OutputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-2-lite-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "EstimatedTPMQuotaUsage",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-lite-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-lite-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationLatency",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-lite-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "Invocations",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-lite-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "OutputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-lite-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "EstimatedTPMQuotaUsage",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-pro-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-pro-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationLatency",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-pro-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "Invocations",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-pro-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "OutputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.amazon.nova-pro-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "CacheReadInputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "CacheWriteInputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "EstimatedTPMQuotaUsage",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationLatency",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationServerErrors",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "Invocations",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "OutputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "CacheReadInputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-5-20251101-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "CacheWriteInputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-5-20251101-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "EstimatedTPMQuotaUsage",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-5-20251101-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-5-20251101-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationLatency",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-5-20251101-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "Invocations",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-5-20251101-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "OutputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-5-20251101-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "CacheReadInputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-7"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "CacheWriteInputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-7"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "EstimatedTPMQuotaUsage",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-7"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-7"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationLatency",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-7"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationServerErrors",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-7"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "Invocations",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-7"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "OutputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-7"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "CacheReadInputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-8"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "CacheWriteInputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-8"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "EstimatedTPMQuotaUsage",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-8"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-8"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationLatency",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-8"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationServerErrors",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-8"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "Invocations",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-8"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "OutputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-4-8"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "CacheReadInputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-5"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "CacheWriteInputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-5"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "EstimatedTPMQuotaUsage",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-5"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-5"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationLatency",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-5"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "Invocations",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-5"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "OutputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-5"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "TimeToFirstToken",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-opus-5"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "CacheReadInputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "CacheWriteInputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "EstimatedTPMQuotaUsage",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationLatency",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "Invocations",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "OutputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "CacheReadInputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-6"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "CacheWriteInputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-6"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "EstimatedTPMQuotaUsage",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-6"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-6"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "InvocationLatency",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-6"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "Invocations",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-6"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "OutputTokenCount",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-6"
+        }
+      ]
+    },
+    {
+      "Namespace": "AWS/Bedrock",
+      "MetricName": "TimeToFirstToken",
+      "Dimensions": [
+        {
+          "Name": "ModelId",
+          "Value": "us.anthropic.claude-sonnet-4-6"
+        }
+      ]
+    }
+  ]
+}
