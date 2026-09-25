@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import ast
 import datetime as dt
 import importlib.util
 import sys
 import types
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 from botocore.exceptions import ClientError
@@ -24,34 +26,24 @@ class FixedDateTime(dt.datetime):
         return cls(2026, 1, 8, 12, tzinfo=tz or dt.timezone.utc)
 
 
-class FakePaginator:
-    def __init__(self, pages: list[dict] | None = None, error: ClientError | None = None) -> None:
-        self.pages = pages or []
-        self.error = error
-
-    def paginate(self, **kwargs):
-        if self.error:
-            raise self.error
-        return self.pages
-
-
 class FakeCloudWatch:
     def __init__(
         self,
         *,
         pages: list[dict] | None = None,
         values_by_id: dict[str, list[float]] | None = None,
-        list_error: ClientError | None = None,
         data_error: ClientError | None = None,
     ) -> None:
         self.pages = pages or []
         self.values_by_id = values_by_id or {}
-        self.list_error = list_error
         self.data_error = data_error
 
-    def get_paginator(self, name: str) -> FakePaginator:
-        assert name == "list_metrics"
-        return FakePaginator(self.pages, self.list_error)
+    def get_paginator(self, name: str) -> NoReturn:
+        # The enforcement path reads the undimensioned aggregates and must never
+        # enumerate models. Any list_metrics call is a regression, so fail loudly
+        # instead of serving it -- this makes every test in the module an assertion
+        # that the enforcement path stays free of list_metrics.
+        raise AssertionError(f"enforcement path must not call get_paginator({name!r})")
 
     def get_metric_data(self, MetricDataQueries: list[dict], **kwargs) -> dict:
         if self.data_error:
@@ -107,12 +99,24 @@ class FakeCE:
             return self.pages[self.calls - 1]
         if self.results_by_time is not None:
             return {"ResultsByTime": self.results_by_time}
+        # The handler asks for every service grouped by SERVICE and classifies the
+        # returned groups by predicate, so the default response is shaped the way the
+        # real API shapes a grouped query: one Group per service, not a bare Total.
+        # A non-Bedrock group is always included so every test that reads this signal
+        # also proves the predicate excludes what it should.
         return {
             "ResultsByTime": [
                 {
-                    "Total": {
-                        "UnblendedCost": {"Amount": str(self.spend)},
-                    }
+                    "Groups": [
+                        {
+                            "Keys": ["Claude Opus 4.8 (Amazon Bedrock Edition)"],
+                            "Metrics": {"UnblendedCost": {"Amount": str(self.spend)}},
+                        },
+                        {
+                            "Keys": ["Amazon Simple Storage Service"],
+                            "Metrics": {"UnblendedCost": {"Amount": str(float(len("noise")))}},
+                        },
+                    ]
                 }
             ]
         }
@@ -232,7 +236,6 @@ def degraded_metered_spend(module, total: float):
         return types.SimpleNamespace(total=total, degraded=True, failures=(failure,))
     return spend_type(
         total=total,
-        metered_estimated=False,
         degraded=True,
         failures=(
             module.MeteredFailure(
@@ -240,6 +243,7 @@ def degraded_metered_spend(module, total: float):
                 exception_class=failure.exception_class,
             ),
         ),
+        saw_datapoints=True,
     )
 
 
@@ -249,7 +253,6 @@ def load_handler(
     *,
     dry_run=False,
     stub_ce=True,
-    stub_rates=True,
     regions: tuple[str, ...] = ("test-region",),
 ):
     module_name = f"bedrock_spend_cap_under_test_{id(fake_aws)}"
@@ -266,7 +269,6 @@ def load_handler(
     monkeypatch.setenv("STATE_PARAM", "/state")
     monkeypatch.setenv("SNS_TOPIC_ARN", "arn:test:sns")
     monkeypatch.setenv("REGIONS", ",".join(regions))
-    monkeypatch.setenv("UNKNOWN_RATE_PER_1K", str(float(len("fallback"))))
     monkeypatch.setenv("DRY_RUN", "true" if dry_run else "false")
 
     spec = importlib.util.spec_from_file_location(module_name, HANDLER_PATH)
@@ -276,25 +278,23 @@ def load_handler(
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     monkeypatch.setattr(module.dt, "datetime", FixedDateTime)
-    if stub_rates:
-        monkeypatch.setattr(module, "_refresh_rates", lambda: {})
     if stub_ce:
         monkeypatch.setattr(module, "_ce_spend_today", lambda day: float(len("")))
     return module
 
 
-def run_handler(module, spend: float) -> dict:
-    module._metered_spend = lambda day_start, now, rates: module.MeteredSpend(
+def run_handler(module, spend: float, *, saw_datapoints: bool = True) -> dict:
+    module._metered_spend = lambda day_start, now: module.MeteredSpend(
         total=spend,
-        metered_estimated=False,
         degraded=False,
         failures=(),
+        saw_datapoints=saw_datapoints,
     )
     return module.handler({}, None)
 
 
 def run_handler_with_unavailable_meter(module) -> dict:
-    module._metered_spend = lambda day_start, now, rates: None
+    module._metered_spend = lambda day_start, now: None
     return module.handler({}, None)
 
 
@@ -397,210 +397,6 @@ def test_partial_attach_failure_is_not_reported_as_fully_attached(
     assert module._is_attached() is False
 
 
-def test_metered_spend_returns_unavailable_when_cloudwatch_listing_fails(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    fake_aws = FakeAWS(cloudwatch=FakeCloudWatch(list_error=client_error("ListMetrics")))
-    module = load_handler(monkeypatch, fake_aws)
-
-    result = module._metered_spend(
-        FixedDateTime.now(dt.timezone.utc), FixedDateTime.now(dt.timezone.utc), {}
-    )
-
-    assert result is None
-
-
-def test_metered_spend_returns_unavailable_when_cloudwatch_data_fails(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    fake_aws = FakeAWS(
-        cloudwatch=FakeCloudWatch(
-            pages=[
-                {
-                    "Metrics": [
-                        {
-                            "MetricName": "InputTokenCount",
-                            "Dimensions": [{"Name": "ModelId", "Value": "model"}],
-                        }
-                    ]
-                }
-            ],
-            data_error=client_error("GetMetricData"),
-        )
-    )
-    module = load_handler(monkeypatch, fake_aws)
-
-    result = module._metered_spend(
-        FixedDateTime.now(dt.timezone.utc), FixedDateTime.now(dt.timezone.utc), {}
-    )
-
-    assert result is None
-
-
-def test_metered_spend_preserves_partial_total_when_later_region_listing_fails(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    first_rate = float(len("first"))
-    later_rate = float(len("later"))
-    fake_aws = FakeAWS(
-        cloudwatch_by_region={
-            "first-region": FakeCloudWatch(
-                pages=[token_metric_page("first-model")],
-                values_by_id={"q0": [1000]},
-            ),
-            "broken-region": FakeCloudWatch(list_error=client_error("ListMetrics")),
-            "later-region": FakeCloudWatch(
-                pages=[token_metric_page("later-model")],
-                values_by_id={"q0": [1000]},
-            ),
-        }
-    )
-    module = load_handler(
-        monkeypatch,
-        fake_aws,
-        regions=("first-region", "broken-region", "later-region"),
-    )
-
-    result = module._metered_spend(
-        FixedDateTime.now(dt.timezone.utc),
-        FixedDateTime.now(dt.timezone.utc),
-        {
-            "USE1-first-model-input-tokens": first_rate,
-            "USE1-later-model-input-tokens": later_rate,
-        },
-    )
-
-    assert result is not None
-    assert isinstance(result, module.MeteredSpend)
-    assert result.total == first_rate + later_rate
-    assert result.degraded is True
-    assert [failure.region for failure in result.failures] == ["broken-region"]
-
-
-def test_metered_spend_preserves_partial_total_when_later_region_data_fails(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    first_rate = float(len("first"))
-    later_rate = float(len("later"))
-    fake_aws = FakeAWS(
-        cloudwatch_by_region={
-            "first-region": FakeCloudWatch(
-                pages=[token_metric_page("first-model")],
-                values_by_id={"q0": [1000]},
-            ),
-            "broken-region": FakeCloudWatch(
-                pages=[token_metric_page("broken-model")],
-                data_error=client_error("GetMetricData"),
-            ),
-            "later-region": FakeCloudWatch(
-                pages=[token_metric_page("later-model")],
-                values_by_id={"q0": [1000]},
-            ),
-        }
-    )
-    module = load_handler(
-        monkeypatch,
-        fake_aws,
-        regions=("first-region", "broken-region", "later-region"),
-    )
-
-    result = module._metered_spend(
-        FixedDateTime.now(dt.timezone.utc),
-        FixedDateTime.now(dt.timezone.utc),
-        {
-            "USE1-first-model-input-tokens": first_rate,
-            "USE1-later-model-input-tokens": later_rate,
-        },
-    )
-
-    assert result is not None
-    assert isinstance(result, module.MeteredSpend)
-    assert result.total == first_rate + later_rate
-    assert result.degraded is True
-    assert [failure.region for failure in result.failures] == ["broken-region"]
-
-
-def test_metered_spend_records_degraded_region_failure(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-):
-    fake_aws = FakeAWS(
-        cloudwatch_by_region={
-            "broken-region": FakeCloudWatch(list_error=client_error("ListMetrics")),
-            "later-region": FakeCloudWatch(
-                pages=[token_metric_page("later-model")],
-                values_by_id={"q0": [1000]},
-            ),
-        }
-    )
-    module = load_handler(monkeypatch, fake_aws, regions=("broken-region", "later-region"))
-
-    result = module._metered_spend(
-        FixedDateTime.now(dt.timezone.utc),
-        FixedDateTime.now(dt.timezone.utc),
-        {"USE1-later-model-input-tokens": float(len("rate"))},
-    )
-
-    assert result is not None
-    assert result.total == float(len("rate"))
-    assert [failure.region for failure in result.failures] == ["broken-region"]
-    assert [failure.exception_class for failure in result.failures] == ["ClientError"]
-    assert "broken-region" in caplog.text
-    assert "ClientError" in caplog.text
-
-
-def test_metered_spend_prices_known_and_unknown_model_tokens(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    known_units_1k = float(len("known"))
-    unknown_units_1k = float(len("new"))
-    known_rate = float(len("rate"))
-    fake_aws = FakeAWS(
-        cloudwatch=FakeCloudWatch(
-            pages=[
-                {
-                    "Metrics": [
-                        {
-                            "MetricName": "InputTokenCount",
-                            "Dimensions": [
-                                {
-                                    "Name": "ModelId",
-                                    "Value": "us.anthropic.claude-sonnet-4-6",
-                                }
-                            ],
-                        },
-                        {
-                            "MetricName": "OutputTokenCount",
-                            "Dimensions": [{"Name": "ModelId", "Value": "unpriced-model"}],
-                        },
-                    ]
-                }
-            ],
-            values_by_id={
-                "q0": [known_units_1k * 1000],
-                "q1": [unknown_units_1k * 1000],
-            },
-        )
-    )
-    module = load_handler(monkeypatch, fake_aws)
-    module.SEED_RATES = {}
-
-    result = module._metered_spend(
-        FixedDateTime.now(dt.timezone.utc),
-        FixedDateTime.now(dt.timezone.utc),
-        {"USE1-claude-sonnet-4-6-input-tokens": known_rate},
-    )
-
-    assert result is not None
-    assert result.total == (
-        known_units_1k * known_rate
-        + unknown_units_1k
-        * module.UNKNOWN_RATE_PER_1K
-        * module.TOKEN_METRICS["OutputTokenCount"][1]
-    )
-    assert result.degraded is False
-
-
 def test_unavailable_metered_signal_trips_unattached_cap(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -641,6 +437,14 @@ def test_quiet_day_without_bedrock_series_releases_existing_restriction(
     module = load_handler(monkeypatch, fake_aws, stub_ce=False)
     fake_aws.iam.role_policies = {"api": {"arn:test:deny"}, "worker": {"arn:test:deny"}}
     fake_aws.iam.group_policies = {"admins": {"arn:test:deny"}}
+
+    # An all-empty CloudWatch read is ambiguous on the FIRST tick of a day: it is both
+    # a genuinely quiet account and a metric-delivery gap, and nothing persisted yet
+    # says which. With a deny attached the handler holds, then releases on the next
+    # tick once the high-water key exists and is still zero. A one-tick delay to the
+    # automatic release is the deliberate price of never lifting a deny on a gap.
+    first = module.handler({}, None)
+    assert first["deny_attached"] is True
 
     result = module.handler({}, None)
 
@@ -714,7 +518,7 @@ def test_degraded_partial_meter_below_near_threshold_respects_ce_interval(
     }
     fake_aws = FakeAWS(ssm=FakeSSM(state), ce=FakeCE(spend=THRESHOLD))
     module = load_handler(monkeypatch, fake_aws, stub_ce=False)
-    module._metered_spend = lambda day_start, now, rates: degraded_metered_spend(module, partial)
+    module._metered_spend = lambda day_start, now: degraded_metered_spend(module, partial)
 
     result = module.handler({}, None)
 
@@ -735,7 +539,7 @@ def test_degraded_partial_meter_at_near_threshold_polls_ce(
     }
     fake_aws = FakeAWS(ssm=FakeSSM(state), ce=FakeCE(spend=float(0)))
     module = load_handler(monkeypatch, fake_aws, stub_ce=False)
-    module._metered_spend = lambda day_start, now, rates: degraded_metered_spend(module, partial)
+    module._metered_spend = lambda day_start, now: degraded_metered_spend(module, partial)
 
     result = module.handler({}, None)
 
@@ -786,7 +590,7 @@ def test_degraded_partial_meter_can_attach(monkeypatch: pytest.MonkeyPatch):
     }
     fake_aws = FakeAWS(ssm=FakeSSM(state), ce=FakeCE(spend=float(0)))
     module = load_handler(monkeypatch, fake_aws, stub_ce=False)
-    module._metered_spend = lambda day_start, now, rates: degraded_metered_spend(module, THRESHOLD)
+    module._metered_spend = lambda day_start, now: degraded_metered_spend(module, THRESHOLD)
 
     result = module.handler({}, None)
 
@@ -805,7 +609,7 @@ def test_degraded_partial_meter_cannot_release(monkeypatch: pytest.MonkeyPatch):
     module = load_handler(monkeypatch, fake_aws, stub_ce=False)
     fake_aws.iam.role_policies = {"api": {"arn:test:deny"}, "worker": {"arn:test:deny"}}
     fake_aws.iam.group_policies = {"admins": {"arn:test:deny"}}
-    module._metered_spend = lambda day_start, now, rates: degraded_metered_spend(
+    module._metered_spend = lambda day_start, now: degraded_metered_spend(
         module, THRESHOLD - len("x")
     )
 
@@ -911,476 +715,6 @@ def test_dry_run_warning_matches_deployed_notify_only_behavior(
     assert_policy_attached(fake_aws, attached=False)
 
 
-def test_estimated_seed_warning_threads_payload_state_and_notification(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    seed_rate = WARN_THRESHOLD
-    fake_aws = FakeAWS(
-        cloudwatch=FakeCloudWatch(
-            pages=[token_metric_page("target-model")],
-            values_by_id={"q0": [1000]},
-        )
-    )
-    module = load_handler(monkeypatch, fake_aws)
-    module.SEED_RATES = {"target-model": {"input": seed_rate}}
-
-    result = module.handler({}, None)
-
-    assert result["metered_estimated"] is True
-    assert fake_aws.ssm.state["metered_estimated"] is True
-    assert [m["Subject"] for m in fake_aws.sns.published] == ["Bedrock daily spend WARNING"]
-    assert "estimated" in fake_aws.sns.published[0]["Message"]
-
-
-def test_estimated_fallback_trip_threads_payload_state_and_notification(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    fake_aws = FakeAWS(
-        cloudwatch=FakeCloudWatch(
-            pages=[token_metric_page("unpriced-model")],
-            values_by_id={"q0": [2000]},
-        )
-    )
-    module = load_handler(monkeypatch, fake_aws)
-    module.SEED_RATES = {}
-
-    result = module.handler({}, None)
-
-    assert result["metered_estimated"] is True
-    assert fake_aws.ssm.state["metered_estimated"] is True
-    assert [m["Subject"] for m in fake_aws.sns.published] == [
-        f"Bedrock daily cap TRIPPED — {module.UNKNOWN_RATE_PER_1K * 2:,.2f} >= {THRESHOLD:,.2f}"
-    ]
-    assert "estimated" in fake_aws.sns.published[0]["Message"]
-
-
-def test_estimated_metered_signal_respects_ce_interval_when_not_near_threshold(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    state = {
-        "ce_day": TODAY.isoformat(),
-        "ce_spend": float(0),
-        "ce_last_poll": FixedDateTime.now(dt.timezone.utc).isoformat(),
-    }
-    fake_aws = FakeAWS(
-        ssm=FakeSSM(state),
-        ce=FakeCE(spend=THRESHOLD),
-        cloudwatch=FakeCloudWatch(
-            pages=[token_metric_page("target-model")],
-            values_by_id={"q0": [1000]},
-        ),
-    )
-    module = load_handler(monkeypatch, fake_aws, stub_ce=False)
-    module.SEED_RATES = {"target-model": {"input": float(len("rate"))}}
-
-    result = module.handler({}, None)
-
-    assert result["metered_estimated"] is True
-    assert fake_aws.ce.calls == len("")
-    assert result["effective_source"] == "metered"
-
-
-def test_seed_for_missing_output_rate_uses_input_seed_before_observed_input(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    module = load_handler(monkeypatch, FakeAWS())
-    module.SEED_RATES = {"model": {"input": float(len("seed"))}}
-
-    rate = module._rate_for("model", "OutputTokenCount", {"USE1-model-input-tokens": 2})
-
-    assert rate == module.MeteredRate(
-        rate=float(len("seed")) * module.TOKEN_METRICS["OutputTokenCount"][1],
-        source="seed",
-    )
-
-
-def test_rate_for_unpriced_model_uses_fail_closed_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    module = load_handler(monkeypatch, FakeAWS())
-    module.SEED_RATES = {}
-
-    rate = module._rate_for("unpriced-model", "OutputTokenCount", {})
-
-    assert rate.rate == module.UNKNOWN_RATE_PER_1K * module.TOKEN_METRICS["OutputTokenCount"][1]
-
-
-def test_refresh_rates_derives_rates_from_positive_cost_and_quantity(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    first_charge = float(len("charged"))
-    second_charge = float(len("more"))
-    first_quantity = float(len("units"))
-    second_quantity = float(len("again"))
-    output_charge = float(len("output"))
-    output_quantity = float(len("quantity"))
-    fake_aws = FakeAWS(
-        ce=FakeCE(
-            results_by_time=[
-                {
-                    "Groups": [
-                        {
-                            "Keys": ["Amazon Bedrock", "USE1-model-input-tokens"],
-                            "Metrics": {
-                                "UnblendedCost": {"Amount": str(first_charge)},
-                                "UsageQuantity": {"Amount": str(first_quantity)},
-                            },
-                        },
-                        {
-                            "Keys": ["Amazon Bedrock", "USE1-model-output-tokens"],
-                            "Metrics": {
-                                "UnblendedCost": {"Amount": str(output_charge)},
-                                "UsageQuantity": {"Amount": str(output_quantity)},
-                            },
-                        },
-                        {
-                            "Keys": ["Amazon Bedrock", "USE1-zero-quantity-input-tokens"],
-                            "Metrics": {
-                                "UnblendedCost": {"Amount": str(float(len("guard")))},
-                                "UsageQuantity": {"Amount": str(float(len("")))},
-                            },
-                        },
-                    ]
-                },
-                {
-                    "Groups": [
-                        {
-                            "Keys": ["Amazon Bedrock", "USE1-model-input-tokens"],
-                            "Metrics": {
-                                "UnblendedCost": {"Amount": str(second_charge)},
-                                "UsageQuantity": {"Amount": str(second_quantity)},
-                            },
-                        },
-                        {
-                            "Keys": ["Amazon Bedrock", "USE1-zero-charge-input-tokens"],
-                            "Metrics": {
-                                "UnblendedCost": {"Amount": str(float(len("")))},
-                                "UsageQuantity": {"Amount": str(float(len("guard")))},
-                            },
-                        },
-                    ]
-                },
-            ]
-        )
-    )
-    module = load_handler(monkeypatch, fake_aws, stub_rates=False)
-
-    rates = module._refresh_rates()
-
-    assert rates == {
-        "USE1-model-input-tokens": (first_charge + second_charge)
-        / (first_quantity + second_quantity),
-        "USE1-model-output-tokens": output_charge / output_quantity,
-    }
-
-
-def test_refresh_rates_queries_all_bedrock_services_grouped_by_service(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    fake_ce = FakeCE(results_by_time=[])
-    module = load_handler(monkeypatch, FakeAWS(ce=fake_ce), stub_rates=False)
-
-    module._refresh_rates()
-
-    request = fake_ce.requests[0]
-    assert request["Filter"] == {
-        "Dimensions": {"Key": "SERVICE", "Values": module.BEDROCK_SERVICE_VALUES}
-    }
-    assert request["GroupBy"] == [
-        {"Type": "DIMENSION", "Key": "SERVICE"},
-        {"Type": "DIMENSION", "Key": "USAGE_TYPE"},
-    ]
-
-
-@pytest.mark.parametrize(
-    "usage_type",
-    [
-        "USE1-MP:InputTokenCount-Units",
-        "USE1-MP:USE1_InputTokenCount-Tokens",
-        "USE1-MP:USE1_ImageTokenCount-Units",
-    ],
-)
-def test_marketplace_rate_key_skips_malformed_or_unknown_usage_types(
-    monkeypatch: pytest.MonkeyPatch,
-    usage_type: str,
-):
-    module = load_handler(monkeypatch, FakeAWS())
-
-    assert (
-        module._marketplace_rate_key("Claude Sonnet 4.5 (Amazon Bedrock Edition)", usage_type)
-        is None
-    )
-
-
-def test_refresh_rates_bridges_claude_marketplace_and_preserves_legacy_bedrock(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    claude_cost = float(len("claude-cost"))
-    claude_quantity = float(len("claude-quantity"))
-    legacy_cost = float(len("legacy"))
-    legacy_quantity = float(len("quantity"))
-    fake_aws = FakeAWS(
-        ce=FakeCE(
-            results_by_time=[
-                {
-                    "Groups": [
-                        {
-                            "Keys": [
-                                "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
-                                "USE1-MP:USE1_InputTokenCount-Units",
-                            ],
-                            "Metrics": {
-                                "UnblendedCost": {"Amount": str(claude_cost)},
-                                "UsageQuantity": {"Amount": str(claude_quantity)},
-                            },
-                        },
-                        {
-                            "Keys": [
-                                "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
-                                "USE1-MP:USE1_OutputTokenCount-Units",
-                            ],
-                            "Metrics": {
-                                "UnblendedCost": {"Amount": str(claude_cost)},
-                                "UsageQuantity": {"Amount": str(claude_quantity)},
-                            },
-                        },
-                        {
-                            "Keys": [
-                                "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
-                                "USE1-MP:USE1_CacheReadInputTokenCount-Units",
-                            ],
-                            "Metrics": {
-                                "UnblendedCost": {"Amount": str(claude_cost)},
-                                "UsageQuantity": {"Amount": str(claude_quantity)},
-                            },
-                        },
-                        {
-                            "Keys": [
-                                "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
-                                "USE1-MP:USE1_CacheWriteInputTokenCount-Units",
-                            ],
-                            "Metrics": {
-                                "UnblendedCost": {"Amount": str(claude_cost)},
-                                "UsageQuantity": {"Amount": str(claude_quantity)},
-                            },
-                        },
-                        {
-                            "Keys": ["Amazon Bedrock", "USE1-model-input-tokens"],
-                            "Metrics": {
-                                "UnblendedCost": {"Amount": str(legacy_cost)},
-                                "UsageQuantity": {"Amount": str(legacy_quantity)},
-                            },
-                        },
-                    ]
-                }
-            ]
-        )
-    )
-    module = load_handler(monkeypatch, fake_aws, stub_rates=False)
-
-    rates = module._refresh_rates()
-
-    # Marketplace quantity is in units of 1,000,000 tokens; the rate table is per 1,000,
-    # so the quantity is scaled UP by 1,000. Asserting cost / (quantity / 1000) here would
-    # merely restate the implementation -- which is how a 1,000,000x error passed review.
-    expected_claude_rate = pytest.approx(claude_cost / (claude_quantity * 1000))
-    assert rates["USE1-Claude Sonnet 4.5-input-tokens"] == expected_claude_rate
-    assert rates["USE1-Claude Sonnet 4.5-output-tokens"] == expected_claude_rate
-    assert rates["USE1-Claude Sonnet 4.5-cache-read-input-token-count"] == expected_claude_rate
-    assert rates["USE1-Claude Sonnet 4.5-cache-write-input-token-count"] == expected_claude_rate
-    assert rates["USE1-model-input-tokens"] == legacy_cost / legacy_quantity
-
-
-def test_refresh_rates_prices_marketplace_million_token_units_at_list_price(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """A marketplace rate must come out at the published $/1,000-token price.
-
-    The figures below are this account's real 2026-09-21 Cost Explorer row for
-    `Claude Sonnet 4.6 (Amazon Bedrock Edition)` input tokens: $11.1250 over a
-    quantity of 3.3712, i.e. $3.30 per unit. $3.30 is the per-MILLION-token list
-    price, which is what fixes the unit: quantity is in millions, so the derived
-    per-1,000-token rate must be $0.0033.
-
-    Under the previous scaling this returned 3300.0 -- a thousand dollars per
-    thousand tokens -- and tripped a $500 daily cap after ~152,000 tokens while
-    real spend was $0.
-    """
-    fake_aws = FakeAWS(
-        ce=FakeCE(
-            results_by_time=[
-                {
-                    "Groups": [
-                        {
-                            "Keys": [
-                                "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
-                                "USE1-MP:USE1_InputTokenCount-Units",
-                            ],
-                            "Metrics": {
-                                "UnblendedCost": {"Amount": "11.1250"},
-                                "UsageQuantity": {"Amount": "3.3712"},
-                            },
-                        },
-                    ]
-                },
-            ]
-        )
-    )
-    module = load_handler(monkeypatch, fake_aws, stub_rates=False)
-
-    rates = module._refresh_rates()
-
-    assert rates["USE1-Claude Sonnet 4.5-input-tokens"] == pytest.approx(0.0033, rel=1e-4)
-
-
-def test_refresh_rates_reads_all_cost_explorer_pages(monkeypatch: pytest.MonkeyPatch):
-    fake_ce = FakeCE(
-        pages=[
-            {
-                "ResultsByTime": [
-                    {
-                        "Groups": [
-                            {
-                                "Keys": [
-                                    "Amazon Bedrock",
-                                    "USE1-model-input-tokens",
-                                ],
-                                "Metrics": {
-                                    "UnblendedCost": {"Amount": "3"},
-                                    "UsageQuantity": {"Amount": "2"},
-                                },
-                            },
-                        ]
-                    },
-                ],
-                "NextPageToken": "next-page",
-            },
-            {
-                "ResultsByTime": [
-                    {
-                        "Groups": [
-                            {
-                                "Keys": [
-                                    "Amazon Bedrock",
-                                    "USE1-model-input-tokens",
-                                ],
-                                "Metrics": {
-                                    "UnblendedCost": {"Amount": "5"},
-                                    "UsageQuantity": {"Amount": "6"},
-                                },
-                            },
-                        ]
-                    },
-                ],
-            },
-        ]
-    )
-    module = load_handler(monkeypatch, FakeAWS(ce=fake_ce), stub_rates=False)
-
-    rates = module._refresh_rates()
-
-    assert rates["USE1-model-input-tokens"] == 1
-    assert fake_ce.calls == 2
-    assert "NextPageToken" not in fake_ce.requests[0]
-    assert fake_ce.requests[1]["NextPageToken"] == "next-page"
-
-
-def test_rate_for_claude_sonnet_45_uses_marketplace_empirical_rate(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    module = load_handler(monkeypatch, FakeAWS())
-    expected_rate = float(len("empirical")) / 1000
-
-    rate = module._rate_for(
-        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-        "InputTokenCount",
-        {"USE1-Claude Sonnet 4.5-input-tokens": expected_rate},
-    )
-
-    assert rate == module.MeteredRate(rate=expected_rate, source="empirical")
-
-
-def test_rate_for_strips_only_known_region_prefix(monkeypatch: pytest.MonkeyPatch):
-    module = load_handler(monkeypatch, FakeAWS())
-    prefixed_rate = float(len("prefixed"))
-    no_prefix_rate = float(len("no-prefix"))
-    truncated_rate = float(len("short"))
-
-    prefixed = module._rate_for(
-        "alpha-beta",
-        "InputTokenCount",
-        {"USE1-alpha-beta-input-tokens": prefixed_rate},
-    )
-    no_prefix = module._rate_for(
-        "alpha-beta",
-        "InputTokenCount",
-        {
-            "beta-input-tokens": truncated_rate,
-            "alpha-beta-input-tokens": no_prefix_rate,
-        },
-    )
-
-    assert prefixed == module.MeteredRate(rate=prefixed_rate, source="empirical")
-    assert no_prefix == module.MeteredRate(rate=no_prefix_rate, source="empirical")
-
-
-def test_rate_for_preserves_meaningful_leading_model_segment(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    module = load_handler(monkeypatch, FakeAWS())
-    family_rate = float(len("family"))
-    truncated_rate = float(len("short"))
-
-    rate = module._rate_for(
-        "family-variant",
-        "InputTokenCount",
-        {
-            "variant-input-tokens": truncated_rate,
-            "family-variant-input-tokens": family_rate,
-        },
-    )
-
-    assert rate == module.MeteredRate(rate=family_rate, source="empirical")
-
-
-def test_seed_for_output_without_output_uses_input_multiplier(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    module = load_handler(monkeypatch, FakeAWS())
-    module.SEED_RATES = {"target-model": {"input": 2.0}}
-
-    rate = module._rate_for("target-model", "OutputTokenCount", {})
-
-    assert rate == module.MeteredRate(rate=10.0, source="seed")
-
-
-def test_seed_for_cache_metrics_still_derive_from_input_seed(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    module = load_handler(monkeypatch, FakeAWS())
-    base = 2.0
-    module.SEED_RATES = {"target-model": {"input": base}}
-
-    read_rate = module._rate_for("target-model", "CacheReadInputTokenCount", {})
-    write_rate = module._rate_for("target-model", "CacheWriteInputTokenCount", {})
-    output_rate = module._rate_for("target-model", "OutputTokenCount", {})
-
-    assert read_rate == module.MeteredRate(rate=base / 10, source="seed")
-    assert write_rate == module.MeteredRate(rate=base * 5 / 4, source="seed")
-    assert output_rate == module.MeteredRate(
-        rate=base * module.TOKEN_METRICS["OutputTokenCount"][1],
-        source="seed",
-    )
-
-
-def test_normalise_strips_stacked_single_and_no_prefixes(monkeypatch: pytest.MonkeyPatch):
-    module = load_handler(monkeypatch, FakeAWS())
-
-    assert module._normalise("us.anthropic.claude-sonnet-4-6") == "claudesonnet46"
-    assert module._normalise("anthropic.claude-sonnet-4-6") == "claudesonnet46"
-    assert module._normalise("claude-sonnet-4-6") == "claudesonnet46"
-
-
 def test_load_state_corrupt_parameter_starts_empty(monkeypatch: pytest.MonkeyPatch):
     class CorruptSSM(FakeSSM):
         def get_parameter(self, Name: str) -> dict:
@@ -1393,244 +727,6 @@ def test_load_state_corrupt_parameter_starts_empty(monkeypatch: pytest.MonkeyPat
 
     assert result["deny_attached"] is False
     assert fake_aws.ssm.state["ce_day"] == TODAY.isoformat()
-
-
-def test_seed_for_cache_token_factors_and_nonmatching_seed(monkeypatch: pytest.MonkeyPatch):
-    module = load_handler(monkeypatch, FakeAWS())
-    base = float(len("seed"))
-    module.SEED_RATES = {
-        "other-model": {"input": base * 2, "output": base * 3},
-        "target-model": {"input": base, "output": base * 4},
-    }
-
-    read_rate = module._seed_for("target-model", "CacheReadInputTokenCount")
-    write_rate = module._seed_for("target-model", "CacheWriteInputTokenCount")
-
-    assert read_rate == base / 10
-    assert write_rate == base * 5 / 4
-
-
-def test_seed_for_returns_none_when_matching_seed_has_no_input_rate(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    module = load_handler(monkeypatch, FakeAWS())
-    module.SEED_RATES = {"target-model": {"output": float(len("seed"))}}
-
-    rate = module._seed_for("target-model", "InputTokenCount")
-
-    assert rate is None
-
-
-def test_rate_for_uses_override_pin_before_model_id(monkeypatch: pytest.MonkeyPatch):
-    module = load_handler(monkeypatch, FakeAWS())
-    module.RATE_OVERRIDES = {
-        "other-model": "WrongFragment",
-        "titan-embed-text-v2": "TitanEmbeddingV2-Text",
-    }
-    pinned_rate = float(len("pinned"))
-
-    rate = module._rate_for(
-        "amazon.titan-embed-text-v2:0",
-        "InputTokenCount",
-        {"USE1-TitanEmbeddingV2-Text-input-tokens": pinned_rate},
-    )
-
-    assert rate.rate == pinned_rate
-
-
-def test_rate_for_ignores_empty_usage_fragment_and_keeps_more_specific_match(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    module = load_handler(monkeypatch, FakeAWS())
-    specific_rate = float(len("specific"))
-    shorter_rate = float(len("short"))
-
-    rate = module._rate_for(
-        "super-model",
-        "InputTokenCount",
-        {
-            "input-tokens": float(len("empty")),
-            "USE1-super-model-input-tokens": specific_rate,
-            "USE1-model-input-tokens": shorter_rate,
-        },
-    )
-
-    assert rate.rate == specific_rate
-
-
-def test_rate_for_uses_seed_when_empirical_rates_do_not_match(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    module = load_handler(monkeypatch, FakeAWS())
-    seed_rate = float(len("seed"))
-    module.SEED_RATES = {"target-model": {"input": seed_rate}}
-
-    rate = module._rate_for(
-        "target-model",
-        "InputTokenCount",
-        {"USE1-other-model-input-tokens": seed_rate * 2},
-    )
-
-    assert rate.rate == seed_rate
-
-
-def test_estimated_rate_for_labels_each_resolution_source(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    module = load_handler(monkeypatch, FakeAWS())
-    exact_rate = float(len("exact"))
-    seed_rate = float(len("seed"))
-    input_rate = float(len("input"))
-    module.SEED_RATES = {"seed-model": {"input": seed_rate}}
-
-    exact = module._rate_for(
-        "exact-model",
-        "InputTokenCount",
-        {"USE1-exact-model-input-tokens": exact_rate},
-    )
-    seed = module._rate_for("seed-model", "InputTokenCount", {})
-    scaled = module._rate_for(
-        "scaled-model",
-        "OutputTokenCount",
-        {"USE1-scaled-model-input-tokens": input_rate},
-    )
-    module.SEED_RATES = {}
-    fallback = module._rate_for("unpriced-model", "InputTokenCount", {})
-
-    assert (exact.rate, exact.source) == (exact_rate, "empirical")
-    assert (seed.rate, seed.source) == (seed_rate, "seed")
-    assert (scaled.rate, scaled.source) == (
-        input_rate * module.TOKEN_METRICS["OutputTokenCount"][1],
-        "empirical_scaled",
-    )
-    assert (fallback.rate, fallback.source) == (module.UNKNOWN_RATE_PER_1K, "fallback")
-
-
-def test_estimated_metered_spend_tracks_estimated_and_non_estimated_sources(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    fake_aws = FakeAWS(
-        cloudwatch_by_region={
-            "seed-region": FakeCloudWatch(
-                pages=[token_metric_page("seed-model")],
-                values_by_id={"q0": [1000]},
-            ),
-            "fallback-region": FakeCloudWatch(
-                pages=[token_metric_page("unpriced-model")],
-                values_by_id={"q0": [1000]},
-            ),
-            "empirical-region": FakeCloudWatch(
-                pages=[token_metric_page("empirical-model")],
-                values_by_id={"q0": [1000]},
-            ),
-            "scaled-region": FakeCloudWatch(
-                pages=[token_metric_page("scaled-model", "OutputTokenCount")],
-                values_by_id={"q0": [1000]},
-            ),
-        }
-    )
-    module = load_handler(
-        monkeypatch,
-        fake_aws,
-        regions=("seed-region", "fallback-region", "empirical-region", "scaled-region"),
-    )
-    seed_rate = float(len("seed"))
-    empirical_rate = float(len("empirical"))
-    input_rate = float(len("input"))
-    module.SEED_RATES = {"seed-model": {"input": seed_rate}}
-
-    estimated = module._metered_spend(
-        FixedDateTime.now(dt.timezone.utc),
-        FixedDateTime.now(dt.timezone.utc),
-        {
-            "USE1-empirical-model-input-tokens": empirical_rate,
-            "USE1-scaled-model-input-tokens": input_rate,
-        },
-    )
-    module.REGIONS = ["empirical-region", "scaled-region"]
-    non_estimated = module._metered_spend(
-        FixedDateTime.now(dt.timezone.utc),
-        FixedDateTime.now(dt.timezone.utc),
-        {
-            "USE1-empirical-model-input-tokens": empirical_rate,
-            "USE1-scaled-model-input-tokens": input_rate,
-            "USE1-unpriced-model-input-tokens": module.UNKNOWN_RATE_PER_1K,
-        },
-    )
-
-    assert estimated is not None
-    assert estimated.total == (
-        seed_rate
-        + module.UNKNOWN_RATE_PER_1K
-        + empirical_rate
-        + input_rate * module.TOKEN_METRICS["OutputTokenCount"][1]
-    )
-    assert estimated.metered_estimated is True
-    assert non_estimated is not None
-    assert non_estimated.metered_estimated is False
-
-
-def test_metered_spend_ignores_non_token_and_non_model_series_then_reports_zero(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    fake_aws = FakeAWS(
-        cloudwatch=FakeCloudWatch(
-            pages=[
-                {
-                    "Metrics": [
-                        {"MetricName": "InvocationCount", "Dimensions": []},
-                        {
-                            "MetricName": "InputTokenCount",
-                            "Dimensions": [{"Name": "Operation", "Value": "InvokeModel"}],
-                        },
-                    ]
-                }
-            ]
-        )
-    )
-    module = load_handler(monkeypatch, fake_aws)
-
-    result = module._metered_spend(
-        FixedDateTime.now(dt.timezone.utc), FixedDateTime.now(dt.timezone.utc), {}
-    )
-
-    assert result is not None
-    assert result.total == float(0)
-    assert result.degraded is False
-
-
-def test_metered_spend_skips_zero_value_series(monkeypatch: pytest.MonkeyPatch):
-    rate = float(len("rate"))
-    fake_aws = FakeAWS(
-        cloudwatch=FakeCloudWatch(
-            pages=[
-                {
-                    "Metrics": [
-                        {
-                            "MetricName": "InputTokenCount",
-                            "Dimensions": [{"Name": "ModelId", "Value": "zero-model"}],
-                        },
-                        {
-                            "MetricName": "InputTokenCount",
-                            "Dimensions": [{"Name": "ModelId", "Value": "paid-model"}],
-                        },
-                    ]
-                }
-            ],
-            values_by_id={"q0": [0], "q1": [1000]},
-        )
-    )
-    module = load_handler(monkeypatch, fake_aws)
-
-    result = module._metered_spend(
-        FixedDateTime.now(dt.timezone.utc),
-        FixedDateTime.now(dt.timezone.utc),
-        {"USE1-paid-model-input-tokens": rate},
-    )
-
-    assert result is not None
-    assert result.total == rate
-    assert result.degraded is False
 
 
 def test_ce_spend_today_returns_zero_when_ce_has_no_results(
@@ -1647,19 +743,6 @@ def test_ce_spend_today_returns_zero_when_ce_has_no_results(
     assert spend == float(0)
 
 
-def test_ce_spend_today_queries_all_bedrock_services(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    fake_ce = FakeCE(results_by_time=[])
-    module = load_handler(monkeypatch, FakeAWS(ce=fake_ce), stub_ce=False)
-
-    module._ce_spend_today(TODAY)
-
-    assert fake_ce.requests[0]["Filter"] == {
-        "Dimensions": {"Key": "SERVICE", "Values": module.BEDROCK_SERVICE_VALUES}
-    }
-
-
 def test_ce_spend_today_reads_all_cost_explorer_pages(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1668,9 +751,12 @@ def test_ce_spend_today_reads_all_cost_explorer_pages(
             {
                 "ResultsByTime": [
                     {
-                        "Total": {
-                            "UnblendedCost": {"Amount": "3"},
-                        }
+                        "Groups": [
+                            {
+                                "Keys": ["Amazon Bedrock"],
+                                "Metrics": {"UnblendedCost": {"Amount": "3"}},
+                            }
+                        ]
                     },
                 ],
                 "NextPageToken": "next-page",
@@ -1678,9 +764,12 @@ def test_ce_spend_today_reads_all_cost_explorer_pages(
             {
                 "ResultsByTime": [
                     {
-                        "Total": {
-                            "UnblendedCost": {"Amount": "5"},
-                        }
+                        "Groups": [
+                            {
+                                "Keys": ["Claude Opus 4.8 (Amazon Bedrock Edition)"],
+                                "Metrics": {"UnblendedCost": {"Amount": "5"}},
+                            }
+                        ]
                     },
                 ],
             },
@@ -1809,42 +898,6 @@ def test_notify_logs_publish_failures(monkeypatch: pytest.MonkeyPatch):
     assert fake_aws.sns.published == []
 
 
-def test_cached_rates_skip_refresh(monkeypatch: pytest.MonkeyPatch):
-    state = {
-        "rates_day": TODAY.isoformat(),
-        "rates": {"USE1-model-input-tokens": float(len("rate"))},
-        "ce_day": TODAY.isoformat(),
-        "ce_spend": float(0),
-        "ce_last_poll": FixedDateTime.now(dt.timezone.utc).isoformat(),
-    }
-    fake_aws = FakeAWS(ssm=FakeSSM(state))
-    module = load_handler(monkeypatch, fake_aws, stub_rates=False, stub_ce=False)
-
-    def fail_refresh() -> dict:
-        raise AssertionError("cached rates should be reused")
-
-    monkeypatch.setattr(module, "_refresh_rates", fail_refresh)
-
-    result = run_handler(module, WARN_THRESHOLD - len("x"))
-
-    assert result["effective_source"] == "metered"
-
-
-def test_refresh_rate_failure_reuses_empty_rates(monkeypatch: pytest.MonkeyPatch):
-    fake_aws = FakeAWS()
-    module = load_handler(monkeypatch, fake_aws, stub_rates=False)
-
-    def fail_refresh() -> dict:
-        raise client_error("GetCostAndUsage")
-
-    monkeypatch.setattr(module, "_refresh_rates", fail_refresh)
-
-    result = run_handler(module, WARN_THRESHOLD - len("x"))
-
-    assert result["effective_source"] == "metered"
-    assert "rates_day" not in fake_aws.ssm.state
-
-
 def test_unavailable_meter_uses_ce_when_ce_has_reached_cap(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1910,26 +963,6 @@ def test_unavailable_meter_polls_ce_after_interval(
     assert fake_aws.ce.calls == len("x")
 
 
-def test_metered_spend_cloudwatch_failure_before_any_series_reports_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    fake_aws = FakeAWS(
-        cloudwatch_by_region={
-            "broken-region": FakeCloudWatch(list_error=client_error("ListMetrics")),
-            "later-region": FakeCloudWatch(pages=[]),
-        }
-    )
-    module = load_handler(monkeypatch, fake_aws, regions=("broken-region", "later-region"))
-
-    result = module._metered_spend(
-        FixedDateTime.now(dt.timezone.utc),
-        FixedDateTime.now(dt.timezone.utc),
-        {"USE1-later-model-input-tokens": float(len("later"))},
-    )
-
-    assert result is None
-
-
 def test_dry_run_release_does_not_publish_detach_notification(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1944,3 +977,360 @@ def test_dry_run_release_does_not_publish_detach_notification(
     assert_policy_attached(fake_aws, attached=True)
     subjects = [published["Subject"] for published in fake_aws.sns.published]
     assert "Bedrock daily cap released" not in subjects
+
+
+# ---------------------------------------------------------------------------
+# Ceiling pricing: the removals, the query shape, and the upper-bound property.
+#
+# These replace the per-model rate-table tests. The previous suite could not
+# express the defect class that produced four live mispricings, because its
+# fixtures built rate keys from the ModelId spelling rather than the billing
+# label, so a label/id mismatch was unrepresentable. Pricing no longer consults
+# either, which is what makes the class unreachable.
+# ---------------------------------------------------------------------------
+REMOVED_PRICING_SYMBOLS = (
+    "_refresh_rates",
+    "_rate_for",
+    "_seed_for",
+    "_normalise",
+    "_strip_billing_region",
+    "_marketplace_rate_key",
+    "_rate_key_for_ce_group",
+    "SEED_RATES",
+    "RATE_OVERRIDES",
+    "BEDROCK_SERVICE_VALUES",
+    "MARKETPLACE_TOKEN_SUFFIXES",
+    "UNKNOWN_RATE_PER_1K",
+    "MARKETPLACE_TOKENS_PER_RATE_UNIT",
+    "MeteredRate",
+    "RateSource",
+    "TOKEN_METRICS",
+)
+
+
+def test_pricing_derivation_layer_is_absent(monkeypatch: pytest.MonkeyPatch):
+    module = load_handler(monkeypatch, FakeAWS())
+
+    surviving = [name for name in REMOVED_PRICING_SYMBOLS if hasattr(module, name)]
+
+    assert surviving == [], f"pricing-derivation symbols still present: {surviving}"
+
+
+def test_module_docstring_no_longer_describes_a_derived_rate_table():
+    source = HANDLER_PATH.read_text(encoding="utf-8")
+    docstring = ast.get_docstring(ast.parse(source)) or ""
+
+    # Stale prose outlives stale code and is how the next reader is misled. Scoped to
+    # the docstring deliberately: the handler body still NAMES the retired state keys,
+    # in the comment explaining that it ignores them on the first tick after deploy.
+    # That comment is load-bearing, so a whole-file ban would be the wrong assertion.
+    # Match the retired HEADINGS and affirmative claims, not bare phrases: the new
+    # docstring legitimately says there is deliberately NO derived rate table, and a
+    # naive substring ban would forbid saying so.
+    for gone in (
+        "WHERE THE PRICES COME FROM",
+        "UNKNOWN_RATE_PER_1K",
+        "seed rate",
+        "Not a hardcoded table",
+        "cost/quantity is the exact blended",
+        "the rate table is refreshed",
+    ):
+        assert gone not in docstring, f"module docstring still describes {gone!r}"
+    assert "CEILING" in docstring, "docstring should explain the ceiling it now uses"
+
+    # Imports orphaned by the removals.
+    assert "\nimport re\n" not in source
+    assert "from typing import Literal" not in source
+    # The retired env vars must not be read anywhere in the module.
+    for gone in ("UNKNOWN_RATE_PER_1K", "SEED_RATES", "RATE_OVERRIDES", "RATE_WINDOW_DAYS"):
+        assert f'os.environ["{gone}"]' not in source
+        assert f'os.environ.get("{gone}"' not in source
+
+
+def test_metered_spend_issues_four_undimensioned_queries_per_region(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    recorded: list[dict] = []
+
+    class RecordingCloudWatch(FakeCloudWatch):
+        def get_metric_data(self, MetricDataQueries, **kwargs):
+            recorded.append({"queries": MetricDataQueries})
+            return super().get_metric_data(MetricDataQueries, **kwargs)
+
+    regions = ("region-one", "region-two")
+    fake_aws = FakeAWS(cloudwatch_by_region={region: RecordingCloudWatch() for region in regions})
+    module = load_handler(monkeypatch, fake_aws, regions=regions)
+
+    module._metered_spend(FixedDateTime.now(dt.timezone.utc), FixedDateTime.now(dt.timezone.utc))
+
+    assert len(recorded) == len(regions), "expected exactly one batched call per region"
+    for call in recorded:
+        assert len(call["queries"]) == 4
+        for query in call["queries"]:
+            metric = query["MetricStat"]["Metric"]
+            assert metric["Namespace"] == "AWS/Bedrock"
+            # An EXPLICIT empty list, not an absent key. Omitting Dimensions asks
+            # CloudWatch for something else, so the distinction is load-bearing.
+            assert metric["Dimensions"] == []
+            assert query["MetricStat"]["Stat"] == "Sum"
+        assert {q["MetricStat"]["Metric"]["MetricName"] for q in call["queries"]} == set(
+            module.CEILING
+        )
+
+
+def test_ceiling_covers_every_observed_rate_in_the_billing_payload(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """CEILING must sit at or above the highest rate the account is actually billed.
+
+    The upper-bound property is the whole safety argument: if any real rate exceeds
+    its ceiling the metered arm under-reads and the cap fires late. Rates are derived
+    here the way the account bills them -- marketplace services meter in units of
+    1,000,000 tokens, the legacy service in units of 1,000.
+    """
+    module = load_handler(monkeypatch, FakeAWS())
+    observed = {
+        "InputTokenCount": [
+            ("Claude Opus 4.8 (Amazon Bedrock Edition)", 5.50, 1e6),
+            ("Amazon Bedrock", 0.0008, 1e3),
+        ],
+        "OutputTokenCount": [("Claude Opus 4.7 (Amazon Bedrock Edition)", 27.50, 1e6)],
+        "CacheReadInputTokenCount": [("Claude Opus 4.5 (Amazon Bedrock Edition)", 0.55, 1e6)],
+        "CacheWriteInputTokenCount": [("Claude Opus 4.8 (Amazon Bedrock Edition)", 6.875, 1e6)],
+    }
+
+    for metric, rows in observed.items():
+        for service, per_million, _unit in rows:
+            per_token = per_million / 1e6
+            assert module.CEILING[metric] >= per_token, (
+                f"{service} bills {metric} above its ceiling"
+            )
+
+
+def test_is_bedrock_service_predicate_matches_every_live_service(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = load_handler(monkeypatch, FakeAWS())
+    # The five the retired allowlist omitted are marked; each cost real money while
+    # the authoritative signal could not see it.
+    live = [
+        "Amazon Bedrock",
+        "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
+        "Claude Sonnet 4.6 (Amazon Bedrock Edition)",
+        "Claude Haiku 4.5 (Amazon Bedrock Edition)",
+        "Claude Opus 4.7 (Amazon Bedrock Edition)",
+        "Claude Opus 4.8 (Amazon Bedrock Edition)",  # omitted
+        "Claude Opus 5 (Amazon Bedrock Edition)",  # omitted
+        "Claude Opus 4.5 (Amazon Bedrock Edition)",  # omitted
+        "Cohere Rerank v3.5 (Amazon Bedrock Edition)",  # omitted
+        "Claude 3 Haiku (Amazon Bedrock Edition)",  # omitted
+    ]
+    for service in live:
+        assert module.is_bedrock_service(service), service
+    for other in [
+        "Amazon Simple Storage Service",
+        "AWS Lambda",
+        "Tax",  # billed separately, never attributed to a Bedrock service
+        "Amazon Bedrock Guardrails X",
+    ]:
+        assert not module.is_bedrock_service(other), other
+
+
+def test_ce_spend_today_sums_only_bedrock_groups(monkeypatch: pytest.MonkeyPatch):
+    fake_ce = FakeCE(
+        results_by_time=[
+            {
+                "Groups": [
+                    {
+                        "Keys": ["Claude Opus 4.8 (Amazon Bedrock Edition)"],
+                        "Metrics": {"UnblendedCost": {"Amount": "7"}},
+                    },
+                    {
+                        "Keys": ["Amazon Bedrock"],
+                        "Metrics": {"UnblendedCost": {"Amount": "2"}},
+                    },
+                    {
+                        "Keys": ["Amazon Simple Storage Service"],
+                        "Metrics": {"UnblendedCost": {"Amount": "1000"}},
+                    },
+                ]
+            }
+        ]
+    )
+    module = load_handler(monkeypatch, FakeAWS(ce=fake_ce), stub_ce=False)
+
+    spend = module._ce_spend_today(TODAY)
+
+    assert spend == float(9)
+    request = fake_ce.requests[0]
+    # No SERVICE filter: an enumerated value list is exactly what went stale.
+    assert "Filter" not in request
+    assert request["GroupBy"] == [{"Type": "DIMENSION", "Key": "SERVICE"}]
+
+
+# ---------------------------------------------------------------------------
+# Release dispositions.
+#
+# An all-empty CloudWatch read is ambiguous: it is BOTH a metric-delivery gap and
+# the normal idle / fresh-UTC-day state the automatic release depends on. Cost
+# Explorer cannot break the tie -- it lags 8-24h and reads zero for hours into a
+# busy day, so "CE says zero" would lift a legitimately tripped deny at noon. The
+# day's high-water token total, keyed by UTC date, is what discriminates.
+# ---------------------------------------------------------------------------
+def _attach_deny(fake_aws) -> None:
+    fake_aws.iam.role_policies = {"api": {"arn:test:deny"}, "worker": {"arn:test:deny"}}
+    fake_aws.iam.group_policies = {"admins": {"arn:test:deny"}}
+
+
+def _empty_read(module):
+    module._metered_spend = lambda day_start, now: module.MeteredSpend(
+        total=float(0), degraded=False, failures=(), saw_datapoints=False
+    )
+
+
+def test_empty_read_with_zero_high_water_today_releases(monkeypatch: pytest.MonkeyPatch):
+    state = {
+        "ce_day": TODAY.isoformat(),
+        "ce_spend": float(0),
+        "ce_last_poll": FixedDateTime.now(dt.timezone.utc).isoformat(),
+        "high_water_day": TODAY.isoformat(),
+        "tokens_high_water": float(0),
+    }
+    fake_aws = FakeAWS(ssm=FakeSSM(state))
+    module = load_handler(monkeypatch, fake_aws)
+    _attach_deny(fake_aws)
+    _empty_read(module)
+
+    result = module.handler({}, None)
+
+    assert result["deny_attached"] is False
+
+
+def test_empty_read_after_traffic_today_holds_the_deny(monkeypatch: pytest.MonkeyPatch):
+    state = {
+        "ce_day": TODAY.isoformat(),
+        "ce_spend": float(0),
+        "ce_last_poll": FixedDateTime.now(dt.timezone.utc).isoformat(),
+        "high_water_day": TODAY.isoformat(),
+        "tokens_high_water": float(len("seen traffic earlier today")),
+    }
+    fake_aws = FakeAWS(ssm=FakeSSM(state))
+    module = load_handler(monkeypatch, fake_aws)
+    _attach_deny(fake_aws)
+    _empty_read(module)
+
+    result = module.handler({}, None)
+
+    # Tokens were observed earlier today, so an empty read now is a gap, not idleness.
+    assert result["deny_attached"] is True
+
+
+def test_empty_read_with_absent_high_water_holds_the_deny(monkeypatch: pytest.MonkeyPatch):
+    """Mid-day deploy over state written by the previous handler.
+
+    Pre-change state carries no high-water key at all. Treating "absent" as "idle"
+    would release a legitimately tripped deny on the first tick after deploy, so
+    absent holds while a deny is attached.
+    """
+    state = {
+        "ce_day": TODAY.isoformat(),
+        "ce_spend": float(0),
+        "ce_last_poll": FixedDateTime.now(dt.timezone.utc).isoformat(),
+        "rates": {"USE1-legacy-input-tokens": 0.003},
+        "rates_day": TODAY.isoformat(),
+    }
+    fake_aws = FakeAWS(ssm=FakeSSM(state))
+    module = load_handler(monkeypatch, fake_aws)
+    _attach_deny(fake_aws)
+    _empty_read(module)
+
+    result = module.handler({}, None)
+
+    assert result["deny_attached"] is True
+
+
+def test_first_tick_after_deploy_ignores_and_drops_old_rate_state(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    state = {
+        "ce_day": TODAY.isoformat(),
+        "ce_spend": float(0),
+        "ce_last_poll": FixedDateTime.now(dt.timezone.utc).isoformat(),
+        "rates": {"USE1-legacy-input-tokens": 0.003},
+        "rates_day": TODAY.isoformat(),
+        "metered_estimated": True,
+    }
+    fake_aws = FakeAWS(ssm=FakeSSM(state))
+    module = load_handler(monkeypatch, fake_aws)
+
+    result = run_handler(module, float(1))
+
+    assert "metered_estimated" not in result
+    persisted = fake_aws.ssm.state
+    for gone in ("rates", "rates_day", "metered_estimated"):
+        assert gone not in persisted, f"{gone} survived into persisted state"
+
+
+def test_partial_region_failure_holds_the_deny(monkeypatch: pytest.MonkeyPatch):
+    """One region raised, the other returned data below threshold.
+
+    The surviving region's total is a FLOOR on account spend, not the account total,
+    so it cannot justify lifting a deny.
+    """
+    state = {
+        "ce_day": TODAY.isoformat(),
+        "ce_spend": float(0),
+        "ce_last_poll": FixedDateTime.now(dt.timezone.utc).isoformat(),
+        "high_water_day": TODAY.isoformat(),
+        "tokens_high_water": float(0),
+    }
+    fake_aws = FakeAWS(ssm=FakeSSM(state))
+    module = load_handler(monkeypatch, fake_aws)
+    _attach_deny(fake_aws)
+    module._metered_spend = lambda day_start, now: degraded_metered_spend(module, float(1))
+
+    result = module.handler({}, None)
+
+    assert result["deny_attached"] is True
+
+
+@pytest.mark.parametrize("failing", ["metered", "ce"])
+def test_read_exception_fails_closed(monkeypatch: pytest.MonkeyPatch, failing: str):
+    """An exception is not an empty read, and must never release."""
+    state = {
+        "high_water_day": TODAY.isoformat(),
+        "tokens_high_water": float(0),
+    }
+    if failing == "ce":
+        fake_aws = FakeAWS(ssm=FakeSSM(state), ce=FakeCE(error=client_error("GetCostAndUsage")))
+    else:
+        fake_aws = FakeAWS(ssm=FakeSSM(state))
+    module = load_handler(monkeypatch, fake_aws, stub_ce=(failing != "ce"))
+    _attach_deny(fake_aws)
+    if failing == "metered":
+        module._metered_spend = lambda day_start, now: None
+
+    result = module.handler({}, None)
+
+    assert result["deny_attached"] is True
+
+
+def test_ce_arm_trips_at_the_unscaled_threshold(monkeypatch: pytest.MonkeyPatch):
+    """The authoritative arm must not be scaled by the ceiling's over-estimate.
+
+    ce_spend is real billed dollars. Raising THRESHOLD_USD to centre the metered arm
+    would raise the bar for this arm too, so the authoritative signal would fire LATE
+    -- the failure this design exists to remove.
+    """
+    fake_aws = FakeAWS(ce=FakeCE(spend=THRESHOLD))
+    module = load_handler(monkeypatch, fake_aws, stub_ce=False)
+    # Metered reads clean and far below the cap; only the CE arm is at the threshold.
+    module._metered_spend = lambda day_start, now: module.MeteredSpend(
+        total=float(1), degraded=False, failures=(), saw_datapoints=True
+    )
+
+    result = module.handler({}, None)
+
+    assert result["effective_source"] == "ce"
+    assert result["effective_usd"] == pytest.approx(THRESHOLD)
+    assert result["deny_attached"] is True

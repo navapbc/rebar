@@ -51,28 +51,6 @@ variable "bedrock_warn_threshold_usd" {
   default     = 300
 }
 
-variable "bedrock_cap_seed_rates" {
-  type = map(object({
-    input  = number
-    output = optional(number)
-  }))
-  description = <<-EOT
-    Published Bedrock per-token rates for models with no billing history in
-    this account.
-  EOT
-  default = {
-    "claude-haiku-4-5"  = { input = 0.0011, output = 0.0055 }
-    "claude-sonnet-4-6" = { input = 0.0033, output = 0.0165 }
-    "claude-opus"       = { input = 0.0055, output = 0.0275 }
-  }
-}
-
-variable "bedrock_cap_unknown_rate_per_1k" {
-  type        = number
-  description = "Fail-closed fallback per-token rate for unpriced models."
-  default     = 0.075
-}
-
 variable "bedrock_cap_target_roles" {
   type        = list(string)
   description = <<-EOT
@@ -119,16 +97,6 @@ variable "bedrock_cap_target_groups" {
 locals {
   bedrock_cap_account_id = data.aws_caller_identity.current.account_id
   bedrock_cap_name       = "bedrock-spend-cap"
-
-  bedrock_cap_seed_rates = var.bedrock_cap_seed_rates
-
-  # Titan embeddings bill as "TitanEmbeddingV2-Text" but meter as
-  # "amazon.titan-embed-text-v2:0"; the two do not normalise to each other, so
-  # the mapping has to be stated. Without this pin, embedding tokens would be
-  # priced at the fail-closed fallback and trip the cap far too early.
-  bedrock_cap_rate_overrides = {
-    "titan-embed-text" = "TitanEmbeddingV2-Text"
-  }
 }
 
 # --- the deny applied when the cap trips ------------------------------------
@@ -333,7 +301,6 @@ resource "aws_iam_role_policy" "bedrock_spend_cap" {
         # None of these support resource-level permissions.
         Action = [
           "ce:GetCostAndUsage",
-          "cloudwatch:ListMetrics",
           "cloudwatch:GetMetricData",
         ]
         Resource = "*"
@@ -433,16 +400,10 @@ resource "aws_lambda_function" "bedrock_spend_cap" {
       # hourly and the fast path rides on CloudWatch.
       CE_MIN_INTERVAL_SECONDS = "3600"
 
-      RATE_WINDOW_DAYS = "60"
-
-      # Above any current Bedrock rate, so a model with neither billing history
-      # nor a seed price trips the cap early instead of slipping under it.
-      # Failing closed is the point of a cap.
-      UNKNOWN_RATE_PER_1K = tostring(var.bedrock_cap_unknown_rate_per_1k)
-
-      RATE_OVERRIDES = jsonencode(local.bedrock_cap_rate_overrides)
-      SEED_RATES     = jsonencode(local.bedrock_cap_seed_rates)
-      DRY_RUN        = "false"
+      # No rate-derivation configuration. Tokens are priced at the per-direction
+      # CEILING constants in handler.py, so there is no rate window, no seed table,
+      # no model-id pins and no fail-closed fallback rate to configure.
+      DRY_RUN = "false"
     }
   }
 

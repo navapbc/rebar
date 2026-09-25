@@ -26,39 +26,38 @@ max(cost_explorer, priced_tokens). CE catches anything the metering misses
 (provisioned throughput, batch, models that publish no token metrics); the
 metering catches a runaway hours before CE would.
 
-WHERE THE PRICES COME FROM
---------------------------
-Not a hardcoded table. Cost Explorer grouped by USAGE_TYPE returns BOTH
-UnblendedCost and UsageQuantity, so cost/quantity is the exact blended
-unit rate
-this account is actually charged — after whatever region, tier, and discount
-apply. That is strictly better than a price list: it cannot go stale, and it is
-right for this account rather than right for the public rate card. (The AWS
-Price List API was evaluated and rejected: its `model` dimension for
-AmazonBedrock still tops out at Claude 3, and no usagetype mentions anthropic.)
+HOW TOKENS BECOME DOLLARS
+-------------------------
+Every token is priced at a CEILING rate for its direction, set ABOVE the highest
+per-token rate this account has ever been billed for that direction. So the
+metered figure is an UPPER BOUND on real spend, not an estimate of it, and the
+cap cannot fire late on the metered arm.
 
-Usage types look like the Bedrock model id plus token direction. UsageQuantity
-is NOT in the same unit for both services Bedrock bills through: the legacy
-`Amazon Bedrock` service meters in units of 1,000 tokens, while the marketplace
-`... (Amazon Bedrock Edition)` services meter in units of 1,000,000 tokens.
-The rate table is $/1,000 tokens throughout, so every quantity is converted to
-that unit before a rate is derived from it. Getting this wrong is not a rounding
-error -- it is a factor of a million, and it lands on the side that trips the
-cap at a thousandth of the real spend.
+There is deliberately no derived rate table and no per-model matching. The
+previous design derived rates from Cost Explorer and matched them to CloudWatch
+ModelIds by substring and suffix heuristics; that produced four distinct
+mispricings in twelve days, two of which reached production, because AWS bills
+the same model family under several label conventions. A single ceiling per
+direction removes the entire class: there is nothing left to match.
 
-A model that has never been billed in the rate window has no empirical rate.
-Its tokens are priced at UNKNOWN_RATE_PER_1K, which is set deliberately HIGH so
-an unpriced model trips the cap early rather than slipping under it. Failing
-closed is the entire point of a cap. Unmatched model ids are logged loudly so
-they can be pinned explicitly via RATE_OVERRIDES.
+The cost is precision in the safe direction. A model much cheaper than the
+priciest is over-priced by the ratio between them, so a large embedding or
+small-model batch job can trip the cap well below the configured dollar figure.
+That is accepted: erring early is correct for a circuit breaker.
+
+THRESHOLD_USD IS NOT SCALED TO COMPENSATE
+-----------------------------------------
+Raising the threshold to centre the metered arm would raise it for `ce_spend`
+too, and `ce_spend` is real billed dollars. The authoritative arm would then
+trip LATE, which is the failure this design exists to remove. Unscaled, the CE
+arm trips at exactly the configured cap and the metered arm trips early.
 
 WHY CE IS NOT POLLED EVERY TICK
 -------------------------------
 Cost Explorer charges per API request. Polling it on the 5-minute tick is an
 inefficient way to run a cost control. CE is therefore polled at most once per
-CE_MIN_INTERVAL_SECONDS (default hourly) and the rate table is refreshed at
-most once a day. The 5-minute tick runs on CloudWatch alone, which is the signal
-that actually needs to be fast.
+CE_MIN_INTERVAL_SECONDS (default hourly). The 5-minute tick runs on CloudWatch
+alone, which is the signal that actually needs to be fast.
 """
 
 from __future__ import annotations
@@ -67,9 +66,7 @@ import datetime as dt
 import json
 import logging
 import os
-import re
 from dataclasses import dataclass
-from typing import Literal
 
 import boto3
 from botocore.exceptions import ClientError
@@ -86,64 +83,40 @@ REGIONS = [r for r in os.environ.get("REGIONS", "us-east-1").split(",") if r]
 STATE_PARAM = os.environ["STATE_PARAM"]
 SNS_TOPIC_ARN = os.environ.get("SNS_TOPIC_ARN", "")
 CE_MIN_INTERVAL_SECONDS = int(os.environ.get("CE_MIN_INTERVAL_SECONDS", "3600"))
-RATE_WINDOW_DAYS = int(os.environ.get("RATE_WINDOW_DAYS", "60"))
-UNKNOWN_RATE_PER_1K = float(os.environ["UNKNOWN_RATE_PER_1K"])
 DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
 
-# Explicit ModelId-substring -> usage-type-fragment pins, for the handful whose
-# billing name and metric name do not normalise to each other (Titan embeddings
-# bill as "TitanEmbeddingV2-Text" but meter as "amazon.titan-embed-text-v2:0").
-RATE_OVERRIDES = json.loads(os.environ.get("RATE_OVERRIDES", "{}"))
-
-# Published per-token rates for models this account is entitled to but has
-# never actually been billed for, so no empirical rate can exist yet. Without
-# these, a first-ever Claude run would be priced at UNKNOWN_RATE_PER_1K and trip
-# the cap at a small fraction of the real threshold. The moment a model appears
-# on a bill its empirical rate wins and the seed stops being consulted.
-#
-# Seeded at the REGIONAL rate (Bedrock prices regional endpoints ~10% above
-# global) so the seed errs high rather than low.
-SEED_RATES = json.loads(os.environ.get("SEED_RATES", "{}"))
-
-BEDROCK_SERVICE_VALUES = [
-    "Amazon Bedrock",
-    "Claude Sonnet 4.5 (Amazon Bedrock Edition)",
-    "Claude Sonnet 4.6 (Amazon Bedrock Edition)",
-    "Claude Haiku 4.5 (Amazon Bedrock Edition)",
-    "Claude Opus 4.7 (Amazon Bedrock Edition)",
-]
+# Bedrock spend lands under the legacy `Amazon Bedrock` service and under one
+# marketplace service per model, named "<Model> (Amazon Bedrock Edition)". The set
+# grows whenever AWS lists a new model, so it is matched by PREDICATE rather than
+# enumerated: an enumerated allowlist silently omitted five live services and left
+# the authoritative signal reading about a third of real spend.
 BEDROCK_EDITION_SUFFIX = " (Amazon Bedrock Edition)"
-# Marketplace-billed Bedrock models are metered in units of 1,000,000 tokens, while the
-# rate table -- and the legacy `Amazon Bedrock` service -- work in units of 1,000. Scale
-# marketplace quantities onto the rate table's unit before deriving cost/quantity.
-MARKETPLACE_TOKENS_PER_RATE_UNIT = 1000
-MARKETPLACE_TOKEN_SUFFIXES = {
-    "InputTokenCount": "input-tokens",
-    "OutputTokenCount": "output-tokens",
-    "CacheReadInputTokenCount": "cache-read-input-token-count",
-    "CacheWriteInputTokenCount": "cache-write-input-token-count",
+
+
+def is_bedrock_service(service: str) -> bool:
+    """True for every Cost Explorer SERVICE that carries Bedrock spend."""
+    return service == "Amazon Bedrock" or service.endswith(BEDROCK_EDITION_SUFFIX)
+
+
+# USD per token, per token direction. Each value is 1.25x the highest per-token
+# rate this account was billed for that direction over the trailing 60 days of
+# Cost Explorer, derived 2026-09-25; Claude Opus binds every direction, being the
+# priciest family in use. The 1.25 factor is deliberate headroom: at parity a
+# price rise would break the upper-bound property silently, on the tick it landed.
+#
+# Re-derive with: for each direction, max(UnblendedCost / UsageQuantity) across all
+# services where is_bedrock_service() holds, remembering that marketplace services
+# meter in units of 1,000,000 tokens and the legacy service in units of 1,000.
+CEILING = {
+    "InputTokenCount": 6.875e-06,
+    "OutputTokenCount": 3.4375e-05,
+    "CacheReadInputTokenCount": 6.875e-07,
+    "CacheWriteInputTokenCount": 8.59375e-06,
 }
 
-# CloudWatch token metric -> (candidate usage-type suffixes that bill it, the
-# multiplier to apply to the model's input rate when none of those suffixes has
-# an observed rate of its own).
-#
-# The output multiplier is higher than input: across every rate observed on this
-# account output bills at several times input, so deriving output from input at parity
-# would UNDER-price a runaway and let the cap fire late. Erring high is the
-# correct direction for a cap. Cache read/write use Bedrock's published factors.
-TOKEN_METRICS = {
-    "InputTokenCount": (("input-tokens", "input-token-count"), 1),
-    "OutputTokenCount": (("output-tokens", "output-token-count"), 5),
-    "CacheReadInputTokenCount": (
-        ("cache-read-input-token-count", "cache-read-input-tokens"),
-        1 / 10,
-    ),
-    "CacheWriteInputTokenCount": (
-        ("cache-write-input-token-count", "cache-write-input-tokens"),
-        5 / 4,
-    ),
-}
+# The day's high-water metered token total, persisted under this state key so an
+# all-empty CloudWatch read can be told apart from a genuinely idle day.
+HIGH_WATER_KEY = "tokens_high_water"
 
 iam = boto3.client("iam")
 ssm = boto3.client("ssm")
@@ -172,202 +145,6 @@ def _save_state(state: dict) -> None:
 
 
 # --------------------------------------------------------------------------
-# empirical rates
-# --------------------------------------------------------------------------
-def _normalise(text: str) -> str:
-    """Collapse a model id or usage-type fragment to comparable alphanumerics."""
-    text = text.lower()
-    prefixes = (
-        "us.",
-        "eu.",
-        "apac.",
-        "global.",
-        "anthropic.",
-        "amazon.",
-        "openai.",
-        "mistral.",
-        "deepseek.",
-        "cohere.",
-        "meta.",
-        "ai21.",
-    )
-    # Loop, not a single pass: ids stack them ("us.anthropic.claude-sonnet-4-6",
-    # "us.amazon.nova-lite-v1:0") and stripping only the first leaves a vendor
-    # name embedded in the comparison key.
-    changed = True
-    while changed:
-        changed = False
-        for prefix in prefixes:
-            if text.startswith(prefix):
-                text = text[len(prefix) :]
-                changed = True
-    return re.sub(r"[^a-z0-9]", "", text)
-
-
-def _strip_billing_region(body: str) -> str:
-    prefix, separator, rest = body.partition("-")
-    if separator and re.fullmatch(r"[A-Z]{2,4}[0-9]?", prefix):
-        return rest
-    return body
-
-
-def _marketplace_rate_key(service: str, usage_type: str) -> tuple[str, float] | None:
-    if not service.endswith(BEDROCK_EDITION_SUFFIX):
-        return None
-    usage_body = usage_type.rsplit(":", 1)[-1]
-    try:
-        region, token_units = usage_body.split("_", 1)
-    except ValueError:
-        return None
-    if not token_units.endswith("-Units"):
-        return None
-    token_kind = token_units[: -len("-Units")]
-    suffix = MARKETPLACE_TOKEN_SUFFIXES.get(token_kind)
-    if suffix is None:
-        return None
-    model_label = service.removesuffix(BEDROCK_EDITION_SUFFIX)
-    return f"{region}-{model_label}-{suffix}", MARKETPLACE_TOKENS_PER_RATE_UNIT
-
-
-def _rate_key_for_ce_group(service: str, usage_type: str) -> tuple[str, float] | None:
-    if service == "Amazon Bedrock":
-        return usage_type, 1  # already metered in units of 1,000 tokens
-    return _marketplace_rate_key(service, usage_type)
-
-
-def _ce_cost_and_usage_pages(request: dict):
-    next_token = None
-    while True:
-        page_request = dict(request)
-        if next_token:
-            page_request["NextPageToken"] = next_token
-        resp = ce.get_cost_and_usage(**page_request)
-        yield resp
-        next_token = resp.get("NextPageToken")
-        if not next_token:
-            break
-
-
-def _refresh_rates() -> dict:
-    """Derive per-token rates per usage type from this account's own bills."""
-    end = dt.datetime.now(dt.timezone.utc).date()
-    start = end - dt.timedelta(days=RATE_WINDOW_DAYS)
-    request = {
-        "TimePeriod": {"Start": start.isoformat(), "End": end.isoformat()},
-        "Granularity": "MONTHLY",
-        "Metrics": ["UnblendedCost", "UsageQuantity"],
-        "Filter": {"Dimensions": {"Key": "SERVICE", "Values": BEDROCK_SERVICE_VALUES}},
-        "GroupBy": [
-            {"Type": "DIMENSION", "Key": "SERVICE"},
-            {"Type": "DIMENSION", "Key": "USAGE_TYPE"},
-        ],
-    }
-    totals: dict[str, list[float]] = {}
-    for resp in _ce_cost_and_usage_pages(request):
-        for period in resp.get("ResultsByTime", []):
-            for group in period.get("Groups", []):
-                service, usage_type = group["Keys"]
-                rate_key = _rate_key_for_ce_group(service, usage_type)
-                if rate_key is None:
-                    continue
-                usage_type, quantity_scale = rate_key
-                cost = float(group["Metrics"]["UnblendedCost"]["Amount"])
-                qty = float(group["Metrics"]["UsageQuantity"]["Amount"])
-                acc = totals.setdefault(usage_type, [float(0), float(0)])
-                acc[0] += cost
-                acc[1] += qty * quantity_scale
-
-    rates = {
-        usage_type: cost / qty for usage_type, (cost, qty) in totals.items() if qty > 0 and cost > 0
-    }
-    log.info("refreshed %d empirical rates", len(rates))
-    return rates
-
-
-def _seed_for(model_id: str, metric_name: str) -> float | None:
-    """Published rate for a model with no billing history yet."""
-    for needle, prices in SEED_RATES.items():
-        if needle not in model_id:
-            continue
-        if metric_name == "OutputTokenCount":
-            output = prices.get("output")
-            if output is not None:
-                return output
-            base = prices.get("input")
-            if base is None:
-                return None
-            return base * TOKEN_METRICS["OutputTokenCount"][1]
-        base = prices.get("input")
-        if base is None:
-            return None
-        if metric_name == "CacheReadInputTokenCount":
-            return base / 10
-        if metric_name == "CacheWriteInputTokenCount":
-            return base * 5 / 4
-        return base
-    return None
-
-
-RateSource = Literal["empirical", "seed", "empirical_scaled", "fallback"]
-
-
-@dataclass(frozen=True)
-class MeteredRate:
-    rate: float
-    source: RateSource
-
-
-def _rate_for(model_id: str, metric_name: str, rates: dict) -> MeteredRate:
-    """Best per-token rate for one model and token direction.
-
-    Resolution order, most trustworthy first:
-      1. an observed rate for this exact model AND token direction
-      2. the model's published seed rate
-      3. the model's observed INPUT rate scaled by the direction multiplier
-      4. UNKNOWN_RATE_PER_1K, which is set high so unpriced models fail closed
-    """
-    suffixes, mult = TOKEN_METRICS[metric_name]
-    pin = None
-    for needle, fragment in RATE_OVERRIDES.items():
-        if needle in model_id:
-            pin = _normalise(fragment)
-            break
-    target = pin or _normalise(model_id)
-
-    def _match(want_suffixes: tuple[str, ...]) -> float | None:
-        best = None
-        for usage_type, rate in rates.items():
-            hit = next((s for s in want_suffixes if usage_type.endswith(s)), None)
-            if hit is None:
-                continue
-            # Strip the "USE1-" style region prefix and the direction suffix.
-            body = _strip_billing_region(usage_type[: -len(hit)].rstrip("-"))
-            norm = _normalise(body)
-            if not norm:
-                continue
-            if norm == target or norm in target or target in norm:
-                # Prefer the most specific (longest) matching fragment.
-                if best is None or len(norm) > best[0]:
-                    best = (len(norm), rate)
-        return best[1] if best else None
-
-    exact = _match(suffixes)
-    if exact is not None:
-        return MeteredRate(rate=exact, source="empirical")
-
-    seed = _seed_for(model_id, metric_name)
-    if seed is not None:
-        return MeteredRate(rate=seed, source="seed")
-
-    base = _match(TOKEN_METRICS["InputTokenCount"][0])
-    if base is not None:
-        return MeteredRate(rate=base * mult, source="empirical_scaled")
-
-    log.warning("no rate for model=%s metric=%s; using fail-closed fallback", model_id, metric_name)
-    return MeteredRate(rate=UNKNOWN_RATE_PER_1K * mult, source="fallback")
-
-
-# --------------------------------------------------------------------------
 # metered spend (fast signal)
 # --------------------------------------------------------------------------
 @dataclass(frozen=True)
@@ -379,9 +156,12 @@ class MeteredFailure:
 @dataclass(frozen=True)
 class MeteredSpend:
     total: float
-    metered_estimated: bool
     degraded: bool
     failures: tuple[MeteredFailure, ...]
+    # False when every query returned no datapoints. Zero tokens and "the metric
+    # pipeline told us nothing" are the same number but not the same fact, and the
+    # release decision turns on which one it is.
+    saw_datapoints: bool
 
 
 def _record_metered_failure(
@@ -396,105 +176,110 @@ def _record_metered_failure(
     log.error("CloudWatch %s unavailable in %s (%s): %s", operation, region, exception_class, exc)
 
 
-def _metered_spend(day_start: dt.datetime, now: dt.datetime, rates: dict) -> MeteredSpend | None:
+def _metered_spend(day_start: dt.datetime, now: dt.datetime) -> MeteredSpend | None:
+    """Price today's Bedrock tokens at the ceiling rate for each direction.
+
+    Reads the four UNDIMENSIONED AWS/Bedrock token series per region — the
+    zero-dimension aggregate, requested with an explicit empty Dimensions list,
+    which is not the same request as omitting the key. That aggregate already
+    covers every model, so per-ModelId series are never added to this total; doing
+    both would double-count. It also needs no list_metrics call, so a model that
+    has stopped publishing recently cannot silently drop out of the sum.
+
+    Returns None only when every region failed, which the caller treats as
+    fail-closed. A partial failure returns degraded=True and a total that is a
+    FLOOR, not the account total.
+    """
     total = float(0)
-    metered_estimated = False
-    found_series = False
+    saw_datapoints = False
     contributed = False
     failures: list[MeteredFailure] = []
     for region in REGIONS:
         cw = boto3.client("cloudwatch", region_name=region)
-        queries, meta = [], {}
-        paginator = cw.get_paginator("list_metrics")
+        queries = [
+            {
+                "Id": f"m{index}",
+                "MetricStat": {
+                    "Metric": {
+                        "Namespace": "AWS/Bedrock",
+                        "MetricName": metric,
+                        "Dimensions": [],
+                    },
+                    "Period": 3600,
+                    "Stat": "Sum",
+                },
+                "ReturnData": True,
+            }
+            for index, metric in enumerate(CEILING)
+        ]
+        metric_by_id = {f"m{index}": metric for index, metric in enumerate(CEILING)}
         try:
-            for page in paginator.paginate(Namespace="AWS/Bedrock"):
-                for metric in page.get("Metrics", []):
-                    name = metric["MetricName"]
-                    if name not in TOKEN_METRICS:
-                        continue
-                    dims = metric.get("Dimensions", [])
-                    # Only the per-ModelId series; the undimensioned aggregate would
-                    # double-count everything already covered below.
-                    if len(dims) != 1 or dims[0]["Name"] != "ModelId":
-                        continue
-                    found_series = True
-                    qid = f"q{len(queries)}"
-                    meta[qid] = (dims[0]["Value"], name)
-                    queries.append(
-                        {
-                            "Id": qid,
-                            "MetricStat": {
-                                "Metric": {
-                                    "Namespace": "AWS/Bedrock",
-                                    "MetricName": name,
-                                    "Dimensions": dims,
-                                },
-                                "Period": 3600,
-                                "Stat": "Sum",
-                            },
-                            "ReturnData": True,
-                        }
-                    )
+            resp = cw.get_metric_data(
+                MetricDataQueries=queries,
+                StartTime=day_start,
+                EndTime=now,
+                ScanBy="TimestampAscending",
+            )
         except ClientError as exc:
-            _record_metered_failure(failures, region=region, operation="metric listing", exc=exc)
+            _record_metered_failure(failures, region=region, operation="metric data", exc=exc)
             continue
-
-        for batch_start in range(0, len(queries), 100):
-            batch = queries[batch_start : batch_start + 100]
-            try:
-                resp = cw.get_metric_data(
-                    MetricDataQueries=batch,
-                    StartTime=day_start,
-                    EndTime=now,
-                    ScanBy="TimestampAscending",
-                )
-            except ClientError as exc:
-                _record_metered_failure(failures, region=region, operation="metric data", exc=exc)
-                continue
-            for result in resp.get("MetricDataResults", []):
-                units_1k = sum(result.get("Values", []) or []) / 1000
-                if units_1k <= 0:
-                    continue
-                model_id, metric_name = meta[result["Id"]]
-                metered_rate = _rate_for(model_id, metric_name, rates)
-                total += units_1k * metered_rate.rate
-                metered_estimated = metered_estimated or metered_rate.source in {
-                    "seed",
-                    "fallback",
-                }
-                contributed = True
+        contributed = True
+        for result in resp.get("MetricDataResults", []):
+            values = result.get("Values") or []
+            if values:
+                saw_datapoints = True
+            total += sum(values) * CEILING[metric_by_id[result["Id"]]]
     if failures and not contributed:
         return None
-    if not found_series:
-        log.info("CloudWatch Bedrock token metrics found no per-model series")
     return MeteredSpend(
         total=total,
-        metered_estimated=metered_estimated,
         degraded=bool(failures),
         failures=tuple(failures),
+        saw_datapoints=saw_datapoints,
     )
 
 
 # --------------------------------------------------------------------------
 # authoritative spend (slow signal)
 # --------------------------------------------------------------------------
+def _ce_cost_and_usage_pages(request: dict):
+    next_token = None
+    while True:
+        page_request = dict(request)
+        if next_token:
+            page_request["NextPageToken"] = next_token
+        resp = ce.get_cost_and_usage(**page_request)
+        yield resp
+        next_token = resp.get("NextPageToken")
+        if not next_token:
+            break
+
+
 def _ce_spend_today(day: dt.date) -> float:
+    # No SERVICE filter. A filter needs an enumerated value list, and that list is
+    # exactly what went stale: it omitted five live marketplace services, so this
+    # signal read about a third of real spend. Ask for every service grouped by
+    # SERVICE instead and classify the returned groups by predicate, which cannot
+    # fall behind AWS listing a new model. Same one request, same cost.
     request = {
         "TimePeriod": {"Start": day.isoformat(), "End": (day + dt.timedelta(days=1)).isoformat()},
         "Granularity": "DAILY",
         "Metrics": ["UnblendedCost"],
-        "Filter": {"Dimensions": {"Key": "SERVICE", "Values": BEDROCK_SERVICE_VALUES}},
+        "GroupBy": [{"Type": "DIMENSION", "Key": "SERVICE"}],
     }
     spend = float(0)
     for resp in _ce_cost_and_usage_pages(request):
         for result in resp.get("ResultsByTime", []):
-            # A present period carrying no Total means no billed Bedrock spend, not a
+            # A period carrying no matching group means no billed Bedrock spend, not a
             # transport failure: report zero rather than raising past the ClientError
             # fallback the caller relies on.
-            total = result.get("Total") or {}
-            amount = total.get("UnblendedCost", {}).get("Amount")
-            if amount is not None:
-                spend += float(amount)
+            for group in result.get("Groups") or []:
+                keys = group.get("Keys") or []
+                if not keys or not is_bedrock_service(keys[0]):
+                    continue
+                amount = group.get("Metrics", {}).get("UnblendedCost", {}).get("Amount")
+                if amount is not None:
+                    spend += float(amount)
     return spend
 
 
@@ -604,18 +389,17 @@ def handler(event, context):
     day_start = dt.datetime.combine(day, dt.time.min, tzinfo=dt.timezone.utc)
     state = _load_state()
 
-    # --- rates: refresh at most daily (one CE call) ------------------------
-    rates = state.get("rates") or {}
-    if state.get("rates_day") != day.isoformat() or not rates:
-        try:
-            rates = _refresh_rates()
-            state["rates"] = rates
-            state["rates_day"] = day.isoformat()
-        except ClientError as exc:
-            log.error("rate refresh failed, reusing cached rates: %s", exc)
+    # State written by the previous handler carries a derived rate table under
+    # "rates"/"rates_day" plus a "metered_estimated" flag. Nothing reads them now, but
+    # _save_state rewrites whatever _load_state returned, so they would persist
+    # forever unless dropped explicitly. Drop them: the rate table was the bulk of a
+    # state document already close to SSM's 4,096-byte Standard-tier ceiling, and a
+    # put_parameter that outgrows it would wedge state persistence outright.
+    for retired in ("rates", "rates_day", "metered_estimated"):
+        state.pop(retired, None)
 
     # --- fast signal: every tick, CloudWatch only --------------------------
-    metered = _metered_spend(day_start, now, rates)
+    metered = _metered_spend(day_start, now)
 
     # --- slow signal: CE, rate-limited to protect against per-call charges --
     ce_spend = None
@@ -635,7 +419,6 @@ def handler(event, context):
     # and polling on it would bypass CE_MIN_INTERVAL_SECONDS on every tick for
     # as long as the CloudWatch outage lasts.
     metered_total = None if metered is None else metered.total
-    metered_estimated = False if metered is None else metered.metered_estimated
     near_threshold = metered_total is not None and metered_total * 5 >= THRESHOLD_USD * 4
     if due or near_threshold:
         try:
@@ -672,12 +455,36 @@ def handler(event, context):
         or (metered is not None and metered.degraded)
         or ce_status == "unavailable"
     )
+
+    # An all-empty CloudWatch read is ambiguous: it is BOTH a metric-delivery gap and
+    # the normal idle / fresh-UTC-day state the automatic release depends on. Cost
+    # Explorer cannot break the tie, because it lags 8-24h and reads zero for hours
+    # into a busy day. So record the day's high-water token total, keyed by UTC date
+    # so a new day starts absent, and let it discriminate:
+    #
+    #   key present, still zero  -> genuinely idle today   -> release permitted
+    #   key present and nonzero  -> we saw traffic earlier  -> empty read is a gap
+    #   key absent               -> nothing known yet; hold if a deny is attached,
+    #                               which is also the mid-day-deploy case over state
+    #                               written by the previous handler
+    #
+    # This governs RELEASE only. On the trip side an empty read simply prices to zero
+    # and ce_spend remains the other arm of the max(), so a gap cannot manufacture a
+    # trip.
+    high_water_day = state.get("high_water_day")
+    prior_high_water = (
+        float(state.get(HIGH_WATER_KEY, float(0))) if high_water_day == day.isoformat() else None
+    )
+    observed_tokens = metered is not None and metered.saw_datapoints
+    if metered is not None and (observed_tokens or prior_high_water is None):
+        state["high_water_day"] = day.isoformat()
+        state[HIGH_WATER_KEY] = max(prior_high_water or float(0), metered.total)
+    empty_read = metered is not None and not metered.saw_datapoints
+    release_blocked_by_gap = empty_read and (prior_high_water is None or prior_high_water > 0)
     if metered_total is None:
         metered_text = "unavailable"
     else:
-        metered_text = f"{metered_total:,.2f}"
-        if metered_estimated:
-            metered_text += " (estimated)"
+        metered_text = f"{metered_total:,.2f} (ceiling-priced upper bound)"
     ce_text = "unavailable" if ce_spend is None else f"{ce_spend:,.2f}"
     attached = _is_attached()
     any_attached = attached or _has_any_attachment()
@@ -715,7 +522,12 @@ def handler(event, context):
         )
 
     # --- enforce -----------------------------------------------------------
-    if any_attached and spend < THRESHOLD_USD and not signal_unavailable:
+    if (
+        any_attached
+        and spend < THRESHOLD_USD
+        and not signal_unavailable
+        and not release_blocked_by_gap
+    ):
         touched = _apply(attach=False)
         if touched:
             _notify(
@@ -747,12 +559,10 @@ def handler(event, context):
                 "the policy from the principals above.",
             )
 
-    state["metered_estimated"] = metered_estimated
     _save_state(state)
     return {
         "day": day.isoformat(),
         "metered_usd": None if metered_total is None else round(metered_total, 4),
-        "metered_estimated": metered_estimated,
         "metered_status": metered_status,
         "ce_usd": None if ce_spend is None else round(ce_spend, 4),
         "ce_status": ce_status,
