@@ -99695,6 +99695,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:45Z"
     },
+    "f7dc-132b-057a-476c": {
+      "created_at": "2026-09-30T03:45:58Z",
+      "jira_id": "4595469",
+      "jira_key": "REB-6663",
+      "state": "confirmed",
+      "updated_at": "2026-09-30T03:46:00Z"
+    },
     "f7e4-4d33-f231-4774": {
       "baseline": {
         "assignee": {
@@ -112203,6 +112210,7 @@
     "REB-6649": "be3d-712b-c1ac-442b",
     "REB-665": "d7d8-0fad-d0f9-436b",
     "REB-666": "cdcb-8be8-425f-48ed",
+    "REB-6663": "f7dc-132b-057a-476c",
     "REB-667": "0f8f-ec8a-8c93-4fc5",
     "REB-668": "1669-a499-e540-46a4",
     "REB-669": "1ead-6d53-8f07-4c24",
