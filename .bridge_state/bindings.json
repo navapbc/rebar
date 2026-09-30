@@ -99696,9 +99696,17 @@
       "updated_at": "2026-08-15T15:15:45Z"
     },
     "f7dc-132b-057a-476c": {
+      "baseline": {
+        "assignee": null,
+        "description": "# Outstanding dependency advisory on `main`\n\nThe scheduled dependency-advisory lane found CRITICAL/HIGH advisories against the committed lock. Per bug `63e8`, this does NOT block merges or Gerrit submit for changes that leave the dependency map alone \u2014 it blocks **releases**, and it is owned here rather than by whoever happens to have a change in flight.\n\n- **Advisories:** CVE-2026-102274,CVE-2026-101917,CVE-2026-102273,CVE-2026-102269,CVE-2026-102267,CVE-2026-102268,CVE-2026-102272,CVE-2026-102271,CVE-2026-102265,CVE-2026-102266\n- **Detail:** CVE-2026-102274 (pyjwt 2.13.0, HIGH); CVE-2026-101917 (pyjwt 2.13.0, HIGH); CVE-2026-102273 (pyjwt 2.13.0, HIGH); CVE-2026-102269 (pyjwt 2.13.0, HIGH); CVE-2026-102267 (pyjwt 2.13.0, HIGH); CVE-2026-102268 (pyjwt 2.13.0, HIGH); CVE-2026-102272 (pyjwt 2.13.0, HIGH); CVE-2026-102271 (pyjwt 2.13.0, HIGH); CVE-2026-102265 (pyjwt 2.13.0, HIGH); CVE-2026-102266 (pyjwt 2.13.0, HIGH)\n- **Detected at:** 2026-09-30T03:41:59Z\n- **Run:** https://github.com/navapbc/rebar/actions/runs/36665277776\n\n## Remediation\n\nFollow `docs/dependency-advisory-runbook.md`: upgrade the direct dependency first; if an upstream cap blocks that, `override-dependencies` with a recorded justification; then track the upstream fix so the override can be removed. `constraint-dependencies` cannot express this \u2014 it only NARROWS, and returns UNSATISFIABLE as its expected output.\n\nThis ticket auto-closes when the advisory clears.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "[dependency-advisory] outstanding advisory on main: CVE-2026-102274,CVE-2026-101917,CVE-2026-102273,CVE-2026-102269,CVE-2026-102267,CVE-2026-102268,CVE-2026-102272,CVE-2026-102271,CVE-2026-102265,CVE-2026-102266"
+      },
       "created_at": "2026-09-30T03:45:58Z",
       "jira_id": "4595469",
       "jira_key": "REB-6663",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-30T03:46:00Z"
     },
