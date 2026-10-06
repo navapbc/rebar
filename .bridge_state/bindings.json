@@ -53268,7 +53268,7 @@
         "assignee": null,
         "description": "## Reproduction Steps\n\nThe Reconciler Heartbeat Canary (reconcile-bridge-canary.yml) detected that reconcile-bridge.yml has not completed a successful run within the 4-hour window (bridge cadence: hourly). Inspect the Actions tab.\n\n## Expected vs Actual\n\n- **Expected:** reconcile-bridge.yml completes a successful run at least once\n  every 4h.\n- **Actual:** Reconciler unhealthy \u2014 canonical status is FAILED.\n- **First red canary run:** 2026-10-06T08:15:28Z\n- **Detected at:** 2026-10-06T10:11:46Z (second consecutive red canary run)\n- **Canary run:** https://github.com/navapbc/rebar/actions/runs/37447725349\n\n## Acceptance Criteria\n\n- [ ] reconcile-bridge.yml is running and its most recent run succeeded.\n- [ ] Root cause identified (workflow disabled / runner outage / acli auth /\n      Jira creds / reconciler error) and addressed.\n\nThis ticket auto-closes when the next successful reconcile-bridge run is detected.",
         "priority": "High",
-        "status": "To Do",
+        "status": "Done",
         "summary": "[heartbeat-canary] reconcile-bridge stale (2026-10-06T09:46:08Z) \u2014 no success within 4h"
       },
       "created_at": "2026-10-06T10:40:48Z",
