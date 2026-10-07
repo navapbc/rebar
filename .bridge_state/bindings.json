@@ -86582,9 +86582,17 @@
       "updated_at": "2026-09-20T18:41:06Z"
     },
     "d730-8a25-1813-4106": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Observation\nOn October 6, 2026, 7 of the 15 scheduled reconcile-bridge runs from 12:41 AM through 2:30 PM PDT failed. All 7 logs report the same ACLI 120-second timeout while running workitem search for project = REB AND statusCategory = \"Done\" ORDER BY updated DESC with --paginate --json and fields issuetype,key,assignee,priority,status,summary,description,labels. Run IDs: 37431226504, 37444104091, 37456915449, 37465414763, 37488201890, 37519464683, 37527518487. All 15 runs use commit 02a4c71a519e9ec6115969243b2d1a186d6c4c11. AWS us-east-1 alarm rebar-bridge-run-failures uses rebar/host bridge_run_failures Sum > 0, 2 of 2 hourly periods, missing data not breaching. Latest ALARM 1:46 PM PDT, OK 2:46 PM PDT. Latest successful run https://github.com/navapbc/rebar/actions/runs/37534400732 reported BRIDGE_STATE: converged at 2:38 PM PDT and published failure metric 0. Failed run https://github.com/navapbc/rebar/actions/runs/37527518487 published 1.\n## Investigation needed\nThe observed failure is a subprocess timeout, not a proved Jira outage or proved undersized timeout. Competing explanations: Jira latency, data volume/pagination cost, ACLI or runner behavior. Compare timed per-page searches and request outcomes on equivalent inputs to separate these; inspect retry and fetch paths before choosing remediation. Successful run still emitted parent hierarchy rejection warnings; convergence does not establish every relationship synced.\n## Acceptance Criteria\n1. Reproduce or instrument the slow Done-ticket fetch and identify the cause using timings, page counts and underlying request results.\n2. Implement a cause-directed remedy with regression coverage; do not treat rerunning or increasing timeout alone as proof of repair.\n3. Verify the affected workflow completes and publishes correct telemetry; record remaining uncertainty and live evidence.\nNo code or production settings changed during initial investigation.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Bridge Done-ticket ACLI search intermittently exceeds 120s, triggering recurring AWS alarms"
+      },
       "created_at": "2026-10-06T23:37:14Z",
       "jira_id": "4595951",
       "jira_key": "REB-6678",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-10-06T23:37:17Z"
     },
