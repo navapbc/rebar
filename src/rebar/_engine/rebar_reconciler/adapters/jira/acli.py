@@ -14,6 +14,8 @@ import json
 import logging
 import subprocess
 import sys
+from collections.abc import Callable, Iterator
+from itertools import islice
 from typing import Any
 
 from rebar_reconciler.adapters.jira import acli_cli_ops, acli_subprocess
@@ -30,7 +32,7 @@ from rebar_reconciler.adapters.jira.acli_cli_ops import (
     _parse_paginated_comments,
     _verify_created_issue,
 )
-from rebar_reconciler.adapters.jira.acli_graph import AcliGraphMixin
+from rebar_reconciler.adapters.jira.acli_graph import AcliGraphMixin, _iter_cursor_pages
 from rebar_reconciler.adapters.jira.acli_rest import AcliRestMixin
 
 # Subprocess transport floor (process exec + retry + typed mutation errors) lives
@@ -216,6 +218,41 @@ def update_issue(
 # ---------------------------------------------------------------------------
 
 
+class _SearchResult:
+    def __init__(self, pages: Iterator[dict[str, Any]]) -> None:
+        self.pages = pages
+        self.issues: list[dict[str, Any]] = []
+
+
+def _iter_search_issues(post: Callable[[str, Any], Any], jql: str) -> Iterator[dict[str, Any]]:
+    """Read only the cursor pages consumed by the caller, rejecting partial wire data."""
+
+    def checked_post(path: str, body: dict[str, Any]) -> dict[str, Any]:
+        response = post(path, body)
+        if not isinstance(response, dict) or not isinstance(response.get("issues"), list):
+            raise RuntimeError("Jira search returned a malformed issues page")
+        if any(not isinstance(issue, dict) or not issue.get("key") for issue in response["issues"]):
+            raise RuntimeError("Jira search returned a malformed issue")
+        return response
+
+    body = {
+        "jql": jql,
+        "maxResults": 100,
+        "fields": [
+            "issuetype",
+            "key",
+            "assignee",
+            "priority",
+            "status",
+            "summary",
+            "description",
+            "labels",
+        ],
+    }
+    for page in _iter_cursor_pages(checked_post, "/rest/api/3/search/jql", body):
+        yield from page["issues"]
+
+
 class AcliClient(AcliRestMixin, AcliGraphMixin):
     """Client wrapping ACLI Go binary for Jira operations.
 
@@ -258,7 +295,7 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         # search_miss_count corroboration counts genuinely fresh queries).
         # WITHIN a pass, a caller that re-asks the same JQL for freshness
         # must call invalidate_search_cache first (bug d30c).
-        self._search_cache: dict[str, list[dict[str, Any]]] = {}
+        self._search_cache: dict[str, _SearchResult] = {}
 
     def invalidate_search_cache(self, jql: str | None = None) -> None:
         """Evict the search memo entry for *jql*, or the whole memo if None.
@@ -429,56 +466,31 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         start_at: int = 0,
         max_results: int = 50,
     ) -> list[dict[str, Any]]:
-        """Search Jira issues via JQL, returning a page slice.
+        """Return an offset slice, fetching REST cursor pages only as needed.
 
-        ACLI Go has no offset flag, so --paginate fetches all results in one
-        call. Results are cached per-JQL to avoid redundant fetches when the
-        caller paginates. Returns a slice of ``[start_at:start_at+max_results]``
-        to satisfy the reconciler's pagination loop contract.
-
-        NEGATIVE (empty) results are cached too, with no TTL: a caller that
-        re-asks the same JQL expecting a fresh answer (e.g. polling for index
-        visibility) must call ``invalidate_search_cache(jql)`` first, or it
-        will replay the first (possibly empty) answer forever (bug d30c).
+        Eager ACLI ``--paginate`` read the entire Done history before the fetcher's
+        1,000-issue cap could stop it, exhausting the subprocess timeout (d730-8a25).
+        Cache both consumed issues and the suspended cursor for this pass. Empty
+        answers remain cached; callers needing fresh data must invalidate first.
         """
+        if start_at < 0 or max_results < 0:
+            raise ValueError("search offsets and limits must be non-negative")
+        if max_results == 0:
+            return []
         if jql not in self._search_cache:
-            cmd = [
-                "jira",
-                "workitem",
-                "search",
-                "--jql",
-                jql,
-                "-f",
-                # Bug 5328: ``labels`` MUST be in this list. Without it the
-                # batch snapshot has labels=[] for every issue, which makes
-                # both differs hallucinate divergence symmetrically (outbound
-                # emits ADD-every-tag, inbound emits REMOVE-every-tag, and
-                # bidir suppression cancels them out). Any Jira-side label
-                # ADD on a bound ticket then becomes invisible to inbound
-                # because the snapshot pretends Jira has no labels at all.
-                # Mirrors the single-issue ``get_issue`` field list above.
-                "issuetype,key,assignee,priority,status,summary,description,labels",
-                "--paginate",
-                "--json",
-            ]
-            result = self._run(cmd, retry_on_timeout=True)  # READ — idempotent
-            parsed = json.loads(result.stdout)
-            if isinstance(parsed, list):
-                all_issues = parsed
-            elif isinstance(parsed, dict) and "issues" in parsed:
-                all_issues = parsed["issues"]
-            else:
-                logging.warning(
-                    "search_issues: unexpected ACLI JSON shape (type=%s); "
-                    "treating as empty result. Response prefix: %.200r",
-                    type(parsed).__name__,
-                    parsed,
-                )
-                all_issues = []
-            self._search_cache[jql] = all_issues
-
-        all_issues = self._search_cache[jql]
-        return all_issues[start_at : start_at + max_results]
+            self._search_cache[jql] = _SearchResult(
+                _iter_search_issues(self._direct_rest_post_json, jql)
+            )
+        cached = self._search_cache[jql]
+        end = start_at + max_results
+        try:
+            cached.issues.extend(islice(cached.pages, max(0, end - len(cached.issues))))
+        except Exception:
+            # A raised generator is exhausted. Keeping it would turn a failed
+            # later page into a successful, truncated result on the next read.
+            self.invalidate_search_cache(jql)
+            raise
+        return cached.issues[start_at:end]
 
     def get_server_info(self) -> dict[str, Any]:
         """Get Jira server info for timezone verification.

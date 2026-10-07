@@ -440,7 +440,7 @@ def record_run(monkeypatch):
 
 
 def test_reads_pass_retry_on_timeout_true(record_run):
-    """The 5 READ call sites must explicitly pass retry_on_timeout=True.
+    """The 4 subprocess READ call sites must explicitly pass retry_on_timeout=True.
 
     A new caller that mis-defaults a read to False is caught here.
     """
@@ -449,7 +449,6 @@ def test_reads_pass_retry_on_timeout_true(record_run):
     # READ sites — route A (self._run) and route B (free functions). Some
     # methods post-process the (empty) fake result and raise (get_issue rejects
     # an empty list) — that is fine; we only assert the recorded retry flag.
-    client.search_issues("project = TEST")  # acli.py:387
     client.get_comments("TEST-1")  # acli.py:590
     client.get_issue_link_types()  # acli_graph.py:77
     with pytest.raises(RuntimeError):
@@ -460,7 +459,7 @@ def test_reads_pass_retry_on_timeout_true(record_run):
     assert all(retry is True for _cmd, retry in record_run), (
         f"a READ did not pass retry_on_timeout=True: {[(c, r) for c, r in record_run]}"
     )
-    assert len(record_run) == 5
+    assert len(record_run) == 4
 
 
 def test_writes_default_retry_on_timeout_false(record_run):

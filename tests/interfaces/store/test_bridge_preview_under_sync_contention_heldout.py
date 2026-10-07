@@ -76,7 +76,6 @@ def _install_empty_acli(monkeypatch, tmp_path: Path) -> None:
     acli.chmod(acli.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
     monkeypatch.setenv("JIRA_PROJECT", "DIG")
-    monkeypatch.setenv("JIRA_URL", "https://example.atlassian.net")
     monkeypatch.setenv("JIRA_USER", "reconciler-tests@example.com")
     monkeypatch.setenv("JIRA_API_TOKEN", "test-token")
     monkeypatch.setenv("REBAR_SYNC_PULL", "off")
@@ -84,7 +83,7 @@ def _install_empty_acli(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_preview_is_complete_while_sync_locks_are_held(
-    repo_with_origin_tickets, monkeypatch, tmp_path: Path
+    repo_with_origin_tickets, monkeypatch, tmp_path: Path, empty_jira_search
 ) -> None:
     """A reader neither waits on nor mutates writer locks and returns complete JSON."""
     repo, tracker, _tid = repo_with_origin_tickets

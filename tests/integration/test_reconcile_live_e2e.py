@@ -14,9 +14,7 @@ and the documented Jira credentials, acli, and test project.
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
-import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -490,8 +488,8 @@ def test_index_visibility_timeout_env_override(monkeypatch):
     assert _default_index_visibility_timeout() == _DEFAULT_INDEX_VISIBILITY_TIMEOUT_S
 
 
-class _IndexLaggingAcliRun:
-    """Model index lag at the subprocess seam while retaining ``AcliClient`` caching."""
+class _IndexLaggingSearch:
+    """Model index lag at the REST boundary while retaining ``AcliClient`` caching."""
 
     def __init__(self, key: str, summary: str, clock: _FakeClock, *, visible_at: float) -> None:
         self._key = key
@@ -500,28 +498,29 @@ class _IndexLaggingAcliRun:
         self._visible_at = visible_at
         self.jqls: list[str] = []
 
-    def __call__(self, cmd: list[str], *, retry_on_timeout: bool = False):
-        jql = cmd[cmd.index("--jql") + 1]
+    def __call__(self, path: str, body: dict[str, Any]):
+        assert path == "/rest/api/3/search/jql"
+        jql = body["jql"]
         self.jqls.append(jql)
         hit = self._clock.monotonic() >= self._visible_at
         payload = [{"key": self._key, "fields": {"summary": self._summary}}] if hit else []
-        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
+        return {"issues": payload, "isLast": True}
 
 
 def test_poll_until_visible_requeries_a_real_client_until_the_index_converges():
     """Re-query Jira instead of replaying a client's cached initial miss.
 
-    The test stubs the subprocess runner and injects simulated clock and sleep functions while
+    The test stubs the REST transport and injects simulated clock and sleep functions while
     preserving ``AcliClient``'s per-JQL cache. An index appearing at simulated 60 seconds must
     still be found within the 120-second budget.
     """
     clock = _FakeClock()
     key, summary = "REB-9999", "synthetic summary"
-    runner = _IndexLaggingAcliRun(key, summary, clock, visible_at=60.0)
+    runner = _IndexLaggingSearch(key, summary, clock, visible_at=60.0)
     client = _recon("acli").AcliClient(
         jira_url="https://example.invalid", user="u", api_token="t", jira_project="REB"
     )
-    client._run = runner  # type: ignore[method-assign]
+    client._direct_rest_post_json = runner  # type: ignore[method-assign]
 
     found = _poll_until_visible(client, key, summary, time_fn=clock.monotonic, sleep_fn=clock.sleep)
 
