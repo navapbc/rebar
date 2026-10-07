@@ -47,7 +47,6 @@ def empty_acli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     executable.chmod(executable.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
     monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ.get("PATH", ""))
     monkeypatch.setenv("JIRA_PROJECT", "DIG")
-    monkeypatch.setenv("JIRA_URL", "https://example.atlassian.net")
     monkeypatch.setenv("JIRA_USER", "reconciler-tests@example.com")
     monkeypatch.setenv("JIRA_API_TOKEN", "test-api-token")
     return bindir
@@ -57,6 +56,7 @@ def test_preview_library_and_mcp_share_real_no_write_semantics(
     rebar_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
     empty_acli: Path,
+    empty_jira_search,
 ) -> None:
     from rebar.mcp_server import build_server
 

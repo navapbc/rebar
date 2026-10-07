@@ -9,9 +9,12 @@ network) and uses a real temp git repo per test.
 from __future__ import annotations
 
 import os
+import socketserver
 import subprocess
 import sys
+import threading
 from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -21,6 +24,47 @@ from _store_template import (
 )
 
 import rebar
+
+
+@pytest.fixture
+def empty_jira_search(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Serve an empty Jira search to both in-process and subprocess bridge callers."""
+
+    class SearchHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            if self.path != "/rest/api/3/search/jql":
+                self.send_error(404)
+                return
+            body = b'{"issues": [], "isLast": true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, _format: str, *args: object) -> None:
+            pass
+
+    class LoopbackServer(HTTPServer):
+        def server_bind(self) -> None:
+            # The test endpoint does not need HTTPServer's reverse DNS lookup.
+            socketserver.TCPServer.server_bind(self)
+            self.server_name, self.server_port = self.server_address
+
+    server = LoopbackServer(("127.0.0.1", 0), SearchHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv("JIRA_URL", f"http://127.0.0.1:{server.server_port}")
+    monkeypatch.setenv("REBAR_JIRA_ALLOW_INSECURE", "1")
+    try:
+        yield
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        assert not thread.is_alive(), "Jira search fixture did not stop"
+
 
 # Make this directory importable from subdirectory tests. pytest's prepend
 # import mode puts each test file's own dir on sys.path, but the seam

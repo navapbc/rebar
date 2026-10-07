@@ -1,13 +1,13 @@
 """AcliClient per-JQL search memo + its supported freshness door (ticket 3288).
 
-``AcliClient.search_issues`` memoizes its full result set per JQL string in
+``AcliClient.search_issues`` memoizes its consumed results per JQL string in
 ``self._search_cache`` — no TTL, and negative (empty) answers are cached too.
 That is correct for the pagination callers it was built for, but a caller that
 re-asks the same JQL for freshness (the bug-d30c index-visibility poll class)
 must evict first. These tests pin BOTH halves of that contract at the
-``AcliClient._run`` subprocess seam, counting invocations:
+``AcliClient._direct_rest_post_json`` HTTP seam, counting invocations:
 
-- the memo itself (a second same-JQL search runs NO subprocess, including a
+- the memo itself (a second same-JQL search runs NO HTTP request, including a
   cached negative), and
 - the supported door, ``invalidate_search_cache`` (per-JQL evict, full clear,
   and the never-searched no-op edge).
@@ -15,8 +15,6 @@ must evict first. These tests pin BOTH halves of that contract at the
 
 from __future__ import annotations
 
-import json
-import subprocess
 from typing import Any
 
 # The reconciler engine is on sys.path via the package conftest; import flat.
@@ -28,10 +26,10 @@ def _issue(key: str) -> dict[str, Any]:
 
 
 class _CountingRunClient(acli_mod.AcliClient):
-    """AcliClient whose ``_run`` seam is a scripted stub counting invocations.
+    """AcliClient whose ``_direct_rest_post_json`` seam is a scripted stub counting invocations.
 
     ``answers`` maps a JQL string to a LIST of successive result sets — each
-    ``_run`` for that JQL consumes the next one (the last repeats), so a test
+    ``_direct_rest_post_json`` for that JQL consumes the next one (the last repeats), so a test
     can script a negative-to-positive flip across a cache eviction.
     """
 
@@ -45,18 +43,13 @@ class _CountingRunClient(acli_mod.AcliClient):
         self._answers = answers
         self.run_count: dict[str, int] = {}
 
-    def _run(
-        self,
-        cmd: list[str],
-        *,
-        retry_on_timeout: bool = False,
-    ) -> subprocess.CompletedProcess[str]:
-        jql = cmd[cmd.index("--jql") + 1]
+    def _direct_rest_post_json(self, path: str, body: Any) -> Any:
+        jql = body["jql"]
         n = self.run_count.get(jql, 0)
         self.run_count[jql] = n + 1
         scripted = self._answers[jql]
         result = scripted[min(n, len(scripted) - 1)]
-        return subprocess.CompletedProcess(cmd, 0, json.dumps(result), "")
+        return {"issues": result, "isLast": True}
 
 
 JQL_A = 'labels="rebar-id:aaaa"'
@@ -64,7 +57,7 @@ JQL_B = 'labels="rebar-id:bbbb"'
 
 
 def test_same_jql_is_memoized_including_a_negative_first_answer() -> None:
-    """Two same-JQL searches run ONE subprocess; a cached negative stays cached."""
+    """Two same-JQL searches run ONE HTTP request; a cached negative stays cached."""
     client = _CountingRunClient({JQL_A: [[], [_issue("TEST-1")]]})
 
     first = client.search_issues(JQL_A)
@@ -72,7 +65,7 @@ def test_same_jql_is_memoized_including_a_negative_first_answer() -> None:
 
     assert first == []
     # The flip to a non-empty answer is scripted but must NOT be visible: the
-    # negative first answer is memoized and replayed without a subprocess.
+    # negative first answer is memoized and replayed without an HTTP request.
     assert second == []
     assert client.run_count == {JQL_A: 1}
 

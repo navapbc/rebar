@@ -83,18 +83,16 @@ def _iter_cursor_pages(
         resp = post(path, body)
         if not isinstance(resp, dict):
             return
-        yield resp
-        if resp.get("isLast"):
-            return
-        token = resp.get("nextPageToken")
-        if not token:
-            return
-        if token == next_page_token:
+        token = None if resp.get("isLast") else resp.get("nextPageToken")
+        if token and token == next_page_token:
             raise RunawayPaginationError(
                 f"cursor walk on {path} stalled: the server returned "
                 f"nextPageToken {token!r} twice consecutively; aborting the "
                 f"walk rather than spinning [rebar:cabc-7a98-d173-4d7c]"
             )
+        yield resp
+        if not token:
+            return
         next_page_token = token
 
 
