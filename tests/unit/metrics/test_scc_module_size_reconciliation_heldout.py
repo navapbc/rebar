@@ -82,7 +82,7 @@ def test_metric_file_set_and_loc_match_the_ci_gate() -> None:
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("scc") is None, reason="scc is not installed")
 def test_configured_scan_excludes_bundled_assets_and_resource_wordlists() -> None:
-    """AC3: the resource .txt and the bundled editor JS are out of the module-size metric."""
+    """AC3: the resource .txt is out of the module-size metric; only .py files are measured."""
 
     value = _code_health()
     result = scc_loc.analyze(
@@ -95,8 +95,6 @@ def test_configured_scan_excludes_bundled_assets_and_resource_wordlists() -> Non
     measured = result.loc["files"]
     excluded = [
         "src/rebar/_engine/resources/ticket-wordlist-v2.txt",
-        "src/rebar/llm/workflow/editor_assets/dist/editor.js",
-        "src/rebar/llm/workflow/editor_assets/src/rebarProvider.jsx",
     ]
     for path in excluded:
         assert (REPO_ROOT / path).exists(), f"fixture assumption broken: {path} is gone"

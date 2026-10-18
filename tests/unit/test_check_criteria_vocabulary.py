@@ -160,13 +160,13 @@ def test_comment_and_blank_allowlist_lines_are_accepted(tmp_path: Path) -> None:
     assert _run(tmp_path, allowlist).returncode == 0
 
 
-# Held-out exclusions preserve frozen history and the minified vendor bundle.
+# Held-out exclusions preserve frozen history and the corpus scrub script.
 @pytest.mark.parametrize(
     "relative",
     [
         "docs/archive/history.md",
         "docs/experiments/trial.md",
-        "src/rebar/llm/workflow/editor_assets/dist/editor.js",
+        "scripts/build_cloud_adf_corpus.py",
     ],
 )
 def test_explicitly_excluded_paths_are_not_scanned(tmp_path: Path, relative: str) -> None:

@@ -1,6 +1,6 @@
 """Workflow-engine CLI command handlers — extracted from ``rebar._cli.__init__`` to
 keep the argv router lean (module-size policy). ``_workflow`` is the subcommand
-dispatcher over ``edit`` / ``show`` / ``run`` / ``read`` / ``new`` / ``validate``;
+dispatcher over ``show`` / ``run`` / ``read`` / ``new`` / ``validate``;
 ``main()`` in ``rebar._cli`` imports ``_workflow``.
 """
 
@@ -112,43 +112,10 @@ def _workflow(argv: list[str]) -> int:
         return _workflow_run(args)
     if args.cmd == "show":
         return _workflow_show(args)
-    if args.cmd == "edit":
-        return _workflow_edit(args)
     if args.cmd in ("status", "result"):
         return _workflow_read(args)
     parser.print_help()
     return 1
-
-
-def _workflow_edit(args: argparse.Namespace) -> int:
-    from rebar.llm import errors as _werr
-    from rebar.llm.workflow import editor
-
-    try:
-        server, host, port, _token = editor.edit_workflow(
-            args.file, port=args.port, open_browser=not args.no_open, serve_forever=False
-        )
-    except _werr.WorkflowError as exc:
-        sys.stderr.write(f"Error: {exc}\n")
-        return 1
-    except OSError as exc:
-        sys.stderr.write(f"Error: cannot start the editor server: {exc}\n")
-        return 1
-    sys.stderr.write(
-        f"rebar visual editor for {args.file} at http://{host}:{port}/  (loopback only, "
-        f"token-guarded; Save writes the IR file + a .bak). Press Ctrl-C to stop.\n"
-    )
-    try:
-        import time
-
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
-        sys.stderr.write("\neditor stopped.\n")
-    finally:
-        server.shutdown()
-        server.server_close()
-    return 0
 
 
 def _workflow_show(args: argparse.Namespace) -> int:

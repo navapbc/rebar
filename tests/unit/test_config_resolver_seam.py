@@ -61,7 +61,6 @@ MOVED_ENTRY_POINTS = (
     "resolve_otlp_endpoint",
     "resolve_pandoc_timeout",
     "resolve_plan_review_budget",
-    "resolve_preview_timeout",
     "resolve_rich_text_cutover",
     "resolve_run_root",
     "resolve_stall_abort_limits",

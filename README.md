@@ -166,13 +166,6 @@ On top of that foundation, rebar adds what parallel agent work actually needs:
     self-references `[agents]` so the validation tests **run** rather than skip, and
     is **required to run the full test suite** (the interface-parity tests import the
     MCP server, so they error — not skip — without `mcp`).
-  - **[Node/npm](https://nodejs.org)** — needed **only** for the workflow visual
-    editor's front-end: *rebuilding* its vendored bundle
-    (`src/rebar/llm/workflow/editor_assets/`, the bpmn-js editor) and running the
-    faithful editor **E2E tier** (`tests/e2e/`, which drives the real bpmn-io
-    libraries). Both are developer-only — the built bundle is committed/shipped and
-    the E2E tier self-skips when Node is absent — so neither the base install nor the
-    default test suite needs Node. See [docs/workflow-editor.md](docs/workflow-editor.md).
 
 See [Install](#install) and [Tests](#tests).
 
@@ -211,14 +204,10 @@ pip  install 'nava-rebar[agents,tracing]'        # the union, if you want it all
 ```
 
 The base install runs **scripted** workflows (`rebar workflow new/validate/show/run`)
-with no extra; **agentic** workflow steps and `rebar review-plan` need `[agents]`. Authoring
-a workflow **visually** — `rebar workflow edit <file>`, a local bpmn-js editor that
-round-trips the diagram back to the IR — also needs no extra and no Node/npm: the editor
-front-end ships pre-built in the wheel and is served locally (no CDN). For what the
+with no extra; **agentic** workflow steps and `rebar review-plan` need `[agents]`. For what the
 engine is *for* — when to author a workflow vs a bespoke op, the YAML DSL, the
 three-pass review pattern, and the prompt-library + eval seam — see
-[docs/workflow-engine.md](docs/workflow-engine.md); for visual editing specifically see
-[docs/workflow-editor.md](docs/workflow-editor.md).
+[docs/workflow-engine.md](docs/workflow-engine.md).
 
 The `[agents]` extra adds the optional **LLM agent operations framework** (`rebar.llm`). It provides tool-using agents that review tickets and code through the library, CLI, and MCP interfaces. Model classes are configured in `[tool.rebar.llm.model_classes]` or with `REBAR_LLM_<CLASS>_MODEL`, `REBAR_LLM_MODEL_PROVIDER`, and `REBAR_LLM_BASE_URL`. The single `REBAR_LLM_MODEL` variable is deprecated. See [docs/llm-framework.md](docs/llm-framework.md).
 

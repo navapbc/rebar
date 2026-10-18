@@ -145,7 +145,6 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_OPCERT_SHUTDOWN_CANCEL_SECONDS` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_TICKETS_REMOTE_URL` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_PLAN_REVIEW_BUDGET` | `src/rebar/_config_resolvers.py` |  |
-| `REBAR_PREVIEW_TIMEOUT` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_RECONCILER_CONFLICT_PARENT_ID` | `src/rebar/_engine/rebar_reconciler/apply_inbound.py` |  |
 | `REBAR_RECONCILER_CREATE_ROUTE` | `src/rebar/_engine/rebar_reconciler/create_route.py` |  |
 | `REBAR_RECONCILER_FAIL_SILENT_NOOP` | `src/rebar/_engine/rebar_reconciler/apply_handlers.py` |  |
@@ -186,11 +185,11 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
 - `src/rebar/_config_resolvers.py:300` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:368` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:381` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:385` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:392` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:722` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:367` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:380` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:384` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:391` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:721` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:56` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/terraform_source.py:410` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/bedrock_model.py:37` — `os.environ.get(<non-literal>)`

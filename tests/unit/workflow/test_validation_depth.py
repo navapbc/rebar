@@ -1,7 +1,7 @@
 """Validation depth (story c768): the 3-state SHALLOW static structural check, the
 RUNTIME validation of a step's resolved inputs against the CONSUMER's input contract
 (the real safety net), and the DISTINCT validator-failure signal (fail-loud, never
-false-pass). Plus the editor's "unchecked" badge flag for an opaque source.
+false-pass).
 """
 
 from __future__ import annotations
@@ -204,28 +204,6 @@ def test_runtime_validator_failure_is_distinct(rebar_repo, monkeypatch) -> None:
     # And the value was NOT applied to the store (never false-pass).
     state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
     assert "ok" not in state["tags"]
-
-
-# ── 3. Editor "unchecked" badge flag ───────────────────────────────────────────
-
-
-def test_contract_view_exposes_checked_flag() -> None:
-    from rebar.llm.workflow import (
-        editor,
-        steps,  # noqa: F401 - registers built-in contracts
-    )
-
-    # A contract-less / unknown op → unchecked (opaque source).
-    unchecked = editor.step_contract_view(None)
-    assert unchecked["has_contract"] is False
-    assert unchecked["checked"] is False
-    unknown = editor.step_contract_view("definitely_not_a_registered_op")
-    assert unknown["checked"] is False
-
-    # A registered op WITH a contract → checked.
-    checked = editor.step_contract_view("tag")
-    assert checked["has_contract"] is True
-    assert checked["checked"] is True
 
 
 # ── agent-step runtime input validation (review T1) ─────────────────────────────
