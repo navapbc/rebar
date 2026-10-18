@@ -52,12 +52,8 @@ def _verdict(source="attested", sha="deadbeef"):
 
 
 # --------------------------------------------------------------------------------------
-# AC1 — verified-at-sha is a SIGNED manifest step; no PAYLOAD_VERSION bump; prior sigs verify
+# AC1 — verified-at-sha is a SIGNED manifest step; prior sigs verify
 # --------------------------------------------------------------------------------------
-def test_payload_version_unchanged():
-    assert signing.PAYLOAD_VERSION == 1
-
-
 def test_verified_at_sha_step_is_signed_and_certifies(rebar_repo: Path):
     tid = rebar.create_ticket("task", "t", repo_root=str(rebar_repo))
     manifest = [
@@ -84,16 +80,23 @@ def test_prior_signature_without_pin_still_verifies(rebar_repo: Path):
 
 
 def test_pin_enters_signed_bytes(rebar_repo: Path):
-    """Changing the pinned SHA changes the signature — proof the step is inside the signed
-    bytes (bound), not mere unsigned metadata."""
+    """Changing the pinned SHA changes the op-cert envelope — proof the step is inside the
+    signed bytes (bound), not mere unsigned metadata."""
     tid = rebar.create_ticket("task", "t", repo_root=str(rebar_repo))
     base = ["completion-verifier: PASS", f"ticket: {tid}"]
-    from rebar import config as _cfg
+    _r, rec_a = signing._prepare_manifest_event(
+        tid, [*base, signing.verified_at_sha_step("aaa")], repo_root=str(rebar_repo)
+    )
+    _r, rec_b = signing._prepare_manifest_event(
+        tid, [*base, signing.verified_at_sha_step("bbb")], repo_root=str(rebar_repo)
+    )
+    from rebar.attest import opcert
 
-    k = signing.signing_key(str(_cfg.tracker_dir(str(rebar_repo))))
-    sig_a = signing.compute_signature(tid, [*base, signing.verified_at_sha_step("aaa")], k)
-    sig_b = signing.compute_signature(tid, [*base, signing.verified_at_sha_step("bbb")], k)
-    assert sig_a != sig_b
+    bound_a = opcert.opcert_from_record(rec_a)[1]["manifest"]
+    bound_b = opcert.opcert_from_record(rec_b)[1]["manifest"]
+    assert signing.verified_at_sha_step("aaa") in bound_a
+    assert signing.verified_at_sha_step("bbb") in bound_b
+    assert rec_a["envelope"] != rec_b["envelope"]
 
 
 # --------------------------------------------------------------------------------------

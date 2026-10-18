@@ -29,8 +29,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # The environment's op-cert key: a passphrase-free Ed25519 keypair auto-generated on first signing
-# use at ``<tracker>/.opcert-key`` (+``.pub``), git-ignored, mirroring the HMAC ``.signing-key``
-# genesis it replaces. The producers sign with it; anyone verifies against the env's public key.
+# use at ``<tracker>/.opcert-key`` (+``.pub``), git-ignored; it replaced the retired HMAC
+# ``.signing-key`` genesis. The producers sign with it; anyone verifies against the env's
+# public key.
 OPCERT_KEY_FILE = ".opcert-key"
 
 # The DSSE subject ``kind`` bound into a raw ``rebar sign`` op-cert that carries no kind-prefixed
@@ -493,7 +494,7 @@ def mint_opcert_record(
         "merged_log_commit": merged_log_commit,
         "principal": principal,
         # Retained so the plan-review claim gate's UNSCOPED whole-HEAD freshness check
-        # (compute_validity) works identically to the legacy HMAC record.
+        # (compute_validity) works identically for every record shape.
         "head_sha": head_sha(config.repo_root(repo_root)),
     }
     if kind is not None:

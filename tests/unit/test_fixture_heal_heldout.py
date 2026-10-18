@@ -161,7 +161,6 @@ def test_cli_dry_run_reports_attempt_list_with_cleared_env(store) -> None:  # no
         "REBAR_ROOT": str(store),
         "REBAR_SYNC_PULL": "off",
         "REBAR_SYNC_PUSH": "off",
-        "REBAR_SIGNING_KEY": "test-signing-key-1cef",
     }
     result = subprocess.run(
         [rebar_bin, "criteria", "heal", "--dry-run"],

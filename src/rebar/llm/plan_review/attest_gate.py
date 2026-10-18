@@ -119,7 +119,7 @@ def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     ``ok`` is True only when a CERTIFIED plan-review attestation exists (verified strictly
     from the kind-keyed map) AND :func:`compute_validity` passes — its reviewed code has not
     drifted, it binds the current material fingerprint, and it post-dates any reopen. NO LLM
-    and NO network — a pure local HMAC verify + a light fingerprint recompute + hashing a
+    and NO network — a pure local op-cert verify + a light fingerprint recompute + hashing a
     handful of dependency files."""
     from rebar import _reads, signing
     from rebar._store import freshness
@@ -193,7 +193,7 @@ def plan_review_status(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     is precisely what a ``claim`` would decide — and enriches it with the attestation's bound
     ``verified_at_sha`` and ``signed_at`` so a caller can see WHAT the plan was reviewed against
     (the moving-base-ref question that motivates this seam). NO LLM and NO network: the same fast
-    local reads (HMAC verify + light fingerprint recompute + a few dependency-file hashes) the
+    local reads (op-cert verify + light fingerprint recompute + a few dependency-file hashes) the
     claim gate does — never a billable review. It is the cheap answer to "should I re-gate before
     I implement?" that avoids re-running the full review just to learn the verdict.
 

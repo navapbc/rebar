@@ -158,10 +158,10 @@ op-cert kinds (`plan-review`, `completion-verifier`) pinned to it. That scheme a
 story 8f1d): those two kinds now resolve **only** the asymmetric `sshsig` op-cert scheme, and
 an unpinned kind fails closed (`unknown_kind`).
 
-> **Scope note.** A pre-existing HMAC-signed `plan-review` / `completion-verifier` record now
-> reads **NOT-certified** (verdict `unknown_scheme`, computed on read; the append-only event
+> **Scope note.** A pre-existing HMAC-signed record of any kind now reads **NOT-certified**
+> (verdict `unsigned` with the retired-scheme reason, computed on read; the append-only event
 > is never mutated). Re-run the gate to re-issue an asymmetric op-cert. The generic HMAC
-> utility (`rebar.signing.compute_signature` / `verify_record`, the `.signing-key` genesis)
-> is **unchanged** and remains available for non-op-cert consumers; see
+> utility (`compute_signature` / `verify_record`, the `.signing-key` genesis) was **retired**
+> in 2026-09; see
 > [`docs/manifest-signing.md`](manifest-signing.md) and
 > [the HMAC operation-certificate removal record](migrations/hmac-opcert-removal.md).

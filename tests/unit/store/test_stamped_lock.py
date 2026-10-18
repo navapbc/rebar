@@ -330,14 +330,13 @@ def test_the_stamped_lock_acquire_appears_only_in_its_owner() -> None:
 
 
 def test_the_unrelated_o_excl_uses_survive() -> None:
-    """The companion criterion: the guard must leave the seven legitimate ``O_EXCL`` lines
-    alone — prose in three modules, a real unrelated create in ``keyprov``, and the literal
+    """The companion criterion: the guard must leave the five legitimate ``O_EXCL`` lines
+    alone — prose in two modules, a real unrelated create in ``keyprov``, and the literal
     trigger token in the code-review overlay — which is exactly why the anchor is the
     conjunction and not ``O_EXCL``."""
     survivors = {
         "opcert_service/keyprov.py": 1,
         "llm/code_review/registry.py": 1,
-        "_signing_hmac.py": 2,
         "_store/fsutil.py": 1,
         "_commands/doctor_locks.py": 2,
     }

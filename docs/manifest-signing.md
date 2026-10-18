@@ -55,9 +55,9 @@ A certified signature establishes the integrity of the signed process record. It
 
 ## Legacy HMAC records
 
-Older `SIGNATURE` events can contain an HMAC-SHA256 hex value and a key fingerprint instead of a DSSE envelope. These events remain readable as append-only history. A legacy HMAC record filed as `plan-review` or `completion-verifier` now returns `unknown_scheme` and cannot certify a current gated operation. Run the relevant gate again to issue an operation certificate.
+Older `SIGNATURE` events can contain an HMAC-SHA256 hex value and a key fingerprint instead of a DSSE envelope. These events remain readable as append-only history. The HMAC scheme is retired (2026-09): any record without a DSSE envelope now verifies `unsigned`, with a reason naming the retired scheme, and cannot certify a gated operation. Run the relevant gate again to issue an operation certificate.
 
-The generic HMAC helpers in `rebar.signing`, including `compute_signature`, `verify_record`, and `signing_key`, remain supported for non-operation-certificate consumers. Current `rebar sign`, plan-review, and completion-verifier writes do not use that HMAC path. See [the migration record](migrations/hmac-opcert-removal.md) for the compatibility window and reissue procedure.
+No HMAC key custody or verifier remains: `REBAR_SIGNING_KEY` and `<tracker>/.signing-key` are no longer read, `rebar init` no longer creates the key file, and the `rebar.signing` HMAC helpers (`compute_signature`, `verify_record`, `signing_key`, `key_fingerprint`) are removed. An existing `.signing-key` file can be deleted. See [the migration record](migrations/hmac-opcert-removal.md) for the compatibility window and reissue procedure.
 
 ## Storage
 

@@ -143,15 +143,6 @@ def test_foreign_environment_certifies_when_the_signature_is_valid(
     assert out["trust_basis"] in ("own_key", "envelope_key")
 
 
-def test_injected_env_key_round_trips(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # The shared-deployment path: the key is injected via REBAR_SIGNING_KEY rather
-    # than read from disk. Signing and certifying under the same injected key works.
-    monkeypatch.setenv("REBAR_SIGNING_KEY", "shared-deployment-key")
-    tid = _seed(rebar_repo)
-    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
-    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
-
-
 # ── compaction survival ───────────────────────────────────────────────────────
 def test_signature_survives_compaction(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo)
@@ -191,26 +182,20 @@ def test_concurrent_signatures_converge_by_basename(rebar_repo: Path) -> None:
     from rebar import signing
 
     tid = _seed(rebar_repo)
-    tracker = str(rebar_repo / ".tickets-tracker")
     tdir = rebar_repo / ".tickets-tracker" / tid
-    key = signing.signing_key(tracker)
     ts = 1_781_000_000_000_000_000
 
     def _write(uid: str, manifest: list[str]) -> None:
+        # A real op-cert record, minted but not appended, then written at a FIXED timestamp.
+        _resolved, data = signing._prepare_manifest_event(tid, manifest, repo_root=str(rebar_repo))
+        data["signed_at"] = ts
         ev = {
             "timestamp": ts,
             "uuid": uid,
             "event_type": "SIGNATURE",
             "env_id": "e",
             "author": "a",
-            "data": {
-                "manifest": manifest,
-                "algorithm": signing.ALGORITHM,
-                "signature": signing.compute_signature(tid, manifest, key),
-                "key_id": signing.key_fingerprint(key),
-                "head_sha": "x",
-                "signed_at": ts,
-            },
+            "data": data,
         }
         (tdir / f"{ts}-{uid}-SIGNATURE.json").write_text(json.dumps(ev))
 
@@ -254,21 +239,6 @@ def test_cross_environment_round_trip_via_file_swap(rebar_repo: Path) -> None:
     assert out_a["key_id"] == "environment-b"  # ANCHOR: B's cert, read back in A
 
 
-def test_readonly_verify_does_not_mint_key(
-    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # A verify on a key-less environment must not write a .signing-key (a read
-    # tool persisting a secret a read-only deployment never asked for).
-    tid = _seed(rebar_repo)
-    keyfile = rebar_repo / ".tickets-tracker" / ".signing-key"
-    keyfile.unlink()
-    monkeypatch.delenv("REBAR_SIGNING_KEY", raising=False)
-    out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
-    assert out["verdict"] == "unsigned"
-    assert not keyfile.exists(), "verify minted a signing key as a side effect"
-
-
-# ── malformed reduced state must not crash verify (fail closed) ────────────────
 def test_verify_survives_non_dict_signature_state(rebar_repo: Path) -> None:
     import time as _time
     import uuid as _uuid

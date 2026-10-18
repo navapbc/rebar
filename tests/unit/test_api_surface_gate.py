@@ -303,10 +303,6 @@ def test_subsumes_signing_signatures():
     assert params("sign_manifest") == ["ticket_id", "manifest", "kind", "repo_root", "signer"]
     assert params("verify_signature") == ["ticket_id", "kind", "repo_root"]
     assert params("verify_attestations") == ["ticket_id", "repo_root"]
-    assert params("verify_record") == ["record", "ticket_id", "key"]
-    assert params("signing_key") == ["tracker", "create_if_missing"]
-    assert params("key_fingerprint") == ["key"]
-    assert params("compute_signature") == ["ticket_id", "manifest", "key"]
     assert params("parse_manifest") == ["payload"]
     assert params("head_sha") == ["repo_root"]
 

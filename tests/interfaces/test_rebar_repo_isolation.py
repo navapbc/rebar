@@ -191,12 +191,6 @@ def test_identity_is_reminted_per_store(_rebar_repo_template: Path, rebar_repo: 
         assert uuid.UUID(copy_val), f"{rel} is not a uuid: {copy_val!r}"
 
 
-def test_signing_key_keeps_restrictive_mode(rebar_repo: Path) -> None:
-    """Re-minting must not widen the signing key's permissions."""
-    mode = (rebar_repo / ".tickets-tracker/.signing-key").stat().st_mode & 0o777
-    assert mode == 0o600, f"signing key mode widened to {oct(mode)}"
-
-
 def test_opcert_signing_key_is_isolated_per_store(
     _rebar_repo_template: Path, tmp_path: Path
 ) -> None:

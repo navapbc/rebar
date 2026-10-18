@@ -70,26 +70,19 @@ def _raw_tickets(tracker: str) -> list[dict]:
 def signature_findings(tracker: str) -> list:
     """Store-wide signature integrity: certify every ticket's recorded signature.
 
-    Reduces each ticket RAW (the public list strips the HMAC hex, so verification
-    must read the reducer state directly) and recomputes the HMAC with this
-    environment's key. A tampered manifest → MAJOR; a signature made by a DIFFERENT
-    environment → MINOR (can't be certified here). ``certified``/``unsigned`` emit
-    nothing. When this environment has no key (read-only / foreign clone) the check
-    no-ops rather than flagging everything foreign — absence of a key is not an
-    integrity failure. Operates on closed tickets too (signatures gate closure),
-    which ``normalize_issues`` drops — hence the separate raw pass.
+    Reduces each ticket RAW and verifies its most-recent attestation. A tampered or
+    invalid op-cert (``mismatch`` / ``invalid`` / ``key_not_valid_at_era``) → MAJOR; an
+    op-cert with no usable signer key (``foreign_key``) → MINOR. ``certified`` and
+    ``unsigned`` emit nothing — including every legacy HMAC record, which reads
+    ``unsigned`` since the scheme was retired (2026-09). Operates on closed tickets too
+    (signatures gate closure), which ``normalize_issues`` drops — hence the separate raw
+    pass.
     """
     from rebar import config, signing
     from rebar._engine_support.validate_checks import Finding
     from rebar.reducer import reduce_ticket
 
     out: list = []
-    try:
-        key = signing.signing_key(tracker, create_if_missing=False)
-    except Exception:  # noqa: BLE001 — fail-open: no key means nothing to certify, return empty
-        return out
-    if not key:  # _NO_KEY: nothing to certify against here.
-        return out
     try:
         entries = sorted(os.listdir(tracker))
     except OSError:
@@ -114,16 +107,16 @@ def signature_findings(tracker: str) -> list:
         record = signing.most_recent_attestation(state or {})
         if not record:
             continue
-        # Shape-aware dispatch (story 8d8e): envelope-bearing op-cert records route to the op-cert
-        # verifier, legacy HMAC records to the unchanged verify_record — so a certified op-cert is
-        # never mis-reported as unsigned. repo_root is the CODE root — resolved the config way
-        # (None == discover), NOT os.path.dirname(tracker), which is the repo root only for a
-        # co-located store. Op-cert environment binding is advisory (ADR 0104), so discovery from
-        # cwd is correct here (auspicial-friended-merganser).
+        # Shape-aware dispatch: envelope-bearing op-cert records route to the op-cert verifier;
+        # anything else (a retired HMAC record) reads unsigned and emits nothing. repo_root is the
+        # CODE root — resolved the config way (None == discover), NOT os.path.dirname(tracker),
+        # which is the repo root only for a co-located store. Op-cert environment binding is
+        # advisory (ADR 0104), so discovery from cwd is correct here
+        # (auspicial-friended-merganser).
         verdict = signing.verify_attestation_record(
-            record, name, key=key, repo_root=config.repo_root_or_none()
+            record, name, repo_root=config.repo_root_or_none()
         ).get("verdict")
-        if verdict == "mismatch":
+        if verdict in ("mismatch", "invalid", "key_not_valid_at_era"):
             out.append(
                 Finding(
                     "major",

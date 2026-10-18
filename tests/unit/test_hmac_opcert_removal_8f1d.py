@@ -6,11 +6,11 @@ Pins the acceptance criteria:
     plus an end-to-end op-cert sign/verify smoke test.
   * no code path SIGNS an HMAC op-cert: ``plan-review`` / ``completion-verifier`` no longer
     resolve the HMAC-SHA256 scheme in ``registry.POLICY``, and ``sign_manifest`` emits an
-    envelope (no HMAC ``signature``) for those kinds — while ``compute_signature`` /
-    ``.signing-key`` remain for non-op-cert consumers.
+    envelope (no HMAC ``signature``) for those kinds. Since the 2026-09 retirement no HMAC
+    helper remains for any kind.
   * no code path ACCEPTS an HMAC op-cert: a pre-existing HMAC-signed op-cert record reads
-    NOT-certified post-contract, and re-running the gate re-issues an asymmetric op-cert that
-    then certifies.
+    NOT-certified (``unsigned`` with the retired-scheme reason), and re-running the gate
+    re-issues an asymmetric op-cert that then certifies.
   * the migration artifact exists, is non-empty, and carries the documented sections.
 """
 
@@ -96,39 +96,22 @@ def test_sign_manifest_emits_no_hmac_for_opcert_kinds(store: Path) -> None:
         assert not rec.get("key_id")
 
 
-def test_generic_hmac_utility_still_works_for_non_opcert(store: Path) -> None:
-    # The kept generic HMAC utility (compute_signature + .signing-key genesis) still certifies a
-    # NON-op-cert record through the unchanged verify_record path.
-    key = signing.signing_key(str(_tracker(store)))
-    assert key  # a per-environment .signing-key was minted
-    manifest = ["generic-note: ok", "ran tests"]
-    rec = {
-        "manifest": manifest,
-        "algorithm": signing.ALGORITHM,
-        "signature": signing.compute_signature("t", manifest, key),
-        "key_id": signing.key_fingerprint(key),
-    }
-    verdict = signing.verify_record(rec, "t", key)
-    assert verdict["verified"] is True and verdict["verdict"] == "certified"
-
-
 # ── no code path ACCEPTS an HMAC op-cert ──────────────────────────────────────────────
 def _write_legacy_hmac_opcert(store: Path, tid: str, kind: str) -> str:
-    """Append a genuine pre-contract HMAC SIGNATURE record for an op-cert ``kind``."""
+    """Append a pre-contract HMAC-shaped SIGNATURE record (literal hex) for an op-cert ``kind``."""
     from rebar._commands._seam import append_event
 
     resolved = rebar.show_ticket(tid, repo_root=str(store))["ticket_id"]
     tracker = _tracker(store)
     manifest = [f"{kind}: PASS"]
-    key = signing.signing_key(str(tracker))
     append_event(
         resolved,
         "SIGNATURE",
         {
             "manifest": manifest,
-            "algorithm": signing.ALGORITHM,
-            "signature": signing.compute_signature(resolved, manifest, key),
-            "key_id": signing.key_fingerprint(key),
+            "algorithm": "HMAC-SHA256",
+            "signature": "ab" * 32,
+            "key_id": "412fa5372ad877e0",
             "kind": kind,
         },
         tracker,
@@ -145,7 +128,8 @@ def test_preexisting_hmac_opcert_reads_not_certified(store: Path, kind: str) -> 
     # Validity-on-read: the HMAC op-cert no longer certifies (both the explicit-kind gate read
     # and the legacy most-recent path derive the op-cert kind and reject it).
     v_kind = signing.verify_signature(tid, kind=kind, repo_root=str(store))
-    assert v_kind["verified"] is False and v_kind["verdict"] == "unknown_scheme"
+    assert v_kind["verified"] is False and v_kind["verdict"] == "unsigned"
+    assert "legacy HMAC scheme retired" in v_kind["reason"]
     v_recent = signing.verify_signature(tid, repo_root=str(store))
     assert v_recent["verified"] is False
 

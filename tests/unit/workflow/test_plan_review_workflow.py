@@ -381,7 +381,6 @@ def test_review_run_emits_lossless_v2_sidecar_via_real_emit_path(monkeypatch, tm
     ):
         subprocess.run(a, cwd=repo, check=True, capture_output=True)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
-    monkeypatch.setenv("REBAR_SIGNING_KEY", "k")
     rebar.init_repo(repo_root=str(repo))
     tid = rebar.create_ticket("story", "Build X", description=_GOOD_AC, repo_root=str(repo))
 

@@ -27,7 +27,7 @@ from _topology_template import (
 # Path repair itself is centralized in ``clone_topology_template`` so broader
 # topologies (multiple stores and sibling bare remotes) use the same safe seam.
 _WORKTREE_POINTERS = (".tickets-tracker/.git", ".git/worktrees/-tickets-tracker/gitdir")
-_IDENTITY_FILES = ((".tickets-tracker/.env-id", 0o644), (".tickets-tracker/.signing-key", 0o600))
+_IDENTITY_FILES = ((".tickets-tracker/.env-id", 0o644),)
 
 # ── store template: build once, copy per test ────────────────────────────────
 #

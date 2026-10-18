@@ -35,7 +35,6 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ):
         subprocess.run(args, cwd=root, check=True, capture_output=True)
     monkeypatch.setenv("REBAR_ROOT", str(root))
-    monkeypatch.setenv("REBAR_SIGNING_KEY", "k")
     monkeypatch.chdir(root)
     rebar.init_repo(repo_root=str(root))
     return root

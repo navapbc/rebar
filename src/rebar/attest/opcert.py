@@ -30,7 +30,8 @@ Distinct from authorship in two ways the design turns on:
 preserves such an event append-only but reads it as **UNSIGNED** — it has no asymmetric verifier —
 so op-cert verification requires the upgraded binary: **upgrade verify/reconcile hosts first** (as
 with the SSHSIG-authorship rollout and ``TAG_DELTA``). The record-schema extension itself is
-additive (legacy HMAC records are byte-unchanged and still HMAC-verify).
+additive (legacy HMAC records are byte-unchanged; since the 2026-09 retirement they read
+``unsigned``).
 """
 
 from __future__ import annotations

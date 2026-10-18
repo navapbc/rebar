@@ -41,7 +41,8 @@ entry points that survive them):
    every production caller of the diagnostic-only shadow migrated to the authoritative
    ``compose_and_bind_llm_config`` / ``compose_and_bind_operation_snapshot`` bindings.)
 7. The op-cert key-path / principal deployment overrides still apply when UNBOUND.
-8. ``signing_key`` still honors an injected ``REBAR_SIGNING_KEY``.
+8. (retired — ``signing_key`` and ``REBAR_SIGNING_KEY`` were deleted with the HMAC scheme,
+   epic honorific-enervated-mantaray.)
 9. ``mirror_guard`` still threads ``GITHUB_TOKEN`` from its CLI boundary.
 10. ``review_bot`` still resolves ``REVIEW_BOT_PORT`` with its default/precedence.
 11. The grounding per-invocation timeout still honors explicit-arg > env > default.
@@ -181,16 +182,6 @@ def test_opcert_overrides_apply_when_unbound(
     monkeypatch.setenv("REBAR_OPCERT_ENV_ID", "prod:eu")
     assert opcert_principal(tmp_path) == "prod:eu", (
         "an unbound REBAR_OPCERT_ENV_ID override must resolve as the principal"
-    )
-
-
-def test_signing_key_env_injection_is_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An injected ``REBAR_SIGNING_KEY`` still short-circuits the on-disk key file."""
-    from rebar.signing import signing_key
-
-    monkeypatch.setenv("REBAR_SIGNING_KEY", "injected-secret")
-    assert signing_key("/nonexistent/tracker") == b"injected-secret", (
-        "a non-empty REBAR_SIGNING_KEY must be used verbatim (stripped, utf-8)"
     )
 
 

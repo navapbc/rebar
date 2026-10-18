@@ -43,7 +43,7 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 | `ticket_deps` | Show the dependency graph for a ticket. |
 | `validate` | Repo-wide quality health check (JSON report: score, critical/major/ minor issues, warnings, suggestions). Takes no ticket id. |
 | `verify_completion_status` | Report durable completion-certificate currency without an LLM or network. |
-| `verify_signature` | Verify a ticket manifest against an op-cert or legacy signature. |
+| `verify_signature` | Verify a ticket manifest against its op-cert signature. |
 
 ## LLM-gated (`REBAR_MCP_ALLOW_LLM`)
 

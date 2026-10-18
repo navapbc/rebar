@@ -66,11 +66,9 @@ def parse_manifest(payload) -> list[str]:
 
 # ── attested verified_at_sha pin (epic raze-vet-ditch S4) ─────────────────────
 # The SHA a gate verified is bound through the EXISTING manifest channel as a manifest
-# STEP, NOT a new signed-payload field: the step enters the signed bytes (compute_signature
-# signs the whole manifest list) WITHOUT touching `_canonical_payload` or bumping
-# PAYLOAD_VERSION — so no prior certified closure is invalidated. The step is shaped as an
-# in-toto-style subject so a future move to a DSSE/asymmetric envelope is an envelope swap,
-# not a data-shape rewrite (see :func:`verified_at_sha_subject`).
+# STEP, NOT a new signed-payload field: the step enters the signed bytes (the op-cert signs
+# the whole manifest list), so no prior certified closure is invalidated. The step is shaped
+# as an in-toto-style subject (see :func:`verified_at_sha_subject`).
 VERIFIED_AT_SHA_PREFIX = "verified-at-sha:"
 
 
@@ -90,7 +88,7 @@ def verified_at_sha_from_manifest(manifest: list[str] | None) -> str | None:
 def verified_at_sha_subject(sha: str, ticket_id: str, predicate_type: str) -> dict:
     """Map the pin to an in-toto v1 Statement subject/predicate shape — the contract that
     makes a future DSSE/asymmetric/transparency-log migration an envelope swap (the same
-    ``{name, digest, predicateType}`` data), not a rewrite. The HMAC manifest step
+    ``{name, digest, predicateType}`` data), not a rewrite. The signed manifest step
     (:func:`verified_at_sha_step`) is the current trust anchor; this is its in-toto image."""
     return {
         "subject": [{"name": ticket_id, "digest": {"sha1": sha}}],
