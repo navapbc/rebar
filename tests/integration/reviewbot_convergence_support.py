@@ -61,7 +61,6 @@ def make_store_pair(tmp_path: Path, monkeypatch) -> StorePair:
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / ".gitconfig"))
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
-    monkeypatch.setenv("REBAR_SIGNING_KEY", "test-signing-key-a6-0b")
     monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
     monkeypatch.delenv("REBAR_ROOT", raising=False)
 

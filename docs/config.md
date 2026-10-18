@@ -811,7 +811,7 @@ vocabulary are orthogonal concerns joined on the same Jira key; neither subsumes
 
 ### Secrets — environment / `.env` only (never the config file)
 
-`REBAR_SIGNING_KEY`, `REBAR_LLM_API_KEY`, `JIRA_API_TOKEN`,
+`REBAR_LLM_API_KEY`, `JIRA_API_TOKEN`,
 and the SDK-standard `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
 `LANGFUSE_SECRET_KEY`. (`LANGFUSE_*` is read by its own SDK and keeps its
 standard names.)

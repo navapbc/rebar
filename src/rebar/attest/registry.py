@@ -34,7 +34,7 @@ from rebar.attest import dsse
 
 @dataclass(frozen=True)
 class Verdict:
-    """Uniform verify outcome (mirrors ``signing.verify_record``'s contract)."""
+    """Uniform verify outcome (mirrors ``signing.verify_attestation_record``'s contract)."""
 
     verified: bool
     verdict: str  # "certified" | "mismatch" | "unknown_kind" | "unknown_scheme" | ...

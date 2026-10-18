@@ -18,7 +18,7 @@ from typing import TypeAlias
 
 from _git_upkeep import unpinned_bare_repositories
 
-_IDENTITY_FILES = ((".env-id", 0o644), (".signing-key", 0o600))
+_IDENTITY_FILES = ((".env-id", 0o644),)
 _PathRewrite: TypeAlias = tuple[bytes, bytes]
 
 

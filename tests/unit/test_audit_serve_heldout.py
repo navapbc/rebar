@@ -39,7 +39,6 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ):
         subprocess.run(args, cwd=repo, check=True, capture_output=True)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
-    monkeypatch.setenv("REBAR_SIGNING_KEY", "k")
     monkeypatch.delenv("REBAR_UI_ENABLED", raising=False)
     from rebar import config as cfg
 

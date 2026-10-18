@@ -7,9 +7,9 @@ operation-cert epics both import.
 Story 8f1d (contract phase): the legacy symmetric HMAC-SHA256 scheme has been RETIRED for
 the op-cert kinds (``plan-review`` / ``completion-verifier``). It is no longer registered
 in the scheme/policy registry, so those kinds resolve ONLY the asymmetric op-cert
-(SSHSIG/DSSE) scheme and can neither be signed nor accepted as HMAC. The generic HMAC
-utility (``signing.compute_signature`` / ``.signing-key``) survives for non-op-cert
-consumers, and ``rebar.authorship.v1`` (already asymmetric) is unaffected.
+(SSHSIG/DSSE) scheme and can neither be signed nor accepted as HMAC. Since 2026-09 the HMAC
+scheme is retired for every kind (no key custody or verifier remains; a legacy record reads
+``unsigned``), and ``rebar.authorship.v1`` (already asymmetric) is unaffected.
 """
 
 from __future__ import annotations

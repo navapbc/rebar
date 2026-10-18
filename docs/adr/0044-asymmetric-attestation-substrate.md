@@ -22,6 +22,12 @@ security-critical code and worsen a namespace collision already forming on the
 `SIGNATURE` event type / `signature` / `key_id` fields. So we build **one** hardened,
 standards-based signing substrate that both consumer epics import.
 
+> **Amendment (2026-09):** the symmetric HMAC model this ADR set out to complement is now
+> fully retired: `src/rebar/_signing_hmac.py`, `REBAR_SIGNING_KEY`, and
+> `<tracker>/.signing-key` no longer exist, and any non-envelope `SIGNATURE` record verifies
+> `unsigned` with the reason `legacy HMAC scheme retired (2026-09)`. The substrate below is the
+> only signing path. See `docs/migrations/hmac-opcert-removal.md` §"Retirement (2026-09)".
+
 The alternative — a full crypto library such as `securesystemslib` — was rejected: it has
 **no SSH signer** (so it would not cover the authorship path) and pulls `cryptography`
 (heavy) for Ed25519. rebar core stays stdlib-only.

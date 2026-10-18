@@ -1,9 +1,10 @@
 """Environment-bound manifest signing for tickets — the entry module of the signing family.
 
-New writes mint ``rebar.opcert.v1`` DSSE op-certs with an environment Ed25519 key; reads dispatch
-by record shape so legacy HMAC attestations remain verifiable. Signatures persist as append-only
-``SIGNATURE`` events through the shared locked write path. Legacy HMAC keys come from
-``REBAR_SIGNING_KEY`` or ``<tracker>/.signing-key`` and bind the ticket id and whole manifest.
+Writes mint ``rebar.opcert.v1`` DSSE op-certs with an environment Ed25519 key; reads dispatch by
+record shape. Signatures persist as append-only ``SIGNATURE`` events through the shared locked write
+path. The legacy symmetric HMAC-SHA256 scheme is RETIRED (2026-09): no key custody remains, and any
+non-envelope record (every attestation minted before 2026-07-15) reads ``unsigned`` through
+:func:`retired_scheme_verdict`. The record itself is never mutated.
 
 This module owns the concerns that need the whole picture — scheme DISPATCH
 (:func:`verify_attestation_record`), the op-cert sign path, the resolve/reduce read path, and the
@@ -12,13 +13,11 @@ point for the entire surface (story f5c1-e41d split it along the seams that alre
 
 * :mod:`rebar._signing_manifest` — the signed-manifest vocabulary + gate-code provenance (a
   stdlib-only leaf).
-* :mod:`rebar._signing_hmac` — the retired symmetric HMAC scheme, kept whole.
 * :mod:`rebar._opcert_signing` — the op-cert env-key custody + mint/verify machinery (story 8d8e).
 
-Direction is ``signing -> _signing_hmac -> _signing_manifest``, acyclic; there are no back-edges.
-A re-exported symbol is an ALIAS: its in-family consumers resolve it in its DEFINING module, so
-tests must monkeypatch it there, not here — see those modules' docstrings and
-``tests/unit/test_signing_module_split.py``, which guards both seams positively.
+Direction is ``signing -> _signing_manifest``, acyclic; there are no back-edges. A re-exported
+symbol is an ALIAS: its in-family consumers resolve it in its DEFINING module, so tests must
+monkeypatch it there, not here — see those modules' docstrings.
 """
 
 from __future__ import annotations
@@ -36,18 +35,6 @@ from rebar._opcert_signing import (
     opcert_principal,
     sign_opcert_manifest,
     verify_opcert_record,
-)
-from rebar._signing_hmac import (
-    _NO_KEY,
-    ALGORITHM,
-    PAYLOAD_VERSION,
-    _canonical_payload,
-    _generate_key_file,
-    _hmac_opcert_not_certified,
-    compute_signature,
-    key_fingerprint,
-    signing_key,
-    verify_record,
 )
 from rebar._signing_manifest import (
     REBAR_VERSION_PREFIX,
@@ -72,47 +59,76 @@ from rebar._signing_manifest import (
 # the declaration a linter reads each re-export as an unused import and an auto-fix deletes it.
 # Sorted (RUF022), not grouped by origin — the import block above shows which module owns what.
 __all__ = [
-    "ALGORITHM",
+    "HMAC_RETIRED_ON",
+    "LEGACY_HMAC_ALGORITHM",
     "OPCERT_KINDS",
-    "PAYLOAD_VERSION",
     "REBAR_VERSION_PREFIX",
     "VERIFIED_AT_SHA_PREFIX",
-    "_NO_KEY",
     "OpcertKeyUnavailable",
     "SigningError",
     "_baked_commit_sha",
-    "_canonical_payload",
     "_gate_commit_sha",
     "_gate_source_dir",
-    "_generate_key_file",
-    "_hmac_opcert_not_certified",
-    "compute_signature",
     "ensure_opcert_key",
     "gate_code_version",
     "head_sha",
-    "key_fingerprint",
     "most_recent_attestation",
     "opcert_principal",
     "parse_manifest",
     "rebar_version_from_manifest",
     "rebar_version_step",
+    "retired_scheme_verdict",
     "sign_manifest",
     "sign_opcert_manifest",
-    "signing_key",
     "verified_at_sha_from_manifest",
     "verified_at_sha_step",
     "verified_at_sha_subject",
     "verify_attestation_record",
     "verify_attestations",
-    "verify_record",
     "verify_signature",
 ]
 
 # The gated OP-CERT kinds (story 8f1d, contract phase): signed + accepted EXCLUSIVELY as
 # asymmetric op-certs (rebar.opcert.v1 DSSE/SSHSIG). The legacy symmetric HMAC scheme is retired
-# for them (a shared HMAC secret would let any verifier forge a verdict). The generic HMAC utility
-# (compute_signature / verify_record / .signing-key) is UNCHANGED for non-op-cert consumers.
+# for them (a shared HMAC secret would let any verifier forge a verdict), and since 2026-09 it is
+# retired for every kind: no HMAC key custody or verifier remains.
 OPCERT_KINDS = frozenset({"plan-review", "completion-verifier"})
+
+# The retired symmetric scheme's algorithm tag — recognised on READ only (to word the verdict
+# reason for pre-retirement records); never minted.
+LEGACY_HMAC_ALGORITHM = "HMAC-SHA256"
+HMAC_RETIRED_ON = "2026-09"
+
+
+def retired_scheme_verdict(record: dict | None) -> dict:
+    """Uniform NOT-certified verdict for any non-envelope SIGNATURE record (HMAC retired 2026-09).
+
+    Carries the same base keys as the op-cert verdict (``_opcert_verify``) so ``compute_validity``,
+    ``signature_findings`` and ``plan_review_status`` read it unchanged. ``verdict`` is always
+    ``unsigned``; the reason names the retired scheme when the record is a legacy HMAC one, else the
+    plain no-signature reason. The record is never mutated (validity is computed on read)."""
+    record = record if isinstance(record, dict) else {}
+    raw = record.get("manifest")
+    manifest = raw if isinstance(raw, list) else []
+    key_id = record.get("key_id")
+    legacy = bool(record.get("signature")) or record.get("algorithm") == LEGACY_HMAC_ALGORITHM
+    return {
+        "manifest": manifest,
+        "step_count": len(manifest),
+        "algorithm": record.get("algorithm"),
+        "key_id": key_id if isinstance(key_id, str) else None,
+        "signed_at": record.get("signed_at"),
+        "head_sha": record.get("head_sha"),
+        "verified_at_sha": verified_at_sha_from_manifest(manifest) or record.get("verified_at_sha"),
+        "rebar_version": rebar_version_from_manifest(manifest),
+        "verified": False,
+        "verdict": "unsigned",
+        "reason": (
+            f"legacy HMAC scheme retired ({HMAC_RETIRED_ON}); re-run the gate to mint an op-cert"
+            if legacy
+            else "ticket has no signature"
+        ),
+    }
 
 
 # ── Verify dispatch (which scheme certified this record) ──────────────────────
@@ -121,41 +137,22 @@ def verify_attestation_record(
     ticket_id: str,
     *,
     kind: str | None = None,
-    key: bytes | None = None,
     repo_root=None,
 ) -> dict:
-    """Shape-aware verify dispatch (story 8d8e, expand phase = write-new / read-both).
+    """Shape-aware verify dispatch.
 
     An ``envelope``-bearing record (a ``rebar.opcert.v1`` DSSE op-cert) routes to the op-cert
-    verifier; a legacy ``signature``-bearing (HMAC) record routes to the UNCHANGED
-    :func:`rebar._signing_hmac.verify_record`. This lets old HMAC attestations verify alongside
-    new envelope ones on the same store (kind-keyed coexistence). The result shape is the uniform
-    :func:`verify_record` contract either way, so downstream readers (``verify_signature``,
+    verifier; anything else — a legacy HMAC record or no record at all — reads ``unsigned`` via
+    :func:`retired_scheme_verdict` (HMAC retired 2026-09; re-running the gate mints an op-cert).
+    The result shape is uniform either way, so downstream readers (``verify_signature``,
     ``compute_validity``, ``signature_findings``) are unchanged.
 
     ``kind`` is the attestation-kind SLOT this record was fetched from; it is threaded to the
     op-cert verifier so it can enforce the SIGNED subject binding (cross-ticket / cross-kind replay
-    defense, finding A). It is irrelevant to the legacy HMAC path. ``key`` is the HMAC secret for
-    the legacy path; when omitted it is resolved read-only (a missing key never mints one).
-    ``repo_root`` locates the tracker for the op-cert principal + pubkey.
-
-    Contract phase (story 8f1d): the ``OPCERT_KINDS`` no longer accept the legacy HMAC scheme.
-    A non-envelope (HMAC) record whose effective kind is an op-cert kind reads NOT-certified
-    (``unknown_scheme``, validity-on-read, record never mutated); re-running the gate re-issues an
-    asymmetric op-cert. Non-op-cert HMAC records still verify through :func:`verify_record`."""
-    record = record if isinstance(record, dict) else {}
-    if record.get("envelope"):
+    defense, finding A). ``repo_root`` locates the tracker for the op-cert principal + pubkey."""
+    if isinstance(record, dict) and record.get("envelope"):
         return verify_opcert_record(record, ticket_id, kind=kind, repo_root=repo_root)
-    # A legacy HMAC record: resolve its effective kind (explicit slot, else the SIGNED manifest[0]
-    # the reducer keys on) and refuse a genuine HMAC signature for the op-cert kinds.
-    from rebar.reducer._processors import attestation_kind
-
-    effective_kind = kind if kind is not None else attestation_kind(record.get("manifest"), record)
-    if effective_kind in OPCERT_KINDS and record.get("signature"):
-        return _hmac_opcert_not_certified(record, effective_kind)
-    if key is None:
-        key = signing_key(str(config.tracker_dir(repo_root)), create_if_missing=False)
-    return verify_record(record, ticket_id, key)
+    return retired_scheme_verdict(record)
 
 
 # ── Sign path (mint an op-cert + append the SIGNATURE event) ──────────────────
@@ -244,12 +241,10 @@ def sign_manifest(
 
 # ── Read path (resolve the ticket, pick the record, verify it) ────────────────
 def _resolve_and_reduce(ticket_id: str, repo_root):
-    """Shared verify boilerplate: resolve the id, reduce the ticket, load the key.
+    """Shared verify boilerplate: resolve the id and reduce the ticket.
 
-    Verify is a READ: never mint a key on disk (a read-only deployment must not write a
-    secret). A key-less environment can only ever report unsigned/foreign_key — the honest
-    answer. Returns ``(resolved_id, state, key)``; raises :class:`SigningError` (exit 1) when
-    the ticket cannot be resolved."""
+    Returns ``(resolved_id, state)``; raises :class:`SigningError` (exit 1) when the ticket
+    cannot be resolved."""
     if not ticket_id:
         raise SigningError("Error: ticket_id must be non-empty")
     tracker = str(config.tracker_dir(repo_root))
@@ -265,7 +260,7 @@ def _resolve_and_reduce(ticket_id: str, repo_root):
         resolved = str(state.get("ticket_id") or "")
         if not resolved:
             raise SigningError(f"Error: ticket '{ticket_id}' not found")
-        return resolved, state, signing_key(tracker, create_if_missing=False)
+        return resolved, state
 
     from rebar._engine_support.resolver import resolve_ticket_id
     from rebar.reducer import reduce_ticket
@@ -275,7 +270,7 @@ def _resolve_and_reduce(ticket_id: str, repo_root):
     if resolved_id is None:
         raise SigningError(f"Error: ticket '{ticket_id}' not found")
     state = reduce_ticket(os.path.join(tracker, resolved_id)) or {}
-    return resolved_id, state, signing_key(tracker, create_if_missing=False)
+    return resolved_id, state
 
 
 def most_recent_attestation(state: dict):
@@ -312,19 +307,18 @@ def _record_for_kind(state: dict, kind: str | None):
 def verify_signature(ticket_id: str, *, kind: str | None = None, repo_root=None) -> dict:
     """Certify a ticket's recorded verified-steps against its signature.
 
-    Resolves the id, reduces the ticket, and verifies one signature record with the
-    environment key. Returns the verdict dict (see :func:`verify_record`) with the resolved
-    ``ticket_id`` attached. Raises :class:`SigningError` (exit 1) only when the ticket itself
-    cannot be resolved.
+    Resolves the id, reduces the ticket, and verifies one signature record. Returns the verdict
+    dict (see :func:`verify_attestation_record`) with the resolved ``ticket_id`` attached.
+    Raises :class:`SigningError` (exit 1) only when the ticket itself cannot be resolved.
 
     ``kind`` selects WHICH attestation to verify (epic dark-acme-lumen): ``None`` (default)
     verifies the legacy most-recent ``signature`` mirror — exact pre-attestations behavior, so
     every existing no-kind caller is unchanged — while an explicit kind (e.g. ``"plan-review"``
     / ``"completion-verifier"``) verifies THAT kind strictly from the kind-keyed map. Use
     :func:`verify_attestations` for all kinds at once."""
-    resolved, state, key = _resolve_and_reduce(ticket_id, repo_root)
+    resolved, state = _resolve_and_reduce(ticket_id, repo_root)
     result = verify_attestation_record(
-        _record_for_kind(state, kind), resolved, kind=kind, key=key, repo_root=repo_root
+        _record_for_kind(state, kind), resolved, kind=kind, repo_root=repo_root
     )
     result["ticket_id"] = resolved
     if kind is not None:
@@ -334,15 +328,15 @@ def verify_signature(ticket_id: str, *, kind: str | None = None, repo_root=None)
 
 def verify_attestations(ticket_id: str, *, repo_root=None) -> dict:
     """Verify EVERY attestation kind on a ticket: returns ``{kind: verdict_dict}`` (each a
-    :func:`verify_record` result with ``ticket_id`` + ``kind`` attached), kinds sorted. ``{}``
-    when the ticket carries no attestations. No LLM, no network — a pure local HMAC verify per
-    kind. Raises :class:`SigningError` only when the ticket cannot be resolved."""
-    resolved, state, key = _resolve_and_reduce(ticket_id, repo_root)
+    :func:`verify_attestation_record` result with ``ticket_id`` + ``kind`` attached), kinds
+    sorted. ``{}`` when the ticket carries no attestations. No LLM, no network — a pure local
+    verify per kind. Raises :class:`SigningError` only when the ticket cannot be resolved."""
+    resolved, state = _resolve_and_reduce(ticket_id, repo_root)
     att = state.get("attestations")
     out: dict = {}
     if isinstance(att, dict):
         for k in sorted(att):
-            r = verify_attestation_record(att[k], resolved, kind=k, key=key, repo_root=repo_root)
+            r = verify_attestation_record(att[k], resolved, kind=k, repo_root=repo_root)
             r["ticket_id"] = resolved
             r["kind"] = k
             out[k] = r
@@ -371,22 +365,14 @@ def sign_cli(argv: list[str]) -> int:
         return exc.returncode
     if fmt == "json":
         sys.stdout.write(js_safe_dumps(record, ensure_ascii=False) + "\n")
-    elif record.get("envelope"):
-        # Op-cert record (story 8d8e): render the DSSE envelope digest + principal (there is no
-        # HMAC ``signature`` field to slice — the legacy render would KeyError).
+    else:
+        # Op-cert record: render the DSSE envelope digest + principal.
         digest = hashlib.sha256(record["envelope"].encode("utf-8")).hexdigest()[:16]
         sys.stdout.write(
             f"SIGNED {record['ticket_id']} "
             f"steps={len(record['manifest'])} "
             f"principal={record.get('principal')} "
             f"envelope={digest}…\n"
-        )
-    else:
-        sys.stdout.write(
-            f"SIGNED {record['ticket_id']} "
-            f"steps={len(record['manifest'])} "
-            f"key={record['key_id']} "
-            f"sig={record['signature'][:16]}…\n"
         )
     return 0
 

@@ -10,7 +10,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from rebar import signing
 from rebar._store.canonical import canonical_bytes, canonical_str, content_hash
 from rebar.llm.workflow.schema import canonical_json
 from rebar.llm.workflow.schema import content_hash as schema_content_hash
@@ -28,13 +27,6 @@ _GOLDEN_MUT_JSON = (
     '"provenance":{"src":"jira"},"target":"TICKET-\\u4e16\\u754c"}]'
 )
 _GOLDEN_MUT_SHA = "95e67c62c5fd9df30df6661be4851aace11db9b2385738ac30b1776610f91ad0"
-_GOLDEN_SIGN_PAYLOAD = (
-    b'{"algorithm":"HMAC-SHA256","manifest":["dep sha123 src/caf\xc3\xa9/'
-    b'\xe4\xb8\x96\xe7\x95\x8c.py","step build ok"],"ticket_id":"1234-abcd","v":1}'
-)
-
-_SIGN_TICKET = "1234-abcd"
-_SIGN_MANIFEST = ["dep sha123 src/café/世界.py", "step build ok"]
 
 
 def _reconciler_modules():
@@ -95,10 +87,6 @@ def test_schema_content_hash_unchanged():
     assert schema_content_hash(_DOC) == _GOLDEN_SCHEMA_CHASH
 
 
-def test_signing_canonical_payload_unchanged():
-    assert signing._canonical_payload(_SIGN_TICKET, _SIGN_MANIFEST) == _GOLDEN_SIGN_PAYLOAD
-
-
 def test_conflict_resolver_hash_value_non_ascii_unchanged():
     # Routes a non-ASCII value through _hash_value: locks the ascii_only=True choice
     # (its pre-refactor json.dumps relied on the stdlib ensure_ascii=True default).
@@ -118,20 +106,3 @@ def test_mutation_serialize_manifest_unchanged():
     json_text, sha = mutation.serialize_manifest([m])
     assert json_text == _GOLDEN_MUT_JSON
     assert sha == _GOLDEN_MUT_SHA
-
-
-# ── signing sign→verify round-trip still certifies (the persisted-and-recompared path) ─────────
-def test_signing_round_trip_certifies():
-    key = b"deterministic-test-signing-key"
-    sig = signing.compute_signature(_SIGN_TICKET, _SIGN_MANIFEST, key)
-    # deterministic recompute
-    assert signing.compute_signature(_SIGN_TICKET, _SIGN_MANIFEST, key) == sig
-    record = {
-        "manifest": _SIGN_MANIFEST,
-        "signature": sig,
-        "key_id": signing.key_fingerprint(key),
-        "algorithm": signing.ALGORITHM,
-        "v": signing.PAYLOAD_VERSION,
-    }
-    verdict = signing.verify_record(record, _SIGN_TICKET, key)
-    assert verdict["verdict"] == "certified", verdict

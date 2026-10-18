@@ -1,6 +1,6 @@
 # Reusable machinery for developers
 
-This reference documents the subsystem contracts that another rebar capability can reuse. It covers public bridge and ticket mutation functions, operation-certificate signing, generic HMAC primitives, the LLM workflow runtime, the prompt and contract model, and the output-schema seam. Related guides explain the [LLM framework](llm-framework.md), the [`SIGNATURE` event](event-schema.md), and [workflow authoring](workflow-authoring-v2.md).
+This reference documents the subsystem contracts that another rebar capability can reuse. It covers public bridge and ticket mutation functions, operation-certificate signing, the retired HMAC scheme, the LLM workflow runtime, the prompt and contract model, and the output-schema seam. Related guides explain the [LLM framework](llm-framework.md), the [`SIGNATURE` event](event-schema.md), and [workflow authoring](workflow-authoring-v2.md).
 
 The plan-review gate demonstrates the operation-certificate, LLM runtime, prompt, and output-schema surfaces. See [the plan-review guide](plan-review-gate.md) and `src/rebar/llm/plan_review/`.
 
@@ -86,7 +86,7 @@ Event writes use the locked tracker write path. They commit locally and then fol
 
 ## 1. Signing surface in `rebar.signing`
 
-Current `sign_manifest` writes an operation certificate for a ticket's manifest of verified steps. The record contains a DSSE envelope with an in-toto Statement. The envelope carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 key. The certificate principal identifies that environment. The plan-review and completion-verifier gates use this form. Generic HMAC primitives remain available for non-operation-certificate consumers.
+Current `sign_manifest` writes an operation certificate for a ticket's manifest of verified steps. The record contains a DSSE envelope with an in-toto Statement. The envelope carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 key. The certificate principal identifies that environment. The plan-review and completion-verifier gates use this form. The legacy HMAC scheme is retired.
 
 ### Operation-certificate key custody
 
@@ -121,8 +121,9 @@ signing.verify_signature(ticket_id, *, kind=None, repo_root=None) -> dict
 signing.verify_attestations(ticket_id, *, repo_root=None) -> dict
 # Verifies every recorded kind and returns a sorted mapping from kind to verdict.
 
-signing.verify_attestation_record(record, ticket_id, *, kind=None, key=None, repo_root=None) -> dict
-# Dispatches by record shape to the operation-certificate or generic HMAC verifier.
+signing.verify_attestation_record(record, ticket_id, *, kind=None, repo_root=None) -> dict
+# Dispatches by record shape: an envelope goes to the operation-certificate verifier;
+# anything else reads unsigned (retired HMAC scheme).
 ```
 
 An operation-certificate record uses `algorithm="sshsig"` and has no HMAC `signature` field. `verify_signature` verifies the DSSE envelope through SSHSIG against the signer's Ed25519 public key. It does **not** require the record principal to match the current environment: Certification environment is **not** a gate under current operator policy (bug `c21f-6f29-5d2d-4a5a`): *"Any certification is as good as any other certification right now. Limited to a trusted set of environments is a future feature, but not currently in use."* A certificate from another environment therefore certifies when its signature verifies, and the result's `trust_basis` (`own_key` / `pinned_environment` / `envelope_key`) names which key was used. Setting `verify.require_environment` re-enables the restriction. See `docs/manifest-signing.md`.
@@ -131,7 +132,7 @@ The verdict dictionary contains `verified`, `verdict`, `reason`, `manifest`, `st
 
 | Verdict | Meaning |
 |---|---|
-| `certified` | The selected certificate or generic HMAC record verifies under the applicable local key. |
+| `certified` | The selected operation certificate verifies. |
 | `mismatch` | The signature, signed subject, ticket binding, or kind binding does not verify. |
 | `foreign_key` | No usable signer key could be obtained (no own key, nothing pinned, no key readable from the envelope), or `verify.require_environment` is set and the record identifies a different environment. |
 | `invalid` | The operation-certificate envelope or payload is malformed. |
@@ -139,20 +140,17 @@ The verdict dictionary contains `verified`, `verdict`, `reason`, `manifest`, `st
 | `unknown_kind` | No verification policy exists for the attestation kind. |
 | `unknown_scheme` | The record uses a scheme that policy does not accept for the kind. |
 | `key_not_valid_at_era` | The authorship-gate verdict: the signature is cryptographically valid by a key the identity holds, but that key was not valid at the event's commit (e.g. a since-revoked key) — distinct from a forgery. |
-| `unsigned` | No signature record exists in the selected slot. |
+| `unsigned` | No operation certificate exists in the selected slot, including a retired legacy HMAC record. |
 
-### Generic HMAC primitives
+### Retired HMAC scheme
 
 ```python
-signing.signing_key(tracker, *, create_if_missing=True) -> bytes
-signing.key_fingerprint(key: bytes) -> str
-signing.compute_signature(ticket_id, manifest, key) -> str   # hex HMAC over the canonical payload
-signing.verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict
+signing.retired_scheme_verdict(record: dict | None) -> dict
+signing.LEGACY_HMAC_ALGORITHM  # "HMAC-SHA256", recognised on read only
+signing.HMAC_RETIRED_ON        # "2026-09"
 ```
 
-These functions preserve the generic HMAC-SHA256 contract for consumers outside the two operation-certificate gates. `signing_key` resolves `REBAR_SIGNING_KEY` before `<tracker>/.signing-key`. `compute_signature` returns a hex HMAC over the versioned canonical payload containing the ticket ID and manifest. `verify_record` is a pure verifier when the caller already holds the record and key.
-
-Do not use the generic HMAC path for `plan-review` or `completion-verifier`. A legacy HMAC record for either kind remains readable, but it returns `unknown_scheme` and cannot certify a current gated operation.
+The legacy HMAC-SHA256 scheme is retired (2026-09). `REBAR_SIGNING_KEY` and `<tracker>/.signing-key` are no longer read, and `signing_key`, `key_fingerprint`, `compute_signature`, and `verify_record` no longer exist. Any `SIGNATURE` record without a DSSE envelope reads `unsigned` through `retired_scheme_verdict`, whose reason names the retired scheme. The record itself is never mutated. Re-run the gate to mint an operation certificate.
 
 ### Code and material freshness
 

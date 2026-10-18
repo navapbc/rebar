@@ -96,15 +96,14 @@ def _write_legacy_hmac_attestation(store: Path, tid: str) -> None:
     resolved = rebar.show_ticket(tid, repo_root=str(store))["ticket_id"]
     tracker = Path(store) / ".tickets-tracker"
     manifest = [f"{KIND}: PASS"]
-    key = signing.signing_key(str(tracker))
     append_event(
         resolved,
         "SIGNATURE",
         {
             "manifest": manifest,
-            "algorithm": signing.ALGORITHM,
-            "signature": signing.compute_signature(resolved, manifest, key),
-            "key_id": signing.key_fingerprint(key),
+            "algorithm": "HMAC-SHA256",
+            "signature": "ab" * 32,
+            "key_id": "412fa5372ad877e0",
             "kind": KIND,
         },
         tracker,
@@ -137,7 +136,7 @@ def test_hmac_record_is_additively_unchanged(store: Path) -> None:
     # NOT-certified — a forgeable HMAC op-cert can no longer certify.
     verdict = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
     assert verdict["verified"] is False
-    assert verdict["verdict"] == "unknown_scheme"
+    assert verdict["verdict"] == "unsigned"
 
 
 def test_opcert_survives_later_events(store: Path, tmp_path: Path) -> None:

@@ -54,7 +54,6 @@ def origin_with_tickets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / ".gitconfig"))
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
-    monkeypatch.setenv("REBAR_SIGNING_KEY", "test-signing-key-d220")
     monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
     monkeypatch.delenv("REBAR_ROOT", raising=False)
 

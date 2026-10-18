@@ -199,7 +199,7 @@ guarantee `2`).
 | `verify-completion` | 0 | 1 | — | PASS → 0, ordinary FAIL → 1, nonretryable raised `LLMError` → 1, retryable raised `LLMError` → 11, `verdict_obtainable=false` → 11, insufficiency-only FAIL (`evidence_sufficient=false`) → 11 |
 | `verify-identity` | 0 | — | — | authenticated-authorship merge gate; 0 = verified, 1 = not-verified, 2 = bad args |
 | `verify-opcert` | 0 | — | — | no ticket id; 0 = op-cert valid, 1 = invalid or not found, 2 = bad args |
-| `verify-signature` | 0 | — | — | no ticket id; certifies a manifest attestation (shape-aware: an asymmetric op-cert, or a legacy record); 0 = signature verified, 1 = not-verified (or, for a legacy HMAC record, a missing key), 2 = bad args |
+| `verify-signature` | 0 | — | — | no ticket id; certifies a manifest attestation (an asymmetric op-cert; a legacy HMAC record reads unsigned); 0 = signature verified, 1 = not-verified, 2 = bad args |
 | `workflow` | 0 | — | — | no ticket id; `run` → 0 = succeeded, 1 = not-succeeded; `validate` → 0 = valid, 1 = invalid; other errors → 1 |
 
 (The meta `help` arm and `rebar` with no subcommand are excluded: `help` exits 0,

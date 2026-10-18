@@ -37,7 +37,6 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ):
         subprocess.run(args, cwd=repo, check=True, capture_output=True)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
-    monkeypatch.setenv("REBAR_SIGNING_KEY", "k")
     rebar.init_repo(repo_root=str(repo))
     return repo
 
@@ -128,7 +127,6 @@ def test_audit_show_cli_json_shape(store: Path) -> None:
 
     env = subprocess_env()
     env["REBAR_ROOT"] = r
-    env["REBAR_SIGNING_KEY"] = "k"
     proc = subprocess.run(
         [sys.executable, "-m", "rebar", "audit", "show", tid, "--output", "json"],
         cwd=r,

@@ -181,6 +181,11 @@ migration artifact **`docs/migrations/hmac-opcert-removal.md`** (cutover window 
 re-run the gates; validity is computed on read). Authorship already signs asymmetrically (ADR 0045),
 so plan-review and completion-verifier op-certs were the last HMAC consumers.
 
+**Contract completed (2026-09):** the read-both window is closed. `verify_attestation_record`
+dispatches an envelope to the SSHSIG verifier and anything else to
+`signing.retired_scheme_verdict` (`unsigned`). No HMAC key custody remains; a project holding a
+pre-2026-07-15 attestation on an open ticket re-runs the gate once (`rebar review-plan <id>`).
+
 ## Consequences
 
 - Operation certificates become **third-party-verifiable, environment-attributed controls**: a

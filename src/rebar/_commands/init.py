@@ -18,7 +18,6 @@ import os
 import subprocess
 import sys
 import time
-import uuid
 
 from rebar._commands import _init_probe
 
@@ -454,17 +453,9 @@ def _commit_precommit(tracker: str) -> None:
 
 def _gen_local_files(tracker: str) -> None:
     # Mint .env-id only when absent; the guard warns if existing events identify other
-    # environments. Create the mode-600 signing key when absent. The retired closure key is
-    # not minted here and remains covered by the store's ignore configuration.
+    # environments. The retired HMAC .signing-key and closure key are no longer minted; both
+    # stay covered by the store's ignore configuration because existing stores carry them.
     mint_env_id_guarded(tracker)
-    key_path = os.path.join(tracker, ".signing-key")
-    if not os.path.isfile(key_path):
-        with open(key_path, "w", encoding="utf-8") as f:
-            f.write(str(uuid.uuid4()) + "\n")
-        try:
-            os.chmod(key_path, 0o600)
-        except OSError:
-            pass
 
 
 def _main_worktree_tracker(repo: str) -> str | None:

@@ -509,11 +509,12 @@ def register_read_tools(mcp, ctx) -> None:
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def verify_signature(ticket_id: str, kind: str | None = None) -> VerifySignatureResultOut:
-        """Verify a ticket manifest against an op-cert or legacy signature.
+        """Verify a ticket manifest against its op-cert signature.
 
         Returns ``{ticket_id, verified, verdict, reason, manifest, ...}``: ``certified``
         matches, ``mismatch`` is altered or invalid, ``foreign_key`` lacks an allowed
-        key, and ``unsigned`` lacks a signature. Outside the opt-in environment
+        key, and ``unsigned`` lacks an op-cert (a retired legacy HMAC record
+        included). Outside the opt-in environment
         restriction, signer environment alone is not a gate; ``trust_basis`` names the
         accepted key. Omitted ``kind`` checks the latest signature; an explicit
         ``plan-review`` or ``completion-verifier`` kind is strict. ``show_ticket``

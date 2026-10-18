@@ -151,7 +151,7 @@ Local `verify-signature` checks the envelope against the current environment's E
 
 The certificate establishes the integrity and environment attribution of the process record. It does not establish that the inputs or verdict are correct. The trusted-environment posture also depends on authoritative-state fetching and the append-only ticket-branch control described in [ADR 0049](adr/0049-opcert-asymmetric.md). A forced operation or a `local` source run records no certificate. That absence is the durable indication that the gate did not issue an attested PASS.
 
-Before the asymmetric operation-certificate migration, `plan-review` and `completion-verifier` records used HMAC-SHA256. The same symmetric secret produced and verified those records. Anyone able to verify could also forge a record, so the scheme provided no non-repudiation. Those legacy records remain readable in append-only history. They now return `unknown_scheme` and cannot certify a current gated operation. Generic HMAC helpers remain available for non-operation-certificate consumers. See [the HMAC operation-certificate removal record](migrations/hmac-opcert-removal.md).
+Before the asymmetric operation-certificate migration, `plan-review` and `completion-verifier` records used HMAC-SHA256. The same symmetric secret produced and verified those records. Anyone able to verify could also forge a record, so the scheme provided no non-repudiation. Those legacy records remain readable in append-only history. Since the scheme's retirement (2026-09) they verify `unsigned` and cannot certify a gated operation; no HMAC helpers remain. See [the HMAC operation-certificate removal record](migrations/hmac-opcert-removal.md).
 
 ## Adding a new agentic operation (the safeguard)
 

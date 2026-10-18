@@ -103,7 +103,6 @@ def store(tmp_path, monkeypatch):
     ):
         subprocess.run(args, cwd=repo, check=True, capture_output=True)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
-    monkeypatch.setenv("REBAR_SIGNING_KEY", "heldout-key")
     rebar.init_repo(repo_root=str(repo))
     description = "\n".join(
         [

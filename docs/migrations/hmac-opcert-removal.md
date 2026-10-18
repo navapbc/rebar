@@ -87,6 +87,24 @@ opt-in hardening step. Turning the policy off again is a safe rollback of that h
 The `rebar.authorship.v1` attestation kind (the identity epic) is **NOT** an op-cert kind
 and is **NOT** touched by this migration. It was already asymmetric (SSHSIG over commit
 authorship), it uses a different key, trust-root, and namespace, and it never used the
-legacy HMAC scheme. Likewise the generic HMAC utility (`signing.compute_signature`,
-`signing.verify_record`, the `.signing-key` genesis) remains available for any non-op-cert
-consumer — only the two op-cert kinds are contracted.
+legacy HMAC scheme. The generic HMAC utility (`signing.compute_signature`,
+`signing.verify_record`, the `.signing-key` genesis) outlived this contract phase for
+non-op-cert consumers until the retirement below.
+
+## Retirement (2026-09)
+
+With no producer left, the HMAC scheme is retired for every kind (operator ruling 2026-09-06,
+epic `honorific-enervated-mantaray`):
+
+- `src/rebar/_signing_hmac.py` is deleted. `rebar.signing` no longer exports `signing_key`,
+  `key_fingerprint`, `compute_signature`, `verify_record`, `ALGORITHM`, or `PAYLOAD_VERSION`,
+  and `verify_attestation_record` loses its `key` parameter.
+- `REBAR_SIGNING_KEY` and `<tracker>/.signing-key` are no longer read, and `rebar init` no
+  longer creates the key file. An existing file is inert and can be deleted; it stays
+  git-ignored.
+- Any `SIGNATURE` record without a DSSE `envelope` (every attestation minted before 2026-07-15)
+  now verifies `unsigned` with the reason `legacy HMAC scheme retired (2026-09); re-run the gate
+  to mint an op-cert`, instead of `unknown_scheme` or `foreign_key`.
+- Historical stores are unaffected: folded snapshots carrying HMAC entries still reduce and
+  render, and closed tickets need nothing. An open ticket holding only an HMAC attestation needs
+  one `rebar review-plan` to re-issue an op-cert.

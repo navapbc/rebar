@@ -8,6 +8,22 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — legacy HMAC-SHA256 signing scheme retired
+
+The legacy HMAC-SHA256 signing scheme is retired. `REBAR_SIGNING_KEY` and
+`<tracker>/.signing-key` are no longer read, and `rebar init` no longer creates the key file
+(delete yours; it stays git-ignored). A `SIGNATURE` record without a DSSE `envelope` (every
+attestation minted before 2026-07-15) now verifies `unsigned` with the reason
+`legacy HMAC scheme retired (2026-09); re-run the gate to mint an op-cert`, no longer
+`unknown_scheme` or `foreign_key`.
+
+**Migration.** Closed tickets are unaffected, and folded snapshots carrying HMAC entries still
+reduce and render. An open ticket holding only an HMAC attestation needs one
+`rebar review-plan`. Library callers lose `rebar.signing.{signing_key, key_fingerprint,
+compute_signature, verify_record, ALGORITHM, PAYLOAD_VERSION}`, and
+`verify_attestation_record` loses its `key` parameter; `retired_scheme_verdict`,
+`LEGACY_HMAC_ALGORITHM`, and `HMAC_RETIRED_ON` are new.
+
 ## BREAKING (pre-1.0) — MCP `ready_tickets` defaults to discovery rows
 
 The MCP `ready_tickets` tool now returns a compact discovery row by default:

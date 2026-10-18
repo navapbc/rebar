@@ -3626,7 +3626,12 @@
     }
   },
   "rebar.signing": {
-    "ALGORITHM": {
+    "HMAC_RETIRED_ON": {
+      "kind": "value",
+      "type": "str",
+      "value": "'2026-09'"
+    },
+    "LEGACY_HMAC_ALGORITHM": {
       "kind": "value",
       "type": "str",
       "value": "'HMAC-SHA256'"
@@ -3667,11 +3672,6 @@
         }
       }
     },
-    "PAYLOAD_VERSION": {
-      "kind": "value",
-      "type": "int",
-      "value": "1"
-    },
     "REBAR_VERSION_PREFIX": {
       "kind": "value",
       "type": "str",
@@ -3710,31 +3710,10 @@
       "type": "str",
       "value": "'verified-at-sha:'"
     },
-    "_NO_KEY": {
-      "kind": "value",
-      "type": "bytes",
-      "value": null
-    },
     "_baked_commit_sha": {
       "kind": "callable",
       "params": [],
       "return": "str | None"
-    },
-    "_canonical_payload": {
-      "kind": "callable",
-      "params": [
-        [
-          "ticket_id",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ],
-        [
-          "manifest",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ]
-      ],
-      "return": "bytes"
     },
     "_gate_commit_sha": {
       "kind": "callable",
@@ -3750,54 +3729,6 @@
     "_gate_source_dir": {
       "kind": "callable",
       "params": [],
-      "return": "str"
-    },
-    "_generate_key_file": {
-      "kind": "callable",
-      "params": [
-        [
-          "key_file",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ]
-      ],
-      "return": "None"
-    },
-    "_hmac_opcert_not_certified": {
-      "kind": "callable",
-      "params": [
-        [
-          "record",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ],
-        [
-          "kind",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ]
-      ],
-      "return": "dict"
-    },
-    "compute_signature": {
-      "kind": "callable",
-      "params": [
-        [
-          "ticket_id",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ],
-        [
-          "manifest",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ],
-        [
-          "key",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ]
-      ],
       "return": "str"
     },
     "ensure_opcert_key": {
@@ -3837,17 +3768,6 @@
       "params": [
         [
           "repo_root",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ]
-      ],
-      "return": "str"
-    },
-    "key_fingerprint": {
-      "kind": "callable",
-      "params": [
-        [
-          "key",
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
@@ -3913,6 +3833,17 @@
         ]
       ],
       "return": "str"
+    },
+    "retired_scheme_verdict": {
+      "kind": "callable",
+      "params": [
+        [
+          "record",
+          "POSITIONAL_OR_KEYWORD",
+          "<none>"
+        ]
+      ],
+      "return": "dict"
     },
     "sign_manifest": {
       "kind": "callable",
@@ -3986,22 +3917,6 @@
       ],
       "return": "dict"
     },
-    "signing_key": {
-      "kind": "callable",
-      "params": [
-        [
-          "tracker",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ],
-        [
-          "create_if_missing",
-          "KEYWORD_ONLY",
-          "True"
-        ]
-      ],
-      "return": "bytes"
-    },
     "verified_at_sha_from_manifest": {
       "kind": "callable",
       "params": [
@@ -4064,11 +3979,6 @@
           "None"
         ],
         [
-          "key",
-          "KEYWORD_ONLY",
-          "None"
-        ],
-        [
           "repo_root",
           "KEYWORD_ONLY",
           "None"
@@ -4088,27 +3998,6 @@
           "repo_root",
           "KEYWORD_ONLY",
           "None"
-        ]
-      ],
-      "return": "dict"
-    },
-    "verify_record": {
-      "kind": "callable",
-      "params": [
-        [
-          "record",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ],
-        [
-          "ticket_id",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ],
-        [
-          "key",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
         ]
       ],
       "return": "dict"
