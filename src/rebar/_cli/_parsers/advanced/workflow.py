@@ -1,7 +1,7 @@
 """``rebar workflow`` parser factory (RP-05 S2c).
 
 Reproduces the nested ``rebar workflow`` grammar (new / validate / run / show /
-edit / status / result) from :mod:`rebar._cli._workflow_commands`, bound to a
+status / result) from :mod:`rebar._cli._workflow_commands`, bound to a
 caller-supplied ``prog``. Uses argparse's default help formatter (as the inline
 parser did) so help renders byte-for-byte unchanged.
 """
@@ -69,13 +69,6 @@ def build(*, prog: str) -> argparse.ArgumentParser:
 
     p_show = subparsers.add_parser("show", help="render a workflow as a Mermaid graph")
     p_show.add_argument("file", help="a workflow file path or a .rebar/workflows/<name> name")
-
-    p_edit = subparsers.add_parser(
-        "edit", help="open a workflow in the ephemeral bpmn-js visual editor (edit-time)"
-    )
-    p_edit.add_argument("file", help="path to a .rebar/workflows/<name>.yaml file")
-    p_edit.add_argument("--port", type=int, default=0, help="local port (default: ephemeral)")
-    p_edit.add_argument("--no-open", action="store_true", help="do not auto-open the browser")
 
     for sub in ("status", "result"):
         p = subparsers.add_parser(sub, help=f"read a run's {sub} via replay")

@@ -1,5 +1,5 @@
 """Story B-DM: the prompt + criteria library WRITE + structured-ENUMERATE data model
-(:mod:`rebar.llm.prompting.prompt_library`) — the backend the visual editor sits on.
+(:mod:`rebar.llm.prompting.prompt_library`) — the library authoring surface.
 
 Covers: enumerate shape/fields for packaged + user-dir entries (incl. criteria +
 overlay flag), create/update round-trip (the new id resolves via get_prompt and
@@ -255,7 +255,7 @@ def test_create_tolerates_crlf_input(tmp_path: Path) -> None:
     assert p.text == "Body line one.\nBody line two.\n"
 
 
-# ── atomicity: the library write now goes through prompt_authoring._atomic_write (os.replace),
+# ── atomicity: the library write goes through prompt_library._atomic_write (os.replace),
 #    so a crash/interrupt before the rename cannot leave a partial file (epic drag-gripe-brake) ──
 def _boom(_src, _dst):  # stand-in for a crash/interrupt BEFORE the atomic rename
     raise OSError("simulated crash before the atomic rename")
@@ -297,8 +297,8 @@ def test_update_is_atomic_leaves_existing_intact_on_failure(
 
 
 def test_create_accepts_uppercase_id(tmp_path: Path) -> None:
-    """The unified id rule (epic drag-gripe-brake) is case-insensitive at BOTH editor
-    endpoints: create_prompt accepts an uppercase-bearing id — e.g. a project override for a
-    packaged criterion prompt like ``plan-review-A1`` (the same rule save_prompt now uses)."""
+    """The id rule (epic drag-gripe-brake) is case-insensitive: create_prompt accepts an
+    uppercase-bearing id — e.g. a project override for a packaged criterion prompt like
+    ``plan-review-A1``."""
     path = create_prompt("plan-review-A1", _CRITERION_MD, repo_root=str(tmp_path))
     assert path.name == "plan-review-A1.md" and path.is_file()

@@ -17,7 +17,7 @@ for **two audiences**, kept deliberately separate:
 It links to, rather than duplicates, the deeper references:
 [llm-framework.md](llm-framework.md) (the agent-operations framework),
 [workflow-authoring-v2.md](workflow-authoring-v2.md) (the contract-bearing prompt/step
-model), [workflow-editor.md](workflow-editor.md) (the visual editor),
+model),
 [plan-review-gate.md](plan-review-gate.md) (the gate itself), and
 [output-schemas.md](output-schemas.md) (the result contracts).
 
@@ -121,13 +121,11 @@ rebar workflow new <name>        # scaffold a valid skeleton
 rebar workflow validate <file>   # lint against the v3 schema + ref checks
 rebar workflow show <file>       # render a Mermaid graph
 rebar workflow run <file> …      # execute (sync); replay status/result by run_id
-rebar workflow edit <file>       # open the ephemeral bpmn-js visual editor
 ```
 
 For the contract-bearing prompt/step model (prompt front-matter, the prompt↔op↔registry
 conventions, `execution_mode`, the derived prompt index + CI drift gate) see
-[workflow-authoring-v2.md](workflow-authoring-v2.md); for the visual editor see
-[workflow-editor.md](workflow-editor.md).
+[workflow-authoring-v2.md](workflow-authoring-v2.md).
 
 ### The three-pass (4-pass) review gating pattern
 
@@ -222,7 +220,6 @@ Use the techniques that actually raise reliability; avoid the cargo-cult ones:
 
 - [llm-framework.md](llm-framework.md) — the `rebar.llm` agent-operations framework.
 - [workflow-authoring-v2.md](workflow-authoring-v2.md) — contract-bearing prompts & steps.
-- [workflow-editor.md](workflow-editor.md) — the bpmn-js visual editor.
 - [plan-review-gate.md](plan-review-gate.md) — the plan-review gate.
 - [output-schemas.md](output-schemas.md) — the structured result contracts.
 - `src/rebar/llm/eval_specs/README.plan-review.md` — the standing eval suite.

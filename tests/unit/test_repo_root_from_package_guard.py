@@ -92,7 +92,7 @@ def test_the_real_defect_shape_is_rejected(tmp_path: Path) -> None:
     "source",
     [
         pytest.param(
-            "from pathlib import Path\nassets = Path(__file__).parent / 'editor_assets'\n",
+            "from pathlib import Path\nassets = Path(__file__).parent / 'bundled_assets'\n",
             id="singular-parent-package-data",
         ),
         pytest.param(

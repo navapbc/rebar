@@ -54,7 +54,6 @@ EXPECTED_CODE: dict[str, str] = {
     "PromptError": "llm_unavailable",
     "PromptVersionError": "llm_unavailable",
     "PromptNotFound": "llm_unavailable",
-    "PromptWriteError": "llm_unavailable",
     "LibraryWriteError": "llm_unavailable",
     "InvalidPromptIdError": "llm_unavailable",
     "PromptExistsError": "llm_unavailable",

@@ -85,11 +85,7 @@ EXPECTED_OPTIONAL: dict[str, ExpectedOptional] = {
 }
 
 # Scripts-leg skip table: script filename -> why importing it is unsafe.
-SCRIPTS_SKIPS: dict[str, str] = {
-    "t5c_calibrate.py": "one-off calibration script with UNGUARDED top-level execution "
-    "(module-scope for/with loops running real LLM criterion-preview calls); importing it "
-    "would execute the calibration",
-}
+SCRIPTS_SKIPS: dict[str, str] = {}
 
 
 def _format_error(exc: BaseException) -> str:

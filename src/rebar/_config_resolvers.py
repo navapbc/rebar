@@ -343,21 +343,6 @@ def resolve_usage_log_sink() -> str | None:
     return path or None
 
 
-def resolve_preview_timeout(default: float) -> float:
-    """The criterion-preview sync-attempt budget in seconds: ``REBAR_PREVIEW_TIMEOUT`` when a
-    POSITIVE number, else ``default`` (the caller's ``_DEFAULT_TIMEOUT``). Read LIVE per call.
-    Owns the ambient read for :func:`rebar.llm.workflow.criterion_preview._default_timeout`."""
-    raw = os.environ.get("REBAR_PREVIEW_TIMEOUT")
-    if raw:
-        try:
-            val = float(raw)
-            if val > 0:
-                return val
-        except ValueError:
-            pass
-    return default
-
-
 def resolve_run_root(explicit: str | os.PathLike[str] | None = None) -> Path:
     """The run-scoped scratch base for the workflow-run bank: ``explicit`` > ``REBAR_ROOT`` >
     ``Path.cwd()`` (env>cwd — NOT the git-toplevel fallback of :func:`repo_root`, and paths are
