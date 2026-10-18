@@ -44,6 +44,26 @@ def _clear_claimed_session(state: dict, data: dict) -> None:
         state["claim_remote_session"] = None
 
 
+_CLOSE_METADATA_KEYS = (
+    "close_class",
+    "close_reason",
+    "force_close_reason",
+    "completion_expectation",
+)
+
+
+def _clear_close_metadata(state: dict, data: dict) -> None:
+    """Drop close metadata only when the winning event leaves ``closed`` (bug 6df4-d3f0).
+
+    The fold below is present-only, so a later clean close cannot clear a reason a forced
+    close left behind; reopen must. A losing fork never reaches this helper, and the event
+    log keeps every close for forensics.
+    """
+    if data.get("current_status") == "closed" and data.get("status") != "closed":
+        for key in _CLOSE_METADATA_KEYS:
+            state.pop(key, None)
+
+
 def _fold_close_metadata(state: dict, data: dict) -> None:
     """Fold nonempty close metadata only for the winning close event.
 
@@ -96,6 +116,7 @@ def process_status(state: dict, event: dict, data: dict, _filepath: str) -> None
             state["parent_status_uuid"] = incoming_uuid  # winner's own UUID
             _fold_claimed_session(state, data)  # only when THIS (winning) event is applied
             _clear_claimed_session(state, data)  # clear provenance on the winning in_progress exit
+            _clear_close_metadata(state, data)  # drop it on the winning closed->* edge
             _fold_close_metadata(state, data)  # close metadata on the *->closed winning edge
         else:
             # Existing chain wins; keep state as-is.
@@ -121,6 +142,7 @@ def process_status(state: dict, event: dict, data: dict, _filepath: str) -> None
         _fold_plan_review_phase(state, state["status"])
         _fold_claimed_session(state, data)  # normal (non-fork) update — this event is applied
         _clear_claimed_session(state, data)  # clear provenance on the in_progress exit
+        _clear_close_metadata(state, data)  # drop it on the closed->* edge
         _fold_close_metadata(state, data)  # close metadata on the *->closed edge
         # Store this UUID for later sibling comparisons. A common-parent UUID would make an
         # empty-parent fork depend on replay order.
