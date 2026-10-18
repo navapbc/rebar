@@ -1,13 +1,12 @@
 """Path-containment and error-redaction regressions.
 
-Ticket resolution, sidecar reads, and workflow prompt reads reject traversal or absolute
-escape paths. Review-bot rerun failures expose no exception detail.
+Ticket resolution and sidecar reads reject traversal or absolute escape paths. Review-bot
+rerun failures expose no exception detail.
 """
 
 from __future__ import annotations
 
 import json
-import types
 from pathlib import Path
 
 import pytest
@@ -109,26 +108,6 @@ def test_plan_review_reader_refuses_traversal(
     # … a traversal id resolves to nothing — the outside "LEAK" record is never read.
     assert sidecar.latest_review_result("../outside") is None
     assert sidecar.all_review_results("../outside") == []
-
-
-# ── editor _raw_prompt_text: contained to the project prompt dir ──────────────
-
-
-def test_editor_raw_prompt_text_refuses_traversal(tmp_path: Path) -> None:
-    from rebar.llm.workflow.editor_server import _Handler
-
-    prompts = tmp_path / "repo" / ".rebar" / "prompts"
-    prompts.mkdir(parents=True)
-    (prompts / "real.md").write_text("REAL", encoding="utf-8")
-    # A readable file that a `../` traversal from the prompts dir would land on.
-    (tmp_path / "repo" / ".rebar" / "secret.md").write_text("SECRET", encoding="utf-8")
-
-    handler = _Handler.__new__(_Handler)
-    handler.session = types.SimpleNamespace(repo_root=str(tmp_path / "repo"))
-
-    assert handler._raw_prompt_text("real") == "REAL"
-    assert handler._raw_prompt_text("../secret") is None  # reachable file, but refused
-    assert handler._raw_prompt_text("../../etc/passwd") is None
 
 
 # ── review-bot /rerun: 502 body has no exception detail ──────────────────────

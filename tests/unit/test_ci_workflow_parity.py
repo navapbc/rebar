@@ -1969,7 +1969,7 @@ def test_ci_reachable_make_targets_follow_workflow_invocations_and_make_edges() 
     transitive ``$(MAKE)`` edges inside the Makefile."""
     makefile = _read(_MAKEFILE)
     reachable = _reachable_make_targets(_workflow_make_targets(_BAT_YML), makefile)
-    assert {"lint", "typecheck", "config-check", "e2e-deps"}.issubset(reachable), (
+    assert {"lint", "typecheck", "config-check"}.issubset(reachable), (
         "the CI-reachable Makefile closure no longer includes one of the lane-invoked "
         f"targets: {sorted(reachable)}"
     )
@@ -2036,7 +2036,7 @@ def test_ci_runs_the_config_gates_through_make_lint_not_a_duplicate_step() -> No
 def test_ci_reachable_make_recipes_reject_bash_only_constructs() -> None:
     """CI-reachable Makefile recipes stay executable by POSIX /bin/sh."""
     recipes = _ci_reachable_make_recipes(_read(_BAT_YML), _read(_MAKEFILE))
-    assert {"lint", "typecheck", "config-check", "e2e-deps", "actionlint-bin"} <= set(recipes)
+    assert {"lint", "typecheck", "config-check", "actionlint-bin"} <= set(recipes)
     assert "worktree" not in recipes
 
     seeded = dict(recipes)

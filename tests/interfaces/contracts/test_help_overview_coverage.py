@@ -118,7 +118,7 @@ def _shipped_package_files(repo_root: Path = _REPO_ROOT) -> list[Path]:
 
     The enumeration source is ``git ls-files`` — deterministically the tracked set,
     which is what the sdist and wheel are built from. Untracked working-tree
-    artifacts (vendored ``editor_assets/node_modules`` payloads, editor build
+    artifacts (vendored ``node_modules`` payloads, local build
     outputs) do not ship, so a token inside one is not a shipped-surface defect.
     If git is unavailable the scan falls back to walking the whole tree: a
     *superset* of the tracked set, so the oracle is never silently narrowed.
@@ -208,12 +208,10 @@ def test_shipped_enumeration_excludes_untracked_build_artifacts(tmp_path: Path) 
     """Negative control: an ignored binary under src/rebar is not a shipped surface."""
     _init_repo(tmp_path)
     package = tmp_path / "src" / "rebar"
-    (package / "editor_assets" / "node_modules" / ".bin").mkdir(parents=True)
+    (package / "build_assets" / "node_modules" / ".bin").mkdir(parents=True)
     (package / "cli.py").write_text("# shipped\n", encoding="utf-8")
-    (tmp_path / ".gitignore").write_text(
-        "src/rebar/editor_assets/node_modules/\n", encoding="utf-8"
-    )
-    artifact = package / "editor_assets" / "node_modules" / ".bin" / "esbuild"
+    (tmp_path / ".gitignore").write_text("src/rebar/build_assets/node_modules/\n", encoding="utf-8")
+    artifact = package / "build_assets" / "node_modules" / ".bin" / "esbuild"
     artifact.write_bytes(b"\xcf\xfa\xed\xfe\x00\x80\xff\xfe")
     subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True)
 

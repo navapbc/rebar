@@ -141,45 +141,6 @@ def test_build_agent_request_agentic_honors_step_mode_and_schema() -> None:
 # `rebar_repo` fixture is only available under the interface tier.
 
 
-# ── 3. Inspector surfaces an agent step's prompt contract ──────────────────────
-def test_resolve_contracts_surfaces_agent_prompt_contract(tmp_path: Path) -> None:
-    pytest.importorskip("jsonschema")
-    from rebar.llm.workflow import editor
-
-    pdir = tmp_path / ".rebar" / "prompts"
-    pdir.mkdir(parents=True)
-    (pdir / "with-contract.md").write_text(
-        "---\ndescription: A contracted prompt\noutputs: completion_verdict\n"
-        "execution_mode: single_turn\n---\nBody {{ticket_id}}",
-        encoding="utf-8",
-    )
-    doc = {"steps": [{"id": "s", "prompt": "with-contract"}]}
-    views = editor.resolve_contracts(doc, repo_root=str(tmp_path))
-    assert "with-contract" in views
-    view = views["with-contract"]
-    assert view["has_contract"] is True
-    assert view["description"] == "A contracted prompt"
-    assert view["produces"]  # completion_verdict has properties
-
-
-def test_resolve_contracts_agent_prompt_without_contract_is_empty(tmp_path: Path) -> None:
-    from rebar.llm.workflow import editor
-
-    pdir = tmp_path / ".rebar" / "prompts"
-    pdir.mkdir(parents=True)
-    (pdir / "bare.md").write_text("---\n---\nBody {{ticket_id}}", encoding="utf-8")
-    doc = {"steps": [{"id": "s", "prompt": "bare"}]}
-    views = editor.resolve_contracts(doc, repo_root=str(tmp_path))
-    assert views["bare"]["has_contract"] is False
-
-
-def test_prompt_contract_view_unknown_prompt_degrades_to_empty() -> None:
-    from rebar.llm.workflow import editor
-
-    view = editor.prompt_contract_view("no-such-prompt-anywhere")
-    assert view["has_contract"] is False
-
-
 # ── 4. validate flags override-vs-built-in outputs drift ───────────────────────
 def test_prompt_override_drift_flags_changed_outputs(tmp_path: Path) -> None:
     pdir = tmp_path / ".rebar" / "prompts"

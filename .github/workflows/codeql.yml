@@ -44,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # `javascript` already covers TypeScript (the workflow-editor assets);
+        # `javascript` covers the infra/terraform/auth Lambda sources;
         # `python` covers src/ and scripts/.
         language: [python, javascript]
     steps:

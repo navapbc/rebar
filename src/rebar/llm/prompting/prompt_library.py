@@ -1,7 +1,8 @@
 """Prompt + criteria library WRITE + structured-ENUMERATE data model (story B-DM).
 
-This is the backend the visual editor's "select / create criteria & prompts" UX
-(story B-UX) sits on. It is ADDITIVE over :mod:`rebar.llm.prompting.prompts` (the read/index
+It was built as the backend for the visual editor's "select / create criteria & prompts"
+UX (story B-UX; the editor was removed in epic f041-4a84-fcdf-405a) and remains the
+library's authoring surface. It is ADDITIVE over :mod:`rebar.llm.prompting.prompts` (the read/index
 layer) and :mod:`rebar.llm.plan_review.registry` (criteria routing) — it does not
 change their read or index behaviour.
 
@@ -39,8 +40,10 @@ Stdlib-only at import (PyYAML stays lazy inside the prompts helpers).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+from rebar._store.fsutil import atomic_write
 from rebar.llm.prompting.prompts import (
     EXECUTION_MODES,
     PromptError,
@@ -58,13 +61,12 @@ from rebar.llm.prompting.prompts import (
 CRITERION_CATEGORY = "plan-review-criterion"
 _CRITERION_PREFIX = "plan-review-"
 
-# The id rule is the SINGLE source shared with the prompt-authoring write path
-# (`prompt_authoring._valid_id`, epic drag-gripe-brake): `[A-Za-z0-9][A-Za-z0-9-]*` —
-# alnum start then alnum/dash, forbidding `/`, `\`, `.`, `..`, and whitespace (so an
-# authored id is a safe, traversal-free `.rebar/prompts/<id>.md` stem and can never
-# masquerade as a `<id>.<variant>.md` overlay). Intentionally CASE-INSENSITIVE: criterion
-# ids carry uppercase + digits (e.g. `plan-review-G1G2`, `plan-review-T5a`). `_validate_id`
-# delegates to the shared validator so the two editor endpoints can never diverge.
+# The prompt-id rule: `[A-Za-z0-9][A-Za-z0-9-]*` — alnum start then alnum/dash,
+# forbidding `/`, `\`, `.`, `..`, and whitespace, so an authored id is a safe,
+# traversal-free `.rebar/prompts/<id>.md` stem and can never masquerade as a
+# `<id>.<variant>.md` overlay. Intentionally CASE-INSENSITIVE: criterion ids carry
+# uppercase + digits (e.g. `plan-review-G1G2`, `plan-review-T5a`).
+_PROMPT_ID_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
 # Front-matter keys an authored entry MUST carry (the picker-facing surface
 # `enumerate_library` exposes). Kept minimal: the per-type richness the clarity gates
@@ -179,11 +181,20 @@ def enumerate_criteria(*, repo_root=None) -> list[dict]:
 # ── create / update (the authoring write path) ──────────────────────────────────
 
 
-def _validate_id(prompt_id: str) -> None:
-    # Delegate to the SINGLE shared id rule (prompt_authoring._valid_id) so the
-    # /prompt/save and /library/create endpoints can never diverge (epic drag-gripe-brake).
-    from rebar.llm.workflow.prompt_authoring import _valid_id
+def _valid_id(prompt_id: str) -> bool:
+    return bool(prompt_id) and bool(_PROMPT_ID_SLUG.match(prompt_id))
 
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` ATOMICALLY via :func:`rebar._store.fsutil.atomic_write`
+    (a same-dir temp + ``os.replace``; a failure before the rename leaves the original
+    untouched and cleans up the temp). ``permissions=0o600`` preserves the prompt file's
+    historical mode; text is written LF-exact (the helper disables newline translation)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(path, text, encoding="utf-8", permissions=0o600)
+
+
+def _validate_id(prompt_id: str) -> None:
     if not _valid_id(prompt_id):
         raise InvalidPromptIdError(
             f"invalid prompt id {prompt_id!r}: a library id must match "
@@ -246,13 +257,10 @@ def _invalidate_caches() -> None:
 
 
 def _write(prompt_id: str, text: str, *, repo_root) -> Path:
-    # Persist through the SHARED atomic writer (prompt_authoring._atomic_write: a temp file
-    # in the same directory + os.replace), NOT a bare path.write_text — so a crash/interrupt
-    # mid-write can never leave a half-written `.rebar/prompts/<id>.md` (epic
-    # drag-gripe-brake). Shared by create_prompt AND update_prompt, so both are atomic.
-    # _atomic_write handles the parent mkdir + the atomic replace.
-    from rebar.llm.workflow.prompt_authoring import _atomic_write
-
+    # Persist through _atomic_write (a temp file in the same directory + os.replace), NOT a
+    # bare path.write_text — so a crash/interrupt mid-write can never leave a half-written
+    # `.rebar/prompts/<id>.md` (epic drag-gripe-brake). Shared by create_prompt AND
+    # update_prompt, so both are atomic; _atomic_write also creates the parent directory.
     canonical = _validate_and_canonicalize(text)
     path = _user_path(repo_root, prompt_id)
     _atomic_write(path, canonical)

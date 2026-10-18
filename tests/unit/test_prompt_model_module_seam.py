@@ -22,8 +22,8 @@ The seam is real, not a line-count carve:
   ``.rebar/prompts/*.md``;
 * nothing in the extracted set is a monkeypatch target. The resolver half is welded in
   place by two patches that must keep reaching their callers through the ``prompts``
-  module namespace (``prompts._catalog_dir`` in ``test_prompt_index`` /
-  ``test_prompt_authoring``, ``prompts._prompt_file`` in ``test_prompt_variants``), so
+  module namespace (``prompts._catalog_dir`` in ``test_prompt_index``,
+  ``prompts._prompt_file`` in ``test_prompt_variants``), so
   moving THAT half would have silently broken late binding. Moving the model leaf
   instead changes no binding at all: the resolver still resolves every one of these
   names out of the ``prompts`` namespace, because that is where the re-export puts them.

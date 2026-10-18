@@ -79,7 +79,6 @@ from rebar._config_sources import resolve_os_actor as resolve_os_actor
 from rebar._config_sources import resolve_otlp_endpoint as resolve_otlp_endpoint
 from rebar._config_sources import resolve_pandoc_timeout as resolve_pandoc_timeout
 from rebar._config_sources import resolve_plan_review_budget as resolve_plan_review_budget
-from rebar._config_sources import resolve_preview_timeout as resolve_preview_timeout
 from rebar._config_sources import resolve_rich_text_cutover as resolve_rich_text_cutover
 from rebar._config_sources import resolve_run_root as resolve_run_root
 from rebar._config_sources import resolve_stall_abort_limits as resolve_stall_abort_limits

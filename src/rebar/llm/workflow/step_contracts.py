@@ -4,8 +4,7 @@ Extracted from ``executor.py`` along an existing call-graph seam: this cluster
 (:class:`StepContract` / ``STEP_CONTRACTS`` / :func:`contract_for` /
 :func:`input_schema_for` and the 3-state :func:`shallow_contract_check`) calls only
 itself, and the executor's RUN LOOP never calls any of it. Its consumers are the
-STATIC / edit-time surface — the editor inspector (:mod:`.editor`,
-:mod:`.editor_contracts`), the reference linter (:mod:`.lint_refs`), and the
+STATIC / edit-time surface — the reference linter (:mod:`.lint_refs`) and the
 interpreter's pre-dispatch consumer-input validation — so it belongs beside them, not
 inside the executor's control flow.
 
@@ -35,12 +34,11 @@ class StepContract:
     """A step kind's authored I/O CONTRACT (workflow authoring v2, 5e78).
 
     Every step kind should advertise an INPUT contract, an OUTPUT contract, and a
-    description so the editor can present a typed palette + inspector and the linter
-    can check a `${{ steps.<id>.outputs.<name> }}` reference against the producing
-    step's declared outputs. ``input_schema`` / ``output_schema`` are SCHEMA NAMES
-    (resolvable via :mod:`rebar.schemas`), not inline schemas; either may be ``None``
-    for a step whose I/O is not yet annotated (the linter then treats that step's
-    outputs as UNKNOWN and never flags a reference to them)."""
+    description so the linter can check a `${{ steps.<id>.outputs.<name> }}` reference
+    against the producing step's declared outputs. ``input_schema`` / ``output_schema``
+    are SCHEMA NAMES (resolvable via :mod:`rebar.schemas`), not inline schemas; either
+    may be ``None`` for a step whose I/O is not yet annotated (the linter then treats
+    that step's outputs as UNKNOWN and never flags a reference to them)."""
 
     input_schema: str | None = None
     output_schema: str | None = None
@@ -65,8 +63,8 @@ def input_schema_for(kind: str, action: str | None, repo_root: Any = None) -> st
     a schema name). ``None`` for any other kind, a missing action, or a contract-less
     step (UNKNOWN → validation is skipped, never failed).
 
-    The SINGLE resolver shared by the runtime validator (interpreter) and the
-    edit-time validator (editor) so the two can never diverge (story b642)."""
+    The SINGLE resolver for the runtime validator (interpreter), so any future
+    edit-time validator shares it rather than diverging (story b642)."""
     if not isinstance(action, str) or not action:
         return None
     if kind == "scripted":
