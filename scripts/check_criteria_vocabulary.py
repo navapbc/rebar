@@ -54,10 +54,7 @@ EXCLUDED_PREFIXES = (
 # scrub MAPS it to the canonical spellings when freezing captured ticket prose into
 # a fixture — the same reason ``scripts/gen_cli_reference.py`` is a compatibility
 # file for the bridge-vocabulary contract.
-EXCLUDED_FILES = (
-    Path("src/rebar/llm/workflow/editor_assets/dist/editor.js"),
-    Path("scripts/build_cloud_adf_corpus.py"),
-)
+EXCLUDED_FILES = (Path("scripts/build_cloud_adf_corpus.py"),)
 ABBREVIATION_DIRECTORIES = (Path("src/rebar/llm/reviewers"), Path("src/rebar/_guides"))
 ABBREVIATION_FILES = (
     Path(".rebar/criteria_routing.json"),

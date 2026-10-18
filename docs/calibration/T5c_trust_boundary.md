@@ -5,8 +5,9 @@ Pass-1 finder in isolation via `criterion_preview` against three real ticket pla
 changed artifact is a prompt, these are **live** LLM runs (not replayed fixtures) — the old rubric
 is supplied inline, the new via `criterion_id="T5c"`.
 
-Reproduce: `REBAR_MCP_ALLOW_LLM=1 REBAR_GATE_ALLOW_UNGATED=1 python scripts/t5c_calibrate.py`
-(the one-off script lives in the PR; it reads each plan from the store and runs both rubrics).
+Not reproducible from the current tree: the one-off `scripts/t5c_calibrate.py` and the
+`criterion_preview` module it drove were removed with the visual workflow editor (epic
+f041-4a84-fcdf-405a). The results below are the historical record of that run.
 
 | Fixture | Kind | Old verdict | New verdict | Outcome |
 |---------|------|-------------|-------------|---------|

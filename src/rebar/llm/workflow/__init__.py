@@ -28,7 +28,6 @@ from rebar.llm.errors import (
     WorkflowVersionError,
 )
 
-from .bpmn import REBAR_MODDLE_DESCRIPTOR, bpmn_to_ir, ir_to_bpmn
 from .executor import (
     FakeAgentRunner,
     MemoryRecorder,
@@ -68,7 +67,6 @@ from .snapshot import SnapshotError, resolve_sha, snapshot_at_ref
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
     "MAX_WORKFLOW_BYTES",
-    "REBAR_MODDLE_DESCRIPTOR",
     "SUPPORTED_SCHEMA_VERSIONS",
     "FakeAgentRunner",
     "LintFinding",
@@ -82,12 +80,10 @@ __all__ = [
     "WorkflowParseError",
     "WorkflowValidationError",
     "WorkflowVersionError",
-    "bpmn_to_ir",
     "canonical_json",
     "content_hash",
     "declared_version",
     "dump_workflow",
-    "ir_to_bpmn",
     "lint_document",
     "lint_passes",
     "lint_workflow",

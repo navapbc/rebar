@@ -226,7 +226,7 @@ class WorkflowError(LLMError):
 
 
 class WorkflowAssetsUnavailableError(WorkflowError):
-    """A local workflow editor/runtime asset needed for the command is missing."""
+    """A local workflow runtime asset needed for the command is missing."""
 
     error_code = "command_failed"
 

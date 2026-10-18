@@ -1,11 +1,11 @@
 """Walking skeleton (5e78): the contract-bearing step model wired end-to-end through
 ONE scripted op (`fetch_ticket`) — the schema registry resolving an INPUT contract by
-name, the step DECLARING input+output+description via `@register_step`, the editor
-inspector SURFACING that contract read-only, and the linter CONSUMING the output
-contract for name-existence of a `${{ steps.<id>.outputs.<name> }}` reference.
+name, the step DECLARING input+output+description via `@register_step`, and the linter
+CONSUMING the output contract for name-existence of a `${{ steps.<id>.outputs.<name> }}`
+reference.
 
-Pure: no store/network (the linter, the registry, and the inspector data layer are all
-offline). Asserts the four layers agree on one op so a design flaw surfaces early."""
+Pure: no store/network (the linter and the registry are both offline). Asserts the layers
+agree on one op so a design flaw surfaces early."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ import pytest
 from rebar import schemas
 from rebar.llm.workflow import lint as L
 from rebar.llm.workflow import steps
-from rebar.llm.workflow.editor import resolve_contracts, step_contract_view
 from rebar.llm.workflow.executor import STEP_CONTRACTS, STEP_REGISTRY, contract_for
 from rebar.llm.workflow.lint_refs import ENGINE_INJECTED_INPUTS
 
@@ -69,42 +68,6 @@ def test_contract_schema_names_resolve_from_the_registry() -> None:
     in_schema = schemas.load("fetch_ticket_input")
     assert in_schema["$id"].endswith("/fetch_ticket_input.schema.json")
     assert set(schemas.load("fetch_ticket_output")["properties"]) == FETCH_OUTPUTS
-
-
-# ── AC #2 + #7: the editor inspector surfaces consumes/produces/description ──────
-
-
-def test_inspector_view_shows_consumes_produces_description() -> None:
-    view = step_contract_view("fetch_ticket")
-    assert view["has_contract"] is True
-    assert view["description"]
-    assert {f["name"] for f in view["consumes"]} == {"ticket_id"}
-    assert {f["name"] for f in view["produces"]} == FETCH_OUTPUTS
-    # field metadata is carried through for the inspector to render
-    produced = {f["name"]: f for f in view["produces"]}
-    assert produced["ticket"]["required"] is True
-    assert produced["title"]["required"] is False
-
-
-def test_inspector_empty_state_for_unknown_or_none() -> None:
-    # AC #7: a node with no declared contract (or nothing selected → None) yields a
-    # defined empty state, never a crash.
-    for arg in (None, "", "not_a_registered_op"):
-        view = step_contract_view(arg)
-        assert view["has_contract"] is False
-        assert view["consumes"] == [] and view["produces"] == []
-        assert view["description"] == ""
-
-
-def test_resolve_contracts_keys_by_op_name() -> None:
-    from rebar.llm.workflow.schema import parse_workflow
-
-    doc = parse_workflow(_GOOD)
-    contracts = resolve_contracts(doc)
-    assert "fetch_ticket" in contracts
-    assert contracts["fetch_ticket"]["has_contract"] is True
-    # render_context now also carries a contract (backfilled in e050).
-    assert contracts["render_context"]["has_contract"] is True
 
 
 # ── AC #3 + #5: the linter consumes the output contract ─────────────────────────
@@ -258,20 +221,3 @@ def test_pure_op_outputs_match_their_output_schema() -> None:
     g_fail = steps.gate(_ctx({"findings": [{"severity": "critical"}], "policy": "default"}))
     schemas.validator("gate_output").validate(g_fail)
     assert g_fail["verdict"] == "fail"
-
-
-def test_inspector_surfaces_scripted_contract_without_preimporting_steps() -> None:
-    # Regression (caught dogfooding the editor demo): the inspector must register the
-    # step library itself, else a fresh process (the real editor) shows every scripted
-    # op as contract-less. Asserted in a CLEAN subprocess since this suite imports
-    # `steps` at module top, which would otherwise mask the bug.
-    import subprocess
-    import sys
-
-    code = (
-        "from rebar.llm.workflow.editor import step_contract_view;"
-        "v = step_contract_view('fetch_ticket');"
-        "assert v['has_contract'] and 'ticket' in [f['name'] for f in v['produces']], v"
-    )
-    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
-    assert r.returncode == 0, r.stderr

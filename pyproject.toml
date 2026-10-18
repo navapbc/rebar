@@ -367,10 +367,6 @@ required-version = "==0.12.7"
 packages = ["src/rebar"]
 artifacts = [
     "src/rebar/_engine/**/*",
-    # Force-include the VENDORED workflow-editor bundle: the repo-root .gitignore
-    # ignores `dist/` globally, so without this the shipped editor.{js,css} would be
-    # dropped from the wheel (verified by tests/unit/test_engine_dir.py).
-    "src/rebar/llm/workflow/editor_assets/dist/**/*",
     # Build-baked gate-code SHA (git-ignored, written by hatch_build.py) — force-include
     # so the baked fallback reaches PyPI/wheel installs (epic jira-reb-596).
     "src/rebar/_build_info.py",
@@ -379,13 +375,10 @@ artifacts = [
 # files that .gitignore would otherwise drop, so spell out the bytecode exclusion
 # explicitly rather than relying on gitignore filtering (ticket fare-rant-clasp;
 # verified by tests/unit/test_engine_dir.py::test_wheel_has_no_bytecode).
-# The editor_assets npm install tree (node_modules) is a BUILD input, never shipped —
-# exclude it so it can't bloat the wheel (only the built dist/ ships, via artifacts).
 exclude = [
     "**/__pycache__",
     "**/*.pyc",
     "**/*.pyo",
-    "**/node_modules",
     # The Terraform IaC tree (infra/) is operational infrastructure, never
     # shipped in the wheel. It is already outside `packages = ["src/rebar"]`,
     # but exclude it explicitly as belt-and-suspenders.
@@ -400,7 +393,6 @@ exclude = [
     "**/__pycache__",
     "**/*.pyc",
     "**/*.pyo",
-    "**/node_modules",
     # infra/ is already excluded by the `include` allowlist above (it is not in
     # the list), but exclude it explicitly as belt-and-suspenders so a future
     # `include` change can't accidentally start shipping the Terraform IaC.
@@ -546,8 +538,8 @@ max-complexity = 15
 "src/rebar/_engine_support/*" = ["T201"]
 # MCP surface (mcp_server.py) + llm/workflow/ + llm top-level — SWEPT by ceaa; removed.
 # The mcp_server.py:892 masking swallow was fixed (the failure-recording path now logs
-# instead of swallowing); the two cleanup-and-reraise `except BaseException` sites
-# (prompt_authoring/snapshot) carry justified noqas. No prints existed in this scope.
+# instead of swallowing); the remaining cleanup-and-reraise `except BaseException` site
+# (snapshot) carries a justified noqa. No prints existed in this scope.
 # CLI surface — BLE001 SWEPT by fd72 (_cli has no prints; removed entirely). `_commands`
 # is the CLI presentation layer (usage strings, `Error:` messages, `exc.message`, and
 # command data output) so it KEEPS T201; its broad-excepts were swept.
@@ -740,6 +732,5 @@ markers = [
     "interface: interface-parity tests (library / CLI / MCP over one store)",
     "allow_network: opt out of the network guard for a test",
     "benchmark: performance benchmark (informational; not a pass/fail gate)",
-    "e2e: faithful round-trip tests that drive the real bpmn-io libraries via a Node harness (tests/e2e); self-skips when Node/npm is unavailable",
     "platform_compat: OS-sensitive tests (file locking, atomic rename, timeout/gtimeout, path semantics, cross-process concurrency) that form the reduced macOS compatibility suite; auto-applied by tests/conftest.py by path (story ci-runtime-round2). The full suite runs on Linux; macOS runs only this subset + the integration tier.",
 ]
