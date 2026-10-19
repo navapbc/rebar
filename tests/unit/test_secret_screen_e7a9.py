@@ -377,21 +377,24 @@ def test_cli_refuses_then_accepts_with_the_override(
 def test_the_override_is_not_exposed_over_mcp() -> None:
     """The escape hatch is a human operator's judgment call, so it stays CLI-only.
 
-    MCP tool schemas are derived from the tool functions' signatures in
-    ``rebar._mcp_writes``, so the absence of the parameter there IS the absence of the
-    override from every published schema.
+    ``comment_ticket`` is derived from ``rebar.comment`` (ADR 0119), so the override is kept
+    out by the spec's ``strip`` — asserted on the derived signature itself, which is what
+    FastMCP publishes as the tool's input schema.
     """
     import inspect
 
     from rebar import _mcp_llm, _mcp_writes
+    from rebar._mcp_derive import build_signature
+    from rebar._mcp_tool_specs import TOOL_SPECS
 
     for module in (_mcp_writes, _mcp_llm):
         source = inspect.getsource(module)
         assert "allow_secret_pattern" not in source, f"override reached {module.__name__}"
         assert "allow-secret-pattern" not in source, f"override reached {module.__name__}"
-    # Pin the positional-only call so a future `**kwargs` passthrough cannot smuggle the
-    # override into the tool schema without failing here.
-    assert "rebar.comment(ticket_id, body)" in inspect.getsource(_mcp_writes)
+    spec = next(s for s in TOOL_SPECS if s.name == "comment_ticket")
+    assert "allow_secret_pattern" in spec.strip
+    signature, _ = build_signature(spec)
+    assert list(signature.parameters) == ["ticket_id", "body"]
 
 
 def test_cli_override_reaches_the_self_parsing_composers(rebar_repo: Path) -> None:

@@ -35,7 +35,16 @@ over one git-backed store.
     `rebar._commands` / `rebar.reducer` / `rebar.graph`, mapping the write path's
     exit 10 to `ConcurrencyError`; in-process reads via `_native.py` / `_reads.py`.
   - **MCP server** (`src/rebar/mcp_server.py`) — FastMCP tools built on the library;
-    write tools gated by `REBAR_MCP_READONLY`; bridge preview is non-mutating.
+    write tools gated by `REBAR_MCP_READONLY`; bridge preview is non-mutating. The 48
+    library-backed tools are DERIVED (ADR 0119): `rebar._mcp_derive.derive_tool` builds each
+    tool's signature from the annotated `rebar.*` function (minus `repo_root`, `_`-prefixed
+    names, and the spec's stripped or pinned parameters) and registers one generic wrapper
+    through the layered `mcp.tool` seam; `rebar._mcp_tool_specs.TOOL_SPECS` is the override
+    table carrying each tool's verbatim description, deliberate divergences (with reasons),
+    pinned arguments, and gate/result hooks. Output schemas are the canonical
+    `src/rebar/schemas/*.json` files (`rebar._mcp_schema`). Only the 16 MCP-only tools are
+    hand-written, and `tests/interfaces/facades/mcp_tool_surface_golden.json` pins the
+    advertised surface.
   - The interface-parity tier (`tests/interfaces/`) asserts all three behave
     identically over one store, and that every structured output conforms to its
     canonical JSON Schema (`src/rebar/schemas/`) — the machine-readable **output

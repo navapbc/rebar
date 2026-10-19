@@ -38,6 +38,10 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **MCP library-backed tools are derived from the `rebar.*` signatures** (ADR 0119) through one
+  factory and an override table; the advertised tool surface is unchanged and pinned by a
+  golden. The name-only MCP/library parity gate is removed.
+
 - **BREAKING (pre-1.0): MCP results carry only what the library returns, and every
   `outputSchema` is the canonical JSON Schema file.** Keys a client may have read as an
   explicit `null` are now absent when unset (for example `cross_session_warning`,

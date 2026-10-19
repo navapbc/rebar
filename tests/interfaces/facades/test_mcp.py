@@ -373,13 +373,13 @@ def test_write_registrar_imports_without_the_pydantic_stack(
     """A core-only wheel must import mcp_server far enough to show its install hint.
 
     The pydantic output mirror is gone (story quilted-nepotic-kitty); the only
-    import-time pydantic-stack touch left is the write registrar's rebuild of the shared
+    import-time pydantic-stack touch left is the tool-spec table's rebuild of the shared
     input entries, which must fall back cleanly when ``typing_extensions`` is absent."""
-    import rebar._mcp_writes as installed_writes
+    import rebar._mcp_tool_specs as installed_specs
     from rebar.types import FileImpactEntry
 
     spec = importlib.util.spec_from_file_location(
-        "rebar_mcp_writes_without_pydantic", installed_writes.__file__
+        "rebar_mcp_tool_specs_without_pydantic", installed_specs.__file__
     )
     assert spec is not None and spec.loader is not None
     fallback = importlib.util.module_from_spec(spec)
