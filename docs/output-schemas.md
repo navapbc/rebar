@@ -16,7 +16,7 @@ selector. The legacy `--json` and `--format=*` flags were removed (pre-1.0).
 | `llm`  | token-minified short-key NDJSON (`show`/`list`/`ready`/`search`)          |
 
 Accepted spellings: `-o json`, `--output json`, `--output=json`. Per-command the
-allowed set differs (a *profile*): `show`/`list`/`search`/`session-logs` default
+allowed set differs (a *profile*): `show`/`list`/`search` default
 to `json` and add `llm`; `ready` is `text`(ids)/`llm`/`json`; everything else is
 `text`/`json`.
 
@@ -26,29 +26,28 @@ validation, and error text are never duplicated across commands.
 
 ## Per-command output contract
 
-Always-JSON reads (no flag needed): `show`, `list`, `search`, `session-logs`,
-`deps`, `list-descendants`, `get-file-impact`, `get-verify-commands`,
-`clarity-check`.
+Always-JSON reads (no flag needed): `show` (including `show --field`), `list`, `search`,
+`deps` (including `deps --descendants`), `check --clarity`.
 
 Structured via `--output json`:
 
 | command(s)                       | schema                    |
 |----------------------------------|---------------------------|
-| `show` / `list` / `ready` / `session-logs` | `ticket_state` |
+| `show` / `list` / `ready` | `ticket_state` |
 | MCP `ready_tickets` default      | `ready_ticket_summary`    |
 | MCP `ready_tickets` with `full: true` | `ticket_state`       |
 | `search` (default JSON; CLI/library/MCP) | `search_result` |
 | `search --full`                  | `ticket_state`              |
-| `show`/`list`/`ready`/`session-logs` `--output llm` | `ticket_state_llm` |
+| `show`/`list`/`ready` `--output llm` | `ticket_state_llm` |
 | `search --output llm`            | `search_result_llm`         |
 | `deps`                           | `deps_graph`              |
 | `next-batch`                     | `next_batch`              |
-| `list-descendants`               | `list_descendants`        |
-| `clarity-check`                  | `clarity_result`          |
-| `check-ac` / `quality-check`     | `gate_result`             |
+| `deps --descendants`             | `list_descendants`        |
+| `check --clarity`                | `clarity_result`          |
+| `check --ac` / `check`           | `gate_result`             |
 | `validate`                       | `validate_report`         |
-| `get-file-impact`                | `file_impact`             |
-| `get-verify-commands`            | `verify_commands`         |
+| `show --field=file_impact`       | `file_impact`             |
+| `show --field=verify_commands`   | `verify_commands`         |
 | `scratch get/set/clear`          | `scratch_envelope`        |
 | `show` (not found)               | `error_envelope`          |
 | `rebar bridge fsck`              | `bridge_fsck`             |
@@ -193,9 +192,9 @@ failure branch routes through it in-process. Pinned by
 `tests/interfaces/contracts/test_error_envelope.py`.
 
 Not every non-zero exit is a "failure" in this sense: the per-ticket **gates**
-(`check-ac`/`quality-check`) use exit 1 as a *verdict*; **tolerant reads**
-(`summary`/`list-descendants`/`get-file-impact`/`scratch get`) return an empty
-result at exit 0; and `clarity-check` has its own always-JSON contract outside the
+(`check --ac`/`check`) use exit 1 as a *verdict*; **tolerant reads**
+(`summary`/`deps --descendants`/`scratch get`) return an empty
+result at exit 0; and `check --clarity` has its own always-JSON contract outside the
 `--output` system. Those are documented exemptions, not envelope cases.
 
 ### The same failure channel over MCP
@@ -224,7 +223,7 @@ the disposition fields agents branch on. Pinned by
 **The hand-authored JSON Schema files under `src/rebar/schemas/*.schema.json` are
 the single source of truth** for output shapes. Shared sub-objects (a comment, a
 dep, a `{path,reason}` entry, the status/type enums, …) are authored once in
-`common.schema.json` and `$ref`'d everywhere, so e.g. `get-file-impact` and
+`common.schema.json` and `$ref`'d everywhere, so e.g. `show --field=file_impact` and
 `TicketState.file_impact[]` can never drift. Because those are cross-file refs,
 validate with `rebar.schemas.validator(name)` (it wires a `referencing` registry)
 rather than calling `jsonschema.validate(instance, load(name))` directly.

@@ -1,9 +1,9 @@
-"""``rebar exists`` / ``resolve`` / ``format`` parser factories (RP-05 S2b).
+"""``rebar resolve`` parser factory (RP-05 S2b).
 
-Prog-bound argparse renderings of the three resolution/display arms in
-:mod:`rebar._engine_support.lookups`. All take a positional ticket id; ``format``
-also accepts an optional trailing display ``mode`` positional. None accepts
-``--output`` (they emit a bare resolved string / exit code). The handlers keep
+Prog-bound argparse rendering of the resolution/display arm in
+:mod:`rebar._engine_support.lookups`. It takes a positional ticket id and an optional
+``--display[=MODE]`` (which replaced the removed ``exists``/``format`` verbs). It does not
+accept ``--output`` (it emits a bare resolved string / exit code). The handlers keep
 their bespoke ``Usage:`` diagnostics and exit codes. Only the stdlib and
 :mod:`rebar._cli._parser` are imported at module top-level.
 """
@@ -21,23 +21,19 @@ def _base(prog: str, description: str | None = None) -> argparse.ArgumentParser:
     )
 
 
-def build_exists(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar exists <ticket_id>``."""
-    parser = _base(prog, "O(1) presence check (exit 0=exists, 1=not found).")
-    parser.add_argument("ticket_id", nargs="?", help="the ticket to check")
-    return parser
-
-
 def build_resolve(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar resolve <id_or_alias_or_prefix>``."""
-    parser = _base(prog, "Resolve an id/alias/prefix to a canonical ticket id.")
+    """``rebar resolve <id_or_alias_or_prefix> [--display[=MODE]]``."""
+    parser = _base(
+        prog,
+        "Resolve an id/alias/prefix to a canonical ticket id (exit 0=found, 1=not found); "
+        "--display renders it in a display mode instead.",
+    )
+    parser.add_argument(
+        "--display",
+        nargs="?",
+        const="",
+        metavar="MODE",
+        help="render the resolved ticket for display (default: the configured display mode)",
+    )
     parser.add_argument("ticket_id", nargs="?", help="the id, alias, or prefix to resolve")
-    return parser
-
-
-def build_format(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar format <ticket_id> [mode]``."""
-    parser = _base(prog, "Render a ticket for display.")
-    parser.add_argument("ticket_id", nargs="?", help="the ticket to render")
-    parser.add_argument("mode", nargs="?", help="optional display mode")
     return parser

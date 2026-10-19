@@ -37,7 +37,17 @@ def _make_logs(repo: Path, n: int) -> list[str]:
 
 def _cli_session_logs(repo: Path, *args: str) -> list[dict]:
     cp = subprocess.run(
-        [sys.executable, "-m", "rebar.cli", "session-logs", *args, "--output", "json"],
+        [
+            sys.executable,
+            "-m",
+            "rebar.cli",
+            "list",
+            "--type=session_log",
+            "--sort=-created",
+            *args,
+            "--output",
+            "json",
+        ],
         capture_output=True,
         text=True,
         cwd=str(repo),

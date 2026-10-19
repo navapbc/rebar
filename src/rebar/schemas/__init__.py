@@ -363,6 +363,7 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "transition": TRANSITION_RESULT,
     "reopen": TRANSITION_RESULT,
     "delete": DELETE_RESULT,
+    "check": GATE_RESULT,
     "check_ac": GATE_RESULT,
     "quality_check": GATE_RESULT,
     "summary": SUMMARY,

@@ -126,7 +126,7 @@ def test_next_batch_and_limit_zero(rebar_repo: Path) -> None:
 def test_list_descendants(rebar_repo: Path) -> None:
     s = _seed(rebar_repo)
     schemas.validator(schemas.LIST_DESCENDANTS).validate(
-        _cli_json("list-descendants", s["epic"], cwd=s["repo"])
+        _cli_json("deps", s["epic"], "--descendants", cwd=s["repo"])
     )
 
 
@@ -213,8 +213,8 @@ def test_gate_results(rebar_repo: Path) -> None:
     )
     v = schemas.validator(schemas.GATE_RESULT)
     # CLI --output json
-    v.validate(_cli_json("check-ac", tid, "--output", "json", cwd=r))
-    v.validate(_cli_json("quality-check", tid, "--output", "json", cwd=r))
+    v.validate(_cli_json("check", tid, "--ac", "--output", "json", cwd=r))
+    v.validate(_cli_json("check", tid, "--output", "json", cwd=r))
     # library (adds `passed`)
     v.validate(rebar.check_ac(tid, repo_root=r))
     v.validate(rebar.quality_check(tid, repo_root=r))

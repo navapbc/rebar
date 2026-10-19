@@ -29,13 +29,29 @@ _NESTED_FAMILY: frozenset[str] = frozenset(
 )
 # Hidden alias spellings (e.g. ``bridge-status``) are neither advertised nor help-served here.
 _HIDDEN_ALIASES: frozenset[str] = frozenset(r.name for r in ROUTES if r.hidden)
-_HISTORICAL_HIDDEN_ALIASES: frozenset[str] = frozenset({"bridge-status"})
-_HISTORICAL_VISIBLE_ALIASES: frozenset[str] = frozenset(
-    {"bridge-fsck", "bridge-probe", "jira-onboard", "verify-authorship"}
-)
-_REMOVED_SIMPLE_CLI_ALIASES: frozenset[str] = (
-    _HISTORICAL_HIDDEN_ALIASES | _HISTORICAL_VISIBLE_ALIASES
-)
+# Removed spellings -> their replacement (hard cutover, no working aliases). Each fails
+# loudly through argparse's invalid-choice error plus a hint naming the replacement.
+_REMOVED_SPELLINGS: dict[str, str] = {
+    # Pre-1.0 simple compatibility aliases (docs/exit-codes.md).
+    "bridge-status": "rebar bridge status",
+    "bridge-fsck": "rebar bridge fsck",
+    "bridge-probe": "rebar bridge check-access",
+    "jira-onboard": "rebar bridge setup",
+    "verify-authorship": "rebar verify-identity",
+    # Ticket verbs merged into the golden-path verbs (epic toadyish-sulfurous-ovenbird).
+    "exists": "rebar resolve <id>",
+    "format": "rebar resolve <id> --display[=MODE]",
+    "check-ac": "rebar check <id> --ac",
+    "clarity-check": "rebar check <id> --clarity",
+    "quality-check": "rebar check <id>",
+    "tag": "rebar edit <id> --add-tag <tag>",
+    "untag": "rebar edit <id> --remove-tag <tag>",
+    "get-file-impact": "rebar show <id> --field=file_impact",
+    "get-verify-commands": "rebar show <id> --field=verify_commands",
+    "list-descendants": "rebar deps <id> --descendants",
+    "session-logs": "rebar list --type=session_log --sort=-created --limit=5",
+}
+_REMOVED_SIMPLE_CLI_ALIASES: frozenset[str] = frozenset(_REMOVED_SPELLINGS)
 
 
 def _help_backed(route: Route) -> bool:
@@ -115,17 +131,22 @@ def _emit_unknown(sub: str) -> int:
 
 
 def _emit_removed_alias_invalid_choice(sub: str) -> int:
-    """Render retired simple aliases through argparse's standard invalid-choice error."""
+    """Render a removed spelling through argparse's standard invalid-choice error, then a
+    hint naming its replacement. Returns argparse's usage-error exit (2)."""
     parser = argparse.ArgumentParser(prog="rebar")
     parser.add_argument(
         "subcommand",
         choices=tuple(r.name for r in ROUTES if not r.hidden and not r.retired),
     )
+    code = 1
     try:
         parser.parse_args([sub])
     except SystemExit as exc:
-        return int(exc.code or 0)
-    return 1
+        code = int(exc.code or 0)
+    replacement = _REMOVED_SPELLINGS.get(sub)
+    if replacement is not None:
+        sys.stderr.write(f"hint: 'rebar {sub}' was removed; use `{replacement}` instead\n")
+    return code
 
 
 def pre_scan(argv: list[str]) -> int | None:

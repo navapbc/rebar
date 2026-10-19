@@ -1,4 +1,4 @@
-Usage: rebar deps [--include-archived] [ticket_id]
+Usage: rebar deps [--include-archived] [--descendants] [ticket_id]
 
 Show dependency graph for a ticket.
 
@@ -7,3 +7,5 @@ positional arguments:
 
 options:
   --include-archived  include archived tickets in the graph
+  --descendants       print the ticket's parent-chain descendants instead of the
+                      dependency graph

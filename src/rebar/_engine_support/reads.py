@@ -541,12 +541,13 @@ def search_state(
 def recent_session_logs_state(tracker: str, *, limit: int = 5) -> list[dict]:
     """Return session logs in descending ``created_at`` order without archived or deleted rows.
 
-    Session logs are hidden from normal lists. Nonpositive limits return no rows."""
+    Session logs are hidden from normal lists. Nonpositive limits return no rows. Ordering is
+    :func:`sort_states` with ``-created`` (ties by ``ticket_id`` ascending, missing last), the
+    same rule ``rebar list --type=session_log --sort=-created --limit=N`` applies, so the
+    library, MCP, and CLI agree row for row."""
     states = reduce_all_tickets(tracker, exclude_archived=True, exclude_deleted=True)
     logs = [t for t in states if t.get("ticket_type") == "session_log"]
-    # created_at is the CREATE-event timestamp (ns); missing/None sorts oldest.
-    logs.sort(key=lambda t: t.get("created_at") or 0, reverse=True)
-    return [public_state(t) for t in logs[: max(0, limit)]]
+    return [public_state(t) for t in sort_states(logs, "-created")[: max(0, limit)]]
 
 
 # ───────────────────────────── CLI command handlers ──────────────────────────

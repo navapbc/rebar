@@ -3,7 +3,7 @@ Usage: rebar list [--output {json,llm}] [--include-archived] [--exclude-deleted]
                   [--type TYPE] [--status STATUS] [--priority PRIORITY]
                   [--parent PARENT] [--has-tag HAS_TAG]
                   [--without-tag WITHOUT_TAG] [--min-children MIN_CHILDREN]
-                  [--sort <priority|created|updated|id|status>]
+                  [--sort <priority|created|updated|id|status>] [--limit N]
 
 List all tickets as JSON.
 
@@ -28,3 +28,5 @@ options:
                         only tickets with at least N children
   --sort <priority|created|updated|id|status>
                         order by key ('-' prefix = descending)
+  --limit N             return at most N rows (positive integer), applied after
+                        --sort; without --sort it is the first N in store order
