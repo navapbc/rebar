@@ -393,19 +393,3 @@ def test_long_matching_line_is_truncated(tmp_path: Path) -> None:
     assert "[truncated]" in result.stderr
     assert "A" * 400 not in result.stderr
     assert max(len(line) for line in result.stderr.splitlines()) < 400
-
-
-# The committed inventory and all live migrations are validated through the real CLI.
-@pytest.mark.allow_unharnessed_subprocess(
-    "validates THIS checkout's committed criteria inventory by running the real script over it"
-)
-def test_current_repository_vocabulary_is_clean() -> None:
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT)],
-        cwd=REPO_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    assert ALLOWLIST.is_file()

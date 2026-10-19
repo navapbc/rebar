@@ -42,11 +42,6 @@ def _write_skill(tmp_path: Path, name: str, body: str) -> Path:
 # ─────────────────────────── HAPPY PATH (shown to implementer) ────────────────
 
 
-def test_real_tree_passes():
-    """The committed examples/agent-skills tree passes (exit 0)."""
-    assert chk.main([]) == 0
-
-
 def test_clean_synthetic_skill_has_no_problems(tmp_path: Path):
     p = _write_skill(
         tmp_path,

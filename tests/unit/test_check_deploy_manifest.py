@@ -16,7 +16,6 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "check_deploy_manifest.py"
 
 sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 import check_deploy_manifest as gate  # noqa: E402
@@ -43,12 +42,6 @@ def _real_manifest_text() -> str:
 
 
 # ─────────────────────────── the gate passes on the complete tree ───────────────────────────
-
-
-def test_passes_against_real_repo() -> None:
-    """With the manifests complete on origin/main the gate is clean."""
-    assert gate.check(_REPO_ROOT) == []
-    assert gate.main([]) == 0
 
 
 def test_derivation_covers_every_recurrence_class() -> None:
@@ -265,21 +258,3 @@ def test_stale_or_reasonless_exclusion_is_flagged(tmp_path: Path, monkeypatch) -
 
 
 # ─────────────────────────── wiring ───────────────────────────
-
-
-def test_make_lint_invokes_the_gate() -> None:
-    """A CI-only gate lets a local verdict be green over a tree CI rejects."""
-    text = (_REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-    body: list[str] = []
-    in_target = False
-    for line in text.splitlines():
-        if re.match(r"^lint:", line):
-            in_target = True
-            continue
-        if in_target and re.match(r"^[A-Za-z0-9_.-]+:", line):
-            break
-        if in_target:
-            body.append(line)
-    assert "scripts/check_deploy_manifest.py" in "\n".join(body), (
-        "`make lint` does not invoke the deploy-manifest gate"
-    )

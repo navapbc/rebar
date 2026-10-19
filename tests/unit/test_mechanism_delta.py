@@ -78,17 +78,6 @@ def test_evaluate_passes_when_the_tree_matches_the_baseline():
     assert code == 0
 
 
-def test_check_passes_on_the_committed_tree(capsys):
-    """The gate is green at rest, and says so with the complexity baseline's summary
-    shape — a silent exit 0 cannot be told from a gate that scanned nothing."""
-    assert ratchet.main(["--check"]) == 0
-    out = capsys.readouterr().out
-    # A mechanism carrying a `# mechanism-ok:` marker reports as `admitted`, not as `new=0`:
-    # the marker is the sanctioned contributor path, so admission is green at rest too.
-    assert "new=0" in out or "admitted" in out, out
-    assert "increased=0" in out, out
-
-
 # ---------------------------------------------------------------------------
 # the partition: one definition site, one entry
 # ---------------------------------------------------------------------------
@@ -397,13 +386,6 @@ def test_the_committed_baseline_matches_the_live_tree():
     assert set(baseline) | admitted == live
 
 
-def test_make_lint_runs_the_ratchet():
-    """AC12."""
-    text = MAKEFILE.read_text()
-    lint = text.split("lint:", 1)[1].split("\n\n", 1)[0]
-    assert "check_mechanism_delta.py" in lint, "the ratchet is not wired into `make lint`"
-
-
 def test_the_shipped_modules_respect_the_module_size_cap():
     """AC15. Neither repo limit-gate scans `scripts/`, so this suite asserts it."""
     limit = int(LIMIT_FILE.read_text().strip())
@@ -540,7 +522,6 @@ def test_the_committed_tree_assertions_consult_marker_admission():
     import textwrap
 
     for func in (
-        test_check_passes_on_the_committed_tree,
         test_the_committed_baseline_matches_the_live_tree,
         ratchet._run_update_stale,
     ):

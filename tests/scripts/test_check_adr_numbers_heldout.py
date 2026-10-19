@@ -11,7 +11,6 @@ not the test.
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 from pathlib import Path
 from types import ModuleType
 
@@ -21,9 +20,6 @@ pytestmark = pytest.mark.scripts
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = REPO_ROOT / "scripts" / "check_adr_numbers.py"
-_DOCS_ACTION = REPO_ROOT / ".github" / "actions" / "docs-gates" / "action.yml"
-_REAL_ADR = REPO_ROOT / "docs" / "adr"
-_REAL_DOCS = REPO_ROOT / "docs"
 
 
 @pytest.fixture(scope="module")
@@ -143,43 +139,3 @@ def test_main_returns_one_on_violation(gate: ModuleType, tmp_path: Path) -> None
     _adr(adr, "0001", "alpha-twin")  # duplicate number
     rc = gate.main(["--adr-dir", str(adr), "--docs-dir", str(docs)])
     assert rc == 1
-
-
-# ---- CI wiring ---------------------------------------------------------------
-def test_ci_wires_the_gate() -> None:
-    text = _DOCS_ACTION.read_text(encoding="utf-8")
-    assert "check_adr_numbers.py" in text, "shared CI action must invoke the ADR-number gate"
-
-
-# ---- real-tree cleanliness at landing ----------------------------------------
-def test_real_repo_tree_is_clean(gate: ModuleType) -> None:
-    errors = gate.check(_REAL_ADR, _REAL_DOCS)
-    assert errors == [], f"the landed ADR corpus must satisfy its own gate: {errors}"
-
-
-def test_real_tree_has_no_duplicate_numbers() -> None:
-    nums = [p.name[:4] for p in _REAL_ADR.glob("*.md") if p.name[:4].isdigit()]
-    dupes = sorted({n for n in nums if nums.count(n) > 1})
-    assert dupes == [], f"duplicate ADR numbers remain: {dupes}"
-
-
-def test_real_tree_marker_per_adr() -> None:
-    markers = _REAL_ADR / ".numbers"
-    assert markers.is_dir(), "docs/adr/.numbers/ must exist"
-    adr_nums = {p.name[:4] for p in _REAL_ADR.glob("*.md") if p.name[:4].isdigit()}
-    marker_nums = {p.name for p in markers.iterdir() if p.is_file() and p.name[:4].isdigit()}
-    assert adr_nums == marker_nums, (
-        f"marker/ADR number sets differ: only-adr={adr_nums - marker_nums}, "
-        f"only-marker={marker_nums - adr_nums}"
-    )
-
-
-def test_real_check_script_runs_as_subprocess() -> None:
-    proc = subprocess.run(
-        ["python", str(_SCRIPT)],
-        cwd=str(REPO_ROOT),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert proc.returncode == 0, f"gate failed on real tree:\n{proc.stdout}\n{proc.stderr}"

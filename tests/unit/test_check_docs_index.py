@@ -44,11 +44,6 @@ def _write_markdown_tree(root: Path, files: dict[str, str]) -> None:
 # ─────────────────────────── HAPPY PATH (shown to implementer) ────────────────
 
 
-def test_current_repo_index_is_clean():
-    """The real, committed docs/README.md passes both checks (exit 0)."""
-    assert chk.main(["--check"]) == 0
-
-
 def test_clean_synthetic_tree_has_no_findings(tmp_path: Path):
     """A well-formed docs tree — every living doc linked, every link resolving —
     yields no unindexed docs and no broken links."""
@@ -352,8 +347,3 @@ def test_main_reports_every_structured_link_field(tmp_path: Path, monkeypatch, c
     assert "missing.md?download=1#part" in error
     assert "docs/missing.md" in error
     assert "missing-target" in error
-
-
-def test_all_docs_relative_links_resolve():
-    """Every declared Markdown source has resolvable repository-relative targets."""
-    assert chk.find_link_findings(REPO_ROOT) == []

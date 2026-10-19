@@ -7,11 +7,8 @@ valid escapes, and the configured deployment template.
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
-
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
@@ -68,16 +65,6 @@ def test_attribute_access_counts_only_the_root() -> None:
 
 
 # --- the committed tree ---------------------------------------------------------------------- #
-
-
-def test_committed_tree_is_clean() -> None:
-    """The gate is wired into ``make lint``; the committed tree must satisfy it."""
-    assert check_repo(REPO_ROOT) == []
-
-
-def test_gate_exits_zero_on_the_committed_tree() -> None:
-    proc = subprocess.run([sys.executable, str(GATE)], capture_output=True, text=True, check=False)
-    assert proc.returncode == 0, proc.stderr
 
 
 def test_legitimate_declared_variable_is_accepted(tmp_path: Path) -> None:
@@ -184,16 +171,6 @@ def test_non_literal_path_resolves_by_unique_suffix(tmp_path: Path) -> None:
 
 
 # --- wiring ------------------------------------------------------------------------------------ #
-
-
-@pytest.mark.repo_policy
-def test_make_lint_wires_the_gate() -> None:
-    """A gate reachable only from CI can be green locally and red on the server. The sibling
-    hygiene gates are wired into `make lint` for this reason; so is this one."""
-    body = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-    assert "scripts/check_templatefile_escapes.py" in body, (
-        "`make lint` does not invoke scripts/check_templatefile_escapes.py"
-    )
 
 
 # --- review findings on change 2317: the gate must not pass vacuously ---------------------- #

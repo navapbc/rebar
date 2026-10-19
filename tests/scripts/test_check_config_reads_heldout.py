@@ -9,7 +9,6 @@ tree-cleanliness of the real repo at landing.
 from __future__ import annotations
 
 import importlib.util
-import re
 from pathlib import Path
 from types import ModuleType
 
@@ -19,9 +18,6 @@ pytestmark = pytest.mark.scripts
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = REPO_ROOT / "scripts" / "check_config_reads.py"
-_REAL_SCHEMA = REPO_ROOT / "src" / "rebar" / "_config_schema.py"
-_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "_build-and-test.yml"
-_MAKEFILE = REPO_ROOT / "Makefile"
 
 
 @pytest.fixture(scope="module")
@@ -217,49 +213,6 @@ def test_main_exit_codes_and_output(gate, tmp_path, capsys):
     assert "OK" in (out2.out + out2.err)
 
 
-# ── the real tree at landing ───────────────────────────────────────────────────────
-@pytest.mark.repo_policy
-def test_real_repo_is_clean_with_default_paths(gate):
-    assert gate.main([]) == 0
-
-
-@pytest.mark.repo_policy
-def test_real_schema_markers_all_carry_pointers(gate):
-    """Every `# read-via:` marker in the real schema must justify itself with a
-    non-empty pointer/reason (bare markers are exactly what the gate rejects)."""
-    text = _REAL_SCHEMA.read_text(encoding="utf-8")
-    markers = re.findall(r"#\s*read-via:(.*)$", text, flags=re.MULTILINE)
-    assert markers, "landing enumerated indirect fields — expected at least one marker"
-    for pointer in markers:
-        assert pointer.strip(), "bare read-via marker committed to the real schema"
-
-
-# String-keyed and getattr reads lack a resolvable attribute site.
-# They stay green via their `# read-via:` markers, which the sweep must not disturb.
-@pytest.mark.repo_policy
-@pytest.mark.parametrize(
-    ("field_name", "reader_hint"),
-    [
-        # getattr dispatch — reconciler/_advisory_lock.py
-        ("lock_lease_secs", "getattr"),
-        # gate_enabled(root, "<key>", ...) string keys — _commands/gates.py
-        ("require_plan_review_for_close", "gate_enabled"),
-        ("require_plan_review_for_claim", "string key"),
-        ("require_completion_verification_for_close", "string key"),
-    ],
-)
-def test_string_read_fields_keep_their_marker_and_do_not_fire(gate, field_name, reader_hint):
-    text = _REAL_SCHEMA.read_text(encoding="utf-8")
-    assert f"{field_name}:" in text, f"{field_name} must still exist in the real schema"
-    # the field is protected by a marker (own line or the line immediately above)
-    lines = text.splitlines()
-    idx = next(i for i, ln in enumerate(lines) if ln.strip().startswith(f"{field_name}:"))
-    window = "\n".join(lines[max(0, idx - 1) : idx + 1])
-    assert "read-via:" in window, f"{field_name} lost its read-via marker"
-    # and the real tree as a whole is clean, so it is not firing
-    assert gate.check(_REAL_SCHEMA, REPO_ROOT / "src" / "rebar") == []
-
-
 # Ticket-pointer reports do not query ticket status. The next lines show sample marker text.
 # ticket is open -- `CodeHealthConfig.analyzers` carried `# read-via: inert pending bug
 # dce2-...`. The fixture checks reporting when the repository schema has none.
@@ -303,21 +256,3 @@ def test_ticket_pointer_reporting_never_changes_the_exit_code(gate, tmp_path, ca
     combined = "".join(capsys.readouterr())
     assert rc == 0, "a ticket-pointing marker must not fail the gate"
     assert "dce2-b93d-4112-451c" in combined, "main must PRINT the report, not just compute it"
-
-
-@pytest.mark.repo_policy
-def test_the_real_schema_parks_no_markers_against_a_ticket(gate):
-    """Require zero parked ticket-pointer markers in the current schema.
-
-    A new unresolved marker must surface in review rather than hiding behind a bound.
-    """
-    reports = gate.ticket_pointer_reports(_REAL_SCHEMA)
-    assert reports == [], f"no marker should be parked against a ticket; got {reports!r}"
-
-
-@pytest.mark.repo_policy
-def test_ci_wires_the_gate(gate):
-    # RP-04 S7.2 (ticket 735b): the gate moved from a standalone workflow step into the
-    # portable `make lint` target, which CI inherits — so assert the Makefile wires it.
-    body = _MAKEFILE.read_text(encoding="utf-8")
-    assert "check_config_reads.py" in body

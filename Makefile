@@ -427,6 +427,10 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# Verified-gate parity (story dispiteous-balsamic-isopod): vote.needs must cover every
 	@# gating job. One owner from make lint; the CI step stays (workflows are out of scope).
 	python scripts/check_verify_gate_parity.py
+	@# ADR numbering and the docs index (story aware-obvious-sphinx): their only portable
+	@# owner was a pytest twin; make lint is now their one owner (the docs-gates CI steps stay).
+	python scripts/check_adr_numbers.py
+	python scripts/check_docs_index.py --check
 	@# Release supply-chain audits (story 08a8), AFTER ruff so ruff findings still surface.
 	@# zizmor audits the release workflow + the Verified-gate vote path ($(ZIZMOR_WORKFLOWS),
 	@# widened in epic 5664 S1); actionlint below validates ALL workflows. zizmor is a

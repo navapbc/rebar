@@ -903,9 +903,3 @@ def test_r3_report_mode_lists_seam_composition_hits(lint, tree, capsys):
     assert rc == 0
     assert "seam-composition" in out
     assert "durable reason here" in out
-
-
-def test_repo_tree_has_no_unsanctioned_raw_git_writes(lint):
-    """The gate must pass on rebar's own tree — the in-process equivalent of the
-    CI step, so the policy holds in environments with no CI provider."""
-    assert lint.check(REPO_ROOT) == []

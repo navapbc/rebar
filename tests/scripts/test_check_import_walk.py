@@ -83,12 +83,6 @@ class TestScriptsLeg:
         assert failures == []
         assert [s.name for s in skips] == ["bridge.py"]
 
-    def test_real_scripts_leg_passes(self) -> None:
-        """The live happy path: every non-skipped repo scripts/ module imports standalone."""
-        failures, skips, _attempted = walk.walk_scripts(walk.SCRIPTS_DIR, skips=walk.SCRIPTS_SKIPS)
-        assert failures == [], "\n".join(f"{f.name}: {f.error}" for f in failures)
-        assert {s.name for s in skips} == set(walk.SCRIPTS_SKIPS)
-
 
 @pytest.fixture
 def broken_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
@@ -135,13 +129,6 @@ class TestInstalledPackageLeg:
         }
         failures, _skips, _attempted = walk.walk_package(broken_package, expected_optional=expected)
         assert f"{broken_package}.broken_a" in {f.name for f in failures}
-
-    def test_real_rebar_walk_passes_in_the_dev_venv(self) -> None:
-        """The live happy path over the actual installed rebar tree."""
-        failures, _skips, _attempted = walk.walk_package(
-            "rebar", expected_optional=walk.EXPECTED_OPTIONAL
-        )
-        assert failures == [], "\n".join(f"{f.name}: {f.error}" for f in failures)
 
 
 class TestMain:

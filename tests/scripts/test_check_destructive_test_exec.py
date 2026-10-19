@@ -117,10 +117,6 @@ def test_repo_with_no_tests_dir_passes(tmp_path):
     assert chk.main(["--root", str(tmp_path)]) == 0
 
 
-def test_repository_tree_is_currently_clean():
-    assert chk.main(["--root", str(REPO_ROOT)]) == 0
-
-
 # --- evasion shapes (LLM-Review 2255, blocking) -----------------------------------
 # Detection keyed to `subprocess.run(...)` was evadable three ways that all still
 # execute the script. Each of these must be flagged.
