@@ -522,7 +522,9 @@ def test_verify_completion_start_preserves_graph_tristate_and_variant_key(store,
     assert all(g is None for g in seen_graph), f"graph tri-state collapsed: {seen_graph}"
     # start and sync build the IDENTICAL variant + key, so they de-dup against each other.
     assert async_variants == sync_variants
-    assert list(async_variants) == ["graph=None;source=attested"]
+    # The variant also carries the ticket's plan-material fingerprint (bug c912-f274); ``d80d``
+    # does not exist in this store, so the light read yields the ``material=None`` key.
+    assert list(async_variants) == ["graph=None;source=attested;material=None"]
 
 
 def test_follower_start_does_not_reclobber_the_leaders_index_record(store, monkeypatch):
