@@ -120,7 +120,7 @@ def duplicate_create_warning(
     """Return warning text for a recent normalized-title match, or ``None``.
 
     The probe runs after CREATE has landed. The duplicate-suggestion setting governs this
-    probe and review-time overlap detection. CLI, library, and MCP callers emit the advisory
+    probe. CLI, library, and MCP callers emit the advisory
     through their own channels.
     """
     try:

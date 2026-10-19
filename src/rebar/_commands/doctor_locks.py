@@ -50,8 +50,8 @@ reach. ``.rebar/compact-worker.lock`` is the compaction trigger's worker lock
 stamp, so it carries a holder and a real staleness verdict from the shared stamped-lock
 function (bug knavish-stimulated-bluebottle) — and the lock most likely to be held by a
 DETACHED background process, which is exactly the holder an operator cannot find with
-``ps``. (The retired enrichment drain's ``.rebar/enrich-drain.lock`` is no longer a leg: it
-has no producer, so a leftover file is not reported — ADR 0086 retired.) The fifth leg is
+``ps``. (The ADR 0086 worker's lock is no longer a leg: that worker was removed, so a
+leftover lock file is not reported.) The fifth leg is
 the snapshot-GC trigger's worker lock
 (:mod:`rebar._snapshot.gc_trigger`, the same shared stamped-lock machinery and the same
 detached-worker shape) — the one leg NOT under the tracker: it lives on the PER-HOST

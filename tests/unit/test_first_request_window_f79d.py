@@ -10,8 +10,8 @@ content, at :data:`rebar.llm.pai_retry.CHARS_PER_TOKEN` chars/token) and fails c
 
 Sizing note: the fit rule is `estimate + reserve > window` with `estimate = chars // 4`, so
 the oversize fixtures use `window * 8` chars (~2x the window in tokens) — decisively over for
-any reserve — and the admissibility fixture uses `window * 2` chars (enrich's maximal
-first-line bound, ~window/2 tokens), which must pass.
+any reserve — and the admissibility fixture uses `window * 2` chars (the maximal
+first-line bound an op may send, ~window/2 tokens), which must pass.
 
 Every runtime test drives the REAL ``PydanticAIRunner`` over an offline ``FunctionModel``
 (``ALLOW_MODEL_REQUESTS`` off) — no live call can escape.
@@ -74,8 +74,8 @@ def test_oversized_first_request_raises_before_any_call():
         proc([_first_request(window * 8)])
 
 
-def test_enrich_maximal_bound_is_admissible():
-    """AC#3 teeth: a request of exactly ``window * 2`` CHARS — enrich's maximal first-line
+def test_maximal_first_line_bound_is_admissible():
+    """AC#3 teeth: a request of exactly ``window * 2`` CHARS — the maximal first-line
     bound — estimates at ~window/2 tokens and must PASS the seam. A chars/2 calibration
     would wrongly refuse it; this pins the chars/4 choice."""
     cfg = LLMConfig(repo_path=".")

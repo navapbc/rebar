@@ -41,7 +41,7 @@ from rebar._store.stamped_lock import release_stamped_lock, stamped_file_lock
 
 logger = logging.getLogger(__name__)
 
-#: Beside ``enrich-drain.lock`` in the repo's ``.rebar/`` — one compactor at a time.
+#: In the repo's ``.rebar/`` beside the clock lock — one compactor at a time.
 _TRIGGER_LOCK_NAME = "compact-worker.lock"
 #: Records when a sweep last ran, so the trigger can fire on staleness alone.
 _SWEEP_STAMP_NAME = "compact-sweep.stamp"

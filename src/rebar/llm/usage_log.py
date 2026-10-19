@@ -90,8 +90,8 @@ def collect_failure_messages(sink: list[object]) -> Iterator[None]:
 
 # The workflow step whose execution is in progress, as (step id, RAW declared `model:` token).
 # Threaded as a ContextVar because `RunRequest` — the object that reaches the runner — is
-# constructed at 25 sites under `src/rebar`, most with NO step context at all (a spec scan and an
-# enrich pass are not workflow steps). A required field would churn all 25; an optional one would
+# constructed at 25 sites under `src/rebar`, most with NO step context at all (a spec scan is not a
+# workflow step). A required field would churn all 25; an optional one would
 # leave ~24 sites passing None forever. A ContextVar costs zero churn and scopes truthfully: a
 # call made OUTSIDE a step simply has no step id. Precedent: `_active_gate_config`
 # (`llm/config.py`), itself mirroring the read-root ContextVars in `llm/gate_context.py`.
@@ -568,7 +568,7 @@ def record(
         row["provider"] = provider
     # Same omission pattern as model/provider above: an absent value is simply not written,
     # rather than written as null. A row without `step` means "this call was not made inside a
-    # workflow step" — the truthful answer for a spec scan or an enrich pass.
+    # workflow step" — the truthful answer for a spec scan.
     if step:
         row["step"] = step
     if model_class:
