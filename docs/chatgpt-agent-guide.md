@@ -12,7 +12,7 @@ Before doing anything else, check these six dimensions:
 1. **Local checkout** — is there a working copy of this repository on disk?
 2. **Native `rebar`/`rebar-mcp` binary** — is the CLI or MCP server installed and runnable?
 3. **Tracker worktree** — is there a directory containing a valid `tickets` branch checkout
-   (confirm with `rebar exists <known-id>` or equivalent)?
+   (confirm with `rebar resolve <known-id>` or equivalent)?
 4. **Network/remote access** — can the session reach a git remote (fetch/clone)?
 5. **GitHub connector** — does the session have GitHub repository access via a connector tool?
 6. **Gerrit availability** — can the session reach the Gerrit code-review remote?
@@ -78,7 +78,7 @@ raw event files and **never** use a GitHub Contents API write to the `tickets` b
 - Is **idempotent by `source_id`** — an already-imported `source_id` is skipped, not
   re-created.
 
-**Before invoking it:** confirm the target branch is current (`git fetch` + `rebar exists
+**Before invoking it:** confirm the target branch is current (`git fetch` + `rebar resolve
 <known-id>` against the intended tracker) and run `rebar import --dry-run` first. In dry-run
 mode specifically, a record missing `ticket_id`/`ticket_type` is silently skipped — it
 increments **no counter** and produces **no warning** at all (the `warnings` list is not

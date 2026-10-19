@@ -59,20 +59,6 @@ _REGISTRY: dict[str, _Cmd] = {
         factory="build_set_verify_commands",
         dests=("ticket_id", "json_array"),
     ),
-    "tag": _Cmd(
-        leaf.tag,
-        2,
-        "Usage: rebar tag <ticket_id> <tag>",
-        factory="build_tag",
-        dests=("ticket_id", "tag"),
-    ),
-    "untag": _Cmd(
-        leaf.untag,
-        2,
-        "Usage: rebar untag <ticket_id> <tag>",
-        factory="build_untag",
-        dests=("ticket_id", "tag"),
-    ),
     "archive": _Cmd(
         leaf.archive,
         1,

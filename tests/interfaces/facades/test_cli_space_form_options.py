@@ -40,16 +40,17 @@ def test_list_status_space_form_matches_equals(
     assert any(t["ticket_id"] == tid for t in space_rows)
 
 
-def test_session_logs_limit_space_form_matches_equals(
+def test_list_limit_space_form_matches_equals(
     rebar_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """``session-logs --limit 30`` (space) returns the same as ``--limit=30``."""
+    """``list --limit 30`` (space) returns the same as ``--limit=30``."""
     rebar.append_session_log("space-form session-log smoke", repo_root=str(rebar_repo))
+    base = ["list", "--type=session_log", "--sort=-created"]
 
-    assert main(["session-logs", "--limit=30"]) == 0
+    assert main([*base, "--limit=30"]) == 0
     equals_rows = _json_out(capsys)
 
-    assert main(["session-logs", "--limit", "30"]) == 0, "space form must not be a usage error"
+    assert main([*base, "--limit", "30"]) == 0, "space form must not be a usage error"
     space_rows = _json_out(capsys)
 
     assert space_rows == equals_rows

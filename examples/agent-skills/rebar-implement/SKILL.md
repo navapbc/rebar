@@ -83,9 +83,9 @@ Read the project's own documentation and configuration and let it govern the mec
 - **Whether an MCP server is configured** — when it is, route this skill's rebar *tracker* ops
   (`claim`/`transition`/`create`/`comment`/`link`, `search`/`list`/`ready`/`next-batch`, and the
   `review-plan` gate) through the MCP server; the local `rebar` CLI is the carve-out/fallback for
-  local-code ops (running gates/tests, `get-verify-commands`, `get-file-impact`) and when no MCP
+  local-code ops (running gates/tests, `show --field=verify_commands`, `show --field=file_impact`) and when no MCP
   server is configured. See the *Drive the tracker through the MCP server* umbrella in `AGENTS.md`.
-- **The verify commands** — `rebar get-verify-commands <id>` if set, otherwise the project's
+- **The verify commands** — `rebar show <id> --field=verify_commands` if set, otherwise the project's
   documented pre-flight (e.g. a `Makefile`'s `lint`/`typecheck`/`test` targets, which are
   typically CI's single source of truth).
 
@@ -115,13 +115,13 @@ this skill executes existing work; it does not create a decomposition.
 
 1. **Resolve the id.** `rebar resolve <id_or_alias>` → canonical id. If it does not resolve,
    **stop**: report that the ticket does not exist.
-2. **Confirm it exists.** `rebar exists <id>` (exit 0). Read it: `rebar show <id>`.
-3. **Confirm it is executable.** `rebar list-descendants <id>` (BFS, bucketed by type). Two
+2. **Confirm it exists.** `rebar resolve <id>` (exit 0). Read it: `rebar show <id>`.
+3. **Confirm it is executable.** `rebar deps <id> --descendants` (BFS, bucketed by type). Two
    executable shapes:
    - **It has children** → treat it as an epic/interior ticket and execute the whole tree
      (the rest of this skill's default path).
    - **It has no children but is a `story` or `task` whose file impact is recorded**
-     (`rebar get-file-impact <id>` returns a non-empty array) → this is a legitimate **single
+     (`rebar show <id> --field=file_impact` returns a non-empty array) → this is a legitimate **single
      code leaf**. Do **not** stop: execute it directly as one code-changing leaf (Phase 4),
      land it as a single change, and close it (Phase 5). The file impact is the acceptance the
      completion gate needs, and it stands in for the decomposition this skill would otherwise
@@ -131,7 +131,7 @@ this skill executes existing work; it does not create a decomposition.
    children) — **stop**: report that the ticket has not been decomposed, and suggest
    `/rebar-brainstorm` or decomposition (or, for a story/task, recording its file impact with
    `rebar set-file-impact`) as the prerequisite. Do not invent children.
-4. **Read the shape of the tree.** `rebar deps <id>` and `rebar list-descendants <id>` together
+4. **Read the shape of the tree.** `rebar deps <id>` and `rebar deps <id> --descendants` together
    give you the parent/child hierarchy and any `blocks`/`depends_on` ordering among siblings.
    Note which leaves are code-changing vs. non-code (docs, research, config, spikes). (For a
    single-leaf run this is trivially the one ticket.)
@@ -385,7 +385,7 @@ internal turn count (which you can't see).
 ### 4f. Pre-flight the review gate locally
 
 Before pushing, run the project's exact verification (the rebar default: `make lint &&
-make typecheck && make test`, or whatever `rebar get-verify-commands <id>` lists) and confirm
+make typecheck && make test`, or whatever `rebar show <id> --field=verify_commands` lists) and confirm
 all green — this is what CI will run. Fix locally until clean. Log the validation.
 
 ### 4g. Commit as a stacked change and push for review

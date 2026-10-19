@@ -17,10 +17,11 @@ from rebar._cli import _execute, _registry
 
 pytestmark = pytest.mark.unit
 
-#: The exact 14 spellings the hardcoded literal carried, kept as the HISTORICAL RECORD so the
-#: refactor is provably policy-preserving. This is not a mirror of the route table: it is the
-#: "before" side of a one-time comparison, and it is expected to need a deliberate edit if the
-#: policy is ever intentionally changed.
+#: The spellings that warn, kept as a deliberate record so a refactor is provably
+#: policy-preserving. This is not a mirror of the route table: it is expected to need a
+#: deliberate edit whenever the policy is intentionally changed. The CLI-verb consolidation
+#: (epic toadyish-sulfurous-ovenbird) was one: ``tag``/``untag`` were removed (``edit``
+#: already warns) and ``check-ac``/``clarity-check`` merged into ``check``, 14 -> 11.
 _LITERAL_BEFORE = frozenset(
     {
         "show",
@@ -28,13 +29,10 @@ _LITERAL_BEFORE = frozenset(
         "edit",
         "transition",
         "reopen",
-        "tag",
-        "untag",
         "set-file-impact",
         "deps",
         "archive",
-        "check-ac",
-        "clarity-check",
+        "check",
         "link",
         "unlink",
     }
@@ -61,7 +59,7 @@ def test_execute_no_longer_carries_a_spelling_list() -> None:
 
 
 def test_membership_is_unchanged_by_the_refactor() -> None:
-    """AC2: exactly the same 14 commands warn — the refactor moved no policy."""
+    """AC2: exactly the recorded 11 commands warn — no unrecorded policy change."""
     assert _derived() == _LITERAL_BEFORE
 
 

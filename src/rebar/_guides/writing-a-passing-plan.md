@@ -24,7 +24,7 @@ draft description ──▶ rebar review-plan <id> ──▶ PASS (exit 0)? ─�
 
 Draft the description at `create` time, iterate while the ticket is `open`, and run
 `review-plan` until it passes — *then* claim. **Only `review-plan`'s signed attestation gates
-the claim.** `rebar clarity-check <id>` and `rebar check-ac <id>` are separate **self-help
+the claim.** `rebar check <id> --clarity` and `rebar check <id> --ac` are separate **self-help
 scorers** (each exits 0/1) — useful to run, but they do **not** independently block the claim.
 
 `review-plan` needs the `[agents]` extra + a model API key to run its LLM passes; without them
@@ -35,7 +35,7 @@ run). The claim gate itself **fails closed**: no valid attestation ⇒ the claim
 > **Routing.** When the rebar MCP server is configured, run the tracker ops named here —
 > `review-plan`/`sign-review` and `claim`/`transition` — through it; the local `rebar` CLI is
 > the carve-out/fallback for local-code ops (the read-only `review-plan <id> --status` currency
-> check, `explain`, and the `clarity-check`/`check-ac` scorers) and when no MCP server is
+> check, `explain`, and the `check --clarity`/`check --ac` scorers) and when no MCP server is
 > configured. See the *Drive the tracker through the MCP server* umbrella in `AGENTS.md`.
 
 **Review in dependency order — dependencies before their dependents.** A review pins not just
@@ -75,7 +75,7 @@ substantive outcomes instead of graph bookkeeping.
 ## The description template
 
 Write these as Markdown headings. An **`## Acceptance Criteria`** block is always required
-(the `check-ac` scorer looks for it). Apply the leaf/container rule above for the rest; a
+(the `check --ac` scorer looks for it). Apply the leaf/container rule above for the rest; a
 purely mechanical change (refactor/rename/config/dep-bump/docs) legitimately has no `##
 Testing` (the testing criterion only fires on *new testable behavior*).
 

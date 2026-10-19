@@ -132,36 +132,19 @@ def test_extraction_never_consumes_tokens_after_double_dash(repo: Path) -> None:
 
 def test_quiet_plus_output_json_still_prints_json(repo: Path) -> None:
     tid = _create(repo)
-    proc = _cli("tag", tid, "qt", "--quiet", "--output", "json", repo=repo)
+    proc = _cli("archive", tid, "--quiet", "--output", "json", repo=repo)
     assert proc.returncode == 0, proc.stderr
-    assert json.loads(proc.stdout)["outcome"] == "tagged"
+    assert json.loads(proc.stdout)["outcome"] == "archived"
 
 
 def test_invalid_output_mode_is_exit_2(repo: Path) -> None:
     tid = _create(repo)
-    proc = _cli("tag", tid, "x", "--output", "yaml", repo=repo)
+    proc = _cli("archive", tid, "--output", "yaml", repo=repo)
     assert proc.returncode == 2
     assert "unsupported output format" in proc.stderr
 
 
-# ── tag / untag / archive (no-op detection; zero extra events on no-op) ───────
-def test_tag_untag_success_and_noop_lines(repo: Path) -> None:
-    tid = _create(repo)
-    assert _cli("tag", tid, "alpha", repo=repo).stdout.strip() == f"tagged {tid}: +alpha"
-    before = _event_count(repo, tid)
-    noop = _cli("tag", tid, "alpha", repo=repo)
-    assert noop.returncode == 0
-    assert noop.stdout.strip() == f"no change: tag alpha already on {tid}"
-    assert _event_count(repo, tid) == before, "an idempotent no-op writes nothing"
-
-    assert _cli("untag", tid, "alpha", repo=repo).stdout.strip() == f"untagged {tid}: -alpha"
-    before = _event_count(repo, tid)
-    noop = _cli("untag", tid, "alpha", repo=repo)
-    assert noop.returncode == 0
-    assert noop.stdout.strip() == f"no change: tag alpha not on {tid}"
-    assert _event_count(repo, tid) == before
-
-
+# ── archive (no-op detection; zero extra events on no-op) ─────────────────────
 def test_archive_success_and_noop(repo: Path) -> None:
     tid = _create(repo)
     proc = _cli("archive", tid, repo=repo)
@@ -525,13 +508,13 @@ def test_confirmation_formatters_need_no_store(
     with _confirm.confirmation_context(quiet=False, fmt=None):
         _confirm.confirm_created("", {"alias": "an-alias", "id": "aaaa-bbbb", "title": "t"})
         _confirm.leaf_confirm("comment", "aaaa-bbbb")
-        _confirm.leaf_confirm("tag", {"wrote": False, "id": "aaaa-bbbb", "tag": "x"})
+        _confirm.leaf_confirm("archive", {"wrote": False, "id": "aaaa-bbbb"})
         _confirm.emit("transitioned", "aaaa-bbbb", "d", "transitioned aaaa-bbbb: open -> closed")
 
     assert capsys.readouterr().out.splitlines() == [
         "created an-alias (aaaa-bbbb): t",
         "comment added to aaaa-bbbb",
-        "no change: tag x already on aaaa-bbbb",
+        "no change: aaaa-bbbb already archived",
         "transitioned aaaa-bbbb: open -> closed",
     ]
 

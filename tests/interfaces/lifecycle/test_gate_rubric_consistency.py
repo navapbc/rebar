@@ -55,10 +55,10 @@ def _cli_rc(*args: str, cwd: str) -> int:
 def test_clarity_pass_implies_check_ac_pass(ttype: str, rebar_repo: Path) -> None:
     r = str(rebar_repo)
     tid = rebar.create_ticket(ttype, f"{ttype} probe", description=WELL_FORMED[ttype], repo_root=r)
-    clarity_rc = _cli_rc("clarity-check", tid, cwd=r)
+    clarity_rc = _cli_rc("check", tid, "--clarity", cwd=r)
     assert clarity_rc == 0, f"{ttype}: expected clarity pass for a well-formed ticket"
     # The invariant: clarity-pass => check-ac-pass (exit 0).
-    assert _cli_rc("check-ac", tid, cwd=r) == 0, f"{ttype}: clarity passed but check-ac failed"
+    assert _cli_rc("check", tid, "--ac", cwd=r) == 0, f"{ttype}: clarity passed but check-ac failed"
 
 
 @pytest.mark.parametrize("ttype", sorted(NO_AC))
@@ -66,5 +66,9 @@ def test_clarity_fails_without_acceptance_criteria(ttype: str, rebar_repo: Path)
     r = str(rebar_repo)
     tid = rebar.create_ticket(ttype, f"{ttype} no-ac", description=NO_AC[ttype], repo_root=r)
     # No AC block -> clarity must fail (the floor), matching check-ac's failure.
-    assert _cli_rc("clarity-check", tid, cwd=r) == 1, f"{ttype}: clarity passed without an AC block"
-    assert _cli_rc("check-ac", tid, cwd=r) == 1, f"{ttype}: check-ac passed without an AC block"
+    assert _cli_rc("check", tid, "--clarity", cwd=r) == 1, (
+        f"{ttype}: clarity passed without an AC block"
+    )
+    assert _cli_rc("check", tid, "--ac", cwd=r) == 1, (
+        f"{ttype}: check-ac passed without an AC block"
+    )

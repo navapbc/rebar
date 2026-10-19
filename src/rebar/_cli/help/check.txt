@@ -1,0 +1,17 @@
+Usage: rebar check [--ac | --clarity] [--output {text,json}] [--stdin]
+                   [--config CONFIG]
+                   [ticket_id]
+
+Check one ticket: dispatch readiness by default, --ac for the Acceptance
+Criteria block, --clarity for the clarity score.
+
+positional arguments:
+  ticket_id             the ticket to check
+
+options:
+  --ac                  check the Acceptance Criteria block
+  --clarity             score clarity (exit 0=pass, 1=fail)
+  --output {text,json}, -o {text,json}
+                        output format
+  --stdin               with --clarity: read the ticket text from stdin
+  --config CONFIG       with --clarity: path to a clarity config override

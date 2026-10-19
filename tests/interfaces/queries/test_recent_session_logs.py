@@ -1,11 +1,10 @@
 """e2e3 (epic 7738): the "recent session logs" read across library, CLI, and MCP.
 
-`recent_session_logs` returns the newest `session_log` tickets (by `created_at`
-ns, descending), default limit 5. It is the one read that surfaces session_logs
-by type (they are hidden from default `list`). The library impl auto-flows to CLI
-(`rebar session-logs`) and the MCP tool (`recent_session_logs`); this asserts
-ordering, the limit, the empty-store case, and three-interface parity.
-"""
+`recent_session_logs` returns the newest `session_log` tickets (by `created_at` ns, descending),
+default limit 5. It is the one read that surfaces session_logs by type (they are hidden from
+default `list`). The library impl auto-flows to CLI (`rebar list --type=session_log
+--sort=-created --limit=N`) and the MCP tool (`recent_session_logs`); this asserts ordering, the
+limit, the empty-store case, and three-interface parity."""
 
 from __future__ import annotations
 
@@ -37,7 +36,17 @@ def _make_logs(repo: Path, n: int) -> list[str]:
 
 def _cli_session_logs(repo: Path, *args: str) -> list[dict]:
     cp = subprocess.run(
-        [sys.executable, "-m", "rebar.cli", "session-logs", *args, "--output", "json"],
+        [
+            sys.executable,
+            "-m",
+            "rebar.cli",
+            "list",
+            "--type=session_log",
+            "--sort=-created",
+            *args,
+            "--output",
+            "json",
+        ],
         capture_output=True,
         text=True,
         cwd=str(repo),

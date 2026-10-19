@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/list_descendants.schema.json",
   "title": "ListDescendants",
-  "description": "BFS walk from a root ticket, bucketed by type, emitted by `rebar list-descendants <id>`. Each bucket is a list of ticket-id strings; `parents_with_children` lists the ids that have at least one child.",
+  "description": "BFS walk from a root ticket, bucketed by type, emitted by `rebar deps <id> --descendants`. Each bucket is a list of ticket-id strings; `parents_with_children` lists the ids that have at least one child.",
   "type": "object",
   "additionalProperties": true,
   "required": ["epics", "stories", "tasks", "bugs", "parents_with_children"],

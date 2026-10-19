@@ -56,8 +56,8 @@ list / search ──▶ ready ──▶ claim ──▶ (work) ──▶ transit
 - **Hierarchy** is the `parent_id` chain (epic → story → task/bug), set with
   `create --parent <id>` / `edit --parent <id>` — **not** a link relation.
 - **Links.** Each link has one relation from `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`, `discovered_from`, or `caused_by`. Blocking links using `blocks` or `depends_on` are promoted through the hierarchy so a dependency connects comparable levels.
-- **Tags** mutate via convergent add/remove deltas (`tag`/`untag`, or
-  `edit --add-tag/--remove-tag/--set-tags`), so concurrent clones adding different tags
+- **Tags** mutate via convergent add/remove deltas
+  (`edit --add-tag/--remove-tag/--set-tags`), so concurrent clones adding different tags
   both survive.
 - **`idea`** is a first-class status for captured-but-undesigned work: it is
   structurally unclaimable and excluded from `ready`, but fully listable/searchable and
@@ -68,12 +68,12 @@ list / search ──▶ ready ──▶ claim ──▶ (work) ──▶ transit
 `rebar session-log append "<note>"` keeps verbose, searchable working notes in the store
 (they never enter the dependency graph or block anything). The first append creates a log;
 distinct sessions auto-rotate to distinct logs. Retrieve recent ones with
-`rebar session-logs`.
+`rebar list --type=session_log --sort=-created --limit=5`.
 
 ### Quality gates you'll experience
 
-- **Per-ticket structural gates** — `rebar clarity-check <id>`, `rebar check-ac <id>`, and
-  `rebar quality-check <id>` confirm a ticket is *shaped* like dispatchable work (the
+- **Per-ticket structural gates** — `rebar check <id> --clarity`, `rebar check <id> --ac`, and
+  `rebar check <id>` confirm a ticket is *shaped* like dispatchable work (the
   universal floor is an `## Acceptance Criteria` block with `- [ ]` items). A pass means
   "well-formed enough to dispatch," not "the content is good."
 - **Repo-wide health** — `rebar validate` scores the whole store (orphans, cycles,

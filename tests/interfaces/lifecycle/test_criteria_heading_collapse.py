@@ -63,8 +63,10 @@ def test_epic_with_acceptance_criteria_scores_six_and_passes_both_gates(
 
     r = str(rebar_repo)
     tid = rebar.create_ticket("epic", "epic ac probe", description=EPIC_AC, repo_root=r)
-    assert _cli_rc("clarity-check", tid, cwd=r) == 0, "well-formed AC epic failed clarity-check"
-    assert _cli_rc("check-ac", tid, cwd=r) == 0, "well-formed AC epic failed check-ac"
+    assert _cli_rc("check", tid, "--clarity", cwd=r) == 0, (
+        "well-formed AC epic failed check --clarity"
+    )
+    assert _cli_rc("check", tid, "--ac", cwd=r) == 0, "well-formed AC epic failed check --ac"
 
 
 # ── held-out: the SC heading is inert ─────────────────────────────────────────
@@ -88,8 +90,8 @@ def test_success_criteria_block_is_inert_alongside_acceptance_criteria(rebar_rep
 
     r = str(rebar_repo)
     tid = rebar.create_ticket("epic", "epic both", description=both, repo_root=r)
-    assert _cli_rc("clarity-check", tid, cwd=r) == 0
-    assert _cli_rc("check-ac", tid, cwd=r) == 0
+    assert _cli_rc("check", tid, "--clarity", cwd=r) == 0
+    assert _cli_rc("check", tid, "--ac", cwd=r) == 0
 
 
 # ── held-out: the two heuristic copies stay in lockstep ───────────────────────

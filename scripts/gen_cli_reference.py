@@ -45,8 +45,8 @@ The **Command syntax** section embeds the committed package help for every visib
 The route registry determines section order and the help generator derives each artifact \
 from its parser factory.
 
-Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, `edit`, `tag`,
-`untag`, `archive`, `set-file-impact`, `set-verify-commands`, `attach-commits`, `session-log`,
+Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, `edit`,
+`archive`, `set-file-impact`, `set-verify-commands`, `attach-commits`, `session-log`,
 `transition`, `reopen`, `claim`) confirms its result on stdout with one kubectl-style line:
 `<past-tense-verb> <args-summary>` on a successful write, `no change: <reason>` on an
 idempotent no-op (exit 0 in both cases). Two global flags are extracted for these verbs at the
@@ -121,18 +121,6 @@ MUTATION_VERBS: dict[str, dict[str, object]] = {
         "condition": "every invocation appends an EDIT event for the named fields",
         "old": "(silent)",
         "new": "`edited <id>: <field names>` (field NAMES only, never their values)",
-    },
-    "tag": {
-        "noop": True,
-        "condition": "the tag is already on the ticket",
-        "old": "(silent)",
-        "new": "`tagged <id>: +<tag>` / `no change: tag <tag> already on <id>`",
-    },
-    "untag": {
-        "noop": True,
-        "condition": "the tag is not on the ticket",
-        "old": "(silent)",
-        "new": "`untagged <id>: -<tag>` / `no change: tag <tag> not on <id>`",
     },
     "archive": {
         "noop": True,
