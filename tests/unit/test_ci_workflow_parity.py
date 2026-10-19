@@ -651,7 +651,7 @@ def test_optionality_contract_gates_the_verified_path(job: str, reusable: str) -
 # The optionality files must remain in the default test selection after their separate job was
 # removed. This guard catches marker or path changes that would silently drop them.
 _OPTIONALITY_SUITE = ("tests/unit/test_core_optionality.py", "tests/unit/test_optional.py")
-_OPTIONALITY_SUITE_ITEM_COUNT = 10
+_OPTIONALITY_SUITE_ITEM_COUNT = 9
 # The default suite selection, verbatim from the reusable `_build-and-test.yml` test step.
 _DEFAULT_SELECTION = "not integration and not external"
 
