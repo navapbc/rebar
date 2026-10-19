@@ -180,6 +180,27 @@ def _attach_completion_read_basis(
         phase_metrics.update(ticket_view.metrics)
 
 
+def _record_read_time_material(result: dict, ticket_id: str, handle: Any) -> None:
+    """Record the plan material the verifier READ on the materialized attested path.
+
+    The verifier's ticket tools read the pinned ``handle.tickets_path`` copy, while library
+    reads keep resolving the live store. Without this record, signing re-read the live ticket
+    and certified an edit made during the run as verified (bug 0521-7e68). The pinned-view
+    path records it in :func:`_attach_completion_read_basis`; local source never signs.
+    """
+    from rebar.llm import gate_source
+    from rebar.llm.plan_review.attest import current_material_fingerprint
+
+    if handle.source != gate_source.SOURCE_ATTESTED or not handle.tickets_path:
+        return
+
+    # An unreadable snapshot yields None: record nothing rather than an "unknown" key, so the
+    # result keeps its pre-fix shape and signing keeps its legacy close-time binding.
+    read_time = current_material_fingerprint(ticket_id, repo_root=handle.tickets_path)
+    if read_time:
+        result["material_fingerprint"] = read_time
+
+
 def _run_completion_at_handle(
     ticket_id: str,
     *,
@@ -227,6 +248,8 @@ def _run_completion_at_handle(
                 repo_root=repo_root,
                 phase_metrics=phase_metrics,
             )
+        else:
+            _record_read_time_material(result, ticket_id, handle)
         annotated = gate_source.annotate_result(result, handle)
         _record_elapsed(phase_metrics, "verifier_annotation_ms", started_ns)
         return annotated

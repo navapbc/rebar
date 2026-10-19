@@ -154,9 +154,42 @@ def sign_completion_verdict(result: dict, ticket_id: str, repo_root=None, *, sig
     from rebar import signing as _signing
 
     manifest = _verdict_manifest(result, ticket_id, repo_root)
-    return _signing.sign_manifest(
-        ticket_id, manifest, kind="completion-verifier", repo_root=repo_root, signer=signer
+    return _signing._sign_manifest_under_lock(
+        ticket_id,
+        manifest,
+        kind="completion-verifier",
+        repo_root=repo_root,
+        under_lock_check=_read_material_unchanged(result, ticket_id, repo_root),
+        signer=signer,
     )
+
+
+def _read_material_unchanged(result: dict, ticket_id: str, repo_root):
+    """Return an under-lock check that the ticket still holds the material the verifier READ.
+
+    Mirrors plan review's pre-sign re-check (``generation.sign_manifest``): without it a
+    description edited during the run was signed as verified, and a close reused the
+    signature (bug 0521-7e68). Administrative dispositions run no verifier, and a result that
+    recorded no read-time material keeps the legacy close-time binding, so both return
+    ``None`` (no check).
+    """
+    read_time = result.get("material_fingerprint")
+    if result.get("disposition") or not read_time:
+        return None
+
+    def check() -> None:
+        from rebar import signing as _signing
+        from rebar.llm.plan_review.attest import current_material_fingerprint
+
+        current = current_material_fingerprint(ticket_id, repo_root=repo_root)
+        if current != read_time:
+            raise _signing.SigningError(
+                f"refusing to sign the completion PASS for {ticket_id}: its plan material "
+                f"changed since the verifier read it (read {read_time}, now {current}); "
+                "re-run completion verification"
+            )
+
+    return check
 
 
 def record_completion_verdict(
