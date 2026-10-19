@@ -384,7 +384,6 @@
     "ci_gate::scripts/check_docs_index.py": 1,
     "ci_gate::scripts/check_fcntl_import_guard.py": 1,
     "ci_gate::scripts/check_import_walk.py": 1,
-    "ci_gate::scripts/check_mcp_library_parity.py": 1,
     "ci_gate::scripts/check_mechanism_delta.py": 1,
     "ci_gate::scripts/check_orphaned_load.py": 1,
     "ci_gate::scripts/check_raw_git_writes.py": 1,

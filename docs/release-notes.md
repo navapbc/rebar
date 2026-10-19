@@ -8,6 +8,20 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## MCP library-backed tools are derived from the library facade
+
+The 48 library-backed MCP tools are now derived at registration from the annotated `rebar.*`
+signatures through one factory and an override table (ADR 0119), replacing 48 hand-copied
+closures and the name-only parity gate (`scripts/check_mcp_library_parity.py`, its manifest, and
+its test, all deleted). On Python 3.11 and 3.12 (the deployed server image runs 3.12) nothing a
+client sees changes: every tool's `inputSchema`, `description`, and `annotations` are pinned
+byte-for-byte by `tests/interfaces/facades/mcp_tool_surface_golden.json`, captured on 3.12 before
+the change. Python 3.13+ strips docstring indentation at compile time, so on 3.13+ the derived
+tools' multi-line descriptions now keep their 3.12 continuation-line indentation (whitespace
+only), and the golden test compares descriptions there after `inspect.cleandoc`. A future library
+signature change now reaches the MCP input schema automatically, and shows up as a golden diff for
+review.
+
 ## BREAKING (pre-1.0) — the cross-ticket overlap/enrichment implementation (ADR 0086) is removed
 
 The store-wide overlap detector was removed in commit `2de5f341ec4` (epic bossy-skittish-foal).
