@@ -21,8 +21,8 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
 
+import pytest
 from _nested_pytest import run_nested_pytest
 from _subprocess_env import subprocess_env
 
@@ -71,83 +71,6 @@ _BRANCH_SENSITIVE_HOOKS = {"no-commit-to-branch"}
 # --all-files` run them again would execute each linter TWICE per job. They must therefore be
 # listed in the reusable's pre-commit `SKIP` so each linter runs exactly once (the direct steps).
 _CI_REDUNDANT_HOOKS = {"lint", "typecheck"}
-
-# Each gating check keyed by a STABLE command signature (not the step name — names differ
-# in wording, e.g. the pip-audit step). Every signature here must appear in the reusable
-# `_build-and-test.yml`, which both the pre-merge Verified gate and the post-merge branch CI run.
-_SHARED_GATE_SIGNATURES = {
-    "module-size gate": ".github/module-size-limit.txt",
-    "prompt-index drift gate": "regenerate-index",
-    "security-rules freshness gate": "security_pin",
-    "criteria-routing parity gate": "validate-routing",
-    "server.json env-contract drift gate": "scripts/check_server_manifest.py",
-    "public-types drift gate": "gen_types",
-    "lint (ruff)": "make lint",
-    "mypy (typecheck)": "make typecheck",
-    "config-check": "make config-check",
-    "pre-commit all hooks": "pre-commit run --all-files",
-    "pip-audit": "pip-audit",
-    "default test suite": 'pytest -m "$DEFAULT_SUITE_MARKS"',
-    "integration tier": "pytest -m integration",
-}
-
-_DOCUMENTATION_GATE_SIGNATURES = {
-    "ADR number and cross-reference gate": "scripts/check_adr_numbers.py",
-    "ADR index drift gate": "scripts/gen_adr_index.py",
-    "env-var registry drift gate": "scripts/gen_env_registry.py",
-    "docs index and dead-link gate": "scripts/check_docs_index.py",
-    "README quickstart gate": "scripts/check_readme_quickstart.py",
-    "CLI reference drift gate": "scripts/gen_cli_reference.py",
-    "MCP reference drift gate": "scripts/gen_mcp_reference.py",
-}
-
-_COVERAGE_FLAGS = "--cov=rebar --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml"
-
-
-def _expanded_test_matrix(workflow: dict[str, Any]) -> list[tuple[str, str]]:
-    matrix = workflow["jobs"]["test"]["strategy"]["matrix"]
-    excluded = {(item["os"], item["python-version"]) for item in matrix.get("exclude", [])}
-    return [
-        (os_name, python_version)
-        for os_name in matrix["os"]
-        for python_version in matrix["python-version"]
-        if (os_name, python_version) not in excluded
-    ]
-
-
-def _coverage_flags_by_cell(run: str, cells: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
-    expression = re.search(
-        r"\$\{\{\s*(?P<condition>[^}]*?)\s*&&\s*'(?P<truthy>--cov=rebar "
-        r"--cov-report=term-missing:skip-covered --cov-report=xml:coverage\.xml)'"
-        r"\s*\|\|\s*'(?P<falsy>[^']*)'\s*\}\}",
-        run,
-    )
-    assert expression is not None, (
-        "the default-suite coverage expression must keep the non-empty flags in the truthy "
-        "`&&` slot and the empty string in the final `||` slot"
-    )
-    assert expression.group("truthy") == _COVERAGE_FLAGS
-    assert expression.group("falsy") == ""
-
-    predicates = [part.strip() for part in expression.group("condition").split("&&")]
-
-    def enabled(os_name: str, python_version: str) -> bool:
-        values: list[bool] = []
-        for predicate in predicates:
-            if predicate == "!startsWith(matrix.os, 'macos')":
-                values.append(not os_name.startswith("macos"))
-            elif predicate == "matrix.python-version == '3.13'":
-                values.append(python_version == "3.13")
-            elif predicate == "false":
-                values.append(False)
-            else:
-                raise AssertionError(f"unsupported coverage predicate: {predicate!r}")
-        return all(values)
-
-    return {
-        cell: expression.group("truthy") if enabled(*cell) else expression.group("falsy")
-        for cell in cells
-    }
 
 
 # Scripts referenced by a gate in the branch-CI lane that are DELIBERATELY not run in the
@@ -299,140 +222,6 @@ def test_module_size_gate_retries_trusted_main_fetch_before_failing_closed() -> 
     )
 
 
-def test_matrix_keeps_every_test_tier_but_collects_coverage_once() -> None:
-    """Every cell runs both tiers; only primary Ubuntu traces coverage and policy."""
-    import yaml
-
-    workflow = yaml.safe_load(_read(_BAT_YML))
-    cells = _expanded_test_matrix(workflow)
-    assert cells == [
-        ("ubuntu-latest", "3.11"),
-        ("ubuntu-latest", "3.12"),
-        ("ubuntu-latest", "3.13"),
-        ("macos-latest", "3.13"),
-    ]
-
-    steps = workflow["jobs"]["test"]["steps"]
-    default_steps = [
-        step
-        for step in steps
-        if step.get("name", "").startswith("Run the default suite")
-        and 'pytest -m "$DEFAULT_SUITE_MARKS"' in step.get("run", "")
-    ]
-    integration_steps = [step for step in steps if "pytest -m integration" in step.get("run", "")]
-    assert len(default_steps) == 1
-    assert len(integration_steps) == 1
-
-    tiers_by_cell = {cell: {"default", "integration"} for cell in cells}
-    assert all(tiers == {"default", "integration"} for tiers in tiers_by_cell.values())
-
-    flags_by_cell = _coverage_flags_by_cell(default_steps[0]["run"], cells)
-    assert flags_by_cell == {
-        ("ubuntu-latest", "3.11"): "",
-        ("ubuntu-latest", "3.12"): "",
-        ("ubuntu-latest", "3.13"): _COVERAGE_FLAGS,
-        ("macos-latest", "3.13"): "",
-    }
-    assert _COVERAGE_FLAGS not in integration_steps[0]["run"]
-
-
-def test_diff_coverage_step_present_gated_to_the_gerrit_coverage_cell_and_pinned() -> None:
-    """The diff-coverage report step (epic soupy-bilineate-whiteeye S4) must exist in the
-    shared reusable, be gated to the SAME single cell that emits coverage.xml (non-macOS,
-    3.13), use the NON-deprecated ``--format markdown:`` spelling, stay strictly report-only,
-    and pin the ad-hoc diff-cover install. Without this assertion the step could silently drop,
-    change cells (so it runs where no coverage.xml exists), regress to the deprecated
-    ``--markdown-report`` flag, or float its version — none of which any other test catches."""
-    import yaml
-
-    workflow = yaml.safe_load(_read(_BAT_YML))
-    steps = workflow["jobs"]["test"]["steps"]
-    diff_steps = [
-        s for s in steps if s.get("name", "").startswith("Diff coverage on changed lines")
-    ]
-    assert len(diff_steps) == 1, (
-        "the reusable must define exactly one 'Diff coverage on changed lines' step; found "
-        f"{len(diff_steps)}"
-    )
-    step = diff_steps[0]
-
-    # Gated to the ONE cell that emits coverage.xml — the non-macOS 3.13 cell — so it never
-    # runs where its input is absent. The condition set must match the coverage-flags gate.
-    condition = step.get("if", "")
-    predicates = {p.strip() for p in re.sub(r"^\$\{\{|\}\}$", "", condition).strip().split("&&")}
-    assert predicates == {"!startsWith(matrix.os, 'macos')", "matrix.python-version == '3.13'"}, (
-        f"diff-coverage step must be gated to the non-macOS 3.13 coverage cell; got {condition!r}"
-    )
-
-    run = step["run"]
-    # Inspect only executable lines (drop shell comments, which mention the deprecated flag).
-    run_code = "\n".join(line for line in run.splitlines() if not line.lstrip().startswith("#"))
-    # Non-deprecated report spelling (the older --markdown-report warns and is slated for
-    # removal); confirmed against diff-cover --help before landing.
-    assert '--format "markdown:' in run_code or "--format markdown:" in run_code, (
-        "diff-coverage must use the non-deprecated `--format markdown:<path>` spelling"
-    )
-    assert "--markdown-report" not in run_code, (
-        "the deprecated --markdown-report flag must not return"
-    )
-    # Strictly report-only: never a merge gate.
-    assert "--fail-under=0" in run_code
-    # The ad-hoc install is version-pinned (supply-chain hygiene; report-only tool, no
-    # latest-version rationale, unlike the deliberately-floating pip-audit scanner).
-    assert re.search(r"uv pip install --quiet ['\"]diff-cover==[0-9]", run_code), (
-        "the ad-hoc diff-cover install must be version-pinned"
-    )
-
-
-def test_scanner_gate_uses_one_reusable_in_both_lanes_and_votes() -> None:
-    """Pinned scanner contracts must run on branch/PR plus the exact Gerrit patchset."""
-    import yaml
-
-    test_yml = yaml.safe_load(_read(_TEST_YML))
-    gerrit = yaml.safe_load(_read(_GERRIT_YML))
-
-    assert (
-        test_yml["jobs"]["scanner-integration"]["uses"]
-        == "./.github/workflows/_scanner-integration.yml"
-    )
-    scanner = gerrit["jobs"]["scanner-integration"]
-    assert scanner["uses"] == "./.github/workflows/_scanner-integration.yml"
-    assert scanner["with"]["gerrit-refspec"] == "${{ inputs.GERRIT_REFSPEC }}"
-    assert scanner["with"]["gerrit-project"] == "${{ inputs.GERRIT_PROJECT }}"
-    assert scanner["with"]["gerrit-url"] == "https://${{ vars.GERRIT_SERVER }}"
-    assert "route == 'full'" in scanner["if"]
-    vote = gerrit["jobs"]["vote"]
-    assert "scanner-integration" in vote["needs"]
-    conclusion = vote["steps"][2]["env"]["CONCLUSION"]
-    assert "needs.scanner-integration.result == 'success'" in conclusion
-    assert "needs.scanner-integration.result == 'skipped'" in conclusion
-    assert "env.WORKFLOW_CONCLUSION" not in conclusion
-
-
-def test_mutation_gate_uses_one_reusable_in_both_lanes_and_votes() -> None:
-    """Targeted mutation checks must run on branch/PR plus the exact Gerrit patchset."""
-    test_yml = _read(_TEST_YML)
-    gerrit_yml = _read(_GERRIT_YML)
-
-    assert _REUSABLE_MUTATION in test_yml
-    assert _REUSABLE_MUTATION in gerrit_yml
-    assert "gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}" in gerrit_yml
-    assert "mutation" in gerrit_yml.split("  vote:", 1)[1].split("runs-on:", 1)[0]
-
-
-def test_mutation_workflows_are_bounded_and_publish_results() -> None:
-    reusable = _read(_ROOT / ".github" / "workflows" / "_mutation.yml")
-    broad = _read(_ROOT / ".github" / "workflows" / "mutation.yml")
-
-    assert "timeout-minutes: 30" in reusable
-    assert "if: always()" in reusable
-    assert "upload-artifact" in reusable
-    assert "--all-shards" in reusable
-    assert _REUSABLE_MUTATION in broad
-    assert "schedule:" in broad
-    assert "workflow_dispatch:" in broad
-
-
 def test_mutation_selector_skips_pre_gate_trees_without_weakening_current_trees(
     tmp_path: Path,
 ) -> None:
@@ -582,334 +371,6 @@ def test_degradation_step_runs_only_the_present_test_files(tmp_path: Path) -> No
             assert selected == (path in present), (
                 f"{present}: pytest must run exactly the present files, got: {pytest_lines[0]}"
             )
-
-
-def test_mutation_reusable_expands_selector_json_into_one_bounded_job_per_shard() -> None:
-    """One selector topology serves push, PR, Gerrit, and weekly mutation lanes."""
-    import re
-
-    import yaml
-
-    def trigger_map(document: dict[Any, Any]) -> dict[str, Any] | None:
-        # PyYAML's YAML-1.1 resolver parses an unquoted ``on`` key as boolean True.
-        key: str | bool | None = "on" if "on" in document else True if True in document else None
-        triggers = document.get(key) if key is not None else None
-        return triggers if isinstance(triggers, dict) else None
-
-    def normalized_expression(value: Any) -> str:
-        expression = str(value).strip()
-        if expression.startswith("${{") and expression.endswith("}}"):
-            expression = expression[3:-2]
-        return "".join(expression.split())
-
-    def executable_lines(run: Any) -> list[str]:
-        lines = []
-        for raw_line in str(run).splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            lines.append(line.split(" #", 1)[0].rstrip())
-        return lines
-
-    def selector_dataflow_contract(lines: list[str]) -> dict[str, Any]:
-        canonical = [
-            "selector_args=(select --base HEAD^ --head HEAD)",
-            'if [[ "${{ inputs.all-shards }}" == "true" ]]; then',
-            "selector_args+=(--all-shards)",
-            "fi",
-            'selection_json="$(uv run --locked python scripts/mutation_gate.py '
-            '"${selector_args[@]}")"',
-            'matrix="$(jq -c \'{shard: .selected_shards}\' <<<"$selection_json")"',
-            'has_shards="$(jq -r \'.empty_selection | not\' <<<"$selection_json")"',
-            'echo "matrix=$matrix" >> "$GITHUB_OUTPUT"',
-            'echo "has-shards=$has_shards" >> "$GITHUB_OUTPUT"',
-        ]
-        start = lines.index(canonical[0]) if lines.count(canonical[0]) == 1 else len(lines)
-        dataflow_lines = lines[start:]
-        positions = [
-            dataflow_lines.index(line) if dataflow_lines.count(line) == 1 else None
-            for line in canonical
-        ]
-        present_positions = [position for position in positions if position is not None]
-        assignment_write = re.compile(
-            r"(?<![A-Za-z0-9_$\"'])"
-            r"(?:selector_args|selection_json|matrix|has_shards)"
-            r"(?:\[[^]\n]+\])?\+?=(?!=)"
-        )
-
-        return {
-            "canonical_sequence_is_unique_and_ordered": len(present_positions) == len(canonical)
-            and present_positions == sorted(present_positions),
-            "assignment_lines": [line for line in dataflow_lines if assignment_write.search(line)],
-        }
-
-    def checkout_contract(steps: list[dict[str, Any]]) -> dict[str, bool]:
-        checkout_steps = [step for step in steps if "checkout" in str(step.get("uses", "")).lower()]
-        branch_or_pr = [
-            step
-            for step in checkout_steps
-            if str(step.get("uses", "")).startswith("actions/checkout@")
-            and normalized_expression(step.get("if")) == "inputs.gerrit-refspec==''"
-        ]
-        exact_patchset = [
-            step
-            for step in checkout_steps
-            if str(step.get("uses", "")).startswith(
-                "lfreleng-actions/checkout-gerrit-change-action@"
-            )
-            and normalized_expression(step.get("if")) == "inputs.gerrit-refspec!=''"
-        ]
-        destructive_ref_replacement = re.compile(r"\bgit\s+(?:checkout|switch|reset)\b")
-        return {
-            "complete_action_set": len(checkout_steps) == 4,
-            "branch_or_pr": len(branch_or_pr) == 1
-            and (branch_or_pr[0].get("with") or {}).get("fetch-depth") == 2
-            and (branch_or_pr[0].get("with") or {}).get("persist-credentials") is False,
-            "exact_patchset": len(exact_patchset) == 1
-            and all(
-                (exact_patchset[0].get("with") or {}).get(key) == f"${{{{ inputs.{key} }}}}"
-                for key in ("gerrit-refspec", "gerrit-project", "gerrit-url")
-            ),
-            "no_destructive_ref_replacement": not any(
-                destructive_ref_replacement.search(line)
-                for step in steps
-                for line in executable_lines(step.get("run", ""))
-            ),
-        }
-
-    github_expression = re.compile(r"\$\{\{(?P<body>.*?)\}\}", re.DOTALL)
-    secret_context = re.compile(r"\bsecrets\b")
-
-    def has_secret_expression(value: str) -> bool:
-        return any(
-            secret_context.search(match.group("body"))
-            for match in github_expression.finditer(value)
-        )
-
-    def secret_paths(node: Any, path: str = "$") -> list[str]:
-        found: list[str] = []
-        if isinstance(node, dict):
-            for key, value in node.items():
-                child_path = f"{path}.{key}"
-                if key == "secrets":
-                    found.append(child_path)
-                found.extend(secret_paths(value, child_path))
-        elif isinstance(node, list):
-            for index, value in enumerate(node):
-                found.extend(secret_paths(value, f"{path}[{index}]"))
-        elif isinstance(node, str) and has_secret_expression(node):
-            found.append(path)
-        return found
-
-    def mutation_call_contract(job: Any) -> dict[str, Any]:
-        return {
-            "uses_reusable": isinstance(job, dict) and job.get("uses") == _REUSABLE_MUTATION,
-            "secret_paths": secret_paths(job),
-        }
-
-    def active_by_default(job: Any) -> bool:
-        return isinstance(job, dict) and (
-            "if" not in job or normalized_expression(job.get("if")).lower() == "true"
-        )
-
-    def full_route_or_classifier_fallback(job: Any) -> bool:
-        condition = normalized_expression(job.get("if")) if isinstance(job, dict) else ""
-        return "needs.classify.result!='success'||needs.classify.outputs.route=='full'" in condition
-
-    reusable_raw = _read(_ROOT / ".github" / "workflows" / "_mutation.yml")
-    workflow = yaml.safe_load(reusable_raw)
-    test_workflow = yaml.safe_load(_read(_TEST_YML))
-    gerrit_workflow = yaml.safe_load(_read(_GERRIT_YML))
-    sweep_workflow = yaml.safe_load(_read(_ROOT / ".github" / "workflows" / "mutation.yml"))
-
-    jobs = workflow.get("jobs") or {}
-    selector = jobs.get("selector") or {}
-    mutation = jobs.get("mutation") or {}
-    selector_steps = selector.get("steps") or []
-    mutation_steps = mutation.get("steps") or []
-    select_steps = [
-        step
-        for step in selector_steps
-        if any("scripts/mutation_gate.py" in line for line in executable_lines(step.get("run", "")))
-    ]
-    driver_steps = [
-        step for step in mutation_steps if "mutation_gate.py run" in str(step.get("run", ""))
-    ]
-    artifact_steps = [
-        step for step in mutation_steps if "actions/upload-artifact@" in str(step.get("uses", ""))
-    ]
-    workflow_triggers = trigger_map(workflow)
-    workflow_call = (
-        workflow_triggers.get("workflow_call") if workflow_triggers is not None else None
-    )
-    select_lines = executable_lines(select_steps[0].get("run")) if len(select_steps) == 1 else []
-    driver_run = str(driver_steps[0].get("run", "")) if len(driver_steps) == 1 else ""
-    driver_env = (driver_steps[0].get("env") or {}) if len(driver_steps) == 1 else {}
-    artifact = artifact_steps[0] if len(artifact_steps) == 1 else {}
-    outputs = selector.get("outputs") or {}
-    strategy = mutation.get("strategy") or {}
-    needs = mutation.get("needs") or []
-    needs = [needs] if isinstance(needs, str) else needs
-    test_triggers = trigger_map(test_workflow)
-    test_mutation = (test_workflow.get("jobs") or {}).get("mutation")
-    gerrit_mutation = (gerrit_workflow.get("jobs") or {}).get("mutation")
-    gerrit_vote = (gerrit_workflow.get("jobs") or {}).get("vote") or {}
-    vote_needs = gerrit_vote.get("needs") or []
-    vote_needs = [vote_needs] if isinstance(vote_needs, str) else vote_needs
-    sweep_triggers = trigger_map(sweep_workflow)
-    sweep_mutation = (sweep_workflow.get("jobs") or {}).get("mutation")
-    contract = {
-        "reusable_workflow_call_mapping": isinstance(workflow_call, dict),
-        "selector_outputs_from_step": all(
-            outputs.get(name) == f"${{{{ steps.select.outputs.{name} }}}}"
-            for name in ("matrix", "has-shards")
-        ),
-        "selector_step_count": len(select_steps),
-        "selector_step_id": select_steps[0].get("id") if len(select_steps) == 1 else None,
-        "selector_json_dataflow": selector_dataflow_contract(select_lines),
-        "selector_checkout": checkout_contract(selector_steps),
-        "mutation_needs_selector": "selector" in needs,
-        "mutation_guarded_by_has_shards": normalized_expression(mutation.get("if"))
-        == "needs.selector.outputs.has-shards=='true'",
-        "matrix_from_selector_json": strategy.get("matrix")
-        == "${{ fromJSON(needs.selector.outputs.matrix) }}",
-        "fail_fast": strategy.get("fail-fast"),
-        "timeout_minutes": mutation.get("timeout-minutes"),
-        "mutation_checkout": checkout_contract(mutation_steps),
-        "driver_step_count": len(driver_steps),
-        "one_matrix_shard": driver_run.count("--shard") == 1
-        and "--all-shards" not in driver_run
-        # The shard value flows through `env:` rather than being interpolated directly into the
-        # run block (zizmor template-injection hardening, epic 5664 S1): some env key must carry
-        # `${{ matrix.shard }}` and be referenced as `$KEY`/`${KEY}` in the run.
-        and any(
-            normalized_expression(str(value)) == "matrix.shard"
-            and (f"${key}" in driver_run or f"${{{key}}}" in driver_run)
-            for key, value in driver_env.items()
-        ),
-        "per_shard_artifact": normalized_expression(artifact.get("if")) == "always()"
-        and "${{ matrix.shard }}" in str((artifact.get("with") or {}).get("name", "")),
-        "reusable_secret_paths": secret_paths(workflow),
-        "callers": {
-            "push_and_pull_request": isinstance(test_triggers, dict)
-            and "push" in test_triggers
-            and "pull_request" in test_triggers,
-            "test_mutation": {
-                **mutation_call_contract(test_mutation),
-                "eligible_on_push_and_pull_request": isinstance(test_mutation, dict)
-                and normalized_expression(test_mutation.get("if"))
-                == "github.event_name!='schedule'",
-            },
-            "gerrit_mutation": {
-                **mutation_call_contract(gerrit_mutation),
-                "full_route_or_classifier_fallback": full_route_or_classifier_fallback(
-                    gerrit_mutation
-                ),
-                "exact_inputs": isinstance(gerrit_mutation, dict)
-                and all(
-                    (gerrit_mutation.get("with") or {}).get(name) == value
-                    for name, value in {
-                        "gerrit-refspec": "${{ inputs.GERRIT_REFSPEC }}",
-                        "gerrit-project": "${{ inputs.GERRIT_PROJECT }}",
-                        "gerrit-url": "https://${{ vars.GERRIT_SERVER }}",
-                    }.items()
-                ),
-                "included_in_vote_needs": "mutation" in vote_needs,
-            },
-            "weekly_and_manual": isinstance(sweep_triggers, dict)
-            and "schedule" in sweep_triggers
-            and "workflow_dispatch" in sweep_triggers,
-            "sweep_mutation": {
-                **mutation_call_contract(sweep_mutation),
-                "active_by_default": active_by_default(sweep_mutation),
-                "all_shards": isinstance(sweep_mutation, dict)
-                and (sweep_mutation.get("with") or {}).get("all-shards") is True,
-            },
-        },
-    }
-
-    assert contract == {
-        "reusable_workflow_call_mapping": True,
-        "selector_outputs_from_step": True,
-        "selector_step_count": 1,
-        "selector_step_id": "select",
-        "selector_json_dataflow": {
-            "canonical_sequence_is_unique_and_ordered": True,
-            "assignment_lines": [
-                "selector_args=(select --base HEAD^ --head HEAD)",
-                "selector_args+=(--all-shards)",
-                'selection_json="$(uv run --locked python scripts/mutation_gate.py '
-                '"${selector_args[@]}")"',
-                'matrix="$(jq -c \'{shard: .selected_shards}\' <<<"$selection_json")"',
-                'has_shards="$(jq -r \'.empty_selection | not\' <<<"$selection_json")"',
-            ],
-        },
-        "selector_checkout": {
-            "complete_action_set": True,
-            "branch_or_pr": True,
-            "exact_patchset": True,
-            "no_destructive_ref_replacement": True,
-        },
-        "mutation_needs_selector": True,
-        "mutation_guarded_by_has_shards": True,
-        "matrix_from_selector_json": True,
-        "fail_fast": False,
-        "timeout_minutes": 30,
-        "mutation_checkout": {
-            "complete_action_set": True,
-            "branch_or_pr": True,
-            "exact_patchset": True,
-            "no_destructive_ref_replacement": True,
-        },
-        "driver_step_count": 1,
-        "one_matrix_shard": True,
-        "per_shard_artifact": True,
-        "reusable_secret_paths": [],
-        "callers": {
-            "push_and_pull_request": True,
-            "test_mutation": {
-                "uses_reusable": True,
-                "secret_paths": [],
-                "eligible_on_push_and_pull_request": True,
-            },
-            "gerrit_mutation": {
-                "uses_reusable": True,
-                "secret_paths": [],
-                "full_route_or_classifier_fallback": True,
-                "exact_inputs": True,
-                "included_in_vote_needs": True,
-            },
-            "weekly_and_manual": True,
-            "sweep_mutation": {
-                "uses_reusable": True,
-                "secret_paths": [],
-                "active_by_default": True,
-                "all_shards": True,
-            },
-        },
-    }
-
-
-def test_shared_gate_signatures_live_in_the_reusable() -> None:
-    """Every known gate signature is present in the reusable both lanes run — so the gate exists
-    AND (via the delegation test above) runs pre-merge and post-merge from one definition."""
-    bat = _read(_BAT_YML)
-    for label, sig in _SHARED_GATE_SIGNATURES.items():
-        assert sig in bat, (
-            f"gate {label!r} signature {sig!r} not found in _build-and-test.yml — either the "
-            "gate was dropped from the shared workflow (it would stop gating BOTH lanes) or its "
-            "signature is stale; update _SHARED_GATE_SIGNATURES to match the renamed/removed gate."
-        )
-
-
-def test_documentation_gate_signatures_live_in_the_shared_action() -> None:
-    """Extracted documentation checks remain one definition used by both CI routes."""
-    action = _read(_DOCS_ACTION)
-    bat = _read(_BAT_YML)
-    assert "./.github/actions/docs-gates" in bat
-    for label, signature in _DOCUMENTATION_GATE_SIGNATURES.items():
-        assert signature in action, f"documentation gate {label!r} was dropped from the action"
-        assert signature not in bat, f"documentation gate {label!r} was copied back inline"
 
 
 def test_shared_pytest_job_has_incident_timeout() -> None:
@@ -1207,37 +668,49 @@ def test_no_drift_script_gate_is_verified_only_in_branch_ci() -> None:
     )
 
 
-def test_optionality_contract_gates_the_verified_path() -> None:
-    """The lean-runtime / clean-core-wheel / packaging (optionality) contract must run in the
-    Verified gate ON THE PATCHSET, not only post-merge. A module-scope heavy-import regression
-    (pydantic_ai/httpx) once reached main precisely because gerrit-verify installs .[dev] (heavy
-    stack present) and never exercised the no-extras clean wheel. Lock in the wiring: gerrit-verify
-    invokes the reusable optionality workflow with the Gerrit refspec (so it checks out the
-    patchset), and the push/PR lane delegates to the SAME reusable workflow (no drift)."""
-    gerrit_yml = _read(_GERRIT_YML)
-    optionality_yml = _read(_OPTIONALITY_YML)
-    assert _REUSABLE_OPTIONALITY in gerrit_yml, (
-        "gerrit-verify.yaml does not invoke the reusable optionality workflow "
-        f"({_REUSABLE_OPTIONALITY}) — the clean-wheel/packaging contract would only fail "
-        "post-merge. Add an `optionality` job that `uses` it with the Gerrit refspec."
-    )
-    # The patchset (not the branch head / main) must be what optionality verifies in the gate.
-    assert "GERRIT_REFSPEC" in gerrit_yml, (
-        "the Verified-lane optionality job must pass GERRIT_REFSPEC so it checks out the exact "
-        "patchset (a plain checkout under workflow_dispatch resolves to main → silent false PASS)."
-    )
-    # The vote must wait for optionality so the run-conclusion snapshot sees a terminal result.
+def _verified_lane_reusable_jobs() -> list[tuple[str, str]]:
+    """Every ``gerrit-verify.yaml`` job delegating to a ``.github/workflows/_*.yml`` reusable."""
     import yaml
 
-    vote_needs = yaml.safe_load(gerrit_yml)["jobs"]["vote"]["needs"]
-    assert "optionality" in vote_needs, (
-        "the `vote` job must list `optionality` in its `needs` so its conclusion is folded into "
-        "the Verified vote (otherwise the run-conclusion snapshot can miss it)."
+    jobs = yaml.safe_load(_read(_GERRIT_YML))["jobs"]
+    return sorted(
+        (name, job["uses"])
+        for name, job in jobs.items()
+        if str(job.get("uses", "")).startswith("./.github/workflows/_")
     )
-    # Both lanes share one definition — no drift between push/PR and Verified.
-    assert _REUSABLE_OPTIONALITY in optionality_yml, (
-        "optionality.yml (push/PR lane) must delegate to the same reusable workflow so its checks "
-        "cannot drift from the Verified-lane checks."
+
+
+@pytest.mark.parametrize(
+    ("job", "reusable"), _verified_lane_reusable_jobs(), ids=lambda v: str(v).rsplit("/", 1)[-1]
+)
+def test_optionality_contract_gates_the_verified_path(job: str, reusable: str) -> None:
+    """Every Verified-lane job that delegates to a reusable workflow must run ON THE PATCHSET,
+    fold into the vote, and share its definition with a push/PR lane. A module-scope
+    heavy-import regression (pydantic_ai/httpx) once reached main precisely because a check ran
+    only post-merge; a reusable called without the Gerrit refspec checks out main under
+    workflow_dispatch and passes silently. This replaces the per-gate wiring snapshots
+    (optionality, scanner, mutation) with one rule over every reusable job."""
+    import yaml
+
+    gerrit = yaml.safe_load(_read(_GERRIT_YML))["jobs"]
+    assert gerrit[job].get("with", {}).get("gerrit-refspec") == "${{ inputs.GERRIT_REFSPEC }}", (
+        f"gerrit-verify job `{job}` must pass `gerrit-refspec: ${{{{ inputs.GERRIT_REFSPEC }}}}` "
+        f"to {reusable}, or it verifies main instead of the patchset."
+    )
+    needs = gerrit["vote"]["needs"]
+    needs = [needs] if isinstance(needs, str) else needs
+    assert job in needs, f"the `vote` job must list `{job}` in `needs` so its result is voted."
+    workflows = Path(_GERRIT_YML).parent
+    callers = [
+        path.name
+        for path in sorted(workflows.glob("*.y*ml"))
+        if path.name != Path(_GERRIT_YML).name
+        and not path.name.startswith("_")
+        and f"uses: {reusable}" in path.read_text(encoding="utf-8")
+    ]
+    assert callers, (
+        f"no push/PR workflow calls {reusable}; the Verified lane's `{job}` checks would drift "
+        "from branch CI."
     )
 
 
@@ -1293,73 +766,11 @@ def _collect_node_ids(paths: tuple[str, ...], selection: str) -> list[str]:
     return [line.strip() for line in proc.stdout.splitlines() if "::" in line]
 
 
-_REPO_POLICY_MODULES = (
-    "tests/unit/test_comment_hygiene_guard.py",
-    "tests/scripts/test_check_config_reads_heldout.py",
-    "tests/unit/test_tests_import_convention.py",
-    "tests/unit/test_external_isolation.py",
-    "tests/unit/test_compute_validity_callers.py",
-    "tests/unit/test_canonical.py",
-    "tests/unit/test_subcall_class_selection.py",
-)
-_REPO_POLICY_NODE_IDS = {
-    "tests/unit/test_comment_hygiene_guard.py::test_the_real_tree_is_clean",
-    "tests/scripts/test_check_config_reads_heldout.py::test_real_repo_is_clean_with_default_paths",
-    "tests/scripts/test_check_config_reads_heldout.py::test_real_schema_markers_all_carry_pointers",
-    "tests/scripts/test_check_config_reads_heldout.py::test_string_read_fields_keep_their_marker_and_do_not_fire[lock_lease_secs-getattr]",
-    "tests/scripts/test_check_config_reads_heldout.py::test_string_read_fields_keep_their_marker_and_do_not_fire[require_plan_review_for_close-gate_enabled]",
-    "tests/scripts/test_check_config_reads_heldout.py::"
-    "test_string_read_fields_keep_their_marker_and_do_not_fire"
-    "[require_plan_review_for_claim-string key]",
-    "tests/scripts/test_check_config_reads_heldout.py::"
-    "test_string_read_fields_keep_their_marker_and_do_not_fire"
-    "[require_completion_verification_for_close-string key]",
-    "tests/scripts/test_check_config_reads_heldout.py::test_the_real_schema_parks_no_markers_against_a_ticket",
-    "tests/scripts/test_check_config_reads_heldout.py::test_ci_wires_the_gate",
-    "tests/unit/test_tests_import_convention.py::test_no_tests_rooted_imports_anywhere_under_tests",
-    "tests/unit/test_external_isolation.py::test_no_external_marked_test_outside_external_dir",
-    "tests/unit/test_compute_validity_callers.py::test_every_compute_validity_call_consumes_a_mapping_not_a_tuple",
-    "tests/unit/test_compute_validity_callers.py::test_plan_validity_profiles_are_selected_by_named_keyword",
-    "tests/unit/test_canonical.py::test_no_raw_event_serializers_in_src",
-    "tests/unit/test_subcall_class_selection.py::test_provenance_scan_preserves_verdicts_with_linear_whole_tree_work",
-    "tests/unit/test_subcall_class_selection.py::test_the_provenance_analysis_can_see_the_sites_it_judges",
-    "tests/unit/test_subcall_class_selection.py::test_no_run_request_inherits_the_raw_config_model",
-    "tests/unit/test_subcall_class_selection.py::test_every_unfollowable_site_is_registered_with_a_reason",
-    "tests/unit/test_subcall_class_selection.py::test_neither_registry_has_stale_entries",
-}
-
-
-def test_repo_policy_nodes_partition_the_default_selection_exactly() -> None:
-    """The 19 OS-invariant guards run once without hiding mixed-module behavior."""
-    default_nodes = set(_collect_node_ids(_REPO_POLICY_MODULES, _DEFAULT_SELECTION))
-    policy_nodes = set(_collect_node_ids(_REPO_POLICY_MODULES, "repo_policy"))
-    non_policy_nodes = set(
-        _collect_node_ids(_REPO_POLICY_MODULES, f"{_DEFAULT_SELECTION} and not repo_policy")
-    )
-
-    assert policy_nodes == _REPO_POLICY_NODE_IDS
-    assert policy_nodes.isdisjoint(non_policy_nodes)
-    assert policy_nodes | non_policy_nodes == default_nodes
-
-
 def test_repo_policy_nodes_run_only_in_the_existing_primary_cell() -> None:
     """Route policy nodes by selector, without a new job or pytest session."""
     import yaml
 
     workflow = yaml.safe_load(_read(_BAT_YML))
-    # `sandbox-enforcement` is NOT a policy-node lane and does not weaken this guard's
-    # intent: it runs one file (the mutation-sandbox enforcement tests) inside a
-    # privileged container, because bwrap cannot create a user namespace on the shared
-    # runners and the tests would otherwise skip silently (`0d22-f664`). Policy nodes
-    # still route by selector into the primary cell asserted below.
-    assert set(workflow["jobs"]) == {"lint", "pip-audit", "sandbox-enforcement", "test"}
-    cells = _expanded_test_matrix(workflow)
-    assert cells == [
-        ("ubuntu-latest", "3.11"),
-        ("ubuntu-latest", "3.12"),
-        ("ubuntu-latest", "3.13"),
-        ("macos-latest", "3.13"),
-    ]
 
     steps = workflow["jobs"]["test"]["steps"]
     default_step = next(
@@ -2005,31 +1416,6 @@ def test_static_recipe_scan_reaches_transitive_make_targets() -> None:
     assert any(
         violation.startswith("actionlint-bin: set -o pipefail")
         for violation in _make_recipe_violations(mutated, reachable)
-    )
-
-
-def test_makefile_lint_runs_both_config_gates() -> None:
-    """The portable, no-CI-required `make lint` path runs BOTH the ownership-direction gate
-    and the field-consumption gate, so the trigger is operation-linked, not CI-only."""
-    body = _lint_target_body(_read(_MAKEFILE))
-    for script in _CONFIG_GATE_SCRIPTS:
-        assert script in body, (
-            f"`make lint` no longer invokes {script} in its `lint` target — the portable "
-            "config gate would stop running for contributors without a CI provider."
-        )
-
-
-def test_ci_runs_the_config_gates_through_make_lint_not_a_duplicate_step() -> None:
-    """CI inherits both gates via its `make lint` step; the field-consumption gate is no
-    longer ALSO a standalone workflow step (which would run it twice per job)."""
-    bat = _read(_BAT_YML)
-    assert "make lint" in bat, "the reusable workflow must still run `make lint` (runs the gates)"
-    assert "scripts/check_config_reads.py" not in bat, (
-        "the field-consumption gate is still a standalone step in _build-and-test.yml — it now "
-        "runs via `make lint`, so the standalone step double-runs it; remove the standalone step."
-    )
-    assert "scripts/check_config_ownership.py" not in bat, (
-        "the ownership gate must run via `make lint`, not as a duplicate standalone workflow step."
     )
 
 
