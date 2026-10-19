@@ -1,6 +1,11 @@
-Usage: rebar resolve [ticket_id]
+Usage: rebar resolve [--display [MODE]] [ticket_id]
 
-Resolve an id/alias/prefix to a canonical ticket id.
+Resolve an id/alias/prefix to a canonical ticket id (exit 0=found, 1=not found);
+--display renders it in a display mode instead.
 
 positional arguments:
-  ticket_id  the id, alias, or prefix to resolve
+  ticket_id         the id, alias, or prefix to resolve
+
+options:
+  --display [MODE]  render the resolved ticket for display (default: the
+                    configured display mode)

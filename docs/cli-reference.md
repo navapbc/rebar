@@ -4,8 +4,8 @@
 
 The **Command syntax** section embeds the committed package help for every visible command. The route registry determines section order and the help generator derives each artifact from its parser factory.
 
-Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, `edit`, `tag`,
-`untag`, `archive`, `set-file-impact`, `set-verify-commands`, `attach-commits`, `session-log`,
+Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, `edit`,
+`archive`, `set-file-impact`, `set-verify-commands`, `attach-commits`, `session-log`,
 `transition`, `reopen`, `claim`) confirms its result on stdout with one kubectl-style line:
 `<past-tense-verb> <args-summary>` on a successful write, `no change: <reason>` on an
 idempotent no-op (exit 0 in both cases). Two global flags are extracted for these verbs at the
@@ -45,10 +45,8 @@ Which verbs can report `no change: <reason>` (an idempotent re-run writes no eve
 | `session-log` | always-writes | every invocation starts a log or appends an entry to one |
 | `set-file-impact` | always-writes | every invocation appends the declaration event |
 | `set-verify-commands` | always-writes | every invocation appends the declaration event |
-| `tag` | no-op-capable | the tag is already on the ticket |
 | `transition` | no-op-capable | the ticket is already at the target status |
 | `unlink` | always-writes | removing an absent edge is an error, not a no-op |
-| `untag` | no-op-capable | the tag is not on the ticket |
 
 ### Confirmation-line record (pre-`42cd70b889` → today)
 
@@ -69,19 +67,18 @@ The golden record of the normalization: what each verb printed before the confir
 | `session-log` | the raw JSON result document | `session-log started <alias> (<id>)` / `session-log appended to <id>` |
 | `set-file-impact` | (silent) | `impact set on <id>: <n> paths` / `impact set on <id>: none declared` |
 | `set-verify-commands` | (silent) | `verify-commands set on <id>: <n>` |
-| `tag` | (silent) | `tagged <id>: +<tag>` / `no change: tag <tag> already on <id>` |
 | `transition` | `UNBLOCKED: <ids\|none>` on a close only (silent on every other target); `No transition needed` on a no-op | `transitioned <id>: <from> -> <to>; unblocked: <ids\|none>` / `no change: <id> already <status>` |
 | `unlink` | (silent) | `unlinked <src> -/-> <dst> (<relation>)` |
-| `untag` | (silent) | `untagged <id>: -<tag>` / `no change: tag <tag> not on <id>` |
 
 ## Command syntax
 
-One section per visible command that is not retired (71 in total), in registry order. Every section embeds its committed package help bytes.
+One section per visible command that is not retired (61 in total), in registry order. Every section embeds its committed package help bytes.
 
 ### `show`
 
 ```
-Usage: rebar show [--output {json,llm}] [--include-scratch] [ticket_id ...]
+Usage: rebar show [--output {json,llm}] [--field NAME] [--include-scratch]
+                  [ticket_id ...]
 
 Show ticket details.
 
@@ -91,6 +88,8 @@ positional arguments:
 options:
   --output {json,llm}, -o {json,llm}
                         output format
+  --field NAME          print only this state field as one JSON line per ticket
+                        (e.g. file_impact)
   --include-scratch     include per-ticket scratch values
 ```
 
@@ -102,7 +101,7 @@ Usage: rebar list [--output {json,llm}] [--include-archived] [--exclude-deleted]
                   [--type TYPE] [--status STATUS] [--priority PRIORITY]
                   [--parent PARENT] [--has-tag HAS_TAG]
                   [--without-tag WITHOUT_TAG] [--min-children MIN_CHILDREN]
-                  [--sort <priority|created|updated|id|status>]
+                  [--sort <priority|created|updated|id|status>] [--limit N]
 
 List all tickets as JSON.
 
@@ -127,6 +126,8 @@ options:
                         only tickets with at least N children
   --sort <priority|created|updated|id|status>
                         order by key ('-' prefix = descending)
+  --limit N             return at most N rows (positive integer), applied after
+                        --sort; without --sort it is the first N in store order
 ```
 
 ### `next-batch`
@@ -148,7 +149,7 @@ options:
 ### `deps`
 
 ```
-Usage: rebar deps [--include-archived] [ticket_id]
+Usage: rebar deps [--include-archived] [--descendants] [ticket_id]
 
 Show dependency graph for a ticket.
 
@@ -157,6 +158,8 @@ positional arguments:
 
 options:
   --include-archived  include archived tickets in the graph
+  --descendants       print the ticket's parent-chain descendants instead of the
+                      dependency graph
 ```
 
 ### `ready`
@@ -200,19 +203,6 @@ options:
                         order by key ('-' prefix = descending)
 ```
 
-### `session-logs`
-
-```
-Usage: rebar session-logs [--output {json,llm}] [--limit N]
-
-List the newest session_log tickets, newest first.
-
-options:
-  --output {json,llm}, -o {json,llm}
-                        output format
-  --limit N             cap the number of logs returned
-```
-
 ### `validate`
 
 ```
@@ -230,120 +220,42 @@ options:
   --terse               emit a single score line
 ```
 
-### `get-file-impact`
-
-```
-Usage: rebar get-file-impact [ticket_id]
-
-Get the current file impact array for a ticket (JSON).
-
-positional arguments:
-  ticket_id  the ticket to read
-```
-
-### `get-verify-commands`
-
-```
-Usage: rebar get-verify-commands [--output {text,json}] [ticket_id]
-
-Get the current verify commands array for a ticket (JSON).
-
-positional arguments:
-  ticket_id             the ticket to read
-
-options:
-  --output {text,json}, -o {text,json}
-                        output format
-```
-
-### `exists`
-
-```
-Usage: rebar exists [ticket_id]
-
-O(1) presence check (exit 0=exists, 1=not found).
-
-positional arguments:
-  ticket_id  the ticket to check
-```
-
 ### `resolve`
 
 ```
-Usage: rebar resolve [ticket_id]
+Usage: rebar resolve [--display [MODE]] [ticket_id]
 
-Resolve an id/alias/prefix to a canonical ticket id.
-
-positional arguments:
-  ticket_id  the id, alias, or prefix to resolve
-```
-
-### `format`
-
-```
-Usage: rebar format [ticket_id] [mode]
-
-Render a ticket for display.
+Resolve an id/alias/prefix to a canonical ticket id (exit 0=found, 1=not found);
+--display renders it in a display mode instead.
 
 positional arguments:
-  ticket_id  the ticket to render
-  mode       optional display mode
-```
-
-### `list-descendants`
-
-```
-Usage: rebar list-descendants [ticket_id]
-
-BFS walk from a root ticket, bucketed by type (JSON).
-
-positional arguments:
-  ticket_id  the root ticket to walk from
-```
-
-### `clarity-check`
-
-```
-Usage: rebar clarity-check [--stdin] [--config CONFIG] [ticket_id]
-
-Score one ticket's clarity (exit 0=pass, 1=fail).
-
-positional arguments:
-  ticket_id        the ticket to score
+  ticket_id         the id, alias, or prefix to resolve
 
 options:
-  --stdin          read the ticket text from stdin
-  --config CONFIG  path to a clarity config override
+  --display [MODE]  render the resolved ticket for display (default: the
+                    configured display mode)
 ```
 
-### `check-ac`
+### `check`
 
 ```
-Usage: rebar check-ac [--output {text,json}] [ticket_id]
+Usage: rebar check [--ac | --clarity] [--output {text,json}] [--stdin]
+                   [--config CONFIG]
+                   [ticket_id]
 
-Check one ticket has an Acceptance Criteria block.
+Check one ticket: dispatch readiness by default, --ac for the Acceptance
+Criteria block, --clarity for the clarity score.
 
 positional arguments:
   ticket_id             the ticket to check
 
 options:
+  --ac                  check the Acceptance Criteria block
+  --clarity             score clarity (exit 0=pass, 1=fail)
   --output {text,json}, -o {text,json}
                         output format
-```
-
-### `quality-check`
-
-```
-Usage: rebar quality-check [--output {text,json}] [ticket_id]
-
-Check one ticket's dispatch readiness.
-
-positional arguments:
-  ticket_id             the ticket to check
-
-options:
-  --output {text,json}, -o {text,json}
-                        output format
+  --stdin               with --clarity: read the ticket text from stdin
+  --config CONFIG       with --clarity: path to a clarity config override
 ```
 
 ### `summary`
@@ -705,30 +617,6 @@ options:
   --review              emit the review payload
 
 --review: preview payload, not atomic; see review-plan --status.
-```
-
-### `tag`
-
-```
-Usage: rebar tag [ticket_id] [tag]
-
-Add a tag to a ticket.
-
-positional arguments:
-  ticket_id  the ticket to tag
-  tag        the tag to add
-```
-
-### `untag`
-
-```
-Usage: rebar untag [ticket_id] [tag]
-
-Remove a tag from a ticket.
-
-positional arguments:
-  ticket_id  the ticket to untag
-  tag        the tag to remove
 ```
 
 ### `archive`

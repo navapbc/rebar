@@ -1,12 +1,13 @@
 """``rebar`` write-command parser factories (RP-05 S2b).
 
-Prog-bound argparse renderings of the fourteen leaf-write arms dispatched by
+Prog-bound argparse renderings of the twelve leaf-write arms dispatched by
 :mod:`rebar._commands` (the ``_REGISTRY`` positional-only leaves and the
 ``_ARGV_REGISTRY`` self-parsing composers), plus ``session-log``. Each models the
 ACCEPTED grammar — the positional ids/bodies and, for the composer verbs, their
 flag surface (``create``/``idea`` also honour the legacy ``report`` ``--output``
-profile). The strict positional-only leaves (``comment``/``tag``/``untag``/
-``archive``/``set-verify-commands``) take positionals ONLY.
+profile). The strict positional-only leaves (``comment``/
+``archive``/``set-verify-commands``) take positionals ONLY. (Tags are edited with
+``edit --add-tag/--remove-tag``; the ``tag``/``untag`` verbs were removed.)
 
 The handlers keep their bespoke diagnostics — the positional-only leaves' loud
 ``unrecognised option '<x>' — 'rebar <cmd>' accepts no options`` rejection, the
@@ -166,22 +167,6 @@ def build_edit(*, prog: str) -> argparse.ArgumentParser:
     parser.add_argument("--review", action="store_true", help="emit the review payload")
     parser.add_argument("ticket_id", nargs="?", help="the ticket to edit")
     parser.epilog = "--review: preview payload, not atomic; see review-plan --status."
-    return parser
-
-
-def build_tag(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar tag <ticket_id> <tag>`` (positionals only)."""
-    parser = _base(prog, "Add a tag to a ticket.")
-    parser.add_argument("ticket_id", nargs="?", help="the ticket to tag")
-    parser.add_argument("tag", nargs="?", help="the tag to add")
-    return parser
-
-
-def build_untag(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar untag <ticket_id> <tag>`` (positionals only)."""
-    parser = _base(prog, "Remove a tag from a ticket.")
-    parser.add_argument("ticket_id", nargs="?", help="the ticket to untag")
-    parser.add_argument("tag", nargs="?", help="the tag to remove")
     return parser
 
 

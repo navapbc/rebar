@@ -52,9 +52,7 @@ def test_routing_tables_cover_every_known_subcommand() -> None:
         "_READS_INIT_ONLY",
         "_READS_NO_INIT",
         "_WRITES_FULL",
-        "_FIELD_READS",
         "_LOOKUPS",
-        "_DESCENDANTS",
         "_GATES",
     )
     sets = [derived[name] for name in set_names]
@@ -86,12 +84,12 @@ def test_inprocess_reads_are_wired(rebar_repo: Path, capsys: pytest.CaptureFixtu
 
 
 def test_inprocess_writes_are_wired(rebar_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """In-process leaf-write arms (comment/tag) dispatch through the CLI and persist."""
+    """In-process write arms (comment/edit --add-tag) dispatch through the CLI and persist."""
     tid = rebar.create_ticket("task", "E0 write smoke", repo_root=str(rebar_repo))
 
     assert main(["comment", tid, "hello from E0"]) == 0
     capsys.readouterr()
-    assert main(["tag", tid, "e0-smoke"]) == 0
+    assert main(["edit", tid, "--add-tag=e0-smoke"]) == 0
     capsys.readouterr()
 
     shown = rebar.show_ticket(tid, repo_root=str(rebar_repo))
@@ -121,3 +119,87 @@ def test_help_unknown_streams_all_to_stderr(capsys: pytest.CaptureFixture[str]) 
     assert cap.out == ""
     assert "unknown subcommand 'frobnicate'" in cap.err
     assert _help.overview() in cap.err
+
+
+# ── merged verbs dispatch end to end through main() (epic toadyish-sulfurous-ovenbird) ──
+def test_resolve_display_dispatches_with_the_three_arg_adapter(
+    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``resolve`` is an ``argv_tracker_root`` route now, so the adapter calls
+    ``resolve_cli(rest, tracker, None)``; a ``TypeError`` here is the signature mismatch."""
+    created = rebar.create_ticket(
+        "task", "resolve display", repo_root=str(rebar_repo), return_alias=True
+    )
+    tid, alias = created["id"], created["alias"]
+
+    assert main(["resolve", tid]) == 0
+    assert capsys.readouterr().out.strip() == tid
+    assert main(["resolve", tid, "--display=alias"]) == 0
+    assert capsys.readouterr().out.strip() == alias
+
+
+@pytest.mark.parametrize("mode", [[], ["--ac"], ["--clarity"]])
+def test_check_modes_dispatch_through_main(
+    rebar_repo: Path, capsys: pytest.CaptureFixture[str], mode: list[str]
+) -> None:
+    """``check`` delegates to the unchanged gate handlers with their own signatures: each
+    mode reaches a verdict (0 pass / 1 fail) via the real dispatcher, never a ``TypeError``."""
+    tid = rebar.create_ticket(
+        "task",
+        "check modes",
+        description="Body line.\n\n## Acceptance Criteria\n- [ ] a\n- [ ] b",
+        repo_root=str(rebar_repo),
+    )
+    assert main(["check", tid, *mode]) in (0, 1)
+    capsys.readouterr()
+
+
+def test_list_limit_returns_the_newest_session_logs(
+    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``list --type=session_log --sort=-created --limit=N`` returns the N newest; no
+    ``--limit`` returns all; ``--limit=0`` and a non-integer are usage errors (exit 2)."""
+    ids = [
+        rebar.create_ticket("session_log", f"Log {i}", repo_root=str(rebar_repo)) for i in range(3)
+    ]
+    base = ["list", "--type=session_log", "--sort=-created"]
+
+    assert main([*base, "--limit=2"]) == 0
+    newest = [t["ticket_id"] for t in json.loads(capsys.readouterr().out)]
+    assert newest == list(reversed(ids))[:2]
+
+    assert main(base) == 0
+    assert len(json.loads(capsys.readouterr().out)) == 3
+
+    for bad in ("--limit=0", "--limit=x"):
+        assert main([*base, bad]) == 2
+        capsys.readouterr()
+
+
+def test_show_field_reads_one_field_and_rejects_bad_combinations(
+    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``show --field=NAME`` prints ``state[NAME]`` as one JSON line (exit 0); an unknown
+    NAME and ``--output llm`` are usage errors (exit 2), never a silent ``null``."""
+    tid = rebar.create_ticket("task", "show field", repo_root=str(rebar_repo))
+
+    assert main(["show", tid, "--field=file_impact"]) == 0
+    assert json.loads(capsys.readouterr().out) == []
+
+    assert main(["show", tid, "--field=file_impacts"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == "" and "unknown --field 'file_impacts'" in captured.err
+
+    assert main(["show", tid, "--field=file_impact", "--output", "llm"]) == 2
+    capsys.readouterr()
+
+
+def test_check_ac_and_clarity_together_is_a_usage_error(
+    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``check --ac --clarity`` names two modes at once: exit 2, and no gate runs."""
+    tid = rebar.create_ticket("task", "check conflict", repo_root=str(rebar_repo))
+
+    assert main(["check", tid, "--ac", "--clarity"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == "" and "mutually exclusive" in captured.err

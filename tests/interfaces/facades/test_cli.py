@@ -119,9 +119,9 @@ def test_help_word_with_subcommand(rebar_repo: Path) -> None:
 
 
 def test_short_help_flag_on_subcommand(rebar_repo: Path) -> None:
-    cp = _cli("tag", "-h", cwd=str(rebar_repo))
+    cp = _cli("edit", "-h", cwd=str(rebar_repo))
     assert cp.returncode == 0
-    assert "Usage: rebar tag" in cp.stdout
+    assert "Usage: rebar edit" in cp.stdout
 
 
 def test_help_in_freetext_title_is_not_intercepted(rebar_repo: Path) -> None:

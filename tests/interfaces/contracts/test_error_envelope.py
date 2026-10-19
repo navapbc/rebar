@@ -9,13 +9,13 @@ agents never parse stderr prose. Text mode is unchanged: the envelope is emitted
 ONLY in json mode, so a report-profile command's text-mode stdout stays empty.
 
 Out of scope (documented):
-  * the per-ticket GATES (``check-ac``/``quality-check``) emit a gate verdict, not
+  * the per-ticket GATES (``check --ac``/``check``) emit a gate verdict, not
     an error, for a failing ticket — exit 1 is a verdict, not a failure;
-  * ``clarity-check`` does NOT participate in the ``--output`` flag system at all
+  * ``check --clarity`` does NOT participate in the ``--output`` flag system at all
     (it has its own always-JSON contract, docs/contracts/ticket-clarity-check-output.md),
     so it is outside this ``--output json`` contract;
-  * the TOLERANT reads — ``summary``/``list-descendants`` render an empty/placeholder
-    result at exit 0; ``get-file-impact <missing>`` returns ``[]`` at exit 0;
+  * the TOLERANT reads — ``summary``/``deps --descendants`` render an empty/placeholder
+    result at exit 0;
     ``scratch get <missing>`` returns ``{status: miss}`` at exit 0 — none of those are
     failures.
 """
@@ -53,7 +53,7 @@ def _cli(*args: str, cwd: str) -> subprocess.CompletedProcess:
 CASES = [
     ("show_missing", ("show", MISSING), "json"),
     ("deps_missing", ("deps", MISSING), "json"),
-    ("get_verify_commands_missing", ("get-verify-commands", MISSING), "text"),
+    ("show_field_missing", ("show", MISSING, "--field=verify_commands"), "json"),
     ("next_batch_missing", ("next-batch", MISSING), "text"),
     ("create_bad_type", ("create", "notatype", "x"), "text"),
     ("claim_missing", ("claim", MISSING), "text"),

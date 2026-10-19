@@ -387,7 +387,7 @@ def test_cancelled_status_roundtrips_through_done_plus_label(adf, outbound, inbo
 
 
 # ===========================================================================
-# 3. label add round-trip (rebar tag -> Jira label -> NOT re-echoed inbound)
+# 3. label add round-trip (rebar edit --add-tag -> Jira label -> NOT re-echoed inbound)
 # ===========================================================================
 
 

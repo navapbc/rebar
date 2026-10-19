@@ -9,17 +9,9 @@ Subcommands:
   deps                  Show dependency graph for a ticket.
   ready                 List tickets ready to work (all blockers closed).
   search                Full-text search over titles/descriptions/comments/tags.
-  session-logs          List the newest session_log tickets, newest first.
   validate              Repo-wide tracker health check (scores the whole store 1-5).
-  get-file-impact       Get the current file impact array for a ticket (JSON).
-  get-verify-commands   Get the current verify commands array for a ticket (JSON).
-  exists                O(1) presence check (exit 0=exists, 1=not found).
-  resolve               Resolve an id/alias/prefix to a canonical ticket id.
-  format                Render a ticket for display.
-  list-descendants      BFS walk from a root ticket, bucketed by type (JSON).
-  clarity-check         Score one ticket's clarity (exit 0=pass, 1=fail).
-  check-ac              Check one ticket has an Acceptance Criteria block.
-  quality-check         Check one ticket's dispatch readiness.
+  resolve               Resolve an id/alias/prefix to a canonical ticket id (exit 0=found, 1=not found); --display renders it in a display mode instead.
+  check                 Check one ticket: dispatch readiness by default, --ac for the Acceptance Criteria block, --clarity for the clarity score.
   summary               One-line ticket summary with blocking status for one or more IDs.
   sign                  Sign a ticket's manifest of verified steps with the environment key.
   verify-signature      Certify that a ticket's verified steps match its signature.
@@ -38,8 +30,6 @@ Subcommands:
   unlink                Remove a link: unlink <source> <target> [relation] (no relation: most-recent for pair; relation: exactly that relation).
   revert                Revert a ticket to a prior event UUID.
   edit                  Edit ticket fields (--title, --priority, --assignee, --ticket_type, --description, --parent; tags via --add-tag/--remove-tag/--set-tags).
-  tag                   Add a tag to a ticket.
-  untag                 Remove a tag from a ticket.
   archive               Archive an open ticket (excludes from default list; idempotent).
   set-file-impact       Record file impact for a ticket (JSON array of {path,reason} objects).
   set-verify-commands   Record DD-level verify commands (JSON array of {dd_id,dd_text,command}).
