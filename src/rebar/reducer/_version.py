@@ -50,6 +50,8 @@ _NON_REPLAY_KNOWN_TYPES = frozenset(
         "PRECONDITIONS",
         "REVIEW_RESULT",
         "COMPLETION_VERDICT",
+        # Retired producer (ADR 0086, removed in granitic-realisable-dolphin); the names are
+        # kept so historical events still parse and compaction preserves them.
         "TICKET_DIGEST",
         "ENQUEUE_ENRICH",
         "CLAIM_ENRICH",

@@ -122,14 +122,14 @@ def test_for_structured_pins_the_single_turn_structured_pair() -> None:
         instructions="i",
         config=_cfg(),
         reviewers=["probe"],
-        output_schema="overlap_verdict",
+        output_schema="epic_bug_screen_verdict",
         bounds=RunRequest.INHERIT_POLICY,
     )
 
     assert (req.mode, req.execution_mode, req.output_schema) == (
         "structured",
         "single_turn",
-        "overlap_verdict",
+        "epic_bug_screen_verdict",
     )
     assert (req.system_prompt, req.instructions, req.reviewers) == ("s", "i", ["probe"])
     assert req.target == {}
@@ -142,7 +142,7 @@ def test_each_bound_reaches_its_own_request_field() -> None:
         instructions="i",
         config=_cfg(),
         reviewers=["probe"],
-        output_schema="overlap_verdict",
+        output_schema="epic_bug_screen_verdict",
         bounds=SingleTurnBounds(
             output_tokens=1024, timeout_s=60, structured_retries=0, transport_attempts=1
         ),
@@ -163,7 +163,7 @@ def test_inherit_policy_leaves_every_ceiling_unset() -> None:
         instructions="i",
         config=_cfg(),
         reviewers=["probe"],
-        output_schema="overlap_verdict",
+        output_schema="epic_bug_screen_verdict",
         bounds=RunRequest.INHERIT_POLICY,
     )
 
@@ -181,7 +181,7 @@ def test_the_bounding_decision_cannot_be_inherited_by_omission() -> None:
             instructions="i",
             config=_cfg(),
             reviewers=["probe"],
-            output_schema="overlap_verdict",
+            output_schema="epic_bug_screen_verdict",
         )
     with pytest.raises(TypeError):
         SingleTurnBounds(output_tokens=None, timeout_s=None)  # type: ignore[call-arg]

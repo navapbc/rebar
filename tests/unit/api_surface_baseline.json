@@ -1723,16 +1723,6 @@
       "params": [],
       "return": "type"
     },
-    "overlap_verdict_batch_response_model": {
-      "kind": "callable",
-      "params": [],
-      "return": "type"
-    },
-    "overlap_verdict_response_model": {
-      "kind": "callable",
-      "params": [],
-      "return": "type"
-    },
     "register_contract": {
       "kind": "callable",
       "params": [
@@ -1758,11 +1748,6 @@
           "<none>"
         ]
       ],
-      "return": "type"
-    },
-    "ticket_digest_response_model": {
-      "kind": "callable",
-      "params": [],
       "return": "type"
     }
   },

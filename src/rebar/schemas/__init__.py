@@ -65,7 +65,6 @@ __all__ = [
     "LIST_DESCENDANTS",
     "NEXT_BATCH",
     "OUTPUT_SCHEMAS",
-    "OVERLAP_VERDICT",
     "PLAN_REVIEW_STATUS",
     "PLAN_REVIEW_VERDICT",
     "READY_TICKET_SUMMARY",
@@ -78,7 +77,6 @@ __all__ = [
     "SUMMARY",
     "TERRAFORM_CONFIG_INSPECT",
     "TERRAFORM_GROUNDING_RECEIPT",
-    "TICKET_DIGEST",
     # name constants
     "TICKET_STATE",
     "TICKET_STATE_LLM",
@@ -146,15 +144,6 @@ TRACKER_FOOTPRINT = "tracker_footprint"
 # coverage guard never drives it live; registered in OUTPUT_SCHEMAS below under a synthetic
 # "verify_identity" key so the every-schema-file-is-wired guard sees verify_identity_report.
 VERIFY_IDENTITY_REPORT = "verify_identity_report"
-# rebar.llm — output of the Cupid ticket-digest enrichment op (epic only-crave-art,
-# ee3d). No CLI --output help arm (the coverage guard never drives it live); registered
-# in OUTPUT_SCHEMAS below under a synthetic "enrich" key so the every-schema-file-is-wired
-# guard sees ticket_digest, and so the runner validates enrich's structured output.
-TICKET_DIGEST = "ticket_digest"
-# rebar.llm — output of one ordered-pair call of the Stage-2 overlap judge (epic
-# only-crave-art, 9022). No CLI --output arm; registered in OUTPUT_SCHEMAS under a synthetic
-# "overlap_judge" key so the schema-coverage guard sees it and the runner validates output.
-OVERLAP_VERDICT = "overlap_verdict"
 # rebar.llm — output of one single-turn epic-close bug-screen call (4b54). No CLI --output
 # arm; registered in OUTPUT_SCHEMAS under a synthetic "epic_bug_screen" key so the
 # schema-coverage guard sees it and the runner validates the screen's structured output.
@@ -385,13 +374,6 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     # --output coverage guard never drives it live); registered so the every-schema-file-is-
     # wired guard sees verify_identity_report.
     "verify_identity": VERIFY_IDENTITY_REPORT,
-    # Cupid ticket-digest enrichment op (epic only-crave-art, ee3d): no CLI --output arm
-    # (coverage guard never drives it live); registered so the every-schema-file-is-wired
-    # guard sees ticket_digest and the runner validates enrich's structured output.
-    "enrich": TICKET_DIGEST,
-    # Stage-2 overlap judge (9022): synthetic key, no CLI arm; wired so the schema-coverage
-    # guard sees overlap_verdict and the runner validates the judge's structured output.
-    "overlap_judge": OVERLAP_VERDICT,
     # Epic-close bug screen (4b54): synthetic key, no CLI arm; wired so the schema-coverage
     # guard sees epic_bug_screen_verdict and the runner validates the screen's output.
     "epic_bug_screen": EPIC_BUG_SCREEN_VERDICT,

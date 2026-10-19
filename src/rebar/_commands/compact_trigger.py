@@ -21,9 +21,9 @@ for minutes. Here the waited-on operation holds nothing:
   worker's lock profile is exactly that of a manual ``rebar compact``, which is the accepted
   baseline, and it never spans an LLM call.
 
-The detach machinery, the stamped advisory lock and the Windows no-op are all REUSED from
-:mod:`rebar.llm.enrich_drain`, which already solved this exact shape for enrichment. Reusing it
-(rather than writing a third dialect) is what lets this inherit the stamped-lock discipline
+The detach machinery (:mod:`rebar._proc`), the stamped advisory lock
+(:mod:`rebar._store.stamped_lock`) and the Windows no-op are shared helpers. Reusing them
+(rather than writing another dialect) is what lets this inherit the stamped-lock discipline
 fixed in ``knavish-stimulated-bluebottle`` — pid-recycle qualification, refusal-without-proof
 and the wall-clock ceiling — instead of re-deriving a heuristic that gets one of them wrong.
 """
@@ -262,7 +262,7 @@ def maybe_compact(tracker: str, ticket_id: str, *, repo_root=None) -> None:
     closed tickets happen not to be foldable would otherwise never fold the ones that are.
 
     NEVER raises and never blocks: every branch is guarded, and the default path hands the work
-    to a detached child. Windows is a v1 no-op, mirroring the enrichment drain, because the
+    to a detached child. Windows is a v1 no-op, because the
     store lock's ``fcntl`` import would crash a detached child there."""
     try:
         if sys.platform == "win32":  # pragma: no cover - POSIX CI

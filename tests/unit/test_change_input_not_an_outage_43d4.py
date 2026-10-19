@@ -95,7 +95,7 @@ def test_the_providers_own_text_survives_the_rewrap():
 
 
 def test_the_classified_disposition_still_rides_on_the_raised_error():
-    """25+ sites (enrich_drain's tombstone, both CLIs' exit codes, the MCP failure envelope,
+    """25+ sites (both CLIs' exit codes, the MCP failure envelope,
     the close gate's remedy sentence) read the disposition off ``.outcome`` rather than off the
     type. Re-typing must not drop it."""
     err = _raised(_http(400, _CONTEXT_400_TEXT))

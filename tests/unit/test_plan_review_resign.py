@@ -61,7 +61,6 @@ def _capture_sign(monkeypatch):
     # Simulate an active attested session: the sign seam's no-null-pin invariant
     # (bug 5128-0856) refuses to sign with no snapshot SHA at all.
     monkeypatch.setattr("rebar.llm.gate_context.current_code_sha", lambda: "c" * 40)
-    monkeypatch.setattr("rebar.llm.overlap.queue.enqueue", lambda *a, **k: None)
     return captured
 
 

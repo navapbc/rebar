@@ -99,7 +99,7 @@ def _engine_root_str(path: str | Path) -> str | None:
 
     Deliberately builds NO ``Path``. ``pathlib.Path.__new__`` dispatches on the LIVE
     value of ``os.name``, and a test that rebinds it to ``"nt"`` (the supported way to
-    exercise a Windows branch — ``tests/unit/test_enrich_drain.py`` does it twice) turns
+    exercise a Windows branch — ``tests/unit/test_spawn_detached.py`` does it) turns
     every later ``Path(...)`` into a ``WindowsPath``, which raises ``NotImplementedError``
     on POSIX. The guard runs during teardown, and ``monkeypatch`` undoes its rebinding
     LAST of the function-scoped fixtures, so the guard is still inside the ``"nt"``

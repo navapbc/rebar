@@ -182,8 +182,8 @@ def test_network_git_is_bounded_and_timeout_is_best_effort(monkeypatch, mod, arg
 def test_event_filename_timestamp_prefix_equals_body_timestamp(tracker: str):
     """The on-disk name's leading timestamp IS the event body's ``timestamp`` field.
 
-    Readers that walk a ticket dir newest-first (``llm/overlap/queue``,
-    ``llm/overlap/digest_sidecar``) rely on this coupling: it is what makes lexicographic
+    Readers that walk a ticket dir newest-first rely on this coupling (the retired overlap
+    queue and digest sidecar did; ADR 0086): it is what makes lexicographic
     filename order equal event-timestamp order, so a bounded suffix scan can stop early
     instead of opening every file. A future writer that names files differently would make
     those reducers silently mis-order, so pin it here at the writer.

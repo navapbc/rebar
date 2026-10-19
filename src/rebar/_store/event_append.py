@@ -7,8 +7,8 @@ a best-effort push.
 Pre-lock validation, canonical serialization, and staging live in
 ``event_prepare.py``. Bounded Git verbs with shared retry policy live in
 ``event_commit_git.py``. Both remain re-exported here to preserve imports and
-monkeypatch targets. This module owns the lock bodies, batch rollback, push and
-enrichment handoffs, and recovery from unmerged or missing index objects.
+monkeypatch targets. This module owns the lock bodies, batch rollback, the push
+handoff, and recovery from unmerged or missing index objects.
 Recovery calls ``_git_add`` through this module so one test patch observes both
 the initial add and recovery add.
 
@@ -351,9 +351,6 @@ def write_and_push(
         _ensures.maybe_emit_pending_hint(canonical)
     except Exception:  # noqa: BLE001 — the hint must never fail a committed write
         pass
-    # Opportunistic cross-ticket enrichment drain (epic only-crave-art / c1de): a cheap
-    # gate that no-ops unless something is soaked. Best-effort — never fails the write.
-    _maybe_enrich_drain(str(canonical))
     return rc
 
 
@@ -384,17 +381,6 @@ def _rollback_batch(tracker: str, renamed: list[_staging.StagedEvent]) -> None:
         _silent_unlink(staged.final_path)
     for staged in renamed:
         staged.unpublish()
-
-
-def _maybe_enrich_drain(tracker: str) -> None:
-    """Ride the write path with the opportunistic enrichment drain gate. Fully isolated: a
-    missing [agents] extra or any failure is a clean no-op (never fails the triggering write)."""
-    try:
-        from rebar.llm.enrich_drain import maybe_drain
-
-        maybe_drain(tracker)
-    except Exception:  # noqa: BLE001 — a drain concern must never fail a write; broad-but-swallowed
-        pass
 
 
 def _silent_unlink(path: str) -> None:

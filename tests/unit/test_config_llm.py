@@ -123,34 +123,14 @@ def test_from_env_uses_grouped_reader_assemblers(tmp_path: Path, monkeypatch) ->
             "llm_tool_timeout_s": 67,
         }
 
-    def _overlap(table: dict, cli: dict) -> dict:
-        seen["overlap"] = (table, cli)
-        return {
-            "overlap_propositions_min": 7,
-            "overlap_propositions_max": 8,
-            "overlap_k": 9,
-            "overlap_max_doc_freq": 0.4,
-            "overlap_min_should_match": 0.3,
-            "overlap_soak_min": 10,
-            "overlap_lease_ttl_min": 11,
-            "overlap_reenrich_debounce_min": 12,
-            "overlap_conf_threshold": 0.8,
-            "overlap_surface_cap": 13,
-            "overlap_drain": "always",
-            "overlap_drain_batch": 14,
-            "overlap_drain_gate_budget_ms": 15,
-        }
-
     monkeypatch.setattr(llm_config, "_read_llm_core_settings", _core, raising=False)
     monkeypatch.setattr(llm_config, "_read_llm_limit_settings", _limits, raising=False)
-    monkeypatch.setattr(llm_config, "_read_llm_overlap_settings", _overlap, raising=False)
 
     resolved = llm_config.LLMConfig.from_env(repo_root=project)
 
     assert seen == {
         "core": ({"source": "table"}, {"source": "cli"}),
         "limits": ({"source": "table"}, {"source": "cli"}),
-        "overlap": ({"source": "table"}, {"source": "cli"}),
     }
     assert resolved.model == "helper-model"
     assert resolved.model_provider == "helper-provider"
@@ -165,19 +145,6 @@ def test_from_env_uses_grouped_reader_assemblers(tmp_path: Path, monkeypatch) ->
     assert resolved.llm_tool_timeout_s == 67
     assert resolved.tickets_path == "/tmp/tickets-root"
     assert resolved.langfuse.host == "https://lf"
-    assert resolved.overlap_propositions_min == 7
-    assert resolved.overlap_propositions_max == 8
-    assert resolved.overlap_k == 9
-    assert resolved.overlap_max_doc_freq == 0.4
-    assert resolved.overlap_min_should_match == 0.3
-    assert resolved.overlap_soak_min == 10
-    assert resolved.overlap_lease_ttl_min == 11
-    assert resolved.overlap_reenrich_debounce_min == 12
-    assert resolved.overlap_conf_threshold == 0.8
-    assert resolved.overlap_surface_cap == 13
-    assert resolved.overlap_drain == "always"
-    assert resolved.overlap_drain_batch == 14
-    assert resolved.overlap_drain_gate_budget_ms == 15
 
 
 # ── config-file locations are consumed ────────────────────────────────────────

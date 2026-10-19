@@ -70,19 +70,6 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_MAX_TOKENS` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_MCP_SERVERS` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MODEL_PROVIDER` | `src/rebar/llm/config_readers.py` |  |
-| `REBAR_LLM_OVERLAP_CONF_THRESHOLD` | `src/rebar/llm/config_readers.py` |  |
-| `REBAR_LLM_OVERLAP_DRAIN` | `src/rebar/llm/config_readers.py` |  |
-| `REBAR_LLM_OVERLAP_DRAIN_BATCH` | `src/rebar/llm/config_readers.py` |  |
-| `REBAR_LLM_OVERLAP_DRAIN_GATE_BUDGET_MS` | `src/rebar/llm/config_readers.py` |  |
-| `REBAR_LLM_OVERLAP_K` | `src/rebar/llm/config_readers.py` |  |
-| `REBAR_LLM_OVERLAP_LEASE_TTL_MIN` | `src/rebar/llm/config_readers.py` |  |
-| `REBAR_LLM_OVERLAP_MAX_DOC_FREQ` | `src/rebar/llm/config_readers.py` |  |
-| `REBAR_LLM_OVERLAP_MIN_SHOULD_MATCH` | `src/rebar/llm/config_readers.py` |  |
-| `REBAR_LLM_OVERLAP_PROPOSITIONS_MAX` | `src/rebar/llm/config_readers.py` |  |
-| `REBAR_LLM_OVERLAP_PROPOSITIONS_MIN` | `src/rebar/llm/config_readers.py` |  |
-| `REBAR_LLM_OVERLAP_REENRICH_DEBOUNCE_MIN` | `src/rebar/llm/config_readers.py` |  |
-| `REBAR_LLM_OVERLAP_SOAK_MIN` | `src/rebar/llm/config_readers.py` |  |
-| `REBAR_LLM_OVERLAP_SURFACE_CAP` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_PARSE_FAILURE_ARTIFACT_DIR` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_REPO_PATH` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_RETRY_MAX_ATTEMPTS` | `src/rebar/llm/config_readers.py` |  |
@@ -177,7 +164,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_165 variables._
+_152 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -198,6 +185,6 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/llm/config_readers.py:90` — `_llm_str_source(<non-literal>)`
 - `src/rebar/llm/config_readers.py:99` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config_readers.py:119` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config_readers.py:152` — `_llm_str(<non-literal>)`
+- `src/rebar/llm/config_readers.py:144` — `_llm_str(<non-literal>)`
 - `src/rebar/opcert_service/config.py:72` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:259` — `os.environ.get(<non-literal>)`

@@ -14,8 +14,8 @@ Two families of logic live here because each was once duplicated per caller:
 
 * :func:`spawn_detached` (+ :func:`detached_child_cwd`) — the ONE implementation of
   "spawn a detached rebar child", shared by the async tickets-branch push
-  (``_store.push``), the enrichment drain (``llm.enrich_drain``), the compaction
-  sweep (``_commands.compact_trigger``) and the snapshot-GC trigger
+  (``_store.push``), the compaction sweep (``_commands.compact_trigger``) and the
+  snapshot-GC trigger
   (``_snapshot.gc_trigger``). The pattern was previously copied per site,
   and a defect (the missing durable ``cwd``, bug 3198-438c-72a5-470f) propagated
   by exactly that imitation (task 2dc4-9bcd-75b9-4544).
@@ -136,7 +136,7 @@ def store_repo_root(tracker: str | os.PathLike[str]) -> str:
 def detached_child_cwd(tracker: str) -> str:
     """Pick a working directory a detached child can still resolve after its parent's is gone.
 
-    A detached child (the enrichment drain, the compaction sweep, the async
+    A detached child (the compaction sweep, the snapshot-GC trigger, the async
     tickets-branch push) is spawned WITHOUT ``cwd=``, so it inherits the spawning
     command's working directory. This project's own workflow runs ordinary writes from
     short-lived ``make worktree`` worktrees that are removed once the change lands — and

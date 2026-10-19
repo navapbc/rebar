@@ -64,7 +64,6 @@ def test_render_plan_review_text_advisory_line_has_no_severity_suffix():
         ],
         "indeterminate": [],
         "coaching": [],
-        "overlap": [],
         "signature": {"signed": True},
     }
     out = _captured(_render_plan_review_text, result)

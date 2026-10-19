@@ -74,14 +74,6 @@ def test_intercept_family_executes_no_store(
 # ── store-touching families: exercised in a real initialized repo ──
 
 
-def test_enrich_family_executes(rebar_repo: Path) -> None:
-    """``rebar enrich status`` dispatches through the registry and prints its JSON status."""
-    cp = _run("enrich", "status", cwd=rebar_repo)
-    assert cp.returncode == 0, cp.stdout + cp.stderr
-    assert '"pending"' in cp.stdout, cp.stdout + cp.stderr
-    assert "has no executable route" not in (cp.stdout + cp.stderr)
-
-
 def test_verify_commit_ticket_family_executes(rebar_repo: Path) -> None:
     """``rebar verify-commit-ticket`` (a store-touching pure intercept) executes."""
     cp = _run("verify-commit-ticket", "--rev", "HEAD", cwd=rebar_repo)

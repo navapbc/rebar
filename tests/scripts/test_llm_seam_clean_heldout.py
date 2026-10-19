@@ -5,7 +5,7 @@ Observable contract, not internal structure. Two properties:
 1. **Seam-clean** — once the llm subsystem's below-seam ambient config reads are cut to
    the approved seam (routed through an owned ``config.py`` resolver) or annotated as
    bounded owned-in-place env-control (``# read-via:`` markers), the config-ownership gate
-   (``scripts/check_config_ownership.py``) must report **zero** findings for the 18 source
+   (``scripts/check_config_ownership.py``) must report **zero** findings for the 17 source
    files this slice owns, AND their ``LEGACY_EXCEPTIONS`` entries must be gone. The
    owned-in-place allowlist is CAPPED at exactly four logical reads = four ``# read-via:``
    marked lines, confined to ``gate_context.py`` (1), ``workflow/gate_ops.py`` (1),
@@ -33,12 +33,11 @@ import check_config_ownership as gate
 import config_ownership_exceptions as exceptions
 import pytest
 
-# The 18 files this slice owns, as paths relative to ``src/rebar/`` (the form the gate
+# The 17 files this slice owns, as paths relative to ``src/rebar/`` (the form the gate
 # emits and the exception registry stores).
 _OWNED_FILES = (
     "llm/code_review/workflow_ops.py",
     "llm/completion.py",
-    "llm/enrich_drain.py",
     "llm/gate_context.py",
     "llm/gate_source.py",
     "llm/plan_review/__init__.py",

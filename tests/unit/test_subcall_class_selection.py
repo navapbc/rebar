@@ -4,9 +4,6 @@ Four ``RunRequest`` sites inherited ``cfg.model``; with class slots on Bedrock a
 on Anthropic, 18 of 23 plan-review calls used the wrong provider. Per-site probes make class
 values distinct from ``cfg.model`` and inspect the runner. A whole-tree provenance guard also
 rejects any config flowing from bare ``LLMConfig.from_env()`` without a class binder.
-
-The overlap probe calls :func:`judge_one` directly because gate retrieval may return no
-candidates and skip the judge, producing a vacuous pass.
 """
 
 from __future__ import annotations
@@ -67,7 +64,7 @@ def class_table(monkeypatch: pytest.MonkeyPatch) -> None:
 class _Recorder(Runner):
     """Record each request model before returning a canned payload.
 
-    The observation survives downstream errors swallowed by novelty or overlap callers.
+    The observation survives downstream errors swallowed by novelty callers.
     """
 
     name = "recorder"
@@ -100,53 +97,6 @@ def _only_model(rec: _Recorder) -> str:
 
 
 # ── per-site probes: the model reaching the runner is the class value, not cfg.model ──────────
-
-
-def test_overlap_judge_selects_the_standard_class() -> None:
-    from rebar.llm.overlap.judge import judge_one
-
-    rec = _Recorder({"relation": "unrelated", "confidence": 0.0, "abstain": True})
-    judge_one(dict(_DIGEST), dict(_DIGEST), _cfg(), rec)
-    assert _only_model(rec) == _STANDARD
-
-
-def test_overlap_judge_selects_the_standard_class_for_every_pair() -> None:
-    """The volume site: one plan review made 18 of its 23 calls here, so the binding has to hold
-    per call and not only on the first."""
-    from rebar.llm.overlap.judge import _CANDIDATES_PER_CALL, judge
-
-    # One candidate beyond the batch limit is the smallest corpus proving both orderings bind
-    # the class again on their later batch.
-    ids = [f"C{i}" for i in range(_CANDIDATES_PER_CALL + 1)]
-    rec = _Recorder({"relation": "unrelated", "confidence": 0.0, "abstain": True})
-    judge(
-        "Q",
-        dict(_DIGEST),
-        ids,
-        {i: dict(_DIGEST) for i in ids},
-        config=_cfg(),
-        runner=rec,
-    )
-    assert len(rec.models) == 4  # two batches x both orderings
-    assert _only_model(rec) == _STANDARD
-
-
-def test_ticket_digest_selects_the_trivial_class() -> None:
-    """Ticket-digest extraction is high-volume, single-turn canonicalization: ``trivial``."""
-    from rebar.llm.enrich import enrich
-
-    rec = _Recorder(dict(_DIGEST))
-    enrich(text="Login is broken.", config=_cfg(), runner=rec)
-    assert _only_model(rec) == _TRIVIAL
-
-
-def test_ticket_digest_holds_on_the_store_write_path() -> None:
-    """Bind ``trivial`` when the store-write path creates config from the environment."""
-    from rebar.llm.enrich import enrich
-
-    rec = _Recorder(dict(_DIGEST))
-    enrich(text="Login is broken.", config=None, runner=rec)
-    assert _only_model(rec) == _TRIVIAL
 
 
 def test_review_ticket_uses_the_operators_configured_model(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -211,17 +161,6 @@ def test_code_novelty_still_degrades_to_keeping_more_findings() -> None:
             runner=_BoomRunner(),
         )
         == {}
-    )
-
-
-def test_overlap_judge_failure_is_an_abstain_not_a_raise() -> None:
-    """The overlap step is advisory and must never block a review."""
-    from rebar.llm.overlap.judge import judge, judge_one
-
-    assert judge_one(dict(_DIGEST), dict(_DIGEST), _cfg(), _BoomRunner())["abstain"] is True
-    assert (
-        judge("Q", dict(_DIGEST), ["C"], {"C": dict(_DIGEST)}, config=_cfg(), runner=_BoomRunner())
-        == []
     )
 
 
@@ -541,7 +480,6 @@ def _run_request_sites() -> list[tuple[str, str, str]]:
 
 _EXPECTED_RUN_REQUEST_SITES = [
     ("llm/code_review/workflow_ops.py::score_code_novelty", "verify.max_output_cfg(cfg)", "bound"),
-    ("llm/enrich.py::enrich", "cfg", "bound"),
     ("llm/epic_bug_screen.py::_screen_one", "cfg", "bound"),
     ("llm/evals/eval_solver.py::_run_code_review_case", "cfg", "unresolved"),
     ("llm/evals/eval_solver.py::_run_novelty_case", "cfg", "unresolved"),
@@ -549,8 +487,6 @@ _EXPECTED_RUN_REQUEST_SITES = [
     ("llm/evals/plan_replay/tier1.py::build_candidate_runner", "cfg", "unresolved"),
     ("llm/evals/plan_replay/tier2.py::run_tier2_full", "cfg", "unresolved"),
     ("llm/operations.py::_review_ticket_impl", "max_output_cfg(cfg)", "unresolved"),
-    ("llm/overlap/judge.py::judge_one", "cfg", "bound"),
-    ("llm/overlap/judge.py::judge_batch", "cfg", "bound"),
     (
         "llm/plan_review/completion_subcall.py::pass2_completion",
         "_max_output_cfg(cfg)",
@@ -598,7 +534,7 @@ def test_provenance_scan_preserves_verdicts_with_linear_whole_tree_work(
 
     sites = _run_request_sites()
 
-    assert len(_EXPECTED_RUN_REQUEST_SITES) == 26
+    assert len(_EXPECTED_RUN_REQUEST_SITES) == 23
     assert all(expr for _, expr, _ in _EXPECTED_RUN_REQUEST_SITES)
     assert sites == _EXPECTED_RUN_REQUEST_SITES
     assert len(module_walks) >= 400, "the oracle did not exercise the real source corpus"

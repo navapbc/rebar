@@ -44,14 +44,6 @@ def _store_mount_eligible(argv: list[str]) -> bool:
     return sub in _INTERCEPTS or sub in _help.known_subcommands()
 
 
-def _enrich(rest: list[str]) -> int:
-    """``rebar enrich`` handler — the enrich drain/status intercept."""
-    from rebar import config as _config
-    from rebar.llm.enrich_drain import cmd_enrich
-
-    return cmd_enrich(rest, str(_config.tracker_dir()))
-
-
 def _identity_intercept(rest: list[str]) -> int:
     """Initialize identity commands except help requests, then dispatch.
 

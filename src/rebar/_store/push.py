@@ -587,15 +587,6 @@ def push_after_commit(tracker: str | os.PathLike) -> None:
             "best-effort tickets-branch push failed; PUSH_PENDING will surface via fsck",
             exc_info=True,
         )
-        return
-    # Opportunistic enrichment drain on the status-only write paths too (epic only-crave-art
-    # / c1de), so the drain rides BOTH push paths. Best-effort — never fails the write.
-    try:
-        from rebar.llm.enrich_drain import maybe_drain
-
-        maybe_drain(str(canonical))
-    except Exception:  # noqa: BLE001 — a drain concern must never fail a write
-        pass
 
 
 def _main(argv: list[str] | None = None) -> int:

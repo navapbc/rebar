@@ -147,118 +147,11 @@ def completion_verdict_response_model() -> type:
     return CompletionVerdict
 
 
-def ticket_digest_response_model() -> type:
-    """Structured-output model for the Cupid ticket-digest op (epic only-crave-art),
-    mirroring ``ticket_digest.schema.json``: four fields, all required. pydantic is
-    imported inside the body (registration stores this builder, not a model)."""
-    from pydantic import BaseModel, Field
-
-    class TicketDigest(BaseModel):
-        problem_keywords: list[str] = Field(
-            default_factory=list, description="Salient problem/domain keywords (deduped)."
-        )
-        component_or_area: str = Field(
-            default="", description="Component / subsystem / area the ticket concerns."
-        )
-        key_entities: list[str] = Field(
-            default_factory=list,
-            description="Named entities: config keys, schema/table names, files, functions.",
-        )
-        propositions: list[str] = Field(
-            default_factory=list,
-            description="2-6 atomic problem/repro statements; the op enforces the count bound.",
-        )
-
-    return TicketDigest
-
-
-def overlap_verdict_response_model() -> type:
-    """Structured-output model for one ordered-pair overlap-judge call (epic only-crave-art,
-    9022), mirroring ``overlap_verdict.schema.json``. pydantic imported inside the body."""
-    from pydantic import BaseModel, Field, field_validator
-
-    class OverlapVerdict(BaseModel):
-        relation: str = Field(
-            default="related_distinct",
-            description="First <relation> Second (closed relation enum).",
-        )
-        shared_artifact: str | None = Field(
-            default=None, description="The concrete named shared artifact, or null."
-        )
-        confidence: float = Field(default=0.0, description="Confidence 0.0-1.0.")
-        abstain: bool = Field(default=False, description="True when the judge is unsure.")
-
-        @field_validator("relation")
-        @classmethod
-        def _norm_relation(cls, v: str) -> str:
-            r = str(v).strip().lower()
-            allowed = {"duplicates", "supersedes", "depends_on", "related_distinct", "unrelated"}
-            return r if r in allowed else "related_distinct"
-
-    return OverlapVerdict
-
-
-def overlap_verdict_batch_response_model() -> type:
-    """Structured-output model for ONE BATCHED overlap-judge call (c403): the shared digest is
-    judged against several candidates at once, so the response is a LIST of verdicts, each
-    echoing the ``candidate_id`` it was given.
-
-    The entry SUBCLASSES the single-pair model so the relation enum, its normalizing validator
-    and the three other fields stay single-sourced — a batched relation and a single-pair one
-    must never be able to drift apart. No JSON Schema file: like ``plan_review_novelty``, this
-    is an internal contract with no ``--output`` surface.
-
-    The entry's judgement fields are REQUIRED here, unlike on the single-pair parent (ticket
-    d147). The parent's all-defaulted shape is a deliberate safe-default for ONE object — a
-    sparse payload still reads as a non-surfacing verdict. Repeated across a LIST it is not
-    safe, and measurably was not: with every field optional the model omitted ``confidence``,
-    which defaulted to 0.0 and so could never clear ``overlap_conf_threshold``, and its
-    multi-entry tool arguments degenerated outright (whole entries collapsing into the first
-    string field). Live 6-candidate batches went from malformed-and-abstaining to 6/6 clean
-    verdicts once these four fields were made required, because a required field is what tells
-    the model the value is not optional to think about. ``shared_artifact`` stays optional: a
-    null there is a MEANINGFUL answer ("no artifact I can name"), not an omission.
-
-    A model that now omits a required field fails validation and — with the judge's
-    ``structured_retry_limit=0`` — abstains the batch, which is the fail-safe direction: the
-    overlap step is advisory, and a dropped finding is cheaper than a false one."""
-    from pydantic import BaseModel, Field
-
-    OverlapVerdict = overlap_verdict_response_model()
-
-    class OverlapVerdictEntry(OverlapVerdict):  # type: ignore[misc,valid-type]
-        # Declared FIRST so it is the first argument the model writes for each entry, anchoring
-        # the entry to the id it is answering for before it starts judging.
-        candidate_id: str = Field(
-            description="The candidate_id given in the request, echoed back verbatim.",
-        )
-        relation: str = Field(
-            description="REQUIRED. First <relation> Second (closed relation enum).",
-        )
-        confidence: float = Field(
-            description=(
-                "REQUIRED. Your honest confidence (0.0-1.0) in the relation stated for THIS "
-                "candidate. Judge it per entry — never omit it, and never leave it at 0.0 "
-                "unless you genuinely have no confidence in your own verdict."
-            ),
-        )
-        abstain: bool = Field(
-            description="REQUIRED. True when the judge is unsure about this candidate.",
-        )
-
-    class OverlapVerdictBatch(BaseModel):
-        verdicts: list[OverlapVerdictEntry] = Field(
-            default_factory=list, description="Exactly one entry per candidate in the request."
-        )
-
-    return OverlapVerdictBatch
-
-
 def epic_bug_screen_verdict_response_model() -> type:
     """Structured-output model for one single-turn epic-close bug-screen call (ticket 4b54),
     mirroring ``epic_bug_screen_verdict.schema.json``. The normalizing validator's DEFAULT is
     ``C`` (unrelated) — any out-of-vocabulary, malformed, or missing verdict coerces to the
-    NON-SURFACING value (the overlap_verdict safe-default idiom): a garbled screen output
+    NON-SURFACING value (a safe-default idiom): a garbled screen output
     degrades open and never fabricates an A-candidate. pydantic imported inside the body."""
     from pydantic import BaseModel, Field, field_validator
 
@@ -287,13 +180,7 @@ def epic_bug_screen_verdict_response_model() -> type:
 # Built-ins. ``review_result`` (the default findings shape) and ``completion_verdict``.
 register_contract("review_result", findings.findings_response_model)
 register_contract("completion_verdict", completion_verdict_response_model)
-# Cupid ticket-digest op (epic only-crave-art, ee3d). Registered here — co-located with
-# ``response_model_for`` — so importing this module to call it guarantees the digest
-# contract is registered before first use (no startup-import ordering assumption).
-register_contract("ticket_digest", ticket_digest_response_model)
-# Stage-2 overlap judge (9022) — same co-location guarantee.
-register_contract("overlap_verdict", overlap_verdict_response_model)
-# The batched form of the same judge call (c403) — one entry per candidate.
-register_contract("overlap_verdict_batch", overlap_verdict_batch_response_model)
-# The epic-close bug screen's forced-choice verdict (4b54) — same co-location guarantee.
+# The epic-close bug screen's forced-choice verdict (4b54). Registered here — co-located
+# with ``response_model_for`` — so importing this module to call it guarantees the contract
+# is registered before first use (no startup-import ordering assumption).
 register_contract("epic_bug_screen_verdict", epic_bug_screen_verdict_response_model)

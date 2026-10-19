@@ -12,18 +12,13 @@ import importlib.util
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-# The `_llm_*` env-reading helpers (and the non-env `_llm_drain_mode` negative control) live in
+# The `_llm_*` env-reading helpers live in
 # `config_readers.py` (extracted from `config.py` for module-size headroom, ticket 02b7); this AST
 # probe follows them so it keeps finding the same function definitions it always has.
 _CONFIG_PY = REPO_ROOT / "src" / "rebar" / "llm" / "config_readers.py"
 
 # Read through `_llm_float`, and therefore invisible to the generator before b00f.
-_FLOAT_VARS = (
-    "REBAR_LLM_TEMPERATURE",
-    "REBAR_LLM_OVERLAP_MAX_DOC_FREQ",
-    "REBAR_LLM_OVERLAP_MIN_SHOULD_MATCH",
-    "REBAR_LLM_OVERLAP_CONF_THRESHOLD",
-)
+_FLOAT_VARS = ("REBAR_LLM_TEMPERATURE",)
 
 
 def _gen_env_registry():
@@ -42,8 +37,8 @@ def _llm_helpers_with_env_arg() -> dict[str, int]:
     the 0-indexed position of that parameter.
 
     Keyed off the `env_name` parameter rather than the `_llm_` prefix, because the prefix alone
-    over-matches: `_llm_drain_mode(raw)` is an enum COERCION helper that never touches the
-    environment, so requiring it to be registered would be wrong.
+    can over-match: an `_llm_*` coercion helper that never touches the environment must not be
+    required to be registered.
     """
     module = ast.parse(_CONFIG_PY.read_text(encoding="utf-8"))
     found: dict[str, int] = {}
@@ -56,7 +51,7 @@ def _llm_helpers_with_env_arg() -> dict[str, int]:
 
 
 def test_the_llm_float_vars_are_visible_to_the_generator() -> None:
-    """The scan must SEE the four `_llm_float` reads. Fails before b00f: the helper is not in
+    """The scan must SEE the `_llm_float` reads. Fails before b00f: the helper is not in
     `KNOWN_ENV_HELPERS`, so the scanner walks straight past every call to it."""
     gen = _gen_env_registry()
     reads, _dynamic = gen.scan(gen.DEFAULT_SCAN_ROOT)
@@ -91,19 +86,23 @@ def test_every_env_reading_llm_helper_is_registered_at_the_right_position() -> N
     assert wrong_position == {}, f"registered index != actual env_name position: {wrong_position}"
 
 
-def test_a_non_env_llm_helper_is_not_registered() -> None:
+def test_no_registered_llm_helper_lacks_an_env_name_parameter() -> None:
     """The negative control that stops the guard above from degenerating into 'register everything
-    beginning with _llm_'. `_llm_drain_mode(raw)` coerces an already-read string to an enum; it
-    reads no environment variable, and registering it would make the scanner mis-file whatever
-    happens to sit at its argument index."""
+    beginning with _llm_': every registered `_llm_*` helper defined here must actually take an
+    `env_name`, because registering one that reads no environment variable would make the
+    scanner mis-file whatever sits at its argument index. (The original control, an enum
+    coercion helper, was retired with the overlap detector, ADR 0086.)"""
     gen = _gen_env_registry()
     module = ast.parse(_CONFIG_PY.read_text(encoding="utf-8"))
-    drain = [
-        n for n in module.body if isinstance(n, ast.FunctionDef) and n.name == "_llm_drain_mode"
-    ]
-    assert drain, "_llm_drain_mode has moved or been renamed — re-target this control"
-    assert "env_name" not in [a.arg for a in drain[0].args.args]
-    assert "_llm_drain_mode" not in gen.KNOWN_ENV_HELPERS
+    defined = {
+        n.name for n in module.body if isinstance(n, ast.FunctionDef) and n.name.startswith("_llm_")
+    }
+    registered_here = {name for name in gen.KNOWN_ENV_HELPERS if name in defined}
+    assert registered_here, "no registered _llm_* helper found here — the probe itself has broken"
+    assert registered_here <= set(_llm_helpers_with_env_arg()), (
+        f"registered helpers without an env_name parameter: "
+        f"{sorted(registered_here - set(_llm_helpers_with_env_arg()))}"
+    )
 
 
 def test_dropping_a_used_helpers_row_fails_loudly_instead_of_shrinking(tmp_path) -> None:

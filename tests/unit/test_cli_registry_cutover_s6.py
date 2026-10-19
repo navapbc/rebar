@@ -2,7 +2,7 @@
 
 S3 cut the CORE + BRIDGE routes over to registry-driven dispatch
 (:func:`rebar._cli._execute.execute`), but the INTERCEPT commands
-(``reconcile`` / ``review-plan`` / ``enrich`` / ``config`` / ``verify-*`` / …) still
+(``reconcile`` / ``review-plan`` / ``config`` / ``verify-*`` / …) still
 dispatched through an explicit ``if argv[0] == …`` ladder in
 :func:`rebar._cli._main_dispatch`, and their registry routes carried NO execution
 metadata (``handler is None``). Because :func:`rebar._cli._execute.execute` RAISES on a

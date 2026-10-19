@@ -169,7 +169,7 @@ def test_detector_reports_a_foreign_root_while_os_name_is_rebound(
     """The detector must not depend on ``os.name`` telling the truth.
 
     Rebinding ``os.name`` to ``"nt"`` is the supported way to exercise a Windows branch,
-    and ``tests/unit/test_enrich_drain.py`` does exactly that. Because ``os`` is one shared
+    and ``tests/unit/test_spawn_detached.py`` does exactly that. Because ``os`` is one shared
     module object the rebinding is process-wide, and ``pathlib.Path.__new__`` dispatches on
     the live value, so every ``Path(...)`` built while it holds becomes a ``WindowsPath``
     and raises ``NotImplementedError`` on POSIX. ``monkeypatch`` undoes its rebinding LAST

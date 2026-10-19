@@ -21,7 +21,7 @@ exists:
 * hold age is :func:`rebar._store.lock_owner._mkdir_lock_age_s` (the lock dir's mtime is
   the acquisition time — the stamp is never refreshed);
 * staleness is :func:`rebar._store.lock_owner._mkdir_lock_is_stale` for the mkdir leg and
-  :func:`rebar._store.lock_owner.stamped_file_is_stale` for the file-shaped drain lock —
+  :func:`rebar._store.lock_owner.stamped_file_is_stale` for the file-shaped worker locks —
   two readers of ONE table and NOTHING ELSE. That table lives in
   :func:`rebar._store.lock_owner._stamp_is_stale` — the pid-recycle qualification, the
   refuse-without-proof rule (bug yaw-gravel-linen) and the wall-clock ceiling (bug
@@ -40,20 +40,19 @@ under contention, not a fault. A lock the shared staleness function calls stale 
 FINDING, because no live process claims it. Findings feed doctor's existing exit rule
 (exit 1 while anything is outstanding).
 
-Six legs are reported. The two tickets-store legs are the dual-window contract
+Five legs are reported. The two tickets-store legs are the dual-window contract
 (:mod:`rebar._store.lock`): ``.ticket-write.lock`` (fcntl) and ``.ticket-write.lock.d``
 (mkdir, the leg that carries the ownership stamp). ``.rebar/hlc.lock`` is the clock's
-short RMW lock (:mod:`rebar._store.hlc`) and ``.rebar/enrich-drain.lock`` is the drain
-lock (:mod:`rebar.llm.enrich_drain`). The three fcntl-family legs are kernel-mediated,
+short RMW lock (:mod:`rebar._store.hlc`). The three fcntl-family legs are kernel-mediated,
 so the kernel drops them when their holder dies and "stale" is not a state they can
-reach; the drain lock is an ``O_EXCL`` file whose CONTENTS are its owner stamp, so it
-carries a holder and a real staleness verdict from the same shared function (bug
-knavish-stimulated-bluebottle; before it the drain lock was unstamped and this row
-could only report ``not-assessable``). ``.rebar/compact-worker.lock`` is the compaction
-trigger's worker lock (:mod:`rebar._commands.compact_trigger`, which reuses the drain's
-stamped-lock machinery), the same existence-plus-stamp shape — and the lock most likely
-to be held by a DETACHED background process, which is exactly the holder an operator
-cannot find with ``ps``. The sixth leg is the snapshot-GC trigger's worker lock
+reach. ``.rebar/compact-worker.lock`` is the compaction trigger's worker lock
+(:mod:`rebar._commands.compact_trigger`): an ``O_EXCL`` file whose CONTENTS are its owner
+stamp, so it carries a holder and a real staleness verdict from the shared stamped-lock
+function (bug knavish-stimulated-bluebottle) — and the lock most likely to be held by a
+DETACHED background process, which is exactly the holder an operator cannot find with
+``ps``. (The retired enrichment drain's ``.rebar/enrich-drain.lock`` is no longer a leg: it
+has no producer, so a leftover file is not reported — ADR 0086 retired.) The fifth leg is
+the snapshot-GC trigger's worker lock
 (:mod:`rebar._snapshot.gc_trigger`, the same shared stamped-lock machinery and the same
 detached-worker shape) — the one leg NOT under the tracker: it lives on the PER-HOST
 snapshot store (``<store>/gc/worker.lock``, where the store root is
@@ -101,12 +100,10 @@ KIND_STALE_LOCK = "stale-lock"
 LEG_TICKETS_FCNTL = "tickets-write-fcntl"
 LEG_TICKETS_MKDIR = "tickets-write-mkdir"
 LEG_HLC = "hlc"
-LEG_ENRICH_DRAIN = "enrich-drain"
 LEG_COMPACT_WORKER = "compact-worker"
 LEG_SNAPSHOT_GC_WORKER = "snapshot-gc-worker"
 
 _HLC_LOCK_NAME = "hlc.lock"
-_DRAIN_LOCK_NAME = "enrich-drain.lock"
 _COMPACT_WORKER_LOCK_NAME = "compact-worker.lock"
 
 _STALE_ADVICE = (
@@ -260,7 +257,7 @@ def _existence_report(name: str, path: str, *, note: str) -> dict[str, Any]:
     """A report row for an ``O_EXCL`` existence lock: held iff the file is there.
 
     The lock file carries the v2 ownership stamp as its own contents (bug
-    knavish-stimulated-bluebottle gave the drain lock the discipline the mkdir leg
+    knavish-stimulated-bluebottle gave the file locks the discipline the mkdir leg
     already had), so this decodes host/ns/pid/start, adds the same same-host-only
     liveness verdict, and asks :func:`rebar._store.lock_owner.stamped_file_is_stale` —
     the shared decision table, reached by a second reader rather than a second heuristic.
@@ -375,14 +372,6 @@ def scan_locks(tracker: str) -> list[dict[str, Any]]:
                 LEG_HLC,
                 os.path.join(rebar_dir, _HLC_LOCK_NAME),
                 note="the clock's read-modify-write lock, held only for one stamp",
-            ),
-        ),
-        (
-            LEG_ENRICH_DRAIN,
-            lambda: _existence_report(
-                LEG_ENRICH_DRAIN,
-                os.path.join(rebar_dir, _DRAIN_LOCK_NAME),
-                note="no drain process holds the enrichment drain lock",
             ),
         ),
         (

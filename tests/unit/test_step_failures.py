@@ -22,13 +22,13 @@ pytestmark = pytest.mark.unit
 def test_records_and_drains_per_step_counts():
     """The shape a caller consumes: a total plus a per-step breakdown, keyed by call label."""
     with step_failures.collect_step_failures():
-        step_failures.record("overlap-judge")
-        step_failures.record("overlap-judge")
-        step_failures.record("overlap-judge")
+        step_failures.record("epic-bug-screen")
+        step_failures.record("epic-bug-screen")
+        step_failures.record("epic-bug-screen")
         step_failures.record("verify")
         assert step_failures.drain() == {
             "total": 4,
-            "by_step": {"overlap-judge": 3, "verify": 1},
+            "by_step": {"epic-bug-screen": 3, "verify": 1},
         }
 
 
@@ -41,7 +41,7 @@ def test_drain_is_empty_when_nothing_failed():
 def test_record_outside_a_scope_is_a_silent_no_op():
     """Unit-testing a runner in isolation must neither raise nor leak a count into the next
     run that happens to open a scope."""
-    step_failures.record("overlap-judge")  # no scope active
+    step_failures.record("epic-bug-screen")  # no scope active
     assert step_failures.drain() == {}
     with step_failures.collect_step_failures():
         assert step_failures.drain() == {}
@@ -50,7 +50,7 @@ def test_record_outside_a_scope_is_a_silent_no_op():
 def test_drain_clears_so_a_second_run_starts_at_zero():
     """Destructive drain + scope exit: a count can never survive into a later run/ticket."""
     with step_failures.collect_step_failures():
-        step_failures.record("overlap-judge")
+        step_failures.record("epic-bug-screen")
         assert step_failures.drain()["total"] == 1
         assert step_failures.drain() == {}  # drained
     with step_failures.collect_step_failures():
@@ -63,8 +63,8 @@ def test_nested_scope_reuses_the_active_sink():
     shadow the run's sink and silently discard counts on exit."""
     with step_failures.collect_step_failures():
         with step_failures.collect_step_failures():
-            step_failures.record("overlap-judge")
-        assert step_failures.drain() == {"total": 1, "by_step": {"overlap-judge": 1}}
+            step_failures.record("epic-bug-screen")
+        assert step_failures.drain() == {"total": 1, "by_step": {"epic-bug-screen": 1}}
 
 
 def test_empty_label_falls_back_to_the_question_mark_key():
@@ -113,12 +113,12 @@ def _coach_ctx():
 def test_verdict_coverage_carries_the_tally_when_a_step_failed():
     op = _coach_op()
     with step_failures.collect_step_failures():
-        step_failures.record("overlap-judge")
-        step_failures.record("overlap-judge")
+        step_failures.record("epic-bug-screen")
+        step_failures.record("epic-bug-screen")
         out = op(_coach_ctx())
     assert out["coverage"]["llm_step_failures"] == {
         "total": 2,
-        "by_step": {"overlap-judge": 2},
+        "by_step": {"epic-bug-screen": 2},
     }
     # Observability only: the tally must not have moved the verdict.
     assert out["verdict"] == "PASS"
@@ -279,13 +279,13 @@ def test_a_failed_runner_call_reaches_the_sink_under_its_call_label():
             system_prompt="s",
             instructions="i",
             config=cfg,
-            reviewers=["overlap-judge"],
+            reviewers=["epic-bug-screen"],
             mode="text",
         )
         with step_failures.collect_step_failures():
             with pytest.raises(Exception):  # noqa: B017 — the spine always re-raises
                 PydanticAIRunner(cfg, model_override=FunctionModel(blow_up)).run(req)
-            assert step_failures.drain() == {"total": 1, "by_step": {"overlap-judge": 1}}
+            assert step_failures.drain() == {"total": 1, "by_step": {"epic-bug-screen": 1}}
     finally:
         pydantic_ai.models.ALLOW_MODEL_REQUESTS = original
 
@@ -308,13 +308,13 @@ def test_text_output_names_the_total_and_the_per_step_counts():
             "coverage": {
                 "llm_step_failures": {
                     "total": 4,
-                    "by_step": {"overlap-judge": 3, "verify": 1},
+                    "by_step": {"epic-bug-screen": 3, "verify": 1},
                 }
             },
         }
     )
     assert "llm step failures: 4" in out
-    assert "overlap-judge=3" in out
+    assert "epic-bug-screen=3" in out
     assert "verify=1" in out
     assert "non-fatal" in out
 

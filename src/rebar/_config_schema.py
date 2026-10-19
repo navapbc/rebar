@@ -80,7 +80,8 @@ class VerifyConfig:
     )
     suggest_duplicate_tickets: bool = _documented(
         False,
-        "Adds duplicate, supersession, and dependency suggestions plus recent-title warnings.",
+        "Warns at create time when another ticket with the same normalized title was created "
+        "inside the recency window (rebar create duplicate_warning).",
     )
     require_ticket_for_commit: bool = _documented(
         False,

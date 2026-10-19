@@ -597,20 +597,6 @@ def _run_plan_review(
 
     plan_review_recovery.strip_surfaced_journal(verdict.get("coverage"))
 
-    # Store-wide cross-ticket overlap (epic only-crave-art, story 0f70) — ADVISORY ONLY. Runs
-    # AFTER signing + sidecar.emit; rides in a SEPARATE `overlap[]` key that never affects the
-    # verdict/claim gate. Gated OFF by default, to real runs only, and graceful-skips (→ []) when
-    # the LLM/agents extra is absent. `overlap[]` is added only when enabled (shape unchanged off).
-    if emit_sidecar:
-        from rebar import config as _overlap_config
-
-        if _overlap_config.compose_config(repo_root).verify.suggest_duplicate_tickets:
-            from rebar.llm.overlap.wire import overlap_findings
-
-            verdict["overlap"] = overlap_findings(
-                ticket_id, repo_root=repo_root, config=cfg, runner=runner
-            )
-
     # Validate the assembled verdict against its documented contract (shape-only, permissive).
     from rebar.llm import findings
 

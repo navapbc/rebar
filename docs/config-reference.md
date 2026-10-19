@@ -66,7 +66,7 @@ The 105 typed `section.field` keys with type, default, description, and lifecycl
 | `verify.completion_pinned_ticket_view` | `bool` | `False` | Uses the experimental non-epic lazy ticket view and atomic completion-close bundle when sync.push is always. | active |
 | `verify.require_plan_review_for_close` | `bool` | `False` | Requires a current plan-review attestation when a work ticket closes. | active |
 | `verify.require_plan_review_for_claim` | `bool` | `False` | Requires a current passing plan-review attestation before a work ticket can be claimed. | active |
-| `verify.suggest_duplicate_tickets` | `bool` | `False` | Adds duplicate, supersession, and dependency suggestions plus recent-title warnings. | active |
+| `verify.suggest_duplicate_tickets` | `bool` | `False` | Warns at create time when another ticket with the same normalized title was created inside the recency window (rebar create duplicate_warning). | active |
 | `verify.require_ticket_for_commit` | `bool` | `False` | Requires each checked commit to reference a ticket that resolves in the store. | active |
 | `verify.enable_code_review` | `bool` | `False` | Enables automatic code-review dispatch without disabling explicit review requests. | active |
 | `verify.verify_window_headroom` | `float` | `0.8` | Limits each plan-review verification request to this fraction of the model window. | active |
