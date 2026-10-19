@@ -11,11 +11,13 @@ counts calls, so the verdict is a call count — deterministic, zero tokens.
 from __future__ import annotations
 
 import threading
+import time
 from types import SimpleNamespace
 
 import anyio
 import pytest
 
+import rebar
 from rebar import _mcp_inflight as inflight
 from rebar._mcp_health import offload_sync_tools
 from rebar._mcp_llm import register_llm_tools
@@ -107,3 +109,142 @@ def test_two_concurrent_calls_invoke_the_gate_exactly_once(tool_name, monkeypatc
     # Both callers received a PASS verdict (FastMCP returns a (content, structured) tuple).
     for key in ("a", "b"):
         assert results[key] is not None
+
+
+# ── Material-sensitive dedup (bug 3b27-8f4b): an edit must not attach to a stale run ────────
+
+
+@pytest.fixture
+def store(tmp_path, monkeypatch):
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (
+        ("git", "init", "-q"),
+        ("git", "config", "user.email", "t@e.com"),
+        ("git", "config", "user.name", "t"),
+        ("git", "commit", "-q", "--allow-empty", "-m", "i"),
+    ):
+        subprocess.run(args, cwd=repo, check=True, capture_output=True)
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    monkeypatch.chdir(repo)
+    rebar.init_repo(repo_root=str(repo))
+    inflight.reset_registry()
+    return repo
+
+
+class _DescriptionRecordingReview:
+    """A blocking ``rebar.llm.review_plan`` stand-in that records the description the
+    store held when each gate call began — the material that call would review."""
+
+    def __init__(self):
+        self.seen: list[str] = []
+        self.release = threading.Event()
+        self._lock = threading.Lock()
+        self.first_started = threading.Event()
+
+    @property
+    def calls(self) -> int:
+        with self._lock:
+            return len(self.seen)
+
+    def __call__(self, ticket_id, **kwargs):
+        import rebar
+
+        text = rebar.show_ticket(ticket_id)["description"]
+        with self._lock:
+            self.seen.append(text)
+        self.first_started.set()
+        self.release.wait(timeout=5)
+        return {"verdict": "BLOCK", "ticket_id": ticket_id}
+
+
+def _wait_until(predicate, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
+def test_review_plan_start_after_an_edit_runs_a_fresh_review(store, monkeypatch):
+    import rebar.llm
+
+    tid = rebar.create_ticket("task", "stale review", description="## Plan\nORIGINAL\n")
+    fake = _DescriptionRecordingReview()
+    monkeypatch.setattr(rebar.llm, "review_plan", fake)
+    mcp = _server_with_llm_tools()
+
+    async def start():
+        return await mcp._tool_manager.call_tool("review_plan_start", {"ticket_id": tid})
+
+    first = anyio.run(start)
+    assert fake.first_started.wait(timeout=5)
+    rebar.edit_ticket(tid, description="## Plan\nEDITED\n")
+    second = anyio.run(start)
+    try:
+        assert second["job_id"] != first["job_id"], (
+            "a start issued after the edit attached to the run that read the old description"
+        )
+        assert _wait_until(lambda: fake.calls == 2)
+        assert "EDITED" in fake.seen[1]
+    finally:
+        fake.release.set()
+
+
+def test_sync_review_plan_after_an_edit_does_not_share_the_stale_result(store, monkeypatch):
+    import rebar.llm
+
+    tid = rebar.create_ticket("task", "stale sync review", description="## Plan\nORIGINAL\n")
+    fake = _DescriptionRecordingReview()
+    monkeypatch.setattr(rebar.llm, "review_plan", fake)
+    # readonly keeps the gate body from signing; the dedup key still applies.
+    mcp = _server_with_llm_tools(readonly=True)
+
+    async def scenario():
+        async def leader():
+            await mcp._tool_manager.call_tool("review_plan", {"ticket_id": tid})
+
+        async def after_edit():
+            while not fake.first_started.is_set():  # noqa: ASYNC110 — set from a worker thread
+                await anyio.sleep(0.005)
+            await anyio.to_thread.run_sync(
+                lambda: rebar.edit_ticket(tid, description="## Plan\nEDITED\n")
+            )
+            await mcp._tool_manager.call_tool("review_plan", {"ticket_id": tid})
+
+        async def releaser():
+            # Release once the post-edit call has entered the gate itself; if it attached to
+            # the stale run instead, release after the bound so the test fails, not hangs.
+            deadline = anyio.current_time() + 3.0
+            while fake.calls < 2 and anyio.current_time() < deadline:  # noqa: ASYNC110
+                await anyio.sleep(0.01)
+            fake.release.set()
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(leader)
+            tg.start_soon(after_edit)
+            tg.start_soon(releaser)
+
+    anyio.run(scenario)
+
+    assert fake.calls == 2, "the post-edit call shared the run that reviewed the old text"
+    assert "EDITED" in fake.seen[1]
+
+
+def test_plan_review_variant_tracks_material_and_degrades_to_a_none_key(monkeypatch):
+    from rebar._mcp_llm import _plan_review_variant
+    from rebar.llm.plan_review import attest
+
+    monkeypatch.setattr(attest, "current_material_fingerprint", lambda _tid: "aaaa")
+    before = _plan_review_variant("t", None)
+    monkeypatch.setattr(attest, "current_material_fingerprint", lambda _tid: "bbbb")
+    after = _plan_review_variant("t", None)
+    monkeypatch.setattr(attest, "current_material_fingerprint", lambda _tid: None)
+    unreadable = _plan_review_variant("t", None)
+
+    assert before != after, "a material change must change the dedup variant"
+    assert unreadable == "source=attested;material=None"
+    assert unreadable not in {before, after}

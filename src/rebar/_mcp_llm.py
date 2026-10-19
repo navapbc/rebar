@@ -69,6 +69,20 @@ def _record_verify_completion(result, ticket_id: str, *, readonly: bool):
     return result
 
 
+def _plan_review_variant(ticket_id: str, source: str | None) -> str:
+    """Dedup variant for plan review, keyed on the ticket's CURRENT plan material.
+
+    Without the material fingerprint, a start issued after a description edit attached to
+    the in-flight run that had already read the old text, so the author polled findings for
+    a plan they had replaced (bug 3b27-8f4b). When the light read fails the fingerprint is
+    ``None`` and the variant is the literal ``material=None``: such calls de-duplicate only
+    with each other, never with a run keyed on a real fingerprint, and the gate still runs.
+    """
+    from rebar.llm.plan_review.attest import current_material_fingerprint
+
+    return f"source={source or 'attested'};material={current_material_fingerprint(ticket_id)}"
+
+
 def _review_plan_body(ticket_id: str, ref, source, force: bool, *, readonly: bool) -> dict:
     """Run the synchronous plan unit shared by singleflight callers.
 
@@ -248,14 +262,15 @@ def _register_gate_start_tools(mcp, ann, allow_llm, readonly) -> None:
         # Basis resolution and index writes block, so keep them off the event loop.
         import anyio.to_thread  # deferred: keep this module importable with core deps only
 
+        # The material read for the dedup variant is a store read too, so it runs in the
+        # worker thread with the rest of the start.
         return await anyio.to_thread.run_sync(
-            functools.partial(
-                _start_gate_job,
+            lambda: _start_gate_job(
                 "plan_review",
                 ticket_id,
                 ref=ref,
                 source=source,
-                variant=f"source={source or 'attested'}",
+                variant=_plan_review_variant(ticket_id, source),
                 readonly=ro,
                 force=force,
                 work=lambda: _review_plan_body(ticket_id, ref, source, force, readonly=ro),
@@ -442,7 +457,7 @@ def register_llm_tools(mcp, ctx) -> None:
             ticket_id,
             ref=ref,
             source=source,
-            variant=f"source={source or 'attested'}",
+            variant=_plan_review_variant(ticket_id, source),
             readonly=ro,
             force=force,
             work=lambda: _review_plan_body(ticket_id, ref, source, force, readonly=ro),
