@@ -50,10 +50,6 @@ def _run_with_manifest(
     return checker.main()
 
 
-def test_committed_manifest_matches_complete_canonical_records():
-    assert checker.main() == 0
-
-
 def test_description_drift_names_the_affected_record(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

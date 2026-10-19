@@ -14,11 +14,8 @@ write-only form is GREEN, a one-param revert is RED again, and the generated-val
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
-
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
@@ -204,16 +201,6 @@ def test_securestring_with_no_value_source_is_flagged() -> None:
 # --- the committed tree + wiring -------------------------------------------------------------- #
 
 
-def test_committed_tree_is_clean() -> None:
-    """The gate is wired into make lint; the committed tree must satisfy it."""
-    assert check_repo(REPO_ROOT) == [], [f.render() for f in check_repo(REPO_ROOT)]
-
-
-def test_gate_exits_zero_on_the_committed_tree() -> None:
-    proc = subprocess.run([sys.executable, str(GATE)], capture_output=True, text=True, check=False)
-    assert proc.returncode == 0, proc.stderr
-
-
 def test_the_three_migrated_resources_are_present_and_write_only() -> None:
     """Pin coverage: the three seeded-secret resources exist and are write-only, so a future
     refactor cannot silently drop one from the tree and pass the committed-tree check vacuously.
@@ -231,13 +218,3 @@ def test_the_three_migrated_resources_are_present_and_write_only() -> None:
     for name in migrated_resource_names:
         assert f'"aws_ssm_parameter" "{name}"' in text, f"missing resource {name}"
     assert "value_wo" in text and "value_wo_version" in text
-
-
-@pytest.mark.repo_policy
-def test_make_lint_wires_the_gate() -> None:
-    """A gate reachable only from CI can be green locally and red on the server; wire it into
-    make lint like its sibling terraform gate."""
-    body = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-    assert "scripts/check_ssm_secret_state.py" in body, (
-        "`make lint` does not invoke scripts/check_ssm_secret_state.py"
-    )

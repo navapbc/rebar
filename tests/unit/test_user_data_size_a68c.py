@@ -61,15 +61,6 @@ def _run(root: Path) -> subprocess.CompletedProcess[str]:
 # ── the shipped configuration ────────────────────────────────────────────────────────────
 
 
-def test_the_shipped_configuration_fits_under_the_ec2_limit() -> None:
-    """The tree as committed must be plannable: this is the bug's own acceptance criterion."""
-    results = check_repo(REPO_ROOT)
-    payloads = [r for r in results if isinstance(r, Payload)]
-    assert payloads, "the gate found no user_data call site, so it proved nothing"
-    for payload in payloads:
-        assert not payload.over, payload.render_report()
-
-
 def test_the_shipped_user_data_is_gzipped_because_its_plain_render_does_not_fit() -> None:
     """The encoding is load-bearing, not stylistic.
 

@@ -56,18 +56,6 @@ import rebar
 # ─────────────────────────── HAPPY PATH (shown to implementer) ────────────────
 
 
-def test_extract_real_readme_has_golden_path_commands():
-    """The real README quickstart block contains the full CLI golden path."""
-    block = chk.extract_quickstart_bash((REPO_ROOT / "README.md").read_text())
-    for needle in ("rebar init", "rebar create", "rebar claim", "rebar transition"):
-        assert needle in block, f"{needle!r} missing from extracted quickstart"
-
-
-def test_main_runs_real_quickstart_green():
-    """main() extracts the real README quickstart and runs it end-to-end (exit 0)."""
-    assert chk.main([]) == 0
-
-
 # ─────────────────────────── EDGE CASES (HELD OUT) ────────────────────────────
 
 

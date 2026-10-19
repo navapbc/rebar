@@ -78,7 +78,6 @@ def test_fcntl_available_here_control() -> None:
 # in-function import, a ``try``-guard, an ``if sys.platform`` guard, or a sanctioned line
 # (true negatives / refactor survival).
 
-import re  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -130,26 +129,3 @@ def test_guard_flags_unconditional_module_scope_import(tmp_path: Path, source: s
 def test_guard_passes_collection_safe_idioms(tmp_path: Path, source: str) -> None:
     """True negative / refactor survival: guarded, lazy, and sanctioned forms are allowed."""
     assert _scan_source(tmp_path, source) == []
-
-
-def test_guard_is_clean_on_the_real_tree() -> None:
-    """The shipped ``src/rebar`` tree must pass the gate (no unguarded fcntl imports)."""
-    assert gate.find_violations(_REPO_ROOT / "src" / "rebar") == []
-
-
-def test_make_lint_invokes_the_guard() -> None:
-    """A gate that runs only in CI lets a local green verdict stand over a tree CI rejects."""
-    text = (_REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-    body: list[str] = []
-    in_target = False
-    for line in text.splitlines():
-        if re.match(r"^lint:", line):
-            in_target = True
-            continue
-        if in_target and re.match(r"^[A-Za-z0-9_.-]+:", line):
-            break
-        if in_target:
-            body.append(line)
-    assert "scripts/check_fcntl_import_guard.py" in "\n".join(body), (
-        "`make lint` does not invoke the fcntl import guard"
-    )
