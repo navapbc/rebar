@@ -373,7 +373,7 @@ substring; default sort preserved.  **Effort.** ~1–1.5 days.
 
 ---
 
-### P1.2 — `rebar export` / `rebar import`
+### P1.2 — `rebar store export` / `rebar store import`
 
 **Goal.** `export` = stable JSON snapshot of replayed state; `import` = create
 tickets from JSON / GitHub-issues payloads through the normal locked write path.

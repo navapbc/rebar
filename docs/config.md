@@ -193,7 +193,7 @@ compact.trigger          = "async"  # async | always | off (env REBAR_COMPACT_TR
                         # library/CLI adopter does not have. So a close TRIGGERS compaction
                         # without performing it: after the store lock is released it makes two
                         # O(1) checks and, if either fires, detaches a worker that runs
-                        # `compact-all` out of band. "always" runs that sweep INLINE instead
+                        # `rebar store compact --all` out of band. "always" runs that sweep INLINE instead
                         # (tests/CI, where a detached child would outlive the assertion);
                         # "off" disables it for operators who drive compaction themselves.
                         # A v1 no-op on Windows.
@@ -255,7 +255,7 @@ tracker.branch = "tickets"           # env REBAR_TRACKER_BRANCH; the orphan bran
 
 # idempotent ensure-registry pending-hint (epic odd-vortex-elbow; see docs/migrations.md)
 ensure.hint_interval_secs = 86400    # min seconds between write-path "store is behind the ensure
-                                      # registry — run `rebar fsck --repair`" nudges, per store, per
+                                      # registry — run `rebar store fsck --repair`" nudges, per store, per
                                       # process (rate-limit; env REBAR_ENSURE_HINT_INTERVAL_SECS). Min 0.
 ensure.hint_enabled       = true     # kill-switch: false silences the nudge entirely
                                       # (env REBAR_ENSURE_HINT_ENABLED)
@@ -298,7 +298,7 @@ returns it as the `description_warning` result field, mirroring `push_status`.
 > read/write thereafter. Changing `tracker.dir`/`tracker.branch` on an **already-initialized**
 > repo does **not** migrate the existing store — it orphans the old branch/dir (the old data is
 > left intact but unreferenced). Renaming an existing store is a separate migration and is out
-> of scope; `rebar fsck` WARNs when the configured branch/dir does not match what is actually
+> of scope; `rebar store fsck` WARNs when the configured branch/dir does not match what is actually
 > mounted so the divergence is observable.
 
 ### Code-health analyzers (`code_health.*`)
@@ -380,7 +380,7 @@ not persist a cleartext url.
 
 The SECRET `JIRA_API_TOKEN` stays env-only — never a config key (see Secrets).
 
-**`jira.project` is the seed default, not the only project a store syncs.** A store records its full set of tracker projects in the committed `.bridge_state/projects.json` mapping on the tickets branch. The mapping belongs to the store rather than to one repository. See [ADR 0097](adr/0097-many-to-many-tracker-projects.md). Manage it with `rebar bridge projects {list,set,remove}`. See the [user guide](user-guide.md#jira). The mapping has the shape `{"version": 1, "legacy_default": "REB", "projects": {"REB": {"repos": ["rebar"]}}}`. Its `projects` key set is the sync list. Its `legacy_default` field identifies the project for pre-mapping tickets that do not have a `bridge_project` field. On a store initialized before the mapping existed, the `projects-seed` ensure unit seeds a mapping whose `legacy_default` is the configured `jira.project` and whose `projects` set is empty at the next `init` or `fsck --repair`. See [migrations.md](migrations.md). An unset `jira.project` remains empty. Synchronization requires explicit project configuration. The sync list stays empty until an operator adds a project with `rebar bridge projects set`. Each project's `repos` entry records which repositories that project's tickets belong to.
+**`jira.project` is the seed default, not the only project a store syncs.** A store records its full set of tracker projects in the committed `.bridge_state/projects.json` mapping on the tickets branch. The mapping belongs to the store rather than to one repository. See [ADR 0097](adr/0097-many-to-many-tracker-projects.md). Manage it with `rebar bridge projects {list,set,remove}`. See the [user guide](user-guide.md#jira). The mapping has the shape `{"version": 1, "legacy_default": "REB", "projects": {"REB": {"repos": ["rebar"]}}}`. Its `projects` key set is the sync list. Its `legacy_default` field identifies the project for pre-mapping tickets that do not have a `bridge_project` field. On a store initialized before the mapping existed, the `projects-seed` ensure unit seeds a mapping whose `legacy_default` is the configured `jira.project` and whose `projects` set is empty at the next `init` or `rebar store fsck --repair`. See [migrations.md](migrations.md). An unset `jira.project` remains empty. Synchronization requires explicit project configuration. The sync list stays empty until an operator adds a project with `rebar bridge projects set`. Each project's `repos` entry records which repositories that project's tickets belong to.
 
 **Env-only reconciler flag — silent-no-op canary** (not a config-file key; epic
 f89d, story 2359). `REBAR_RECONCILER_FAIL_SILENT_NOOP` (default off ⇒ **warn-first**):

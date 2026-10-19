@@ -1,11 +1,11 @@
-"""``rebar export`` NDJSON must not put a JSON-uninteroperable integer on the wire,
-and its ``rebar import`` twin must accept the decimal-string form losslessly
+"""``rebar store export`` NDJSON must not put a JSON-uninteroperable integer on the wire,
+and its ``rebar store import`` twin must accept the decimal-string form losslessly
 (bug ``guilty-pusslike-wyvern`` / ``a8db-dc3c-983a-40b0``).
 
 The NDJSON export sibling of ``test_cli_js_safe_integers`` (bug e127). RFC 8259 §6
 guarantees implementations "agree exactly on their numeric values" only for integers in
 ``[-(2**53)+1, (2**53)-1]``. rebar stamps ``time.time_ns()`` timestamps — 19 digits, far
-outside that range — and ``rebar export`` emitted them as bare JSON numbers, so every
+outside that range — and ``rebar store export`` emitted them as bare JSON numbers, so every
 float64 consumer of the export artifact (``jq`` / ``node`` / a DuckDB or pandas JS-based
 loader) read a SILENTLY WRONG value: a stored ``1787860170488898642`` comes back from
 ``node``'s ``JSON.parse`` as ``1787860170488898600``.
@@ -133,7 +133,7 @@ def test_export_emits_no_uninteroperable_integer(ns_ticket: str, rebar_repo: Pat
     assert int(line["comments"][0]["timestamp"]) > JS_SAFE_MAX, "comment ts inside JS-safe range"
 
     hits = _unsafe_ints(line)
-    assert not hits, f"rebar export emitted uninteroperable integers: {hits}"
+    assert not hits, f"rebar store export emitted uninteroperable integers: {hits}"
 
 
 def test_export_timestamps_round_trip_exactly(ns_ticket: str, rebar_repo: Path) -> None:

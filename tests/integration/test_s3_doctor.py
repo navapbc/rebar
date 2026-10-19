@@ -167,7 +167,7 @@ def test_persistent_bad_object_reports_an_object_read_failure_not_a_heads_confli
 ) -> None:
     """When the transient never clears, the error names the real fault.
 
-    ``S3DoctorConflict``'s default hint sends the operator to ``rebar fsck-recover``, which
+    ``S3DoctorConflict``'s default hint sends the operator to ``rebar store fsck-recover``, which
     is the wrong tool for a merge that never conflicted: the merge succeeded and the object
     store could not be READ. The raised error distinguishes the two.
     """

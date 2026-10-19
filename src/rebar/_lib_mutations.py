@@ -312,7 +312,7 @@ def compact(
         rc = _compact.compact_cli(argv, repo_root=repo_root)
     if rc != 0:
         raise RebarError(
-            f"rebar compact failed (exit {rc}): {err.getvalue().strip()}",
+            f"rebar store compact failed (exit {rc}): {err.getvalue().strip()}",
             returncode=rc,
             stderr=err.getvalue(),
         )

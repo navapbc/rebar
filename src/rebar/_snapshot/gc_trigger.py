@@ -63,7 +63,7 @@ def _log_path(root: Path) -> Path:
 def worker_lock_probe_path() -> Path:
     """Return this host's worker-lock path without creating the store.
 
-    ``rebar doctor`` uses the owner-defined layout with ``peek_store_root`` so its census
+    ``rebar store doctor`` uses the owner-defined layout with ``peek_store_root`` so its census
     has no mkdir or chmod side effects."""
     from rebar._snapshot.repo_snapshot import peek_store_root
 

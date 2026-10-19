@@ -242,7 +242,7 @@ def _advisory_lines(tracker: str, signed_total: int, unsigned_total: int) -> lis
     applied_n = len(_ensures.applied_ids(tracker) & registry)
     ensures_line = f"ensures: {applied_n}/{len(registry)} applied"
     if applied_n < len(registry):
-        ensures_line += " — run `rebar fsck --repair` to converge"
+        ensures_line += " — run `rebar store fsck --repair` to converge"
 
     authorship_line = f"authorship: {signed_total} signed, {unsigned_total} unsigned event(s)"
     if unsigned_total:

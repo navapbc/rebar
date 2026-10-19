@@ -630,7 +630,7 @@ class ScratchConfig:
 class EnsureConfig:
     # Write-path pending-hint (epic odd-vortex-elbow / WS2). When an existing store is
     # behind the idempotent ensure-registry, a covered write emits a best-effort,
-    # rate-limited WARNING nudging `rebar fsck --repair`. These tune it; both are
+    # rate-limited WARNING nudging `rebar store fsck --repair`. These tune it; both are
     # auto-derived env vars (REBAR_ENSURE_HINT_INTERVAL_SECS / REBAR_ENSURE_HINT_ENABLED).
     hint_interval_secs: int = _documented(
         86400,

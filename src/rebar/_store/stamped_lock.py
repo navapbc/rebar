@@ -43,7 +43,7 @@ def stamped_file_lock(
     ``knavish-stimulated-bluebottle``). An orphan is reclaimed LOUDLY and the create retried
     EXACTLY ONCE; a holder the table will not condemn is respected. *label* and *lock_noun* name
     the caller and the lock in the log lines; *describe_holder*, when given, renders the holder
-    into the reclaim WARNING so a wedge is attributable without ``rebar doctor``. Exclusion is
+    into the reclaim WARNING so a wedge is attributable without ``rebar store doctor``. Exclusion is
     DEFEASIBLE ACROSS THE RECLAIM — see below."""
     from rebar._store import lock_owner as _owner
 

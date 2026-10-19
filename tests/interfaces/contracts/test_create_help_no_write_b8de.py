@@ -166,7 +166,7 @@ def test_nested_family_child_help_falls_through_to_argparse(
     expected_names = _help_route._NESTED_FAMILY - _help_route._HIDDEN_ALIASES - {"config"}
     assert family_names == expected_names
     assert _help_route._NESTED_INTERCEPTS == frozenset(
-        {"audit", "config", "criteria", "identity", "llm", "prompt", "workflow"}
+        {"audit", "config", "criteria", "identity", "llm", "prompt", "store", "workflow"}
     )
 
     for cmd, child in families:

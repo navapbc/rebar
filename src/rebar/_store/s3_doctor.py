@@ -40,7 +40,7 @@ class S3DoctorConflict(Exception):
 
     def __init__(self, message: str, *, hint: str | None = None) -> None:
         super().__init__(message)
-        self.hint = hint or "tickets store heads conflict; run: rebar fsck-recover"
+        self.hint = hint or "tickets store heads conflict; run: rebar store fsck-recover"
 
 
 # raw-git-ok: locked store seam internal
@@ -354,7 +354,7 @@ def _publish_and_prune(
         create = _git(base_path, "bundle", "create", bundle_path, *bundle_refs)
         if create.returncode != 0:
             # A bundle failure that survived the seam's retries is NOT a heads conflict, so
-            # the default hint's "run rebar fsck-recover" would be the wrong tool: the merge
+            # the default hint's "run rebar store fsck-recover" would be the wrong tool: the merge
             # already succeeded and it is the object store that could not be READ.
             hint = None
             if is_transient_object_read_error(create.stderr or create.stdout or ""):

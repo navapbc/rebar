@@ -35,10 +35,8 @@ _CENSUS_SETS = (
     "_GATES",
     "_SIGNING",
     "_LIFECYCLE",
-    "_COMPACT",
     "_BRIDGE",
     "_HIDDEN_ALIASES",
-    "_IO",
     "_WRITES_FULL",
     "_CONFIRM_SCOPE",
     "_WARN_CROSS_SESSION",
@@ -54,10 +52,7 @@ _INDIVIDUAL_ARMS = frozenset(
         "scratch",
         "metrics",
         "delete",
-        "fsck",
-        "fsck-recover",
-        "tracker-maintenance",
-        "doctor",
+        "store",
         "grounding-info",
         "audit",
     }
@@ -105,15 +100,23 @@ def test_shipped_route_table_validates_clean() -> None:
     assert tuple(_registry.validate()) == ()
 
 
-def test_tracker_footprint_is_an_unmounted_read_only_intercept() -> None:
-    route = _registry.route_for("tracker-footprint")
+def test_store_footprint_is_an_unmounted_read_only_member() -> None:
+    route = _registry.route_for("footprint", _registry.STORE_ROUTES)
 
     assert route is not None
-    assert route.group == "static_read"
-    assert route.intercept is True
+    assert route.group == "store"
     assert route.no_auto_mount is True
     assert route.init == "none"
     assert route.capabilities == ()
+    assert _registry.route_for("tracker-footprint") is None
+
+
+def test_store_member_table_validates_clean_with_unique_names() -> None:
+    names = [r.name for r in _registry.STORE_ROUTES]
+    assert len(names) == len(set(names)) == 8
+    assert tuple(_registry.validate(_registry.STORE_ROUTES)) == ()
+    # A member name is not a top-level spelling, so no member shadows a ROUTES entry.
+    assert all(_registry.route_for(name) is None for name in names)
 
 
 def test_routes_are_immutable() -> None:

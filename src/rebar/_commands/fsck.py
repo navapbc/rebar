@@ -312,7 +312,7 @@ def _fsck_govern(
     if fmt in ("text", "json"):
         norm.append(f"--output={fmt}")
     try:
-        build_fsck(prog="rebar fsck").parse_args(norm)
+        build_fsck(prog="rebar store fsck").parse_args(norm)
     except ParseError as exc:
         return render_parse_error(exc)
     return None

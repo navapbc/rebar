@@ -91,7 +91,8 @@ def test_fresh_clone_json_exposes_allocation_without_a_policy_verdict(
 
     completed = _run_cli(
         rebar_repo,
-        "tracker-footprint",
+        "store",
+        "footprint",
         "--fresh-clone",
         "--output",
         "json",
@@ -130,7 +131,7 @@ def test_mounted_linked_store_is_shared_and_read_only(rebar_repo: Path) -> None:
     before_project = _repo_state(rebar_repo)
     before_tracker = _repo_state(tracker)
 
-    completed = _run_cli(rebar_repo, "tracker-footprint", "--output", "json")
+    completed = _run_cli(rebar_repo, "store", "footprint", "--output", "json")
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stderr == ""
@@ -147,7 +148,7 @@ def test_mounted_linked_store_is_shared_and_read_only(rebar_repo: Path) -> None:
 
 
 def test_text_output_names_each_layer_and_requested_ref(rebar_repo: Path) -> None:
-    completed = _run_cli(rebar_repo, "tracker-footprint")
+    completed = _run_cli(rebar_repo, "store", "footprint")
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stderr == ""
@@ -177,7 +178,8 @@ def test_invalid_configured_branch_cleans_only_its_temporary_child(
 
     completed = _run_cli(
         rebar_repo,
-        "tracker-footprint",
+        "store",
+        "footprint",
         "--fresh-clone",
         extra_env={
             "REBAR_TRACKER_BRANCH": "missing-branch",
@@ -196,7 +198,7 @@ def test_invalid_configured_branch_cleans_only_its_temporary_child(
 
 
 def test_unknown_argument_exits_two_without_a_report(rebar_repo: Path) -> None:
-    completed = _run_cli(rebar_repo, "tracker-footprint", "--nonexistent-flag")
+    completed = _run_cli(rebar_repo, "store", "footprint", "--nonexistent-flag")
 
     assert completed.returncode == 2
     assert completed.stdout == ""

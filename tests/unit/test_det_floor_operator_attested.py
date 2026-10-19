@@ -49,7 +49,7 @@ _FIXTURES = [
     ),
     (
         "8c4f-fsck",
-        "- [ ] Re-run `rebar fsck` with the ENQUEUE_ENRICH-era binary against the live "
+        "- [ ] Re-run `rebar store fsck` with the ENQUEUE_ENRICH-era binary against the live "
         "store and record the counts",
         True,
     ),
@@ -89,7 +89,7 @@ def test_known_case_115b_fires() -> None:
 
 def test_known_case_8c4f_fires() -> None:
     """8c4f (re-run fsck against the live store) — the historical untagged AC must be flagged."""
-    text = _ac("- [ ] Re-run `rebar fsck` against the live store and record the counts")
+    text = _ac("- [ ] Re-run `rebar store fsck` against the live store and record the counts")
     assert _gaps(text)
 
 

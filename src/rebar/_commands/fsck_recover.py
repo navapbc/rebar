@@ -94,7 +94,7 @@ def _fsck_recover_govern(
         norm.append("--recover-dangling")
     norm.append(f"--timeout={continue_timeout}")
     try:
-        build_fsck_recover(prog="rebar fsck-recover").parse_args(norm)
+        build_fsck_recover(prog="rebar store fsck-recover").parse_args(norm)
     except ParseError as exc:
         return render_parse_error(exc)
     return None

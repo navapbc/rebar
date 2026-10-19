@@ -2,7 +2,7 @@
 
 The properties worth pinning are the ones an operator's decision hangs on. A HELD lock
 with a live holder must read as information and must NOT fail the exit code, or every CI
-gate keyed on ``rebar doctor`` turns red whenever two agents write concurrently. A lock
+gate keyed on ``rebar store doctor`` turns red whenever two agents write concurrently. A lock
 with no live owner must read as a finding, or the surface fails at the only job it was
 added for (ticket metaphoric-fleeting-nutcracker). And the whole pass must be read-only:
 a diagnostic that reclaims a lock it merely meant to describe would be a far worse bug

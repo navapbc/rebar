@@ -165,7 +165,7 @@ def init_core(repo_root=None, *, silent: bool = False, force_new_store: bool = F
                     if rc != 0:
                         _emit(
                             "WARNING: rebase --continue failed; aborting rebase. Run "
-                            "'rebar fsck-recover' to cherry-pick stranded commits.",
+                            "'rebar store fsck-recover' to cherry-pick stranded commits.",
                             silent,
                         )
                         _git(tracker, "rebase", "--abort")

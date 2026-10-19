@@ -10,7 +10,7 @@ changed.
 
 Jira stays an OPTIONAL extra: the reconciler ``access_check`` module is imported
 LAZILY, only when the diagnostic runs, so nothing here is reachable from core
-``rebar doctor`` (which must stay Jira-free).
+``rebar store doctor`` (which must stay Jira-free).
 """
 
 from __future__ import annotations

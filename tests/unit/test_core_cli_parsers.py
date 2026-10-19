@@ -33,8 +33,9 @@ from rebar._cli import _registry
 from rebar._cli import main as cli_main
 from rebar._cli._parser import ParseError, RebarArgumentParser
 
-# The 40 core commands (S2b migrated 50; the CLI-verb consolidation removed 11 and added
-# ``check``). ``metrics`` is intentionally excluded — its
+# The 32 top-level core commands (S2b migrated 50; the CLI-verb consolidation removed 11 and
+# added ``check``, then moved 8 storage verbs under ``rebar store``, folding ``compact-all``
+# into ``store compact --all``). ``metrics`` is intentionally excluded — its
 # Route already carries an advanced ``parser_factory`` from S2c and re-migrating
 # it is forbidden by this ticket.
 CORE_COMMANDS = frozenset(
@@ -51,11 +52,7 @@ CORE_COMMANDS = frozenset(
         "summary",
         "sign",
         "verify-signature",
-        "compact",
-        "compact-all",
         "reclaim-collapse",
-        "export",
-        "import",
         "transition",
         "reopen",
         "claim",
@@ -74,17 +71,21 @@ CORE_COMMANDS = frozenset(
         "init",
         "scratch",
         "delete",
-        "fsck",
-        "fsck-recover",
-        "tracker-maintenance",
-        "doctor",
         "grounding-info",
     }
 )
 
 
+# The ``rebar store`` members whose factories are core parsers (``footprint`` keeps its
+# advanced factory).
+STORE_CORE_MEMBERS = frozenset(
+    {"fsck", "fsck-recover", "doctor", "maintenance", "export", "import", "compact"}
+)
+
+
 def _core_routes() -> list[_registry.Route]:
-    return [r for r in _registry.ROUTES if r.name in CORE_COMMANDS]
+    top = [r for r in _registry.ROUTES if r.name in CORE_COMMANDS]
+    return top + [r for r in _registry.STORE_ROUTES if r.name in STORE_CORE_MEMBERS]
 
 
 def _resolve(ref: str):
@@ -93,10 +94,11 @@ def _resolve(ref: str):
     return getattr(module, attr)
 
 
-def test_the_core_inventory_is_the_expected_40_commands() -> None:
-    """Guards the census: exactly these 40 core commands are in scope."""
+def test_the_core_inventory_is_the_expected_32_commands() -> None:
+    """Guards the census: exactly these 32 top-level core commands and 7 store members."""
 
-    assert len(CORE_COMMANDS) == 40
+    assert len(CORE_COMMANDS) == 32
+    assert STORE_CORE_MEMBERS <= {r.name for r in _registry.STORE_ROUTES}
     present = {r.name for r in _registry.ROUTES}
     assert CORE_COMMANDS <= present, CORE_COMMANDS - present
     # metrics is migrated already and must NOT be in scope here.
@@ -190,18 +192,21 @@ sys.meta_path.insert(0, _Poison())
 importlib.import_module('rebar._cli._parsers.core')
 from rebar._cli import _registry
 core = {sorted(CORE_COMMANDS)!r}
+members = {sorted(STORE_CORE_MEMBERS)!r}
 built = 0
-for route in _registry.ROUTES:
-    if route.name not in core:
-        continue
-    ref = route.parser_factory
-    assert ref, route.name
-    mod_name, _, attr = ref.partition(':')
-    mod = importlib.import_module(mod_name)
-    parser = getattr(mod, attr)(prog='rebar ' + route.name)
-    assert parser.prog == 'rebar ' + route.name, route.name
-    built += 1
-assert built == 40, built
+tables = ((_registry.ROUTES, core, 'rebar '), (_registry.STORE_ROUTES, members, 'rebar store '))
+for routes, names, prefix in tables:
+    for route in routes:
+        if route.name not in names:
+            continue
+        ref = route.parser_factory
+        assert ref, route.name
+        mod_name, _, attr = ref.partition(':')
+        mod = importlib.import_module(mod_name)
+        parser = getattr(mod, attr)(prog=prefix + route.name)
+        assert parser.prog == prefix + route.name, route.name
+        built += 1
+assert built == 39, built
 print('OK', built)
 """
     result = subprocess.run(
@@ -324,9 +329,19 @@ def _rejecting_parser(prog: str) -> RebarArgumentParser:
     return parser
 
 
+# The factory a governance row's handler parses with. A route names that factory itself,
+# except ``store compact``: its route carries the help-facing union, while the ``--all``
+# sweep parses with ``build_compact_all`` (and one ticket with ``build_compact_one``).
+_PARSING_FACTORY = {"compact-all": "rebar._cli._parsers.core.compact:build_compact_all"}
+
+
 def _install_rejecting_factory(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
-    route = next(r for r in _registry.ROUTES if r.name == name)
-    mod_name, _, attr = route.parser_factory.partition(":")
+    ref = _PARSING_FACTORY.get(name)
+    if ref is None:
+        route = _registry.route_for(name) or _registry.route_for(name, _registry.STORE_ROUTES)
+        assert route is not None and route.parser_factory, name
+        ref = route.parser_factory
+    mod_name, _, attr = ref.partition(":")
     module = importlib.import_module(mod_name)
     monkeypatch.setattr(module, attr, lambda *, prog: _rejecting_parser(prog))
 
@@ -339,10 +354,10 @@ def _invoke_rc(argv: list[str]) -> int:
 
 
 _GOVERNANCE = [
-    ("export", ["export"]),
-    ("compact-all", ["compact-all"]),
+    ("export", ["store", "export"]),
+    ("compact-all", ["store", "compact", "--all"]),
     ("create", ["create", "task", "T"]),
-    ("fsck", ["fsck"]),
+    ("fsck", ["store", "fsck"]),
     ("session-log", ["session-log", "append", "hi"]),
 ]
 

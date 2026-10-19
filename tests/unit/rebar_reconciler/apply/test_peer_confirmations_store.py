@@ -195,7 +195,7 @@ def test_store_survives_snapshot_compaction_of_the_ticket_log(peer_confirmations
         store.save()
 
         subprocess.run(
-            ["rebar", "compact", a], cwd=repo, check=False, capture_output=True, text=True
+            ["rebar", "store", "compact", a], cwd=repo, check=False, capture_output=True, text=True
         )
 
         reopened = peer_confirmations.open_store(repo)

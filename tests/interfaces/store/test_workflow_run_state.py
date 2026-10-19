@@ -178,7 +178,7 @@ def test_survives_compaction(rebar_repo: Path) -> None:
         {"run_id": "r", "step_id": "s", "status": "ok", "outputs": {"k": "v"}},
     )
     cp = subprocess.run(
-        [sys.executable, "-m", "rebar.cli", "compact", tid, "--threshold=0"],
+        [sys.executable, "-m", "rebar.cli", "store", "compact", tid, "--threshold=0"],
         capture_output=True,
         text=True,
         cwd=str(rebar_repo),

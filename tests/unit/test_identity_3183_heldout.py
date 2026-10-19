@@ -193,7 +193,7 @@ def test_fsck_surfaces_unsigned_count(store: Path) -> None:
     rebar.create_ticket("task", "unsigned t", repo_root=str(store))
     env = subprocess_env({"REBAR_ROOT": str(store)})
     res = subprocess.run(
-        ["rebar", "fsck"], cwd=store, env=env, capture_output=True, text=True, check=False
+        ["rebar", "store", "fsck"], cwd=store, env=env, capture_output=True, text=True, check=False
     )
     assert "authorship:" in res.stdout.lower()
     assert "unsigned" in res.stdout.lower()

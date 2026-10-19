@@ -74,7 +74,7 @@ tree, filesystem allocation slack from many small files, Git indexes and other m
 the combined clone. Measure those layers explicitly when evaluating a real store:
 
 ```sh
-rebar tracker-footprint --fresh-clone --output json
+rebar store footprint --fresh-clone --output json
 ```
 
 The report separates `.pack` logical bytes, checkout logical/allocated bytes and file count,
@@ -109,8 +109,8 @@ global write pause when it fires — ADR 0051). For the
 event-store's own compaction of long/verbose tickets (e.g. large session logs),
 use:
 
-- `rebar compact <id>` / `rebar compact-all` — compact a ticket / the whole store.
-- `rebar fsck` — health-check the store (reports `PUSH_PENDING`, newer-than-binary
+- `rebar store compact <id>` / `rebar store compact --all` — compact a ticket / the whole store.
+- `rebar store fsck` — health-check the store (reports `PUSH_PENDING`, newer-than-binary
   event types, etc.).
 
 Session logs are the usual growth driver; they are kept out of the graph/health
@@ -147,7 +147,7 @@ t = time.perf_counter(); rebar.search("bench 42"); print(f"search: {(time.perf_c
 
 Git object growth in the historical table used `git count-objects -vH` inside the
 `.tickets-tracker/` worktree. That command describes Git objects only; use
-`rebar tracker-footprint --fresh-clone` for the current layered clone measurement.
+`rebar store footprint --fresh-clone` for the current layered clone measurement.
 
 ## Related
 

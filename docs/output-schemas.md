@@ -93,7 +93,7 @@ implementations "agree exactly on their numeric values" only for integers in
 | **CLI `--output json`** / `--output llm` | **decimal string** when the value is outside the JS-safe range |
 | **MCP tools** | **decimal string** when the value is outside the JS-safe range |
 | Python library (`rebar.*`) | Python `int` (unchanged — arbitrary precision, no JSON boundary) |
-| `rebar export` NDJSON / `rebar.export_tickets()` | **integer** (unchanged — a separately versioned interop projection with a `rebar import` round-trip contract) |
+| `rebar store export` NDJSON / `rebar.export_tickets()` | **integer** (unchanged — a separately versioned interop projection with a `rebar store import` round-trip contract) |
 
 The string form is **decimal digits only** — no sign, no thousands separators, no decimal
 point, no units suffix — e.g. `"1787856371950409998"`. It is emitted that way because the
@@ -138,9 +138,9 @@ ticket's genesis `CREATE`, from a closed six-value enum
 
 - **`cli`** — the `rebar` CLI; **`mcp`** — the MCP server's write tools; **`python`** — a
   direct `rebar.*` library call (the default at the library boundary).
-- **`jira`** (Jira-inbound) and **`import`** (NDJSON `rebar import`) are now emitted
+- **`jira`** (Jira-inbound) and **`import`** (NDJSON `rebar store import`) are now emitted
   (story e622): the reconciler stamps `jira` on the CREATE it writes for an inbound Jira
-  issue, and `rebar import` stamps `import` on the fresh local ticket. An imported ticket
+  issue, and `rebar store import` stamps `import` on the fresh local ticket. An imported ticket
   reports `import` even when the exported source record carried a different channel — the
   source's origin is preserved as `source_*`, never copied into `creation_channel`.
 - **`unknown`** is a **projection-only fallback**: a legacy ticket whose `CREATE` predates
@@ -173,7 +173,7 @@ identically by full-log replay, **SNAPSHOT-only replay**, and a **snapshot rebui
 post-feature `SNAPSHOT` restores the recorded value verbatim from its `compiled_state`; a
 pre-feature `SNAPSHOT` (compacted before the field existed) re-infers it at restore time from
 the restored genesis envelope — yielding `jira`+`inferred` on the legacy-Jira signature and
-`unknown` otherwise — and a full-log rebuild (`fsck --repair-snapshots`) replays the retained
+`unknown` otherwise — and a full-log rebuild (`rebar store fsck --repair-snapshots`) replays the retained
 CREATE to persist the same value durably. Compaction is therefore transparent to these
 fields: a caller cannot tell from the output whether the ticket was compacted.
 

@@ -102,7 +102,7 @@ def _build_authorship_ledger(
     entry and fall silently back to the per-event resolver — correct output, unchanged cost,
     nothing to notice.
 
-    Left ``None`` (the single-ticket ``rebar compact`` path, and the fsck rebuild in
+    Left ``None`` (the single-ticket ``rebar store compact`` path, and the fsck rebuild in
     ``compact_rebuild``) it builds its own per-ticket map exactly as before, which is the right
     cost when folding ONE ticket.
 
@@ -317,7 +317,7 @@ def _retire_folded_sources(fold_files: list[str], ticket_id: str, final_path: st
         sys.stderr.write(
             "Error: failed to retire folded events while holding lock; rollback "
             "incomplete (a folded source is stranded) — the SNAPSHOT is retained "
-            "to avoid data loss. Run `rebar fsck --repair-snapshots` to reconcile.\n"
+            "to avoid data loss. Run `rebar store fsck --repair-snapshots` to reconcile.\n"
         )
         return 1
     return 0
@@ -353,7 +353,7 @@ def _rollback_fold(tracker: str, ticket_id: str, final_path: str, fold_files: li
     else:
         logger.warning(
             "compact: rollback incomplete for %s — SNAPSHOT %s retained; run "
-            "`rebar fsck --repair-snapshots`",
+            "`rebar store fsck --repair-snapshots`",
             ticket_id,
             final_path,
         )

@@ -296,7 +296,7 @@ runtime `rebar.reducer._version.CREATION_CHANNELS`; a contract test pins the two
 | `mcp` | the MCP server's write tools (`create_ticket` / `create_idea` / `create_identity` / `log_session`) |
 | `python` | a direct `rebar.*` library call (the default at the library boundary) |
 | `jira` | Jira-inbound attribution: the reconciler's inbound materialization path stamps `jira` on the CREATE it writes directly for an imported Jira issue (and on a Jira-minted placeholder assignee identity). Story e622. |
-| `import` | NDJSON `rebar import`: the fresh LOCAL ticket an import creates records `import` — regardless of the channel the exported source record carried (that origin lives on in `source_*`, not in `creation_channel`). Story e622. |
+| `import` | NDJSON `rebar store import`: the fresh LOCAL ticket an import creates records `import` — regardless of the channel the exported source record carried (that origin lives on in `source_*`, not in `creation_channel`). Story e622. |
 | `unknown` | **projection-only fallback**: a legacy `CREATE` that carried no field reduces to `unknown`. NEVER a valid live-write value — `validate_creation_channel` rejects it, so no writer may stamp it |
 
 **Default-per-interface.** The three local ingresses all converge on
@@ -374,7 +374,7 @@ the exact legacy-Jira signature (`jira-*` id + `reconciler` author/env_id) yield
 `jira` + `creation_channel_inferred=true`, every other case yields `unknown`. The
 `"creation_channel" not in compiled_state` guard makes this migration touch ONLY pre-feature
 snapshots, so a recorded channel is never clobbered. `fsck` flags such a stale snapshot as
-`SNAPSHOT_STALE_CHANNEL` when a retained CREATE exists, and `fsck --repair-snapshots` rebuilds
+`SNAPSHOT_STALE_CHANNEL` when a retained CREATE exists, and `rebar store fsck --repair-snapshots` rebuilds
 it to persist the channel durably.
 
 ## Provider provenance (`provider_provenance`)

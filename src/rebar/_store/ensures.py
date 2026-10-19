@@ -9,7 +9,7 @@ change when its state is already converged.
 sweeps serialize, failures are recorded and skipped, and a converged sweep makes
 no Git commit. An atomic rewrite of the ignored ``.ensure-applied`` marker records
 all nonfailed identifiers. The marker informs the write-path warning and the
-``rebar fsck`` applied count, but never controls execution.
+``rebar store fsck`` applied count, but never controls execution.
 
 Content-backed units live in :mod:`rebar._commands._init_ensures` and remain
 re-exported from :mod:`rebar._commands.init`. That module also owns
@@ -178,8 +178,8 @@ def run_ensures(
 
 
 # A covered write computes pending units once per process and store. When any remain, it emits
-# one rate-limited warning that names them and recommends ``rebar fsck --repair``. Failures never
-# block the write. A converged store performs no later marker reads.
+# one rate-limited warning that names them and recommends ``rebar store fsck --repair``.
+# Failures never block the write. A converged store performs no later marker reads.
 
 # Cache of pending id sets, keyed by canonical tracker path (registry is static per
 # process, so `.ensure-applied` is read at most once per store per process).
@@ -216,7 +216,7 @@ def _read_hinted(tracker: str) -> float | None:
 def maybe_emit_pending_hint(tracker: str | os.PathLike) -> None:
     """Best-effort, fail-silent write-path nudge: if this store has pending ensure
     units and the last hint is older than the configured interval, log ONE WARNING
-    naming the pending units and pointing at ``rebar fsck --repair``, then stamp
+    naming the pending units and pointing at ``rebar store fsck --repair``, then stamp
     ``.ensure-hinted``. Swallows ALL of its own exceptions (incl. lazy-import
     failures) so a committed write never fails because of it."""
     try:
@@ -238,7 +238,7 @@ def maybe_emit_pending_hint(tracker: str | os.PathLike) -> None:
         except OSError:
             pass  # best-effort stamp — still surface the hint
         logger.warning(
-            "rebar: %d ensure unit(s) pending (%s) — run `rebar fsck --repair` to converge",
+            "rebar: %d ensure unit(s) pending (%s) — run `rebar store fsck --repair` to converge",
             len(pending),
             ", ".join(sorted(pending)),
         )

@@ -1,6 +1,6 @@
 """Provenance surfacing (P1.2 import): source_* on CREATE and COMMENT events.
 
-`rebar import` re-creates a ticket in a fresh store via the normal locked write
+`rebar store import` re-creates a ticket in a fresh store via the normal locked write
 path, recording the ORIGINAL store's id/date/author/env as source_* on the CREATE
 event (and the original comment author/time on each COMMENT). The reducer surfaces
 these additively — present only when the event carried them, so a normally-created

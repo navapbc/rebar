@@ -1,9 +1,0 @@
-Usage: rebar doctor [--output {text,json}] [--repair] [--dry-run]
-
-Diagnose the store and heal what is safe to fix (--repair).
-
-options:
-  --output {text,json}, -o {text,json}
-                        output format
-  --repair              apply the safe fixes
-  --dry-run             report fixes without applying

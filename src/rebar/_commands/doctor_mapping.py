@@ -1,4 +1,4 @@
-"""Mapping-config diagnostics for ``rebar doctor``.
+"""Mapping-config diagnostics for ``rebar store doctor``.
 
 Surfaces ``[mapping]`` config that would make a Jira reconcile silently drift, in two
 tiers:

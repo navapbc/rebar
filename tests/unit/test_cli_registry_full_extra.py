@@ -32,9 +32,10 @@ def _resolve(ref: str):
 
 
 def _live_routes():
-    from rebar._cli._registry import ROUTES
+    from rebar._cli._registry import ROUTES, STORE_ROUTES
 
-    return [r for r in ROUTES if not r.retired]
+    # The ``rebar store`` members are lazy references too, dispatched through ``store_cli``.
+    return [r for r in (*ROUTES, *STORE_ROUTES) if not r.retired]
 
 
 def test_every_handler_reference_resolves():
@@ -87,9 +88,10 @@ def test_every_route_capability_is_a_known_capability():
 def test_registry_validate_reports_no_findings():
     """The registry's own structural validation (references, capabilities, adapters, init
     policies) passes for the shipped route table — the S3/S4 execution metadata resolves."""
-    from rebar._cli._registry import ROUTES, validate
+    from rebar._cli._registry import ROUTES, STORE_ROUTES, validate
 
     assert validate(ROUTES) == ()
+    assert validate(STORE_ROUTES) == ()
 
 
 def test_every_capability_extra_is_declared():

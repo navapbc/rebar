@@ -142,7 +142,7 @@ def test_survives_compaction(rebar_repo: Path) -> None:
     s1, s2 = _real_shas(rebar_repo, 2)
     rebar.attach_commits(tid, [s1, s2], repo_root=str(rebar_repo))
     cp = subprocess.run(
-        [sys.executable, "-m", "rebar.cli", "compact", tid, "--threshold=0"],
+        [sys.executable, "-m", "rebar.cli", "store", "compact", tid, "--threshold=0"],
         capture_output=True,
         text=True,
         cwd=str(rebar_repo),

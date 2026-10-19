@@ -177,11 +177,8 @@ def test_every_adapter_kind_has_at_least_one_route() -> None:
         ("transition", "full"),
         ("claim", "full"),
         ("metrics", "init_only"),
-        ("export", "init_only"),
-        ("import", "full"),
         ("delete", "full"),
-        ("fsck", "full"),
-        ("tracker-maintenance", "full"),
+        ("store", "none"),
         ("sign", "full"),
         ("resolve", "full"),
         ("check", "none"),
@@ -194,6 +191,25 @@ def test_every_adapter_kind_has_at_least_one_route() -> None:
 )
 def test_route_init_policy_matches_pre_cutover_census(name: str, expected: str) -> None:
     route = _registry.route_for(name)
+    assert route is not None and route.init == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("fsck", "full"),
+        ("fsck-recover", "fsck_recover"),
+        ("doctor", "doctor"),
+        ("maintenance", "full"),
+        ("footprint", "none"),
+        ("export", "init_only"),
+        ("import", "full"),
+        ("compact", "full"),
+    ],
+)
+def test_store_member_keeps_its_pre_move_init_policy(name: str, expected: str) -> None:
+    """Each ``rebar store`` member keeps the init policy it had as a top-level command."""
+    route = _registry.route_for(name, _registry.STORE_ROUTES)
     assert route is not None and route.init == expected
 
 
@@ -233,11 +249,11 @@ def test_doctor_selector_is_conditional_on_repair(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr("rebar._commands.doctor.doctor_cli", lambda argv: 0)
 
     calls = _init_spy(monkeypatch)
-    _execute.execute("doctor", [])
+    _execute.execute("doctor", [], routes=_registry.STORE_ROUTES)
     assert calls == [True], "doctor without --repair must init read-only (init_only=True)"
 
     calls2 = _init_spy(monkeypatch)
-    _execute.execute("doctor", ["--repair"])
+    _execute.execute("doctor", ["--repair"], routes=_registry.STORE_ROUTES)
     assert calls2 == [False], "doctor --repair must init full (init_only=False)"
 
 
@@ -249,12 +265,12 @@ def test_fsck_recover_selector_skips_init_under_tracker_override(
 
     calls = _init_spy(monkeypatch)
     monkeypatch.setattr("rebar.config.tracker_dir_override", lambda: "/injected/tracker")
-    _execute.execute("fsck-recover", [])
+    _execute.execute("fsck-recover", [], routes=_registry.STORE_ROUTES)
     assert calls == [], "an injected tracker must suppress the auto-init"
 
     calls2 = _init_spy(monkeypatch)
     monkeypatch.setattr("rebar.config.tracker_dir_override", lambda: None)
-    _execute.execute("fsck-recover", [])
+    _execute.execute("fsck-recover", [], routes=_registry.STORE_ROUTES)
     assert calls2 == [False], "with no injected tracker fsck-recover inits full"
 
 
@@ -263,11 +279,11 @@ def test_export_and_import_split_their_init_policy(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr("rebar._io._cli.import_cli", lambda argv: 0)
 
     calls = _init_spy(monkeypatch)
-    _execute.execute("export", [])
+    _execute.execute("export", [], routes=_registry.STORE_ROUTES)
     assert calls == [True], "export reads → init_only"
 
     calls2 = _init_spy(monkeypatch)
-    _execute.execute("import", [])
+    _execute.execute("import", [], routes=_registry.STORE_ROUTES)
     assert calls2 == [False], "import composes writes → full"
 
 

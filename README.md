@@ -340,7 +340,7 @@ so be deliberate when working against a repo with a shared `tickets` remote. The
 push is **best-effort**: with no `origin` remote nothing is pushed, and a push
 failure (e.g. non-fast-forward it cannot auto-merge, or no network) never fails
 the write — it leaves the local commit intact and the branch diverged.
-`rebar fsck` reports `PUSH_PENDING` when the local `tickets` branch is ahead of
+`rebar store fsck` reports `PUSH_PENDING` when the local `tickets` branch is ahead of
 `origin/tickets`, so unpushed activity is observable. See
 [`docs/concurrency.md`](docs/concurrency.md) for the push/merge-retry algorithm.
 

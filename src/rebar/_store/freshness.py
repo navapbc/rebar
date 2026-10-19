@@ -335,8 +335,8 @@ def stale_gate_message(gate_label: str, ticket_id: str, freshness: dict[str, Any
         "  attestation can read as unsigned purely because this clone never received it —\n"
         "  so the gate declines rather than record a certification it cannot stand behind.\n"
         "  Recovery:\n"
-        "    rebar fsck                     # confirm the condition on THIS store\n"
-        "    rebar tracker-maintenance      # reconcile a store that cannot self-heal\n"
+        "    rebar store fsck                     # confirm the condition on THIS store\n"
+        "    rebar store maintenance      # reconcile a store that cannot self-heal\n"
         "  If this ran through an MCP server whose clone is stale, re-run the gate against\n"
         "  a local checkout's store instead (the local `rebar` CLI reads its own clone)."
     )

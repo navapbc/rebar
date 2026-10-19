@@ -135,7 +135,7 @@ operator action and no data loss**:
   divergent bundle head and folds them into one by iterated lossless 2-parent merges (never an
   octopus merge, never discarding a head), writes the merged bundle **before** deleting the
   originals, and retries the push. This is strictly lossless: a real content conflict aborts the
-  heal, deletes nothing, and surfaces `rebar fsck-recover` rather than dropping a parent. It
+  heal, deletes nothing, and surfaces `rebar store fsck-recover` rather than dropping a parent. It
   contrasts deliberately with upstream's interactive `git-remote-s3 doctor`, which prompts and
   can discard a head.
 - **Stale push-lock auto-clear.** The helper serializes pushes with a per-ref S3 lock object. If

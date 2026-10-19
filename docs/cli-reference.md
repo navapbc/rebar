@@ -72,7 +72,7 @@ The golden record of the normalization: what each verb printed before the confir
 
 ## Command syntax
 
-One section per visible command that is not retired (61 in total), in registry order. Every section embeds its committed package help bytes.
+One section per visible command that is not retired (53 in total), in registry order. Every section embeds its committed package help bytes.
 
 ### `show`
 
@@ -305,39 +305,6 @@ options:
   --kind KIND           which signature kind to verify
 ```
 
-### `compact`
-
-```
-Usage: rebar compact [--threshold N] [--horizon NS] [--skip-sync] [--no-commit]
-                     [ticket_id]
-
-Compact a ticket's event log.
-
-positional arguments:
-  ticket_id      the ticket to compact
-
-options:
-  --threshold N  compact only above N events
-  --horizon NS   retain events newer than NS nanoseconds
-  --skip-sync    skip the reconverge
-  --no-commit    stage the snapshot without committing
-```
-
-### `compact-all`
-
-```
-Usage: rebar compact-all [--dry-run] [--limit N] [--no-commit]
-                         [--include-archived]
-
-Compact all eligible tickets.
-
-options:
-  --dry-run           report what would compact without writing
-  --limit N           compact at most N tickets
-  --no-commit         stage the snapshots without committing
-  --include-archived  also compact archived tickets
-```
-
 ### `reclaim-collapse`
 
 ```
@@ -357,54 +324,6 @@ options:
   --apply               update the shadow clone's current branch; omitted means
                         dry-run only
   --format {text,json}  output format
-```
-
-### `export`
-
-```
-Usage: rebar export [--out OUT] [--status STATUS] [--type TICKET_TYPE]
-                    [--parent PARENT] [--strip-external]
-                    [--include-session-logs] [--exclude-archived]
-                    [--include-deleted]
-
-Export the store as NDJSON (one ticket per line).
-
-options:
-  --out OUT, -o OUT     write to FILE instead of stdout
-  --status STATUS       filter by status
-  --type TICKET_TYPE    filter by ticket type
-  --parent PARENT       filter to descendants of <id>
-  --strip-external, --no-jira
-                        strip external (Jira) bindings from the export
-  --include-session-logs
-                        include session_log tickets
-  --exclude-archived    exclude archived tickets
-  --include-deleted     include deleted tickets
-```
-
-### `import`
-
-```
-Usage: rebar import [--dry-run] [file]
-
-Import tickets from export NDJSON for a clean rebar-to-rebar migration.
-
-positional arguments:
-  file       NDJSON file to import (stdin if omitted)
-
-options:
-  --dry-run  report without writing
-
-Ticket creation, parent assignment, file impact, verification commands, and
-comments are committed in batches of up to 256 events. Links and status changes
-are committed one event at a time. Rebar defers the push until import work
-finishes successfully. Each run scans stored source_id values and skips matching
-records, so a serial rerun does not duplicate tickets created by an earlier run.
-The import does not provide whole-file atomicity. A crash between passes can
-leave incomplete tickets. A serial rerun skips those tickets based on source_id
-and does not complete the missing events automatically. Run imports serially.
-Concurrent imports can scan before either run records a source_id and can create
-duplicate tickets.
 ```
 
 ### `transition`
@@ -1135,20 +1054,6 @@ options:
   --output {json,text}  output format (default: json)
 ```
 
-### `tracker-footprint`
-
-```
-Usage: rebar tracker-footprint [-h] [--fresh-clone] [--output {text,json}]
-
-Measure Git, checkout, allocation, and whole-clone tracker footprint.
-
-options:
-  -h, --help            show this help message and exit
-  --fresh-clone         measure a temporary unfiltered clone of the configured
-                        tickets ref
-  --output {text,json}  output format (default: text)
-```
-
 ### `audit`
 
 ```
@@ -1237,66 +1142,37 @@ options:
   --user-approved       required destructive-op guard
 ```
 
-### `fsck`
+### `store`
 
 ```
-Usage: rebar fsck [--output {text,json}] [--repair] [--repair-snapshots]
-                  [--dry-run] [--include-archived] [--only ONLY] [--limit N]
+Usage: rebar store [-h]
+                   {fsck,fsck-recover,doctor,maintenance,footprint,export,import,compact}
+                   ...
 
-Check store integrity (JSON validity, CREATE presence, index.lock).
+Check, repair, measure, migrate, and compact the ticket store.
 
 options:
-  --output {text,json}, -o {text,json}
-                        output format
-  --repair              repair what is safe to fix
-  --repair-snapshots    rebuild snapshot state
-  --dry-run             report without writing
-  --include-archived    also check archived tickets
-  --only ONLY           check only the named ticket(s)
-  --limit N             check at most N tickets
-```
+  -h, --help            show this help message and exit
 
-### `fsck-recover`
+commands:
+  {fsck,fsck-recover,doctor,maintenance,footprint,export,import,compact}
+    fsck                Check store integrity (JSON validity, CREATE presence,
+                        index.lock).
+    fsck-recover        Recover the tracker worktree (dangling commits,
+                        interrupted rebases).
+    doctor              Diagnose the store and heal what is safe to fix
+                        (--repair).
+    maintenance         Supported door for raw git in the tracker; backup ref +
+                        refusal + audit.
+    footprint           Measure Git, checkout, allocation, and whole-clone
+                        tracker footprint.
+    export              Export the store as NDJSON (one ticket per line).
+    import              Import tickets from export NDJSON for a clean rebar-to-
+                        rebar migration.
+    compact             Compact one ticket's event log, or every eligible ticket
+                        with --all.
 
-```
-Usage: rebar fsck-recover [--tracker-dir TRACKER_DIR] [--detect-only]
-                          [--recover-dangling] [--timeout SECONDS]
-
-Recover the tracker worktree (dangling commits, interrupted rebases).
-
-options:
-  --tracker-dir TRACKER_DIR
-                        path to the tracker worktree
-  --detect-only         detect without recovering
-  --recover-dangling    recover dangling commits
-  --timeout SECONDS     git operation timeout
-```
-
-### `tracker-maintenance`
-
-```
-Usage: rebar tracker-maintenance [--status] [--clean] [--force FORCE]
-
-Supported door for raw git in the tracker; backup ref + refusal + audit.
-
-options:
-  --status       report tracker maintenance status
-  --clean        clean the tracker worktree
-  --force FORCE  break-glass override (--force=<reason>)
-```
-
-### `doctor`
-
-```
-Usage: rebar doctor [--output {text,json}] [--repair] [--dry-run]
-
-Diagnose the store and heal what is safe to fix (--repair).
-
-options:
-  --output {text,json}, -o {text,json}
-                        output format
-  --repair              apply the safe fixes
-  --dry-run             report fixes without applying
+Run 'rebar store <subcommand> --help' for a subcommand's options.
 ```
 
 ### `grounding-info`

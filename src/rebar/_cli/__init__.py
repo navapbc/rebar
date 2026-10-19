@@ -28,9 +28,10 @@ _INTERCEPTS = _DERIVED_POLICY_SETS["_INTERCEPTS"]
 def _store_mount_eligible(argv: list[str]) -> bool:
     """Return whether this invocation should attempt the central store mount.
 
-    Empty input, ``init``, ``scratch``, ``config validate``, help forms, and unknown
-    commands are ineligible. Help remains side-effect free. Strict per-arm initialization
-    still mounts or rejects greenfield stores for commands that require one.
+    Empty input, ``init``, ``scratch``, ``config validate``, ``store`` members that never
+    mount (``store footprint``), help forms, and unknown commands are ineligible. Help
+    remains side-effect free. Strict per-arm initialization still mounts or rejects
+    greenfield stores for commands that require one.
     """
     if not argv:
         return False
@@ -39,9 +40,23 @@ def _store_mount_eligible(argv: list[str]) -> bool:
         return False
     if sub == "config" and len(argv) > 1 and argv[1] == "validate":
         return False
+    if sub == "store" and _store_member_skips_mount(argv[1:]):
+        return False
     if "--help" in argv or "-h" in argv:
         return False
     return sub in _INTERCEPTS or sub in _help.known_subcommands()
+
+
+def _store_member_skips_mount(rest: list[str]) -> bool:
+    """Whether ``rebar store <member>`` names a member whose route is ``no_auto_mount``.
+
+    Read from :data:`rebar._cli._registry.STORE_ROUTES`, so a member carries the same
+    mount behaviour it had as a top-level command.
+    """
+    if not rest:
+        return False
+    member = _registry.route_for(rest[0], _registry.STORE_ROUTES)
+    return member is not None and member.no_auto_mount
 
 
 def _identity_intercept(rest: list[str]) -> int:

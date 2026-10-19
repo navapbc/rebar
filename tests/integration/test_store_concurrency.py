@@ -139,7 +139,7 @@ def test_concurrent_writer_storm_no_loss(clone: Path):
 
     # fsck clean (no index.lock corruption, no missing CREATE, etc.).
     fsck = subprocess.run(
-        [_REBAR, "fsck", "--output", "json"],
+        [_REBAR, "store", "fsck", "--output", "json"],
         cwd=clone,
         env=_clean_env(),
         capture_output=True,

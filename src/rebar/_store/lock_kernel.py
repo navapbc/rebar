@@ -2,7 +2,7 @@
 
 Every kernel-mediated store lock goes through here: :func:`rebar._store.lock._acquire_fcntl`
 (the write-lock acquire path), :func:`rebar._store.lock.write_lock_is_busy` (the advisory
-stand-aside probe), :func:`rebar._commands.doctor_locks._probe_fcntl` (``rebar doctor
+stand-aside probe), :func:`rebar._commands.doctor_locks._probe_fcntl` (``rebar store doctor
 --locks``), and :func:`rebar._store.fsutil.sibling_exclusive_lock` (blocking sibling
 read-modify-write locks). They previously each called ``fcntl.flock`` directly.
 ``fcntl`` has no Windows build, and while ``lock.py`` guarded the *import*

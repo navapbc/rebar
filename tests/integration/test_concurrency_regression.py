@@ -955,7 +955,13 @@ def test_compaction_horizon_keeps_young_events_live(two_clones):
     _engine_run(repo_a, "comment", seed, "c2")
 
     out = _engine_run(
-        repo_a, "compact", seed, "--threshold=0", "--horizon=9223372036854775807", "--skip-sync"
+        repo_a,
+        "store",
+        "compact",
+        seed,
+        "--threshold=0",
+        "--horizon=9223372036854775807",
+        "--skip-sync",
     ).stdout
     assert "within the compaction horizon" in out or "nothing to fold" in out, out
 
@@ -983,7 +989,9 @@ def test_sub_horizon_append_orphan_recovered_by_fsck_rebuild(two_clones):
     # A adds its own comments and compacts (folds only what A can see; horizon 0).
     _engine_run(repo_a, "comment", seed, "a1")
     _engine_run(repo_a, "comment", seed, "a2")
-    out = _engine_run(repo_a, "compact", seed, "--threshold=0", "--horizon=0", "--skip-sync").stdout
+    out = _engine_run(
+        repo_a, "store", "compact", seed, "--threshold=0", "--horizon=0", "--skip-sync"
+    ).stdout
     assert "compacted" in out, out
 
     # Merge-as-union outcome: B's comment file lands in A's ticket dir (union never
@@ -1000,12 +1008,12 @@ def test_sub_horizon_append_orphan_recovered_by_fsck_rebuild(two_clones):
     assert "orphan-from-B" not in _show(repo_a), "expected the pre-rebuild drop"
 
     # Remediation: rebuild the snapshot from the full log.
-    fsck_out = _engine_run(repo_a, "fsck", "--repair-snapshots", check=False).stdout
+    fsck_out = _engine_run(repo_a, "store", "fsck", "--repair-snapshots", check=False).stdout
     assert "rebuilt SNAPSHOT" in fsck_out, fsck_out
 
     # GREEN: the orphan comment is recovered, and fsck is now clean.
     assert "orphan-from-B" in _show(repo_a)
-    clean = _engine_run(repo_a, "fsck", check=False)
+    clean = _engine_run(repo_a, "store", "fsck", check=False)
     assert "ORPHAN_EVENT" not in clean.stdout and "SNAPSHOT_INCONSISTENT" not in clean.stdout
 
 
@@ -1044,22 +1052,22 @@ def test_a3_repair_dry_run_noop_then_live_repair_pretag_and_rollback(two_clones)
     _git("add", "-A", cwd=tracker_a)
     _git("commit", "-q", "--no-verify", "-m", "craft: inconsistent snapshot", cwd=tracker_a)
 
-    assert "SNAPSHOT_INCONSISTENT" in _engine_run(repo_a, "fsck", check=False).stdout
+    assert "SNAPSHOT_INCONSISTENT" in _engine_run(repo_a, "store", "fsck", check=False).stdout
     head_before = _git("rev-parse", "HEAD", cwd=tracker_a).stdout.strip()
 
     # DRY-RUN: describes the repair, writes nothing, commits nothing.
-    dry = _engine_run(repo_a, "fsck", "--repair", "--dry-run", check=False).stdout
+    dry = _engine_run(repo_a, "store", "fsck", "--repair", "--dry-run", check=False).stdout
     assert "0 file writes, 0 commits" in dry, dry
     assert _git("rev-parse", "HEAD", cwd=tracker_a).stdout.strip() == head_before
     assert create_file.exists(), "dry-run must not retire anything"
 
     # LIVE repair: pre-tag, retire the source, commit, reach fsck-clean.
-    live = _engine_run(repo_a, "fsck", "--repair", check=False).stdout
+    live = _engine_run(repo_a, "store", "fsck", "--repair", check=False).stdout
     assert "pre-a3-remediation" in live, live
     assert _git("rev-parse", "pre-a3-remediation", cwd=tracker_a).returncode == 0
     assert not create_file.exists()
     assert (seed_dir / (create_file.name + ".retired")).exists()
-    assert "SNAPSHOT_INCONSISTENT" not in _engine_run(repo_a, "fsck", check=False).stdout
+    assert "SNAPSHOT_INCONSISTENT" not in _engine_run(repo_a, "store", "fsck", check=False).stdout
 
     # ROLLBACK rehearsal: the pre-tag restores the pre-repair tree exactly.
     _git("reset", "--hard", "pre-a3-remediation", cwd=tracker_a)
@@ -1102,13 +1110,13 @@ def test_a3_repair_aborts_when_push_fails_leaving_pretag_for_rollback(two_clones
     _remote, repo_a, repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
     create_file = _craft_inconsistent_snapshot(tracker_a, seed)
-    assert "SNAPSHOT_INCONSISTENT" in _engine_run(repo_a, "fsck", check=False).stdout
+    assert "SNAPSHOT_INCONSISTENT" in _engine_run(repo_a, "store", "fsck", check=False).stdout
 
     # Diverge origin/tickets from under A: B writes+auto-pushes a comment, so A's
     # non-fast-forward `push origin HEAD:tickets` in the repair is rejected.
     _engine_run(repo_b, "comment", seed, "divergent-from-b")
 
-    out = _engine_run(repo_a, "fsck", "--repair", check=False).stdout
+    out = _engine_run(repo_a, "store", "fsck", "--repair", check=False).stdout
     assert "ABORT: push failed" in out, out
     # The pre-tag was written BEFORE any mutation → rollback remains possible.
     assert _git("rev-parse", "pre-a3-remediation", cwd=tracker_a).returncode == 0
@@ -1147,7 +1155,7 @@ def test_a3_repair_aborts_when_a_reconciler_pass_is_in_flight(two_clones):
     oid = advisory.acquire_pass_lock("a3-test-pass", repo_a)
     assert oid is not None, "failed to acquire the reconciler pass lock for the test"
     try:
-        out = _engine_run(repo_a, "fsck", "--repair", check=False).stdout
+        out = _engine_run(repo_a, "store", "fsck", "--repair", check=False).stdout
         assert "ABORT: a reconciler pass is in flight" in out, out
         assert create_file.exists(), "repair must NOT retire under a live reconciler pass"
     finally:
@@ -1157,10 +1165,10 @@ def test_a3_repair_aborts_when_a_reconciler_pass_is_in_flight(two_clones):
         _git("update-ref", "-d", "refs/reconciler/lock", cwd=repo_a, check=False)
 
     # Lock released → the repair now proceeds and retires the still-present source.
-    out2 = _engine_run(repo_a, "fsck", "--repair", check=False).stdout
+    out2 = _engine_run(repo_a, "store", "fsck", "--repair", check=False).stdout
     assert "ABORT" not in out2, out2
     assert not create_file.exists()
-    assert "SNAPSHOT_INCONSISTENT" not in _engine_run(repo_a, "fsck", check=False).stdout
+    assert "SNAPSHOT_INCONSISTENT" not in _engine_run(repo_a, "store", "fsck", check=False).stdout
 
 
 def test_a3_repair_replacement_cannot_clear_foreign_pause_and_blocks_sync(two_clones, monkeypatch):
@@ -1242,7 +1250,7 @@ def test_a3_marker_is_optimization_not_authority_crash_before_marker(two_clones)
     tracker_a = _tracker(repo_a)
     create_file = _craft_inconsistent_snapshot(tracker_a, seed)
 
-    _engine_run(repo_a, "fsck", "--repair", check=False)
+    _engine_run(repo_a, "store", "fsck", "--repair", check=False)
     assert not create_file.exists()
 
     git_dir = fsck._resolve_tracker_git_dir(str(tracker_a))
@@ -1253,10 +1261,10 @@ def test_a3_marker_is_optimization_not_authority_crash_before_marker(two_clones)
 
     # Simulate crash-before-marker: the fix is committed but the marker never landed.
     marker.unlink()
-    out = _engine_run(repo_a, "fsck", "--repair", check=False).stdout
+    out = _engine_run(repo_a, "store", "fsck", "--repair", check=False).stdout
     assert "no repairable faults" in out, out  # fsck-authoritative: nothing to redo
     assert not (tracker_a / seed / (create_file.name + ".retired" + ".retired")).exists()
-    assert "SNAPSHOT_INCONSISTENT" not in _engine_run(repo_a, "fsck", check=False).stdout
+    assert "SNAPSHOT_INCONSISTENT" not in _engine_run(repo_a, "store", "fsck", check=False).stdout
 
 
 def test_a3_repair_surfaces_missing_create_without_auto_writing(two_clones):
@@ -1276,7 +1284,7 @@ def test_a3_repair_surfaces_missing_create_without_auto_writing(two_clones):
     _git("commit", "-q", "--no-verify", "-m", "craft: ghost ticket missing CREATE", cwd=tracker_a)
     before = {p.name for p in ghost.iterdir()}
 
-    out = _engine_run(repo_a, "fsck", "--repair", check=False).stdout
+    out = _engine_run(repo_a, "store", "fsck", "--repair", check=False).stdout
     assert "MISSING_CREATE" in out and "reb-ghost-nocreate" in out, out
     assert "no repairable faults" in out, out  # nothing auto-written for the ghost
     assert {p.name for p in ghost.iterdir()} == before, "repair must not write for MISSING_CREATE"
@@ -1294,7 +1302,9 @@ def test_two_clone_compaction_resurrection_no_data_loss_and_repairable(two_clone
 
     # A compacts: the CREATE source is folded and RENAMED to *.retired (not deleted).
     create_file = next(seed_dir.glob("*-CREATE.json"))
-    out = _engine_run(repo_a, "compact", seed, "--threshold=0", "--horizon=0", "--skip-sync").stdout
+    out = _engine_run(
+        repo_a, "store", "compact", seed, "--threshold=0", "--horizon=0", "--skip-sync"
+    ).stdout
     assert "compacted" in out, out
     retired = seed_dir / (create_file.name + ".retired")
     assert retired.exists(), "b306: source must be retired"
@@ -1304,11 +1314,11 @@ def test_two_clone_compaction_resurrection_no_data_loss_and_repairable(two_clone
     create_file.write_text(retired.read_text())
     _git("add", "-A", cwd=tracker_a)
     _git("commit", "-q", "--no-verify", "-m", "merge: union resurrects source", cwd=tracker_a)
-    assert "SNAPSHOT_INCONSISTENT" in _engine_run(repo_a, "fsck", check=False).stdout
+    assert "SNAPSHOT_INCONSISTENT" in _engine_run(repo_a, "store", "fsck", check=False).stdout
 
     # No data loss (the retired copy preserved it) and fsck --repair drives it clean.
-    _engine_run(repo_a, "fsck", "--repair", check=False)
-    clean = _engine_run(repo_a, "fsck", check=False).stdout
+    _engine_run(repo_a, "store", "fsck", "--repair", check=False)
+    clean = _engine_run(repo_a, "store", "fsck", check=False).stdout
     assert "SNAPSHOT_INCONSISTENT" not in clean
     assert _engine_run(repo_a, "show", seed).returncode == 0  # ticket still reduces
 
@@ -1508,7 +1518,7 @@ def test_two_clone_concurrent_claim_loser_detects_and_fork_surfaced(two_clones):
     # The resolved STATUS fork is surfaced: show carries the derived record and fsck flags it.
     shown = json.loads(_engine_run(repo_b, "show", seed).stdout)
     assert shown.get("status_fork_resolutions"), "show must surface the resolved fork record"
-    fsck = json.loads(_engine_run(repo_b, "fsck", "--output", "json", check=False).stdout)
+    fsck = json.loads(_engine_run(repo_b, "store", "fsck", "--output", "json", check=False).stdout)
     kinds = [f.get("kind") for f in fsck.get("issues", [])]
     assert "status_fork_resolved" in kinds, f"fsck must flag the resolved fork; kinds={kinds}"
 
@@ -1584,6 +1594,7 @@ def test_scenario_a_normal_horizon_real_remote_append_visible_no_repair(two_clon
     # the retirement (no folded source survives as live .json to later resurrect).
     out = _engine_run_env(
         repo_a,
+        "store",
         "compact",
         tid,
         "--threshold=0",
@@ -1623,7 +1634,7 @@ def test_scenario_a_normal_horizon_real_remote_append_visible_no_repair(two_clon
 
     # fsck is clean: no positional-skip drop (ORPHAN_EVENT) and no resurrected folded
     # source (SNAPSHOT_INCONSISTENT). This is the whole point of the conservative horizon.
-    fsck_out = _engine_run(repo_a, "fsck", check=False).stdout
+    fsck_out = _engine_run(repo_a, "store", "fsck", check=False).stdout
     assert "SNAPSHOT_INCONSISTENT" not in fsck_out, fsck_out
     assert "ORPHAN_EVENT" not in fsck_out, fsck_out
 
@@ -1656,6 +1667,7 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
     # SNAPSHOT ts is next_tick, floored up to REBAR_HLC_NOW). Then A publishes it.
     out = _engine_run_env(
         repo_a,
+        "store",
         "compact",
         seed,
         "--threshold=0",
@@ -1693,7 +1705,7 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
     # comment sorts before the far-future snapshot yet is absent from its
     # source_event_uuids, which is exactly the ORPHAN_EVENT / SNAPSHOT_INCONSISTENT the
     # detector reports (so the drop is operator-detectable, not silent).
-    pre_repair_fsck = _engine_run(repo_b, "fsck", check=False).stdout
+    pre_repair_fsck = _engine_run(repo_b, "store", "fsck", check=False).stdout
     assert ("ORPHAN_EVENT" in pre_repair_fsck) or ("SNAPSHOT_INCONSISTENT" in pre_repair_fsck), (
         f"fsck must flag the orphan before repair; got: {pre_repair_fsck}"
     )
@@ -1704,7 +1716,7 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
     # SETUP precondition for the repair: a repair that ran without B's orphan in hand would
     # "pass" while proving nothing, so the fetch is checked rather than incidental.
     _sync_from_origin(tracker_a)  # A now holds B's orphan
-    a_repair = _engine_run(repo_a, "fsck", "--repair-snapshots", check=False).stdout
+    a_repair = _engine_run(repo_a, "store", "fsck", "--repair-snapshots", check=False).stdout
     assert "rebuilt SNAPSHOT" in a_repair, a_repair
     assert "orphan-from-B" in _comment_bodies(repo_a), "A repair must fold in the orphan"
     _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
@@ -1712,7 +1724,7 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
     # THEN B fetches+syncs A's repaired snapshot and runs `fsck --repair` to converge.
     # SETUP precondition: B repairs against A's repaired snapshot, so that fetch must land.
     _sync_from_origin(tracker_b)
-    _engine_run(repo_b, "fsck", "--repair", check=False)
+    _engine_run(repo_b, "store", "fsck", "--repair", check=False)
     _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_b, check=False)
     assert "orphan-from-B" in _comment_bodies(repo_b), "B must hold the orphan after sync + repair"
     # A reconverges onto any commit B published during its repair — via the read path,
@@ -1886,7 +1898,9 @@ def test_parent_cascade_two_clone_offline_race_forks_resolved_independently(two_
     assert p_uuids.isdisjoint(c_uuids), f"parent/child forks not independent: {p_uuids} & {c_uuids}"
 
     # ...and fsck flags BOTH tickets' resolved forks.
-    fsck_out = json.loads(_engine_run(repo_b, "fsck", "--output", "json", check=False).stdout)
+    fsck_out = json.loads(
+        _engine_run(repo_b, "store", "fsck", "--output", "json", check=False).stdout
+    )
     forked = {
         f.get("ticket_id")
         for f in fsck_out.get("issues", [])

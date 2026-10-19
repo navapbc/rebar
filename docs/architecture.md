@@ -200,7 +200,7 @@ conflated — a recurring confusion for agents scoping bulk-write work:
    `rebar._commands.txn` (transition/claim) and `_commands.delete`. Every CLI,
    library, and MCP mutation — and every bulk operation (import/export/migration) —
    writes through here. Default granularity is **one event = one commit**; a few
-   inline cores (claim, delete, `compact-all`) already stage several event files
+   inline cores (claim, delete, `rebar store compact --all`) already stage several event files
    into a single commit.
 2. **The Jira reconciler** — `rebar_reconciler/` (shipped as `_engine/` package
    data) — a **bridge** that syncs the local store ↔ Jira. It is a *client* of the

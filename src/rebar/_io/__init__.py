@@ -1,4 +1,4 @@
-"""rebar import/export adapters (P1.2).
+"""rebar store import/export adapters (P1.2).
 
 A lossy interop *projection* of the ticket store — NOT a backup (``git bundle
 create tickets.bundle tickets`` already gives a lossless, full-audit-trail

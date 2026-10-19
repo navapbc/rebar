@@ -104,7 +104,7 @@ jobs:
       - name: Mount tickets branch as a worktree
         # The store lives on the `tickets` orphan branch at the repo root. Mount it
         # as .tickets-tracker on the ACTUAL `tickets` branch (not detached) so
-        # tracker.branch matches and `rebar fsck` does not WARN on a mismatch.
+        # tracker.branch matches and `rebar store fsck` does not WARN on a mismatch.
         run: |
           set -euo pipefail
           # Full fetch (no --depth): a shallow tickets history defeats merge-base and

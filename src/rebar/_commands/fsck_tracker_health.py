@@ -223,7 +223,7 @@ def _tracker_sync_status(tracker: str) -> tuple[str | None, bool]:
 _TMP_EVENT_PREFIX = ".tmp-event-"
 
 # (classes key, finding kind, blurb, counted-issue?). Classes 1 and 2 are counted:
-# each wedges reconverge until healed (`rebar doctor --repair`). Class 3 is
+# each wedges reconverge until healed (`rebar store doctor --repair`). Class 3 is
 # informational — an in-flight append legitimately holds a live ``.tmp-event-*`` for a
 # moment, so counting it would make fsck flake against concurrent writers; it is
 # reported for MANUAL triage and never auto-touched.
@@ -232,14 +232,14 @@ _DIRTY_LINE_SPECS: tuple[tuple[str, str, str, bool], ...] = (
         "deletions",
         "TRACKER_DIRTY_DELETION",
         "tracked store file(s) deleted in the working tree; bytes intact at HEAD "
-        "(heal: rebar doctor --repair restores them)",
+        "(heal: rebar store doctor --repair restores them)",
         True,
     ),
     (
         "leftovers",
         "TRACKER_DIRTY_LEFTOVER",
         "untracked regenerable compaction leftover(s) "
-        "(heal: rebar doctor --repair quarantines them — moved, never deleted)",
+        "(heal: rebar store doctor --repair quarantines them — moved, never deleted)",
         True,
     ),
     (

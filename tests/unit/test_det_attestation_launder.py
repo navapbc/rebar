@@ -163,8 +163,8 @@ def test_no_ac_section_yields_no_gaps() -> None:
 def test_live_grunion_ac19_text_fires() -> None:
     # The live laundering instance this bug reproduces (epic fb8a-7363-e406-4e36 AC-19).
     plan = _ac(
-        "- [x] [operator-attested] `rebar fsck` and `rebar compact-all` default to active "
-        "tickets and reach archived ones only with `--include-archived`; proxy: "
+        "- [x] [operator-attested] `rebar store fsck` and `rebar store compact --all` default to "
+        "active tickets and reach archived ones only with `--include-archived`; proxy: "
         "tests/unit/test_scan_scoping.py (merged 39de64871c)"
     )
     gaps = launder.laundering_gaps(plan)

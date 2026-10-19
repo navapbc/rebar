@@ -59,9 +59,9 @@ Whichever you choose: **never commit the value**, and never paste it into a clie
 ticket, a commit message, or a chat transcript. The configs below deliberately reference the
 variable **by name** so that the secret has exactly one home.
 
-### Check the wiring with `rebar doctor`
+### Check the wiring with `rebar store doctor`
 
-`rebar doctor` reads each client's config and reports two faults that both end in the same
+`rebar store doctor` reads each client's config and reports two faults that both end in the same
 symptom (`rebar` missing from the tool list):
 
 - **`pat-unresolvable`** — the config names a bearer env var that is unset or empty in the current

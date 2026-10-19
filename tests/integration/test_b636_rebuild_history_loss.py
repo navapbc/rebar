@@ -107,7 +107,7 @@ def test_repair_snapshots_dry_run_writes_nothing(two_clones):  # noqa: F811
 
     before = _events()
 
-    res = _engine_run(repo_a, "fsck", "--repair-snapshots", "--dry-run", check=False)
+    res = _engine_run(repo_a, "store", "fsck", "--repair-snapshots", "--dry-run", check=False)
 
     after = _events()
     assert after == before, "--dry-run must not modify, add, or remove any event file"
@@ -120,7 +120,7 @@ def test_fsck_surfaces_missing_sources(two_clones):  # noqa: F811
     tracker_a = _tracker(repo_a)
     _legacy_compacted_closed_ticket(repo_a, seed, tracker_a)
 
-    res = _engine_run(repo_a, "fsck", check=False)
+    res = _engine_run(repo_a, "store", "fsck", check=False)
 
     assert "SNAPSHOT_MISSING_SOURCES" in res.stdout, (
         "fsck must report snapshots citing source events absent from disk"

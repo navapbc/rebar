@@ -211,7 +211,7 @@ def test_validate_rejects_removed_fix_flag(rebar_repo: Path) -> None:
     """`validate --fix` was advertised but was a silent no-op — a user following the
     tool's own advice got nothing. The flag is removed, so `--fix` now falls through
     validate's existing unknown-option handler: it is REFUSED (exit 1) rather than
-    silently accepted. `rebar doctor` is the path for fixing."""
+    silently accepted. `rebar store doctor` is the path for fixing."""
     cp = _cli("validate", "--fix", cwd=str(rebar_repo))
     assert cp.returncode == 1
     assert "Unknown option: --fix" in (cp.stdout + cp.stderr)

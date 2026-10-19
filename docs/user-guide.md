@@ -388,7 +388,7 @@ rebar validate --output json
 
 ## Tracker footprint — pack size is not clone size
 
-`rebar tracker-footprint [--fresh-clone] [--output text|json]` reports the store's
+`rebar store footprint [--fresh-clone] [--output text|json]` reports the store's
 physical layers without applying a budget or changing the store. The default measures the
 configured mounted tracker exactly as found. Because a mounted tracker may be a linked
 worktree or use Git alternates, the report labels its object database `shared` and names the
@@ -400,8 +400,8 @@ Git's local hardlink optimization, measures it, and removes the temporary direct
 the reproducible choice when comparing independent clone residence:
 
 ```sh
-rebar tracker-footprint --fresh-clone
-rebar tracker-footprint --fresh-clone --output json
+rebar store footprint --fresh-clone
+rebar store footprint --fresh-clone --output json
 ```
 
 The layers are intentionally distinct:
@@ -518,10 +518,10 @@ command's stdout payload and exit code are untouched, so it never breaks a pipel
 Bulk commands (`list`, `ready`, `next-batch`, `search`, …) and `claim` do not warn.
 Set `warnings.cross_session = false` (default on) to disable the notice.
 
-## A dirty tickets tracker: `fsck` names it, `doctor --repair` heals it
+## A dirty tickets tracker: `fsck` names it, `rebar store doctor --repair` heals it
 
 A crash mid-compaction or an interrupted sync can leave the tickets tracker's working
-tree dirty, which wedges auto-commit. `rebar fsck` classifies that state into three
+tree dirty, which wedges auto-commit. `rebar store fsck` classifies that state into three
 finding classes (each carried in `--output json` with a per-class count and path list):
 
 - `TRACKER_DIRTY_DELETION` — a tracked store artifact deleted from the working tree or
@@ -552,10 +552,10 @@ it exits 1. Every report-only kind — `PUSH_PENDING`, `STATUS_FORK_RESOLVED`,
 tracker is reported as a single counted `not_initialized` issue, so its JSON payload is
 distinguishable from a clean store's empty `issues[]`.
 
-`rebar doctor --repair` heals the first two classes and then reconverges the store:
+`rebar store doctor --repair` heals the first two classes and then reconverges the store:
 
 1. Before the first mutation it records a backup ref `refs/rebar-doctor/<utc-ts>` at the
-   tracker's HEAD (the same envelope pattern as `tracker-maintenance`).
+   tracker's HEAD (the same envelope pattern as `rebar store maintenance`).
 2. Under one short write-lock window it restores deletions via `git checkout HEAD --` and
    **moves** (never deletes) leftovers into
    `<git-common-dir>/reconverge-quarantine/<utc-ts>/`.
@@ -564,12 +564,12 @@ distinguishable from a clean store's empty `issues[]`.
 
 Orphaned `.tmp-event-*` files are printed with a `manual` repair status and left
 byte-identical; inspect and remove them by hand only when you know the append that wrote
-them is dead. On a clean tracker `doctor --repair` makes zero changes and records no
+them is dead. On a clean tracker `rebar store doctor --repair` makes zero changes and records no
 backup ref.
 
 ## `doctor` also audits your `[mapping]` config
 
-`rebar doctor` diagnoses the hand-edited `[mapping]` seam so a misconfigured mapping can't
+`rebar store doctor` diagnoses the hand-edited `[mapping]` seam so a misconfigured mapping can't
 silently drift a Jira reconcile. It reports two classes, and — like the rest of `doctor` —
 folds them into its exit code, but keeps them OUT of `--repair` (mapping findings are
 report-only):
@@ -602,9 +602,9 @@ CI or scheduler dependency.
 Because archived tickets are settled and folded, the store-walking maintenance commands
 skip them by default, so their cost tracks store *activity*, not store *history*:
 
-- `rebar fsck`'s per-ticket checks walk **active** tickets only; pass `--include-archived`
+- `rebar store fsck`'s per-ticket checks walk **active** tickets only; pass `--include-archived`
   to restore the full historical walk (works with `--output json` too).
-- `rebar compact-all` selects among active tickets only; `--include-archived` also sweeps
+- `rebar store compact --all` selects among active tickets only; `--include-archived` also sweeps
   archived ones — the migration door that folds tickets archived before the archive-time
   fold existed.
 
@@ -641,7 +641,7 @@ Each ticket carries a `bridge_project` (its sync target) and `repos`; a ticket w
 [the ticket model](ticket-model.md#the-project-fields-bridge_project-and-repos)). A store
 created before this feature seeds a mapping from its configured `jira.project` (recording it
 as the `legacy_default`, with an empty sync list) automatically at the next `rebar init` /
-`rebar fsck --repair` (see [migrations.md](migrations.md)); the design rationale is [ADR
+`rebar store fsck --repair` (see [migrations.md](migrations.md)); the design rationale is [ADR
 0097](adr/0097-many-to-many-tracker-projects.md).
 
 **Upgrade note for mixed-version fleets.** Once a store actually syncs more than one project,

@@ -29,7 +29,7 @@ derived caches the reconciler rebuilds). Resolution by case: unrelated histories
 (no common ancestor) + an EMPTY local store → ``merge --allow-unrelated-histories``
 (union — nothing local can be lost); unrelated histories + a local store that already
 carries ticket events → **REFUSE**, mutate nothing, and log a ``DIVERGED`` warning
-pointing at ``rebar fsck`` / ``rebar fsck-recover`` (see ``_carries_ticket_events``);
+pointing at ``rebar store fsck`` / ``rebar store fsck-recover`` (see ``_carries_ticket_events``);
 related + no local commits → fast-forward adopt (``reset --hard`` onto an ancestor —
 discards nothing); local strictly ahead → nothing to do; diverged → ``merge
 origin/tickets`` (union). Every merge: on conflict → ``merge --abort``, keep local,
@@ -145,7 +145,7 @@ def _do_reconverge(tracker: str, branch: str, remote_name: str) -> None:
     except _lock.RebaseGuard:
         logger.warning(
             "tickets sync skipped — tracker in rebase/merge recovery state "
-            "(run: rebar fsck-recover)"
+            "(run: rebar store fsck-recover)"
         )
         return
 
@@ -176,7 +176,7 @@ def _do_reconverge(tracker: str, branch: str, remote_name: str) -> None:
             logger.warning(
                 "tickets sync DIVERGED — local store and %s share no common ancestor "
                 "and the local store already carries ticket events; refusing to merge. "
-                "Local state is untouched; run: rebar fsck (then rebar fsck-recover)",
+                "Local state is untouched; run: rebar store fsck (then rebar store fsck-recover)",
                 remote,
             )
             return
@@ -245,7 +245,7 @@ def _union_merge(tracker: str, remote: str, *extra: str) -> None:
 
     _git(tracker, "merge", "--abort")
     logger.warning(
-        "tickets sync could not auto-merge %s — local state kept; run: rebar fsck-recover",
+        "tickets sync could not auto-merge %s — local state kept; run: rebar store fsck-recover",
         remote,
     )
 

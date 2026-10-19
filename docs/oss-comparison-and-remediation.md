@@ -163,7 +163,7 @@ lock or a committed shared-mutable index).
    reusing the existing in-memory reducer filter path. Purely read-side (I3
    clean), no schema change, immediately useful to every agent. *Test:* extend
    reducer search/filter unit tests + a golden.
-2. **`rebar export` / `rebar import` (G-export).** `export` = stable JSON dump of
+2. **`rebar store export` / `rebar store import` (G-export).** `export` = stable JSON dump of
    replayed state (the output schemas already exist); `import` = create events
    from a JSON/GitHub-issues payload through the normal locked write path. Fully
    additive, enables migration/backup/CI snapshots.

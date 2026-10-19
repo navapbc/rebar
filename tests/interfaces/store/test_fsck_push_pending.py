@@ -3,7 +3,7 @@
 In-process port of tests/scripts/test-ticket-fsck-push-pending.sh (the bash engine
 is being deleted). Push is best-effort, so a local commit with no push silently
 diverges from origin; fsck must surface that (it is informational — it does NOT
-fail the fsck). Drives ``rebar._cli.main(["fsck"])`` against a tracker ahead of a
+fail the fsck). Drives ``rebar._cli.main(["store", "fsck"])`` against a tracker ahead of a
 real local bare origin.
 """
 
@@ -74,7 +74,7 @@ def test_fsck_reports_push_pending_and_stays_exit_0(
     _git_q("fetch", "origin", "tickets", cwd=tracker)
     assert _ahead(tracker) >= 1, "fixture did not reach a local-ahead state"
 
-    rc = _cli.main(["fsck"])
+    rc = _cli.main(["store", "fsck"])
     out = capsys.readouterr().out
 
     assert "PUSH_PENDING" in out, f"fsck did not surface PUSH_PENDING; output:\n{out}"
@@ -92,7 +92,7 @@ def test_fsck_quiet_when_in_sync(
     _git_q("fetch", "origin", "tickets", cwd=tracker)
     assert _ahead(tracker) == 0, "fixture unexpectedly ahead of origin"
 
-    _cli.main(["fsck"])
+    _cli.main(["store", "fsck"])
     out = capsys.readouterr().out
     assert "PUSH_PENDING" not in out, f"fsck emitted PUSH_PENDING when in sync:\n{out}"
 
@@ -126,7 +126,7 @@ def test_fsck_reports_diverged_on_unrelated_history(
         "precondition: local and origin/tickets must share no common ancestor"
     )
 
-    rc = _cli.main(["fsck"])
+    rc = _cli.main(["store", "fsck"])
     out = capsys.readouterr().out
 
     assert "DIVERGED" in out, f"fsck did not surface DIVERGED on an unrelated history:\n{out}"

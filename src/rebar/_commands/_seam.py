@@ -504,9 +504,9 @@ def _refuse_unpublishable_store(tracker) -> None:
     raise CommandError(
         "Error: ticket write refused: "
         f"{stale.get('reason', 'the local ticket store cannot publish')}. "
-        f"Run `rebar fsck` to confirm DIVERGED against {remote_ref}; recover with "
-        "`rebar fsck-recover` for stale rebase/merge dangling commits, or use "
-        "`rebar tracker-maintenance` from an isolated operator window before writing "
+        f"Run `rebar store fsck` to confirm DIVERGED against {remote_ref}; recover with "
+        "`rebar store fsck-recover` for stale rebase/merge dangling commits, or use "
+        "`rebar store maintenance` from an isolated operator window before writing "
         "again.",
         returncode=1,
     )

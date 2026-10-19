@@ -54,7 +54,7 @@ def _tickets_head(tracker: Path) -> str:
 def test_plain_fsck_prints_converged_line(repo: Path) -> None:
     out = rebar.fsck(repo_root=str(repo))
     assert "ensures: 9/9 applied" in out
-    assert "run `rebar fsck --repair`" not in out  # converged → no nudge
+    assert "run `rebar store fsck --repair`" not in out  # converged → no nudge
 
 
 def test_plain_fsck_pending_line_and_no_sweep(repo: Path) -> None:
@@ -63,7 +63,7 @@ def test_plain_fsck_pending_line_and_no_sweep(repo: Path) -> None:
     before = _tickets_head(tracker)
     out = rebar.fsck(repo_root=str(repo))
     assert "ensures: 0/9 applied" in out
-    assert "run `rebar fsck --repair` to converge" in out
+    assert "run `rebar store fsck --repair` to converge" in out
     # read-only fsck must NOT sweep: no marker rewritten, no commits.
     assert not (tracker / ensures.APPLIED_MARKER).exists()
     assert _tickets_head(tracker) == before

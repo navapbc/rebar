@@ -26,9 +26,16 @@ class _Handler(Protocol):
     def __call__(self, *args: object) -> int: ...
 
 
-def execute(name: str, rest: list[str]) -> int:
-    """Resolve and run the selected registry route's handler."""
-    route = _registry.route_for(name)
+def execute(
+    name: str, rest: list[str], *, routes: tuple[_registry.Route, ...] = _registry.ROUTES
+) -> int:
+    """Resolve and run the selected registry route's handler.
+
+    ``routes`` is the table ``name`` is resolved in: the top-level :data:`ROUTES` by
+    default, or a family's member table such as :data:`STORE_ROUTES` for
+    ``rebar store <sub>``, so a member runs under its own init policy and adapter.
+    """
+    route = _registry.route_for(name, routes)
     if route is None or route.handler is None:
         raise RuntimeError(f"rebar: {name!r} has no executable route")
     _apply_init(route.init, rest)

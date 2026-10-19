@@ -33,7 +33,7 @@ def _compact(repo: Path, tid: str) -> None:
     env["REBAR_ROOT"] = str(repo)
     env["REBAR_SYNC_PULL"] = "off"
     cp = subprocess.run(
-        [sys.executable, "-m", "rebar.cli", "compact", tid, "--threshold=0"],
+        [sys.executable, "-m", "rebar.cli", "store", "compact", tid, "--threshold=0"],
         cwd=str(repo),
         capture_output=True,
         text=True,

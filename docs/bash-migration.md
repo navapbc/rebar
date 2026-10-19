@@ -102,7 +102,7 @@ all seven steps; no step is skipped because a command "looks trivial":
 6. **Soak.** Dogfood on this repo's own store (this repo tracks its work in
    rebar, so the flip is exercised immediately): the soak window is the rest
    of the release cycle for Tiers B/C commands, one FULL release for Tier D.
-   Soak exit criteria: `rebar fsck` clean, no `PUSH_PENDING` anomalies, no
+   Soak exit criteria: `rebar store fsck` clean, no `PUSH_PENDING` anomalies, no
    exit-code regressions in CI or live use, perf gates (`tests/perf/`) green.
 7. **Retire.** In one commit (the a93885ed pattern): delete the switch, the
    bash implementation, its heredocs, and the dual-run wiring; translate the
@@ -347,7 +347,7 @@ Same-clone, cross-process (sessions):
   interop), AND on macOS CI.
 - Crash safety: `kill -9` mid-critical-section under each impl → fcntl lock
   auto-releases; the mkdir-leg staleness behavior matches bash today
-  (timeout, manual recovery via `fsck-recover`) — preserved, not "fixed",
+  (timeout, manual recovery via `rebar store fsck-recover`) — preserved, not "fixed",
   in the port.
 - `tests/scripts/test-mkdir-lock-stress.sh` extended to drive the Python
   core.

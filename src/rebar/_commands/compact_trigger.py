@@ -18,7 +18,7 @@ for minutes. Here the waited-on operation holds nothing:
 * its decision is two ``O(1)`` checks — no store-wide scan, nothing that grows with the number
   of tickets;
 * the fold itself happens in a DETACHED worker, so the session returns immediately. The
-  worker's lock profile is exactly that of a manual ``rebar compact``, which is the accepted
+  worker's lock profile is exactly that of a manual ``rebar store compact``, which is the accepted
   baseline, and it never spans an LLM call.
 
 The detach machinery (:mod:`rebar._proc`), the stamped advisory lock

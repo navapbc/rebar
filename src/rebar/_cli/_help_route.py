@@ -15,11 +15,11 @@ from rebar._cli import _help
 from rebar._cli._registry import ROUTES, Route, route_for
 
 # Nested families retain nonleading child help. Bridge membership comes from its parser
-# factory. Intercepts and config's handler-only ``validate`` are named because pre-scan
-# cannot derive them.
+# factory. Intercepts, the ``store`` family (whose members render their own help), and
+# config's handler-only ``validate`` are named because pre-scan cannot derive them.
 _BRIDGE_FACTORY: str | None = next((r.parser_factory for r in ROUTES if r.name == "bridge"), None)
 _NESTED_INTERCEPTS: frozenset[str] = frozenset(
-    {"audit", "config", "criteria", "identity", "llm", "prompt", "workflow"}
+    {"audit", "config", "criteria", "identity", "llm", "prompt", "store", "workflow"}
 )
 _NESTED_FAMILY: frozenset[str] = frozenset(
     r.name
@@ -50,6 +50,16 @@ _REMOVED_SPELLINGS: dict[str, str] = {
     "get-verify-commands": "rebar show <id> --field=verify_commands",
     "list-descendants": "rebar deps <id> --descendants",
     "session-logs": "rebar list --type=session_log --sort=-created --limit=5",
+    # Storage-maintenance verbs moved under the ``store`` family.
+    "fsck": "rebar store fsck",
+    "fsck-recover": "rebar store fsck-recover",
+    "doctor": "rebar store doctor",
+    "tracker-maintenance": "rebar store maintenance",
+    "tracker-footprint": "rebar store footprint",
+    "export": "rebar store export",
+    "import": "rebar store import",
+    "compact": "rebar store compact <id>",
+    "compact-all": "rebar store compact --all",
 }
 _REMOVED_SIMPLE_CLI_ALIASES: frozenset[str] = frozenset(_REMOVED_SPELLINGS)
 

@@ -913,7 +913,7 @@ lock timeouts, and model/provider errors leave no partial signature event.
 
 ### Phase rollback and precision loss
 
-Disable claim/close enforcement first, then pause every `rebar compact` invocation during the
+Disable claim/close enforcement first, then pause every `rebar store compact` invocation during the
 downgrade window. Existing phase-bearing snapshots are lossless because old reducers
 preserve unknown snapshot fields. If old code instead fully re-reduces raw events after its own
 cache bump, it drops the derived phase; a later forward upgrade bootstraps planning for `open` or

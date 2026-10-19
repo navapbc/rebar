@@ -484,7 +484,7 @@ def test_genuinely_empty_link_vocabulary_still_drifts(
 def test_doctor_cli_mapping_error_yields_nonzero_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """An offline mapping ERROR makes ``rebar doctor`` exit non-zero, folded into the exit
+    """An offline mapping ERROR makes ``rebar store doctor`` exit non-zero, folded into the exit
     code exactly as a stale lock or an unrepaired link finding is.
     """
     monkeypatch.setattr("rebar._optional.capability_installed", lambda key: False)
@@ -504,7 +504,7 @@ def test_doctor_cli_mapping_warning_only_yields_zero_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A mapping WARNING (stub block) and an ``unavailable`` live-drift finding — with no
-    error — leave ``rebar doctor`` at a zero exit, while still being rendered.
+    error — leave ``rebar store doctor`` at a zero exit, while still being rendered.
     """
     monkeypatch.setattr("rebar._optional.capability_installed", lambda key: False)
     proj = _proj(tmp_path, "[mapping.projects.STUB]\n")
