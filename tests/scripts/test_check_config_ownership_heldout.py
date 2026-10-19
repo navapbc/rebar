@@ -261,12 +261,3 @@ def test_unowned_credential_name_drifts_to_error(gate, tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 # Real-tree cleanliness — the enrolled gate must pass on rebar itself         #
 # --------------------------------------------------------------------------- #
-
-
-def test_real_source_tree_is_clean(gate):
-    root = gate.REPO_ROOT / "src" / "rebar"
-    assert gate.check(root) == [], "the enrolled tree must be clean via LEGACY_EXCEPTIONS"
-
-
-def test_main_on_real_tree_returns_zero(gate):
-    assert gate.main([]) == 0

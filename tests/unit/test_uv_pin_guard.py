@@ -13,7 +13,6 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GATE = REPO_ROOT / "scripts" / "check_uv_pin.py"
@@ -141,12 +140,6 @@ def tree(tmp_path: Path) -> Path:
     compose.mkdir(parents=True)
     (compose / "Dockerfile.svc").write_text(DOCKERFILE_CLEAN, encoding="utf-8")
     return tmp_path
-
-
-def test_real_repository_passes() -> None:
-    """The gate is green on the tree it actually governs."""
-    result = _run(REPO_ROOT)
-    assert result.returncode == 0, result.stderr
 
 
 def test_fixture_baseline_passes(tree: Path) -> None:
@@ -306,42 +299,6 @@ def test_local_action_emits_acceptance_anchor() -> None:
         encoding="utf-8"
     )
     assert "Successfully installed uv $version" in body
-
-
-def test_make_lint_invokes_the_gate() -> None:
-    """A gate nothing runs is not a gate.
-
-    `make lint` is the portable, no-CI-provider trigger the project uses for every checker of
-    this kind, and CI inherits it through the same step -- so wiring is part of the contract,
-    not an implementation detail.
-    """
-    body = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-    assert "python scripts/check_uv_pin.py" in body
-
-
-def test_real_repository_dockerfiles_do_not_float_the_uv_tag() -> None:
-    """Verify Dockerfiles pin uv to the repository-required version.
-
-    This prevents upstream tag changes from breaking image builds without a repository change.
-    """
-    offenders = [
-        f"{path}:{number}"
-        for path in _gate_module()._dockerfiles(REPO_ROOT)
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
-        if ":latest" in line and line.lstrip().startswith(("FROM", "COPY --from="))
-    ]
-    assert not offenders, f"floating :latest toolchain tags: {offenders}"
-
-
-def test_real_repository_dockerfiles_match_the_pyproject_pin() -> None:
-    """AC2 -- the images must install the uv that ``pyproject.toml`` requires."""
-    required = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    version = required["tool"]["uv"]["required-version"].removeprefix("==")
-    for path in sorted(REPO_ROOT.glob("infra/compose/Dockerfile.*")):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if "astral-sh/uv" not in line:
-                continue
-            assert f"astral-sh/uv:{version}" in line, f"{path.name}: {line.strip()}"
 
 
 def test_dockerfile_floating_uv_tag_is_rejected(tree: Path) -> None:

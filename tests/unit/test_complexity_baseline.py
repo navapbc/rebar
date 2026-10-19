@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import re
 import subprocess
 import sys
 import types
@@ -45,104 +44,7 @@ ccb = _load()
 # ─────────────────────────── live-census helpers ────────────────────────────
 
 
-def _live_census() -> list[dict]:
-    """Run the raw JSON census (command 5: no ``--exit-zero``) and return findings.
-
-    Exit code is asserted to be 1 by the caller when it needs it; here we only parse.
-    """
-    proc = subprocess.run(
-        [
-            "ruff",
-            "check",
-            "--no-cache",
-            "--select",
-            "C901",
-            "--config",
-            "lint.mccabe.max-complexity=15",
-            "--output-format=json",
-            "src/rebar",
-        ],
-        cwd=str(REPO_ROOT),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return json.loads(proc.stdout), proc.returncode
-
-
-def _live_count() -> int:
-    findings, _ = _live_census()
-    return len(findings)
-
-
 # ───────────────────────── census / exit-code contract ──────────────────────
-
-
-def test_raw_json_census_exits_1_with_live_count():
-    """Command 5: raw JSON census (no --exit-zero) exits 1 and length == live count."""
-    findings, rc = _live_census()
-    assert rc == 1, "raw JSON census must exit 1 because findings exist"
-    assert all(f["code"] == "C901" for f in findings)
-    assert len(findings) == _live_count()
-    assert len(findings) > 0
-
-
-@pytest.mark.allow_unharnessed_subprocess(
-    "the complexity census is a property of the real committed src/rebar"
-)
-def test_census_transport_exit_zero_same_count():
-    """Command 2: --exit-zero census exits 0 with the same live census count."""
-    proc = subprocess.run(
-        [
-            "ruff",
-            "check",
-            "--no-cache",
-            "--select",
-            "C901",
-            "--config",
-            "lint.mccabe.max-complexity=15",
-            "--exit-zero",
-            "--output-format=json",
-            "src/rebar",
-        ],
-        cwd=str(REPO_ROOT),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert proc.returncode == 0
-    findings = json.loads(proc.stdout)
-    raw, raw_rc = _live_census()
-    assert raw_rc == 1
-    assert len(findings) == len(raw)
-
-
-@pytest.mark.allow_unharnessed_subprocess(
-    "asserts the committed baseline is current for THIS checkout's real source"
-)
-def test_wrapper_check_on_committed_baseline():
-    """Command 3: --check on the committed tree exits 0 with the shrink-only verdict.
-
-    The gate's contract is ``new=0`` and ``increased=0`` — ``active``/``stale`` are
-    informational. A contributor who legitimately REDUCES a baselined function makes
-    ``stale`` nonzero (and drops that symbol out of ``active``) and must still pass.
-    """
-    live = _live_count()
-    proc = subprocess.run(
-        [sys.executable, str(SCRIPT_PATH), "--check"],
-        cwd=str(REPO_ROOT),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    match = re.fullmatch(r"active=(\d+) new=(\d+) increased=(\d+) stale=(\d+)", proc.stdout.strip())
-    assert match is not None, f"unexpected verdict line: {proc.stdout!r}"
-    active, new, increased, _stale = (int(g) for g in match.groups())
-    assert new == 0
-    assert increased == 0
-    # Only a live finding sitting exactly at its ceiling can be `active`.
-    assert active <= live
 
 
 # ─────────────────────────── pyproject / baseline ───────────────────────────
@@ -172,41 +74,6 @@ def test_src_rebar_has_no_inline_c901_noqa():
             if "noqa" in low and "c901" in low:
                 offenders.append(f"{module.path}:{i}")
     assert offenders == [], f"inline C901 noqa found: {offenders}"
-
-
-def test_committed_baseline_schema_and_count():
-    live = _live_count()
-    doc = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
-    assert doc["schema_version"] == 1
-    assert type(doc["schema_version"]) is int
-    # Every live finding must have a baseline key, or `--check` would report `new>0`.
-    # The baseline may additionally retain keys for functions that have since dropped
-    # below the threshold (reported as `stale`, an allowed improvement).
-    assert len(doc["ceilings"]) >= live
-    # every value > threshold; keys sorted
-    keys = list(doc["ceilings"])
-    assert keys == sorted(keys)
-    for key, ceiling in doc["ceilings"].items():
-        assert type(ceiling) is int and ceiling > 15
-        ccb._validate_key(key)  # contract-valid key
-
-
-def test_committed_baseline_loads_and_checks_clean():
-    """The committed tree carries no NEW or INCREASED debt.
-
-    `stale` is not asserted away: a legitimate complexity reduction is reported as
-    `stale` and still passes the gate. What holds structurally is that the counters
-    partition the baseline (they are mutually exclusive) and that only live findings
-    sitting exactly at their ceiling can be `active`.
-    """
-    ceilings = ccb.load_baseline(BASELINE_PATH)
-    findings = ccb.run_scanner()
-    current = ccb.normalize_findings(findings, ccb.REPO_ROOT)
-    counters = ccb.compare(current, ceilings)
-    assert counters.new == []
-    assert counters.increased == []
-    assert len(counters.active) + len(counters.increased) + len(counters.stale) == len(ceilings)
-    assert len(counters.active) <= _live_count()
 
 
 # ───────────────────────────── schema validation ────────────────────────────
@@ -808,14 +675,6 @@ def test_runbook_documents_tokens():
 # ────────────────────────────── make lint wiring ────────────────────────────
 
 
-def test_make_lint_wires_wrapper_and_retains_ruff_format():
-    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-    lint_block = makefile.split("\nlint:", 1)[1].split("\n\n", 1)[0]
-    assert "python scripts/check_complexity_baseline.py --check" in lint_block
-    assert "ruff check $(sources)" in lint_block
-    assert "ruff format --check $(sources)" in lint_block
-
-
 def test_make_sources_cover_src_and_tests():
     makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
     # `sources` must span both src and tests (the ruff/format scope).
@@ -1029,19 +888,14 @@ def test_tree_assertions_agree_with_gate_on_a_reduction(
     monkeypatch.setattr(ccb, "BASELINE_PATH", baseline_file)
     monkeypatch.setattr(ccb, "run_scanner", lambda **k: [])
     monkeypatch.setattr(ccb, "normalize_findings", lambda f, root: current)
-    # The same synthetic tree as the committed-tree tests see it.
-    monkeypatch.setattr(f"{__name__}.BASELINE_PATH", baseline_file)
-    monkeypatch.setattr(f"{__name__}._live_census", lambda: ([{"code": "C901"}] * len(current), 1))
 
-    # Half 1 -- the local gate allows the reduction.
+    # The local gate allows the reduction. The committed-tree assertions this once had to
+    # agree with were retired (epic sainted-illjudged-fossa), so `make lint`'s gate is the
+    # one verdict CI enforces and the two can no longer disagree.
     rc = ccb._run_check(tmp_path)
     out = capsys.readouterr().out
     assert rc == expect_rc, out
     assert expect_token in out
-
-    # Half 2 -- the assertions CI enforces on that same tree must agree.
-    test_committed_baseline_schema_and_count()
-    test_committed_baseline_loads_and_checks_clean()
 
 
 @pytest.mark.parametrize(

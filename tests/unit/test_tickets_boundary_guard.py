@@ -9,8 +9,6 @@ that runs only in CI lets a local verdict be green over a tree CI rejects.
 
 from __future__ import annotations
 
-import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -19,7 +17,6 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "check_tickets_boundary.py"
 
 sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 import check_tickets_boundary as gate  # noqa: E402
@@ -131,29 +128,3 @@ def test_an_empty_reason_does_not_sanction(tmp_path: Path) -> None:
 
 
 # ─────────────────────────── the real tree, and wiring ───────────────────────────
-
-
-def test_the_repository_is_clean() -> None:
-    """The drained tree passes. This is the regression guard for all thirteen sites."""
-    completed = subprocess.run(
-        [sys.executable, str(_SCRIPT)], capture_output=True, text=True, check=False
-    )
-    assert completed.returncode == 0, completed.stderr
-
-
-def test_make_lint_invokes_the_gate() -> None:
-    """A CI-only gate lets a local verdict be green over a tree CI rejects."""
-    text = (_REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-    body: list[str] = []
-    in_target = False
-    for line in text.splitlines():
-        if re.match(r"^lint:", line):
-            in_target = True
-            continue
-        if in_target and re.match(r"^[A-Za-z0-9_.-]+:", line):
-            break
-        if in_target:
-            body.append(line)
-    assert "scripts/check_tickets_boundary.py" in "\n".join(body), (
-        "`make lint` does not invoke the tickets-boundary gate"
-    )

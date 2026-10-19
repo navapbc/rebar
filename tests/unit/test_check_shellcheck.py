@@ -131,8 +131,3 @@ def test_missing_shellcheck_names_the_install_path(tmp_path, monkeypatch, capsys
     chk.main(["--root", str(repo)])
     err = capsys.readouterr().err
     assert "make install" in err and "shellcheck-py" in err
-
-
-def test_repository_tree_is_currently_clean():
-    # The gate is wired into `make lint`; the committed tree must satisfy it.
-    assert chk.main(["--root", str(REPO_ROOT)]) == 0

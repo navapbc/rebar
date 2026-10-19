@@ -20,11 +20,36 @@ pytestmark = pytest.mark.unit
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _MAKEFILE = _REPO_ROOT / "Makefile"
 
-# The gates this story wired. Each already ran in CI; each must now also be reachable
-# locally. Listed explicitly rather than discovered, so ADDING a CI-only script is not
-# silently treated as a `make lint` obligation.
+# Every script ``make lint`` runs: this module is their ONE wiring census (epic
+# sainted-illjudged-fossa retired the per-script "make lint wires it" twins). Listed
+# explicitly rather than discovered, so ADDING a CI-only script is not silently treated as a
+# ``make lint`` obligation; ``test_every_make_lint_script_is_listed`` closes the other
+# direction, so a newly wired script cannot go unlisted either.
 _WIRED_GATES = (
+    "scripts/check_adr_numbers.py",
+    "scripts/check_cli_json_js_safe.py",
+    "scripts/check_comment_hygiene.py",
+    "scripts/check_complexity_baseline.py",
+    "scripts/check_config_ownership.py",
+    "scripts/check_config_reads.py",
+    "scripts/check_criteria_vocabulary.py",
+    "scripts/check_dco_identity.py",
+    "scripts/check_deploy_manifest.py",
+    "scripts/check_destructive_test_exec.py",
+    "scripts/check_docs_index.py",
+    "scripts/check_fcntl_import_guard.py",
+    "scripts/check_mechanism_delta.py",
     "scripts/check_raw_git_writes.py",
+    "scripts/check_repo_root_from_package.py",
+    "scripts/check_repo_root_from_tracker.py",
+    "scripts/check_shellcheck.py",
+    "scripts/check_skill_frontmatter.py",
+    "scripts/check_ssm_secret_state.py",
+    "scripts/check_templatefile_escapes.py",
+    "scripts/check_tickets_boundary.py",
+    "scripts/check_user_data_size.py",
+    "scripts/check_uv_pin.py",
+    "scripts/check_verify_gate_parity.py",
     "scripts/check_wall_clock_asserts.py",
 )
 
@@ -64,3 +89,26 @@ def test_the_wiring_check_has_teeth(script: str) -> None:
     assert script not in _lint_target_body(stripped)
     relocated = stripped + f"\nsome-other-target:\n\tpython {script}\n"
     assert script not in _lint_target_body(relocated)
+
+
+_SCRIPT_CALL = re.compile(r"\bpython\s+(scripts/check_[A-Za-z0-9_]+\.py)")
+
+
+def _lint_scripts(makefile_text: str) -> set[str]:
+    return set(_SCRIPT_CALL.findall(_lint_target_body(makefile_text)))
+
+
+def test_every_make_lint_script_is_listed() -> None:
+    """The reverse direction: a ``scripts/check_*.py`` invoked by ``make lint`` but absent from
+    ``_WIRED_GATES`` would have no wiring census at all once its pytest twin is gone. A
+    synthetic script wired into a copy of the ``lint`` recipe must be reported as unlisted."""
+    mk = _MAKEFILE.read_text(encoding="utf-8")
+    assert _lint_scripts(mk) == set(_WIRED_GATES), (
+        "`make lint` and _WIRED_GATES disagree: "
+        f"unlisted={sorted(_lint_scripts(mk) - set(_WIRED_GATES))}, "
+        f"not-run={sorted(set(_WIRED_GATES) - _lint_scripts(mk))}"
+    )
+    head, sep, tail = mk.partition("\nlint:")
+    first, _, rest = tail.partition("\n")
+    seeded = head + sep + first + "\n\tpython scripts/check_new.py\n" + rest
+    assert _lint_scripts(seeded) - set(_WIRED_GATES) == {"scripts/check_new.py"}
