@@ -134,6 +134,17 @@ class VerifyCommandEntry(TypedDict):
     command: str
 
 
+class PushStatus(TypedDict):
+    """Shared `push_status` object (common.schema.json)."""
+
+    state: Literal["ok", "pending", "unknown"]
+    reason: NotRequired[str]
+    detail: NotRequired[str]
+    remote_ref: NotRequired[str]
+    unpushed: NotRequired[str]
+    since: NotRequired[float]
+
+
 class BatchItem(TypedDict):
     """Shared `batch_item` object (common.schema.json)."""
 
@@ -185,6 +196,7 @@ class TicketState(TypedDict):
     file_impact: NotRequired[list[FileImpactEntry]]
     file_impact_scope: NotRequired[FileImpactScope]
     no_file_impact_reason: NotRequired[str]
+    cross_session_warning: NotRequired[str]
     plan_review_health: NotRequired[dict[str, Any] | None]
     verify_commands: NotRequired[list[VerifyCommandEntry]]
     bridge_alerts: NotRequired[list[Any]]
@@ -262,6 +274,7 @@ class CreateResult(TypedDict):
     title: NotRequired[str]
     description_warning: NotRequired[str | None]
     duplicate_warning: NotRequired[str | None]
+    push_status: NotRequired[PushStatus]
 
 
 class ClaimResult(TypedDict):
@@ -270,6 +283,7 @@ class ClaimResult(TypedDict):
     ticket_id: str
     status: TicketStatus
     assignee: NotRequired[str | None]
+    push_status: NotRequired[PushStatus]
 
 
 # Return shape of the `transition_result` output schema.
@@ -280,6 +294,8 @@ TransitionResult = TypedDict(
         "from": TicketStatus,
         "to": TicketStatus,
         "newly_unblocked": list[str],
+        "push_status": NotRequired[PushStatus],
+        "cross_session_warning": NotRequired[str],
         "completion_signature": NotRequired[dict[str, Any]],
     },
 )
@@ -306,6 +322,7 @@ class GateResult(TypedDict):
     keyword_count: NotRequired[int]
     ac_items: NotRequired[int]
     file_impact: NotRequired[int]
+    cross_session_warning: NotRequired[str]
 
 
 class ValidateReport(TypedDict):
@@ -346,6 +363,7 @@ class SignResult(TypedDict):
     head_sha: NotRequired[str | None]
     signature: NotRequired[str | None]
     key_id: NotRequired[str | None]
+    push_status: NotRequired[PushStatus]
 
 
 class VerifySignatureResult(TypedDict):

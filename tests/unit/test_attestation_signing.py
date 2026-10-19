@@ -288,15 +288,16 @@ def test_show_displays_rebar_version_stamp(store: Path) -> None:
     assert signing.rebar_version_from_manifest(manifest) == "8.8.8 (b4dc0de-dirty)"
 
 
-def test_verify_signature_result_model_documents_rebar_version() -> None:
-    """The typed MCP contract (VerifySignatureResultOut) carries the field (epic jira-reb-596)."""
-    models = pytest.importorskip("rebar._mcp_models")
-    model = models.VerifySignatureResultOut
-    if model is None:  # pydantic unavailable in this env
-        pytest.skip("pydantic not installed")
-    field = model.model_fields.get("rebar_version")
-    assert field is not None, "VerifySignatureResultOut must document rebar_version"
-    assert not field.is_required(), "rebar_version must be optional for pre-stamp back-compat"
+def test_verify_signature_result_schema_documents_rebar_version() -> None:
+    """The typed MCP contract carries the field (epic jira-reb-596): MCP verify_signature
+    advertises verify_signature_result.schema.json verbatim (story quilted-nepotic-kitty)."""
+    from rebar import schemas
+
+    schema = schemas.load(schemas.VERIFY_SIGNATURE_RESULT)
+    assert "rebar_version" in schema["properties"], "the schema must declare rebar_version"
+    assert "rebar_version" not in schema["required"], (
+        "rebar_version must be optional for pre-stamp back-compat"
+    )
 
 
 def test_both_manifests_carry_rebar_version_line(monkeypatch: pytest.MonkeyPatch) -> None:

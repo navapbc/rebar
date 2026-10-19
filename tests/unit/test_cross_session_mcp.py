@@ -127,10 +127,10 @@ def test_show_ticket_warns_for_other_session(repo: Path, monkeypatch: pytest.Mon
 
     out = _read_tools()["show_ticket"](tid)
 
-    assert out.cross_session_warning is not None
-    assert _HOLDER_MSG in out.cross_session_warning
-    assert "sess-A" in out.cross_session_warning
-    assert out.claimed_session == "sess-A"
+    assert out.get("cross_session_warning") is not None
+    assert _HOLDER_MSG in out.get("cross_session_warning")
+    assert "sess-A" in out.get("cross_session_warning")
+    assert out["claimed_session"] == "sess-A"
 
 
 def test_comment_warns_and_still_mutates(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -141,9 +141,11 @@ def test_comment_warns_and_still_mutates(repo: Path, monkeypatch: pytest.MonkeyP
 
     out = _write_tools()["comment_ticket"](tid, "hello-from-B")
 
-    assert out.result == "ok"
-    assert out.cross_session_warning is not None
-    assert _HOLDER_MSG in out.cross_session_warning and "sess-A" in out.cross_session_warning
+    assert out["result"] == "ok"
+    assert out.get("cross_session_warning") is not None
+    assert _HOLDER_MSG in out.get("cross_session_warning") and "sess-A" in out.get(
+        "cross_session_warning"
+    )
     # The mutation landed despite the advisory.
     assert any(
         c.get("body") == "hello-from-B"
@@ -161,14 +163,14 @@ def test_gate_reads_warn_for_other_session(repo: Path, monkeypatch: pytest.Monke
     check_ac = reads["check_ac"](tid)
     quality = reads["quality_check"](tid)
 
-    assert check_ac.cross_session_warning is not None
-    assert _HOLDER_MSG in check_ac.cross_session_warning
-    assert "sess-A" in check_ac.cross_session_warning
-    assert check_ac.verdict in {"pass", "fail"}
-    assert quality.cross_session_warning is not None
-    assert _HOLDER_MSG in quality.cross_session_warning
-    assert "sess-A" in quality.cross_session_warning
-    assert quality.verdict in {"pass", "fail"}
+    assert check_ac.get("cross_session_warning") is not None
+    assert _HOLDER_MSG in check_ac.get("cross_session_warning")
+    assert "sess-A" in check_ac.get("cross_session_warning")
+    assert check_ac["verdict"] in {"pass", "fail"}
+    assert quality.get("cross_session_warning") is not None
+    assert _HOLDER_MSG in quality.get("cross_session_warning")
+    assert "sess-A" in quality.get("cross_session_warning")
+    assert quality["verdict"] in {"pass", "fail"}
 
 
 def test_declare_no_file_impact_warns_and_still_mutates(
@@ -181,9 +183,11 @@ def test_declare_no_file_impact_warns_and_still_mutates(
 
     out = _write_tools()["declare_no_file_impact"](tid, "operator action only")
 
-    assert out.result == "ok"
-    assert out.cross_session_warning is not None
-    assert _HOLDER_MSG in out.cross_session_warning and "sess-A" in out.cross_session_warning
+    assert out["result"] == "ok"
+    assert out.get("cross_session_warning") is not None
+    assert _HOLDER_MSG in out.get("cross_session_warning") and "sess-A" in out.get(
+        "cross_session_warning"
+    )
     state = rebar.show_ticket(tid, repo_root=str(repo))
     assert state["file_impact_scope"] == "none"
     assert state["no_file_impact_reason"] == "operator action only"
@@ -196,12 +200,14 @@ def test_same_session_is_silent(repo: Path, monkeypatch: pytest.MonkeyPatch) -> 
     reads = _read_tools()
     writes = _write_tools()
 
-    assert reads["show_ticket"](tid).cross_session_warning is None
-    assert reads["check_ac"](tid).cross_session_warning is None
-    assert reads["quality_check"](tid).cross_session_warning is None
-    assert writes["comment_ticket"](tid, "mine").cross_session_warning is None
+    assert reads["show_ticket"](tid).get("cross_session_warning") is None
+    assert reads["check_ac"](tid).get("cross_session_warning") is None
+    assert reads["quality_check"](tid).get("cross_session_warning") is None
+    assert writes["comment_ticket"](tid, "mine").get("cross_session_warning") is None
     assert (
-        writes["declare_no_file_impact"](tid, "same-session non-code change").cross_session_warning
+        writes["declare_no_file_impact"](tid, "same-session non-code change").get(
+            "cross_session_warning"
+        )
         is None
     )
 
@@ -249,8 +255,7 @@ def test_bulk_tools_never_warn(repo: Path, monkeypatch: pytest.MonkeyPatch) -> N
     for name in ("list_tickets", "ready_tickets"):
         result = reads[name]()
         for item in result:
-            as_dict = item if isinstance(item, dict) else item.model_dump()
-            assert as_dict.get("cross_session_warning") is None, f"{name} leaked a warning"
+            assert item.get("cross_session_warning") is None, f"{name} leaked a warning"
 
 
 def test_unset_acting_session_is_silent(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -260,8 +265,8 @@ def test_unset_acting_session_is_silent(repo: Path, monkeypatch: pytest.MonkeyPa
     for var in _SESSION_VARS:
         monkeypatch.delenv(var, raising=False)
 
-    assert _read_tools()["show_ticket"](tid).cross_session_warning is None
-    assert _write_tools()["comment_ticket"](tid, "anon").cross_session_warning is None
+    assert _read_tools()["show_ticket"](tid).get("cross_session_warning") is None
+    assert _write_tools()["comment_ticket"](tid, "anon").get("cross_session_warning") is None
     trans = _write_tools()["transition_ticket"](tid, "in_progress", "blocked")
     assert trans.get("cross_session_warning") is None
 
@@ -273,21 +278,23 @@ def test_toggle_off_silences_every_surface(repo: Path, monkeypatch: pytest.Monke
     tid = _claimed(repo, monkeypatch, holder="sess-A")
     monkeypatch.setenv("REBAR_SESSION_ID", "sess-B")
 
-    assert _read_tools()["show_ticket"](tid).cross_session_warning is None
-    assert _write_tools()["comment_ticket"](tid, "b").cross_session_warning is None
+    assert _read_tools()["show_ticket"](tid).get("cross_session_warning") is None
+    assert _write_tools()["comment_ticket"](tid, "b").get("cross_session_warning") is None
     trans = _write_tools()["transition_ticket"](tid, "in_progress", "blocked")
     assert trans.get("cross_session_warning") is None
 
 
 def test_output_schema_exposes_optional_field(repo: Path) -> None:
-    """The response models advertise the OPTIONAL ``cross_session_warning`` property, and a
-    default (unset) response still validates — the schema change is additive."""
-    from rebar._mcp_models import GateResultOut, TicketStateOut, WriteAckOut
+    """The advertised outputSchemas declare the OPTIONAL ``cross_session_warning`` property,
+    and a default (unset) response still validates — the schema change is additive."""
+    from rebar import schemas
+    from rebar._mcp_schema import OUTPUT_SCHEMAS_BY_TOOL, inline_schema
 
-    for model in (GateResultOut, WriteAckOut, TicketStateOut):
-        schema = model.model_json_schema()
-        assert "cross_session_warning" in schema["properties"], model.__name__
-        assert "cross_session_warning" not in schema.get("required", []), model.__name__
+    for tool in ("check_ac", "comment_ticket", "show_ticket", "transition_ticket"):
+        schema = inline_schema(*OUTPUT_SCHEMAS_BY_TOOL[tool])
+        assert "cross_session_warning" in schema["properties"], tool
+        assert "cross_session_warning" not in schema.get("required", []), tool
 
-    ack = WriteAckOut.model_validate({"result": "ok", "push_status": {"state": "unknown"}})
-    assert ack.cross_session_warning is None
+    schemas.validator(schemas.WRITE_ACK).validate(
+        {"result": "ok", "push_status": {"state": "unknown"}}
+    )

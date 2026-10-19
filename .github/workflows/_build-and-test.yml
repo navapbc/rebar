@@ -841,21 +841,6 @@ jobs:
           fi
           echo "Public-types drift gate: OK (types.py is up to date)."
 
-      # MCP model schema drift gate (ticket 8efe): the hand-mirrored pydantic output
-      # models in _mcp_models.py must declare every property their canonical JSON
-      # Schema defines (minus intentional PERMISSIVE_OMISSIONS).  Fails on drift.
-      # If-present guard per ticket ee2a (see raw-git-write gate above): story
-      # quilted-nepotic-kitty deletes the oracle together with this step, and Gerrit runs
-      # main's workflow definition against that change's tree.
-      - name: MCP model schema drift gate
-        shell: bash
-        run: |
-          if [ -f src/rebar/schemas/check_mcp_models.py ]; then
-            python -m rebar.schemas.check_mcp_models --check
-          else
-            echo "src/rebar/schemas/check_mcp_models.py not in checked-out tree (the mirror was removed) — skipping"
-          fi
-
       # Config-boundary gates (config-read gate ticket 6754, config-ownership gate RP-04 S7.1)
       # run through the `make lint` step above (RP-04 S7.2, ticket 735b) — the portable,
       # no-CI-required trigger — so they are NOT standalone steps here (that would double-run

@@ -407,7 +407,7 @@ def test_usage_and_limit_errors(tracker: Path):
 
 def test_library_and_mcp_shape(tracker: Path, monkeypatch):
     import rebar
-    from rebar._mcp_models import NextBatchOut
+    from rebar import schemas
 
     _three_tier(tracker)
     monkeypatch.setenv("REBAR_TRACKER_DIR", str(tracker))
@@ -430,4 +430,5 @@ def test_library_and_mcp_shape(tracker: Path, monkeypatch):
     }
     assert [s["id"] for s in d["skipped_blocked_story"]] == ["nb-task-3"]
     assert d["skipped_blocked_story"][0]["blocked_story"] == "nb-story-2"
-    NextBatchOut.model_validate(d)
+    # MCP next_batch advertises and returns this canonical shape verbatim.
+    schemas.validator(schemas.NEXT_BATCH).validate(d)

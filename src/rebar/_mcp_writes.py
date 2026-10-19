@@ -9,29 +9,34 @@ signatures, docstrings, outputSchemas, and gating are behaviour-identical.
 The read-only gate is enforced at REGISTRATION time exactly as before: when the
 server is read-only NO write tool is registered (so they are absent from
 ``list_tools()``), which this registrar reproduces by returning early. Shared handles
-(``_dump``, ``_allow_llm``, ``logger``) are captured off ``ctx`` and rebound to their
-original local names so the tool bodies are copied verbatim. Output models are
-imported at module level (FastMCP resolves return annotations against this module's
-globals).
+(``_allow_llm``, ``logger``) are captured off ``ctx`` and rebound to their original local
+names. Tools return plain dicts; ``rebar._mcp_schema`` advertises the canonical JSON
+Schema for each.
 """
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import rebar
 from rebar._commands.cross_session import cross_session_warning_for
-from rebar._mcp_models import (
-    AttachCommitsResultOut,
-    ClaimResultOut,
-    CreateResultOut,
-    FileImpactItemOut,
-    SignResultOut,
-    VerifyCommandItemOut,
-    WriteAckOut,
-    tool_annotation_presets,
-)
+from rebar._mcp_schema import pydantic_typed_dict, tool_annotation_presets
 from rebar._opcert_binding import spawn_context_daemon
+from rebar.types import FileImpactEntry, VerifyCommandEntry
+
+# MCP inputs typed with the canonical shared entries (common.schema.json), rebuilt for
+# pydantic, which refuses ``typing.TypedDict`` on Python < 3.12. FastMCP resolves the
+# (string) annotations against these module globals at registration.
+if TYPE_CHECKING:
+    _FileImpactEntry = FileImpactEntry
+    _VerifyCommandEntry = VerifyCommandEntry
+else:
+    try:
+        _FileImpactEntry = pydantic_typed_dict(FileImpactEntry)
+        _VerifyCommandEntry = pydantic_typed_dict(VerifyCommandEntry)
+    except ImportError:  # core-only install: build_server refuses before any registration
+        _FileImpactEntry = FileImpactEntry
+        _VerifyCommandEntry = VerifyCommandEntry
 
 
 def _cross_session(ticket_id: str) -> str | None:
@@ -87,26 +92,24 @@ def _ack(
     *,
     description_warning: str | None = None,
     cross_session_warning: str | None = None,
-) -> Any:
-    """The shared write ack: the pre-existing ``{"result": …}`` plus delivery status.
+) -> dict[str, Any]:
+    """The shared write ack (``write_ack.schema.json``): ``{"result": …}`` plus delivery status.
 
     ``description_warning`` rides the same reasoning as ``push_status`` (ticket 594b):
     the library logs the save-time cap notice, but an MCP client reads only the tool
-    result, so it is carried as a result field. ``None`` when there is nothing to say.
-    ``cross_session_warning`` (story 734d) rides that same reasoning.
+    result, so it is carried as a result field. ``cross_session_warning`` (story 734d)
+    rides that same reasoning. Each advisory key is ABSENT when there is nothing to say.
     """
-    return WriteAckOut.model_validate(
-        {
-            "result": result,
-            "push_status": _push_status(),
-            "description_warning": description_warning,
-            "cross_session_warning": cross_session_warning,
-        }
-    )
+    ack: dict[str, Any] = {"result": result, "push_status": _push_status()}
+    if description_warning is not None:
+        ack["description_warning"] = description_warning
+    if cross_session_warning is not None:
+        ack["cross_session_warning"] = cross_session_warning
+    return ack
 
 
 def _with_push(payload: dict[str, Any]) -> dict[str, Any]:
-    """Attach delivery status to a tool that returns a plain (schema-less) dict."""
+    """Attach delivery status to a library result dict."""
     return {**payload, "push_status": _push_status()}
 
 
@@ -119,14 +122,14 @@ def _register_attach_commits(mcp, ann) -> None:
     """
 
     @mcp.tool(annotations=ann["MUTATE_IDEMPOTENT"])
-    def attach_commits(ticket_id: str, commits: list[str]) -> AttachCommitsResultOut:
+    def attach_commits(ticket_id: str, commits: list[str]) -> dict[str, Any]:
         """Retroactively link commits to a ticket by SHA (union-add, idempotent).
 
         The repair path when a commit landed without a usable `rebar-ticket:` trailer:
         attaching the SHAs records a COMMITS event so the close gate can still tie the
         ticket to its change. Every SHA must resolve to a commit in this repository —
         validation is ALL-OR-NOTHING, so if any SHA is bad, nothing is recorded."""
-        return AttachCommitsResultOut.model_validate(rebar.attach_commits(ticket_id, commits))
+        return dict(rebar.attach_commits(ticket_id, commits))
 
 
 def _register_bridge_projects_writes(mcp, ann) -> None:
@@ -138,13 +141,13 @@ def _register_bridge_projects_writes(mcp, ann) -> None:
     """
 
     @mcp.tool(annotations=ann["MUTATE_IDEMPOTENT"])
-    def bridge_projects_set(key: str, repos: list[str]) -> WriteAckOut:
+    def bridge_projects_set(key: str, repos: list[str]) -> dict[str, Any]:
         """Set a bridge project key's repos (REPLACE semantics; idempotent)."""
         rebar.bridge_projects_set(key, repos)
         return _ack()
 
     @mcp.tool(annotations=ann["MUTATE"])
-    def bridge_projects_remove(key: str) -> WriteAckOut:
+    def bridge_projects_remove(key: str) -> dict[str, Any]:
         """Remove a bridge project key from the mapping (error if absent)."""
         rebar.bridge_projects_remove(key)
         return _ack()
@@ -158,7 +161,6 @@ def register_write_tools(mcp, ctx) -> None:
     the write tools never appear in ``list_tools()``."""
     if ctx.readonly():
         return
-    _dump = ctx.dump
     _allow_llm = ctx.allow_llm
     logger = ctx.logger
 
@@ -175,7 +177,7 @@ def register_write_tools(mcp, ctx) -> None:
         tags: list[str] | None = None,
         bridge_project: str | None = None,
         repos: list[str] | None = None,
-    ) -> CreateResultOut:
+    ) -> dict[str, Any]:
         """Create a ticket; returns {id, alias} (agents get the alias without
         a second show()). A non-null description_warning means the description exceeds
         the plan-review admission cap while the claim gate is on — the ticket was still
@@ -196,7 +198,7 @@ def register_write_tools(mcp, ctx) -> None:
             return_alias=True,
             _creation_channel="mcp",
         )
-        return CreateResultOut.model_validate(_with_push(cast("dict[str, Any]", created)))
+        return _with_push(cast("dict[str, Any]", created))
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def create_identity(
@@ -204,7 +206,7 @@ def register_write_tools(mcp, ctx) -> None:
         email: str,
         mappings: list[dict] | None = None,
         keys: list[str] | None = None,
-    ) -> CreateResultOut:
+    ) -> dict[str, Any]:
         """Create an identity entity: a gate-/graph-exempt ticket recording a
         person/agent. ``name`` is the title; ``email`` plus ``mappings`` (list of
         {provider, external_id}) and ``keys`` (OpenSSH authorized-keys lines) ride the
@@ -217,24 +219,22 @@ def register_write_tools(mcp, ctx) -> None:
             return_alias=True,
             _creation_channel="mcp",
         )
-        return CreateResultOut.model_validate(_with_push(cast("dict[str, Any]", created)))
+        return _with_push(cast("dict[str, Any]", created))
 
     @mcp.tool(annotations=_ANN["MUTATE"])
-    def create_idea(title: str, description: str | None = None) -> CreateResultOut:
+    def create_idea(title: str, description: str | None = None) -> dict[str, Any]:
         """Capture an undesigned idea: create an epic in status 'idea' atomically.
 
         The idea is born in status 'idea' via a single CREATE event (never momentarily
         'open'/claimable), is excluded from ready/next-batch, and 'idea -> closed'
         (reject) skips the completion gates. Promote a kept idea with
         transition_ticket(id, "idea", "open"). Returns {id, alias}."""
-        return CreateResultOut.model_validate(
-            _with_push(
-                cast(
-                    "dict[str, Any]",
-                    rebar.idea(
-                        title, description=description, return_alias=True, _creation_channel="mcp"
-                    ),
-                )
+        return _with_push(
+            cast(
+                "dict[str, Any]",
+                rebar.idea(
+                    title, description=description, return_alias=True, _creation_channel="mcp"
+                ),
             )
         )
 
@@ -248,7 +248,7 @@ def register_write_tools(mcp, ctx) -> None:
         force: str | None = None,
         caused_by: str = "",
         ref: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Transition a ticket's status (optimistic concurrency). Returns the
         engine result {ticket_id, from, to, newly_unblocked}.
 
@@ -303,7 +303,7 @@ def register_write_tools(mcp, ctx) -> None:
         ticket_id: str,
         assignee: str | None = None,
         force: str | None = None,
-    ) -> ClaimResultOut:
+    ) -> dict[str, Any]:
         """Atomically claim an OPEN ticket (-> in_progress + assignee).
 
         Raises a tool error (ConcurrencyError) if the ticket is not open —
@@ -311,17 +311,12 @@ def register_write_tools(mcp, ctx) -> None:
         bypassing the plan-review gate; when it replaces certification, the absent
         certified attestation is the durable audit signal.
         """
-        return ClaimResultOut.model_validate(
-            _with_push(
-                cast(
-                    "dict[str, Any]",
-                    rebar.claim(ticket_id, assignee=assignee, force=force),
-                )
-            )
+        return _with_push(
+            cast("dict[str, Any]", rebar.claim(ticket_id, assignee=assignee, force=force))
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
-    def reopen_ticket(ticket_id: str) -> dict:
+    def reopen_ticket(ticket_id: str) -> dict[str, Any]:
         """Reopen a closed ticket (closed -> open). Optimistic-concurrency:
         raises a tool error if the ticket is not currently closed."""
         warning = _cross_session(ticket_id)
@@ -329,7 +324,7 @@ def register_write_tools(mcp, ctx) -> None:
         return _attach_cross_session(result, warning)
 
     @mcp.tool(annotations=_ANN["MUTATE"])
-    def comment_ticket(ticket_id: str, body: str) -> WriteAckOut:
+    def comment_ticket(ticket_id: str, body: str) -> dict[str, Any]:
         """Append a comment to a ticket."""
         warning = _cross_session(ticket_id)
         rebar.comment(ticket_id, body)
@@ -341,7 +336,7 @@ def register_write_tools(mcp, ctx) -> None:
         summary: str | None = None,
         relates_to: str | None = None,
         discovered_from: str | None = None,
-    ) -> CreateResultOut:
+    ) -> dict[str, Any]:
         """Append a verbose entry to the current session_log, creating one on
         first use (write-gated: refused under REBAR_MCP_READONLY=1). Returns the
         log's {id, alias}; optional relates_to / discovered_from link it to the
@@ -353,9 +348,7 @@ def register_write_tools(mcp, ctx) -> None:
             discovered_from=discovered_from,
             _creation_channel="mcp",
         )
-        return CreateResultOut.model_validate(
-            _with_push({"id": res["id"], "alias": res.get("alias")})
-        )
+        return _with_push({"id": res["id"], "alias": res.get("alias")})
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def edit_ticket(
@@ -370,7 +363,7 @@ def register_write_tools(mcp, ctx) -> None:
         set_tags: list[str] | None = None,
         bridge_project: str | None = None,
         repos: list[str] | None = None,
-    ) -> WriteAckOut:
+    ) -> dict[str, Any]:
         """Edit ticket fields (title/priority/assignee/description/ticket_type).
 
         Tags mutate via convergent deltas: add_tags / remove_tags add/remove,
@@ -406,7 +399,7 @@ def register_write_tools(mcp, ctx) -> None:
         return _ack(description_warning=description_warning, cross_session_warning=warning)
 
     @mcp.tool(annotations=_ANN["MUTATE"])
-    def link_tickets(id1: str, id2: str, relation: str, force: str = "") -> WriteAckOut:
+    def link_tickets(id1: str, id2: str, relation: str, force: str = "") -> dict[str, Any]:
         """Link two tickets (one of the seven canonical relations: blocks |
         depends_on | relates_to | duplicates | supersedes | discovered_from |
         caused_by).
@@ -432,7 +425,7 @@ def register_write_tools(mcp, ctx) -> None:
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
-    def unlink_tickets(id1: str, id2: str, relation: str | None = None) -> WriteAckOut:
+    def unlink_tickets(id1: str, id2: str, relation: str | None = None) -> dict[str, Any]:
         """Remove a link between two tickets, optionally selecting its relation.
 
         Pass ``relation`` to remove that specific relation while preserving any
@@ -444,62 +437,62 @@ def register_write_tools(mcp, ctx) -> None:
         return _ack(cross_session_warning=warning)
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
-    def tag_ticket(ticket_id: str, tag: str) -> WriteAckOut:
+    def tag_ticket(ticket_id: str, tag: str) -> dict[str, Any]:
         """Add a tag to a ticket."""
         warning = _cross_session(ticket_id)
         rebar.tag(ticket_id, tag)
         return _ack(cross_session_warning=warning)
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
-    def untag_ticket(ticket_id: str, tag: str) -> WriteAckOut:
+    def untag_ticket(ticket_id: str, tag: str) -> dict[str, Any]:
         """Remove a tag from a ticket."""
         warning = _cross_session(ticket_id)
         rebar.untag(ticket_id, tag)
         return _ack(cross_session_warning=warning)
 
     @mcp.tool(annotations=_ANN["DESTRUCTIVE"])
-    def archive_ticket(ticket_id: str) -> WriteAckOut:
+    def archive_ticket(ticket_id: str) -> dict[str, Any]:
         """Archive a ticket (excludes it from the default list)."""
         warning = _cross_session(ticket_id)
         rebar.archive(ticket_id)
         return _ack(cross_session_warning=warning)
 
     @mcp.tool(annotations=_ANN["DESTRUCTIVE"])
-    def compact_ticket(ticket_id: str | None = None) -> WriteAckOut:
+    def compact_ticket(ticket_id: str | None = None) -> dict[str, Any]:
         """Compact a ticket's event log (or all tickets if id omitted)."""
         rebar.compact(ticket_id)
         return _ack()
 
     # ── File-impact / verify-commands writes (WS5d; feed next-batch) ───────
-    # Typed item params so the tools advertise an inputSchema (the {path,reason}
-    # / {dd_id,dd_text,command} shapes mirror the get_* output models + schemas).
+    # Typed item params so the tools advertise an inputSchema: the canonical
+    # common.schema.json file_impact_entry / verify_command_entry shapes.
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
-    def set_file_impact(ticket_id: str, impact: list[FileImpactItemOut]) -> WriteAckOut:
+    def set_file_impact(ticket_id: str, impact: list[_FileImpactEntry]) -> dict[str, Any]:
         """Record file impact (list of {path, reason}) for conflict-aware
         next-batch scheduling."""
         warning = _cross_session(ticket_id)
-        rebar.set_file_impact(ticket_id, [_dump(e) for e in impact])
+        rebar.set_file_impact(ticket_id, cast("list[FileImpactEntry]", list(impact)))
         return _ack(cross_session_warning=warning)
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
-    def declare_no_file_impact(ticket_id: str, reason: str) -> WriteAckOut:
+    def declare_no_file_impact(ticket_id: str, reason: str) -> dict[str, Any]:
         """Declare that a ticket has no repository-file impact, with a reason."""
         warning = _cross_session(ticket_id)
         rebar.declare_no_file_impact(ticket_id, reason)
         return _ack(cross_session_warning=warning)
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
-    def set_verify_commands(ticket_id: str, commands: list[VerifyCommandItemOut]) -> WriteAckOut:
+    def set_verify_commands(ticket_id: str, commands: list[_VerifyCommandEntry]) -> dict[str, Any]:
         """Record DD-level verify commands (list of {dd_id, dd_text, command})."""
         warning = _cross_session(ticket_id)
-        rebar.set_verify_commands(ticket_id, [_dump(e) for e in commands])
+        rebar.set_verify_commands(ticket_id, cast("list[VerifyCommandEntry]", list(commands)))
         return _ack(cross_session_warning=warning)
 
     _register_attach_commits(mcp, _ANN)
     _register_bridge_projects_writes(mcp, _ANN)
 
     @mcp.tool(annotations=_ANN["MUTATE"])
-    def sign_manifest(ticket_id: str, manifest: list[str]) -> SignResultOut:
+    def sign_manifest(ticket_id: str, manifest: list[str]) -> dict[str, Any]:
         """Sign a manifest of verified steps as an asymmetric op-cert.
 
         Mints a rebar.opcert.v1 DSSE op-cert over the steps with this
@@ -510,9 +503,7 @@ def register_write_tools(mcp, ctx) -> None:
         completion-verifier) are signed and accepted ONLY as op-certs — the
         legacy symmetric HMAC scheme is retired for them (story 8f1d). Use
         verify_signature to certify it later."""
-        return SignResultOut.model_validate(
-            _with_push(cast("dict[str, Any]", rebar.sign_manifest(ticket_id, manifest)))
-        )
+        return _with_push(cast("dict[str, Any]", rebar.sign_manifest(ticket_id, manifest)))
 
     @mcp.tool(annotations=_ANN["MUTATE_OPEN_WORLD"])
     async def run_workflow(

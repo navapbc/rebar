@@ -533,7 +533,6 @@ def test_run_http_with_grace_decouples_uvicorn_grace_from_op_grace_2f46(monkeypa
         )
         assert tgs == int(health.DEFAULT_UVICORN_BACKSTOP_SECONDS)
         assert health.DEFAULT_UVICORN_BACKSTOP_SECONDS == 30
-        assert health.DEFAULT_UVICORN_GRACEFUL_SECONDS == health.DEFAULT_UVICORN_BACKSTOP_SECONDS
         assert health.DEFAULT_UVICORN_BACKSTOP_SECONDS < health.DEFAULT_SHUTDOWN_GRACE_SECONDS
     finally:
         signal.signal(signal.SIGTERM, prev)
@@ -772,7 +771,7 @@ def test_drain_then_exit_is_bounded_when_gauge_never_drains():
 
 def test_run_http_with_grace_installs_sigterm_and_bounds_uvicorn(monkeypatch):
     """run_http_with_grace builds a uvicorn server with a SHORT graceful-shutdown timeout
-    (the DEFAULT_UVICORN_GRACEFUL_SECONDS backstop, decoupled from the 1200s op grace — bug
+    (the DEFAULT_UVICORN_BACKSTOP_SECONDS backstop, decoupled from the 1200s op grace — bug
     2f46), installs a SIGTERM handler, and joins the serving thread. A fake uvicorn Server
     (run() returns immediately) keeps the test port-free; the SIGTERM handler drains the
     gauge then sets should_exit."""
@@ -831,12 +830,10 @@ def test_shutdown_grace_constant_is_positive_and_bounded():
     from rebar._mcp_health import (
         DEFAULT_SHUTDOWN_GRACE_SECONDS,
         DEFAULT_UVICORN_BACKSTOP_SECONDS,
-        DEFAULT_UVICORN_GRACEFUL_SECONDS,
     )
 
     assert DEFAULT_SHUTDOWN_GRACE_SECONDS == 1200
     assert DEFAULT_UVICORN_BACKSTOP_SECONDS == 30
-    assert DEFAULT_UVICORN_GRACEFUL_SECONDS == DEFAULT_UVICORN_BACKSTOP_SECONDS
 
 
 def test_sigterm_grace_subprocess_waits_for_inflight_then_exits_zero():

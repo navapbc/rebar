@@ -8,6 +8,50 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — MCP results carry only what the library returns
+
+MCP `outputSchema`s are now the canonical `src/rebar/schemas/*.json` files (inlined so each
+is self-contained), and every tool returns the library payload unchanged; the pydantic
+output mirror that re-added unset keys as `null` is deleted (story quilted-nepotic-kitty).
+
+Keys a client may previously have read as an explicit `null`, now ABSENT when unset:
+
+- on `show_ticket` / `list_tickets` / `ready_tickets` (`full: true`) / `recent_session_logs`
+  rows: `cross_session_warning`, `last_reopened_at`, `source_id`, `source_created_at`,
+  `source_author`, `source_env`, `plan_review_health` (list rows only; `show_ticket` still
+  computes it), and on lean `list_tickets` rows the mirror-restored `description`,
+  `comments`, `deps`, `inbound_deps`, `file_impact`, `file_impact_scope`,
+  `no_file_impact_reason`, `attestations`;
+- on every write ack (`comment_ticket`, `edit_ticket`, `tag_ticket`, `untag_ticket`,
+  `archive_ticket`, `compact_ticket`, `link_tickets`, `unlink_tickets`, `set_file_impact`,
+  `declare_no_file_impact`, `set_verify_commands`, `bridge_projects_set`,
+  `bridge_projects_remove`): `description_warning`, `cross_session_warning`, and
+  `push_status.reason` / `detail` / `remote_ref` / `unpushed` / `since` (`push_status` is
+  `{"state": "ok"}` when delivered);
+- on `create_ticket` / `create_idea` / `create_identity` / `claim_ticket` / `sign_manifest`:
+  the same five `push_status` sub-keys;
+- on `log_session`: `description_warning`, `duplicate_warning`;
+- on `sign_manifest`: `signature`, `key_id`;
+- on `gate_status` for an unknown job: `ticket_id`, `gate_type`, `findings`;
+- on `verify_signature` for an unsigned ticket: `trust_basis`.
+
+Keys the library itself emits as `null` are unchanged: `assignee`, `bridge_project`,
+`claimed_session`, `claim_harness`, `claim_remote_session`, `signature` on tickets,
+`fsck.report`, `*_status.signed_at` / `verified_at_sha`, `workflow_run.error`,
+`create_result.description_warning` / `duplicate_warning`.
+
+`transition_ticket` and `reopen_ticket` now advertise `transition_result`; the write acks,
+`attach_commits`, `gate_status`, and `verify_completion_status` advertise the new
+`write_ack`, `attach_commits_result`, `gate_run`, and `verify_completion_status` schemas.
+Advertised enums and required sets are now the canonical ones (stricter than the mirror's);
+real results already satisfied them.
+
+**Input change.** `set_file_impact.impact[].reason` and `set_verify_commands.commands[].dd_id`
+/ `dd_text` no longer accept an explicit `null`; omit the key. (The store still requires a
+string `reason`, `dd_id`, and `dd_text` on every entry, as before.)
+
+**Migration.** Read optional keys with `.get`.
+
 ## BREAKING (pre-1.0) — visual-editor library surface removed
 
 The BPMN visual workflow editor was removed in commit `21dabcbb2c1` (epic

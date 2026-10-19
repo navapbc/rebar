@@ -269,28 +269,32 @@ def test_mcp_create_returns_the_warning_field(repo: Path, gate_on: None) -> None
 
     out = tools["create_ticket"]("task", "oversized", description=_OVER)
 
-    assert out.description_warning, "an MCP client reads only the result — it was told nothing"
-    assert "max_ticket_description_chars" in out.description_warning
+    assert out.get("description_warning"), (
+        "an MCP client reads only the result — it was told nothing"
+    )
+    assert "max_ticket_description_chars" in out.get("description_warning")
 
 
 def test_mcp_edit_returns_the_warning_field(repo: Path, gate_on: None) -> None:
     tools = _collect_mcp_tools()
     created = tools["create_ticket"]("task", "small", description="ok")
 
-    out = tools["edit_ticket"](created.id, description=_OVER)
+    out = tools["edit_ticket"](created["id"], description=_OVER)
 
-    assert out.result == "ok", "the ack text changed; existing consumers break"
-    assert out.description_warning and "max_ticket_description_chars" in out.description_warning
+    assert out["result"] == "ok", "the ack text changed; existing consumers break"
+    assert out.get("description_warning") and "max_ticket_description_chars" in out.get(
+        "description_warning"
+    )
 
 
 def test_mcp_is_silent_when_the_gate_is_off(repo: Path) -> None:
     tools = _collect_mcp_tools()
 
     created = tools["create_ticket"]("task", "oversized", description=_OVER)
-    edited = tools["edit_ticket"](created.id, description=_OVER + "z")
+    edited = tools["edit_ticket"](created["id"], description=_OVER + "z")
 
-    assert created.description_warning is None
-    assert edited.description_warning is None
+    assert created.get("description_warning") is None
+    assert edited.get("description_warning") is None
 
 
 def test_mcp_is_silent_within_the_cap(repo: Path, gate_on: None) -> None:

@@ -177,11 +177,22 @@ def test_ready_default_is_narrower_than_filterable_list_default(
     listed = _rows(_call("list_tickets").structuredContent)
     ready = _rows(_call("ready_tickets").structuredContent)
 
-    assert len(ready[0]) < len(listed[0]) and "blocking_summary" in ready[0], (
-        "ready_tickets should now be the smaller discovery shape while list_tickets "
-        "keeps its filterable default: "
-        f"list-only={sorted(set(listed[0]) - set(ready[0]))} "
-        f"ready-only={sorted(set(ready[0]) - set(listed[0]))}"
+    # The discovery row is exactly the canonical summary shape; list_tickets keeps the
+    # filterable ticket fields (e.g. tags) that the summary drops. (Lengths are no longer
+    # compared: before story quilted-nepotic-kitty the pydantic mirror re-added the lean
+    # list's omitted fields as nulls, which is what made list rows the longer ones.)
+    assert set(ready[0]) == {
+        "ticket_id",
+        "alias",
+        "title",
+        "ticket_type",
+        "status",
+        "priority",
+        "blocking_summary",
+    }
+    assert set(listed[0]) - set(ready[0]), (
+        "list_tickets should keep filterable fields the ready discovery row drops: "
+        f"list-only={sorted(set(listed[0]) - set(ready[0]))}"
     )
 
 
@@ -304,29 +315,24 @@ def test_budget_is_measured_on_the_wire_payload_not_the_raw_reducer_rows(
 ) -> None:
     """The bound must not UNDER-estimate: measure what the client receives.
 
-    Sizing the raw reducer dicts is wrong on two independent axes, and both make the
-    measurement SMALLER than the truth -- which is the dangerous direction, because an
-    under-estimating bound passes a payload that still overruns the client:
+    Sizing the raw reducer dicts as one JSON object is wrong on two independent axes, and
+    both make the measurement SMALLER than the truth -- which is the dangerous direction,
+    because an under-estimating bound passes a payload that still overruns the client.
+    (A third axis -- pydantic output models re-adding every lean-dropped field as an
+    explicit ``null``/``[]``/``""`` -- disappeared with the mirror, story
+    quilted-nepotic-kitty: the tool now returns the lean rows unchanged.)
 
-    1. ``TicketStateOut`` DECLARES defaults (`description`, `comments`, `deps`,
-       `inbound_deps`, `file_impact`, `file_impact_scope`, `no_file_impact_reason`,
-       `plan_review_health`, `cross_session_warning`), so ``model_validate`` RE-ADDS every
-       field the lean projection just dropped, as an explicit ``null``/``[]``/``""``.
-    2. ``js_safe_result`` rewrites each JS-unsafe 19-digit nanosecond integer as a QUOTED
+    1. ``js_safe_result`` rewrites each JS-unsafe 19-digit nanosecond integer as a QUOTED
        string, which is longer than the bare int.
 
-    3. ``FastMCP`` emits the result TWICE -- ``structuredContent`` (the whole
+    2. ``FastMCP`` emits the result TWICE -- ``structuredContent`` (the whole
        ``{"result": [...]}`` object) AND one ``content`` text block per row, each
        ``json.dumps(row, indent=2)``. Together they are ~2.08x the structured object alone,
        so measuring only ``structuredContent`` would pass roughly twice the budget.
 
-    Measured at 2,855 rows (this store's size): raw dicts 552,772 bytes; after
-    ``model_validate`` 1,526,327; after ``js_safe_result`` 1,537,747 -- and roughly twice
-    that again on the wire once both halves of the result are counted.
     """
     from rebar._engine_support.reads import LEAN_OMITTED_FIELDS
     from rebar._mcp_budget import _payload_bytes, _wire_bytes
-    from rebar._mcp_models import TicketStateOut
 
     rows = []
     for index in range(20):
@@ -334,13 +340,12 @@ def test_budget_is_measured_on_the_wire_payload_not_the_raw_reducer_rows(
         # Nanosecond timestamps as the reducer emits them: bare 19-digit ints.
         state["created_at"] = 1787858559072112001 + index
         state["updated_at"] = 1787949089260113711 + index
-        # Exactly what the real lean path yields, so the models measured here are the
-        # models the tool emits -- LEAN_OMITTED_FIELDS, not just the signature bulk.
+        # Exactly what the real lean path yields, so the rows measured here are the rows
+        # the tool emits -- LEAN_OMITTED_FIELDS, not just the signature bulk.
         rows.append({k: v for k, v in state.items() if k not in LEAN_OMITTED_FIELDS})
 
     raw_measure = _payload_bytes({"result": rows})
-    models = [TicketStateOut.model_validate(row) for row in rows]
-    wire_measure = _wire_bytes(models)
+    wire_measure = _wire_bytes(rows)
 
     # The oracle is the REAL emitted CallToolResult, obtained by running the tool -- not a
     # second spelling of _wire_bytes' own arithmetic, which would be a convergence twin
@@ -365,8 +370,8 @@ def test_a_list_the_raw_measurement_would_have_passed_is_refused(
 
     250 plain rows (no signature bulk at all -- just the 19-digit `created_at`/`updated_at`
     every ticket carries) measure 49,652 bytes as raw reducer dicts, comfortably inside the
-    90,000-byte budget, but reach the client as 135,902 bytes. A bound measured on the raw
-    dicts RETURNS this list; a payload 51% over the budget it was supposed to enforce is
+    90,000-byte budget, but reach the client as 105,292 bytes. A bound measured on the raw
+    dicts RETURNS this list; a payload 17% over the budget it was supposed to enforce is
     exactly the "passes something that still overruns" failure the bound exists to prevent.
     """
     import rebar._engine_support.reads as reads_mod
@@ -394,7 +399,7 @@ def test_a_list_the_raw_measurement_would_have_passed_is_refused(
 
     assert response.isError, (
         "a list that only LOOKS under budget as raw dicts must still be refused -- "
-        "the client receives 135,902 bytes for it"
+        "the client receives 105,292 bytes for it"
     )
     text = "".join(getattr(b, "text", "") for b in (response.content or []))
     message = json.loads(text[text.index("{") :])["message"]

@@ -38,6 +38,15 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): MCP results carry only what the library returns, and every
+  `outputSchema` is the canonical JSON Schema file.** Keys a client may have read as an
+  explicit `null` are now absent when unset (for example `cross_session_warning`,
+  `last_reopened_at`, `source_*` on tickets, and the unset `push_status` sub-keys on write
+  acks); read optional keys with `.get`. `transition_ticket` and `reopen_ticket` now
+  advertise `transition_result`, and `set_file_impact` / `set_verify_commands` no longer
+  accept an explicit `null` for an optional entry key. The full list is in
+  [docs/release-notes.md](docs/release-notes.md).
+
 - **BREAKING (pre-1.0): MCP `ready_tickets` now defaults to compact discovery
   rows.** The default row contains ticket id, alias, title, type, status,
   priority, and blocking summary. Pass `full: true` to keep receiving the

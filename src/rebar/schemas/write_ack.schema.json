@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/write_ack.schema.json",
+  "title": "WriteAck",
+  "description": "MCP-only acknowledgement of a write tool that has no structured library result (comment_ticket, edit_ticket, tag_ticket, untag_ticket, archive_ticket, compact_ticket, link_tickets, unlink_tickets, set_file_impact, declare_no_file_impact, set_verify_commands, bridge_projects_set, bridge_projects_remove). `result` is `ok` (link_tickets names an escalated edge there). The advisories are present only when they have something to say.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "result"
+  ],
+  "properties": {
+    "result": {
+      "type": "string"
+    },
+    "push_status": {
+      "$ref": "common.schema.json#/$defs/push_status"
+    },
+    "description_warning": {
+      "type": "string",
+      "description": "edit_ticket only: the description now exceeds the plan-review admission cap while the claim gate is on (ticket 594b)."
+    },
+    "cross_session_warning": {
+      "type": "string",
+      "description": "The non-gating holder advisory, present only when another session holds the live claim (story 734d)."
+    }
+  }
+}

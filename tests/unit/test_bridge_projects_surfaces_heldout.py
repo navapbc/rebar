@@ -75,7 +75,6 @@ def _write_tools() -> _FakeMcp:
     m = _FakeMcp()
     ctx = types.SimpleNamespace(
         readonly=lambda: False,
-        dump=lambda obj: obj,
         allow_llm=lambda: False,
         logger=logging.getLogger("test"),
     )

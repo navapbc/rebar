@@ -36,13 +36,16 @@ _POST_REF_INDEX_WRITE_STDERR = (
 
 
 def test_mcp_server_no_longer_reexports_output_models() -> None:
-    import rebar._mcp_models as models
+    """The pydantic output mirror is deleted (story quilted-nepotic-kitty), and none of its
+    model names resurfaces on the server module."""
+    import importlib.util
+
     import rebar.mcp_server as mcp_server
 
-    missing = [name for name in _OUTPUT_MODEL_NAMES if not hasattr(models, name)]
+    assert importlib.util.find_spec("rebar._mcp_models") is None
     leaked = [name for name in _OUTPUT_MODEL_NAMES if hasattr(mcp_server, name)]
 
-    assert missing == [] and leaked == []
+    assert leaked == []
 
 
 def test_transient_write_classifier_has_only_the_canonical_gitutil_name() -> None:

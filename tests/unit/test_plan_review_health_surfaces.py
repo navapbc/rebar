@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from rebar import schemas
 from rebar._cli._audit_commands import _render_text
-from rebar._mcp_models import TicketStateOut
+from rebar._mcp_schema import OUTPUT_SCHEMAS_BY_TOOL, inline_schema
 from rebar.audit import page, read
 
 HEALTH = {
@@ -121,17 +122,18 @@ def test_health_derivation_failure_uses_canonical_compact_payload(monkeypatch, c
     context = page.build_context({})
     assert context["plan_review_health"] == unavailable
 
-    model = TicketStateOut.model_validate(
+    # MCP show_ticket returns the library dict unchanged, validated against ticket_state.
+    schemas.validator(schemas.TICKET_STATE).validate(
         {
             "ticket_id": "1111-2222-3333-4444",
             "ticket_type": "story",
             "title": "subject",
             "status": "in_progress",
             "priority": 2,
+            "tags": [],
             "plan_review_health": unavailable,
         }
     )
-    assert model.model_dump()["plan_review_health"] == unavailable
 
     _render_text({"plan_review_health": unavailable})
     rendered = capsys.readouterr().out
@@ -199,7 +201,9 @@ def test_renderer_keeps_legacy_unpinned_distinct(capsys) -> None:
 
 
 def test_mcp_ticket_detail_schema_exposes_structured_plan_review_health() -> None:
-    mcp_schema = TicketStateOut.model_json_schema()["properties"]["plan_review_health"]
+    mcp_schema = inline_schema(*OUTPUT_SCHEMAS_BY_TOOL["show_ticket"])["properties"][
+        "plan_review_health"
+    ]
     rendered_mcp_schema = json.dumps(mcp_schema, sort_keys=True)
     for field in (
         "available",
@@ -221,15 +225,14 @@ def test_mcp_ticket_detail_schema_exposes_structured_plan_review_health() -> Non
     rendered_canonical = json.dumps(canonical, sort_keys=True)
     for field in ("available", "pin_status", "enforcement_status", "targets"):
         assert field in rendered_canonical
-    model = TicketStateOut.model_validate(
+    schemas.validator(schemas.TICKET_STATE).validate(
         {
             "ticket_id": "1111-2222-3333-4444",
             "ticket_type": "story",
             "title": "subject",
             "status": "in_progress",
             "priority": 2,
+            "tags": [],
             "plan_review_health": HEALTH,
         }
     )
-
-    assert model.model_dump()["plan_review_health"] == HEALTH

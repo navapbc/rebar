@@ -22,6 +22,7 @@ stay a documented, closed set.
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -75,42 +76,33 @@ CANONICAL: dict[str, str] = {
     "get_workflow_result": schemas.WORKFLOW_RUN,
     "grounding_info": schemas.GROUNDING_INFO,
     "plan_review_status": schemas.PLAN_REVIEW_STATUS,
+    # Story quilted-nepotic-kitty: the raw-dict tools and the MCP-only shapes now
+    # advertise canonical schemas too.
+    "transition_ticket": schemas.TRANSITION_RESULT,
+    "reopen_ticket": schemas.TRANSITION_RESULT,
+    "attach_commits": schemas.ATTACH_COMMITS_RESULT,
+    "gate_status": schemas.GATE_RUN,
+    "verify_completion_status": schemas.VERIFY_COMPLETION_STATUS,
+    "comment_ticket": schemas.WRITE_ACK,
+    "tag_ticket": schemas.WRITE_ACK,
+    "untag_ticket": schemas.WRITE_ACK,
+    "archive_ticket": schemas.WRITE_ACK,
+    "compact_ticket": schemas.WRITE_ACK,
+    "edit_ticket": schemas.WRITE_ACK,
+    "link_tickets": schemas.WRITE_ACK,
+    "unlink_tickets": schemas.WRITE_ACK,
+    "set_file_impact": schemas.WRITE_ACK,
+    "declare_no_file_impact": schemas.WRITE_ACK,
+    "set_verify_commands": schemas.WRITE_ACK,
+    "bridge_projects_set": schemas.WRITE_ACK,
+    "bridge_projects_remove": schemas.WRITE_ACK,
 }
 
-# Advertisers with no canonical structured shape — they return the shared write ack
-# (`WriteAckOut`): the same `{result: <str>}` wrapper these tools have always advertised,
-# plus the `push_status` delivery field added by bug vapoury-attack-lamb. It stays EXEMPT
-# rather than canonical because a canonical schema pins a CLI/library `--output json`
-# shape, and these acks are MCP-only — `rebar comment` prints no JSON document.
+# Advertisers with no canonical structured shape. Since story quilted-nepotic-kitty every
+# structured result has a canonical schema; only the text render remains.
 EXEMPT_GENERIC: dict[str, str] = {
-    "comment_ticket": "write ack {result, push_status}; no canonical shape",
-    "tag_ticket": "write ack {result, push_status}; no canonical shape",
-    "untag_ticket": "write ack {result, push_status}; no canonical shape",
-    "archive_ticket": "write ack {result, push_status}; no canonical shape",
-    "compact_ticket": "write ack {result, push_status}; no canonical shape",
-    "edit_ticket": "write ack {result, push_status}; no canonical shape",
-    "link_tickets": "write ack {result, push_status}; no canonical shape",
-    "unlink_tickets": "write ack {result, push_status}; no canonical shape",
-    "set_file_impact": "write ack {result, push_status}; no canonical shape",
-    "declare_no_file_impact": "write ack {result, push_status}; no canonical shape",
-    "set_verify_commands": "write ack {result, push_status}; no canonical shape",
-    "bridge_projects_set": "write ack {result, push_status}; no canonical shape",
-    "bridge_projects_remove": "write ack {result, push_status}; no canonical shape",
-    "attach_commits": "returns the small {ticket_id, attached} receipt of a union-add "
-    "write (how many SHAs were recorded); there is no canonical schema for it, and the "
-    "durable shape consumers read is the ticket's `commits` list, not this ack",
     "render_workflow": "workflow engine (WS-I): returns a Mermaid flowchart as a "
     "string (a read-only render); no canonical structured shape.",
-    "gate_status": "async gate-run status poll (bug d80d P2): an MCP-only READ that "
-    "returns the GateRunOut handle for a review_plan_start/verify_completion_start job "
-    "(status running -> passed/failed, plus the durable attestation "
-    "currency). It advertises its auto-derived model schema, but — like the run_workflow "
-    "handle it mirrors — there is NO canonical CLI `--output json` shape to pin, so it "
-    "stays EXEMPT_GENERIC rather than canonical.",
-    "verify_completion_status": "completion-verifier attestation poll (bug d80d P2): the "
-    "MCP-only sibling of plan_review_status, returning the VerifyCompletionStatusOut view "
-    "of the durable `completion-verifier` attestation. Same rationale as gate_status — an "
-    "MCP-only structured read with no canonical CLI `--output json` shape to pin.",
 }
 
 # Tools that deliberately advertise NO outputSchema by design.
@@ -123,10 +115,6 @@ NO_SCHEMA_EXEMPT: dict[str, str] = {
     "WS10): a pure registry/guide READ that returns a plain dict — {criterion_id, section} on "
     "success or {error, kind} on failure — a FREE-FORM doc section, not a schema-backed model, "
     "so it advertises NO outputSchema by design.",
-    "transition_ticket": "returns {ticket_id, from, to, …}; `from` is a Python "
-    "reserved word, so it returns a plain dict (no pydantic "
-    "model). CLI/library JSON pinned to transition_result.",
-    "reopen_ticket": "same {…, from, …} shape as transition; reserved word.",
     "review_code": "rebar.llm code-review op: live LLM call(s) over a git range, "
     "returns an aggregated review_result as a plain dict (no outputSchema) — it must "
     "NOT be auto-driven on the fixture store in CI. The CLI/library --output json path "
@@ -268,6 +256,16 @@ def _seed(repo: Path) -> dict:
     )
     # A spare open ticket to exercise claim_ticket without disturbing `task`.
     claimable = rebar.create_ticket("task", "Claimable", repo_root=r)
+    # Spare tickets for the transition/reopen/archive writes (story quilted-nepotic-kitty).
+    movable = rebar.create_ticket("task", "Movable", repo_root=r)
+    reopenable = rebar.create_ticket("task", "Reopenable", repo_root=r)
+    rebar.transition(reopenable, "open", "closed", repo_root=r)
+    archivable = rebar.create_ticket("task", "Archivable", repo_root=r)
+    rebar.link(task, claimable, "relates_to", repo_root=r)
+    rebar.bridge_projects_set("OLD", ["navapbc/rebar"], repo_root=r)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=r, capture_output=True, text=True, check=True
+    ).stdout.strip()
     # A session_log so recent_session_logs returns a non-empty list to shape-check
     # (hidden from list/search/ready, so it does not disturb the other tools).
     log = rebar.create_ticket("session_log", "Session log", description="verbose", repo_root=r)
@@ -287,6 +285,10 @@ def _seed(repo: Path) -> dict:
         "epic": epic,
         "task": task,
         "claimable": claimable,
+        "movable": movable,
+        "reopenable": reopenable,
+        "archivable": archivable,
+        "head": head,
         "log": log,
         "repo": r,
         "run_id": run["run_id"],
@@ -331,6 +333,34 @@ def _call_args(name: str, s: dict) -> dict:
         # No attestation on the seeded ticket -> the `unsigned` end of the verdict
         # range; a pure local read (no LLM, no network), safe to drive in CI.
         "plan_review_status": {"ticket_id": s["task"]},
+        "transition_ticket": {
+            "ticket_id": s["movable"],
+            "current_status": "open",
+            "target_status": "blocked",
+        },
+        "reopen_ticket": {"ticket_id": s["reopenable"]},
+        "attach_commits": {"ticket_id": s["task"], "commits": [s["head"]]},
+        "gate_status": {"job_id": "no-such-job"},
+        "verify_completion_status": {"ticket_id": s["task"]},
+        "comment_ticket": {"ticket_id": s["task"], "body": "a comment"},
+        "tag_ticket": {"ticket_id": s["task"], "tag": "t1"},
+        "untag_ticket": {"ticket_id": s["task"], "tag": "t1"},
+        "archive_ticket": {"ticket_id": s["archivable"]},
+        "compact_ticket": {"ticket_id": s["task"]},
+        "edit_ticket": {"ticket_id": s["task"], "title": "Task renamed"},
+        "link_tickets": {"id1": s["movable"], "id2": s["archivable"], "relation": "relates_to"},
+        "unlink_tickets": {"id1": s["task"], "id2": s["claimable"]},
+        "set_file_impact": {"ticket_id": s["task"], "impact": [{"path": "b.py", "reason": "r"}]},
+        "declare_no_file_impact": {
+            "ticket_id": s["claimable"],
+            "reason": "no repository files change",
+        },
+        "set_verify_commands": {
+            "ticket_id": s["task"],
+            "commands": [{"dd_id": "D2", "dd_text": "t", "command": "true"}],
+        },
+        "bridge_projects_set": {"key": "REB", "repos": ["navapbc/rebar"]},
+        "bridge_projects_remove": {"key": "OLD"},
     }[name]
 
 
