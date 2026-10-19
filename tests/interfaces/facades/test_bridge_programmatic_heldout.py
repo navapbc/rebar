@@ -35,27 +35,36 @@ class _Registrar:
 def test_new_library_signatures_are_explicit_and_legacy_reconcile_is_absent() -> None:
     assert str(inspect.signature(rebar.bridge_preview)) == (
         "(*, only: 'list[str] | None' = None, exclude: 'list[str] | None' = None, "
-        "repo_root=None) -> 'BridgeRun'"
+        "repo_root: 'str | os.PathLike[str] | None' = None) -> 'BridgeRun'"
     )
     assert str(inspect.signature(rebar.bridge_run)) == (
-        "(profile: 'str | None' = None, *, repo_root=None) -> 'BridgeRun'"
+        "(profile: 'str | None' = None, *, "
+        "repo_root: 'str | os.PathLike[str] | None' = None) -> 'BridgeRun'"
     )
     assert str(inspect.signature(rebar.bridge_sync)) == (
         "(*, only: 'list[str] | None' = None, exclude: 'list[str] | None' = None, "
-        "max_changes: 'int | None' = None, repo_root=None) -> 'BridgeRun'"
+        "max_changes: 'int | None' = None, "
+        "repo_root: 'str | os.PathLike[str] | None' = None) -> 'BridgeRun'"
     )
     assert str(inspect.signature(rebar.bridge_status)) == (
         "(*, target_environment_id: 'str | None' = None, "
-        "max_age_seconds: 'int | None' = None, repo_root=None) -> 'BridgeStatus'"
+        "max_age_seconds: 'int | None' = None, "
+        "repo_root: 'str | os.PathLike[str] | None' = None) -> 'BridgeStatus'"
     )
     assert str(inspect.signature(rebar.bridge_pause)) == (
-        "(reason: 'str', *, repo_root=None) -> 'BridgeControl'"
+        "(reason: 'str', *, repo_root: 'str | os.PathLike[str] | None' = None) -> 'BridgeControl'"
     )
-    assert str(inspect.signature(rebar.bridge_resume)) == "(*, repo_root=None) -> 'BridgeControl'"
+    assert (
+        str(inspect.signature(rebar.bridge_resume))
+        == "(*, repo_root: 'str | os.PathLike[str] | None' = None) -> 'BridgeControl'"
+    )
     assert str(inspect.signature(rebar.bridge_check_access)) == "() -> 'BridgeAccessCheck'"
 
     assert not hasattr(rebar, "reconcile")
-    assert str(inspect.signature(rebar.bridge_fsck)) == "(*, repo_root=None) -> 'BridgeFsck'"
+    assert (
+        str(inspect.signature(rebar.bridge_fsck))
+        == "(*, repo_root: 'str | os.PathLike[str] | None' = None) -> 'BridgeFsck'"
+    )
 
 
 @pytest.mark.parametrize(

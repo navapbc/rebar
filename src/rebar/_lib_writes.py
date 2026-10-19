@@ -7,6 +7,7 @@ remain re-exported here so pre-split ``rebar`` and ``_lib_writes`` imports resol
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from functools import wraps
 from typing import TYPE_CHECKING, Literal, cast, overload
@@ -54,7 +55,9 @@ if TYPE_CHECKING:
 
 
 # ── Initialization ───────────────────────────────────────────────────────────
-def init_repo(*, repo_root=None, force_new_store: bool = False) -> None:
+def init_repo(
+    *, repo_root: str | os.PathLike[str] | None = None, force_new_store: bool = False
+) -> None:
     """Initialize or mount the ticket system explicitly without prompting.
 
     Remote discovery fails closed by default; ``force_new_store=True`` deliberately
@@ -119,7 +122,7 @@ def create_ticket(
     bridge_project: str | None = None,
     repos: list[str] | None = None,
     return_alias: bool = False,
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
     _creation_channel: str = "python",
 ) -> str | CreateResult:
     """Create a ticket.
@@ -182,7 +185,7 @@ def idea(
     *,
     description: str | None = None,
     return_alias: bool = False,
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
     _creation_channel: str = "python",
 ) -> str | CreateResult:
     """Capture an undesigned idea: create an ``epic`` in status ``idea`` atomically.
@@ -270,7 +273,7 @@ def transition(
     close_class: str = "",
     caused_by: str = "",
     ref: str | None = None,
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
 ) -> TransitionResult:
     """Transition status with optimistic concurrency and configured gates.
 
@@ -352,7 +355,11 @@ def transition(
 
 
 def claim(
-    ticket_id: str, *, assignee=None, force: str | None = None, repo_root=None
+    ticket_id: str,
+    *,
+    assignee: str | None = None,
+    force: str | None = None,
+    repo_root: str | os.PathLike[str] | None = None,
 ) -> ClaimResult:
     """Atomically move an open ticket to ``in_progress`` and assign it.
 
@@ -400,7 +407,7 @@ def claim(
         ) from None
 
 
-def reopen(ticket_id: str, *, repo_root=None) -> TransitionResult:
+def reopen(ticket_id: str, *, repo_root: str | os.PathLike[str] | None = None) -> TransitionResult:
     """Reopen a closed ticket with an optimistic parent-first cascade.
 
     Closed ancestors reopen recursively before the child; other parent states remain.

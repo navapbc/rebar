@@ -11,6 +11,7 @@ sibling write module (a one-way import; no cycle).
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any, cast
 
 from rebar import config
@@ -33,7 +34,9 @@ if TYPE_CHECKING:
 # ── Quality gates + file-impact (WS5d; CLI-parity + MCP surface) ──────────────
 # Quality checks exit 0=pass / 1=fail (not an error), so they report a `passed`
 # boolean rather than raising.
-def clarity_check(ticket_id: str, *, repo_root=None) -> ClarityResult:
+def clarity_check(
+    ticket_id: str, *, repo_root: str | os.PathLike[str] | None = None
+) -> ClarityResult:
     """Score ticket clarity → {score, verdict, threshold, passed}.
 
     A ``fail`` also carries a ``reason`` naming which half of the verdict failed —
@@ -56,7 +59,7 @@ def clarity_check(ticket_id: str, *, repo_root=None) -> ClarityResult:
     # The clarity threshold is a CONFIG read: resolve it from repo_root (None == discover),
     # NOT os.path.dirname(tracker), which is only the repo root for a co-located store
     # (auspicial-friended-merganser).
-    threshold = gates._clarity_threshold(repo_root, None)
+    threshold = gates._clarity_threshold(None if repo_root is None else os.fspath(repo_root), None)
     data, code = gates.clarity_check_compute(
         (state.get("ticket_type") or "").strip(), state.get("description") or "", threshold
     )
@@ -64,7 +67,7 @@ def clarity_check(ticket_id: str, *, repo_root=None) -> ClarityResult:
     return cast("ClarityResult", data)
 
 
-def check_ac(ticket_id: str, *, repo_root=None) -> GateResult:
+def check_ac(ticket_id: str, *, repo_root: str | os.PathLike[str] | None = None) -> GateResult:
     """Check a ticket has an Acceptance Criteria block.
 
     Returns the engine's structured gate result {verdict, criteria_count, reason}
@@ -79,7 +82,7 @@ def check_ac(ticket_id: str, *, repo_root=None) -> GateResult:
     return cast("GateResult", data)
 
 
-def quality_check(ticket_id: str, *, repo_root=None) -> GateResult:
+def quality_check(ticket_id: str, *, repo_root: str | os.PathLike[str] | None = None) -> GateResult:
     """Check ticket dispatch readiness.
 
     Returns the engine's structured gate result {verdict, line_count,
@@ -94,7 +97,7 @@ def quality_check(ticket_id: str, *, repo_root=None) -> GateResult:
     return cast("GateResult", data)
 
 
-def validate(*, repo_root=None) -> ValidateReport:
+def validate(*, repo_root: str | os.PathLike[str] | None = None) -> ValidateReport:
     """Repo-wide quality health check (JSON report).
 
     ``validate`` is repo-wide and takes no ticket id. Its exit code is
@@ -109,7 +112,9 @@ def validate(*, repo_root=None) -> ValidateReport:
     return cast("ValidateReport", _validate.validate_state(tracker))
 
 
-def get_file_impact(ticket_id: str, *, repo_root=None) -> list[FileImpactEntry]:
+def get_file_impact(
+    ticket_id: str, *, repo_root: str | os.PathLike[str] | None = None
+) -> list[FileImpactEntry]:
     """Get the current file-impact array for a ticket ([] on a miss)."""
     from rebar._engine_support import field_reads, reads
 
@@ -118,7 +123,9 @@ def get_file_impact(ticket_id: str, *, repo_root=None) -> list[FileImpactEntry]:
     return field_reads.file_impact(ticket_id, tracker)
 
 
-def get_file_impact_scope(ticket_id: str, *, repo_root=None) -> dict[str, object]:
+def get_file_impact_scope(
+    ticket_id: str, *, repo_root: str | os.PathLike[str] | None = None
+) -> dict[str, object]:
     """Get the current file-impact declaration: undeclared, paths, or none."""
     from rebar._engine_support import reads
 
@@ -133,7 +140,12 @@ def get_file_impact_scope(ticket_id: str, *, repo_root=None) -> dict[str, object
     }
 
 
-def set_file_impact(ticket_id: str, impact, *, repo_root=None) -> None:
+def set_file_impact(
+    ticket_id: str,
+    impact: list[FileImpactEntry] | str,
+    *,
+    repo_root: str | os.PathLike[str] | None = None,
+) -> None:
     """Record file impact (list of {path, reason} dicts, or a JSON string)."""
     import json as _json
 
@@ -146,7 +158,9 @@ def set_file_impact(ticket_id: str, impact, *, repo_root=None) -> None:
     )
 
 
-def declare_no_file_impact(ticket_id: str, reason: str, *, repo_root=None) -> None:
+def declare_no_file_impact(
+    ticket_id: str, reason: str, *, repo_root: str | os.PathLike[str] | None = None
+) -> None:
     """Record a validated explicit declaration that a ticket has no file impact."""
     from rebar._commands import leaf
 
@@ -160,7 +174,9 @@ def declare_no_file_impact(ticket_id: str, reason: str, *, repo_root=None) -> No
     )
 
 
-def get_verify_commands(ticket_id: str, *, repo_root=None) -> list[VerifyCommandEntry]:
+def get_verify_commands(
+    ticket_id: str, *, repo_root: str | os.PathLike[str] | None = None
+) -> list[VerifyCommandEntry]:
     """Get the current DD-level verify-commands array for a ticket.
 
     A missing ticket raises ``RebarError`` (the dispatcher's exit-1 contract),
@@ -179,7 +195,12 @@ def get_verify_commands(ticket_id: str, *, repo_root=None) -> list[VerifyCommand
         ) from None
 
 
-def set_verify_commands(ticket_id: str, commands, *, repo_root=None) -> None:
+def set_verify_commands(
+    ticket_id: str,
+    commands: list[VerifyCommandEntry] | str,
+    *,
+    repo_root: str | os.PathLike[str] | None = None,
+) -> None:
     """Record DD-level verify commands (list of {dd_id, dd_text, command} dicts,
     or a JSON string)."""
     import json as _json
@@ -211,7 +232,9 @@ def grounding_info() -> GroundingInfo:
     return cast("GroundingInfo", oracle.contract())
 
 
-def summary(*ticket_ids: str, repo_root=None) -> list[dict[str, Any]]:
+def summary(
+    *ticket_ids: str, repo_root: str | os.PathLike[str] | None = None
+) -> list[dict[str, Any]]:
     """One-line-per-ticket summary as structured JSON: a list of
     {ticket_id, alias, status, title, blocking_summary}.
 

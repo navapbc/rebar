@@ -18,6 +18,7 @@ package facade, so ``rebar.<name>`` and ``rebar._lib_writes.<name>`` keep resolv
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, cast
 
 from rebar._errors import RebarError
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     # Schema-derived return types (story 3a10). Import-only under TYPE_CHECKING —
     # ``from __future__ import annotations`` makes every annotation a string, so
     # these names never need to exist at runtime (zero import cost, no cycle).
+    from rebar.attest import dsse
     from rebar.types import CreateResult, SignResult, VerifySignatureResult
 
 
@@ -37,7 +39,7 @@ def create_identity(
     keys: list[str] | None = None,
     *,
     tags: list[str] | None = None,
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
     return_alias: bool = False,
     _creation_channel: str = "python",
 ) -> str | CreateResult:
@@ -81,7 +83,7 @@ def ensure_identity_for(
     external_id: str,
     display_name: str,
     *,
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
     creation_channel: str = "python",
 ) -> str:
     """Resolve-or-mint the identity for an inbound ``(provider, external_id)`` user; return
@@ -102,7 +104,13 @@ def ensure_identity_for(
     )
 
 
-def add_identity_key(identity_id, public_key, *, signature=None, repo_root=None) -> None:
+def add_identity_key(
+    identity_id: str,
+    public_key: str,
+    *,
+    signature: dsse.Envelope | None = None,
+    repo_root: str | os.PathLike[str] | None = None,
+) -> None:
     """Add ``public_key`` to an identity's epoch-scoped keyring (epic gnu-whale-ichor).
 
     GENESIS/TOFU: the first key on a keyless identity is added trust-on-first-use (no
@@ -124,7 +132,13 @@ def add_identity_key(identity_id, public_key, *, signature=None, repo_root=None)
         ) from None
 
 
-def revoke_identity_key(identity_id, public_key, *, signature, repo_root=None) -> None:
+def revoke_identity_key(
+    identity_id: str,
+    public_key: str,
+    *,
+    signature: dsse.Envelope,
+    repo_root: str | os.PathLike[str] | None = None,
+) -> None:
     """Revoke ``public_key`` from an identity's keyring (epic gnu-whale-ichor).
 
     Always signed: ``signature`` (a :class:`~rebar.attest.dsse.Envelope` over
@@ -145,7 +159,7 @@ def revoke_identity_key(identity_id, public_key, *, signature, repo_root=None) -
         ) from None
 
 
-def use_identity(identity_id: str, *, repo_root=None) -> None:
+def use_identity(identity_id: str, *, repo_root: str | os.PathLike[str] | None = None) -> None:
     """Point ``.rebar/current_identity`` at ``identity_id`` (a local, git-ignored
     pointer — never propagated across machines)."""
     from rebar._commands import identity as _identity
@@ -153,7 +167,7 @@ def use_identity(identity_id: str, *, repo_root=None) -> None:
     _identity.use_identity(identity_id, repo_root=repo_root)
 
 
-def resolve_current_identity(*, repo_root=None) -> str | None:
+def resolve_current_identity(*, repo_root: str | os.PathLike[str] | None = None) -> str | None:
     """Resolve the current self-identity (opt-in; returns ``None`` on any miss, never
     raises). Prefers the ``.rebar/current_identity`` pointer, else a case-insensitive
     ``git config user.email`` match against identity tickets."""
@@ -163,7 +177,9 @@ def resolve_current_identity(*, repo_root=None) -> str | None:
 
 
 # ── Cryptographic manifest signing (environment-bound) ────────────────────────
-def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> SignResult:
+def sign_manifest(
+    ticket_id: str, manifest: list[str] | str, *, repo_root: str | os.PathLike[str] | None = None
+) -> SignResult:
     """Sign a manifest of verified steps for a ticket with the environment key.
 
     ``manifest`` is a list of verified-step strings (or a JSON-array string).
@@ -187,7 +203,7 @@ def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> SignResult:
 
 
 def verify_signature(
-    ticket_id: str, *, kind: str | None = None, repo_root=None
+    ticket_id: str, *, kind: str | None = None, repo_root: str | os.PathLike[str] | None = None
 ) -> VerifySignatureResult:
     """Certify a ticket's recorded verified steps against its signature.
 

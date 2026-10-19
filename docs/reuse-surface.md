@@ -18,16 +18,16 @@ Use the noun-based facade for programmatic Jira bridge work:
 
 ```python
 bridge_preview(*, only: list[str] | None = None, exclude: list[str] | None = None,
-               repo_root=None) -> BridgeRun
-bridge_run(profile: str | None = None, *, repo_root=None) -> BridgeRun
+               repo_root: str | os.PathLike[str] | None = None) -> BridgeRun
+bridge_run(profile: str | None = None, *, repo_root: str | os.PathLike[str] | None = None) -> BridgeRun
 bridge_sync(*, only: list[str] | None = None, exclude: list[str] | None = None,
-            max_changes: int | None = None, repo_root=None) -> BridgeRun
+            max_changes: int | None = None, repo_root: str | os.PathLike[str] | None = None) -> BridgeRun
 bridge_status(*, target_environment_id: str | None = None,
-              max_age_seconds: int | None = None, repo_root=None) -> BridgeStatus
-bridge_pause(reason: str, *, repo_root=None) -> BridgeControl
-bridge_resume(*, repo_root=None) -> BridgeControl
+              max_age_seconds: int | None = None, repo_root: str | os.PathLike[str] | None = None) -> BridgeStatus
+bridge_pause(reason: str, *, repo_root: str | os.PathLike[str] | None = None) -> BridgeControl
+bridge_resume(*, repo_root: str | os.PathLike[str] | None = None) -> BridgeControl
 bridge_check_access() -> BridgeAccessCheck
-bridge_fsck(*, repo_root=None) -> BridgeFsck
+bridge_fsck(*, repo_root: str | os.PathLike[str] | None = None) -> BridgeFsck
 ```
 
 `bridge_preview` selects the dry-run route and never applies changes;
@@ -51,11 +51,11 @@ interactive and intentionally has no library or MCP operation.
 The package facade exposes these ticket and store mutations:
 
 ```python
-unlink(id1: str, id2: str, relation: str | None = None, *, repo_root=None) -> None
-tag(ticket_id: str, tag: str, *, repo_root=None) -> None
-untag(ticket_id: str, tag: str, *, repo_root=None) -> None
-archive(ticket_id: str, *, repo_root=None) -> None
-compact(ticket_id: str | None = None, *, repo_root=None) -> None
+unlink(id1: str, id2: str, relation: str | None = None, *, repo_root: str | os.PathLike[str] | None = None) -> None
+tag(ticket_id: str, tag: str, *, repo_root: str | os.PathLike[str] | None = None) -> None
+untag(ticket_id: str, tag: str, *, repo_root: str | os.PathLike[str] | None = None) -> None
+archive(ticket_id: str, *, repo_root: str | os.PathLike[str] | None = None) -> None
+compact(ticket_id: str | None = None, *, repo_root: str | os.PathLike[str] | None = None) -> None
 ```
 
 All five functions pass `repo_root` through standard repository and tracker resolution. An explicit value selects that repository and its configured tracker. Omitting it uses normal repository discovery. Successful calls return `None`. Expected ticket, validation, state, compaction, and store failures raise `RebarError`. The exception carries the command return code and stderr when the command supplied them. A missing optional delivery helper can raise `OptionalDependencyError` after the local commit.
