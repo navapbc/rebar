@@ -197,7 +197,7 @@ def test_mcp_write_validation_and_schema_contract(
         )
     )
     assert result["result"] == "ok"
-    assert result["cross_session_warning"] is None
+    assert "cross_session_warning" not in result  # absent when silent (canonical write_ack)
 
     state = rebar.show_ticket(ticket_id, repo_root=root)
     assert state["file_impact_scope"] == "none"

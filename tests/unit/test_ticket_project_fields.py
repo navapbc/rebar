@@ -159,7 +159,6 @@ def test_bridge_project_and_repos_are_parity_across_surfaces(repo: Path) -> None
 
     ctx = types.SimpleNamespace(
         readonly=lambda: False,
-        dump=lambda obj: obj,
         allow_llm=lambda: False,
         logger=logging.getLogger("test"),
     )
@@ -169,7 +168,7 @@ def test_bridge_project_and_repos_are_parity_across_surfaces(repo: Path) -> None
     mcp_res = mcp_tools["create_ticket"](
         "task", "mcp", bridge_project="REB", repos=["rebar", "api"]
     )
-    mcp_id = (mcp_res if isinstance(mcp_res, dict) else mcp_res.model_dump())["id"]
+    mcp_id = mcp_res["id"]
 
     shapes = [
         (_state(repo, cli_id)["bridge_project"], _state(repo, cli_id)["repos"]),
@@ -200,7 +199,6 @@ def test_mcp_edit_sets_bridge_project_and_repos_at_parity(repo: Path) -> None:
 
     ctx = types.SimpleNamespace(
         readonly=lambda: False,
-        dump=lambda obj: obj,
         allow_llm=lambda: False,
         logger=logging.getLogger("test"),
     )

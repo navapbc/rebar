@@ -100,7 +100,6 @@ def run_http_with_grace(
     *,
     grace_seconds: float = DEFAULT_SHUTDOWN_GRACE_SECONDS,
     uvicorn_backstop_seconds: float = DEFAULT_UVICORN_BACKSTOP_SECONDS,
-    uvicorn_graceful_seconds: float | None = None,
     poll_interval: float = 0.5,
     opcert_binding: Any = None,
 ) -> None:
@@ -118,9 +117,6 @@ def run_http_with_grace(
     so this short backstop only sweeps idle streams and never truncates a real op. The main
     thread joins with a timeout so it stays responsive to the signal (a bare ``join()``
     would defer handler delivery).
-    ``uvicorn_graceful_seconds`` remains accepted as a backward-compatible spelling; new
-    callers should use ``uvicorn_backstop_seconds`` to avoid confusing this transport
-    backstop with the certified-op drain grace.
 
     ``opcert_binding`` (the box's startup op-cert signer, or ``None``) is bound
     context-locally INSIDE the serving thread's target, not in the caller's thread:
@@ -133,9 +129,6 @@ def run_http_with_grace(
     import uvicorn
 
     from rebar._opcert_binding import bound_signer
-
-    if uvicorn_graceful_seconds is not None:
-        uvicorn_backstop_seconds = uvicorn_graceful_seconds
 
     app = mcp.streamable_http_app()
     # Prove the MCP REQUEST PATH works before uvicorn accepts its first connection: the

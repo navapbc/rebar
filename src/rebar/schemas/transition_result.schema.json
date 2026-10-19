@@ -11,6 +11,8 @@
     "from": { "$ref": "common.schema.json#/$defs/ticket_status" },
     "to": { "$ref": "common.schema.json#/$defs/ticket_status" },
     "newly_unblocked": { "type": "array", "items": { "type": "string" } },
+    "push_status": { "$ref": "common.schema.json#/$defs/push_status", "description": "MCP results only: delivery status of this write (see common push_status)." },
+    "cross_session_warning": { "type": "string", "description": "MCP results only: the non-gating holder advisory, present only when another session holds the live claim (story 734d)." },
     "completion_signature": {
       "type": "object",
       "description": "What became of the completion signature on a close. Optional: see the top-level description for when it is absent.",

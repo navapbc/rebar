@@ -348,16 +348,18 @@ def test_sign_result_schema_admits_envelope_shape(store: Path) -> None:
     del jsonschema
 
 
-def test_sign_result_out_model_admits_envelope_shape(store: Path) -> None:
-    models = pytest.importorskip("rebar._mcp_models")
-    if models.SignResultOut is None:  # pydantic unavailable
-        pytest.skip("pydantic not installed")
+def test_sign_manifest_output_schema_admits_envelope_shape(store: Path) -> None:
+    """MCP sign_manifest advertises sign_result.schema.json (story quilted-nepotic-kitty)."""
+    jsonschema = pytest.importorskip("jsonschema")
+    from rebar._mcp_schema import OUTPUT_SCHEMAS_BY_TOOL, inline_schema
+
+    advertised = inline_schema(*OUTPUT_SCHEMAS_BY_TOOL["sign_manifest"])
     tid = rebar.create_ticket("task", "model", repo_root=str(store))
     rec = rebar.sign_manifest(tid, ["plan-review: PASS"], repo_root=str(store))
-    out = models.SignResultOut.model_validate(rec)
-    assert out.envelope and out.algorithm == "sshsig"
-    # signature (HMAC) is now optional (expand phase).
-    assert not models.SignResultOut.model_fields["signature"].is_required()
+    jsonschema.validate(rec, advertised)
+    assert rec["envelope"] and rec["algorithm"] == "sshsig"
+    # signature (HMAC, retired) is optional.
+    assert "signature" not in advertised["required"]
 
 
 # ── read-path dispatch (verify_attestation_record) ────────────────────────────────────

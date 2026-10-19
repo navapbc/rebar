@@ -214,8 +214,8 @@ def test_mcp_create_result_carries_the_warning(repo: Path, flag_on: None) -> Non
     tools["create_ticket"]("task", _TITLE)
     result = tools["create_ticket"]("task", _TITLE)
 
-    assert result.duplicate_warning is not None
-    assert "possible duplicate" in result.duplicate_warning
+    assert result.get("duplicate_warning") is not None
+    assert "possible duplicate" in result.get("duplicate_warning")
 
 
 # ── concurrency: simultaneous same-title creates serialize on the journal ──────

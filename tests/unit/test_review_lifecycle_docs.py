@@ -33,7 +33,6 @@ def _review_plan_description() -> str:
     ctx = SimpleNamespace(
         readonly=ms._readonly,
         allow_llm=ms._allow_llm,
-        dump=ms._dump,
         logger=ms.logger,
     )
     register_llm_tools(mcp, ctx)

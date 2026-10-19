@@ -176,7 +176,7 @@ def _library_ids() -> set[str]:
 
 
 def _mcp_ids() -> set[str]:
-    return {t.ticket_id for t in _mcp_list_tool()()}
+    return {t["ticket_id"] for t in _mcp_list_tool()()}
 
 
 def _cli_ids(extra: tuple[str, ...] = ()) -> set[str]:

@@ -367,36 +367,33 @@ def test_absent_mcp_extra_raises_systemexit(monkeypatch: pytest.MonkeyPatch) -> 
     assert "mcp" in str(exc.value).lower()
 
 
-def test_absent_pydantic_declares_every_mcp_model_placeholder(
+def test_write_registrar_imports_without_the_pydantic_stack(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A core-only wheel must import mcp_server far enough to show its install hint."""
-    import rebar._mcp_models as installed_models
+    """A core-only wheel must import mcp_server far enough to show its install hint.
+
+    The pydantic output mirror is gone (story quilted-nepotic-kitty); the only
+    import-time pydantic-stack touch left is the write registrar's rebuild of the shared
+    input entries, which must fall back cleanly when ``typing_extensions`` is absent."""
+    import rebar._mcp_writes as installed_writes
+    from rebar.types import FileImpactEntry
 
     spec = importlib.util.spec_from_file_location(
-        "rebar_mcp_models_without_pydantic", installed_models.__file__
+        "rebar_mcp_writes_without_pydantic", installed_writes.__file__
     )
     assert spec is not None and spec.loader is not None
-    fallback_models = importlib.util.module_from_spec(spec)
+    fallback = importlib.util.module_from_spec(spec)
     real_import = builtins.__import__
 
-    def _fail_pydantic(name, *args, **kwargs):
-        if name == "pydantic" or name.startswith("pydantic."):
-            raise ImportError("No module named 'pydantic'")
+    def _fail_typing_extensions(name, *args, **kwargs):
+        if name == "typing_extensions":
+            raise ImportError("No module named 'typing_extensions'")
         return real_import(name, *args, **kwargs)
 
-    monkeypatch.setattr(builtins, "__import__", _fail_pydantic)
-    spec.loader.exec_module(fallback_models)
+    monkeypatch.setattr(builtins, "__import__", _fail_typing_extensions)
+    spec.loader.exec_module(fallback)
 
-    for name in (
-        "BridgeRunOut",
-        "BridgeStatusOut",
-        "BridgeControlOut",
-        "BridgeAccessStepOut",
-        "BridgeAccessCheckOut",
-        "ReadyTicketSummaryOut",
-    ):
-        assert getattr(fallback_models, name) is None
+    assert fallback._FileImpactEntry is FileImpactEntry
 
 
 # ── bug-close over MCP requires a bounded close_class (ticket 376d) ──────────

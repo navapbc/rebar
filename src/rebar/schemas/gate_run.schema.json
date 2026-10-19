@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/gate_run.schema.json",
+  "title": "GateRun",
+  "description": "MCP gate_status: the async plan-review / completion run handle for a review_plan_start or verify_completion_start job. `status` is running, then passed or failed; attaching awaits a duplicate's index record, and unknown marks an unrecognized job id (which carries no ticket_id, gate_type, or findings). A settled run adds verdict, error, durable (signed-certificate currency), and findings (plan-review sidecar readability).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "job_id",
+    "status"
+  ],
+  "properties": {
+    "job_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "ticket_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "gate_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "verdict": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "durable": {
+      "type": "object"
+    },
+    "findings": {
+      "type": "object"
+    }
+  }
+}

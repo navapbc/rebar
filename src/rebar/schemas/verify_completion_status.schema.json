@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/verify_completion_status.schema.json",
+  "title": "VerifyCompletionStatus",
+  "description": "Result of the library rebar.llm.verify_completion_status() / MCP verify_completion_status: the read-only currency of a ticket's completion-verifier attestation, with no LLM or network. verdict is `certified` only when the attestation is valid right now, otherwise the close-gate classifier reason (`stale-reopened`, `stale-material`, `not-closed`, `unsigned`, ...); `ok` tracks the same currency. verified_at_sha and signed_at are null when no readable attestation exists.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "ok",
+    "verdict",
+    "reason"
+  ],
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "verdict": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "verified_at_sha": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "signed_at": {
+      "type": [
+        "integer",
+        "string",
+        "null"
+      ],
+      "description": "Nanoseconds since the Unix epoch; a decimal STRING on the MCP wire when outside the JS-safe integer range (bug 6fe7)."
+    }
+  }
+}

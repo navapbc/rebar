@@ -17,6 +17,7 @@
     "merged_log_commit": { "type": ["string", "null"], "description": "The bound commit (verified-at sha, else HEAD) the op-cert subject binds." },
     "head_sha": { "type": ["string", "null"], "description": "Audit metadata: HEAD at signing time." },
     "signature": { "type": ["string", "null"], "description": "RETIRED (2026-09): the legacy HMAC-SHA256 hex. Never emitted; retained nullable only so a reader tolerates a pre-retirement record." },
-    "key_id": { "type": ["string", "null"], "description": "RETIRED (2026-09): the legacy HMAC environment key fingerprint. Never emitted; retained nullable only for pre-retirement records." }
+    "key_id": { "type": ["string", "null"], "description": "RETIRED (2026-09): the legacy HMAC environment key fingerprint. Never emitted; retained nullable only for pre-retirement records." },
+    "push_status": { "$ref": "common.schema.json#/$defs/push_status", "description": "MCP results only: delivery status of this write (see common push_status)." }
   }
 }

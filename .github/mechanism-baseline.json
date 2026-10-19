@@ -156,7 +156,6 @@
     "ci_gate::.github/workflows/_build-and-test.yml::Install rebar from the committed lock (dev + reviewbot + ui extras)": 1,
     "ci_gate::.github/workflows/_build-and-test.yml::Install rebar from the committed lock (dev extra)": 1,
     "ci_gate::.github/workflows/_build-and-test.yml::Install rebar from the committed lock (dev extra) and pip-audit": 1,
-    "ci_gate::.github/workflows/_build-and-test.yml::MCP model schema drift gate": 1,
     "ci_gate::.github/workflows/_build-and-test.yml::Module-size gate": 1,
     "ci_gate::.github/workflows/_build-and-test.yml::Prompt-index drift gate": 1,
     "ci_gate::.github/workflows/_build-and-test.yml::Prove bwrap can namespace and enforce (fail the lane if not)": 1,

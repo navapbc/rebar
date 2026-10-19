@@ -83,6 +83,20 @@
         "command": { "type": "string" }
       }
     },
+    "push_status": {
+      "type": "object",
+      "description": "Durable delivery state of this write's ticket events to sync.remote (bug vapoury-attack-lamb). `{\"state\": \"ok\"}` when delivered (or nothing has failed since the last push that landed); otherwise the recorded `pending` marker. MCP write results carry it because an MCP client cannot see the server's stderr push warning; the other keys appear only on a `pending` marker, and `unknown` means the marker could not be read.",
+      "additionalProperties": true,
+      "required": ["state"],
+      "properties": {
+        "state": { "type": "string", "enum": ["ok", "pending", "unknown"] },
+        "reason": { "type": "string" },
+        "detail": { "type": "string" },
+        "remote_ref": { "type": "string" },
+        "unpushed": { "type": "string", "description": "`<remote_ref>..HEAD` commit count as decimal digits, or `unknown`." },
+        "since": { "type": "number", "description": "When the delivery first failed, seconds since the Unix epoch." }
+      }
+    },
     "batch_item": {
       "type": "object",
       "additionalProperties": true,

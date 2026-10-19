@@ -11,7 +11,6 @@ import pytest
 
 from rebar import _bridge_runner
 from rebar._cli import _registry
-from rebar._mcp_models import BridgeStatusOut
 
 pytestmark = pytest.mark.unit
 
@@ -77,7 +76,8 @@ def test_bridge_status_ignores_retired_reconcile_check_artifact(
     )
 
     assert "reconcile_diagnostics" not in status
-    assert "reconcile_diagnostics" not in BridgeStatusOut.model_fields
+    # The MCP bridge_status outputSchema IS bridge_status.schema.json (story
+    # quilted-nepotic-kitty), so the schema assertion below covers the MCP surface too.
     assert "reconcile_diagnostics" not in bridge_status_schema["properties"]
 
 

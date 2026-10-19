@@ -93,7 +93,6 @@ def _registrar_tools() -> dict[str, dict[str, str]]:
             allow_jira_sync=ms._allow_jira_sync,
             cap_workflow_payload=ms._cap_workflow_payload,
             bound_list_payload=ms._bound_list_payload,
-            dump=ms._dump,
             MODE_CAPS=ms.MODE_CAPS,
             Mode=ms.Mode,
             logger=ms.logger,
@@ -206,11 +205,10 @@ def render() -> str:
         "held by a DIFFERENT session than the acting one. It rides on the single-ticket "
         "writes (`comment_ticket`, `edit_ticket`, `tag_ticket`, `untag_ticket`, "
         "`set_file_impact`, `set_verify_commands`, `archive_ticket`, `link_tickets`, "
-        "`unlink_tickets`) and on `show_ticket` as the optional `cross_session_warning` "
-        "model field; `transition_ticket` / `reopen_ticket` (which return the raw engine "
-        "dict) carry it as an additive `cross_session_warning` dict key, present only "
-        "when non-null. It is best-effort and advisory: it never gates the operation — "
-        "the mutation still lands."
+        "`unlink_tickets`), on `show_ticket`, `check_ac`, and `quality_check`, and on "
+        "`transition_ticket` / `reopen_ticket`; the key is ABSENT when silent (every MCP "
+        "result carries only the keys the library and these advisories emit). It is "
+        "best-effort and advisory: it never gates the operation — the mutation still lands."
     )
     lines.append("")
 

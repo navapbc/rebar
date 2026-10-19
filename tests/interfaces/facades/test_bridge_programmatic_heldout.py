@@ -157,7 +157,7 @@ def test_bridge_mutation_gates_accept_legacy_boolean_context_values(
         },
     )
     result = registrar.tools["bridge_sync"]()
-    assert result.model_dump() == {
+    assert result == {
         "route": "sync",
         "state": "converged",
         "returncode": 0,
@@ -195,30 +195,25 @@ def test_read_only_mcp_bridge_tools_are_not_blocked_by_jira_sync_opt_in(
         assert _unwrap(asyncio.run(server.call_tool(name, arguments[name]))) == value
 
 
-def test_bridge_result_schemas_are_wired_to_public_types_and_mcp_models() -> None:
+def test_bridge_result_schemas_are_wired_to_public_types_and_mcp_output_schemas() -> None:
     from rebar import schemas
-    from rebar._mcp_models import (
-        BridgeAccessCheckOut,
-        BridgeControlOut,
-        BridgeRunOut,
-        BridgeStatusOut,
-    )
+    from rebar._mcp_schema import OUTPUT_SCHEMAS_BY_TOOL
 
     samples = {
-        schemas.BRIDGE_RUN: (
-            BridgeRunOut,
+        "bridge_preview": (
+            schemas.BRIDGE_RUN,
             {"route": "preview", "state": "converged", "returncode": 0, "details": {}},
         ),
-        schemas.BRIDGE_STATUS: (
-            BridgeStatusOut,
+        "bridge_status": (
+            schemas.BRIDGE_STATUS,
             {"verdict": "HEALTHY", "target_environment_id": "worker-a"},
         ),
-        schemas.BRIDGE_CONTROL: (BridgeControlOut, {"state": "resumed"}),
-        schemas.BRIDGE_ACCESS_CHECK: (
-            BridgeAccessCheckOut,
+        "bridge_resume": (schemas.BRIDGE_CONTROL, {"state": "resumed"}),
+        "bridge_check_access": (
+            schemas.BRIDGE_ACCESS_CHECK,
             {"verdict": "PASS", "steps": [{"step": "STEP_CREATE", "passed": True}]},
         ),
     }
-    for schema_name, (model, sample) in samples.items():
+    for tool, (schema_name, sample) in samples.items():
         schemas.validator(schema_name).validate(sample)
-        assert model.model_validate(sample).model_dump(exclude_none=True) == sample
+        assert OUTPUT_SCHEMAS_BY_TOOL[tool] == ((schema_name,), "object")
