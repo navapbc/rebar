@@ -1,4 +1,4 @@
-"""``rebar tracker-footprint`` parser factory."""
+"""``rebar store footprint`` parser factory."""
 
 from __future__ import annotations
 

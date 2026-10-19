@@ -1,0 +1,28 @@
+Usage: rebar store [-h]
+                   {fsck,fsck-recover,doctor,maintenance,footprint,export,import,compact}
+                   ...
+
+Check, repair, measure, migrate, and compact the ticket store.
+
+options:
+  -h, --help            show this help message and exit
+
+commands:
+  {fsck,fsck-recover,doctor,maintenance,footprint,export,import,compact}
+    fsck                Check store integrity (JSON validity, CREATE presence,
+                        index.lock).
+    fsck-recover        Recover the tracker worktree (dangling commits,
+                        interrupted rebases).
+    doctor              Diagnose the store and heal what is safe to fix
+                        (--repair).
+    maintenance         Supported door for raw git in the tracker; backup ref +
+                        refusal + audit.
+    footprint           Measure Git, checkout, allocation, and whole-clone
+                        tracker footprint.
+    export              Export the store as NDJSON (one ticket per line).
+    import              Import tickets from export NDJSON for a clean rebar-to-
+                        rebar migration.
+    compact             Compact one ticket's event log, or every eligible ticket
+                        with --all.
+
+Run 'rebar store <subcommand> --help' for a subcommand's options.

@@ -59,18 +59,18 @@ Do **not** claim a ticket was created. Instead:
 2. Report the **exact missing capability** (which of the six dimensions failed) alongside the
    payload, so a human or a capable agent can pick it up.
 
-This is the same shape produced by `rebar export` and consumed by `rebar import`, so a
+This is the same shape produced by `rebar store export` and consumed by `rebar store import`, so a
 maintainer can review it and optionally ingest it without hand-transcription. Because
 `ticket_id` here is agent-generated (not rebar-assigned), re-running the same fallback payload
-through `rebar import` later is idempotent by `source_id` — a no-op, not a duplicate.
+through `rebar store import` later is idempotent by `source_id` — a no-op, not a duplicate.
 
 ## 5. The exceptional import mechanism
 
-The **only** sanctioned path for turning a fallback payload into real tickets is `rebar import`
+The **only** sanctioned path for turning a fallback payload into real tickets is `rebar store import`
 (or the library's `rebar.import_tickets()`) — the native, locked write path. **Never** hand-write
 raw event files and **never** use a GitHub Contents API write to the `tickets` branch.
 
-`rebar import`:
+`rebar store import`:
 
 - Accepts **NDJSON** compiled-state projections conforming to the schema above (not raw events).
 - Assigns **fresh local ids and HLC timestamps** to each created ticket, preserving source
@@ -79,7 +79,7 @@ raw event files and **never** use a GitHub Contents API write to the `tickets` b
   re-created.
 
 **Before invoking it:** confirm the target branch is current (`git fetch` + `rebar resolve
-<known-id>` against the intended tracker) and run `rebar import --dry-run` first. In dry-run
+<known-id>` against the intended tracker) and run `rebar store import --dry-run` first. In dry-run
 mode specifically, a record missing `ticket_id`/`ticket_type` is silently skipped — it
 increments **no counter** and produces **no warning** at all (the `warnings` list is not
 populated in the dry-run branch); only an already-imported record (its `source_id` already
@@ -88,7 +88,7 @@ present in the target) increments `skipped`. So a malformed record is invisible 
 `would_create + skipped` against the total NDJSON record count: any shortfall is exactly the
 count of malformed (missing `ticket_id`/`ticket_type`) records.
 
-**After invoking it:** run `rebar fsck` against the tracker to confirm store integrity (`fsck`
+**After invoking it:** run `rebar store fsck` against the tracker to confirm store integrity (`fsck`
 checks the stored bytes and git refs; `rebar validate` scores ticket semantics instead).
 
 ## Summary checklist
@@ -99,5 +99,5 @@ checks the stored bytes and git refs; `rebar validate` scores ticket semantics i
 - [ ] Never hand-authored or mutated event files.
 - [ ] Used the fallback payload (schema-conformant) and a transparent capability-gap report when
       native creation was genuinely impossible — never claimed persistence that didn't happen.
-- [ ] Used only `rebar import` (never raw event injection or a Contents API write) for the
+- [ ] Used only `rebar store import` (never raw event injection or a Contents API write) for the
       exceptional ingest path, with a pre-flight `--dry-run` and a post-flight `rebar validate`.

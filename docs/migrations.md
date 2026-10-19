@@ -18,7 +18,7 @@ trade-offs, and the future A-tier ledger.
 The ensure-registry generalizes the old init-time `_migrate_*`/`_ensure_*` steps, which ran
 **only** at `init`/re-init — so a fix shipped *after* a store was initialized never reached it
 (the `gc.auto=0` legacy-store gap). Now those steps are ensure units that converge every
-existing store on any init/re-init, `fsck --repair`, or MCP boot.
+existing store on any init/re-init, `rebar store fsck --repair`, or MCP boot.
 
 ## Anatomy: `EnsureOutcome` + the registry
 
@@ -32,7 +32,7 @@ class EnsureOutcome:
     detail: str = ""                             # changed = drift corrected; failed = raised
 ```
 
-`run_ensures(tracker)` runs **every** unit unconditionally under the store write lock. It catches an exception from an individual unit, records `failed`, excludes that unit from the applied set, and continues. Lock acquisition failures, marker write failures, and other sweep failures are logged without aborting the caller. `StoreIncompatibleError` from the write-lock compatibility gate is the deliberate exception. It escapes the sweep so an incompatible store fails closed during init, MCP boot, and `fsck --repair`.
+`run_ensures(tracker)` runs **every** unit unconditionally under the store write lock. It catches an exception from an individual unit, records `failed`, excludes that unit from the applied set, and continues. Lock acquisition failures, marker write failures, and other sweep failures are logged without aborting the caller. `StoreIncompatibleError` from the write-lock compatibility gate is the deliberate exception. It escapes the sweep so an incompatible store fails closed during init, MCP boot, and `rebar store fsck --repair`.
 
 ## Adding an ensure unit
 
@@ -98,13 +98,13 @@ missing `.archived` marker for a net-archived ticket on the next default list.
 
 - **`init` / re-init** and the **symlink worktree attach** (`init.py`) — the sweep replaces the
   old hand-listed `_migrate_*`/`_ensure_*` calls; init logs any `failed` unit and never aborts.
-- **`rebar fsck --repair`** — the ensure-sweep is folded into the existing "drive healthy"
+- **`rebar store fsck --repair`** — the ensure-sweep is folded into the existing "drive healthy"
   verb as a distinct phase (no new mutation flag). `--dry-run` does not sweep.
 - **MCP server startup** (`rebar-mcp`) — best-effort, after the `--help` check and before the
   server runs, with a **short** write-lock budget so a contended lock skips rather than delays
   boot. A missing store / import / sweep error never aborts boot.
 
-Plain read-only `rebar fsck` prints an informational `ensures: N/M applied` line (N = applied
+Plain read-only `rebar store fsck` prints an informational `ensures: N/M applied` line (N = applied
 units present in the marker ∩ registry, M = registry size) **without** sweeping; it is
 text-only (excluded from `--output json`, so it never inflates `issue_count`).
 
@@ -123,14 +123,14 @@ On a covered write, `maybe_emit_pending_hint(tracker)` nudges when the store is 
 
 - **`marker-gates-hint-never-repair`.** The `.ensure-applied` marker **gates the hint only** —
   it decides *whether to nudge*, and the nudge NEVER runs a sweep or repairs anything. The only
-  thing that converges a store is `run_ensures` (init / `fsck --repair` / MCP boot). This keeps
+  thing that converges a store is `run_ensures` (init / `rebar store fsck --repair` / MCP boot). This keeps
   the write path cheap and side-effect-free.
 - **Hot-path budget (≤1 read/process).** `pending = registry_ids() − applied_ids(tracker)` is
   computed once per process per store and cached as the pending id **set** (so the hint can
   name the pending units), so a converged store reads `.ensure-applied` **at most once** and
   does zero further reads on later writes — and never spawns a subprocess.
 - **Rate-limited + suppressible.** When pending, it emits one WARNING naming the pending units
-  and pointing at `rebar fsck --repair`, no more than once per `ensure.hint_interval_secs`
+  and pointing at `rebar store fsck --repair`, no more than once per `ensure.hint_interval_secs`
   (default 86400) via `.ensure-hinted`; `ensure.hint_enabled = false` silences it entirely.
   Env overrides auto-derive as `REBAR_ENSURE_HINT_INTERVAL_SECS` / `REBAR_ENSURE_HINT_ENABLED`
   (see [config.md](config.md) `[ensure]`).
@@ -147,7 +147,7 @@ On a covered write, `maybe_emit_pending_hint(tracker)` nudges when the store is 
 
 - **Long-lived MCP re-sweep.** The registry is swept at boot; a store that drifts *during* a
   long-lived server's life (e.g. a new unit shipped to a peer) is not auto-re-swept mid-life —
-  converge it with `rebar fsck --repair` or a server restart. The write-path hint will surface
+  converge it with `rebar store fsck --repair` or a server restart. The write-path hint will surface
   the drift.
 - **Post-rollback safety.** Rolling back to an older binary is safe: the git-ignored
   `.ensure-applied` / `.ensure-hinted` markers are simply ignored by old code, and the
@@ -221,7 +221,7 @@ self-blocked. The record is a **committed** file — deliberately NOT in `.gitig
 **Fail-closed integrity in the sweep.** `run_ensures` wraps its body in a broad `except Exception`
 that logs-and-returns (an ensure sweep must never abort its caller). `StoreIncompatibleError`
 subclasses `Exception`, so it would be swallowed into a silent no-op — turning the gate into a
-bypass at MCP boot / `fsck --repair`. `run_ensures` therefore **re-raises** it explicitly, ahead
+bypass at MCP boot / `rebar store fsck --repair`. `run_ensures` therefore **re-raises** it explicitly, ahead
 of the broad handler, so the incompatible-store signal reaches the caller and fails closed.
 
 **Rollback safety.** Rolling back to a pre-v1.0 binary is safe: an older binary does not read

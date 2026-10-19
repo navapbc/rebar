@@ -110,9 +110,14 @@ def test_trusted_env_preserves_explicit_multiline_usage(tmp_path: Path, monkeypa
     ]
 
 
-def test_import_help_and_user_guide_describe_current_recovery_contract() -> None:
-    """The generated import help and user guide state the shipped import contract."""
-    help_text = " ".join((HELP_DIR / "import.txt").read_text(encoding="utf-8").split())
+def test_import_help_and_user_guide_describe_current_recovery_contract(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The rendered ``store import`` help and user guide state the shipped import contract."""
+    from rebar._cli import main
+
+    assert main(["store", "import", "--help"]) == 0
+    help_text = " ".join(capsys.readouterr().out.split())
     guide = IMPORT_GUIDE.read_text(encoding="utf-8")
 
     assert "batches of up to 256 events" in help_text

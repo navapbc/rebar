@@ -2,7 +2,7 @@
 
 When neither ``fcntl`` nor ``msvcrt`` is available, acquisition raises
 ``NoExclusiveLegError`` without creating the mkdir lock. Advisory probes degrade to not busy,
-and ``rebar doctor --locks`` reports ``unknown``. POSIX tests exercise the Windows branch with
+and ``rebar store doctor --locks`` reports ``unknown``. POSIX tests exercise the Windows branch with
 a ``flock``-backed ``msvcrt`` substitute. Windows-only tests prove native cross-process
 exclusion and release after process death. PID liveness remains conservative where signal zero
 cannot probe safely.
@@ -99,7 +99,7 @@ def test_no_leg_busy_probe_fails_open(tmp_path) -> None:
 
 
 def test_no_leg_doctor_probe_reports_unknown(tmp_path) -> None:
-    """Without an exclusive leg, ``rebar doctor --locks`` reports ``unknown`` instead of free."""
+    """Without an exclusive leg, ``rebar store doctor --locks`` reports ``unknown``, not free."""
     _assert_child_ok(
         _run_without_any_leg(
             """
@@ -212,7 +212,7 @@ def test_windows_leg_busy_probe_answers_truthfully(tmp_path, windows_leg: None) 
 
 
 def test_windows_leg_doctor_probe_answers_truthfully(tmp_path, windows_leg: None) -> None:
-    """``rebar doctor --locks`` reports held and free states through the Windows leg."""
+    """``rebar store doctor --locks`` reports held and free states through the Windows leg."""
     tracker = str(tmp_path)
     lock_path = os.path.join(tracker, _lock.WRITE_LOCK_NAME)
 

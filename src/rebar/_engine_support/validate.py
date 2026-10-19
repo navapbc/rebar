@@ -301,7 +301,7 @@ def _emit_summary(score: int, buckets: dict[str, list[str]], *, terse: bool) -> 
             print(_labels[score], file=sys.stderr)
         print("", file=sys.stderr)
         print("Run with --verbose for more details", file=sys.stderr)
-        print("Run `rebar doctor` to attempt automatic repairs", file=sys.stderr)
+        print("Run `rebar store doctor` to attempt automatic repairs", file=sys.stderr)
         return
     _labels = {
         5: f"Health Score: {_GREEN}{score}/5{_NC} - Excellent",
@@ -314,7 +314,7 @@ def _emit_summary(score: int, buckets: dict[str, list[str]], *, terse: bool) -> 
     if score < 5:
         print("", file=sys.stderr)
         print("Run with --verbose for more details", file=sys.stderr)
-        print("Run `rebar doctor` to attempt automatic repairs", file=sys.stderr)
+        print("Run `rebar store doctor` to attempt automatic repairs", file=sys.stderr)
 
 
 # ───────────────────────────── library entrypoint ────────────────────────────

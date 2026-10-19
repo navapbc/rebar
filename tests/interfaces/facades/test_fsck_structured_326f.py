@@ -1,7 +1,7 @@
 """Bug 326f-595a-088b-40a5 — a COMPLETED fsck run is a result, not a tool error.
 
 ``fsck`` is a DIAGNOSTIC: finding problems IS its success condition. The library
-flattened every non-zero exit into ``RebarError("rebar fsck failed (exit N): <whole
+flattened every non-zero exit into ``RebarError("rebar store fsck failed (exit N): <whole
 text report>")`` and the MCP tool relayed that to the client as
 ``{"error": "command_failed", "exit_code": 1, "message": "<the report>"}`` — so a
 caller could not ENUMERATE the findings, and could not tell "the store has issues"
@@ -56,7 +56,7 @@ def _seed_missing_create(repo: Path, ticket_id: str = "aaaa-bbbb-cccc-dddd") -> 
 
 def _cli_fsck(repo: Path, *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, "-m", "rebar", "fsck", *extra],
+        [sys.executable, "-m", "rebar", "store", "fsck", *extra],
         cwd=repo,
         capture_output=True,
         check=False,

@@ -1,6 +1,6 @@
 # Import / export (NDJSON interop projection)
 
-`rebar export` / `rebar import` (and the library `rebar.export_tickets()` /
+`rebar store export` / `rebar store import` (and the library `rebar.export_tickets()` /
 `rebar.import_tickets()`) move tickets in and out of the store as **NDJSON — one
 full ticket object per line**. This is a **lossy interop projection, NOT a
 backup**: for a lossless, full-audit-trail backup use
@@ -36,7 +36,7 @@ import` coerces it back with `int()`, so the round-trip preserves the exact digi
 ## Export
 
 ```
-rebar export [-o FILE] [--status=S[,S]] [--type=T[,T]] [--parent=ID] \
+rebar store export [-o FILE] [--status=S[,S]] [--type=T[,T]] [--parent=ID] \
              [--strip-external|--no-jira] \
              [--include-session-logs] [--exclude-archived] [--include-deleted]
 ```
@@ -55,7 +55,7 @@ so memory stays flat regardless of store size.
 ## Import
 
 ```
-rebar import [FILE] [--dry-run]      # reads stdin if FILE omitted
+rebar store import [FILE] [--dry-run]      # reads stdin if FILE omitted
 ```
 
 Import composes ordinary events through the **normal locked write path** (no

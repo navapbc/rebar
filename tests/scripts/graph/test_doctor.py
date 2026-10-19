@@ -416,7 +416,7 @@ def test_repair_force_writes_the_pre_repair_tag_and_repoints_it(
 def test_doctor_arm_reconverges_only_for_repair(
     monkeypatch: pytest.MonkeyPatch, rest: list[str], expect_init_only: bool
 ) -> None:
-    """A plain `doctor` must not reconverge the store; only `--repair` may.
+    """A plain `store doctor` must not reconverge the store; only `--repair` may.
 
     `doctor` deliberately does NOT join `_WRITES_FULL`, whose arms reconverge on
     every invocation — that would make a read-only audit mutate/​sync the store. Its
@@ -430,7 +430,7 @@ def test_doctor_arm_reconverges_only_for_repair(
     )
     monkeypatch.setattr("rebar._commands.doctor.doctor_cli", lambda *_a, **_k: 0)
 
-    _cli._dispatch("doctor", rest)
+    _cli._dispatch("store", ["doctor", *rest])
 
     assert seen == [expect_init_only], (rest, seen)
 
@@ -681,7 +681,7 @@ def test_unrepairable_finding_leaves_its_edge_and_the_run_continues(
 def test_no_flag_run_writes_no_events(
     graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
 ) -> None:
-    """A bare `rebar doctor` is a diagnostic and must not mutate the store.
+    """A bare `rebar store doctor` is a diagnostic and must not mutate the store.
 
     Asserted through `doctor_cli` rather than `scan()`, because the CLI is what a
     user actually invokes and the repair branch lives there — testing `scan()`

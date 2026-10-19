@@ -98,8 +98,8 @@ CLI_OUTPUT_DRIVERS: dict[str, object] = {
     "summary": lambda s: ["summary", s["task"]],
     "check": lambda s: ["check", s["task"]],
     "validate": lambda s: ["validate"],
-    "fsck": lambda s: ["fsck"],
-    "doctor": lambda s: ["doctor"],
+    "fsck": lambda s: ["store", "fsck"],
+    "doctor": lambda s: ["store", "doctor"],
     "grounding-info": lambda s: ["grounding-info"],
     "create": lambda s: ["create", "task", "Made by guard"],
     "idea": lambda s: ["idea", "Made by guard"],
@@ -111,7 +111,7 @@ CLI_OUTPUT_DRIVERS: dict[str, object] = {
     "delete": lambda s: ["delete", s["doomed"], "--user-approved"],
     "audit": lambda s: ["audit", "show", s["task"]],
     "metrics": lambda s: ["metrics", "--since", "2026-01-01", "--until", "2026-07-01"],
-    "tracker-footprint": lambda s: ["tracker-footprint"],
+    "tracker-footprint": lambda s: ["store", "footprint"],
     "config": lambda s: ["config", "--root", s["repo"]],
     "sign-review": lambda s: ["sign-review", s["task"]],
 }
@@ -136,9 +136,13 @@ def _output_advertisers() -> set[str]:
 # regenerated the package help from the argparse parser factories, so:
 #   * ``audit`` is a subparser group; its ``--output`` lives on ``audit show``, never in the
 #     top-level ``audit`` help; and
+#   * ``fsck``, ``doctor`` and ``tracker-footprint`` are ``rebar store`` members; their
+#     ``--output`` lives on ``store fsck|doctor|footprint`` help, which the store handler
+#     renders from each member factory, while the committed ``store`` help lists only the
+#     members. The driver keys stay the ``OUTPUT_SCHEMAS`` keys (shared with the MCP tools).
 # These stay in CLI_OUTPUT_DRIVERS (their real-output tests still validate the flag); they are
 # exempt only from the "stale advertiser" guard.
-_OUTPUT_ABSENT_FROM_TOP_LEVEL_HELP = {"audit"}
+_OUTPUT_ABSENT_FROM_TOP_LEVEL_HELP = {"audit", "fsck", "doctor", "tracker-footprint"}
 
 
 def test_every_cli_output_advertiser_is_classified() -> None:

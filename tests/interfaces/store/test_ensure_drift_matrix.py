@@ -7,7 +7,7 @@ proves the *differential* contract end-to-end: fabricate legacy drift on an arbi
 subset of {env-id, gc-config, merge-ours, gitattributes, gitignore}, then assert that
 a single sweep corrects EXACTLY the drifted units (`changed`), leaves the converged
 ones untouched (`ok`), never `failed`, actually reconverges the store, and is a no-op
-on the second pass (zero new commits). Then the operator path (`rebar fsck --repair`)
+on the second pass (zero new commits). Then the operator path (`rebar store fsck --repair`)
 is shown to converge a fully-legacy store, and a pre-feature store (no marker) is
 reported pending by the read-only line.
 """
@@ -212,7 +212,7 @@ def test_pre_feature_store_reports_pending(repo: Path) -> None:
 
     out = rebar.fsck(repo_root=str(repo))
     assert "ensures: 0/9 applied" in out
-    assert "run `rebar fsck --repair` to converge" in out
+    assert "run `rebar store fsck --repair` to converge" in out
 
     # After the operator repairs, the same read-only line reports fully applied.
     fsck_mod.fsck_cli(["--repair"], repo_root=str(repo))

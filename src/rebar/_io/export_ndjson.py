@@ -37,7 +37,7 @@ from . import _strip
 # not a bare JSON number — RFC 8259 §6 only guarantees numeric agreement inside that
 # range, so a float64 consumer (jq/node/DuckDB) silently rounds a bare 19-digit int.
 # This mirrors the js-safe wire form bug e127 adopted for the CLI ``--output json`` and
-# MCP surfaces; the ``rebar import`` twin coerces the field back with ``int()``.
+# MCP surfaces; the ``rebar store import`` twin coerces the field back with ``int()``.
 EXPORT_SCHEMA_VERSION = 2
 
 

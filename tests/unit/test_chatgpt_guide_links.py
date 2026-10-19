@@ -47,7 +47,7 @@ def test_guide_does_not_sanction_direct_contents_api_writes():
 
 def test_guide_names_rebar_import_as_the_only_sanctioned_ingest_mechanism():
     text = _guide_text()
-    assert "rebar import" in text
+    assert "rebar store import" in text
     assert "raw event" in text
 
 

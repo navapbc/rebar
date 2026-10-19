@@ -247,7 +247,7 @@ def test_list_epics_cli_removed(rebar_repo: Path) -> None:
 
 def test_fsck_and_bridge_fsck_shapes(rebar_repo: Path) -> None:
     r = str(rebar_repo)
-    schemas.validator(schemas.FSCK).validate(_cli_json("fsck", "--output", "json", cwd=r))
+    schemas.validator(schemas.FSCK).validate(_cli_json("store", "fsck", "--output", "json", cwd=r))
     schemas.validator(schemas.BRIDGE_FSCK).validate(
         _cli_json("bridge", "fsck", "--output", "json", cwd=r)
     )

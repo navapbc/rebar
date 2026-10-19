@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/tracker_footprint.schema.json",
   "title": "Tracker footprint",
-  "description": "Layered, descriptive result of `rebar tracker-footprint --output json`.",
+  "description": "Layered, descriptive result of `rebar store footprint --output json`.",
   "type": "object",
   "additionalProperties": false,
   "required": ["mode", "source", "object_database", "layers", "definitions"],

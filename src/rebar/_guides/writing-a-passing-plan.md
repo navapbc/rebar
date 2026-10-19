@@ -279,7 +279,7 @@ you cite.
 
 ```markdown
 ## Context / Problem
-`rebar export` writes UTF-8 but crashes on tickets whose title has a lone surrogate,
+`rebar store export` writes UTF-8 but crashes on tickets whose title has a lone surrogate,
 so a nightly export of the store aborts. Fixes the crash for the ops team.
 
 ## Approach

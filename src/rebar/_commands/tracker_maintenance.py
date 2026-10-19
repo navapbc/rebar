@@ -26,7 +26,7 @@ from rebar._store.gitutil import discard_unmerged_paths, path_is_foreign_to_bran
 _AUDIT_BASENAME = "rebar-maintenance-audit.jsonl"
 
 _USAGE = """\
-Usage: rebar tracker-maintenance [--status] [--clean] [--force=<reason>]
+Usage: rebar store maintenance [--status] [--clean] [--force=<reason>]
 
   --status          report what would change; makes NO writes (default)
   --clean           perform the repair (backup ref first, then heal)
@@ -164,7 +164,7 @@ def _parse(argv: list[str]) -> tuple[bool, str, int | None]:
 
 
 def tracker_maintenance_cli(argv: list[str], *, repo_root=None) -> int:
-    """``rebar tracker-maintenance`` entry."""
+    """``rebar store maintenance`` entry."""
     from rebar import config
 
     clean, force_reason, early_rc = _parse(argv)
@@ -181,7 +181,7 @@ def tracker_maintenance_cli(argv: list[str], *, repo_root=None) -> int:
     # factory below still governs: a rejecting factory (or a genuinely malformed argv
     # that survived ``_parse``) raises here and the run fails.
     try:
-        build_tracker_maintenance(prog="rebar tracker-maintenance").parse_args(argv)
+        build_tracker_maintenance(prog="rebar store maintenance").parse_args(argv)
     except ParseError as exc:
         return render_parse_error(exc)
 

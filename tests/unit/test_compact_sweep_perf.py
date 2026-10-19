@@ -178,7 +178,7 @@ def test_a_sweep_walks_history_once_regardless_of_ticket_count(
 def test_the_single_ticket_path_still_builds_its_own_map(
     store: Path, walk_counts: dict[str, int]
 ) -> None:
-    """`rebar compact <id>` folds ONE ticket, where a per-ticket walk is already the right
+    """`rebar store compact <id>` folds ONE ticket, where a per-ticket walk is already the right
     cost. The optimisation must not change it — this is the control proving the sweep result
     above comes from the prebuilt map, not from the walk having been removed outright."""
     repo = store

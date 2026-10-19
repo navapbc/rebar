@@ -1,4 +1,4 @@
-"""In-process ``compact`` / ``compact-all`` — the CLI facade.
+"""In-process ``rebar store compact`` (one ticket, or the sweep under ``--all``) — the CLI facade.
 
 Compaction squashes a ticket's event log into ONE SNAPSHOT event under the unified
 write lock: re-list events inside the lock, partition out forward-compat
@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "compact_all_cli",
     "compact_cli",
+    "compact_dispatch_cli",
     "get_rebuild_count",
     "rebuild_snapshot_from_full_log",
 ]
@@ -62,7 +63,7 @@ __all__ = [
 
 def _usage() -> int:
     sys.stderr.write(
-        "Usage: ticket-compact.sh <ticket_id> [--threshold=N] [--horizon=NS]\n"
+        "Usage: rebar store compact <ticket_id> [--threshold=N] [--horizon=NS]\n"
         "  Default threshold: REBAR_COMPACT_THRESHOLD env / compact.threshold config or 10\n"
         "  Default horizon:   REBAR_COMPACTION_HORIZON_NS env / compact.COMPACTION_HORIZON_NS\n"
         "                     config or 1800s in ns (events younger than this stay live)\n"
@@ -73,7 +74,7 @@ def _usage() -> int:
 def compact_cli(
     argv: list[str], *, repo_root=None, position_commits: dict[str, str] | None = None
 ) -> int:
-    """``rebar compact <id>`` entry.
+    """``rebar store compact <id>`` entry.
 
     ``position_commits`` is the OPTIONAL prebuilt position->commit map the store-wide sweep
     threads in so the authorship-ledger history walk does not run inside the store write lock
@@ -81,7 +82,7 @@ def compact_cli(
     if len(argv) < 1:
         return _usage()
     from rebar._cli._parser import ParseError, render_parse_error
-    from rebar._cli._parsers.core.compact import build_compact
+    from rebar._cli._parsers.core.compact import build_compact_one
 
     tracker = str(config.tracker_dir(repo_root))
     raw = argv[0]
@@ -113,7 +114,7 @@ def compact_cli(
             sys.stderr.write(f"Error: unknown argument '{a}'\n")
             return _usage()
     try:
-        ns = build_compact(prog="rebar compact").parse_args([*argv[1:], "--", raw])
+        ns = build_compact_one(prog="rebar store compact").parse_args([*argv[1:], "--", raw])
     except ParseError as exc:
         return render_parse_error(exc)
     if ns.threshold is not None:
@@ -279,7 +280,10 @@ def _compact_all_parse(argv: list[str]) -> tuple[bool, int, bool, bool, int | No
     limit = 0
     no_commit = False
     include_archived = False
-    usage = "Usage: ticket compact-all [--dry-run] [--limit=N] [--no-commit] [--include-archived]\n"
+    usage = (
+        "Usage: rebar store compact --all [--dry-run] [--limit=N] [--no-commit] "
+        "[--include-archived]\n"
+    )
     for a in argv:
         if a == "--dry-run":
             dry_run = True
@@ -485,7 +489,7 @@ def _run_sweep(
     # Tag every store-lock acquisition this loop drives (via _sweep_one_ticket ->
     # _compact_locked) as `op=compact-sweep`, so a writer blocked by the sweep sees a named,
     # safe-to-interrupt holder rather than a bare pid (camerashy-erectable-frog). Ambient, so
-    # it also covers a direct `rebar compact-all` invocation, not only the detached trigger.
+    # it also covers a direct `rebar store compact --all` invocation, not only the detached trigger.
     with _lock_owner.operation_label("compact-sweep"):
         for tid in needs:
             if _sweep_should_yield(tracker, compacted + skipped + len(error_ids)):
@@ -506,7 +510,7 @@ def _run_sweep(
 
 
 def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
-    """``rebar compact-all`` entry — the recurring store-wide compaction sweep.
+    """``rebar store compact --all`` entry — the recurring store-wide compaction sweep.
 
     Selects every ticket whose FOLDABLE event count exceeds ``compact.threshold`` and folds
     it, so a ticket that was compacted before and has since grown is folded again. Backfilling
@@ -530,7 +534,7 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
     # rejects a real invocation (a rejecting factory injected by the governance test
     # does, which is the point).
     try:
-        ns = build_compact_all(prog="rebar compact-all").parse_args(argv)
+        ns = build_compact_all(prog="rebar store compact --all").parse_args(argv)
     except ParseError as exc:
         return render_parse_error(exc)
     dry_run = ns.dry_run
@@ -616,3 +620,27 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
         compact_trigger.record_sweep(tracker)
 
     return 2 if error_ids else 0
+
+
+# Sweep-only flags: valid only beside ``--all`` (the one-ticket arm has no such options).
+_SWEEP_ONLY_FLAGS = ("--dry-run", "--limit", "--include-archived")
+
+
+def compact_dispatch_cli(argv: list[str], *, repo_root=None) -> int:
+    """``rebar store compact`` entry: one ticket, or the store-wide sweep under ``--all``.
+
+    ``--all`` (before any ``--``) selects :func:`compact_all_cli` with the remaining
+    arguments, exactly as the former ``compact-all`` spelling received them. A sweep-only
+    flag without ``--all`` is a usage error (exit 2) rather than a silently ignored option.
+    Anything else is the one-ticket arm, :func:`compact_cli`, unchanged.
+    """
+    end = argv.index("--") if "--" in argv else len(argv)
+    head = argv[:end]
+    if "--all" in head:
+        return compact_all_cli([a for a in head if a != "--all"] + argv[end:], repo_root=repo_root)
+    sweep_only = next((a for a in head if a.split("=", 1)[0] in _SWEEP_ONLY_FLAGS), None)
+    if sweep_only is not None:
+        flag = sweep_only.split("=", 1)[0]
+        sys.stderr.write(f"Error: {flag} applies only to the sweep: rebar store compact --all\n")
+        return 2
+    return compact_cli(argv, repo_root=repo_root)

@@ -61,13 +61,13 @@ def _render_text(report: dict[str, object]) -> str:
 
 
 def tracker_footprint_cli(argv: list[str], *, repo_root: str | None = None) -> int:
-    """Run ``rebar tracker-footprint`` without initializing or changing a store."""
+    """Run ``rebar store footprint`` without initializing or changing a store."""
 
     from rebar._cli._parser import ParseError, render_parse_error
     from rebar._cli._parsers.advanced.tracker_footprint import build
 
     try:
-        args = build(prog="rebar tracker-footprint").parse_args(argv)
+        args = build(prog="rebar store footprint").parse_args(argv)
     except ParseError as exc:
         return render_parse_error(exc)
 

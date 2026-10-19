@@ -147,7 +147,7 @@ def _revert_partial_fold(tracker: str, record: dict) -> None:
     else:
         logger.warning(
             "compact recovery: revert incomplete — snapshot %s retained; run "
-            "`rebar fsck --repair-snapshots`",
+            "`rebar store fsck --repair-snapshots`",
             snapshot,
         )
     ticket_id = record.get("ticket_id", "")

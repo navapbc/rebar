@@ -13,7 +13,7 @@ from .export_ndjson import export_tickets
 from .import_ndjson import import_tickets
 
 _EXPORT_USAGE = (
-    "Usage: rebar export [-o FILE] [--status S[,S]] [--type T[,T]] [--parent ID] "
+    "Usage: rebar store export [-o FILE] [--status S[,S]] [--type T[,T]] [--parent ID] "
     "[--strip-external|--no-jira] [--include-session-logs] [--exclude-archived] "
     "[--include-deleted]"
 )
@@ -60,7 +60,7 @@ def export_cli(argv: list[str], *, repo_root: str | Path | None = None) -> int:
             return 2
 
     try:
-        ns = build_export(prog="rebar export").parse_args(norm)
+        ns = build_export(prog="rebar store export").parse_args(norm)
     except ParseError as exc:
         return render_parse_error(exc)
 
@@ -83,7 +83,7 @@ def export_cli(argv: list[str], *, repo_root: str | Path | None = None) -> int:
     return 0
 
 
-_IMPORT_USAGE = "Usage: rebar import [FILE] [--dry-run]   (reads stdin if FILE omitted)"
+_IMPORT_USAGE = "Usage: rebar store import [FILE] [--dry-run]   (reads stdin if FILE omitted)"
 
 
 def import_cli(argv: list[str], *, repo_root: str | Path | None = None) -> int:
@@ -114,7 +114,7 @@ def import_cli(argv: list[str], *, repo_root: str | Path | None = None) -> int:
             return 2
 
     try:
-        ns = build_import(prog="rebar import").parse_args(
+        ns = build_import(prog="rebar store import").parse_args(
             [*(["--dry-run"] if dry_run else []), *(["--", in_file] if in_file is not None else [])]
         )
     except ParseError as exc:

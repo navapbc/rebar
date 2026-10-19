@@ -261,7 +261,7 @@ restated here:
 - **Mutating the tracker** — the rule is **no AD-HOC raw git in the tickets tracker** (route
   writes through rebar; `git stash` there is banned outright because the stash stack is
   repo-global and shared by every worktree). When rebar itself cannot write the store, use the
-  supported door `rebar tracker-maintenance` (backup ref before the first write, refusal on
+  supported door `rebar store maintenance` (backup ref before the first write, refusal on
   unpushed ticket commits, durable audit) and its human-only `--force=<reason>` break-glass →
   `docs/concurrency.md` §"Mutating the tracker: no AD-HOC raw git". Also do not use
   `git stash` anywhere in this repository while linked worktrees share one repo-global

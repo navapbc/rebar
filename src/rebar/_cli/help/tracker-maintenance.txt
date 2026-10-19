@@ -1,8 +1,0 @@
-Usage: rebar tracker-maintenance [--status] [--clean] [--force FORCE]
-
-Supported door for raw git in the tracker; backup ref + refusal + audit.
-
-options:
-  --status       report tracker maintenance status
-  --clean        clean the tracker worktree
-  --force FORCE  break-glass override (--force=<reason>)

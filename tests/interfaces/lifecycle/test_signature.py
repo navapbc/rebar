@@ -147,7 +147,7 @@ def test_foreign_environment_certifies_when_the_signature_is_valid(
 def test_signature_survives_compaction(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo)
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
-    cp = _cli("compact", tid, "--threshold=0", cwd=rebar_repo, REBAR_SYNC_PULL="off")
+    cp = _cli("store", "compact", tid, "--threshold=0", cwd=rebar_repo, REBAR_SYNC_PULL="off")
     assert cp.returncode == 0, cp.stderr
     snaps = list((rebar_repo / ".tickets-tracker" / tid).glob("*-SNAPSHOT.json"))
     assert snaps, "expected a SNAPSHOT after compaction"
@@ -163,11 +163,17 @@ def test_sign_compact_sign_compact_latest_wins(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo)
     rebar.sign_manifest(tid, ["v1: first"], repo_root=str(rebar_repo))
     assert (
-        _cli("compact", tid, "--threshold=0", cwd=rebar_repo, REBAR_SYNC_PULL="off").returncode == 0
+        _cli(
+            "store", "compact", tid, "--threshold=0", cwd=rebar_repo, REBAR_SYNC_PULL="off"
+        ).returncode
+        == 0
     )
     rebar.sign_manifest(tid, ["v2: second", "v2: more"], repo_root=str(rebar_repo))
     assert (
-        _cli("compact", tid, "--threshold=0", cwd=rebar_repo, REBAR_SYNC_PULL="off").returncode == 0
+        _cli(
+            "store", "compact", tid, "--threshold=0", cwd=rebar_repo, REBAR_SYNC_PULL="off"
+        ).returncode
+        == 0
     )
 
     out = rebar.verify_signature(tid, repo_root=str(rebar_repo))

@@ -172,7 +172,7 @@
     "preconditions_summary": { "type": "object" },
     "source_id": {
       "type": ["string", "null"],
-      "description": "Provenance (P1.2 import): the ticket's original id in the source store. Present only on tickets created by `rebar import`."
+      "description": "Provenance (P1.2 import): the ticket's original id in the source store. Present only on tickets created by `rebar store import`."
     },
     "source_created_at": {
       "type": ["integer", "string", "null"],

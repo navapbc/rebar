@@ -26,6 +26,7 @@ __all__ = [
     "INIT_POLICIES",
     "KNOWN_CAPABILITIES",
     "ROUTES",
+    "STORE_ROUTES",
     "Finding",
     "Route",
     "derive_policy_sets",
@@ -34,7 +35,7 @@ __all__ = [
 ]
 
 # Group buckets that derive a named policy frozenset (see derive_policy_sets).
-# Groups NOT listed here (e.g. "intercept", "bootstrap", "repair") are census
+# Groups NOT listed here (e.g. "intercept", "bootstrap", "store") are census
 # buckets that carry no policy-set membership of their own.
 _GROUP_TO_SET: dict[str, str] = {
     "reads_init_only": "_READS_INIT_ONLY",
@@ -43,9 +44,7 @@ _GROUP_TO_SET: dict[str, str] = {
     "gates": "_GATES",
     "signing": "_SIGNING",
     "lifecycle": "_LIFECYCLE",
-    "compact": "_COMPACT",
     "bridge": "_BRIDGE",
-    "io": "_IO",
     "writes_full": "_WRITES_FULL",
 }
 
@@ -92,7 +91,6 @@ _CORE_FACTORIES: dict[str, str] = {
     "sign": f"{_CORE_P}.signing:build_sign",
     "verify-signature": f"{_CORE_P}.signing:build_verify_signature",
     "compact": f"{_CORE_P}.compact:build_compact",
-    "compact-all": f"{_CORE_P}.compact:build_compact_all",
     "reclaim-collapse": f"{_CORE_P}.reclaim:build_reclaim_collapse",
     "export": f"{_CORE_P}.io:build_export",
     "import": f"{_CORE_P}.io:build_import",
@@ -116,7 +114,7 @@ _CORE_FACTORIES: dict[str, str] = {
     "delete": f"{_CORE_P}.delete:build",
     "fsck": f"{_CORE_P}.repair:build_fsck",
     "fsck-recover": f"{_CORE_P}.repair:build_fsck_recover",
-    "tracker-maintenance": f"{_CORE_P}.repair:build_tracker_maintenance",
+    "maintenance": f"{_CORE_P}.repair:build_tracker_maintenance",
     "doctor": f"{_CORE_P}.repair:build_doctor",
     "grounding-info": f"{_CORE_P}.grounding:build",
 }
@@ -208,44 +206,12 @@ def _simple_read_groups() -> tuple[Route, ...]:
             init="full",
         ),
         Route(
-            "compact",
-            group="compact",
-            parser_factory=_core_factory("compact"),
-            handler="rebar._commands.compact:compact_cli",
-            adapter="argv",
-            init="full",
-        ),
-        Route(
-            "compact-all",
-            group="compact",
-            parser_factory=_core_factory("compact-all"),
-            handler="rebar._commands.compact:compact_all_cli",
-            adapter="argv",
-            init="full",
-        ),
-        Route(
             "reclaim-collapse",
             group="static_read",
             no_auto_mount=True,
             parser_factory=_core_factory("reclaim-collapse"),
             handler="rebar._commands.reclaim_collapse:cli",
             adapter="argv",
-        ),
-        Route(
-            "export",
-            group="io",
-            parser_factory=_core_factory("export"),
-            handler="rebar._io._cli:export_cli",
-            adapter="argv",
-            init="init_only",
-        ),
-        Route(
-            "import",
-            group="io",
-            parser_factory=_core_factory("import"),
-            handler="rebar._io._cli:import_cli",
-            adapter="argv",
-            init="full",
         ),
     )
 
@@ -392,18 +358,6 @@ def _intercepts() -> tuple[Route, ...]:
     )
     routes.append(
         Route(
-            "tracker-footprint",
-            group="static_read",
-            intercept=True,
-            no_auto_mount=True,
-            parser_factory=f"{_P}.tracker_footprint:build",
-            handler="rebar._commands.tracker_footprint:tracker_footprint_cli",
-            adapter="argv",
-            init="none",
-        )
-    )
-    routes.append(
-        Route(
             "audit",
             group="static_read",
             intercept=True,
@@ -455,36 +409,12 @@ def _bridge_and_arms() -> tuple[Route, ...]:
             init="full",
         ),
         Route(
-            "fsck",
-            group="repair",
-            parser_factory=_core_factory("fsck"),
-            handler="rebar._commands.fsck:fsck_cli",
+            "store",
+            group="store",
+            parser_factory="rebar._cli._parsers.advanced.store:build",
+            handler="rebar._cli._store_commands:store_cli",
             adapter="argv",
-            init="full",
-        ),
-        Route(
-            "fsck-recover",
-            group="repair",
-            parser_factory=_core_factory("fsck-recover"),
-            handler="rebar._commands.fsck_recover:fsck_recover_cli",
-            adapter="argv",
-            init="fsck_recover",
-        ),
-        Route(
-            "tracker-maintenance",
-            group="repair",
-            parser_factory=_core_factory("tracker-maintenance"),
-            handler="rebar._commands.tracker_maintenance:tracker_maintenance_cli",
-            adapter="argv",
-            init="full",
-        ),
-        Route(
-            "doctor",
-            group="repair",
-            parser_factory=_core_factory("doctor"),
-            handler="rebar._commands.doctor:doctor_cli",
-            adapter="argv",
-            init="doctor",
+            init="none",
         ),
         Route(
             "grounding-info",
@@ -509,6 +439,89 @@ def _build_routes() -> tuple[Route, ...]:
 
 
 ROUTES: tuple[Route, ...] = _build_routes()
+
+
+def _store_routes() -> tuple[Route, ...]:
+    """The ``rebar store <sub>`` members, dispatched by ``_store_commands.store_cli``.
+
+    Each member keeps the handler, adapter, init policy, and mount behaviour it had as a
+    top-level command, so the executor applies that member's own policy. ``compact`` folds
+    the former ``compact``/``compact-all`` pair behind one handler that selects on ``--all``;
+    its factory is the help-facing union of both grammars.
+    """
+    return (
+        Route(
+            "fsck",
+            group="store",
+            parser_factory=_core_factory("fsck"),
+            handler="rebar._commands.fsck:fsck_cli",
+            adapter="argv",
+            init="full",
+        ),
+        Route(
+            "fsck-recover",
+            group="store",
+            parser_factory=_core_factory("fsck-recover"),
+            handler="rebar._commands.fsck_recover:fsck_recover_cli",
+            adapter="argv",
+            init="fsck_recover",
+        ),
+        Route(
+            "doctor",
+            group="store",
+            parser_factory=_core_factory("doctor"),
+            handler="rebar._commands.doctor:doctor_cli",
+            adapter="argv",
+            init="doctor",
+        ),
+        Route(
+            "maintenance",
+            group="store",
+            parser_factory=_core_factory("maintenance"),
+            handler="rebar._commands.tracker_maintenance:tracker_maintenance_cli",
+            adapter="argv",
+            init="full",
+        ),
+        Route(
+            "footprint",
+            group="store",
+            no_auto_mount=True,
+            parser_factory="rebar._cli._parsers.advanced.tracker_footprint:build",
+            handler="rebar._commands.tracker_footprint:tracker_footprint_cli",
+            adapter="argv",
+            init="none",
+        ),
+        Route(
+            "export",
+            group="store",
+            parser_factory=_core_factory("export"),
+            handler="rebar._io._cli:export_cli",
+            adapter="argv",
+            init="init_only",
+        ),
+        Route(
+            "import",
+            group="store",
+            parser_factory=_core_factory("import"),
+            handler="rebar._io._cli:import_cli",
+            adapter="argv",
+            init="full",
+        ),
+        Route(
+            "compact",
+            group="store",
+            parser_factory=_core_factory("compact"),
+            handler="rebar._commands.compact:compact_dispatch_cli",
+            adapter="argv",
+            init="full",
+        ),
+    )
+
+
+#: The ``rebar store`` family's member table. It is separate from :data:`ROUTES`, so a
+#: member name is not a top-level spelling; :func:`route_for` resolves it with
+#: ``routes=STORE_ROUTES``.
+STORE_ROUTES: tuple[Route, ...] = _store_routes()
 
 
 def _index(routes: tuple[Route, ...]) -> tuple[dict[str, Route], dict[str, Route]]:

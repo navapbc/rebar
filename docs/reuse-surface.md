@@ -60,7 +60,7 @@ compact(ticket_id: str | None = None, *, repo_root: str | os.PathLike[str] | Non
 
 All five functions pass `repo_root` through standard repository and tracker resolution. An explicit value selects that repository and its configured tracker. Omitting it uses normal repository discovery. Successful calls return `None`. Expected ticket, validation, state, compaction, and store failures raise `RebarError`. The exception carries the command return code and stderr when the command supplied them. A missing optional delivery helper can raise `OptionalDependencyError` after the local commit.
 
-Event writes use the locked tracker write path. They commit locally and then follow `sync.push` when publishing to `sync.remote`. The `always` mode attempts publication before return, `async` starts detached publication, and `off` leaves commits local. An ordinary delivery failure preserves the local commit and is visible through `rebar.push_status()` or `rebar fsck`.
+Event writes use the locked tracker write path. They commit locally and then follow `sync.push` when publishing to `sync.remote`. The `always` mode attempts publication before return, `async` starts detached publication, and `off` leaves commits local. An ordinary delivery failure preserves the local commit and is visible through `rebar.push_status()` or `rebar store fsck`.
 
 ### `CrossSessionWarning`
 

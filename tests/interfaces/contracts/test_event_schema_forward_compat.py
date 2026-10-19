@@ -132,7 +132,7 @@ def test_unknown_event_file_survives_compaction(rebar_repo: Path) -> None:
 
     # Force compaction (threshold 0 => compact whatever is present). REBAR_SYNC_PULL
     # =off so the no-origin fixture doesn't attempt the in-process pull before compact.
-    cp = _cli("compact", tid, "--threshold=0", cwd=str(rebar_repo), REBAR_SYNC_PULL="off")
+    cp = _cli("store", "compact", tid, "--threshold=0", cwd=str(rebar_repo), REBAR_SYNC_PULL="off")
     assert cp.returncode == 0, f"compact failed: {cp.stderr}"
 
     # A SNAPSHOT must have been written ...
@@ -243,7 +243,7 @@ def test_retired_overlap_event_types_still_parse(rebar_repo: Path) -> None:
     # The retired events contribute nothing to compiled state (no computed overlap field).
     assert set(state) == baseline_keys
 
-    cp = _cli("compact", tid, "--threshold=0", cwd=str(rebar_repo), REBAR_SYNC_PULL="off")
+    cp = _cli("store", "compact", tid, "--threshold=0", cwd=str(rebar_repo), REBAR_SYNC_PULL="off")
     assert cp.returncode == 0, f"compact failed: {cp.stderr}"
     for path in paths:
         assert path.exists(), f"compaction deleted the retired-type event file {path.name}"

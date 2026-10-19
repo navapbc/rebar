@@ -94,7 +94,7 @@ def in_snapshot_entry(path: str | os.PathLike[str]) -> bool:
 def peek_store_root() -> Path:
     """Derive the store root without creating it or changing permissions.
 
-    Read-only diagnostics such as ``rebar doctor`` can therefore name absent-store locks."""
+    Read-only diagnostics such as ``rebar store doctor`` can therefore name absent-store locks."""
     from rebar import config
 
     base = config.resolve_gate_tmpdir() or tempfile.gettempdir()

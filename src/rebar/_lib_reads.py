@@ -363,7 +363,8 @@ def fsck(
             _rc = _fr.fsck_recover_cli([], repo_root=repo_root)
         if _rc != 0:
             raise RebarError(
-                f"rebar fsck failed (exit {_rc}): {(_err.getvalue() or _out.getvalue()).strip()}",
+                f"rebar store fsck failed (exit {_rc}): "
+                f"{(_err.getvalue() or _out.getvalue()).strip()}",
                 returncode=_rc,
                 stderr=_err.getvalue(),
             )
@@ -383,7 +384,7 @@ def fsck(
         rc = _fsck_mod.fsck_cli([], repo_root=repo_root, no_mutate=report_only)
     if rc != 0:
         raise RebarError(
-            f"rebar fsck failed (exit {rc}): {(err.getvalue() or out.getvalue()).strip()}",
+            f"rebar store fsck failed (exit {rc}): {(err.getvalue() or out.getvalue()).strip()}",
             returncode=rc,
             stderr=err.getvalue(),
         )
@@ -391,7 +392,7 @@ def fsck(
 
 
 def _fsck_scan_report(*, report_only: bool, repo_root) -> dict:
-    """The structured SCAN report — ``rebar fsck --output json`` in process.
+    """The structured SCAN report — ``rebar store fsck --output json`` in process.
 
     Asks the CLI for its own JSON so the shape comes from the CLI's transform and
     text/JSON cannot drift. Completed = exit 0 (clean) or 1 (issues found).
@@ -407,7 +408,7 @@ def _fsck_scan_report(*, report_only: bool, repo_root) -> dict:
         rc = _fsck_mod.fsck_cli(["--output=json"], repo_root=repo_root, no_mutate=report_only)
     if rc not in (0, 1):
         raise RebarError(
-            f"rebar fsck failed (exit {rc}): {(err.getvalue() or out.getvalue()).strip()}",
+            f"rebar store fsck failed (exit {rc}): {(err.getvalue() or out.getvalue()).strip()}",
             returncode=rc,
             stderr=err.getvalue(),
         )
@@ -419,7 +420,7 @@ def _fsck_scan_report(*, report_only: bool, repo_root) -> dict:
         # Unparseable stdout means the run did not produce a report at all — an
         # execution failure, not a clean/dirty diagnosis. Never fake an empty report.
         raise RebarError(
-            f"rebar fsck produced no parseable JSON report (exit {rc}): {exc}",
+            f"rebar store fsck produced no parseable JSON report (exit {rc}): {exc}",
             returncode=rc,
             stderr=err.getvalue(),
         ) from exc
@@ -456,7 +457,7 @@ def _fsck_scan_report(*, report_only: bool, repo_root) -> dict:
         # back to the captured streams rather than KeyError on the error path.
         reason = (ni.get("detail") if ni else None) or (err.getvalue() or out.getvalue()).strip()
         raise RebarError(
-            "rebar fsck could not scan the store (an uninitialized or unreadable "
+            "rebar store fsck could not scan the store (an uninitialized or unreadable "
             "tracker, not a clean store)" + (f": {reason}" if reason else ""),
             returncode=rc,
             stderr=err.getvalue(),
@@ -496,7 +497,8 @@ def _fsck_recover_report(*, repo_root) -> dict:
         rc = _fr.fsck_recover_cli([], repo_root=repo_root)
     if rc not in (0, 1):
         raise RebarError(
-            f"rebar fsck-recover failed (exit {rc}): {(err.getvalue() or out.getvalue()).strip()}",
+            f"rebar store fsck-recover failed (exit {rc}): "
+            f"{(err.getvalue() or out.getvalue()).strip()}",
             returncode=rc,
             stderr=err.getvalue(),
         )

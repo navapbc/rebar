@@ -1,6 +1,6 @@
 """WS2: the write-path pending-hint (``ensures.maybe_emit_pending_hint``).
 
-A store that is behind the ensure registry should nudge ``rebar fsck --repair`` on
+A store that is behind the ensure registry should nudge ``rebar store fsck --repair`` on
 write activity — cheaply (≤1 marker read/process), rate-limited via ``.ensure-hinted``,
 suppressible via ``[ensure]`` config, and NEVER breaking a write. These tests assert
 on captured log output and on the read-dedup + fail-silent contract.
@@ -66,7 +66,7 @@ def test_pending_store_emits_one_warning_then_rate_limited(
     warnings = [r for r in caplog.records if "pending" in r.getMessage()]
     assert len(warnings) == 1
     msg = warnings[0].getMessage()
-    assert "rebar fsck --repair" in msg
+    assert "rebar store fsck --repair" in msg
     # names pending units (all five on a freshly-cleared marker)
     assert "gc-config" in msg and "gitignore" in msg
     assert (tracker / ensures.HINTED_MARKER).is_file()

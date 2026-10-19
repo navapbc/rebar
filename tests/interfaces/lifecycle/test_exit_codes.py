@@ -70,7 +70,7 @@ def test_success_paths_exit_0(rebar_repo: Path) -> None:
     assert _rc("list", cwd=r) == 0
     assert _rc("ready", cwd=r) == 0
     assert _rc("deps", tid, cwd=r) == 0
-    assert _rc("fsck", cwd=r) == 0
+    assert _rc("store", "fsck", cwd=r) == 0
 
 
 # ── 1: runtime errors ─────────────────────────────────────────────────────────

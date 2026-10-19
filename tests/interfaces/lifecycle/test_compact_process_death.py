@@ -102,7 +102,16 @@ def test_sigkill_mid_retirement_recovers_from_fresh_process(
     env["REBAR_COMPACTION_HORIZON_NS"] = "0"
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "rebar.cli", "compact", tid, "--threshold=0", "--skip-sync"],
+        [
+            sys.executable,
+            "-m",
+            "rebar.cli",
+            "store",
+            "compact",
+            tid,
+            "--threshold=0",
+            "--skip-sync",
+        ],
         cwd=str(rebar_repo),
         env=env,
         stdout=subprocess.DEVNULL,
@@ -158,10 +167,10 @@ def test_sigkill_mid_retirement_recovers_from_fresh_process(
 
 
 def _fsck_subprocess(repo: Path, *flags: str) -> tuple[int, str]:
-    """Run ``rebar fsck [flags]`` in a brand-new CLI process so we exercise real
+    """Run ``rebar store fsck [flags]`` in a brand-new CLI process so we exercise real
     cross-process behavior (including write-lock reclamation for ``--repair-*``)."""
     out = subprocess.run(
-        [sys.executable, "-m", "rebar.cli", "fsck", *flags],
+        [sys.executable, "-m", "rebar.cli", "store", "fsck", *flags],
         cwd=str(repo),
         env=subprocess_env({"REBAR_COMPACTION_HORIZON_NS": "0"}),
         capture_output=True,

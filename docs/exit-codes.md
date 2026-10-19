@@ -26,7 +26,7 @@ to an emitted code are contract changes and must be called out in release notes.
 | `2`  | usage error | An unrecognized CLI `--option` on a **structured read command** (`show`, `list`, `deps`, `ready`, `search`), which reject unknown options rather than silently ignoring them. Also the not-found/usage path of `check --clarity` (see the gate note below). The plan-review gate's **INDETERMINATE** verdict also exits `2` — either from a non-retryable LLM degrade **or** from the deliberate **not-claimable fast-fail** (`review-plan` refusing a ticket that can't be claimed yet — a `ticket-not-claimable` finding with `coverage.llm_ran=false`; **no LLM ran**). `review-plan --retry` also exits `2` when it **refuses an ineligible resume** (the latest result is a PASS/BLOCK, a non-retryable indeterminate, or a missing/legacy/corrupt/stale/digest-mismatched journal) — before any model call, no sidecar, the full-review remedy on stderr — and when `--retry` is combined with `--force`/`--status`/`--check` (a flag conflict). Predates and is unchanged by exit 11. |
 | `10` | concurrency mismatch | Optimistic-concurrency rejection: a state-dependent op (`transition`/`claim`/`reopen`) re-read the ticket under lock and the actual status no longer matched the expected one. **Normal under parallelism** — re-read and pick another, never force. Emitted by `_commands/txn.py` (`ConcurrencyMismatch`). |
 | `11` | retryable gate fault | An LLM gate could not produce a usable result and the caller may retry without changing the reviewed work. `review-plan`, `review-code`, `verify-completion`, and the `close` completion gate emit `11` for provider degradation classified as retryable. `verify-completion` and the `close` gate also emit `11` when bounded completion recovery returns `verdict_obtainable=false`. An ordinary completion FAIL remains `1`. A nonretryable raised completion error also remains `1`. A nonretryable plan-review or code-review INDETERMINATE remains `2`. See "Recorded decisions". |
-| `3`  | stale-rebase sentinel / poor health | `fsck-recover --detect-only` found a paused rebase or merge; `validate` scored repo health 2/5; or a **legacy reconciler route** found another pass in flight. Canonical bridge routes translate that last benign state to 0. |
+| `3`  | stale-rebase sentinel / poor health | `store fsck-recover --detect-only` found a paused rebase or merge; `validate` scored repo health 2/5; or a **legacy reconciler route** found another pass in flight. Canonical bridge routes translate that last benign state to 0. |
 | `4`  | critical health / legacy phase gate | `validate` scored repo health 1/5, or a **legacy reconciler route** was stopped by its historical phase gate. Canonical bridge routes translate the phase-gate state to 0. |
 | `12` | review attestation stale or absent | `review-plan --status` found the ticket's plan-review attestation is not current — the plan changed since the last review, the attestation was never written, or the verified-at SHA is no longer reachable. Exit 0 means current; 12 means a fresh `rebar review-plan` is needed before `claim` will pass the gate (`src/rebar/_cli/_llm_commands.py` — `return 0 if status["ok"] else 12`). |
 | `75` | rebase / merge guard / legacy reschedule | A ticket-store write was refused during a paused rebase or merge (`RebaseGuard`), or a **legacy reconciler route** requested another pass. Canonical bridge routes translate the benign reconciler reschedule to 0; the store guard remains 75. |
@@ -65,7 +65,7 @@ for operational state.
   `rebar deps <id> --bogus` all exit `2`. (`show`/`list` historically returned
   `1` here; aligned to `2` in the 2026-06-09 window — see "Recorded decisions"
   below.) The five structured reads are the **contracted, pinned** set for option-validation
-  — `metrics`, `doctor`, `fsck`, and `composer`/`create` also exit `2` on an unknown option
+  — `metrics`, `store doctor`, `store fsck`, and `composer`/`create` also exit `2` on an unknown option
   today but are not yet pinned by the test suite. See "Unknown-option handling" for the full
   scope note.
 - **Missing required positional → `1`.** `rebar show` (no id), `rebar create`
@@ -98,7 +98,7 @@ validate their options and exit `2` on an unrecognized `--option`: `show`,
 `test_exit_codes.py::test_unknown_option_exits_2`.
 
 Several additional commands also exit `2` on an unknown option today —
-notably `metrics`, `doctor`, `fsck`, and the composer family (`create`,
+notably `metrics`, `store doctor`, `store fsck`, and the composer family (`create`,
 `edit`) — but they are **not yet pinned** by the test suite and therefore
 represent a larger validated (but uncontracted) set.
 
@@ -114,6 +114,13 @@ The eleven ticket verbs merged into the golden-path verbs are rejected the same 
 `get-file-impact`/`get-verify-commands` → `show --field=file_impact`/`--field=verify_commands`;
 `list-descendants` → `deps --descendants`; `session-logs` →
 `list --type=session_log --sort=-created --limit=5`.
+
+The nine storage-maintenance spellings moved under `rebar store` are rejected the same way:
+`fsck`, `fsck-recover`, `doctor`, `export`, and `import` → `store <same name>`;
+`tracker-maintenance` → `store maintenance`; `tracker-footprint` → `store footprint`;
+`compact` → `store compact <id>`; `compact-all` → `store compact --all`. A sweep-only option
+(`--dry-run`, `--limit`, `--include-archived`) given to `store compact` without `--all` exits
+`2`. The full removed-to-replacement registry is `_help_route._REMOVED_SPELLINGS`.
 
 Other subcommands do **not** uniformly validate options: most mutation commands
 either silently ignore an unknown `--option` (e.g. `claim` → exit `0`) or fail incidentally (e.g. `archive`, `unlink` →
@@ -140,17 +147,18 @@ guarantee `2`).
 | `claim` | 0 | 1 | 10 | 10 when the ticket is not open (already claimed) |
 | `check --clarity` | 0 | **2** | — | **gate**: 0=pass, 1=fail-verdict, 2=not-found/usage (was `clarity-check`) |
 | `comment` | 0 | 1 | — | |
-| `compact` | 0 | 1 | — | |
-| `compact-all` | 0 | — | — | no ticket id |
+| `store` | — | — | — | no ticket id; storage-maintenance family; no subcommand or an unknown one → 2 (usage / invalid choice) |
+| `store compact` | 0 | 1 | — | |
+| `store compact --all` | 0 | — | — | no ticket id |
 | `create` | 0 | — | — | missing `<type>`/`<title>` → 1 |
 | `delete` | 0 | 1 | — | requires `--user-approved`; otherwise 1 |
 | `deps` | 0 | 1 | — | structured read (unknown option → 2) |
 | `edit` | 0 | 1 | — | |
 | `resolve --display` | 0 | 1 | — | resolves first (unknown id → 1), then renders in the display mode (was `exists`/`format`) |
-| `fsck` | 0 | — | — | no ticket id |
-| `fsck-recover` | 0 | — | — | no ticket id; `--detect-only` exits **3** if stale rebase found; bad args → 2 |
-| `tracker-maintenance` | 0 | — | — | no ticket id; **1** = refused (unpushed ticket commits, or `origin/tickets` missing so they cannot be ruled out) without `--force=<reason>`; bad args / no tracker → 2 |
-| `tracker-footprint` | 0 | — | — | no ticket id; opt-in descriptive read; **1** = configured tracker/source cannot be measured; bad args → 2 |
+| `store fsck` | 0 | — | — | no ticket id |
+| `store fsck-recover` | 0 | — | — | no ticket id; `--detect-only` exits **3** if stale rebase found; bad args → 2 |
+| `store maintenance` | 0 | — | — | no ticket id; **1** = refused (unpushed ticket commits, or `origin/tickets` missing so they cannot be ruled out) without `--force=<reason>`; bad args / no tracker → 2 |
+| `store footprint` | 0 | — | — | no ticket id; opt-in descriptive read; **1** = configured tracker/source cannot be measured; bad args → 2 |
 | `show --field` | 0 | 1 | — | one JSON line per id; with `--output llm` → 2 (was `get-file-impact`/`get-verify-commands`) |
 | `init` | 0 | — | — | idempotent |
 | `link` | 0 | 1 | — | missing relation arg → 1 |
@@ -177,13 +185,13 @@ guarantee `2`).
 | `bridge check-access` | 0 | — | — | no ticket id; subprocess passthrough (jira-capability-probe.py); 0 = PROBE_PASS, non-zero = PROBE_FAIL |
 | `config` | 0 | — | — | no ticket id; reads or writes rebar config; error → 1 |
 | `criteria` | 0 | — | — | no ticket id; `criteria eval <id>` runs calibration fixtures live; `criteria eval --changed-since <ref>` prints selected criterion ids and exits 0 (a null/empty/all-zero `before` SHA from a branch's first push selects nothing and exits 0 with a stderr note); an unmappable rubric path is named on stderr and still exits 0; with `--require-live`, selected criteria that cannot run live (no LLM backend/credentials), or a live run where every selected criterion errors, → 1 (otherwise a stderr warning and 0); positional id and `--changed-since` together → 2, including when the `--changed-since` value is empty; empty or missing id with no `--changed-since` → 2; unknown criterion → 1 |
-| `doctor` | 0 | — | — | no ticket id; 0 = no outstanding findings (or all repaired); 1 = findings remain; bad args → 2 |
+| `store doctor` | 0 | — | — | no ticket id; 0 = no outstanding findings (or all repaired); 1 = findings remain; bad args → 2 |
 | `explain` | 0 | — | — | no ticket id; `explain <criterion-id\|guide>`; unknown id or guide name → 1 |
-| `export` | 0 | — | — | no ticket id; NDJSON ticket export; bad args → 2 |
+| `store export` | 0 | — | — | no ticket id; NDJSON ticket export; bad args → 2 |
 | `grounding-info` | 0 | — | — | no ticket id; static code-grounding contract info; unexpected args → 1; bad `--output` → 2 |
 | `idea` | 0 | 1 | — | promotes an `idea` ticket to `open`; bad args → 2 |
 | `identity` | 0 | — | — | no ticket id; shows or configures operator identity; no args → 1; error → 1 |
-| `import` | 0 | — | — | no ticket id; NDJSON ticket import; bad args → 2 |
+| `store import` | 0 | — | — | no ticket id; NDJSON ticket import; bad args → 2 |
 | `bridge setup` | 0 | — | — | no ticket id; interactive Jira config wizard; error or user abort → 1 |
 | `llm` | 0 | — | — | no ticket id; `llm setup` FakeRunner dry-run; 0 = dry-run OK, 1 = dry-run failed or write error; no subcommand → 1 |
 | `metrics` | 0 | — | — | no ticket id; repo-wide metrics report; bad args → 2 |

@@ -216,7 +216,7 @@ def test_reads_allowed_under_incompatible_record(rebar_repo: Path) -> None:
         cp = _cli(*args, cwd=str(rebar_repo))
         assert cp.returncode == 0, f"read command {args} was blocked: {cp.stderr}"
     # fsck diagnostic stays available (exit 0) AND surfaces a structured compat_error.
-    cp = _cli("fsck", "--output", "json", cwd=str(rebar_repo))
+    cp = _cli("store", "fsck", "--output", "json", cwd=str(rebar_repo))
     assert cp.returncode == 0, f"fsck diagnostic was blocked: {cp.stderr}"
     report = json.loads(cp.stdout)
     assert report.get("compat_error", {}).get("kind") == "unknown_format_version", (
@@ -229,7 +229,7 @@ def test_fsck_repair_blocked_under_incompatible_record(rebar_repo: Path) -> None
     _seed(rebar_repo)
     _write_record(rebar_repo, {"format_version": 99, "required_capabilities": []})
     # fsck --repair takes the write lock -> gated -> non-zero exit.
-    cp = _cli("fsck", "--repair", cwd=str(rebar_repo))
+    cp = _cli("store", "fsck", "--repair", cwd=str(rebar_repo))
     assert cp.returncode != 0, "fsck --repair (write-intent) must be blocked"
 
 
@@ -238,6 +238,7 @@ def test_fsck_recover_gated_under_incompatible_record(rebar_repo: Path) -> None:
     _seed(rebar_repo)
     _write_record(rebar_repo, {"format_version": 99, "required_capabilities": []})
     cp = _cli(
+        "store",
         "fsck-recover",
         "--tracker-dir",
         str(_tracker(rebar_repo)),
@@ -252,6 +253,7 @@ def test_fsck_recover_detect_only_allowed_under_incompatible(rebar_repo: Path) -
     _seed(rebar_repo)
     _write_record(rebar_repo, {"format_version": 99, "required_capabilities": []})
     cp = _cli(
+        "store",
         "fsck-recover",
         "--tracker-dir",
         str(_tracker(rebar_repo)),
@@ -453,7 +455,7 @@ def test_rollback_pre_v1_binary_ignores_record(rebar_repo: Path, monkeypatch) ->
 
     # Reads stay operable (real subprocess gate is a no-op on a compatible record too).
     assert _cli("list", cwd=str(rebar_repo)).returncode == 0
-    assert _cli("fsck", cwd=str(rebar_repo)).returncode == 0
+    assert _cli("store", "fsck", cwd=str(rebar_repo)).returncode == 0
     # A normal in-process write (gate patched out) succeeds.
     tid = _seed(rebar_repo)
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "open"

@@ -396,7 +396,7 @@ def test_the_completion_close_gate_refuses_before_the_billable_verifier(
     assert freshness.STALE_VERDICT in excinfo.value.message, (
         f"the refusal does not name the condition: {excinfo.value.message}"
     )
-    assert "rebar fsck" in excinfo.value.message, "the refusal is not actionable"
+    assert "rebar store fsck" in excinfo.value.message, "the refusal is not actionable"
 
 
 # ── operator decision B4: the ordinary write path still SIGNALS, never raises ───────────

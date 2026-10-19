@@ -52,7 +52,7 @@ reverse-rename also fails**, the SNAPSHOT is **intentionally RETAINED** (it carr
 the folded effect of the source now stuck as `*.retired`; removing it would lose that
 effect from both an active event *and* the snapshot — silent data loss). The retained
 SNAPSHOT plus a reversed-to-active source is a `SNAPSHOT_INCONSISTENT` state that
-`rebar fsck --repair-snapshots` rebuilds from the full log; compaction emits a
+`rebar store fsck --repair-snapshots` rebuilds from the full log; compaction emits a
 `rollback incomplete … run fsck` diagnostic pointing there. **Reads are already
 correct in this mixed window** — the reversed-to-active source keeps its original
 (pre-snapshot) filename, sorts before the SNAPSHOT, and is positionally skipped during
@@ -440,7 +440,7 @@ Today:
 
 - **A close never compacts.** It ends after the STATUS write, signing, the force-close audit
   comment and scratch cleanup. Its lock holds are the short per-append acquisitions.
-- **`rebar compact <id>` still folds on demand**, unchanged.
+- **`rebar store compact <id>` still folds on demand**, unchanged.
 - **A close TRIGGERS compaction without performing it** — the floor for stores with no CI and
   no cron. Compaction has to work in environments without either; that is why the original
   design was linked to an operation, and a schedule alone would leave a library/CLI adopter
@@ -448,7 +448,7 @@ Today:
   store lock and after the best-effort push — two `O(1)` checks run: does the ticket just
   written satisfy the two-arm selection (one directory read, independent of store size), or is
   the last-sweep stamp older than `compact.trigger_interval_s`? If either fires, a **detached
-  worker** runs the same `compact-all` sweep out of band and the session returns immediately.
+  worker** runs the same `rebar store compact --all` sweep out of band and the session returns immediately.
   One worker at a time, arbitrated by a stamped advisory lock that reuses the store lock's v2
   ownership stamp and `lock_owner.stamped_file_is_stale`, so an orphaned lock is reclaimed
   rather than disabling the trigger forever. That lock, the last-sweep stamp and the worker log
@@ -461,8 +461,8 @@ Today:
   This does **not** reintroduce the hold that moved compaction out: the P0 was never "a close
   compacts", it was that an operation agents *wait on* held the store lock for minutes. Here
   the waited-on operation holds nothing and waits for nothing; the worker's lock profile is
-  that of a manual `rebar compact`.
-- **The standing trigger is `rebar compact-all`, run out of band on a schedule.** The
+  that of a manual `rebar store compact`.
+- **The standing trigger is `rebar store compact --all`, run out of band on a schedule.** The
   `Compaction Sweep` workflow (`.github/workflows/compact-sweep.yml`) runs it **every 6
   hours** (`cron: '0 */6 * * *'`, also `workflow_dispatch`-able with `dry_run` / `limit`), on
   a disposable CI runner. The isolation that matters is that the runner is a **separate
@@ -476,14 +476,14 @@ Today:
   clone to maintain** — each run re-derives the store from `origin/tickets`, and a failed push
   leaves only local commits on a workspace that is discarded.
 
-  `compact-all` selects a ticket on **either** of two arms:
+  `rebar store compact --all` selects a ticket on **either** of two arms:
 
   1. **Backfill** — it has no SNAPSHOT yet and has at least one foldable event. Every ticket
      still earns its first SNAPSHOT regardless of size (the historical rule, preserved).
   2. **Recurrence** — its **foldable** event count exceeds `compact.threshold`, whatever its
      snapshot state.
 
-  Arm 2 is what makes the sweep RECUR. Selecting on arm 1 alone made `compact-all` a one-time
+  Arm 2 is what makes the sweep RECUR. Selecting on arm 1 alone made `rebar store compact --all` a one-time
   operation: a ticket folded once and since grown had a SNAPSHOT, so it was never folded
   again. Selecting on arm 2 alone would regress the other way — a ticket with fewer events
   than the threshold would never get a first SNAPSHOT at all. Both arms converge: after a
@@ -514,8 +514,8 @@ ticket sits in one of **three states**:
 Only the **third** state loses the field from the *durable* SNAPSHOT, and compaction is the
 **only** operation that can produce it. Therefore:
 
-- **STOP every `rebar compact` invocation for the entire downgrade window.** Pause scheduled
-  compaction and `compact` / `compact-all` until every clone is back on a binary that
+- **STOP every `rebar store compact` invocation for the entire downgrade window.** Pause scheduled
+  compaction and `compact` / `rebar store compact --all` until every clone is back on a binary that
   understands the field. (Closing a ticket does **not** compact it — see
   "Compaction runs out of band" below — so no close can enter state 3.) With `compact`
   paused, no ticket can enter state 3, so the downgrade is fully lossless (states 1–2 retain
@@ -524,9 +524,9 @@ Only the **third** state loses the field from the *durable* SNAPSHOT, and compac
   window are exactly the ones whose SNAPSHOT `compiled_state` now lacks `creation_channel`
   while a retained `.retired` CREATE still exists — record them from the compaction commit
   range (the `ticket: COMPACT <id>` / `REBUILD SNAPSHOT <id>` commit messages on the `tickets`
-  branch) as you find them. After upgrading, `rebar fsck` surfaces the same set as
+  branch) as you find them. After upgrading, `rebar store fsck` surfaces the same set as
   `SNAPSHOT_STALE_CHANNEL` findings.
-- **Recover with a full-log rebuild.** `rebar fsck --repair-snapshots` rebuilds each flagged
+- **Recover with a full-log rebuild.** `rebar store fsck --repair-snapshots` rebuilds each flagged
   snapshot via `rebuild_snapshot_from_full_log`, which reduces with `include_retired=True` — it
   replays the retained `.retired` CREATE and re-projects `creation_channel` (including the
   legacy-Jira `jira` + `inferred` inference) into a refreshed SNAPSHOT. Reads are correct even
@@ -605,9 +605,9 @@ ordinary delivery failures, and a marker that cannot be written (an unwritable t
 degrades to "no status" rather than failing the write. It is not a recovery queue: the
 events are already durable as local commits. If `fsck` reports `PUSH_PENDING`, a later
 successful write/push publishes them. If `fsck` reports `DIVERGED`, stop writing from
-that store; `fsck-recover` preserves dangling `ticket: ...` commits from stale
+that store; `rebar store fsck-recover` preserves dangling `ticket: ...` commits from stale
 rebase/merge recovery by cherry-picking them, but it does not rewrite a live, unrelated
-local branch into the shared store. Do that only through `rebar tracker-maintenance` (or
+local branch into the shared store. Do that only through `rebar store maintenance` (or
 an isolated operator clone) while other sessions are quiesced, because this host runs many
 worktrees against one shared `tickets` branch.
 
@@ -707,7 +707,7 @@ state, and `off` deliberately suppresses remote observation. Selection retains t
 both modes, and a mid-run policy change discards the private candidate and aborts. The ordinary
 event store remains available and unchanged when the default-off switch is disabled.
 
-`rebar import` uses `off` internally for its whole run and pushes once at the end,
+`rebar store import` uses `off` internally for its whole run and pushes once at the end,
 so a bulk import pays one round-trip rather than one per event; it still does one
 commit + one lock cycle per event (no batch primitive yet). See
 [import-export.md](import-export.md) for the accepted large-import limitation and
@@ -948,14 +948,14 @@ held-out test. For a held-out oracle, move the file outside the worktree instead
 `mkdir -p "$(git rev-parse --git-path heldout)" && mv <test> "$(git rev-parse --git-path heldout)/"`,
 then move it back for validation. Hold the same line in anything you write.
 
-### The supported door — `rebar tracker-maintenance`
+### The supported door — `rebar store maintenance`
 
 For a store that rebar itself cannot write, use the maintenance entrypoint rather than
 improvising:
 
 ```sh
-rebar tracker-maintenance            # --status (default): report; makes NO writes
-rebar tracker-maintenance --clean    # repair, inside the safety envelope
+rebar store maintenance            # --status (default): report; makes NO writes
+rebar store maintenance --clean    # repair, inside the safety envelope
 ```
 
 Its value is the envelope, not the repair:

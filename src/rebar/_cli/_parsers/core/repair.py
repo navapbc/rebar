@@ -24,7 +24,7 @@ def _base(prog: str, description: str | None = None) -> argparse.ArgumentParser:
 
 
 def build_doctor(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar doctor [--repair] [--dry-run] [--output json]``."""
+    """``rebar store doctor [--repair] [--dry-run] [--output json]``."""
     parser = _base(prog, "Diagnose the store and heal what is safe to fix (--repair).")
     parser.add_argument(
         "--output", "-o", choices=("text", "json"), default="text", help="output format"
@@ -35,7 +35,7 @@ def build_doctor(*, prog: str) -> argparse.ArgumentParser:
 
 
 def build_fsck(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar fsck [--repair] [--dry-run] [--include-archived] [--only=...] [--limit=N]``."""
+    """``rebar store fsck [--repair] [--dry-run] [--include-archived] [--only=...] [--limit=N]``."""
     parser = _base(prog, "Check store integrity (JSON validity, CREATE presence, index.lock).")
     parser.add_argument(
         "--output", "-o", choices=("text", "json"), default="text", help="output format"
@@ -52,7 +52,7 @@ def build_fsck(*, prog: str) -> argparse.ArgumentParser:
 
 
 def build_fsck_recover(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar fsck-recover [--tracker-dir <path>] [--detect-only] ...``."""
+    """``rebar store fsck-recover [--tracker-dir <path>] [--detect-only] ...``."""
     parser = _base(prog, "Recover the tracker worktree (dangling commits, interrupted rebases).")
     parser.add_argument("--tracker-dir", help="path to the tracker worktree")
     parser.add_argument("--detect-only", action="store_true", help="detect without recovering")
@@ -62,7 +62,7 @@ def build_fsck_recover(*, prog: str) -> argparse.ArgumentParser:
 
 
 def build_tracker_maintenance(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar tracker-maintenance [--status] [--clean] [--force=<reason>]``."""
+    """``rebar store maintenance [--status] [--clean] [--force=<reason>]``."""
     parser = _base(prog, "Supported door for raw git in the tracker; backup ref + refusal + audit.")
     parser.add_argument("--status", action="store_true", help="report tracker maintenance status")
     parser.add_argument("--clean", action="store_true", help="clean the tracker worktree")

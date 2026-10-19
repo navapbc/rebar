@@ -345,7 +345,7 @@ def test_reconverge_local_changes_recovery_survives_conflict_on_retry(
         f"expected exactly one retry (2 merge attempts), got {len(merge_calls)}"
     )
     assert any("fsck-recover" in r.message for r in caplog.records), (
-        "the abort net must hint rebar fsck-recover"
+        "the abort net must hint rebar store fsck-recover"
     )
 
 
@@ -463,7 +463,7 @@ def test_reconverge_refuses_a_stranded_merge_marker_after_lock_acquisition(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A genuinely stranded `MERGE_HEAD` (no lock holder) must still block the reset/merge
-    and direct the operator to `rebar fsck-recover`. After consensual-hollow-drake moved
+    and direct the operator to `rebar store fsck-recover`. After consensual-hollow-drake moved
     recovery-state classification under the write lock, this refusal comes from the in-lock
     guard in `_do_reconverge`; it must not be lost with the removed pre-lock early-out."""
     import logging as _logging

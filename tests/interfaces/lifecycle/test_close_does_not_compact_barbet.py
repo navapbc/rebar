@@ -12,7 +12,7 @@ seconds earlier, so the store always read free to its own probe.
 THE FIX (asserted here): compaction is off the close path entirely. It is OPTIONAL
 housekeeping, never a correctness step — an unfolded event log is completely valid and the
 reducer replays it — so removing the trigger changes performance and store size, never stored
-state. ``rebar compact <id>`` still folds on demand.
+state. ``rebar store compact <id>`` still folds on demand.
 
 Assertions are on OBSERVABLE artifacts only: the files in the ticket dir, the tracker's commit
 subjects, and the reduced ticket state. Nothing here asserts a duration — the lock-scoping
@@ -114,7 +114,7 @@ def test_close_still_lands_its_status_write(rebar_repo: Path) -> None:
 
 # ── compaction itself is intact, only its trigger is gone ────────────────────────────────────
 def test_explicit_compact_still_folds_a_closed_ticket(rebar_repo: Path) -> None:
-    """``rebar compact <id>`` on the just-closed ticket must still fold it — proof that this
+    """``rebar store compact <id>`` on the just-closed ticket must still fold it — proof that this
     change removed the TRIGGER, not the capability."""
     repo = rebar_repo
     tid = _seed_and_claim(repo, "explicit compact still works")

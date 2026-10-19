@@ -1,4 +1,4 @@
-"""`rebar compact` reports a malformed config as a clean error (exit 1), not an
+"""`rebar store compact` reports a malformed config as a clean error (exit 1), not an
 uncaught traceback (session-review remediation: compact resolves its default
 threshold via load_config, which can raise ConfigError on a broken config file).
 """

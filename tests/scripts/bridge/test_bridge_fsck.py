@@ -233,7 +233,7 @@ def test_live_visibility_cli_flag_stderr_advisory_keeps_json_contract(
 
 
 def test_core_doctor_stays_jira_free() -> None:
-    """(d) Core `rebar doctor` must not reach any reconciler / Jira import."""
+    """(d) Core `rebar store doctor` must not reach any reconciler / Jira import."""
     import ast
     from pathlib import Path as _P
 

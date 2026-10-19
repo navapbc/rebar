@@ -233,7 +233,7 @@ def test_stale_epoch_push_refuses_merge_and_fsck_reports_diverged(
     assert "epoch" in caplog.text.lower()
     assert "failed after 3 retries" not in caplog.text
 
-    rc = _cli.main(["fsck"])
+    rc = _cli.main(["store", "fsck"])
     fsck_output = capsys.readouterr().out
     assert rc == 1
     assert "DIVERGED" in fsck_output

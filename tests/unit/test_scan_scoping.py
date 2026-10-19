@@ -1,9 +1,9 @@
 """Active-only scan scoping + archive-time terminal fold (story detoxicant-pointless-paperwasp).
 
-THE PROBLEM. The store-walking maintenance surfaces — ``rebar fsck``'s per-ticket checks and
-``rebar compact-all``'s selection sweep — visited EVERY ticket directory, archived or not. An
-archive is a statement that a ticket is settled; re-reading its whole event log on every sweep
-makes maintenance cost grow with store HISTORY instead of store ACTIVITY.
+THE PROBLEM. The store-walking maintenance surfaces — ``rebar store fsck``'s per-ticket checks
+and ``rebar store compact --all``'s selection sweep — visited EVERY ticket directory, archived or
+not. An archive is a statement that a ticket is settled; re-reading its whole event log on every
+sweep makes maintenance cost grow with store HISTORY instead of store ACTIVITY.
 
 THE FIX (asserted here), in two halves:
 
@@ -390,9 +390,11 @@ def test_authorship_tallies_still_count_archived_tickets(store: Path) -> None:
 
 # ── the flag is documented where usage lives ─────────────────────────────────────────────────
 def test_usage_lines_name_the_flag(capsys: pytest.CaptureFixture[str]) -> None:
-    help_dir = Path(_fsck.__file__).resolve().parents[1] / "_cli" / "help"
-    assert "--include-archived" in (help_dir / "fsck.txt").read_text()
-    assert "--include-archived" in (help_dir / "compact-all.txt").read_text()
+    from rebar._cli import main
+
+    for member in ("fsck", "compact"):
+        assert main(["store", member, "--help"]) == 0
+        assert "--include-archived" in capsys.readouterr().out, member
 
     assert _compact.compact_all_cli(["--help"]) == 0
     assert "--include-archived" in capsys.readouterr().out

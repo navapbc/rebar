@@ -436,11 +436,11 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
 
     # Parser of record for doctor's accepted grammar; the membership scan below is
     # retained because it owns the bespoke ``unexpected argument(s)`` reject/exit code.
-    build_doctor(prog="rebar doctor").parse_known_args(rest)
+    build_doctor(prog="rebar store doctor").parse_known_args(rest)
     unknown = [a for a in rest if a not in ("--repair", "--dry-run")]
     if unknown:
         print(
-            f"Usage: rebar doctor [--repair] [--dry-run] [--output json]\n"
+            f"Usage: rebar store doctor [--repair] [--dry-run] [--output json]\n"
             f"  unexpected argument(s): {' '.join(unknown)}",
             file=sys.stderr,
         )

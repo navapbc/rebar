@@ -89,7 +89,7 @@ class RebaseGuard(Exception):
         super().__init__(
             f"Error: ticket write blocked — tracker is in {kind} recovery state.\n"
             f"  tracker: {tracker}\n"
-            f'  Run: rebar fsck-recover --tracker-dir "{tracker}" '
+            f'  Run: rebar store fsck-recover --tracker-dir "{tracker}" '
             "(or ticket-fsck-recover.sh from the rebar engine dir)"
         )
 

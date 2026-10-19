@@ -244,7 +244,7 @@ def test_the_reclaim_warning_names_the_holder_when_a_describer_is_given(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The ``describe_holder`` operator affordance (introduced for the ADR 0086 worker, since
-    removed) makes a wedge attributable without running ``rebar doctor``. Callers
+    removed) makes a wedge attributable without running ``rebar store doctor``. Callers
     that pass ``None`` must NOT gain a phantom holder clause."""
     from rebar._store.stamped_lock import stamped_file_lock
 

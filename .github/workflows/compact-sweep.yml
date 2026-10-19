@@ -87,7 +87,7 @@ jobs:
       - name: Mount tickets branch as a worktree
         # The store lives on the `tickets` orphan branch at the repo root. Mount it as
         # .tickets-tracker on the ACTUAL `tickets` branch (not detached) so tracker.branch
-        # matches and `rebar fsck` does not WARN on a mismatch. Same recipe as
+        # matches and `rebar store fsck` does not WARN on a mismatch. Same recipe as
         # reconcile-bridge.yml — the proven way to give a CI job a writable store.
         run: |
           set -euo pipefail
@@ -150,7 +150,7 @@ jobs:
           # Redirect rather than pipe: under `set -o pipefail` a `tee` failure (unwritable
           # RUNNER_TEMP, full disk) becomes the pipeline's exit status and would masquerade as
           # rebar's, defeating the exit-2-vs-1 branching immediately below.
-          rebar compact-all "${ARGS[@]}" >"${RUNNER_TEMP}/sweep.out" 2>&1 || rc=$?
+          rebar store compact --all "${ARGS[@]}" >"${RUNNER_TEMP}/sweep.out" 2>&1 || rc=$?
           cat "${RUNNER_TEMP}/sweep.out"
           if [ "${rc:-0}" = "2" ]; then
             echo "::warning::some tickets failed to compact; they stay live and the next sweep retries them"

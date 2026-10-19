@@ -1,4 +1,4 @@
-"""``rebar import`` / ``export`` parser factories (RP-05 S2b).
+"""``rebar store import`` / ``export`` parser factories (RP-05 S2b).
 
 Prog-bound argparse renderings of the two NDJSON I/O arms in
 :mod:`rebar._io._cli`. ``export`` carries the filter/output surface (``-o/--out``
@@ -16,7 +16,7 @@ from rebar._cli._parser import build_argument_parser
 
 
 def build_export(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar export [-o FILE] [--status S] [--type T] [--parent ID] [toggles]``."""
+    """``rebar store export [-o FILE] [--status S] [--type T] [--parent ID] [toggles]``."""
     parser = build_argument_parser(
         prog=prog,
         description="Export the store as NDJSON (one ticket per line).",
@@ -43,7 +43,7 @@ def build_export(*, prog: str) -> argparse.ArgumentParser:
 
 
 def build_import(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar import [FILE] [--dry-run]``   (reads stdin if FILE omitted)."""
+    """``rebar store import [FILE] [--dry-run]``   (reads stdin if FILE omitted)."""
     parser = build_argument_parser(
         prog=prog,
         description="Import tickets from export NDJSON for a clean rebar-to-rebar migration.",

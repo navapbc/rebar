@@ -128,7 +128,7 @@ GATE_RESULT = "gate_result"
 SUMMARY = "summary"
 FSCK = "fsck"
 CONFIG_RESULT = "config_result"
-# graph — output of `rebar doctor`: blocking edges that disagree with the
+# graph — output of `rebar store doctor`: blocking edges that disagree with the
 # structural link rule, plus their repair disposition after a `--repair` pass.
 DOCTOR = "doctor"
 # rebar.llm — the structured review-findings document. Produced by the code-review op
@@ -169,7 +169,7 @@ CODE_REVIEW_VERDICT = "code_review_verdict"
 SIGN_RESULT = "sign_result"
 SIGN_REVIEW_RESULT = "sign_review_result"
 VERIFY_SIGNATURE_RESULT = "verify_signature_result"
-# _io/export_ndjson — the per-line shape of `rebar export` NDJSON output. Not in
+# _io/export_ndjson — the per-line shape of `rebar store export` NDJSON output. Not in
 # OUTPUT_SCHEMAS (export emits NDJSON, not the standard --output json envelope);
 # documented + validated directly via schemas.validator(schemas.EXPORT).
 EXPORT = "export"

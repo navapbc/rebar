@@ -102,7 +102,7 @@ In CI the same three values come from repo **Variables** (and the token from a
 > — for example `rebar bridge projects set DIG --repos digit` adds project `DIG` alongside
 > `REB`. A store first created before this feature seeds a mapping from
 > `project` (recording it as the `legacy_default`, with an empty sync list) automatically at
-> the next `rebar init` / `rebar fsck --repair` and needs no manual step; the operator then
+> the next `rebar init` / `rebar store fsck --repair` and needs no manual step; the operator then
 > `set`s the projects to sync. See the [user guide](user-guide.md#jira), [config
 > reference](config.md), and [ADR 0097](adr/0097-many-to-many-tracker-projects.md).
 >
@@ -275,7 +275,7 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 
 | Step | rebar fact that requires it |
 |------|------------------------------|
-| **Mount `tickets` as a worktree** | The store lives on the `tickets` orphan branch at the repo root; `actions/checkout` lands you on `main`. The reconciler reads/writes `.tickets-tracker`, so the branch must be mounted there. We mount on the real `tickets` branch (`-B tickets`) so `tracker.branch` matches and `rebar fsck` doesn't WARN. |
+| **Mount `tickets` as a worktree** | The store lives on the `tickets` orphan branch at the repo root; `actions/checkout` lands you on `main`. The reconciler reads/writes `.tickets-tracker`, so the branch must be mounted there. We mount on the real `tickets` branch (`-B tickets`) so `tracker.branch` matches and `rebar store fsck` doesn't WARN. |
 | **`rebar bridge preview` / `rebar bridge sync`** | These are the primary bridge entry points. They are lean-runtime capabilities — no `[agents]` extra needed. The workflow routes `dry-run` to preview and live/bootstrap profiles to sync. |
 | **Exit-code handling (0 / 75 / 3 / other)** | `__main__.py` returns **75** (reschedule — rebase-retry exhausted; the next scheduled run retries) and **3** (another pass already holds the pass-lock). Both are operational, not errors, so we exit 0 on them; any other non-zero fails the job. |
 | **Commit-back + push when dirty *or ahead*** | **The reconciler does not push.** It writes inbound events as *uncommitted* files in the worktree and makes its own `.bridge_state/bindings.json` commit *without pushing*. So a clean worktree does **not** mean "nothing to push" — we push whenever the local `tickets` branch is ahead of `origin/tickets`. This is the single biggest divergence from a naive DSO copy (whose `git status --porcelain` gate would skip pushing the reconciler's own binding commit). |
