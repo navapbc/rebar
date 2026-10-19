@@ -9,7 +9,8 @@ in .github/workflows/optionality.yml):
     runs with no optional dependency. Run in a clean subprocess.
   * STATIC — no module under src/rebar imports the heavy stack at MODULE scope;
     every such import must be lazy (inside a function), so `import rebar` and the
-    lean runtime can never silently grow heavy.
+    lean runtime can never silently grow heavy. Ruff TID253 enforces the flat
+    top-level form; the nested-form test below covers what TID253 skips.
 """
 
 from __future__ import annotations
@@ -20,36 +21,17 @@ import sys
 import textwrap
 from pathlib import Path
 
+import tomllib
 from _tree_scan import parsed_python_files
 
 import rebar
 
-# The heavy stack gated behind extras. None may be imported by the lean runtime or
-# at module scope anywhere in the core tree.
-_HEAVY = (
-    "langchain",
-    "langgraph",
-    "langchain_anthropic",
-    "langchain_openai",
-    "langchain_mcp_adapters",
-    "langfuse",
-    "anthropic",
-    "deepagents",
-    "opentelemetry",
-    # [agents] extra — the provider-agnostic in-process runtime (story d6d1 cutover
-    # dropped LangChain/LangGraph for pydantic-ai). `httpx` arrives transitively via
-    # pydantic-ai; neither is a core dep, so both must stay lazy (call-boundary).
-    "pydantic_ai",
-    "httpx",
-    # [grounding] extra — the in-process structural-parsing binding. The grounding
-    # contract + harness are stdlib-only; tree-sitter must stay lazy (worker boundary).
-    "tree_sitter",
-    "tree_sitter_language_pack",
-    # [grounding-terraform] extra (REB-640) — python-hcl2 (and its lark parser) power
-    # the optional Terraform structural grounding tools; both must stay lazy so
-    # `import rebar` and non-Terraform reviews never pull the HCL parser.
-    "hcl2",
-    "lark",
+# The heavy optional stacks that must stay lazy. Single-sourced from pyproject.toml, where
+# ruff TID253 bans them at module scope (story fixed-spinulose-hoverfly).
+_HEAVY = tuple(
+    tomllib.loads((Path(__file__).resolve().parents[2] / "pyproject.toml").read_text())["tool"][
+        "ruff"
+    ]["lint"]["flake8-tidy-imports"]["banned-module-level-imports"]
 )
 
 _SRC = Path(rebar.__file__).resolve().parent
@@ -98,47 +80,53 @@ def test_lean_workflow_runtime_pulls_no_heavy_stack() -> None:
     )
 
 
-def _module_scope_imports(tree: ast.Module):
-    """Yield Import/ImportFrom nodes at MODULE scope (recurse into module-level
-    if/try/with, but NOT into function/class bodies — those are lazy by design)."""
+def _nested_module_scope_imports(tree: ast.Module):
+    """Yield Import/ImportFrom nodes nested in a MODULE-level compound statement.
 
-    def walk(body):
+    Ruff 0.16.3 TID253 checks only flat top-level imports: it skips any statement
+    with a parent statement. This covers the rest of the module scope: imports in
+    a module-level if/try/try*/with/for/while/match body, branch, handler, or
+    finally, at any depth. Function and class bodies are lazy by design and are
+    not entered. `if TYPE_CHECKING:` is flagged too, as the deleted full scan did.
+    """
+
+    def walk(body, nested: bool):
         for node in body:
             if isinstance(node, ast.Import | ast.ImportFrom):
-                yield node
-            elif isinstance(node, ast.If | ast.Try | ast.With | ast.For | ast.While):
-                yield from walk(node.body)
-                yield from walk(getattr(node, "orelse", []))
-                yield from walk(getattr(node, "finalbody", []))
+                if nested:
+                    yield node
+            elif isinstance(node, ast.If | ast.Try | ast.TryStar | ast.With | ast.For | ast.While):
+                yield from walk(node.body, True)
+                yield from walk(getattr(node, "orelse", []), True)
+                yield from walk(getattr(node, "finalbody", []), True)
                 for h in getattr(node, "handlers", []):
-                    yield from walk(h.body)
+                    yield from walk(h.body, True)
             elif isinstance(node, ast.Match):
                 for case in node.cases:
-                    yield from walk(case.body)
+                    yield from walk(case.body, True)
 
-    yield from walk(tree.body)
+    yield from walk(tree.body, False)
 
 
 def _is_heavy(name: str | None) -> bool:
     return bool(name) and any(name == h or name.startswith(h + ".") for h in _HEAVY)
 
 
-def test_no_core_module_imports_heavy_stack_at_module_scope() -> None:
+def test_no_core_module_imports_heavy_stack_nested_at_module_scope() -> None:
     offenders: list[str] = []
     for module in parsed_python_files(_SRC):
         py = module.path
         # _engine ships as reconciler subprocess data (stdlib-only); skip caches.
         if "_engine" in py.parts or "__pycache__" in py.parts:
             continue
-        tree = module.tree
-        for node in _module_scope_imports(tree):
+        for node in _nested_module_scope_imports(module.tree):
             names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module]
             for n in names:
                 if _is_heavy(n):
-                    offenders.append(f"{py.relative_to(_SRC.parent)}: import {n}")
+                    offenders.append(f"{py.relative_to(_SRC.parent)}:{node.lineno}: import {n}")
     assert not offenders, (
-        "heavy [agents]/[tracing] imports must be LAZY (inside a function), "
-        "not at module scope:\n" + "\n".join(offenders)
+        "heavy [agents]/[tracing] imports must be LAZY (inside a function), not nested in "
+        "a module-level block (flat top-level ones are ruff TID253's):\n" + "\n".join(offenders)
     )
 
 
