@@ -1,0 +1,2469 @@
+{
+ "archive_ticket": {
+  "annotations": {
+   "destructiveHint": true,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Archive a ticket (excludes it from the default list).",
+  "inputSchema": {
+   "properties": {
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "archive_ticketArguments",
+   "type": "object"
+  }
+ },
+ "attach_commits": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Retroactively link commits to a ticket by SHA (union-add, idempotent).\n\n        The repair path when a commit landed without a usable `rebar-ticket:` trailer:\n        attaching the SHAs records a COMMITS event so the close gate can still tie the\n        ticket to its change. Every SHA must resolve to a commit in this repository \u2014\n        validation is ALL-OR-NOTHING, so if any SHA is bad, nothing is recorded.",
+  "inputSchema": {
+   "properties": {
+    "commits": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Commits",
+     "type": "array"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id",
+    "commits"
+   ],
+   "title": "attach_commitsArguments",
+   "type": "object"
+  }
+ },
+ "audit_trail": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Read a ticket's complete plan, completion, and code-review audit trail.\n\n        Plan and related code-review sidecar histories are newest-first; completion\n        includes its attestation and sidecar. Individual sidecar failures degrade to\n        ``[]`` or ``None``. This read remains available under ``REBAR_MCP_READONLY=1``.\n        ",
+  "inputSchema": {
+   "properties": {
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "audit_trailArguments",
+   "type": "object"
+  }
+ },
+ "bridge_check_access": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": true,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Run the six-step live Jira capability check and return its typed verdict.",
+  "inputSchema": {
+   "properties": {},
+   "title": "bridge_check_accessArguments",
+   "type": "object"
+  }
+ },
+ "bridge_fsck": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Offline bridge audit -> {unknown_event_types, binding_drift, store_integrity}.",
+  "inputSchema": {
+   "properties": {},
+   "title": "bridge_fsckArguments",
+   "type": "object"
+  }
+ },
+ "bridge_pause": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": true,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Persist a durable reconciliation pause with its operator reason.",
+  "inputSchema": {
+   "properties": {
+    "reason": {
+     "title": "Reason",
+     "type": "string"
+    }
+   },
+   "required": [
+    "reason"
+   ],
+   "title": "bridge_pauseArguments",
+   "type": "object"
+  }
+ },
+ "bridge_preview": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Compute proposed Jira changes without applying them.",
+  "inputSchema": {
+   "properties": {
+    "exclude": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Exclude"
+    },
+    "only": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Only"
+    }
+   },
+   "title": "bridge_previewArguments",
+   "type": "object"
+  }
+ },
+ "bridge_projects_list": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Read the store's ``{project: {\"repos\": [...]}}`` sync mapping without an LLM.\n\n        Its project keys are the sync list; each value names that project's repositories.\n        ",
+  "inputSchema": {
+   "properties": {},
+   "title": "bridge_projects_listArguments",
+   "type": "object"
+  }
+ },
+ "bridge_projects_remove": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Remove a bridge project key from the mapping (error if absent).",
+  "inputSchema": {
+   "properties": {
+    "key": {
+     "title": "Key",
+     "type": "string"
+    }
+   },
+   "required": [
+    "key"
+   ],
+   "title": "bridge_projects_removeArguments",
+   "type": "object"
+  }
+ },
+ "bridge_projects_set": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Set a bridge project key's repos (REPLACE semantics; idempotent).",
+  "inputSchema": {
+   "properties": {
+    "key": {
+     "title": "Key",
+     "type": "string"
+    },
+    "repos": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Repos",
+     "type": "array"
+    }
+   },
+   "required": [
+    "key",
+    "repos"
+   ],
+   "title": "bridge_projects_setArguments",
+   "type": "object"
+  }
+ },
+ "bridge_resume": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": true,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Clear the durable reconciliation pause.",
+  "inputSchema": {
+   "properties": {},
+   "title": "bridge_resumeArguments",
+   "type": "object"
+  }
+ },
+ "bridge_run": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": true,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Run one scheduled bridge profile and strictly deliver its ticket events.",
+  "inputSchema": {
+   "properties": {
+    "profile": {
+     "default": "dry-run",
+     "title": "Profile",
+     "type": "string"
+    }
+   },
+   "title": "bridge_runArguments",
+   "type": "object"
+  }
+ },
+ "bridge_status": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Read the durable bridge status snapshot and optional freshness assertion.",
+  "inputSchema": {
+   "properties": {
+    "max_age_seconds": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Max Age Seconds"
+    },
+    "target_environment_id": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Target Environment Id"
+    }
+   },
+   "title": "bridge_statusArguments",
+   "type": "object"
+  }
+ },
+ "bridge_sync": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": true,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Apply proposed Jira changes, optionally with an explicit change limit.",
+  "inputSchema": {
+   "properties": {
+    "exclude": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Exclude"
+    },
+    "max_changes": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Max Changes"
+    },
+    "only": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Only"
+    }
+   },
+   "title": "bridge_syncArguments",
+   "type": "object"
+  }
+ },
+ "check_ac": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Check the ticket has an Acceptance Criteria block\n        ({verdict, criteria_count, reason, passed}).",
+  "inputSchema": {
+   "properties": {
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "check_acArguments",
+   "type": "object"
+  }
+ },
+ "claim_ticket": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Atomically claim an OPEN ticket (-> in_progress + assignee).\n\n        Raises a tool error (ConcurrencyError) if the ticket is not open \u2014\n        i.e. another agent already claimed it. ``force`` supplies the reason for\n        bypassing the plan-review gate; when it replaces certification, the absent\n        certified attestation is the durable audit signal.\n        ",
+  "inputSchema": {
+   "properties": {
+    "assignee": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Assignee"
+    },
+    "force": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Force"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "claim_ticketArguments",
+   "type": "object"
+  }
+ },
+ "clarity_check": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Score ticket clarity (score / verdict / threshold / passed).",
+  "inputSchema": {
+   "properties": {
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "clarity_checkArguments",
+   "type": "object"
+  }
+ },
+ "comment_ticket": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Append a comment to a ticket.",
+  "inputSchema": {
+   "properties": {
+    "body": {
+     "title": "Body",
+     "type": "string"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id",
+    "body"
+   ],
+   "title": "comment_ticketArguments",
+   "type": "object"
+  }
+ },
+ "compact_ticket": {
+  "annotations": {
+   "destructiveHint": true,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Compact a ticket's event log (or all tickets if id omitted).",
+  "inputSchema": {
+   "properties": {
+    "ticket_id": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ticket Id"
+    }
+   },
+   "title": "compact_ticketArguments",
+   "type": "object"
+  }
+ },
+ "create_idea": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Capture an undesigned idea: create an epic in status 'idea' atomically.\n\n        The idea is born in status 'idea' via a single CREATE event (never momentarily\n        'open'/claimable), is excluded from ready/next-batch, and 'idea -> closed'\n        (reject) skips the completion gates. Promote a kept idea with\n        transition_ticket(id, \"idea\", \"open\"). Returns {id, alias}.",
+  "inputSchema": {
+   "properties": {
+    "description": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Description"
+    },
+    "title": {
+     "title": "Title",
+     "type": "string"
+    }
+   },
+   "required": [
+    "title"
+   ],
+   "title": "create_ideaArguments",
+   "type": "object"
+  }
+ },
+ "create_identity": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Create an identity entity: a gate-/graph-exempt ticket recording a\n        person/agent. ``name`` is the title; ``email`` plus ``mappings`` (list of\n        {provider, external_id}) and ``keys`` (OpenSSH authorized-keys lines) ride the\n        CREATE and surface in show_ticket. Returns {id, alias}.",
+  "inputSchema": {
+   "properties": {
+    "email": {
+     "title": "Email",
+     "type": "string"
+    },
+    "keys": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Keys"
+    },
+    "mappings": {
+     "anyOf": [
+      {
+       "items": {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Mappings"
+    },
+    "name": {
+     "title": "Name",
+     "type": "string"
+    }
+   },
+   "required": [
+    "name",
+    "email"
+   ],
+   "title": "create_identityArguments",
+   "type": "object"
+  }
+ },
+ "create_ticket": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Create a ticket; returns {id, alias} (agents get the alias without\n        a second show()). A non-null description_warning means the description exceeds\n        the plan-review admission cap while the claim gate is on \u2014 the ticket was still\n        created, but claiming it needs a review that refuses the description as-is. A\n        non-null duplicate_warning means another ticket with the same normalized title\n        was created inside the recency window \u2014 advisory only; the named candidate may\n        already cover this work.",
+  "inputSchema": {
+   "properties": {
+    "assignee": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Assignee"
+    },
+    "bridge_project": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Bridge Project"
+    },
+    "description": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Description"
+    },
+    "parent": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Parent"
+    },
+    "priority": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Priority"
+    },
+    "repos": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Repos"
+    },
+    "tags": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Tags"
+    },
+    "ticket_type": {
+     "title": "Ticket Type",
+     "type": "string"
+    },
+    "title": {
+     "title": "Title",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_type",
+    "title"
+   ],
+   "title": "create_ticketArguments",
+   "type": "object"
+  }
+ },
+ "declare_no_file_impact": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Declare that a ticket has no repository-file impact, with a reason.",
+  "inputSchema": {
+   "properties": {
+    "reason": {
+     "title": "Reason",
+     "type": "string"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id",
+    "reason"
+   ],
+   "title": "declare_no_file_impactArguments",
+   "type": "object"
+  }
+ },
+ "edit_ticket": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Edit ticket fields (title/priority/assignee/description/ticket_type).\n\n        Tags mutate via convergent deltas: add_tags / remove_tags add/remove,\n        or set_tags replaces the whole set (compiled to a delta; add-wins, so a\n        concurrent remote add is never silently clobbered). set_tags is mutually\n        exclusive with add_tags/remove_tags.\n\n        bridge_project is promote-only \u2014 it may be set on an unbound ticket but is\n        rejected once the ticket already holds a binding (\"\" marks never-sync); repos\n        replaces the associated repositories and is freely editable. Both are\n        present-only: leave them None to edit neither. Unlike the library edit_ticket\n        (a **fields passthrough), this tool's signature is enumerated, so these two are\n        forwarded explicitly to keep the MCP edit surface at parity with CLI/library.\n\n        description_warning is non-null when the new description exceeds the plan-review\n        admission cap while the claim gate is on: the edit still succeeded, but claiming\n        the ticket will need a review that refuses it until the description is shorter.\n        ",
+  "inputSchema": {
+   "properties": {
+    "add_tags": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Add Tags"
+    },
+    "assignee": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Assignee"
+    },
+    "bridge_project": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Bridge Project"
+    },
+    "description": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Description"
+    },
+    "priority": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Priority"
+    },
+    "remove_tags": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Remove Tags"
+    },
+    "repos": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Repos"
+    },
+    "set_tags": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Set Tags"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    },
+    "ticket_type": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ticket Type"
+    },
+    "title": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Title"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "edit_ticketArguments",
+   "type": "object"
+  }
+ },
+ "explain_criterion": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Read a plan criterion or an author guide without an LLM.\n\n        Guide names are ``plan`` (passing plans), ``review`` (code review), and\n        ``commit-trailer`` (the required ``rebar-ticket:`` format), using the same\n        lookup as ``rebar explain``. Failures return ``{error, kind, message}``, where\n        kind is ``unknown-id``, ``malformed-registry``, or ``missing-file``.\n        ",
+  "inputSchema": {
+   "properties": {
+    "criterion_id": {
+     "title": "Criterion Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "criterion_id"
+   ],
+   "title": "explain_criterionArguments",
+   "type": "object"
+  }
+ },
+ "fsck": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Check ticket-store integrity (JSON validity, CREATE presence, lock\n        cleanup). Set recover=True to run the recovery path.",
+  "inputSchema": {
+   "properties": {
+    "recover": {
+     "default": false,
+     "title": "Recover",
+     "type": "boolean"
+    }
+   },
+   "title": "fsckArguments",
+   "type": "object"
+  }
+ },
+ "gate_status": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Poll an async plan-review or completion run without executing it.\n\n        Replaying the local gate index returns ``{job_id, status, ticket_id,\n        gate_type, verdict?, error?, durable?, findings?}``. Status is ``running``,\n        then ``passed`` or ``failed``; stale runs fail diagnostically, ``attaching``\n        awaits a duplicate's index record, and ``unknown`` marks an unrecognized ID.\n        ``durable`` reports signed-certificate currency. Read plan findings only after\n        ``findings.readable`` is true.\n        ",
+  "inputSchema": {
+   "properties": {
+    "job_id": {
+     "title": "Job Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "job_id"
+   ],
+   "title": "gate_statusArguments",
+   "type": "object"
+  }
+ },
+ "get_file_impact": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Get the file-impact array (consumed by next-batch conflict scheduling).",
+  "inputSchema": {
+   "properties": {
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "get_file_impactArguments",
+   "type": "object"
+  }
+ },
+ "get_verify_commands": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Get the DD-level verify-commands array for a ticket.",
+  "inputSchema": {
+   "properties": {
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "get_verify_commandsArguments",
+   "type": "object"
+  }
+ },
+ "get_workflow_result": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Read a workflow run's outputs via replay -> {run_id, status,\n        terminal_step, terminal_output, outputs, error}. The terminal step's output\n        is the run result.\n\n        Typed read tool (workflow_run schema), always available. Bulky outputs are\n        elided to stay under the MCP token budget (``truncated: true``); read the\n        full result via the library/CLI.",
+  "inputSchema": {
+   "properties": {
+    "run_id": {
+     "title": "Run Id",
+     "type": "string"
+    },
+    "ticket_id": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ticket Id"
+    }
+   },
+   "required": [
+    "run_id"
+   ],
+   "title": "get_workflow_resultArguments",
+   "type": "object"
+  }
+ },
+ "get_workflow_status": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Read a workflow run's current status via replay (no execution) ->\n        {run_id, ticket_id, workflow_name, status, terminal_step, error, steps}.\n\n        Typed read tool (mirrors src/rebar/schemas/workflow_run.schema.json), always\n        available. ``ticket_id`` is resolved from the local run index when omitted.",
+  "inputSchema": {
+   "properties": {
+    "run_id": {
+     "title": "Run Id",
+     "type": "string"
+    },
+    "ticket_id": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ticket Id"
+    }
+   },
+   "required": [
+    "run_id"
+   ],
+   "title": "get_workflow_statusArguments",
+   "type": "object"
+  }
+ },
+ "grounding_info": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "The STATIC code-grounding oracle integration contract (epic 8f6c): the\n        closed dimension-ID vocabulary + version, the reference kinds, the closed\n        abstain-reason enum (+ outcome/job/tier vocabularies), and the available\n        backends with their detected availability/version. A fast, deterministic,\n        repo-independent discovery surface (no repo is scanned). Takes no args.",
+  "inputSchema": {
+   "properties": {},
+   "title": "grounding_infoArguments",
+   "type": "object"
+  }
+ },
+ "link_tickets": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Link two tickets (one of the seven canonical relations: blocks |\n        depends_on | relates_to | duplicates | supersedes | discovered_from |\n        caused_by).\n\n        Blocking relations are escalated to comparable endpoints when the two tickets\n        do not share a parent, so the RECORDED edge may differ from the requested one.\n        When that happens the return value names both pairs \u2014 otherwise the caller\n        would be told \"ok\" for an edge that was never written.\n\n        A ``caused_by`` link whose target has no commit referencing it is refused;\n        ``force`` (a reason string) bypasses that check.\n        ",
+  "inputSchema": {
+   "properties": {
+    "force": {
+     "default": "",
+     "title": "Force",
+     "type": "string"
+    },
+    "id1": {
+     "title": "Id1",
+     "type": "string"
+    },
+    "id2": {
+     "title": "Id2",
+     "type": "string"
+    },
+    "relation": {
+     "title": "Relation",
+     "type": "string"
+    }
+   },
+   "required": [
+    "id1",
+    "id2",
+    "relation"
+   ],
+   "title": "link_ticketsArguments",
+   "type": "object"
+  }
+ },
+ "list_tickets": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "List tickets with optional lifecycle, hierarchy, tag, and readiness filters.\n\n        Archived exclusion already hides deleted tombstones; ``exclude_deleted`` matters\n        with ``include_archived=True``. Rows carry ``children_count`` and can require a\n        minimum. The default omits bodies and signature material; ``full=True`` restores\n        complete state, while ``show_ticket`` remains the single-ticket alternative.\n        Oversize results fail with structured ``response_too_large`` details and narrowing\n        filters; they are never truncated or dropped by the transport.\n        ",
+  "inputSchema": {
+   "properties": {
+    "blocking_state": {
+     "default": "",
+     "title": "Blocking State",
+     "type": "string"
+    },
+    "exclude_deleted": {
+     "default": false,
+     "title": "Exclude Deleted",
+     "type": "boolean"
+    },
+    "full": {
+     "default": false,
+     "title": "Full",
+     "type": "boolean"
+    },
+    "has_tag": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Has Tag"
+    },
+    "include_archived": {
+     "default": false,
+     "title": "Include Archived",
+     "type": "boolean"
+    },
+    "min_children": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Min Children"
+    },
+    "parent": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Parent"
+    },
+    "priority": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Priority"
+    },
+    "sort": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Sort"
+    },
+    "status": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Status"
+    },
+    "ticket_type": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ticket Type"
+    },
+    "with_children_count": {
+     "default": false,
+     "title": "With Children Count",
+     "type": "boolean"
+    },
+    "without_tag": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Without Tag"
+    }
+   },
+   "title": "list_ticketsArguments",
+   "type": "object"
+  }
+ },
+ "log_session": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Append a verbose entry to the current session_log, creating one on\n        first use (write-gated: refused under REBAR_MCP_READONLY=1). Returns the\n        log's {id, alias}; optional relates_to / discovered_from link it to the\n        work it documents.",
+  "inputSchema": {
+   "properties": {
+    "discovered_from": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Discovered From"
+    },
+    "entry": {
+     "title": "Entry",
+     "type": "string"
+    },
+    "relates_to": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Relates To"
+    },
+    "summary": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Summary"
+    }
+   },
+   "required": [
+    "entry"
+   ],
+   "title": "log_sessionArguments",
+   "type": "object"
+  }
+ },
+ "next_batch": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Next parallel batch of unblocked tickets under an epic's hierarchy.",
+  "inputSchema": {
+   "properties": {
+    "epic_id": {
+     "title": "Epic Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "epic_id"
+   ],
+   "title": "next_batchArguments",
+   "type": "object"
+  }
+ },
+ "plan_review_status": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Report plan-certificate currency using the exact claim-gate check.\n\n        This read uses no LLM or network. It returns ``{ok, verdict, reason,\n        verified_at_sha, signed_at}``; current is ``certified``, otherwise\n        ``stale-code``, ``stale-head``, ``stale-material``, ``stale-reopened``,\n        ``stale-pin-drift``, ``stale-pin-missing``, ``stale-store``, ``unsigned``,\n        ``wrong-kind``, ``not-closed``, ``malformed-pin``, ``malformed-phase``,\n        ``incompatible-phase``, ``unverifiable-material``, or ``error``. ``reason``\n        names the drift; the SHA and timestamp are null without a readable certificate.\n        ",
+  "inputSchema": {
+   "properties": {
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "plan_review_statusArguments",
+   "type": "object"
+  }
+ },
+ "quality_check": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Check ticket dispatch readiness ({verdict, line_count, keyword_count,\n        ac_items, file_impact, reason, passed}).",
+  "inputSchema": {
+   "properties": {
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "quality_checkArguments",
+   "type": "object"
+  }
+ },
+ "ready_tickets": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "List tickets whose blockers are closed, optionally sorted.\n\n        The lean default returns id, alias, title, type, status, priority, and blocking\n        summary; ``full=True`` restores the pre-1.0 full ``ticket_state`` contract, or use\n        ``show_ticket`` for one item. See ``docs/release-notes.md``. Like ``list_tickets``,\n        oversize results are refused; because this tool has no filters, the remedy names\n        ``next_batch(epic_id)``. Sort keys are ``priority|created|updated|id|status``;\n        prefix ``-`` for descending, with unset values last.\n        ",
+  "inputSchema": {
+   "properties": {
+    "full": {
+     "default": false,
+     "title": "Full",
+     "type": "boolean"
+    },
+    "sort": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Sort"
+    }
+   },
+   "title": "ready_ticketsArguments",
+   "type": "object"
+  }
+ },
+ "recent_session_logs": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "The newest session_log tickets, newest first (by created_at; default\n        limit 5). session_logs are hidden from list_tickets; this is the\n        type-specific read that surfaces them.",
+  "inputSchema": {
+   "properties": {
+    "limit": {
+     "default": 5,
+     "title": "Limit",
+     "type": "integer"
+    }
+   },
+   "title": "recent_session_logsArguments",
+   "type": "object"
+  }
+ },
+ "render_workflow": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Render a workflow (a .rebar/workflows/<name> name or a file path) to a\n        read-only Mermaid flowchart (TEXT; the host renders it to SVG, never\n        committed). Large graphs degrade to a text outline. Read tool, always\n        available.",
+  "inputSchema": {
+   "properties": {
+    "workflow": {
+     "title": "Workflow",
+     "type": "string"
+    }
+   },
+   "required": [
+    "workflow"
+   ],
+   "title": "render_workflowArguments",
+   "type": "object"
+  }
+ },
+ "reopen_ticket": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Reopen a closed ticket (closed -> open). Optimistic-concurrency:\n        raises a tool error if the ticket is not currently closed.",
+  "inputSchema": {
+   "properties": {
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "reopen_ticketArguments",
+   "type": "object"
+  }
+ },
+ "review_code": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": true,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Run the gate-backed LLM code review of a git range (base..head) ->\n        an aggregated review_result dict (findings carry agreement + reviewers).\n\n        ``source=attested`` (default) reads file context from a snapshot pinned at ``ref``\n        (default: the reviewed ``head``), a single ref/snapshot (no base+head snapshot pair);\n        ``source=local`` reads the checkout. The diff is computed from ``REBAR_ROOT``'s object\n        DB. Results carry ``source``/``verified_at_sha``/``signable``.\n\n        DISABLED unless REBAR_MCP_ALLOW_LLM=1 (live, billable LLM call(s); reaches\n        network + filesystem + git). Needs the 'agents' extra + an API key. Returns\n        a plain dict and advertises NO outputSchema by design (documented\n        NO_SCHEMA_EXEMPT) \u2014 its CLI/library --output json is pinned to\n        review_result.",
+  "inputSchema": {
+   "properties": {
+    "base": {
+     "default": "HEAD~1",
+     "title": "Base",
+     "type": "string"
+    },
+    "head": {
+     "default": "HEAD",
+     "title": "Head",
+     "type": "string"
+    },
+    "ref": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ref"
+    },
+    "source": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Source"
+    }
+   },
+   "title": "review_codeArguments",
+   "type": "object"
+  }
+ },
+ "review_plan": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": true,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Review a whole plan through the P1-P11 find/verify/decide/coach passes.\n\n        Returns ``{verdict: PASS|BLOCK|INDETERMINATE, blocking, advisory, coaching,\n        indeterminate, coverage, signature?, source, verified_at_sha}``.\n\n        A writable PASS signs the claim attestation and emits REVIEW_RESULT; readonly is\n        pure. Unchanged valid attestations short-circuit unless ``force=True``. Tickets\n        that cannot be claimed fast-fail unsigned and without an LLM, except in-progress\n        or forced work. Attested source binds the reviewed SHA; local reads the checkout.\n        A PASS is unusable until ``attestation.signed``: follow its structured retry and\n        recovery tool instead of claiming. Concurrent identical reviews share one run;\n        force bypasses dedup, and ``review_plan_start`` is preferred for long calls.\n        Requires the agents extra, model credentials, and ``REBAR_MCP_ALLOW_LLM=1``; the\n        model result intentionally has no output schema.\n        ",
+  "inputSchema": {
+   "properties": {
+    "force": {
+     "default": false,
+     "title": "Force",
+     "type": "boolean"
+    },
+    "ref": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ref"
+    },
+    "source": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Source"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "review_planArguments",
+   "type": "object"
+  }
+ },
+ "review_plan_start": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": true,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Start plan review and immediately return\n        ``{job_id, ticket_id, gate_type, status: \"running\"}``.\n\n        Prefer this timeout-proof path, then poll ``plan_review_status`` for the durable\n        attestation or ``gate_status`` for run state and sidecar readability. Duplicate\n        ticket/basis starts share a job; ``force=True`` creates a fresh one. The local\n        index and daemon do not survive process exit. Requires ``REBAR_MCP_ALLOW_LLM=1``.\n        ",
+  "inputSchema": {
+   "properties": {
+    "force": {
+     "default": false,
+     "title": "Force",
+     "type": "boolean"
+    },
+    "ref": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ref"
+    },
+    "source": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Source"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "review_plan_startArguments",
+   "type": "object"
+  }
+ },
+ "run_workflow": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": true,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Start a workflow run; returns {run_id, ticket_id, status:'running'}\n        IMMEDIATELY (async \u2014 the run executes on a background **daemon thread**, so\n        it survives client request timeouts). Poll get_workflow_status /\n        get_workflow_result to read its outcome. DURABILITY IS LIMITED: the daemon\n        thread does NOT survive the MCP process exiting, and there is NO reaper or\n        automatic resume \u2014 if the process dies mid-run the run is left ``running``\n        forever and nothing re-drives it. Step effects ARE persisted to\n        ``ticket_id``'s event log with idempotency markers, so a run can be\n        **resumed only by explicitly re-invoking it** (already-completed steps are\n        then skipped); it does not resume on its own. ``workflow`` is a\n        .rebar/workflows/<name> name or a file path; ``dry_run`` executes agent\n        steps with the offline FakeRunner (no tokens). Write tool (gated by\n        REBAR_MCP_READONLY).\n\n        A workflow with LLM/agent steps reads a snapshot pinned at ``ref`` (default\n        ``origin/main``) in ``source=attested`` (default) mode \u2014 never the server's\n        mutable checkout \u2014 and is DISABLED unless REBAR_MCP_ALLOW_LLM=1 (it makes\n        live, billable LLM calls), exactly like the other agentic tools. A\n        deterministic-only workflow needs neither.",
+  "inputSchema": {
+   "properties": {
+    "dry_run": {
+     "default": false,
+     "title": "Dry Run",
+     "type": "boolean"
+    },
+    "inputs": {
+     "anyOf": [
+      {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Inputs"
+    },
+    "ref": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ref"
+    },
+    "source": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Source"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    },
+    "workflow": {
+     "title": "Workflow",
+     "type": "string"
+    }
+   },
+   "required": [
+    "workflow",
+    "ticket_id"
+   ],
+   "title": "run_workflowArguments",
+   "type": "object"
+  }
+ },
+ "scan_spec": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": true,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Batch-scan the store's open epics against a specification -> a\n        review_result dict (gaps/conflicts/overlaps), epics evaluated in batches.\n\n        ``ref``/``source`` select the verified code (``attested`` snapshot at ``ref`` default\n        ``origin/main``, else ``local`` checkout); results carry ``source``/``verified_at_sha``.\n\n        DISABLED unless REBAR_MCP_ALLOW_LLM=1 (live, billable LLM call(s)). Needs\n        the 'agents' extra + an API key. Returns a plain dict and advertises NO\n        outputSchema by design (documented NO_SCHEMA_EXEMPT).",
+  "inputSchema": {
+   "properties": {
+    "batch_size": {
+     "default": 5,
+     "title": "Batch Size",
+     "type": "integer"
+    },
+    "ref": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ref"
+    },
+    "source": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Source"
+    },
+    "spec_text": {
+     "title": "Spec Text",
+     "type": "string"
+    }
+   },
+   "required": [
+    "spec_text"
+   ],
+   "title": "scan_specArguments",
+   "type": "object"
+  }
+ },
+ "search": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Search ticket prose and tags with bounded discovery results.\n\n        Queries support ``status:``, ``type:``, ``priority:``, ``assignee:``, ``tag:``,\n        and ``parent:``; commas mean field-local OR, priorities accept comparisons and\n        ``n..m``, and ``-``/``not:`` negate. Unknown fields become literal text. Sort by\n        ``priority|created|updated|id|status``; prefix ``-`` for descending, with unset\n        values last. Oversize results return ``response_too_large`` with count, size,\n        and narrowing guidance rather than truncating.\n        ",
+  "inputSchema": {
+   "properties": {
+    "has_tag": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Has Tag"
+    },
+    "include_archived": {
+     "default": false,
+     "title": "Include Archived",
+     "type": "boolean"
+    },
+    "query": {
+     "title": "Query",
+     "type": "string"
+    },
+    "sort": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Sort"
+    },
+    "status": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Status"
+    },
+    "ticket_type": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ticket Type"
+    }
+   },
+   "required": [
+    "query"
+   ],
+   "title": "searchArguments",
+   "type": "object"
+  }
+ },
+ "set_file_impact": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Record file impact (list of {path, reason}) for conflict-aware\n        next-batch scheduling.",
+  "inputSchema": {
+   "$defs": {
+    "FileImpactEntry": {
+     "description": "Shared `file_impact_entry` object (common.schema.json).",
+     "properties": {
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "reason": {
+       "title": "Reason",
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "FileImpactEntry",
+     "type": "object"
+    }
+   },
+   "properties": {
+    "impact": {
+     "items": {
+      "$ref": "#/$defs/FileImpactEntry"
+     },
+     "title": "Impact",
+     "type": "array"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id",
+    "impact"
+   ],
+   "title": "set_file_impactArguments",
+   "type": "object"
+  }
+ },
+ "set_verify_commands": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Record DD-level verify commands (list of {dd_id, dd_text, command}).",
+  "inputSchema": {
+   "$defs": {
+    "VerifyCommandEntry": {
+     "description": "Shared `verify_command_entry` object (common.schema.json).",
+     "properties": {
+      "command": {
+       "title": "Command",
+       "type": "string"
+      },
+      "dd_id": {
+       "title": "Dd Id",
+       "type": "string"
+      },
+      "dd_text": {
+       "title": "Dd Text",
+       "type": "string"
+      }
+     },
+     "required": [
+      "command"
+     ],
+     "title": "VerifyCommandEntry",
+     "type": "object"
+    }
+   },
+   "properties": {
+    "commands": {
+     "items": {
+      "$ref": "#/$defs/VerifyCommandEntry"
+     },
+     "title": "Commands",
+     "type": "array"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id",
+    "commands"
+   ],
+   "title": "set_verify_commandsArguments",
+   "type": "object"
+  }
+ },
+ "show_ticket": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Show compiled ticket state (accepts full id, short id, or alias).\n        Includes the computed ``inbound_deps`` (inbound edges: other tickets\n        linking TO this one, with the source's status) alongside the stored\n        outgoing ``deps``.",
+  "inputSchema": {
+   "properties": {
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "show_ticketArguments",
+   "type": "object"
+  }
+ },
+ "sign_manifest": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Sign a manifest of verified steps as an asymmetric op-cert.\n\n        Mints a rebar.opcert.v1 DSSE op-cert over the steps with this\n        environment's Ed25519 key (the gitignored .opcert-key) and records a\n        SIGNATURE event. Returns {ticket_id, manifest, algorithm:'sshsig',\n        envelope, principal, material_fingerprint, merged_log_commit,\n        head_sha, signed_at}. The op-cert kinds (plan-review /\n        completion-verifier) are signed and accepted ONLY as op-certs \u2014 the\n        legacy symmetric HMAC scheme is retired for them (story 8f1d). Use\n        verify_signature to certify it later.",
+  "inputSchema": {
+   "properties": {
+    "manifest": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Manifest",
+     "type": "array"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id",
+    "manifest"
+   ],
+   "title": "sign_manifestArguments",
+   "type": "object"
+  }
+ },
+ "sign_review": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Persist a current PASS sidecar without an LLM and return\n        ``{ok, signed, ticket_id, verdict, reason, signature?}``.\n\n        Missing, stale, degraded, and non-PASS sidecars are refused with a reason.\n        LLM enablement is unnecessary, but readonly mode disables this signature write.\n        ",
+  "inputSchema": {
+   "properties": {
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "sign_reviewArguments",
+   "type": "object"
+  }
+ },
+ "summary": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "One-line-per-ticket summary [{ticket_id, alias, status, title, blocking_summary}].\n\n        ticket_id preserves the caller token; alias is the exact resolved\n        human-friendly alias, or null when resolution fails closed.\n        ",
+  "inputSchema": {
+   "properties": {
+    "ticket_ids": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Ticket Ids",
+     "type": "array"
+    }
+   },
+   "required": [
+    "ticket_ids"
+   ],
+   "title": "summaryArguments",
+   "type": "object"
+  }
+ },
+ "tag_ticket": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Add a tag to a ticket.",
+  "inputSchema": {
+   "properties": {
+    "tag": {
+     "title": "Tag",
+     "type": "string"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id",
+    "tag"
+   ],
+   "title": "tag_ticketArguments",
+   "type": "object"
+  }
+ },
+ "ticket_deps": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Show the dependency graph for a ticket.",
+  "inputSchema": {
+   "properties": {
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "ticket_depsArguments",
+   "type": "object"
+  }
+ },
+ "transition_ticket": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Transition a ticket's status (optimistic concurrency). Returns the\n        engine result {ticket_id, from, to, newly_unblocked}.\n\n        ``open -> in_progress`` starts work and is gated by the plan-review gate\n        (``verify.require_plan_review_for_claim``) exactly like ``claim_ticket``.\n        ``force`` supplies the operator's audit reason while bypassing whichever gate\n        applies to this transition: the start-work gate or the completion-close gate.\n        Only ``null`` means no bypass; an empty string is a present bypass and the\n        shared core records its audit-safe placeholder. When force replaces otherwise-\n        required certification, the absent certified attestation is the durable audit\n        signal.\n\n        ``close_class`` is REQUIRED when closing a ``bug`` ticket. Bug closes accept\n        the full bounded vocabulary: ``regression``, ``plan_defect``,\n        ``env_integration``, ``flaky``, ``preexisting``, ``not_a_bug``,\n        ``duplicate``, ``escalated``, ``obsolete``, ``superseded``, ``wontfix``,\n        ``undetermined``. A non-bug ticket normally closes without ``close_class``;\n        only the administrative subset may be supplied: ``duplicate``, ``obsolete``,\n        ``superseded``, ``wontfix``. It is ignored for non-closing transitions. Force\n        does not relax this classification invariant: a bug close without a valid\n        ``close_class`` is refused.\n\n        ``reason`` is the close reason for a reason-required ``close_class``\n        (``obsolete``/``wontfix``, and \u2014 absent a live replacement link \u2014\n        ``not_a_bug``/``escalated``): it is recorded as the disposition's\n        ``close_reason`` and signed into the attestation. It is NOT the force\n        bypass note (that is ``force``'s value) and is discarded on any other\n        combination, exactly as on the CLI's ``--reason``.\n\n        ``caused_by`` records the explicit culprit for a bug close. ``ref`` selects\n        the committed tree used by completion verification; it defaults to HEAD.",
+  "inputSchema": {
+   "properties": {
+    "caused_by": {
+     "default": "",
+     "title": "Caused By",
+     "type": "string"
+    },
+    "close_class": {
+     "default": "",
+     "title": "Close Class",
+     "type": "string"
+    },
+    "current_status": {
+     "title": "Current Status",
+     "type": "string"
+    },
+    "force": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Force"
+    },
+    "reason": {
+     "default": "",
+     "title": "Reason",
+     "type": "string"
+    },
+    "ref": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ref"
+    },
+    "target_status": {
+     "title": "Target Status",
+     "type": "string"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id",
+    "current_status",
+    "target_status"
+   ],
+   "title": "transition_ticketArguments",
+   "type": "object"
+  }
+ },
+ "unlink_tickets": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Remove a link between two tickets, optionally selecting its relation.\n\n        Pass ``relation`` to remove that specific relation while preserving any\n        other active relation between the pair. When omitted, removes the pair's\n        most-recent active relation (the legacy pair-scoped behavior).\n        ",
+  "inputSchema": {
+   "properties": {
+    "id1": {
+     "title": "Id1",
+     "type": "string"
+    },
+    "id2": {
+     "title": "Id2",
+     "type": "string"
+    },
+    "relation": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Relation"
+    }
+   },
+   "required": [
+    "id1",
+    "id2"
+   ],
+   "title": "unlink_ticketsArguments",
+   "type": "object"
+  }
+ },
+ "untag_ticket": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Remove a tag from a ticket.",
+  "inputSchema": {
+   "properties": {
+    "tag": {
+     "title": "Tag",
+     "type": "string"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id",
+    "tag"
+   ],
+   "title": "untag_ticketArguments",
+   "type": "object"
+  }
+ },
+ "validate": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Repo-wide quality health check (JSON report: score, critical/major/\n        minor issues, warnings, suggestions). Takes no ticket id.",
+  "inputSchema": {
+   "properties": {},
+   "title": "validateArguments",
+   "type": "object"
+  }
+ },
+ "verify_completion": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": true,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Verify applicable criteria and return a cited ``{verdict: PASS|FAIL,\n        findings, target, reviewers, runner, model, trace_id, source, verified_at_sha,\n        signable}`` result.\n\n        ``graph=None`` uses the type default (epics include descendants); booleans force\n        subtree or own criteria. Attested source defaults to ``origin/main`` and can sign;\n        local source cannot. Writable servers best-effort record every sidecar and sign a\n        reusable attested PASS, reporting that outcome in ``record``; readonly servers do\n        neither. Concurrent identical calls share one run; prefer\n        ``verify_completion_start`` for a durable client handle. Requires the agents extra,\n        model credentials, and ``REBAR_MCP_ALLOW_LLM=1``. The model result intentionally\n        has no output schema.\n        ",
+  "inputSchema": {
+   "properties": {
+    "graph": {
+     "anyOf": [
+      {
+       "type": "boolean"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Graph"
+    },
+    "ref": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ref"
+    },
+    "source": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Source"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "verify_completionArguments",
+   "type": "object"
+  }
+ },
+ "verify_completion_start": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": true,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Start completion verification and immediately return\n        ``{job_id, ticket_id, gate_type, status: \"running\"}``.\n\n        Prefer this path, then poll ``verify_completion_status`` for the durable verdict\n        or ``gate_status`` for run state. ``graph=None`` uses the type default; booleans\n        force subtree or own-criteria verification and share the sync dedup key. Duplicate\n        starts attach to one job. Local daemon/index durability ends with the process.\n        Requires ``REBAR_MCP_ALLOW_LLM=1``.\n        ",
+  "inputSchema": {
+   "properties": {
+    "graph": {
+     "anyOf": [
+      {
+       "type": "boolean"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Graph"
+    },
+    "ref": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ref"
+    },
+    "source": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Source"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "verify_completion_startArguments",
+   "type": "object"
+  }
+ },
+ "verify_completion_status": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Report durable completion-certificate currency without an LLM or network.\n\n        This local close-gate check lets callers poll completion runs without another\n        charge. It returns ``{ok, verdict, reason, verified_at_sha, signed_at}``;\n        ``verdict`` is ``certified`` or ``unsigned``; its SHA and timestamp are\n        null when no certificate exists.\n        ",
+  "inputSchema": {
+   "properties": {
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "verify_completion_statusArguments",
+   "type": "object"
+  }
+ },
+ "verify_signature": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": false,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Verify a ticket manifest against its op-cert signature.\n\n        Returns ``{ticket_id, verified, verdict, reason, manifest, ...}``: ``certified``\n        matches, ``mismatch`` is altered or invalid, ``foreign_key`` lacks an allowed\n        key, and ``unsigned`` lacks an op-cert (a retired legacy HMAC record\n        included). Outside the opt-in environment\n        restriction, signer environment alone is not a gate; ``trust_basis`` names the\n        accepted key. Omitted ``kind`` checks the latest signature; an explicit\n        ``plan-review`` or ``completion-verifier`` kind is strict. ``show_ticket``\n        exposes every attestation.\n        ",
+  "inputSchema": {
+   "properties": {
+    "kind": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Kind"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id"
+   ],
+   "title": "verify_signatureArguments",
+   "type": "object"
+  }
+ }
+}
