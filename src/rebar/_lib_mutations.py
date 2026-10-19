@@ -18,6 +18,8 @@ package facade, so ``rebar.<name>``, ``rebar._lib_writes.<name>`` and
 
 from __future__ import annotations
 
+import os
+from collections.abc import Sequence
 from typing import Any
 
 from rebar._commands.gates import log_description_cap_warning as _warn_description_cap
@@ -58,7 +60,7 @@ def comment(
     body: str,
     *,
     source: dict | None = None,
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
     allow_secret_pattern: str = "",
 ) -> None:
     """Append a comment. ``source`` (P1.2 import): optional per-comment provenance
@@ -84,10 +86,10 @@ def comment(
 def append_session_log(
     entry: str,
     *,
-    summary=None,
-    relates_to=None,
-    discovered_from=None,
-    repo_root=None,
+    summary: str | None = None,
+    relates_to: str | None = None,
+    discovered_from: str | None = None,
+    repo_root: str | os.PathLike[str] | None = None,
     _creation_channel: str = "python",
 ) -> dict:
     """Append ``entry`` to the current session_log, creating one on first use.
@@ -120,10 +122,10 @@ def append_session_log(
 
 def start_session_log(
     *,
-    summary=None,
-    relates_to=None,
-    discovered_from=None,
-    repo_root=None,
+    summary: str | None = None,
+    relates_to: str | None = None,
+    discovered_from: str | None = None,
+    repo_root: str | os.PathLike[str] | None = None,
     _creation_channel: str = "python",
 ) -> dict:
     """Explicitly create a NEW session_log and make it the current one (rotating
@@ -146,7 +148,9 @@ def start_session_log(
         raise RebarError(exc.message, returncode=exc.returncode, stderr=exc.message) from None
 
 
-def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> str | None:
+def edit_ticket(
+    ticket_id: str, *, repo_root: str | os.PathLike[str] | None = None, **fields: Any
+) -> str | None:
     """Edit ticket fields: title, priority, assignee, ticket_type, description.
 
     Tags (P2.3): use ``add_tags``/``remove_tags``/``set_tags`` (lists or CSV) to
@@ -181,7 +185,14 @@ def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> str | None:
     return _warn_description_cap(warning)
 
 
-def link(id1: str, id2: str, relation: str, *, force: str = "", repo_root=None) -> dict | None:
+def link(
+    id1: str,
+    id2: str,
+    relation: str,
+    *,
+    force: str = "",
+    repo_root: str | os.PathLike[str] | None = None,
+) -> dict | None:
     """Link two tickets.
 
     ``relation`` must be one of the seven canonical relations: blocks, depends_on,
@@ -207,7 +218,13 @@ def link(id1: str, id2: str, relation: str, *, force: str = "", repo_root=None) 
     return _python_leaf(_link, id1, id2, relation, repo_root=repo_root, what="link")
 
 
-def unlink(id1: str, id2: str, relation: str | None = None, *, repo_root=None) -> None:
+def unlink(
+    id1: str,
+    id2: str,
+    relation: str | None = None,
+    *,
+    repo_root: str | os.PathLike[str] | None = None,
+) -> None:
     """Remove an active link from ``id1`` to ``id2``.
 
     When ``relation`` is provided, the function removes that relation. Otherwise it removes
@@ -224,7 +241,7 @@ def unlink(id1: str, id2: str, relation: str | None = None, *, repo_root=None) -
     _python_leaf(_unlink_cmd.unlink_core, id1, id2, relation, repo_root=repo_root, what="unlink")
 
 
-def tag(ticket_id: str, tag: str, *, repo_root=None) -> None:
+def tag(ticket_id: str, tag: str, *, repo_root: str | os.PathLike[str] | None = None) -> None:
     """Add a tag to a ticket through a ``TAG_DELTA`` event.
 
     The tag is trimmed and validated. An existing tag is an idempotent success that writes no
@@ -238,7 +255,7 @@ def tag(ticket_id: str, tag: str, *, repo_root=None) -> None:
     _python_leaf(leaf.tag, ticket_id, tag, repo_root=repo_root, what="tag")
 
 
-def untag(ticket_id: str, tag: str, *, repo_root=None) -> None:
+def untag(ticket_id: str, tag: str, *, repo_root: str | os.PathLike[str] | None = None) -> None:
     """Remove a tag from a ticket through a ``TAG_DELTA`` event.
 
     The tag is trimmed and validated. An absent tag is an idempotent success that writes no
@@ -252,7 +269,7 @@ def untag(ticket_id: str, tag: str, *, repo_root=None) -> None:
     _python_leaf(leaf.untag, ticket_id, tag, repo_root=repo_root, what="untag")
 
 
-def archive(ticket_id: str, *, repo_root=None) -> None:
+def archive(ticket_id: str, *, repo_root: str | os.PathLike[str] | None = None) -> None:
     """Archive an open ticket and preserve its terminal state.
 
     The function first folds eligible events into a ``SNAPSHOT``. It then appends an
@@ -268,7 +285,9 @@ def archive(ticket_id: str, *, repo_root=None) -> None:
     _python_leaf(leaf.archive, ticket_id, repo_root=repo_root, what="archive")
 
 
-def compact(ticket_id: str | None = None, *, repo_root=None) -> None:
+def compact(
+    ticket_id: str | None = None, *, repo_root: str | os.PathLike[str] | None = None
+) -> None:
     """Fold eligible events for one ticket into a ``SNAPSHOT``.
 
     ``ticket_id`` accepts any resolvable ticket identifier. Its annotation permits ``None``, but
@@ -299,7 +318,12 @@ def compact(ticket_id: str | None = None, *, repo_root=None) -> None:
         )
 
 
-def attach_commits(ticket_id: str, commits, *, repo_root=None) -> dict:
+def attach_commits(
+    ticket_id: str,
+    commits: Sequence[str | dict[str, Any]],
+    *,
+    repo_root: str | os.PathLike[str] | None = None,
+) -> dict:
     """Attach commit SHAs to a ticket as a durable, union-merged ``commits`` list
     (epic a88f / WS-H). ``commits`` is a list of SHA strings or {sha, message?,
     author?, …} records. Convergent (union by sha) and NOT synced to Jira. Returns

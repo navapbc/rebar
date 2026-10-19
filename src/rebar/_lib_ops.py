@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime
 import importlib
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -43,7 +44,7 @@ def run_workflow(
     ticket_id: str | None = None,
     run_id: str | None = None,
     dry_run: bool = False,
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
     secrets: dict | None = None,
 ) -> dict:
     """Run a workflow (a ``.rebar/workflows/<name>.yaml`` path/name or a dict) and
@@ -58,30 +59,40 @@ def run_workflow(
         ticket_id=ticket_id,
         run_id=run_id,
         dry_run=dry_run,
-        repo_root=repo_root,
+        repo_root=None if repo_root is None else os.fspath(repo_root),
         secrets=secrets,
     )
 
 
 def get_workflow_status(
-    run_id: str, ticket_id: str | None = None, *, repo_root=None
+    run_id: str, ticket_id: str | None = None, *, repo_root: str | os.PathLike[str] | None = None
 ) -> WorkflowRun:
     """A workflow run's current status, read via replay (no execution)."""
     from rebar.llm.workflow import runs
 
-    return cast("WorkflowRun", runs.status(run_id, ticket_id, repo_root=repo_root))
+    return cast(
+        "WorkflowRun",
+        runs.status(
+            run_id, ticket_id, repo_root=None if repo_root is None else os.fspath(repo_root)
+        ),
+    )
 
 
 def get_workflow_result(
-    run_id: str, ticket_id: str | None = None, *, repo_root=None
+    run_id: str, ticket_id: str | None = None, *, repo_root: str | os.PathLike[str] | None = None
 ) -> WorkflowRun:
     """A workflow run's outputs (the terminal step's output is the result)."""
     from rebar.llm.workflow import runs
 
-    return cast("WorkflowRun", runs.result(run_id, ticket_id, repo_root=repo_root))
+    return cast(
+        "WorkflowRun",
+        runs.result(
+            run_id, ticket_id, repo_root=None if repo_root is None else os.fspath(repo_root)
+        ),
+    )
 
 
-def bridge_fsck(*, repo_root=None) -> BridgeFsck:
+def bridge_fsck(*, repo_root: str | os.PathLike[str] | None = None) -> BridgeFsck:
     """Offline bridge audit: unknown types, binding drift, and store integrity.
     Anomaly findings are normal results, not errors. Operational scan failures
     raise ``RebarError`` with ``returncode=2``.
@@ -100,7 +111,7 @@ def bridge_fsck(*, repo_root=None) -> BridgeFsck:
         return cast("BridgeFsck", findings)
 
 
-def bridge_projects_list(*, repo_root=None) -> dict:
+def bridge_projects_list(*, repo_root: str | os.PathLike[str] | None = None) -> dict:
     """Return the store's bridge-projects mapping ``{key: {"repos": [...]}}``."""
     from rebar._operation_config import compose_and_bind_operation_snapshot
 
@@ -110,7 +121,9 @@ def bridge_projects_list(*, repo_root=None) -> dict:
         return store.read_projects(root)
 
 
-def bridge_projects_set(key, repos, *, repo_root=None) -> None:
+def bridge_projects_set(
+    key: str, repos: list[str], *, repo_root: str | os.PathLike[str] | None = None
+) -> None:
     """Replace ``key``'s repos with ``repos`` in the bridge-projects mapping.
 
     A syntactically-invalid ``key`` (rejected by ``set_project``) is mapped to a
@@ -133,7 +146,7 @@ def bridge_projects_set(key, repos, *, repo_root=None) -> None:
         push.commit_and_push_tickets_branch(tracker, message="bridge: update projects mapping")
 
 
-def bridge_projects_remove(key, *, repo_root=None) -> None:
+def bridge_projects_remove(key: str, *, repo_root: str | os.PathLike[str] | None = None) -> None:
     """Remove ``key`` from the bridge-projects mapping.
 
     Raise ``RebarError`` (naming the key) if it is not present, and likewise map a
@@ -252,13 +265,15 @@ def bridge_preview(
     *,
     only: list[str] | None = None,
     exclude: list[str] | None = None,
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
 ) -> BridgeRun:
     """Compute proposed Jira changes without mutating Jira or bridge state."""
     return _bridge_run("preview", only=only, exclude=exclude, max_changes=None, repo_root=repo_root)
 
 
-def bridge_run(profile: str | None = None, *, repo_root=None) -> BridgeRun:
+def bridge_run(
+    profile: str | None = None, *, repo_root: str | os.PathLike[str] | None = None
+) -> BridgeRun:
     """Run one scheduled bridge profile with captured output and strict delivery."""
     from rebar._bridge_runner import run_bridge
     from rebar._operation_config import compose_and_bind_operation_snapshot
@@ -272,7 +287,7 @@ def bridge_sync(
     only: list[str] | None = None,
     exclude: list[str] | None = None,
     max_changes: int | None = None,
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
 ) -> BridgeRun:
     """Apply proposed Jira changes, optionally limiting the applied plan."""
     return _bridge_run(
@@ -284,7 +299,7 @@ def bridge_status(
     *,
     target_environment_id: str | None = None,
     max_age_seconds: int | None = None,
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
 ) -> BridgeStatus:
     """Read the durable last-pass, pause, and live-lock status snapshot."""
     _validate_positive("max_age_seconds", max_age_seconds)
@@ -316,7 +331,7 @@ def _bridge_remote(root: Path) -> str:
     return remote
 
 
-def bridge_pause(reason: str, *, repo_root=None) -> BridgeControl:
+def bridge_pause(reason: str, *, repo_root: str | os.PathLike[str] | None = None) -> BridgeControl:
     """Persist an idempotent reconciliation pause through the shared CAS ref."""
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError("pause reason must be a non-empty string")
@@ -347,13 +362,15 @@ def bridge_pause(reason: str, *, repo_root=None) -> BridgeControl:
     )
 
 
-def bridge_resume(*, repo_root=None) -> BridgeControl:
+def bridge_resume(*, repo_root: str | os.PathLike[str] | None = None) -> BridgeControl:
     """Clear the reconciliation pause through its observed-OID CAS operation."""
     result, _changed = _bridge_resume_operation(repo_root=repo_root)
     return result
 
 
-def _bridge_resume_operation(*, repo_root=None) -> tuple[BridgeControl, bool]:
+def _bridge_resume_operation(
+    *, repo_root: str | os.PathLike[str] | None = None
+) -> tuple[BridgeControl, bool]:
     """Internal resume result plus whether an active gate was actually cleared."""
     root = Path(config.repo_root(repo_root))
     remote = _bridge_remote(root)

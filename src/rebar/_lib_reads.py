@@ -14,6 +14,7 @@ subprocess (the bash orchestrator was retired in the bash→Python migration).
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Literal, cast, overload
 
 from rebar._errors import RebarError
@@ -21,6 +22,9 @@ from rebar._lib_warn import emit_cross_session_warning
 
 if TYPE_CHECKING:
     # Schema-derived return types (story 3a10). Import-only under TYPE_CHECKING.
+    from collections.abc import Iterable
+    from typing import Any, TextIO
+
     from rebar.types import DepsGraph, NextBatch, SearchResult, TicketState
 
 
@@ -38,7 +42,12 @@ def _json_or(out: str, default):
 
 
 # ── Read path (in-process via rebar._reads; alias-aware, returns parsed JSON) ──
-def show_ticket(ticket_id: str, *, repo_root=None, include_inbound: bool = False) -> TicketState:
+def show_ticket(
+    ticket_id: str,
+    *,
+    repo_root: str | os.PathLike[str] | None = None,
+    include_inbound: bool = False,
+) -> TicketState:
     """Compiled ticket state as a dict (alias/short-id aware).
 
     ``include_inbound=True`` adds the computed ``inbound_deps`` key — inbound
@@ -56,7 +65,7 @@ def show_ticket(ticket_id: str, *, repo_root=None, include_inbound: bool = False
 
 def export_tickets(
     *,
-    out=None,
+    out: TextIO | str | os.PathLike[str] | None = None,
     status: str | None = None,
     ticket_type: str | None = None,
     parent: str | None = None,
@@ -64,7 +73,7 @@ def export_tickets(
     include_session_logs: bool = False,
     exclude_archived: bool = False,
     include_deleted: bool = False,
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
 ) -> dict:
     """Export the store as NDJSON (one full ticket per line) to ``out``.
 
@@ -88,11 +97,16 @@ def export_tickets(
         include_session_logs=include_session_logs,
         exclude_archived=exclude_archived,
         include_deleted=include_deleted,
-        repo_root=repo_root,
+        repo_root=None if repo_root is None else os.fspath(repo_root),
     )
 
 
-def import_tickets(source, *, dry_run: bool = False, repo_root=None) -> dict:
+def import_tickets(
+    source: str | os.PathLike[str] | TextIO | Iterable[str | dict[str, Any]],
+    *,
+    dry_run: bool = False,
+    repo_root: str | os.PathLike[str] | None = None,
+) -> dict:
     """Import tickets from rebar export NDJSON ``source`` into this repo.
 
     ``source`` is an NDJSON file path, a file object, or an iterable of lines/dicts.
@@ -108,7 +122,11 @@ def import_tickets(source, *, dry_run: bool = False, repo_root=None) -> dict:
     """
     from rebar._io import import_ndjson
 
-    return import_ndjson.import_tickets(source, dry_run=dry_run, repo_root=repo_root)
+    return import_ndjson.import_tickets(
+        source,
+        dry_run=dry_run,
+        repo_root=None if repo_root is None else os.fspath(repo_root),
+    )
 
 
 def list_tickets(
@@ -126,7 +144,7 @@ def list_tickets(
     with_children_count: bool = False,
     sort: str | None = None,
     full: bool = True,
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
 ) -> list[TicketState]:
     """List tickets as a list of dicts, with optional filters.
 
@@ -171,7 +189,7 @@ def list_tickets(
     )
 
 
-def deps(ticket_id: str, *, repo_root=None) -> DepsGraph:
+def deps(ticket_id: str, *, repo_root: str | os.PathLike[str] | None = None) -> DepsGraph:
     """Dependency graph for a ticket (JSON)."""
     from rebar import _reads
 
@@ -179,7 +197,9 @@ def deps(ticket_id: str, *, repo_root=None) -> DepsGraph:
     return cast("DepsGraph", _reads.deps(ticket_id, repo_root=repo_root))
 
 
-def ready(*, sort: str | None = None, repo_root=None) -> list[TicketState]:
+def ready(
+    *, sort: str | None = None, repo_root: str | os.PathLike[str] | None = None
+) -> list[TicketState]:
     """Tickets ready to work (all blockers closed).
 
     ``sort`` orders by ``priority|created|updated|id|status`` (``-`` prefix =
@@ -189,7 +209,7 @@ def ready(*, sort: str | None = None, repo_root=None) -> list[TicketState]:
     return _reads.ready(sort=sort, repo_root=repo_root)
 
 
-def next_batch(epic_id: str, *, repo_root=None) -> NextBatch:
+def next_batch(epic_id: str, *, repo_root: str | os.PathLike[str] | None = None) -> NextBatch:
     """Next parallel batch of unblocked tickets under an epic's hierarchy (JSON).
 
     Runs in-process via the shared read plumbing, like every other read (Tier C
@@ -209,7 +229,7 @@ def search(
     include_archived: bool = False,
     sort: str | None = None,
     full: Literal[False] = False,
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
 ) -> list[SearchResult]: ...
 
 
@@ -223,7 +243,7 @@ def search(
     include_archived: bool = False,
     sort: str | None = None,
     full: Literal[True],
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
 ) -> list[TicketState]: ...
 
 
@@ -236,7 +256,7 @@ def search(
     include_archived: bool = False,
     sort: str | None = None,
     full: bool = False,
-    repo_root=None,
+    repo_root: str | os.PathLike[str] | None = None,
 ) -> list[SearchResult] | list[TicketState]:
     """Search tickets, returning bounded discovery results by default.
 
@@ -263,7 +283,9 @@ def search(
     )
 
 
-def recent_session_logs(*, limit: int = 5, repo_root=None) -> list[TicketState]:
+def recent_session_logs(
+    *, limit: int = 5, repo_root: str | os.PathLike[str] | None = None
+) -> list[TicketState]:
     """The ``limit`` newest ``session_log`` tickets, newest first (by created_at).
 
     session_log tickets are hidden from :func:`list_tickets`; this is the
@@ -276,7 +298,9 @@ def recent_session_logs(*, limit: int = 5, repo_root=None) -> list[TicketState]:
 
 
 # ── identity provider-neutral resolution seam (264f; read path, never raises) ──
-def resolve_mapping(provider: str, external_id: str, *, repo_root=None) -> str | None:
+def resolve_mapping(
+    provider: str, external_id: str, *, repo_root: str | os.PathLike[str] | None = None
+) -> str | None:
     """Id of the identity whose ``mappings`` contains ``{provider, external_id}`` (exact
     match on the provider's opaque external id, NEVER email), else ``None``. Never raises."""
     from rebar._commands import identity as _identity
@@ -284,7 +308,7 @@ def resolve_mapping(provider: str, external_id: str, *, repo_root=None) -> str |
     return _identity.resolve_mapping(provider, external_id, repo_root=repo_root)
 
 
-def is_placeholder(identity_id: str, *, repo_root=None) -> bool:
+def is_placeholder(identity_id: str, *, repo_root: str | os.PathLike[str] | None = None) -> bool:
     """True iff ``identity_id`` is an identity whose compiled-state ``tags`` carries the
     ``placeholder`` marker (a ghost minted for an unmapped inbound user). An unknown id or
     non-identity ticket is ``False``. Never raises."""
@@ -293,7 +317,9 @@ def is_placeholder(identity_id: str, *, repo_root=None) -> bool:
     return _identity.is_placeholder(identity_id, repo_root=repo_root)
 
 
-def jira_account_id(local_assignee: str, *, repo_root=None) -> str | None:
+def jira_account_id(
+    local_assignee: str, *, repo_root: str | os.PathLike[str] | None = None
+) -> str | None:
     """Resolve a LOCAL assignee/reporter string (identity ticket id or case-insensitive
     email) to its Jira accountId (``{provider:"jira"}`` external_id), else ``None``.
     Never raises."""
@@ -302,7 +328,9 @@ def jira_account_id(local_assignee: str, *, repo_root=None) -> str | None:
     return _identity.jira_account_id(local_assignee, repo_root=repo_root)
 
 
-def identity_email(local_assignee: str, *, repo_root=None) -> str | None:
+def identity_email(
+    local_assignee: str, *, repo_root: str | os.PathLike[str] | None = None
+) -> str | None:
     """The matched identity's ``email`` (same id/email matching as
     :func:`jira_account_id`), else ``None``. Never raises."""
     from rebar._commands import identity as _identity
@@ -310,7 +338,12 @@ def identity_email(local_assignee: str, *, repo_root=None) -> str | None:
     return _identity.identity_email(local_assignee, repo_root=repo_root)
 
 
-def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) -> str:
+def fsck(
+    *,
+    recover: bool = False,
+    report_only: bool = False,
+    repo_root: str | os.PathLike[str] | None = None,
+) -> str:
     """Run store integrity checks. ``recover=True`` runs the destructive recovery
     path. ``report_only=True`` suppresses fsck's only mutation — removing a stale
     ``.git/index.lock`` — so a read-only surface (MCP under REBAR_MCP_READONLY)
@@ -477,7 +510,12 @@ def _fsck_recover_report(*, repo_root) -> dict:
     }
 
 
-def fsck_report(*, recover: bool = False, report_only: bool = False, repo_root=None) -> dict:
+def fsck_report(
+    *,
+    recover: bool = False,
+    report_only: bool = False,
+    repo_root: str | os.PathLike[str] | None = None,
+) -> dict:
     """Run fsck and return a STRUCTURED result instead of the human text — and,
     crucially, WITHOUT collapsing "the diagnosis is: N findings" into "the tool failed".
 

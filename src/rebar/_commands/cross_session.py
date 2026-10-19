@@ -7,6 +7,7 @@ DIFFERENT session; it performs no I/O so it stays trivially testable.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from typing import Any
 
@@ -30,7 +31,9 @@ def cross_session_warning(
     return f"ticket held by another session {claimed}"
 
 
-def cross_session_warning_for(ticket_id: str, *, repo_root: str | None = None) -> str | None:
+def cross_session_warning_for(
+    ticket_id: str, *, repo_root: str | os.PathLike[str] | None = None
+) -> str | None:
     """Compose :func:`cross_session_warning` with the real state, session, and config reads.
 
     Reads the config toggle and acting session BEFORE the ``show_ticket`` reduce: the pure

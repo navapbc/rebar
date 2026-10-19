@@ -8,6 +8,7 @@ models let FastMCP resolve return annotations.
 from __future__ import annotations
 
 from functools import partial
+from typing import Any
 
 import rebar
 from rebar._mcp_models import (
@@ -124,7 +125,9 @@ def register_bridge_tools(mcp, ctx) -> None:
         only: list[str] | None = None, exclude: list[str] | None = None
     ) -> BridgeRunOut:
         """Compute proposed Jira changes without applying them."""
-        kwargs = {
+        # Typed as Any-valued: omitting unset keys is the pinned forwarding contract, and a
+        # ``dict[str, list[str]]`` splat would type-check against the typed ``repo_root``.
+        kwargs: dict[str, Any] = {
             key: value
             for key, value in {"only": only, "exclude": exclude}.items()
             if value is not None

@@ -12,6 +12,7 @@ import contextlib
 import contextvars
 import functools
 import inspect
+import os
 import warnings
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -41,7 +42,7 @@ def suppress_cross_session_warning() -> Iterator[None]:
 
 
 def emit_cross_session_warning(
-    ticket_id: str, *, repo_root: str | None = None, stacklevel: int = 3
+    ticket_id: str, *, repo_root: str | os.PathLike[str] | None = None, stacklevel: int = 3
 ) -> None:
     """Best-effort advisory warning when another session holds ``ticket_id``'s claim.
 
