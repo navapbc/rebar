@@ -167,3 +167,38 @@ def test_grace_env_override(tracker: Path, monkeypatch) -> None:
     bs = _store_with_binding(tracker, "loc-6", "DIG-6")
     bs.note_absent("DIG-6")
     assert bs.is_retired("DIG-6"), "GRACE=1 retires after a single 404"
+
+
+def test_resolve_absent_retire_grace_via_public_facade(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The owned accessor is reachable from the PUBLIC ``rebar.config`` facade and keeps
+    its byte-identical contract."""
+    from rebar.config import resolve_absent_retire_grace
+
+    monkeypatch.delenv("RECONCILER_ABSENT_RETIRE_GRACE", raising=False)
+    assert resolve_absent_retire_grace() == 3, "unset ⇒ default 3"
+    monkeypatch.setenv("RECONCILER_ABSENT_RETIRE_GRACE", "5")
+    assert resolve_absent_retire_grace() == 5, "a valid value is honored"
+    monkeypatch.setenv("RECONCILER_ABSENT_RETIRE_GRACE", "not-an-int")
+    assert resolve_absent_retire_grace() == 3, "malformed ⇒ default"
+    monkeypatch.setenv("RECONCILER_ABSENT_RETIRE_GRACE", "0")
+    assert resolve_absent_retire_grace() == 1, "a sub-minimum value clamps to 1"
+
+
+def test_binding_retires_at_exactly_grace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """END-TO-END: with ``RECONCILER_ABSENT_RETIRE_GRACE=2`` a bound key survives the
+    first confirmed-404 ``note_absent`` and retires on the SECOND — proving the accessor
+    is wired into ``note_absent`` through the cut. A cut that froze the grace at the
+    default 3, or dropped the read, would retire at the wrong count."""
+    binding_store = _mod
+    monkeypatch.setenv("RECONCILER_ABSENT_RETIRE_GRACE", "2")
+
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir(parents=True, exist_ok=True)
+    store = binding_store.BindingStore(tracker)
+    store.bind_confirm("local-1", "JIRA-1")
+    store.save()
+
+    store.note_absent("JIRA-1")
+    assert not store.is_retired("JIRA-1"), "must NOT retire before grace consecutive 404s"
+    store.note_absent("JIRA-1")
+    assert store.is_retired("JIRA-1"), "must retire at exactly grace (2) consecutive 404s"

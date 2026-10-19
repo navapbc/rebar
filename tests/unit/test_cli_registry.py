@@ -14,12 +14,13 @@ held-out oracle and are exercised by the orchestrator, not the implementer.
 
 from __future__ import annotations
 
+import inspect
 import subprocess
 import sys
 
 import pytest
 
-from rebar._cli import _registry
+from rebar._cli import _registry, _registry_checks
 from rebar._cli._registry import Route, validate
 
 # The named policy sets ``derive_policy_sets`` produces — its complete key census. (Before
@@ -313,3 +314,73 @@ def test_route_for_shipped_table_has_no_alias_regression() -> None:
     # unknown-spelling contract must be unchanged.
     assert _registry.route_for("show") is not None
     assert _registry.route_for("definitely-not-a-command") is None
+
+
+def test_every_defined_check_is_wired_into_the_check_tuple() -> None:
+    """A check that moved but was left out of ``_CHECKS`` would silently stop running."""
+    defined = {
+        name
+        for name, obj in vars(_registry_checks).items()
+        if name.startswith("_check_") and inspect.isfunction(obj)
+    }
+    wired = {check.__name__ for check in _registry_checks._CHECKS}
+    assert defined == wired, f"defined but not wired: {sorted(defined - wired)}"
+
+
+@pytest.mark.parametrize(
+    ("code", "routes"),
+    [
+        (
+            "duplicate",
+            (Route(name="dup", group="read"), Route(name="dup", group="read")),
+        ),
+        (
+            "alias_retired_collision",
+            (
+                Route(name="gone", group="read", retired=True),
+                Route(name="live", group="read", aliases=("gone",)),
+            ),
+        ),
+        (
+            "unknown_capability",
+            (Route(name="c", group="read", capabilities=("not-a-real-capability",)),),
+        ),
+        (
+            "malformed_reference",
+            (Route(name="r", group="read", handler="no-colon-here", adapter="argv"),),
+        ),
+        (
+            "contradiction",
+            (Route(name="x", group="read", retired=True, hidden=True),),
+        ),
+        (
+            "unknown_adapter",
+            (Route(name="a", group="read", adapter="teleport"),),
+        ),
+        (
+            "unknown_init",
+            (Route(name="i", group="read", init="whenever"),),
+        ),
+        (
+            "handler_without_adapter",
+            (Route(name="h", group="read", handler="mod:attr", adapter=""),),
+        ),
+        (
+            "prefix_without_argv",
+            (Route(name="p", group="read", adapter="dispatcher", argv_prefix=("x",)),),
+        ),
+    ],
+)
+def test_each_check_fires_on_its_own_violation(code: str, routes: tuple[Route, ...]) -> None:
+    """Every rule that moved still detects its own violation through the public entry point.
+
+    This is what makes the split checkable rather than merely importable: if a check were
+    dropped from ``_CHECKS``, or its module-level vocabulary failed to move with it, the
+    corresponding case here goes green-to-red.
+    """
+    assert code in _codes(routes)
+
+
+def test_a_clean_table_produces_no_findings() -> None:
+    """The negative control: the crafted-route harness is not reporting findings for free."""
+    assert validate((Route(name="ok", group="read"),)) == ()

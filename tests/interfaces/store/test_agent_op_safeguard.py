@@ -212,3 +212,23 @@ def test_mcp_run_workflow_fences_llm_without_allow_llm(rebar_repo, monkeypatch):
         _call("run_workflow", {"workflow": "agentwf", "ticket_id": tid, "dry_run": True})
     )
     assert res is not None
+
+
+def test_the_audited_override_warning_names_the_module_that_holds_the_code(caplog) -> None:
+    """`assert_gated` hardcoded `logging.getLogger("rebar.llm.config")`. The warning it emits is
+    security-relevant — its own text calls the REBAR_GATE_ALLOW_UNGATED override "audited" — so
+    attributing it to a module that no longer contains the code sends whoever greps the logs to the
+    wrong file. Verified safe to re-point: that literal had exactly one occurrence repo-wide and no
+    test filtered on it."""
+    from rebar.llm import gate_context
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("REBAR_GATE_ALLOW_UNGATED", "1")
+        with caplog.at_level("WARNING"):
+            gate_context.assert_gated("probe context")
+
+    records = [r for r in caplog.records if "OUTSIDE a snapshot gate session" in r.getMessage()]
+    assert records, "the override warning was not emitted"
+    assert all(r.name == "rebar.llm.gate_context" for r in records), (
+        f"warning attributed to {[r.name for r in records]}, not rebar.llm.gate_context"
+    )

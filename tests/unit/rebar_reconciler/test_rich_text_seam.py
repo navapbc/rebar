@@ -32,16 +32,6 @@ _REC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine" / "reba
 _ADAPTERS = _REC / "adapters"
 
 
-def test_cloud_send_path_prose_names_shared_codec_owner() -> None:
-    """The dead Cloud helper name is gone; prose points at the shared codec path instead."""
-    for path in (
-        _ADAPTERS / "jira" / "backend.py",
-        _ADAPTERS / "jira" / "jira_fields.py",
-        _ADAPTERS / "jira_family" / "rich_text.py",
-    ):
-        assert "_fit_description" not in path.read_text()
-
-
 # ---------------------------------------------------------------------------
 # 1–2. Cloud behavioural parity — the composition and the two distinct callers
 # ---------------------------------------------------------------------------

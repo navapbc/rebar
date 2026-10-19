@@ -22,6 +22,8 @@ What these tests pin:
 
 from __future__ import annotations
 
+import builtins
+import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -275,3 +277,55 @@ def test_resolver_lives_in_the_shared_layer_without_cloud_imports() -> None:
         if m.startswith("rebar_reconciler.adapters.jira.") or m == "rebar_reconciler.adapters.jira"
     ]
     assert offenders == []
+
+
+@contextlib.contextmanager
+def _rebar_unimportable():
+    """Make a call-time ``import rebar.<...>`` raise ImportError for the duration of the
+    ``with`` block only, simulating the stdlib-only pandoc subprocess where ``rebar`` is
+    not on the path. Scoped tightly (restored before any fixture teardown) and leaves
+    ``rebar_reconciler`` — a distinct top-level name — untouched, so already-imported
+    adapter modules keep working."""
+    real_import = builtins.__import__
+
+    def _fake(name, *args, **kwargs):
+        if name == "rebar" or name.startswith("rebar."):
+            raise ImportError(f"blocked: {name}")
+        return real_import(name, *args, **kwargs)
+
+    builtins.__import__ = _fake
+    try:
+        yield
+    finally:
+        builtins.__import__ = real_import
+
+
+def test_cutover_clients_degrades_when_rebar_unimportable() -> None:
+    from rebar_reconciler.adapters.jira_family.rich_text import cutover_clients
+
+    with _rebar_unimportable():
+        result = cutover_clients()
+    assert result == frozenset(), (
+        "cutover_clients must fail CLOSED to the empty set (plain wire) when rebar is not "
+        "importable at call time — the delegating cut must keep the ImportError->default guard"
+    )
+
+
+def test_cutover_clients_read_live_per_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Flipping ``reconciler.rich_text_cutover`` between calls is observed immediately: the
+    cut resolver must read the flag live per call, never freeze it at compose time."""
+    import rebar.config
+    from rebar_reconciler.adapters.jira_family.rich_text import cutover_clients
+
+    class _Cfg:
+        def __init__(self, value: str) -> None:
+            self.reconciler = type("R", (), {"rich_text_cutover": value})()
+
+    state = {"value": "off"}
+    monkeypatch.setattr(rebar.config, "load_config", lambda *a, **k: _Cfg(state["value"]))
+
+    assert cutover_clients() == frozenset()
+    state["value"] = "both"
+    assert cutover_clients() == frozenset({"cloud", "dc"}), (
+        "cutover_clients must re-read reconciler.rich_text_cutover live per call after the cut"
+    )

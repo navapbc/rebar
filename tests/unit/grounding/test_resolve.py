@@ -18,6 +18,7 @@ binary is absent, so the suite stays green on a host without it.
 from __future__ import annotations
 
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -378,3 +379,35 @@ def test_extracted_import_resolves_against_index(repo, index):
     rec = r.refute_absence(refs[0], repo_root=repo, index=index)
     ev.validate(rec)
     assert rec["outcome"] == ev.OUTCOME_REFUTED
+
+
+def test_grounding_load_config_fails_open_and_reads_ctags(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``grounding.load_config`` still reads ``.rebar/grounding.toml`` and fails open to
+    defaults on a missing file, and ``REBAR_CTAGS_BIN`` is still honored."""
+    from rebar.grounding import resolve
+
+    cfg = resolve.load_config(str(tmp_path))
+    assert cfg.t2_enabled is False, "a missing grounding.toml must fail open to defaults"
+
+    rebar_dir = tmp_path / ".rebar"
+    rebar_dir.mkdir()
+    (rebar_dir / "grounding.toml").write_text("[grounding]\nt2_enabled = true\n", encoding="utf-8")
+    cfg2 = resolve.load_config(str(tmp_path))
+    assert cfg2.t2_enabled is True, "a present grounding.toml must be read"
+
+    monkeypatch.setenv("REBAR_CTAGS_BIN", "my-ctags")
+    # Assert the import-time capture in a FRESH interpreter so an in-process
+    # ``importlib.reload`` can't pollute module identity for other tests (the
+    # subprocess inherits the monkeypatched environment).
+    import subprocess
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-c", "import rebar.grounding.resolve as r; print(r._CTAGS_BIN)"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.strip() == "my-ctags", "REBAR_CTAGS_BIN must still be honored at import"
