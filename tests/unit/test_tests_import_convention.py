@@ -8,62 +8,17 @@ guard scans test modules."""
 
 from __future__ import annotations
 
-import ast
 import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-from _tree_scan import parsed_python_files
 
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TESTS_DIR = _REPO_ROOT / "tests"
-
-
-def _tests_rooted_imports(tree: ast.AST, rel: Path) -> list[str]:
-    """Return ``"<file>:<line>: <module>"`` for every ``tests``-rooted import in *tree*.
-
-    AST-based (not textual) so prose in docstrings and comments cannot produce a false hit.
-    """
-    hits: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == "tests" or alias.name.startswith("tests."):
-                    hits.append(f"{rel}:{node.lineno}: import {alias.name}")
-        elif isinstance(node, ast.ImportFrom):
-            # level > 0 is an explicit relative import, which is a different mechanism.
-            if (
-                node.level == 0
-                and node.module
-                and (node.module == "tests" or node.module.startswith("tests."))
-            ):
-                hits.append(f"{rel}:{node.lineno}: from {node.module} import ...")
-    return hits
-
-
-@pytest.mark.repo_policy
-def test_no_tests_rooted_imports_anywhere_under_tests() -> None:
-    """No module under ``tests/`` imports through a ``tests.``-rooted absolute path.
-
-    Same-directory helpers are imported by bare name (pytest's prepend mode puts the test's
-    own directory on ``sys.path``); cross-directory helpers live directly under ``tests/``,
-    which ``tests/conftest.py`` guarantees is importable.
-    Run this with bare ``pytest``: ``python -m pytest`` injects the repo root and can false-green.
-    """
-    offenders: list[str] = []
-    for module in parsed_python_files(_TESTS_DIR):
-        offenders.extend(_tests_rooted_imports(module.tree, module.relative))
-
-    assert offenders == [], (
-        "`tests.`-rooted imports resolve only when the repository root is on sys.path, "
-        "which the bare `pytest` console script (the invocation used by `make test` and CI) "
-        "does not provide. Import same-directory helpers by bare name instead:\n  "
-        + "\n  ".join(offenders)
-    )
 
 
 @pytest.mark.parametrize(

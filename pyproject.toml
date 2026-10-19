@@ -475,6 +475,8 @@ select = [
     "PT021",
     "PT022",
     "PT028",
+    "TID251",
+    "TID253",
 ]
 
 # ── RUF (Ruff-native) hygiene ratchet (story 125d) ────────────────────────────
@@ -521,11 +523,38 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 [tool.ruff.lint.mccabe]
 max-complexity = 15
 
+# Import conventions folded into ruff (story fixed-spinulose-hoverfly), replacing two
+# whole-tree AST scans: TID253 keeps the heavy optional stacks lazy (call-boundary imports)
+# everywhere except the stdlib-only `_engine` subprocess payload, tests and scripts;
+# TID251 bans `tests.`-rooted imports (bug a371). The list is read by
+# tests/unit/test_core_optionality.py, so it has one source.
+[tool.ruff.lint.flake8-tidy-imports]
+banned-module-level-imports = [
+    "langchain",
+    "langgraph",
+    "langchain_anthropic",
+    "langchain_openai",
+    "langchain_mcp_adapters",
+    "langfuse",
+    "anthropic",
+    "deepagents",
+    "opentelemetry",
+    "pydantic_ai",
+    "httpx",
+    "tree_sitter",
+    "tree_sitter_language_pack",
+    "hcl2",
+    "lark",
+]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"tests".msg = "tests.-rooted imports resolve only with the repo root on sys.path, which the bare pytest console script (make test, CI) does not provide; import same-directory helpers by bare name (bug a371)"
+
 [tool.ruff.lint.per-file-ignores]
 # Test code is out of the convention's scope: tests legitimately catch broadly (to
 # assert on failures) and print (debug/diagnostic output). PERMANENT, not part of
 # the shrinking allowlist.
-"tests/**" = ["T201"]
+"tests/**" = ["T201", "TID253"]
 # core leaves (__init__, reducer, graph, _store, _io) — SWEPT by 8d01 (crow-aeon-muck);
 # removed from the allowlist. Inline `# noqa` carry the justifications; _io/_cli.py keeps
 # inline `# noqa: T201` (CLI presentation), graph/_links.py keeps one inline T201 (stdout
@@ -566,7 +595,8 @@ max-complexity = 15
 # the shrinking allowlist. (Ticket ae96: replaced nine discretionary single-file entries and
 # 28 now-redundant inline `# noqa: T201` directives; scripts/ is linted by `make lint` from
 # here on.)
-"scripts/**" = ["T201"]
+"scripts/**" = ["T201", "TID253"]
+"src/rebar/_engine/**" = ["TID253"]
 # TypedDict generator CLI (story 3a10) — prints its regenerate/--check report to
 # stdout (the CI drift-gate surface). Legitimate-print category. KEEPS T201.
 "src/rebar/schemas/gen_types.py" = ["T201"]

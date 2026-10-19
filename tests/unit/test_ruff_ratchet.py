@@ -177,3 +177,72 @@ def test_the_deferred_pt_codes_stay_deferred_and_the_group_is_never_taken_whole(
         f"{sorted(still_deferred)} are deferred by decision, not oversight — adopting one is "
         "a behaviour-touching sweep and belongs in its own change with its own reasoning"
     )
+
+
+# --------------------------------------------------------------------------------------
+# Import conventions folded into ruff (story a757): TID251 / TID253 replaced two AST scans,
+# so nothing else asserts these contracts any more. The ratchet below keeps them from being
+# dropped, emptied or widened without a reviewed change.
+# --------------------------------------------------------------------------------------
+#: The heavy optional stacks that must stay out of module scope. Also the check set of
+#: tests/unit/test_core_optionality.py, which reads the same list from pyproject.toml, so
+#: pinning it here stops that test from passing vacuously over an emptied list.
+_HEAVY_STACKS = frozenset(
+    {
+        "langchain",
+        "langgraph",
+        "langchain_anthropic",
+        "langchain_openai",
+        "langchain_mcp_adapters",
+        "langfuse",
+        "anthropic",
+        "deepagents",
+        "opentelemetry",
+        "pydantic_ai",
+        "httpx",
+        "tree_sitter",
+        "tree_sitter_language_pack",
+        "hcl2",
+        "lark",
+    }
+)
+
+#: The only paths exempt from TID253: tests and scripts import heavy stacks freely, and the
+#: stdlib-only reconciler payload under ``_engine`` is a separate subprocess.
+_TID253_EXEMPT = frozenset({"tests/**", "scripts/**", "src/rebar/_engine/**"})
+
+
+def _tidy_imports_table() -> dict:
+    return _ruff_lint_table().get("flake8-tidy-imports", {})
+
+
+def test_ruff_select_enables_the_two_tidy_import_bans() -> None:
+    select = _ruff_select()
+    assert "TID251" in select, "TID251 (no tests.-rooted imports, bug a371) must stay selected"
+    assert "TID253" in select, "TID253 (heavy stacks stay lazy at module scope) must stay selected"
+
+
+def test_the_banned_module_level_stacks_are_exactly_the_named_ones() -> None:
+    banned = set(_tidy_imports_table().get("banned-module-level-imports", []))
+    assert banned == _HEAVY_STACKS, (
+        "the heavy-stack list drifted from the reviewed set; change it together with this "
+        f"test. Added: {sorted(banned - _HEAVY_STACKS)}; dropped: {sorted(_HEAVY_STACKS - banned)}"
+    )
+
+
+def test_the_tests_package_stays_banned_with_its_reason() -> None:
+    banned_api = _tidy_imports_table().get("banned-api", {})
+    assert "tests" in banned_api, "the `tests` package ban (TID251, bug a371) was removed"
+    assert "a371" in banned_api["tests"].get("msg", ""), (
+        "the `tests` ban must keep a message that names bug a371 and the bare-import fix"
+    )
+
+
+def test_tid253_is_exempt_only_for_tests_scripts_and_the_engine_payload() -> None:
+    per_file = _ruff_lint_table().get("per-file-ignores", {})
+    exempt = {pattern for pattern, codes in per_file.items() if "TID253" in codes}
+    assert exempt == _TID253_EXEMPT, (
+        "TID253 exemptions drifted: a new exemption lets a heavy stack load at import time "
+        f"in that path. Added: {sorted(exempt - _TID253_EXEMPT)}; "
+        f"dropped: {sorted(_TID253_EXEMPT - exempt)}"
+    )
