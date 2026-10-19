@@ -248,3 +248,102 @@ def test_plan_review_variant_tracks_material_and_degrades_to_a_none_key(monkeypa
     assert before != after, "a material change must change the dedup variant"
     assert unreadable == "source=attested;material=None"
     assert unreadable not in {before, after}
+
+
+# ── Material-sensitive completion dedup (bug c912-f274) ─────────────────────────────────────
+
+
+def test_verify_completion_start_after_an_edit_runs_a_fresh_check(store, monkeypatch):
+    import rebar.llm
+
+    tid = rebar.create_ticket("task", "stale completion", description="## Plan\nORIGINAL\n")
+    fake = _DescriptionRecordingReview()
+    monkeypatch.setattr(rebar.llm, "verify_completion", fake)
+    # readonly keeps the completion body from writing a verdict sidecar; the key still applies.
+    mcp = _server_with_llm_tools(readonly=True)
+
+    async def start():
+        return await mcp._tool_manager.call_tool("verify_completion_start", {"ticket_id": tid})
+
+    first = anyio.run(start)
+    assert fake.first_started.wait(timeout=5)
+    rebar.edit_ticket(tid, description="## Plan\nEDITED\n")
+    second = anyio.run(start)
+    try:
+        assert second["job_id"] != first["job_id"], (
+            "a completion start issued after the edit attached to the run that read the old text"
+        )
+        assert _wait_until(lambda: fake.calls == 2)
+        assert "EDITED" in fake.seen[1]
+    finally:
+        fake.release.set()
+
+
+def test_sync_verify_completion_after_an_edit_does_not_share_the_stale_result(store, monkeypatch):
+    import rebar.llm
+
+    tid = rebar.create_ticket("task", "stale sync check", description="## Plan\nORIGINAL\n")
+    fake = _DescriptionRecordingReview()
+    monkeypatch.setattr(rebar.llm, "verify_completion", fake)
+    mcp = _server_with_llm_tools(readonly=True)
+
+    async def scenario():
+        async def leader():
+            await mcp._tool_manager.call_tool("verify_completion", {"ticket_id": tid})
+
+        async def after_edit():
+            while not fake.first_started.is_set():  # noqa: ASYNC110 — set from a worker thread
+                await anyio.sleep(0.005)
+            await anyio.to_thread.run_sync(
+                lambda: rebar.edit_ticket(tid, description="## Plan\nEDITED\n")
+            )
+            await mcp._tool_manager.call_tool("verify_completion", {"ticket_id": tid})
+
+        async def releaser():
+            deadline = anyio.current_time() + 3.0
+            while fake.calls < 2 and anyio.current_time() < deadline:  # noqa: ASYNC110
+                await anyio.sleep(0.01)
+            fake.release.set()
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(leader)
+            tg.start_soon(after_edit)
+            tg.start_soon(releaser)
+
+    anyio.run(scenario)
+
+    assert fake.calls == 2, "the post-edit call shared the run that checked the old text"
+    assert "EDITED" in fake.seen[1]
+
+
+def _raise_read_failure(_tid):
+    raise RuntimeError("pinned ticket read failed")
+
+
+@pytest.mark.parametrize(
+    ("build", "prefix"),
+    [
+        (lambda m, tid: m._completion_variant(tid, None, None), "graph=None;source=attested"),
+        (lambda m, tid: m._plan_review_variant(tid, None), "source=attested"),
+    ],
+    ids=["verify_completion", "plan_review"],
+)
+def test_gate_variant_tracks_material_and_degrades_to_a_none_key(build, prefix, monkeypatch):
+    import rebar._mcp_llm as mcp_llm
+    from rebar.llm.plan_review import attest
+
+    monkeypatch.setattr(attest, "current_material_fingerprint", lambda _tid: "aaaa")
+    before = build(mcp_llm, "t")
+    monkeypatch.setattr(attest, "current_material_fingerprint", lambda _tid: "bbbb")
+    after = build(mcp_llm, "t")
+    monkeypatch.setattr(attest, "current_material_fingerprint", lambda _tid: None)
+    unreadable = build(mcp_llm, "t")
+    # A raising read (a pinned-view failure re-raised by the light read) must not fail the
+    # tool call before the gate starts; it degrades to the same None key.
+    monkeypatch.setattr(attest, "current_material_fingerprint", _raise_read_failure)
+    raising = build(mcp_llm, "t")
+
+    assert before != after, "a material change must change the dedup variant"
+    assert unreadable == f"{prefix};material=None"
+    assert raising == unreadable
+    assert unreadable not in {before, after}

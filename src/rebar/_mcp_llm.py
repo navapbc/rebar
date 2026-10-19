@@ -7,7 +7,6 @@ signatures. Model-produced results stay plain dictionaries without output-model 
 
 from __future__ import annotations
 
-import functools
 import time
 from collections.abc import Callable
 from typing import Any
@@ -69,18 +68,42 @@ def _record_verify_completion(result, ticket_id: str, *, readonly: bool):
     return result
 
 
+def _material_key(ticket_id: str) -> str | None:
+    """The ticket's current plan-material fingerprint for a dedup variant, or ``None``.
+
+    A gate start must not fail on its own dedup key: when the light read raises (a pinned
+    ticket-view failure is re-raised rather than returned as ``None``) or returns ``None``,
+    the variant carries the literal ``material=None``. Such calls de-duplicate only with each
+    other, never with a run keyed on a real fingerprint, and the gate still runs and reports
+    the read failure itself.
+    """
+    from rebar.llm.plan_review.attest import current_material_fingerprint
+
+    try:
+        return current_material_fingerprint(ticket_id)
+    except Exception:  # noqa: BLE001 — an unreadable key degrades to the None key, see above
+        return None
+
+
 def _plan_review_variant(ticket_id: str, source: str | None) -> str:
     """Dedup variant for plan review, keyed on the ticket's CURRENT plan material.
 
     Without the material fingerprint, a start issued after a description edit attached to
     the in-flight run that had already read the old text, so the author polled findings for
-    a plan they had replaced (bug 3b27-8f4b). When the light read fails the fingerprint is
-    ``None`` and the variant is the literal ``material=None``: such calls de-duplicate only
-    with each other, never with a run keyed on a real fingerprint, and the gate still runs.
+    a plan they had replaced (bug 3b27-8f4b). See :func:`_material_key` for the
+    ``material=None`` arm.
     """
-    from rebar.llm.plan_review.attest import current_material_fingerprint
+    return f"source={source or 'attested'};material={_material_key(ticket_id)}"
 
-    return f"source={source or 'attested'};material={current_material_fingerprint(ticket_id)}"
+
+def _completion_variant(ticket_id: str, graph: bool | None, source: str | None) -> str:
+    """Dedup variant for completion verification, keyed on the ticket's CURRENT material.
+
+    Same defect as plan review (bug c912-f274): a check started after an edit attached to
+    the run that had read the old text. See :func:`_material_key` for the ``material=None``
+    arm.
+    """
+    return f"graph={graph};source={source or 'attested'};material={_material_key(ticket_id)}"
 
 
 def _review_plan_body(ticket_id: str, ref, source, force: bool, *, readonly: bool) -> dict:
@@ -303,14 +326,15 @@ def _register_gate_start_tools(mcp, ann, allow_llm, readonly) -> None:
         # (see ``review_plan_start``).
         import anyio.to_thread  # deferred: keep this module importable with core deps only
 
+        # The material read for the dedup variant is a store read too, so it runs in the
+        # worker thread with the rest of the start.
         return await anyio.to_thread.run_sync(
-            functools.partial(
-                _start_gate_job,
+            lambda: _start_gate_job(
                 "verify_completion",
                 ticket_id,
                 ref=ref,
                 source=source,
-                variant=f"graph={graph};source={source or 'attested'}",
+                variant=_completion_variant(ticket_id, graph, source),
                 readonly=ro,
                 force=False,
                 work=lambda: _verify_completion_body(ticket_id, graph, ref, source, readonly=ro),
@@ -417,7 +441,7 @@ def register_llm_tools(mcp, ctx) -> None:
             ticket_id,
             ref=ref,
             source=source,
-            variant=f"graph={graph};source={source or 'attested'}",
+            variant=_completion_variant(ticket_id, graph, source),
             readonly=ro,
             force=False,
             work=lambda: _verify_completion_body(ticket_id, graph, ref, source, readonly=ro),
