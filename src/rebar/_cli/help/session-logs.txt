@@ -1,8 +1,0 @@
-Usage: rebar session-logs [--output {json,llm}] [--limit N]
-
-List the newest session_log tickets, newest first.
-
-options:
-  --output {json,llm}, -o {json,llm}
-                        output format
-  --limit N             cap the number of logs returned

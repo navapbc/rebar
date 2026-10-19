@@ -1,4 +1,5 @@
-"""In-process quality gates: clarity-check / check-ac / quality-check / summary.
+"""In-process quality gates: ``check`` (``--ac`` / ``--clarity`` / dispatch readiness) and
+``summary``.
 
 Reuses the single reducer via ``reads.show_state`` /
 ``reads.deps_state``. Each ``_compute`` returns the structured result the gate's
@@ -85,11 +86,11 @@ def check_ac_cli(argv: list[str], tracker: str) -> int:
     except OutputFormatError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 2
-    from rebar._cli._parsers.core.gates import build_check_ac
+    from rebar._cli._parsers.core.gates import build_check
 
-    ns, _extra = build_check_ac(prog="rebar check-ac").parse_known_args(rest)
+    ns, _extra = build_check(prog="rebar check").parse_known_args(rest)
     if len(rest) < 1:
-        sys.stderr.write("Usage: check-acceptance-criteria.sh <id>\n")
+        sys.stderr.write("Usage: rebar check <id> --ac\n")
         return 1
     ticket_id = ns.ticket_id if ns.ticket_id is not None else rest[0]
     result, code = check_ac_compute(ticket_id, tracker)
@@ -236,9 +237,9 @@ def clarity_check_cli(argv: list[str], tracker: str, repo_root: str | None) -> i
             seen_id = True
             mode = "ticket_id"
             i += 1
-    from rebar._cli._parsers.core.gates import build_clarity_check
+    from rebar._cli._parsers.core.gates import build_check
 
-    ns, _extra = build_clarity_check(prog="rebar clarity-check").parse_known_args(argv)
+    ns, _extra = build_check(prog="rebar check").parse_known_args(argv)
     ticket_id = ns.ticket_id or ""
     config_file = ns.config or ""
     if not mode:
@@ -391,11 +392,11 @@ def quality_check_cli(argv: list[str], tracker: str) -> int:
     except OutputFormatError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 2
-    from rebar._cli._parsers.core.gates import build_quality_check
+    from rebar._cli._parsers.core.gates import build_check
 
-    ns, _extra = build_quality_check(prog="rebar quality-check").parse_known_args(rest)
+    ns, _extra = build_check(prog="rebar check").parse_known_args(rest)
     if len(rest) != 1:
-        sys.stderr.write("Usage: issue-quality-check.sh <id>\n")
+        sys.stderr.write("Usage: rebar check <id>\n")
         return 1
     ticket_id = ns.ticket_id if ns.ticket_id is not None else rest[0]
     result, code, warn = quality_check_compute(ticket_id, tracker)
@@ -434,6 +435,45 @@ def quality_check_cli(argv: list[str], tracker: str) -> int:
     if warn:
         sys.stderr.write(warn + "\n")
     return code
+
+
+# ── check (the merged gate verb) ──────────────────────────────────────────────
+_CHECK_MODES = ("--ac", "--clarity")
+
+
+def _strip_output_opt(argv: list[str]) -> list[str]:
+    """Drop ``--output``/``-o`` and its value: ``check --clarity`` always emits JSON."""
+    out: list[str] = []
+    skip = False
+    for tok in argv:
+        if skip:
+            skip = False
+        elif tok in ("--output", "-o"):
+            skip = True
+        elif not tok.startswith(("--output=", "-o=")):
+            out.append(tok)
+    return out
+
+
+def check_cli(argv: list[str], tracker: str, repo_root: str | None) -> int:
+    """``rebar check <id> [--ac | --clarity] [--output json]``.
+
+    The single entry the ``argv_tracker_root`` adapter calls for the merged gate verb. It
+    pops the mode flag (more than one is a usage error, exit 2) and delegates with each
+    handler's CURRENT signature: ``--ac`` -> :func:`check_ac_cli`, ``--clarity`` ->
+    :func:`clarity_check_cli`, no flag -> :func:`quality_check_cli` (dispatch readiness,
+    the superset gate). Output bytes and exit codes are the delegated handler's own.
+    """
+    modes = [tok for tok in argv if tok in _CHECK_MODES]
+    if len(set(modes)) > 1:
+        sys.stderr.write("Error: --ac and --clarity are mutually exclusive\n")
+        return 2
+    rest = [tok for tok in argv if tok not in _CHECK_MODES]
+    if modes and modes[0] == "--ac":
+        return check_ac_cli(rest, tracker)
+    if modes and modes[0] == "--clarity":
+        return clarity_check_cli(_strip_output_opt(rest), tracker, repo_root)
+    return quality_check_cli(rest, tracker)
 
 
 # ── summary ───────────────────────────────────────────────────────────────────

@@ -18,7 +18,6 @@ from rebar._engine_support.reads import (
     ensure_fresh,
     list_states,
     ready_states,
-    recent_session_logs_state,
     search_state,
     show_state,
     sort_key_valid,
@@ -109,15 +108,72 @@ _LIST_VALUE_OPTS = frozenset(
         "--priority",
         "--without-tag",
         "--min-children",
+        "--limit",
     }
 )
 _SEARCH_VALUE_OPTS = frozenset({"--status", "--type", "--has-tag", "--sort"})
-_SESSION_LOGS_VALUE_OPTS = frozenset({"--limit"})
+_SHOW_VALUE_OPTS = frozenset({"--field"})
 _READY_VALUE_OPTS = frozenset({"--epic", "--sort"})
 
 
+def _render_show_state(state: dict, fmt: str) -> None:
+    """Print one shown ticket in ``fmt`` and warn on unresolved bridge alerts."""
+    if fmt == "llm":
+        # The `--output llm` arm is a machine format with a show↔list parity contract
+        # (test_llm_parity_show_vs_list) — do NOT add presentation-only fields here.
+        print(js_safe_dumps(to_llm(state), ensure_ascii=False, separators=(",", ":")))
+        return
+    out = dict(state)
+    from rebar.audit.read import plan_review_health
+
+    out["plan_review_health"] = plan_review_health(state)
+    print(js_safe_dumps(out, indent=2, ensure_ascii=False))
+    unresolved = sum(1 for a in state.get("bridge_alerts", []) if not a.get("resolved", False))
+    if unresolved > 0:
+        print(
+            f"WARNING: ticket {state.get('ticket_id')} has {unresolved} "
+            "unresolved bridge alert(s). Inspect unresolved bridge alerts for details.",
+            file=sys.stderr,
+        )
+
+
+def _print_show_error(raw_id: str, exc: ReadError) -> None:
+    """show emits a parseable JSON error to stdout AND a free-form stderr line
+    (preserving the historical contract callers depend on)."""
+    print(
+        js_safe_dumps(
+            error_envelope("ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1),
+            ensure_ascii=False,
+        )
+        if "not found" in exc.message
+        else js_safe_dumps(
+            error_envelope("show_failed", raw_id, exc.message, 1), ensure_ascii=False
+        )
+    )
+    print(f"Error: {exc.message}", file=sys.stderr)
+
+
+def _show_field(ids: list[str], field: str, tracker: str) -> int:
+    """``show --field NAME``: one compact JSON line per id holding ``state[NAME]``
+    (``null`` when the field is absent). Replaced the removed ``get-file-impact`` /
+    ``get-verify-commands`` verbs."""
+    rc = 0
+    for raw_id in ids:
+        try:
+            state = show_state(raw_id, tracker)
+        except ReadError as exc:
+            _print_show_error(raw_id, exc)
+            rc = 1
+            continue
+        print(js_safe_dumps(state.get(field), ensure_ascii=False))
+    return rc
+
+
 def _cmd_show(argv: list[str], tracker: str) -> int:
-    usage = "Usage: ticket show [--output llm] [--include-scratch] <ticket_id> [<ticket_id> ...]"
+    usage = (
+        "Usage: ticket show [--output llm] [--include-scratch] [--field=NAME] "
+        "<ticket_id> [<ticket_id> ...]"
+    )
     try:
         fmt, rest = parse_output(argv, "reader")
     except OutputFormatError as exc:
@@ -133,7 +189,10 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
     # the flag out of ``usage`` keeps it reconciler-only in practice.
     # Bespoke unknown-option guard (byte-exact reject text) runs BEFORE the factory
     # parses the accepted grammar (positionals + the two boolean flags).
+    rest = _coalesce_value_opts(rest, _SHOW_VALUE_OPTS)
     for arg in rest:
+        if arg.startswith("--field="):
+            continue
         if arg.startswith("-") and arg not in ("--include-scratch", "--include-provenance"):
             return _reject_unknown_option(arg, usage)
     from rebar._cli._parsers.core.reads import build_show
@@ -145,6 +204,14 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
     if not ids:
         print(usage, file=sys.stderr)
         return 1
+    if ns.field is not None:
+        if fmt == "llm" or not ns.field:
+            print(
+                "Error: --field needs a field name and cannot combine with --output llm",
+                file=sys.stderr,
+            )
+            return 2
+        return _show_field(ids, ns.field, tracker)
 
     overall_rc = 0
     for idx, raw_id in enumerate(ids):
@@ -168,41 +235,40 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
                 # left untouched to preserve ``show``/``list`` llm-output parity.
                 state.pop("managed_refs", None)
         except ReadError as exc:
-            # show emits a parseable JSON error to stdout AND a free-form stderr
-            # line (preserving the historical contract callers depend on).
-            print(
-                js_safe_dumps(
-                    error_envelope("ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1),
-                    ensure_ascii=False,
-                )
-                if "not found" in exc.message
-                else js_safe_dumps(
-                    error_envelope("show_failed", raw_id, exc.message, 1), ensure_ascii=False
-                )
-            )
-            print(f"Error: {exc.message}", file=sys.stderr)
+            _print_show_error(raw_id, exc)
             overall_rc = 1
             continue
-        if fmt == "llm":
-            # The `--output llm` arm is a machine format with a show↔list parity contract
-            # (test_llm_parity_show_vs_list) — do NOT add presentation-only fields here.
-            print(js_safe_dumps(to_llm(state), ensure_ascii=False, separators=(",", ":")))
-        else:
-            out = dict(state)
-            from rebar.audit.read import plan_review_health
-
-            out["plan_review_health"] = plan_review_health(state)
-            print(js_safe_dumps(out, indent=2, ensure_ascii=False))
-            unresolved = sum(
-                1 for a in state.get("bridge_alerts", []) if not a.get("resolved", False)
-            )
-            if unresolved > 0:
-                print(
-                    f"WARNING: ticket {state.get('ticket_id')} has {unresolved} "
-                    "unresolved bridge alert(s). Inspect unresolved bridge alerts for details.",
-                    file=sys.stderr,
-                )
+        _render_show_state(state, fmt)
     return overall_rc
+
+
+def _validate_priority(pri: str) -> int:
+    """``--priority``: integers 0-4 (comma-separated for OR). Return 0 when valid, else
+    print the error and return the usage exit (1)."""
+    if not pri:
+        return 0
+    if any(c not in "0123456789," for c in pri):
+        print(
+            f"Error: --priority expects integer values 0-4 (comma-separated for OR), got '{pri}'",
+            file=sys.stderr,
+        )
+        return 1
+    for p in pri.split(","):
+        if p not in ("", "0", "1", "2", "3", "4"):
+            print(f"Error: --priority value '{p}' out of range (expected 0-4)", file=sys.stderr)
+            return 1
+    return 0
+
+
+def _parse_list_limit(raw: str | None) -> int | None:
+    """``--limit N``: ``None`` (all rows) when absent, the positive int when valid, else
+    print the error and return ``0`` (the caller exits 2)."""
+    if raw is None:
+        return None
+    if not raw.isdigit() or int(raw) <= 0:
+        print(f"Error: --limit expects a positive integer, got '{raw}'", file=sys.stderr)
+        return 0
+    return int(raw)
 
 
 def _cmd_list(argv: list[str], tracker: str) -> int:
@@ -211,7 +277,8 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         "[--type=<type>[,<type>...]] [--status=<status>] [--priority=<n>] [--parent=<id>] "
         "[--has-tag=<tag>] [--without-tag=<tag>] [--min-children=<n>] "
         "[--unblocked|--blocked] [--with-children-count] [--full] "
-        "[--sort=<priority|created|updated|id|status>] (prefix '-' for descending)"
+        "[--sort=<priority|created|updated|id|status>] (prefix '-' for descending) "
+        "[--limit=<n>] (applied after --sort)"
     )
     try:
         fmt, rest = parse_output(argv, "reader")
@@ -239,6 +306,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         "--priority=",
         "--without-tag=",
         "--min-children=",
+        "--limit=",
     )
     for arg in rest:
         if arg in _list_known_bare or arg.startswith(_list_known_prefix):
@@ -250,7 +318,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
             arg,
             "Valid filters: --type --status --priority --parent --has-tag "
             "--without-tag --min-children --unblocked --blocked --with-children-count "
-            "--full --sort --include-archived --exclude-deleted --output llm",
+            "--full --sort --limit --include-archived --exclude-deleted --output llm",
         )
     from rebar._cli._parsers.core.reads import build_list
 
@@ -290,23 +358,12 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         )
         return 2
 
-    # --priority: integers 0-4 (comma-separated for OR).
-    pri = opts["priority"]
-    if pri:
-        if any(c not in "0123456789," for c in pri):
-            print(
-                f"Error: --priority expects integer values 0-4 "
-                f"(comma-separated for OR), got '{pri}'",
-                file=sys.stderr,
-            )
-            return 1
-        for p in pri.split(","):
-            if p not in ("", "0", "1", "2", "3", "4"):
-                print(
-                    f"Error: --priority value '{p}' out of range (expected 0-4)",
-                    file=sys.stderr,
-                )
-                return 1
+    rc = _validate_priority(opts["priority"])
+    if rc:
+        return rc
+    limit = _parse_list_limit(ns.limit)
+    if limit == 0:
+        return 2
 
     # --status: reject unknown values loudly (comma-separated for OR). A mistyped
     # status (e.g. `all`) otherwise falls through to the reducer's set-membership
@@ -329,7 +386,9 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         print("Error: ticket system not initialized. Run 'ticket init' first.", file=sys.stderr)
         return 1
 
-    results = list_states(tracker, TicketQuery(**opts))
+    # --limit applies AFTER the --sort ordering list_states already applied; without
+    # --sort it is the first N rows in store order.
+    results = list_states(tracker, TicketQuery(**opts))[:limit]
     if fmt == "llm":
         for t in results:
             print(js_safe_dumps(to_llm(t), ensure_ascii=False, separators=(",", ":")))
@@ -341,52 +400,11 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
     return 0
 
 
-def _cmd_session_logs(argv: list[str], tracker: str) -> int:
-    usage = "Usage: ticket session-logs [--output json|llm] [--limit=<n>]"
-    try:
-        fmt, rest = parse_output(argv, "reader")
-    except OutputFormatError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 2
-    limit = 5
-    rest = _coalesce_value_opts(rest, _SESSION_LOGS_VALUE_OPTS)
-    for arg in rest:
-        if arg.startswith("--limit="):
-            continue
-        if arg in ("--help", "-h"):
-            print(usage, file=sys.stderr)
-            return 0
-        return _reject_unknown_option(arg, usage)
-    from rebar._cli._parsers.core.reads import build_session_logs
-
-    ns = build_session_logs(prog="rebar session-logs").parse_args(rest)
-    if ns.limit is not None:
-        if not ns.limit.isdigit() or int(ns.limit) <= 0:
-            print(
-                f"Error: --limit expects a positive integer, got '{ns.limit}'",
-                file=sys.stderr,
-            )
-            return 2
-        limit = int(ns.limit)
-
-    if not store_is_usable(tracker):
-        print("Error: ticket system not initialized. Run 'ticket init' first.", file=sys.stderr)
-        return 1
-
-    results = recent_session_logs_state(tracker, limit=limit)
-    if fmt == "llm":
-        for t in results:
-            print(js_safe_dumps(to_llm(t), ensure_ascii=False, separators=(",", ":")))
-    else:
-        print(js_safe_dumps(results, ensure_ascii=False))
-    return 0
-
-
 def _cmd_deps(argv: list[str], tracker: str) -> int:
     for arg in argv:
-        if arg.startswith("-") and arg != "--include-archived":
+        if arg.startswith("-") and arg not in ("--include-archived", "--descendants"):
             return _reject_unknown_option(
-                arg, "Usage: ticket deps <ticket_id> [--include-archived]"
+                arg, "Usage: ticket deps <ticket_id> [--include-archived] [--descendants]"
             )
     from rebar._cli._parsers.core.reads import build_deps
 
@@ -395,6 +413,16 @@ def _cmd_deps(argv: list[str], tracker: str) -> int:
     if not ns.ticket_id:
         print("Usage: ticket deps <ticket_id>", file=sys.stderr)
         return 1
+    if ns.descendants:
+        # Parent-chain descendants (replaced the removed ``list-descendants`` verb). An
+        # unresolved id passes through raw: the documented empty-arrays contract.
+        # ``--include-archived`` has no effect here.
+        from rebar._engine_support.descendants import list_descendants
+        from rebar._engine_support.resolver import resolve_ticket_id
+
+        root_id = resolve_ticket_id(ns.ticket_id, tracker) or ns.ticket_id
+        print(js_safe_dumps(list_descendants(root_id, tracker), ensure_ascii=False))
+        return 0
     try:
         result = deps_state(ns.ticket_id, tracker, include_archived=include_archived)
     except ReadError as exc:
@@ -571,7 +599,6 @@ _COMMANDS = {
     "search": _cmd_search,
     "next-batch": _cmd_next_batch,
     "validate": _cmd_validate,
-    "session-logs": _cmd_session_logs,
 }
 
 # Subcommands that own their freshness policy (so main does not pre-fetch).

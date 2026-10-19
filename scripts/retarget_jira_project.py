@@ -42,7 +42,7 @@ def _load_bindings(path: Path) -> dict:
 
 
 def _scan_id_tags(tracker_dir: Path) -> dict[str, list[str]]:
-    """Find stale ID tags for reporting before removal through ``rebar untag``."""
+    """Find stale ID tags for reporting before removal through ``rebar edit --remove-tag``."""
     found: dict[str, set[str]] = {}
     for ticket_dir in tracker_dir.iterdir():
         if not ticket_dir.is_dir() or ticket_dir.name.startswith("."):
@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--strip-tags",
         action="store_true",
-        help="also remove residual dso-id:jira-* id tags via `rebar untag`",
+        help="also remove residual dso-id:jira-* id tags via `rebar edit --remove-tag`",
     )
     ap.add_argument(
         "--no-backup", action="store_true", help="skip backing up .bridge_state before clearing"
@@ -123,15 +123,17 @@ def main(argv: list[str] | None = None) -> int:
     print("Cleared bindings.json, prev_snapshot.json, bindings-retired.json.")
 
     if args.strip_tags and tag_count:
-        print("Stripping residual id tags via `rebar untag`...")
+        print("Stripping residual id tags via `rebar edit --remove-tag`...")
         stripped = 0
         for ticket_id, tags in id_tags.items():
             for tag in tags:
-                rc = subprocess.call(["rebar", "untag", ticket_id, tag])
+                rc = subprocess.call(["rebar", "edit", ticket_id, f"--remove-tag={tag}"])
                 if rc == 0:
                     stripped += 1
                 else:
-                    print(f"  WARN: untag {ticket_id} {tag} exited {rc}", file=sys.stderr)
+                    print(
+                        f"  WARN: edit --remove-tag {ticket_id} {tag} exited {rc}", file=sys.stderr
+                    )
         print(f"Stripped {stripped}/{tag_count} id tags.")
 
     print(

@@ -107,9 +107,16 @@ The removed pre-1.0 simple compatibility aliases `bridge-status`, `bridge-fsck`,
 top-level parser as invalid choices and exit `2`; use `bridge status`,
 `bridge fsck`, `bridge check-access`, `bridge setup`, and `verify-identity`.
 
+The twelve ticket verbs merged into the golden-path verbs are rejected the same way (exit
+`2`, an invalid-choice error, then a `hint:` line naming the replacement): `exists` and
+`format` → `resolve [--display[=MODE]]`; `check-ac`, `clarity-check`, `quality-check` →
+`check --ac`, `check --clarity`, `check`; `tag`/`untag` → `edit --add-tag`/`--remove-tag`;
+`get-file-impact`/`get-verify-commands` → `show --field=file_impact`/`--field=verify_commands`;
+`list-descendants` → `deps --descendants`; `session-logs` →
+`list --type=session_log --sort=-created --limit=5`.
+
 Other subcommands do **not** uniformly validate options: most mutation commands
-either silently ignore an unknown `--option` (e.g. `comment`, `tag`, `claim`,
-`check-ac` → exit `0`) or fail incidentally (e.g. `archive`, `unlink` →
+either silently ignore an unknown `--option` (e.g. `claim` → exit `0`) or fail incidentally (e.g. `archive`, `unlink` →
 exit `1`). Standardizing option validation across the mutation commands is a
 **known gap deliberately left out of this freeze** (sub-effort (a) scoped the
 contract + the structured-read alignment; a broader option-parsing sweep is
@@ -129,9 +136,9 @@ guarantee `2`).
 | `archive` | 0 | 1 | — | idempotent on an already-archived ticket (still 0) |
 | `bridge fsck` | 0 | — | — | audit; no ticket id |
 | `bridge` | 0 | — | — | no ticket id; canonical `preview`/`sync` use 0/1/2 as documented above; `pause`/`resume` control scheduled reconciliation |
-| `check-ac` | 0 | 1 | — | **gate**: 0=has-AC, 1=missing-AC **or** not-found |
+| `check --ac` | 0 | 1 | — | **gate**: 0=has-AC, 1=missing-AC **or** not-found (was `check-ac`) |
 | `claim` | 0 | 1 | 10 | 10 when the ticket is not open (already claimed) |
-| `clarity-check` | 0 | **2** | — | **gate**: 0=pass, 1=fail-verdict, 2=not-found/usage |
+| `check --clarity` | 0 | **2** | — | **gate**: 0=pass, 1=fail-verdict, 2=not-found/usage (was `clarity-check`) |
 | `comment` | 0 | 1 | — | |
 | `compact` | 0 | 1 | — | |
 | `compact-all` | 0 | — | — | no ticket id |
@@ -139,20 +146,18 @@ guarantee `2`).
 | `delete` | 0 | 1 | — | requires `--user-approved`; otherwise 1 |
 | `deps` | 0 | 1 | — | structured read (unknown option → 2) |
 | `edit` | 0 | 1 | — | |
-| `exists` | 0 | 1 | — | **by design**: 0=exists, 1=not-found (presence probe) |
-| `format` | 0 | 0 | — | tolerant read: unknown id renders empty, still 0 |
+| `resolve --display` | 0 | 1 | — | resolves first (unknown id → 1), then renders in the display mode (was `exists`/`format`) |
 | `fsck` | 0 | — | — | no ticket id |
 | `fsck-recover` | 0 | — | — | no ticket id; `--detect-only` exits **3** if stale rebase found; bad args → 2 |
 | `tracker-maintenance` | 0 | — | — | no ticket id; **1** = refused (unpushed ticket commits, or `origin/tickets` missing so they cannot be ruled out) without `--force=<reason>`; bad args / no tracker → 2 |
 | `tracker-footprint` | 0 | — | — | no ticket id; opt-in descriptive read; **1** = configured tracker/source cannot be measured; bad args → 2 |
-| `get-file-impact` | 0 | 1 | — | |
-| `get-verify-commands` | 0 | 1 | — | |
+| `show --field` | 0 | 1 | — | one JSON line per id; with `--output llm` → 2 (was `get-file-impact`/`get-verify-commands`) |
 | `init` | 0 | — | — | idempotent |
 | `link` | 0 | 1 | — | missing relation arg → 1 |
 | `list` | 0 | — | — | structured read (unknown option → 2); empty result still 0 |
-| `list-descendants` | 0 | 0 | — | tolerant read: unknown root → empty buckets, 0 |
+| `deps --descendants` | 0 | 0 | — | tolerant read: unknown root → empty buckets, 0 (was `list-descendants`) |
 | `next-batch` | 0 | 1 | — | |
-| `quality-check` | 0 | 1 | — | **gate**: 0=dispatch-ready, 1=not-ready **or** not-found |
+| `check` | 0 | 1 | — | **gate**: 0=dispatch-ready, 1=not-ready **or** not-found; `--ac`/`--clarity` together → 2 (was `quality-check`) |
 | `ready` | 0 | — | — | structured read (unknown option → 2); empty result still 0 |
 | `reclaim-collapse` | 0 | — | — | offline shadow-clone-only history rewrite engine; dry-run/apply success → 0, safety refusal / invalid boundary / ineligible horizon → 2 |
 | `reopen` | 0 | 1 | 10 | 10 when the ticket is not closed |
@@ -165,10 +170,8 @@ guarantee `2`).
 | `attach-commits` | 0 | 1 | — | missing args → 2; an unresolvable SHA → 1 (nothing recorded) |
 | `show` | 0 | 1 | — | structured read (unknown option → 2); not-found also emits a parseable JSON error on stdout |
 | `summary` | 0 | 0 | — | tolerant read: unknown id renders `[unknown]`, still 0 |
-| `tag` | 0 | 1 | — | |
 | `transition` | 0 | 1 | 10 | 10 on stale `current` status. A close guarded by completion verification also returns 11 for a retryable raised verifier error or `verdict_obtainable=false`. |
 | `unlink` | 0 | 1 | — | |
-| `untag` | 0 | 1 | — | removing an absent tag is still 0 |
 | `validate` | **0-4** | — | — | **exception**: exit is a health-severity bucket, not the standard contract; takes **no** ticket id (passing one → 1) |
 | `audit` | 0 | — | — | no ticket id; `audit show <ticket>` reads the audit trail; unknown subcommand or bad option → 2; `audit serve` with missing `[ui]` extra → 1 |
 | `bridge check-access` | 0 | — | — | no ticket id; subprocess passthrough (jira-capability-probe.py); 0 = PROBE_PASS, non-zero = PROBE_FAIL |
@@ -190,7 +193,7 @@ guarantee `2`).
 | `review-plan` | 0 | 1 | — | PASS → 0, BLOCK → 1, INDETERMINATE → 2, retryable degrade → 11; `--status`: 0 = current, 12 = stale/absent; `--retry`: resumes the latest INDETERMINATE (same 0/1/2/11 dispositions), or exits 2 refusing an ineligible resume / a `--force`/`--status`/`--check` conflict |
 | `scan-spec` | 0 | — | — | no ticket id; `--spec-file` read error or LLMError → 1 |
 | `session-log` | 0 | 1 | — | appends or reads session log events; error → 1 |
-| `session-logs` | 0 | — | — | structured read (unknown option → 2); empty result still 0 |
+| `list --limit` | 0 | — | — | `--limit` not a positive integer → 2; with `--type=session_log --sort=-created` replaces `session-logs` |
 | `sign` | 0 | 1 | — | signs the ticket's current event manifest; bad args → 2 |
 | `sign-review` | 0 | 1 | — | cheap re-sign of an existing PASS verdict (no LLM); refused when sidecar absent, non-PASS, or plan changed → 1 |
 | `trusted-env` | 0 | — | — | no ticket id; maintains `.rebar/trusted_environments.yaml`; bad args → 2; error → 1 |

@@ -39,9 +39,7 @@ __all__ = [
 _GROUP_TO_SET: dict[str, str] = {
     "reads_init_only": "_READS_INIT_ONLY",
     "reads_no_init": "_READS_NO_INIT",
-    "field_reads": "_FIELD_READS",
     "lookups": "_LOOKUPS",
-    "descendants": "_DESCENDANTS",
     "gates": "_GATES",
     "signing": "_SIGNING",
     "lifecycle": "_LIFECYCLE",
@@ -87,17 +85,9 @@ _CORE_FACTORIES: dict[str, str] = {
     "deps": f"{_CORE_P}.reads:build_deps",
     "ready": f"{_CORE_P}.reads:build_ready",
     "search": f"{_CORE_P}.reads:build_search",
-    "session-logs": f"{_CORE_P}.reads:build_session_logs",
     "validate": f"{_CORE_P}.reads:build_validate",
-    "get-file-impact": f"{_CORE_P}.field_reads:build_get_file_impact",
-    "get-verify-commands": f"{_CORE_P}.field_reads:build_get_verify_commands",
-    "exists": f"{_CORE_P}.lookups:build_exists",
     "resolve": f"{_CORE_P}.lookups:build_resolve",
-    "format": f"{_CORE_P}.lookups:build_format",
-    "list-descendants": f"{_CORE_P}.descendants:build",
-    "clarity-check": f"{_CORE_P}.gates:build_clarity_check",
-    "check-ac": f"{_CORE_P}.gates:build_check_ac",
-    "quality-check": f"{_CORE_P}.gates:build_quality_check",
+    "check": f"{_CORE_P}.gates:build_check",
     "summary": f"{_CORE_P}.gates:build_summary",
     "sign": f"{_CORE_P}.signing:build_sign",
     "verify-signature": f"{_CORE_P}.signing:build_verify_signature",
@@ -116,8 +106,6 @@ _CORE_FACTORIES: dict[str, str] = {
     "unlink": f"{_CORE_P}.writes:build_unlink",
     "revert": f"{_CORE_P}.writes:build_revert",
     "edit": f"{_CORE_P}.writes:build_edit",
-    "tag": f"{_CORE_P}.writes:build_tag",
-    "untag": f"{_CORE_P}.writes:build_untag",
     "archive": f"{_CORE_P}.writes:build_archive",
     "set-file-impact": f"{_CORE_P}.writes:build_set_file_impact",
     "set-verify-commands": f"{_CORE_P}.writes:build_set_verify_commands",
@@ -140,7 +128,6 @@ def _core_factory(name: str) -> str:
 
 
 _READS_DISPATCHER = "rebar._engine_support.reads:main"
-_FIELD_READS_MOD = "rebar._engine_support.field_reads"
 _LOOKUPS_MOD = "rebar._engine_support.lookups"
 _GATES_MOD = "rebar._engine_support.gates"
 
@@ -165,7 +152,6 @@ def _reads_init_only() -> tuple[Route, ...]:
             ("deps", True),
             ("ready", False),
             ("search", False),
-            ("session-logs", False),
         )
     )
 
@@ -181,77 +167,20 @@ def _simple_read_groups() -> tuple[Route, ...]:
             init="none",
         ),
         Route(
-            "get-file-impact",
-            group="field_reads",
-            parser_factory=_core_factory("get-file-impact"),
-            handler=f"{_FIELD_READS_MOD}:file_impact_cli",
-            adapter="argv_tracker",
-            init="full",
-        ),
-        Route(
-            "get-verify-commands",
-            group="field_reads",
-            parser_factory=_core_factory("get-verify-commands"),
-            handler=f"{_FIELD_READS_MOD}:verify_commands_cli",
-            adapter="argv_tracker",
-            init="full",
-        ),
-        Route(
-            "exists",
-            group="lookups",
-            parser_factory=_core_factory("exists"),
-            handler=f"{_LOOKUPS_MOD}:exists_cli",
-            adapter="argv_tracker",
-            init="full",
-        ),
-        Route(
             "resolve",
             group="lookups",
             parser_factory=_core_factory("resolve"),
             handler=f"{_LOOKUPS_MOD}:resolve_cli",
-            adapter="argv_tracker",
-            init="full",
-        ),
-        Route(
-            "format",
-            group="lookups",
-            parser_factory=_core_factory("format"),
-            handler=f"{_LOOKUPS_MOD}:format_cli",
             adapter="argv_tracker_root",
             init="full",
         ),
         Route(
-            "list-descendants",
-            group="descendants",
-            parser_factory=_core_factory("list-descendants"),
-            handler="rebar._engine_support.descendants:list_descendants_cli",
-            adapter="argv_tracker",
-            init="full",
-        ),
-        Route(
-            "clarity-check",
+            "check",
             group="gates",
             warn_cross_session=True,
-            parser_factory=_core_factory("clarity-check"),
-            handler=f"{_GATES_MOD}:clarity_check_cli",
+            parser_factory=_core_factory("check"),
+            handler=f"{_GATES_MOD}:check_cli",
             adapter="argv_tracker_root",
-            init="none",
-        ),
-        Route(
-            "check-ac",
-            group="gates",
-            warn_cross_session=True,
-            parser_factory=_core_factory("check-ac"),
-            handler=f"{_GATES_MOD}:check_ac_cli",
-            adapter="argv_tracker",
-            init="none",
-        ),
-        Route(
-            "quality-check",
-            group="gates",
-            parser_factory=_core_factory("quality-check"),
-            handler=f"{_GATES_MOD}:quality_check_cli",
-            adapter="argv_tracker",
             init="none",
         ),
         Route(
@@ -370,8 +299,6 @@ def _writes_full() -> tuple[Route, ...]:
         ("unlink", True),
         ("revert", False),
         ("edit", True),
-        ("tag", True),
-        ("untag", True),
         ("archive", True),
         ("set-file-impact", True),
         ("set-verify-commands", False),

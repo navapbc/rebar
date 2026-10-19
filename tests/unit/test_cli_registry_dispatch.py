@@ -30,6 +30,7 @@ import pytest
 from _subprocess_env import subprocess_env
 
 from rebar._cli import _execute, _registry, main
+from rebar._cli._help_route import _REMOVED_SPELLINGS
 
 pytestmark = pytest.mark.unit
 
@@ -124,21 +125,21 @@ def test_dispatcher_adapter_prefixes_the_route_name_for_writes(
 
 
 def test_argv_tracker_adapter_appends_the_tracker(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``get-file-impact`` (argv_tracker) receives ``(rest, tracker_dir())``."""
+    """``summary`` (argv_tracker) receives ``(rest, tracker_dir())``."""
     seen: list[tuple] = []
     monkeypatch.setattr(
-        "rebar._engine_support.field_reads.file_impact_cli",
+        "rebar._engine_support.gates.summary_cli",
         lambda argv, tracker: seen.append((argv, tracker)) or 0,
     )
     _no_init(monkeypatch)
-    _execute.execute("get-file-impact", ["abcd"])
+    _execute.execute("summary", ["abcd"])
     assert seen == [(["abcd"], "/tmp/tk")]
 
 
 def test_argv_tracker_root_adapter_appends_tracker_and_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``format``/``clarity-check`` (argv_tracker_root) get ``(rest, tracker, None)``.
+    """``resolve``/``check`` (argv_tracker_root) get ``(rest, tracker, None)``.
 
     The root arg is ``None`` — "discover the repo/config root" (REBAR_ROOT > git
     toplevel of cwd) — NOT ``os.path.dirname(tracker)``, which is the repo root only
@@ -147,12 +148,12 @@ def test_argv_tracker_root_adapter_appends_tracker_and_root(
     """
     seen: list[tuple] = []
     monkeypatch.setattr(
-        "rebar._engine_support.lookups.format_cli",
+        "rebar._engine_support.lookups.resolve_cli",
         lambda argv, tracker, root: seen.append((argv, tracker, root)) or 0,
     )
     monkeypatch.setattr("rebar._cli.ensure_initialized", lambda **_k: None)
     monkeypatch.setattr("rebar._engine_support.reads.tracker_dir", lambda: "/repo/.tickets-tracker")
-    _execute.execute("format", ["abcd"])
+    _execute.execute("resolve", ["abcd"])
     assert seen == [(["abcd"], "/repo/.tickets-tracker", None)]
 
 
@@ -170,7 +171,6 @@ def test_every_adapter_kind_has_at_least_one_route() -> None:
     [
         ("show", "init_only"),
         ("list", "init_only"),
-        ("session-logs", "init_only"),
         ("validate", "none"),
         ("comment", "full"),
         ("create", "full"),
@@ -183,11 +183,8 @@ def test_every_adapter_kind_has_at_least_one_route() -> None:
         ("fsck", "full"),
         ("tracker-maintenance", "full"),
         ("sign", "full"),
-        ("get-file-impact", "full"),
-        ("exists", "full"),
-        ("list-descendants", "full"),
-        ("clarity-check", "none"),
-        ("check-ac", "none"),
+        ("resolve", "full"),
+        ("check", "none"),
         ("summary", "none"),
         ("init", "none"),
         ("scratch", "none"),
@@ -456,10 +453,7 @@ def test_bridge_canonical_passes_the_remainder_verbatim(
     assert seen == [["status", "--json"]]
 
 
-@pytest.mark.parametrize(
-    "removed",
-    ["bridge-status", "bridge-fsck", "bridge-probe", "jira-onboard", "verify-authorship"],
-)
+@pytest.mark.parametrize("removed", sorted(_REMOVED_SPELLINGS))
 def test_removed_simple_compatibility_aliases_are_parse_time_invalid_choices(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -484,6 +478,9 @@ def test_removed_simple_compatibility_aliases_are_parse_time_invalid_choices(
         True,
         True,
     )
+    hint = f"hint: 'rebar {removed}' was removed; use `{_REMOVED_SPELLINGS[removed]}` instead"
+    assert hint in captured.err
+    assert _registry.route_for(removed) is None
 
 
 def test_purge_bridge_remains_unknown() -> None:

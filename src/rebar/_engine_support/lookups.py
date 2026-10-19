@@ -1,8 +1,8 @@
-"""In-process ``exists`` / ``resolve`` / ``format``.
+"""In-process ``resolve`` (with ``--display[=MODE]``).
 
-The three resolution/display arms (``exists``; ``resolve`` / ``format`` via
-``resolve_ticket_id`` / ``format_ticket_id``). All three reuse the shared resolver;
-the library never exposed them, so this is CLI-only.
+The resolution/display arm: ``resolve`` resolves an id/alias/prefix through the shared
+resolver and, with ``--display``, renders it in a display mode. It replaced the removed
+``exists`` and ``format`` verbs. The library never exposed it, so this is CLI-only.
 """
 
 from __future__ import annotations
@@ -13,16 +13,6 @@ import os
 import sys
 
 from rebar._engine_support.resolver import resolve_ticket_id
-
-
-def _has_ticket_events(ticket_dir: str) -> bool:
-    """True when ``ticket_dir`` is a directory with a CREATE or SNAPSHOT event."""
-    if not os.path.isdir(ticket_dir):
-        return False
-    return bool(
-        glob.glob(os.path.join(ticket_dir, "*-CREATE.json"))
-        or glob.glob(os.path.join(ticket_dir, "*-SNAPSHOT.json"))
-    )
 
 
 def _create_data(ticket_dir: str) -> dict:
@@ -74,50 +64,10 @@ def _display_mode(repo_root: str | None) -> str:
         return "auto"
 
 
-# ── CLI arms ──────────────────────────────────────────────────────────────
-def exists_cli(argv: list[str], tracker: str) -> int:
-    if not argv or not argv[0]:
-        sys.stderr.write("Usage: ticket exists <ticket_id>\n")
-        return 1
-    # Positional-only lookup: ``exists`` is permissive about dash-leading ids, which
-    # is genuinely argparse-inexpressible, so the first token is read raw. The
-    # registry declares ``build_exists`` for lazy census + canonical help (RP-05 S2d).
-    raw = argv[0]
-    if _has_ticket_events(os.path.join(tracker, raw)):  # fast exact-dir path
-        return 0
-    resolved = resolve_ticket_id(raw, tracker)
-    if not resolved:
-        return 1
-    return 0 if _has_ticket_events(os.path.join(tracker, resolved)) else 1
-
-
-def resolve_cli(argv: list[str], tracker: str) -> int:
-    if len(argv) < 1:
-        sys.stderr.write("Usage: ticket resolve <id_or_alias_or_prefix>\n")
-        return 1
-    # Positional-only lookup: the permissive raw/dash-leading input is genuinely
-    # argparse-inexpressible, so the first token is read raw. The registry declares
-    # ``build_resolve`` for lazy census + canonical help (RP-05 S2d).
-    raw = argv[0]
-    resolved = resolve_ticket_id(raw, tracker)
-    if not resolved:  # None or "" (the resolver returns "" for an empty input)
-        sys.stderr.write(f"Error: ticket '{argv[0]}' not found\n")
-        return 1
-    sys.stdout.write(resolved + "\n")
-    return 0
-
-
-def format_cli(argv: list[str], tracker: str, repo_root: str | None) -> int:
-    if len(argv) < 1:
-        sys.stderr.write("Usage: ticket format <ticket_id> [mode]\n")
-        return 1
-    # Positional-only lookup (``<ticket_id> [mode]``): the permissive raw/dash-leading
-    # ticket_id is genuinely argparse-inexpressible, so positionals are read raw. The
-    # registry declares ``build_format`` for lazy census + canonical help (RP-05 S2d).
-    ticket_id = argv[0]
-    mode = argv[1] if len(argv) > 1 else ""
-    if not mode:
-        mode = _display_mode(repo_root)
+# ── CLI arm ───────────────────────────────────────────────────────────────
+def _render_display(ticket_id: str, tracker: str, mode: str) -> str:
+    """Render a resolved ``ticket_id`` in display ``mode`` (``auto``/``canonical``/
+    ``alias``/``short``); an unknown mode warns and falls back to ``auto``."""
 
     def _auto() -> str:
         data = _create_data(os.path.join(tracker, ticket_id))
@@ -128,15 +78,64 @@ def format_cli(argv: list[str], tracker: str, repo_root: str | None) -> int:
         return _short_prefix(ticket_id, tracker)
 
     if mode == "auto":
-        out = _auto()
-    elif mode == "canonical":
-        out = ticket_id
-    elif mode == "alias":
-        out = _create_data(os.path.join(tracker, ticket_id)).get("alias") or ticket_id
-    elif mode == "short":
-        out = _short_prefix(ticket_id, tracker)
-    else:
-        sys.stderr.write(f"WARN: unknown ticket.display_mode '{mode}' — falling back to auto\n")
-        out = _auto()
-    sys.stdout.write(out + "\n")
+        return _auto()
+    if mode == "canonical":
+        return ticket_id
+    if mode == "alias":
+        return _create_data(os.path.join(tracker, ticket_id)).get("alias") or ticket_id
+    if mode == "short":
+        return _short_prefix(ticket_id, tracker)
+    sys.stderr.write(f"WARN: unknown ticket.display_mode '{mode}' — falling back to auto\n")
+    return _auto()
+
+
+def _pop_display(argv: list[str]) -> tuple[list[str], str | None]:
+    """Remove ``--display[=MODE]`` / ``--display MODE`` from ``argv``; return the remaining
+    tokens and the mode (``None`` when absent, ``""`` for a bare ``--display``)."""
+    rest: list[str] = []
+    mode: str | None = None
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok.startswith("--display="):
+            mode = tok.split("=", 1)[1]
+        elif tok == "--display":
+            nxt = argv[i + 1] if i + 1 < len(argv) else None
+            # A following non-option token is the MODE only when a ticket id already
+            # precedes it, so `--display <id>` still treats <id> as the ticket.
+            if nxt is not None and not nxt.startswith("-") and rest:
+                mode = nxt
+                i += 1
+            else:
+                mode = ""
+        else:
+            rest.append(tok)
+        i += 1
+    return rest, mode
+
+
+def resolve_cli(argv: list[str], tracker: str, repo_root: str | None) -> int:
+    """``rebar resolve <id_or_alias_or_prefix> [--display[=MODE]]``.
+
+    Resolve the id to its canonical form (exit 1 when not found). With ``--display`` the
+    resolved ticket is rendered in ``MODE`` (default: the configured
+    ``ticket.display_mode``) instead of printing the canonical id; this replaced the
+    removed ``exists`` and ``format`` verbs.
+    """
+    args, mode = _pop_display(argv)
+    if len(args) < 1:
+        sys.stderr.write("Usage: rebar resolve <id_or_alias_or_prefix> [--display[=MODE]]\n")
+        return 1
+    # Positional-only lookup: the permissive raw/dash-leading input is genuinely
+    # argparse-inexpressible, so the first token is read raw. The registry declares
+    # ``build_resolve`` for lazy census + canonical help (RP-05 S2d).
+    raw = args[0]
+    resolved = resolve_ticket_id(raw, tracker)
+    if not resolved:  # None or "" (the resolver returns "" for an empty input)
+        sys.stderr.write(f"Error: ticket '{raw}' not found\n")
+        return 1
+    if mode is None:
+        sys.stdout.write(resolved + "\n")
+        return 0
+    sys.stdout.write(_render_display(resolved, tracker, mode or _display_mode(repo_root)) + "\n")
     return 0

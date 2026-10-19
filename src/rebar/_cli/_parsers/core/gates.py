@@ -1,11 +1,10 @@
 """``rebar`` gate-command parser factories (RP-05 S2b).
 
-Prog-bound argparse renderings of the four gate arms in
-:mod:`rebar._engine_support.gates` (``check-ac``, ``clarity-check``,
-``quality-check``, ``summary``). ``check-ac``/``quality-check``/``summary`` honour
-the ``report`` ``--output`` profile and take ticket-id positional(s); ``summary``
-accepts several. ``clarity-check`` is the odd one — a ticket id XOR ``--stdin``,
-plus ``--config <path>`` — and keeps its distinct ``ERROR: unknown flag`` wording.
+Prog-bound argparse renderings of the two gate arms in
+:mod:`rebar._engine_support.gates` (``check`` and ``summary``). ``check`` merges the removed
+``check-ac``/``clarity-check``/``quality-check`` verbs behind ``--ac``/``--clarity``/(default
+dispatch readiness); ``summary`` accepts several ticket ids. Both honour the ``report``
+``--output`` profile; ``check --clarity`` also takes ``--stdin`` and ``--config <path>``.
 The handlers keep their bespoke diagnostics and exit codes. Only the stdlib and
 :mod:`rebar._cli._parser` are imported at module top-level.
 """
@@ -23,26 +22,6 @@ def _base(prog: str, description: str | None = None) -> argparse.ArgumentParser:
     )
 
 
-def build_check_ac(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar check-ac <id> [--output json]``."""
-    parser = _base(prog, "Check one ticket has an Acceptance Criteria block.")
-    parser.add_argument(
-        "--output", "-o", choices=("text", "json"), default="text", help="output format"
-    )
-    parser.add_argument("ticket_id", nargs="?", help="the ticket to check")
-    return parser
-
-
-def build_quality_check(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar quality-check <id> [--output json]``."""
-    parser = _base(prog, "Check one ticket's dispatch readiness.")
-    parser.add_argument(
-        "--output", "-o", choices=("text", "json"), default="text", help="output format"
-    )
-    parser.add_argument("ticket_id", nargs="?", help="the ticket to check")
-    return parser
-
-
 def build_summary(*, prog: str) -> argparse.ArgumentParser:
     """``rebar summary <id> [<id> ...] [--output json]``."""
     parser = _base(prog, "One-line ticket summary with blocking status for one or more IDs.")
@@ -53,10 +32,23 @@ def build_summary(*, prog: str) -> argparse.ArgumentParser:
     return parser
 
 
-def build_clarity_check(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar clarity-check <id> | --stdin [--config <path>]``."""
-    parser = _base(prog, "Score one ticket's clarity (exit 0=pass, 1=fail).")
-    parser.add_argument("--stdin", action="store_true", help="read the ticket text from stdin")
-    parser.add_argument("--config", help="path to a clarity config override")
-    parser.add_argument("ticket_id", nargs="?", help="the ticket to score")
+def build_check(*, prog: str) -> argparse.ArgumentParser:
+    """``rebar check <id> [--ac | --clarity] [--output json]``; ``--clarity`` also takes
+    ``--stdin`` / ``--config <path>``. With no mode flag it checks dispatch readiness."""
+    parser = _base(
+        prog,
+        "Check one ticket: dispatch readiness by default, --ac for the Acceptance Criteria "
+        "block, --clarity for the clarity score.",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--ac", action="store_true", help="check the Acceptance Criteria block")
+    mode.add_argument("--clarity", action="store_true", help="score clarity (exit 0=pass, 1=fail)")
+    parser.add_argument(
+        "--output", "-o", choices=("text", "json"), default="text", help="output format"
+    )
+    parser.add_argument(
+        "--stdin", action="store_true", help="with --clarity: read the ticket text from stdin"
+    )
+    parser.add_argument("--config", help="with --clarity: path to a clarity config override")
+    parser.add_argument("ticket_id", nargs="?", help="the ticket to check")
     return parser

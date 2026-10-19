@@ -24,13 +24,15 @@ search / list ──▶ ready ──▶ claim ──▶ (work + comment) ──�
 
 ## Mutation confirmations
 
-Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, `edit`, `tag`, `untag`, `archive`, `set-file-impact`, `set-verify-commands`, `attach-commits`, `session-log`, `transition`, `reopen`, `claim`) prints one confirmation line to standard output after a successful write. The line uses `<past-tense-verb> <args-summary>`. An idempotent operation prints `no change: <reason>` and exits 0.
+Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, `edit`, `archive`, `set-file-impact`, `set-verify-commands`, `attach-commits`, `session-log`, `transition`, `reopen`, `claim`) prints one confirmation line to standard output after a successful write. The line uses `<past-tense-verb> <args-summary>`. An idempotent operation prints `no change: <reason>` and exits 0.
 
 ```
-$ rebar tag c50e-7326 perf
-tagged c50e-7326-9cac-45e4: +perf
-$ rebar tag c50e-7326 perf
-no change: tag perf already on c50e-7326-9cac-45e4
+$ rebar edit c50e-7326 --add-tag=perf
+edited c50e-7326-9cac-45e4: add-tag
+$ rebar archive c50e-7326
+archived c50e-7326-9cac-45e4
+$ rebar archive c50e-7326
+no change: c50e-7326-9cac-45e4 already archived
 ```
 
 These options may appear anywhere among the verb arguments. A bare `--` ends option parsing, so a comment body containing `--quiet` remains unchanged.
@@ -238,11 +240,11 @@ Relations are `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`, 
 
 Remove the most recent link for a pair with `rebar unlink <a> <b>`. When a pair has several relations, remove one relation with `rebar unlink <a> <b> <relation>`.
 
-**Tag** and **untag** for lightweight labels; `rebar edit` changes fields:
+Tags are lightweight labels, edited with `rebar edit` alongside the other fields:
 
 ```sh
-rebar tag <id> needs-review
-rebar untag <id> needs-review
+rebar edit <id> --add-tag=needs-review
+rebar edit <id> --remove-tag=needs-review
 rebar edit <id> --priority=1 --assignee=alice@example.com --add-tag=urgent
 ```
 
@@ -253,10 +255,10 @@ Session logs are searchable working notes kept in the ticket store. They do not 
 ```sh
 rebar session-log append "Spent the morning tracing the pager bug. See comment on <id>."
 rebar session-log start --summary "Dark-mode implementation"   # rotate to a fresh log
-rebar session-logs --limit 5                                    # newest first
+rebar list --type=session_log --sort=-created --limit=5          # newest first
 ```
 
-Later appends from the same identified session use the same log. When rebar identifies a different session, its first append creates a new log. Use `start` when you want to rotate explicitly. Use `session-logs` to find recent logs.
+Later appends from the same identified session use the same log. When rebar identifies a different session, its first append creates a new log. Use `start` when you want to rotate explicitly. Use `rebar list --type=session_log --sort=-created` to find recent logs.
 
 The `session_log` type is exempt from lifecycle gates, excluded from graph health, and never synchronized to Jira. These properties are documented in [event-schema.md](event-schema.md).
 
@@ -268,7 +270,7 @@ Debugging-orchestration sessions periodically sweep for AWS and GitHub Actions e
 
 ```sh
 rebar search "ops-sweep"                       # or: rebar search "error-sweep ledger"
-rebar session-logs                             # lists session_log tickets, newest first
+rebar list --type=session_log --sort=-created # lists session_log tickets, newest first
 ```
 
 Each sweep appends a comment whose first line is a header:
@@ -299,7 +301,7 @@ A `session_log` accepts only the non-blocking relations (`relates_to`, `discover
 
 ```sh
 rebar session-log start --summary "OPS: error-sweep ledger (AWS + GitHub Actions)"
-rebar tag <new-id> ops-sweep
+rebar edit <new-id> --add-tag=ops-sweep
 ```
 
 ## The quality gates as you experience them
@@ -308,9 +310,9 @@ rebar has a few self-checks you can run on demand. The **per-ticket** gates take
 ticket id and tell you whether a single ticket is well-formed enough to work or close:
 
 ```sh
-rebar clarity-check <id>    # is the ticket shaped like dispatchable work? (score/verdict)
-rebar check-ac <id>         # does it have an ## Acceptance Criteria block?
-rebar quality-check <id>    # combined dispatch-readiness check
+rebar check <id> --clarity  # is the ticket shaped like dispatchable work? (score/verdict)
+rebar check <id> --ac       # does it have an ## Acceptance Criteria block?
+rebar check <id>            # combined dispatch-readiness check
 ```
 
 These are structural floor checks — a pass means "well-formed enough to dispatch,"

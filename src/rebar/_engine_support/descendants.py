@@ -1,7 +1,7 @@
-"""In-process ``list-descendants``.
+"""Parent-chain descendants of a ticket (``rebar deps <id> --descendants``).
 
-BFS walk from a root ticket, bucketed by type, reusing
-``rebar.reducer.reduce_all_tickets`` and the shared resolver. CLI-only.
+BFS walk from a root ticket, bucketed by type, reusing ``rebar.reducer.reduce_all_tickets``.
+The ``list-descendants`` verb was removed; the CLI reads this through ``deps --descendants``.
 
 Output (always valid, empty arrays when the root has no descendants / is absent):
 ``{epics, stories, tasks, bugs, parents_with_children}``.
@@ -9,11 +9,8 @@ Output (always valid, empty arrays when the root has no descendants / is absent)
 
 from __future__ import annotations
 
-import sys
 from collections import deque
 
-from rebar._engine_support.resolver import resolve_ticket_id
-from rebar._mcp_errors import js_safe_dumps
 from rebar.reducer import reduce_all_tickets
 
 _TYPE_TO_BUCKET = {"epic": "epics", "story": "stories", "task": "tasks", "bug": "bugs"}
@@ -71,18 +68,3 @@ def list_descendants(root_id: str, tracker: str) -> dict:
         "bugs": buckets["bugs"],
         "parents_with_children": parents_with_children,
     }
-
-
-def list_descendants_cli(argv: list[str], tracker: str) -> int:
-    if not argv:
-        sys.stderr.write("Usage: rebar list-descendants <ticket_id>\n")
-        return 1
-    # Positional-only lookup: the permissive raw/dash-leading ticket_id is genuinely
-    # argparse-inexpressible, so the first token is read raw. The registry declares
-    # ``build`` for lazy census + canonical help (RP-05 S2d).
-    raw = argv[0]
-    # Graceful: pass the raw input through when resolution misses (documented
-    # empty-arrays contract).
-    root_id = resolve_ticket_id(raw, tracker) or raw
-    sys.stdout.write(js_safe_dumps(list_descendants(root_id, tracker), ensure_ascii=False) + "\n")
-    return 0

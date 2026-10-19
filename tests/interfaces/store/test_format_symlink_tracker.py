@@ -1,4 +1,4 @@
-"""``format <id>`` must resolve through a SYMLINKED tracker.
+"""``resolve <id> --display`` (formerly ``format <id>``) must resolve through a SYMLINKED tracker.
 
 In-process port of tests/scripts/test-format-ticket-id-symlink.sh (bug
 3203-236a-09bc-44f4: the bash fallback used ``find`` without ``-L``, silently
@@ -42,7 +42,7 @@ def test_format_via_symlink_tracker(
     mode: str,
 ) -> None:
     full_id = rebar.create_ticket("task", f"symlink test {mode}", repo_root=str(rebar_repo))
-    out, rc = _format(["format", full_id, mode], capsys)
+    out, rc = _format(["resolve", full_id, f"--display={mode}"], capsys)
     assert rc == 0
     # A valid short handle: non-empty, not the raw full id, and it resolves back to
     # this exact ticket THROUGH the symlinked tracker. Asserting a fixed char-length
@@ -72,7 +72,7 @@ def test_format_auto_alias_length_is_not_bounded(
     monkeypatch.setattr("rebar._alias.compute_genesis_alias", lambda _tid: long_alias)
     full_id = rebar.create_ticket("task", "long alias", repo_root=str(rebar_repo))
 
-    out, rc = _format(["format", full_id, "auto"], capsys)
+    out, rc = _format(["resolve", full_id, "--display=auto"], capsys)
     assert rc == 0
     assert out == long_alias and len(out) > 32  # the retired `len(out) <= 32` bound would fail here
     resolved, rrc = _format(["resolve", out], capsys)

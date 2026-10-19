@@ -330,7 +330,7 @@ class CliAdapter(Adapter):
         assert self._run("comment", tid, body).returncode == 0
 
     def tag(self, tid: str, tag: str) -> None:
-        assert self._run("tag", tid, tag).returncode == 0
+        assert self._run("edit", tid, f"--add-tag={tag}").returncode == 0
 
     def link(self, a: str, b: str, relation: str, *, force: str | None = None) -> Outcome:
         return self._outcome(self._run("link", a, b, relation, *_force_cli_args(force)))

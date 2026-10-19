@@ -133,33 +133,17 @@ def confirm_created(noun: str, res: dict) -> None:
     emit_text(f"created {noun}{who}: {res['title']}")
 
 
-def _confirm_tag_outcome(command: str, out: dict) -> None:
-    """Confirmation for the ``tag`` / ``untag`` leaf outcomes."""
-    tid, tag_value = out["id"], out["tag"]
-    if command == "tag":
-        if out["wrote"]:
-            emit("tagged", tid, f"+{tag_value}", f"tagged {tid}: +{tag_value}")
-        else:
-            noop(tid, f"tag {tag_value} already on {tid}")
-    elif out["wrote"]:
-        emit("untagged", tid, f"-{tag_value}", f"untagged {tid}: -{tag_value}")
-    else:
-        noop(tid, f"tag {tag_value} not on {tid}")
-
-
 def leaf_confirm(command: str, out) -> None:
     """Map a ``_REGISTRY`` leaf command's outcome return to its confirmation.
 
     ``out`` is what the leaf function returned: the resolved id for ``comment`` /
     ``set-verify-commands`` (a ``(id, count)`` pair for the latter), and a small
-    ``{"wrote", "id", ...}`` outcome dict for the no-op-capable ``tag`` / ``untag``
-    / ``archive``. Unknown commands (a future registry entry without a formatter)
+    ``{"wrote", "id", ...}`` outcome dict for the no-op-capable ``archive``. Unknown commands
+    (a future registry entry without a formatter)
     stay silent rather than guessing a line.
     """
     if command == "comment":
         emit("commented", out, "comment added", f"comment added to {out}")
-    elif command in ("tag", "untag"):
-        _confirm_tag_outcome(command, out)
     elif command == "archive":
         if out["wrote"]:
             emit("archived", out["id"], "archived", f"archived {out['id']}")

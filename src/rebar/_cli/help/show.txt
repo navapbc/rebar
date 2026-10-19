@@ -1,4 +1,5 @@
-Usage: rebar show [--output {json,llm}] [--include-scratch] [ticket_id ...]
+Usage: rebar show [--output {json,llm}] [--field NAME] [--include-scratch]
+                  [ticket_id ...]
 
 Show ticket details.
 
@@ -8,4 +9,6 @@ positional arguments:
 options:
   --output {json,llm}, -o {json,llm}
                         output format
+  --field NAME          print only this state field as one JSON line per ticket
+                        (e.g. file_impact)
   --include-scratch     include per-ticket scratch values

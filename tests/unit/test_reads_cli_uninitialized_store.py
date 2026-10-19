@@ -74,11 +74,17 @@ def _absent_tracker(tmp_path: Path) -> Path:
     return tmp_path / "nope" / ".tickets-tracker"
 
 
-# The two CLI read arms still on the bare-isdir gate, driven directly through their
-# argv-facing handler (the tracker is an explicit parameter for exactly this).
+# The CLI read arm once on the bare-isdir gate, driven directly through its argv-facing
+# handler (the tracker is an explicit parameter for exactly this). ``session-logs`` was the
+# second arm; it was removed for ``list --type=session_log --sort=-created --limit=N``, so
+# its row is the same handler with those flags.
 _CLI_ARMS = [
     ("list", reads_cli._cmd_list, []),
-    ("session-logs", reads_cli._cmd_session_logs, []),
+    (
+        "list-session-logs",
+        reads_cli._cmd_list,
+        ["--type=session_log", "--sort=-created", "--limit=5"],
+    ),
 ]
 
 
@@ -149,7 +155,7 @@ def test_cli_read_arms_do_not_gate_on_bare_isdir() -> None:
     reintroduces the weak existence check the parent fix (rapt-d) removed."""
     import inspect
 
-    source = inspect.getsource(reads_cli._cmd_list) + inspect.getsource(reads_cli._cmd_session_logs)
+    source = inspect.getsource(reads_cli._cmd_list)
     assert "os.path.isdir(tracker)" not in source, (
         "a CLI read arm still gates readiness on bare os.path.isdir(tracker) — use "
         "store_is_usable(tracker) for parity with rebar._reads._tracker (be80-8377)"

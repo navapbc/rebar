@@ -62,10 +62,6 @@ def _bodies(ticket_id: str, repo: Path) -> list[str]:
     return [c.get("body", "") for c in shown["comments"]]
 
 
-def _tags(ticket_id: str, repo: Path) -> list[str]:
-    return list(rebar.show_ticket(ticket_id, repo_root=str(repo))["tags"])
-
-
 # --------------------------------------------------------------------------- comment
 
 
@@ -153,21 +149,6 @@ def test_bare_double_dash_with_no_body_is_a_usage_error(ticket: str, rebar_repo:
 
 
 # ------------------------------------------------------- the other arity-path commands
-
-
-def test_tag_rejects_an_option_looking_value(ticket: str, rebar_repo: Path) -> None:
-    """`tag` shares comment's arity path, so it shared the silent-loss bug."""
-    assert commands_main(["tag", ticket, "--body-file", "/tmp/x.md"]) != 0
-    assert _tags(ticket, rebar_repo) == []
-
-
-def test_tag_double_dash_allows_a_dash_leading_tag(ticket: str, rebar_repo: Path) -> None:
-    assert commands_main(["tag", ticket, "--", "-dash-tag"]) == 0
-    assert _tags(ticket, rebar_repo) == ["-dash-tag"]
-
-
-def test_untag_rejects_an_option_looking_value(ticket: str) -> None:
-    assert commands_main(["untag", ticket, "--body-file", "/tmp/x.md"]) != 0
 
 
 def test_archive_rejects_an_option_looking_ticket_id() -> None:

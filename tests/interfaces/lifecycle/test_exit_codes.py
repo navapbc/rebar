@@ -79,10 +79,10 @@ def test_success_paths_exit_0(rebar_repo: Path) -> None:
     [
         ("show", MISSING),
         ("deps", MISSING),
-        ("check-ac", MISSING),
-        ("quality-check", MISSING),
+        ("check", MISSING, "--ac"),
+        ("check", MISSING),
         ("comment", MISSING, "body"),
-        ("tag", MISSING, "atag"),
+        ("edit", MISSING, "--add-tag=atag"),
         ("transition", MISSING, "open", "closed"),
     ],
 )
@@ -133,9 +133,9 @@ def test_unknown_option_exits_2(rebar_repo: Path, base: tuple) -> None:
 
 
 def test_clarity_check_not_found_exits_2(rebar_repo: Path) -> None:
-    # clarity-check uses 0=pass / 1=fail-VERDICT, so a not-found ticket cannot be
+    # check --clarity uses 0=pass / 1=fail-VERDICT, so a not-found ticket cannot be
     # signalled with 1; it uses 2 (the gate convention, documented in exit-codes.md).
-    assert _rc("clarity-check", MISSING, cwd=str(rebar_repo)) == 2
+    assert _rc("check", MISSING, "--clarity", cwd=str(rebar_repo)) == 2
 
 
 # ── 10: optimistic-concurrency mismatch ───────────────────────────────────────

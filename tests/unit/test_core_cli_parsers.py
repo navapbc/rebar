@@ -33,7 +33,8 @@ from rebar._cli import _registry
 from rebar._cli import main as cli_main
 from rebar._cli._parser import ParseError, RebarArgumentParser
 
-# The 50 core commands S2b migrates. ``metrics`` is intentionally excluded — its
+# The 40 core commands (S2b migrated 50; the CLI-verb consolidation removed 11 and added
+# ``check``). ``metrics`` is intentionally excluded — its
 # Route already carries an advanced ``parser_factory`` from S2c and re-migrating
 # it is forbidden by this ticket.
 CORE_COMMANDS = frozenset(
@@ -44,17 +45,9 @@ CORE_COMMANDS = frozenset(
         "deps",
         "ready",
         "search",
-        "session-logs",
         "validate",
-        "get-file-impact",
-        "get-verify-commands",
-        "exists",
         "resolve",
-        "format",
-        "list-descendants",
-        "clarity-check",
-        "check-ac",
-        "quality-check",
+        "check",
         "summary",
         "sign",
         "verify-signature",
@@ -73,8 +66,6 @@ CORE_COMMANDS = frozenset(
         "unlink",
         "revert",
         "edit",
-        "tag",
-        "untag",
         "archive",
         "set-file-impact",
         "set-verify-commands",
@@ -102,10 +93,10 @@ def _resolve(ref: str):
     return getattr(module, attr)
 
 
-def test_the_core_inventory_is_the_expected_50_commands() -> None:
-    """Guards the census: exactly these 50 core commands are S2b's scope."""
+def test_the_core_inventory_is_the_expected_40_commands() -> None:
+    """Guards the census: exactly these 40 core commands are in scope."""
 
-    assert len(CORE_COMMANDS) == 50
+    assert len(CORE_COMMANDS) == 40
     present = {r.name for r in _registry.ROUTES}
     assert CORE_COMMANDS <= present, CORE_COMMANDS - present
     # metrics is migrated already and must NOT be in scope here.
@@ -147,15 +138,18 @@ def test_core_factory_builds_prog_bound_parser(route: _registry.Route) -> None:
 _ACCEPTS = [
     ("show", ["some-ticket"]),
     ("list", []),
-    ("exists", ["some-ticket"]),
     ("resolve", ["some-ticket"]),
+    ("resolve", ["some-ticket", "--display=alias"]),
+    ("check", ["some-ticket", "--ac"]),
     ("comment", ["some-ticket", "a note"]),
     ("create", ["task", "a title"]),
-    ("tag", ["some-ticket", "atag"]),
+    ("edit", ["some-ticket", "--add-tag=atag"]),
 ]
 
 
-@pytest.mark.parametrize(("name", "argv"), _ACCEPTS, ids=[a[0] for a in _ACCEPTS])
+@pytest.mark.parametrize(
+    ("name", "argv"), _ACCEPTS, ids=[f"{a[0]}-{i}" for i, a in enumerate(_ACCEPTS)]
+)
 def test_representative_valid_argv_is_accepted(name: str, argv: list[str]) -> None:
     """A canonical well-formed invocation parses without raising ParseError."""
 
@@ -207,7 +201,7 @@ for route in _registry.ROUTES:
     parser = getattr(mod, attr)(prog='rebar ' + route.name)
     assert parser.prog == 'rebar ' + route.name, route.name
     built += 1
-assert built == 50, built
+assert built == 40, built
 print('OK', built)
 """
     result = subprocess.run(
