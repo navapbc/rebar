@@ -253,10 +253,9 @@ The same slots are settable from the environment, one variable per class and fie
 ```bash
 # `frontier` drives the code-review Pass-1 finder (`gates/code-review.yaml`):
 REBAR_LLM_FRONTIER_MODEL=openai-responses:gpt-4o rebar review-code
-# `standard` drives plan-review, the completion verifier, the code-review verify passes
-# and the overlap judge:
+# `standard` drives plan-review, the completion verifier and the code-review verify passes:
 REBAR_LLM_STANDARD_MODEL=google:gemini-2.5-pro rebar review-plan <id>
-# `trivial` drives ticket enrichment and the epic bug screen. Point it at a local
+# `trivial` drives the epic bug screen. Point it at a local
 # OpenAI-compatible server (LMStudio / Ollama / vLLM) with the per-class endpoint:
 REBAR_LLM_TRIVIAL_MODEL=mlx-community/Qwen3-8B REBAR_LLM_TRIVIAL_PROVIDER=openai \
   REBAR_LLM_TRIVIAL_ENDPOINT=http://127.0.0.1:1234/v1
@@ -283,9 +282,7 @@ class the operation declares) to move a classless operation.
 ### A validated local-model run
 
 Verified end to end against a local OpenAI-compatible server (an MLX model served at
-`http://127.0.0.1:1234/v1`, no API key). Install the openai provider group, point the
-`trivial` class at the server, and run any operation that declares it — here ticket
-enrichment, the highest-volume `trivial` site:
+`http://127.0.0.1:1234/v1`, no API key) by pointing the `trivial` class at the server:
 
 ```bash
 pip install 'pydantic-ai-slim[openai]'   # the OpenAI-compatible provider group
@@ -293,24 +290,14 @@ pip install 'pydantic-ai-slim[openai]'   # the OpenAI-compatible provider group
 # Either recipe works — a per-class endpoint, or a top-level base_url:
 REBAR_LLM_TRIVIAL_MODEL=<your-local-model> REBAR_LLM_TRIVIAL_PROVIDER=openai \
   REBAR_LLM_TRIVIAL_ENDPOINT=http://127.0.0.1:1234/v1 \
-  python -c "import json, rebar.llm.enrich as e; \
-print(json.dumps(e.enrich(text='Title: retries lack jitter; add exponential backoff')['digest']))"
+  <any operation that declares the trivial class>
 ```
 
-The call reaches the local server through rebar's builder (no `OPENAI_API_KEY`, no dummy
-`REBAR_LLM_API_KEY`), returns a schema-valid `ticket_digest`, and records `tier=best_effort` in
-the signed provenance because a local/opaque endpoint was used. Observed abridged output:
-
-```json
-{
-  "problem_keywords": ["retry", "jitter", "exponential backoff"],
-  "component_or_area": "client retry handler",
-  "propositions": [
-    "Client retries lack jitter",
-    "Acceptance requires adding exponential backoff with jitter to retry logic"
-  ]
-}
-```
+The recorded run used ticket enrichment, an op since removed with the ADR 0086 overlap
+detector; the epic bug screen is the surviving `trivial` site. The call reached the local server
+through rebar's builder (no `OPENAI_API_KEY`, no dummy `REBAR_LLM_API_KEY`), returned
+schema-valid output, and recorded `tier=best_effort` in the signed provenance because a
+local/opaque endpoint was used.
 
 > A missing provider group fails loudly and by name (`pip install 'pydantic-ai-slim[openai]'`)
 > rather than with a bare `ModuleNotFoundError` — the framework's clean-degradation contract.
@@ -457,31 +444,6 @@ is by **content hash**: the resolved (git-canonical) prompt's hash is recorded o
 the run so a span can be tied back to the exact prompt text. Heavy deps are an
 optional extra; a missing extra/credential raises a clear, actionable error.
 
-### The opportunistic enrichment drain runs in three phases
-
-`enrich_drain.drain()` (spawned per ordinary store write by `maybe_drain`, or run inline via
-`rebar enrich --drain`) follows the SKIP LOCKED job-queue shape — reserve-short,
-process-unlocked, finalize-short, lease recovery — so its advisory drain lock is **never held
-across an LLM call** (bug 6148-5d81-8e80-41e8: the earlier lock-across-LLM shape held it for
-minutes and made the drain single-flight):
-
-1. **Collect** (under the drain lock, seconds): a concurrency guard (at most 3 distinct
-   live-lease drainers may spend LLM $ at once — a 4th skips with
-   `{"skipped": "concurrency-cap"}`), the stale-digest self-heal re-enqueues, the pending
-   scan, then optimistic per-ticket claims up to the batch cap with a content-hash snapshot
-   each. `REBAR_LLM_OVERLAP_DRAIN_BATCH` (default 20) is the claim-window size, clamped to a
-   lease-derived bound (`lease_ttl_s // 40` = 22 at the default 15-minute lease) so a run
-   cannot outlive its claims.
-2. **Enrich** (no lock): the LLM calls. Other drainers keep collecting and processing.
-3. **Finalize** (short writes): each snapshot is revalidated — a ticket edited mid-enrichment
-   gets no stale digest (the entry is re-enqueued with soak 0, reported as `stale_skipped`);
-   otherwise the digest is emitted and the entry marked done. Failures keep their
-   dispositions (transient → lease-expiry retry; permanent input rejection → tombstone).
-
-Queue event schema, store write-lock semantics, and the `REBAR_LLM_OVERLAP_DRAIN`
-off|async|always door are unchanged; correctness rests on the optimistic claim + lease, not
-on the drain lock.
-
 ## Using it
 
 ```bash
@@ -518,7 +480,7 @@ file into a Markdown table (per-op breakdown + totals) for `$GITHUB_STEP_SUMMARY
 A call made inside a workflow step also carries **`step`** (the step id) and, when that step
 declared a model CLASS rather than a literal id, **`model_class`** (`trivial`/`standard`/
 `frontier`). Both are omitted — not written as null — when they do not apply, so a row with no
-`step` means the call was made outside any step (a spec scan, an enrich pass). They exist because
+`step` means the call was made outside any step (a spec scan). They exist because
 `op` alone cannot attribute a call: it is the PROMPT name, several steps may share one prompt, and
 without the declared class a reader cannot tell "resolved to opus *because* `frontier`" from
 "resolved to opus *because* it fell through to `cfg.model`" — the distinction that makes a
@@ -767,7 +729,7 @@ committed list, so other projects are not saddled with rebar's noise.
 **This repo's entry (the worked example).** rebar's own `.rebar/criteria_routing.json` carries
 a `code_review.concurrency` entry whose `trigger_tokens` add `.lock`, `retry`, `Popen`,
 `setsid`, `fork`, `stage_and_commit`, `push_tickets_branch`, `refs/reconciler/`, and whose
-`applies_to` adds `**/_store/**`, `**/lock*`, `**/enrich_drain*`, `.github/workflows/**`. A diff
+`applies_to` adds `**/_store/**`, `**/lock*`, `.github/workflows/**`. A diff
 touching `index.lock` — caught by the `.lock` token, which is absent from the committed
 high-precision list — fires the overlay under this repo's effective routing but not under
 committed-only routing, the same dogfood-by-example pattern as `project.portability` and
@@ -807,8 +769,7 @@ conflated:
    `min(OUTPUT_RETRIES, max(0, structured_retry_limit))`; the same N seeds **both** the Agent
    `retries={"output": N}` **and** the matching `UsageLimits` request addend, so the request
    budget and the retry allowance can never drift. **`structured_retry_limit=0` ⇒ allowance 0 ⇒
-   single-shot**: zero output-repair retries — the abstain/fail-safe `overlap/judge.py` and the
-   `contracts.py` batch depend on. Raising a starved allowance is a **plan-reviewed follow-up**,
+   single-shot**: zero output-repair retries — the abstain/fail-safe `contracts.py` batch depends on. Raising a starved allowance is a **plan-reviewed follow-up**,
    never an ad-hoc bump.
 3. **The native→prompted downgrade** (bug 895c) — the *only* sanctioned **second outer
    `run_sync`**. When the provider rejects native structured output at grammar-compile time

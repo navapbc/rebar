@@ -33,7 +33,7 @@ text but no tool call — a tool-calling turn is part of the agentic loop and is
   :class:`ContextWindowExceededError` BEFORE the provider call. This is what covers the
   FIRST request — a history of ``[ModelRequest]`` carries no billed usage for the response
   rule to read, and previously went to the provider unmeasured (a 400 surfaced as
-  ``LLMUnavailableError``). Per-op input bounds (enrich, spec-scan, plan-review sizing,
+  ``LLMUnavailableError``). Per-op input bounds (spec-scan, plan-review sizing,
   completion ceilings) remain the first line; this seam is the shared backstop.
 
 Seam 2 — truncation reclassification (:func:`concision_guard`)
@@ -206,7 +206,7 @@ def _wire_keeps_response(response: Any, reserve: int, window: int) -> bool:
 # `plan_review.det_floor.CHARS_PER_TOKEN` and the inline `len//4 + 1` estimators. Deliberately
 # permissive (prose/code average ≤4 chars/token) so calls that succeed today are not newly
 # refused, while gross overflows (an input several times the window) are caught before the
-# provider call. chars/2 would score enrich's maximal `window * 2`-char first-line bound at
+# provider call. chars/2 would score the maximal `window * 2`-char first-line bound at
 # exactly `window` tokens and wrongly refuse it; chars/4 scores it at window/2 and admits it.
 CHARS_PER_TOKEN = 4
 

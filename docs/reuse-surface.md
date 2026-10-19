@@ -232,8 +232,8 @@ single `get_runner(...).run(...)` facade into one `_pai_structured` operation th
 the *in-Agent* bounded retry (`retries={"output": N}`): it adds a model request but not a second
 `run_sync`, and its allowance N is single-sourced with the `UsageLimits` request budget by
 `output_retry_allowance = min(OUTPUT_RETRIES, max(0, structured_retry_limit))`. So
-`structured_retry_limit=0` means **single-shot** (zero output-repair retries — the overlap/judge
-and contracts batch abstain fail-safe); the only sanctioned *second* outer run is the bug-895c
+`structured_retry_limit=0` means **single-shot** (zero output-repair retries — the contracts batch
+abstains fail-safe); the only sanctioned *second* outer run is the bug-895c
 native→prompted downgrade. Full retry-layer/accounting contract:
 [llm-framework.md](llm-framework.md) §"The structured retry layers and their accounting".
 
@@ -624,7 +624,7 @@ This binding is wired into the CLI's top-level dispatch (`rebar._cli.__init__._m
 
 ### Authoritative binding, LLM surface (RP-04 S3)
 
-`rebar.llm.config_binding.compose_and_bind_llm_config(*, explicit=None, repo_root=None)` is the LLM-surface counterpart, completing ADR 0098 (ticket `gaudy-working-mantaray`). It composes ONE `LLMConfig` per public LLM operation — `review_code`, `verify_completion`, `review_plan`, `scan_epics_for_spec`, and `run_workflow` — and binds it active via the same `gate_config` contextvar mechanism `resolve_gate_config` already used for a bound gate run, so nested subcalls and multi-step workflow steps observe the identical `LLMConfig` instance instead of each independently re-reading the environment. An `explicit=` config (e.g. a caller-supplied gate handle) always wins and is bound unconditionally; absent that, an already-bound config is reused verbatim before falling back to a fresh `LLMConfig.from_env(repo_root=repo_root)`. Below-boundary call sites (`enrich`, `epic_bug_screen`, the `overlap/*` workers, `plan_review/attest.py`, the completion/plan-review agent-step bridge) call `resolve_gate_config(repo_root)` rather than `LLMConfig.from_env()` directly.
+`rebar.llm.config_binding.compose_and_bind_llm_config(*, explicit=None, repo_root=None)` is the LLM-surface counterpart, completing ADR 0098 (ticket `gaudy-working-mantaray`). It composes ONE `LLMConfig` per public LLM operation — `review_code`, `verify_completion`, `review_plan`, `scan_epics_for_spec`, and `run_workflow` — and binds it active via the same `gate_config` contextvar mechanism `resolve_gate_config` already used for a bound gate run, so nested subcalls and multi-step workflow steps observe the identical `LLMConfig` instance instead of each independently re-reading the environment. An `explicit=` config (e.g. a caller-supplied gate handle) always wins and is bound unconditionally; absent that, an already-bound config is reused verbatim before falling back to a fresh `LLMConfig.from_env(repo_root=repo_root)`. Below-boundary call sites (`epic_bug_screen`, `plan_review/attest.py`, the completion/plan-review agent-step bridge) call `resolve_gate_config(repo_root)` rather than `LLMConfig.from_env()` directly.
 
 Unlike the general operation snapshot above, `compose_and_bind_llm_config` does NOT fail open: a missing or conflicting decision-bearing provider/credential composition fails before any external call, with no anonymous/cross-provider fallback. `redacted_snapshot_values`/`llm_config_fingerprint` give the LLM config the same non-secret, JSON-primitive-only projection `OperationSnapshot` gives, via an explicit field allowlist that never exposes `api_key` or the live `ticket_view`. `resign_plan_review` is a documented exception: it makes no LLM call, so it is never bound via this composer (it still gets the general operation-snapshot binding like any other MCP tool).
 

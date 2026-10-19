@@ -153,24 +153,8 @@ verify.auto_resume_max             = 2       # bounded auto-resume for the compl
                                              # count, remaining unmet) rides the close output and the
                                              # durable COMPLETION_VERDICT sidecar record.
 verify.require_plan_review_for_claim = false # gate claim on a successful (non-BLOCK) plan review attestation
-verify.suggest_duplicate_tickets   = false   # ADVISORY store-wide duplicate detection during
-                                             # `review-plan`: emits up to three suggested
-                                             # `duplicates`/`supersedes`/`depends_on` links in a
-                                             # separate `overlap[]` verdict key (ready-to-run
-                                             # `rebar link` commands). Three stages — the query
-                                             # ticket's digest via `enrich`, BM25F retrieval over
-                                             # the WHOLE tracker with the query's own graph
-                                             # excluded, then a bounded pairwise LLM judge. It is
-                                             # advisory and NEVER blocks a claim or a close, and
-                                             # never affects the plan-review verdict. Cost scales
-                                             # with TRACKER SIZE, not with the reviewed ticket, so
-                                             # it grows as the store grows. Algorithm tunables are
-                                             # the `[tool.rebar.llm] overlap_*` keys (`overlap_k`,
-                                             # `overlap_drain`, `overlap_conf_threshold`, …). env
-                                             # REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS.
-                                             # See [ADR 0086](adr/0086-cross-ticket-overlap.md).
-                                             # The SAME key also enables the cheap CREATE-TIME
-                                             # advisory (ticket eac3): a create whose normalized
+verify.suggest_duplicate_tickets   = false   # ADVISORY create-time duplicate journal ONLY
+                                             # (ticket eac3): a create whose normalized
                                              # title matches another create inside a 600 s window
                                              # is surfaced (candidate id + status) on the
                                              # creating surface's own channel — CLI stderr,
@@ -212,7 +196,7 @@ compact.trigger          = "async"  # async | always | off (env REBAR_COMPACT_TR
                         # `compact-all` out of band. "always" runs that sweep INLINE instead
                         # (tests/CI, where a detached child would outlive the assertion);
                         # "off" disables it for operators who drive compaction themselves.
-                        # A v1 no-op on Windows, mirroring the enrichment drain.
+                        # A v1 no-op on Windows.
 compact.trigger_interval_s = 21600  # env REBAR_COMPACT_TRIGGER_INTERVAL_S
                         # How stale the last-sweep stamp may get before a close detaches a
                         # worker even when the ticket it just wrote needs no folding. Without
@@ -428,8 +412,8 @@ reached identically from the CLI, the matching MCP tool, and the Python API) and
 (`rebar.llm.config.gate_config`) for the whole operation so nested subcalls and
 multi-step workflow runs observe the SAME resolved `LLMConfig` — a later env/config-file
 mutation never reaches an in-progress operation; only the NEXT operation observes it.
-Every below-boundary call site (`enrich`, `epic_bug_screen`, the `overlap/*` workers,
-`plan_review/attest.py`, the completion/plan-review agent-step bridge, etc.) now calls
+Every below-boundary call site (`epic_bug_screen`, `plan_review/attest.py`, the
+completion/plan-review agent-step bridge, etc.) now calls
 `rebar.llm.config.resolve_gate_config(repo_root)` instead of `LLMConfig.from_env()`
 directly — it returns the bound operation's config when one is active, else falls back
 to a fresh `from_env()` for a genuinely standalone call. Composition failure (a missing/

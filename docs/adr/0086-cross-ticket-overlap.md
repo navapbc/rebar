@@ -2,8 +2,19 @@
 
 > **Renumbered by story 0743:** previously ADR 0037 (a number shared by 5 ADRs — a collision); reassigned to 0086 to make ADR numbers unique. See [RENUMBERING.md](RENUMBERING.md).
 
-**Status:** Accepted (epic only-crave-art — cross-ticket overlap & dependency detection)
+**Status:** Retired 2026-09-06 — implementation removed in 2de5f341ec4 (originally Accepted, epic only-crave-art); redesign tracked on epic fattish-plucky-bufflehead (62dc-535b-5d05-421d)
 **Date:** 2026-07-09
+
+> **Retired 2026-09-06 (implementation removed in `2de5f341ec4`).** The overlap/enrichment
+> implementation this ADR specified — the `enrich` verb, the write-path queue drain, the
+> certification-time `ENQUEUE_ENRICH` enqueue, the BM25F retrieve plus pairwise judge, and the
+> `[llm] overlap_*` tunables — was removed from rebar. The four event-type names
+> `TICKET_DIGEST`/`ENQUEUE_ENRICH`/`CLAIM_ENRICH`/`DONE_ENRICH` stay recognized so historical
+> stores parse. It was retired because the write-path queue appended and pushed about 4 commits
+> per ticket on the shared `tickets` branch, starving every other writer and diverging stores
+> without bound (rebar-ticket 62ab-c11e-30c2-40be). The redesign is tracked on the design-record
+> epic fattish-plucky-bufflehead (62dc-535b-5d05-421d); this file remains only as the historical
+> design record.
 
 ## Context
 
@@ -64,8 +75,8 @@ Four load-bearing choices, each derisked by a measured experiment (2026-07-09):
   pairwise judge (both orderings, a required cited shared artifact, default related-but-distinct,
   abstain-when-unsure), directed so the emitted `rebar link` command is never inverted.
 - **Gated off by default** (`verify.suggest_duplicate_tickets`, renamed from the
-  `verify.overlap_enabled` this ADR was written against — the old key remains a permanent
-  alias); all tunables live on `LLMConfig`
+  `verify.overlap_enabled` this ADR was written against — the old spelling was retired by
+  ADR 0116 and no longer resolves); all tunables live on `LLMConfig`
   (`[tool.rebar.llm]`, `REBAR_LLM_OVERLAP_*`).
 - **Graceful skip, no fallback.** If the `[agents]` extra / plan-review / an API key is absent,
   the whole feature silently no-ops. A cold store surfaces little until drains warm the digest

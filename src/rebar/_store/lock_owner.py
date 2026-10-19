@@ -306,9 +306,9 @@ def _mkdir_lock_is_stale(lock_dir: str, *, fcntl_held: bool = False) -> bool:
 def stamped_file_is_stale(path: str) -> bool:
     """Return whether a stamped single-file lock is provably orphaned.
 
-    This applies the shared decision table to ``.rebar/enrich-drain.lock``. The file has no
-    kernel leg or legacy stamp dialect, so unreadable or unrecognized content uses the age
-    ceiling. A vanished file reports not stale."""
+    This applies the shared decision table to a stamped worker lock (the compaction and snapshot-GC
+    worker locks). The file has no kernel leg or legacy stamp dialect, so unreadable or
+    unrecognized content uses the age ceiling. A vanished file reports not stale."""
     try:
         with open(path, encoding="utf-8") as fh:
             stamp = fh.read().strip()

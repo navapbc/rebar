@@ -456,7 +456,7 @@ Today:
   `_store.lock.canonical_tracker` requires — so every worktree view of one store shares one
   worker lock and one sweep clock instead of each keying its own. `compact.trigger` selects
   `async` (detach, the default), `always` (inline — for tests/CI) or `off`. Windows is a v1
-  no-op, as the enrichment drain is.
+  no-op.
 
   This does **not** reintroduce the hold that moved compaction out: the P0 was never "a close
   compacts", it was that an operation agents *wait on* held the store lock for minutes. Here

@@ -243,8 +243,8 @@ def test_a_failed_stamp_write_still_returns_the_fd_and_says_so(
 def test_the_reclaim_warning_names_the_holder_when_a_describer_is_given(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The ``describe_holder`` operator affordance (introduced for the since-retired
-    enrichment drain) makes a wedge attributable without running ``rebar doctor``. Callers
+    """The ``describe_holder`` operator affordance (introduced for the ADR 0086 worker, since
+    removed) makes a wedge attributable without running ``rebar doctor``. Callers
     that pass ``None`` must NOT gain a phantom holder clause."""
     from rebar._store.stamped_lock import stamped_file_lock
 

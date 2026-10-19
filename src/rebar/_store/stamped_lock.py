@@ -1,8 +1,8 @@
 """One stamped-file advisory lock for the background workers (story 1cf6-f902-5bfa-438f).
 
-The compaction sweep and the snapshot-GC worker (and, before ADR 0086 retired it, the
-enrichment drain) each need the same cheap "only one of me at a time" file lock, and each
-carried its OWN copy of the loop — which is how
+The compaction sweep and the snapshot-GC worker (and, until ADR 0086's worker was removed, a
+third background worker) each need the same cheap "only one of me at a time" file lock, and
+each carried its OWN copy of the loop — which is how
 the unresolved-path defect spread (bug ``da68-fc7c-068c-4c53``), how the three dialects drifted
 apart (bug ``aadc-9af6-0e67-4e2a``), and how the release delta :func:`release_stamped_lock` now
 settles survived in one of them. Deliberately narrow: staleness stays in
@@ -57,17 +57,18 @@ def stamped_file_lock(
             held = "" if describe_holder is None else f" held by {describe_holder(target)}"
             logger.warning("%s: reclaiming stale %s %s%s", label, lock_noun, target, held)
             # ACCEPTED RACE (task deathful-lettered-maltesedog, operator decision
-            # 2026-08-16). Nothing excludes another drainer between the
+            # 2026-08-16). Nothing excludes another worker between the
             # `stamped_file_is_stale` verdict above and this unlink: both can condemn the
             # same orphan, the winner can recreate and stamp a FRESH lock, and this unlink
-            # then removes that live lock — so two drains can run at once. (The mkdir leg
+            # then removes that live lock — so two workers can run at once. (The mkdir leg
             # has the same shape but is safe, because `_acquire_mkdir`'s precondition is
             # that its caller already holds the exclusive fcntl leg; a single FILE lock has
             # no such kernel leg to inherit.) The window is left open deliberately:
             #   * Harm is bounded to REDUNDANT WORK, never to a wrong outcome. This lock is
-            #     advisory and exists only to stop two drain PROCESSES duplicating effort;
-            #     the correctness boundary is the per-ticket optimistic queue claim
-            #     (`overlap.queue.claim`, lease-bounded), which a second drainer loses.
+            #     advisory and exists only to stop two worker PROCESSES duplicating effort;
+            #     the correctness boundary is the store lock each pass takes for its actual
+            #     work (the GC pass's non-blocking store lock; the sweep stands aside while a
+            #     writer holds the store write lock), which a second worker cannot bypass.
             #   * Closing it means changing the MECHANISM — a kernel leg (`flock`) or an
             #     atomic create-and-rename — which is a larger change than the bug it would
             #     prevent, on a path that is already strictly better than the permanent

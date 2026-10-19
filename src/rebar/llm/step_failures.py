@@ -1,12 +1,12 @@
 """Run-scoped tally of LLM step calls that FAILED but did not fail the run (ticket
 eclectic-industrial-argali).
 
-**The gap this closes.** Most LLM sub-steps are deliberately non-fatal: the overlap judge
-swallows a batch failure to all-abstain, the novelty / contradiction / completion sub-calls
-degrade to "score nothing", and so on. Each one logs a warning and nothing else, so a run in
-which EVERY overlap batch died emits a verdict byte-identical to a run in which nothing
-overlapped. A caller consuming the gate's JSON cannot tell the difference, and repeated
-silent degradation stays invisible unless someone scrapes the logs.
+**The gap this closes.** Most LLM sub-steps are deliberately non-fatal: the novelty /
+contradiction / completion sub-calls degrade to "score nothing", the epic bug screen degrades
+open, and so on. Each one logs a warning and nothing else, so a run in which EVERY such call
+died emits a verdict byte-identical to a run in which none was needed. A caller consuming the
+gate's JSON cannot tell the difference, and repeated silent degradation stays invisible unless
+someone scrapes the logs.
 
 **The design.** Every LLM call in the system funnels through one except block —
 :meth:`rebar.llm.runner.PydanticAIRunner.run`'s — which already knows the step's call label

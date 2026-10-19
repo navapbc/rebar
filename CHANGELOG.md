@@ -115,6 +115,8 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   follow in task dihedral-crying-grunion). Node/npm are no longer required to build, test, or
   develop rebar. ADR 0071 (never implemented) is marked Superseded; the deleted code is restorable
   from the commit recorded on ticket `yip-gem-teak`.
+- **BREAKING (pre-1.0): the cross-ticket overlap/enrichment implementation (ADR 0086) is removed**,
+  including `rebar enrich` and the 13 `[llm] overlap_*` keys. See `docs/release-notes.md`.
 
 ## [0.13.0] - 2026-08-28
 

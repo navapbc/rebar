@@ -230,7 +230,7 @@ def _bug_digest(bug: dict) -> str:
 
 
 def _screen_one(bug: dict, system_prompt: str, cfg: LLMConfig, runner: Runner | None) -> dict:
-    """One single-turn forced-choice screen call. Mirrors ``overlap.judge.judge_one``: the
+    """One single-turn forced-choice screen call. The
     model CLASS is bound here per call (bug afeb — inheriting raw ``cfg.model`` would ignore
     the operator's class table), inside the try so a config error degrades like any other
     screen failure."""

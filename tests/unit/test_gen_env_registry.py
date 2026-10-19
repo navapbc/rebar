@@ -145,8 +145,8 @@ def test_committed_registry_still_documents_the_popped_opcert_key():
     # The specific instance that exposed this bug (illusory-patronal-giraffe): the opcert
     # private key is read then popped. It must stay documented, and the registry must not
     # shrink below its floor. The floor was the 162 keys observed at the time of the fix; it
-    # is now the 152 left after the retired ADR 0086 overlap detector's 13 REBAR_LLM_OVERLAP_*
-    # variables were removed from a 165-key registry (granitic-realisable-dolphin).
+    # is now the 152 left after the ADR 0086 worker's 13 tuning variables were removed from a
+    # 165-key registry (granitic-realisable-dolphin).
     doc = (REPO_ROOT / "docs" / "env-vars.md").read_text()
     assert "REBAR_OPCERT_PRIVATE_KEY" in doc
     count = int(re.search(r"_(\d+) variables\._", doc).group(1))

@@ -111,10 +111,10 @@ _NATIVE_MAX_UNION_PROPERTIES = 12
 #     must be one of: modelId, messages, system, inferenceConfig, toolConfig, …
 #
 # MEASURED: botocore 1.43.64 carries `outputConfig`; botocore 1.40.61 does not. The 1.40.61
-# failure hit `ticket_digest` — a 722-BYTE contract, 4 optional properties — so this is NOT
-# the complexity failure wearing a different hat: on an under-versioned stack EVERY native
-# call fails regardless of schema size, and it degrades silently ("store-wide overlap step
-# failed; no overlap findings"). Error-string matching could never have caught this from the
+# failure hit the (since-removed) digest contract — 722 BYTES, 4 optional properties — so this
+# is NOT the complexity failure wearing a different hat: on an under-versioned stack EVERY native
+# call fails regardless of schema size, and it degrades silently (the then-live overlap
+# step logged only a warning). Error-string matching could never have caught this from the
 # complexity phrases — the two failures share no vocabulary — which is why the gate, not the
 # fallback, is the load-bearing half.
 #

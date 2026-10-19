@@ -8,6 +8,27 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — the cross-ticket overlap/enrichment implementation (ADR 0086) is removed
+
+The store-wide overlap detector was removed in commit `2de5f341ec4` (epic bossy-skittish-foal).
+
+- `rebar enrich` is now an unknown subcommand.
+- The 13 `[llm]` keys `overlap_propositions_min`, `overlap_propositions_max`, `overlap_k`, `overlap_max_doc_freq`, `overlap_min_should_match`, `overlap_soak_min`, `overlap_lease_ttl_min`, `overlap_reenrich_debounce_min`, `overlap_conf_threshold`, `overlap_surface_cap`, `overlap_drain`, `overlap_drain_batch`, `overlap_drain_gate_budget_ms` and their `REBAR_LLM_OVERLAP_*` environment variables are
+  removed with no tombstone (ADR 0116). A leftover `[llm] overlap_*` key in `rebar.toml` is
+  silently ignored, because `[llm]` is a reserved section that the unknown-key warning and
+  `REBAR_CONFIG_UNKNOWN_KEYS=error` never inspect — so delete the keys.
+- `verify.suggest_duplicate_tickets` keeps its name and now gates only the create-time
+  same-title journal (`rebar create` stderr warning / `duplicate_warning` result field).
+- `rebar review-plan` and MCP `review_plan` verdicts never carry an `overlap` key and the CLI's
+  `overlap:` block is gone (no schema change: `plan_review_verdict.schema.json` never declared
+  it). `rebar show` no longer emits `digest_freshness`. `rebar doctor` reports five lock legs.
+- `rebar.llm.enrich` and the `ticket_digest` / `overlap_verdict` contracts and schemas are gone
+  from the library surface.
+
+Migration: delete the keys; remove `.rebar/enrich-drain.lock`, `.rebar/logs/enrich-drain.log` and
+`.rebar/enrich-gate.json` if present. Historical `TICKET_DIGEST` and `*_ENRICH` events need no
+action: the four names stay recognized, reduce to nothing, and survive compaction.
+
 ## BREAKING (pre-1.0) — visual-editor library surface removed
 
 The BPMN visual workflow editor was removed in commit `21dabcbb2c1` (epic

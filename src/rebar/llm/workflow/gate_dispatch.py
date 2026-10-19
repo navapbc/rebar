@@ -151,7 +151,7 @@ def produce_plan_review_verdict(
             assemble_context_cache(),
             review_kernel.collect_contract_violations(),
             # Tally LLM step calls that fail but do not fail the run, so repeated silent
-            # degradation (the motivating case: every overlap-judge batch dying) is visible on
+            # degradation (e.g. every novelty sub-call dying) is visible on
             # the verdict coverage instead of only in the logs. Additive observability — see
             # rebar.llm.step_failures.
             collect_step_failures(),

@@ -171,7 +171,7 @@ def test_a_trigger_failure_never_reaches_the_gate(
 def test_the_quiet_check_never_enumerates_the_store(
     store: Path, repo: Path, spawns: list[tuple[str, str | None]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The marker discipline (inherited from the retired enrich-drain gate): the
+    """The marker discipline (inherited from the ADR 0086 worker's gate, since removed): the
     per-operation answer must be one marker ``stat``, not a
     walk that grows with the 64k-entry store this bug measured."""
     for i in range(25):

@@ -68,8 +68,8 @@ These record types appear in ticket event directories but do not enter the main 
 | `SYNC` | External bridge compatibility writers | The current Python reconciler does not emit this metadata or fold it into ticket state. Compaction preserves the file. |
 | `REVIEW_RESULT` | `rebar.llm.plan_review.sidecar`, `rebar.llm.code_review.sidecar`, and `rebar.llm.gate_error_sidecar` | Plan-review and code-review readers select retained verdict records without adding them to compiled ticket state. |
 | `COMPLETION_VERDICT` | `rebar.llm.completion_sidecar` and `rebar.llm.gate_error_sidecar` | Completion readers select retained verdict records without adding them to compiled ticket state. |
-| `TICKET_DIGEST` | `rebar.llm.overlap.digest_sidecar` | Overlap detection reads the latest usable content digest. |
-| `ENQUEUE_ENRICH` / `CLAIM_ENRICH` / `DONE_ENRICH` | `rebar.llm.overlap.queue` | The enrichment drain reduces this broker-free queue outside ticket-state replay. |
+| `TICKET_DIGEST` | retired producer (ADR 0086) | No maintained producer or consumer; the name is kept in `_NON_REPLAY_KNOWN_TYPES` and the store allowlist so historical events still parse; compaction preserves the files. |
+| `ENQUEUE_ENRICH` / `CLAIM_ENRICH` / `DONE_ENRICH` | retired producer (ADR 0086) | No maintained producer or consumer; the name is kept in `_NON_REPLAY_KNOWN_TYPES` and the store allowlist so historical events still parse; compaction preserves the files. |
 
 ## Close metadata on the `*->closed` STATUS event
 

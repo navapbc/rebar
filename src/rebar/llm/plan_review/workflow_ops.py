@@ -532,8 +532,8 @@ def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
     violations = review_kernel.drain_contract_violations()
     if violations:
         coverage["verification_contract_violations"] = violations
-    # Same posture for LLM step calls that failed but did not fail this run (the overlap judge
-    # abstaining because every batch died, a novelty sub-call degrading to un-floored, ...):
+    # Same posture for LLM step calls that failed but did not fail this run (a novelty sub-call
+    # degrading to un-floored, ...):
     # present ONLY when non-empty, so a clean run's coverage is byte-identical and the verdict
     # string is untouched. Reaching this line at all means the run survived them.
     step_failures = step_failure_sink.drain()

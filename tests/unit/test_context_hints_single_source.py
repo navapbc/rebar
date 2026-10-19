@@ -7,8 +7,8 @@ stale, and the two classifiers then disagree about the same wire error.
 
 The guard matches the CONJUNCTION of all eight phrases as *distinct string literals* in one
 module — never a single common token such as ``"context"``, which appears innocently all over
-the tree. Prose that merely quotes the phrases inside one docstring (``run_failure.py``,
-``enrich.py``) is one literal, not eight, so it is left alone; so is
+the tree. Prose that merely quotes the phrases inside one docstring (``run_failure.py``)
+is one literal, not eight, so it is left alone; so is
 ``workflow.completion_failures``, whose token-exhaustion classifier is a deliberately
 DIFFERENT list.
 
