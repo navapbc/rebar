@@ -437,6 +437,9 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# root uv.toml. Stdlib + PyYAML, no CI provider required -- same portability contract as the
 	@# ShellCheck and templatefile gates above.
 	python scripts/check_uv_pin.py
+	@# Verified-gate parity (story dispiteous-balsamic-isopod): vote.needs must cover every
+	@# gating job. One owner from make lint; the CI step stays (workflows are out of scope).
+	python scripts/check_verify_gate_parity.py
 	@# Release supply-chain audits (story 08a8), AFTER ruff so ruff findings still surface.
 	@# zizmor audits the release workflow + the Verified-gate vote path ($(ZIZMOR_WORKFLOWS),
 	@# widened in epic 5664 S1); actionlint below validates ALL workflows. zizmor is a
