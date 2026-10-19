@@ -185,22 +185,10 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
             continue
         if fmt == "llm":
             # The `--output llm` arm is a machine format with a show↔list parity contract
-            # (test_llm_parity_show_vs_list) — do NOT add the overlap flag here.
+            # (test_llm_parity_show_vs_list) — do NOT add presentation-only fields here.
             print(js_safe_dumps(to_llm(state), ensure_ascii=False, separators=(",", ":")))
         else:
-            # Cross-ticket overlap (epic only-crave-art): render the digest freshness flag in
-            # the human `show` output ONLY. The flag is added to the dict THIS arm prints — it
-            # never enters library read results nor the `--output llm` arm. Lazy import +
-            # fail-safe so `rebar show` never breaks on it.
             out = dict(state)
-            try:
-                from rebar.llm.overlap import digest_sidecar
-
-                out["digest_freshness"] = digest_sidecar.freshness(
-                    raw_id, state=state, tracker=tracker
-                )
-            except Exception:  # noqa: BLE001 — presentation-only; never break `show` on it
-                pass
             from rebar.audit.read import plan_review_health
 
             out["plan_review_health"] = plan_review_health(state)

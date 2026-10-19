@@ -76,7 +76,7 @@ The golden record of the normalization: what each verb printed before the confir
 
 ## Command syntax
 
-One section per visible command that is not retired (72 in total), in registry order. Every section embeds its committed package help bytes.
+One section per visible command that is not retired (71 in total), in registry order. Every section embeds its committed package help bytes.
 
 ### `show`
 
@@ -999,22 +999,6 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --output, -o {json,text}
-```
-
-### `enrich`
-
-```
-Usage: rebar enrich [-h] [--drain] [--once] [{status}]
-
-Inspect or drain the ticket enrichment queue.
-
-positional arguments:
-  {status}    'status' prints the queue buckets as JSON. Omit to drain
-
-options:
-  -h, --help  show this help message and exit
-  --drain     bounded drain of the overlap queue
-  --once      process a single queue entry
 ```
 
 ### `explain`

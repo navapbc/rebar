@@ -184,6 +184,76 @@ def test_fsck_warns_on_unknown_newer_event_type(rebar_repo: Path) -> None:
     assert "CORRUPT" not in report
 
 
+# ── RETIRED: the overlap/enrichment event names still parse (ADR 0086) ────────
+_RETIRED_OVERLAP_EVENTS = {
+    # Payload shapes are the ones the removed producers (the overlap queue and digest sidecar)
+    # wrote, so this is what ~105k historical events look like.
+    "TICKET_DIGEST": {
+        "schema": "ticket_digest.v1",
+        "digest": {"summary": "s", "propositions": ["a", "b"], "artifacts": [], "kind": "task"},
+        "content_hash": "0" * 64,
+        "model": "historical-model",
+        "digest_hash_version": 1,
+    },
+    "ENQUEUE_ENRICH": {"ticket_id": None, "not_before_ns": 1},
+    "CLAIM_ENRICH": {"ticket_id": None, "drainer_id": "historical", "lease_expires_ns": 2},
+    "DONE_ENRICH": {"ticket_id": None},
+}
+
+
+def _write_retired_event(repo: Path, tid: str, event_type: str, n: int, data: dict) -> Path:
+    tdir = _ticket_dir(repo, tid)
+    env_id = (repo / ".tickets-tracker" / ".env-id").read_text().strip()
+    ts = FUTURE_TS + n
+    uid = f"eeeeeeee-0000-4000-8000-{n:012d}"
+    payload = {k: (tid if k == "ticket_id" else v) for k, v in data.items()}
+    event = {
+        "event_type": event_type,
+        "timestamp": ts,
+        "uuid": uid,
+        "env_id": env_id,
+        "author": "a-retired-producer",
+        "data": payload,
+    }
+    path = tdir / f"{ts}-{uid}-{event_type}.json"
+    path.write_text(json.dumps(event, ensure_ascii=False))
+    return path
+
+
+def test_retired_overlap_event_types_still_parse(rebar_repo: Path) -> None:
+    """The overlap detector's producers are gone, but their four event names stay KNOWN: the
+    store carries historical events of each, which must reduce cleanly, survive compaction
+    (no SNAPSHOT absorbs them), and pass fsck without a newer-type warning or corruption."""
+    from rebar._store import event_append
+    from rebar.reducer._version import _NON_REPLAY_KNOWN_TYPES, is_unknown_newer_type
+
+    tid = _seed(rebar_repo)
+    baseline_keys = set(rebar.show_ticket(tid, repo_root=str(rebar_repo)))
+    paths = [
+        _write_retired_event(rebar_repo, tid, name, i, data)
+        for i, (name, data) in enumerate(_RETIRED_OVERLAP_EVENTS.items(), start=1)
+    ]
+    for name in _RETIRED_OVERLAP_EVENTS:
+        assert name in _NON_REPLAY_KNOWN_TYPES, name
+        assert is_unknown_newer_type(name) is False, name
+        assert name in event_append.EVENT_TYPES, name
+
+    state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
+    assert state["status"] == "open"
+    # The retired events contribute nothing to compiled state (no computed overlap field).
+    assert set(state) == baseline_keys
+
+    cp = _cli("compact", tid, "--threshold=0", cwd=str(rebar_repo), REBAR_SYNC_PULL="off")
+    assert cp.returncode == 0, f"compact failed: {cp.stderr}"
+    for path in paths:
+        assert path.exists(), f"compaction deleted the retired-type event file {path.name}"
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "open"
+
+    report = rebar.fsck(repo_root=str(rebar_repo))
+    assert "newer than this rebar understands" not in report
+    assert "CORRUPT" not in report
+
+
 # ── mirror F1: KNOWN_EVENT_TYPES vs the reducer's dispatch table ──────────────
 
 

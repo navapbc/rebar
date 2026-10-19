@@ -175,7 +175,6 @@ guarantee `2`).
 | `config` | 0 | — | — | no ticket id; reads or writes rebar config; error → 1 |
 | `criteria` | 0 | — | — | no ticket id; `criteria eval <id>` runs calibration fixtures live; `criteria eval --changed-since <ref>` prints selected criterion ids and exits 0 (a null/empty/all-zero `before` SHA from a branch's first push selects nothing and exits 0 with a stderr note); an unmappable rubric path is named on stderr and still exits 0; with `--require-live`, selected criteria that cannot run live (no LLM backend/credentials), or a live run where every selected criterion errors, → 1 (otherwise a stderr warning and 0); positional id and `--changed-since` together → 2, including when the `--changed-since` value is empty; empty or missing id with no `--changed-since` → 2; unknown criterion → 1 |
 | `doctor` | 0 | — | — | no ticket id; 0 = no outstanding findings (or all repaired); 1 = findings remain; bad args → 2 |
-| `enrich` | 0 | — | — | no ticket id; cross-ticket overlap drain; always 0 on a clean run |
 | `explain` | 0 | — | — | no ticket id; `explain <criterion-id\|guide>`; unknown id or guide name → 1 |
 | `export` | 0 | — | — | no ticket id; NDJSON ticket export; bad args → 2 |
 | `grounding-info` | 0 | — | — | no ticket id; static code-grounding contract info; unexpected args → 1; bad `--output` → 2 |

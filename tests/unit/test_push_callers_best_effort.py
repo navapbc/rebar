@@ -20,7 +20,6 @@ def test_event_and_batch_append_keep_the_default_push_contract(
     monkeypatch.setattr(event_append, "stage_and_commit", lambda *_a, **_k: 1)
     monkeypatch.setattr(event_append, "batch_stage_and_commit", lambda *_a, **_k: 1)
     monkeypatch.setattr(lock, "canonical_tracker", lambda _tracker: str(tracker))
-    monkeypatch.setattr(event_append, "_maybe_enrich_drain", lambda _tracker: None)
     monkeypatch.setattr(
         push,
         "push_tickets_branch",

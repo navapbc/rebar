@@ -1,6 +1,6 @@
 """Detached children must use a durable working directory.
 
-The enrichment drain, async tickets push, and compaction sweep outlive their
+The async tickets push and the compaction sweep outlive their
 short-lived spawning worktrees. Their cwd therefore resolves through the
 ``.tickets-tracker`` symlink to the canonical store root.
 """
@@ -17,7 +17,6 @@ import pytest
 
 from rebar._commands import compact_trigger
 from rebar._store import push
-from rebar.llm import enrich_drain
 
 # Captured before any monkeypatching so the recorder below can still spawn for real.
 _REAL_POPEN = subprocess.Popen
@@ -89,10 +88,10 @@ def _worktree_view(tmp_path: Path, tracker: str, name: str = "ephemeral-worktree
     return wt
 
 
-# --- the reported bug: the drain child dies when its spawning worktree is removed ----------
+# --- the reported bug: a detached child dies when its spawning worktree is removed ---------
 
 
-def test_detached_drain_child_survives_removal_of_the_spawning_worktree(
+def test_detached_sweep_child_survives_removal_of_the_spawning_worktree(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Use operating-system processes to prove the child survives worktree removal."""
@@ -105,7 +104,7 @@ def test_detached_drain_child_survives_removal_of_the_spawning_worktree(
 
     monkeypatch.chdir(worktree)
     assert Path.cwd() == Path(os.path.realpath(worktree))  # precondition: spawned from it
-    enrich_drain._spawn_detached_drain(str(worktree / ".tickets-tracker"))
+    compact_trigger._spawn_detached_sweep(str(worktree / ".tickets-tracker"))
 
     monkeypatch.chdir(tmp_path)
     shutil.rmtree(worktree)
@@ -117,11 +116,7 @@ def test_detached_drain_child_survives_removal_of_the_spawning_worktree(
     assert out.read_text() == "CWD " + os.path.realpath(root)
 
 
-# --- the contract, across all three detach sites -------------------------------------------
-
-
-def _spawn_drain(tracker: str) -> None:
-    enrich_drain._spawn_detached_drain(tracker)
+# --- the contract, across both tracker-scoped detach sites ---------------------------------
 
 
 def _spawn_sweep(tracker: str) -> None:
@@ -133,7 +128,6 @@ def _spawn_push(tracker: str) -> None:
 
 
 _SITES = [
-    pytest.param(_spawn_drain, id="enrich-drain"),
     pytest.param(_spawn_sweep, id="compact-sweep"),
     pytest.param(_spawn_push, id="async-push"),
 ]

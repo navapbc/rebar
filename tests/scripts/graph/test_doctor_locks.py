@@ -80,7 +80,7 @@ def _dead_pid() -> int:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_a_free_store_reports_every_leg_and_no_finding(tmp_path: Path) -> None:
-    """All six legs are reported even when nothing is held — "the lock is free" is the
+    """All five legs are reported even when nothing is held — "the lock is free" is the
     answer an operator most often needs, and a missing row is indistinguishable from a
     check that never ran."""
     tracker = _tracker(tmp_path)
@@ -91,7 +91,6 @@ def test_a_free_store_reports_every_leg_and_no_finding(tmp_path: Path) -> None:
         doctor_locks.LEG_TICKETS_FCNTL,
         doctor_locks.LEG_TICKETS_MKDIR,
         doctor_locks.LEG_HLC,
-        doctor_locks.LEG_ENRICH_DRAIN,
         doctor_locks.LEG_COMPACT_WORKER,
         doctor_locks.LEG_SNAPSHOT_GC_WORKER,
     }
@@ -268,7 +267,7 @@ def test_an_unrecognised_stamp_is_stated_not_guessed(tmp_path: Path) -> None:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_a_missing_rebar_dir_reports_absent_rather_than_raising(tmp_path: Path) -> None:
-    """A store that has never enriched or stamped a clock has no ``.rebar`` dir; the two
+    """A store that has never compacted or stamped a clock has no ``.rebar`` dir; the two
     legs living there must degrade to a row, not abort the run."""
     tracker = _tracker(tmp_path)
     assert not (tracker.parent / ".rebar").exists()
@@ -276,13 +275,15 @@ def test_a_missing_rebar_dir_reports_absent_rather_than_raising(tmp_path: Path) 
     reports = doctor_locks.scan_locks(str(tracker))
 
     assert _by_name(reports, doctor_locks.LEG_HLC)["state"] == "absent"
-    assert _by_name(reports, doctor_locks.LEG_ENRICH_DRAIN)["state"] == "free"
+    assert _by_name(reports, doctor_locks.LEG_COMPACT_WORKER)["state"] == "free"
 
 
-def _plant_drain_lock(tracker: Path, stamp: str, *, age_s: float = 0.0) -> Path:
+def _plant_stamped_lock(tracker: Path, stamp: str, *, age_s: float = 0.0) -> Path:
+    """Plant the compact-worker lock (the stamped ``O_EXCL`` leg left after the retired
+    enrichment drain lock was dropped, ADR 0086)."""
     rebar_dir = tracker.parent / ".rebar"
     rebar_dir.mkdir(exist_ok=True)
-    path = rebar_dir / "enrich-drain.lock"
+    path = rebar_dir / "compact-worker.lock"
     path.write_text(stamp, encoding="utf-8")
     if age_s:
         when = time.time() - age_s
@@ -300,14 +301,14 @@ def _drain_stamp(**overrides: str) -> str:
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_the_drain_lock_names_a_live_holder_and_is_not_a_finding(tmp_path: Path) -> None:
-    """The drain lock now carries the v2 stamp (bug knavish-stimulated-bluebottle), so its
+def test_a_stamped_lock_names_a_live_holder_and_is_not_a_finding(tmp_path: Path) -> None:
+    """A stamped lock carries the v2 stamp (bug knavish-stimulated-bluebottle), so its
     row names a holder and carries a REAL staleness verdict instead of ``not-assessable``.
     A live holder is information, never a finding."""
     tracker = _tracker(tmp_path)
-    _plant_drain_lock(tracker, _drain_stamp())  # this live process
+    _plant_stamped_lock(tracker, _drain_stamp())  # this live process
 
-    drain = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_ENRICH_DRAIN)
+    drain = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_COMPACT_WORKER)
 
     assert drain["state"] == "held"
     assert drain["held_seconds"] is not None
@@ -319,12 +320,12 @@ def test_the_drain_lock_names_a_live_holder_and_is_not_a_finding(tmp_path: Path)
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_a_dead_holder_drain_lock_is_a_stale_finding(tmp_path: Path) -> None:
-    """The wedge the bug describes: a drainer that died without releasing."""
+def test_a_dead_holder_stamped_lock_is_a_stale_finding(tmp_path: Path) -> None:
+    """The wedge the bug describes: a holder that died without releasing."""
     tracker = _tracker(tmp_path)
-    _plant_drain_lock(tracker, _drain_stamp(pid=str(_dead_pid())))
+    _plant_stamped_lock(tracker, _drain_stamp(pid=str(_dead_pid())))
 
-    drain = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_ENRICH_DRAIN)
+    drain = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_COMPACT_WORKER)
 
     assert drain["staleness"] == doctor_locks.STALENESS_STALE
     findings = doctor_locks.lock_findings([drain])
@@ -333,31 +334,31 @@ def test_a_dead_holder_drain_lock_is_a_stale_finding(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_an_unstamped_drain_lock_is_adjudicated_by_the_shared_ceiling(tmp_path: Path) -> None:
+def test_an_unstamped_lock_is_adjudicated_by_the_shared_ceiling(tmp_path: Path) -> None:
     """A lock written by a rebar predating the stamp: unattributable, so the shared
     wall-clock ceiling decides — young is honoured, aged-out is stale."""
     tracker = _tracker(tmp_path)
 
-    _plant_drain_lock(tracker, "")
-    fresh = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_ENRICH_DRAIN)
+    _plant_stamped_lock(tracker, "")
+    fresh = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_COMPACT_WORKER)
     assert fresh["holder_description"] == "unknown (no ownership stamp)"
     assert fresh["staleness"] == doctor_locks.STALENESS_NOT_STALE
 
-    _plant_drain_lock(tracker, "", age_s=_owner._MKDIR_LOCK_STALE_CEILING_S + 60)
-    aged = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_ENRICH_DRAIN)
+    _plant_stamped_lock(tracker, "", age_s=_owner._MKDIR_LOCK_STALE_CEILING_S + 60)
+    aged = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_COMPACT_WORKER)
     assert aged["staleness"] == doctor_locks.STALENESS_STALE
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_an_unrecognised_drain_stamp_is_stated_not_guessed(tmp_path: Path) -> None:
+def test_an_unrecognised_lock_stamp_is_stated_not_guessed(tmp_path: Path) -> None:
     """A drain lock whose contents ``_parse_v2_stamp`` declines outright (a NEWER rebar's
     dialect) is reported as unrecognised, with no invented holder: the forward-compatible
     refusal, not a half-parse. Young, so the shared ceiling still honours it."""
     tracker = _tracker(tmp_path)
-    _plant_drain_lock(tracker, "rebar-lock v9 something=else")
+    _plant_stamped_lock(tracker, "rebar-lock v9 something=else")
 
-    drain = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_ENRICH_DRAIN)
+    drain = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_COMPACT_WORKER)
 
     assert drain["holder_description"] == "unknown (unrecognised ownership stamp)"
     assert drain["holder"] is None
@@ -367,14 +368,14 @@ def test_an_unrecognised_drain_stamp_is_stated_not_guessed(tmp_path: Path) -> No
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_an_incomplete_drain_stamp_is_stated_not_guessed(tmp_path: Path) -> None:
+def test_an_incomplete_lock_stamp_is_stated_not_guessed(tmp_path: Path) -> None:
     """A v2 stamp missing required fields — a torn mid-write read — is reported as
     INCOMPLETE rather than unrecognised or absent, so an operator can tell a drainer
     caught between create and stamp apart from a lock that was never stamped."""
     tracker = _tracker(tmp_path)
-    _plant_drain_lock(tracker, "rebar-lock v2 host=boot-x ns=1")
+    _plant_stamped_lock(tracker, "rebar-lock v2 host=boot-x ns=1")
 
-    drain = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_ENRICH_DRAIN)
+    drain = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_COMPACT_WORKER)
 
     assert drain["holder_description"] == "unknown (incomplete ownership stamp)"
     assert drain["holder"] is None
@@ -544,7 +545,7 @@ def test_doctor_never_touches_a_lock(
     graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
 ) -> None:
     """The load-bearing guarantee: a doctor pass over a stale lock leaves the lock dir,
-    its owner file and the drain lock byte-identical — including with ``--repair``, whose
+    its owner file and the compact-worker lock byte-identical — including with ``--repair``, whose
     repair loop must never reach a lock."""
     tracker = _tracker(tmp_path)
     lock_dir = tracker / _lock.MKDIR_LOCK_NAME
@@ -555,7 +556,7 @@ def test_doctor_never_touches_a_lock(
     _stamp(lock_dir, stamp)
     rebar_dir = tracker.parent / ".rebar"
     rebar_dir.mkdir()
-    drain = rebar_dir / "enrich-drain.lock"
+    drain = rebar_dir / "compact-worker.lock"
     drain.write_text("claimant", encoding="utf-8")
     monkeypatch.setattr(doctor, "tracker_dir", lambda _repo_root=None: tracker)
     monkeypatch.setattr(doctor, "_reconciler_in_flight", lambda *_a, **_k: False)

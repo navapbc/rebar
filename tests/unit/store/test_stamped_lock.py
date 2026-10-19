@@ -1,4 +1,4 @@
-"""Stamped file locking serves the drain, compaction, and snapshot workers.
+"""Stamped file locking serves the compaction and snapshot workers.
 
 Acquisition and reclamation remain bounded, ownership stamps must match, and concurrent
 workers remain excluded. Release closes and unlinks independently so a close failure cannot
@@ -243,9 +243,9 @@ def test_a_failed_stamp_write_still_returns_the_fd_and_says_so(
 def test_the_reclaim_warning_names_the_holder_when_a_describer_is_given(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The drain's operator affordance, kept: it passes ``_describe_drain_lock_holder`` so a
-    wedge is attributable without running ``rebar doctor``. The other two pass ``None`` and
-    must NOT gain a phantom holder clause."""
+    """The ``describe_holder`` operator affordance (introduced for the since-retired
+    enrichment drain) makes a wedge attributable without running ``rebar doctor``. Callers
+    that pass ``None`` must NOT gain a phantom holder clause."""
     from rebar._store.stamped_lock import stamped_file_lock
 
     path = _plant(_lock_path(tmp_path), _stamp_with(pid=str(_dead_pid())))
@@ -404,21 +404,13 @@ def _tracker(tmp_path: Path, name: str) -> str:
 
 
 def test_every_worker_still_excludes_a_second_holder_and_releases(tmp_path: Path) -> None:
-    """Each drain, compaction, and snapshot worker excludes, releases, and reacquires."""
+    """Each compaction and snapshot worker excludes, releases, and reacquires."""
     from rebar._commands import compact_trigger
     from rebar._snapshot import gc_trigger
-    from rebar.llm import enrich_drain
 
     gc_root = Path(os.path.realpath(tmp_path)) / "store"
     gc_root.mkdir()
     workers = [
-        (
-            "enrich drain",
-            enrich_drain._acquire_advisory_lock,
-            enrich_drain._release_advisory_lock,
-            _tracker(tmp_path, "drain-repo"),
-            enrich_drain._drain_lock_path,
-        ),
         (
             "compaction trigger",
             compact_trigger._acquire_trigger_lock,
@@ -446,17 +438,15 @@ def test_every_worker_still_excludes_a_second_holder_and_releases(tmp_path: Path
         release(target, again)
 
 
-def test_the_six_worker_lock_functions_are_still_module_attributes() -> None:
+def test_the_four_worker_lock_functions_are_still_module_attributes() -> None:
     """``tests/unit/test_lock_holder_labelling.py:134-135`` monkeypatches
     ``compact_trigger._acquire_trigger_lock`` and ``release_trigger_lock`` BY NAME with no
     ``raising=False``, so removing either attribute makes that test ERROR on attribute-not-found
-    rather than fail informatively. All six names are pinned here, where the reason is stated."""
+    rather than fail informatively. All four names are pinned here, where the reason is stated."""
     from rebar._commands import compact_trigger
     from rebar._snapshot import gc_trigger
-    from rebar.llm import enrich_drain
 
     for module, names in (
-        (enrich_drain, ("_acquire_advisory_lock", "_release_advisory_lock")),
         (compact_trigger, ("_acquire_trigger_lock", "release_trigger_lock")),
         (gc_trigger, ("_acquire_worker_lock", "release_worker_lock")),
     ):

@@ -532,7 +532,7 @@ def _probe() -> None:  # deliberately one linear probe script
     # ``show`` adds computed fields and retains bodies plus signature material omitted
     # by lean ``list``. ``list`` alone adds ``managed_refs``. Intersect optional signature
     # fields with the emitted show row, then assert the exact difference in both directions.
-    show_only_computed = {"digest_freshness", "inbound_deps", "plan_review_health"}
+    show_only_computed = {"inbound_deps", "plan_review_health"}
     lean_dropped = {
         "comments",
         "description",

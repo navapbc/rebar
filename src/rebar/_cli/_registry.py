@@ -404,7 +404,6 @@ def _intercepts() -> tuple[Route, ...]:
         "verify-completion": f"{_P}.llm:build_verify_completion",
         "review-plan": f"{_P}.llm:build_review_plan",
         "sign-review": f"{_P}.llm:build_sign_review",
-        "enrich": f"{_P}.enrich:build",
         "explain": f"{_P}.llm:build_explain",
         "verify-commit-ticket": f"{_P}.verify:build_commit_ticket",
         "verify-identity": f"{_P}.verify:build_identity",
@@ -418,8 +417,8 @@ def _intercepts() -> tuple[Route, ...]:
         "identity": f"{_P}.identity:build",
         "config": f"{_P}.config:build",
     }
-    # Every intercept uses a lazy handler reference and shared argv adapter. Identity and
-    # enrich perform their exceptional initialization or extra-argument work internally.
+    # Every intercept uses a lazy handler reference and shared argv adapter. Identity
+    # performs its exceptional initialization or extra-argument work internally.
     _LLM = "rebar._cli._llm_commands"
     handlers: dict[str, str] = {
         "review-code": f"{_LLM}:_review_code",
@@ -427,7 +426,6 @@ def _intercepts() -> tuple[Route, ...]:
         "verify-completion": f"{_LLM}:_verify_completion",
         "review-plan": f"{_LLM}:_review_plan",
         "sign-review": f"{_LLM}:_sign_review",
-        "enrich": "rebar._cli:_enrich",
         "explain": f"{_LLM}:_explain",
         "verify-commit-ticket": "rebar._commands.verify_commit:cli",
         "verify-identity": "rebar._commands.verify_authorship:cli",

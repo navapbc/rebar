@@ -1,7 +1,8 @@
 """One stamped-file advisory lock for the background workers (story 1cf6-f902-5bfa-438f).
 
-The enrichment drain, the compaction sweep and the snapshot-GC worker each need the same cheap
-"only one of me at a time" file lock, and each carried its OWN copy of the loop — which is how
+The compaction sweep and the snapshot-GC worker (and, before ADR 0086 retired it, the
+enrichment drain) each need the same cheap "only one of me at a time" file lock, and each
+carried its OWN copy of the loop — which is how
 the unresolved-path defect spread (bug ``da68-fc7c-068c-4c53``), how the three dialects drifted
 apart (bug ``aadc-9af6-0e67-4e2a``), and how the release delta :func:`release_stamped_lock` now
 settles survived in one of them. Deliberately narrow: staleness stays in

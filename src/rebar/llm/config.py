@@ -44,7 +44,6 @@ from rebar._optional import module_available as _module_available
 from rebar.llm import gate_context as _gate_context
 from rebar.llm.config_readers import (  # noqa: F401  (re-export: monkeypatch.setattr(rebar.llm.config, "...") targets these; from_env below calls them as bare names resolved through THIS module's namespace)
     _env_truthy,
-    _llm_drain_mode,
     _llm_float,
     _llm_int,
     _llm_str,
@@ -52,7 +51,6 @@ from rebar.llm.config_readers import (  # noqa: F401  (re-export: monkeypatch.se
     _read_llm_core_settings,
     _read_llm_file_table,
     _read_llm_limit_settings,
-    _read_llm_overlap_settings,
 )
 from rebar.llm.headers import resolve_headers
 
@@ -111,37 +109,6 @@ DEFAULT_MAX_TOKENS = 16000
 # REBAR_LLM_MAX_STEPS lowers it; a per-op floor still wins via max(floor, configured).
 DEFAULT_MAX_ITERATIONS = 250
 DEFAULT_TIMEOUT_S = 600
-# Cross-ticket overlap detection (epic only-crave-art) — LLM-feature tunables live on
-# LLMConfig, never VerifyConfig (_config_schema.py reserves the llm.* layer). The Cupid
-# ticket-digest op (ee3d) instructs the model to emit MIN..MAX atomic propositions and
-# post-validates the count (truncate above max; flag low_proposition_count below min).
-DEFAULT_OVERLAP_PROPOSITIONS_MIN = 2
-DEFAULT_OVERLAP_PROPOSITIONS_MAX = 6
-# Stage-1 BM25F candidate generation (2d0f/5a8f): top-K candidates; boilerplate prune
-# (ignore terms appearing in > this fraction of digests); overlap floor (fraction of query
-# terms a candidate must share to be returned). Field weights are a code constant in
-# retrieve.py, not a config knob.
-DEFAULT_OVERLAP_K = 20
-DEFAULT_OVERLAP_MAX_DOC_FREQ = 0.5
-DEFAULT_OVERLAP_MIN_SHOULD_MATCH = 0.15
-# Enrichment queue (e1f4): the soak between plan-review cert and drain eligibility, and the
-# claim lease TTL (a crashed drainer's claim is treated as unclaimed once it expires).
-DEFAULT_OVERLAP_SOAK_MIN = 60
-DEFAULT_OVERLAP_LEASE_TTL_MIN = 15
-# Self-heal re-enrichment debounce (bug 8bef): minimum wall-clock gap between a ticket's last
-# DONE_ENRICH and a self-heal re-enrichment of it — bounds churn-driven re-firing to once per
-# window; 0 disables. Rationale: enrich_drain._stale_digest_ids docstring.
-DEFAULT_OVERLAP_REENRICH_DEBOUNCE_MIN = 1440
-# Stage-2 pairwise judge (9022): the per-ordering confidence a candidate must clear to be
-# surfaced, and the max number of advisory link suggestions surfaced per query ticket.
-DEFAULT_OVERLAP_CONF_THRESHOLD = 0.7
-DEFAULT_OVERLAP_SURFACE_CAP = 3
-# Tier-1 opportunistic drain (c1de): mode (off|async|always), per-run batch cap, gate budget ms.
-DEFAULT_OVERLAP_DRAIN = "async"
-# 20, not 5 (operator ruling OQ3 on bug 6148): with LLM calls outside the drain lock the batch
-# is clamped to the lease-derived bound (enrich_drain._lease_bounded_batch = lease_ttl_s // 40).
-DEFAULT_OVERLAP_DRAIN_BATCH = 20
-DEFAULT_OVERLAP_DRAIN_GATE_BUDGET_MS = 20
 # Transport-layer retry for Anthropic gate calls (story arcticduck): tenacity envelope over the
 # httpx transport (SDK max_retries=0). Attempts counts the first try; max wait caps each sleep.
 DEFAULT_LLM_RETRY_MAX_ATTEMPTS = 4
@@ -405,25 +372,6 @@ class LLMConfig:
     # grammar, its resolution, and the safety denylist live in `rebar.llm.headers`.
     headers: dict[str, str] = field(default_factory=dict)
     langfuse: LangfuseConfig = field(default_factory=LangfuseConfig)
-    # Cross-ticket overlap detection (epic only-crave-art) — proposition-count bounds
-    # for the Cupid ticket-digest op (ee3d).
-    overlap_propositions_min: int = DEFAULT_OVERLAP_PROPOSITIONS_MIN
-    overlap_propositions_max: int = DEFAULT_OVERLAP_PROPOSITIONS_MAX
-    # Stage-1 BM25F candidate generation (5a8f).
-    overlap_k: int = DEFAULT_OVERLAP_K
-    overlap_max_doc_freq: float = DEFAULT_OVERLAP_MAX_DOC_FREQ
-    overlap_min_should_match: float = DEFAULT_OVERLAP_MIN_SHOULD_MATCH
-    # Enrichment queue (e1f4).
-    overlap_soak_min: int = DEFAULT_OVERLAP_SOAK_MIN
-    overlap_lease_ttl_min: int = DEFAULT_OVERLAP_LEASE_TTL_MIN
-    overlap_reenrich_debounce_min: int = DEFAULT_OVERLAP_REENRICH_DEBOUNCE_MIN
-    # Stage-2 pairwise judge (9022).
-    overlap_conf_threshold: float = DEFAULT_OVERLAP_CONF_THRESHOLD
-    overlap_surface_cap: int = DEFAULT_OVERLAP_SURFACE_CAP
-    # Tier-1 drain (c1de).
-    overlap_drain: str = DEFAULT_OVERLAP_DRAIN
-    overlap_drain_batch: int = DEFAULT_OVERLAP_DRAIN_BATCH
-    overlap_drain_gate_budget_ms: int = DEFAULT_OVERLAP_DRAIN_GATE_BUDGET_MS
     # Per-gate-run correlation identity minted by `rebar.llm.run_identity` at the gate_dispatch
     # run boundaries; all None outside a gate run, so a standalone op is byte-unchanged.
     trace_id: str | None = None
@@ -502,7 +450,6 @@ class LLMConfig:
             bedrock_region_source=bedrock_region_source,
         )
         limit_settings = _read_llm_limit_settings(table, cli)
-        overlap_settings = _read_llm_overlap_settings(table, cli)
         return cls(
             runner=runner,
             api_key=os.environ.get("REBAR_LLM_API_KEY") or None,
@@ -518,7 +465,6 @@ class LLMConfig:
             langfuse=LangfuseConfig.from_env(),
             **core_settings,
             **limit_settings,
-            **overlap_settings,
         )
 
 

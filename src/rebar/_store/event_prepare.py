@@ -66,15 +66,9 @@ EVENT_TYPES = frozenset(
         # preserves it; in this WRITE allow-list so it can be emitted, and in
         # _NON_REPLAY_KNOWN_TYPES so fsck recognises it and does not warn.
         "COMPLETION_VERDICT",
-        # Cross-ticket overlap detection digest sidecar (epic only-crave-art / 2d0f).
-        # Reducer-IGNORED (like REVIEW_RESULT) — a content-hash-keyed per-ticket Cupid
-        # digest; in this WRITE allow-list so it can be emitted, in _NON_REPLAY_KNOWN_TYPES
-        # so fsck recognises it and does not warn.
+        # Retired producer (ADR 0086, removed in granitic-realisable-dolphin); the names are
+        # kept so historical events still parse and compaction preserves them.
         "TICKET_DIGEST",
-        # Enrichment queue sidecar events (epic only-crave-art / e1f4): cert-triggered
-        # enqueue with a soak deadline, optimistic claim + lease, and done tombstone.
-        # Reducer-IGNORED (like REVIEW_RESULT/TICKET_DIGEST) — a broker-less queue on the
-        # event store; the drain reduces them out-of-band.
         "ENQUEUE_ENRICH",
         "CLAIM_ENRICH",
         "DONE_ENRICH",

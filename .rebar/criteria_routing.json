@@ -122,7 +122,6 @@
       "applies_to": [
         "**/_store/**",
         "**/lock*",
-        "**/enrich_drain*",
         ".github/workflows/**"
       ]
     }

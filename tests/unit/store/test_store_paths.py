@@ -56,7 +56,7 @@ def test_a_symlinked_worktree_view_derives_the_canonical_stores_sidecars(tmp_pat
     assert os.path.isdir(os.path.join(os.path.dirname(a), ".rebar"))
     assert os.path.realpath(a) == canonical
 
-    for name in ("enrich-drain.lock", "compact-worker.lock", "hlc.state"):
+    for name in ("compact-worker.lock", "hlc.lock", "hlc.state"):
         assert StorePaths(a).sidecar(name) == StorePaths(b).sidecar(name), (
             f"sidecar({name!r}) is keyed on the worktree"
         )
@@ -103,8 +103,8 @@ def test_a_plain_tracker_is_its_own_canonical(tmp_path: Path) -> None:
     sp = StorePaths(tracker)
     assert sp.canonical == tracker
     assert sp.rebar_dir == os.path.join(os.path.dirname(tracker), ".rebar")
-    assert sp.sidecar("enrich-drain.lock") == os.path.join(
-        os.path.dirname(tracker), ".rebar", "enrich-drain.lock"
+    assert sp.sidecar("compact-worker.lock") == os.path.join(
+        os.path.dirname(tracker), ".rebar", "compact-worker.lock"
     )
 
 
@@ -229,11 +229,9 @@ def test_the_guard_marker_requires_a_reason(tmp_path: Path) -> None:
 
 
 def test_every_real_sidecar_helper_lands_in_the_one_canonical_rebar(tmp_path: Path) -> None:
-    """The ``compact_trigger``, ``doctor_locks``, ``enrich_drain``, and overlap queue consumers
-    place sidecars in the canonical store behind a symlinked worktree view."""
+    """The ``compact_trigger`` and ``doctor_locks`` consumers place sidecars in the canonical
+    store behind a symlinked worktree view."""
     from rebar._commands import compact_trigger, doctor_locks
-    from rebar.llm import enrich_drain
-    from rebar.llm.overlap import queue
 
     canonical = _canonical_store(tmp_path)
     wt = _worktree_tracker(tmp_path, canonical, "worktree-a")
@@ -244,16 +242,12 @@ def test_every_real_sidecar_helper_lands_in_the_one_canonical_rebar(tmp_path: Pa
         "compact trigger lock": compact_trigger._trigger_lock_path(wt),
         "compact sweep stamp": compact_trigger._sweep_stamp_path(wt),
         "compact trigger log": compact_trigger._trigger_log_path(wt),
-        "drain lock": enrich_drain._drain_lock_path(wt),
-        "drain log": enrich_drain._drain_log_path(wt),
-        "overlap gate marker": queue._gate_marker_path(wt),
     }
     # doctor is driven through its PUBLIC scan: the private helper is deleted by this very
     # consolidation, so asserting on it would be a change-detector for the refactor itself.
     for row in doctor_locks.scan_locks(wt):
         if row["name"] in (
             doctor_locks.LEG_HLC,
-            doctor_locks.LEG_ENRICH_DRAIN,
             doctor_locks.LEG_COMPACT_WORKER,
         ):
             derived[f"doctor {row['name']} path"] = row["path"]

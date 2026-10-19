@@ -41,7 +41,6 @@ from rebar.llm.config import (
     agents_extra_installed,
     available_backends,
 )
-from rebar.llm.enrich import enrich
 from rebar.llm.errors import (
     CompletionRecoveryError,
     LLMConfigError,
@@ -110,7 +109,6 @@ __all__ = [
     "build_result",
     "claim_gate_check",
     "create_prompt",
-    "enrich",
     "enumerate_criteria",
     # prompt-library authoring (write + structured enumerate; story B-DM)
     "enumerate_library",

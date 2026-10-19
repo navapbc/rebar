@@ -1,6 +1,6 @@
 """Pin the shared detached-child launcher (task 2dc4-9bcd-75b9-4544).
 
-Async push, enrichment drain, compaction, and snapshot GC share PYTHONPATH bootstrap,
+Async push, compaction, and snapshot GC share PYTHONPATH bootstrap,
 re-entry, detach flags, stdio handling, and durable ``cwd`` ownership. Keeping that signature
 only in :mod:`rebar._proc` prevents copy drift such as bug 3198-438c-72a5-470f while preserving
 per-caller environment and error handling. ``test_detached_child_cwd.py`` exercises the real
@@ -98,8 +98,8 @@ def test_spawn_detached_builds_the_bare_python_reentry(
     tracker.mkdir(parents=True)
 
     _proc.spawn_detached(
-        "rebar.llm.enrich_drain",
-        "drain",
+        "rebar._commands.compact_trigger",
+        "run_sweep",
         str(tracker),
         env={"HOME": "/home/x"},
         stderr=subprocess.DEVNULL,
@@ -110,8 +110,8 @@ def test_spawn_detached_builds_the_bare_python_reentry(
     assert captured.argv[1] == "-c"
     assert "sys.path.insert(0, sys.argv[2])" in captured.argv[2]
     assert (
-        "import rebar.llm.enrich_drain; rebar.llm.enrich_drain.drain(*sys.argv[1:2])"
-        in (captured.argv[2])
+        "import rebar._commands.compact_trigger; "
+        "rebar._commands.compact_trigger.run_sweep(*sys.argv[1:2])" in (captured.argv[2])
     )
     assert captured.argv[3] == str(tracker)
     assert captured.argv[4] == str(_SRC)
@@ -185,9 +185,9 @@ def test_spawn_detached_layers_pythonpath_without_mutating_the_callers_env(
 def test_spawn_detached_reraises_so_each_caller_keeps_its_own_catch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The failure posture stays per-caller: the push catches only ``OSError``, the drain and
-    sweep catch broad ``Exception``. The helper therefore RE-RAISES — owning the catch here
-    would silently broaden the push's exposure."""
+    """The failure posture stays per-caller: the push catches only ``OSError``, the sweep
+    and the snapshot-GC trigger catch broad ``Exception``. The helper therefore RE-RAISES —
+    owning the catch here would silently broaden the push's exposure."""
     tracker = tmp_path / ".tickets-tracker"
     tracker.mkdir()
 
@@ -211,7 +211,7 @@ def test_spawn_detached_reraises_so_each_caller_keeps_its_own_catch(
 
 
 def test_windows_detach_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Migrated from test_enrich_drain.py when the per-site ``_detach_kwargs`` collapsed into
+    """Migrated from the retired drain's tests when the per-site ``_detach_kwargs`` collapsed into
     ``_proc``: the API-derisked Windows branch keeps its assertion at the one remaining home."""
     monkeypatch.setattr(_proc.os, "name", "nt")
     monkeypatch.setattr(subprocess, "DETACHED_PROCESS", 0x8, raising=False)
