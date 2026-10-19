@@ -201,3 +201,22 @@ def test_gate_doc_documents_p10_and_p11() -> None:
     assert "P10" in doc and "P11" in doc
     assert "verification-presence" in doc
     assert "vague" in doc.lower()
+
+
+def test_det_checks_still_runs_all_eleven_checks_in_order() -> None:
+    """The split moves definitions, not the floor's composition."""
+    from rebar.llm.plan_review.det_floor import DET_CHECKS
+
+    assert [c.__name__ for c in DET_CHECKS] == [
+        "p1_readiness_shape",
+        "p2_resolution",
+        "p3_package_existence",
+        "p4_oversize",
+        "p5_task_dag",
+        "p6_ac_quality",
+        "p7_destructive",
+        "p8_reviewability",
+        "p9_file_impact_coverage",
+        "p10_verification_presence",
+        "p11_ac_vagueness",
+    ]

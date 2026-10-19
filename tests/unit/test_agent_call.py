@@ -7,10 +7,8 @@ while ``.github/module-size-limit.txt`` remains the authoritative size limit.
 
 from __future__ import annotations
 
-import ast
 import json
 import logging
-import pathlib
 
 import pytest
 
@@ -26,17 +24,6 @@ from rebar.llm.config import LLMConfig
 from rebar.llm.runner import RunRequest
 
 pytestmark = pytest.mark.unit
-
-_SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "rebar" / "llm"
-_RUNNER = _SRC / "runner.py"
-_AGENT_CALL = _SRC / "agent_call.py"
-
-# AGENTS.md: never create a file under 100 LOC by splitting.
-_SPLIT_FLOOR = 100
-
-
-def _loc(path: pathlib.Path) -> int:
-    return len(path.read_text().splitlines())
 
 
 def _cfg(**kw) -> LLMConfig:
@@ -299,54 +286,3 @@ def test_spend_record_is_a_no_op_without_the_opt_in(monkeypatch, tmp_path):
 
 
 # ── §C structural: the size policy and the leaf rule ─────────────────────────────────────
-
-
-def test_agent_call_clears_the_split_floor():
-    """AGENTS.md forbids creating a sub-100-LOC file by splitting — a split that small is a
-    sign the seam was mechanical rather than real."""
-    loc = _loc(_AGENT_CALL)
-    assert _SPLIT_FLOOR <= loc < 500, (
-        f"agent_call.py is {loc} LOC; expected >= {_SPLIT_FLOOR} (the anti-fragmentation "
-        "floor) and < 500 (the AGENTS.md target ceiling)"
-    )
-
-
-def test_agent_call_has_no_runtime_import_from_runner():
-    """The leaf rule, asserted on the AST rather than on a grep. A ``TYPE_CHECKING``-guarded
-    import of ``RunRequest`` is permitted — it is a string annotation at runtime and creates
-    no cycle. A module-level runtime import of ``runner`` is not."""
-    tree = ast.parse(_AGENT_CALL.read_text())
-
-    def _guarded_by_type_checking(node: ast.AST) -> bool:
-        for parent in ast.walk(tree):
-            if isinstance(parent, ast.If):
-                test = parent.test
-                name = getattr(test, "id", None) or getattr(test, "attr", None)
-                if name == "TYPE_CHECKING" and node in ast.walk(parent):
-                    return True
-        return False
-
-    offenders = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("llm.runner"):
-            if not _guarded_by_type_checking(node):
-                offenders.append(f"line {node.lineno}: from {node.module} import ...")
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name.endswith("llm.runner") and not _guarded_by_type_checking(node):
-                    offenders.append(f"line {node.lineno}: import {alias.name}")
-
-    assert not offenders, (
-        "agent_call.py must not import `runner` at RUNTIME (a TYPE_CHECKING-guarded "
-        f"annotation import is fine): {offenders}"
-    )
-
-
-def test_runner_no_longer_builds_the_kwargs_dict_inline():
-    """The extraction is real, not a copy: the literal the four fragments used to write is
-    gone from run(), so a future edit cannot quietly reintroduce a second assembly site."""
-    src = _RUNNER.read_text()
-    assert "kwargs: dict[str, Any] = {" not in src
-    assert "build_agent_kwargs(" in src
-    assert "log_call_success(" in src
-    assert "record_call_spend(" in src

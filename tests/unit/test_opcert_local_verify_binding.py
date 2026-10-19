@@ -441,3 +441,16 @@ def test_regver_drift_does_not_mask_code_drift_on_a_scoped_attestation(store: Pa
     assert v["verdict"] == "stale-code", "registry grandfathering must not mask real code drift"
     assert v["registry_drift"]["signed"] == "an-old-registry-version"
     assert v["registry_drift"]["current"] != "an-old-registry-version"
+
+
+def test_opcert_overrides_apply_when_unbound(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When no signer is bound, the op-cert key-path and principal deployment overrides
+    are still honored from the environment (the unbound fallback)."""
+    from rebar._opcert_signing import opcert_principal
+
+    monkeypatch.setenv("REBAR_OPCERT_ENV_ID", "prod:eu")
+    assert opcert_principal(tmp_path) == "prod:eu", (
+        "an unbound REBAR_OPCERT_ENV_ID override must resolve as the principal"
+    )

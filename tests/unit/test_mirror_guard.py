@@ -538,3 +538,22 @@ def test_missing_sha_fails_immediately_without_resampling(monkeypatch) -> None:
     assert verdicts[0]["healthy"] is False
     assert seq.calls == 1
     assert seq.sleeps == []
+
+
+def test_mirror_guard_threads_github_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``mirror_guard.main`` still reads ``GITHUB_TOKEN`` from its CLI boundary and threads
+    it into ``run`` — asserted by capturing the token ``run`` receives."""
+    import rebar.mirror_guard as mg
+
+    seen: dict[str, object] = {}
+
+    def _fake_run(**kwargs: object) -> tuple[list, int]:
+        seen.update(kwargs)
+        return [], 0
+
+    monkeypatch.setattr(mg, "run", _fake_run)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok-abc")
+    mg.main(["--replication"])
+    assert seen.get("github_token") == "tok-abc", (
+        "mirror_guard.main must thread GITHUB_TOKEN from the environment into run()"
+    )

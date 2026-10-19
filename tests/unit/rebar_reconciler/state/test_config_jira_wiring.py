@@ -227,3 +227,44 @@ def test_bootstrap_env_check_requires_resolved_url_user_token(tmp_path: Path, mo
     cfg.reset_config_cache()
     with pytest.raises(RuntimeError, match="JIRA_API_TOKEN"):
         backend.assert_env_ready()
+
+
+def test_jira_settings_env_fallback_is_read_live_per_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the typed config is unreadable the endpoint degrades to the JIRA_* env layer,
+    and it re-reads that layer LIVE per call — a mid-pass override is observed on the next
+    call. A compose-once cut would cache the first value."""
+    import rebar.config
+    from rebar_reconciler.adapters.jira.acli_subprocess import resolve_jira_settings
+
+    def _raise_config_error(*_a, **_k):
+        raise rebar.config.ConfigError("unreadable")
+
+    monkeypatch.setattr(rebar.config, "load_config", _raise_config_error)
+
+    monkeypatch.setenv("JIRA_URL", "https://one.example")
+    monkeypatch.setenv("JIRA_USER", "u1")
+    monkeypatch.setenv("JIRA_PROJECT", "P1")
+    first = resolve_jira_settings()
+    assert (first.url, first.user, first.project) == ("https://one.example", "u1", "P1")
+
+    monkeypatch.setenv("JIRA_URL", "https://two.example")
+    monkeypatch.setenv("JIRA_PROJECT", "P2")
+    second = resolve_jira_settings()
+    assert (second.url, second.project) == ("https://two.example", "P2"), (
+        "resolve_jira_settings must re-read the JIRA_* env layer live per call after the cut"
+    )
+
+
+def test_jira_settings_insecure_url_fails_loud(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cleartext ``jira.url`` is a deliberate security-policy rejection: the cut must keep
+    it FAILING LOUD (``InsecureUrlError`` propagates), not degrade to env like a malformed
+    config does."""
+    import rebar.config
+    from rebar_reconciler.adapters.jira.acli_subprocess import resolve_jira_settings
+
+    def _raise_insecure(*_a, **_k):
+        raise rebar.config.InsecureUrlError("cleartext jira.url")
+
+    monkeypatch.setattr(rebar.config, "load_config", _raise_insecure)
+    with pytest.raises(rebar.config.InsecureUrlError):
+        resolve_jira_settings()

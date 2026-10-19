@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 import rebar
+from rebar import _config_resolvers, _config_sources
 from rebar.llm import gate_source
 from rebar.llm.runner import FakeRunner
 
@@ -221,3 +222,89 @@ def test_gate_rematerializes_absent_snapshot(repo_with_origin, gate_tmpdir):
     h2 = gate_source.resolve_gate_handle("origin/main", "attested", str(repo))
     assert h2.path.is_dir()  # re-materialized, never a partial/absent read
     assert (h2.path / "sentinel.txt").read_text() == "from-main\n"
+
+
+def test_gate_ref_is_read_live_per_call(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """A mid-operation REBAR_GATE_REF override must be observed on the NEXT call — the cut
+    must keep the resolver live-per-call (a compose-once cut caches the first value)."""
+    from rebar.llm import gate_source
+
+    root = str(tmp_path)  # no [snapshot] table -> env > default
+    monkeypatch.setenv("REBAR_GATE_REF", "refs/for/alpha")
+    assert gate_source.default_ref(root) == "refs/for/alpha"
+    monkeypatch.setenv("REBAR_GATE_REF", "refs/for/omega")
+    assert gate_source.default_ref(root) == "refs/for/omega", (
+        "default_ref must re-read REBAR_GATE_REF live per call after the cut"
+    )
+
+
+def test_gate_source_is_read_live_per_call(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Same live-per-call contract for REBAR_GATE_SOURCE."""
+    from rebar.llm import gate_source
+
+    root = str(tmp_path)
+    monkeypatch.setenv("REBAR_GATE_SOURCE", "local")
+    first = gate_source.default_source(root)
+    monkeypatch.setenv("REBAR_GATE_SOURCE", "attested")
+    second = gate_source.default_source(root)
+    assert (first, second) == ("local", "attested"), (
+        "default_source must re-read REBAR_GATE_SOURCE live per call after the cut; "
+        f"got {(first, second)}"
+    )
+
+
+# ── 2. late binding across the move (the Gerrit-1932 regression class) ───────
+def _project(tmp_path: Path) -> Path:
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / ".git").mkdir()
+    (root / "rebar.toml").write_text("[snapshot]\nref = 'patched-ref'\n", encoding="utf-8")
+    return root
+
+
+def test_snapshot_table_honours_a_patched_discover_project_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A patch on ``_config_sources._discover_project_config`` still steers the MOVED
+    ``_snapshot_table``. Eager import-time binding in ``_config_resolvers`` breaks this."""
+    root = _project(tmp_path)
+    calls: list[object] = []
+
+    real = _config_sources._discover_project_config
+
+    def _spy(arg=None):  # test double mirrors the real signature
+        calls.append(arg)
+        return real(root)
+
+    monkeypatch.setattr(_config_sources, "_discover_project_config", _spy)
+    assert _config_resolvers._snapshot_table() == {"ref": "patched-ref"}
+    assert calls, "the patched _discover_project_config was never reached"
+
+
+def test_snapshot_table_honours_a_patched_user_config_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same for ``user_config_path`` -- the user layer of the merged ``[snapshot]`` table."""
+    user_cfg = tmp_path / "user.toml"
+    user_cfg.write_text("[snapshot]\ngrace_seconds = 77\n", encoding="utf-8")
+    monkeypatch.setattr(_config_sources, "user_config_path", lambda: user_cfg)
+    monkeypatch.setattr(_config_sources, "_discover_project_config", lambda root=None: None)
+    assert _config_resolvers._snapshot_table() == {"grace_seconds": 77}
+
+
+def test_patched_read_toml_table_reaches_the_moved_resolver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The third raw-input name ``_snapshot_table`` calls, exercised through the public
+    ``resolve_gate_ref`` so the whole moved call chain is covered end to end."""
+    user_cfg = tmp_path / "user.toml"
+    user_cfg.write_text("[snapshot]\nref = 'from-user'\n", encoding="utf-8")
+    monkeypatch.delenv("REBAR_GATE_REF", raising=False)
+    monkeypatch.setattr(_config_sources, "user_config_path", lambda: user_cfg)
+    monkeypatch.setattr(_config_sources, "_discover_project_config", lambda root=None: None)
+    monkeypatch.setattr(
+        _config_sources,
+        "_read_toml_table",
+        lambda path, *, pyproject: {"snapshot": {"ref": "patched-table"}},
+    )
+    assert _config_resolvers.resolve_gate_ref("fallback") == "patched-table"

@@ -97,3 +97,40 @@ def test_phase_bearing_snapshot_preserves_historical_value() -> None:
 
 def test_compaction_does_not_strip_plan_review_phase() -> None:
     assert "plan_review_phase" not in _snapshot_strip_keys()
+
+
+def _apply_status(state: dict, event_uuid: str, current: str | None, target: str, **data):
+    event = {"uuid": event_uuid, "env_id": "e", "timestamp": 1}
+    payload = {"current_status": current, "status": target, **data}
+    process_status(state, event, payload, "")
+    return state
+
+
+def test_status_fold_replay_equivalence() -> None:
+    """A crafted STATUS replay still folds status, plan_review_phase, claimed_session and
+    close_class — the assertion that proves a fold did not silently drop in the move."""
+    state: dict = {"status": "open", "ticket_id": "t1"}
+
+    # open -> in_progress: status, execution phase, claimed session + harness all fold.
+    _apply_status(
+        state, "u1", "open", "in_progress", session="s-42", harness="cli", remote_session="r"
+    )
+    assert state["status"] == "in_progress"
+    assert state["plan_review_phase"] == "execution"
+    assert state["claimed_session"] == "s-42"
+    assert state["claim_harness"] == "cli"
+    assert state["claim_remote_session"] == "r"
+
+    # in_progress -> closed with a bug class + force reason: close metadata folds.
+    _apply_status(
+        state, "u2", "in_progress", "closed", close_class="wontfix", force_close_reason="ops"
+    )
+    assert state["status"] == "closed"
+    assert state["close_class"] == "wontfix"
+    assert state["force_close_reason"] == "ops"
+
+    # closed -> open reopen: phase returns to planning and reopen timestamp records.
+    _apply_status(state, "u3", "closed", "open")
+    assert state["status"] == "open"
+    assert state["plan_review_phase"] == "planning"
+    assert state["last_reopened_at"] == 1

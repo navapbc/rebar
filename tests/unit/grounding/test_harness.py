@@ -350,3 +350,14 @@ def test_signal_death_not_misclassified_as_timeout_under_reap_lag() -> None:
         "(crash-vs-timeout race, bug 85c3)"
     )
     ev.validate(r.as_abstain(job=ev.JOB_SMELL, provenance_tier=ev.TIER_T1))
+
+
+def test_grounding_timeout_precedence_is_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The grounding per-invocation timeout keeps explicit-arg > env > default precedence."""
+    from rebar.grounding.harness import _DEFAULT_TIMEOUT, _resolve_timeout
+
+    monkeypatch.delenv("REBAR_GROUNDING_TIMEOUT", raising=False)
+    assert _resolve_timeout(None) == _DEFAULT_TIMEOUT, "unset ⇒ default"
+    monkeypatch.setenv("REBAR_GROUNDING_TIMEOUT", "12")
+    assert _resolve_timeout(None) == 12.0, "a valid env timeout must resolve"
+    assert _resolve_timeout(5) == 5, "an explicit argument must win over the env var"

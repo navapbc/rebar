@@ -221,3 +221,35 @@ def test_persistent_non_cas_push_failure_is_loud_and_still_releases_lock(
     assert attempts == 1, "transport/auth failures are not CAS mismatches and must not retry"
     assert released == [None]
     assert "last-pass" in capsys.readouterr().err.lower()
+
+
+def test_environment_id_semantics_are_preserved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``resolve_environment_id`` keeps its identity contract through the cut: an explicit
+    env id wins, and a *set-but-empty* ``REBAR_ENV_ID`` still fails LOUD rather than
+    silently defaulting to the local-id file. The owned accessor must re-raise these, not
+    swallow them."""
+    from rebar_reconciler.last_pass import LastPassError, resolve_environment_id
+
+    monkeypatch.delenv("REBAR_ENV_ID", raising=False)
+    assert resolve_environment_id(tmp_path, explicit="prod:main") == "prod:main", (
+        "an explicit environment id must win"
+    )
+
+    monkeypatch.setenv("REBAR_ENV_ID", "")
+    with pytest.raises(LastPassError):
+        resolve_environment_id(tmp_path)
+
+
+def test_environment_id_env_var_is_read_after_the_cut(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A non-empty ``REBAR_ENV_ID`` is honored (no explicit argument): the cut must keep
+    reading the env layer through its owned accessor, not freeze or drop it."""
+    from rebar_reconciler.last_pass import resolve_environment_id
+
+    monkeypatch.setenv("REBAR_ENV_ID", "staging:eu")
+    assert resolve_environment_id(tmp_path) == "staging:eu", (
+        "a set, non-empty REBAR_ENV_ID must resolve as the environment id after the cut"
+    )

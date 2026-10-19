@@ -23,6 +23,8 @@ boundary. The weekly/manual external job performs every required real conversion
 from __future__ import annotations
 
 import base64
+import builtins
+import contextlib
 import hashlib
 import importlib.util
 import json
@@ -500,3 +502,35 @@ def test_static_replay_output_is_byte_identical_to_the_landed_renderer() -> None
         assert converter(prepared, "committed-static-pandoc", None) == expected, (
             f"corpus unit {position} rendered differently from the landed renderer: {prepared!r}"
         )
+
+
+@contextlib.contextmanager
+def _rebar_unimportable():
+    """Make a call-time ``import rebar.<...>`` raise ImportError for the duration of the
+    ``with`` block only, simulating the stdlib-only pandoc subprocess where ``rebar`` is
+    not on the path. Scoped tightly (restored before any fixture teardown) and leaves
+    ``rebar_reconciler`` — a distinct top-level name — untouched, so already-imported
+    adapter modules keep working."""
+    real_import = builtins.__import__
+
+    def _fake(name, *args, **kwargs):
+        if name == "rebar" or name.startswith("rebar."):
+            raise ImportError(f"blocked: {name}")
+        return real_import(name, *args, **kwargs)
+
+    builtins.__import__ = _fake
+    try:
+        yield
+    finally:
+        builtins.__import__ = real_import
+
+
+def test_pandoc_timeout_degrades_when_rebar_unimportable() -> None:
+    from rebar_reconciler.adapters.jira_family import wiki_render
+
+    with _rebar_unimportable():
+        result = wiki_render._pandoc_timeout()
+    assert result == wiki_render._PANDOC_TIMEOUT_DEFAULT and result > 0, (
+        "_pandoc_timeout must fall back to the positive built-in default when rebar is not "
+        "importable at call time — the delegating cut must keep the ImportError->default guard"
+    )

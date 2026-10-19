@@ -87,3 +87,16 @@ def test_code_review_decision_forwards_runtime_into_the_request_runner(
     assert out["decision"] == "PASS"
     # The runtime forced the adapter to construct and inject a runner.
     assert captured["runner"] is not None
+
+
+def test_review_bot_port_resolution_is_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``REVIEW_BOT_PORT`` still resolves with its default and integer-parse precedence."""
+    pytest.importorskip("fastapi")
+    from rebar.review_bot.app import DEFAULT_PORT, _port
+
+    monkeypatch.delenv("REVIEW_BOT_PORT", raising=False)
+    assert _port() == DEFAULT_PORT, "unset REVIEW_BOT_PORT must fall back to DEFAULT_PORT"
+    monkeypatch.setenv("REVIEW_BOT_PORT", "9099")
+    assert _port() == 9099, "a valid REVIEW_BOT_PORT must resolve"
+    monkeypatch.setenv("REVIEW_BOT_PORT", "not-an-int")
+    assert _port() == DEFAULT_PORT, "an invalid REVIEW_BOT_PORT must fall back to DEFAULT_PORT"

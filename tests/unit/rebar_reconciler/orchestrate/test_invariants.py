@@ -381,3 +381,47 @@ def test_valid_cli_output_extracts_id_and_patches_alert(
     mock_alert_store.patch_bug_filed.assert_called_once_with(
         "bridge-alert:at-most-one:DIG-100", canonical_id, tmp_path
     )
+
+
+def test_reconciler_repo_root_unset_fallback_is_cwd_independent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """With ``REBAR_ROOT`` unset and no explicit root, a valid owned package-root
+    checkout must win before any CWD-based fallback — the caller's working directory must
+    not leak into the reconciler's root. The pure wheel/no-checkout case deliberately
+    raises (covered below), so this leg makes the valid package-root precondition
+    explicit and then resolves from an unrelated checkout to prove CWD-independence."""
+    import rebar.config as cfg_mod
+    from rebar_reconciler import invariants
+
+    monkeypatch.delenv("REBAR_ROOT", raising=False)
+    owned_checkout = tmp_path / "owned_checkout"
+    owned_checkout.mkdir()
+    subprocess.run(["git", "init", "-q", str(owned_checkout)], check=True)
+    owned_config = owned_checkout / "src" / "rebar" / "config.py"
+    owned_config.parent.mkdir(parents=True)
+    owned_config.write_text("# editable package stand-in\n", encoding="utf-8")
+    monkeypatch.setattr(cfg_mod, "__file__", str(owned_config))
+
+    other_repo = tmp_path / "unrelated_checkout"
+    other_repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(other_repo)], check=True)
+
+    baseline = invariants._default_repo_root().resolve()
+    monkeypatch.chdir(other_repo)
+    from_other_cwd = invariants._default_repo_root().resolve()
+
+    assert from_other_cwd == baseline, (
+        "the reconciler repo-root fallback (REBAR_ROOT unset, no explicit arg) must be "
+        f"cwd-independent; resolved to {from_other_cwd} from inside {other_repo} but to "
+        f"{baseline} from the original cwd (a git-toplevel-of-cwd fallback leaked the "
+        "caller's working directory)"
+    )
+    assert from_other_cwd != other_repo.resolve(), (
+        "the reconciler repo-root fallback resolved to the caller's unrelated checkout — "
+        "the cwd leaked into the owned root resolution"
+    )
+    assert from_other_cwd == owned_checkout.resolve(), (
+        "the valid owned package-root checkout must be the deterministic fallback when "
+        f"REBAR_ROOT is unset; got {from_other_cwd}, expected {owned_checkout.resolve()}"
+    )
