@@ -1,20 +1,17 @@
 # Workflow authoring v2: contract-bearing prompts & steps
 
-> **Audience: rebar developers and workflow *authors*.** Like the visual editor, this
-> is edit-time authoring. rebar *clients* (agents/humans driving tickets over the
+> **Audience: rebar developers and workflow *authors*.** This is edit-time
+> authoring. rebar *clients* (agents/humans driving tickets over the
 > CLI/MCP) run workflows; they don't author prompts or step contracts and never need
 > any of this. Nothing here is on the client/runtime path.
 
 This document is the single reference for the **contract-bearing prompt/step model**
-that powers the typed palette, the in-editor inspector, the prompt library/authoring,
-and the workflow validator. The companion [workflow-editor.md](workflow-editor.md)
-covers the visual editor itself (`rebar workflow edit`); this page covers the *model*
-the editor presents.
+that powers the prompt library and the workflow validator; this page covers the *model*
+the engine consumes.
 
 The unifying requirement: **every workflow step kind advertises an INPUT contract, an
-OUTPUT contract, and a description**, so the editor can present a typed palette and
-validate edits, and the runtime can validate produced values without inventing
-protocol.
+OUTPUT contract, and a description**, so the linter can check references and the
+runtime can validate produced values without inventing protocol.
 
 ---
 
@@ -31,12 +28,12 @@ Front-matter carries each prompt's contract. The key set is **closed** — autho
 | Key              | Meaning |
 |------------------|---------|
 | `schema_version` | Front-matter format version (stamped by the writer; see §1.3). |
-| `title`          | Human label for the palette. |
-| `description`    | What the prompt does (shown in the inspector/palette). |
+| `title`          | Human-readable label. |
+| `description`    | What the prompt does. |
 | `inputs`         | The prompt's INPUT contract — a **named registry schema** (see §3). |
 | `outputs`        | The prompt's OUTPUT contract — a **named registry schema** (see §3). |
 | `execution_mode` | `single_turn` \| `agentic` (see the ADR, §6). Fixed on the prompt. |
-| `category`       | Advisory palette grouping (`review`/`verifier`/`transform`/`code`/`exploration`). The **explicit** `category: review` flag is what makes a prompt a reviewer — never inferred from the output schema. |
+| `category`       | Advisory grouping (`review`/`verifier`/`transform`/`code`/`exploration`). The **explicit** `category: review` flag is what makes a prompt a reviewer — never inferred from the output schema. |
 | `model`          | Optional model override. |
 | `tags`           | Free-form labels. |
 | `dimension`      | A reviewer's review dimension. |
@@ -83,29 +80,6 @@ change the content hash).
 key a prior version lacked. The documented deploy order is **readers before writers**
 (the read-side refuse is the safety net), the same discipline as `TAG_DELTA`.
 
-### 1.4 In-editor authoring & write-back location detection
-
-The editor's prompt library lists built-in + project prompts; you can **create** a new
-prompt and **edit** prompt text in place. On Save, the write-back target is
-**auto-detected** (`prompt_write_target`) and shown before you save:
-
-- a writable **`nava-rebar` source checkout** (`pyproject.toml` `[project].name ==
-  "nava-rebar"` and a writable `src/rebar/llm/reviewers/`) → edit the packaged `.md`;
-- else a writable **project override** dir → write `.rebar/prompts/<id>.md`;
-- else **refuse** with a clear reason (neither location writable).
-
-Writes are **atomic** (write-temp + `os.replace`) through the canonical writer, and
-creating/editing a *packaged* prompt **regenerates the derived index** (§5). Non-happy
-paths each surface a clear error, never silent corruption: an invalid/empty id, an id
-**collision** on create-new (refuse unless `overwrite`), and the neither-writable case.
-
-> **Note — editing a prompt's CONTRACT (not just its text).** Prompt *text* editing is
-> shipped; editing a prompt's `inputs`/`outputs` **schema names** from the editor is a
-> design proposal (schema-name picker + write-time resolve-check, the
-> `prompt_override_drift` interaction, the breaking-change UX, and the
-> scripted-op-contract-in-code boundary — ops stay code-only and read-only). See
-> [adr/0071-editing-prompt-contracts-from-the-editor.md](adr/0071-editing-prompt-contracts-from-the-editor.md).
-
 ---
 
 ## 2. Steps: scripted ops are contract-bearing too
@@ -147,11 +121,7 @@ Resolution follows the **WS-D3 precedence** (`resolve_model`):
 > **step `model:` > workflow `model:` > config (a `model_classes` slot, or the DEPRECATED
 > `[tool.rebar.llm].model`) > `DEFAULT_MODEL`**
 
-The visual editor exposes this as the per-step **Model** field (a free-text entry, so
-custom/non-ladder models are allowed); it round-trips losslessly through BPMN
-export/import via the step's `<rebar:Config>` extension, and a legacy document that lacks
-the attribute imports cleanly (no per-step override → the step falls back to the
-workflow/config model).
+The per-step `model` field is free text, so custom/non-ladder models are allowed.
 
 > **Note — gate verifier default.** Because step precedence beats config, a *static* step
 > `model:` can never *yield* to an operator override. So gates that want a model default
@@ -209,7 +179,7 @@ of truth (the linter allow-lists exactly it).
 ## 3. Contract conventions (prompts ↔ ops ↔ registry)
 
 Both surfaces resolve to **named schemas** in the registry
-(`rebar.schemas`), so the editor inspector and the validator share one vocabulary:
+(`rebar.schemas`), so the linter and the runtime validator share one vocabulary:
 
 | Surface | INPUT contract | OUTPUT contract |
 |---------|----------------|-----------------|
@@ -218,12 +188,8 @@ Both surfaces resolve to **named schemas** in the registry
 
 The per-step I/O contract schemas live in `src/rebar/schemas/*_input.schema.json` /
 `*_output.schema.json` and are collected in `schemas.CONTRACT_SCHEMAS`. They are
-consumed directly (by the inspector + linter), not advertised as a command's `--output`,
+consumed directly (by the linter), not advertised as a command's `--output`,
 so the schema coverage-guard exempts them (alongside the workflow DSL input schemas).
-
-The editor inspector surfaces a selected node's **CONSUMES** (input fields), **PRODUCES**
-(output fields), and **description**, read-only, with a defined empty state for a node
-with no declared contract.
 
 ---
 
@@ -278,12 +244,6 @@ registry validator — the real safety net:
 - a step with **no declared contract** is UNKNOWN → validation is skipped (never failed),
   so contract-less workflows keep working.
 
-The editor exposes the same model live: a debounced **`/validate`** endpoint returns the
-defined shape `{ok, errors:[{path, message}], unavailable}`; the panel shows red errors
-before Save, a distinct **"validation unavailable"** state on endpoint/validator failure,
-and **fail-closed Save** (Save is blocked while errors exist *or* while unavailable). An
-**"⚠ unchecked (opaque source)"** badge marks UNKNOWN/opaque sources in the inspector.
-
 ---
 
 ## 6. `execution_mode`: single_turn vs agentic
@@ -301,16 +261,3 @@ to `agentic` when absent), **distinct** from the step-level `mode`
 The decision to fix `execution_mode` on the prompt (rather than a swappable per-call
 strategy) is recorded in
 [adr/0001-execution-mode-fixed-on-prompt.md](adr/0001-execution-mode-fixed-on-prompt.md).
-
----
-
-## 7. The editor authoring experience (pointers)
-
-The visual editor ([workflow-editor.md](workflow-editor.md)) composes these pieces:
-
-- a **typed palette** that inserts a scripted op (`uses:`) or a prompt (`prompt:`),
-  grouped by the closed category vocabulary;
-- the **prompt library** + in-UI create/edit with auto-detected, atomic write-back (§1.4);
-- **structured per-field** properties driven by each step kind's contract (with a raw
-  "Advanced (JSON)" fallback for uncommon configs);
-- the read-only **contract inspector** (§3) and the live **validator** (§5).

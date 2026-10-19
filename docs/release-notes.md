@@ -8,6 +8,16 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — visual-editor library surface removed
+
+The BPMN visual workflow editor was removed in commit `21dabcbb2c1` (epic
+middle-dowdy-sanddollar). Library callers lose the `rebar.llm.workflow` exports `bpmn_to_ir`,
+`ir_to_bpmn`, and `REBAR_MODDLE_DESCRIPTOR`, the modules `rebar.llm.workflow.{editor,
+editor_server,editor_contracts,bpmn,criterion_preview,prompt_authoring}` (and with
+`prompt_authoring` its `PromptWriteError`), and `rebar.config.resolve_preview_timeout`; the
+`REBAR_PREVIEW_TIMEOUT` environment variable is no longer read. The workflow engine, its
+schema, and the `workflow new|validate|run|show|status|result` surfaces are unchanged.
+
 ## BREAKING (pre-1.0) — legacy HMAC-SHA256 signing scheme retired
 
 The legacy HMAC-SHA256 signing scheme is retired. `REBAR_SIGNING_KEY` and

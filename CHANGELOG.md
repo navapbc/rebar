@@ -102,6 +102,20 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   unrelated completion-verification pipeline) are unaffected and always continue to carry
   `severity`. See `docs/release-notes.md` for the schema detail.
 
+### Removed
+
+- **BREAKING (pre-1.0): the BPMN visual workflow editor has been removed.** `rebar workflow edit`
+  no longer exists (`new|validate|run|show|status|result` are unchanged and existing
+  `.rebar/workflows/*.yaml` keep running). Removed with it: the modules
+  `rebar.llm.workflow.{editor,editor_server,editor_contracts,bpmn,criterion_preview,prompt_authoring}`
+  and the exports `rebar.llm.workflow.{bpmn_to_ir,ir_to_bpmn,REBAR_MODDLE_DESCRIPTOR}`; the vendored
+  `editor_assets/dist/editor.{js,css}` bundle (~2 MB) that shipped in the wheel; the
+  `REBAR_PREVIEW_TIMEOUT` environment variable and `rebar.config.resolve_preview_timeout`;
+  `tests/e2e/` and `make e2e-deps` (the inert `e2e` marker and wheel glob left in `pyproject.toml`
+  follow in task dihedral-crying-grunion). Node/npm are no longer required to build, test, or
+  develop rebar. ADR 0071 (never implemented) is marked Superseded; the deleted code is restorable
+  from the commit recorded on ticket `yip-gem-teak`.
+
 ## [0.13.0] - 2026-08-28
 
 ### Changed

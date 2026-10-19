@@ -20,9 +20,8 @@ coverage), never turned into a false accusation.
 > runtime API + the prompt library), [grounding.md](grounding.md) (the code-grounding
 > oracle), [event-schema.md](event-schema.md) (the `SIGNATURE` + `REVIEW_RESULT`
 > events). The gate runs **on the workflow engine** — see the workflow-engine usage
-> docs [workflow-authoring-v2.md](workflow-authoring-v2.md) +
-> [workflow-editor.md](workflow-editor.md) (the consolidated `docs/workflow-engine.md`
-> is the pending 6f2d WS-DOC deliverable; these are the current authoritative refs).
+> docs [workflow-authoring-v2.md](workflow-authoring-v2.md) (the consolidated
+> `docs/workflow-engine.md` is the pending 6f2d WS-DOC deliverable; these are the current authoritative refs).
 
 ## Two surfaces
 

@@ -76,7 +76,6 @@ These pages explain the development process, maintenance contracts, and contribu
 - **[reuse-surface.md](reuse-surface.md)**. Library API and reusable subsystem reference.
 - **[review-policy.md](review-policy.md)**. Meaning of the Gerrit `LLM-Review` and `Verified` votes.
 - **[workflow-authoring-v2.md](workflow-authoring-v2.md)**. Contract for authoring prompts and workflow steps.
-- **[workflow-editor.md](workflow-editor.md)**. Visual workflow editor usage and constraints.
 - **[your-first-change.md](your-first-change.md)**. Contributor walkthrough from setup through Gerrit submission.
 
 ### Architecture

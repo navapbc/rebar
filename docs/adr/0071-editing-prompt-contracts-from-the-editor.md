@@ -2,8 +2,7 @@
 
 > **Renumbered by story 0743:** previously ADR 0007 (a number shared by 3 ADRs — a collision); reassigned to 0071 to make ADR numbers unique. See [RENUMBERING.md](RENUMBERING.md).
 
-- **Status:** Proposed (design spike — recommendation; implementation deferred to the
-  follow-on stories in §Consequences)
+- **Status:** Superseded — never implemented; the visual editor it extends was removed on 2026-10-19 in commit `21dabcbb2c1` (epic middle-dowdy-sanddollar). Restore recipe: the comment on ticket `yip-gem-teak` (`7013-447f-3084-4241`).
 - **Context:** Workflow authoring v2 (epic *Workflow authoring v2: contract-bearing
   prompt/step model + editor authoring*, `da27`), story `5b9e-2b65`. Discovered from the
   in-editor authoring work shipped by story **6592** (*Editor prompt library +

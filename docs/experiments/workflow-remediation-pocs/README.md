@@ -19,4 +19,5 @@ production implementation (cited below) supersedes it.
 - **[`visual_bpmn_roundtrip_poc.mjs`](visual_bpmn_roundtrip_poc.mjs)** — that an IR↔BPMN
   projection round-trips losslessly (ids / multi-instance / agent metadata survive a real
   bpmn-io parse via a registered moddle descriptor). Shipped as
-  `src/rebar/llm/workflow/bpmn.py` + the editor; see [docs/workflow-editor.md](../../workflow-editor.md).
+  `src/rebar/llm/workflow/bpmn.py` + the editor (removed in `21dabcbb2c1`; restore recipe on
+  ticket `yip-gem-teak`).
