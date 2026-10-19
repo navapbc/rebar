@@ -67,8 +67,8 @@ def test_link_tickets_returns_plain_ok_when_nothing_was_escalated(
 
     out = tools["link_tickets"]("a", "b", "depends_on")
 
-    assert out.result == "ok"
-    assert out.push_status is not None, "the write ack dropped its push-delivery status"
+    assert out["result"] == "ok"
+    assert out.get("push_status") is not None, "the write ack dropped its push-delivery status"
 
 
 @pytest.mark.unit
@@ -86,4 +86,4 @@ def test_link_tickets_names_both_pairs_when_it_escalated(
 
     out = tools["link_tickets"]("leaf-a", "epic-b", "depends_on")
 
-    assert out.result == "ok (escalated: leaf-a->epic-b recorded as epic-a->epic-b)", out
+    assert out["result"] == "ok (escalated: leaf-a->epic-b recorded as epic-a->epic-b)", out

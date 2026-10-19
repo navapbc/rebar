@@ -178,11 +178,9 @@ def test_read_surface_to_llm() -> None:
 
 
 def test_read_surface_mcp_model() -> None:
-    models = pytest.importorskip("rebar._mcp_models")
-    m = models.TicketStateOut
-    if m is None:
-        pytest.skip("pydantic not installed")
-    props = m.model_json_schema()["properties"]
+    from rebar._mcp_schema import OUTPUT_SCHEMAS_BY_TOOL, inline_schema
+
+    props = inline_schema(*OUTPUT_SCHEMAS_BY_TOOL["show_ticket"])["properties"]
     assert "claim_harness" in props
     assert "claim_remote_session" in props
 

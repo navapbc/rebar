@@ -271,7 +271,7 @@ def test_mcp_link_tickets_records_the_edge_when_the_checkout_lags(
 
     out = tools["link_tickets"](bug, culprit, "caused_by")  # type: ignore[operator]
 
-    assert out.result.startswith("ok")
+    assert out["result"].startswith("ok")
     assert ("caused_by", culprit) in _relations(bug, repo)
 
 

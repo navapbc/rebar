@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/attach_commits_result.schema.json",
+  "title": "AttachCommitsResult",
+  "description": "Result of the library attach_commits() / MCP attach_commits: the resolved ticket and how many SHAs this call recorded (a union-add; the durable shape is the ticket's `commits` list).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "ticket_id",
+    "attached"
+  ],
+  "properties": {
+    "ticket_id": {
+      "type": "string"
+    },
+    "attached": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

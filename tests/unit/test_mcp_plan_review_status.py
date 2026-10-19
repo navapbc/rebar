@@ -126,7 +126,7 @@ def test_current_attestation_reports_certified(monkeypatch: pytest.MonkeyPatch) 
     )
     tools, _ = _read_tools()
 
-    result = tools["plan_review_status"]("86c8-4b91-5257-4cca").model_dump()
+    result = tools["plan_review_status"]("86c8-4b91-5257-4cca")
 
     assert seen == ["86c8-4b91-5257-4cca"]
     assert result["ok"] is True
@@ -149,7 +149,7 @@ def test_missing_attestation_reports_unsigned(monkeypatch: pytest.MonkeyPatch) -
     )
     tools, _ = _read_tools()
 
-    result = tools["plan_review_status"]("86c8-4b91-5257-4cca").model_dump()
+    result = tools["plan_review_status"]("86c8-4b91-5257-4cca")
 
     assert result["ok"] is False
     assert result["verdict"] == "unsigned"
@@ -173,7 +173,7 @@ def test_tool_delegates_to_the_library_function(monkeypatch: pytest.MonkeyPatch)
     )
     tools, _ = _read_tools()
 
-    result = tools["plan_review_status"]("86c8-4b91-5257-4cca").model_dump()
+    result = tools["plan_review_status"]("86c8-4b91-5257-4cca")
 
     assert result["verdict"] == "stale-code"
     assert result["reason"] == "reviewed code changed: src/rebar/_mcp_reads.py"

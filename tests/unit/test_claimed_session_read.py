@@ -64,11 +64,9 @@ def test_show_json_unclaimed_ticket_has_null_session(tmp_path, monkeypatch) -> N
 
 # ------------------------------------------------------------------ MCP outputSchema
 def test_outputschema_advertises_claimed_session() -> None:
-    models = pytest.importorskip("rebar._mcp_models")
-    ticket_state_out = models.TicketStateOut
-    if ticket_state_out is None:  # pydantic unavailable in this env
-        pytest.skip("pydantic not installed")
-    props = ticket_state_out.model_json_schema()["properties"]
+    from rebar._mcp_schema import OUTPUT_SCHEMAS_BY_TOOL, inline_schema
+
+    props = inline_schema(*OUTPUT_SCHEMAS_BY_TOOL["show_ticket"])["properties"]
     assert "claimed_session" in props
 
 

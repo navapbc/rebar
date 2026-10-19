@@ -135,7 +135,7 @@ def test_usage_errors(capsys, monkeypatch, tmp_path: Path):
 # ───────────────────────────── library / MCP ─────────────────────────────────
 def test_library_and_mcp_shape(monkeypatch):
     import rebar
-    from rebar._mcp_models import ValidateReportOut
+    from rebar import schemas
 
     monkeypatch.setenv("REBAR_SYNC_PULL", "off")
     d = rebar.validate()  # real store, in-process
@@ -148,4 +148,5 @@ def test_library_and_mcp_shape(monkeypatch):
         "suggestions",
     }
     assert 1 <= d["score"] <= 5
-    ValidateReportOut.model_validate(d)
+    # MCP validate advertises and returns this canonical shape verbatim.
+    schemas.validator(schemas.VALIDATE_REPORT).validate(d)

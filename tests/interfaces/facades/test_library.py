@@ -60,12 +60,8 @@ def test_clarity_check_missing_ticket_schema_conformant(rebar_repo: Path) -> Non
     assert "output" not in res
     assert set(("score", "verdict", "threshold")) <= set(res)
     assert res["passed"] is False
-    # Validates against the canonical schema.
+    # Validates against the canonical schema (which MCP clarity_check also advertises).
     schemas.validator(schemas.CLARITY_RESULT).validate(res)
-    # And against the MCP output model.
-    from rebar._mcp_models import ClarityResultOut
-
-    ClarityResultOut.model_validate(res)
 
 
 def test_sibling_gates_missing_ticket_structured(rebar_repo: Path) -> None:

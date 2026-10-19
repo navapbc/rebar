@@ -14,6 +14,7 @@
     "line_count": { "type": "integer" },
     "keyword_count": { "type": "integer" },
     "ac_items": { "type": "integer" },
-    "file_impact": { "type": "integer" }
+    "file_impact": { "type": "integer" },
+    "cross_session_warning": { "type": "string", "description": "MCP results only: the non-gating holder advisory, present only when another session holds the live claim (story 734d)." }
   }
 }

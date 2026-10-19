@@ -34,6 +34,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only imports (jsonschema ships wi
     from referencing import Registry
 
 __all__ = [
+    "ATTACH_COMMITS_RESULT",
     "BRIDGE_ACCESS_CHECK",
     "BRIDGE_CONTROL",
     "BRIDGE_FSCK",
@@ -58,6 +59,7 @@ __all__ = [
     "FILE_IMPACT",
     "FSCK",
     "GATE_RESULT",
+    "GATE_RUN",
     "GROUNDING",
     "GROUNDING_INFO",
     "INPUT_SCHEMAS",
@@ -86,11 +88,13 @@ __all__ = [
     "TRANSITION_RESULT",
     "VALIDATE_REPORT",
     "VERIFY_COMMANDS",
+    "VERIFY_COMPLETION_STATUS",
     "VERIFY_SIGNATURE_RESULT",
     "WORKFLOW_RUN",
     "WORKFLOW_V1",
     "WORKFLOW_V2",
     "WORKFLOW_V3",
+    "WRITE_ACK",
     "load",
     "names",
     "path",
@@ -183,6 +187,13 @@ EXPORT = "export"
 # rebar.llm.workflow — the run status/result read-tool output (WS-ffc4): a typed
 # read surface for get_workflow_status / get_workflow_result.
 WORKFLOW_RUN = "workflow_run"
+# MCP-only result shapes advertised as outputSchemas (story quilted-nepotic-kitty): the
+# shared write ack, the attach_commits receipt, the async gate-run handle, and the
+# completion-attestation currency poll. No CLI --output arm; keyed by MCP tool name below.
+WRITE_ACK = "write_ack"
+ATTACH_COMMITS_RESULT = "attach_commits_result"
+GATE_RUN = "gate_run"
+VERIFY_COMPLETION_STATUS = "verify_completion_status"
 # rebar.llm.workflow — the version-pinned, IMMUTABLE workflow DSL schema (the
 # `.rebar/workflows/<name>.yaml` document format). These are INPUT/validation
 # schemas, not command outputs: a workflow file is validated against them via
@@ -422,6 +433,13 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     # The static code-grounding oracle integration contract (S5): a repo-independent
     # read driven by both the CLI (`grounding-info`) and the MCP `grounding_info` tool.
     "grounding_info": GROUNDING_INFO,
+    # MCP-only result shapes (story quilted-nepotic-kitty), keyed by MCP tool name like
+    # review_code_gate: the MCP output-schema coverage guard drives each tool on a seeded
+    # store and validates the real result against its schema.
+    "write_ack": WRITE_ACK,
+    "attach_commits": ATTACH_COMMITS_RESULT,
+    "gate_status": GATE_RUN,
+    "verify_completion_status": VERIFY_COMPLETION_STATUS,
     # `export` emits NDJSON (one EXPORT line per ticket), not the canonical
     # --output json envelope, so it is not driven by the --output coverage guard;
     # registered here so the every-schema-file-is-wired guard sees it.

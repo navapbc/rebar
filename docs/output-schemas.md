@@ -229,9 +229,10 @@ dep, a `{path,reason}` entry, the status/type enums, …) are authored once in
 validate with `rebar.schemas.validator(name)` (it wires a `referencing` registry)
 rather than calling `jsonschema.validate(instance, load(name))` directly.
 
-The MCP server's pydantic models (`src/rebar/mcp_server.py`, e.g. `TicketStateOut`)
-**mirror** these schemas to advertise an `outputSchema` to MCP clients; they are
-not a second source of truth. Tests pin both:
+The MCP server advertises these files directly as each tool's `outputSchema`
+(`src/rebar/_mcp_schema.py` inlines the `common.schema.json` refs so the document is
+self-contained) and returns the library payload unchanged, so a key the library omits is
+absent on the wire, never `null`. There is no second copy of the contract. Tests pin both:
 
 - `tests/interfaces/contracts/test_schema_outputs.py` — drives every shape's REAL engine
   output (library + CLI) and validates it against its schema.

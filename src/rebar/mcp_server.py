@@ -15,8 +15,9 @@ Structure: ``build_server`` is a thin assembler — it builds the FastMCP server
 packs the shared handles + gate helpers into a ``ctx`` namespace, and calls the
 three per-cluster registrars (``register_read_tools`` / ``register_llm_tools`` /
 ``register_write_tools`` in ``_mcp_reads`` / ``_mcp_llm`` / ``_mcp_writes``). The
-gate helpers, the workflow-payload budget cap, ``_dump``, the ``MODE_CAPS`` table,
-and the startup entry points live here.
+gate helpers, the workflow-payload budget cap, the ``MODE_CAPS`` table, and the
+startup entry points live here. Tool results are plain dicts; ``rebar._mcp_schema``
+advertises each one's canonical JSON Schema as its ``outputSchema``.
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ class McpStartupError(RuntimeError):
 # can never silently drift from the real gates again. The ``--help`` text below is
 # also derived from this list, so the three stay in lockstep.
 #
-# Each entry: name, a one-line description, and whether it is a deprecated alias.
+# Each entry: name and a one-line description.
 # The active gates are read in mcp_server.build_server / _mcp_reads / _mcp_llm /
 # _mcp_writes / config.py. (The REBAR_MCP_ALLOW_RECONCILE_LIVE alias of
 # REBAR_MCP_ALLOW_JIRA_SYNC was removed pre-1.0 — DE7.)
@@ -71,12 +72,10 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Path to the repo root that holds the .tickets-tracker store "
             "(defaults to the git toplevel of the working dir)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_READONLY",
         "description": "Set to 1 to expose only the read tools (no write/mutation tools).",
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_ALLOW_LLM",
@@ -84,7 +83,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Set to 1 to enable the billable LLM tools (review_code / scan_spec / "
             "verify_completion / review_plan); off by default."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_DEDUP",
@@ -94,7 +92,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "attaches to the running gate instead of launching a second billable LLM "
             "pass. On by default; set to 0 to disable (kill-switch)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_ALLOW_JIRA_SYNC",
@@ -102,7 +99,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Set to 1 to allow bridge_sync to perform live (mutating) Jira sync; "
             "otherwise bridge_sync uses dry-run behavior."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_TRANSPORT",
@@ -110,22 +106,18 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Transport for the MCP server: 'stdio' (default) or 'http' (the optional "
             "Streamable-HTTP transport)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_HTTP_HOST",
         "description": "Bind host for the Streamable-HTTP transport (default 127.0.0.1).",
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_HTTP_PORT",
         "description": "Bind port for the Streamable-HTTP transport (1-65535; default 8000).",
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_HTTP_PATH",
         "description": "URL path the Streamable-HTTP transport serves on (default /mcp).",
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_HTTP_ALLOWED_HOSTS",
@@ -133,7 +125,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Comma-separated allowlist of exact host:port values accepted by the "
             "Streamable-HTTP DNS-rebinding protection; empty defaults to loopback."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_HTTP_ALLOWED_ORIGINS",
@@ -141,7 +132,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Comma-separated allowlist of exact Origin values accepted by the "
             "Streamable-HTTP DNS-rebinding protection; empty defaults to loopback."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_HTTP_TLS_AT_EDGE",
@@ -149,7 +139,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Set to 1 to acknowledge TLS is terminated at the edge; required to bind "
             "the Streamable-HTTP transport to a non-loopback host."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP",
@@ -157,7 +146,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Set to 1 to acknowledge running the Streamable-HTTP transport without a "
             "token verifier; required to boot the HTTP transport while auth is off."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_ENABLED",
@@ -165,7 +153,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Set to 1 to enable MCP authentication (the composite token verifier + "
             "Resource-Server wiring); off by default."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_STRATEGIES",
@@ -173,7 +160,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Comma-separated, ordered list of token-verifier strategies to compose "
             "(closed set: static, jwt, introspection, proxy, custom)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_ISSUER_URL",
@@ -181,7 +167,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "OAuth authorization-server issuer URL advertised in the Protected-Resource "
             "Metadata (RFC 9728) when auth is enabled."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_RESOURCE_SERVER_URL",
@@ -189,7 +174,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "The single resource identifier (RFC 8707 audience) for this server; the "
             "composite verifier re-checks every accepted token against it."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_REQUIRED_SCOPES",
@@ -197,7 +181,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Comma-separated scopes a caller must hold; the SDK returns 403 "
             "insufficient_scope when a principal lacks one."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_STATIC_TOKENS_FILE",
@@ -205,7 +188,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Path to the JSON secrets file for the static-bearer verifier (stores only "
             "SHA-256 digests of the accepted tokens)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_JWT_JWKS_URI",
@@ -213,7 +195,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "HTTPS JWKS endpoint the `jwt` verifier fetches signing keys from (an OIDC "
             "provider's .well-known/jwks.json)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_JWT_ISSUER",
@@ -221,7 +202,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Expected `iss` claim for the `jwt` verifier; falls back to "
             "REBAR_MCP_AUTH_ISSUER_URL when unset."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_JWT_ALGORITHMS",
@@ -229,7 +209,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Comma-separated PINNED, asymmetric-only JWS algorithms for the `jwt` verifier "
             "(default RS256,ES256); a symmetric algorithm on a JWKS source is refused."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_JWT_LEEWAY",
@@ -237,7 +216,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Clock-skew leeway in seconds applied to exp/nbf validation by the `jwt` "
             "verifier (default 60)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_JWT_JWKS_REFETCH_COOLDOWN",
@@ -245,14 +223,12 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Minimum seconds between JWKS refetches triggered by an unknown key id "
             "(the concurrency-safe flood guard; default 30)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_JWT_JWKS_TIMEOUT",
         "description": (
             "HTTP timeout in seconds for the `jwt` verifier's JWKS fetch (default 10)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_JWT_EXPECTED_TYP",
@@ -260,7 +236,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "When set, the `jwt` verifier requires the JWT header `typ` to equal this "
             "(e.g. at+JWT per RFC 9068); unset skips the check."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_JWT_ALLOW_PRIVATE_JWKS_HOST",
@@ -268,7 +243,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Set to 1 to permit a private/link-local/loopback JWKS host (SSRF guard is "
             "on by default); off by default."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_INTROSPECTION_ENDPOINT",
@@ -276,7 +250,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "The `introspection` verifier's RFC 7662 endpoint URL (must be https://); the "
             "opaque token is POSTed here on every request (no caching)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_INTROSPECTION_CLIENT_ID",
@@ -284,7 +257,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "The client id the `introspection` verifier presents to the Authorization "
             "Server via HTTP Basic (client_secret_basic)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_INTROSPECTION_CLIENT_SECRET_ENV",
@@ -293,7 +265,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "secret itself); must be present + non-empty at startup or the server refuses "
             "to start (fail-closed)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_INTROSPECTION_ALLOW_PRIVATE_HOST",
@@ -301,7 +272,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Set to 1 to permit a private/link-local/loopback introspection endpoint host "
             "(SSRF guard is on by default); off by default."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_INTROSPECTION_ALLOW_MISSING_AUD",
@@ -309,7 +279,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Set to 1 to accept an active introspection response that OMITS `aud` (many "
             "AS do); off by default (fail-closed reject)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_PROXY_SECRET_ENV",
@@ -318,7 +287,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "secret itself); must be present + non-empty at startup or the `proxy` verifier "
             "refuses to start (fail-closed)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_PROXY_SECRET_HEADER",
@@ -326,7 +294,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "The header the fronting proxy sends its shared secret on; the identity is "
             "trusted only when this matches (constant-time; default x-proxy-auth)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_PROXY_IDENTITY_HEADER",
@@ -334,7 +301,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "The header carrying the proxy-authenticated principal identity, trusted only "
             "when the secret header validates (default x-forwarded-user)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_PROXY_SCOPES",
@@ -342,7 +308,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "Comma-separated fixed scope set granted to proxy-authenticated principals; "
             "empty by default (the principal holds no scopes)."
         ),
-        "deprecated": False,
     },
     {
         "name": "REBAR_MCP_AUTH_CUSTOM_IMPORT",
@@ -351,7 +316,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "that returns a TokenVerifier; a TRUSTED operator config value that loads and "
             "executes the operator-configured code at startup (fail-closed on any load error)."
         ),
-        "deprecated": False,
     },
 )
 
@@ -408,15 +372,6 @@ def _allow_jira_sync() -> bool:
     # Off by default; a malformed config ERRORS (never silently enables live/applying
     # Jira writes — and never silently reads as the operator's "off" either).
     return _mcp_gate("allow_jira_sync")
-
-
-def _dump(item):
-    """Normalize a typed list-item param to a plain dict (FastMCP may deliver a
-    validated pydantic model or a raw dict depending on version). Drops keys whose
-    value is None so the engine receives a clean {path,reason}/{dd_id,…} object."""
-    if hasattr(item, "model_dump"):
-        return {k: v for k, v in item.model_dump().items() if v is not None}
-    return item
 
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
@@ -595,18 +550,20 @@ def build_server(cfg=None):
         allow_jira_sync=_allow_jira_sync,
         cap_workflow_payload=_cap_workflow_payload,
         bound_list_payload=_bound_list_payload,
-        dump=_dump,
         MODE_CAPS=MODE_CAPS,
         Mode=Mode,
         logger=logger,
     )
 
     # Install the structured-error guard BEFORE tool registration (ticket 8a31), then the
-    # JS-safe-integer result guard (bug 6fe7). Both rebind `mcp.tool` and compose.
+    # JS-safe-integer result guard (bug 6fe7), then the canonical outputSchema layer
+    # (story quilted-nepotic-kitty). All three rebind `mcp.tool` and compose.
     from rebar._mcp_errors import install_error_guard, install_js_safe_guard
+    from rebar._mcp_schema import install_canonical_output_schemas
 
     install_error_guard(mcp)
     install_js_safe_guard(mcp)
+    install_canonical_output_schemas(mcp)
 
     # Registration order matches the original in-line definition order (reads, then
     # the always-registered LLM tools, then the READONLY-gated writes). The read and
@@ -680,10 +637,7 @@ def main() -> None:
     if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
         # Env list is DERIVED from MCP_ENV_VARS so --help can't drift from the
         # manifest (server.json) or the real gates.
-        env_lines = "\n".join(
-            f"       {v['name']}{'  (deprecated alias)' if v['deprecated'] else ''}"
-            for v in MCP_ENV_VARS
-        )
+        env_lines = "\n".join(f"       {v['name']}" for v in MCP_ENV_VARS)
         print(  # noqa: T201 — --help output belongs on stdout (server not yet started)
             "rebar-mcp — the rebar MCP server (FastMCP, stdio transport).\n"
             "Usage: rebar-mcp            # serve MCP over stdio (takes no options)\n"

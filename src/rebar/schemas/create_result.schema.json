@@ -11,6 +11,7 @@
     "alias": { "type": ["string", "null"] },
     "title": { "type": "string" },
     "description_warning": { "type": ["string", "null"] },
-    "duplicate_warning": { "type": ["string", "null"] }
+    "duplicate_warning": { "type": ["string", "null"] },
+    "push_status": { "$ref": "common.schema.json#/$defs/push_status", "description": "MCP results only: delivery status of this write (see common push_status)." }
   }
 }

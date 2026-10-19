@@ -1,8 +1,8 @@
 """Register the MCP server's always-available read tools.
 
 Split from ``build_server`` to keep its composition root small. The registrar
-captures read-only and payload-budget helpers from ``ctx``; module-level output
-models let FastMCP resolve return annotations.
+captures read-only and payload-budget helpers from ``ctx``. Tools return the library
+payload unchanged; ``rebar._mcp_schema`` advertises the canonical JSON Schema for each.
 """
 
 from __future__ import annotations
@@ -11,31 +11,7 @@ from functools import partial
 from typing import Any
 
 import rebar
-from rebar._mcp_models import (
-    BridgeAccessCheckOut,
-    BridgeControlOut,
-    BridgeFsckOut,
-    BridgeRunOut,
-    BridgeStatusOut,
-    ClarityResultOut,
-    DepsGraphOut,
-    FileImpactItemOut,
-    FsckOut,
-    GateResultOut,
-    GateRunOut,
-    GroundingInfoOut,
-    NextBatchOut,
-    PlanReviewStatusOut,
-    ReadyTicketSummaryOut,
-    SearchResultOut,
-    TicketStateOut,
-    ValidateReportOut,
-    VerifyCommandItemOut,
-    VerifyCompletionStatusOut,
-    VerifySignatureResultOut,
-    WorkflowRunOut,
-    tool_annotation_presets,
-)
+from rebar._mcp_schema import tool_annotation_presets
 
 
 def _cross_session(ticket_id: str) -> str | None:
@@ -52,6 +28,11 @@ def _cross_session(ticket_id: str) -> str | None:
         return None
 
 
+def _as_dict(result: Any) -> dict[str, Any]:
+    """The library's (TypedDict) result as the plain dict FastMCP passes through."""
+    return dict(result)
+
+
 def _gate_value(gate: object) -> bool:
     """Read either a live gate callback or its legacy boolean value."""
     return bool(gate() if callable(gate) else gate)
@@ -66,7 +47,7 @@ def _register_bridge_mutation_tools(mcp, ctx, annotations) -> None:
     """Register bridge mutations on servers that expose write tools."""
 
     @mcp.tool(annotations=annotations["MUTATE_OPEN_WORLD"])
-    def bridge_run(profile: str = "dry-run") -> BridgeRunOut:
+    def bridge_run(profile: str = "dry-run") -> dict[str, Any]:
         """Run one scheduled bridge profile and strictly deliver its ticket events."""
         if _gate_value(ctx.readonly):
             raise ValueError(
@@ -74,14 +55,14 @@ def _register_bridge_mutation_tools(mcp, ctx, annotations) -> None:
             )
         if not _gate_value(ctx.allow_jira_sync):
             raise ValueError("bridge run is disabled; set REBAR_MCP_ALLOW_JIRA_SYNC=1 to enable")
-        return BridgeRunOut.model_validate(rebar.bridge_run(profile=profile))
+        return _as_dict(rebar.bridge_run(profile=profile))
 
     @mcp.tool(annotations=annotations["MUTATE_OPEN_WORLD"])
     def bridge_sync(
         only: list[str] | None = None,
         exclude: list[str] | None = None,
         max_changes: int | None = None,
-    ) -> BridgeRunOut:
+    ) -> dict[str, Any]:
         """Apply proposed Jira changes, optionally with an explicit change limit."""
         if _gate_value(ctx.readonly):
             raise ValueError(
@@ -91,10 +72,10 @@ def _register_bridge_mutation_tools(mcp, ctx, annotations) -> None:
             raise ValueError("bridge sync is disabled; set REBAR_MCP_ALLOW_JIRA_SYNC=1 to enable")
         values = {"only": only, "exclude": exclude, "max_changes": max_changes}
         kwargs: dict = {key: value for key, value in values.items() if value is not None}
-        return BridgeRunOut.model_validate(rebar.bridge_sync(**kwargs))
+        return _as_dict(rebar.bridge_sync(**kwargs))
 
     @mcp.tool(annotations=annotations["MUTATE_OPEN_WORLD"])
-    def bridge_pause(reason: str) -> BridgeControlOut:
+    def bridge_pause(reason: str) -> dict[str, Any]:
         """Persist a durable reconciliation pause with its operator reason."""
         if _gate_value(ctx.readonly):
             raise ValueError(
@@ -102,10 +83,10 @@ def _register_bridge_mutation_tools(mcp, ctx, annotations) -> None:
             )
         if not _gate_value(ctx.allow_jira_sync):
             raise ValueError("bridge pause is disabled; set REBAR_MCP_ALLOW_JIRA_SYNC=1 to enable")
-        return BridgeControlOut.model_validate(rebar.bridge_pause(reason=reason))
+        return _as_dict(rebar.bridge_pause(reason=reason))
 
     @mcp.tool(annotations=annotations["MUTATE_OPEN_WORLD"])
-    def bridge_resume() -> BridgeControlOut:
+    def bridge_resume() -> dict[str, Any]:
         """Clear the durable reconciliation pause."""
         if _gate_value(ctx.readonly):
             raise ValueError(
@@ -113,7 +94,7 @@ def _register_bridge_mutation_tools(mcp, ctx, annotations) -> None:
             )
         if not _gate_value(ctx.allow_jira_sync):
             raise ValueError("bridge resume is disabled; set REBAR_MCP_ALLOW_JIRA_SYNC=1 to enable")
-        return BridgeControlOut.model_validate(rebar.bridge_resume())
+        return _as_dict(rebar.bridge_resume())
 
 
 def register_bridge_tools(mcp, ctx) -> None:
@@ -123,7 +104,7 @@ def register_bridge_tools(mcp, ctx) -> None:
     @mcp.tool(annotations=annotations["READ_ONLY"])
     def bridge_preview(
         only: list[str] | None = None, exclude: list[str] | None = None
-    ) -> BridgeRunOut:
+    ) -> dict[str, Any]:
         """Compute proposed Jira changes without applying them."""
         # Typed as Any-valued: omitting unset keys is the pinned forwarding contract, and a
         # ``dict[str, list[str]]`` splat would type-check against the typed ``repo_root``.
@@ -132,25 +113,25 @@ def register_bridge_tools(mcp, ctx) -> None:
             for key, value in {"only": only, "exclude": exclude}.items()
             if value is not None
         }
-        return BridgeRunOut.model_validate(rebar.bridge_preview(**kwargs))
+        return _as_dict(rebar.bridge_preview(**kwargs))
 
     @mcp.tool(annotations=annotations["READ_ONLY"])
     def bridge_status(
         target_environment_id: str | None = None,
         max_age_seconds: int | None = None,
-    ) -> BridgeStatusOut:
+    ) -> dict[str, Any]:
         """Read the durable bridge status snapshot and optional freshness assertion."""
         values = {
             "target_environment_id": target_environment_id,
             "max_age_seconds": max_age_seconds,
         }
         kwargs: dict = {key: value for key, value in values.items() if value is not None}
-        return BridgeStatusOut.model_validate(rebar.bridge_status(**kwargs))
+        return _as_dict(rebar.bridge_status(**kwargs))
 
     @mcp.tool(annotations=annotations["READ_ONLY_OPEN_WORLD"])
-    def bridge_check_access() -> BridgeAccessCheckOut:
+    def bridge_check_access() -> dict[str, Any]:
         """Run the six-step live Jira capability check and return its typed verdict."""
-        return BridgeAccessCheckOut.model_validate(rebar.bridge_check_access())
+        return _as_dict(rebar.bridge_check_access())
 
     if not _gate_value(ctx.readonly):
         _register_bridge_mutation_tools(mcp, ctx, annotations)
@@ -166,7 +147,7 @@ def _register_plan_review_tools(mcp, annotations) -> None:
     """
 
     @mcp.tool(annotations=annotations["READ_ONLY"])
-    def plan_review_status(ticket_id: str) -> PlanReviewStatusOut:
+    def plan_review_status(ticket_id: str) -> dict[str, Any]:
         """Report plan-certificate currency using the exact claim-gate check.
 
         This read uses no LLM or network. It returns ``{ok, verdict, reason,
@@ -179,10 +160,10 @@ def _register_plan_review_tools(mcp, annotations) -> None:
         """
         import rebar.llm
 
-        return PlanReviewStatusOut.model_validate(rebar.llm.plan_review_status(ticket_id))
+        return _as_dict(rebar.llm.plan_review_status(ticket_id))
 
     @mcp.tool(annotations=annotations["READ_ONLY"])
-    def verify_completion_status(ticket_id: str) -> VerifyCompletionStatusOut:
+    def verify_completion_status(ticket_id: str) -> dict[str, Any]:
         """Report durable completion-certificate currency without an LLM or network.
 
         This local close-gate check lets callers poll completion runs without another
@@ -192,12 +173,10 @@ def _register_plan_review_tools(mcp, annotations) -> None:
         """
         import rebar.llm
 
-        return VerifyCompletionStatusOut.model_validate(
-            rebar.llm.verify_completion_status(ticket_id)
-        )
+        return rebar.llm.verify_completion_status(ticket_id)
 
     @mcp.tool(annotations=annotations["READ_ONLY"])
-    def gate_status(job_id: str) -> GateRunOut:
+    def gate_status(job_id: str) -> dict[str, Any]:
         """Poll an async plan-review or completion run without executing it.
 
         Replaying the local gate index returns ``{job_id, status, ticket_id,
@@ -209,7 +188,7 @@ def _register_plan_review_tools(mcp, annotations) -> None:
         """
         import rebar.llm
 
-        return GateRunOut.model_validate(rebar.llm.gate_run_status(job_id))
+        return _as_dict(rebar.llm.gate_run_status(job_id))
 
 
 def _register_bridge_projects_read(mcp, ann) -> None:
@@ -241,7 +220,7 @@ def _ready_discovery_row(row: dict) -> dict:
 def _discovery_rows(rows, *, full: bool) -> list[dict]:
     """Project ready work to the lean discovery shape unless ``full=True``.
 
-    The default answers what is next without depending on ``TicketStateOut`` defaults;
+    The default answers what is next without the full ticket_state payload;
     full mode preserves the previous complete shape.
     """
     return list(rows) if full else [_ready_discovery_row(row) for row in rows]
@@ -259,17 +238,19 @@ def register_read_tools(mcp, ctx) -> None:
     _register_bridge_projects_read(mcp, _ANN)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def show_ticket(ticket_id: str) -> TicketStateOut:
+    def show_ticket(ticket_id: str) -> dict[str, Any]:
         """Show compiled ticket state (accepts full id, short id, or alias).
         Includes the computed ``inbound_deps`` (inbound edges: other tickets
         linking TO this one, with the source's status) alongside the stored
         outgoing ``deps``."""
         from rebar.audit.read import plan_review_health
 
-        ticket = dict(rebar.show_ticket(ticket_id, include_inbound=True))
+        ticket: dict[str, Any] = dict(rebar.show_ticket(ticket_id, include_inbound=True))
         ticket["plan_review_health"] = plan_review_health(ticket)
-        ticket["cross_session_warning"] = _cross_session(ticket_id)
-        return TicketStateOut.model_validate(ticket)
+        warning = _cross_session(ticket_id)
+        if warning is not None:
+            ticket["cross_session_warning"] = warning
+        return ticket
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def explain_criterion(criterion_id: str) -> dict:
@@ -313,7 +294,7 @@ def register_read_tools(mcp, ctx) -> None:
         with_children_count: bool = False,
         sort: str | None = None,
         full: bool = False,
-    ) -> list[TicketStateOut]:
+    ) -> list[dict[str, Any]]:
         """List tickets with optional lifecycle, hierarchy, tag, and readiness filters.
 
         Archived exclusion already hides deleted tombstones; ``exclude_deleted`` matters
@@ -325,7 +306,7 @@ def register_read_tools(mcp, ctx) -> None:
         """
         return _bound_list_payload(
             [
-                TicketStateOut.model_validate(t)
+                dict(t)
                 for t in rebar.list_tickets(
                     status=status,
                     ticket_type=ticket_type,
@@ -346,9 +327,9 @@ def register_read_tools(mcp, ctx) -> None:
         )
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def ticket_deps(ticket_id: str) -> DepsGraphOut:
+    def ticket_deps(ticket_id: str) -> dict[str, Any]:
         """Show the dependency graph for a ticket."""
-        return DepsGraphOut.model_validate(rebar.deps(ticket_id))
+        return _as_dict(rebar.deps(ticket_id))
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def audit_trail(ticket_id: str) -> dict:
@@ -363,28 +344,24 @@ def register_read_tools(mcp, ctx) -> None:
         return _audit_trail(ticket_id)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def ready_tickets(
-        sort: str | None = None, full: bool = False
-    ) -> list[ReadyTicketSummaryOut | TicketStateOut]:
+    def ready_tickets(sort: str | None = None, full: bool = False) -> list[dict[str, Any]]:
         """List tickets whose blockers are closed, optionally sorted.
 
         The lean default returns id, alias, title, type, status, priority, and blocking
-        summary; ``full=True`` restores the pre-1.0 ``TicketStateOut`` contract, or use
+        summary; ``full=True`` restores the pre-1.0 full ``ticket_state`` contract, or use
         ``show_ticket`` for one item. See ``docs/release-notes.md``. Like ``list_tickets``,
         oversize results are refused; because this tool has no filters, the remedy names
         ``next_batch(epic_id)``. Sort keys are ``priority|created|updated|id|status``;
         prefix ``-`` for descending, with unset values last.
         """
-        model = TicketStateOut if full else ReadyTicketSummaryOut
         return _bound_list_payload(
-            [model.model_validate(t) for t in _discovery_rows(rebar.ready(sort=sort), full=full)],
-            tool="ready_tickets",
+            _discovery_rows(rebar.ready(sort=sort), full=full), tool="ready_tickets"
         )
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def next_batch(epic_id: str) -> NextBatchOut:
+    def next_batch(epic_id: str) -> dict[str, Any]:
         """Next parallel batch of unblocked tickets under an epic's hierarchy."""
-        return NextBatchOut.model_validate(rebar.next_batch(epic_id))
+        return _as_dict(rebar.next_batch(epic_id))
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def search(
@@ -394,7 +371,7 @@ def register_read_tools(mcp, ctx) -> None:
         has_tag: str | None = None,
         include_archived: bool = False,
         sort: str | None = None,
-    ) -> list[SearchResultOut]:
+    ) -> list[dict[str, Any]]:
         """Search ticket prose and tags with bounded discovery results.
 
         Queries support ``status:``, ``type:``, ``priority:``, ``assignee:``, ``tag:``,
@@ -406,7 +383,7 @@ def register_read_tools(mcp, ctx) -> None:
         """
         return _bound_list_payload(
             [
-                SearchResultOut.model_validate(t)
+                dict(t)
                 for t in rebar.search(
                     query,
                     status=status,
@@ -420,14 +397,14 @@ def register_read_tools(mcp, ctx) -> None:
         )
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def recent_session_logs(limit: int = 5) -> list[TicketStateOut]:
+    def recent_session_logs(limit: int = 5) -> list[dict[str, Any]]:
         """The newest session_log tickets, newest first (by created_at; default
         limit 5). session_logs are hidden from list_tickets; this is the
         type-specific read that surfaces them."""
-        return [TicketStateOut.model_validate(t) for t in rebar.recent_session_logs(limit=limit)]
+        return [dict(t) for t in rebar.recent_session_logs(limit=limit)]
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
-    def fsck(recover: bool = False) -> FsckOut:
+    def fsck(recover: bool = False) -> dict[str, Any]:
         """Check ticket-store integrity (JSON validity, CREATE presence, lock
         cleanup). Set recover=True to run the recovery path."""
         if recover and _readonly():
@@ -437,63 +414,61 @@ def register_read_tools(mcp, ctx) -> None:
             )
         # Plain fsck still mutates: it removes a stale .git/index.lock. On a
         # read-only server suppress that write (report the stale lock instead).
-        return FsckOut.model_validate(rebar.fsck_report(recover=recover, report_only=_readonly()))
+        return _as_dict(rebar.fsck_report(recover=recover, report_only=_readonly()))
 
     # ── Quality gates + file-impact reads (WS5d) ───────────────────────────────
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def clarity_check(ticket_id: str) -> ClarityResultOut:
+    def clarity_check(ticket_id: str) -> dict[str, Any]:
         """Score ticket clarity (score / verdict / threshold / passed)."""
-        return ClarityResultOut.model_validate(rebar.clarity_check(ticket_id))
+        return _as_dict(rebar.clarity_check(ticket_id))
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def check_ac(ticket_id: str) -> GateResultOut:
+    def check_ac(ticket_id: str) -> dict[str, Any]:
         """Check the ticket has an Acceptance Criteria block
         ({verdict, criteria_count, reason, passed})."""
-        result = dict(rebar.check_ac(ticket_id))
+        result: dict[str, Any] = dict(rebar.check_ac(ticket_id))
         warning = _cross_session(ticket_id)
         if warning is not None:
             result["cross_session_warning"] = warning
-        return GateResultOut.model_validate(result)
+        return result
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def quality_check(ticket_id: str) -> GateResultOut:
+    def quality_check(ticket_id: str) -> dict[str, Any]:
         """Check ticket dispatch readiness ({verdict, line_count, keyword_count,
         ac_items, file_impact, reason, passed})."""
-        result = dict(rebar.quality_check(ticket_id))
+        result: dict[str, Any] = dict(rebar.quality_check(ticket_id))
         warning = _cross_session(ticket_id)
         if warning is not None:
             result["cross_session_warning"] = warning
-        return GateResultOut.model_validate(result)
+        return result
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def validate() -> ValidateReportOut:
+    def validate() -> dict[str, Any]:
         """Repo-wide quality health check (JSON report: score, critical/major/
         minor issues, warnings, suggestions). Takes no ticket id."""
-        return ValidateReportOut.model_validate(rebar.validate())
+        return _as_dict(rebar.validate())
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def get_file_impact(ticket_id: str) -> list[FileImpactItemOut]:
+    def get_file_impact(ticket_id: str) -> list[dict[str, Any]]:
         """Get the file-impact array (consumed by next-batch conflict scheduling)."""
-        return [FileImpactItemOut.model_validate(e) for e in rebar.get_file_impact(ticket_id)]
+        return [dict(e) for e in rebar.get_file_impact(ticket_id)]
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def get_verify_commands(ticket_id: str) -> list[VerifyCommandItemOut]:
+    def get_verify_commands(ticket_id: str) -> list[dict[str, Any]]:
         """Get the DD-level verify-commands array for a ticket."""
-        return [
-            VerifyCommandItemOut.model_validate(e) for e in rebar.get_verify_commands(ticket_id)
-        ]
+        return [dict(e) for e in rebar.get_verify_commands(ticket_id)]
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def grounding_info() -> GroundingInfoOut:
+    def grounding_info() -> dict[str, Any]:
         """The STATIC code-grounding oracle integration contract (epic 8f6c): the
         closed dimension-ID vocabulary + version, the reference kinds, the closed
         abstain-reason enum (+ outcome/job/tier vocabularies), and the available
         backends with their detected availability/version. A fast, deterministic,
         repo-independent discovery surface (no repo is scanned). Takes no args."""
-        return GroundingInfoOut.model_validate(rebar.grounding_info())
+        return _as_dict(rebar.grounding_info())
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def summary(ticket_ids: list[str]) -> list[dict]:
+    def summary(ticket_ids: list[str]) -> list[dict[str, Any]]:
         """One-line-per-ticket summary [{ticket_id, alias, status, title, blocking_summary}].
 
         ticket_id preserves the caller token; alias is the exact resolved
@@ -502,16 +477,16 @@ def register_read_tools(mcp, ctx) -> None:
         return rebar.summary(*ticket_ids)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def bridge_fsck() -> BridgeFsckOut:
+    def bridge_fsck() -> dict[str, Any]:
         """Offline bridge audit -> {unknown_event_types, binding_drift, store_integrity}."""
-        return BridgeFsckOut.model_validate(rebar.bridge_fsck())
+        return _as_dict(rebar.bridge_fsck())
 
     register_bridge_tools(mcp, ctx)
 
     _register_plan_review_tools(mcp, _ANN)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def verify_signature(ticket_id: str, kind: str | None = None) -> VerifySignatureResultOut:
+    def verify_signature(ticket_id: str, kind: str | None = None) -> dict[str, Any]:
         """Verify a ticket manifest against its op-cert signature.
 
         Returns ``{ticket_id, verified, verdict, reason, manifest, ...}``: ``certified``
@@ -523,21 +498,19 @@ def register_read_tools(mcp, ctx) -> None:
         ``plan-review`` or ``completion-verifier`` kind is strict. ``show_ticket``
         exposes every attestation.
         """
-        return VerifySignatureResultOut.model_validate(rebar.verify_signature(ticket_id, kind=kind))
+        return _as_dict(rebar.verify_signature(ticket_id, kind=kind))
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def get_workflow_status(run_id: str, ticket_id: str | None = None) -> WorkflowRunOut:
+    def get_workflow_status(run_id: str, ticket_id: str | None = None) -> dict[str, Any]:
         """Read a workflow run's current status via replay (no execution) ->
         {run_id, ticket_id, workflow_name, status, terminal_step, error, steps}.
 
         Typed read tool (mirrors src/rebar/schemas/workflow_run.schema.json), always
         available. ``ticket_id`` is resolved from the local run index when omitted."""
-        return WorkflowRunOut.model_validate(
-            _cap_workflow_payload(rebar.get_workflow_status(run_id, ticket_id))
-        )
+        return _cap_workflow_payload(dict(rebar.get_workflow_status(run_id, ticket_id)))
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def get_workflow_result(run_id: str, ticket_id: str | None = None) -> WorkflowRunOut:
+    def get_workflow_result(run_id: str, ticket_id: str | None = None) -> dict[str, Any]:
         """Read a workflow run's outputs via replay -> {run_id, status,
         terminal_step, terminal_output, outputs, error}. The terminal step's output
         is the run result.
@@ -545,9 +518,7 @@ def register_read_tools(mcp, ctx) -> None:
         Typed read tool (workflow_run schema), always available. Bulky outputs are
         elided to stay under the MCP token budget (``truncated: true``); read the
         full result via the library/CLI."""
-        return WorkflowRunOut.model_validate(
-            _cap_workflow_payload(rebar.get_workflow_result(run_id, ticket_id))
-        )
+        return _cap_workflow_payload(dict(rebar.get_workflow_result(run_id, ticket_id)))
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def render_workflow(workflow: str) -> str:

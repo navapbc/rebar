@@ -4,9 +4,8 @@
 RFC 8259 section 6 guarantees that implementations "agree exactly on their numeric
 values" only for integers in ``[-(2**53)+1, (2**53)-1]``. rebar's ticket timestamps are
 ``time.time_ns()`` values -- 19 digits, far outside that range -- and they reached the MCP
-wire as bare JSON numbers through ``_Out.model_config = ConfigDict(extra="allow")``
-(``src/rebar/_mcp_models.py:31-36``), which lets ``created_at``/``updated_at`` pass through
-``TicketStateOut`` undeclared.
+wire as bare JSON numbers through the (since deleted) permissive pydantic output models,
+which let ``created_at``/``updated_at`` pass through undeclared.
 
 Every supported MCP client parses JSON numbers as IEEE-754 binary64, so this broke both
 ways: a client using plain ``JSON.parse`` SILENTLY truncated the value
@@ -182,33 +181,38 @@ def test_the_timestamp_survives_the_wire_without_losing_digits(
 _NS_TIMESTAMP_FIELDS = ("signed_at", "created_at", "updated_at", "timestamp")
 
 
-def _models_declaring_ns_timestamps() -> list[tuple[type, str]]:
-    """Every MCP output model that declares one of the ns-timestamp field names."""
-    from rebar import _mcp_models
+def _advertised_ns_timestamp_fields() -> list[tuple[str, str, dict]]:
+    """Every advertised outputSchema property named like a ns timestamp, at any depth."""
+    from rebar.mcp_server import build_server
 
-    found = []
-    for name in dir(_mcp_models):
-        model = getattr(_mcp_models, name)
-        fields = getattr(model, "model_fields", None)
-        if not isinstance(fields, dict):
-            continue
-        for field in _NS_TIMESTAMP_FIELDS:
-            if field in fields:
-                found.append((model, field))
+    found: list[tuple[str, str, dict]] = []
+
+    def _walk(tool: str, node: object) -> None:
+        if isinstance(node, dict):
+            for key, sub in (node.get("properties") or {}).items():
+                if key in _NS_TIMESTAMP_FIELDS and isinstance(sub, dict):
+                    found.append((tool, key, sub))
+            for sub in node.values():
+                _walk(tool, sub)
+        elif isinstance(node, list):
+            for sub in node:
+                _walk(tool, sub)
+
+    for tool in asyncio.run(build_server().list_tools()):
+        _walk(tool.name, tool.outputSchema or {})
     return found
 
 
 def test_a_declared_ns_timestamp_field_advertises_the_safe_string_form() -> None:
     """The advertised outputSchema must permit the decimal-string form.
 
-    Asserts on ``model_json_schema()`` — the very bytes published to clients as a tool's
-    ``outputSchema`` in ``tools/list`` — so this is client-observable output, not an
-    internal name. A field advertised as ``integer`` only is also the field pydantic
-    coerces the guard's string back into, which is what reintroduced the bare
-    out-of-range number in structuredContent.
+    Walks every tool's ``outputSchema`` from ``tools/list`` (the canonical JSON Schema
+    files since story quilted-nepotic-kitty), so this is client-observable output, not an
+    internal name. A field advertised as ``integer`` only would make the SDK's output
+    validation reject the guard's JS-safe decimal string.
     """
-    declared = _models_declaring_ns_timestamps()
-    assert declared, "no MCP output model declares a ns-timestamp field — check the names"
+    declared = _advertised_ns_timestamp_fields()
+    assert declared, "no advertised outputSchema declares a ns-timestamp field — check names"
 
     def _permits_string(node: dict) -> bool:
         declared_type = node.get("type")
@@ -216,18 +220,15 @@ def test_a_declared_ns_timestamp_field_advertises_the_safe_string_form() -> None
             isinstance(declared_type, list) and "string" in declared_type
         ):
             return True
+        if "$ref" in node:
+            return True  # a shared def; its own entry is walked separately
         return any(_permits_string(sub) for sub in node.get("anyOf", []))
 
-    offenders = [
-        (model.__name__, field)
-        for model, field in declared
-        if not _permits_string(model.model_json_schema()["properties"][field])
-    ]
+    offenders = [(tool, field) for tool, field, node in declared if not _permits_string(node)]
 
     assert not offenders, (
-        "these output models advertise a nanosecond timestamp as an integer only, so "
-        "pydantic coerces the JS-safe decimal string back and structuredContent carries "
-        f"an uninteroperable bare number again: {offenders}"
+        "these outputSchemas advertise a nanosecond timestamp as an integer only, so the "
+        f"JS-safe decimal string would fail output validation: {offenders}"
     )
 
 

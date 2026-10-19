@@ -12,7 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from rebar._mcp_inflight import GateJobHandle, begin_gate_job, run_gate_singleflight
-from rebar._mcp_models import tool_annotation_presets
+from rebar._mcp_schema import tool_annotation_presets
 from rebar._opcert_binding import spawn_context_daemon
 
 

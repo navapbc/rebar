@@ -9,6 +9,7 @@
   "properties": {
     "ticket_id": { "type": "string" },
     "status": { "$ref": "common.schema.json#/$defs/ticket_status" },
-    "assignee": { "type": ["string", "null"] }
+    "assignee": { "type": ["string", "null"] },
+    "push_status": { "$ref": "common.schema.json#/$defs/push_status", "description": "MCP results only: delivery status of this write (see common push_status)." }
   }
 }

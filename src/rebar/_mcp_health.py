@@ -48,9 +48,6 @@ blue-green port ~20 min and exhausting the two-port pool (``mcp_retire_cap`` /
 runs BEFORE ``should_exit`` is set), never by this timeout, so keeping it short only sweeps
 IDLE held-open streams fast and never truncates a real in-flight op."""
 
-DEFAULT_UVICORN_GRACEFUL_SECONDS = DEFAULT_UVICORN_BACKSTOP_SECONDS
-"""Backward-compatible alias for :data:`DEFAULT_UVICORN_BACKSTOP_SECONDS`."""
-
 _GAUGE_ATTR = "_rebar_in_flight_gauge"
 
 

@@ -9,8 +9,7 @@ from __future__ import annotations
 
 from typing import TypeVar
 
-#: A list row: the validated MCP output model (``TicketStateOut``), kept generic so the
-#: budget module stays free of a dependency on the model layer.
+#: A list row: the plain library dict the tool returns, kept generic.
 _Row = TypeVar("_Row")
 
 # Keep MCP workflow status/result payloads under the client's ~25K-token budget
@@ -93,11 +92,11 @@ _DEFAULT_LIST_REMEDY = _LIST_REMEDIES["list_tickets"]
 
 
 def _wire_bytes(rows: list[_Row]) -> int:
-    """Measure the validated list payload exactly as the client receives it.
+    """Measure the list payload exactly as the client receives it.
 
-    Model defaults and quoted JS-unsafe integers enlarge reducer rows, while FastMCP
-    emits both structured content and an indented text block per row. Callers therefore
-    pass post-validation rows; this sizes both post-``js_safe_result`` wire halves.
+    Quoted JS-unsafe integers enlarge reducer rows, while FastMCP emits both structured
+    content and an indented text block per row; this sizes both post-``js_safe_result``
+    wire halves of the rows the tool returns (the library rows, unchanged).
     """
     import json
 
