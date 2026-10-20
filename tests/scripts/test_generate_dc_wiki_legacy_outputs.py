@@ -227,6 +227,35 @@ def test_validation_rejects_platform_version_and_hash_drift_with_diagnostics(
         )
 
 
+_INTEL_DARWIN = "d7b1e75cd20ee6a788a1399492be07d4559949e18e55f34cfc5c91807fdfa90d"
+_ARM64_DARWIN = "140353e19f2518a76aa144ce90a7afcb6f485ba94d0dbe069e77c805277908c3"
+
+
+def test_darwin_arm64_accepts_both_byte_identical_binaries_and_rejects_a_third(
+    generator: ModuleType,
+) -> None:
+    """Bug 9119-3f7b-22c0-4421: the pypandoc-binary wheel's x86_64 payload and the official
+    arm64 pandoc 3.9 release are both accepted on darwin-arm64; any other binary is not."""
+    fingerprints = generator.SUPPORTED_PANDOC_BINARY_SHA256
+    provenance = {
+        "version": generator.LEGACY_PANDOC_VERSION,
+        "generating_platform": "darwin-arm64",
+        "binary_sha256": fingerprints["darwin-arm64"],
+        "supported_platform_binary_sha256": fingerprints,
+    }
+    for accepted in (_INTEL_DARWIN, _ARM64_DARWIN):
+        generator.validate_pandoc_provenance(
+            provenance, platform_key="darwin-arm64", version="3.9", binary_sha256=accepted
+        )
+
+    with pytest.raises(ValueError, match="Pandoc binary SHA-256 mismatch") as excinfo:
+        generator.validate_pandoc_provenance(
+            provenance, platform_key="darwin-arm64", version="3.9", binary_sha256="f" * 64
+        )
+    assert _INTEL_DARWIN in str(excinfo.value)
+    assert _ARM64_DARWIN in str(excinfo.value)
+
+
 def test_validation_rejects_an_incomplete_supported_platform_map(
     generator: ModuleType,
 ) -> None:
