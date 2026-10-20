@@ -10,8 +10,7 @@ All tests mock AcliClient so no real Jira calls are made.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -22,16 +21,11 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location("applier_identity", APPLIER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["applier_identity"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
@@ -154,7 +148,7 @@ def test_add_label_transient_5xx_absorbed_by_retry_no_rollback(applier):
     # Ticket a3fa: _call_with_retry moved to dispatch_apply_phases (to make room under the
     # 800-LOC cap for the capability guards), so patch ``time`` at its NEW point of use —
     # patching dispatch_one.time would now be inert and reintroduce real backoff sleeps.
-    from rebar_reconciler import dispatch_apply_phases  # point-of-use: the retry lives here
+    from rebar.reconciler import dispatch_apply_phases  # point-of-use: the retry lives here
 
     with patch.object(dispatch_apply_phases, "time") as mock_time:
         mock_time.sleep = MagicMock()
@@ -193,7 +187,7 @@ def test_set_entity_property_transient_5xx_absorbed_by_retry_no_rollback(applier
 
     mutation = _make_create_mutation(local_id)
 
-    from rebar_reconciler import dispatch_apply_phases  # point-of-use: the retry lives here
+    from rebar.reconciler import dispatch_apply_phases  # point-of-use: the retry lives here
 
     with patch.object(dispatch_apply_phases, "time") as mock_time:
         mock_time.sleep = MagicMock()

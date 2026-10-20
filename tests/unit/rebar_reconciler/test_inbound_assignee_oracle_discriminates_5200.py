@@ -42,7 +42,7 @@ from pathlib import Path
 import pytest
 
 import rebar
-import rebar_reconciler.apply_inbound_records as air
+import rebar.reconciler.apply_inbound_records as air
 
 _DC_USER = "admin"
 _DC_USER_OBJECT = {"name": _DC_USER, "displayName": _DC_USER}

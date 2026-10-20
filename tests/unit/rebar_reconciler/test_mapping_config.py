@@ -18,7 +18,7 @@ import pytest
 
 from rebar import config as cfg
 from rebar._config_coercion import ConfigError
-from rebar_reconciler import mapping_config as mc
+from rebar.reconciler import mapping_config as mc
 
 pytestmark = pytest.mark.unit
 

@@ -12,28 +12,18 @@ a tmp tracker dir.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-_SRC_DIR = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, _SRC_DIR / filename)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+_SRC_DIR = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def binding_store_mod():
-    return _load("_binding_store_for_capture", "binding_store.py")
+    return importlib.import_module("rebar.reconciler.binding_store")
 
 
 @pytest.fixture
@@ -46,7 +36,7 @@ _KEY = "1785800303802040001-cccc"
 
 def test_update_dispatch_records_comment_id(store):
     """_update_one_dispatch_comments records the returned id against the key."""
-    from rebar_reconciler.dispatch_apply_phases import _update_one_dispatch_comments
+    from rebar.reconciler.dispatch_apply_phases import _update_one_dispatch_comments
 
     client = MagicMock()
     client.add_comment.return_value = {"id": "10001"}
@@ -61,7 +51,7 @@ def test_update_dispatch_records_comment_id(store):
 
 def test_update_dispatch_without_store_is_noop(store):
     """binding_store is optional — the legacy path still posts the comment."""
-    from rebar_reconciler.dispatch_apply_phases import _update_one_dispatch_comments
+    from rebar.reconciler.dispatch_apply_phases import _update_one_dispatch_comments
 
     client = MagicMock()
     client.add_comment.return_value = {"id": "10001"}
@@ -73,7 +63,7 @@ def test_update_dispatch_without_store_is_noop(store):
 
 def test_create_one_records_comment_id(store):
     """create_one captures the add_comment id and persists it via the store."""
-    from rebar_reconciler.dispatch_one import create_one
+    from rebar.reconciler.dispatch_one import create_one
 
     client = MagicMock()
     client.search_issues.return_value = []  # JQL miss -> create
@@ -106,8 +96,8 @@ def test_comment_id_captured_and_persisted(store):
     ``local_comment_key`` via ``record_comment_id``. The enactment code is
     backend-agnostic, so the same capture holds whether the client is the Cloud
     (acli) transport or the DC transport (both return ``{"id": ...}``)."""
-    from rebar_reconciler.dispatch_apply_phases import _update_one_dispatch_comments
-    from rebar_reconciler.dispatch_one import create_one
+    from rebar.reconciler.dispatch_apply_phases import _update_one_dispatch_comments
+    from rebar.reconciler.dispatch_one import create_one
 
     create_key = "1785800303802040001-create"
     update_key = "1785800303802040001-update"

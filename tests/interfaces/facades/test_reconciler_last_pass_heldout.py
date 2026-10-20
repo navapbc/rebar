@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -14,10 +13,7 @@ LAST_PASS_REF = "refs/reconciler/last-pass"
 
 
 def _reconciler_main():
-    engine_dir = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine"
-    if str(engine_dir) not in sys.path:
-        sys.path.insert(0, str(engine_dir))
-    return importlib.import_module("rebar_reconciler.__main__")
+    return importlib.import_module("rebar.reconciler.__main__")
 
 
 def _configure_origin(repo: Path, tmp_path: Path) -> Path:
@@ -165,7 +161,7 @@ def test_last_pass_cas_retries_exactly_three_times_with_jittered_backoff(
 
     sleeps: list[float] = []
     monkeypatch.setattr(subprocess, "run", run)
-    last_pass = importlib.import_module("rebar_reconciler.last_pass")
+    last_pass = importlib.import_module("rebar.reconciler.last_pass")
     monkeypatch.setattr(last_pass, "_sleep", sleeps.append)
 
     rc = reconciler_main.main(["sync", "--repo-root", str(rebar_repo)])
@@ -230,7 +226,7 @@ def test_environment_id_semantics_are_preserved(
     env id wins, and a *set-but-empty* ``REBAR_ENV_ID`` still fails LOUD rather than
     silently defaulting to the local-id file. The owned accessor must re-raise these, not
     swallow them."""
-    from rebar_reconciler.last_pass import LastPassError, resolve_environment_id
+    from rebar.reconciler.last_pass import LastPassError, resolve_environment_id
 
     monkeypatch.delenv("REBAR_ENV_ID", raising=False)
     assert resolve_environment_id(tmp_path, explicit="prod:main") == "prod:main", (
@@ -247,7 +243,7 @@ def test_environment_id_env_var_is_read_after_the_cut(
 ) -> None:
     """A non-empty ``REBAR_ENV_ID`` is honored (no explicit argument): the cut must keep
     reading the env layer through its owned accessor, not freeze or drop it."""
-    from rebar_reconciler.last_pass import resolve_environment_id
+    from rebar.reconciler.last_pass import resolve_environment_id
 
     monkeypatch.setenv("REBAR_ENV_ID", "staging:eu")
     assert resolve_environment_id(tmp_path) == "staging:eu", (

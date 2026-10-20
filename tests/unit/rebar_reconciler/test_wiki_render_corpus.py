@@ -27,8 +27,8 @@ from unittest import mock
 
 import pytest
 
-from rebar_reconciler.adapters.jira_family import wiki_render
-from rebar_reconciler.adapters.jira_family.wiki_render import (
+from rebar.reconciler.adapters.jira_family import wiki_render
+from rebar.reconciler.adapters.jira_family.wiki_render import (
     code_fragments,
     render_markdown_to_wiki,
 )

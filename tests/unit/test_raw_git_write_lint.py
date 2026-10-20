@@ -385,7 +385,7 @@ def test_wrapper_attribute_receiver_shape_does_not_matter(lint, tree):
         tree,
         "src/rebar/attr2.py",
         """
-        from rebar._engine.rebar_reconciler import _ref_lock
+        from rebar.reconciler import _ref_lock
 
         class Store:
             def compact(self, repo_root):
@@ -672,7 +672,7 @@ def test_r3_composed_add_commit_outside_seam_fires(lint, tree):
         tree,
         "src/rebar/compose.py",
         """
-        from rebar_reconciler import git_adapter
+        from rebar.reconciler import git_adapter
 
         def snapshot(d):
             git_adapter.add(d, "bindings.json")
@@ -690,7 +690,7 @@ def test_r3_detached_index_purge_shape_fires(lint, tree):
         tree,
         "src/rebar/purge.py",
         """
-        from rebar_reconciler import git_adapter
+        from rebar.reconciler import git_adapter
 
         def purge(root, present, old, env):
             git_adapter.read_tree(root, old, env=env)
@@ -703,10 +703,10 @@ def test_r3_detached_index_purge_shape_fires(lint, tree):
     assert _kinds(lint.check(tree)) == ["seam-composition"] * 5
 
 
-_SEAM_DIR = "src/rebar/_engine/rebar_reconciler"
+_SEAM_DIR = "src/rebar/reconciler"
 
 _COMPOSED = """
-    from rebar_reconciler import git_adapter
+    from rebar.reconciler import git_adapter
 
     def under_the_lock(d):
         git_adapter.add(d, "bindings.json")
@@ -735,11 +735,11 @@ def test_r3_dotted_attribute_receiver_fires(lint, tree):
         tree,
         "src/rebar/dotted.py",
         """
-        import rebar_reconciler.git_adapter
+        import rebar.reconciler.git_adapter
 
         def snapshot(d):
-            rebar_reconciler.git_adapter.add(d, "b.json")
-            rebar_reconciler.git_adapter.commit(d, "m")
+            rebar.reconciler.git_adapter.add(d, "b.json")
+            rebar.reconciler.git_adapter.commit(d, "m")
         """,
     )
     assert _kinds(lint.check(tree)) == ["seam-composition", "seam-composition"]
@@ -767,7 +767,7 @@ def test_r3_line_marker_with_reason_silences(lint, tree):
         tree,
         "src/rebar/compose.py",
         """
-        from rebar_reconciler import git_adapter
+        from rebar.reconciler import git_adapter
 
         def snapshot(d):
             git_adapter.add(d, "b.json")  # raw-git-ok: selective staging, see 11a9
@@ -782,7 +782,7 @@ def test_r3_function_marker_with_reason_silences(lint, tree):
         tree,
         "src/rebar/compose.py",
         """
-        from rebar_reconciler import git_adapter
+        from rebar.reconciler import git_adapter
 
         # raw-git-ok: detached temp index + CAS ref-advance; never touches the worktree
         def purge(root, old, env):
@@ -798,7 +798,7 @@ def test_r3_marker_without_reason_fails(lint, tree):
         tree,
         "src/rebar/compose.py",
         """
-        from rebar_reconciler import git_adapter
+        from rebar.reconciler import git_adapter
 
         def snapshot(d):
             git_adapter.commit(d, "m")  # raw-git-ok:
@@ -831,7 +831,7 @@ def test_r3_ignores_git_adapter_read_ops(lint, tree):
         tree,
         "src/rebar/reads.py",
         """
-        from rebar_reconciler import git_adapter
+        from rebar.reconciler import git_adapter
 
         def probe(d, sha):
             git_adapter.rev_parse(d, "tickets")
@@ -850,7 +850,7 @@ def test_r3_dynamic_loader_binding_fires(lint, tree):
         "src/rebar/lazy.py",
         """
         def snapshot(d):
-            git_adapter = _load("rebar_reconciler.git_adapter", "git_adapter.py")
+            git_adapter = _load("rebar.reconciler.git_adapter", "git_adapter.py")
             git_adapter.commit(d, "m")
         """,
     )
@@ -862,7 +862,7 @@ def test_r3_aliased_import_binding_fires(lint, tree):
         tree,
         "src/rebar/aliased.py",
         """
-        from rebar_reconciler import git_adapter as ga
+        from rebar.reconciler import git_adapter as ga
 
         def snapshot(d):
             ga.add(d, "b.json")
@@ -876,7 +876,7 @@ def test_r3_from_imported_primitive_bare_name_fires(lint, tree):
         tree,
         "src/rebar/direct.py",
         """
-        from rebar_reconciler.git_adapter import add, commit, rev_parse
+        from rebar.reconciler.git_adapter import add, commit, rev_parse
 
         def snapshot(d):
             rev_parse(d, "tickets")
@@ -892,7 +892,7 @@ def test_r3_report_mode_lists_seam_composition_hits(lint, tree, capsys):
         tree,
         "src/rebar/compose.py",
         """
-        from rebar_reconciler import git_adapter
+        from rebar.reconciler import git_adapter
 
         def snapshot(d):
             git_adapter.commit(d, "m")  # raw-git-ok: durable reason here

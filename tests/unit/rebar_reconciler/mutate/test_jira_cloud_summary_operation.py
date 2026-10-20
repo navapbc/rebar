@@ -23,10 +23,10 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler.adapters.jira import acli, acli_subprocess
-from rebar_reconciler.adapters.jira import summary_operation as so
-from rebar_reconciler.adapters.jira.acli_rest import ONE_ATTEMPT_NO_SLEEP
-from rebar_reconciler.operation_outcome import Disposition, OperationOutcome, ReplaySafety
+from rebar.reconciler.adapters.jira import acli, acli_subprocess
+from rebar.reconciler.adapters.jira import summary_operation as so
+from rebar.reconciler.adapters.jira.acli_rest import ONE_ATTEMPT_NO_SLEEP
+from rebar.reconciler.operation_outcome import Disposition, OperationOutcome, ReplaySafety
 
 _CORPUS = (
     Path(__file__).resolve().parents[3] / "fixtures" / "reconciler" / "rp03_acli_outcomes.json"
@@ -182,7 +182,7 @@ def _rest_client() -> acli.AcliClient:
 def test_default_policy_keeps_three_attempts_and_2s_5s_waits(monkeypatch):
     import urllib.request
 
-    import rebar_reconciler.adapters.jira.acli_rest as rest_mod
+    import rebar.reconciler.adapters.jira.acli_rest as rest_mod
 
     slept: list[float] = []
     attempts = {"n": 0}
@@ -204,7 +204,7 @@ def test_default_policy_keeps_three_attempts_and_2s_5s_waits(monkeypatch):
 def test_one_attempt_no_sleep_policy_makes_exactly_one_attempt(monkeypatch):
     import urllib.request
 
-    import rebar_reconciler.adapters.jira.acli_rest as rest_mod
+    import rebar.reconciler.adapters.jira.acli_rest as rest_mod
 
     slept: list[float] = []
     attempts = {"n": 0}
@@ -266,7 +266,7 @@ def test_failure_outcome_diagnostic_is_redacted(monkeypatch):
 
 
 def test_diagnostics_are_capped_at_eight_entries():
-    from rebar_reconciler.operation_outcome import bound_diagnostics
+    from rebar.reconciler.operation_outcome import bound_diagnostics
 
     raw = [{"stage": "s", "message": f"m{i}"} for i in range(20)]
     bounded = bound_diagnostics(raw)
@@ -277,7 +277,7 @@ def test_diagnostics_are_capped_at_eight_entries():
 
 
 def _outcome(disposition: Disposition = Disposition.commit_unknown) -> OperationOutcome:
-    from rebar_reconciler.operation_outcome import DelaySource, FailureScope
+    from rebar.reconciler.operation_outcome import DelaySource, FailureScope
 
     return OperationOutcome(
         logical_id="11111111-1111-4111-8111-111111111111",

@@ -43,7 +43,7 @@ def fixture_root(tmp_path: Path) -> Path:
 
 def _dry_run_enumerate(root: Path) -> str:
     cp = subprocess.run(
-        [sys.executable, "-m", "rebar_reconciler", "--repo-root", str(root), "--dry-run-enumerate"],
+        [sys.executable, "-m", "rebar.reconciler", "--repo-root", str(root), "--dry-run-enumerate"],
         env=engine_env(str(root)),
         capture_output=True,
         text=True,

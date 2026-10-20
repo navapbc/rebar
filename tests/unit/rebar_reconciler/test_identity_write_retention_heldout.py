@@ -32,8 +32,8 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler.binding_store import BindingPersistError, BindingStore
-from rebar_reconciler.dispatch_one import create_one
+from rebar.reconciler.binding_store import BindingPersistError, BindingStore
+from rebar.reconciler.dispatch_one import create_one
 
 
 @pytest.fixture

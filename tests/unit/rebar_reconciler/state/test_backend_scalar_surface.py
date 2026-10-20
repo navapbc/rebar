@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from rebar import config as cfg
-from rebar_reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.adapters.jira.backend import JiraBackend
 
 pytestmark = pytest.mark.unit
 

@@ -2,26 +2,16 @@
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-BINDING_STORE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "binding_store.py"
-)
+BINDING_STORE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "binding_store.py"
 
 
 def _load_binding_store_module():
-    name = "_test_get_rotation_binding_store"
-    sys.modules.pop(name, None)
-    spec = importlib.util.spec_from_file_location(name, BINDING_STORE_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    return importlib.import_module("rebar.reconciler.binding_store")
 
 
 def _write_bindings(bridge: Path) -> None:

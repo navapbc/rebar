@@ -7,6 +7,7 @@ status-update kill switch.
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 from pathlib import Path
 from types import ModuleType
@@ -18,15 +19,11 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-CONFIG_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "config.py"
+CONFIG_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "config.py"
 
 
 def _load_config() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("config", CONFIG_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.config")
 
 
 @pytest.fixture(scope="module")
@@ -77,28 +74,27 @@ def test_local_to_jira_status_keys_are_known_local_statuses(
     assert expected_keys.issubset(set(config.local_to_jira_status.keys()))
 
 
-def test_empty_mapping_kill_switch_safe() -> None:
+def test_empty_mapping_kill_switch_safe(
+    config: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An empty local_to_jira_status mapping is a valid kill-switch
-    configuration — assigning {} must not raise, and the default-loaded
-    mapping (fresh import) remains non-empty so preflight's no-status-update
-    path is the documented safe fallthrough."""
-    fresh = _load_config()
+    configuration — assigning {} must not raise, and the shipped mapping
+    stays non-empty once the override is undone, so preflight's
+    no-status-update path is the documented safe fallthrough."""
     # Empty assignment must be tolerated at the module-attribute level.
-    fresh.local_to_jira_status = {}
-    assert fresh.local_to_jira_status == {}
-    # A fresh import must restore the documented non-empty default.
-    reloaded = _load_config()
-    assert isinstance(reloaded.local_to_jira_status, dict)
-    assert len(reloaded.local_to_jira_status) > 0
+    monkeypatch.setattr(config, "local_to_jira_status", {})
+    assert config.local_to_jira_status == {}
+    # Undoing the override restores the documented non-empty default.
+    monkeypatch.undo()
+    assert isinstance(config.local_to_jira_status, dict)
+    assert len(config.local_to_jira_status) > 0
 
 
 # ---------------------------------------------------------------------------
 # jira_to_local_status — canonical reverse map (ticket robe-creek-zealot)
 # ---------------------------------------------------------------------------
 
-INBOUND_DIFFER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "inbound_differ.py"
-)
+INBOUND_DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "inbound_differ.py"
 
 
 def test_jira_to_local_status_is_nonempty_str_dict(config: ModuleType) -> None:
@@ -135,17 +131,8 @@ def test_jira_to_local_status_parity_with_inbound_differ(
     config: ModuleType,
 ) -> None:
     """The inbound differ and configuration share the Jira-to-local status map."""
-    import sys
 
-    spec = importlib.util.spec_from_file_location(
-        "inbound_differ_for_config_parity", INBOUND_DIFFER_PATH
-    )
-    assert spec is not None and spec.loader is not None
-    inbound_differ = importlib.util.module_from_spec(spec)
-    # Register before exec: the module defines dataclasses, which resolve
-    # their namespace via sys.modules[cls.__module__] at class-creation time.
-    sys.modules["inbound_differ_for_config_parity"] = inbound_differ
-    spec.loader.exec_module(inbound_differ)  # type: ignore[union-attr]
+    inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
     assert config.jira_to_local_status == inbound_differ._JIRA_TO_LOCAL_STATUS
     # The `idea ↔ IDEA` entry must be present on BOTH sides of the parity.
     assert config.jira_to_local_status["IDEA"] == "idea"
@@ -157,51 +144,24 @@ def test_idea_maps_to_jira_idea_across_all_status_maps(config: ModuleType) -> No
     reconciler status map — a missing one causes a preflight abort or a silent
     mistranslation (story tawny-herb-bug)."""
 
-    def _load_attr(module_file: str, attr: str):
-        path = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / module_file
-        spec = importlib.util.spec_from_file_location(f"_parity_{module_file}", path)
-        assert spec is not None and spec.loader is not None
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[f"_parity_{module_file}"] = mod
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
-        return getattr(mod, attr)
-
-    import sys
+    def _load_attr(module: str, attr: str):
+        return getattr(importlib.import_module(f"rebar.reconciler.{module}"), attr)
 
     assert config.local_to_jira_status["idea"] == "IDEA"
     assert config.jira_to_local_status["IDEA"] == "idea"
-    assert _load_attr("inbound_differ.py", "_JIRA_TO_LOCAL_STATUS")["IDEA"] == "idea"
-    assert (
-        _load_attr("adapters/jira_family/value_maps.py", "LOCAL_STATUS_TO_JIRA")["idea"] == "IDEA"
-    )
-    assert _load_attr("adapters/jira/outbound_fields.py", "_LOCAL_TO_JIRA_STATUS")["idea"] == "IDEA"
+    assert _load_attr("inbound_differ", "_JIRA_TO_LOCAL_STATUS")["IDEA"] == "idea"
+    assert _load_attr("adapters.jira_family.value_maps", "LOCAL_STATUS_TO_JIRA")["idea"] == "IDEA"
+    assert _load_attr("adapters.jira.outbound_fields", "_LOCAL_TO_JIRA_STATUS")["idea"] == "IDEA"
 
 
 def test_local_to_jira_status_parity_with_the_jira_family_map(config: ModuleType) -> None:
     """The core status map equals the Jira-family map.
 
     Full-dictionary parity catches drift without importing a vendor adapter
-    into core. The test loads the adapter map by path to preserve dependency
-    direction.
+    into core.
     """
-    import sys
 
-    # Load by path to compare maps without importing the vendor package into core.
-    path = (
-        REPO_ROOT
-        / "src"
-        / "rebar"
-        / "_engine"
-        / "rebar_reconciler"
-        / "adapters"
-        / "jira_family"
-        / "value_maps.py"
-    )
-    spec = importlib.util.spec_from_file_location("_parity_jira_family_value_maps", path)
-    assert spec is not None and spec.loader is not None
-    value_maps = importlib.util.module_from_spec(spec)
-    sys.modules["_parity_jira_family_value_maps"] = value_maps
-    spec.loader.exec_module(value_maps)  # type: ignore[union-attr]
+    value_maps = importlib.import_module("rebar.reconciler.adapters.jira_family.value_maps")
 
     assert config.local_to_jira_status == value_maps.LOCAL_STATUS_TO_JIRA, (
         "config.local_to_jira_status has DRIFTED from the canonical Jira-family map. These are "

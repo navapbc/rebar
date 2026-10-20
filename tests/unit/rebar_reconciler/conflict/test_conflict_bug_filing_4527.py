@@ -16,27 +16,20 @@ contract of the extracted ``conflict_bug_filing`` module:
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-MODULE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "conflict_bug_filing.py"
-)
+MODULE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "conflict_bug_filing.py"
 
 NOW = 1_785_800_000
 
 
 def _load_module():
-    spec = importlib.util.spec_from_file_location("conflict_bug_filing_4527", MODULE_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["conflict_bug_filing_4527"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.conflict_bug_filing")
 
 
 @pytest.fixture(scope="module")

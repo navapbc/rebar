@@ -36,10 +36,10 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler import outbound_comments as oc
-from rebar_reconciler.adapters.jira import acli_cli_ops
-from rebar_reconciler.adapters.jira.backend import _JiraInbound, _JiraSanitizer
-from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
+from rebar.reconciler import outbound_comments as oc
+from rebar.reconciler.adapters.jira import acli_cli_ops
+from rebar.reconciler.adapters.jira.backend import _JiraInbound, _JiraSanitizer
+from rebar.reconciler.adapters.jira.rich_text_codec import AdfCodec
 
 # Long enough that the ADF serialization crosses 32,000 AND the plain text
 # crosses 32,767, so BOTH fitters are engaged and their disagreement is visible.

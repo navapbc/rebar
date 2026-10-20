@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import sys
 import time
 import uuid
 from typing import Any
@@ -20,16 +19,11 @@ _CLOUD_CRED_VARS = ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN")
 
 
 def engine_on_path() -> None:
-    """Put ``<repo>/src/rebar/_engine`` on ``sys.path`` so ``rebar_reconciler`` resolves.
+    """Put ``<repo>/src/rebar/_engine`` on ``sys.path`` so ``rebar.reconciler`` resolves.
 
     The reconciler ships stdlib-only UNDER the wheel rather than as a top-level install
     (mirrors the DC + S3 live harness helpers).
     """
-    from _engine_path import engine_dir
-
-    engine = str(engine_dir())
-    if engine not in sys.path:
-        sys.path.insert(0, engine)
 
 
 def live_jira_ready() -> bool:
@@ -50,7 +44,7 @@ def build_cloud_client(project: str | None = None) -> Any:
     per-JQL PER instance, so a reused client could answer stale after a create.
     """
     engine_on_path()
-    from rebar_reconciler.adapters.jira import acli
+    from rebar.reconciler.adapters.jira import acli
 
     return acli.AcliClient(
         jira_url=os.environ["JIRA_URL"],
@@ -88,7 +82,7 @@ def new_local_id() -> str:
 def _jql_backoff() -> list[float]:
     """The §1 capped-exponential JQL visibility schedule (reuses access_check)."""
     engine_on_path()
-    from rebar_reconciler import access_check
+    from rebar.reconciler import access_check
 
     retries, base, cap = access_check._resolve_jql_backoff(os.environ)
     return access_check._jql_backoff_delays(retries, base, cap)

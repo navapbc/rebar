@@ -13,47 +13,33 @@ RED today (before fix):
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 MUTATION_PATH = APPLIER_PATH.parent / "mutation.py"
 INBOUND_DIFFER_PATH = APPLIER_PATH.parent / "inbound_differ.py"
 
 
-def _load_module(canonical_key: str, path: Path):
-    if canonical_key in sys.modules:
-        return sys.modules[canonical_key]
-    spec = importlib.util.spec_from_file_location(canonical_key, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[canonical_key] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
 @pytest.fixture(scope="module")
 def mut_mod():
-    canonical = "rebar_reconciler.mutation"
-    return _load_module(canonical, MUTATION_PATH)
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 @pytest.fixture(scope="module")
 def applier():
     # Load under a unique key to avoid collision with other test modules
-    return _load_module("applier_bootstrap_test", APPLIER_PATH)
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
 def inbound_differ():
-    canonical = "rebar_reconciler.inbound_differ"
-    return _load_module(canonical, INBOUND_DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.inbound_differ")
 
 
 @pytest.fixture

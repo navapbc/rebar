@@ -13,10 +13,10 @@ collection).
 
 from __future__ import annotations
 
-from rebar_reconciler import manifest_renderer
-from rebar_reconciler.batch_dispatch import CutoverOutcome
-from rebar_reconciler.failure_policy import OUTCOME_BUCKETS
-from rebar_reconciler.operation_outcome import (
+from rebar.reconciler import manifest_renderer
+from rebar.reconciler.batch_dispatch import CutoverOutcome
+from rebar.reconciler.failure_policy import OUTCOME_BUCKETS
+from rebar.reconciler.operation_outcome import (
     DelaySource,
     Disposition,
     FailureScope,
@@ -24,7 +24,7 @@ from rebar_reconciler.operation_outcome import (
     ReplaySafety,
     bound_diagnostics,
 )
-from rebar_reconciler.pass_fuse import FuseDecision
+from rebar.reconciler.pass_fuse import FuseDecision
 
 
 def _outcome(

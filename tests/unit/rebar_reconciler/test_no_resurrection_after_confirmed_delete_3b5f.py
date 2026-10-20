@@ -19,9 +19,8 @@ Follows the importlib loader convention established across this test tree.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -29,28 +28,17 @@ from typing import Any
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-_REC = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    if name in sys.modules:
-        del sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+_REC = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def od() -> ModuleType:
-    return _load_module("outbound_differ_3b5f", _REC / "outbound_differ.py")
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 @pytest.fixture
 def binding_store_mod() -> ModuleType:
-    return _load_module("binding_store_3b5f", _REC / "binding_store.py")
+    return importlib.import_module("rebar.reconciler.binding_store")
 
 
 def _ticket(tid: str, **over: Any) -> dict[str, Any]:
@@ -304,7 +292,7 @@ def test_snapshot_differ_local_state_suppression_is_still_present_and_consulted(
     ``unbound_local``) that duplicate work ``outbound_differ`` and ``binding_walk``
     already do.
     """
-    helpers = _load_module("reconcile_helpers_3b5f", _REC / "reconcile_helpers.py")
+    helpers = importlib.import_module("rebar.reconciler.reconcile_helpers")
     assert callable(helpers.drop_snapshot_differ_local_state_emissions)
     run_differs_src = (_REC / "run_differs.py").read_text(encoding="utf-8")
     assert "drop_snapshot_differ_local_state_emissions(mutations)" in run_differs_src, (
@@ -313,8 +301,8 @@ def test_snapshot_differ_local_state_suppression_is_still_present_and_consulted(
 
 
 def test_property_bound_snapshot_differ_suppression_is_narrow() -> None:
-    helpers = _load_module("reconcile_helpers_property_bound", _REC / "reconcile_helpers.py")
-    mutation = _load_module("mutation_property_bound", _REC / "mutation.py")
+    helpers = importlib.import_module("rebar.reconciler.reconcile_helpers")
+    mutation = importlib.import_module("rebar.reconciler.mutation")
     Mutation = mutation.Mutation
     MutationAction = mutation.MutationAction
     MutationDirection = mutation.MutationDirection

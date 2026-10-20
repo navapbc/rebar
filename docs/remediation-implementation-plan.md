@@ -42,7 +42,7 @@ sketched at the end for sequencing only.*
    - `ticket_txn.py:~200,333,359` — transition / claim (generated **under** the
      lock that file takes at `:78`);
    - `ticket-compact.sh:~253` — SNAPSHOT (bash; via inline `python3`);
-   - reconciler `rebar_reconciler/inbound_translate.py` `_event_meta` — batched
+   - reconciler `reconciler/inbound_translate.py` `_event_meta` — batched
      events written by `_engine/event_append.append_event` (rename under lock, **no
      per-event commit** — commits are batched by the applier).
    Any change to how the timestamp is derived must land at **all four**.
@@ -217,7 +217,7 @@ event-file write through it. Known live writers (the guard, not this list, is th
 backstop):
 - `_store/event_append.py:56-61` — **canonical** (the target form);
 - `_engine/event_append.py:123` — reconciler inbound events (batched commit);
-- `rebar_reconciler/batch_dispatch.py:221-232` — **BRIDGE_ALERT**, a *separate*
+- `reconciler/batch_dispatch.py:221-232` — **BRIDGE_ALERT**, a *separate*
   live reconciler writer with its **own** plain `json.dumps` directly to
   `{ts}-{uuid}-BRIDGE_ALERT.json` (does **not** go through
   `_engine/event_append`); reachable on the live reconcile path. (This omission —
@@ -743,7 +743,7 @@ total order. **Effort.** ~1.5–2 days (down from ~2–3; the OR-Set machinery i
 
 ## Phases 3–4 (sequencing only; detail when scheduled)
 
-- **P3.1 GitHub/GitLab bridge** — reuse `rebar_reconciler` differ/applier seams; a
+- **P3.1 GitHub/GitLab bridge** — reuse `rebar.reconciler` differ/applier seams; a
   new client adapter mirroring `acli.py`.
 - **P3.2 Read-only web/TUI viewer** — thin server over `reduce_all_tickets` JSON;
   **read-only** (I-neutral, no write path).

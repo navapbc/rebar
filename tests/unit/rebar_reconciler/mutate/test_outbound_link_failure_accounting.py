@@ -37,10 +37,9 @@ importing any constant from the adapter, so the oracle cannot move with the code
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import io
 import subprocess
-import sys
 from contextlib import redirect_stderr
 from pathlib import Path
 from types import ModuleType
@@ -48,26 +47,17 @@ from types import ModuleType
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-_ENGINE = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+_ENGINE = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def batch_dispatch() -> ModuleType:
-    return _load("batch_dispatch_5528", _ENGINE / "batch_dispatch.py")
+    return importlib.import_module("rebar.reconciler.batch_dispatch")
 
 
 @pytest.fixture(scope="module")
 def applier_mod() -> ModuleType:
-    return _load("applier_5528", _ENGINE / "applier.py")
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 class _LinkClient:
@@ -251,7 +241,7 @@ class _ArgvCapturingGraph:
 
 @pytest.fixture(scope="module")
 def graph_cls():
-    from rebar_reconciler.adapters.jira.acli_graph import AcliGraphMixin
+    from rebar.reconciler.adapters.jira.acli_graph import AcliGraphMixin
 
     return type("_Graph", (_ArgvCapturingGraph, AcliGraphMixin), {})
 

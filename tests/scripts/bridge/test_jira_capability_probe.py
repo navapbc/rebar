@@ -67,7 +67,7 @@ def _run_probe_with_mocked_acli(
     mock_spec.loader.exec_module.side_effect = _fake_exec_module
 
     # Register the package module through ``sys.modules``.
-    _fake_acli_mod = types.ModuleType("rebar_reconciler.adapters.jira.acli")
+    _fake_acli_mod = types.ModuleType("rebar.reconciler.adapters.jira.acli")
     _fake_acli_mod.AcliClient = mock_acli_cls  # type: ignore[attr-defined]
 
     # Keep standard loading for the probe module.
@@ -78,7 +78,7 @@ def _run_probe_with_mocked_acli(
     probe_mod = _real_module_from_spec(probe_spec)
 
     def _patched_spec_from_file(name: str, path: object, *args: object, **kwargs: object) -> object:
-        if "rebar_reconciler/acli" in str(path) or name == "acli_integration":
+        if "reconciler/acli" in str(path) or name == "acli_integration":
             return mock_spec
         return _real_spec_from_file(name, path, *args, **kwargs)  # type: ignore[arg-type]
 
@@ -91,12 +91,12 @@ def _run_probe_with_mocked_acli(
     captured = io.StringIO()
     exit_code: int | None = None
 
-    import rebar_reconciler.adapters.jira as _rr_jira_pkg
+    import rebar.reconciler.adapters.jira as _rr_jira_pkg
 
     patches: list[contextlib.AbstractContextManager] = [
         mock.patch.dict("os.environ", env, clear=False),
-        mock.patch.dict("sys.modules", {"rebar_reconciler.adapters.jira.acli": _fake_acli_mod}),
-        # `from rebar_reconciler.adapters.jira import acli` resolves the package
+        mock.patch.dict("sys.modules", {"rebar.reconciler.adapters.jira.acli": _fake_acli_mod}),
+        # `from rebar.reconciler.adapters.jira import acli` resolves the package
         # ATTRIBUTE if present (set by a prior test's import), bypassing the
         # sys.modules patch. Patch the attribute too so each probe run sees its own fake.
         mock.patch.object(_rr_jira_pkg, "acli", _fake_acli_mod, create=True),

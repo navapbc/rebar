@@ -30,16 +30,16 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler._backend import BackendAssigneeNotFoundError
-from rebar_reconciler.adapters.jira.backend import JiraBackend
-from rebar_reconciler.adapters.jira_family.identity_model import (
+from rebar.reconciler._backend import BackendAssigneeNotFoundError
+from rebar.reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.adapters.jira_family.identity_model import (
     AccountIdIdentity,
     NameIdentity,
 )
 
 from .backend_support import FakeTransport
 
-_REC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_REC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler"
 
 
 def _resolver(mapping: dict[str, tuple[Any, bool, bool]]):

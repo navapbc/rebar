@@ -21,7 +21,7 @@ from unittest import mock
 
 import pytest
 
-from rebar_reconciler.adapters.jira import acli
+from rebar.reconciler.adapters.jira import acli
 
 
 @dataclass

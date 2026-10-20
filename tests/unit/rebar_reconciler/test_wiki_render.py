@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from rebar_reconciler.adapters.jira_family import wiki_render
-from rebar_reconciler.adapters.jira_family.wiki_render import (
+from rebar.reconciler.adapters.jira_family import wiki_render
+from rebar.reconciler.adapters.jira_family.wiki_render import (
     code_fragments,
     render_markdown_to_wiki,
     substitute_arrows,
@@ -311,7 +311,7 @@ def test_dc_preservation_failure_returns_exact_unit(
 
 def test_dc_codec_remains_identity() -> None:
     """This story wires nothing: the DC codec must still be the identity."""
-    from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec
+    from rebar.reconciler.adapters.jira_family.rich_text import WikiTextCodec
 
     codec = WikiTextCodec()
     body = "# Heading\n\n- alpha\n"

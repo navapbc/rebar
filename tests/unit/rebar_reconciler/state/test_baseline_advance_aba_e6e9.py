@@ -27,20 +27,17 @@ dangerous:
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 _ENGINE = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine"
-if str(_ENGINE) not in sys.path:  # pragma: no cover - import bootstrap
-    sys.path.insert(0, str(_ENGINE))
 
-from rebar_reconciler.binding_store import BindingStore  # noqa: E402
-from rebar_reconciler.inbound_fields import _map_jira_to_local_fields  # noqa: E402
-from rebar_reconciler.outbound_field_diff import diff_canonical_fields  # noqa: E402
-from rebar_reconciler.reconcile_helpers import _advance_baselines  # noqa: E402
+from rebar.reconciler.binding_store import BindingStore  # noqa: E402
+from rebar.reconciler.inbound_fields import _map_jira_to_local_fields  # noqa: E402
+from rebar.reconciler.outbound_field_diff import diff_canonical_fields  # noqa: E402
+from rebar.reconciler.reconcile_helpers import _advance_baselines  # noqa: E402
 
 # The five inbound-mirrored fields share one guard (``_suppressed_by_inbound``) and
 # therefore one ABA exposure, so all five are covered — not just the status field that

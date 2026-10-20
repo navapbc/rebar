@@ -10,15 +10,14 @@ Credentials stay usable for authentication but absent from representations.
 from __future__ import annotations
 
 import importlib
-import sys
 
 import pytest
 
 from rebar._config_coercion import ConfigError
 
-# The engine's ``rebar_reconciler`` package and the ``tests/unit/rebar_reconciler``
+# The engine's ``rebar.reconciler`` package and the ``tests/unit/rebar_reconciler``
 # test package share the SAME top-level name. Importing the engine seam at module
-# (collection) scope caches ``sys.modules['rebar_reconciler']`` as the engine, which
+# (collection) scope caches ``sys.modules['rebar.reconciler']`` as the engine, which
 # shadows the test package and breaks the relative-import collection of
 # ``tests/unit/rebar_reconciler/classify/*`` ("not a package"). So the engine dir is
 # put on ``sys.path`` and the seam imported only at RUN time (after collection), the
@@ -30,13 +29,9 @@ BackendEnvError = None
 @pytest.fixture(autouse=True, scope="module")
 def _engine_seam():
     global compose_reconciler_runtime, BackendEnvError
-    from _engine_path import engine_dir
 
-    engine = str(engine_dir())
-    if engine not in sys.path:
-        sys.path.insert(0, engine)
-    from rebar_reconciler._backend import BackendEnvError as _BackendEnvError
-    from rebar_reconciler.runtime import (
+    from rebar.reconciler._backend import BackendEnvError as _BackendEnvError
+    from rebar.reconciler.runtime import (
         compose_reconciler_runtime as _compose_reconciler_runtime,
     )
 
@@ -46,9 +41,9 @@ def _engine_seam():
 
 
 # The ambient resolvers S2 must stop re-reading after composition.
-_CLOUD_RESOLVER = ("rebar_reconciler.adapters.jira.acli_subprocess", "resolve_jira_settings")
+_CLOUD_RESOLVER = ("rebar.reconciler.adapters.jira.acli_subprocess", "resolve_jira_settings")
 _DC_RESOLVER = (
-    "rebar_reconciler.adapters.jira_datacenter.settings",
+    "rebar.reconciler.adapters.jira_datacenter.settings",
     "resolve_jira_datacenter_settings",
 )
 
@@ -142,7 +137,7 @@ def test_only_selected_cloud_backend_is_constructed(monkeypatch) -> None:
     """Poison the REAL unselected (DC) backend class that ``_build_datacenter`` constructs;
     a Cloud compose+build must never touch it. (Poisoning the registry factory would be
     vacuous — the cloud path dispatches straight to ``_build_cloud`` and never calls it.)"""
-    dc_backend = importlib.import_module("rebar_reconciler.adapters.jira_datacenter.backend")
+    dc_backend = importlib.import_module("rebar.reconciler.adapters.jira_datacenter.backend")
     monkeypatch.setattr(
         dc_backend,
         "JiraDataCenterBackend",

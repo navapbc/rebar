@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rebar_reconciler import peer_state
+from rebar.reconciler import peer_state
 
 _FIELDS = {
     "summary": "S",

@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler.adapters.jira_datacenter.backend import (
+from rebar.reconciler.adapters.jira_datacenter.backend import (
     JiraDataCenterBackend,
     _map_local_to_dc_fields,
 )
-from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec
-from rebar_reconciler.outbound_comments import _decorate_outbound_comment
+from rebar.reconciler.adapters.jira_family.rich_text import WikiTextCodec
+from rebar.reconciler.outbound_comments import _decorate_outbound_comment
 
 from .backend_support import FakeTransport
 
@@ -189,7 +189,7 @@ def test_dc_create_path_description_fit_diverges_from_cloud():
     # description through ``WikiTextCodec``; Cloud's ``_map_local_to_jira_fields``
     # passes it through untouched (Cloud fits on the send path, not here). A
     # change that made either side match the other must go red.
-    from rebar_reconciler.adapters.jira.outbound_fields import _map_local_to_jira_fields
+    from rebar.reconciler.adapters.jira.outbound_fields import _map_local_to_jira_fields
 
     text = "d" * (WIKI_LIMIT + 1)
     dc_value = _map_local_to_dc_fields({"description": text})["description"]
@@ -210,7 +210,7 @@ def test_dc_rich_text_constants_pinned():
     Asserted here so a change to either constant fails ONE obvious test as well
     as the boundary pins, instead of quietly relocating their expectations.
     """
-    from rebar_reconciler.adapters.jira_family import rich_text
+    from rebar.reconciler.adapters.jira_family import rich_text
 
     assert rich_text.WIKI_DESCRIPTION_LIMIT == WIKI_LIMIT
     assert rich_text._WIKI_TRUNCATION_SUFFIX == WIKI_SUFFIX
@@ -265,7 +265,7 @@ def test_dc_description_boundary_diverges_from_cloud():
     # serialized ADF document (a smaller effective plain-text budget). At exactly
     # DC's limit, DC passes the value through and Cloud truncates it — so a change
     # that accidentally bound Cloud's fit to the DC sanitizer goes red here.
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     body = "d" * WIKI_LIMIT
     dc_out = _backend().sanitizer.sanitize_description(body)
@@ -324,7 +324,7 @@ def test_dc_map_fields_to_remote_description_diverges_from_cloud():
     # DIVERGENCE: the SAME shared mapper body, the SAME input, two codecs. At
     # exactly DC's limit the wiki fit is a no-op while the ADF fit truncates —
     # proof the codec really is the injected parameter and not a shared constant.
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     value = "d" * WIKI_LIMIT
     dc_out = _backend().outbound.map_fields_to_remote({"description": value})["description"]

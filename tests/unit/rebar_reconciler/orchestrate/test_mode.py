@@ -1,18 +1,14 @@
-"""Unit tests for the Mode enum in src/rebar/_engine/rebar_reconciler/mode.py."""
+"""Unit tests for the Mode enum in src/rebar/reconciler/mode.py."""
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-MODE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mode.py"
+MODE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "mode.py"
 
-_spec = importlib.util.spec_from_file_location("rebar_reconciler_mode_under_test", MODE_PATH)
-_mode_mod = importlib.util.module_from_spec(_spec)
-sys.modules["rebar_reconciler_mode_under_test"] = _mode_mod
-_spec.loader.exec_module(_mode_mod)
+_mode_mod = importlib.import_module("rebar.reconciler.mode")
 Mode = _mode_mod.Mode
 MODE_CAPS = _mode_mod.MODE_CAPS
 
@@ -108,11 +104,7 @@ def test_mode_rich_comparisons_follow_order_for_every_pair():
 
 def test_mode_rich_comparisons_accept_equivalent_members_from_a_second_load():
     """Dynamic loader aliases retain the same four-value comparison contract."""
-    spec = importlib.util.spec_from_file_location("rebar_reconciler_mode_second_load", MODE_PATH)
-    assert spec is not None and spec.loader is not None
-    second = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = second
-    spec.loader.exec_module(second)
+    second = importlib.import_module("rebar.reconciler.mode")
 
     assert Mode.BOOTSTRAP_THROTTLE > second.Mode.DRY_RUN
     assert Mode.DRY_RUN <= second.Mode.DRY_RUN

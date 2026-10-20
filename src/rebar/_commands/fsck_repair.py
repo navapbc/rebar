@@ -16,7 +16,6 @@ import json
 import logging
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 from rebar._commands._repair_pause import RepairPauseError, owned_repair_pause
@@ -314,12 +313,7 @@ def _reconciler_in_flight(repo_root=None) -> bool:
     (ref absent) reads free → False → repair proceeds."""
     root = Path(repo_root) if repo_root is not None else Path(".")
     try:
-        from rebar._engine import engine_dir
-
-        eng = str(engine_dir())
-        if eng not in sys.path:
-            sys.path.insert(0, eng)  # so the top-level rebar_reconciler package resolves
-        from rebar_reconciler import _advisory_lock as advisory
+        from rebar.reconciler import _advisory_lock as advisory
     except Exception:  # noqa: BLE001 — any import/asset failure → can't prove it's free → fail-closed
         return True
     try:

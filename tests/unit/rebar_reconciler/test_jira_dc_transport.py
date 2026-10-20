@@ -115,7 +115,7 @@ def transport() -> Any:
     Pins the constructor seam: the transport accepts its client so it is testable
     without the extra installed and without a network.
     """
-    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+    from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
     return JiraDataCenterTransport(client=FakeJiraClient(), project="DC")
 
@@ -183,7 +183,7 @@ def test_missing_extra_raises_naming_the_install_command(monkeypatch) -> None:
     """
     import sys
 
-    from rebar_reconciler.adapters.jira_datacenter import transport as _t
+    from rebar.reconciler.adapters.jira_datacenter import transport as _t
 
     monkeypatch.setitem(sys.modules, "jira", None)
 

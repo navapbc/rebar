@@ -7,9 +7,8 @@ additions. Healthy snapshots still deduplicate comments.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -21,38 +20,23 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
-BINDING_STORE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "binding_store.py"
-)
+BINDING_STORE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "binding_store.py"
 
-OUTBOUND_DIFFER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
-)
+OUTBOUND_DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
 
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
 
 
-def _load_module(name: str, path: Path) -> ModuleType:
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
 @pytest.fixture(scope="module")
 def binding_store_mod() -> ModuleType:
-    return _load_module("corrupt_state_binding_store", BINDING_STORE_PATH)
+    return importlib.import_module("rebar.reconciler.binding_store")
 
 
 @pytest.fixture(scope="module")
 def outbound_differ_mod() -> ModuleType:
-    return _load_module("corrupt_state_outbound_differ", OUTBOUND_DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 # ---------------------------------------------------------------------------

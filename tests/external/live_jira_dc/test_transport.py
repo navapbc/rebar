@@ -180,8 +180,8 @@ def test_name_identity_user_search_resolves_a_real_user_authoritatively(
     A missing or non-authoritative resolver would re-emit assignee changes forever; a fake
     cannot validate DC's ``user/search`` endpoint.
     """
-    from rebar_reconciler.adapters.jira_datacenter.backend import _search_users_by_username
-    from rebar_reconciler.adapters.jira_family.identity_model import NameIdentity
+    from rebar.reconciler.adapters.jira_datacenter.backend import _search_users_by_username
+    from rebar.reconciler.adapters.jira_family.identity_model import NameIdentity
 
     resolved, authoritative, is_account_id = _search_users_by_username(
         dc_transport._client, _ADMIN_USER
@@ -212,8 +212,8 @@ def test_assigning_an_unknown_user_raises_backend_assignee_not_found(
     The resolver returns authoritative-but-unmappable without raising; apply converts the
     assignment into vendor-neutral ``BackendAssigneeNotFoundError`` for core callers.
     """
-    from rebar_reconciler._backend import BackendAssigneeNotFoundError
-    from rebar_reconciler.adapters.jira_datacenter.backend import _search_users_by_username
+    from rebar.reconciler._backend import BackendAssigneeNotFoundError
+    from rebar.reconciler.adapters.jira_datacenter.backend import _search_users_by_username
 
     unknown = "definitely-not-a-real-dc-user-9fd4"
 
@@ -237,11 +237,11 @@ def test_assigning_an_unknown_user_raises_backend_assignee_not_found(
 @_skip_no_extra
 def test_select_backend_resolves_after_importing_adapters() -> None:
     """``select_backend("jira-datacenter")`` resolves once
-    ``rebar_reconciler.adapters`` is imported — pinning the self-registration
+    ``rebar.reconciler.adapters`` is imported — pinning the self-registration
     import (``adapters/__init__.py``) rather than a transport-only test that
     would never catch a missing registration."""
-    import rebar_reconciler.adapters  # noqa: F401 — registers the DC factory
-    from rebar_reconciler._backend_registry import _REGISTRY
+    import rebar.reconciler.adapters  # noqa: F401 — registers the DC factory
+    from rebar.reconciler._backend_registry import _REGISTRY
 
     assert "jira-datacenter" in _REGISTRY
 
@@ -256,7 +256,7 @@ def test_add_label_and_the_links_surface_against_a_real_instance(
     Verify link content through direct issue reads to avoid index lag; the search-backed
     map is held only to its raw-shape contract.
     """
-    from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+    from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
     dc_transport.project = jira_dc_project
     blocker = dc_transport.create_issue(

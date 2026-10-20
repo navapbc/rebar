@@ -21,7 +21,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src" / "rebar" / "_engine"))
 
-from rebar_reconciler.inbound_fields import normalize_baseline_value  # noqa: E402
+from rebar.reconciler.inbound_fields import normalize_baseline_value  # noqa: E402
 
 _BINDINGS = ".bridge_state/bindings.json"
 _ROTATION = ".bridge_state/get_rotation.json"

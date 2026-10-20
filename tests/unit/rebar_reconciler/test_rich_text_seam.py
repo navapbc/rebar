@@ -28,7 +28,7 @@ from pathlib import Path
 import pytest
 from _tree_scan import parsed_python_files
 
-_REC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_REC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler"
 _ADAPTERS = _REC / "adapters"
 
 
@@ -52,8 +52,8 @@ def test_cloud_send_path_composition_is_unchanged(text: str) -> None:
     Both sides evaluated live against the pinned ADF module, so a reordering, a
     dropped step, or a reimplementation all break this.
     """
-    from rebar_reconciler.adapters.jira import adf
-    from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
+    from rebar.reconciler.adapters.jira import adf
+    from rebar.reconciler.adapters.jira.rich_text_codec import AdfCodec
 
     expected = adf.normalize_description(adf.fit_text_to_adf_limit(text))
     codec = AdfCodec()
@@ -69,8 +69,8 @@ def test_the_sanitizer_applies_the_fit_only_not_the_normalization() -> None:
     start normalizing and Cloud's observable behaviour would change — which J1's
     pinned oracles forbid.
     """
-    from rebar_reconciler.adapters.jira import adf
-    from rebar_reconciler.adapters.jira.jira_fields import _sanitize_description
+    from rebar.reconciler.adapters.jira import adf
+    from rebar.reconciler.adapters.jira.jira_fields import _sanitize_description
 
     # prose whose normalized form DIFFERS from its raw form (soft wraps rejoined)
     text = "one\ntwo\nthree"
@@ -83,8 +83,8 @@ def test_the_sanitizer_applies_the_fit_only_not_the_normalization() -> None:
 def test_cloud_backend_description_mapping_still_normalizes() -> None:
     """The other side of the same coin: the BACKEND send path must still apply
     both steps, so the send value and every description comparison converge."""
-    from rebar_reconciler.adapters.jira import adf
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira import adf
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     from .backend_support import FakeTransport
 
@@ -99,7 +99,7 @@ def test_cloud_backend_description_mapping_still_normalizes() -> None:
 def test_non_string_description_still_bypasses_the_codec_entirely() -> None:
     """Today's mapper guards with ``isinstance(value, str)``; a non-str must reach
     the wire untouched rather than being coerced by the codec."""
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     from .backend_support import FakeTransport
 

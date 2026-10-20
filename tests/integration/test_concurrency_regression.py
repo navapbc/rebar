@@ -1129,15 +1129,9 @@ def test_a3_repair_aborts_when_push_fails_leaving_pretag_for_rollback(two_clones
 
 def _reconciler_advisory():
     """Load the reconciler advisory-lock module the way production does (engine dir on
-    sys.path so the top-level ``rebar_reconciler`` package resolves)."""
-    import sys as _sys
+    sys.path so the top-level ``rebar.reconciler`` package resolves)."""
 
-    from _engine_path import engine_dir
-
-    eng = str(engine_dir())
-    if eng not in _sys.path:
-        _sys.path.insert(0, eng)
-    from rebar_reconciler import _advisory_lock as advisory
+    from rebar.reconciler import _advisory_lock as advisory
 
     return advisory
 

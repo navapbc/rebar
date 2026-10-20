@@ -6,8 +6,7 @@ is a genuine invocability proof (not merely a linkage/import check). Nothing is
 swallowed — a real import/dispatch error fails the test.
 """
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -15,20 +14,12 @@ from unittest.mock import MagicMock
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-
-
-def _load_module(path, name):
-    spec = importlib.util.spec_from_file_location(name, path)
-    m = importlib.util.module_from_spec(spec)
-    sys.modules[name] = m
-    spec.loader.exec_module(m)
-    return m
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 @pytest.fixture(scope="module")
 def applier():
-    return _load_module(APPLIER_PATH, "applier")
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 def test_outbound_probe_leaf_genuinely_invocable(applier):

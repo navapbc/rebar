@@ -78,7 +78,7 @@ dataset:
 
       When an inbound Jira status is unmapped, operators get no signal. There is currently NO
       bridge alert for unmapped Jira statuses, so we must ADD a new
-      `unmapped-jira-status` bridge alert in `src/rebar/_engine/rebar_reconciler/fetcher.py`.
+      `unmapped-jira-status` bridge alert in `src/rebar/reconciler/fetcher.py`.
 
       ## Acceptance Criteria
 

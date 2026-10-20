@@ -11,11 +11,11 @@ Held out from the implementation subagent.
 
 from __future__ import annotations
 
-from rebar_reconciler._backend import (
+from rebar.reconciler._backend import (
     SupportsComments,
     SupportsLinks,
 )
-from rebar_reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.adapters.jira.backend import JiraBackend
 
 from .backend_support import FakeBackend, FakeTransport
 

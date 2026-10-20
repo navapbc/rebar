@@ -32,12 +32,12 @@ import pytest
 
 @pytest.fixture
 def apply_records():
-    return importlib.import_module("rebar_reconciler.apply_inbound_records")
+    return importlib.import_module("rebar.reconciler.apply_inbound_records")
 
 
 @pytest.fixture
 def pc():
-    return importlib.import_module("rebar_reconciler.peer_confirmations")
+    return importlib.import_module("rebar.reconciler.peer_confirmations")
 
 
 @pytest.fixture

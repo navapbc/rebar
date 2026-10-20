@@ -7,7 +7,7 @@ takes precedence over typed config. Property writes remain outside label enforce
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import logging
 import os
 import sys
@@ -21,9 +21,9 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
-ERRORS_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_errors.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "mutation.py"
+ERRORS_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "_errors.py"
 
 
 # ---------------------------------------------------------------------------
@@ -31,23 +31,9 @@ ERRORS_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_e
 # ---------------------------------------------------------------------------
 
 
-def _load(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
 def _load_applier():
     """Load applier under the canonical 'applier' module name."""
-    spec = importlib.util.spec_from_file_location("applier", APPLIER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["applier"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 # ---------------------------------------------------------------------------
@@ -57,12 +43,12 @@ def _load_applier():
 
 @pytest.fixture(scope="module")
 def mut_mod():
-    return _load(MUTATION_PATH, "rebar_reconciler_mutation_guard")
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 @pytest.fixture(scope="module")
 def errors_mod():
-    return _load(ERRORS_PATH, "rebar_reconciler_errors_guard")
+    return importlib.import_module("rebar.reconciler._errors")
 
 
 @pytest.fixture(scope="module")
@@ -153,7 +139,7 @@ def _make_inbound_update_mutation_with_rebar_id_label(mut_mod):
 def test_apply_raises_for_unauthorized_rebar_id_label_mutation(applier, errors_mod):
     """Canonical inbound-update Mutation identity raises RebarIdLabelWriteError."""
     # Build from the canonical module because typed dispatch checks Mutation identity.
-    canonical_mut = sys.modules.get("rebar_reconciler.mutation") or applier._load_mutation_module()
+    canonical_mut = sys.modules.get("rebar.reconciler.mutation") or applier._load_mutation_module()
     mut = _make_inbound_update_mutation_with_rebar_id_label(canonical_mut)
     # Use applier.RebarIdLabelWriteError to avoid importlib module-identity mismatch.
     with pytest.raises(applier.RebarIdLabelWriteError):

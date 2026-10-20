@@ -255,7 +255,7 @@ def test_construction_imports_no_command_handlers() -> None:
         "rebar._commands.transition",
         "rebar._commands.delete",
         "rebar._cli._bridge_commands",
-        "rebar_reconciler",
+        "rebar.reconciler",
         "pydantic_ai",
     )
     code = (

@@ -14,31 +14,21 @@ Covers:
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import subprocess
-import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-ENGINE = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+ENGINE = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def advisory() -> ModuleType:
-    return _load("rebar_reconciler._advisory_lock", ENGINE / "_advisory_lock.py")
+    return importlib.import_module("rebar.reconciler._advisory_lock")
 
 
 @pytest.fixture(scope="module")
@@ -50,7 +40,7 @@ def ref_lock(advisory: ModuleType) -> ModuleType:
 
 @pytest.fixture(scope="module")
 def mode_mod() -> ModuleType:
-    return _load("rebar_reconciler.mode", ENGINE / "mode.py")
+    return importlib.import_module("rebar.reconciler.mode")
 
 
 def _git(args: list[str], repo: Path, **kwargs) -> subprocess.CompletedProcess:
@@ -356,7 +346,7 @@ def test_crashed_pass_reclaimable_after_lease(
 
 
 def test_heartbeat_sets_lock_lost_on_lease_loss(advisory: ModuleType, repo: Path) -> None:
-    main_mod = _load("rebar_reconciler.__main__", ENGINE / "__main__.py")
+    main_mod = importlib.import_module("rebar.reconciler.__main__")
 
     class _FakeAdvisory:
         ReconcileLockLost = advisory.ReconcileLockLost
@@ -389,7 +379,7 @@ def test_heartbeat_sets_lock_lost_on_lease_loss(advisory: ModuleType, repo: Path
 
 
 def test_applier_apply_invokes_abort_check(repo: Path) -> None:
-    applier = _load("rebar_reconciler.applier", ENGINE / "applier.py")
+    applier = importlib.import_module("rebar.reconciler.applier")
     calls: list[int] = []
 
     def abort_check() -> None:
@@ -429,7 +419,7 @@ def test_purge_committed_reconciler_locks(tmp_path: Path) -> None:
     """The startup migration deletes legacy committed .reconciler-* files from the
     tickets branch; idempotent (a second run is a no-op) and a regression that no
     such path survives."""
-    main_mod = _load("rebar_reconciler.__main__", ENGINE / "__main__.py")
+    main_mod = importlib.import_module("rebar.reconciler.__main__")
     repo = _repo_with_tickets_branch(tmp_path)
     # Seed the legacy committed lock files on the tickets branch.
     for name in (".reconciler-pass-lock", ".reconciler-phase-gate"):

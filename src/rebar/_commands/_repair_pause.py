@@ -10,7 +10,6 @@ can inspect and recover the durable marker instead of racing a reconciler.
 from __future__ import annotations
 
 import datetime
-import sys
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -34,12 +33,7 @@ class RepairPauseError(CommandError):
 
 def _backend(repo_root: Path) -> tuple[ModuleType, str | None]:
     """Load the bundled ref backend and resolve its authoritative remote."""
-    from rebar._engine import engine_dir
-
-    engine = str(engine_dir())
-    if engine not in sys.path:
-        sys.path.insert(0, engine)
-    from rebar_reconciler import _advisory_lock as advisory
+    from rebar.reconciler import _advisory_lock as advisory
 
     return advisory._load_ref_lock(), advisory._lock_remote(repo_root)
 

@@ -61,7 +61,7 @@ Two of these units migrate a legacy store to the many-to-many projects model (ti
   command (story c927), so `bridge projects list` on a freshly seeded store is empty until an
   operator `set`s a key; every absent-`bridge_project` ticket then resolves to the
   `legacy_default` (see
-  `rebar._engine.rebar_reconciler.projects_store`).
+  `rebar.reconciler.projects_store`).
 - **`projects-compat-stamp`** — a level-triggered **backstop**, not the trigger. It reads the
   mapping's project count and, ONLY when the mapping holds **more than one** project and the
   token is not already present, appends the `multi-project-bridge` capability to

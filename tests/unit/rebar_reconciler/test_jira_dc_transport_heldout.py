@@ -41,8 +41,8 @@ def _built_client_kwargs(monkeypatch: Any, **overrides: Any) -> dict[str, Any]:
     real ``JiraDataCenterSettings``, swapping only the library class — so the
     assertions below see exactly what a live run would pass to ``jira.JIRA``.
     """
-    from rebar_reconciler.adapters.jira_datacenter import transport as _t
-    from rebar_reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
+    from rebar.reconciler.adapters.jira_datacenter import transport as _t
+    from rebar.reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
 
     captured: dict[str, Any] = {}
 
@@ -124,7 +124,7 @@ class _CredentialCarryingClient:
 
 def test_the_pat_never_appears_in_the_repr_of_the_transport() -> None:
     """A credential that leaks into logs via repr is a real disclosure path."""
-    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+    from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
     client = _CredentialCarryingClient(_PAT)
     assert _PAT in repr(client), (
@@ -154,8 +154,8 @@ def test_the_dc_backend_is_registered_and_selectable() -> None:
     ``BackendRegistryError`` at runtime with every other file correct — and no
     transport unit test would notice.
     """
-    import rebar_reconciler.adapters  # noqa: F401  (side effect: registers factories)
-    from rebar_reconciler._backend_registry import _REGISTRY
+    import rebar.reconciler.adapters  # noqa: F401  (side effect: registers factories)
+    from rebar.reconciler._backend_registry import _REGISTRY
 
     assert "jira-datacenter" in _REGISTRY, (
         f"the DC backend did not self-register; registered keys: {sorted(_REGISTRY)}. "
@@ -175,7 +175,7 @@ def test_an_unknown_backend_raises_the_registry_error_not_key_error() -> None:
     ``_backend_registry`` raises ``BackendRegistryError``; a guard written as
     ``pytest.raises(KeyError)`` would never match and would protect nothing.
     """
-    from rebar_reconciler._backend_registry import (
+    from rebar.reconciler._backend_registry import (
         BackendRegistryError,
         _reset_registry_for_test,
         register,
@@ -227,7 +227,7 @@ class FakeHttpError(Exception):
 
 def test_an_http_error_is_attempted_exactly_once(monkeypatch: Any) -> None:
     """Retrying a 4xx/5xx mutation risks a DUPLICATE issue/comment. Not retried."""
-    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+    from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
     calls = {"n": 0}
 
@@ -247,7 +247,7 @@ def test_an_http_error_is_attempted_exactly_once(monkeypatch: Any) -> None:
 def test_a_connection_timeout_is_retried(monkeypatch: Any) -> None:
     """The mirror image: a transient connectivity fault IS retried, or every
     reconcile pass becomes flaky on an ordinary network blip."""
-    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+    from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
     calls = {"n": 0}
 
@@ -285,10 +285,7 @@ def test_the_dc_package_does_not_import_the_cloud_acli_transport() -> None:
 
     from _tree_scan import parsed_python_files
 
-    root = (
-        Path(__file__).resolve().parents[3]
-        / "src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter"
-    )
+    root = Path(__file__).resolve().parents[3] / "src/rebar/reconciler/adapters/jira_datacenter"
     assert root.is_dir(), "the jira_datacenter package does not exist"
 
     for module in parsed_python_files(root):

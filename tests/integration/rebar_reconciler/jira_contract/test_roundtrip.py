@@ -118,7 +118,7 @@ _BINDINGS = {
 
 @pytest.fixture
 def snapshot(monkeypatch) -> dict:
-    from rebar_reconciler import fetcher
+    from rebar.reconciler import fetcher
 
     install(monkeypatch, fetcher)
     monkeypatch.setenv("JIRA_PROJECT", "REB")
@@ -126,7 +126,7 @@ def snapshot(monkeypatch) -> dict:
 
 
 def _inbound(snapshot, bind, locals_by_id):
-    from rebar_reconciler import inbound_differ
+    from rebar.reconciler import inbound_differ
 
     muts, _ = inbound_differ.compute_inbound_mutations(snapshot, bind, locals_by_id)
     return muts
@@ -152,7 +152,7 @@ def test_inbound_reflects_links_and_parent(snapshot) -> None:
 
 
 def test_outbound_pushes_comment_link_parent_through_applier() -> None:
-    from rebar_reconciler import batch_dispatch, outbound_differ
+    from rebar.reconciler import batch_dispatch, outbound_differ
 
     bind = _StubBindingStore({"loc-a": "DIG-1", "loc-b": "DIG-2", "loc-p": "DIG-9"})
     a = _make_local(
@@ -217,7 +217,7 @@ def test_outbound_pushes_comment_link_parent_through_applier() -> None:
 
 
 def test_roundtrip_converges_links_and_parent(snapshot) -> None:
-    from rebar_reconciler import outbound_differ
+    from rebar.reconciler import outbound_differ
 
     bind = _StubBindingStore(_BINDINGS)
 
@@ -262,7 +262,7 @@ def test_roundtrip_comments_echo_suppressed_native_synced(snapshot) -> None:
     local. Inject one native comment alongside the real (all-echo) fixture comments
     and assert inbound emits an add for exactly the native one.
     """
-    from rebar_reconciler import inbound_differ
+    from rebar.reconciler import inbound_differ
 
     bind = _StubBindingStore(_BINDINGS)
     locals_by_id = {lid: _make_local(lid) for lid in _BINDINGS}

@@ -18,26 +18,10 @@ import rebar
 
 @contextlib.contextmanager
 def _production_reconciler():
-    """Load the engine without shadowing pytest's same-named test package."""
-    saved = {
-        key: module
-        for key, module in sys.modules.items()
-        if key == "rebar_reconciler" or key.startswith("rebar_reconciler.")
-    }
-    for key in saved:
-        sys.modules.pop(key, None)
-    engine_root = str(Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine")
-    sys.path.insert(0, engine_root)
-    try:
-        main_mod = importlib.import_module("rebar_reconciler.__main__")
-        binding_mod = importlib.import_module("rebar_reconciler.binding_store")
-        yield main_mod, binding_mod.BindingStore
-    finally:
-        sys.path.remove(engine_root)
-        for key in tuple(sys.modules):
-            if key == "rebar_reconciler" or key.startswith("rebar_reconciler."):
-                sys.modules.pop(key, None)
-        sys.modules.update(saved)
+    """The shared production reconciler entry module and ``BindingStore``."""
+    main_mod = importlib.import_module("rebar.reconciler.__main__")
+    binding_mod = importlib.import_module("rebar.reconciler.binding_store")
+    yield main_mod, binding_mod.BindingStore
 
 
 def _run_with_real_preflight(main_mod, argv: list[str]) -> tuple[int, dict, MagicMock, MagicMock]:

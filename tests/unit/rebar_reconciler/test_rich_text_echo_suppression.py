@@ -22,8 +22,8 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec
-from rebar_reconciler.outbound_field_diff import diff_canonical_fields
+from rebar.reconciler.adapters.jira_family.rich_text import WikiTextCodec
+from rebar.reconciler.outbound_field_diff import diff_canonical_fields
 
 _MD = "# Heading\n\nProse with **bold**.\n\n- alpha\n- beta\n"
 

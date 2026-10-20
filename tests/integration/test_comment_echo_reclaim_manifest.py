@@ -471,7 +471,10 @@ def test_manifest_normalizes_raw_rest_v3_adf_with_the_production_inbound_path(
     assert live["normalized_body"] == BODY
 
 
-def test_import_does_not_preload_the_engine_top_level_package() -> None:
+def test_import_binds_the_packaged_inbound_fields_normalizer() -> None:
+    """The script imports ``rebar.reconciler.inbound_fields`` as an ordinary package
+    module (no by-path private copy) and never loads the retired top-level
+    ``rebar_reconciler`` name."""
     probe = subprocess.run(
         [
             sys.executable,
@@ -479,7 +482,9 @@ def test_import_does_not_preload_the_engine_top_level_package() -> None:
             (
                 "import sys; "
                 f"sys.path.insert(0, {str(SCRIPTS)!r}); "
-                "import comment_echo_reclaim_manifest; "
+                "import comment_echo_reclaim_manifest as m; "
+                "fields = sys.modules['rebar.reconciler.inbound_fields']; "
+                "assert m.normalize_rich_text is fields.normalize_rich_text; "
                 "assert 'rebar_reconciler' not in sys.modules"
             ),
         ],

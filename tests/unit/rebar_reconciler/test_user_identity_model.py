@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler.adapters.jira_family.identity_model import (
+from rebar.reconciler.adapters.jira_family.identity_model import (
     AccountIdIdentity,
     NameIdentity,
 )

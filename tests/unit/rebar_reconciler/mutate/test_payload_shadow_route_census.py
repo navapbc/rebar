@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
-from rebar_reconciler import (
+from rebar.reconciler import (
     apply_base,
     batch_dispatch,
     binding_walk,

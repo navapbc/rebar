@@ -15,9 +15,8 @@ Behavioral assertions only (emitted mutations, GET call counts, retired-set).
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import math
-import sys
 import urllib.error
 from pathlib import Path
 from types import ModuleType
@@ -26,33 +25,18 @@ from unittest.mock import MagicMock
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-OUTBOUND_DIFFER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
-)
-BINDING_STORE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "binding_store.py"
-)
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    if name in sys.modules:
-        del sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+OUTBOUND_DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
+BINDING_STORE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "binding_store.py"
 
 
 @pytest.fixture(scope="module")
 def od() -> ModuleType:
-    return _load_module("outbound_differ_bound_but_absent", OUTBOUND_DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 @pytest.fixture
 def binding_store_mod() -> ModuleType:
-    return _load_module("binding_store_bba", BINDING_STORE_PATH)
+    return importlib.import_module("rebar.reconciler.binding_store")
 
 
 # ---------------------------------------------------------------------------

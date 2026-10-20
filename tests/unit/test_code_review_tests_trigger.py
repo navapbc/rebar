@@ -168,10 +168,10 @@ def test_added_declaration_outside_python_and_outside_src_selects(path: str, lin
         pytest.param(
             "d9e0f0e733 new module, 15 added declarations",
             _diff(
-                "src/rebar/_engine/rebar_reconciler/git_adapter.py",
+                "src/rebar/reconciler/git_adapter.py",
                 [f"def helper_{i}(self):" for i in range(15)],
             ),
-            ["src/rebar/_engine/rebar_reconciler/git_adapter.py"],
+            ["src/rebar/reconciler/git_adapter.py"],
             True,
             id="d9e0f0e733",
         ),

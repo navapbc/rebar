@@ -1,6 +1,6 @@
 """Tests for live comment fetch in outbound_differ when snapshot lacks 'comment' field.
 
-Root cause: fetcher.fetch_snapshot → AcliClient.search_issues (rebar_reconciler/acli.py:1021+,
+Root cause: fetcher.fetch_snapshot → AcliClient.search_issues (reconciler/acli.py:1021+,
 `acli jira workitem search --jql ... --paginate --json`) returns issue fields WITHOUT
 the `comment` field (Jira search doesn't return comments). So in outbound_differ.py
 `_diff_comments`, `jira_issue.get("comment", {})` is ALWAYS {} on live runs →
@@ -22,8 +22,7 @@ Test cases:
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock
@@ -35,24 +34,13 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-OUTBOUND_DIFFER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
-)
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+OUTBOUND_DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
 
 
 @pytest.fixture(scope="module")
 def outbound_differ() -> ModuleType:
     # Use a unique name so this test module's load doesn't collide with other fixtures.
-    return _load_module("outbound_differ_live_comment_fetch", OUTBOUND_DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 # ---------------------------------------------------------------------------

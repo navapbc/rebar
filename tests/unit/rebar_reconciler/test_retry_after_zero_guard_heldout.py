@@ -16,8 +16,7 @@ immediate replay) and GREEN after.
 from __future__ import annotations
 
 import email.message
-import importlib.util
-import sys
+import importlib
 import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -25,12 +24,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # The reconciler engine is on sys.path via the package conftest; import flat.
-from rebar_reconciler._errors import MAX_BACKOFF_S, parse_retry_after
-from rebar_reconciler.adapters.jira import acli_subprocess
-from rebar_reconciler.adapters.jira_datacenter import retry as _dc_retry
+from rebar.reconciler._errors import MAX_BACKOFF_S, parse_retry_after
+from rebar.reconciler.adapters.jira import acli_subprocess
+from rebar.reconciler.adapters.jira_datacenter import retry as _dc_retry
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DISPATCH_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "dispatch_one.py"
+DISPATCH_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "dispatch_one.py"
 
 
 # ── the shared parser (single source feeding dispatch + DC) ─────────────────────────────────
@@ -55,12 +54,7 @@ def test_parse_retry_after_still_honors_a_positive_value() -> None:
 
 # ── surface 2: dispatch_apply_phases._call_with_retry (raw urllib HTTPError floor) ──────────
 def _load_dispatch():
-    spec = importlib.util.spec_from_file_location("dispatch_one_zeroguard_test", DISPATCH_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["dispatch_one_zeroguard_test"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.dispatch_one")
 
 
 @pytest.fixture(scope="module")
@@ -134,7 +128,7 @@ def test_dc_429_with_retry_after_zero_does_not_immediately_replay(
     is translated on the first occurrence (DC has no jittered 429 fallback: no header => raise,
     never a zero-delay replay). RED before the guard: the ``0.0`` slips through and it sleeps 0.
     """
-    from rebar_reconciler._backend import BackendHTTPError
+    from rebar.reconciler._backend import BackendHTTPError
 
     slept: list[float] = []
     monkeypatch.setattr(_dc_retry.time, "sleep", lambda s: slept.append(s))

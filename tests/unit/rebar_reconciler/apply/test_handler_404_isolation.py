@@ -29,7 +29,7 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler import applier, apply_handlers
+from rebar.reconciler import applier, apply_handlers
 
 
 def _http_error(code: int) -> urllib.error.HTTPError:

@@ -14,34 +14,24 @@ label. Recovery is then deterministic:
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RECON_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, RECON_DIR / filename)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+RECON_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def binding_store_mod():
-    return _load("binding_store_wa_test", "binding_store.py")
+    return importlib.import_module("rebar.reconciler.binding_store")
 
 
 @pytest.fixture(scope="module")
 def dispatch():
-    return _load("dispatch_one_wa_test", "dispatch_one.py")
+    return importlib.import_module("rebar.reconciler.dispatch_one")
 
 
 def _new_store(binding_store_mod, tmp_path):
@@ -210,7 +200,7 @@ def test_bind_pending_persist_failure_skips_create(dispatch, tmp_path):
 
 @pytest.fixture(scope="module")
 def route_mod():
-    return _load("create_route_wa_test", "create_route.py")
+    return importlib.import_module("rebar.reconciler.create_route")
 
 
 class _RecordingClient:

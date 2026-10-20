@@ -2,7 +2,7 @@
 
 The sibling repo ``agentic-dev-platform`` imports the ``normalize_rich_text`` seam
 from this package — as the free function
-``rebar_reconciler.inbound_fields.normalize_rich_text`` AND through the Backend port's
+``rebar.reconciler.inbound_fields.normalize_rich_text`` AND through the Backend port's
 ``InboundMapper.normalize_rich_text`` (``adapters/jira/backend.py:_JiraInbound`` and the
 Data Center twin). Its behavior is therefore a PUBLIC contract, not an internal detail:
 a change to the accepted input types, the return type, or the decode behavior would
@@ -30,10 +30,10 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler import inbound_fields
-from rebar_reconciler._backend import InboundMapper
-from rebar_reconciler.adapters.jira.backend import JiraBackend
-from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+from rebar.reconciler import inbound_fields
+from rebar.reconciler._backend import InboundMapper
+from rebar.reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
 pytestmark = pytest.mark.unit
 

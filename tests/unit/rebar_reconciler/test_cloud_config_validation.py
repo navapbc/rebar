@@ -110,7 +110,7 @@ def test_cloud_jira_config_accepts_https_and_empty_url() -> None:
 
 
 def _stub_settings(**over: Any):
-    from rebar_reconciler.adapters.jira import acli_subprocess
+    from rebar.reconciler.adapters.jira import acli_subprocess
 
     base = {
         "url": "https://acme.atlassian.net",
@@ -126,7 +126,7 @@ def _build_with_settings(monkeypatch, settings, *, forbid_client: bool = False):
     """Drive ``_build_jira_backend`` with a stubbed ``resolve_jira_settings``. When
     ``forbid_client`` is set, ``AcliClient`` is replaced with a sentinel that fails if
     constructed — proving the credential guard runs BEFORE transport construction."""
-    from rebar_reconciler.adapters.jira import acli, acli_subprocess, backend
+    from rebar.reconciler.adapters.jira import acli, acli_subprocess, backend
 
     monkeypatch.setattr(acli_subprocess, "resolve_jira_settings", lambda **_k: settings)
     if forbid_client:
@@ -146,7 +146,7 @@ def test_cloud_build_backend_missing_credential_fails_loudly(monkeypatch, field,
     construction — naming the missing var and the anonymous-access consequence — instead of
     building an ``AcliClient`` with empty creds that only fails at the first API call. The
     guard runs BEFORE the transport is constructed (``forbid_client``)."""
-    from rebar_reconciler._backend import BackendEnvError
+    from rebar.reconciler._backend import BackendEnvError
 
     env_names = {"url": "JIRA_URL", "user": "JIRA_USER", "api_token": "JIRA_API_TOKEN"}
     settings = _stub_settings(**{field: bad})
@@ -160,7 +160,7 @@ def test_cloud_build_backend_missing_credential_fails_loudly(monkeypatch, field,
 def test_cloud_build_backend_names_every_missing_credential(monkeypatch) -> None:
     """All three absent → ONE message names ALL of them (no fix-one-rerun loop), mirroring
     DC's single-message guard."""
-    from rebar_reconciler._backend import BackendEnvError
+    from rebar.reconciler._backend import BackendEnvError
 
     settings = _stub_settings(url="", user="", api_token="")
     with pytest.raises(BackendEnvError) as excinfo:
@@ -175,7 +175,7 @@ def test_cloud_build_backend_non_email_user_fails_loudly(monkeypatch, user) -> N
     """Cloud authenticates with the Atlassian account EMAIL as the Basic-auth username
     (jira.js's hard-won lesson); a bare handle/accountId silently 401s. A present-but-not-
     an-email ``JIRA_USER`` raises ``BackendEnvError`` naming ``JIRA_USER``."""
-    from rebar_reconciler._backend import BackendEnvError
+    from rebar.reconciler._backend import BackendEnvError
 
     settings = _stub_settings(user=user)
     with pytest.raises(BackendEnvError) as excinfo:

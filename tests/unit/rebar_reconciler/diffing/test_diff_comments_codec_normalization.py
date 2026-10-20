@@ -29,38 +29,26 @@ LOOSE would silently swallow real new comments.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-OUTBOUND_DIFFER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
-)
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+OUTBOUND_DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
 
 
 @pytest.fixture(scope="module")
 def differ() -> ModuleType:
-    return _load_module("outbound_differ_codec_normalization", OUTBOUND_DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 @pytest.fixture(scope="module")
 def adf_codec():
     """The real Cloud ``RichTextCodec``: a genuinely non-identity outbound
     transform (soft-wrap rejoin), not a synthetic test double."""
-    from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
+    from rebar.reconciler.adapters.jira.rich_text_codec import AdfCodec
 
     return AdfCodec()
 

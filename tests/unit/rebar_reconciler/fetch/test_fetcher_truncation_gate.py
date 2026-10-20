@@ -7,25 +7,20 @@ Each JQL raises ``SilentTruncationError`` at the 1,200-item ACLI ceiling
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
-ERRORS_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_errors.py"
+FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "fetcher.py"
+ERRORS_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "_errors.py"
 
 # Fall back to a local error class so collection survives a missing production
 # module.
 try:
-    spec = importlib.util.spec_from_file_location("_rebar_reconciler_errors", ERRORS_PATH)
-    assert spec is not None and spec.loader is not None
-    _errors_mod = importlib.util.module_from_spec(spec)
-    sys.modules["_rebar_reconciler_errors"] = _errors_mod
-    spec.loader.exec_module(_errors_mod)  # type: ignore[union-attr]
+    _errors_mod = importlib.import_module("rebar.reconciler._errors")
     SilentTruncationError = getattr(
         _errors_mod,
         "SilentTruncationError",
@@ -36,12 +31,7 @@ except Exception:  # noqa: BLE001 — best-effort dynamic import with placeholde
 
 
 def _load_fetcher():
-    spec = importlib.util.spec_from_file_location("fetcher", FETCHER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["fetcher"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.fetcher")
 
 
 @pytest.fixture

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from rebar_reconciler.adapters.jira import adf
+from rebar.reconciler.adapters.jira import adf
 
 _CORPUS = Path(__file__).resolve().parents[2] / "fixtures" / "cloud_adf_corpus"
 
@@ -132,7 +132,7 @@ def test_cloud_plain_fallback_helper_returns_plain_functions() -> None:
 
 def test_adf_codec_pass_through_is_untouched_by_this_story() -> None:
     """This story wires nothing: ``AdfCodec`` must still be a plain pass-through."""
-    from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
+    from rebar.reconciler.adapters.jira.rich_text_codec import AdfCodec
 
     text = "# Heading\n\n- item\n"
 

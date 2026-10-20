@@ -99,7 +99,7 @@ def tracker_dir_override() -> str | None:
 
     The removed ``TICKETS_TRACKER_DIR`` alias is a load-bearing tombstone checked
     HERE — the single env-read source, reached by ``tracker_dir()`` AND directly by
-    ``rebar_reconciler/inbound_translate.py:_resolve_tracker_dir`` (both bypass
+    ``reconciler/inbound_translate.py:_resolve_tracker_dir`` (both bypass
     ``load_config``). A ``load_config``-only check would leave those paths silently
     reading the wrong store."""
     if "TICKETS_TRACKER_DIR" in os.environ:

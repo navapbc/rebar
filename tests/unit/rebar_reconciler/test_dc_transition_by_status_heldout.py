@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
 # The CLASSIC workflow shape, which is what the Data Center harness actually serves. Note `Done`
 # is deliberately both a transition name AND a destination status: that coincidence is what let

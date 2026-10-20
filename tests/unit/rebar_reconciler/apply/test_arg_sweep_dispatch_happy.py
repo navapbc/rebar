@@ -8,25 +8,19 @@ Protocol keyword names remain covered by the held-out suite.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import subprocess
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location("arg_sweep_happy_applier", APPLIER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["arg_sweep_happy_applier"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
@@ -71,8 +65,8 @@ def test_apply_typed_routes_outbound_probe_to_its_leaf(applier):
 @pytest.mark.parametrize(
     "rel_path",
     [
-        "src/rebar/_engine/rebar_reconciler/apply_inbound.py",
-        "src/rebar/_engine/rebar_reconciler/apply_outbound.py",
+        "src/rebar/reconciler/apply_inbound.py",
+        "src/rebar/reconciler/apply_outbound.py",
     ],
 )
 @pytest.mark.allow_unharnessed_subprocess(

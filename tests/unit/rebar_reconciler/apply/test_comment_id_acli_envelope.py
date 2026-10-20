@@ -12,14 +12,13 @@ round-tripping. The hermetic test stubs `_run_acli` and uses a `BindingStore`.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-_SRC_DIR = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_SRC_DIR = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler"
 
 #: The envelope shape verified live against ``acli 1.3.19-stable``.
 ACLI_SUCCESS_ENVELOPE = {
@@ -53,18 +52,9 @@ _KEY = 1787251802516868001
 _BODY = "## Heading\n\nA **rich** body that will not survive ADF round-tripping."
 
 
-def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, _SRC_DIR / filename)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
 @pytest.fixture(scope="module")
 def binding_store_mod():
-    return _load("_binding_store_for_acli_envelope", "binding_store.py")
+    return importlib.import_module("rebar.reconciler.binding_store")
 
 
 @pytest.fixture
@@ -75,7 +65,7 @@ def store(binding_store_mod, tmp_path):
 @pytest.fixture
 def acli_result(monkeypatch):
     """The value the REAL ``acli_cli_ops.add_comment`` returns for a live ACLI post."""
-    from rebar_reconciler.adapters.jira import acli_cli_ops, acli_subprocess
+    from rebar.reconciler.adapters.jira import acli_cli_ops, acli_subprocess
 
     class _Completed:
         stdout = json.dumps(ACLI_SUCCESS_ENVELOPE)
@@ -94,7 +84,7 @@ def acli_result(monkeypatch):
 
 def test_acli_envelope_post_is_recorded_in_the_comment_map(store, acli_result):
     """A successful post with NO echoed comment id still maps the local key."""
-    from rebar_reconciler.dispatch_apply_phases import _record_comment_id
+    from rebar.reconciler.dispatch_apply_phases import _record_comment_id
 
     assert store.is_comment_mapped(_KEY) is False, "precondition: key starts unmapped"
 
@@ -108,7 +98,7 @@ def test_acli_envelope_post_is_recorded_in_the_comment_map(store, acli_result):
     # The VALUE must say plainly that no comment id is known. In particular the
     # envelope's ``results[].id`` is the WORK ITEM KEY ("REB-1861"); storing that
     # would satisfy is_comment_mapped while lying about what the map holds.
-    from rebar_reconciler.binding_lifecycle import UNKNOWN_COMMENT_ID
+    from rebar.reconciler.binding_lifecycle import UNKNOWN_COMMENT_ID
 
     recorded = store.comment_id_for(_KEY)
     assert recorded == UNKNOWN_COMMENT_ID, f"expected the no-id sentinel, got {recorded!r}"
@@ -119,7 +109,7 @@ def test_acli_envelope_post_is_recorded_in_the_comment_map(store, acli_result):
 
 def test_recorded_mapping_survives_a_reopen(binding_store_mod, tmp_path, acli_result):
     """The write-ahead save persists it, so the NEXT hourly pass sees it."""
-    from rebar_reconciler.dispatch_apply_phases import _record_comment_id
+    from rebar.reconciler.dispatch_apply_phases import _record_comment_id
 
     tracker = tmp_path / ".tickets-tracker"
     _record_comment_id(
@@ -138,8 +128,8 @@ def test_no_reemission_after_an_acli_post_even_when_the_body_diverges(store, acl
     round-trip divergence that defeats the SECONDARY body-equality skip), so this
     passes ONLY when the PRIMARY id-identity skip engages.
     """
-    from rebar_reconciler.dispatch_apply_phases import _record_comment_id
-    from rebar_reconciler.outbound_comments import _diff_comments
+    from rebar.reconciler.dispatch_apply_phases import _record_comment_id
+    from rebar.reconciler.outbound_comments import _diff_comments
 
     ticket = {"comments": [{"body": _BODY, "timestamp": _KEY}]}
     diverged = {"REB-1861": {"comment": {"comments": [{"body": "totally different"}], "total": 1}}}
@@ -159,7 +149,7 @@ def test_no_reemission_after_an_acli_post_even_when_the_body_diverges(store, acl
 
 def test_a_transport_supplied_comment_id_is_still_recorded_verbatim(store):
     """The DC/REST path echoes a real comment id; it must be preserved, not replaced."""
-    from rebar_reconciler.dispatch_apply_phases import _record_comment_id
+    from rebar.reconciler.dispatch_apply_phases import _record_comment_id
 
     _record_comment_id(store, {"local_comment_key": _KEY, "body": _BODY}, {"id": "10001"})
 
@@ -168,7 +158,7 @@ def test_a_transport_supplied_comment_id_is_still_recorded_verbatim(store):
 
 def _add_comment_with_stdout(monkeypatch, stdout: str):
     """Drive the REAL ``acli_cli_ops.add_comment`` with *stdout* stubbed at ``_run_acli``."""
-    from rebar_reconciler.adapters.jira import acli_cli_ops, acli_subprocess
+    from rebar.reconciler.adapters.jira import acli_cli_ops, acli_subprocess
 
     class _Completed:
         stderr = ""
@@ -212,7 +202,7 @@ def test_recorded_failure_envelope_raises_acli_mutation_error():
     completed mutation, so a real post of this payload raises before ``add_comment``
     ever parses it.
     """
-    from rebar_reconciler.adapters.jira.acli_subprocess import (
+    from rebar.reconciler.adapters.jira.acli_subprocess import (
         AcliMutationError,
         _check_mutation_failure,
     )
@@ -242,7 +232,7 @@ _JIRA_KEY = "REB-1861"
 @pytest.fixture
 def transport_result(monkeypatch):
     """What the REAL Cloud transport hands the apply phase for a live ACLI post."""
-    from rebar_reconciler.adapters.jira import acli_cli_ops, acli_subprocess
+    from rebar.reconciler.adapters.jira import acli_cli_ops, acli_subprocess
 
     class _Completed:
         stdout = json.dumps(ACLI_SUCCESS_ENVELOPE)
@@ -268,13 +258,13 @@ def _ticket_and_remote():
 
 
 def _diff(ticket, remote, store):
-    from rebar_reconciler.outbound_comments import _diff_comments
+    from rebar.reconciler.outbound_comments import _diff_comments
 
     return _diff_comments(ticket, _JIRA_KEY, remote, binding_store=store)
 
 
 def _record_first_pending(store, pending, transport_result):
-    from rebar_reconciler.dispatch_apply_phases import _record_comment_id
+    from rebar.reconciler.dispatch_apply_phases import _record_comment_id
 
     entry = next(e for e in pending if e["local_comment_key"] == _KEY_POSTED)
     _record_comment_id(store, entry, transport_result)

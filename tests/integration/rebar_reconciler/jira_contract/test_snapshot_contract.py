@@ -93,7 +93,7 @@ def _make_local(ticket_id: str, **over: object) -> dict:
 @pytest.fixture
 def produced_snapshot(monkeypatch) -> dict:
     """The real production snapshot built from fixtures through fetch_snapshot."""
-    from rebar_reconciler import fetcher
+    from rebar.reconciler import fetcher
 
     install(monkeypatch, fetcher)
     monkeypatch.setenv("JIRA_PROJECT", "REB")
@@ -157,7 +157,7 @@ def test_producer_carries_enrichment_keys(produced_snapshot) -> None:
 
 def test_inbound_reads_issuelinks(produced_snapshot) -> None:
     """Inbound reverse-maps the producer's ``issuelinks`` into local link adds."""
-    from rebar_reconciler import inbound_differ
+    from rebar.reconciler import inbound_differ
 
     bind = _StubBindingStore(_BINDINGS)
     locals_by_id = {lid: _make_local(lid) for lid in _BINDINGS}
@@ -174,7 +174,7 @@ def test_inbound_reads_issuelinks(produced_snapshot) -> None:
 
 def test_inbound_reads_parent(produced_snapshot) -> None:
     """Inbound maps the producer's ``parent.key`` to the bound local parent."""
-    from rebar_reconciler import inbound_differ
+    from rebar.reconciler import inbound_differ
 
     bind = _StubBindingStore(_BINDINGS)
     locals_by_id = {lid: _make_local(lid) for lid in _BINDINGS}
@@ -198,7 +198,7 @@ def test_inbound_reads_comment_field_and_would_miss_prefix(produced_snapshot) ->
     Under the PRE-FIX flat-``comments`` shape the count would be zero in BOTH runs
     — which is exactly the divergence this contract catches.
     """
-    from rebar_reconciler import inbound_differ
+    from rebar.reconciler import inbound_differ
 
     bind = _StubBindingStore(_BINDINGS)
     locals_by_id = {lid: _make_local(lid) for lid in _BINDINGS}
@@ -241,7 +241,7 @@ def test_inbound_reads_comment_field_and_would_miss_prefix(produced_snapshot) ->
 
 def test_inbound_reads_scalar_summary(produced_snapshot) -> None:
     """Scalar exemplar: inbound reads ``summary`` (all scalars read uniformly)."""
-    from rebar_reconciler import inbound_differ
+    from rebar.reconciler import inbound_differ
 
     bind = _StubBindingStore(_BINDINGS)
     jira_summary = produced_snapshot["REB-431"]["summary"]

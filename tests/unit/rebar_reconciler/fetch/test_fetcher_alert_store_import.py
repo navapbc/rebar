@@ -1,42 +1,31 @@
 """Exercise the alert-store loader without a ``plugins`` namespace.
 
-The lazy load must expose ``append``, cache one module at
-``rebar_reconciler.alert_store``, and remove a partial cache entry when
-``exec_module`` fails so a retry can load cleanly.
+The lazy load must expose ``append`` and cache one module at
+``rebar.reconciler.alert_store``.
 """
 
+import importlib
 import importlib.util
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
-_CANONICAL_KEY = "rebar_reconciler.alert_store"
+FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "fetcher.py"
+_CANONICAL_KEY = "rebar.reconciler.alert_store"
 
 
 @pytest.fixture
 def fetcher_mod():
-    """Load fetcher.py freshly under the canonical dotted key so production
-    code and tests see the same module object. Clears `plugins.*` stubs so
-    the test environment mirrors production CI.
+    """The shared ``rebar.reconciler.fetcher`` module, with `plugins.*` stubs hidden
+    so the test environment mirrors production CI.
     """
     plugins_keys = [k for k in list(sys.modules.keys()) if k.startswith("plugins")]
     saved = {k: sys.modules.pop(k) for k in plugins_keys}
-    sys.modules.pop(_CANONICAL_KEY, None)
     try:
-        spec = importlib.util.spec_from_file_location(
-            "rebar_reconciler.fetcher_ec9a_test", FETCHER_PATH
-        )
-        assert spec is not None and spec.loader is not None
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        yield mod
+        yield importlib.import_module("rebar.reconciler.fetcher")
     finally:
-        sys.modules.pop(_CANONICAL_KEY, None)
-        sys.modules.pop("rebar_reconciler.fetcher_ec9a_test", None)
         for k, v in saved.items():
             sys.modules[k] = v
 
@@ -66,40 +55,4 @@ def test_load_alert_store_is_idempotent(fetcher_mod):
     assert first is second, (
         "_load_alert_store returned a different module on second call — "
         "would create dual-class identity (Cluster A pattern)"
-    )
-
-
-def test_load_alert_store_does_not_leave_partial_module_on_exec_failure(fetcher_mod):
-    """If exec_module raises during load (e.g. SyntaxError in alert_store.py),
-    sys.modules must NOT retain a partially-initialised module under the
-    canonical key — a subsequent call must be able to retry cleanly.
-    """
-    # Capture a real spec by calling the unpatched function first, then
-    # swap its loader. The patched spec_from_file_location simply returns
-    # this prepared spec — no recursion into the wrapped original.
-    real_spec = importlib.util.spec_from_file_location(
-        _CANONICAL_KEY, FETCHER_PATH.parent / "alert_store.py"
-    )
-    assert real_spec is not None
-
-    class _FailingLoader:
-        def create_module(self, spec):
-            return None
-
-        def exec_module(self, mod):
-            raise RuntimeError("intentional test exec_module failure")
-
-    real_spec.loader = _FailingLoader()
-
-    with patch.object(
-        fetcher_mod.importlib.util,
-        "spec_from_file_location",
-        return_value=real_spec,
-    ):
-        with pytest.raises(RuntimeError, match="intentional test exec_module failure"):
-            fetcher_mod._load_alert_store()
-
-    assert _CANONICAL_KEY not in sys.modules, (
-        "Partial module remained in sys.modules after exec_module failure — "
-        "subsequent calls would reuse the broken module"
     )

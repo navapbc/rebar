@@ -6,10 +6,10 @@ when local equals the baseline (no local edit since the last sync), a differing 
 value must flow INBOUND, so the outbound diff has to suppress its local-wins push.
 
 The gap this file closes: only ``title`` was ever pinned against the module the
-production pass actually executes (``rebar_reconciler.outbound_field_diff``). The
+production pass actually executes (``rebar.reconciler.outbound_field_diff``). The
 other four fields are pinned only in
 ``tests/unit/rebar_reconciler/diffing/test_inbound_field_sync_directionality.py``
-against ``rebar_reconciler.adapters.jira.outbound_fields._diff_fields`` — a function
+against ``rebar.reconciler.adapters.jira.outbound_fields._diff_fields`` — a function
 that, since ticket 625b re-homed the diff into the vendor-neutral core, has NO
 production caller. Those cells therefore pin a dead code path: they can stay green
 while the live path regresses on ``description``/``priority``/``status``/``assignee``.
@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler.outbound_field_diff import compute_update_fields, diff_canonical_fields
+from rebar.reconciler.outbound_field_diff import compute_update_fields, diff_canonical_fields
 
 # --- the live-path harness (same shape as the existing ``title`` cells) ----------
 
@@ -105,7 +105,7 @@ def test_the_function_under_test_is_the_one_production_calls() -> None:
     object every cell below drives. Without this, a future re-home would leave the
     cells green while pinning a function nothing calls.
     """
-    from rebar_reconciler import outbound_differ
+    from rebar.reconciler import outbound_differ
 
     assert outbound_differ.compute_update_fields is compute_update_fields, (
         "outbound_differ must call THIS compute_update_fields; if this binding moves, "

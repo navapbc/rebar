@@ -4,21 +4,17 @@ Drives reconcile_once() through a minimal scenario that triggers an invariant
 violation (duplicate local_ids on a Jira issue), then asserts that
 alert_store wrote >= 1 record to the bridge_state/bridge_alerts/ directory.
 
-Module under test: src/rebar/_engine/rebar_reconciler/reconcile.py (reconcile module).
+Module under test: src/rebar/reconciler/reconcile.py (reconcile module).
 This test exercises the orchestrator path through reconcile_once().
 
 Story 25c7 / Task c79d — dd-5 coverage.
 """
-# import reconcile -- loaded below via importlib (spec_from_file_location) as
-# RECONCILE_PATH = REPO_ROOT / "src/rebar/_engine/rebar_reconciler/reconcile.py"
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 import types
-import types as _types  # alias retained for the namespace-stub fixture below
 from pathlib import Path
 from unittest.mock import patch
 
@@ -29,89 +25,14 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-ALERT_STORE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "alert_store.py"
+RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "reconcile.py"
+FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "fetcher.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
+ALERT_STORE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "alert_store.py"
 
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
-
-
-def _load_module(name: str, path: Path):
-    """Load a module by file path, registering it in sys.modules."""
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
-# Seed sys.modules so production code's
-#   `from rebar_reconciler import alert_store`
-# resolves at runtime — `plugins/` is a project directory, not a real Python
-# package on sys.path. Register alert_store under the canonical dotted name
-# so `from <pkg> import alert_store` walks the namespace stubs and finds it.
-#
-# V2 fix (PR #345 remediation): lifted from module-import-time into a
-# module-scoped autouse fixture so the seeding has explicit lifecycle —
-# matching the idiom established by test_reconcile_main.py's
-# _seed_sys_modules fixture.
-#
-# Cleanup scope is intentionally minimal: the
-# `rebar_reconciler` namespace stub and its `alert_store`
-# attribute are NOT torn down here. Other tests in this directory
-# (test_fetcher_*.py, test_reconcile_once.py, test_e2e_dedup_pass.py) rely
-# on the seeded namespace + attribute being present at import time of
-# fetcher.py's `from rebar_reconciler import alert_store`.
-# Tearing them down regresses the suite baseline. The finalizer drops only
-# this module's per-test smoke aliases (`reconcile_smoke`, etc.) so they
-# don't masquerade as production modules for later tests.
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _seed_namespace_stubs():
-    """Seed sys.modules with namespace stubs + alert_store under dotted key.
-
-    See the comment above for cleanup-scope rationale.
-    """
-    for _parent in ("rebar_reconciler",):
-        if _parent not in sys.modules:
-            sys.modules[_parent] = _types.ModuleType(_parent)
-
-    _alert_store_key = "rebar_reconciler.alert_store"
-    if _alert_store_key not in sys.modules:
-        _spec = importlib.util.spec_from_file_location(_alert_store_key, ALERT_STORE_PATH)
-        assert _spec is not None and _spec.loader is not None
-        _mod = importlib.util.module_from_spec(_spec)
-        sys.modules[_alert_store_key] = _mod
-        _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
-
-    # Attach .alert_store onto the namespace stub so
-    # `from rebar_reconciler import alert_store` resolves.
-    pkg = sys.modules.get("rebar_reconciler")
-    if pkg is not None and not hasattr(pkg, "alert_store"):
-        pkg.alert_store = sys.modules[_alert_store_key]
-
-    # Smoke-alias sys.modules keys that this module's _load_module helper
-    # creates as side effects of fixture loading. Drop them in the finalizer
-    # so they don't masquerade as the production modules for later tests.
-    _smoke_keys = (
-        "reconcile_smoke",
-        "reconcile_fetcher_smoke",
-        "reconcile_applier_smoke",
-        "alert_store_smoke",
-        "reconcile_differ_smoke",
-    )
-
-    yield
-
-    for key in _smoke_keys:
-        sys.modules.pop(key, None)
 
 
 @pytest.fixture(scope="module")
@@ -119,19 +40,19 @@ def reconcile_mod():
     """Load reconcile.py."""
     if not RECONCILE_PATH.exists():
         pytest.fail(f"reconcile.py not found at {RECONCILE_PATH}")
-    return _load_module("reconcile_smoke", RECONCILE_PATH)
+    return importlib.import_module("rebar.reconciler.reconcile")
 
 
 @pytest.fixture(scope="module")
 def fetcher_mod():
     """Load fetcher.py."""
-    return _load_module("reconcile_fetcher_smoke", FETCHER_PATH)
+    return importlib.import_module("rebar.reconciler.fetcher")
 
 
 @pytest.fixture(scope="module")
 def applier_mod():
     """Load applier.py."""
-    return _load_module("reconcile_applier_smoke", APPLIER_PATH)
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
@@ -139,7 +60,7 @@ def alert_store_mod():
     """Load alert_store.py."""
     if not ALERT_STORE_PATH.exists():
         pytest.fail(f"alert_store.py not found at {ALERT_STORE_PATH}")
-    return _load_module("alert_store_smoke", ALERT_STORE_PATH)
+    return importlib.import_module("rebar.reconciler.alert_store")
 
 
 # ---------------------------------------------------------------------------
@@ -232,13 +153,7 @@ def test_alert_emitted_through_stateless_path(
         return result
 
     # Load the differ module to patch compute_mutations.
-    differ_path = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "differ.py"
-    differ_mod = _load_module("reconcile_differ_smoke", differ_path)
-
-    # Pre-register modules so reconcile._load() reuses them.
-    sys.modules["reconcile_fetcher"] = fetcher_mod
-    sys.modules["reconcile_applier"] = applier_mod
-    sys.modules["reconcile_differ"] = differ_mod
+    differ_mod = importlib.import_module("rebar.reconciler.differ")
 
     # Patch compute_mutations to return [] — this lets the invariant check run
     # (and write the alert) without the orchestrator hitting the Mutation.get()
@@ -252,14 +167,10 @@ def test_alert_emitted_through_stateless_path(
         patch.object(applier_mod, "_load_acli", return_value=mock_acli),
         patch.object(differ_mod, "compute_mutations", return_value=[]),
         patch("subprocess.run", side_effect=_fake_run),
-    ):
         # Patch _load_concurrency on the applier to avoid real git ops.
-        original_lc = applier_mod._load_concurrency
-        applier_mod._load_concurrency = lambda: ok_concurrency
-        try:
-            result = reconcile_mod.reconcile_once("alert-smoke-pass", repo_root=tmp_path)
-        finally:
-            applier_mod._load_concurrency = original_lc
+        patch.object(applier_mod, "_load_concurrency", return_value=ok_concurrency),
+    ):
+        result = reconcile_mod.reconcile_once("alert-smoke-pass", repo_root=tmp_path)
 
     # Verify reconcile_once returned a valid result dict.
     assert "pass_id" in result, f"reconcile_once result missing pass_id: {result}"

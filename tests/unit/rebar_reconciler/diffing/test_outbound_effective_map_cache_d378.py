@@ -31,10 +31,10 @@ from typing import Any
 import pytest
 
 from rebar import config as user_cfg
-from rebar_reconciler import binding_store as binding_store_mod
-from rebar_reconciler import config as cfg_mod
-from rebar_reconciler import outbound_differ as od
-from rebar_reconciler import projects_store as ps
+from rebar.reconciler import binding_store as binding_store_mod
+from rebar.reconciler import config as cfg_mod
+from rebar.reconciler import outbound_differ as od
+from rebar.reconciler import projects_store as ps
 
 pytestmark = pytest.mark.unit
 

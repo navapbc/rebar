@@ -232,7 +232,7 @@ TERRAFORM_CONFIG_INSPECT = "terraform_config_inspect"
 FETCH_TICKET_INPUT = "fetch_ticket_input"
 FETCH_TICKET_OUTPUT = "fetch_ticket_output"
 
-# rebar_reconciler — the per-issue Jira SNAPSHOT-ENTRY contract (ADR 0004): the shape the
+# rebar.reconciler — the per-issue Jira SNAPSHOT-ENTRY contract (ADR 0004): the shape the
 # fetcher (producer) writes and the inbound/outbound differs (consumers) read. An INTERNAL
 # contract validated directly via schemas.validator(JIRA_SNAPSHOT_ENTRY), never a command
 # --output, so (like GROUNDING) it is exempt from OUTPUT_SCHEMAS via INPUT_SCHEMAS below.

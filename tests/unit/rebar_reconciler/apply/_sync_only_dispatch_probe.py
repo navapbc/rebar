@@ -11,7 +11,7 @@ Consumers invoke `python _sync_only_dispatch_probe.py <route> <base_dir>`.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import os
 import subprocess
@@ -21,20 +21,6 @@ import urllib.error
 import uuid as _uuid
 from pathlib import Path
 from typing import Any
-
-_ENGINE_DIR = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine"
-if str(_ENGINE_DIR) not in sys.path:  # pragma: no cover - import bootstrap
-    sys.path.insert(0, str(_ENGINE_DIR))
-_RECONCILER_DIR = _ENGINE_DIR / "rebar_reconciler"
-
-
-def _load_module(name: str, path: Path) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
 
 
 class _FakeJiraState:
@@ -146,30 +132,22 @@ def _make_ok_concurrency() -> types.ModuleType:
 
 
 def _fresh_modules() -> tuple[Any, Any, Any]:
-    for key in (
-        "reconcile",
-        "reconcile_fetcher",
-        "reconcile_applier",
-        "reconcile_run_differs",
-        "acli_integration",
-    ):
-        sys.modules.pop(key, None)
-    fetcher = _load_module("reconcile_fetcher", _RECONCILER_DIR / "fetcher.py")
-    applier = _load_module("reconcile_applier", _RECONCILER_DIR / "applier.py")
-    reconcile = _load_module("reconcile", _RECONCILER_DIR / "reconcile.py")
-    _load_module("reconcile_run_differs", _RECONCILER_DIR / "run_differs.py")
+    fetcher = importlib.import_module("rebar.reconciler.fetcher")
+    applier = importlib.import_module("rebar.reconciler.applier")
+    reconcile = importlib.import_module("rebar.reconciler.reconcile")
     return fetcher, applier, reconcile
 
 
 def _wire(fetcher: Any, applier: Any, state: _FakeJiraState) -> _FakeClient:
+    # This module runs as its own subprocess, so rebinding the shared modules'
+    # loader seams cannot leak into any other test.
     fake = _FakeClient(state)
-    sys.modules["acli_integration"] = fake  # type: ignore[assignment]
     fetcher._load_acli = lambda: fake
     applier._load_acli = lambda: fake
     applier._load_concurrency = lambda: _make_ok_concurrency()
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
-    rd = sys.modules["reconcile_run_differs"]
+    rd = importlib.import_module("rebar.reconciler.run_differs")
     rd._load_reconcile_backend = lambda: JiraBackend(fake)  # type: ignore[attr-defined]
     return fake
 
@@ -240,7 +218,7 @@ def _run_scoped_pass(base: Path, **pass_kwargs: Any) -> list[str]:
     fetcher, applier, rc = _fresh_modules()
     _wire(fetcher, applier, state)
     state.write_calls.clear()
-    from rebar_reconciler.mode import Mode
+    from rebar.reconciler.mode import Mode
 
     rc.reconcile_once("scoped-pass", repo_root=repo, target_mode=Mode.LIVE, **pass_kwargs)
     return [c for c in state.write_calls if c.startswith("update_issue")]
@@ -250,8 +228,8 @@ def _main(argv: list[str]) -> int:
     """CLI entry: `python _sync_only_dispatch_probe.py <route> <base_dir>` where route is
     `only` or `filter`. Prints a JSON list of the recorded update_issue calls to stdout.
 
-    Run as a clean subprocess so pytest's package/conftest module seeding cannot collide
-    with the flat-key module (re)loading this in-memory reconcile pass performs.
+    Run as a clean subprocess so the loader-seam rebinding and environment this
+    in-memory reconcile pass performs cannot leak into pytest's process.
     """
     route, base = argv[1], Path(argv[2])
     if route == "only":

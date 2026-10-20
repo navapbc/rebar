@@ -33,13 +33,13 @@ from pathlib import Path
 
 import pytest
 
-from rebar_reconciler import dispatch_apply_phases, dispatch_one, pass_io
+from rebar.reconciler import dispatch_apply_phases, dispatch_one, pass_io
 
 # The guard logs through the module that owns it. Target that logger by NAME when asserting:
 # a sibling test in the same session can leave the module logger above INFO, and
 # ``caplog.at_level(INFO)`` alone only adjusts the ROOT logger, so the record would be
 # filtered before it ever reaches caplog.
-_GUARD_LOGGER = "rebar_reconciler.dispatch_apply_phases"
+_GUARD_LOGGER = "rebar.reconciler.dispatch_apply_phases"
 
 # CPython gh-102433 (3.12) switched @runtime_checkable isinstance to resolve members with
 # inspect.getattr_static, which does not see attributes served by __getattr__. On 3.11 the
@@ -318,7 +318,7 @@ class _FullCommentTransport(_NoCapabilityTransport):
 
 def test_proxying_transport_is_capable_and_is_not_skipped(alert_root):
     """REGRESSION: a __getattr__-proxying transport must NOT be reported capability-absent."""
-    from rebar_reconciler._backend import SupportsComments
+    from rebar.reconciler._backend import SupportsComments
 
     inner = _FullCommentTransport()
     client = _ProxyTransport(inner)
@@ -366,7 +366,7 @@ def test_proxying_transport_is_capable_and_is_not_skipped(alert_root):
 
 def test_capability_protocols_are_runtime_checkable():
     """The guard shape ADR-0083 prescribes only works if the Protocols are runtime-checkable."""
-    from rebar_reconciler._backend import SupportsComments, SupportsLinks
+    from rebar.reconciler._backend import SupportsComments, SupportsLinks
 
     assert isinstance(_RaisingCommentTransport(), SupportsComments)
     assert not isinstance(_NoCapabilityTransport(), SupportsComments)

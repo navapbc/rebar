@@ -20,7 +20,7 @@ ZERO mutations and issues ZERO Jira write calls.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import subprocess
 import sys
@@ -32,16 +32,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ENGINE_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
-RECONCILER_DIR = ENGINE_DIR / "rebar_reconciler"
-
-
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+RECONCILER_DIR = ENGINE_DIR.parent / "reconciler"
 
 
 # ---------------------------------------------------------------------------
@@ -218,34 +209,18 @@ def git_repo(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def reconciler_modules(monkeypatch):
-    """Fresh fetcher/applier/reconcile modules registered under the canonical
-    sys.modules keys reconcile._load() reuses."""
-    # Drop any stale registrations from other test files in this session so
-    # reconcile_once loads OUR patched copies.
-    for key in (
-        "reconcile",
-        "reconcile_fetcher",
-        "reconcile_applier",
-        "reconcile_run_differs",
-        "acli_integration",
-    ):
-        monkeypatch.delitem(sys.modules, key, raising=False)
-    fetcher = _load_module("reconcile_fetcher", RECONCILER_DIR / "fetcher.py")
-    applier = _load_module("reconcile_applier", RECONCILER_DIR / "applier.py")
-    reconcile = _load_module("reconcile", RECONCILER_DIR / "reconcile.py")
-    # Pre-register run_differs under the lazy_load key reconcile_once reuses,
-    # so a per-pass _load_reconcile_backend monkeypatch (wire_backend below)
-    # lands on the copy the pass actually executes.
-    _load_module("reconcile_run_differs", RECONCILER_DIR / "run_differs.py")
+def reconciler_modules():
+    """The shared fetcher/applier/reconcile modules; each pass monkeypatches their
+    loader seams, so the patches land on the modules the pass executes."""
+    fetcher = importlib.import_module("rebar.reconciler.fetcher")
+    applier = importlib.import_module("rebar.reconciler.applier")
+    reconcile = importlib.import_module("rebar.reconciler.reconcile")
     return fetcher, applier, reconcile
 
 
 def _run_pass(reconciler_modules, state, repo_root, monkeypatch, pass_id, *, wire_backend=False):
     fetcher, applier, reconcile = reconciler_modules
     fake_mod = _make_fake_acli_module(state)
-    # reconcile_once's own outbound-comment client load reuses this key.
-    monkeypatch.setitem(sys.modules, "acli_integration", fake_mod)
     monkeypatch.setattr(fetcher, "_load_acli", lambda: fake_mod)
     monkeypatch.setattr(applier, "_load_acli", lambda: fake_mod)
     ok_concurrency = _make_ok_concurrency()
@@ -255,9 +230,9 @@ def _run_pass(reconciler_modules, state, repo_root, monkeypatch, pass_id, *, wir
         # (select_backend(compose_config())), so a bound-but-absent key's direct
         # GET never reaches the fake. Wire the real Jira adapter (real mappers)
         # over the SAME fake transport so the absence machinery is drivable.
-        from rebar_reconciler.adapters.jira.backend import JiraBackend
+        from rebar.reconciler.adapters.jira.backend import JiraBackend
 
-        run_differs_mod = sys.modules["reconcile_run_differs"]
+        run_differs_mod = importlib.import_module("rebar.reconciler.run_differs")
         monkeypatch.setattr(
             run_differs_mod, "_load_reconcile_backend", lambda: JiraBackend(fake_mod)
         )
@@ -270,7 +245,7 @@ def clear_absent_calls(monkeypatch):
 
     The reach guard bug 02c4's oracle lacked: byte-compare alone cannot tell
     "clear_absent ran and changed nothing" from "clear_absent never ran"."""
-    import rebar_reconciler.binding_lifecycle as bl
+    import rebar.reconciler.binding_lifecycle as bl
 
     calls: list[str] = []
     real = bl.BindingLifecycle.clear_absent
@@ -286,10 +261,11 @@ def clear_absent_calls(monkeypatch):
 def _freeze_binding_clocks(monkeypatch) -> str:
     """Freeze _now_iso on BOTH binding_store and binding_lifecycle (bug 02c4)
     to a sentinel that can never legitimately appear unless something stamps."""
-    import rebar_reconciler.binding_lifecycle as bl
+    import rebar.reconciler.binding_lifecycle as bl
 
     sentinel = "2099-01-01T00:00:00Z"
-    monkeypatch.setattr(sys.modules["reconcile_binding_store"], "_now_iso", lambda: sentinel)
+    binding_store_mod = importlib.import_module("rebar.reconciler.binding_store")
+    monkeypatch.setattr(binding_store_mod, "_now_iso", lambda: sentinel)
     monkeypatch.setattr(bl, "_now_iso", lambda: sentinel)
     return sentinel
 
@@ -389,8 +365,8 @@ def test_unchanged_second_pass_preserves_binding_store_bytes_and_head(
     # binding_lifecycle for any future healthy-pass write, matching the direct
     # unit-tier guard test_binding_lifecycle.py::
     # test_clear_absent_does_not_dirty_an_entry_with_no_absence.
-    binding_store_mod = sys.modules["reconcile_binding_store"]
-    lifecycle_mod = sys.modules["rebar_reconciler.binding_lifecycle"]
+    binding_store_mod = importlib.import_module("rebar.reconciler.binding_store")
+    lifecycle_mod = sys.modules["rebar.reconciler.binding_lifecycle"]
     monkeypatch.setattr(binding_store_mod, "_now_iso", lambda: "2099-01-01T00:00:00Z")
     monkeypatch.setattr(lifecycle_mod, "_now_iso", lambda: "2099-01-01T00:00:00Z")
 
@@ -453,7 +429,7 @@ def test_keyless_recovery_legacy_hyphen_jql_does_not_fall_through_to_window_sear
     git_repo,
 ):
     """A legacy hyphen identity-label lookup is still label equality, not a window query."""
-    from rebar_reconciler.binding_store import BindingStore
+    from rebar.reconciler.binding_store import BindingStore
 
     state = _FakeJiraState()
     state.seed(

@@ -55,7 +55,7 @@ def test_fixtures_carry_no_secrets() -> None:
 @pytest.mark.integration
 def test_fake_routes_fixtures_through_production_fetch(monkeypatch) -> None:
     """The fake flows fixtures through the production enrichment merge, unmassaged."""
-    from rebar_reconciler import fetcher
+    from rebar.reconciler import fetcher
 
     install(monkeypatch, fetcher)
     monkeypatch.setenv("JIRA_PROJECT", "REB")

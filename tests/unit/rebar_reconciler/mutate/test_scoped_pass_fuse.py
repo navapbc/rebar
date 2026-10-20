@@ -9,65 +9,49 @@ scope, reason, identity, and retry time from the injected clock without performi
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-import types
+import importlib
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECON_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-if "rebar_reconciler" not in sys.modules:  # pragma: no cover - import bootstrap
-    _pkg = types.ModuleType("rebar_reconciler")
-    _pkg.__path__ = [str(RECON_DIR)]
-    sys.modules["rebar_reconciler"] = _pkg
-
-
-def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, RECON_DIR / filename)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+RECON_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def outcome_mod():
-    return _load("operation_outcome_fuse_test", "operation_outcome.py")
+    return importlib.import_module("rebar.reconciler.operation_outcome")
 
 
 @pytest.fixture(scope="module")
 def policy_mod():
-    return _load("failure_policy_fuse_test", "failure_policy.py")
+    return importlib.import_module("rebar.reconciler.failure_policy")
 
 
 @pytest.fixture(scope="module")
 def fuse_mod():
-    return _load("pass_fuse_fuse_test", "pass_fuse.py")
+    return importlib.import_module("rebar.reconciler.pass_fuse")
 
 
 @pytest.fixture(scope="module")
 def mutation_mod():
-    return _load("mutation_fuse_test", "mutation.py")
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 @pytest.fixture(scope="module")
 def ticket_plan_mod():
-    return _load("ticket_plan_fuse_test", "ticket_plan.py")
+    return importlib.import_module("rebar.reconciler.ticket_plan")
 
 
 @pytest.fixture(scope="module")
 def budget_mod():
-    return _load("retry_budget_fuse_test", "retry_budget.py")
+    return importlib.import_module("rebar.reconciler.retry_budget")
 
 
 @pytest.fixture(scope="module")
 def coordinator_mod():
-    return _load("coordinator_fuse_test", "coordinator.py")
+    return importlib.import_module("rebar.reconciler.coordinator")
 
 
 # ── Deterministic, injected test doubles ─────────────────────────────────────────

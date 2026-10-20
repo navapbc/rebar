@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -59,10 +58,7 @@ def _reconciler_main() -> Any:
     The engine directory stays on ``sys.path`` so later imports of unloaded reconciler submodules
     continue to work.
     """
-    engine_dir = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine"
-    if str(engine_dir) not in sys.path:
-        sys.path.insert(0, str(engine_dir))
-    return importlib.import_module("rebar_reconciler.__main__")
+    return importlib.import_module("rebar.reconciler.__main__")
 
 
 def _composed_by(run: Callable[[], object]) -> list[OperationSnapshot]:

@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from rebar_reconciler import mutation as mutation_mod
-from rebar_reconciler import mutation_payloads, payload_shadow
+from rebar.reconciler import mutation as mutation_mod
+from rebar.reconciler import mutation_payloads, payload_shadow
 
 CORPUS_PATH = (
     Path(__file__).resolve().parents[3]

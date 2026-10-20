@@ -20,7 +20,6 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from types import ModuleType
 
 from rebar._cli._parser import ParseError, render_parse_error
 from rebar._mcp_errors import js_safe_dumps
@@ -29,7 +28,7 @@ _BRIDGE_ROUTES = {"preview", "sync"}
 
 
 def launch_reconciler(argv: Sequence[str], *, default_mode: str | None = "dry-run") -> int:
-    """Run ``rebar_reconciler`` with repository defaults when they are absent.
+    """Run ``rebar.reconciler`` with repository defaults when they are absent.
 
     ``reconcile`` deliberately accepts its historical reconciler arguments, so
     this function retains that behavior. Canonical bridge commands forward their
@@ -46,9 +45,9 @@ def launch_reconciler(argv: Sequence[str], *, default_mode: str | None = "dry-ru
         arg == "--mode" or arg.startswith("--mode=") for arg in args
     ):
         args += ["--mode", default_mode]
-    # Use this interpreter rather than a bare ``python3``: the reconciler imports
-    # ``rebar.*`` in-package, while engine_env exposes its top-level package.
-    return subprocess.call([sys.executable, "-m", "rebar_reconciler", *args], env=engine_env(root))
+    # Use this interpreter rather than a bare ``python3``: ``rebar.reconciler`` and the
+    # ``rebar.*`` modules it imports resolve from this interpreter's import path.
+    return subprocess.call([sys.executable, "-m", "rebar.reconciler", *args], env=engine_env(root))
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -144,23 +143,6 @@ def _passthrough_help(command: str) -> int:
     return 0
 
 
-def _ref_lock_module() -> ModuleType:
-    """Load the engine-scoped ref-lock module for the bridge control verbs."""
-    from rebar._engine import engine_dir
-
-    package = "rebar_reconciler"
-    if package not in sys.modules:
-        package_dir = engine_dir() / package
-        spec = importlib.util.spec_from_file_location(
-            package, package_dir / "__init__.py", submodule_search_locations=[str(package_dir)]
-        )
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[package] = module
-        spec.loader.exec_module(module)
-    return importlib.import_module(f"{package}._ref_lock")
-
-
 def _pause_or_resume(command: str, reason: str | None = None) -> int:
     """Set or clear the reconciler pause ref through its observed-OID CAS API."""
     import rebar
@@ -185,8 +167,7 @@ def _status(parsed: argparse.Namespace) -> int:
     """Render the shared status-core snapshot in machine or operator form."""
     from rebar import config
 
-    _ref_lock_module()  # bootstrap the engine package for the in-process status core
-    last_pass = importlib.import_module("rebar_reconciler.last_pass")
+    last_pass = importlib.import_module("rebar.reconciler.last_pass")
     try:
         result = last_pass.snapshot(
             Path(config.repo_root()),

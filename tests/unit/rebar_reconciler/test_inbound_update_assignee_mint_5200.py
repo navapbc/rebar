@@ -40,9 +40,9 @@ from typing import Any
 import pytest
 
 import rebar
-import rebar_reconciler.apply_inbound_events as inbound_events
-import rebar_reconciler.apply_inbound_records as air
-from rebar_reconciler.inbound_differ import _diff_jira_vs_local
+import rebar.reconciler.apply_inbound_events as inbound_events
+import rebar.reconciler.apply_inbound_records as air
+from rebar.reconciler.inbound_differ import _diff_jira_vs_local
 
 _DC_USER = "admin"
 # The raw Jira Data Center user object: NO accountId, identified by `name` (bug 5f48's shape).
@@ -78,7 +78,7 @@ class _DCMapper:
     """
 
     def map_remote_to_local(self, remote_fields: dict[str, Any]) -> dict[str, Any]:
-        from rebar_reconciler import inbound_fields
+        from rebar.reconciler import inbound_fields
 
         return inbound_fields._map_jira_to_local_fields(remote_fields)
 
@@ -160,7 +160,7 @@ def test_the_mapper_already_carries_everything_the_mint_needs(store: Path) -> No
     meet, and a fix that instead loosens the dict guard to accept a bare string is visibly the
     wrong one: on Cloud that string is the displayName, not the accountId.
     """
-    from rebar_reconciler import inbound_fields
+    from rebar.reconciler import inbound_fields
 
     mapped = inbound_fields._map_jira_to_local_fields({"assignee": dict(_RAW_DC_ASSIGNEE)})
 

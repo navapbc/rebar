@@ -154,8 +154,8 @@ WARM NAMESPACE (already defined in run_python; do not re-import unless you want 
   dc_request  -> harness raw REST helper: dc_request(path, method="GET", payload=None) -> tuple
   rebar       -> the rebar library (edit_ticket, show_ticket, ...)
   dc          -> module _dc_support (run_bridge, run_reconcile, seed_searchable_issue, ...)
-  compute_update_fields, diff_canonical_fields  (rebar_reconciler.outbound_field_diff)
-  WikiTextCodec, cutover_clients                (rebar_reconciler.adapters.jira_family.rich_text)
+  compute_update_fields, diff_canonical_fields  (rebar.reconciler.outbound_field_diff)
+  WikiTextCodec, cutover_clients                (rebar.reconciler.adapters.jira_family.rich_text)
   rich_markdown(heading, bold, code) -> a representative rich body (h1 + bold + {{code}} macro)
   json, os, subprocess, uuid, textwrap
 
@@ -254,16 +254,16 @@ def _build_namespace(
     import textwrap
 
     import _dc_support as dc
-    from rebar_reconciler.adapters.jira_family.rich_text import (
+
+    import rebar
+    from rebar.reconciler.adapters.jira_family.rich_text import (
         WikiTextCodec,
         cutover_clients,
     )
-    from rebar_reconciler.outbound_field_diff import (
+    from rebar.reconciler.outbound_field_diff import (
         compute_update_fields,
         diff_canonical_fields,
     )
-
-    import rebar
 
     return {
         "repo": repo,

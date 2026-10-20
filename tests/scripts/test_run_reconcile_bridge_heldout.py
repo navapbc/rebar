@@ -206,7 +206,7 @@ def test_strict_delivery_failure_is_fatal_and_preserves_diagnostic(tmp_path: Pat
 def test_legacy_engine_dispositions_remain_visible_to_direct_callers() -> None:
     sys.path.insert(0, str(ROOT / "src" / "rebar" / "_engine"))
     try:
-        from rebar_reconciler.__main__ import _Disposition
+        from rebar.reconciler.__main__ import _Disposition
     finally:
         sys.path.pop(0)
 

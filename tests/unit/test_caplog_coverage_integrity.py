@@ -1,7 +1,7 @@
 """Coverage checks for logging assertions that use ``caplog``.
 
 The guard restores propagation and logger levels on both ``rebar`` and
-``rebar_reconciler``. The subprocess cases prove that teardown makes a guarded run red even
+``rebar.reconciler``. The subprocess cases prove that teardown makes a guarded run red even
 when a negative assertion passed vacuously, and that leaked logger levels cannot affect later
 tests.
 """
@@ -28,7 +28,7 @@ pytest_plugins = ["pytester"]
 
 def test_both_shared_roots_are_guarded() -> None:
     """The reconciler root is a SIBLING of ``rebar``, so it needs its own coverage."""
-    assert set(_log_integrity.SHARED_LOGGER_NAMES) == {"rebar", "rebar_reconciler"}
+    assert set(_log_integrity.SHARED_LOGGER_NAMES) == {"rebar", "rebar.reconciler"}
 
 
 def test_no_failure_while_propagation_is_healthy() -> None:
@@ -38,7 +38,7 @@ def test_no_failure_while_propagation_is_healthy() -> None:
     assert _log_integrity.propagation_failure("t::x", phase="teardown") is None
 
 
-@pytest.mark.parametrize("root", ["rebar", "rebar_reconciler"])
+@pytest.mark.parametrize("root", ["rebar", "rebar.reconciler"])
 def test_teardown_phase_blames_the_test_that_disabled_propagation(root: str) -> None:
     lg = logging.getLogger(root)
     lg.propagate = False
@@ -175,7 +175,7 @@ def test_innocent_bystander(caplog):
     result.assert_outcomes(passed=2, errors=1)
 
 
-@pytest.mark.parametrize("root", ["rebar", "rebar_reconciler"])
+@pytest.mark.parametrize("root", ["rebar", "rebar.reconciler"])
 def test_without_the_guard_a_leaked_level_breaks_a_later_info_assertion(pytester, root) -> None:
     """The level vector, reproduced: an unrelated later test goes red, far from the cause."""
     pytester.makeconftest("")
@@ -185,7 +185,7 @@ def test_without_the_guard_a_leaked_level_breaks_a_later_info_assertion(pytester
     assert result.ret != 0
 
 
-@pytest.mark.parametrize("root", ["rebar", "rebar_reconciler"])
+@pytest.mark.parametrize("root", ["rebar", "rebar.reconciler"])
 def test_with_the_guard_a_leaked_level_is_contained(pytester, root) -> None:
     """Same file, guard installed: the leak does not survive the test that caused it."""
     pytester.makeconftest(_GUARDED_CONFTEST.format(tests_dir=str(_TESTS_DIR)))
@@ -195,7 +195,7 @@ def test_with_the_guard_a_leaked_level_is_contained(pytester, root) -> None:
     assert result.ret == 0
 
 
-@pytest.mark.parametrize("root", ["rebar", "rebar_reconciler"])
+@pytest.mark.parametrize("root", ["rebar", "rebar.reconciler"])
 def test_restore_level_reports_whether_it_moved(root: str) -> None:
     baseline = _log_integrity.current_level()
     assert set(baseline) == set(_log_integrity.SHARED_LOGGER_NAMES)

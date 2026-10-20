@@ -9,9 +9,8 @@ All tests use tmp_path for isolation.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -23,16 +22,11 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location("applier_provenance_tests", APPLIER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["applier_provenance_tests"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
@@ -214,7 +208,7 @@ def test_provenance_preserves_existing_mapping_entries(applier, tmp_path):
 
 def test_concurrent_provenance_writes_merge_distinct_issue_keys(tmp_path):
     """Independent provenance writes must merge rather than snapshot-clobber."""
-    pass_io = __import__("rebar_reconciler.pass_io", fromlist=["_persist_field_provenance"])
+    pass_io = __import__("rebar.reconciler.pass_io", fromlist=["_persist_field_provenance"])
     mapping_path = tmp_path / "bridge_state" / "mapping.json"
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
     mapping_path.write_text(json.dumps({"old-local-id": "DIG-1"}), encoding="utf-8")

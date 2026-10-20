@@ -14,23 +14,17 @@ Hermetic: a stub binding store, a synthetic Jira snapshot, no network.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 
 import pytest
 
-_SRC_DIR = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_SRC_DIR = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler"
 _OC = _SRC_DIR / "outbound_comments.py"
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("outbound_comments_commentid_test", _OC)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.outbound_comments")
 
 
 @pytest.fixture(scope="module")
@@ -208,7 +202,7 @@ def test_dc_comment_diff_converges_after_migration(oc):
     zero duplicate re-post. Injecting the REAL DC ``WikiTextCodec`` (the migrated
     dedup normalizer, replacing the a32a ``_IdentityCodec``), a comment whose body
     already landed in Jira is recognized and skipped, while a new one still emits."""
-    from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec
+    from rebar.reconciler.adapters.jira_family.rich_text import WikiTextCodec
 
     dc_codec = WikiTextCodec()
     already = {"comments": [{"body": "converged body", "timestamp": _K1}]}

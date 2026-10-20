@@ -19,7 +19,7 @@ below go RED.
 
 from __future__ import annotations
 
-from rebar_reconciler.outbound_assignee import (
+from rebar.reconciler.outbound_assignee import (
     _USER_SEARCH_METHODS,
     _bootstrap_account_id_via_user_search,
     _resolve_assignee_account_id,

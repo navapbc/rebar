@@ -8,8 +8,7 @@ presence semantics.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 
@@ -17,15 +16,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-_REC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, filename: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, _REC / filename)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+_REC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler"
 
 
 class _StubBindingStore:
@@ -94,12 +85,12 @@ def _emit(od, backend, t, jf):
 
 @pytest.fixture(scope="module")
 def od() -> ModuleType:
-    return _load("outbound_differ_canonical_equiv_heldout", "outbound_differ.py")
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 @pytest.fixture(scope="module")
 def backend():
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     return JiraBackend(transport=object())
 
@@ -126,7 +117,7 @@ def test_assignee_email_match_emits_nothing(od, backend) -> None:
 def test_map_remote_to_local_partial_omits_absent_keys() -> None:
     """A partial `_BASELINE_FIELDS` subset maps ONLY the keys present; an absent vendor key
     yields NO corresponding canonical key (never a default). A FULL snapshot is unchanged."""
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     inbound = JiraBackend(transport=object()).inbound
 

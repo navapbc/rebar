@@ -512,10 +512,11 @@ def _no_repo_root_leaks() -> Iterator[None]:
 
 
 # --- Canonical reconciler engine root (bug bd2d-3e31-31d9-4a66) --------------------
-# ``rebar_reconciler`` can exist TWICE on disk: the checkout copy the tests tree owns
-# (``tests._engine_path.engine_dir()``) and, under a NON-editable install, a second copy
-# in site-packages that ``rebar._engine.engine_dir()`` resolves. ``sys.modules`` is keyed
-# by NAME, so a canonical ``rebar_reconciler.*`` key holds exactly one of them and which
+# ``rebar.reconciler`` can exist TWICE on disk: the checkout copy and, under a NON-editable
+# install, a second copy in site-packages. The canonical one is the ``reconciler`` package
+# of the ``rebar`` this process imports (``tests._engine_path.canonical_reconciler_root()``),
+# which is what every plain ``import rebar.reconciler.<x>`` binds. ``sys.modules`` is keyed
+# by NAME, so a canonical ``rebar.reconciler.*`` key holds exactly one of them and which
 # one is decided by whichever test registered it first — after which every later test
 # silently operates on a module object the code under test does not hold. That is how bug
 # ``ae96-72a9-8145-4c85`` put three sweep lanes red while every editable lane, including
@@ -531,26 +532,26 @@ _REPORTED_FOREIGN_ENGINE: set[tuple[str, str]] = set()
 
 
 def _foreign_engine_failure_message(offenders: list[tuple[str, str]]) -> str:
-    from _engine_path import engine_dir as _canonical_engine_dir
+    from _engine_path import canonical_reconciler_root
 
     listed = "\n".join(f"  {what} -> {path}" for what, path in offenders)
     return (
-        "a canonical `rebar_reconciler.*` binding was registered from a NON-canonical "
-        "engine root:\n"
+        "a canonical `rebar.reconciler.*` binding was registered from a NON-canonical "
+        "package root:\n"
         f"{listed}\n"
-        f"the one canonical root for the tests tree is {_canonical_engine_dir()}\n"
-        "Resolve the engine with `tests/_engine_path.py`'s `engine_dir()` (the CHECKOUT), "
-        'never `rebar._engine.engine_dir()` or `Path(rebar.__file__).parent / "_engine"` '
-        "(the INSTALLED copy). Under an editable install the two are the same directory, "
-        "so this failure appears only on a non-editable lane -- it is real there, and it "
-        "is why bug ae96 reached main red on three lanes at once. See tests/_engine_path.py."
+        f"the one canonical root for this test process is {canonical_reconciler_root()}\n"
+        "Reach reconciler modules with a plain `import` / `importlib.import_module("
+        '"rebar.reconciler.<x>")`, never a by-path load of another on-disk copy. Under an '
+        "editable install the checkout and installed copies are the same directory, so this "
+        "failure appears only on a non-editable lane -- it is real there, and it is why bug "
+        "ae96 reached main red on three lanes at once. See tests/_engine_path.py."
     )
 
 
 @pytest.fixture(autouse=True)
 # mechanism-ok: autouse_fixture tests/conftest.py::_one_engine_root — bd2d: state guard
 def _one_engine_root() -> Iterator[None]:
-    """Fail the test that binds a canonical ``rebar_reconciler.*`` key to a foreign copy."""
+    """Fail the test that binds a canonical ``rebar.reconciler.*`` key to a foreign copy."""
     yield
     from _engine_path import foreign_engine_registrations
 
@@ -894,7 +895,7 @@ def _no_repo_commits(request: pytest.FixtureRequest) -> Iterator[None]:
 # caplog captures via a handler on the ROOT logger, so records only reach it if
 # the shared parent logger both emits and propagates them. There are TWO shared
 # parents — `rebar` for the library/CLI/MCP surfaces and the sibling
-# `rebar_reconciler` for the reconciler subprocess's top-level-imported modules —
+# `rebar.reconciler` for the reconciler subprocess's top-level-imported modules —
 # and both are guarded (_log_integrity.SHARED_LOGGER_NAMES). Two process-global,
 # never-restored mutations sever capture under either, and both are real:
 #   * propagate = False — nothing under that root reaches the root handler
@@ -907,8 +908,8 @@ def _no_repo_commits(request: pytest.FixtureRequest) -> Iterator[None]:
 #     logger, and caplog.at_level(INFO) without a `logger=` argument cannot undo
 #     it because it raises the ROOT level (rebar._logging.install_stderr_handler
 #     does this; every in-process rebar._cli.main() call leaks it onto `rebar`,
-#     and every in-process rebar_reconciler.__main__.main() call leaks it onto
-#     `rebar_reconciler` — bug 9151, an INFO assertion in the a4bd inbound-removal
+#     and every in-process rebar.reconciler.__main__.main() call leaks it onto
+#     `rebar.reconciler` — bug 9151, an INFO assertion in the a4bd inbound-removal
 #     suite going order-dependently red under -n 3 --dist worksteal).
 #
 # The two are handled differently on purpose. Disabling propagation is never

@@ -1,6 +1,6 @@
-"""Enforce one ``rebar_reconciler`` engine root across the test suite.
+"""Enforce one ``rebar.reconciler`` package root across the test suite.
 
-A non-editable installation exposes both the checkout engine and a site-packages copy.
+A non-editable installation exposes both the checkout package and a site-packages copy.
 Because ``sys.modules`` keys modules by name, the first registration can bind later tests to
 a module from the wrong root. Editable installations map both paths to one directory and
 therefore hide this failure.
@@ -9,7 +9,7 @@ therefore hide this failure.
 selects the installed copy. The ``_one_engine_root`` autouse fixture in ``tests/conftest.py``
 dynamically detects foreign module and package-path registrations, including forms that a
 source scan does not recognize. The ``split_engine`` fixture keeps that detector effective in
-editable installations. ``tests/_engine_path.py`` defines the canonical checkout root.
+editable installations. ``tests/_engine_path.py`` defines the canonical root.
 """
 
 from __future__ import annotations
@@ -21,7 +21,11 @@ import sys
 from pathlib import Path
 
 import pytest
-from _engine_path import engine_dir, engine_root_of, foreign_engine_registrations
+from _engine_path import (
+    canonical_reconciler_root,
+    engine_root_of,
+    foreign_engine_registrations,
+)
 from _repo_root import REPO_ROOT
 from _tree_scan import parsed_python_files
 
@@ -32,7 +36,7 @@ _TESTS_ROOT = REPO_ROOT / "tests"
 _INSTALLED_ENGINE_OWNERS = frozenset({"rebar._engine", "_engine"})
 
 # ``test_engine_dir.py`` tests the resolver without importing from its result or adding it to
-# ``sys.path``, so it cannot register ``rebar_reconciler`` from the installed root.
+# ``sys.path``, so it cannot register ``rebar.reconciler`` from the installed root.
 _ALLOWED: dict[str, str] = {
     "tests/unit/test_engine_dir.py": "its subject is the production resolver itself",
 }
@@ -81,7 +85,7 @@ def test_no_test_module_resolves_the_installed_engine_root() -> None:
         "these test modules resolve the engine from the INSTALLED rebar package:\n"
         + "\n".join(sorted(offenders))
         + "\n\nUnder a non-editable install that is a DIFFERENT copy from the checkout the "
-        "tests tree owns, and a canonical `rebar_reconciler.*` sys.modules key can hold only "
+        "tests tree owns, and a canonical `rebar.reconciler.*` sys.modules key can hold only "
         "one of the two — so whichever test runs first decides what every later test sees "
         "(bug bd2d-3e31-31d9-4a66; bug ae96-72a9-8145-4c85 is what it costs). Resolve it with "
         "`tests/_engine_path.py`'s `engine_dir()` instead. Under an editable install both "
@@ -110,49 +114,52 @@ def test_the_conftest_guard_is_wired_to_the_detector() -> None:
 
 @pytest.fixture
 def split_engine(tmp_path: Path) -> Path:
-    """Create a distinct engine root so the detector runs in editable installations."""
-    other = tmp_path / "site-packages" / "rebar" / "_engine"
+    """Create a distinct package root so the detector runs in editable installations."""
+    other = tmp_path / "site-packages" / "rebar" / "reconciler"
     other.parent.mkdir(parents=True)
     # Skip __pycache__: megabytes of bytecode this test never executes.
-    shutil.copytree(engine_dir(), other, ignore=shutil.ignore_patterns("__pycache__"))
-    assert (other / "rebar_reconciler" / "runtime.py").is_file()
+    shutil.copytree(
+        canonical_reconciler_root(), other, ignore=shutil.ignore_patterns("__pycache__")
+    )
+    assert (other / "runtime.py").is_file()
     return other
 
 
 def test_detector_names_a_key_registered_from_a_foreign_engine_root(split_engine: Path) -> None:
-    foreign = split_engine / "rebar_reconciler" / "runtime.py"
-    probe = type(sys)("rebar_reconciler.runtime")
+    foreign = split_engine / "runtime.py"
+    probe = type(sys)("rebar.reconciler.runtime")
     probe.__file__ = str(foreign)
 
-    offenders = foreign_engine_registrations({"rebar_reconciler.runtime": probe})
+    offenders = foreign_engine_registrations({"rebar.reconciler.runtime": probe})
 
-    assert offenders == [("rebar_reconciler.runtime", str(foreign.resolve()))]
+    assert offenders == [("rebar.reconciler.runtime", str(foreign.resolve()))]
 
 
 def test_detector_names_a_foreign_entry_on_the_package_search_path(split_engine: Path) -> None:
     """A foreign ``__path__`` entry is the same defect one step earlier: every later
-    ``import rebar_reconciler.<sub>`` resolves out of the wrong copy."""
-    foreign_pkg = split_engine / "rebar_reconciler"
-    probe = type(sys)("rebar_reconciler")
-    probe.__path__ = [str(engine_dir() / "rebar_reconciler"), str(foreign_pkg)]
+    ``import rebar.reconciler.<sub>`` resolves out of the wrong copy."""
+    foreign_pkg = split_engine
+    probe = type(sys)("rebar.reconciler")
+    probe.__path__ = [str(canonical_reconciler_root()), str(foreign_pkg)]
 
-    offenders = foreign_engine_registrations({"rebar_reconciler": probe})
+    offenders = foreign_engine_registrations({"rebar.reconciler": probe})
 
-    assert offenders == [("rebar_reconciler.__path__", str(foreign_pkg.resolve()))]
+    assert offenders == [("rebar.reconciler.__path__", str(foreign_pkg.resolve()))]
 
 
 def test_detector_accepts_the_canonical_root_and_the_test_shadow_package() -> None:
-    """The rule constrains ENGINE files only — the ``tests/unit/rebar_reconciler`` shadow
-    package legitimately holds the top-level key and must never be reported."""
-    canonical = type(sys)("rebar_reconciler.runtime")
-    canonical.__file__ = str(engine_dir() / "rebar_reconciler" / "runtime.py")
-    shadow = type(sys)("rebar_reconciler")
+    """The rule constrains reconciler package files only — a module living outside any
+    ``rebar/reconciler`` tree (here the ``tests/unit/rebar_reconciler`` test package) is
+    never reported."""
+    canonical = type(sys)("rebar.reconciler.runtime")
+    canonical.__file__ = str(canonical_reconciler_root() / "runtime.py")
+    shadow = type(sys)("rebar.reconciler")
     shadow.__file__ = str(_TESTS_ROOT / "unit" / "rebar_reconciler" / "__init__.py")
     shadow.__path__ = [str(_TESTS_ROOT / "unit" / "rebar_reconciler")]
 
     assert (
         foreign_engine_registrations(
-            {"rebar_reconciler": shadow, "rebar_reconciler.runtime": canonical}
+            {"rebar.reconciler": shadow, "rebar.reconciler.runtime": canonical}
         )
         == []
     )
@@ -160,7 +167,7 @@ def test_detector_accepts_the_canonical_root_and_the_test_shadow_package() -> No
 
 def test_engine_root_of_ignores_paths_outside_any_engine_tree() -> None:
     assert engine_root_of(_TESTS_ROOT / "conftest.py") is None
-    assert engine_root_of(engine_dir() / "rebar_reconciler" / "runtime.py") == engine_dir()
+    assert engine_root_of(canonical_reconciler_root() / "runtime.py") == canonical_reconciler_root()
 
 
 def test_detector_reports_a_foreign_root_while_os_name_is_rebound(
@@ -176,15 +183,15 @@ def test_detector_reports_a_foreign_root_while_os_name_is_rebound(
     of the function-scoped fixtures, so the ``_one_engine_root`` teardown guard runs while
     the rebinding is still in force (bug ``f46c-8a93-2eb9-4913``).
     """
-    foreign = split_engine / "rebar_reconciler" / "runtime.py"
+    foreign = split_engine / "runtime.py"
     expected = os.path.realpath(foreign)
-    probe = type(sys)("rebar_reconciler.runtime")
+    probe = type(sys)("rebar.reconciler.runtime")
     probe.__file__ = str(foreign)
     monkeypatch.setattr(os, "name", "nt")
 
-    offenders = foreign_engine_registrations({"rebar_reconciler.runtime": probe})
+    offenders = foreign_engine_registrations({"rebar.reconciler.runtime": probe})
 
-    assert offenders == [("rebar_reconciler.runtime", expected)]
+    assert offenders == [("rebar.reconciler.runtime", expected)]
 
 
 def test_detector_accepts_a_non_engine_path_while_os_name_is_rebound(
@@ -198,12 +205,12 @@ def test_detector_accepts_a_non_engine_path_while_os_name_is_rebound(
     shadow = tmp_path / "rebar_reconciler" / "__init__.py"
     shadow.parent.mkdir(parents=True)
     shadow.touch()
-    probe = type(sys)("rebar_reconciler")
+    probe = type(sys)("rebar.reconciler")
     probe.__file__ = str(shadow)
     probe.__path__ = [str(shadow.parent)]
     monkeypatch.setattr(os, "name", "nt")
 
-    assert foreign_engine_registrations({"rebar_reconciler": probe}) == []
+    assert foreign_engine_registrations({"rebar.reconciler": probe}) == []
 
 
 def test_engine_root_of_returns_none_for_a_non_engine_path_while_os_name_is_rebound(

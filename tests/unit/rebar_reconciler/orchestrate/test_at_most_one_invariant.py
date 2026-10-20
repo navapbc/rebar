@@ -14,9 +14,8 @@ Tests cover:
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 import types
 from pathlib import Path
 from types import ModuleType
@@ -29,16 +28,11 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-INVARIANTS_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "invariants.py"
+INVARIANTS_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "invariants.py"
 
 
 def _load_invariants() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("invariants", INVARIANTS_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["invariants"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.invariants")
 
 
 @pytest.fixture(scope="module")
@@ -103,7 +97,7 @@ def test_a_clean_snapshot(tmp_path, invariants):
     mock_store = _make_alert_store_mock(deduped_keys=set())
 
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
-        with patch("invariants.subprocess.run") as mock_run:
+        with patch("rebar.reconciler.invariants.subprocess.run") as mock_run:
             result = invariants.check_at_most_one_local_id(
                 snapshot, repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
@@ -133,7 +127,9 @@ def test_b_single_violation(tmp_path, invariants):
     mock_proc_result = _make_subprocess_result(returncode=0, stdout="abcd-1234-5678-90ef")
 
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
-        with patch("invariants.subprocess.run", return_value=mock_proc_result) as mock_run:
+        with patch(
+            "rebar.reconciler.invariants.subprocess.run", return_value=mock_proc_result
+        ) as mock_run:
             result = invariants.check_at_most_one_local_id(
                 snapshot, repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
@@ -181,7 +177,7 @@ def test_c_dedup_window(tmp_path, invariants):
     mock_store = _make_alert_store_mock(deduped_keys={dedup_key})
 
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
-        with patch("invariants.subprocess.run") as mock_run:
+        with patch("rebar.reconciler.invariants.subprocess.run") as mock_run:
             result = invariants.check_at_most_one_local_id(
                 snapshot, repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
@@ -208,7 +204,7 @@ def test_c_legacy_dedup_key_still_recognized(tmp_path, invariants):
     mock_store = _make_alert_store_mock(deduped_keys={legacy_dedup_key})
 
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
-        with patch("invariants.subprocess.run") as mock_run:
+        with patch("rebar.reconciler.invariants.subprocess.run") as mock_run:
             result = invariants.check_at_most_one_local_id(
                 snapshot, repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
@@ -236,7 +232,9 @@ def test_d_cap_at_5(tmp_path, invariants):
     mock_proc_result = _make_subprocess_result(returncode=0, stdout="cafe-babe-dead-beef")
 
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
-        with patch("invariants.subprocess.run", return_value=mock_proc_result) as mock_run:
+        with patch(
+            "rebar.reconciler.invariants.subprocess.run", return_value=mock_proc_result
+        ) as mock_run:
             result = invariants.check_at_most_one_local_id(
                 snapshot, repo_root=tmp_path, ticket_cli="/fake/rebar"
             )
@@ -258,32 +256,22 @@ def test_d_cap_at_5(tmp_path, invariants):
 # Paths for reconcile.py integration tests
 # ---------------------------------------------------------------------------
 
-RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-
-
-_RECONCILE_COLLAB_KEYS = (
-    "reconcile_fetcher",
-    "reconcile_differ",
-    "reconcile_applier",
-    "reconcile_health",
-    "reconcile_invariants",
-)
+RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "reconcile.py"
 
 
 def _load_reconcile() -> ModuleType:
-    """Load a fresh reconcile module, evicting only the 'reconcile' entry itself.
+    """The shared reconcile module."""
+    return importlib.import_module("rebar.reconciler.reconcile")
 
-    Collaborator stubs (reconcile_fetcher, etc.) must be pre-registered in
-    sys.modules BEFORE calling this helper so that reconcile._load() finds them.
-    This function intentionally does NOT evict collaborators.
-    """
-    sys.modules.pop("reconcile", None)
-    spec = importlib.util.spec_from_file_location("reconcile", RECONCILE_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["reconcile"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+
+def _stubbed_load(reconcile_mod: ModuleType, stubs: dict[str, ModuleType]):
+    """A ``reconcile._load`` replacement that serves ``stubs`` by sibling key."""
+    real_load = reconcile_mod._load
+
+    def _load(name: str, relpath: str) -> ModuleType:
+        return stubs[name] if name in stubs else real_load(name, relpath)
+
+    return _load
 
 
 def _make_stub_fetcher(snapshot: dict, pass_id: str, tmp_path: Path) -> ModuleType:
@@ -342,8 +330,8 @@ def test_reconcile_once_invokes_invariant_after_fetch(tmp_path):
     """reconcile_once() must call check_at_most_one_local_id exactly once
     with the post-fetch snapshot dict, BEFORE computing mutations.
 
-    All collaborators (fetcher, differ, applier, health, invariants) are mocked
-    via sys.modules so reconcile._load() picks them up.
+    All collaborators (fetcher, differ, applier, health, invariants) are served
+    by a patched ``reconcile._load``.
     """
     pass_id = "inv-invoke-test"
     snapshot = {
@@ -363,22 +351,16 @@ def test_reconcile_once_invokes_invariant_after_fetch(tmp_path):
     stub_invariants.check_dual_identity_complete = lambda prev, curr: (set(), [])
     stub_invariants.report_schema_drift = lambda *a, **kw: None
 
-    # Pre-register all stubs BEFORE loading reconcile so reconcile._load() finds them
-    for key in _RECONCILE_COLLAB_KEYS:
-        sys.modules.pop(key, None)
-    sys.modules["reconcile_fetcher"] = stub_fetcher
-    sys.modules["reconcile_differ"] = stub_differ
-    sys.modules["reconcile_applier"] = stub_applier
-    sys.modules["reconcile_health"] = stub_health
-    sys.modules["reconcile_invariants"] = stub_invariants
-
+    stubs = {
+        "reconcile_fetcher": stub_fetcher,
+        "reconcile_differ": stub_differ,
+        "reconcile_applier": stub_applier,
+        "reconcile_health": stub_health,
+        "reconcile_invariants": stub_invariants,
+    }
     reconcile_mod = _load_reconcile()
-    try:
+    with patch.object(reconcile_mod, "_load", _stubbed_load(reconcile_mod, stubs)):
         reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
-    finally:
-        # Clean up injected stubs
-        for key in (*_RECONCILE_COLLAB_KEYS, "reconcile"):
-            sys.modules.pop(key, None)
 
     # check_at_most_one_local_id must have been called exactly once
     assert invariants_mock.call_count == 1, (
@@ -411,9 +393,8 @@ def test_end_to_end_second_write_produces_one_alert_one_bug(tmp_path):
     Pass 2: 'JIRA-42' has local_ids=['id1','id2'] (violation) → exactly one
     alert entry in bridge_state/alerts/ and exactly one ticket-cli subprocess call.
 
-    Strategy: load the real invariants module once, patch subprocess.run on it, then
-    pre-register it under 'reconcile_invariants' in sys.modules so that reconcile._load()
-    reuses the same patched instance for both passes.
+    Strategy: patch subprocess on the shared invariants module, then serve it (and the
+    collaborator stubs) through a patched ``reconcile._load`` for both passes.
     """
     pass_id = "e2e-alert-test"
 
@@ -426,34 +407,17 @@ def test_end_to_end_second_write_produces_one_alert_one_bug(tmp_path):
     }
 
     def _run_pass_e2e(snapshot: dict, invariants_instance: ModuleType) -> None:
-        """Run one reconciler pass with all collaborator stubs injected.
-
-        invariants_instance is pre-registered in sys.modules by the caller
-        so reconcile._load() returns it without loading a fresh copy.
-        """
-        stub_fetcher = _make_stub_fetcher(snapshot, pass_id, tmp_path)
-        stub_differ = _make_stub_differ()
-        stub_applier = _make_stub_applier(tmp_path)
-        stub_health = _make_stub_health()
-
-        # Evict reconcile and all collaborators except invariants (managed by caller)
-        keys_to_evict = [k for k in _RECONCILE_COLLAB_KEYS if k != "reconcile_invariants"]
-        keys_to_evict.append("reconcile")
-        for key in keys_to_evict:
-            sys.modules.pop(key, None)
-
-        sys.modules["reconcile_fetcher"] = stub_fetcher
-        sys.modules["reconcile_differ"] = stub_differ
-        sys.modules["reconcile_applier"] = stub_applier
-        sys.modules["reconcile_health"] = stub_health
-        # reconcile_invariants is already registered by caller — do not touch it
-
+        """Run one reconciler pass with all collaborator stubs injected."""
+        stubs = {
+            "reconcile_fetcher": _make_stub_fetcher(snapshot, pass_id, tmp_path),
+            "reconcile_differ": _make_stub_differ(),
+            "reconcile_applier": _make_stub_applier(tmp_path),
+            "reconcile_health": _make_stub_health(),
+            "reconcile_invariants": invariants_instance,
+        }
         reconcile_mod = _load_reconcile()
-        try:
+        with patch.object(reconcile_mod, "_load", _stubbed_load(reconcile_mod, stubs)):
             reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
-        finally:
-            for key in keys_to_evict:
-                sys.modules.pop(key, None)
 
     # Load the real invariants module once, patch subprocess on it
     invariants_mod = _load_invariants()
@@ -461,18 +425,13 @@ def test_end_to_end_second_write_produces_one_alert_one_bug(tmp_path):
     with patch.object(invariants_mod, "subprocess") as mock_subproc:
         mock_subproc.run.return_value = MagicMock(returncode=0, stdout="bug-e2e-001\n")
 
-        # Pre-register the patched invariants under the name reconcile._load() uses
-        sys.modules["reconcile_invariants"] = invariants_mod
-        try:
-            # Pass 1: clean snapshot — no violations expected
-            _run_pass_e2e(snapshot_clean, invariants_mod)
-            calls_after_pass1 = mock_subproc.run.call_count
+        # Pass 1: clean snapshot — no violations expected
+        _run_pass_e2e(snapshot_clean, invariants_mod)
+        calls_after_pass1 = mock_subproc.run.call_count
 
-            # Pass 2: snapshot with a violation for JIRA-42
-            _run_pass_e2e(snapshot_violation, invariants_mod)
-            calls_after_pass2 = mock_subproc.run.call_count
-        finally:
-            sys.modules.pop("reconcile_invariants", None)
+        # Pass 2: snapshot with a violation for JIRA-42
+        _run_pass_e2e(snapshot_violation, invariants_mod)
+        calls_after_pass2 = mock_subproc.run.call_count
 
     # Pass 1 must have produced zero ticket-cli calls
     assert calls_after_pass1 == 0, (

@@ -12,31 +12,21 @@ emitted.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
-from rebar_reconciler.adapters.jira import outbound_fields as _of  # 625b: adapter-internal
+from rebar.reconciler.adapters.jira import outbound_fields as _of  # 625b: adapter-internal
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
-
-
-def _load(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
 
 
 @pytest.fixture(scope="module")
 def differ() -> ModuleType:
-    return _load("outbound_differ_baseline_arb", DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 class _FakeStore:

@@ -8,9 +8,8 @@ Persisted create data and reduced state are the observable oracle.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -19,27 +18,16 @@ import rebar
 from rebar.reducer import reduce_ticket
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 MUTATION_PATH = APPLIER_PATH.parent / "mutation.py"
 
 
 def _load_mutation_module():
-    canonical = "rebar_reconciler.mutation"
-    if canonical in sys.modules:
-        return sys.modules[canonical]
-    spec = importlib.util.spec_from_file_location(canonical, MUTATION_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[canonical] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location("applier_under_test", APPLIER_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["applier_under_test"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")

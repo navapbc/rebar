@@ -22,9 +22,9 @@ from pathlib import Path
 import pytest
 
 from rebar import config as user_cfg
-from rebar_reconciler import config as cfg_mod
-from rebar_reconciler import fetcher, inbound_fields, outbound_labels
-from rebar_reconciler.adapters.jira_family.outbound_mapper import OutboundFieldMapper
+from rebar.reconciler import config as cfg_mod
+from rebar.reconciler import fetcher, inbound_fields, outbound_labels
+from rebar.reconciler.adapters.jira_family.outbound_mapper import OutboundFieldMapper
 
 pytestmark = pytest.mark.unit
 
@@ -56,7 +56,7 @@ def _reset_drift_warnings() -> None:
     recorded the same status, so drift-emission assertions would be order-dependent. The
     reset uses the public ``reset_drift_warnings()`` seam, never the private set.
     """
-    from rebar_reconciler.adapters.jira_family import outbound_mapper
+    from rebar.reconciler.adapters.jira_family import outbound_mapper
 
     outbound_mapper.reset_drift_warnings()
 
@@ -285,7 +285,7 @@ def test_preflight_tolerates_config_remap(
     """
     # preflight_status_mapping moved to pass_support.py (ticket
     # piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
-    from rebar_reconciler import pass_support
+    from rebar.reconciler import pass_support
 
     proj = _proj(
         tmp_path,
@@ -316,8 +316,8 @@ def test_effective_status_map_for_resolves_project(tmp_path: Path) -> None:
     resolves the ticket's target project and returns its effective overlay. Observable
     contract: a ticket bound to a remapped project yields that project's remapped map;
     an unseeded/empty mapping yields ``None`` (the built-in fallback the mappers apply)."""
-    from rebar_reconciler import outbound_differ
-    from rebar_reconciler.projects_store import Mapping
+    from rebar.reconciler import outbound_differ
+    from rebar.reconciler.projects_store import Mapping
 
     proj = _proj(
         tmp_path,
@@ -346,8 +346,8 @@ def test_effective_status_map_for_honors_repo_root(
     ``fetcher._known_jira_statuses`` / ``preflight_status_mapping``. A reconcile pass may
     run from a CWD that is not the store root, so a CWD-relative read would silently
     resolve the WRONG project's overlay."""
-    from rebar_reconciler import outbound_differ
-    from rebar_reconciler.projects_store import Mapping
+    from rebar.reconciler import outbound_differ
+    from rebar.reconciler.projects_store import Mapping
 
     authoritative = _proj(
         tmp_path,
@@ -388,7 +388,7 @@ def test_drift_warning_deduped_within_pass(
     stderr drift alert on every mapper call within a pass — the warning is emitted at
     most once per distinct drifted status, so a stuck status does not flood the log each
     reconcile pass."""
-    from rebar_reconciler.adapters.jira_family import outbound_mapper
+    from rebar.reconciler.adapters.jira_family import outbound_mapper
 
     outbound_mapper.reset_drift_warnings()
     # Same drifted status resolved twice: exactly one warning line.
@@ -407,7 +407,7 @@ def test_drift_records_status_in_shared_set(tmp_path: Path) -> None:
     about ``drifty_status``. Part 2 then proves the warning still fires despite this
     prior record, which holds only because the autouse reset clears the set between
     tests."""
-    from rebar_reconciler.adapters.jira_family import outbound_mapper
+    from rebar.reconciler.adapters.jira_family import outbound_mapper
 
     assert outbound_mapper.resolve_outbound_status("drifty_status", {"open": "To Do"}) is None
 

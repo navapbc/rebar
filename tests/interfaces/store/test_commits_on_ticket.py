@@ -184,7 +184,7 @@ def test_commits_not_a_jira_synced_field() -> None:
     # read by path.
     from _engine_path import engine_dir
 
-    fields_mod = engine_dir() / "rebar_reconciler" / "adapters" / "jira" / "outbound_fields.py"
+    fields_mod = engine_dir().parent / "reconciler" / "adapters" / "jira" / "outbound_fields.py"
     src = fields_mod.read_text(encoding="utf-8")
     assert '"commits"' not in src and "'commits'" not in src, (
         "commits leaked into the outbound differ — it must not be a Jira-synced field"

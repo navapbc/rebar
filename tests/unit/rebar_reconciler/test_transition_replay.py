@@ -25,7 +25,7 @@ No private structure is asserted: only the recorded transition-call sequence, th
 ``result is None`` drift signal.
 
 Target module (does NOT yet exist — its absence is the correct RED state):
-``rebar_reconciler.transition_replay`` with ``recorded_status_hops(local_id, tracker)``
+``rebar.reconciler.transition_replay`` with ``recorded_status_hops(local_id, tracker)``
 and ``replay_transition(client, remote_id, local_id, target_status)``.
 """
 
@@ -38,9 +38,9 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler._errors import JiraAPIError, RetryExhaustedError
-from rebar_reconciler.adapters.jira_datacenter.transitions import IllegalTransitionError
-from rebar_reconciler.dispatch_one import update_one
+from rebar.reconciler._errors import JiraAPIError, RetryExhaustedError
+from rebar.reconciler.adapters.jira_datacenter.transitions import IllegalTransitionError
+from rebar.reconciler.dispatch_one import update_one
 
 pytestmark = pytest.mark.unit
 
@@ -49,22 +49,22 @@ pytestmark = pytest.mark.unit
 # Imported INSIDE each test (not at module top) so that, before S6 lands, each
 # replay/hops test fails INDEPENDENTLY with ``ModuleNotFoundError`` at its own call
 # site — the correct RED signal — rather than collapsing the whole file into a single
-# collection error. Once ``transition_replay`` exists, the conftest ``rebar_reconciler``
+# collection error. Once ``transition_replay`` exists, the conftest ``rebar.reconciler``
 # namespace bridge resolves these the same way it resolves every other engine submodule.
 def _replay_transition():
-    from rebar_reconciler.transition_replay import replay_transition
+    from rebar.reconciler.transition_replay import replay_transition
 
     return replay_transition
 
 
 def _recorded_status_hops():
-    from rebar_reconciler.transition_replay import recorded_status_hops
+    from rebar.reconciler.transition_replay import recorded_status_hops
 
     return recorded_status_hops
 
 
 def _replay_should_drift():
-    from rebar_reconciler.transition_replay import replay_should_drift
+    from rebar.reconciler.transition_replay import replay_should_drift
 
     return replay_should_drift
 
@@ -620,7 +620,7 @@ def test_5xx_http_error_propagates_not_drift(
     rejection), never route into replay/drift. Retry backoff is neutralised so the test
     is fast.
     """
-    import rebar_reconciler.dispatch_apply_phases as dap
+    import rebar.reconciler.dispatch_apply_phases as dap
 
     monkeypatch.setattr(dap.time, "sleep", lambda *_a, **_k: None)
     tracker = _make_tracker(tmp_path, "tkt-5xx", ["open", "in_progress", "closed"])
@@ -766,7 +766,7 @@ def test_recorded_hops_for_reads_self_resolved_store(
     replay helpers) reads the self-resolved store for a truthy ``local_id`` and returns
     ``[]`` for a falsy one (nothing to replay against).
     """
-    from rebar_reconciler.transition_replay import recorded_hops_for
+    from rebar.reconciler.transition_replay import recorded_hops_for
 
     tracker = _make_tracker(tmp_path, "tkt-hopsfor", ["open", "in_progress", "closed"])
     _point_config_at(monkeypatch, tracker)

@@ -88,7 +88,7 @@ def two_tickets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, 
 
 def test_stage1_the_differ_emits_an_add_for_an_outward_blocks_link() -> None:
     """A bound, present counterpart must yield exactly one ``blocks`` add."""
-    inbound_differ = importlib.import_module("rebar_reconciler.inbound_differ")
+    inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
 
     bindings = _FakeBindingStore({"DC-1": "local-a", "DC-2": "local-b"})
     local_a = {"ticket_id": "local-a", "deps": []}
@@ -114,7 +114,7 @@ def test_stage1_an_unbound_counterpart_is_skipped_silently() -> None:
     ``run_differs.py:240``, AFTER it — and nothing is applied until ``reconcile.py:454``. So the
     link is dropped at ``inbound_differ.py:402-404`` with no mutation, no alert, and no log.
     """
-    inbound_differ = importlib.import_module("rebar_reconciler.inbound_differ")
+    inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
 
     bindings = _FakeBindingStore({"DC-1": "local-a"})  # DC-2 deliberately unbound
     local_a = {"ticket_id": "local-a", "deps": []}
@@ -138,7 +138,7 @@ def test_stage1_a_bound_but_locally_absent_counterpart_is_skipped_silently() -> 
     ``inbound_differ.py:409-412`` then drops the link. Varying only the local-set membership
     from the passing case isolates this from the unbound case above.
     """
-    inbound_differ = importlib.import_module("rebar_reconciler.inbound_differ")
+    inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
 
     bindings = _FakeBindingStore({"DC-1": "local-a", "DC-2": "local-b"})
     local_a = {"ticket_id": "local-a", "deps": []}
@@ -160,7 +160,7 @@ def test_stage1_the_mirror_entry_on_the_far_end_emits_the_inverse() -> None:
     Both endpoints are in the snapshot on a real pass, so the differ visits both. Recording
     this explicitly because it is what makes the applier write TWO edges for one Jira link.
     """
-    inbound_differ = importlib.import_module("rebar_reconciler.inbound_differ")
+    inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
 
     bindings = _FakeBindingStore({"DC-1": "local-a", "DC-2": "local-b"})
     local_a = {"ticket_id": "local-a", "deps": []}
@@ -193,7 +193,7 @@ def test_stage2_the_applier_writes_the_dep_onto_the_source_ticket(
     import rebar
 
     repo, a, b = two_tickets
-    apply_records = importlib.import_module("rebar_reconciler.apply_inbound_records")
+    apply_records = importlib.import_module("rebar.reconciler.apply_inbound_records")
 
     applied = apply_records._inbound_update_apply_links(
         {"links": [{"action": "add", "target_id": b, "relation": "blocks"}]},
@@ -220,7 +220,7 @@ def test_stage3_applying_both_directions_of_one_jira_link_is_survivable(
     import rebar
 
     repo, a, b = two_tickets
-    apply_records = importlib.import_module("rebar_reconciler.apply_inbound_records")
+    apply_records = importlib.import_module("rebar.reconciler.apply_inbound_records")
 
     apply_records._inbound_update_apply_links(
         {"links": [{"action": "add", "target_id": b, "relation": "blocks"}]}, a, repo

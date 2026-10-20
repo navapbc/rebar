@@ -14,7 +14,7 @@ a second implementation is exactly how the MCP and CLI answers would drift apart
 from __future__ import annotations
 
 import logging
-from typing import Any, ClassVar
+from typing import Any
 
 import pytest
 
@@ -43,8 +43,6 @@ class _FakeCtx:
     """The minimum surface the read registrar reads off ctx."""
 
     logger = logging.getLogger("test")
-    MODE_CAPS: ClassVar[dict[str, Any]] = {}
-    Mode = None
 
     @staticmethod
     def readonly() -> bool:

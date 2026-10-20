@@ -5,7 +5,7 @@ planning layer (lifecycle intents, inter-ticket dependencies, caps ordering, and
 preview rendering are OUT OF SCOPE for T1 and owned by later S2 tasks). Three modules
 and one refactor are under test (the ticket's file impact):
 
-``rebar_reconciler.observation``
+``rebar.reconciler.observation``
     ``ObservationVersion(pass_id: str, fingerprint: str)`` — a frozen, hashable identity.
     ``Observation`` — a frozen, provider-neutral snapshot of one reconcile pass's inputs
     (version, local_snapshot, remote_snapshot, binding_view, mode, selection, limits,
@@ -16,7 +16,7 @@ and one refactor are under test (the ticket's file impact):
     two passes over identical data share a fingerprint while ``pass_id`` still
     distinguishes their version identity.
 
-``rebar_reconciler.ticket_plan``
+``rebar.reconciler.ticket_plan``
     ``PlanDisposition(str, Enum)`` — ``mutate`` / ``defer`` / ``noop``. T1 only ever emits
     ``mutate``; ``defer`` and ``noop`` are the reserved forward-compat surface later S2
     tasks (lifecycle/scope deferral) extend.
@@ -25,14 +25,14 @@ and one refactor are under test (the ticket's file impact):
     covers the hashable subset (identity, mutations, diagnostics, disposition,
     observation_version).
 
-``rebar_reconciler.ticket_planner``
+``rebar.reconciler.ticket_planner``
     ``plan_pass(*, pass_id, local_snapshot, remote_snapshot, binding_view, mode, selection,
     limits, mutations, diagnostics_by_target=None, plan_payload_by_target=None,
     observation_payload=None) -> tuple[Observation, tuple[TicketPlan, ...]]`` — a PURE
     function that groups the already-computed ``Mutation`` values by ``Mutation.target``
     into per-ticket plans, performing ZERO I/O.
 
-``rebar_reconciler.run_differs``
+``rebar.reconciler.run_differs``
     After it accumulates ``ctx.mutations`` (legacy, still authoritative), it attaches a
     deterministic shadow ``ctx.observation`` and ``ctx.ticket_plans`` derived purely from
     those mutations and the pass inputs — without disturbing ``ctx.mutations``.
@@ -40,49 +40,34 @@ and one refactor are under test (the ticket's file impact):
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 import types
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECON_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-if "rebar_reconciler" not in sys.modules:  # pragma: no cover - import bootstrap
-    _pkg = types.ModuleType("rebar_reconciler")
-    _pkg.__path__ = [str(RECON_DIR)]
-    sys.modules["rebar_reconciler"] = _pkg
-
-
-def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, RECON_DIR / filename)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+RECON_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def mutation_mod():
-    return _load("mutation_ticket_plan_test", "mutation.py")
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 @pytest.fixture(scope="module")
 def observation_mod():
-    return _load("observation_ticket_plan_test", "observation.py")
+    return importlib.import_module("rebar.reconciler.observation")
 
 
 @pytest.fixture(scope="module")
 def ticket_plan_mod():
-    return _load("ticket_plan_ticket_plan_test", "ticket_plan.py")
+    return importlib.import_module("rebar.reconciler.ticket_plan")
 
 
 @pytest.fixture(scope="module")
 def planner_mod():
-    return _load("ticket_planner_ticket_plan_test", "ticket_planner.py")
+    return importlib.import_module("rebar.reconciler.ticket_planner")
 
 
 # ── Fixtures: frozen, provider-neutral pass inputs ──────────────────────────────
@@ -410,14 +395,14 @@ def _drive_run_differs(run_differs_mod, monkeypatch, *, seed_mutations):
     pass; the named phase helpers then run as no-ops, leaving the seed intact.
     """
     seed = list(seed_mutations)
-    mode_mod = _load("mode_shadow_e2e", "mode.py")
+    mode_mod = importlib.import_module("rebar.reconciler.mode")
     monkeypatch.setattr(
         run_differs_mod,
         "_run_differs_invariants",
         lambda ctx: (False, set(), []),
     )
     # The suppression drops "local-state" differ arms; keep the seed intact.
-    from rebar_reconciler import reconcile_helpers as _rh_mod
+    from rebar.reconciler import reconcile_helpers as _rh_mod
 
     monkeypatch.setattr(_rh_mod, "drop_snapshot_differ_local_state_emissions", lambda m: list(m))
     for name in _STUBBED_PHASES:
@@ -448,7 +433,7 @@ def test_run_differs_attaches_deterministic_shadow_plan(monkeypatch, mutation_mo
     """run_differs attaches a shadow ``observation`` + ``ticket_plans`` derived purely from
     the accumulated mutations, WITHOUT disturbing the authoritative ``ctx.mutations``, and
     does so deterministically across two identical passes."""
-    run_differs_mod = _load("run_differs_shadow_plan_e2e", "run_differs.py")
+    run_differs_mod = importlib.import_module("rebar.reconciler.run_differs")
     seed = _mutations(mutation_mod)
 
     ctx1 = _drive_run_differs(run_differs_mod, monkeypatch, seed_mutations=seed)
@@ -486,7 +471,7 @@ def test_run_differs_shadow_plan_tolerates_legacy_dict_mutations(monkeypatch, mu
     mutations (documented dual shape — see ``_run_differs_report_schema_drift``). The
     shadow attach must not raise on the dicts, must leave ``ctx.mutations`` (dict
     included) authoritative and unchanged, and must plan only the typed items."""
-    run_differs_mod = _load("run_differs_shadow_legacy_dict", "run_differs.py")
+    run_differs_mod = importlib.import_module("rebar.reconciler.run_differs")
     legacy = {
         "action": "repair_property",
         "key": "JIRA-9",
@@ -513,7 +498,7 @@ def test_run_differs_shadow_plan_tolerates_legacy_dict_mutations(monkeypatch, mu
 
 @pytest.fixture(scope="module")
 def operation_outcome_mod():
-    return _load("operation_outcome_ticket_plan_test", "operation_outcome.py")
+    return importlib.import_module("rebar.reconciler.operation_outcome")
 
 
 def _mk(mutation_mod, direction, action, target, payload=None, provenance=None):
@@ -837,7 +822,7 @@ def test_run_differs_shadow_plan_applies_scope_exclusion(monkeypatch, mutation_m
     """E2E through the real ``run_differs``: an ``only`` selection narrows the shadow plan so
     out-of-scope targets are deferred with ``scope_deferred`` while the in-scope target is a
     mutate plan — driven at ``Mode.LIVE`` with the pre-effect exclusion still applied."""
-    run_differs_mod = _load("run_differs_shadow_scope_e2e", "run_differs.py")
+    run_differs_mod = importlib.import_module("rebar.reconciler.run_differs")
     seed = _mutations(mutation_mod)
 
     ctx = _drive_run_differs(run_differs_mod, monkeypatch, seed_mutations=seed)
@@ -987,17 +972,17 @@ def test_transitive_create_provider_cascade_blocks_dependent(planner_mod, mutati
 
 @pytest.fixture(scope="module")
 def manifest_renderer_mod():
-    return _load("rebar_reconciler.manifest_renderer", "manifest_renderer.py")
+    return importlib.import_module("rebar.reconciler.manifest_renderer")
 
 
 @pytest.fixture(scope="module")
 def apply_planning_mod():
-    return _load("rebar_reconciler.apply_planning", "apply_planning.py")
+    return importlib.import_module("rebar.reconciler.apply_planning")
 
 
 @pytest.fixture(scope="module")
 def mode_mod_t3():
-    return _load("mode_t3_preview", "mode.py")
+    return importlib.import_module("rebar.reconciler.mode")
 
 
 def _deferred_plans(planner_mod, mutation_mod, *, extra_payload=None):
@@ -1223,7 +1208,7 @@ def test_lifecycle_section_excludes_raw_payload(planner_mod, mutation_mod, manif
 def test_run_differs_attaches_matching_parity_report(monkeypatch, mutation_mod):
     """E2E: run_differs computes a shadow-vs-legacy parity report from ctx.mutations (legacy)
     vs ctx.ticket_plans (shadow) and attaches it. For a normal corpus it matches."""
-    run_differs_mod = _load("run_differs_parity_e2e", "run_differs.py")
+    run_differs_mod = importlib.import_module("rebar.reconciler.run_differs")
     seed = _mutations(mutation_mod)
     ctx = _drive_run_differs(run_differs_mod, monkeypatch, seed_mutations=seed)
 
@@ -1239,7 +1224,7 @@ def test_run_differs_parity_flags_deferred_divergence(monkeypatch, mutation_mod)
     """E2E: when a seeded mutation depends on a create that never happens, the shadow plan
     defers it (empties its mutation), so parity flags an unexpected delta naming that ticket
     and the pass observation version — without disturbing the authoritative ctx.mutations."""
-    run_differs_mod = _load("run_differs_parity_defer_e2e", "run_differs.py")
+    run_differs_mod = importlib.import_module("rebar.reconciler.run_differs")
     seed = [
         _mk(
             mutation_mod,

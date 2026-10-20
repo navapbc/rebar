@@ -11,8 +11,7 @@ Per AC comment: fresh ProvenanceLedger per pass, inline dict-merge state advance
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 
 import pytest
@@ -22,29 +21,18 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "differ.py"
-RESOLVER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "conflict_resolver.py"
-)
-
-
-def _load(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "differ.py"
+RESOLVER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "conflict_resolver.py"
 
 
 @pytest.fixture(scope="module")
 def differ():
-    return _load(DIFFER_PATH, "differ_matrix_tests")
+    return importlib.import_module("rebar.reconciler.differ")
 
 
 @pytest.fixture(scope="module")
 def resolver():
-    return _load(RESOLVER_PATH, "conflict_resolver_matrix_tests")
+    return importlib.import_module("rebar.reconciler.conflict_resolver")
 
 
 # ---------------------------------------------------------------------------
