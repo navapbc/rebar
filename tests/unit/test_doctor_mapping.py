@@ -12,10 +12,10 @@ import time
 from pathlib import Path
 
 import pytest
-from rebar_reconciler import config as cfg_mod
 
 from rebar import config as user_cfg
 from rebar._commands import doctor, doctor_mapping
+from rebar.reconciler import config as cfg_mod
 
 pytestmark = pytest.mark.unit
 
@@ -227,7 +227,7 @@ def test_portability_guard_absent_extra_single_unavailable(
         lambda key: called.append(key) or False,
     )
     # If the guard were bypassed, the probe factory would be reached — make that fatal.
-    from rebar_reconciler import mapping_probe
+    from rebar.reconciler import mapping_probe
 
     def _boom(*_a: object, **_k: object) -> object:
         raise AssertionError("probe must not be built when the extra is absent")
@@ -274,9 +274,8 @@ def test_degradation_config_error_folds_to_unavailable(
     finding, never raises.
     """
     monkeypatch.setattr("rebar._optional.capability_installed", lambda key: True)
-    from rebar_reconciler import mapping_probe
-
     from rebar._config_coercion import ConfigError
+    from rebar.reconciler import mapping_probe
 
     def _raise(*_a: object, **_k: object) -> object:
         raise ConfigError("malformed [tool.rebar.reconciler]")
@@ -299,7 +298,7 @@ def test_degradation_slow_probe_times_out_to_unavailable(
     """
     monkeypatch.setattr("rebar._optional.capability_installed", lambda key: True)
     monkeypatch.setattr(doctor_mapping, "_PROBE_TIMEOUT_S", 0.2, raising=False)
-    from rebar_reconciler import mapping_probe
+    from rebar.reconciler import mapping_probe
 
     def _hang(*_a: object, **_k: object) -> object:
         time.sleep(5.0)
@@ -345,7 +344,7 @@ def test_live_drift_per_axis_divergence(tmp_path: Path, monkeypatch: pytest.Monk
     probe never observes ``hierarchyLevel``.)
     """
     monkeypatch.setattr("rebar._optional.capability_installed", lambda key: True)
-    from rebar_reconciler import mapping_probe
+    from rebar.reconciler import mapping_probe
 
     monkeypatch.setattr(
         mapping_probe, "build_probe", lambda *a, **k: _DivergentPort(), raising=False
@@ -404,7 +403,7 @@ def test_link_probe_failure_degrades_link_axis_not_drift(
     other axes are still diffed (a bogus status still errors), and the link-axis
     degradation alone never blocks."""
     monkeypatch.setattr("rebar._optional.capability_installed", lambda key: True)
-    from rebar_reconciler import mapping_probe
+    from rebar.reconciler import mapping_probe
 
     monkeypatch.setattr(
         mapping_probe, "build_probe", lambda *a, **k: _LinkAxisFailedPort(), raising=False
@@ -435,7 +434,7 @@ def test_link_probe_failure_alone_is_not_blocking(
     """With an otherwise-clean config, a link-types could-not-check degrades to the
     distinct ``unavailable`` finding and contributes NO error — zero-exit territory."""
     monkeypatch.setattr("rebar._optional.capability_installed", lambda key: True)
-    from rebar_reconciler import mapping_probe
+    from rebar.reconciler import mapping_probe
 
     monkeypatch.setattr(
         mapping_probe, "build_probe", lambda *a, **k: _LinkAxisFailedPort(), raising=False
@@ -459,7 +458,7 @@ def test_genuinely_empty_link_vocabulary_still_drifts(
     valid observation, NOT a degradation: a configured link value must still surface as
     a drift error. Guards the checked-and-empty vs could-not-check distinction."""
     monkeypatch.setattr("rebar._optional.capability_installed", lambda key: True)
-    from rebar_reconciler import mapping_probe
+    from rebar.reconciler import mapping_probe
 
     monkeypatch.setattr(
         mapping_probe, "build_probe", lambda *a, **k: _LinkAxisEmptyPort(), raising=False

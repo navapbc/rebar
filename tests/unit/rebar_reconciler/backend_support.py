@@ -6,14 +6,14 @@ BOTH the real ``JiraBackend`` (with an injected fake transport) and an in-memory
 in the held-out characterization tests.
 
 The engine dir is placed on ``sys.path`` by the package conftest, so the reconciler
-modules import flat (``from rebar_reconciler import ...``).
+modules import flat (``from rebar.reconciler import ...``).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from rebar_reconciler._backend import RemoteRef
+from rebar.reconciler._backend import RemoteRef
 
 
 class FakeTransport:

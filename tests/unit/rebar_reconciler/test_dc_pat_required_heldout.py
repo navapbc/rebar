@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler._backend import BackendEnvError
-from rebar_reconciler.adapters.jira_datacenter import settings as dc_settings
-from rebar_reconciler.adapters.jira_datacenter import transport as dc_transport
+from rebar.reconciler._backend import BackendEnvError
+from rebar.reconciler.adapters.jira_datacenter import settings as dc_settings
+from rebar.reconciler.adapters.jira_datacenter import transport as dc_transport
 
 
 def _settings(pat: str) -> dc_settings.JiraDataCenterSettings:
@@ -99,7 +99,7 @@ def test_settings_resolution_stays_total_for_protocol_checks(monkeypatch) -> Non
     """
     monkeypatch.delenv("JIRA_PAT", raising=False)
 
-    from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+    from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
     class _FakeTransport:
         project = "REB"

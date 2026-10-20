@@ -10,14 +10,13 @@ one-shot removal (WS4). It is NOT an invocability proof — that lives in the si
 outcome.
 """
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 # The exact (direction, action) pairs the registry must expose after the legacy
 # bridge deletion. Pinned here so a leaf silently dropped from the routing table
@@ -45,18 +44,9 @@ EXPECTED_LEAF_PAIRS = frozenset(
 )
 
 
-def _load_module(path, name):
-    spec = importlib.util.spec_from_file_location(name, path)
-    m = importlib.util.module_from_spec(spec)
-    # Register in sys.modules so dataclass __module__ resolution works.
-    sys.modules[name] = m
-    spec.loader.exec_module(m)
-    return m
-
-
 @pytest.fixture(scope="module")
 def applier():
-    return _load_module(APPLIER_PATH, "applier")
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 def test_leaves_registry_linkage_intact(applier):

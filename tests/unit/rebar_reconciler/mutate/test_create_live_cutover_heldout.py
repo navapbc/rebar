@@ -8,23 +8,22 @@ and the legacy rollback path remains unchanged.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import subprocess
-import sys
 import types
 import urllib.error
 from pathlib import Path
 
 import pytest
 
-from rebar_reconciler.apply_handlers import BatchApplyContext, dispatch_mutation, handle_create
-from rebar_reconciler.binding_store import BindingPersistError, BindingStore
+from rebar.reconciler.apply_handlers import BatchApplyContext, dispatch_mutation, handle_create
+from rebar.reconciler.binding_store import BindingPersistError, BindingStore
 
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 # ── Fakes ─────────────────────────────────────────────────────────────────────
@@ -322,12 +321,7 @@ def _init_git_repo(path: Path) -> None:
 
 
 def _load_applier(name: str):
-    spec = importlib.util.spec_from_file_location(name, APPLIER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 def _read_manifest(path: Path) -> dict:

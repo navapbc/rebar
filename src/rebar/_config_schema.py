@@ -513,7 +513,7 @@ class ReconcilerConfig:
     )
     # Which vendor backend the reconciler drives (ADR 0035 §(d) vendor-adapter seam,
     # epic bbf1). Selects the adapter via the in-tree backend registry
-    # (rebar_reconciler._backend_registry.select_backend). Only "jira" exists today;
+    # (rebar.reconciler._backend_registry.select_backend). Only "jira" exists today;
     # a second backend widens the choice-set here when it lands (epic be74). The
     # REBAR_RECONCILER_BACKEND env override is auto-derived from this field.
     backend: str = _documented(
@@ -523,7 +523,7 @@ class ReconcilerConfig:
     # Lease (seconds) the ref-backend pass-lock holds; the heartbeat renews at
     # max(1, lease // 3). Consumed by the refs/reconciler/* CAS lock (epic
     # dust-troth-naval / ADR 0031), the only pass-lock backend.
-    # read-via: _engine/rebar_reconciler/_advisory_lock.py getattr
+    # read-via: reconciler/_advisory_lock.py getattr
     lock_lease_secs: int = _documented(
         120,
         "Sets how long the reconciler pass lock remains valid before renewal or takeover.",
@@ -652,7 +652,7 @@ class TrackerConfig:
         "Sets the worktree or symlink directory containing the ticket event store.",
     )
     # Consumers call config.tickets_branch() instead of reading this field: _commands/fsck.py,
-    # _commands/init.py, _engine/rebar_reconciler/_concurrency.py, opcert_service/workspace.py.
+    # _commands/init.py, reconciler/_concurrency.py, opcert_service/workspace.py.
     # read-via: config.py tickets_branch()
     branch: str = _documented(
         "tickets",

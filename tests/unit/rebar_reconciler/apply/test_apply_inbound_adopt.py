@@ -15,28 +15,18 @@ purely against a real BindingStore + a tmp tracker dir.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 
-_SRC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_SRC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler"
 
 
-def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, _SRC / filename)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-_apply_inbound = _load("_apply_inbound_adopt_ut", "apply_inbound.py")
-_mutation = _load("_mutation_adopt_ut", "mutation.py")
-_bs = _load("_binding_store_adopt_ut", "binding_store.py")
-_walk = _load("_binding_walk_adopt_ut", "binding_walk.py")
-_classify = _load("_classify_adopt_ut", "classify.py")
-_ob = _load("_ob_adopt_ut", "outbound_differ.py")
+_apply_inbound = importlib.import_module("rebar.reconciler.apply_inbound")
+_mutation = importlib.import_module("rebar.reconciler.mutation")
+_bs = importlib.import_module("rebar.reconciler.binding_store")
+_walk = importlib.import_module("rebar.reconciler.binding_walk")
+_classify = importlib.import_module("rebar.reconciler.classify")
+_ob = importlib.import_module("rebar.reconciler.outbound_differ")
 BindingStore = _bs.BindingStore
 
 

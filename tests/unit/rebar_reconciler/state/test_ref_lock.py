@@ -7,9 +7,8 @@ by file to preserve the standalone reconciler boundary.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import subprocess
-import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -17,29 +16,20 @@ import pytest
 from _git_upkeep import init_bare_remote
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-REF_LOCK_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_ref_lock.py"
-ADVISORY_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_advisory_lock.py"
-
-
-def _load(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+REF_LOCK_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "_ref_lock.py"
+ADVISORY_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "_advisory_lock.py"
 
 
 @pytest.fixture(scope="module")
 def ref_lock() -> ModuleType:
     if not REF_LOCK_PATH.exists():
         pytest.fail(f"_ref_lock.py not found at {REF_LOCK_PATH}")
-    return _load("rebar_reconciler_ref_lock", REF_LOCK_PATH)
+    return importlib.import_module("rebar.reconciler._ref_lock")
 
 
 @pytest.fixture(scope="module")
 def advisory() -> ModuleType:
-    return _load("rebar_reconciler_advisory_lock", ADVISORY_PATH)
+    return importlib.import_module("rebar.reconciler._advisory_lock")
 
 
 def _git(args: list[str], repo: Path) -> subprocess.CompletedProcess:

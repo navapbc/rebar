@@ -29,10 +29,10 @@ import urllib.error
 
 import pytest
 
-from rebar_reconciler import _backend
-from rebar_reconciler._backend import TicketTransport
+from rebar.reconciler import _backend
+from rebar.reconciler._backend import TicketTransport
 
-_REC = pathlib.Path(__file__).resolve().parents[3] / "src/rebar/_engine/rebar_reconciler"
+_REC = pathlib.Path(__file__).resolve().parents[3] / "src/rebar/reconciler"
 
 #: Every member absent from the DC transport before this story, measured by AST audit.
 _REQUIRED = [
@@ -52,7 +52,7 @@ _REQUIRED = [
 
 
 def _dc_transport_class():
-    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+    from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
     return JiraDataCenterTransport
 
@@ -170,7 +170,7 @@ def test_the_audit_catches_value_form_references() -> None:
 def test_identity_of_prefers_accountId_over_name() -> None:
     """HELD-OUT edge, load-bearing. `account_id` must receive `accountId or name` in THAT
     order. Reversed, every Cloud user silently re-identifies to their username."""
-    from rebar_reconciler.inbound_fields import _identity_of
+    from rebar.reconciler.inbound_fields import _identity_of
 
     assert _identity_of({"accountId": "557058:abc", "displayName": "C"})["account_id"] == (
         "557058:abc"
@@ -196,7 +196,7 @@ def test_validate_assignee_exists_returns_the_dc_username(monkeypatch) -> None:
     asserts `hasattr`, so a `hasattr` check adds nothing. This one CALLS the member and
     pins the returned VALUE, which is the part that flows on as the identity.
     """
-    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+    from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
     class _MatchingClient:
         """Exact match on `name`, with an accountId also present on the record —
@@ -236,7 +236,7 @@ def test_cloud_validate_assignee_exists_returns_the_account_id_not_the_username(
     resolved identity is the `accountId`, not the display name or email. Asserting only
     the DC half would leave the divergence itself untested — and the two implementations
     are the pair most likely to be "harmonised" by mistake."""
-    from rebar_reconciler.adapters.jira.acli import AcliClient
+    from rebar.reconciler.adapters.jira.acli import AcliClient
 
     client = AcliClient.__new__(AcliClient)
     client._direct_rest_get = lambda _path: [  # type: ignore[method-assign]
@@ -262,7 +262,7 @@ def test_cloud_validate_assignee_exists_returns_the_account_id_not_the_username(
 def test_dc_transport_has_a_logger() -> None:
     """HELD-OUT edge. transport.py had NO logging at all, which is precisely why a failure
     in a swallowed member surfaced nothing. Without a logger there is no channel."""
-    from rebar_reconciler.adapters.jira_datacenter import transport as dc_transport
+    from rebar.reconciler.adapters.jira_datacenter import transport as dc_transport
 
     assert isinstance(getattr(dc_transport, "logger", None), logging.Logger), (
         "the DC transport has no module logger, so member failures cannot be observed"
@@ -288,7 +288,7 @@ def test_get_parent_map_survives_server_side_maxresults_truncation() -> None:
 
     Advance by what the server ACTUALLY returned; stop only on an empty page.
     """
-    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+    from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
     class _TruncatingClient:
         """Serves 250 issues but caps every page at 20, whatever is requested."""
@@ -328,7 +328,7 @@ class _StubTransport:
 
 
 def _REQUIRED_TRANSPORT_MEMBERS_LIVE():
-    from rebar_reconciler._backend import _REQUIRED_TRANSPORT_MEMBERS
+    from rebar.reconciler._backend import _REQUIRED_TRANSPORT_MEMBERS
 
     return _REQUIRED_TRANSPORT_MEMBERS
 
@@ -336,7 +336,7 @@ def _REQUIRED_TRANSPORT_MEMBERS_LIVE():
 def test_the_conformance_guard_rejects_a_transport_missing_a_member() -> None:
     """HELD-OUT edge. Declaring members on the port only helps if something CHECKS at
     the moment a backend is assembled. The failure must name the missing member."""
-    from rebar_reconciler._backend import BackendEnvError, assert_transport_conforms
+    from rebar.reconciler._backend import BackendEnvError, assert_transport_conforms
 
     complete = _StubTransport()
     assert_transport_conforms(complete, vendor="test")  # conforming: must not raise
@@ -356,10 +356,10 @@ def test_the_dc_factory_asserts_conformance_at_construction(monkeypatch) -> None
     the exact shape of the original defect, where the port described members nothing
     enforced. Proven by making the factory build an INCOMPLETE transport and asserting
     construction fails BEFORE a JiraDataCenterBackend is returned."""
-    from rebar_reconciler import _backend as backend_mod
-    from rebar_reconciler.adapters.jira_datacenter import backend as dc_backend
-    from rebar_reconciler.adapters.jira_datacenter import settings as dc_settings
-    from rebar_reconciler.adapters.jira_datacenter import transport as dc_transport
+    from rebar.reconciler import _backend as backend_mod
+    from rebar.reconciler.adapters.jira_datacenter import backend as dc_backend
+    from rebar.reconciler.adapters.jira_datacenter import settings as dc_settings
+    from rebar.reconciler.adapters.jira_datacenter import transport as dc_transport
 
     class _Incomplete:
         def __init__(self, **kw) -> None:
@@ -383,9 +383,9 @@ def test_the_dc_factory_asserts_conformance_at_construction(monkeypatch) -> None
 def test_the_cloud_factory_also_asserts_conformance(monkeypatch) -> None:
     """HELD-OUT edge. The port states what the CORE requires, so it binds every vendor.
     Guarding only the new backend would leave Cloud free to regress silently."""
-    from rebar_reconciler import _backend as backend_mod
-    from rebar_reconciler.adapters.jira import acli, acli_subprocess
-    from rebar_reconciler.adapters.jira import backend as cloud_backend
+    from rebar.reconciler import _backend as backend_mod
+    from rebar.reconciler.adapters.jira import acli, acli_subprocess
+    from rebar.reconciler.adapters.jira import backend as cloud_backend
 
     class _Incomplete:
         def __init__(self, **kw) -> None:
@@ -411,9 +411,9 @@ def test_the_real_transports_both_satisfy_the_guard() -> None:
     """TEETH for the two tests above: a guard that rejected the REAL transports would
     make every backend unbuildable, so this pins that the guard is correct as well as
     present. If this fails, the shipped product cannot construct a backend at all."""
-    from rebar_reconciler._backend import assert_transport_conforms
-    from rebar_reconciler.adapters.jira.acli import AcliClient
-    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+    from rebar.reconciler._backend import assert_transport_conforms
+    from rebar.reconciler.adapters.jira.acli import AcliClient
+    from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
     for cls, vendor in ((AcliClient, "jira"), (JiraDataCenterTransport, "jira-datacenter")):
         assert_transport_conforms(cls, vendor=vendor)
@@ -430,7 +430,7 @@ def test_a_failing_member_emits_a_warning_naming_member_and_remote_id(caplog) ->
     this WARNING is the only signal those paths ever produce. An observability
     requirement with no test asserting emission is exactly the "absence of errors is not
     evidence" trap."""
-    from rebar_reconciler.adapters.jira_datacenter import transport as dc_transport
+    from rebar.reconciler.adapters.jira_datacenter import transport as dc_transport
 
     def _boom():
         raise RuntimeError("the remote said no")
@@ -451,7 +451,7 @@ def test_set_entity_property_passes_key_and_value_through_intact() -> None:
     error" is not evidence here. Assert the property key and the value reach the REST
     layer verbatim — a mangled key silently orphans the local_id correlation that
     keyless-pending recovery depends on."""
-    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+    from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
     seen: list[tuple] = []
 
@@ -475,7 +475,7 @@ def test_validate_assignee_exists_raises_assignee_not_found_on_a_definitive_miss
     NotImplementedError above all — silently downgrades EVERY DC assignee resolution to
     the non-authoritative string-match fallback, permanently. So the error TYPE is the
     contract, not merely that it raises."""
-    from rebar_reconciler.adapters.jira_datacenter.transport import (
+    from rebar.reconciler.adapters.jira_datacenter.transport import (
         AssigneeNotFoundError,
         JiraDataCenterTransport,
     )
@@ -502,8 +502,8 @@ def test_a_successful_dc_reporter_write_leaves_the_next_differ_pass_clean(monkey
     `_resolve_reporter_account_id` asks for. If it does not, `_diff_reporter` emits a
     reporter mutation on EVERY pass — a write loop that converges never, while each
     individual write reports success."""
-    from rebar_reconciler import outbound_field_diff
-    from rebar_reconciler.inbound_fields import _identity_of
+    from rebar.reconciler import outbound_field_diff
+    from rebar.reconciler.inbound_fields import _identity_of
 
     # The local reporter resolves to the DC username (DC identities are minted under it).
     monkeypatch.setattr(outbound_field_diff, "_resolve_reporter_account_id", lambda r: "dcuser")

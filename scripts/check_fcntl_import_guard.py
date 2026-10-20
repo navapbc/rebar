@@ -35,7 +35,7 @@ What is FLAGGED — an *unconditional* module-scope ``import fcntl`` / ``from fc
   idiom this gate exists to require;
 * an import inside an **``if``/``else``** branch — a platform guard such as
   ``if sys.platform != "win32": import fcntl / else: fcntl = None`` is equally
-  collection-safe (see ``rebar._engine.rebar_reconciler.alert_store``);
+  collection-safe (see ``rebar.reconciler.alert_store``);
 * a line carrying the sanction marker ``# fcntl-guard-ok: <reason>`` (reason MANDATORY) — for
   a genuinely collection-safe module-scope import the AST cannot otherwise prove safe.
 """

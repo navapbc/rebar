@@ -82,7 +82,7 @@ def test_lean_workflow_runtime_pulls_no_heavy_stack() -> None:
         import rebar.llm.workflow.lint
         import rebar.grounding
         sys.path.insert(0, {_ENGINE_DIR!r})
-        import rebar_reconciler.runtime as reconciler_runtime
+        import rebar.reconciler.runtime as reconciler_runtime
 
         first_auth = reconciler_runtime.StaticAuth("first-secret")
         second_auth = reconciler_runtime.StaticAuth("second-secret")

@@ -27,7 +27,7 @@ def test_bridge_preview_launches_primary_engine_subcommand(rebar_repo: Path, mon
     assert argv == [
         sys.executable,
         "-m",
-        "rebar_reconciler",
+        "rebar.reconciler",
         "preview",
         "--repo-root",
         str(rebar_repo),
@@ -53,7 +53,7 @@ def test_bridge_sync_forwards_primary_operational_options(rebar_repo: Path, monk
         [
             sys.executable,
             "-m",
-            "rebar_reconciler",
+            "rebar.reconciler",
             "sync",
             "--max-changes",
             "10",

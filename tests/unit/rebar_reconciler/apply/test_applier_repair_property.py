@@ -13,8 +13,7 @@ routes to invariants in the next iteration.
 from __future__ import annotations
 
 import ast
-import importlib.util
-import sys
+import importlib
 import types
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -22,16 +21,11 @@ from unittest.mock import MagicMock
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location("applier", APPLIER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["applier"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
@@ -177,10 +171,10 @@ def _guard_scanned_sources() -> dict[str, str]:
         sources[name] = path.read_text()
         for module in _imported_module_paths(ast.parse(sources[name])):
             tail = module.rsplit(".", 1)[-1]
-            # Only follow siblings inside rebar_reconciler, and never follow invariants
+            # Only follow siblings inside rebar.reconciler, and never follow invariants
             # itself — its own imports are not the applier's import direction.
             is_sibling = (
-                module.startswith(("rebar_reconciler.", "."))
+                module.startswith(("rebar.reconciler.", "."))
                 or (_RECONCILER_DIR / f"{tail}.py").is_file()
             )
             if is_sibling and tail != "invariants":
@@ -193,7 +187,7 @@ def _invariants_imports(sources: dict[str, str]) -> list[str]:
 
     An AST scan rather than a line-prefix match: the prefixes only ever caught relative and
     bare spellings, while the applier family imports absolutely
-    (`from rebar_reconciler.invariants import ...`). Scanning the parsed tree also means a
+    (`from rebar.reconciler.invariants import ...`). Scanning the parsed tree also means a
     comment or docstring naming `invariants` stays legal — several of these modules discuss
     the contract in prose.
     """
@@ -258,8 +252,8 @@ def test_the_guard_scans_the_module_that_holds_the_repair_leaf():
 
 _SYNTHETIC_OFFENDER_SRC = '''
 """A module that mentions invariants in prose — which stays legal."""
-from rebar_reconciler.invariants import check_schema
-from rebar_reconciler.differ import diff
+from rebar.reconciler.invariants import check_schema
+from rebar.reconciler.differ import diff
 
 
 def go():
@@ -298,7 +292,7 @@ def test_the_guard_would_catch_an_invariants_import_outside_the_facade():
     assert leaf != "applier", "precondition: the repair leaf lives outside the facade"
 
     mutated = dict(sources)
-    mutated[leaf] = "from rebar_reconciler.invariants import check_schema\n" + mutated[leaf]
+    mutated[leaf] = "from rebar.reconciler.invariants import check_schema\n" + mutated[leaf]
     offenders = _invariants_imports(mutated)
     assert any(o.startswith(f"{leaf}:") for o in offenders), (
         f"an invariants import planted in {leaf}.py went unreported (offenders: "

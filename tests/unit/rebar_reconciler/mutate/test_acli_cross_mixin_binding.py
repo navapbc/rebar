@@ -9,9 +9,8 @@ both the former monolith and the split mixins.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -21,30 +20,12 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
-ACLI_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "acli.py"
-
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-
-
-def _bootstrap_pkg() -> None:
-    """Register the rebar_reconciler package so by-path acli load resolves siblings."""
-    if "rebar_reconciler" not in sys.modules:
-        import types as _types
-
-        pkg = _types.ModuleType("rebar_reconciler")
-        pkg.__path__ = [str(SCRIPTS_DIR / "rebar_reconciler")]
-        sys.modules["rebar_reconciler"] = pkg
+ACLI_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "acli.py"
 
 
 @pytest.fixture(scope="module")
 def acli_mod() -> ModuleType:
-    _bootstrap_pkg()
-    spec = importlib.util.spec_from_file_location("acli_xmixin_under_test", ACLI_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return importlib.import_module("rebar.reconciler.adapters.jira.acli")
 
 
 @pytest.fixture

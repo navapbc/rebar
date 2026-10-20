@@ -11,16 +11,13 @@ bounds, and ADR 0103 ownership.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
 _ENGINE = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine"
-if str(_ENGINE) not in sys.path:  # pragma: no cover - import bootstrap
-    sys.path.insert(0, str(_ENGINE))
 
-from rebar_reconciler.apply_handlers import BatchApplyContext, handle_update  # noqa: E402
-from rebar_reconciler.operation_outcome import (  # noqa: E402
+from rebar.reconciler.apply_handlers import BatchApplyContext, handle_update  # noqa: E402
+from rebar.reconciler.operation_outcome import (  # noqa: E402
     DelaySource,
     Disposition,
     FailureScope,
@@ -135,9 +132,9 @@ import os  # noqa: E402
 
 import pytest  # noqa: E402
 
-import rebar_reconciler.dispatch_one as _dispatch_one  # noqa: E402
-from rebar_reconciler.apply_handlers import HandlerResult  # noqa: E402
-from rebar_reconciler.operation_outcome import bound_diagnostics  # noqa: E402
+import rebar.reconciler.dispatch_one as _dispatch_one  # noqa: E402
+from rebar.reconciler.apply_handlers import HandlerResult  # noqa: E402
+from rebar.reconciler.operation_outcome import bound_diagnostics  # noqa: E402
 
 
 def _mixed_mutation(local_id: str = "loc-1") -> dict:
@@ -193,7 +190,7 @@ def test_selected_summary_route_does_not_touch_generic_retry(
     # Poison the generic retry wrapper at BOTH the source definition AND the
     # dispatch_one re-export, so a violating route is caught no matter which import
     # path it reaches the wrapper through.
-    import rebar_reconciler.dispatch_apply_phases as _dap
+    import rebar.reconciler.dispatch_apply_phases as _dap
 
     monkeypatch.setattr(_dispatch_one, "_call_with_retry", poison)
     monkeypatch.setattr(_dap, "_call_with_retry", poison)

@@ -43,7 +43,6 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -51,22 +50,12 @@ from typing import Any
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-ENGINE = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
+ENGINE = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 CHILD_KEY = "DC-1"
 PARENT_KEY = "DC-2"
 CHILD_LOCAL = "local-child"
 PARENT_LOCAL = "local-parent"
-
-
-def _load(name: str, filename: str) -> ModuleType:
-    """Load an engine module by path — the loader convention of this test directory."""
-    spec = importlib.util.spec_from_file_location(name, ENGINE / filename)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +173,7 @@ def _snapshot() -> dict[str, dict[str, Any]]:
     introduced — the Epic-Link-cleared state the live harness observed. Hand-poking
     ``"parent": None`` onto the entry would let the snapshot shape drift away from production.
     """
-    fetcher = importlib.import_module("rebar_reconciler.fetcher")
+    fetcher = importlib.import_module("rebar.reconciler.fetcher")
     base = {
         CHILD_KEY: _remote_fields("child", "Task"),
         PARENT_KEY: _remote_fields("parent", "Epic"),
@@ -194,12 +183,12 @@ def _snapshot() -> dict[str, dict[str, Any]]:
 
 @pytest.fixture(scope="module")
 def outbound_differ() -> ModuleType:
-    return _load("outbound_differ_bidir_37e7", "outbound_differ.py")
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 @pytest.fixture(scope="module")
 def backend() -> Any:
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     return JiraBackend(transport=object())
 
@@ -320,7 +309,7 @@ def test_inbound_clear_survives_a_real_bidirectional_pass(
     bidirectional pass while its entire unit suite stayed green, because every one of those cells
     either omits outbound context or supplies a hand-built stand-in for it.
     """
-    inbound_differ = importlib.import_module("rebar_reconciler.inbound_differ")
+    inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
 
     outbound_raw = _run_outbound(outbound_differ, backend)
     ob_fields = _outbound_fields_for(outbound_raw, CHILD_KEY)

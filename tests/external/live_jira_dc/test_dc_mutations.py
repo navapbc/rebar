@@ -548,9 +548,8 @@ def test_outbound_create_stamps_both_provenance_markers(
     legacy hyphen form is insufficient. Read both via raw REST, outside the writing abstraction,
     to detect an incorrectly wrapped property that the same transport might re-read consistently.
     """
-    from rebar_reconciler.binding_store import load_binding_store
-
     import rebar
+    from rebar.reconciler.binding_store import load_binding_store
 
     title = _uniq("rebar J11 outbound create")
     local_id = rebar.create_ticket("task", title, repo_root=dc_store_copy_repo)
@@ -701,8 +700,8 @@ def test_inbound_link_round_trips(
     link translation precedes binding adoption and skips unresolved or dormant targets. Link
     removal is asserted independently below.
     """
-    from rebar_reconciler.binding_store import load_binding_store
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+    from rebar.reconciler.binding_store import load_binding_store
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     local_id, key = bound_dc_issue
     other = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 link target"))
@@ -777,8 +776,8 @@ def test_inbound_delete_link_round_trips(
     evidence because the bridge soft-fails. This remains expected-red while inbound link diffing
     is add-only, unlike the outbound removal path; do not invert the oracle to preserve that gap.
     """
-    from rebar_reconciler.binding_store import load_binding_store
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+    from rebar.reconciler.binding_store import load_binding_store
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     local_id, key = bound_dc_issue
     other = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 unlink target"))
@@ -848,10 +847,9 @@ def test_outbound_link_round_trips(
 
     This cell covers only addition; the independent removal cell proves add then absence.
     """
-    from rebar_reconciler.binding_store import load_binding_store
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
-
     import rebar
+    from rebar.reconciler.binding_store import load_binding_store
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     local_id, key = bound_dc_issue
     other = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 outlink target"))
@@ -894,10 +892,9 @@ def test_outbound_delete_link_round_trips(
     Prove the add as setup, then assert absence through a direct instance read. Exit status and
     the best-effort removal payload cannot establish the remote post-state.
     """
-    from rebar_reconciler.binding_store import load_binding_store
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
-
     import rebar
+    from rebar.reconciler.binding_store import load_binding_store
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     local_id, key = bound_dc_issue
     other = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 outunlink target"))
@@ -1064,10 +1061,9 @@ def test_outbound_epic_parent_reaches_dc_THROUGH_A_RECONCILE_PASS(
     an ``epic`` so the emit guard includes it, then verifies the Epic Link independently through
     raw REST. An unexpected local type is a setup failure, not evidence about application.
     """
-    from rebar_reconciler.binding_store import load_binding_store
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
-
     import rebar
+    from rebar.reconciler.binding_store import load_binding_store
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     epic_field = _epic_link_field_id(dc_request)
     if epic_field is None:
@@ -1140,10 +1136,9 @@ def test_a_repeat_pass_over_a_converged_epic_parent_plans_nothing(
     agreement is its own path. Wait until the production, index-backed parent map sees the attach
     before requiring an empty repeat plan, so lag cannot be mistaken for churn.
     """
-    from rebar_reconciler.binding_store import load_binding_store
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
-
     import rebar
+    from rebar.reconciler.binding_store import load_binding_store
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     epic_field = _epic_link_field_id(dc_request)
     if epic_field is None:
@@ -1331,8 +1326,8 @@ def test_inbound_set_parent_round_trips(
     Epic Link, wait on the production parent map, then assert the real pass adopts the bound
     parent locally.
     """
-    from rebar_reconciler.binding_store import load_binding_store
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+    from rebar.reconciler.binding_store import load_binding_store
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     epic_field = _epic_link_field_id(dc_request)
     if epic_field is None:
@@ -1416,8 +1411,8 @@ def test_inbound_clear_parent_round_trips(
     a separate pin. The supported case is observable because ``get_parent_map`` also reads the
     Epic Link fallback; prove the attach before clearing it.
     """
-    from rebar_reconciler.binding_store import load_binding_store
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+    from rebar.reconciler.binding_store import load_binding_store
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     epic_field = _epic_link_field_id(dc_request)
     if epic_field is None:
@@ -1530,10 +1525,9 @@ def test_outbound_clear_parent_round_trips(
     relation—the provenance required for removal propagation. Prove the attach landed, detach
     locally, and verify absence by raw REST outside the writer.
     """
-    from rebar_reconciler.binding_store import load_binding_store
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
-
     import rebar
+    from rebar.reconciler.binding_store import load_binding_store
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     epic_field = _epic_link_field_id(dc_request)
     if epic_field is None:
@@ -1623,10 +1617,9 @@ def test_outbound_unrepresentable_parent_is_REPORTED_rather_than_silently_droppe
     Raw REST must also show neither ``fields.parent`` nor Epic Link was written. This complements
     the direct transport-refusal cell by asserting the user-visible pass outcome.
     """
-    from rebar_reconciler.binding_store import load_binding_store
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
-
     import rebar
+    from rebar.reconciler.binding_store import load_binding_store
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     # Resolved up front because the "nothing was written" oracle below reads it: the Epic Link
     # is the field a write for THIS child shape would actually land in, so without it that

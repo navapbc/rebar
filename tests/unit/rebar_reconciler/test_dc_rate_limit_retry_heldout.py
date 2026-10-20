@@ -13,10 +13,10 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler._backend import BackendHTTPError
-from rebar_reconciler._errors import MAX_BACKOFF_S
-from rebar_reconciler.adapters.jira_datacenter import retry as _retry
-from rebar_reconciler.adapters.jira_datacenter import transport as _t
+from rebar.reconciler._backend import BackendHTTPError
+from rebar.reconciler._errors import MAX_BACKOFF_S
+from rebar.reconciler.adapters.jira_datacenter import retry as _retry
+from rebar.reconciler.adapters.jira_datacenter import transport as _t
 
 
 class _FakeResponse:

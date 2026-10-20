@@ -230,7 +230,7 @@ def test_make_lint_invokes_the_gate() -> None:
 def test_the_only_sanctioned_sites_are_the_resolver_seam_and_the_pkg_parent() -> None:
     """The sanction exists for a genuine non-checkout package-location derivation, never as a
     place to park a fix. Exactly two real-tree sites may carry a marker on a ``.parents[`` line:
-    ``config.py`` (the validated resolver seam) and ``rebar_reconciler/__main__.py`` (the
+    ``config.py`` (the validated resolver seam) and ``reconciler/__main__.py`` (the
     sys.path package parent). A third sanctioned site is a regression of the drained class.
     """
     sanctioned_files: set[str] = set()
@@ -244,5 +244,5 @@ def test_the_only_sanctioned_sites_are_the_resolver_seam_and_the_pkg_parent() ->
                 sanctioned_files.add(str(path.relative_to(_REPO_ROOT)))
     assert sanctioned_files == {
         "src/rebar/config.py",
-        "src/rebar/_engine/rebar_reconciler/__main__.py",
+        "src/rebar/reconciler/__main__.py",
     }, f"unexpected sanctioned package-location site(s): {sorted(sanctioned_files)}"

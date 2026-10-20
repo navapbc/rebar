@@ -11,42 +11,27 @@ sleep_fn and fail-closed-on-exception contract.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 import time
-import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RECON_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
+RECON_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 # Ensure the package shim so __main__/_advisory_lock resolve sibling imports.
-if "rebar_reconciler" not in sys.modules:
-    _pkg = types.ModuleType("rebar_reconciler")
-    _pkg.__path__ = [str(RECON_DIR)]
-    sys.modules["rebar_reconciler"] = _pkg
-
-
-def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, RECON_DIR / filename)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
 
 
 @pytest.fixture(scope="module")
 def main_mod():
-    return _load("reconciler_main_locksteal", "__main__.py")
+    return importlib.import_module("rebar.reconciler.__main__")
 
 
 @pytest.fixture(scope="module")
 def advisory_mod():
-    return _load("advisory_lock_locksteal", "_advisory_lock.py")
+    return importlib.import_module("rebar.reconciler._advisory_lock")
 
 
 def _fake_advisory(advisory_mod):

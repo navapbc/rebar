@@ -8,6 +8,25 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING: the reconciler is `rebar.reconciler`; `rebar_reconciler` is gone
+
+The Jira reconciler moved from `src/rebar/_engine/rebar_reconciler/` (a top-level package found
+only because the engine directory was put on `sys.path`) to the ordinary subpackage
+`src/rebar/reconciler/`. There is no compatibility shim (ADR 0083, ADR 0111):
+
+- `python -m rebar_reconciler` is now `python -m rebar.reconciler`. rebar's own launchers
+  (`rebar bridge ...` and `rebar reconcile`, including the `reconcile-bridge` workflow's
+  `rebar bridge run`) use the new name; a hand-written script that names the old module must be
+  updated.
+- `import rebar_reconciler` and `from rebar_reconciler.<module> import ...` fail; use
+  `rebar.reconciler.<module>`. Its loggers now sit under the `rebar` root
+  (`rebar.reconciler.*`), so the `rebar` NullHandler covers them.
+- `rebar._engine.engine_env()` no longer prepends `src/rebar/_engine` to `PYTHONPATH`; it only
+  pins `REBAR_ROOT`. `rebar._engine.engine_dir()` still locates `jira-capability-probe.py` and
+  the alias wordlist.
+- The reconciler's by-path loader (`rebar_reconciler._loader.lazy_load`) and the internal
+  `rebar._lib_ops._engine_module` helper are deleted.
+
 ## MCP library-backed tools are derived from the library facade
 
 The 48 library-backed MCP tools are now derived at registration from the annotated `rebar.*`

@@ -36,8 +36,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from rebar_reconciler import inbound_collection_diffs as icd
-from rebar_reconciler import outbound_comments as oc
+from rebar.reconciler import inbound_collection_diffs as icd
+from rebar.reconciler import outbound_comments as oc
 
 # The stable identity tag the breadcrumb must carry so dedup keys on the tag, not
 # on the variable ancestor key (ticket "Body content contract" / "Append-once").

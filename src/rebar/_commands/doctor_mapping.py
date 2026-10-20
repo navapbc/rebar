@@ -4,7 +4,7 @@ Surfaces ``[mapping]`` config that would make a Jira reconcile silently drift, i
 tiers:
 
 * an OFFLINE tier that ALWAYS runs, stdlib-only, against the provider-neutral resolvers
-  in :mod:`rebar_reconciler.config` and the loader :mod:`rebar_reconciler.mapping_config`
+  in :mod:`rebar.reconciler.config` and the loader :mod:`rebar.reconciler.mapping_config`
   -- it never imports any ``adapters.jira*`` package; and
 * a best-effort LIVE-DRIFT tier that only attempts a read-only Jira probe when the
   optional ``jira-datacenter`` capability is installed, degrades to a single
@@ -21,7 +21,6 @@ pulls in an adapter at load time.
 
 from __future__ import annotations
 
-import sys
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -29,20 +28,15 @@ from typing import Any
 
 def _ensure_engine_on_path() -> None:
     """Put the bundled engine directory on ``sys.path`` so the top-level
-    ``rebar_reconciler`` package resolves.
+    ``rebar.reconciler`` package resolves.
 
     The provider-neutral reconciler resolvers ship as ``rebar`` package data under
     ``rebar/_engine/`` (present in the lean core install; only the Jira *adapter* is an
     optional extra), but a bare ``python -m rebar.cli`` process does not add that
     directory to ``sys.path``. Insert it here, idempotently, exactly as the other
-    engine-touching commands do -- otherwise the lazy ``from rebar_reconciler import ...``
+    engine-touching commands do -- otherwise the lazy ``from rebar.reconciler import ...``
     below raises ``ModuleNotFoundError`` and crashes ``doctor``.
     """
-    from rebar._engine import engine_dir
-
-    eng = str(engine_dir())
-    if eng not in sys.path:
-        sys.path.insert(0, eng)
 
 
 # Doctor-side bounded wall-clock ceiling for the best-effort live-drift probe (seconds).
@@ -73,7 +67,7 @@ class _ProbeTimeout(Exception):
 def scan_mapping(root: Any = None) -> list[dict[str, Any]]:
     """Run both diagnostic tiers and return all findings."""
     _ensure_engine_on_path()
-    from rebar_reconciler import mapping_config as mc
+    from rebar.reconciler import mapping_config as mc
 
     findings: list[dict[str, Any]] = []
     cfg = None
@@ -117,8 +111,8 @@ def _finding(
 def _offline_per_key(cfg: Any, root: Any) -> list[dict[str, Any]]:
     """Run every provider-neutral resolver for each project key (plus the default layer),
     emitting one error finding per key whose resolution fails."""
-    from rebar_reconciler import config as rc
-    from rebar_reconciler import mapping_config as mc
+    from rebar.reconciler import config as rc
+    from rebar.reconciler import mapping_config as mc
 
     findings: list[dict[str, Any]] = []
     for key in [*sorted(cfg.projects), _DEFAULT_SENTINEL]:
@@ -237,7 +231,7 @@ def _build_and_read_probe() -> tuple[set[str], set[str], set[str] | None]:
     it) and read the observed status / type / link vocabularies. The link axis is
     ``None`` when the port's link-types read could not check (its fail-soft degradation),
     kept distinct from a genuinely-empty observed set."""
-    from rebar_reconciler import mapping_probe
+    from rebar.reconciler import mapping_probe
 
     port = mapping_probe.build_probe()
     statuses = set(port.statuses())
@@ -249,9 +243,8 @@ def _build_and_read_probe() -> tuple[set[str], set[str], set[str] | None]:
 
 def _degrade_reason(exc: Exception) -> str:
     """A tailored reason string for a probe failure, by cause where easy."""
-    from rebar_reconciler._backend import BackendEnvError
-
     from rebar._config_coercion import ConfigError
+    from rebar.reconciler._backend import BackendEnvError
 
     if isinstance(exc, BackendEnvError):
         return f"Jira backend not configured: {exc}"
@@ -275,8 +268,8 @@ def _drift_findings(
     check) is degraded to ONE distinct ``unavailable`` finding instead of being diffed —
     a failed read must never report every configured target as drift — while the other
     axes are still checked. Hierarchy is excluded by design."""
-    from rebar_reconciler import config as rc
-    from rebar_reconciler import mapping_config as mc
+    from rebar.reconciler import config as rc
+    from rebar.reconciler import mapping_config as mc
 
     observed_by_axis = dict(zip(("status", "type", "link"), observed, strict=True))
     findings: list[dict[str, Any]] = [

@@ -14,8 +14,8 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "pass_support.py"
-GIT_ADAPTER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "git_adapter.py"
+PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "pass_support.py"
+GIT_ADAPTER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "git_adapter.py"
 
 _STANDALONE_PROBE = r"""
 import importlib.util
@@ -29,11 +29,11 @@ repo_root = Path(sys.argv[2]).resolve()
 scenario = sys.argv[3]
 
 # Prove the package-free precondition before seeding any exact child key.
-parent_importable = importlib.util.find_spec("rebar_reconciler") is not None
+parent_importable = importlib.util.find_spec("rebar.reconciler") is not None
 assert not parent_importable
-assert "rebar_reconciler" not in sys.modules
+assert "rebar.reconciler" not in sys.modules
 
-adapter_key = "rebar_reconciler.git_adapter"
+adapter_key = "rebar.reconciler.git_adapter"
 seeded_adapter = None
 if scenario != "no_state":
     # The helper reads the tracker/state-file constants from this module; the
@@ -130,7 +130,7 @@ def test_package_free_no_state_returns_true_and_loads_canonical_adapter(tmp_path
 
     assert result["parent_importable"] is False
     assert result["result"] is True
-    assert result["adapter_name"] == "rebar_reconciler.git_adapter"
+    assert result["adapter_name"] == "rebar.reconciler.git_adapter"
     assert Path(result["adapter_file"]).resolve() == GIT_ADAPTER_PATH.resolve()
 
 

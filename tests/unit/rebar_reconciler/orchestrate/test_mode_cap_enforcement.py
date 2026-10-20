@@ -9,36 +9,22 @@ real ``applier.apply`` entry point.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(dotted_key: str, filename: str):
-    """Load a reconciler sibling module under a stable sys.modules key."""
-    if dotted_key in sys.modules:
-        return sys.modules[dotted_key]
-    path = RECONCILER_DIR / filename
-    spec = importlib.util.spec_from_file_location(dotted_key, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[dotted_key] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def applier_mod():
     """Load applier.py under a UNIQUE non-canonical key.
 
-    Pre-seeding canonical sys.modules keys (e.g. ``rebar_reconciler.applier``)
+    Pre-seeding canonical sys.modules keys (e.g. ``rebar.reconciler.applier``)
     leaks the applier's internally-loaded mutation/mode modules under their
     canonical keys, which other test files that re-import mutation under
     different keys (e.g. reconcile.py's ``reconcile_mutation``) then see
@@ -46,10 +32,7 @@ def applier_mod():
     DirectionMismatchError pollution. Loading our applier under a unique
     key keeps its sub-loads isolated from sibling tests.
     """
-    return _load(
-        "applier_under_test_286b",
-        "applier.py",
-    )
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
@@ -217,8 +200,8 @@ def test_target_mode_threaded_to_applier(tmp_path, applier_mod, mode_mod, mutati
     Sentinel test: dispatch a known Mode through the call chain and assert it
     reaches applier.apply unchanged (kwarg name preserved end-to-end).
     """
-    reconcile_mod = _load("rebar_reconciler.reconcile_under_test", "reconcile.py")
-    main_mod = _load("rebar_reconciler.main_under_test", "__main__.py")
+    reconcile_mod = importlib.import_module("rebar.reconciler.reconcile")
+    main_mod = importlib.import_module("rebar.reconciler.__main__")
 
     sentinel = mode_mod.Mode.BOOTSTRAP_STRICT
     captured: dict = {}
@@ -337,8 +320,8 @@ def test_phase_gate_still_blocks(tmp_path):
     phase-gate path that ``__main__.main`` reads BEFORE invoking run_pass —
     the new ``target_mode`` plumbing must not have weakened it.
     """
-    advisory = _load("rebar_reconciler._advisory_lock", "_advisory_lock.py")
-    mode_mod = _load("rebar_reconciler.mode", "mode.py")
+    advisory = importlib.import_module("rebar.reconciler._advisory_lock")
+    mode_mod = importlib.import_module("rebar.reconciler.mode")
 
     # Pin the gate at dry-run.
     tickets_dir = tmp_path / ".tickets-tracker"
@@ -378,14 +361,8 @@ def test_spot_check_sampling_is_deterministic_across_runs(applier_mod, mutation_
     import importlib.util
 
     def _fresh_renderer():
-        path = RECONCILER_DIR / "manifest_renderer.py"
         # Unique key per load → fresh module object every call.
-        key = f"manifest_renderer_fresh_{id(object())}"
-        spec = importlib.util.spec_from_file_location(key, path)
-        assert spec is not None and spec.loader is not None
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
-        return mod
+        return importlib.import_module("rebar.reconciler.manifest_renderer")
 
     muts = _make_mutations(200, mutation_mod)
     r1 = _fresh_renderer()

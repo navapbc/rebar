@@ -38,6 +38,14 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): the Jira reconciler is the `rebar.reconciler` subpackage.** It moved
+  from the top-level `rebar_reconciler` package (shipped as `_engine/` package data) to
+  `src/rebar/reconciler/`, with no re-export shim (ADR 0083, ADR 0111). Run a pass with
+  `python -m rebar.reconciler` instead of `python -m rebar_reconciler`, and import
+  `rebar.reconciler.<module>` instead of `rebar_reconciler.<module>`. `rebar._engine.engine_env()`
+  no longer prepends the engine directory to `PYTHONPATH`; it only pins `REBAR_ROOT`. Details in
+  [docs/release-notes.md](docs/release-notes.md).
+
 - **MCP library-backed tools are derived from the `rebar.*` signatures** (ADR 0119) through one
   factory and an override table; the advertised tool surface is unchanged and pinned by a
   golden. The name-only MCP/library parity gate is removed.

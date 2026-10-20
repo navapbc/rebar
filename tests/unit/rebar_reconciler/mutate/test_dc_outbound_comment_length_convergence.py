@@ -12,9 +12,9 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler import outbound_comments
-from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
-from rebar_reconciler.adapters.jira_family.rich_text import (
+from rebar.reconciler import outbound_comments
+from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+from rebar.reconciler.adapters.jira_family.rich_text import (
     _WIKI_TRUNCATION_SUFFIX,
     WIKI_DESCRIPTION_LIMIT,
 )

@@ -18,28 +18,18 @@ to end through ``compute_inbound_mutations``.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-INBOUND_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "inbound_differ.py"
-
-
-def _load(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+INBOUND_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "inbound_differ.py"
 
 
 @pytest.fixture(scope="module")
 def inbound():
-    return _load("inbound_differ_comment_shape_test", INBOUND_PATH)
+    return importlib.import_module("rebar.reconciler.inbound_differ")
 
 
 class _BindingStore:

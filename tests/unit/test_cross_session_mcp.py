@@ -103,8 +103,6 @@ def _read_tools() -> dict[str, Any]:
         allow_jira_sync=False,
         cap_workflow_payload=lambda *a, **k: None,
         bound_list_payload=lambda rows, **k: rows,
-        MODE_CAPS={},
-        Mode=None,
     )
     _mcp_reads.register_read_tools(_FakeMCP(), ctx=ctx)
     return tools

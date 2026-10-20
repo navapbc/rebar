@@ -32,9 +32,9 @@ from typing import Any
 import pytest
 
 # Engine is on sys.path via the package conftest.
-from rebar_reconciler.adapters.jira import acli as acli_mod
-from rebar_reconciler.adapters.jira import acli_cli_ops, acli_subprocess
-from rebar_reconciler.dispatch_apply_phases import (
+from rebar.reconciler.adapters.jira import acli as acli_mod
+from rebar.reconciler.adapters.jira import acli_cli_ops, acli_subprocess
+from rebar.reconciler.dispatch_apply_phases import (
     _update_one_apply_reporter,
     _update_one_dispatch_comments,
 )
@@ -146,7 +146,7 @@ def test_bare_urlopen_update_priority_makes_exactly_one_attempt_on_429(
 def test_dispatch_wrapped_429_is_a_bounded_retry_honouring_retry_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from rebar_reconciler import dispatch_one
+    from rebar.reconciler import dispatch_one
 
     slept: list[float] = []
     monkeypatch.setattr(dispatch_one.time, "sleep", lambda s: slept.append(s))
@@ -168,7 +168,7 @@ def test_dispatch_wrapped_429_is_a_bounded_retry_honouring_retry_after(
 def test_dispatch_wrapped_429_is_bounded_not_infinite(monkeypatch: pytest.MonkeyPatch) -> None:
     """A persistent 429 exhausts a BOUNDED number of retries then re-raises the raw
     HTTPError — the retry is bounded by ``max_retries`` (mutation: unbound the loop)."""
-    from rebar_reconciler import dispatch_one
+    from rebar.reconciler import dispatch_one
 
     monkeypatch.setattr(dispatch_one.time, "sleep", lambda _s: None)
     calls: list[int] = []
@@ -192,7 +192,7 @@ def test_dispatch_wrapped_429_is_bounded_not_infinite(monkeypatch: pytest.Monkey
 def test_apply_reporter_makes_exactly_one_attempt_on_429(monkeypatch: pytest.MonkeyPatch) -> None:
     """``_update_one_apply_reporter`` routes reporter through ``client.set_reporter``
     OUTSIDE ``_call_with_retry``; a 429 there is soft-degraded after exactly one attempt."""
-    import rebar_reconciler.dispatch_apply_phases as dap
+    import rebar.reconciler.dispatch_apply_phases as dap
 
     # Force the reporter to resolve so set_reporter is actually reached.
     monkeypatch.setattr(dap, "_jira_account_id_for", lambda _r: "acct-1")
@@ -409,7 +409,7 @@ _DC_SWEPT = {
 }
 
 
-_JIRA_ADAPTER_PKG = "src/rebar/_engine/rebar_reconciler/adapters/jira"
+_JIRA_ADAPTER_PKG = "src/rebar/reconciler/adapters/jira"
 
 # The DECLARED transport surface this sweep is ABOUT (ticket 8a5e ruled that scoping
 # correct; ticket 81d5's operator decision — option B — kept it rather than globbing the

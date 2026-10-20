@@ -14,23 +14,14 @@ Bug B (discovered during e2e_field_validation_probe run on 2026-05-28):
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
-
-
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "mutation.py"
 
 
 def test_direction_guard_accepts_mutation_from_separate_module_load():
@@ -43,12 +34,12 @@ def test_direction_guard_accepts_mutation_from_separate_module_load():
     False even when both members share the same ``.value``.
     """
     # Load applier and its bundled mutation module.
-    applier = _load_module("applier_dg_cross", APPLIER_PATH)
+    applier = importlib.import_module("rebar.reconciler.applier")
     applier_mut = applier._load_mutation_module()
 
     # Load mutation.py separately under a different sys.modules name —
     # this produces a distinct MutationDirection class.
-    foreign_mut = _load_module("foreign_mutation_module", MUTATION_PATH)
+    foreign_mut = importlib.import_module("rebar.reconciler.mutation")
 
     # Sanity check: same value, different identity.
     assert applier_mut.MutationDirection.outbound.value == "outbound"
@@ -75,7 +66,7 @@ def test_direction_guard_still_rejects_actual_mismatch():
     """Defense-in-depth: a real direction mismatch (inbound passed to outbound
     leaf, or vice versa) MUST still raise — the value-comparison fix must
     not relax the guard."""
-    applier = _load_module("applier_dg_reject", APPLIER_PATH)
+    applier = importlib.import_module("rebar.reconciler.applier")
     applier_mut = applier._load_mutation_module()
     errs = applier._load_errors_module()
 

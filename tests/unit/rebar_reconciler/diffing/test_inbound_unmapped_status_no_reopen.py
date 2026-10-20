@@ -11,35 +11,20 @@ from the same mapping; the differ must simply leave the local status untouched.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
-from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-INBOUND_DIFFER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "inbound_differ.py"
-)
+INBOUND_DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "inbound_differ.py"
 
 
-def _load(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-_id = _load("inbound_differ_unmapped", INBOUND_DIFFER_PATH)
+_id = importlib.import_module("rebar.reconciler.inbound_differ")
 
 # Ticket 4af8: the Jira->local field mapper is no longer re-exported on the differ
 # module (the core differ now receives the mapper by injection). Load the mapper from
 # its owning leaf module directly for the isolated mapper assertion below.
-_INBOUND_FIELDS_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "inbound_fields.py"
-)
-_ifields = _load("inbound_fields_unmapped", _INBOUND_FIELDS_PATH)
+_INBOUND_FIELDS_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "inbound_fields.py"
+_ifields = importlib.import_module("rebar.reconciler.inbound_fields")
 
 
 def _jira(status: str) -> dict:

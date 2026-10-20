@@ -603,7 +603,7 @@ The composer delegates these responsibilities:
 
 Runtime capabilities remain outside `OperationSnapshot` and its fingerprint. The implemented bindings are specific to their owners:
 
-- `rebar_reconciler.runtime.ReconcilerRuntime` derives immutable `ReconcilerSettings` from an operation snapshot and builds only the selected Jira backend. `CloudStaticAuth` and `DataCenterStaticAuth` exclude the selected adapter credential from representations, comparisons, and hashes. The provider-specific factory reveals the credential only while constructing the client.
+- `rebar.reconciler.runtime.ReconcilerRuntime` derives immutable `ReconcilerSettings` from an operation snapshot and builds only the selected Jira backend. `CloudStaticAuth` and `DataCenterStaticAuth` exclude the selected adapter credential from representations, comparisons, and hashes. The provider-specific factory reveals the credential only while constructing the client.
 - `rebar.llm.auth.LLMRuntime` carries optional provider-native authentication. `AnthropicAuth` holds either an API key or OAuth token. `BedrockAuth` holds a caller-owned boto3 session. `OpenAIAuth` holds a key or rotating key callable. `ProviderSession` consumes only the carrier for the selected provider while retaining Rebar's client construction, retry, timeout, and teardown policies.
 - `rebar.review_bot.startup.StartupBinding` pairs `LLMRuntime` with read-only non-secret startup policy. A running review bot retains this binding until restart.
 - `rebar.opcert_service.keyprov.OpcertSigner` holds the process-owned operation certificate key copy and principal. `rebar._opcert_binding.bound_signer` passes it through a context-local binding so concurrent gate workers do not patch process-global signing variables.

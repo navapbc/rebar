@@ -4,7 +4,7 @@ This oracle pins the OBSERVABLE contract of two new pure/policy modules that
 coordinate atomic non-create postconditions (update / delete / probe /
 clean_label / repair_property / conflict) over the S2 immutable plans:
 
-``rebar_reconciler.failure_policy``
+``rebar.reconciler.failure_policy``
     The normalization policy. Projects the 11-member ``operation_outcome.Disposition``
     vocabulary onto the five exact AC6 outcome buckets, classifies broad vs
     ticket-local ``FailureScope``, maps adapter signal-statuses and S2 ``DeferReason``s
@@ -12,7 +12,7 @@ clean_label / repair_property / conflict) over the S2 immutable plans:
     provider-neutral (signal-status, scope) pair — the ticket-local 404 / permanent
     4xx / idempotent already-gone delete rule (AC3/AC4). PURE: no I/O, no clock.
 
-``rebar_reconciler.coordinator``
+``rebar.reconciler.coordinator``
     ``coordinate(ticket_plans, *, execute, budget_factory=None, locate=None)`` —
     executes each mutate plan's atomic postconditions ONCE in dependency order,
     calling the injected ``execute`` adapter through the S1 ``RetryBudget`` for
@@ -30,64 +30,48 @@ names or source text — so a behavior-preserving refactor cannot break them.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-import types
+import importlib
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECON_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-if "rebar_reconciler" not in sys.modules:  # pragma: no cover - import bootstrap
-    _pkg = types.ModuleType("rebar_reconciler")
-    _pkg.__path__ = [str(RECON_DIR)]
-    sys.modules["rebar_reconciler"] = _pkg
-
-
-def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, RECON_DIR / filename)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+RECON_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def outcome_mod():
-    return _load("operation_outcome_coord_test", "operation_outcome.py")
+    return importlib.import_module("rebar.reconciler.operation_outcome")
 
 
 @pytest.fixture(scope="module")
 def mutation_mod():
-    return _load("mutation_coord_test", "mutation.py")
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 @pytest.fixture(scope="module")
 def ticket_plan_mod():
-    return _load("ticket_plan_coord_test", "ticket_plan.py")
+    return importlib.import_module("rebar.reconciler.ticket_plan")
 
 
 @pytest.fixture(scope="module")
 def planner_mod():
-    return _load("ticket_planner_coord_test", "ticket_planner.py")
+    return importlib.import_module("rebar.reconciler.ticket_planner")
 
 
 @pytest.fixture(scope="module")
 def budget_mod():
-    return _load("retry_budget_coord_test", "retry_budget.py")
+    return importlib.import_module("rebar.reconciler.retry_budget")
 
 
 @pytest.fixture(scope="module")
 def policy_mod():
-    return _load("failure_policy_coord_test", "failure_policy.py")
+    return importlib.import_module("rebar.reconciler.failure_policy")
 
 
 @pytest.fixture(scope="module")
 def coordinator_mod():
-    return _load("coordinator_coord_test", "coordinator.py")
+    return importlib.import_module("rebar.reconciler.coordinator")
 
 
 # ── Deterministic, injected test doubles ─────────────────────────────────────────
@@ -748,7 +732,7 @@ def test_e2e_blocked_prereq_plan_is_deferred_by_coordinator(
 # RP-03 S3 T3 — cut over non-create routing (selector + coordinate_and_fuse).
 #
 # These pin the OBSERVABLE contract of the cutover surface added to
-# ``rebar_reconciler.batch_dispatch``:
+# ``rebar.reconciler.batch_dispatch``:
 #   * ``route_for(action, overrides=None)`` — the internal per-family selector whose
 #     six non-create families default to the ``coordinator`` route with ``legacy`` as
 #     the internal rollback value (AC1; never dual-send: exactly one route returned).
@@ -767,7 +751,7 @@ def test_e2e_blocked_prereq_plan_is_deferred_by_coordinator(
 
 @pytest.fixture(scope="module")
 def batch_dispatch_mod():
-    return _load("batch_dispatch_t3_test", "batch_dispatch.py")
+    return importlib.import_module("rebar.reconciler.batch_dispatch")
 
 
 # Two tickets on endpoint-a of provider jira, a third on endpoint-b, plus an
@@ -1461,7 +1445,7 @@ def test_guarded_execute_wiring_adds_no_legacy_retry_nesting(
     execute never re-enters the legacy ad-hoc ``dispatch_apply_phases._call_with_retry``
     nesting — the cutover surface adds no second retry layer around the coordinator's own
     RetryBudget. (The production ``dispatch_fn`` here is a fake, isolating the wiring.)"""
-    dap = _load("dispatch_apply_phases_reroute_test", "dispatch_apply_phases.py")
+    dap = importlib.import_module("rebar.reconciler.dispatch_apply_phases")
     calls: list = []
 
     def _spy(fn, *a, **k):

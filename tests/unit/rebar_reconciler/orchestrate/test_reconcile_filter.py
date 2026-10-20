@@ -9,43 +9,36 @@ Verifies that when filter_local_ids is set:
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 import types
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Load reconcile.py via importlib (same pattern as test_reconcile_main.py)
 # ---------------------------------------------------------------------------
 
 _HERE = Path(__file__).resolve().parent
-_RECONCILER_DIR = _HERE.parents[3] / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_RECONCILER_DIR = _HERE.parents[3] / "src" / "rebar" / "reconciler"
 
 
 def _load_reconcile():
-    name = "reconcile_under_test"
-    if name in sys.modules:
-        return sys.modules[name]
-    path = _RECONCILER_DIR / "reconcile.py"
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.reconcile")
 
 
 def _load_pass_support():
-    name = "pass_support_under_test"
-    if name in sys.modules:
-        return sys.modules[name]
-    path = _RECONCILER_DIR / "pass_support.py"
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.pass_support")
+
+
+def _serve_stubs(stubs: dict):
+    """Patch the shared ``reconcile._load`` so it serves ``stubs`` by sibling key."""
+    real_load = reconcile._load
+
+    def _load(name, relpath):
+        return stubs[name] if name in stubs else real_load(name, relpath)
+
+    return patch.object(reconcile, "_load", _load)
 
 
 reconcile = _load_reconcile()
@@ -224,17 +217,7 @@ class TestReconcileOnceFiltered:
         mut_mod = types.ModuleType("reconcile_mutation_stub")
 
         # Load the real mutation module so StrEnum .value works correctly
-        real_mut_path = (
-            Path(__file__).parents[4]
-            / "src"
-            / "rebar"
-            / "_engine"
-            / "rebar_reconciler"
-            / "mutation.py"
-        )
-        real_mut_spec = importlib.util.spec_from_file_location("reconcile_mutation", real_mut_path)
-        real_mut = importlib.util.module_from_spec(real_mut_spec)
-        real_mut_spec.loader.exec_module(real_mut)
+        real_mut = importlib.import_module("rebar.reconciler.mutation")
 
         mut_mod.MutationDirection = real_mut.MutationDirection
         mut_mod.MutationAction = real_mut.MutationAction
@@ -337,12 +320,7 @@ class TestReconcileOnceFiltered:
         ob.compute_outbound_mutations = lambda *a, **kw: ([], {})
         # reconcile.py now constructs an OutboundDiffConfig on this module before
         # calling compute_outbound_mutations; borrow the real dataclass.
-        real_ob_path = _RECONCILER_DIR / "outbound_differ.py"
-        real_ob_name = "reconcile_outbound_differ_real"
-        real_ob_spec = importlib.util.spec_from_file_location(real_ob_name, real_ob_path)
-        real_ob = importlib.util.module_from_spec(real_ob_spec)
-        sys.modules[real_ob_name] = real_ob
-        real_ob_spec.loader.exec_module(real_ob)
+        real_ob = importlib.import_module("rebar.reconciler.outbound_differ")
         ob.OutboundDiffConfig = real_ob.OutboundDiffConfig
         stubs["reconcile_outbound_differ"] = ob
 
@@ -378,12 +356,7 @@ class TestReconcileOnceFiltered:
         bridge_dir = tracker_dir / ".bridge_state"
         bridge_dir.mkdir()
 
-        originals = {}
-        for name, mod in stubs.items():
-            originals[name] = sys.modules.get(name)
-            sys.modules[name] = mod
-
-        try:
+        with _serve_stubs(stubs):
             result = reconcile.reconcile_once(
                 "test-pass",
                 repo_root=tmp_path,
@@ -404,12 +377,6 @@ class TestReconcileOnceFiltered:
             # which provenance field caused the match.
             targets = {m.target for m in applier._applied}
             assert targets == {"DIG-100", "some-unrelated-key"}, f"unexpected targets: {targets}"
-        finally:
-            for name, orig in originals.items():
-                if orig is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = orig
 
     def test_no_filter_passes_all_mutations(self, tmp_path):
         stubs, applier = self._stub_modules()
@@ -419,12 +386,7 @@ class TestReconcileOnceFiltered:
         bridge_dir = tracker_dir / ".bridge_state"
         bridge_dir.mkdir()
 
-        originals = {}
-        for name, mod in stubs.items():
-            originals[name] = sys.modules.get(name)
-            sys.modules[name] = mod
-
-        try:
+        with _serve_stubs(stubs):
             result = reconcile.reconcile_once(
                 "test-pass-unfiltered",
                 repo_root=tmp_path,
@@ -434,12 +396,6 @@ class TestReconcileOnceFiltered:
             assert "filter_local_ids" not in result
             assert "unfiltered_mutation_count" not in result
             assert len(applier._applied) == 4
-        finally:
-            for name, orig in originals.items():
-                if orig is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = orig
 
 
 # ---------------------------------------------------------------------------
@@ -451,26 +407,17 @@ class TestFilterLocalIdsLegacyRoute:
     """The engine-only ``--filter-local-ids`` surface remains on the legacy route."""
 
     def _load_main(self):
-        name = "rebar_reconciler_main_under_test"
-        if name in sys.modules:
-            return sys.modules[name]
-        path = _RECONCILER_DIR / "__main__.py"
-        spec = importlib.util.spec_from_file_location(name, path)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[name] = mod
-        spec.loader.exec_module(mod)
-        return mod
+        return importlib.import_module("rebar.reconciler.__main__")
 
     def test_filter_local_ids_reaches_legacy_route_post_filter(self, tmp_path, monkeypatch, capsys):
         main_mod = self._load_main()
         run_pass = MagicMock(return_value=0)
         monkeypatch.setattr(main_mod, "run_pass", run_pass)
-        package = sys.modules.setdefault("rebar_reconciler", types.ModuleType("rebar_reconciler"))
-        last_pass = types.ModuleType("rebar_reconciler.last_pass")
-        last_pass.finalize_process = MagicMock(side_effect=lambda _repo, _pass_id, run: run())
-        last_pass.release_process_lock = MagicMock()
-        monkeypatch.setattr(package, "last_pass", last_pass, raising=False)
-        monkeypatch.setitem(sys.modules, "rebar_reconciler.last_pass", last_pass)
+        last_pass = importlib.import_module("rebar.reconciler.last_pass")
+        monkeypatch.setattr(
+            last_pass, "finalize_process", MagicMock(side_effect=lambda _repo, _pass_id, run: run())
+        )
+        monkeypatch.setattr(last_pass, "release_process_lock", MagicMock())
         original_load_sibling_keyed = main_mod._load_sibling_keyed
         advisory = types.SimpleNamespace(
             ReconcileLockLost=RuntimeError,
@@ -505,14 +452,7 @@ class TestFilterLocalIdsLegacyRoute:
 
 
 def _load_create_route():
-    name = "create_route_filter_test"
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, _RECONCILER_DIR / "create_route.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.create_route")
 
 
 class _Plan:

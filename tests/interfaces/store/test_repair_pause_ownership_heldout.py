@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -30,12 +29,8 @@ def _git_repo(path: Path, *, email: str | None = "repair@example.com") -> Path:
 
 
 def _ref_lock():
-    from _engine_path import engine_dir
 
-    engine = str(engine_dir())
-    if engine not in sys.path:
-        sys.path.insert(0, engine)
-    from rebar_reconciler import _advisory_lock as advisory
+    from rebar.reconciler import _advisory_lock as advisory
 
     return advisory._load_ref_lock()
 

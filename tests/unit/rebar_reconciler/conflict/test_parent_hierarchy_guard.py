@@ -15,8 +15,7 @@ All tests use mock clients; no live Jira calls.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 import urllib.error
 from io import BytesIO
 from pathlib import Path
@@ -26,36 +25,25 @@ from typing import Any
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-_REC = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_REC = REPO_ROOT / "src" / "rebar" / "reconciler"
 OUTBOUND_DIFFER_PATH = _REC / "outbound_differ.py"
 APPLIER_PATH = _REC / "applier.py"
 MUTATION_PATH = _REC / "mutation.py"
 
 
-def _load(name: str, path: Path) -> ModuleType:
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
 @pytest.fixture(scope="module")
 def outbound_differ() -> ModuleType:
-    return _load("outbound_differ_hierarchy_test", OUTBOUND_DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 @pytest.fixture(scope="module")
 def applier() -> ModuleType:
-    return _load("applier_hierarchy_test", APPLIER_PATH)
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
 def mutation_mod() -> ModuleType:
-    return _load("mutation_hierarchy_test", MUTATION_PATH)
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 class StubBindingStore:

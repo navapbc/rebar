@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler.adapters.jira_family import (
+from rebar.reconciler.adapters.jira_family import (
     JIRA_LABEL_MAX_CHARS,
     JIRA_SUMMARY_MAX_CHARS,
     LOCAL_PRIORITY_TO_JIRA,

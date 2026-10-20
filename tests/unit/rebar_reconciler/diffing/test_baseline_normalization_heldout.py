@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from rebar_reconciler.adapters.jira.backend import JiraBackend
-from rebar_reconciler.binding_store import BindingStore
-from rebar_reconciler.outbound_field_diff import compute_update_fields
+from rebar.reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.binding_store import BindingStore
+from rebar.reconciler.outbound_field_diff import compute_update_fields
 
 pytestmark = pytest.mark.unit
 

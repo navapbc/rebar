@@ -662,7 +662,7 @@ removed; `purge-bridge` remains retired.
 The legacy top-level `rebar reconcile` adapter is removed. Use `rebar bridge preview` for live
 Jira-vs-local proposed changes, `rebar bridge sync` for writes, `rebar bridge fsck` for offline
 binding/integrity audit, and `rebar bridge status` for operational state. Direct argument-less
-`python -m rebar_reconciler` still means live synchronization, and its supported rollout modes
+`python -m rebar.reconciler` still means live synchronization, and its supported rollout modes
 remain `dry-run`, `bootstrap-strict`, `bootstrap-throttle`, and `live`. The engine-only `--filter-local-ids` post-filter remains
 available on that direct legacy route for live-DC harness scoping. The legacy `jira-onboard`,
 `bridge-probe`, and `bridge-fsck` spellings have been removed; use `rebar bridge setup`,

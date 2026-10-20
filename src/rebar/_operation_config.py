@@ -229,7 +229,7 @@ def compose_operation_snapshot(
 
 # ── Authoritative binding (RP-04 S2, ticket 3a08) ──────────────────────────────
 #
-# The reconciler runtime (``_engine/rebar_reconciler/runtime.py``) already demonstrates
+# The reconciler runtime (``reconciler/runtime.py``) already demonstrates
 # the pattern this reuses: compose ONE snapshot, derive a binding from it, and hold that
 # binding for the whole operation instead of re-resolving ambient state per read. Here
 # the "binding" is the snapshot itself, held in a context-local (``contextvars``) slot so

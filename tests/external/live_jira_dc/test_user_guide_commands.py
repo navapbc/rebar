@@ -128,7 +128,7 @@ def test_the_documented_config_and_preview_work_against_a_real_dc_instance(
         [
             sys.executable,
             "-m",
-            "rebar_reconciler",
+            "rebar.reconciler",
             "preview",
             "--repo-root",
             str(documented_repo),
@@ -189,7 +189,7 @@ def test_the_documented_setup_refuses_to_read_the_pat_from_config(
         [
             sys.executable,
             "-m",
-            "rebar_reconciler",
+            "rebar.reconciler",
             "preview",
             "--repo-root",
             str(documented_repo),

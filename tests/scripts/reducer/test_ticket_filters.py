@@ -13,15 +13,12 @@ Run: python3 -m pytest tests/scripts/test_ticket_filters.py -x
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
 
 from rebar.reducer import apply_ticket_filters  # noqa: E402
 

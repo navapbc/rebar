@@ -27,14 +27,14 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler._backend import (
+from rebar.reconciler._backend import (
     Backend,
     BackendEnvError,
     SupportsComments,
     SupportsLinks,
 )
-from rebar_reconciler.adapters.jira_datacenter import settings as dc_settings
-from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+from rebar.reconciler.adapters.jira_datacenter import settings as dc_settings
+from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
 from .backend_support import FakeTransport
 

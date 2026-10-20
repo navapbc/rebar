@@ -1,4 +1,4 @@
-"""Characterization test pinning ``rebar_reconciler.git_adapter``'s behaviour.
+"""Characterization test pinning ``rebar.reconciler.git_adapter``'s behaviour.
 
 The reconciler routes *every* ``git`` subprocess through :mod:`git_adapter` (the
 single git seam). This test documents "this is the git behaviour the adapter
@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from rebar_reconciler import git_adapter
+from rebar.reconciler import git_adapter
 
 # ---------------------------------------------------------------------------
 # Named ref / path constants — the single source of truth for the strings the

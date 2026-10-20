@@ -14,33 +14,23 @@ Follows the reconciler test-tree loader convention (spec_from_file_location).
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-_SRC_DIR = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, _SRC_DIR / filename)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+_SRC_DIR = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def invariants_mod():
-    return _load("_invariants_for_comment_divergence", "invariants.py")
+    return importlib.import_module("rebar.reconciler.invariants")
 
 
 @pytest.fixture(scope="module")
 def binding_store_mod():
-    return _load("_binding_store_for_comment_divergence", "binding_store.py")
+    return importlib.import_module("rebar.reconciler.binding_store")
 
 
 @pytest.fixture
@@ -113,7 +103,7 @@ def test_record_comment_id_seam_counts_post_even_without_key(binding_store_mod, 
     An entry with no ``local_comment_key`` means recording no-ops — exactly the
     silent-failure class this invariant watches — so the post must still count.
     """
-    from rebar_reconciler.dispatch_apply_phases import _record_comment_id
+    from rebar.reconciler.dispatch_apply_phases import _record_comment_id
 
     store = _fresh_store(binding_store_mod, repo_root)
     _record_comment_id(store, {"body": "no key"}, {"id": "10001"})

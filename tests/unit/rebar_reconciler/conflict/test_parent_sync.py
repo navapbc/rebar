@@ -14,8 +14,7 @@ All tests use mock clients; no live Jira calls.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -28,32 +27,21 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 _BASE = REPO_ROOT / "src" / "rebar" / "_engine"
-_REC = _BASE / "rebar_reconciler"
+_REC = _BASE.parent / "reconciler"
 
 OUTBOUND_DIFFER_PATH = _REC / "outbound_differ.py"
 INBOUND_DIFFER_PATH = _REC / "inbound_differ.py"
 APPLIER_PATH = _REC / "applier.py"
 
 
-def _load(name: str, path: Path) -> ModuleType:
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
 @pytest.fixture(scope="module")
 def outbound_differ() -> ModuleType:
-    return _load("outbound_differ_parent_test", OUTBOUND_DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 @pytest.fixture(scope="module")
 def inbound_differ() -> ModuleType:
-    return _load("inbound_differ_parent_test", INBOUND_DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.inbound_differ")
 
 
 # ---------------------------------------------------------------------------
@@ -421,21 +409,14 @@ class TestApplierInboundCreateParent:
     """Applier: _apply_inbound_create populates parent_id when payload carries it."""
 
     def _load_applier(self) -> ModuleType:
-        key = "applier_parent_test"
-        return _load(key, APPLIER_PATH)
+        return importlib.import_module("rebar.reconciler.applier")
 
     def test_inbound_create_sets_parent_id_from_payload(self, tmp_path: Path) -> None:
         """_apply_inbound_create: parent key in fields → CREATE event has parent_id."""
         import os
 
         applier = self._load_applier()
-        mut_mod = importlib.util.spec_from_file_location(
-            "mutation_parent_test", _REC / "mutation.py"
-        )
-        assert mut_mod is not None and mut_mod.loader is not None
-        mm = importlib.util.module_from_spec(mut_mod)
-        sys.modules["mutation_parent_test"] = mm
-        mut_mod.loader.exec_module(mm)  # type: ignore[union-attr]
+        mm = importlib.import_module("rebar.reconciler.mutation")
 
         tracker_dir = tmp_path / ".tickets-tracker"
         tracker_dir.mkdir()
@@ -493,8 +474,7 @@ class TestApplierInboundUpdateParent:
     """Applier: _apply_inbound_update handles parent_id in fields dict."""
 
     def _load_applier(self) -> ModuleType:
-        key = "applier_parent_update_test"
-        return _load(key, APPLIER_PATH)
+        return importlib.import_module("rebar.reconciler.applier")
 
     def test_inbound_update_writes_parent_id_in_edit_event(self, tmp_path: Path) -> None:
         """_apply_inbound_update: parent_id in fields → EDIT event carries parent_id."""
@@ -502,13 +482,7 @@ class TestApplierInboundUpdateParent:
         import os
 
         applier = self._load_applier()
-        mut_mod_spec = importlib.util.spec_from_file_location(
-            "mutation_parent_upd_test", _REC / "mutation.py"
-        )
-        assert mut_mod_spec is not None and mut_mod_spec.loader is not None
-        mm = importlib.util.module_from_spec(mut_mod_spec)
-        sys.modules["mutation_parent_upd_test"] = mm
-        mut_mod_spec.loader.exec_module(mm)  # type: ignore[union-attr]
+        mm = importlib.import_module("rebar.reconciler.mutation")
 
         tracker_dir = tmp_path / ".tickets-tracker"
         ticket_dir = tracker_dir / "jira-dig-70"
@@ -582,19 +556,12 @@ class TestApplierOutboundSetParent:
     """Applier: _apply_outbound_update routes parent → client.set_parent."""
 
     def _load_applier(self) -> ModuleType:
-        key = "applier_outbound_parent_test"
-        return _load(key, APPLIER_PATH)
+        return importlib.import_module("rebar.reconciler.applier")
 
     def test_outbound_update_calls_set_parent(self, tmp_path: Path) -> None:
         """_apply_outbound_update: parent field in changed_fields → client.set_parent called."""
         applier = self._load_applier()
-        mut_mod_spec = importlib.util.spec_from_file_location(
-            "mutation_ob_parent_test", _REC / "mutation.py"
-        )
-        assert mut_mod_spec is not None and mut_mod_spec.loader is not None
-        mm = importlib.util.module_from_spec(mut_mod_spec)
-        sys.modules["mutation_ob_parent_test"] = mm
-        mut_mod_spec.loader.exec_module(mm)  # type: ignore[union-attr]
+        mm = importlib.import_module("rebar.reconciler.mutation")
 
         client = StubClient()
         mut = mm.Mutation(
@@ -624,18 +591,8 @@ class TestFetcherParentEnrichment:
 
     def test_snapshot_enriches_parent_field(self, tmp_path: Path) -> None:
         """fetch_snapshot: issues in snapshot get parent field from REST lookup."""
-        import importlib.util as _iu
-        import sys
 
-        fetcher_path = _REC / "fetcher.py"
-        key = "fetcher_parent_test"
-        if key in sys.modules:
-            del sys.modules[key]
-        spec = _iu.spec_from_file_location(key, fetcher_path)
-        assert spec is not None and spec.loader is not None
-        fetcher_mod = _iu.module_from_spec(spec)
-        sys.modules[key] = fetcher_mod
-        spec.loader.exec_module(fetcher_mod)  # type: ignore[union-attr]
+        fetcher_mod = importlib.import_module("rebar.reconciler.fetcher")
 
         class _StubClient:
             """Client that returns one issue with a parent field."""
@@ -682,18 +639,8 @@ class TestFetcherParentEnrichment:
         self, tmp_path: Path
     ) -> None:
         """fetch_snapshot: REST parent-read failure → warning only, snapshot still written."""
-        import importlib.util as _iu
-        import sys
 
-        fetcher_path = _REC / "fetcher.py"
-        key = "fetcher_parent_degrade_test"
-        if key in sys.modules:
-            del sys.modules[key]
-        spec = _iu.spec_from_file_location(key, fetcher_path)
-        assert spec is not None and spec.loader is not None
-        fetcher_mod = _iu.module_from_spec(spec)
-        sys.modules[key] = fetcher_mod
-        spec.loader.exec_module(fetcher_mod)  # type: ignore[union-attr]
+        fetcher_mod = importlib.import_module("rebar.reconciler.fetcher")
 
         class _FailingClient:
             """Client whose get_parents call raises."""

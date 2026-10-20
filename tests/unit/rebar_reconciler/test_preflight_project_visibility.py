@@ -15,7 +15,7 @@ and the ``__main__.run_pass_result`` wiring that aborts the pass before
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import sys
 import types
 import urllib.error
@@ -26,10 +26,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ENGINE_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
-MAIN_PATH = ENGINE_DIR / "rebar_reconciler" / "__main__.py"
-
-if str(ENGINE_DIR) not in sys.path:
-    sys.path.insert(0, str(ENGINE_DIR))
+MAIN_PATH = ENGINE_DIR.parent / "reconciler" / "__main__.py"
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +36,7 @@ if str(ENGINE_DIR) not in sys.path:
 
 @pytest.fixture(scope="module")
 def access_check():
-    from rebar_reconciler import access_check as mod
+    from rebar.reconciler import access_check as mod
 
     return mod
 
@@ -48,12 +45,7 @@ def access_check():
 def main_mod():
     if not MAIN_PATH.exists():
         pytest.fail(f"__main__.py not found at {MAIN_PATH}")
-    spec = importlib.util.spec_from_file_location("rebar_reconciler.__main__", MAIN_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["rebar_reconciler.__main__"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.__main__")
 
 
 # ---------------------------------------------------------------------------
@@ -249,9 +241,9 @@ def test_pagination_non_termination_fails_closed(access_check, tmp_path):
 
 
 def _seed_fake_access_check(monkeypatch, result=None, *, check=None):
-    fake = types.ModuleType("rebar_reconciler.access_check")
+    fake = types.ModuleType("rebar.reconciler.access_check")
     fake.check_mapped_project_visibility = check or MagicMock(return_value=result)
-    monkeypatch.setitem(sys.modules, "rebar_reconciler.access_check", fake)
+    monkeypatch.setitem(sys.modules, "rebar.reconciler.access_check", fake)
     return fake
 
 
@@ -268,7 +260,7 @@ def _patch_cloud_backend(monkeypatch, *, backend="jira", query_project="FALL"):
         lambda: types.SimpleNamespace(reconciler=types.SimpleNamespace(backend=backend)),
     )
     monkeypatch.setattr(
-        "rebar_reconciler._backend_registry.select_backend",
+        "rebar.reconciler._backend_registry.select_backend",
         lambda config: types.SimpleNamespace(query_project=query_project),
     )
 
@@ -337,7 +329,7 @@ def test_wiring_preview_route_skips_probe(main_mod, monkeypatch, tmp_path):
 
 
 def test_wiring_dry_run_skips_probe(main_mod, monkeypatch, tmp_path):
-    from rebar_reconciler import mode as mode_mod
+    from rebar.reconciler import mode as mode_mod
 
     fake = _seed_fake_access_check(monkeypatch, _result("missing", missing=("BAD",)))
     _patch_cloud_backend(monkeypatch)

@@ -6,17 +6,17 @@ before adding a broad ``except`` or a diagnostic ``print``.
 The convention (deliberately boring; mirrors rebar's peers, no novel machinery):
 
 * **Named loggers.** Modules log via ``logger = logging.getLogger(__name__)`` so every
-  record resolves under the ``rebar`` root (or the sibling ``rebar_reconciler`` root for
-  the reconciler subprocess, which is imported top-level as ``rebar_reconciler.*``).
+  record resolves under the ``rebar`` root (or the sibling ``rebar.reconciler`` root for
+  the reconciler subprocess, which is imported top-level as ``rebar.reconciler.*``).
 
 * **Library hygiene — quiet by default.** ``rebar/__init__.py`` attaches a
   ``logging.NullHandler`` to the ``rebar`` root (and the reconciler package init does the
-  same for ``rebar_reconciler``). Importing rebar as a library never configures handlers
+  same for ``rebar.reconciler``). Importing rebar as a library never configures handlers
   or emits to stderr — the embedding application owns output.
 
 * **Entrypoints install a stderr handler.** The three process entrypoints — the CLI
   ``main`` (:mod:`rebar._cli`), the MCP server ``main`` (:mod:`rebar.mcp_server`), and the
-  reconciler subprocess ``main`` (``rebar_reconciler.__main__``) — call
+  reconciler subprocess ``main`` (``rebar.reconciler.__main__``) — call
   :func:`install_stderr_handler` so diagnostics become observable. **Never target
   stdout:** CLI *data* ``print(json.dumps(...))`` is a machine contract (the reconciler
   ``json.loads`` it) and MCP-over-stdio reserves stdout for JSON-RPC framing. Only stderr

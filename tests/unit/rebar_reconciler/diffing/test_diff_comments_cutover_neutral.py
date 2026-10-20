@@ -16,8 +16,7 @@ Jira-stored body is the codec's rendered form suppresses cleanly.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -25,12 +24,8 @@ from typing import Any
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-OUTBOUND_DIFFER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
-)
-OUTBOUND_COMMENTS_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_comments.py"
-)
+OUTBOUND_DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
+OUTBOUND_COMMENTS_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_comments.py"
 
 pytestmark = pytest.mark.unit
 
@@ -39,23 +34,14 @@ pytestmark = pytest.mark.unit
 _MARKDOWN_COMMENT = "# Heading\n\n- alpha\n- beta\n"
 
 
-def _load_module(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
 @pytest.fixture(scope="module")
 def differ() -> ModuleType:
-    return _load_module("outbound_differ_cutover_neutral", OUTBOUND_DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 @pytest.fixture(scope="module")
 def comments() -> ModuleType:
-    return _load_module("outbound_comments_cutover_neutral", OUTBOUND_COMMENTS_PATH)
+    return importlib.import_module("rebar.reconciler.outbound_comments")
 
 
 @pytest.fixture
@@ -93,7 +79,7 @@ def test_the_rendered_form_really_does_differ(set_flag) -> None:
     protect nothing.
     """
     set_flag("both")
-    from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec
+    from rebar.reconciler.adapters.jira_family.rich_text import WikiTextCodec
 
     assert WikiTextCodec(rich=True).normalize_outbound(_MARKDOWN_COMMENT) != _MARKDOWN_COMMENT
 

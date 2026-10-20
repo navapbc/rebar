@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler._backend import RemoteRef
-from rebar_reconciler.adapters.jira_family import instance_from_base_url
+from rebar.reconciler._backend import RemoteRef
+from rebar.reconciler.adapters.jira_family import instance_from_base_url
 
 # ---------------------------------------------------------------------------
 # The normalisation helper
@@ -81,8 +81,8 @@ def _real_backends(instance: str):
     If `remote_ref()` ever resolves settings when called, these constructions start needing a
     config fixture and this helper breaks, which is exactly the signal wanted.
     """
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
-    from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
     return [
         JiraBackend(transport=_StubTransport(), instance=instance),
@@ -126,7 +126,7 @@ def test_two_deployments_of_the_same_vendor_produce_unequal_refs() -> None:
 
     `RemoteRef` is frozen and value-equal, so this is a direct `==` comparison.
     """
-    from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+    from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
     one = JiraDataCenterBackend(transport=_StubTransport(), instance="one.example.com/jira")
     two = JiraDataCenterBackend(transport=_StubTransport(), instance="two.example.com/jira")
@@ -167,7 +167,7 @@ def test_instance_does_NOT_prevent_local_id_collision_between_deployments() -> N
     existing Jira-sourced ticket — a breaking, store-wide migration that is deliberately out of
     scope here. If that migration is ever done, THIS test is the one that should go red.
     """
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     one = _jira_key_to_local_id("DIG-123")
     two = _jira_key_to_local_id("DIG-123")

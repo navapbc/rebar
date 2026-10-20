@@ -11,8 +11,8 @@ rule). The tests drive the REAL CLI entry point (``rebar._cli.main(["bridge",
 
 Contract the implementer must satisfy (the injection seam these tests target)
 -----------------------------------------------------------------------------
-NEW module ``rebar_reconciler.mapping_probe`` (source at
-``src/rebar/_engine/rebar_reconciler/mapping_probe.py``) exposes:
+NEW module ``rebar.reconciler.mapping_probe`` (source at
+``src/rebar/reconciler/mapping_probe.py``) exposes:
 
 * ``build_probe(...)`` — a module-level factory that returns a probe PORT constructed from
   resolved DC settings (via ``adapters/jira_datacenter/transport.build_client_from_settings``).
@@ -41,8 +41,8 @@ throwaway issue.
 
 ``mapping_probe.build_probe`` is resolvable in this test tree because
 ``tests/unit/rebar_reconciler/conftest.py`` already puts the engine dir on ``sys.path`` and
-extends ``rebar_reconciler.__path__`` to the engine package, so ``import
-rebar_reconciler.mapping_probe`` binds the SAME module object the CLI handler imports.
+extends ``rebar.reconciler.__path__`` to the engine package, so ``import
+rebar.reconciler.mapping_probe`` binds the SAME module object the CLI handler imports.
 """
 
 from __future__ import annotations
@@ -198,7 +198,7 @@ def _install_fake_port(monkeypatch: pytest.MonkeyPatch) -> _FakePort:
     Imported lazily so this file still COLLECTS (and the config-writer regression guard
     still runs) before ``mapping_probe`` exists — a missing module surfaces here as a
     ModuleNotFoundError in exactly the tests that need it, the correct RED signal."""
-    import rebar_reconciler.mapping_probe as mapping_probe
+    import rebar.reconciler.mapping_probe as mapping_probe
 
     fake = _FakePort()
     monkeypatch.setattr(mapping_probe, "build_probe", lambda *a, **k: fake, raising=False)
@@ -437,7 +437,7 @@ def test_real_port_core_getter_failure_is_not_swallowed(tmp_path, monkeypatch) -
     swallowed into an empty suggestion. The REAL ``_JiraProbePort`` over a fully-failing
     client, driven through ``build_mapping_layer``, must raise rather than return an empty
     layer (which is indistinguishable from a genuinely-empty-but-successful probe)."""
-    import rebar_reconciler.mapping_probe as mp
+    import rebar.reconciler.mapping_probe as mp
 
     port = mp._JiraProbePort(_BoomClient())
     with pytest.raises(mp.ProbeError):
@@ -479,7 +479,7 @@ def test_real_port_link_types_failure_is_none_not_empty() -> None:
     consumers (doctor's live-drift diff) can degrade the axis instead of treating every
     configured link target as drift. Precedent: Flutter doctor's ``notAvailable`` state
     and Homebrew's ``T.nilable(Finding)`` typed could-not-evaluate."""
-    import rebar_reconciler.mapping_probe as mp
+    import rebar.reconciler.mapping_probe as mp
 
     port = mp._JiraProbePort(_LinkTypesOnlyBoomClient())
     assert port.issue_link_types() is None
@@ -489,7 +489,7 @@ def test_builder_tolerates_link_types_could_not_check() -> None:
     """``build_mapping_layer`` over a port whose link-types read could not check
     (``None``) still emits a valid layer with an EMPTY link axis — the optional axis
     stays fail-soft for the suggestion builder."""
-    import rebar_reconciler.mapping_probe as mp
+    import rebar.reconciler.mapping_probe as mp
 
     layer = mp.build_mapping_layer(mp._JiraProbePort(_LinkTypesOnlyBoomClient()), "REB")
     project = layer["projects"]["REB"]
@@ -501,7 +501,7 @@ def test_all_empty_probe_is_systemic_not_a_valid_suggestion() -> None:
     """BLOCKING: a probe whose getters all succeed but return NOTHING (anonymous access /
     nonexistent project answering 200-empty) is indistinguishable from broken; the builder
     surfaces it as an error rather than emitting an empty mapping."""
-    import rebar_reconciler.mapping_probe as mp
+    import rebar.reconciler.mapping_probe as mp
 
     with pytest.raises(mp.ProbeError):
         mp.build_mapping_layer(_AllEmptyPort(), "REB")
@@ -511,7 +511,7 @@ def test_cli_systemic_probe_failure_exits_nonzero(tmp_path, monkeypatch, capsys)
     """BLOCKING (end-to-end): a systemic probe failure makes ``rebar bridge suggest-mapping``
     exit non-zero with a clear stderr message, instead of printing an empty block + exit 0."""
     _proj(tmp_path, monkeypatch)
-    import rebar_reconciler.mapping_probe as mp
+    import rebar.reconciler.mapping_probe as mp
 
     monkeypatch.setattr(
         mp, "build_probe", lambda *a, **k: mp._JiraProbePort(_BoomClient()), raising=False
@@ -526,7 +526,7 @@ def test_cli_build_probe_raise_exits_nonzero(tmp_path, monkeypatch, capsys) -> N
     """Advisory (tests a): ``build_probe`` itself raising (e.g. a missing credential) is
     surfaced as a clean exit-1 with the stderr error, not a traceback."""
     _proj(tmp_path, monkeypatch)
-    import rebar_reconciler.mapping_probe as mp
+    import rebar.reconciler.mapping_probe as mp
 
     def _raise(*_a: Any, **_k: Any) -> Any:
         raise RuntimeError("JIRA_PAT is not set")
@@ -576,7 +576,7 @@ class _JqlRecordingPort:
 def test_transition_hint_jql_is_project_scoped() -> None:
     """Advisory (correctness): the transition-sampling JQL must be scoped to the target
     project (``project = "<KEY>"``), else hints are sampled from the whole instance."""
-    import rebar_reconciler.mapping_probe as mp
+    import rebar.reconciler.mapping_probe as mp
 
     port = _JqlRecordingPort(["Story"])
     mp.build_mapping_layer(port, "REB")
@@ -588,7 +588,7 @@ def test_transition_hint_jql_escapes_embedded_quotes() -> None:
     """Advisory (edge-cases): an issue-type value containing a double-quote must be escaped
     (JQL ``\\"``), not interpolated raw (which yields malformed JQL that the fail-soft catch
     then silently swallows)."""
-    import rebar_reconciler.mapping_probe as mp
+    import rebar.reconciler.mapping_probe as mp
 
     port = _JqlRecordingPort(['Fo"o'])
     mp.build_mapping_layer(port, "REB")
@@ -631,7 +631,7 @@ def test_empty_optional_axes_are_fail_soft_with_honesty_notes() -> None:
     """Advisory (tests b): with core vocabulary present but every optional axis empty and
     no ``hierarchyLevel``, the builder does NOT raise; empty axes yield empty maps and the
     ``hierarchy omitted`` honesty note is emitted."""
-    import rebar_reconciler.mapping_probe as mp
+    import rebar.reconciler.mapping_probe as mp
 
     block = mp.build_mapping_layer(_NoOptionalVocabPort(), "REB")
     layer = block["projects"]["REB"]

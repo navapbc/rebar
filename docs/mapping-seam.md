@@ -16,7 +16,7 @@ authoring model; this page covers the code behind it.
 
 The mapping engine is deliberately split so the reusable half carries no vendor knowledge.
 
-**The provider-neutral core** — `src/rebar/_engine/rebar_reconciler/mapping_config.py` — imports
+**The provider-neutral core** — `src/rebar/reconciler/mapping_config.py` — imports
 **nothing** from any `adapters.jira*` package and contains **no Jira value literal** anywhere
 (its docstring examples use neutral placeholders such as `"VALUE"` and `"<status-a>"`). It
 provides:
@@ -55,7 +55,7 @@ gates a future axis that has no map here yet.)
 
 ## Built-in defaults and effective resolvers
 
-`src/rebar/_engine/rebar_reconciler/config.py` holds the **built-in default literals** and the
+`src/rebar/reconciler/config.py` holds the **built-in default literals** and the
 **effective resolvers** that overlay config onto them. That module imports nothing but
 `__future__` at module scope, so its operator-overridable literals never sit behind an adapter
 or config import; `mapping_config` is imported **lazily** inside each resolver.
@@ -134,7 +134,7 @@ When a local ticket's parent hierarchy cannot be fully represented in Jira — b
 parent's type is **collapsed or absent** from Jira's issue-type hierarchy — the reconciler emits
 an **echo-safe breadcrumb comment** noting the nearest tracked ancestor. This is
 `_build_parent_breadcrumb` in
-`src/rebar/_engine/rebar_reconciler/outbound_comments.py`. Its observable behavior:
+`src/rebar/reconciler/outbound_comments.py`. Its observable behavior:
 
 - It fires only when the direct parent is present with a **non-epic** type (mirroring the
   parent-field suppression in the Jira outbound-fields mapper); a missing or epic parent type
@@ -167,7 +167,7 @@ local key mapped to the same remote value, so the operator edits only where a lo
 diverge). Default: serialize to stdout; `--write`: deep-merge into a rebar-owned `rebar.toml`
 (existing keys win — hand edits are never clobbered).
 
-The implementation is `src/rebar/_engine/rebar_reconciler/mapping_probe.py`:
+The implementation is `src/rebar/reconciler/mapping_probe.py`:
 
 - `ProbePort` — a Protocol exposing **only getters** (`issue_types`, `statuses`, `priorities`,
   `issue_link_types`, `createmeta_*`, `search_issues`, `transitions`). There is deliberately no

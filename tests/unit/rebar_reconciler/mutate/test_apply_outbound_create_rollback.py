@@ -7,16 +7,15 @@ coordinated default is covered separately and never deletes a created issue (bug
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "mutation.py"
 
 
 @pytest.fixture(autouse=True)
@@ -25,18 +24,9 @@ def _force_legacy_route(monkeypatch):
     monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", "legacy")
 
 
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
 @pytest.fixture(scope="module")
 def applier():
-    return _load_module("applier_outbound_create_rollback", APPLIER_PATH)
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
@@ -67,7 +57,7 @@ def test_rollback_invokes_delete_via_call_with_retry(applier, mutation_mod):
 
     mutation = _make_outbound_create_mutation(mutation_mod)
 
-    from rebar_reconciler import apply_outbound  # point-of-use: leaf calls retry here
+    from rebar.reconciler import apply_outbound  # point-of-use: leaf calls retry here
 
     real_call_with_retry = apply_outbound._call_with_retry
     captured: list[tuple] = []

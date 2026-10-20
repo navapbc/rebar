@@ -2,7 +2,7 @@
 
 The cells that consume these predicates run only against live Jira DC in CI's external
 lane. This module pins their parsing in the ordinary unit lane — no Jira, no network, no
-credentials, no ``rebar_reconciler`` import — so a change to the reconciler's stream
+credentials, no ``rebar.reconciler`` import — so a change to the reconciler's stream
 contract is caught by a local ``pytest`` run instead of by a 40-minute scheduled live job.
 
 The module under test is loaded by path because it lives under ``tests/external/`` and is

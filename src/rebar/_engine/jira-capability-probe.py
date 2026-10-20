@@ -22,8 +22,8 @@ from __future__ import annotations
 
 import sys
 
-from rebar_reconciler.access_check import run_access_check
-from rebar_reconciler.adapters.jira.acli import AcliClient
+from rebar.reconciler.access_check import run_access_check
+from rebar.reconciler.adapters.jira.acli import AcliClient
 
 # ---------------------------------------------------------------------------
 # Main probe

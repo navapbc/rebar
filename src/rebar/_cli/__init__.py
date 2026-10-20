@@ -100,14 +100,7 @@ def _bridge_suggest_mapping(argv: list[str]) -> int:
     except SystemExit as exc:
         return 0 if exc.code in (0, None) else int(exc.code)
 
-    # The engine ships under ``rebar/_engine``; put it on the in-process import path so
-    # ``rebar_reconciler.mapping_probe`` resolves as the SAME module object a test patches.
-    from rebar._engine import engine_dir
-
-    eng = str(engine_dir())
-    if eng not in sys.path:
-        sys.path.insert(0, eng)
-    import rebar_reconciler.mapping_probe as mapping_probe
+    import rebar.reconciler.mapping_probe as mapping_probe
 
     key = args.project
     try:

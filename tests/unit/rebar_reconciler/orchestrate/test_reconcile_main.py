@@ -1,32 +1,19 @@
-"""Behavioral tests for rebar_reconciler.__main__ mode-validation + advisory-lock guards.
+"""Behavioral tests for rebar.reconciler.__main__ mode-validation + advisory-lock guards.
 
 These tests verify the guard sequence in main():
   argparse → Mode.from_str → check_pass_lock → check_phase_gate →
   acquire_pass_lock → try/finally(release) → reconcile_once
 
 Test-loading strategy:
-  Modules are loaded via importlib.util.spec_from_file_location.
-  The ``plugins`` directory is NOT a Python package on sys.path, so
-  unittest.mock.patch() targets of the form
-  ``"rebar_reconciler._advisory_lock.<fn>"``
-  cannot resolve without pre-seeding sys.modules with namespace ModuleType
-  entries.
-
-  The module-scoped ``_seed_sys_modules`` fixture:
-    1. Creates stub namespace entries for the intermediate package segments
-       (the rebar_reconciler package).
-    2. Loads _advisory_lock.py and mode.py under their fully-qualified dotted
-       names via importlib so the real module objects live at the expected keys.
-    3. Loads __main__.py under the same strategy, registering it at
-       ``"rebar_reconciler.__main__"``.
-
-  This guarantees that patch() targets resolve to the real module objects, and
-  that production code (which also imports by dotted name) and test code see the
-  same module object.
+  The modules under test are the shared ``rebar.reconciler`` submodules, so
+  ``unittest.mock.patch()`` targets of the form
+  ``"rebar.reconciler._advisory_lock.<fn>"`` resolve to the same objects that
+  production code imports.
 """
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import subprocess
 import sys
@@ -42,15 +29,15 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-_PKG_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_PKG_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 _MAIN_PATH = _PKG_DIR / "__main__.py"
 _ADVISORY_LOCK_PATH = _PKG_DIR / "_advisory_lock.py"
 _MODE_PATH = _PKG_DIR / "mode.py"
 
 # Dotted module key that __main__.py will use when importing _advisory_lock
-_ADVISORY_LOCK_KEY = "rebar_reconciler._advisory_lock"
-_MODE_KEY = "rebar_reconciler.mode"
-_MAIN_KEY = "rebar_reconciler.__main__"
+_ADVISORY_LOCK_KEY = "rebar.reconciler._advisory_lock"
+_MODE_KEY = "rebar.reconciler.mode"
+_MAIN_KEY = "rebar.reconciler.__main__"
 
 
 @pytest.fixture(autouse=True)
@@ -67,16 +54,6 @@ def _git_repo(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _load_module(name: str, path: Path) -> types.ModuleType:
-    """Load a file as a named module and register it in sys.modules."""
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None, f"Cannot load {path}"
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
 # ---------------------------------------------------------------------------
 # Module-scoped fixture: seed sys.modules and load modules under test
 # ---------------------------------------------------------------------------
@@ -84,43 +61,15 @@ def _load_module(name: str, path: Path) -> types.ModuleType:
 
 @pytest.fixture(scope="module")
 def _seed_sys_modules():
-    """Seed sys.modules so patch() targets resolve to real module objects.
+    """The shared ``__main__``, ``_advisory_lock`` and ``mode`` modules.
 
     Returns a dict with keys 'main_mod', 'advisory_lock_mod', 'mode_mod'.
-
-    Tears the seeded namespace stub entries down after this test module
-    completes, so other test modules are not affected by them.
     """
-    # Track which keys we newly insert (vs those already present) so we only
-    # clean up what WE added — leave pre-existing entries intact.
-    newly_added: list[str] = []
-
-    # Step 1: seed the rebar_reconciler namespace package
-    for pkg in ("rebar_reconciler",):
-        if pkg not in sys.modules:
-            sys.modules[pkg] = types.ModuleType(pkg)
-            newly_added.append(pkg)
-
-    # Step 2: load real _advisory_lock and mode modules under the exact dotted keys
-    advisory_lock_mod = _load_module(_ADVISORY_LOCK_KEY, _ADVISORY_LOCK_PATH)
-    newly_added.append(_ADVISORY_LOCK_KEY)
-    mode_mod = _load_module(_MODE_KEY, _MODE_PATH)
-    newly_added.append(_MODE_KEY)
-
-    # Step 3: load __main__ under its dotted key (also under the standard key)
-    main_mod = _load_module(_MAIN_KEY, _MAIN_PATH)
-    newly_added.append(_MAIN_KEY)
-    sys.modules["rebar_reconciler.__main__"] = main_mod  # keep existing consumers happy
-    newly_added.append("rebar_reconciler.__main__")
-
-    yield {
-        "main_mod": main_mod,
-        "advisory_lock_mod": advisory_lock_mod,
-        "mode_mod": mode_mod,
+    return {
+        "main_mod": importlib.import_module(_MAIN_KEY),
+        "advisory_lock_mod": importlib.import_module(_ADVISORY_LOCK_KEY),
+        "mode_mod": importlib.import_module(_MODE_KEY),
     }
-
-    for key in newly_added:
-        sys.modules.pop(key, None)
 
 
 @pytest.fixture
@@ -130,27 +79,21 @@ def main_mod(_seed_sys_modules):
 
 
 # ---------------------------------------------------------------------------
-# Fetcher sentinel: a module-level MagicMock placed in sys.modules so we can
-# detect whether reconcile_once (and therefore the fetcher) was ever invoked.
+# Fetcher sentinel: the shared fetcher's ``fetch_snapshot`` patched with a
+# MagicMock so we can detect whether reconcile_once (and therefore the fetcher)
+# was ever invoked.
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
 def fetcher_sentinel():
-    """Install a MagicMock for the fetcher module in sys.modules.
+    """Patch the shared fetcher's ``fetch_snapshot``.
 
     Returns the mock so tests can assert call_count == 0.
     """
-    sentinel = MagicMock()
-    sentinel.fetch_snapshot = MagicMock(return_value=None)
-    original = sys.modules.get("reconcile_fetcher")
-    sys.modules["reconcile_fetcher"] = sentinel
-    yield sentinel
-    # Restore
-    if original is None:
-        sys.modules.pop("reconcile_fetcher", None)
-    else:
-        sys.modules["reconcile_fetcher"] = original
+    fetcher = importlib.import_module("rebar.reconciler.fetcher")
+    with patch.object(fetcher, "fetch_snapshot", return_value=None) as sentinel:
+        yield type("_FetcherSentinel", (), {"fetch_snapshot": sentinel})
 
 
 # ---------------------------------------------------------------------------
@@ -428,29 +371,25 @@ def test_lock_released_on_exception_variants(main_mod, tmp_path, exc_factory, ex
     )
 
 
-def test_import_does_not_load_fetcher(_seed_sys_modules):
+def test_import_does_not_load_fetcher(tmp_path):
     """Importing the reconcile module does NOT pull fetcher into sys.modules.
 
     Verifies that reconcile.py uses lazy _load() calls for fetcher (deferred
-    until reconcile_once is called), not top-level imports.
+    until reconcile_once is called), not top-level imports. Checked in a fresh
+    interpreter: in-process, other tests have already imported the shared fetcher.
     """
-    # Remove any pre-existing fetcher entry from a prior test run
-    for key in list(sys.modules.keys()):
-        if "fetcher" in key.lower() and "reconcile" in key.lower():
-            del sys.modules[key]
-
-    # Load reconcile.py fresh (as a new key to avoid collision with existing)
-    reconcile_path = _PKG_DIR / "reconcile.py"
-    _load_module("_test_import_reconcile_fresh", reconcile_path)
-
-    # Fetcher should NOT be in sys.modules after a bare import
-    fetcher_loaded = any(
-        "fetcher" in k.lower() and "reconcile" in k.lower()
-        for k in sys.modules
-        if k != "_test_import_reconcile_fresh"
+    probe = (
+        "import sys\n"
+        "import rebar.reconciler.reconcile\n"
+        "loaded = sorted(k for k in sys.modules if 'fetcher' in k.lower())\n"
+        "assert not loaded, loaded\n"
     )
-    assert not fetcher_loaded, (
-        "reconcile.py must not load fetcher at module-import time (lazy import topology)"
+    cp = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=False, cwd=tmp_path
+    )
+    assert cp.returncode == 0, (
+        "reconcile.py must not load fetcher at module-import time (lazy import topology):\n"
+        f"{cp.stdout}{cp.stderr}"
     )
 
 
@@ -598,12 +537,12 @@ def _assert_resolved_repo_root(call_args) -> Path:
     assert isinstance(resolved, Path), (
         f"Expected a Path, got {type(resolved).__name__!r}: {resolved!r}"
     )
-    # The resolved default must point at a directory containing the rebar_reconciler package,
+    # The resolved default must point at a directory containing the rebar.reconciler package,
     # confirming it is the actual project repo root (not an arbitrary or null path).
-    marker = resolved / "src" / "rebar" / "_engine" / "rebar_reconciler" / "__main__.py"
+    marker = resolved / "src" / "rebar" / "reconciler" / "__main__.py"
     assert marker.exists(), (
         f"Resolved repo_root {resolved!r} does not contain "
-        f"src/rebar/_engine/rebar_reconciler/__main__.py — default root resolution is wrong; "
+        f"src/rebar/reconciler/__main__.py — default root resolution is wrong; "
         f"expected Path(__file__).resolve().parents[4] from __main__.py"
     )
     return resolved
@@ -655,7 +594,7 @@ def test_main_resolves_repo_root_even_when_the_ambient_gate_ref_is_corrupt(main_
 
 def test_main_without_repo_root_passes_resolved_repo_root(main_mod, monkeypatch):
     """The Path passed to check_pass_lock when --repo-root is omitted must contain
-    the rebar_reconciler package, confirming it resolves to the actual project root.
+    the rebar.reconciler package, confirming it resolves to the actual project root.
 
     The conftest sandbox sets REBAR_ROOT for isolation; clear it
     here so the genuine depth-fallback runs. reconcile_once is mocked, so nothing
@@ -663,7 +602,7 @@ def test_main_without_repo_root_passes_resolved_repo_root(main_mod, monkeypatch)
 
     This pins the default-resolution path: Path(__file__).resolve().parents[4]
     from __main__.py should reach the repo root, which contains
-    src/rebar/_engine/rebar_reconciler/__main__.py.
+    src/rebar/reconciler/__main__.py.
 
     Every advisory call main() reaches is stubbed, read_pause included — see
     _stub_main_advisory for why the ambient gate ref must not reach this test.

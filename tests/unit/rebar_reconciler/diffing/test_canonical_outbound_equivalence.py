@@ -13,8 +13,7 @@ vendor snapshot key.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 
@@ -22,15 +21,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-_REC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, filename: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, _REC / filename)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+_REC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler"
 
 
 class _StubBindingStore:
@@ -105,7 +96,7 @@ def _emit(od, backend, t: dict, jf: dict) -> dict | None:
 
 @pytest.fixture(scope="module")
 def od() -> ModuleType:
-    return _load("outbound_differ_canonical_equiv", "outbound_differ.py")
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 @pytest.fixture
@@ -113,7 +104,7 @@ def backend(monkeypatch: pytest.MonkeyPatch):
     """Pin the pre-refactor plain-wire golden independently of project rollout config."""
     monkeypatch.setenv("REBAR_RECONCILER_RICH_TEXT_CUTOVER", "off")
 
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     return JiraBackend(transport=object())
 

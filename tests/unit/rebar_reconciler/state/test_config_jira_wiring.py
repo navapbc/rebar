@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from rebar import config as cfg
-from rebar_reconciler.adapters.jira.acli_subprocess import resolve_jira_settings
+from rebar.reconciler.adapters.jira.acli_subprocess import resolve_jira_settings
 
 pytestmark = pytest.mark.unit
 
@@ -175,7 +175,7 @@ def test_non_https_jira_url_resolves_when_allow_insecure(tmp_path: Path, monkeyp
 def test_dc_resolver_also_fails_loud_on_non_https_jira_url(tmp_path: Path, monkeypatch) -> None:
     """The Data Center resolver propagates ``InsecureUrlError`` from typed settings."""
     from rebar.config import InsecureUrlError
-    from rebar_reconciler.adapters.jira_datacenter.settings import (
+    from rebar.reconciler.adapters.jira_datacenter.settings import (
         resolve_jira_datacenter_settings,
     )
 
@@ -203,7 +203,7 @@ def test_provenance(tmp_path: Path, monkeypatch) -> None:
 # ── consumer: the bootstrap env fail-fast requires the resolved essentials ────
 def test_bootstrap_env_check_requires_resolved_url_user_token(tmp_path: Path, monkeypatch) -> None:
     """Bootstrap checks the resolved URL, user, token, and explicit project default."""
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     p = _proj(tmp_path)
     # url/user from the config FILE, token from env → all three present → no raise.
@@ -234,7 +234,7 @@ def test_jira_settings_env_fallback_is_read_live_per_call(monkeypatch: pytest.Mo
     and it re-reads that layer LIVE per call — a mid-pass override is observed on the next
     call. A compose-once cut would cache the first value."""
     import rebar.config
-    from rebar_reconciler.adapters.jira.acli_subprocess import resolve_jira_settings
+    from rebar.reconciler.adapters.jira.acli_subprocess import resolve_jira_settings
 
     def _raise_config_error(*_a, **_k):
         raise rebar.config.ConfigError("unreadable")
@@ -260,7 +260,7 @@ def test_jira_settings_insecure_url_fails_loud(monkeypatch: pytest.MonkeyPatch) 
     it FAILING LOUD (``InsecureUrlError`` propagates), not degrade to env like a malformed
     config does."""
     import rebar.config
-    from rebar_reconciler.adapters.jira.acli_subprocess import resolve_jira_settings
+    from rebar.reconciler.adapters.jira.acli_subprocess import resolve_jira_settings
 
     def _raise_insecure(*_a, **_k):
         raise rebar.config.InsecureUrlError("cleartext jira.url")

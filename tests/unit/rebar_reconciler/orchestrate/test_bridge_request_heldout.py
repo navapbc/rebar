@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import rebar_reconciler.__main__ as main_mod
+import rebar.reconciler.__main__ as main_mod
 
 
 def _capture_run(argv: list[str], tmp_path: Path) -> tuple[int, dict]:

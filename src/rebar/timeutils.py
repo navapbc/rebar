@@ -6,9 +6,9 @@ they are stored or logged. Before this existed, call sites drifted between
 and ``strftime(...) + "Z"`` (seconds, ``Z`` suffix) — two spellings of the same
 instant that parse differently and read inconsistently across logs/records.
 
-The reconciler (``rebar._engine.rebar_reconciler``) is a subprocess-isolated,
+The reconciler (``rebar.reconciler``) is a subprocess-isolated,
 stdlib-only program that deliberately imports no ``rebar.*`` modules, so it carries
-a byte-for-byte twin of :func:`utc_now_iso` at ``rebar_reconciler/timeutil.py`` —
+a byte-for-byte twin of :func:`utc_now_iso` at ``reconciler/timeutil.py`` —
 keep the two in lock-step.
 """
 

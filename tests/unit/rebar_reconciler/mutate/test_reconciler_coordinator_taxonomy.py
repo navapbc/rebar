@@ -13,11 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from rebar_reconciler import pass_io
-from rebar_reconciler.apply_handlers import BatchApplyContext, dispatch_mutation
-from rebar_reconciler.binding_store import BindingStore
-from rebar_reconciler.retry_budget import decide_replay, replay_safety_for
-from rebar_reconciler.transition_replay import replay_transition
+from rebar.reconciler import pass_io
+from rebar.reconciler.apply_handlers import BatchApplyContext, dispatch_mutation
+from rebar.reconciler.binding_store import BindingStore
+from rebar.reconciler.retry_budget import decide_replay, replay_safety_for
+from rebar.reconciler.transition_replay import replay_transition
 
 from ._coordinator_harness import (
     CLEAN_BUCKETS,
@@ -181,7 +181,7 @@ def test_s9_commit_unknown_is_its_own_outcome_and_not_applied():
     """A ``commit_unknown`` disposition surfaces as a non-applied outcome (its own
     ``deferred`` bucket, ``is_success`` False) and is replay-FORBIDDEN — a partial /
     ambiguous write is never counted as applied nor blindly re-driven."""
-    from rebar_reconciler import failure_policy
+    from rebar.reconciler import failure_policy
 
     assert failure_policy.bucket_for(Disposition.commit_unknown) == "deferred"
     assert failure_policy.is_success(Disposition.commit_unknown) is False

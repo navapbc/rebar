@@ -27,8 +27,8 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler import binding_repository, get_rotation
-from rebar_reconciler.binding_repository import BindingRepository
+from rebar.reconciler import binding_repository, get_rotation
+from rebar.reconciler.binding_repository import BindingRepository
 
 # Canonical serialization contract shared by every binding-state file.
 _INDENT = 2

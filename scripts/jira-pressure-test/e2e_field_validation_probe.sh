@@ -124,7 +124,7 @@ run_reconciler() {
     local output
     # Use trailing Xs: `mktemp -t` differs across platforms and BSD rejects suffixes.
     LAST_RECONCILER_LOG=$(mktemp "/tmp/recon-probe.XXXXXX")
-    output=$(cd "$RECONCILER_DIR" && "$PYTHON_BIN" -m rebar_reconciler "$@" 2>&1) || true
+    output=$(cd "$RECONCILER_DIR" && "$PYTHON_BIN" -m rebar.reconciler "$@" 2>&1) || true
     printf '%s\n' "$output" > "$LAST_RECONCILER_LOG"
     echo "$output"
 }
@@ -138,7 +138,7 @@ run_filtered_reconciler() {
 run_bridge_preview_for_ids() {
     local filter_ids="$1"
     cd "$RECONCILER_DIR"
-    "$PYTHON_BIN" -m rebar_reconciler preview --only "$filter_ids" --repo-root "$REPO_ROOT"
+    "$PYTHON_BIN" -m rebar.reconciler preview --only "$filter_ids" --repo-root "$REPO_ROOT"
 }
 
 preview_plan_is_clean_for_probe() {
@@ -184,10 +184,8 @@ get_jira_field() {
     cd "$RECONCILER_DIR"
     "$PYTHON_BIN" -c "
 import importlib.util, sys, json, os
-from rebar_reconciler.adapters.jira import acli as mod
-adf_spec = importlib.util.spec_from_file_location('adf', '${RECONCILER_DIR}/rebar_reconciler/adf.py')
-adf_mod = importlib.util.module_from_spec(adf_spec)
-adf_spec.loader.exec_module(adf_mod)
+from rebar.reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import adf as adf_mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -219,7 +217,7 @@ get_jira_comments() {
     cd "$RECONCILER_DIR"
     "$PYTHON_BIN" -c "
 import importlib.util, json, os
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -342,7 +340,7 @@ print(json.dumps(kwargs))
 " "$@")
     "$PYTHON_BIN" -c "
 import importlib.util, os, json, sys
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 kwargs = json.loads(sys.argv[1])
 mod.update_issue('${key}', **kwargs)
 " "$kwargs_json"
@@ -354,7 +352,7 @@ jira_update_priority() {
     cd "$RECONCILER_DIR"
     "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -370,7 +368,7 @@ jira_update_issuetype() {
     cd "$RECONCILER_DIR"
     "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -386,7 +384,7 @@ jira_transition() {
     cd "$RECONCILER_DIR"
     "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 mod.transition_issue('${key}', '${status_name}')"
 }
 
@@ -396,7 +394,7 @@ jira_add_label() {
     cd "$RECONCILER_DIR"
     "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -412,7 +410,7 @@ jira_remove_label() {
     cd "$RECONCILER_DIR"
     "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -428,7 +426,7 @@ jira_add_comment() {
     cd "$RECONCILER_DIR"
     "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -443,7 +441,7 @@ jira_delete_issue() {
     cd "$RECONCILER_DIR"
     "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -470,7 +468,7 @@ fallback_cleanup() {
     cd "$RECONCILER_DIR"
     "$PYTHON_BIN" -c "
 import importlib.util, os, json
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -525,7 +523,7 @@ if [ ! -d "$RECONCILER_DIR" ]; then
     exit 2
 fi
 if ! (cd "$RECONCILER_DIR" && "$PYTHON_BIN" -c "
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 
 module_operations = ('update_issue', 'transition_issue')
 client_operations = (
@@ -548,7 +546,7 @@ pass_test "Phase0.env-vars"
 # Read the Jira identity after local preflight succeeds.
 PROBE_USER=$(cd "$RECONCILER_DIR" && "$PYTHON_BIN" -c "
 import importlib.util, os, json
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -1186,7 +1184,7 @@ fi
 if [ -n "$CHILD_JIRA_KEY" ] && [ -n "$EPIC_JIRA_KEY" ]; then
     child_parent_key=$(cd "$RECONCILER_DIR" && "$PYTHON_BIN" -c "
 import importlib.util, os, json
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -1252,7 +1250,7 @@ if [ -n "$CHILD_LOCAL_ID" ] && [ -n "$EPIC2_LOCAL_ID" ]; then
     if [ -n "$CHILD_JIRA_KEY" ] && [ -n "$EPIC2_JIRA_KEY" ]; then
         new_parent_key=$(cd "$RECONCILER_DIR" && "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -1278,7 +1276,7 @@ fi
 if [ -n "$THIRD_JIRA_KEY" ] && [ -n "$EPIC_JIRA_KEY" ]; then
     cd "$RECONCILER_DIR" && "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
@@ -1355,7 +1353,7 @@ print(match[0] if match else '')
 
     dup_count=$(cd "$RECONCILER_DIR" && "$PYTHON_BIN" -c "
 import importlib.util, os, json
-from rebar_reconciler.adapters.jira import acli as mod
+from rebar.reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],

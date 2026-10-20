@@ -17,16 +17,15 @@ Hard constraint: the truncated description is NEVER written back to the local st
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-ENGINE = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
+ENGINE = REPO_ROOT / "src" / "rebar" / "reconciler"
 OUTBOUND_DIFFER_PATH = ENGINE / "outbound_differ.py"
 ADF_PATH = ENGINE / "adapters" / "jira" / "adf.py"
 
@@ -34,23 +33,14 @@ ADF_PATH = ENGINE / "adapters" / "jira" / "adf.py"
 _ADF_DESCRIPTION_LIMIT = 32000
 
 
-def _load_module(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
 @pytest.fixture(scope="module")
 def outbound_differ() -> ModuleType:
-    return _load_module("outbound_differ_desc_conv", OUTBOUND_DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 @pytest.fixture(scope="module")
 def adf() -> ModuleType:
-    return _load_module("adf_desc_conv", ADF_PATH)
+    return importlib.import_module("rebar.reconciler.adapters.jira.adf")
 
 
 class StubBindingStore:

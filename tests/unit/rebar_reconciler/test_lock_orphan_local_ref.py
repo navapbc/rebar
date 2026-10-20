@@ -23,35 +23,19 @@ the real ``_ref_lock`` primitives; no mocking of the CAS.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import subprocess
-import sys
-import types
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RECON_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-if "rebar_reconciler" not in sys.modules:
-    _pkg = types.ModuleType("rebar_reconciler")
-    _pkg.__path__ = [str(RECON_DIR)]
-    sys.modules["rebar_reconciler"] = _pkg
-
-
-def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, RECON_DIR / filename)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+RECON_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def ref_lock():
-    return _load("reconciler_ref_lock_orphan", "_ref_lock.py")
+    return importlib.import_module("rebar.reconciler._ref_lock")
 
 
 def _git(cwd: Path, *args: str) -> str:

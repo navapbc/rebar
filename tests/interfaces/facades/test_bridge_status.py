@@ -15,10 +15,7 @@ LAST_PASS_REF = "refs/reconciler/last-pass"
 
 
 def _reconciler_main():
-    engine_dir = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine"
-    if str(engine_dir) not in sys.path:
-        sys.path.insert(0, str(engine_dir))
-    return importlib.import_module("rebar_reconciler.__main__")
+    return importlib.import_module("rebar.reconciler.__main__")
 
 
 def _run_cli(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:

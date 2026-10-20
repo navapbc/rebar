@@ -16,34 +16,24 @@ Follows the reconciler test-tree loader convention (spec_from_file_location).
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 
-_SRC_DIR = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_SRC_DIR = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler"
 
 
-def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, _SRC_DIR / filename)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-_walk = _load("_binding_walk_under_test", "binding_walk.py")
-_bs = _load("_binding_store_for_walk", "binding_store.py")
-_classify = _load("_classify_for_walk", "classify.py")
-_mutation = _load("_mutation_for_walk", "mutation.py")
-_ob = _load("_ob_for_walk", "outbound_differ.py")
+_walk = importlib.import_module("rebar.reconciler.binding_walk")
+_bs = importlib.import_module("rebar.reconciler.binding_store")
+_classify = importlib.import_module("rebar.reconciler.classify")
+_mutation = importlib.import_module("rebar.reconciler.mutation")
+_ob = importlib.import_module("rebar.reconciler.outbound_differ")
 BindingStore = _bs.BindingStore
 
 
 def compute(*args, **kwargs):
     """Invoke the walk with the engine sibling modules injected (avoids the
-    pytest test-package import shadow on ``rebar_reconciler.classify``)."""
+    pytest test-package import shadow on ``rebar.reconciler.classify``)."""
     kwargs.setdefault("classify_mod", _classify)
     kwargs.setdefault("mutation_mod", _mutation)
     kwargs.setdefault("outbound_differ_mod", _ob)

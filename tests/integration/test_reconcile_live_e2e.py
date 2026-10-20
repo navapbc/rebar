@@ -13,9 +13,8 @@ and the documented Jira credentials, acli, and test project.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import os
-import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -33,16 +32,8 @@ pytestmark = [
 ]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-RECON_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
+RECON_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 LEAKED_LOG = REPO_ROOT / "leaked-artifacts.log"
-
-# Expose the nested reconciler package so its top-level sibling imports resolve.
-if str(RECON_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(RECON_DIR.parent))
-
-# Other integration modules replace canonical reconciler entries in ``sys.modules``.
-# Cache this suite's references under unique keys while leaving sibling imports canonical.
-_MOD_CACHE: dict[str, ModuleType] = {}
 
 # The Jira vendor modules were relocated into ``adapters/jira/`` (ADR 0035 §(c), epic
 # bbf1 / story dfb9); resolve them from that sub-package instead of the package root.
@@ -61,20 +52,12 @@ _JIRA_ADAPTER_MODULES = frozenset(
 
 
 def _recon(modname: str) -> ModuleType:
-    """Load ``rebar_reconciler/<modname>.py`` (or ``adapters/jira/<modname>.py`` for a
-    relocated vendor module) under a unique, pollution-proof key."""
-    key = f"d01e_{modname}"
-    cached = _MOD_CACHE.get(key)
-    if cached is not None:
-        return cached
-    base = RECON_DIR / "adapters" / "jira" if modname in _JIRA_ADAPTER_MODULES else RECON_DIR
-    spec = importlib.util.spec_from_file_location(key, base / f"{modname}.py")
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[key] = mod
-    spec.loader.exec_module(mod)
-    _MOD_CACHE[key] = mod
-    return mod
+    """Import ``rebar.reconciler.<modname>`` (or ``rebar.reconciler.adapters.jira.<modname>``
+    for a relocated vendor module)."""
+    package = (
+        "rebar.reconciler.adapters.jira" if modname in _JIRA_ADAPTER_MODULES else "rebar.reconciler"
+    )
+    return importlib.import_module(f"{package}.{modname}")
 
 
 _LIVE_ENV_KEYS = ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN")

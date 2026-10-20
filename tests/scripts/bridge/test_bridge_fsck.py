@@ -248,6 +248,6 @@ def test_core_doctor_stays_jira_free() -> None:
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.append(node.module)
 
-    forbidden = ("rebar_reconciler", "access_check", "acli")
+    forbidden = ("rebar.reconciler", "access_check", "acli")
     offenders = [name for name in imported if any(tok in name for tok in forbidden)]
     assert not offenders, f"core doctor must stay Jira-free; found: {offenders}"

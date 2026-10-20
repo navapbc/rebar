@@ -35,9 +35,7 @@ from test_reconcile_idempotency import (  # noqa: F401
     reconciler_modules,
 )
 
-RECONCILER_DIR = (
-    Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine" / "rebar_reconciler"
-)
+RECONCILER_DIR = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler"
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +51,7 @@ def _run_pass(reconciler_modules, client, repo_root, monkeypatch, pass_id, *, wi
     monkeypatch.setattr(applier, "_load_acli", lambda: client)
     monkeypatch.setattr(applier, "_load_concurrency", lambda: _make_ok_concurrency())
     if wire_backend:
-        from rebar_reconciler.adapters.jira.backend import JiraBackend
+        from rebar.reconciler.adapters.jira.backend import JiraBackend
 
         run_differs_mod = sys.modules["reconcile_run_differs"]
         monkeypatch.setattr(run_differs_mod, "_load_reconcile_backend", lambda: JiraBackend(client))

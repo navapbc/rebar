@@ -8,9 +8,8 @@ The transport raises `BackendAssigneeNotFoundError` directly, proving
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 import time
 from pathlib import Path
 from types import ModuleType
@@ -18,49 +17,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler._backend import BackendAssigneeNotFoundError
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
-APPLIER_PATH = SCRIPTS_DIR / "rebar_reconciler" / "applier.py"
-
-# Mirror the sibling soft-fail test's bootstrap so the loader chain resolves the
-# ``rebar_reconciler`` namespace to the real source dir under any cwd — this makes the
-# ``BackendAssigneeNotFoundError`` we import below the SAME class object apply_handlers
-# catches.
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-if "rebar_reconciler" not in sys.modules:
-    import types as _types
-
-    _dr = _types.ModuleType("rebar_reconciler")
-    _dr.__path__ = [str(SCRIPTS_DIR / "rebar_reconciler")]
-    sys.modules["rebar_reconciler"] = _dr
-for _name, _rel in (
-    ("rebar_reconciler.adapters.jira.adf", "adapters/jira/adf.py"),
-    ("rebar_reconciler.adapters.jira.comment_limits", "adapters/jira/comment_limits.py"),
-):
-    if _name not in sys.modules:
-        _spec = importlib.util.spec_from_file_location(
-            _name, SCRIPTS_DIR / "rebar_reconciler" / _rel
-        )
-        _mod = importlib.util.module_from_spec(_spec)
-        sys.modules[_name] = _mod
-        _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
-
-from rebar_reconciler._backend import BackendAssigneeNotFoundError  # noqa: E402
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+APPLIER_PATH = SCRIPTS_DIR.parent / "reconciler" / "applier.py"
 
 
 @pytest.fixture(scope="module")
 def applier_mod() -> ModuleType:
-    return _load_module("applier_neutral_assignee", APPLIER_PATH)
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 def _read_alert_records(repo_root: Path) -> list[dict]:

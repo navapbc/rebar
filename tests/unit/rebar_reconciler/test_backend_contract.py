@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler._backend import Backend, FieldSanitizer, RemoteRef
-from rebar_reconciler.adapters.jira.backend import JiraBackend
-from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+from rebar.reconciler._backend import Backend, FieldSanitizer, RemoteRef
+from rebar.reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
 from .backend_support import FakeBackend, FakeTransport
 

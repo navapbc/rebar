@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import importlib.util
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -101,26 +100,9 @@ def test_code_review_is_searchable(store: Path) -> None:
 
 
 def _load_outbound_differ():
-    """Load outbound_differ standalone (the bash->Python strangler engine sets its own
-    sys.path), returning the module so we can drive its real type-filtering path."""
-    engine_dir = Path(__file__).resolve().parents[2] / "src" / "rebar" / "_engine"
-    if str(engine_dir) not in sys.path:
-        sys.path.insert(0, str(engine_dir))
-    # Under pytest, tests/unit/rebar_reconciler/__init__.py is itself importable as
-    # the top-level ``rebar_reconciler`` package and SHADOWS the engine package of the
-    # same name (which lacks _loader.py etc.). tests/unit/conftest.py bridges that
-    # shadow for every tests/unit collection, so outbound_differ's own
-    # ``from rebar_reconciler.<x> import ...`` already falls through to the real
-    # engine modules — no per-module __path__ compensation is needed here.
-    engine_pkg = str(engine_dir / "rebar_reconciler")
-    spec = importlib.util.spec_from_file_location(
-        "outbound_differ_code_review", Path(engine_pkg) / "outbound_differ.py"
-    )
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["outbound_differ_code_review"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    """The shared ``rebar.reconciler.outbound_differ`` module, so we can drive its real
+    type-filtering path."""
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 class _StubBindingStore:

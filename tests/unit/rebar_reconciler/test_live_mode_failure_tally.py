@@ -36,7 +36,7 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler import apply_planning, reconcile, reconcile_helpers
+from rebar.reconciler import apply_planning, reconcile, reconcile_helpers
 
 
 def _write_manifest(tmp_path: Path, outcomes: list[dict]) -> Path:
@@ -46,7 +46,7 @@ def _write_manifest(tmp_path: Path, outcomes: list[dict]) -> Path:
 
 
 def _mode_mod() -> Any:
-    from rebar_reconciler import mode as mode_mod
+    from rebar.reconciler import mode as mode_mod
 
     return mode_mod
 
@@ -212,7 +212,7 @@ def test_live_failure_reaches_a_non_zero_exit_end_to_end(
 
     Drives: _emit_mode_manifest (LIVE, real) -> _persist_and_log (real) -> run_pass (real).
     """
-    from rebar_reconciler import __main__ as reconciler_main
+    from rebar.reconciler import __main__ as reconciler_main
 
     outcomes = [
         {"action": "create", "key": "OK-1"},
@@ -284,7 +284,7 @@ class _T3Clock:
 
 
 def _t3_budget_factory():
-    from rebar_reconciler import retry_budget as rb
+    from rebar.reconciler import retry_budget as rb
 
     def factory():
         return rb.RetryBudget(clock=_T3Clock(), jitter=lambda: 0.0)
@@ -293,8 +293,8 @@ def _t3_budget_factory():
 
 
 def _t3_plan(identity: str, action: str):
-    from rebar_reconciler import mutation as m
-    from rebar_reconciler import ticket_plan as tp
+    from rebar.reconciler import mutation as m
+    from rebar.reconciler import ticket_plan as tp
 
     mut = m.Mutation(
         direction=m.MutationDirection.outbound,
@@ -317,7 +317,7 @@ def _t3_plan(identity: str, action: str):
 
 def _t3_cutover_report():
     """A cutover report with one applied and one budget-exhausted (failed) plan."""
-    from rebar_reconciler import batch_dispatch, coordinator
+    from rebar.reconciler import batch_dispatch, coordinator
 
     def execute(plan, _mutation):
         if plan.identity == "OK-1":
@@ -336,7 +336,7 @@ def _t3_cutover_report():
 
 def test_cutover_five_bucket_tally_is_exact() -> None:
     """AC4: ``build_pass_tally`` over the cutover report yields the exact five buckets."""
-    from rebar_reconciler import batch_dispatch
+    from rebar.reconciler import batch_dispatch
 
     tally = batch_dispatch.build_pass_tally(_t3_cutover_report())
     assert tally["applied_count"] == 1
@@ -352,8 +352,8 @@ def test_cutover_tally_reaches_a_non_zero_exit_end_to_end(
     """AC4: the cutover's five-bucket tally, threaded through the EXISTING LIVE seam
     (``ctx.apply_tally`` → ``_persist_and_log`` → ``run_pass``), preserves the nonzero
     degraded-pass exit — a failed mutation still makes the pass loud."""
-    from rebar_reconciler import __main__ as reconciler_main
-    from rebar_reconciler import batch_dispatch
+    from rebar.reconciler import __main__ as reconciler_main
+    from rebar.reconciler import batch_dispatch
 
     tally = batch_dispatch.build_pass_tally(_t3_cutover_report())
 
@@ -394,8 +394,8 @@ def _t3_degraded_deferred_report():
     """A cutover report where the fuse OPENS on budget-deferred (retryable_deferred)
     outcomes only: four plans on ONE endpoint each exhaust the cumulative-sleep budget,
     so the ``failed`` bucket stays empty yet the fuse opens — a degraded pass."""
-    from rebar_reconciler import batch_dispatch, coordinator
-    from rebar_reconciler import retry_budget as rb
+    from rebar.reconciler import batch_dispatch, coordinator
+    from rebar.reconciler import retry_budget as rb
 
     over = rb.MAX_CUMULATIVE_SLEEP_MS + 5000
 
@@ -420,8 +420,8 @@ def test_cutover_deferred_only_pass_is_degraded_and_exits_nonzero(
     """AC4: a degraded pass with ZERO failures (the fuse opened, so matching work was
     safety-deferred) must still exit non-zero. The tally carries ``degraded=True`` with
     ``failed_count == 0``; threaded through the LIVE seam it drives an OPERATIONAL exit."""
-    from rebar_reconciler import __main__ as reconciler_main
-    from rebar_reconciler import batch_dispatch
+    from rebar.reconciler import __main__ as reconciler_main
+    from rebar.reconciler import batch_dispatch
 
     report = _t3_degraded_deferred_report()
     tally = batch_dispatch.build_pass_tally(report)
@@ -468,7 +468,7 @@ def test_legacy_apply_tally_without_degraded_key_stays_converged(
 ) -> None:
     """A pre-cutover apply_tally (no ``deferred_count`` / ``degraded`` keys) is unchanged:
     the new fields default to 0 / absent so a clean legacy pass stays converged."""
-    from rebar_reconciler import __main__ as reconciler_main
+    from rebar.reconciler import __main__ as reconciler_main
 
     class _Logger:
         def log(self, *a: Any, **k: Any) -> None: ...
@@ -521,7 +521,7 @@ from unittest.mock import MagicMock, patch  # noqa: E402
 
 
 def _rr_mods():
-    from rebar_reconciler import applier, mutation, ticket_plan
+    from rebar.reconciler import applier, mutation, ticket_plan
 
     return applier, mutation, ticket_plan
 
@@ -581,7 +581,7 @@ def test_live_reroute_migrated_update_dispatches_through_coordinator_not_legacy_
     # G6: the pre-dispatch rebar-id label-write authorization guard must still fire on
     # the coordinator route. The guard lives in its owning leaf module rebar_id_audit;
     # the coordinator dispatch loads it from there, so spy on the source function.
-    from rebar_reconciler import rebar_id_audit
+    from rebar.reconciler import rebar_id_audit
 
     audited: list = []
     orig_audit = rebar_id_audit._audit_rebar_id_label_writes
@@ -890,7 +890,7 @@ def test_reconcile_unfolds_the_real_build_pass_tally_fold(
     ``build_pass_tally``) to ``applied_count`` 5 with ``recovered_count`` 2; reconcile must
     report ``mutations_applied`` 3 and ``mutations_recovered`` 2 — disjoint, summing to
     ``mutation_count``."""
-    from rebar_reconciler import batch_dispatch
+    from rebar.reconciler import batch_dispatch
 
     report = batch_dispatch.CutoverReport(
         outcomes=(),
@@ -945,7 +945,7 @@ def test_commit_unknown_deferred_work_is_not_counted_applied(
 
 
 def _last_pass_mod() -> Any:
-    from rebar_reconciler import last_pass
+    from rebar.reconciler import last_pass
 
     return last_pass
 

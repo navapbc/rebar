@@ -41,28 +41,28 @@ pyt_reserved_key = "_bridge_target_project"
 
 @pytest.fixture
 def od() -> Any:
-    from rebar_reconciler import outbound_differ
+    from rebar.reconciler import outbound_differ
 
     return outbound_differ
 
 
 @pytest.fixture
 def projects_store() -> Any:
-    from rebar_reconciler import projects_store as ps
+    from rebar.reconciler import projects_store as ps
 
     return ps
 
 
 @pytest.fixture
 def binding_store_mod() -> Any:
-    from rebar_reconciler import binding_store
+    from rebar.reconciler import binding_store
 
     return binding_store
 
 
 @pytest.fixture
 def applier_mod() -> Any:
-    from rebar_reconciler import applier
+    from rebar.reconciler import applier
 
     return applier
 
@@ -180,7 +180,7 @@ def test_single_project_store_is_unchanged_when_no_mapping_is_seeded(
 
 @pytest.fixture
 def acli_mod() -> Any:
-    from rebar_reconciler.adapters.jira import acli
+    from rebar.reconciler.adapters.jira import acli
 
     return acli
 
@@ -195,7 +195,7 @@ def _cloud_client(acli_mod: Any) -> Any:
 
 
 def test_cloud_create_targets_the_stamped_project(acli_mod, monkeypatch):
-    from rebar_reconciler.adapters.jira import acli_cli_ops
+    from rebar.reconciler.adapters.jira import acli_cli_ops
 
     recorded: dict[str, Any] = {}
 
@@ -213,7 +213,7 @@ def test_cloud_create_targets_the_stamped_project(acli_mod, monkeypatch):
 
 
 def test_cloud_create_falls_back_to_construction_project(acli_mod, monkeypatch):
-    from rebar_reconciler.adapters.jira import acli_cli_ops
+    from rebar.reconciler.adapters.jira import acli_cli_ops
 
     recorded: dict[str, Any] = {}
 
@@ -252,7 +252,7 @@ class _RecordingDCClient:
 
 
 def _dc_transport(client: Any) -> Any:
-    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+    from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
     return JiraDataCenterTransport(client=client, project="A")
 
@@ -379,7 +379,7 @@ def test_create_still_suppressed_when_project_absent_even_case_folded(
 def test_run_differs_outbound_seam_fails_closed_on_malformed_projects_json(tmp_path):
     import types
 
-    from rebar_reconciler import local_label_intent, outbound_differ, run_differs
+    from rebar.reconciler import local_label_intent, outbound_differ, run_differs
 
     bridge = tmp_path / ".tickets-tracker" / ".bridge_state"
     bridge.mkdir(parents=True)

@@ -97,7 +97,7 @@ def _write_python_stub(path: Path) -> None:
             printf 'python\t%s\t%s\timport\n' "$0" "$PWD" >> "$PROBE_TEST_EVENTS"
             rc="${PROBE_TEST_IMPORT_RC:-0}"
             if [ "$rc" -ne 0 ]; then
-                printf 'rebar_reconciler import rejected by probe fixture\n' >&2
+                printf 'rebar.reconciler import rejected by probe fixture\n' >&2
             fi
             exit "$rc"
         fi
@@ -106,11 +106,11 @@ def _write_python_stub(path: Path) -> None:
             printf 'Probe User\n'
             exit 0
         fi
-        if [[ "$*" == *"rebar_reconciler"* ]]; then
+        if [[ "$*" == *"rebar.reconciler"* ]]; then
             printf 'python\t%s\t%s\timport\n' "$0" "$PWD" >> "$PROBE_TEST_EVENTS"
             rc="${PROBE_TEST_IMPORT_RC:-0}"
             if [ "$rc" -ne 0 ]; then
-                printf 'rebar_reconciler import rejected by probe fixture\n' >&2
+                printf 'rebar.reconciler import rejected by probe fixture\n' >&2
             fi
             exit "$rc"
         fi
@@ -134,7 +134,7 @@ def _workspace(tmp_path: Path) -> ProbeWorkspace:
     repo = tmp_path / "checkout"
     engine = repo / "src" / "rebar" / "_engine"
     engine.mkdir(parents=True)
-    (engine / "rebar_reconciler").mkdir()
+    (engine / "rebar.reconciler").mkdir()
 
     python = repo / ".venv" / "bin" / "python"
     ticket_cli = repo / ".venv" / "bin" / "rebar"
@@ -165,7 +165,7 @@ def _write_python_wrapper(path: Path) -> None:
 def _write_fake_jira_adapter(
     workspace: ProbeWorkspace, *, missing_operation: tuple[str, str] | None = None
 ) -> None:
-    package = workspace.engine / "rebar_reconciler"
+    package = workspace.engine / "rebar.reconciler"
     adapters = package / "adapters"
     jira = adapters / "jira"
     for directory in (package, adapters, jira):
@@ -342,7 +342,7 @@ def test_each_probe_rejects_a_missing_adapter_operation_before_mutation(
                 [
                     str(missing.python),
                     "-c",
-                    "from rebar_reconciler.adapters.jira import acli as mod\n"
+                    "from rebar.reconciler.adapters.jira import acli as mod\n"
                     f"raise SystemExit(0 if not hasattr({target}, {operation!r}) else 1)",
                 ],
                 cwd=missing.engine,
@@ -438,7 +438,7 @@ def test_missing_checkout_tools_and_failed_import_stop_before_mutation(tmp_path:
         env["PROBE_TEST_IMPORT_RC"] = "42"
         completed = _run(probe, env)
         output = completed.stdout + completed.stderr
-        if completed.returncode == 0 or "rebar_reconciler" not in output:
+        if completed.returncode == 0 or "rebar.reconciler" not in output:
             failures.append(f"{probe.name} did not report the failed reconciler import")
         if any(line.startswith("ticket\t") for line in _events(failed_import)):
             failures.append(

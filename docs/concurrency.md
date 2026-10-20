@@ -195,7 +195,7 @@ surface that writes STATUS events upholds it:
 - **Inbound reconcile** (the Jira reconciler's inbound apply) — a Jira-originated status
   change that takes a cascading edge cascades the same way:
   `_cascade_inbound_status_parents` in
-  `src/rebar/_engine/rebar_reconciler/apply_inbound_events.py` shares the cascade
+  `src/rebar/reconciler/apply_inbound_events.py` shares the cascade
   DECISION (the same `_CASCADING_EDGES` table and `_resolve_parent_in_status`
   eligibility lookup) and writes the eligible ancestors' STATUS events first, topmost
   ancestor first, on both the inbound-update and inbound-create paths. Only the write
@@ -270,7 +270,7 @@ Regression coverage: `tests/integration/test_concurrency_regression.py`
 (`…parent_cascade_same_tracker_race…`, `…parent_cascade_two_clone_offline_race…`).
 
 ### I5 — Single locked write path
-All writes go through the lock-guarded append and commit path. The atomic tmp-then-rename, `git add <event>`, and `git commit` operations run under the tickets tracker write lock held by `rebar._store.lock.write_lock` or `rebar._store.lock.acquire`. No side-channel writes are allowed. The reconciler event writer shares this lock through `rebar_reconciler.inbound_translate._write_event_file`, which uses `rebar._store.lock.write_lock` and the shared `rebar._store.event_append.event_filename` contract. The former Bash `_flock_stage_commit` write core has been retired. This Python lock remains.
+All writes go through the lock-guarded append and commit path. The atomic tmp-then-rename, `git add <event>`, and `git commit` operations run under the tickets tracker write lock held by `rebar._store.lock.write_lock` or `rebar._store.lock.acquire`. No side-channel writes are allowed. The reconciler event writer shares this lock through `rebar.reconciler.inbound_translate._write_event_file`, which uses `rebar._store.lock.write_lock` and the shared `rebar._store.event_append.event_filename` contract. The former Bash `_flock_stage_commit` write core has been retired. This Python lock remains.
 
 **The dual-window lock (permanent contract).** By default the lock takes BOTH a
 `fcntl.flock(LOCK_EX)` on `.ticket-write.lock` AND an atomic `mkdir` lock at

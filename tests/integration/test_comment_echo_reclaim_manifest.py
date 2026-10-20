@@ -480,7 +480,7 @@ def test_import_does_not_preload_the_engine_top_level_package() -> None:
                 "import sys; "
                 f"sys.path.insert(0, {str(SCRIPTS)!r}); "
                 "import comment_echo_reclaim_manifest; "
-                "assert 'rebar_reconciler' not in sys.modules"
+                "assert 'rebar.reconciler' not in sys.modules"
             ),
         ],
         check=False,

@@ -2,25 +2,14 @@
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, filename: str):
-    sys.modules.pop(name, None)
-    spec = importlib.util.spec_from_file_location(name, RECONCILER_DIR / filename)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 def _binding_doc(stamps: dict[str, str]) -> dict:
@@ -95,8 +84,8 @@ def test_interleaved_old_new_state_selects_same_next_key_as_all_new(
         },
     )
 
-    binding_store = _load("_heldout_rotation_binding_store", "binding_store.py")
-    outbound = _load("_heldout_rotation_outbound", "outbound_differ.py")
+    binding_store = importlib.import_module("rebar.reconciler.binding_store")
+    outbound = importlib.import_module("rebar.reconciler.outbound_differ")
     mixed = binding_store.BindingStore(mixed_root / ".tickets-tracker")
     all_new = binding_store.BindingStore(all_new_root / ".tickets-tracker")
 
@@ -133,7 +122,7 @@ def test_corrupt_sidecar_fails_open_to_legacy_rotation(tmp_path: Path) -> None:
     sidecar = tmp_path / ".tickets-tracker" / ".bridge_state" / "get_rotation.json"
     sidecar.write_text("{ not-json ")
 
-    binding_store = _load("_heldout_corrupt_rotation_binding_store", "binding_store.py")
+    binding_store = importlib.import_module("rebar.reconciler.binding_store")
     store = binding_store.BindingStore(tmp_path / ".tickets-tracker")
     assert store.last_get_pass("DIG-A") == "2026-07-01T00-00-02"
     store.set_last_get("DIG-A", "2026-07-01T00-00-03")
@@ -149,7 +138,7 @@ def test_legacy_only_store_materializes_equivalent_sidecar_on_save(tmp_path: Pat
         "C": "2026-07-01T00-00-01",
     }
     _write_store(tmp_path, inline=inline, sidecar=None)
-    binding_store = _load("_heldout_legacy_rotation_binding_store", "binding_store.py")
+    binding_store = importlib.import_module("rebar.reconciler.binding_store")
     store = binding_store.BindingStore(tmp_path / ".tickets-tracker")
     before = {key: store.last_get_pass(key) for key in ("DIG-A", "DIG-B", "DIG-C")}
 
@@ -176,8 +165,8 @@ def test_sidecar_tempfile_failure_does_not_abort_legacy_save(
         inline={"A": "2026-07-01T00-00-01", "B": "", "C": ""},
         sidecar=None,
     )
-    binding_store = _load("_heldout_rotation_save_failure", "binding_store.py")
-    from rebar_reconciler import get_rotation
+    binding_store = importlib.import_module("rebar.reconciler.binding_store")
+    from rebar.reconciler import get_rotation
 
     store = binding_store.BindingStore(tmp_path / ".tickets-tracker")
     store.set_last_get("DIG-A", "2026-07-01T00-00-02")
@@ -221,8 +210,8 @@ def test_sidecar_replace_failure_retains_inline_floor_until_retry(
         inline={"A": "2026-07-01T00-00-01", "B": "", "C": ""},
         sidecar={"DIG-A": "2026-07-01T00-00-00"},
     )
-    binding_store = _load("_heldout_rotation_sidecar_replace_failure", "binding_store.py")
-    from rebar_reconciler import get_rotation
+    binding_store = importlib.import_module("rebar.reconciler.binding_store")
+    from rebar.reconciler import get_rotation
 
     tracker = tmp_path / ".tickets-tracker"
     bridge = tracker / ".bridge_state"
@@ -266,7 +255,7 @@ def test_failure_after_sidecar_replace_preserves_newest_rotation_maximum(
         inline={"A": "2026-07-01T00-00-01", "B": "", "C": ""},
         sidecar={"DIG-A": "2026-07-01T00-00-00"},
     )
-    binding_store = _load("_heldout_rotation_second_replace_failure", "binding_store.py")
+    binding_store = importlib.import_module("rebar.reconciler.binding_store")
     tracker = tmp_path / ".tickets-tracker"
     bridge = tracker / ".bridge_state"
     bindings_path = bridge / "bindings.json"
@@ -301,7 +290,7 @@ def test_failure_after_sidecar_replace_preserves_newest_rotation_maximum(
 
 def test_rotation_paths_and_regenerable_documentation_are_pinned() -> None:
     from rebar._store import push
-    from rebar_reconciler import git_adapter
+    from rebar.reconciler import git_adapter
 
     assert getattr(git_adapter, "GET_ROTATION_FILE", None) == ".bridge_state/get_rotation.json"
     assert "get_rotation.json" in (push._resolve_conflicted_apply.__doc__ or "")

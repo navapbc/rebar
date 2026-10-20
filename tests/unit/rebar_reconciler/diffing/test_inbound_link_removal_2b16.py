@@ -117,7 +117,7 @@ def _enrich_via_fetcher(
     the production merge, any drift in that rule turns these tests RED instead of leaving a
     stale copy green.
     """
-    fetcher = importlib.import_module("rebar_reconciler.fetcher")
+    fetcher = importlib.import_module("rebar.reconciler.fetcher")
     return fetcher.merge_issuelinks_map(snapshot, issuelinks_map)
 
 
@@ -128,7 +128,7 @@ def _inbound(
     outbound: list[Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Run the production inbound differ and return the flat list of link records."""
-    inbound_differ = importlib.import_module("rebar_reconciler.inbound_differ")
+    inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
     muts, _suppressed = inbound_differ.compute_inbound_mutations(
         snapshot,
         bindings,
@@ -528,7 +528,7 @@ def _confirm_local_deps(repo: Path, source_id: str) -> None:
     correct for both the single-relation cells and the e39f double-related pair.
     """
     import rebar
-    from rebar_reconciler.peer_confirmations import open_store
+    from rebar.reconciler.peer_confirmations import open_store
 
     store = open_store(repo)
     for dep in rebar.show_ticket(source_id, repo_root=repo).get("deps") or []:
@@ -578,7 +578,7 @@ def test_end_to_end_a_peer_deleted_link_leaves_the_dep_gone(
     )
 
     _confirm_local_deps(repo, a)
-    apply_records = importlib.import_module("rebar_reconciler.apply_inbound_records")
+    apply_records = importlib.import_module("rebar.reconciler.apply_inbound_records")
     applied = apply_records._inbound_update_apply_links({"links": records}, a, repo)
 
     remaining = _targets(repo, a)
@@ -603,7 +603,7 @@ def test_end_to_end_reapply_is_idempotent(
     """
     repo, a, b = two_linked_tickets
     _confirm_local_deps(repo, a)
-    apply_records = importlib.import_module("rebar_reconciler.apply_inbound_records")
+    apply_records = importlib.import_module("rebar.reconciler.apply_inbound_records")
     payload = {"links": [{"action": "remove", "target_id": b, "relation": "blocks"}]}
 
     apply_records._inbound_update_apply_links(payload, a, repo)
@@ -634,7 +634,7 @@ def test_g5_relation_mismatch_removes_nothing_and_logs(
     be logged rather than passing silently.
     """
     repo, a, b = two_linked_tickets
-    apply_records = importlib.import_module("rebar_reconciler.apply_inbound_records")
+    apply_records = importlib.import_module("rebar.reconciler.apply_inbound_records")
 
     # Pin the level ON THE ORIGINATING LOGGER: it lives outside the `rebar` hierarchy
     # that tests/conftest.py's propagation guard restores, so a leaked
@@ -702,7 +702,7 @@ def test_e39f_inbound_removal_converges_for_a_double_related_pair(
     )
 
     _confirm_local_deps(repo, a)
-    apply_records = importlib.import_module("rebar_reconciler.apply_inbound_records")
+    apply_records = importlib.import_module("rebar.reconciler.apply_inbound_records")
     applied = apply_records._inbound_update_apply_links(
         {"links": [{"action": "remove", "target_id": b, "relation": "blocks"}]}, a, repo
     )
@@ -727,7 +727,7 @@ def test_e39f_double_related_reapply_is_idempotent(
     """Re-applying the same relation-scoped removal is a counted-zero no-op."""
     repo, a, b = double_related_tickets
     _confirm_local_deps(repo, a)
-    apply_records = importlib.import_module("rebar_reconciler.apply_inbound_records")
+    apply_records = importlib.import_module("rebar.reconciler.apply_inbound_records")
     payload = {"links": [{"action": "remove", "target_id": b, "relation": "blocks"}]}
 
     apply_records._inbound_update_apply_links(payload, a, repo)

@@ -26,44 +26,30 @@ looked up from the live table, so the coverage claim is structural.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from rebar_reconciler import apply_outbound
-from rebar_reconciler._errors import JiraAPIError
+from rebar.reconciler import apply_outbound
+from rebar.reconciler._errors import JiraAPIError
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 MUTATION_PATH = APPLIER_PATH.parent / "mutation.py"
 
 
 def _load_mutation_module():
     # Load under the canonical key so Mutation objects share class identity with
     # the enum members the leaves see (avoids _direction_guard false negatives).
-    canonical = "rebar_reconciler.mutation"
-    if canonical in sys.modules:
-        return sys.modules[canonical]
-    spec = importlib.util.spec_from_file_location(canonical, MUTATION_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[canonical] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location("applier_effect_matrix", APPLIER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["applier_effect_matrix"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")

@@ -2,39 +2,22 @@
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "pass_support.py"
-BINDING_STORE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "binding_store.py"
-)
+PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "pass_support.py"
+BINDING_STORE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "binding_store.py"
 
 
 def _load_pass_support():
-    name = "_test_get_rotation_commit_pass_support"
-    sys.modules.pop(name, None)
-    spec = importlib.util.spec_from_file_location(name, PASS_SUPPORT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    return importlib.import_module("rebar.reconciler.pass_support")
 
 
 def _load_binding_store():
-    name = "_test_get_rotation_commit_binding_store"
-    sys.modules.pop(name, None)
-    spec = importlib.util.spec_from_file_location(name, BINDING_STORE_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    return importlib.import_module("rebar.reconciler.binding_store")
 
 
 def _git(tracker: Path, *args: str) -> str:

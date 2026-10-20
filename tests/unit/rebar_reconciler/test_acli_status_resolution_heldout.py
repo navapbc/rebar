@@ -8,7 +8,7 @@ key, so a single unified dict cannot preserve both callers — the story decides
 explicitly rather than smuggling it:
 
   * ``outbound_fields._LOCAL_TO_JIRA_STATUS`` mapped ``deleted`` -> ``"Done"``
-    (as does ``rebar_reconciler/config.py``'s third copy);
+    (as does ``reconciler/config.py``'s third copy);
   * ``jira_fields._LOCAL_STATUS_TO_JIRA`` OMITTED ``deleted``, so the ACLI path
     fell through to ``status.replace("_", " ").title()`` -> ``"Deleted"`` — not a
     state in the live DIG workflow ({To Do, In Progress, In Review, Done}), so
@@ -30,7 +30,7 @@ from unittest import mock
 
 import pytest
 
-from rebar_reconciler.adapters.jira import acli
+from rebar.reconciler.adapters.jira import acli
 
 _SETTINGS = SimpleNamespace(url="https://example.invalid", user="u", api_token="t")
 

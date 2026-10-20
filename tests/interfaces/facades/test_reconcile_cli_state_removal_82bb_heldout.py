@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -15,21 +14,12 @@ from rebar._cli import _registry
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RECONCILER = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load_module(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, RECONCILER / filename)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+RECONCILER = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 def test_legacy_reconcile_cli_is_absent_and_engine_filter_is_retained() -> None:
-    mode_mod = _load_module("heldout_82bb_mode", "mode.py")
-    request_mod = _load_module("heldout_82bb_request", "request.py")
+    mode_mod = importlib.import_module("rebar.reconciler.mode")
+    request_mod = importlib.import_module("rebar.reconciler.request")
 
     assert _registry.route_for("reconcile") is None
     with pytest.raises((request_mod.RequestError, ValueError)):
@@ -47,7 +37,7 @@ def test_bridge_runner_dry_run_profile_invokes_canonical_preview() -> None:
 def test_bridge_status_ignores_retired_reconcile_check_artifact(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    last_pass = _load_module("heldout_82bb_last_pass", "last_pass.py")
+    last_pass = importlib.import_module("rebar.reconciler.last_pass")
     store = rebar_repo / ".tickets-tracker"
     bridge_state = store / ".bridge_state"
     bridge_state.mkdir(parents=True, exist_ok=True)
@@ -82,8 +72,8 @@ def test_bridge_status_ignores_retired_reconcile_check_artifact(
 
 
 def test_retired_pause_sentinel_blocks_write_capable_modes(rebar_repo: Path) -> None:
-    mode_mod = _load_module("heldout_82bb_mode_pause", "mode.py")
-    _advisory_lock = _load_module("heldout_82bb_advisory_lock", "_advisory_lock.py")
+    mode_mod = importlib.import_module("rebar.reconciler.mode")
+    _advisory_lock = importlib.import_module("rebar.reconciler._advisory_lock")
     ref_lock = _advisory_lock._load_ref_lock()
 
     ref_lock.set_gate(rebar_repo, "reconcile-check")

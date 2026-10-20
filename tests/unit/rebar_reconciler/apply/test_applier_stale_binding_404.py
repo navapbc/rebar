@@ -7,7 +7,7 @@ HTTP errors retain their current behavior.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import sys
 import time
@@ -21,64 +21,24 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
-APPLIER_PATH = SCRIPTS_DIR / "rebar_reconciler" / "applier.py"
-ACLI_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "acli.py"
+APPLIER_PATH = SCRIPTS_DIR.parent / "reconciler" / "applier.py"
+ACLI_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "acli.py"
 
-# acli.py imports ``from rebar_reconciler.adapters.jira.adf import text_to_adf``;
+# acli.py imports ``from rebar.reconciler.adapters.jira.adf import text_to_adf``;
 # mirror the package-bootstrap pattern from test_applier_assignee_soft_fail.py
 # so the loader chain resolves under any cwd.
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-_ADF_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "adf.py"
-if "rebar_reconciler" not in sys.modules:
-    import types as _types
-
-    _dr = _types.ModuleType("rebar_reconciler")
-    _dr.__path__ = [str(SCRIPTS_DIR / "rebar_reconciler")]
-    sys.modules["rebar_reconciler"] = _dr
-if "rebar_reconciler.adapters.jira.adf" not in sys.modules:
-    _adf_spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler.adapters.jira.adf", _ADF_PATH
-    )
-    _adf_mod = importlib.util.module_from_spec(_adf_spec)
-    sys.modules["rebar_reconciler.adapters.jira.adf"] = _adf_mod
-    _adf_spec.loader.exec_module(_adf_mod)  # type: ignore[union-attr]
-# acli.py also imports ``from rebar_reconciler.adapters.jira.comment_limits import ...``
+_ADF_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "adf.py"
+# acli.py also imports ``from rebar.reconciler.adapters.jira.comment_limits import ...``
 # (bug 6afc-20ee-84e5-4dd5). Bootstrap it explicitly alongside adf so the loader
 # chain resolves regardless of which sibling test first registered the
-# ``rebar_reconciler`` namespace stub.
-_CL_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "comment_limits.py"
-if "rebar_reconciler.adapters.jira.comment_limits" not in sys.modules:
-    _cl_spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler.adapters.jira.comment_limits", _CL_PATH
-    )
-    _cl_mod = importlib.util.module_from_spec(_cl_spec)
-    sys.modules["rebar_reconciler.adapters.jira.comment_limits"] = _cl_mod
-    _cl_spec.loader.exec_module(_cl_mod)  # type: ignore[union-attr]
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    """Load ``path`` as a fresh module under ``name``.
-
-    Unlike ``sys.modules.setdefault``, this always executes a fresh module and
-    registers it under a file-unique key. The module is registered before
-    ``exec_module`` so any self-referential imports resolve. Callers are
-    responsible for popping ``name`` from ``sys.modules`` on teardown (see the
-    yield fixtures below) so the cache does not leak across test files or
-    review cycles (the 4cc1 leakage class).
-    """
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+# ``rebar.reconciler`` namespace stub.
+_CL_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "comment_limits.py"
 
 
 @pytest.fixture(scope="module")
 def applier_mod() -> Iterator[ModuleType]:
     name = "applier_stale_binding_404"
-    mod = _load_module(name, APPLIER_PATH)
+    mod = importlib.import_module("rebar.reconciler.applier")
     try:
         yield mod
     finally:
@@ -88,7 +48,7 @@ def applier_mod() -> Iterator[ModuleType]:
 @pytest.fixture(scope="module")
 def acli_mod() -> Iterator[ModuleType]:
     name = "acli_stale_binding_404"
-    mod = _load_module(name, ACLI_PATH)
+    mod = importlib.import_module("rebar.reconciler.adapters.jira.acli")
     try:
         yield mod
     finally:
@@ -100,8 +60,8 @@ def _make_fake_acli(acli_mod: ModuleType, client: MagicMock) -> MagicMock:
     the backend transport, not a module).
 
     apply_handlers catches ``AssigneeNotFoundError`` via a direct import from
-    ``rebar_reconciler.adapters.jira.acli_subprocess`` — the same real class the test's client
-    raises (the shadow ``rebar_reconciler`` package __path__'s to the real source
+    ``rebar.reconciler.adapters.jira.acli_subprocess`` — the same real class the test's client
+    raises (the shadow ``rebar.reconciler`` package __path__'s to the real source
     dir), so the soft-fail path resolves to a real BaseException subclass.
     """
     return client
@@ -260,16 +220,16 @@ def test_non_404_http_error_still_propagates(
 # regression pins that mapping so the ticket-local-isolation contract (AC4) cannot
 # silently regress into a pass-fatal or over-broad failure.
 
-_FAILURE_POLICY_PATH = SCRIPTS_DIR / "rebar_reconciler" / "failure_policy.py"
-_OPERATION_OUTCOME_PATH = SCRIPTS_DIR / "rebar_reconciler" / "operation_outcome.py"
+_FAILURE_POLICY_PATH = SCRIPTS_DIR.parent / "reconciler" / "failure_policy.py"
+_OPERATION_OUTCOME_PATH = SCRIPTS_DIR.parent / "reconciler" / "operation_outcome.py"
 
 
 @pytest.fixture(scope="module")
 def failure_policy_mod() -> Iterator[ModuleType]:
     outcome_name = "operation_outcome_stale_binding_404"
-    _load_module(outcome_name, _OPERATION_OUTCOME_PATH)
+    importlib.import_module("rebar.reconciler.operation_outcome")
     name = "failure_policy_stale_binding_404"
-    mod = _load_module(name, _FAILURE_POLICY_PATH)
+    mod = importlib.import_module("rebar.reconciler.failure_policy")
     try:
         yield mod
     finally:

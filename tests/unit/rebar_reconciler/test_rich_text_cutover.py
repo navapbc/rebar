@@ -29,9 +29,9 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
-from rebar_reconciler.adapters.jira_family import rich_text
-from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec, cutover_clients
+from rebar.reconciler.adapters.jira.rich_text_codec import AdfCodec
+from rebar.reconciler.adapters.jira_family import rich_text
+from rebar.reconciler.adapters.jira_family.rich_text import WikiTextCodec, cutover_clients
 
 _MD = "# Heading\n\n- alpha\n- beta **bold**\n"
 
@@ -67,7 +67,7 @@ def test_cutover_defaults_off(set_flag: Any) -> None:
     assert cutover_clients() == frozenset()
     assert WikiTextCodec(rich="dc" in cutover_clients()).to_wire(_MD) == _MD
     assert AdfCodec(rich="cloud" in cutover_clients()).to_wire(_MD) == __import__(
-        "rebar_reconciler.adapters.jira.adf", fromlist=["adf"]
+        "rebar.reconciler.adapters.jira.adf", fromlist=["adf"]
     ).text_to_adf(_MD)
 
 
@@ -133,7 +133,7 @@ def test_cloud_cutover_sends_structured_adf() -> None:
 
 def test_cutover_rollback_restores_plain() -> None:
     """Flipping back to plain restores the historical wire exactly."""
-    from rebar_reconciler.adapters.jira import adf
+    from rebar.reconciler.adapters.jira import adf
 
     assert WikiTextCodec(rich=False).to_wire(_MD) == _MD
     assert WikiTextCodec(rich=False).normalize_outbound(_MD) == _MD
@@ -178,7 +178,7 @@ def test_dc_create_path_renders_like_the_update_path(set_flag: Any) -> None:
     cutover a created issue would carry raw Markdown while every later update carried
     rendered wiki.
     """
-    from rebar_reconciler.adapters.jira_datacenter import _issues
+    from rebar.reconciler.adapters.jira_datacenter import _issues
 
     set_flag("dc")
     fields = _issues._translate_create_fields({"title": "headline", "description": _MD})
@@ -200,7 +200,7 @@ def test_dc_backend_create_path_renders_like_the_update_path(set_flag: Any) -> N
     Having two independent DC create paths is exactly why this is asserted twice. The
     sibling test passing said nothing about this one.
     """
-    from rebar_reconciler.adapters.jira_datacenter import backend
+    from rebar.reconciler.adapters.jira_datacenter import backend
 
     set_flag("dc")
     fields = backend._map_local_to_dc_fields({"title": "headline", "description": _MD})
@@ -213,7 +213,7 @@ def test_dc_backend_create_path_renders_like_the_update_path(set_flag: Any) -> N
 
 def test_dc_backend_create_path_is_unchanged_when_flag_is_off(set_flag: Any) -> None:
     """Flag off keeps the plain wire on this path too — the rollback must cover both."""
-    from rebar_reconciler.adapters.jira_datacenter import backend
+    from rebar.reconciler.adapters.jira_datacenter import backend
 
     set_flag("off")
     fields = backend._map_local_to_dc_fields({"title": "headline", "description": _MD})
@@ -221,7 +221,7 @@ def test_dc_backend_create_path_is_unchanged_when_flag_is_off(set_flag: Any) -> 
 
 
 def test_dc_create_path_is_unchanged_when_flag_is_off(set_flag: Any) -> None:
-    from rebar_reconciler.adapters.jira_datacenter import _issues
+    from rebar.reconciler.adapters.jira_datacenter import _issues
 
     set_flag("off")
     fields = _issues._translate_create_fields({"title": "headline", "description": _MD})
@@ -235,7 +235,7 @@ def test_cloud_functions_degrade_without_marklas(monkeypatch: pytest.MonkeyPatch
     With the ``adf`` extra absent the Markdown-aware functions return their plain
     results, so the cutover path emits the plain-text ADF wire and raises nothing.
     """
-    from rebar_reconciler.adapters.jira import adf
+    from rebar.reconciler.adapters.jira import adf
 
     monkeypatch.setattr(adf, "_marklas", lambda: None)
 
@@ -245,7 +245,7 @@ def test_cloud_functions_degrade_without_marklas(monkeypatch: pytest.MonkeyPatch
 
 def test_dc_degrades_without_pandoc(monkeypatch: pytest.MonkeyPatch) -> None:
     """Same for DC: no pandoc means the identity wire, never an exception."""
-    from rebar_reconciler.adapters.jira_family import wiki_render
+    from rebar.reconciler.adapters.jira_family import wiki_render
 
     monkeypatch.setattr(wiki_render, "_pandoc_path", lambda: None)
 
@@ -274,7 +274,7 @@ def test_resolver_lives_in_the_shared_layer_without_cloud_imports() -> None:
     offenders = [
         m
         for m in imported
-        if m.startswith("rebar_reconciler.adapters.jira.") or m == "rebar_reconciler.adapters.jira"
+        if m.startswith("rebar.reconciler.adapters.jira.") or m == "rebar.reconciler.adapters.jira"
     ]
     assert offenders == []
 
@@ -284,7 +284,7 @@ def _rebar_unimportable():
     """Make a call-time ``import rebar.<...>`` raise ImportError for the duration of the
     ``with`` block only, simulating the stdlib-only pandoc subprocess where ``rebar`` is
     not on the path. Scoped tightly (restored before any fixture teardown) and leaves
-    ``rebar_reconciler`` — a distinct top-level name — untouched, so already-imported
+    ``rebar.reconciler`` — a distinct top-level name — untouched, so already-imported
     adapter modules keep working."""
     real_import = builtins.__import__
 
@@ -301,7 +301,7 @@ def _rebar_unimportable():
 
 
 def test_cutover_clients_degrades_when_rebar_unimportable() -> None:
-    from rebar_reconciler.adapters.jira_family.rich_text import cutover_clients
+    from rebar.reconciler.adapters.jira_family.rich_text import cutover_clients
 
     with _rebar_unimportable():
         result = cutover_clients()
@@ -315,7 +315,7 @@ def test_cutover_clients_read_live_per_call(monkeypatch: pytest.MonkeyPatch) -> 
     """Flipping ``reconciler.rich_text_cutover`` between calls is observed immediately: the
     cut resolver must read the flag live per call, never freeze it at compose time."""
     import rebar.config
-    from rebar_reconciler.adapters.jira_family.rich_text import cutover_clients
+    from rebar.reconciler.adapters.jira_family.rich_text import cutover_clients
 
     class _Cfg:
         def __init__(self, value: str) -> None:

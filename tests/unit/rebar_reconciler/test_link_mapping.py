@@ -23,29 +23,20 @@ behaviour (no ``[mapping]`` block) must stay bit-for-bit what it is today.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 from rebar import config as user_cfg
-from rebar_reconciler import config as cfg_mod
-from rebar_reconciler.adapters.jira_family.value_maps import RELATION_TO_JIRA_LINK
-from rebar_reconciler.mapping_config import SKIP, MappingConfigError
+from rebar.reconciler import config as cfg_mod
+from rebar.reconciler.adapters.jira_family.value_maps import RELATION_TO_JIRA_LINK
+from rebar.reconciler.mapping_config import SKIP, MappingConfigError
 
 pytestmark = pytest.mark.unit
 
-_REC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, filename: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, _REC / filename)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+_REC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler"
 
 
 class _BS:
@@ -83,14 +74,14 @@ def _managed_ticket(relation: str, target: str) -> dict[str, object]:
 
 @pytest.fixture(scope="module")
 def backend():
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     return JiraBackend(transport=object())
 
 
 @pytest.fixture(scope="module")
 def ol() -> ModuleType:
-    return _load("outbound_links_s4", "outbound_links.py")
+    return importlib.import_module("rebar.reconciler.outbound_links")
 
 
 # ---------------------------------------------------------------------------
@@ -267,8 +258,8 @@ def test_effective_link_map_for_resolves_project_and_retains_skip(
     entries, because the diff funcs must tell a forced skip from an absent key. An
     empty/unseeded mapping short-circuits to ``None`` (the built-in fallback the diff
     funcs apply)."""
-    from rebar_reconciler import outbound_differ
-    from rebar_reconciler.projects_store import Mapping
+    from rebar.reconciler import outbound_differ
+    from rebar.reconciler.projects_store import Mapping
 
     proj = _proj(
         tmp_path,

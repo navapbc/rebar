@@ -46,21 +46,21 @@ does not: Serena returns a well-formed **empty** result, indistinguishable from 
 genuinely unused".
 
 Reproduced in this repo on `AcliRestMixin.set_entity_property` (defined at
-`src/rebar/_engine/rebar_reconciler/adapters/jira/acli_rest.py:266`):
+`src/rebar/reconciler/adapters/jira/acli_rest.py:266`):
 
 ```
 find_referencing_symbols("AcliRestMixin/set_entity_property",
-                         "src/rebar/_engine/rebar_reconciler/adapters/jira/acli_rest.py")
+                         "src/rebar/reconciler/adapters/jira/acli_rest.py")
   -> {}                                    # zero references
 ```
 
 `grep -rn set_entity_property src/rebar/` finds three real call sites:
 
-- `src/rebar/_engine/rebar_reconciler/dispatch_one.py:321` —
+- `src/rebar/reconciler/dispatch_one.py:321` —
   `_call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)`
-- `src/rebar/_engine/rebar_reconciler/apply_inbound_events.py:214` —
+- `src/rebar/reconciler/apply_inbound_events.py:214` —
   `_call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)`
-- `src/rebar/_engine/rebar_reconciler/binding_store.py:517` —
+- `src/rebar/reconciler/binding_store.py:517` —
   `client.set_entity_property(keyed, "local_id", local_id)`
 
 This is not "Serena is broken", and it is not "that file is unindexed". The control is a sibling
@@ -68,7 +68,7 @@ method in the same class in the same file: `find_referencing_symbols` on
 `AcliRestMixin/_direct_rest_put_raw` returns **5** references across 3 files — three inside
 `acli_rest.py` and one in `acli.py:693` via `self`, plus one in `jira-capability-probe.py:98`
 through a local `client`. A typed attribute resolves too: `TicketTransport` in
-`_engine/rebar_reconciler/_backend.py` correctly returns `Backend/transport`, its return
+`reconciler/_backend.py` correctly returns `Backend/transport`, its return
 annotation.
 
 The discriminator is the **static type of the receiver**, not "untyped" in any loose sense:

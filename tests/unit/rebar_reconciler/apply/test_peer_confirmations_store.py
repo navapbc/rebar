@@ -41,17 +41,17 @@ import pytest
 
 @pytest.fixture
 def peer_confirmations():
-    return importlib.import_module("rebar_reconciler.peer_confirmations")
+    return importlib.import_module("rebar.reconciler.peer_confirmations")
 
 
 @pytest.fixture
 def dispatch_phases():
-    return importlib.import_module("rebar_reconciler.dispatch_apply_phases")
+    return importlib.import_module("rebar.reconciler.dispatch_apply_phases")
 
 
 @pytest.fixture
 def dispatch_one():
-    return importlib.import_module("rebar_reconciler.dispatch_one")
+    return importlib.import_module("rebar.reconciler.dispatch_one")
 
 
 @pytest.fixture
@@ -221,8 +221,8 @@ def test_commit_only_peer_confirmations_is_staged_and_committed(tmp_path, monkey
     """
     # _commit_binding_store_snapshot moved to pass_support.py (ticket
     # piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
-    helpers = importlib.import_module("rebar_reconciler.pass_support")
-    git_adapter = importlib.import_module("rebar_reconciler.git_adapter")
+    helpers = importlib.import_module("rebar.reconciler.pass_support")
+    git_adapter = importlib.import_module("rebar.reconciler.git_adapter")
 
     assert "PEER_CONFIRMATIONS_FILE" in git_adapter.__all__
 
@@ -344,7 +344,7 @@ def test_dispatch_counter_parity_on_the_dedup_skip_path(dispatch_one, monkeypatc
             return [{"type": {"name": "Blocks"}, "outwardIssue": {"key": "PROJ-9"}}]
 
     monkeypatch.setattr(
-        importlib.import_module("rebar_reconciler.dispatch_apply_phases"),
+        importlib.import_module("rebar.reconciler.dispatch_apply_phases"),
         "_index_existing_links",
         lambda links: {("Blocks", "PROJ-9")},
     )
@@ -371,7 +371,7 @@ class _BindingStore:
 
 
 def _ctx(tmp_path, binding_store):
-    handlers = importlib.import_module("rebar_reconciler.apply_handlers")
+    handlers = importlib.import_module("rebar.reconciler.apply_handlers")
     return handlers.BatchApplyContext(
         client=object(),
         repo_root=tmp_path,
@@ -382,7 +382,7 @@ def _ctx(tmp_path, binding_store):
 
 def test_handle_update_callback_writes_a_local_id_keyed_record(tmp_path, peer_confirmations):
     """AC3/AC5. The dispatched entry carries JIRA keys; the record is keyed on LOCAL ids."""
-    handlers = importlib.import_module("rebar_reconciler.apply_handlers")
+    handlers = importlib.import_module("rebar.reconciler.apply_handlers")
     tracker = tmp_path / ".tickets-tracker"
     (tracker / ".bridge_state").mkdir(parents=True)
 
@@ -403,7 +403,7 @@ def test_handle_update_callback_writes_a_local_id_keyed_record(tmp_path, peer_co
 
 def test_handle_update_callback_records_nothing_for_an_unbound_target(tmp_path, peer_confirmations):
     """AC5. Never write a vendor key into a local-id field; retry next pass instead."""
-    handlers = importlib.import_module("rebar_reconciler.apply_handlers")
+    handlers = importlib.import_module("rebar.reconciler.apply_handlers")
     tracker = tmp_path / ".tickets-tracker"
     (tracker / ".bridge_state").mkdir(parents=True)
 
@@ -419,12 +419,12 @@ def test_handle_update_callback_records_nothing_for_an_unbound_target(tmp_path, 
 
 def test_handle_update_callback_is_none_without_a_binding_store(tmp_path):
     """Fail-open: no reverse map means no way to key the evidence, so record nothing."""
-    handlers = importlib.import_module("rebar_reconciler.apply_handlers")
+    handlers = importlib.import_module("rebar.reconciler.apply_handlers")
     assert handlers._make_link_confirm(_link_mutation(), _ctx(tmp_path, None)) is None
 
 
 def test_handle_update_callback_is_none_without_a_local_id(tmp_path):
-    handlers = importlib.import_module("rebar_reconciler.apply_handlers")
+    handlers = importlib.import_module("rebar.reconciler.apply_handlers")
     ctx = _ctx(tmp_path, _BindingStore({"PROJ-9": "t"}))
     assert handlers._make_link_confirm({"links": []}, ctx) is None
 

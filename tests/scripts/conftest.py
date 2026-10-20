@@ -7,7 +7,7 @@ auto-discovered by pytest regardless of working directory.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import sys
 from collections.abc import Iterator
@@ -26,8 +26,6 @@ if _TESTS_SCRIPTS_DIR not in sys.path:
 
 # Ensure the bundled engine scripts are importable for tests that load modules by path.
 _SCRIPTS_DIR = str(Path(__file__).resolve().parents[2] / "src" / "rebar" / "_engine")
-if _SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPTS_DIR)
 
 # Ensure repo-root `scripts/` is importable. Those modules import each other by bare name
 # (e.g. canary_bridge -> alert_dedup), which resolves at runtime because `python
@@ -42,24 +40,14 @@ if _REPO_SCRIPTS_DIR not in sys.path:
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ACLI_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "adapters" / "jira" / "acli.py"
-)
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    return module
+ACLI_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "adapters" / "jira" / "acli.py"
 
 
 @pytest.fixture(scope="module")
 def acli_mod() -> ModuleType:
     if not ACLI_PATH.exists():
         pytest.fail(f"acli.py not found at {ACLI_PATH}")
-    return _load_module("acli_integration", ACLI_PATH)
+    return importlib.import_module("rebar.reconciler.adapters.jira.acli")
 
 
 # ---------------------------------------------------------------------------

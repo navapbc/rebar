@@ -30,18 +30,12 @@ _skip = pytest.mark.skipif(
 
 
 def _build_client():
-    # The reconciler ships as the stdlib-only ``rebar_reconciler`` package under
+    # The reconciler ships as the stdlib-only ``rebar.reconciler`` package under
     # <repo>/src/rebar/_engine (not a top-level installed package). Put that dir
-    # on sys.path so ``from rebar_reconciler import acli`` resolves, mirroring
+    # on sys.path so ``from rebar.reconciler import acli`` resolves, mirroring
     # tests/unit/rebar_reconciler/conftest.py.
-    import sys
-    from pathlib import Path
 
-    engine_dir = Path(__file__).resolve().parents[2] / "src" / "rebar" / "_engine"
-    if str(engine_dir) not in sys.path:
-        sys.path.insert(0, str(engine_dir))
-
-    from rebar_reconciler.adapters.jira import acli as mod
+    from rebar.reconciler.adapters.jira import acli as mod
 
     return mod.AcliClient(
         jira_url=os.environ["JIRA_URL"],

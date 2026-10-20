@@ -17,27 +17,21 @@ _read_latest_status == reduce_ticket(...)["status"].
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 @pytest.fixture(scope="module")
 def applier():
     if not APPLIER_PATH.exists():
         pytest.fail(f"applier.py not found at {APPLIER_PATH}")
-    spec = importlib.util.spec_from_file_location("applier_status_reducer", APPLIER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["applier_status_reducer"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")

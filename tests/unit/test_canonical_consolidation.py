@@ -7,9 +7,6 @@ digests through the shared canonical helpers.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 from rebar._store.canonical import canonical_bytes, canonical_str, content_hash
 from rebar.llm.workflow.schema import canonical_json
 from rebar.llm.workflow.schema import content_hash as schema_content_hash
@@ -30,7 +27,7 @@ _GOLDEN_MUT_SHA = "95e67c62c5fd9df30df6661be4851aace11db9b2385738ac30b1776610f91
 
 
 def _reconciler_modules():
-    """Import the engine-rooted ``rebar_reconciler`` modules (own sys.path root).
+    """Import the engine-rooted ``rebar.reconciler`` modules (own sys.path root).
 
     Under pytest the ``tests/unit/rebar_reconciler`` package shadows the engine package
     of the same name. ``tests/unit/conftest.py`` bridges that shadow for every
@@ -38,10 +35,7 @@ def _reconciler_modules():
     ``__path__``, so engine submodules (``mutation``, ``conflict_resolver``,
     ``timeutil``) resolve here without any per-module compensation.
     """
-    engine = Path(__file__).resolve().parents[2] / "src" / "rebar" / "_engine"
-    if str(engine) not in sys.path:
-        sys.path.insert(0, str(engine))
-    from rebar_reconciler import conflict_resolver, mutation
+    from rebar.reconciler import conflict_resolver, mutation
 
     return mutation, conflict_resolver
 

@@ -26,14 +26,14 @@ _WINDOWS_ENV_VAR_VALUE_TOO_LONG = "the environment variable is longer than 32767
 
 @pytest.fixture
 def acli_ops():
-    from rebar_reconciler.adapters.jira import acli_cli_ops
+    from rebar.reconciler.adapters.jira import acli_cli_ops
 
     return acli_cli_ops
 
 
 @pytest.fixture
 def outbound():
-    from rebar_reconciler import outbound_comments
+    from rebar.reconciler import outbound_comments
 
     return outbound_comments
 
@@ -54,7 +54,7 @@ def _capture_run(monkeypatch, acli_ops) -> dict:
 
 def _landed_text(captured: dict) -> tuple[str, str]:
     """``(serialized --body, the text a Jira reader/the inbound differ sees)``."""
-    from rebar_reconciler.adapters.jira import adf
+    from rebar.reconciler.adapters.jira import adf
 
     cmd = captured["cmd"]
     body_arg = cmd[cmd.index("--body") + 1]
@@ -117,7 +117,7 @@ def test_the_inbound_loop_breaker_recognises_a_truncated_echo(
     monkeypatch, acli_ops, outbound
 ) -> None:
     """End-to-end: the landed body satisfies the inbound differ's echo predicate."""
-    from rebar_reconciler import inbound_collection_diffs as icd
+    from rebar.reconciler import inbound_collection_diffs as icd
 
     captured = _capture_run(monkeypatch, acli_ops)
     acli_ops.add_comment("DIG-1", outbound._decorate_outbound_comment("x" * 60_000))
@@ -153,7 +153,7 @@ def test_under_limit_comment_is_unchanged(monkeypatch, acli_ops, outbound) -> No
 @pytest.fixture
 def cloud_fit():
     """The real Cloud comment fitter the send path injects."""
-    from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
+    from rebar.reconciler.adapters.jira.rich_text_codec import AdfCodec
 
     return AdfCodec(rich=False).fit_outbound
 

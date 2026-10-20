@@ -17,25 +17,17 @@ is a dict, so the preflight lookup is shape-tolerant.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "pass_support.py"
+PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "pass_support.py"
 
 
 def _load_pass_support():
-    spec = importlib.util.spec_from_file_location(
-        "pass_support_status_preflight_test", PASS_SUPPORT_PATH
-    )
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["pass_support_status_preflight_test"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.pass_support")
 
 
 @pytest.fixture(scope="module")

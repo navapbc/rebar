@@ -388,7 +388,7 @@ def test_a_policy_decline_is_subtracted_from_both_retriable_predicates() -> None
 
 MARKER_ATOMS = ("index.lock", "non-fast-forward", "cannot lock ref", "could not parse head")
 MARKER_ESCAPE = "# git-marker-ok:"
-GUARD_A_DIRS = ("_store", "_engine/rebar_reconciler")
+GUARD_A_DIRS = ("_store", "reconciler")
 MARKER_OWNER = "_store/git_outcome.py"
 
 

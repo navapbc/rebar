@@ -1,4 +1,4 @@
-"""Tests for rebar_reconciler/reconcile.py reconcile_once().
+"""Tests for reconciler/reconcile.py reconcile_once().
 
 Covers:
 - Idempotency: two consecutive reconcile_once() calls with unchanged remote
@@ -14,7 +14,7 @@ Covers:
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import sys
 import types
@@ -27,18 +27,9 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-
-
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "reconcile.py"
+FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "fetcher.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 @pytest.fixture(scope="module")
@@ -48,19 +39,19 @@ def reconcile_mod():
         pytest.fail(
             f"reconcile.py not found at {RECONCILE_PATH} — implement the module to make tests pass."
         )
-    return _load_module("reconcile", RECONCILE_PATH)
+    return importlib.import_module("rebar.reconciler.reconcile")
 
 
 @pytest.fixture(scope="module")
 def fetcher_mod():
     """Load fetcher.py."""
-    return _load_module("reconcile_fetcher", FETCHER_PATH)
+    return importlib.import_module("rebar.reconciler.fetcher")
 
 
 @pytest.fixture(scope="module")
 def applier_mod():
     """Load applier.py."""
-    return _load_module("reconcile_applier", APPLIER_PATH)
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 # ---------------------------------------------------------------------------
@@ -438,13 +429,13 @@ def test_real_field_change_converges_after_one_pass(
 # full differ COMPUTATION but write NOTHING to the local store.
 # ---------------------------------------------------------------------------
 
-MODE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mode.py"
+MODE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "mode.py"
 
 
 @pytest.fixture(scope="module")
 def mode_mod():
     """Load mode.py under the dotted key reconcile_once uses."""
-    return _load_module("rebar_reconciler.mode", MODE_PATH)
+    return importlib.import_module("rebar.reconciler.mode")
 
 
 def _make_jql_partitioned_acli(issues: list[dict]) -> object:

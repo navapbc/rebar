@@ -1,0 +1,753 @@
+"""Outbound comment-diff cluster for bidirectional Jira sync.
+
+The cohesive comment-diff seam extracted from ``outbound_differ.py`` (it grew
+past the module-size soft cap; the comment logic is self-contained). Owns the
+local→Jira comment comparison and the create-path comment mapping:
+
+    - ``_diff_comments`` — compare local comments to Jira's, emit "add" mutations
+      for the ones not already mirrored (the bug-4292 live-fetch safety invariant
+      lives here).
+    - ``_map_comments_for_create`` — map all local comments to outbound "add"
+      mutations for a brand-new issue.
+    - ``_normalize_comment_body`` / ``_decorate_outbound_comment`` — the rich-text→text
+      normalisation and the RECONCILER_MARKER loop-breaker decoration (bug 85a1 /
+      Gap 1).
+    - ``fit_preserving_marker`` — the send-path fit that keeps that marker inside
+      the backend's size budget instead of letting the fitter shear it off the
+      tail (bug 5931).
+    - ``fit_for_send`` — the ONE fit behind an outbound comment (story 4cee):
+      it returns the wire text the transport is handed together with that text's
+      decoded readback, so the dedup key is taken FROM the bytes sent instead of
+      predicting them.
+    - ``_is_machine_marker_comment`` — the bridge-internal machine-comment
+      exclusion (bug 6afc).
+
+``compute_outbound_mutations`` (in ``outbound_differ``) imports this module; the
+dependency is one-way.
+
+Ticket 21ca: the ADF decode + comment-limit truncation are routed through the
+Backend port (``InboundMapper.normalize_rich_text`` / ``FieldSanitizer.fit_comment``)
+instead of this module's own lazy vendor loaders — this module now carries NO
+``"rebar.reconciler.adapters.jira"`` literal. ``_normalize_comment_body`` and
+``_diff_comments`` accept an optional injected ``inbound_mapper``/``sanitizer``
+(mirroring ``outbound_differ.compute_outbound_mutations``'s injection seam) that
+default to ``None`` and are resolved lazily via ``select_backend(load_config())``
+INSIDE the function body — never at import time — because this module is
+spec-loaded standalone in tests, where package-relative config resolution may not
+be available at import.
+
+Ticket a32a: ``_diff_comments`` additionally accepts an injected ``codec`` — any
+object exposing ``to_wire(text) -> Any`` (typically a real
+``adapters/jira_family/rich_text.RichTextCodec``) — so the LOCAL comparison key
+is derived from the SAME wire shape the send path's landed form would embody.
+Bug 17c3-2f6e-a5e0-438c sharpened the composition: the local key is the codec's
+``to_wire`` of the decorated, fitted body decoded back through the SAME
+``_normalize_comment_body`` decoder the Jira-side key uses — one decoder for
+both keys, where the previous ``normalize_outbound`` routing decoded the local
+side with a markdown round trip the Jira side never applies.
+``codec`` defaults to ``None``, which resolves to an identity no-op
+(:class:`_IdentityCodec`) — today's actual behaviour for both deployments (Cloud
+sends comment bodies as plain text via ACLI with no ADF encoding computed; DC's
+own codec is already the identity), so nothing here changes what a caller sees
+until a real, non-identity codec is wired in.
+
+**The invariant this depends on, and why there is no origin-aware gate for
+it:** this module does NOT distinguish "a body that originated in Jira and was
+pulled inbound" from "a body a human typed locally" before computing the
+outbound comparison key — both are normalized identically. That is safe because
+the PRIMARY identity skip (``jira_comment_id`` / the comment-id map) removes
+inbound-origin comments before the body-equality layer, and because the local
+key is now, by construction, the one-decoder decode of the exact wire the send
+path would produce (``_normalize_comment_body(to_wire(decorated fitted body))``,
+bug 17c3-2f6e-a5e0-438c) — encode-then-decode symmetry is used directly instead
+of being assumed of a parallel ``normalize_outbound`` normalizer (the codec law,
+pinned in ``test_rich_text_codec.py::test_normalize_outbound_equals_decode_of_to_wire``).
+"""
+
+from __future__ import annotations
+
+import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+from rebar.reconciler.parent_breadcrumb import (  # noqa: F401 — tag re-exported (split seam)
+    PARENT_BREADCRUMB_TAG,
+    _breadcrumb_target,
+    _build_parent_breadcrumb,
+)
+
+if TYPE_CHECKING:
+    from ._backend import TicketTransport
+
+# Sentinel: presence of the "comment" key in a snapshot entry confirms the
+# snapshot carries real comment data (fixture/synthetic path). Absence means
+# the entry came from a live Jira search result, which never includes comments.
+_COMMENT_FIELD_KEY = "comment"
+
+# Bug 85a1 (Gap 1): marker token embedded in every outbound comment body so the
+# inbound differ can identify and filter our own echoes when the reconciler reads
+# Jira comments back on the next pass. Without the marker every outbound comment
+# would re-appear inbound as a "new Jira comment" and the bridge would loop. Kept
+# identical here and in inbound_differ.py so both directions agree on the
+# loop-breaker pattern.
+RECONCILER_MARKER = "<!-- rebar:reconciler-echo -->"
+
+# The parent-drift breadcrumb cluster (S7) — PARENT_BREADCRUMB_TAG,
+# _breadcrumb_target, _build_parent_breadcrumb — lives in the
+# ``parent_breadcrumb`` sibling module (split for the 800-line cap, bug
+# 9ebb-3114-4d0e-4528) and is re-imported above. Unlike RECONCILER_MARKER the
+# tag is NOT stripped by _normalize_comment_body, so it survives into the
+# resolved-comment dedup set.
+
+
+def _resolve_inbound_mapper(inbound_mapper: Any | None) -> Any:
+    """Resolve the injected ``InboundMapper``, falling back to the configured
+    backend (ticket 21ca; mirrors ``outbound_differ.compute_outbound_mutations``'s
+    injection seam). Resolved LAZILY here — never at import time — because this
+    module is spec-loaded standalone in tests, where ``select_backend(load_config())``
+    may not resolve config."""
+    if inbound_mapper is not None:
+        return inbound_mapper
+    from rebar.config import compose_config
+    from rebar.reconciler._backend_registry import select_backend
+
+    return select_backend(compose_config()).inbound
+
+
+def _resolve_sanitizer(sanitizer: Any | None) -> Any:
+    """Resolve the injected ``FieldSanitizer``, falling back to the configured
+    backend (ticket 21ca; same injection seam as :func:`_resolve_inbound_mapper`)."""
+    if sanitizer is not None:
+        return sanitizer
+    from rebar.config import compose_config
+    from rebar.reconciler._backend_registry import select_backend
+
+    return select_backend(compose_config()).sanitizer
+
+
+class _IdentityCodec:
+    """No-op outbound rich-text codec: ``normalize_outbound`` is the identity.
+
+    Ticket a32a: the default when a caller does not inject a real
+    ``RichTextCodec`` (``adapters/jira_family/rich_text.RichTextCodec``).
+    This matches TODAY's actual comment send path exactly — Cloud sends
+    comment bodies as plain text via ACLI with no ADF encoding computed
+    (see the module docstring), and Data Center's own codec
+    (``WikiTextCodec.normalize_outbound``) is already the identity — so
+    falling back to identity here changes nothing for any caller that does
+    not (yet) inject a real codec.
+    """
+
+    def normalize_outbound(self, text: str) -> str:
+        return text
+
+    def to_wire(self, text: str) -> Any:
+        """Identity wire shape (bug 17c3-2f6e: the key derivation predicts the
+        as-sent wire via ``to_wire``, so the fallback must expose it too)."""
+        return text
+
+
+def _resolve_codec(codec: Any | None) -> Any:
+    """Resolve the injected outbound rich-text codec for the LOCAL comparison
+    key (ticket a32a; default flipped to the real codec by emersed-specific-mutt).
+
+    A caller (or test) may pass any object exposing ``to_wire(text) -> Any``
+    — typically a real ``adapters/jira_family/rich_text.RichTextCodec``
+    (``AdfCodec``/``WikiTextCodec``) — so the local comment key is derived from
+    the codec's own wire shape (bug 17c3-2f6e-a5e0-438c: the key is
+    ``_normalize_comment_body(to_wire(decorated fitted body))``, the same decode
+    the Jira-side key gets).
+
+    ``None`` (the default) now resolves to the configured backend's REAL comment
+    codec (Cloud ``AdfCodec``/DC ``WikiTextCodec``, each built with
+    ``rich=<family> in cutover_clients()``) — so ``reconciler.rich_text_cutover``
+    (story 3388, ships ``off``) governs rendering and the local dedup key matches
+    the landed wire instead of an identity no-op. Resolution goes through the
+    NEUTRAL ``_backend_registry.select_backend`` seam (never a direct
+    ``adapters/jira*`` import) so this shared-layer module keeps the Jira-family
+    import boundary — exactly as :func:`_resolve_sanitizer`/:func:`_resolve_inbound_mapper`
+    do. Imported LAZILY inside the function because this module is spec-loaded
+    standalone in tests. A backend that predates ``comment_codec`` falls back to
+    the identity, preserving today's behaviour."""
+    if codec is not None:
+        return codec
+    from rebar.config import compose_config
+    from rebar.reconciler._backend_registry import select_backend
+
+    resolved = getattr(select_backend(compose_config()).outbound, "comment_codec", None)
+    return resolved if resolved is not None else _IdentityCodec()
+
+
+def _map_comments_for_create(ticket: dict[str, Any]) -> list[dict[str, Any]]:
+    """Map all local comments to outbound create mutations.
+
+    Every outbound body is decorated with the reconciler marker (Gap 1
+    loop-breaker) so inbound passes can identify our own echoes, and tagged with
+    its ``local_comment_key`` (the COMMENT event's HLC ``timestamp``) so the
+    enactment site can record the returned Jira comment ID against it
+    (emersed-specific-mutt, append-only comment sync).
+    """
+    comments = ticket.get("comments", [])
+    return [
+        {
+            "action": "add",
+            "body": _decorate_outbound_comment(c.get("body", "")),
+            "local_comment_key": c.get("timestamp"),
+        }
+        for c in comments
+    ]
+
+
+def _normalize_comment_body(body: Any, inbound_mapper: Any | None = None) -> str:
+    """Coerce a comment body to a comparable plain-text string.
+
+    Jira comments are returned with ``body`` as an Atlassian Document Format
+    (ADF) dict (``{"type": "doc", ...}``). Local comments store ``body`` as a
+    plain string. Direct dict-vs-string comparison always reports them as
+    different — driving spurious duplicate pushes (Phase 2 verify-no-
+    duplicate-comments: "found 2 copies") and the dict-as-key crash in
+    ``_diff_comments`` (Phase 3+ "unhashable type: 'dict'" when an ADF body
+    flows into a ``set[str]`` insertion).
+
+    Normalize via the Backend port's ``InboundMapper.normalize_rich_text`` (ticket
+    21ca; Jira: ``adf.adf_to_text``) so the canonical comparison is on text. Bug
+    85a1. The reconciler marker token (Gap 1) is also stripped so dedup compares
+    the *user content* on both sides — without the strip, a previously-pushed
+    Jira body ``"hello\\n\\n<marker>"`` would never match a local ``"hello"`` and
+    the diff would re-emit the same comment.
+
+    ``inbound_mapper``: the injected Backend-port ``InboundMapper`` (ticket 21ca);
+    ``None`` resolves the configured backend's mapper via :func:`_resolve_inbound_mapper`.
+    """
+    text = _resolve_inbound_mapper(inbound_mapper).normalize_rich_text(body)
+    return text.replace(RECONCILER_MARKER, "").strip()
+
+
+def _decorate_outbound_comment(body: str) -> str:
+    """Append the reconciler marker to an outbound comment body (Gap 1).
+
+    Two paragraphs of separation keeps the marker visually below the user
+    content. The marker survives ADF round-trip (each paragraph maps to
+    its own ADF node and back).
+    """
+    return f"{body}\n\n{RECONCILER_MARKER}"
+
+
+def fit_preserving_marker(text: str, fit: Callable[[str], str]) -> str:
+    """Fit a decorated outbound comment WITHOUT cutting off its marker.
+
+    Bug 5931-78a3-95d2-44cd. :func:`_decorate_outbound_comment` puts
+    ``RECONCILER_MARKER`` at the very END of the body, and every vendor fitter
+    truncates from the RIGHT (largest prefix + a visible truncation notice that
+    still serializes within the backend's limit). So on the send path the marker
+    — being the tail — was always the FIRST thing cut: an over-length comment
+    landed in Jira unmarked, the inbound loop-breaker (which tests
+    ``RECONCILER_MARKER in body_text``) did not recognise it as our own echo, and
+    the bridge re-mirrored it on every pass. 836 such unmarked duplicates
+    accumulated live. The defect is the ORDERING (decorate-then-fit), not the
+    fitter, so the repair belongs here beside the decoration rather than in any
+    vendor fitter.
+
+    The fix truncates the CONTENT and re-appends the decoration, so the marker is
+    inside the fitted budget instead of hanging off its end.
+
+    ``fit`` is the caller's vendor fitter (Cloud: ``AdfCodec.fit_outbound``),
+    injected as a plain ``Callable[[str], str]`` so this backend-neutral core
+    module keeps knowing nothing about any vendor or its numeric limit (pinned by
+    ``tests/unit/rebar_reconciler/test_backend_neutrality.py``). Two properties of
+    every real fitter are relied on and hold by construction: it is idempotent,
+    and ``fit(x) == x`` exactly when ``x`` is already within the limit — which is
+    the only within-limit oracle available without naming a limit here.
+
+    Behaviour:
+
+    - text that does not end with the marker (descriptions, undecorated bodies)
+      is handed straight to ``fit`` — byte-identical to the pre-fix path;
+    - a decorated body already within the limit is returned UNCHANGED (no
+      truncation notice, no reordering, no added whitespace);
+    - an over-limit decorated body is rebuilt as
+      ``<content prefix><vendor truncation notice>`` re-decorated with the marker,
+      binary-searching the largest content prefix that still fits.
+
+    The vendor's own truncation notice is DERIVED from a single probe of ``fit``
+    (the part of the probe past its common prefix with the input) rather than
+    hard-coded: that literal is already triplicated across ``adapters/jira/adf.py``,
+    ``comment_limits.py`` and ``jira_family/rich_text.py``, and a fourth copy here
+    would silently drift. Likewise the marker separator comes from
+    :func:`_decorate_outbound_comment` itself, so the decoration has exactly one
+    source of truth.
+    """
+    if not text.endswith(RECONCILER_MARKER):
+        return fit(text)
+    probe = fit(text)
+    if probe == text:
+        # Already within the limit: send it completely unchanged.
+        return text
+    # The vendor notice is whatever the probe appended past the point it cut.
+    common = len(_common_prefix(text, probe))
+    notice = probe[common:]
+    # Strip the decoration to recover the user content: the separator's length is
+    # taken from the decorator so no separator literal is duplicated here.
+    separator_len = len(_decorate_outbound_comment("")) - len(RECONCILER_MARKER)
+    content = text[: len(text) - len(RECONCILER_MARKER) - separator_len]
+    lo, hi, best = 0, len(content), None
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = _decorate_outbound_comment(content[:mid] + notice)
+        if fit(candidate) == candidate:
+            best = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    # Pathological: not even the bare decoration fits. Fall back to the vendor
+    # fitter's own answer rather than emitting something over the limit.
+    return best if best is not None else probe
+
+
+def fit_comment_as_sent(text: str, fit: Callable[[str], str]) -> str:
+    """Return the MARKER-FREE body an undecorated comment would actually land as.
+
+    The comment-diff's dedup key and the send path must agree on the landed body
+    or an over-length comment can never match and is re-posted every pass — the
+    convergence requirement stated in ``adapters/jira/comment_limits.py``'s module
+    docstring ("the two paths MUST share one truncation function"). The send path
+    is decorate-then-:func:`fit_preserving_marker`, so the only way to reproduce
+    its result exactly is to run that same composition and then take the marker
+    back off: the differ compares USER CONTENT (``_normalize_comment_body`` strips
+    ``RECONCILER_MARKER`` from both sides), while the fit budget is consumed by the
+    DECORATED body. A fitter applied to the bare text cannot see that reserved
+    budget and so lands on a different cut — the drift that reopened the loop when
+    the send path moved onto ``fit_preserving_marker`` and the differ's fitter was
+    left behind.
+
+    ``fit`` is the caller's vendor fitter, injected as a plain
+    ``Callable[[str], str]`` exactly as :func:`fit_preserving_marker` takes it, so
+    this backend-neutral core module still names no vendor and no numeric limit
+    (pinned by ``tests/unit/rebar_reconciler/test_backend_neutrality.py``). The
+    decoration's length is likewise derived from
+    :func:`_decorate_outbound_comment`, never restated.
+
+    A body already within the limit is returned BYTE-IDENTICAL: the decorated form
+    is then within the limit too, :func:`fit_preserving_marker` returns it
+    unchanged, and removing the decoration recovers the input. That is
+    load-bearing — a shifted in-limit key would make every already-mirrored
+    comment look new and re-post it.
+
+    Both Jira deployments compose this. Cloud measures with
+    ``AdfCodec.fit_outbound`` (serialized-ADF budget); Data Center measures with
+    its own plain-character comment fit at the deployment-resolved ceiling, kept
+    deliberately distinct from its description fitter (bug 049e). Each backend's
+    ``fit_comment`` passes its OWN vendor fitter here, so the shared
+    :func:`_diff_comments` keeps calling ``sanitizer.fit_comment`` rather than any
+    codec directly.
+    """
+    decoration = _decorate_outbound_comment("")
+    landed = fit_preserving_marker(_decorate_outbound_comment(text), fit)
+    if landed.endswith(decoration):
+        return landed[: len(landed) - len(decoration)]
+    # Pathological: not even the bare decoration fit, so fit_preserving_marker fell
+    # back to the vendor fitter's own (undecorated) answer. Pass it through as-is.
+    return landed
+
+
+@dataclass(frozen=True)
+class FittedComment:
+    """The two values an outbound comment needs, derived from ONE fit.
+
+    ``wire_body``
+        The exact decorated, fitted text handed to the transport.
+    ``landed_text``
+        The marker-free decode of that text's wire form — the differ's dedup key
+        and the value the Jira-side key (the same decode over the FETCHED wire)
+        is compared against.
+
+    They are produced together so the key cannot be a prediction of the send.
+    """
+
+    landed_text: str
+    wire_body: str
+
+
+def fit_for_send(
+    body: str,
+    *,
+    sanitizer: Any | None = None,
+    codec: Any | None = None,
+    inbound_mapper: Any | None = None,
+) -> FittedComment:
+    """Derive the outbound comment's wire text and its dedup key from ONE fit.
+
+    The dedup key used to be a PREDICTION. ``_diff_comments`` composed
+    decorate → :meth:`fit_comment` → ``to_wire`` → decode to build it, while the
+    mutation it queued carried the UNFITTED decorated body; each adapter then
+    re-derived the wire at send time (Cloud in ``acli_cli_ops.add_comment``, Data
+    Center in ``JiraDataCenterBackend.add_comment``). The key was correct only
+    while three separately-maintained compositions agreed, and every historical
+    divergence made an over-length comment un-matchable, so it re-posted on every
+    pass (bugs 6afc, 5931, b9b4, 17c3).
+
+    Computing both here removes the obligation instead of restating it: the
+    caller queues ``wire_body`` on the mutation, the enactment site hands that
+    string to the transport, and ``landed_text`` is by construction the readback
+    of what was sent rather than a forecast of it.
+
+    ``sanitizer``/``codec``/``inbound_mapper`` are the injected Backend-port
+    collaborators, resolved lazily from the configured backend when ``None``
+    exactly as :func:`_diff_comments` resolves them — so this stays the
+    backend-neutral core (no vendor and no numeric limit is named here).
+    """
+    fitted = _resolve_sanitizer(sanitizer).fit_comment(body)
+    wire_body = _decorate_outbound_comment(fitted)
+    landed_text = _normalize_comment_body(
+        _resolve_codec(codec).to_wire(wire_body), inbound_mapper=inbound_mapper
+    )
+    return FittedComment(landed_text=landed_text, wire_body=wire_body)
+
+
+def _common_prefix(left: str, right: str) -> str:
+    """The shared leading run of two strings (returned as the prefix itself).
+
+    Used by :func:`fit_preserving_marker` to isolate what a vendor fitter APPENDED
+    when it truncated, without importing or restating the vendor's notice literal.
+    """
+    limit = min(len(left), len(right))
+    index = 0
+    while index < limit and left[index] == right[index]:
+        index += 1
+    return left[:index]
+
+
+# Reconciler-internal machine-comment exclusion.
+#
+# These prefixes mark reconciler-generated machine comments that must NEVER be
+# mirrored outbound to Jira (they are internal monitoring noise, not human Jira
+# content). Only reconciler-internal markers are listed here — a standalone
+# rebar produces no skill-to-skill payload comments, so none are listed.
+#
+# Kept here beside the comment-diff logic for locality with the only consumer
+# (_diff_comments). Human comments are never excluded.
+#
+# Prefixes:
+#   - BRIDGE_CANARY_ALERT: heartbeat-canary staleness alert. The canary appends a
+#       freshly-TIMESTAMPED "Still stale as of <ts>: ..." comment to its alert
+#       ticket every run; mirrored outbound, the volatile timestamp never matches
+#       a prior Jira body, so the comment re-adds every pass and accumulates
+#       duplicate Jira comments. Internal monitoring noise — exclude it.
+#   - "Still stale as of"  LEGACY pre-marker form of the same canary alert comment
+#       (the BRIDGE_CANARY_ALERT: marker only tags future canary comments; this
+#       excludes the existing unmarked backlog too). The canary is the only
+#       producer of this exact phrasing (a human would not write it).
+_EXCLUDED_COMMENT_PREFIXES: tuple[str, ...] = (
+    "BRIDGE_CANARY_ALERT:",
+    "Still stale as of",
+)
+
+
+def _is_machine_marker_comment(normalized_body: str) -> bool:
+    """True when a normalised comment body is a bridge-internal machine payload.
+
+    Match is prefix-based on the already-normalised (ADF→text, marker-stripped,
+    leading/trailing-whitespace-stripped) body so it is robust to ADF round-trip
+    and the RECONCILER_MARKER decoration.
+    """
+    return normalized_body.startswith(_EXCLUDED_COMMENT_PREFIXES)
+
+
+def _snapshot_comment_set(
+    jira_key: str,
+    comment_field: Any,
+    local_comments: list[Any],
+    client: TicketTransport | None,
+) -> list[Any]:
+    """Resolve the Jira comment list from a snapshot-carried ``comment`` field.
+
+    Split from :func:`_diff_comments` (bug 9ebb-3114-4d0e-4528,
+    behaviour-preserving extraction). Truncation guard (bug 1f3d): the bulk
+    ``/search/jql`` enrichment (get_comment_map) CAPS embedded comments at ~20
+    per issue while reporting the true ``total``. Deduping against a truncated
+    set re-posts every comment past the cap — the exact 5000-comment inflation
+    this guard exists to stop (the per-ticket get_comments pagination fix alone
+    does NOT close it, because the SNAPSHOT path is production's primary
+    source). When the field is demonstrably truncated and a live client is
+    available, fetch the COMPLETE paginated set per-ticket instead.
+    """
+    embedded = comment_field.get("comments", []) if isinstance(comment_field, dict) else []
+    total = comment_field.get("total") if isinstance(comment_field, dict) else None
+    jira_comments: list = embedded if isinstance(embedded, list) else []
+    if (
+        isinstance(total, int)
+        and len(jira_comments) < total
+        and local_comments
+        and client is not None
+    ):
+        try:
+            fetched = client.get_comments(jira_key)
+            if isinstance(fetched, list):
+                jira_comments = fetched
+        except Exception as exc:  # noqa: BLE001 — fail-open to the truncated subset (bug 4292)
+            print(  # noqa: T201
+                f"WARNING: outbound_differ: live comment re-fetch for {jira_key!r} "
+                f"failed ({exc!r}); using the truncated snapshot set (may re-post).",
+                file=sys.stderr,
+            )
+    return jira_comments
+
+
+def _live_comment_set(
+    jira_key: str,
+    client: TicketTransport | None,
+    *,
+    has_local_comments: bool,
+    breadcrumb_applies: bool,
+) -> list[Any] | None:
+    """Resolve Jira comments in the live-search path; ``None`` = emit nothing.
+
+    Split from :func:`_diff_comments` (bug 9ebb-3114-4d0e-4528). ``None`` tells
+    the caller to emit NO comment mutations at all — either the Jira comment
+    state is unknown (no client, or the live fetch failed; bug-4292 safety:
+    never blind-add against unknown state) or there is provably nothing to do
+    (no local comments AND no parent-drift breadcrumb would apply, so the live
+    fetch is skipped as an unnecessary API call). When a breadcrumb WOULD
+    apply, the fetch proceeds even with zero local comments so the append-once
+    dedup set is the real Jira comment list (the bug 9ebb-3114 fix — this case
+    previously early-returned before the breadcrumb builder ran).
+    """
+    if not has_local_comments and not breadcrumb_applies:
+        return None
+    if client is None:
+        # No client provided. We cannot know the Jira comment state.
+        # Emit a warning and skip comment mutations to avoid blind duplicates.
+        print(  # noqa: T201
+            f"WARNING: outbound_differ: snapshot for {jira_key!r} lacks "
+            f"'comment' field (live search shape) and no client was provided. "
+            f"Skipping comment mutations to avoid blind duplicate adds. "
+            f"Pass a client to compute_outbound_mutations to enable live "
+            f"comment fetch.",
+            file=sys.stderr,
+        )
+        return None
+    # Fetch comments live. One call per ticket — bounded by the set of bound
+    # tickets with local comments (or a pending parent-drift breadcrumb).
+    try:
+        fetched = client.get_comments(jira_key)
+    except Exception as exc:  # noqa: BLE001 — fail-open: skip comment mutations, warn (bug 4292)
+        # Live fetch failed. Skip comment mutations entirely for this ticket.
+        # Never emit blind adds when comment state is unknown (bug 4292 safety
+        # invariant). Emit a loud warning + log to stderr.
+        print(  # noqa: T201
+            f"WARNING: outbound_differ: live comment fetch for {jira_key!r} "
+            f"failed ({exc!r}). Skipping comment mutations for this ticket "
+            f"to avoid emitting duplicate adds against unknown Jira state. "
+            f"Alert: jira_key={jira_key!r}",
+            file=sys.stderr,
+        )
+        return None
+    return fetched if isinstance(fetched, list) else []
+
+
+def _diff_comments(
+    ticket: dict[str, Any],
+    jira_key: str,
+    jira_snapshot: dict[str, Any],
+    client: TicketTransport | None = None,
+    *,
+    inbound_mapper: Any | None = None,
+    sanitizer: Any | None = None,
+    codec: Any | None = None,
+    binding_store: Any | None = None,
+    local_parents: dict[str, Any] | None = None,
+    local_ticket_types: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Compare local comments to Jira comments. Return mutations for new comments.
+
+    Matching rule: emit a comment "add" only for local comment bodies NOT
+    already present in Jira, after normalising both sides via
+    :func:`_normalize_comment_body` (rich-text→text conversion + RECONCILER_MARKER
+    strip + whitespace strip). The LOCAL side's input to that shared decoder is
+    the PREDICTED wire (bug 17c3-2f6e-a5e0-438c, one decoder for both keys):
+    ``codec.to_wire(_decorate_outbound_comment(sanitizer.fit_comment(body)))`` —
+    decorate-fit-encode, the send path's own composition
+    (``acli_cli_ops.add_comment``: ``to_wire(fit_preserving_marker(decorated))``).
+    Without this, the Jira-side key is always a DECODED value while the
+    local-side key never accounts for what the send path would actually
+    produce — the exact asymmetry that already bit the description path, that
+    bit the comment path's truncation guard (bug 6afc), and that under the rich
+    cutover made the local key a markdown-ESCAPED round trip the Jira-side
+    ``adf_to_text`` decode never matches (bug 17c3). Body equality after
+    normalisation → skip (already mirrored); otherwise emit with outbound
+    decoration.
+
+    ``inbound_mapper``/``sanitizer``: the injected Backend-port ``InboundMapper``/
+    ``FieldSanitizer`` (ticket 21ca); ``None`` resolves the configured backend via
+    :func:`_resolve_inbound_mapper`/:func:`_resolve_sanitizer`. Threaded from
+    ``outbound_differ.compute_outbound_mutations`` (which already holds the backend).
+
+    ``codec``: the injected outbound rich-text codec (ticket a32a) — any object
+    exposing ``to_wire(text) -> Any``, typically a real
+    ``adapters/jira_family/rich_text.RichTextCodec``. ``None`` resolves to
+    :func:`_resolve_codec`'s identity default, so no existing caller's
+    behaviour changes until one is wired in.
+
+    Snapshot lookup: the Jira REST API places comments at
+    fields["comment"]["comments"] (outer key is "comment", not "comments").
+    The fetcher writes snapshot[jira_key] = {k: fields[k] for k in fields},
+    so we read jira_issue["comment"]["comments"] (bug 4572 fix).
+
+    Live search path (bug 4292 fix): Jira search results do NOT include the
+    ``comment`` field. When the snapshot entry for *jira_key* lacks the
+    ``comment`` key, the comment state is unknown. If a ``client`` is provided,
+    fetch comments live via ``client.get_comments(jira_key)``; this is bounded
+    (one call per ticket with local comments or a pending parent-drift
+    breadcrumb — bug 9ebb-3114-4d0e-4528: a drift-affected child with ZERO
+    local comments still fetches, so the S7 breadcrumb is emitted append-once
+    against the real Jira comment set instead of being skipped). If the live
+    fetch FAILS, skip comment mutations for this ticket entirely and emit a
+    loud warning — never emit blind adds against unknown Jira comment state
+    (the root cause of DIG-5301 reaching 14 duplicate comments).
+
+    When the snapshot entry DOES carry a ``comment`` key (fixture/synthetic path),
+    use it directly — the client is NOT consulted (fixture path preserved).
+
+    Note: PR #402 (ADF walker + comment ID binding) will provide exact ID-
+    based binding once available; this body-equality match is the baseline.
+    """
+    # Resolve the injected Backend-port members ONCE per call (ticket 21ca) rather
+    # than re-resolving per comment below.
+    inbound_mapper = _resolve_inbound_mapper(inbound_mapper)
+    sanitizer = _resolve_sanitizer(sanitizer)
+    codec = _resolve_codec(codec)
+
+    local_comments = ticket.get("comments", [])
+    jira_issue = jira_snapshot.get(jira_key, {})
+
+    # Safety invariant (bug 4292): distinguish "snapshot has comment data" from
+    # "snapshot lacks comment field entirely" (live search shape).
+    #
+    # Jira search returns fields WITHOUT the comment field. The fetcher copies
+    # fields verbatim: snapshot[key] = {k: fields[k] for k in fields}. So a
+    # live snapshot entry will never have a "comment" key. A fixture/synthetic
+    # entry built for tests WILL have it. We use the key's presence as the
+    # discriminator, not the value (empty dict is a valid Jira response for an
+    # issue with no comments, and indistinguishable from an absent key if we
+    # only check truthiness).
+    resolved: list[Any] | None
+    if _COMMENT_FIELD_KEY in jira_issue:
+        # Snapshot-carried path (fixtures, synthetic, or the bulk get_comment_map
+        # enrichment). Normally used directly — do NOT call the client (the
+        # bug-1f3d truncation guard inside is the one exception).
+        resolved = _snapshot_comment_set(
+            jira_key, jira_issue[_COMMENT_FIELD_KEY], local_comments, client
+        )
+    else:
+        # Live search path: snapshot lacks the comment field (bug 4292). None
+        # means "emit no comment mutations" — unknown Jira state or nothing to do.
+        resolved = _live_comment_set(
+            jira_key,
+            client,
+            has_local_comments=bool(local_comments),
+            breadcrumb_applies=_breadcrumb_target(
+                ticket,
+                binding_store=binding_store,
+                local_parents=local_parents,
+                local_ticket_types=local_ticket_types,
+            )
+            is not None,
+        )
+    if resolved is None:
+        return []
+    jira_comments: list = resolved
+
+    jira_bodies: set[str] = set()
+    for c in jira_comments:
+        raw = c.get("body", "") if isinstance(c, dict) else c
+        jira_bodies.add(_normalize_comment_body(raw, inbound_mapper=inbound_mapper))
+
+    mutations: list[dict[str, Any]] = []
+    for c in local_comments:
+        raw = c.get("body", "") if isinstance(c, dict) else c
+        body = _normalize_comment_body(raw, inbound_mapper=inbound_mapper)
+        local_comment_key = c.get("timestamp") if isinstance(c, dict) else None
+        # emersed-specific-mutt — PRIMARY identity skip (append-only comment sync):
+        # a comment is already-mirrored when its persistent HLC key is in the
+        # binding_store comment_ids map, OR when the entry carries a
+        # ``jira_comment_id`` (bug 85a1: it originated from an inbound Jira pull, so
+        # pushing it back would loop). Identity is the key/ID, NOT the body — so
+        # same-text comments never collide and an edited body is not seen as new.
+        if isinstance(c, dict) and c.get("jira_comment_id"):
+            continue
+        if (
+            binding_store is not None
+            and local_comment_key is not None
+            and binding_store.is_comment_mapped(local_comment_key)
+        ):
+            continue
+        # Bug 6afc-20ee-84e5-4dd5: never mirror skill-to-skill machine-marker
+        # comments (BRIDGE_CANARY_ALERT:, etc.) outbound to Jira. Symmetric with
+        # the label _EXCLUDED_PREFIXES exclusion.
+        if _is_machine_marker_comment(body):
+            continue
+        # Bug 6afc-20ee-84e5-4dd5 (convergence): the send path truncates an
+        # over-length body to Jira's 32,767-char limit before it lands, so the
+        # body in jira_bodies is the TRUNCATED form. Apply the SAME shared
+        # truncation to the expected local body before the membership test.
+        # The local store is NOT mutated — this is an in-memory comparison key.
+        #
+        # emersed-specific-mutt: this body-equality test is now a SECONDARY
+        # (belt-and-suspenders) skip behind the ID identity above — it guards a
+        # lost map write (a crash between add_comment and record_comment_id's
+        # save) so a re-sync still does not re-post an already-landed body.
+        #
+        # Bug 17c3-2f6e-a5e0-438c: BOTH keys must be produced by ONE decoder.
+        # The Jira-side key above decodes the FETCHED wire with
+        # ``_normalize_comment_body``; the local key therefore predicts the wire
+        # the send path produces — decorate, fit, ``to_wire`` (the send path is
+        # ``to_wire(fit_preserving_marker(decorated))``, and ``fit_comment`` is
+        # that fit with the decoration taken back off, so re-decorating it
+        # reproduces the encoder's exact input) — and decodes it with the SAME
+        # ``_normalize_comment_body``. Routing the local key through
+        # ``normalize_outbound`` instead (the previous shape) decoded the two
+        # sides differently under the rich cutover: ``AdfCodec(rich=True)``'s
+        # markdown round trip escapes markdown-active characters and rewrites
+        # autolinks, while the Jira side's ``adf_to_text`` never does — and the
+        # real wire is the PLAIN encode anyway, because the decoration is an
+        # HTML comment and ``markdown_to_adf`` degrades a document that would
+        # drop one. So the secondary dedup was inert for every markdown-bearing
+        # comment and re-posted it each pass.
+        #
+        # Story 4cee: the key is no longer a PREDICTION of the send. ``fit_for_send``
+        # produces the wire text and its decoded readback together; the readback is
+        # the key and the wire text rides on the mutation, so the enactment site
+        # hands the transport the very bytes this key was taken from instead of
+        # re-deriving them from the unfitted body.
+        fitted = fit_for_send(body, sanitizer=sanitizer, codec=codec, inbound_mapper=inbound_mapper)
+        compare_body = fitted.landed_text
+        if compare_body and compare_body not in jira_bodies:
+            # Decorate the outbound body with the reconciler marker so the
+            # inbound differ can identify (and filter) our own echoes on the
+            # next pass (Gap 1 loop-breaker). The mutation carries its
+            # ``local_comment_key`` so the enactment site records the returned
+            # Jira comment ID against it (append-only map).
+            mutations.append(
+                {
+                    "action": "add",
+                    "body": _decorate_outbound_comment(body),
+                    # The bytes the transport must send, decided HERE (story 4cee).
+                    # ``body`` stays for the pre-cutover fallback and for readers.
+                    "wire_body": fitted.wire_body,
+                    "local_comment_key": local_comment_key,
+                }
+            )
+    # S7: after the resolved Jira dedup set is built, append at most one
+    # parent-drift breadcrumb (append-once, keyed on PARENT_BREADCRUMB_TAG).
+    mutations.extend(
+        _build_parent_breadcrumb(
+            ticket,
+            jira_bodies,
+            binding_store=binding_store,
+            local_parents=local_parents,
+            local_ticket_types=local_ticket_types,
+            decorate=_decorate_outbound_comment,
+        )
+    )
+    return mutations

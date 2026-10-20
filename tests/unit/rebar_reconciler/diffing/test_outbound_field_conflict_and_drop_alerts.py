@@ -5,33 +5,23 @@ the drop are preserved — only signals are added).
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
-from rebar_reconciler.adapters.jira import outbound_fields as _of  # 625b: adapter-internal
+from rebar.reconciler.adapters.jira import outbound_fields as _of  # 625b: adapter-internal
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
-RUN_DIFFERS_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "run_differs.py"
-ALERT_STORE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "alert_store.py"
-
-
-def _load(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
+RUN_DIFFERS_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "run_differs.py"
+ALERT_STORE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "alert_store.py"
 
 
 @pytest.fixture(scope="module")
 def differ() -> ModuleType:
-    return _load("outbound_differ_conflict_drop", DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 def _ticket(**ov) -> dict:
@@ -131,8 +121,8 @@ def test_matching_issuetype_is_not_flagged(differ) -> None:
 
 # ── dedup: one alert per (kind, ticket, field) ───────────────────────────────
 def test_emit_dedupes_per_ticket_field(tmp_path) -> None:
-    rd = _load("run_differs_conflict_drop", RUN_DIFFERS_PATH)
-    als = _load("alert_store_conflict_drop", ALERT_STORE_PATH)
+    rd = importlib.import_module("rebar.reconciler.run_differs")
+    als = importlib.import_module("rebar.reconciler.alert_store")
     rd._emit_outbound_field_alerts([("KEY-9", "priority")], [], tmp_path, "p1")
     assert als.is_deduped("outbound-field-conflict:KEY-9:priority", repo_root=tmp_path)
     # A second pass for the same (ticket, field) must not re-file.

@@ -6,55 +6,11 @@ packages used by the library without per-test ``sys.path`` changes.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPTS_DIR = str(_REPO_ROOT / "src" / "rebar" / "_engine")
-
-# Seed the test shadow package before adding the engine directory to ``sys.path``.
-# Extend its search path here so every unit-test collection can resolve engine
-# submodules while test packages such as ``classify`` retain precedence.
-_ENGINE_PKG_DIR = Path(_SCRIPTS_DIR) / "rebar_reconciler"
-_SHADOW_PKG_DIR = Path(__file__).resolve().parent / "rebar_reconciler"
-
-
-def _bridge_reconciler_shadow_package() -> None:
-    pkg = sys.modules.get("rebar_reconciler")
-    if pkg is None:
-        init = _SHADOW_PKG_DIR / "__init__.py"
-        if not init.is_file():  # pragma: no cover - shadow dir removed
-            return
-        spec = importlib.util.spec_from_file_location(
-            "rebar_reconciler",
-            init,
-            submodule_search_locations=[str(_SHADOW_PKG_DIR)],
-        )
-        pkg = importlib.util.module_from_spec(spec)
-        sys.modules["rebar_reconciler"] = pkg
-        try:
-            spec.loader.exec_module(pkg)
-        except BaseException:  # pragma: no cover - defensive
-            del sys.modules["rebar_reconciler"]
-            raise
-    # Search the test shadow before the engine so test packages outrank modules with
-    # the same name. Rebuild in place to preserve unrelated entries.
-    _front = [str(_SHADOW_PKG_DIR), str(_ENGINE_PKG_DIR)]
-    pkg.__path__[:] = _front + [p for p in pkg.__path__ if p not in _front]
-    # Evict a stale non-package ``rebar_reconciler.classify`` (the engine module) so the
-    # test package can bind the name; nothing imports the engine module under that name.
-    classify = sys.modules.get("rebar_reconciler.classify")
-    if classify is not None and not hasattr(classify, "__path__"):
-        del sys.modules["rebar_reconciler.classify"]
-
-
-_bridge_reconciler_shadow_package()
-
-if _SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPTS_DIR)
 
 
 @pytest.fixture(autouse=True)

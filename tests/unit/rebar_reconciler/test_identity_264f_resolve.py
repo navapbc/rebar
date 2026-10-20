@@ -11,10 +11,10 @@ from pathlib import Path
 import pytest
 
 import rebar
-import rebar_reconciler.outbound_differ as differ
+import rebar.reconciler.outbound_differ as differ
 
 # ticket 625b: the field-diff helpers are now adapter-internal (outbound_fields).
-from rebar_reconciler.adapters.jira import outbound_fields as _of
+from rebar.reconciler.adapters.jira import outbound_fields as _of
 
 
 @pytest.fixture

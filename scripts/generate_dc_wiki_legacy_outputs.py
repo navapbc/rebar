@@ -40,7 +40,7 @@ ENGINE_ROOT = REPO_ROOT / "src" / "rebar" / "_engine"
 if str(ENGINE_ROOT) not in sys.path:
     sys.path.insert(0, str(ENGINE_ROOT))
 
-from rebar_reconciler.adapters.jira_family import wiki_render  # noqa: E402
+from rebar.reconciler.adapters.jira_family import wiki_render  # noqa: E402
 
 DEFAULT_CORPUS = REPO_ROOT / "tests" / "fixtures" / "dc_wiki_corpus"
 DEFAULT_OUTPUT = REPO_ROOT / "tests" / "fixtures" / "dc_wiki_legacy_outputs.json"

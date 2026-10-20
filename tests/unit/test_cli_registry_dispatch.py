@@ -338,7 +338,7 @@ assert main(["show", tid]) == 0
 forbidden = [
     "rebar._cli._bridge_commands",
     "rebar._commands.transition",
-    "rebar_reconciler",
+    "rebar.reconciler",
     "pydantic_ai",
 ]
 leaked = [m for m in forbidden if m in sys.modules]

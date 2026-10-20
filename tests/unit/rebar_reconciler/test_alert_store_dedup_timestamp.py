@@ -18,25 +18,14 @@ through-the-real-path oracle in
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 from pathlib import Path
 
-_MOD_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "src"
-    / "rebar"
-    / "_engine"
-    / "rebar_reconciler"
-    / "alert_store.py"
-)
+_MOD_PATH = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler" / "alert_store.py"
 
 
 def _load_alert_store():
-    spec = importlib.util.spec_from_file_location("rebar_reconciler.alert_store", _MOD_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.alert_store")
 
 
 _24H_NS = 24 * 3600 * 1_000_000_000

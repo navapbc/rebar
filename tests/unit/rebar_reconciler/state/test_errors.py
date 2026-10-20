@@ -1,14 +1,13 @@
-"""Tests for rebar_reconciler._errors."""
+"""Tests for rebar.reconciler._errors."""
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-ERRORS_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_errors.py"
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+ERRORS_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "_errors.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 # These nine applier leaves expose authorization-documentation drift.
 # Update this set with the production documentation contract.
@@ -28,21 +27,14 @@ _CANONICAL_9_LEAVES = frozenset(
 
 
 def _load_errors():
-    spec = importlib.util.spec_from_file_location("_errors", ERRORS_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler._errors")
 
 
 def _load_applier():
     # Register under the canonical module name so that Python's dataclass
     # machinery (which looks up cls.__module__ in sys.modules) can resolve
     # the annotation strings for ApplyResult's slots=True dataclass.
-    spec = importlib.util.spec_from_file_location("applier", APPLIER_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["applier"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")

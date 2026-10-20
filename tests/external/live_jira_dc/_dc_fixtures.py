@@ -203,8 +203,8 @@ def dc_transport(jira_dc_pat: str, jira_dc_base_url: str) -> Any:
     loopback harness's insecure setting. ``conftest.py`` re-exports this fixture so sibling
     test modules can resolve it at setup.
     """
-    from rebar_reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
-    from rebar_reconciler.adapters.jira_datacenter.transport import (
+    from rebar.reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
+    from rebar.reconciler.adapters.jira_datacenter.transport import (
         JiraDataCenterTransport,
         build_client_from_settings,
     )
@@ -345,8 +345,9 @@ def bound_dc_issue(
     leg cannot derive the Jira key from the local ID, while the inbound-create target is the key.
     """
     from _dc_support import run_reconcile, seed_searchable_issue
-    from rebar_reconciler.binding_store import load_binding_store
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+
+    from rebar.reconciler.binding_store import load_binding_store
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     key = seed_searchable_issue(
         dc_transport, jira_dc_project, track_issue, "rebar J11 — bound fixture"

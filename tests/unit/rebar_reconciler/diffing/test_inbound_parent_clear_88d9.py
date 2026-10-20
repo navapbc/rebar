@@ -119,7 +119,7 @@ def _snapshot(keys: list[str], parent_map: dict[str, str | None]) -> dict[str, d
     while an issue the map maps to None gets ``"parent": None`` (queried, authoritatively
     parentless) and may therefore be cleared.
     """
-    fetcher = importlib.import_module("rebar_reconciler.fetcher")
+    fetcher = importlib.import_module("rebar.reconciler.fetcher")
     return fetcher.merge_parent_map({k: {} for k in keys}, parent_map)
 
 
@@ -130,7 +130,7 @@ def _inbound_fields(
     outbound: list[Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Run the production inbound differ; return ``{jira_key: mutation.fields}``."""
-    inbound_differ = importlib.import_module("rebar_reconciler.inbound_differ")
+    inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
     muts, _suppressed = inbound_differ.compute_inbound_mutations(
         snapshot,
         bindings,
@@ -360,7 +360,7 @@ def test_outbound_parent_translates_to_the_inbound_parent_id_name() -> None:
     ``_OUTBOUND_TO_INBOUND_FIELD``. Without this cell, deleting that entry would silently
     remove the guard while every other test still passed.
     """
-    inbound_differ = importlib.import_module("rebar_reconciler.inbound_differ")
+    inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
     assert inbound_differ._OUTBOUND_TO_INBOUND_FIELD.get("parent") == "parent_id", (
         "the outbound->inbound field translation no longer maps 'parent' to 'parent_id', so "
         "the same-pass suppression silently stops firing for the parent field and an inbound "
@@ -435,7 +435,7 @@ def test_explicit_none_leaves_the_canonical_remote_parent_unchanged() -> None:
     consumer, the outbound field diff, reads it with ``.get("remote_parent_id")``, for which
     absent and None are the same value. Pinned here so that equivalence is not merely argued.
     """
-    inbound_fields = importlib.import_module("rebar_reconciler.inbound_fields")
+    inbound_fields = importlib.import_module("rebar.reconciler.inbound_fields")
     explicit = inbound_fields._map_jira_to_local_fields({"parent": None})
     absent = inbound_fields._map_jira_to_local_fields({})
     assert explicit.get("remote_parent_id") == absent.get("remote_parent_id") is None, (
@@ -507,7 +507,7 @@ def test_end_to_end_a_removed_jira_parent_leaves_parent_id_empty(
     # The issue was OBSERVED and Jira has no parent for it.
     snap = _snapshot(["DC-1"], {"DC-1": None})
 
-    inbound_differ = importlib.import_module("rebar_reconciler.inbound_differ")
+    inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
     muts, _ = inbound_differ.compute_inbound_mutations(
         snap,
         bindings,
@@ -524,8 +524,8 @@ def test_end_to_end_a_removed_jira_parent_leaves_parent_id_empty(
         f"expected the clear to travel as None; got {muts[0].fields['parent_id']!r}"
     )
 
-    mut_mod = importlib.import_module("rebar_reconciler.mutation")
-    apply_inbound = importlib.import_module("rebar_reconciler.apply_inbound")
+    mut_mod = importlib.import_module("rebar.reconciler.mutation")
+    apply_inbound = importlib.import_module("rebar.reconciler.apply_inbound")
     typed = mut_mod.Mutation(
         direction=mut_mod.MutationDirection.inbound,
         action=mut_mod.MutationAction.update,

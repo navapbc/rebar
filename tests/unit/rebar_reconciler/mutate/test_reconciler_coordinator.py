@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler.batch_dispatch import build_pass_tally
+from rebar.reconciler.batch_dispatch import build_pass_tally
 
 from ._coordinator_harness import (
     CLEAN_BUCKETS,

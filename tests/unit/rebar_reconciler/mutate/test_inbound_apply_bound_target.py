@@ -23,24 +23,18 @@ Behaviour under test (observable via on-disk events):
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location("applier", APPLIER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["applier"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
@@ -53,7 +47,7 @@ def _reset_ticket_reducer_module_cache(applier):
     yield
     # The ticket-reducer lazy cache now lives in inbound_translate (its owner);
     # reset it at point-of-use rather than on the applier facade.
-    from rebar_reconciler import inbound_translate
+    from rebar.reconciler import inbound_translate
 
     inbound_translate._TICKET_REDUCER_MODULE = None
 
@@ -307,7 +301,7 @@ def test_inbound_label_add_writes_tag_delta(tmp_path, applier):
     assert data.get("added") == ["new-tag"], data
     assert data.get("removed") == [], data
     # Reduced state keeps the pre-existing tag (delta layered on the base).
-    from rebar_reconciler import inbound_translate
+    from rebar.reconciler import inbound_translate
 
     reducer = inbound_translate._load_ticket_reducer()
     state = reducer.reduce_ticket(str(tracker_dir / local_uuid))
@@ -336,7 +330,7 @@ def test_inbound_label_remove_writes_tag_delta(tmp_path, applier):
     data = _inbound_tag_delta(_read_events(tracker_dir / local_uuid))
     assert data.get("removed") == ["drop-me"], data
     assert data.get("added") == [], data
-    from rebar_reconciler import inbound_translate
+    from rebar.reconciler import inbound_translate
 
     reducer = inbound_translate._load_ticket_reducer()
     state = reducer.reduce_ticket(str(tracker_dir / local_uuid))
@@ -387,7 +381,7 @@ def test_inbound_label_add_does_not_wipe_tags_when_reducer_fails(tmp_path, appli
     # concurrent write). Patch the reducer module's reduce_ticket to raise.
     # The lazy reducer loader now lives in inbound_translate (its owner) and
     # returns rebar.reducer; patch reduce_ticket there (Tier E E5b).
-    from rebar_reconciler import inbound_translate
+    from rebar.reconciler import inbound_translate
 
     reducer_mod = inbound_translate._load_ticket_reducer()
     monkeypatch.setattr(

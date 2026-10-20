@@ -11,7 +11,7 @@ Consumers invoke `python _sync_only_dispatch_probe.py <route> <base_dir>`.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import os
 import subprocess
@@ -23,18 +23,7 @@ from pathlib import Path
 from typing import Any
 
 _ENGINE_DIR = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine"
-if str(_ENGINE_DIR) not in sys.path:  # pragma: no cover - import bootstrap
-    sys.path.insert(0, str(_ENGINE_DIR))
-_RECONCILER_DIR = _ENGINE_DIR / "rebar_reconciler"
-
-
-def _load_module(name: str, path: Path) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+_RECONCILER_DIR = _ENGINE_DIR.parent / "reconciler"
 
 
 class _FakeJiraState:
@@ -154,10 +143,10 @@ def _fresh_modules() -> tuple[Any, Any, Any]:
         "acli_integration",
     ):
         sys.modules.pop(key, None)
-    fetcher = _load_module("reconcile_fetcher", _RECONCILER_DIR / "fetcher.py")
-    applier = _load_module("reconcile_applier", _RECONCILER_DIR / "applier.py")
-    reconcile = _load_module("reconcile", _RECONCILER_DIR / "reconcile.py")
-    _load_module("reconcile_run_differs", _RECONCILER_DIR / "run_differs.py")
+    fetcher = importlib.import_module("rebar.reconciler.fetcher")
+    applier = importlib.import_module("rebar.reconciler.applier")
+    reconcile = importlib.import_module("rebar.reconciler.reconcile")
+    importlib.import_module("rebar.reconciler.run_differs")
     return fetcher, applier, reconcile
 
 
@@ -167,7 +156,7 @@ def _wire(fetcher: Any, applier: Any, state: _FakeJiraState) -> _FakeClient:
     fetcher._load_acli = lambda: fake
     applier._load_acli = lambda: fake
     applier._load_concurrency = lambda: _make_ok_concurrency()
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     rd = sys.modules["reconcile_run_differs"]
     rd._load_reconcile_backend = lambda: JiraBackend(fake)  # type: ignore[attr-defined]
@@ -240,7 +229,7 @@ def _run_scoped_pass(base: Path, **pass_kwargs: Any) -> list[str]:
     fetcher, applier, rc = _fresh_modules()
     _wire(fetcher, applier, state)
     state.write_calls.clear()
-    from rebar_reconciler.mode import Mode
+    from rebar.reconciler.mode import Mode
 
     rc.reconcile_once("scoped-pass", repo_root=repo, target_mode=Mode.LIVE, **pass_kwargs)
     return [c for c in state.write_calls if c.startswith("update_issue")]
