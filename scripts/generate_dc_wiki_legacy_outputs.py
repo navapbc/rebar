@@ -61,6 +61,20 @@ SUPPORTED_PANDOC_BINARY_SHA256 = {
     "darwin-arm64": "d7b1e75cd20ee6a788a1399492be07d4559949e18e55f34cfc5c91807fdfa90d",
     "linux-x86_64": "decd3dd11a3fe0c16ce56443343ec53adde6fbed6f97d7f56f06b1c424248e7b",
 }
+# The binaries verification ACCEPTS per platform (bug 9119-3f7b-22c0-4421). The map above is
+# the frozen GENERATING fingerprint the committed fixtures embed, so it is not widened. On
+# darwin-arm64 two binaries are byte-identical for every corpus unit: the pypandoc-binary 1.17
+# wheel's payload (an x86_64 executable, runs under Rosetta) and the official pandoc 3.9
+# arm64-macOS release that docs/local-dev-env.md prescribes for hosts without Rosetta.
+ACCEPTED_PANDOC_BINARY_SHA256 = {
+    "darwin-arm64": frozenset(
+        {
+            "d7b1e75cd20ee6a788a1399492be07d4559949e18e55f34cfc5c91807fdfa90d",
+            "140353e19f2518a76aa144ce90a7afcb6f485ba94d0dbe069e77c805277908c3",
+        }
+    ),
+    "linux-x86_64": frozenset({"decd3dd11a3fe0c16ce56443343ec53adde6fbed6f97d7f56f06b1c424248e7b"}),
+}
 _LEGACY_ANCHOR_RE = re.compile(r"\{anchor:[^}]*\}")
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -129,10 +143,12 @@ def validate_pandoc_provenance(
             f"Pandoc generating platform {generating_platform!r} is not supported; "
             f"supported platforms: {sorted(fingerprints)}"
         )
-    if generating_hash != fingerprints[generating_platform]:
+    # The membership check above guarantees a supported (string) key.
+    accepted_generating = ACCEPTED_PANDOC_BINARY_SHA256[str(generating_platform)]
+    if generating_hash not in accepted_generating:
         raise ValueError(
             f"Pandoc generating binary SHA-256 mismatch for {generating_platform}: "
-            f"expected {fingerprints[generating_platform]}, found {generating_hash}"
+            f"expected one of {sorted(accepted_generating)}, found {generating_hash}"
         )
 
     if version != expected_version:
@@ -145,11 +161,11 @@ def validate_pandoc_provenance(
             f"unsupported Pandoc platform {platform_key!r}; "
             f"supported platforms: {sorted(fingerprints)}"
         )
-    expected_hash = fingerprints[platform_key]
-    if binary_sha256 != expected_hash:
+    accepted = ACCEPTED_PANDOC_BINARY_SHA256[platform_key]
+    if binary_sha256 not in accepted:
         raise ValueError(
             f"Pandoc binary SHA-256 mismatch for {platform_key}: "
-            f"expected {expected_hash}, installed {binary_sha256}"
+            f"expected one of {sorted(accepted)}, installed {binary_sha256}"
         )
 
 

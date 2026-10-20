@@ -64,13 +64,6 @@ export PYPANDOC_PANDOC="$HOME/.local/pandoc-3.9/pandoc-3.9-arm64/bin/pandoc"
 file "$PYPANDOC_PANDOC"                    # Mach-O 64-bit executable arm64
 ```
 
-One test still fails after this setup, and it is a known defect rather than a
-mistake in your environment:
-`test_wiki_render_hardening.py::test_the_installed_pandoc_matches_the_legacy_fixture_provenance`
-compares your pandoc against a frozen `darwin-arm64` fingerprint that was
-recorded from the bundled x86_64 payload, so no genuine arm64 binary can match
-it. Tracked as `9119-3f7b-22c0-4421`.
-
 ## Prerequisite — provision the venv on the Python CI tests
 
 **Create the venv with `make venv`, not `python3 -m venv`.** `make venv` asks uv for the
