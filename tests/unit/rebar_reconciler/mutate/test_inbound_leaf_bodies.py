@@ -8,9 +8,8 @@ file, directory rename, follow-on payload, client call).
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 import types
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -18,7 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 MUTATION_PATH = APPLIER_PATH.parent / "mutation.py"
 
 
@@ -26,22 +25,11 @@ def _load_mutation_module():
     # Load under the canonical key used by applier.py so that Mutation
     # objects created here share class identity with the applier-side enum
     # members (avoids _direction_guard 'is' check failures).
-    canonical = "rebar_reconciler.mutation"
-    if canonical in sys.modules:
-        return sys.modules[canonical]
-    spec = importlib.util.spec_from_file_location(canonical, MUTATION_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[canonical] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location("applier_under_test", APPLIER_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["applier_under_test"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
@@ -91,11 +79,11 @@ def _patch_apply_deps(applier, monkeypatch):
     """Stub applier.apply()'s lazy module loaders for an offline, all-inbound run.
 
     apply() calls ``_load_acli()`` unconditionally to construct the Jira client
-    (applier.py ~2716). The real rebar_reconciler/acli.py does
-    ``from rebar_reconciler.adapters.jira.adf import text_to_adf`` at import time, which is
+    (applier.py ~2716). The real reconciler/acli.py does
+    ``from rebar.reconciler.adapters.jira.adf import text_to_adf`` at import time, which is
     unresolvable under this file's spec_from_file_location loading scheme
-    (modules live under the ``rebar_reconciler`` package, not a
-    bare ``rebar_reconciler`` package) — so the real load raises ModuleNotFoundError
+    (modules live under the ``rebar.reconciler`` package, not a
+    bare ``rebar.reconciler`` package) — so the real load raises ModuleNotFoundError
     before any inbound dispatch happens. Mirror test_e2e_dedup_pass: stub
     ``_load_acli`` (offline client) and ``_load_concurrency`` (no git in tmp_path).
     """

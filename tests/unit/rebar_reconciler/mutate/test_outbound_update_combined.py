@@ -23,37 +23,25 @@ docs/adr/0004-reconciler-snapshot-contract.md).
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import logging
-import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-_REC = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, path: Path) -> ModuleType:
-    if name in sys.modules:
-        del sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+_REC = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def batch() -> ModuleType:
-    return _load("batch_dispatch_combined_test", _REC / "batch_dispatch.py")
+    return importlib.import_module("rebar.reconciler.batch_dispatch")
 
 
 @pytest.fixture(scope="module")
 def applier() -> ModuleType:
-    return _load("applier_combined_test", _REC / "applier.py")
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 class _RecordingClient:

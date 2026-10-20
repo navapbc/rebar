@@ -7,8 +7,7 @@ rebar-id label produces zero create_issue calls.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 import types
 from pathlib import Path
 from unittest.mock import patch
@@ -21,31 +20,22 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
-DIFFER_PATH = SCRIPTS_DIR / "rebar_reconciler" / "differ.py"
-APPLIER_PATH = SCRIPTS_DIR / "rebar_reconciler" / "applier.py"
-
-
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None, f"Cannot load {path}"
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+DIFFER_PATH = SCRIPTS_DIR.parent / "reconciler" / "differ.py"
+APPLIER_PATH = SCRIPTS_DIR.parent / "reconciler" / "applier.py"
 
 
 @pytest.fixture(scope="module")
 def differ():
     if not DIFFER_PATH.exists():
         pytest.fail(f"differ.py not found at {DIFFER_PATH}")
-    return _load_module("e2e_differ", DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.differ")
 
 
 @pytest.fixture(scope="module")
 def applier():
     if not APPLIER_PATH.exists():
         pytest.fail(f"applier.py not found at {APPLIER_PATH}")
-    return _load_module("e2e_applier", APPLIER_PATH)
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 # ---------------------------------------------------------------------------

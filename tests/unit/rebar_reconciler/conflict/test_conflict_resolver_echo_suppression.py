@@ -1,32 +1,23 @@
 """RED tests for differ ProvenanceLedger echo suppression."""
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "differ.py"
-LEDGER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "conflict_resolver.py"
-
-
-def _load(path, name):
-    spec = importlib.util.spec_from_file_location(name, path)
-    m = importlib.util.module_from_spec(spec)
-    sys.modules[name] = m
-    spec.loader.exec_module(m)
-    return m
+DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "differ.py"
+LEDGER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "conflict_resolver.py"
 
 
 @pytest.fixture(scope="module")
 def differ():
-    return _load(DIFFER_PATH, "differ")
+    return importlib.import_module("rebar.reconciler.differ")
 
 
 @pytest.fixture(scope="module")
 def ledger_mod():
-    return _load(LEDGER_PATH, "conflict_resolver")
+    return importlib.import_module("rebar.reconciler.conflict_resolver")
 
 
 def test_echo_suppressed_for_identical_elements(differ, ledger_mod):

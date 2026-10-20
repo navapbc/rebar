@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler.adapters.jira import acli_cli_ops, acli_subprocess
+from rebar.reconciler.adapters.jira import acli_cli_ops, acli_subprocess
 
 # ── the parameter is gone from the contract ─────────────────────────────────
 

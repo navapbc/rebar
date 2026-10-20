@@ -12,7 +12,7 @@ warning is not merely content-free, it is never DELIVERED at all:
 * an **MCP** client reads only the tool result. Measured on a real rejecting origin, the
   ``comment_ticket`` tool returned ``{"result": "ok"}`` while two ticket commits sat
   stranded;
-* the **reconciler** subprocess installs its handler on the ``rebar_reconciler`` root,
+* the **reconciler** subprocess installs its handler on the ``rebar.reconciler`` root,
   while this package logs under ``rebar``.
 
 A log line is therefore the wrong carrier. This module records the outcome as STATE: a

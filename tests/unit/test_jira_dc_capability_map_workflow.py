@@ -128,8 +128,8 @@ def _run_map_script(*args: str, cwd: Path | None = None) -> subprocess.Completed
     """Drive the script through its CLI in a subprocess.
 
     Deliberately NOT an in-process import: ``tests/unit/`` contains its own
-    ``rebar_reconciler/`` test package, and pytest puts the test's own directory on
-    ``sys.path`` ahead of the engine, so under pytest ``import rebar_reconciler`` resolves
+    ``reconciler/`` test package, and pytest puts the test's own directory on
+    ``sys.path`` ahead of the engine, so under pytest ``import rebar.reconciler`` resolves
     to that shadowing test package and the script's engine imports fail with a spurious
     ``ModuleNotFoundError``. Driving the real CLI sidesteps the shadowing entirely AND
     exercises the script as CI actually invokes it — which matters because ``make lint``

@@ -127,7 +127,7 @@ def test_a_traceback_still_fails_even_when_the_child_exits_zero() -> None:
 def test_a_documented_sentinel_exit_can_be_accepted_explicitly() -> None:
     """``ok_codes`` carries the reconciler's legacy 3/4/75 sentinels where a site allows them.
 
-    ``rebar_reconciler/__main__.py:65-72`` maps RESCHEDULE to legacy exit 75, and
+    ``reconciler/__main__.py:65-72`` maps RESCHEDULE to legacy exit 75, and
     ``test_reconcile_pass.py:200`` already accepts ``(0, 75)``. A site that means it says so;
     the DEFAULT stays 0, matching ``_dc_support.py:658``.
     """

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 
-from rebar_reconciler import alert_store
+from rebar.reconciler import alert_store
 
 
 def _write_record(path, record: dict) -> None:

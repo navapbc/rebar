@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
 # Ensure ticket_reducer package is importable regardless of invocation directory.
 _SCRIPTS_DIR = str(Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine")
-if _SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPTS_DIR)
 
 
 # Submodule import

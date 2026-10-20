@@ -7,9 +7,9 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler.adapters.jira.acli import AcliClient
-from rebar_reconciler.adapters.jira.acli_graph import RunawayPaginationError
-from rebar_reconciler.fetch_paging import collect
+from rebar.reconciler.adapters.jira.acli import AcliClient
+from rebar.reconciler.adapters.jira.acli_graph import RunawayPaginationError
+from rebar.reconciler.fetch_paging import collect
 
 
 @pytest.fixture

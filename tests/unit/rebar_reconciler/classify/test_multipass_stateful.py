@@ -10,8 +10,7 @@ fixed point.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 
 from ._load import load_classify
@@ -21,19 +20,8 @@ ObservedJira = c.ObservedJira
 DecisionKind = c.DecisionKind
 JiraObservation = c.JiraObservation
 
-_BS_SRC = (
-    Path(__file__).resolve().parents[4]
-    / "src"
-    / "rebar"
-    / "_engine"
-    / "rebar_reconciler"
-    / "binding_store.py"
-)
-_spec = importlib.util.spec_from_file_location("binding_store_multipass", _BS_SRC)
-assert _spec and _spec.loader
-_bs = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = _bs
-_spec.loader.exec_module(_bs)
+_BS_SRC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler" / "binding_store.py"
+_bs = importlib.import_module("rebar.reconciler.binding_store")
 BindingStore = _bs.BindingStore
 
 

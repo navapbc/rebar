@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.adapters.jira.backend import JiraBackend
 
 pytestmark = pytest.mark.unit
 

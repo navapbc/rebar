@@ -6,9 +6,9 @@ from types import SimpleNamespace
 
 
 def test_old_private_reconciler_shim_bindings_are_removed() -> None:
-    import rebar_reconciler.apply_inbound_records as records
-    import rebar_reconciler.mode as mode
-    import rebar_reconciler.reconcile as reconcile
+    import rebar.reconciler.apply_inbound_records as records
+    import rebar.reconciler.mode as mode
+    import rebar.reconciler.reconcile as reconcile
 
     assert not hasattr(records, "_inbound_update_write_edit_event")
     for name in (
@@ -39,7 +39,7 @@ def test_old_private_reconciler_shim_bindings_are_removed() -> None:
 
 
 def test_mode_ordering_remains_observable_without_rank() -> None:
-    from rebar_reconciler.mode import Mode
+    from rebar.reconciler.mode import Mode
 
     ordered = [
         Mode.DRY_RUN,
@@ -52,8 +52,8 @@ def test_mode_ordering_remains_observable_without_rank() -> None:
 
 
 def test_reconcile_once_uses_canonical_runtime_composer(monkeypatch, tmp_path) -> None:
-    import rebar_reconciler.reconcile as reconcile
-    import rebar_reconciler.runtime as runtime
+    import rebar.reconciler.reconcile as reconcile
+    import rebar.reconciler.runtime as runtime
 
     captured_transport = SimpleNamespace(name="canonical-transport")
 

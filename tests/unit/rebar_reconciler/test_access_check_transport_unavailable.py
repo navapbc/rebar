@@ -13,9 +13,9 @@ unchanged — only the leaked exception is wrapped into a typed ``reason``.
 
 from __future__ import annotations
 
-import pytest
+import importlib
 
-from rebar._lib_ops import _engine_module
+import pytest
 
 pytestmark = pytest.mark.unit
 
@@ -56,7 +56,7 @@ class _GenericFailureClient:
 
 def test_missing_transport_binary_is_typed_transport_unavailable() -> None:
     """A missing ``acli`` binary at STEP_CREATE yields a typed transport_unavailable verdict."""
-    access_check = _engine_module("rebar_reconciler.access_check")
+    access_check = importlib.import_module("rebar.reconciler.access_check")
 
     result, lines, returncode = access_check.run_access_check(
         env=_PROBE_ENV, client_cls=_MissingAcliClient
@@ -79,7 +79,7 @@ def test_missing_transport_binary_is_typed_transport_unavailable() -> None:
 
 def test_a_generic_provider_error_is_still_reported_as_exception() -> None:
     """The fix is narrow: an ordinary provider failure keeps the ``exception`` reason."""
-    access_check = _engine_module("rebar_reconciler.access_check")
+    access_check = importlib.import_module("rebar.reconciler.access_check")
 
     result, _lines, returncode = access_check.run_access_check(
         env=_PROBE_ENV, client_cls=_GenericFailureClient

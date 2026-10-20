@@ -8,14 +8,14 @@ observable translation behavior end-to-end:
 - preflight: the status-mapping scan does not abort (or even warn) on a local
   ``idea`` update mutation, because ``idea`` is now a mapped status.
 
-The ``rebar_reconciler`` package is importable via the sibling conftest, which
+The ``rebar.reconciler`` package is importable via the sibling conftest, which
 puts ``src/rebar/_engine`` on ``sys.path``.
 """
 
 from __future__ import annotations
 
-from rebar_reconciler import inbound_translate, pass_support
-from rebar_reconciler.adapters.jira import outbound_fields
+from rebar.reconciler import inbound_translate, pass_support
+from rebar.reconciler.adapters.jira import outbound_fields
 
 
 def test_outbound_idea_ticket_yields_jira_idea():

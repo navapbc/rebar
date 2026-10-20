@@ -1,4 +1,4 @@
-"""RED tests for rebar_reconciler/mutation.py.
+"""RED tests for reconciler/mutation.py.
 
 Tests assert behavioral contracts for:
   - MutationDirection StrEnum (inbound, outbound)
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
-import importlib.util
+import importlib
 import random
 from pathlib import Path
 from types import ModuleType
@@ -26,17 +26,11 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "mutation.py"
 
 
 def _load_mutation() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("mutation", MUTATION_PATH)
-    assert spec is not None and spec.loader is not None, (
-        f"Cannot load mutation module from {MUTATION_PATH} — file does not exist yet (RED phase)"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 @pytest.fixture(scope="module")

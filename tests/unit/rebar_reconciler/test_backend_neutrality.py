@@ -23,14 +23,12 @@ of import wiring and fails BEFORE the S4 rewiring, PASSES after.
 from __future__ import annotations
 
 import ast
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
-_REC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_REC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler"
 
 # Core modules that must NOT construct an AcliClient inline (the seam returns the
 # backend transport instead). adapters/jira/ is deliberately excluded — the factory
@@ -92,11 +90,11 @@ def test_apply_inbound_records_has_single_jira_literal() -> None:
 # OutboundMapper/InboundMapper) from the orchestrator that owns the configured
 # backend. This gate pins that win: a regression that re-adds a module-level
 # `from ...adapters.jira.outbound_fields import _map_local_to_jira_fields` (or the
-# inbound `from rebar_reconciler.inbound_fields import _map_jira_to_local_fields`)
+# inbound `from rebar.reconciler.inbound_fields import _map_jira_to_local_fields`)
 # fails CI.
 #
 # The assertion is on MODULE-LEVEL imports only (via AST): a lazy import of the
-# NEUTRAL registry seam (`from rebar_reconciler._backend_registry import
+# NEUTRAL registry seam (`from rebar.reconciler._backend_registry import
 # select_backend`) inside a function — used by the injection fallback and by
 # apply_inbound's hard-delete re-create — is fine, because it names no vendor
 # mapper. Non-mapping helpers with no port equivalent (e.g. outbound_fields'
@@ -221,16 +219,6 @@ def test_scalar_core_imports_no_jira_adapter(filename: str) -> None:
     )
 
 
-def _load_by_path(name: str, filename: str) -> ModuleType:
-    """Load a reconciler module standalone by path (the reconciler test convention)."""
-    spec = importlib.util.spec_from_file_location(name, _REC / filename)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
 class _RecordingOutboundMapper:
     """A fake OutboundMapper that returns a sentinel so we can prove the differ used
     the INJECTED mapper (not a hidden vendor import)."""
@@ -290,7 +278,7 @@ class _NeutralityStubBindingStore:
 def test_outbound_differ_uses_injected_mapper() -> None:
     """A passed-in ``outbound_mapper`` is actually used by ``compute_outbound_mutations``
     (proves the injection seam is wired, not bypassed by a hidden vendor call)."""
-    outbound_differ = _load_by_path("outbound_differ_neutrality", "outbound_differ.py")
+    outbound_differ = importlib.import_module("rebar.reconciler.outbound_differ")
     fake = _RecordingOutboundMapper()
     ticket = {
         "ticket_id": "loc-1",
@@ -316,7 +304,7 @@ def test_outbound_differ_uses_injected_mapper() -> None:
 
 def test_inbound_differ_uses_injected_mapper() -> None:
     """A passed-in ``inbound_mapper`` is actually used by ``compute_inbound_mutations``."""
-    inbound_differ = _load_by_path("inbound_differ_neutrality", "inbound_differ.py")
+    inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
     fake = _RecordingInboundMapper()
     bind = _NeutralityStubBindingStore({"loc-1": "DIG-1"})
     local = {"ticket_id": "loc-1", "title": "T", "description": "d", "status": "open"}
@@ -333,7 +321,7 @@ def test_inbound_differ_uses_injected_mapper() -> None:
 # Ticket 21ca — the UNION lazy-load-literal sweep. After the rich-text codec + comment
 # limits move behind the port (InboundMapper.normalize_rich_text / FieldSanitizer.
 # fit_comment), NO package-root core module may carry a
-# ``"rebar_reconciler.adapters.jira[...]"`` string constant (an actual lazy-load key) —
+# ``"rebar.reconciler.adapters.jira[...]"`` string constant (an actual lazy-load key) —
 # with a SINGLE deliberate exemption: inbound_fields.py is the one mapper shared by
 # the Cloud and Data Center adapters. Keeping it at the package root lets both adapters
 # reuse that implementation without opening the sibling-adapter import edge forbidden
@@ -343,7 +331,7 @@ def test_inbound_differ_uses_injected_mapper() -> None:
 # the explicit cost of preserving both seals, not temporary relocation debt. A
 # docstring/comment that MENTIONS the string in prose is not a load key, so the gate
 # inspects string CONSTANTS by value (via AST), not raw text.
-_VENDOR_LAZYLOAD_PREFIX = "rebar_reconciler.adapters.jira"
+_VENDOR_LAZYLOAD_PREFIX = "rebar.reconciler.adapters.jira"
 _SWEEP_EXEMPTIONS = {"inbound_fields.py"}
 
 

@@ -31,13 +31,13 @@ import time
 
 import pytest
 
-import rebar_reconciler.pass_support as pass_support
-import rebar_reconciler.persist_phase as persist_phase
+import rebar.reconciler.pass_support as pass_support
+import rebar.reconciler.persist_phase as persist_phase
 
 
 @pytest.fixture
 def pc():
-    return importlib.import_module("rebar_reconciler.peer_confirmations")
+    return importlib.import_module("rebar.reconciler.peer_confirmations")
 
 
 @pytest.fixture
@@ -230,7 +230,7 @@ def test_reconfirmation_is_idempotent_and_does_not_rewrite(pc, store):
 
 def test_persist_seam_writes_and_saves(tmp_path, pc):
     """``persist_phase.confirm_peer_links`` is the named seam the persist phase calls."""
-    reconcile = importlib.import_module("rebar_reconciler.reconcile")
+    reconcile = importlib.import_module("rebar.reconciler.reconcile")
     (tmp_path / ".tickets-tracker" / ".bridge_state").mkdir(parents=True)
 
     ctx = reconcile._PassContext(repo_root=tmp_path, pass_id="pass-9")
@@ -251,7 +251,7 @@ def test_confirmation_failure_does_not_break_the_pass(tmp_path, monkeypatch, cap
     property under test is the caller's try/except — testing the seam alone would
     pass even if the call site were unguarded.
     """
-    reconcile = importlib.import_module("rebar_reconciler.reconcile")
+    reconcile = importlib.import_module("rebar.reconciler.reconcile")
 
     def _boom(_ctx):
         raise RuntimeError("snapshot confirmation exploded")
@@ -281,7 +281,7 @@ def test_confirmation_failure_does_not_break_the_pass(tmp_path, monkeypatch, cap
 
 def test_no_write_mode_confirms_nothing(tmp_path, monkeypatch):
     """AC7. A no-write pass writes no evidence, just as it writes no bindings."""
-    reconcile = importlib.import_module("rebar_reconciler.reconcile")
+    reconcile = importlib.import_module("rebar.reconciler.reconcile")
     calls: list[str] = []
     monkeypatch.setattr(
         persist_phase, "confirm_peer_links", lambda _ctx: calls.append("called") or 0
@@ -301,7 +301,7 @@ def test_no_write_mode_confirms_nothing(tmp_path, monkeypatch):
 
 def test_persist_seam_writes_no_file_when_nothing_is_confirmed(tmp_path):
     """A converged (or fully-unobserved) pass must not touch the file."""
-    reconcile = importlib.import_module("rebar_reconciler.reconcile")
+    reconcile = importlib.import_module("rebar.reconciler.reconcile")
     (tmp_path / ".tickets-tracker" / ".bridge_state").mkdir(parents=True)
 
     ctx = reconcile._PassContext(repo_root=tmp_path, pass_id="pass-9")

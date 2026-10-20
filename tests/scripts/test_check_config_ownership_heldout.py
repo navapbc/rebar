@@ -142,7 +142,7 @@ def test_credential_read_below_boundary_fires(gate, tmp_path):
 
 def test_credential_read_inside_a_provider_boundary_passes(gate, tmp_path):
     # Same read, but placed at an APPROVED provider-credential boundary path → allowed.
-    rel = "_engine/rebar_reconciler/access_check.py"
+    rel = "reconciler/access_check.py"
     body = "import os\n\n\ndef f():\n    return os.getenv('JIRA_API_TOKEN')\n"
     assert gate.check(_root(tmp_path, body, relname=rel)) == []
 
@@ -160,7 +160,7 @@ def test_select_backend_outside_reconciler_fires(gate, tmp_path):
 
 
 def test_select_backend_inside_reconciler_passes(gate, tmp_path):
-    rel = "_engine/rebar_reconciler/runtime.py"
+    rel = "reconciler/runtime.py"
     body = (
         "from ._backend_registry import select_backend\n\n\n"
         "def f():\n    return select_backend('jira')\n"

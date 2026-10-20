@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONCURRENCY = REPO_ROOT / "src/rebar/_engine/rebar_reconciler/_concurrency.py"
-PASS_IO = REPO_ROOT / "src/rebar/_engine/rebar_reconciler/pass_io.py"
-APPLIER = REPO_ROOT / "src/rebar/_engine/rebar_reconciler/applier.py"
+CONCURRENCY = REPO_ROOT / "src/rebar/reconciler/_concurrency.py"
+PASS_IO = REPO_ROOT / "src/rebar/reconciler/pass_io.py"
+APPLIER = REPO_ROOT / "src/rebar/reconciler/applier.py"
 
 
 def _text(path: Path) -> str:

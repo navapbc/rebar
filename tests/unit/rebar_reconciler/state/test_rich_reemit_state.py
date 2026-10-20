@@ -9,19 +9,16 @@ That function remains the sole baseline writer.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 _ENGINE = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine"
-if str(_ENGINE) not in sys.path:  # pragma: no cover - import bootstrap
-    sys.path.insert(0, str(_ENGINE))
 
-from rebar_reconciler import apply_handlers, peer_state  # noqa: E402
-from rebar_reconciler.binding_store import BindingStore  # noqa: E402
-from rebar_reconciler.reconcile_helpers import _advance_baselines  # noqa: E402
+from rebar.reconciler import apply_handlers, peer_state  # noqa: E402
+from rebar.reconciler.binding_store import BindingStore  # noqa: E402
+from rebar.reconciler.reconcile_helpers import _advance_baselines  # noqa: E402
 
 _WIRE = "h1. Heading\n\n* alpha\n"
 _OTHER_WIRE = "h1. Heading\n\n* alpha\n* beta\n"
@@ -203,7 +200,7 @@ def test_the_core_flag_read_agrees_with_the_codecs(value: str, set_flag) -> None
 
     Both readers fail closed on an invalid value.
     """
-    from rebar_reconciler.adapters.jira_family.rich_text import cutover_clients
+    from rebar.reconciler.adapters.jira_family.rich_text import cutover_clients
 
     set_flag(value)
     assert apply_handlers._rich_cutover_active() == bool(cutover_clients())
@@ -312,9 +309,9 @@ import json as _json  # noqa: E402
 from pathlib import Path as _Path  # noqa: E402
 from typing import Any as _Any  # noqa: E402
 
-from rebar_reconciler import binding_lifecycle as _bl  # noqa: E402
-from rebar_reconciler import peer_state as _ps  # noqa: E402
-from rebar_reconciler.binding_store import BindingStore as _Store  # noqa: E402
+from rebar.reconciler import binding_lifecycle as _bl  # noqa: E402
+from rebar.reconciler import peer_state as _ps  # noqa: E402
+from rebar.reconciler.binding_store import BindingStore as _Store  # noqa: E402
 
 
 def _tracker_dir(root: _Path) -> _Path:
@@ -423,7 +420,7 @@ def test_the_operation_performs_no_save_at_either_layer(tmp_path: _Path) -> None
 
     The pass performs its single store save after emission.
     """
-    from rebar_reconciler.binding_repository import BindingRepository
+    from rebar.reconciler.binding_repository import BindingRepository
 
     store = _bound_store(tmp_path)
     saves: list[str] = []
@@ -466,8 +463,8 @@ def test_all_bindings_copy_depth_is_unchanged_by_the_new_seam(tmp_path: _Path) -
 
 def test_the_narrow_operation_does_not_expose_the_owners(tmp_path: _Path) -> None:
     """The facade stays authoritative: adding a seam must not hand out a writable owner."""
-    from rebar_reconciler.binding_lifecycle import BindingLifecycle
-    from rebar_reconciler.binding_repository import BindingRepository
+    from rebar.reconciler.binding_lifecycle import BindingLifecycle
+    from rebar.reconciler.binding_repository import BindingRepository
 
     store = _bound_store(tmp_path)
 
@@ -579,7 +576,7 @@ def test_the_call_site_makes_no_false_claim_about_the_facade(tmp_path: _Path) ->
 
     This source assertion pins only that obsolete claim.
     """
-    source = (_ENGINE / "rebar_reconciler" / "apply_handlers.py").read_text(encoding="utf-8")
+    source = (_ENGINE.parent / "reconciler" / "apply_handlers.py").read_text(encoding="utf-8")
 
     assert "cannot carry a narrower accessor" not in source
 
@@ -589,10 +586,10 @@ def test_the_call_site_makes_no_false_claim_about_the_facade(tmp_path: _Path) ->
 #: Production callers may use ``all_bindings`` only for iteration or snapshots.
 #: Every mutation in those modules uses a named facade operation.
 _ALL_BINDINGS_READERS = {
-    "_engine/rebar_reconciler/binding_walk.py": (
+    "reconciler/binding_walk.py": (
         "iterates entries to classify off-snapshot bindings; phase 1 is read-only by design"
     ),
-    "_engine/rebar_reconciler/reconcile_helpers.py": (
+    "reconciler/reconcile_helpers.py": (
         "iterates to advance baselines; writes go through set_baseline / merge_baseline"
     ),
     "_commands/bridge_repair.py": (

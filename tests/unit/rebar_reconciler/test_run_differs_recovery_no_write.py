@@ -25,8 +25,8 @@ import json
 import types
 from pathlib import Path
 
-from rebar_reconciler import local_label_intent, run_differs
-from rebar_reconciler.binding_store import BindingStore
+from rebar.reconciler import local_label_intent, run_differs
+from rebar.reconciler.binding_store import BindingStore
 
 
 class _SpyTransport:

@@ -1,4 +1,4 @@
-"""Tests for rebar_reconciler/fetcher.py — new generator + filtered-JQL contract.
+"""Tests for reconciler/fetcher.py — new generator + filtered-JQL contract.
 
 Asserts the post-10e3 contract:
   * fetcher exposes ``_iter_pages(client, jql, page_size)`` — a generator that
@@ -18,9 +18,8 @@ the OLD shape (no ``_iter_pages``, full-project JQL).
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,7 +30,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
+FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "fetcher.py"
 
 # Split-JQL contract (bug f6cc-b174-9e9a-435c). fetch_snapshot now issues
 # TWO queries (active first, then Done-recent). Both must reach
@@ -45,12 +44,7 @@ ANY_JQL = EXPECTED_JQL_ACTIVE
 
 
 def _load_fetcher():
-    spec = importlib.util.spec_from_file_location("fetcher", FETCHER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["fetcher"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.fetcher")
 
 
 @pytest.fixture(scope="module")

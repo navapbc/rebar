@@ -480,7 +480,7 @@ def test_the_inbound_jira_translate_routes_through_the_shared_seam() -> None:
     """
     from _engine_path import engine_dir
 
-    source = (engine_dir() / "rebar_reconciler" / "inbound_translate.py").read_text()
+    source = (engine_dir().parent / "reconciler" / "inbound_translate.py").read_text()
     assert "_seam.finalize_event(" in source
     assert "_seam._apply_authorship(" not in source
 

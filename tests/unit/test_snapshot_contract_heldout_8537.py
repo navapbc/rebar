@@ -129,7 +129,7 @@ def test_the_hand_rolled_module_no_longer_exists() -> None:
     """Two copies of one contract is the defect; the point of the move is that there is
     now exactly one."""
     src = Path(schemas.__file__).resolve().parents[1]
-    assert not (src / "_engine" / "rebar_reconciler" / "_snapshot_schema.py").exists()
+    assert not (src / "reconciler" / "_snapshot_schema.py").exists()
 
 
 def test_generated_typeddict_tracks_the_schema() -> None:

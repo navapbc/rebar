@@ -24,7 +24,7 @@ import pytest
 
 @pytest.fixture
 def run_differs_outbound():
-    from rebar_reconciler import local_label_intent, outbound_differ, run_differs
+    from rebar.reconciler import local_label_intent, outbound_differ, run_differs
 
     return run_differs._run_differs_outbound, outbound_differ, local_label_intent
 
@@ -51,7 +51,7 @@ def test_outbound_create_mutation_carries_a_typed_payload(
     run_differs_outbound, tmp_path, monkeypatch
 ):
     run_fn, outbound_differ_mod, local_label_intent_mod = run_differs_outbound
-    from rebar_reconciler.mutation_payloads import OutboundCreatePayload
+    from rebar.reconciler.mutation_payloads import OutboundCreatePayload
 
     create_om = outbound_differ_mod.OutboundMutation(
         local_id="local-1",
@@ -91,7 +91,7 @@ def test_outbound_update_mutation_carries_a_typed_payload(
     run_differs_outbound, tmp_path, monkeypatch
 ):
     run_fn, outbound_differ_mod, local_label_intent_mod = run_differs_outbound
-    from rebar_reconciler.mutation_payloads import OutboundUpdatePayload
+    from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
     update_om = outbound_differ_mod.OutboundMutation(
         local_id="local-2",
@@ -129,7 +129,7 @@ def test_outbound_delete_mutation_carries_a_typed_payload(
     run_differs_outbound, tmp_path, monkeypatch
 ):
     run_fn, outbound_differ_mod, local_label_intent_mod = run_differs_outbound
-    from rebar_reconciler.mutation_payloads import OutboundDeletePayload
+    from rebar.reconciler.mutation_payloads import OutboundDeletePayload
 
     delete_om = outbound_differ_mod.OutboundMutation(
         local_id="local-3",
@@ -160,7 +160,7 @@ def test_typed_create_payload_round_trips_through_mutation_to_batch_dict(
     i.e. the "Cut" (producer) and simplified "Delete" (dispatch ambiguity
     removal) halves of this story compose correctly."""
     run_fn, outbound_differ_mod, local_label_intent_mod = run_differs_outbound
-    from rebar_reconciler import batch_dispatch
+    from rebar.reconciler import batch_dispatch
 
     create_om = outbound_differ_mod.OutboundMutation(
         local_id="local-4",
@@ -196,7 +196,7 @@ def test_typed_create_prerequisites_stay_out_of_vendor_fields(
     run_differs_outbound, tmp_path, monkeypatch
 ):
     run_fn, outbound_differ_mod, local_label_intent_mod = run_differs_outbound
-    from rebar_reconciler import batch_dispatch
+    from rebar.reconciler import batch_dispatch
 
     create_om = outbound_differ_mod.OutboundMutation(
         local_id="local-5",

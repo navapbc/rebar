@@ -79,7 +79,7 @@ def assert_child_ran_clean(
     ``bootstrap-strict`` mutation passes at ``tests/external/live_jira_dc/_dc_support.py:658``.
     Callers whose child may legitimately exit non-zero widen it explicitly: the reconciler maps
     the legacy RESCHEDULE disposition to exit 75
-    (``src/rebar/_engine/rebar_reconciler/__main__.py:65-72``), which is why
+    (``src/rebar/reconciler/__main__.py:65-72``), which is why
     ``tests/external/live_jira_dc/test_reconcile_pass.py:200`` accepts ``(0, 75)``.
     """
     if proc.returncode not in ok_codes:

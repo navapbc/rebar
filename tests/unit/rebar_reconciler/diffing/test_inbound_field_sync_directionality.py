@@ -16,26 +16,20 @@ assignee), not just assignee.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
-from rebar_reconciler.adapters.jira import outbound_fields as _of  # 625b: adapter-internal
+from rebar.reconciler.adapters.jira import outbound_fields as _of  # 625b: adapter-internal
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
+DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
 
 
 def _load_differ() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("outbound_differ_inbound_dir", DIFFER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["outbound_differ_inbound_dir"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 @pytest.fixture(scope="module")
@@ -169,7 +163,7 @@ class _PassthroughOutboundMapper:
 
 
 def _live_diff(ticket: dict, remote: dict, baseline: dict | None) -> dict:
-    from rebar_reconciler.outbound_field_diff import diff_canonical_fields
+    from rebar.reconciler.outbound_field_diff import diff_canonical_fields
 
     return diff_canonical_fields(
         ticket,

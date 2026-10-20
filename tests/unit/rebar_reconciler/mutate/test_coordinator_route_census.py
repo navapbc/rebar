@@ -12,16 +12,16 @@ from pathlib import Path
 
 import pytest
 
-import rebar_reconciler.dispatch_one as dispatch_one
-import rebar_reconciler.typed_dispatch as typed_dispatch
-from rebar_reconciler.apply_base import _load_errors_module, _load_mutation_module
-from rebar_reconciler.apply_handlers import BatchApplyContext, dispatch_mutation
-from rebar_reconciler.binding_store import BindingStore
+import rebar.reconciler.dispatch_one as dispatch_one
+import rebar.reconciler.typed_dispatch as typed_dispatch
+from rebar.reconciler.apply_base import _load_errors_module, _load_mutation_module
+from rebar.reconciler.apply_handlers import BatchApplyContext, dispatch_mutation
+from rebar.reconciler.binding_store import BindingStore
 
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-SRC = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
+SRC = REPO_ROOT / "src" / "rebar" / "reconciler"
 APPLIER_PATH = SRC / "applier.py"
 APPLY_BASE_PATH = SRC / "apply_base.py"
 BATCH_DISPATCH_PATH = SRC / "batch_dispatch.py"
@@ -282,7 +282,7 @@ def test_ac6_rollback_guidance_reobserve_never_remote_delete():
     successfully-created remote issue is NEVER deleted (no delete seam) — code/routing
     reversion + re-observation, never a remote delete.
     """
-    from rebar_reconciler import create_coordinator
+    from rebar.reconciler import create_coordinator
 
     doc = (create_coordinator.__doc__ or "").lower()
     assert "re-observe" in doc, "guidance must require re-observation on ambiguous create"

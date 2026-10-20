@@ -21,10 +21,9 @@ Held-out RED oracle for 1734 — kept out of the fix subagent's tree.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import re
-import sys
 import urllib.error
 from pathlib import Path
 from unittest.mock import patch
@@ -32,26 +31,17 @@ from unittest.mock import patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-_SRC = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, _SRC / filename)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+_SRC = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture
 def fetcher():
-    return _load("fetcher", "fetcher.py")
+    return importlib.import_module("rebar.reconciler.fetcher")
 
 
 def _seed_projects(repo_root: Path, mapping: dict[str, list[str]]) -> None:
     """Seed ``projects.json`` under ``repo_root`` with ``{key: repos}``."""
-    from rebar_reconciler import projects_store
+    from rebar.reconciler import projects_store
 
     for key, repos in mapping.items():
         projects_store.set_project(repo_root, key, repos)
@@ -148,7 +138,7 @@ def test_ceiling_is_per_project_not_a_shared_budget(fetcher, tmp_path, monkeypat
     """With the ceiling lowered to 10, two projects of 7 issues (sum 14 > 10, each
     under 10) BOTH ingest — proving the ceiling is a per-query bound, not a shared
     cumulative budget that would raise once the combined total crossed 10."""
-    from rebar_reconciler import fetch_paging
+    from rebar.reconciler import fetch_paging
 
     monkeypatch.setattr(fetch_paging, "_ACLI_CEILING", 10)
     monkeypatch.setenv("JIRA_PROJECT", "AAA")
@@ -265,7 +255,7 @@ def test_single_mapped_unknown_project_fails_closed(fetcher, tmp_path, monkeypat
 def test_resolve_inbound_bridge_fields_derives_from_prefix(tmp_path):
     """The helper derives ``bridge_project`` from the Jira key prefix and ``repos``
     from the mapping entry."""
-    from rebar_reconciler import projects_store
+    from rebar.reconciler import projects_store
 
     _seed_projects(tmp_path, {"DIG": ["rebar", "infra"]})
     fields = projects_store.resolve_inbound_bridge_fields("DIG-123", tmp_path)
@@ -275,7 +265,7 @@ def test_resolve_inbound_bridge_fields_derives_from_prefix(tmp_path):
 def test_resolve_inbound_bridge_fields_unmapped_project_empty_repos(tmp_path):
     """A project absent from the mapping still resolves its prefix; repos default
     to empty."""
-    from rebar_reconciler import projects_store
+    from rebar.reconciler import projects_store
 
     _seed_projects(tmp_path, {"DIG": ["rebar"]})
     fields = projects_store.resolve_inbound_bridge_fields("REB-9", tmp_path)
@@ -287,9 +277,9 @@ def test_inbound_create_stamps_bridge_project_and_repos(tmp_path):
     and ``repos`` (from the mapping) on its CREATE event."""
     from rebar.reducer import reduce_ticket
 
-    _apply_inbound = _load("_apply_inbound_1734_ut", "apply_inbound.py")
-    _mutation = _load("_mutation_1734_ut", "mutation.py")
-    _bs = _load("_binding_store_1734_ut", "binding_store.py")
+    _apply_inbound = importlib.import_module("rebar.reconciler.apply_inbound")
+    _mutation = importlib.import_module("rebar.reconciler.mutation")
+    _bs = importlib.import_module("rebar.reconciler.binding_store")
 
     _seed_projects(tmp_path, {"DIG": ["rebar", "infra"]})
     bs = _bs.BindingStore(tmp_path / ".tickets-tracker")

@@ -26,7 +26,7 @@ import stat
 
 import pytest
 
-from rebar_reconciler.adapters.jira import acli_subprocess
+from rebar.reconciler.adapters.jira import acli_subprocess
 
 
 def _path_without_acli(tmp_path, monkeypatch) -> None:
@@ -138,7 +138,7 @@ def test_data_center_path_does_not_import_acli_transport():
     """
     import importlib
 
-    dc_transport = importlib.import_module("rebar_reconciler.adapters.jira_datacenter.transport")
+    dc_transport = importlib.import_module("rebar.reconciler.adapters.jira_datacenter.transport")
     src = dc_transport.__file__ or ""
     assert src.endswith("transport.py")
     # The DC transport does not shell out to acli.

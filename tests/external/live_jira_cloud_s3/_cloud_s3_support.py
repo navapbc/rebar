@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 import uuid
 from pathlib import Path
 from typing import Any
@@ -76,23 +75,18 @@ class JiraWriteForbidden(AssertionError):
 
 
 def engine_on_path() -> None:
-    """Put ``<repo>/src/rebar/_engine`` on ``sys.path`` so ``rebar_reconciler`` resolves.
+    """Put ``<repo>/src/rebar/_engine`` on ``sys.path`` so ``rebar.reconciler`` resolves.
 
     The reconciler ships as a stdlib-only package UNDER the wheel rather than as a
     top-level install (mirrors ``tests/external/test_link_sync_live.py`` and the DC
     harness helpers).
     """
-    from _engine_path import engine_dir
-
-    engine = str(engine_dir())
-    if engine not in sys.path:
-        sys.path.insert(0, engine)
 
 
 def transport_class() -> type:
     """The live-Cloud transport class every mutating method is patched on."""
     engine_on_path()
-    from rebar_reconciler.adapters.jira import acli as mod
+    from rebar.reconciler.adapters.jira import acli as mod
 
     return mod.AcliClient
 

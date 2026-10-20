@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
 _EPIC_FIELD_ID = "customfield_10008"
 

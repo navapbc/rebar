@@ -16,8 +16,7 @@ Covers:
 from __future__ import annotations
 
 import email.message
-import importlib.util
-import sys
+import importlib
 import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -25,16 +24,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DISPATCH_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "dispatch_one.py"
+DISPATCH_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "dispatch_one.py"
 
 
 def _load_dispatch():
-    spec = importlib.util.spec_from_file_location("dispatch_one_httperror_test", DISPATCH_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["dispatch_one_httperror_test"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.dispatch_one")
 
 
 @pytest.fixture(scope="module")
@@ -110,7 +104,7 @@ def test_404_fast_fails_raw_no_retry(dispatch):
 def test_acli_rest_raw_httperror_raise_unchanged():
     """No boundary translation: acli_rest's _rest_urlopen_with_retry still re-raises
     the RAW urllib.error.HTTPError (the 8+ raw-HTTPError catchers rely on it)."""
-    from rebar_reconciler.adapters.jira import acli_rest
+    from rebar.reconciler.adapters.jira import acli_rest
 
     err = _http_error(404)
     # The retry helper is a mixin method needing no instance state — it re-raises

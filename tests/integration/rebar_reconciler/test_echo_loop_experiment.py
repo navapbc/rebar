@@ -22,9 +22,9 @@ real finding, not a failure.
 # parameter of every test that uses one as a redefinition.
 from __future__ import annotations
 
+import importlib
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 from test_reconcile_idempotency import (  # noqa: F401
@@ -35,9 +35,7 @@ from test_reconcile_idempotency import (  # noqa: F401
     reconciler_modules,
 )
 
-RECONCILER_DIR = (
-    Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine" / "rebar_reconciler"
-)
+RECONCILER_DIR = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler"
 
 
 # ---------------------------------------------------------------------------
@@ -48,14 +46,13 @@ RECONCILER_DIR = (
 def _run_pass(reconciler_modules, client, repo_root, monkeypatch, pass_id, *, wire_backend=True):
     """One reconcile pass over ``client`` (any _FakeClient-shaped object)."""
     fetcher, applier, reconcile = reconciler_modules
-    monkeypatch.setitem(sys.modules, "acli_integration", client)
     monkeypatch.setattr(fetcher, "_load_acli", lambda: client)
     monkeypatch.setattr(applier, "_load_acli", lambda: client)
     monkeypatch.setattr(applier, "_load_concurrency", lambda: _make_ok_concurrency())
     if wire_backend:
-        from rebar_reconciler.adapters.jira.backend import JiraBackend
+        from rebar.reconciler.adapters.jira.backend import JiraBackend
 
-        run_differs_mod = sys.modules["reconcile_run_differs"]
+        run_differs_mod = importlib.import_module("rebar.reconciler.run_differs")
         monkeypatch.setattr(run_differs_mod, "_load_reconcile_backend", lambda: JiraBackend(client))
     return reconcile.reconcile_once(pass_id, repo_root=repo_root)
 

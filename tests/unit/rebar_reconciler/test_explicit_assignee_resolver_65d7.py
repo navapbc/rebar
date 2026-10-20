@@ -28,14 +28,14 @@ from typing import Any
 import pytest
 from _tree_scan import ParsedModule, parsed_python_files
 
-from rebar_reconciler import outbound_field_diff as _ofd
-from rebar_reconciler._backend import OutboundMapper
-from rebar_reconciler.adapters.jira.backend import JiraBackend
-from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+from rebar.reconciler import outbound_field_diff as _ofd
+from rebar.reconciler._backend import OutboundMapper
+from rebar.reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
 from .backend_support import FakeTransport
 
-_REC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_REC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler"
 
 #: An authoritative live lookup: "ada@example.com" is account ``acct-1``.
 _RESOLVED: tuple[Any, bool, bool] = ("acct-1", True, True)

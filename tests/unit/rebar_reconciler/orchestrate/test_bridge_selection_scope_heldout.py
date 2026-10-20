@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from rebar_reconciler import pass_support, reconcile
+from rebar.reconciler import pass_support, reconcile
 
 
 class _Bindings:

@@ -28,7 +28,7 @@ human's identity across deployments, and drag in a migration the epic avoids.
 
 Patching note: the reconciler resolves the backend through a FUNCTION-LOCAL import,
 which binds at CALL time, so these tests patch ``select_backend`` on its DEFINING
-module (``rebar_reconciler._backend_registry``), never a local alias.
+module (``rebar.reconciler._backend_registry``), never a local alias.
 """
 
 from __future__ import annotations
@@ -41,8 +41,8 @@ from typing import Any
 import pytest
 
 import rebar
-import rebar_reconciler._backend_registry as registry
-import rebar_reconciler.apply_inbound_records as air
+import rebar.reconciler._backend_registry as registry
+import rebar.reconciler.apply_inbound_records as air
 
 #: A DC assignee exactly as REST v2 returns it: a username, and NO accountId.
 DC_ASSIGNEE = {"name": "dcuser", "key": "dcuser", "displayName": "DC User"}
@@ -74,10 +74,10 @@ def _real_backend(kind: str):
     from .backend_support import FakeTransport
 
     if kind == "jira":
-        from rebar_reconciler.adapters.jira.backend import JiraBackend
+        from rebar.reconciler.adapters.jira.backend import JiraBackend
 
         return JiraBackend(transport=FakeTransport())
-    from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+    from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
     return JiraDataCenterBackend(transport=FakeTransport())
 

@@ -27,7 +27,7 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler import __main__ as reconciler_main
+from rebar.reconciler import __main__ as reconciler_main
 
 
 class _LeaseLost(Exception):

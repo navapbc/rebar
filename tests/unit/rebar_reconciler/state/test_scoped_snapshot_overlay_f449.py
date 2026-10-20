@@ -8,17 +8,14 @@ prior snapshot. The refreshed view prevents stale inbound clobber.
 
 from __future__ import annotations
 
-import sys
 import urllib.error
 from pathlib import Path
 from typing import Any
 
 _ENGINE = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine"
-if str(_ENGINE) not in sys.path:  # pragma: no cover - import bootstrap
-    sys.path.insert(0, str(_ENGINE))
 
-from rebar_reconciler.inbound_differ import compute_inbound_mutations  # noqa: E402
-from rebar_reconciler.snapshot_lagfree_refresh import (  # noqa: E402
+from rebar.reconciler.inbound_differ import compute_inbound_mutations  # noqa: E402
+from rebar.reconciler.snapshot_lagfree_refresh import (  # noqa: E402
     overlay_lagfree_scalars,
     refresh_scoped_snapshot,
 )

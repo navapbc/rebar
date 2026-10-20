@@ -32,7 +32,7 @@ def test_real_engine_rejects_abbreviation_before_store_access(
         [
             sys.executable,
             "-m",
-            "rebar_reconciler",
+            "rebar.reconciler",
             bad_option,
             "--repo-root",
             str(rebar_repo),

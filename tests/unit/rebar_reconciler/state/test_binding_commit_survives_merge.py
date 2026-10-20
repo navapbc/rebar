@@ -25,72 +25,32 @@ GREEN test (after fix): ``_commit_binding_store_snapshot`` commits bindings.json
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import subprocess
-import sys
-import types
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "pass_support.py"
-BINDING_STORE_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "binding_store.py"
-)
-OUTBOUND_DIFFER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
-)
-
-
-def _load_module(name: str, path: Path):
-    if name in sys.modules:
-        del sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "pass_support.py"
+BINDING_STORE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "binding_store.py"
+OUTBOUND_DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
 
 
 @pytest.fixture
 def pass_support_mod():
-    mod = _load_module("_test_pass_support_bcs", PASS_SUPPORT_PATH)
-    yield mod
-    sys.modules.pop("_test_pass_support_bcs", None)
+    return importlib.import_module("rebar.reconciler.pass_support")
 
 
 @pytest.fixture
 def binding_store_mod():
-    mod = _load_module("_test_bcs_binding_store", BINDING_STORE_PATH)
-    yield mod
-    sys.modules.pop("_test_bcs_binding_store", None)
+    return importlib.import_module("rebar.reconciler.binding_store")
 
 
 @pytest.fixture
 def outbound_differ_mod():
-    # Install a stub ADF module under a unique key that only _this_ module's
-    # outbound_differ copy will see.  We must NOT clobber the canonical
-    # "rebar_reconciler.adapters.jira.adf" key that other test modules rely on.
-    _ADF_KEY = "rebar_reconciler.adapters.jira.adf"
-    _prev_adf = sys.modules.get(_ADF_KEY)
-    adf_stub = types.ModuleType(_ADF_KEY)
-    adf_stub.adf_to_text = lambda x: str(x) if isinstance(x, str) else ""
-    # bug 626d follow-up: the differ now fits over-length descriptions to Jira's ADF
-    # limit before comparison; these fixtures are short, so identity is correct.
-    adf_stub.fit_text_to_adf_limit = lambda x, **_kw: x
-    sys.modules[_ADF_KEY] = adf_stub
-    mod = _load_module("_test_bcs_outbound_differ", OUTBOUND_DIFFER_PATH)
-    yield mod
-    # Teardown: restore the original ADF module (or remove if it wasn't there).
-    if _prev_adf is None:
-        sys.modules.pop(_ADF_KEY, None)
-    else:
-        sys.modules[_ADF_KEY] = _prev_adf
-    # Also clean up the outbound differ module so it doesn't share the stub.
-    sys.modules.pop("_test_bcs_outbound_differ", None)
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 def _init_tickets_git_repo(tracker_dir: Path) -> None:

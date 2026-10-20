@@ -1,4 +1,4 @@
-"""Contract tests for ``rebar_reconciler.mutation_payloads`` (ADR 0107, e9d5).
+"""Contract tests for ``rebar.reconciler.mutation_payloads`` (ADR 0107, e9d5).
 
 Covers the ten live ``(direction, action)`` payload dataclasses: happy-path
 construction + round-trip through ``as_legacy_dict()``, and validation
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler import mutation_payloads as mp
+from rebar.reconciler import mutation_payloads as mp
 
 # ---------------------------------------------------------------------------
 # (outbound, create)

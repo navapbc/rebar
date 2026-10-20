@@ -22,8 +22,8 @@ from __future__ import annotations
 import pytest
 
 from rebar._store.canonical import canonical_bytes
-from rebar_reconciler import retry_budget
-from rebar_reconciler.operation_outcome import (
+from rebar.reconciler import retry_budget
+from rebar.reconciler.operation_outcome import (
     DelaySource,
     Disposition,
     FailureScope,

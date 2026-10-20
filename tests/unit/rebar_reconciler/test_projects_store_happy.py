@@ -9,28 +9,18 @@ oracle.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.unit
 
-_SRC_DIR = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_SRC_DIR = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler"
 
 
-def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, _SRC_DIR / filename)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-projects_store = _load("_projects_store_happy", "projects_store.py")
+projects_store = importlib.import_module("rebar.reconciler.projects_store")
 
 
 def _write_record(repo_root: Path, record: dict) -> None:

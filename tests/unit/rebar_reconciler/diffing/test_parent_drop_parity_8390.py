@@ -48,30 +48,17 @@ outbound payload, and changes no return value.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import io
 import json
-import sys
 import urllib.error
 from pathlib import Path
-from types import ModuleType
 from typing import Any
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-_REC = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, path: Path) -> ModuleType:
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+_REC = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 class _Bindings:
@@ -129,8 +116,8 @@ def _create_mutations(
     Goes through ``compute_outbound_mutations`` (not the mapper directly) because the contract
     under test is that the drop reaches the pass's sink, and only the differ owns that sink.
     """
-    from rebar_reconciler import outbound_differ
-    from rebar_reconciler.adapters.jira.backend import _JiraOutbound
+    from rebar.reconciler import outbound_differ
+    from rebar.reconciler.adapters.jira.backend import _JiraOutbound
 
     bindings = {"parent-local": "RBJ-1"} if parent_bound else {}
     config = outbound_differ.OutboundDiffConfig(
@@ -273,8 +260,8 @@ def test_the_dropped_create_parent_reaches_the_bridge_alert_store(tmp_path: Path
     Without this the cells above could pass while the pair went nowhere: ``dropped_field_sink`` is
     only a signal if ``_emit_outbound_field_alerts`` files it.
     """
-    run_differs = _load("run_differs_parent_drop_8390", _REC / "run_differs.py")
-    alert_store = _load("alert_store_parent_drop_8390", _REC / "alert_store.py")
+    run_differs = importlib.import_module("rebar.reconciler.run_differs")
+    alert_store = importlib.import_module("rebar.reconciler.alert_store")
 
     dropped: list[tuple[str, str]] = []
     _create_mutations("task", dropped=dropped)
@@ -311,7 +298,7 @@ def test_an_ACLI_attach_rejected_with_400_records_a_parent_divergence(
     Asserted against the durable store on disk, not a spy, because durability is the contract.
     """
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
-    acli_cli_ops = _load("acli_cli_ops_parity_8390", _REC / "adapters" / "jira" / "acli_cli_ops.py")
+    acli_cli_ops = importlib.import_module("rebar.reconciler.adapters.jira.acli_cli_ops")
     client = _RejectingClient(_http_400())
 
     acli_cli_ops._attach_parent_guarded(client, "RBJ-9", "RBJ-1")
@@ -337,7 +324,7 @@ def test_the_ACLI_400_is_still_SWALLOWED_so_the_create_still_lands(
     failure escape, would turn an issue that was successfully created into a failed pass.
     """
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
-    acli_cli_ops = _load("acli_cli_ops_parity_8390", _REC / "adapters" / "jira" / "acli_cli_ops.py")
+    acli_cli_ops = importlib.import_module("rebar.reconciler.adapters.jira.acli_cli_ops")
 
     assert (
         acli_cli_ops._attach_parent_guarded(_RejectingClient(_http_400()), "RBJ-9", "RBJ-1") is None
@@ -353,7 +340,7 @@ def test_a_NON_400_attach_error_still_propagates(
     Pins that adding the recording did not widen the except clause into a blanket swallow.
     """
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
-    acli_cli_ops = _load("acli_cli_ops_parity_8390", _REC / "adapters" / "jira" / "acli_cli_ops.py")
+    acli_cli_ops = importlib.import_module("rebar.reconciler.adapters.jira.acli_cli_ops")
     boom = urllib.error.HTTPError(
         "https://example.invalid", 500, "Server Error", {}, io.BytesIO(b"")
     )
@@ -372,7 +359,7 @@ def test_a_SUCCESSFUL_attach_records_nothing(
     ``outbound-parent-rejected`` mean "a parent was attached".
     """
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
-    acli_cli_ops = _load("acli_cli_ops_parity_8390", _REC / "adapters" / "jira" / "acli_cli_ops.py")
+    acli_cli_ops = importlib.import_module("rebar.reconciler.adapters.jira.acli_cli_ops")
 
     class _OK:
         def set_parent(self, child_key: str, parent_key: str) -> None:
@@ -411,7 +398,7 @@ def _update_drop(remote_parent_id: str | None) -> list[tuple[str, str]]:
     Hardcoding it is precisely how a sibling change shipped past two green gates while alerting on
     every converged ticket.
     """
-    from rebar_reconciler.outbound_field_diff import diff_canonical_fields
+    from rebar.reconciler.outbound_field_diff import diff_canonical_fields
 
     dropped: list[tuple[str, str]] = []
     diff_canonical_fields(

@@ -6,8 +6,7 @@ The reducer replay path maintains a monotonic projection used by
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 
@@ -22,23 +21,13 @@ from rebar.reducer._managed_refs import (
 pytestmark = [pytest.mark.unit, pytest.mark.scripts]
 
 _OUTBOUND_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "src"
-    / "rebar"
-    / "_engine"
-    / "rebar_reconciler"
-    / "outbound_differ.py"
+    Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler" / "outbound_differ.py"
 )
 
 
 @pytest.fixture(scope="module")
 def outbound_differ() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("outbound_differ_mr", _OUTBOUND_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["outbound_differ_mr"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 class _Store:

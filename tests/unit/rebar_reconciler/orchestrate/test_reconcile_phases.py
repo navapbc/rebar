@@ -13,32 +13,22 @@ module exercises them DIRECTLY in isolation:
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-from rebar_reconciler.reconcile_helpers import _NoOpSyncLogger
+from rebar.reconciler.reconcile_helpers import _NoOpSyncLogger
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-
-
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "reconcile.py"
 
 
 @pytest.fixture(scope="module")
 def reconcile_mod():
     assert RECONCILE_PATH.is_file(), f"reconcile.py not found at {RECONCILE_PATH}"
-    return _load_module("reconcile_phases_under_test", RECONCILE_PATH)
+    return importlib.import_module("rebar.reconciler.reconcile")
 
 
 # --- load phase: the corrupt-snapshot abort (lifted helper) --------------------

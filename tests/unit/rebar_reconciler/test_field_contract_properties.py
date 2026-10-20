@@ -1,6 +1,6 @@
 """Property tests for the reconciler field-symmetry contract (story e931).
 
-The registry under test is ``rebar_reconciler/_field_contract.py`` — the
+The registry under test is ``reconciler/_field_contract.py`` — the
 declarative per-field symmetry contract.  These tests enforce, against the REAL
 code paths (never re-implementations):
 
@@ -36,31 +36,18 @@ MUTATION CHECKS (how this suite kills the bug class):
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
-from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-_ENGINE = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_ENGINE = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
-def _load(name: str, path: Path) -> ModuleType:
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
-_contract = _load("field_contract_under_test", _ENGINE / "_field_contract.py")
-_config = _load("config_for_field_contract", _ENGINE / "config.py")
-_link_direction = _load("link_direction_for_field_contract", _ENGINE / "link_direction.py")
-_conflict_resolver = _load("conflict_resolver_for_field_contract", _ENGINE / "conflict_resolver.py")
-_inbound_differ = _load("inbound_differ_for_field_contract", _ENGINE / "inbound_differ.py")
+_contract = importlib.import_module("rebar.reconciler._field_contract")
+_config = importlib.import_module("rebar.reconciler.config")
+_link_direction = importlib.import_module("rebar.reconciler.link_direction")
+_conflict_resolver = importlib.import_module("rebar.reconciler.conflict_resolver")
+_inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
 
 from rebar.reducer._managed_refs import should_propagate_removal  # noqa: E402
 from rebar.reducer._processors import process_tag_delta  # noqa: E402

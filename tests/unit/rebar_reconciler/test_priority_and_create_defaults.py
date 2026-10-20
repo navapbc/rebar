@@ -31,8 +31,8 @@ from typing import Any
 import pytest
 
 from rebar import config as user_cfg
-from rebar_reconciler import config as cfg_mod
-from rebar_reconciler.adapters.jira_family.value_maps import LOCAL_PRIORITY_TO_JIRA
+from rebar.reconciler import config as cfg_mod
+from rebar.reconciler.adapters.jira_family.value_maps import LOCAL_PRIORITY_TO_JIRA
 
 pytestmark = pytest.mark.unit
 
@@ -58,7 +58,7 @@ def _isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def _reset_drift() -> None:
     """Clear the per-process drift-warning dedupe set so emission counts are
     deterministic across tests."""
-    from rebar_reconciler.adapters.jira_family import outbound_mapper
+    from rebar.reconciler.adapters.jira_family import outbound_mapper
 
     outbound_mapper.reset_drift_warnings()
 
@@ -87,19 +87,19 @@ class _NullCodec:
 
 
 def _cloud() -> Any:
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     return JiraBackend(_NullCodec())  # type: ignore[arg-type]
 
 
 def _dc() -> Any:
-    from rebar_reconciler.adapters.jira_datacenter.backend import _DCOutbound
+    from rebar.reconciler.adapters.jira_datacenter.backend import _DCOutbound
 
     return _DCOutbound()
 
 
 def _mapper() -> Any:
-    from rebar_reconciler.adapters.jira_family.outbound_mapper import OutboundFieldMapper
+    from rebar.reconciler.adapters.jira_family.outbound_mapper import OutboundFieldMapper
 
     return OutboundFieldMapper(_NullCodec())  # type: ignore[arg-type]
 
@@ -217,7 +217,7 @@ def test_priority_drift_warning_deduped(capsys: pytest.CaptureFixture[str]) -> N
     """A persistently drifting priority does not re-flood stderr: the drift alert is
     emitted at most once per distinct drifted priority per process, so a stuck priority
     warns once, not once-per-mapper-call. Driven through the shared resolver."""
-    from rebar_reconciler.adapters.jira_family import outbound_mapper
+    from rebar.reconciler.adapters.jira_family import outbound_mapper
 
     outbound_mapper.reset_drift_warnings()
     for _ in range(3):
@@ -257,7 +257,7 @@ def test_create_defaults_not_applied_on_update(tmp_path: Path) -> None:
     onto an edit. Asserted at the shared UPDATE boundary the differ routes edits through."""
     import inspect
 
-    from rebar_reconciler.adapters.jira_family.outbound_mapper import OutboundFieldMapper
+    from rebar.reconciler.adapters.jira_family.outbound_mapper import OutboundFieldMapper
 
     params = inspect.signature(OutboundFieldMapper.map_fields_to_remote).parameters
     assert "priority_map" in params  # priority IS config-driven on update ...

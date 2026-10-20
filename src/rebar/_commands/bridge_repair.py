@@ -30,6 +30,7 @@ operational failure.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import sys
@@ -152,12 +153,11 @@ def prune_orphan_reverse_bindings(tracker_dir: Path, *, argv: list[str] | None =
             "a retired binding is a tombstone, not an orphan."
         )
 
-    # The reconciler ships as an embedded top-level ``rebar_reconciler`` package,
+    # The reconciler ships as an embedded top-level ``rebar.reconciler`` package,
     # not as ``rebar._engine.*`` (there is no ``_engine/__init__.py``), so it is
     # reached through the supported loader rather than a plain import.
-    from rebar._lib_ops import _engine_module
 
-    binding_store = _engine_module("rebar_reconciler.binding_store")
+    binding_store = importlib.import_module("rebar.reconciler.binding_store")
 
     try:
         store = binding_store.BindingStore(tracker)

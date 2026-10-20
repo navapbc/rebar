@@ -24,33 +24,21 @@ This module exercises OBSERVABLE behaviour:
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-OUTBOUND_DIFFER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
-)
+OUTBOUND_DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
 
 _JIRA_COMMENT_MAX_CHARS = 32767
 
 
-def _load_module(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
 @pytest.fixture(scope="module")
 def outbound_differ() -> ModuleType:
-    return _load_module("outbound_differ_length_conv", OUTBOUND_DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 class StubBindingStore:
@@ -105,7 +93,7 @@ def _make_ticket_with_comments(ticket_id: str, comment_bodies: list[str]) -> dic
 # A non-excluded (i.e. human-class, NOT a machine marker) over-length body.
 # Send-path (add_comment) truncation is covered in
 # tests/scripts/test_acli_comment_length_guard.py (that suite's conftest sets
-# up the sys.path needed to import rebar_reconciler/acli.py).
+# up the sys.path needed to import rebar.reconciler/acli.py).
 _OVERSIZE_BODY = "X" * 38015
 
 
@@ -148,9 +136,9 @@ def test_oversize_comment_converges_over_two_passes(
     # measure that also reserves budget for the marker. Modelling the superseded
     # helper is why this convergence test stayed green while live convergence was
     # broken, so the model is now taken from the real send path.
-    from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
-    from rebar_reconciler.adapters.jira_family.rich_text import cutover_clients
-    from rebar_reconciler.outbound_comments import fit_preserving_marker
+    from rebar.reconciler.adapters.jira.rich_text_codec import AdfCodec
+    from rebar.reconciler.adapters.jira_family.rich_text import cutover_clients
+    from rebar.reconciler.outbound_comments import fit_preserving_marker
 
     codec = AdfCodec(rich="cloud" in cutover_clients())
     landed_body = fit_preserving_marker(emitted_body, codec.fit_outbound)

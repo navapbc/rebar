@@ -1,10 +1,8 @@
-"""Behavioral tests for rebar_reconciler.__main__ entry module.
+"""Behavioral tests for rebar.reconciler.__main__ entry module.
 
 Tests cover the canonical __main__ API which delegates a single steady-state
 pass to reconcile.reconcile_once(pass_id, repo_root=...):
 
-  - test_run_pass_returns_0_when_all_steps_absent: run_pass() returns 0 directly
-    when reconcile.py is not loadable (walking-skeleton no-op path).
   - test_run_pass_returns_0_when_reconcile_succeeds: run_pass() returns 0 when a
     stubbed reconcile.reconcile_once returns a normal result dict.
   - test_run_pass_returns_1_when_reconcile_raises: run_pass() returns 1 and does
@@ -15,9 +13,8 @@ pass to reconcile.reconcile_once(pass_id, repo_root=...):
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import subprocess
-import sys
 import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -29,18 +26,13 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-MAIN_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "__main__.py"
-RECONCILER_PKG = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
+MAIN_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "__main__.py"
+RECONCILER_PKG = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 def _load_main_module():
     """Load __main__.py as a named module for patching."""
-    spec = importlib.util.spec_from_file_location("rebar_reconciler.__main__", MAIN_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["rebar_reconciler.__main__"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.__main__")
 
 
 @pytest.fixture(scope="module")
@@ -86,18 +78,6 @@ def _make_stub_reconcile(return_value=None, side_effect=None) -> types.ModuleTyp
 # ---------------------------------------------------------------------------
 
 
-def test_run_pass_returns_0_when_all_steps_absent(main_mod, tmp_path):
-    """run_pass() returns 0 when _try_load_step returns None for reconcile.
-
-    Simulates the walking-skeleton path: reconcile.py is not present.  Per
-    __main__.py's module docstring, modules that do not exist yet are skipped
-    gracefully and the pass converges to a clean 0 exit.
-    """
-    with patch.object(main_mod, "_try_load_step", return_value=None):
-        rc = main_mod.run_pass(repo_root=tmp_path)
-    assert rc == 0
-
-
 def test_run_pass_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
     """run_pass() returns 0 when reconcile.reconcile_once returns a result dict."""
     stub = _make_stub_reconcile(
@@ -141,18 +121,8 @@ def test_run_pass_returns_75_on_reschedule_error(main_mod, tmp_path):
     module, special-cases its RescheduleError, and returns
     applier.EXIT_RESCHEDULE (75).
     """
-    # Load the real applier so we use the real RescheduleError and EXIT_RESCHEDULE
-    import importlib.util
-
-    applier_path = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-    spec = importlib.util.spec_from_file_location("applier_for_reschedule_test", applier_path)
-    applier_mod = importlib.util.module_from_spec(spec)
-    # Python 3.14: dataclass introspection reads sys.modules.get(cls.__module__).__dict__
-    # during class construction; the module must be registered before exec.
-    import sys as _sys
-
-    _sys.modules["applier_for_reschedule_test"] = applier_mod
-    spec.loader.exec_module(applier_mod)
+    # Use the real applier so we use the real RescheduleError and EXIT_RESCHEDULE
+    applier_mod = importlib.import_module("rebar.reconciler.applier")
 
     stub_reconcile = _make_stub_reconcile(
         side_effect=applier_mod.RescheduleError(attempt_count=3, last_error="exhausted")
@@ -177,15 +147,7 @@ def test_run_pass_returns_75_on_reschedule_error(main_mod, tmp_path):
 
 def test_canonical_run_pass_maps_reschedule_to_benign_zero(main_mod, tmp_path, capsys):
     """Canonical sync names a reschedule and exposes only the 0/1/2 contract."""
-    import importlib.util
-
-    applier_path = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-    spec = importlib.util.spec_from_file_location(
-        "applier_for_canonical_reschedule_test", applier_path
-    )
-    applier_mod = importlib.util.module_from_spec(spec)
-    sys.modules["applier_for_canonical_reschedule_test"] = applier_mod
-    spec.loader.exec_module(applier_mod)
+    applier_mod = importlib.import_module("rebar.reconciler.applier")
     stub_reconcile = _make_stub_reconcile(
         side_effect=applier_mod.RescheduleError(attempt_count=3, last_error="exhausted")
     )
@@ -205,6 +167,42 @@ def test_canonical_run_pass_maps_reschedule_to_benign_zero(main_mod, tmp_path, c
 
     assert rc == 0
     assert capsys.readouterr().err == "BRIDGE_STATE: reschedule\n"
+
+
+@pytest.mark.parametrize("missing", ["reconcile_step", "advisory_lock"])
+def test_missing_pipeline_module_raises_instead_of_converging(main_mod, tmp_path, missing):
+    """A missing pipeline module is an import failure, never a converged pass.
+
+    The by-path loaders once turned an absent ``reconcile.py`` into a graceful no-op and
+    an ``_advisory_lock`` ImportError into ``None``. Both fallbacks were deleted with the
+    move to ``rebar.reconciler``, so the ImportError must propagate out of
+    ``run_pass_result`` before ``reconcile_once`` runs.
+    """
+    stub_reconcile = _make_stub_reconcile()
+    real_try_load_step = main_mod._try_load_step
+    real_load_sibling_keyed = main_mod._load_sibling_keyed
+
+    def _load_step(name):
+        if name == "reconcile":
+            if missing == "reconcile_step":
+                raise ModuleNotFoundError("No module named 'rebar.reconciler.reconcile'")
+            return stub_reconcile
+        return real_try_load_step(name)
+
+    def _load_sibling(key, filename):
+        if missing == "advisory_lock" and key == main_mod._ADVISORY_LOCK_KEY:
+            raise ModuleNotFoundError(f"No module named {key!r}")
+        return real_load_sibling_keyed(key, filename)
+
+    with (
+        patch.object(main_mod, "_try_load_step", side_effect=_load_step),
+        patch.object(main_mod, "_load_sibling_keyed", side_effect=_load_sibling),
+        patch.object(main_mod, "_project_visibility_preflight", return_value=None),
+        pytest.raises(ImportError),
+    ):
+        main_mod.run_pass_result(repo_root=tmp_path, route="sync")
+
+    stub_reconcile.reconcile_once.assert_not_called()
 
 
 def test_main_returns_0_when_reconcile_succeeds(main_mod, tmp_path):

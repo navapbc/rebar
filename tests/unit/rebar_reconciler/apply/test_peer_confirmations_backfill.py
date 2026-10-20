@@ -24,13 +24,13 @@ import importlib
 
 import pytest
 
-import rebar_reconciler.pass_support as pass_support
-import rebar_reconciler.persist_phase as persist_phase
+import rebar.reconciler.pass_support as pass_support
+import rebar.reconciler.persist_phase as persist_phase
 
 
 @pytest.fixture
 def pc():
-    return importlib.import_module("rebar_reconciler.peer_confirmations")
+    return importlib.import_module("rebar.reconciler.peer_confirmations")
 
 
 @pytest.fixture
@@ -198,7 +198,7 @@ class _Logger:
 
 def test_ordering_backfill_runs_before_snapshot_confirmation(tracker, pc):
     """Both halves run on ONE instance, backfill first, so the upgrade lands."""
-    reconcile = importlib.import_module("rebar_reconciler.reconcile")
+    reconcile = importlib.import_module("rebar.reconciler.reconcile")
 
     ctx = reconcile._PassContext(repo_root=tracker, pass_id="pass-5")
     ctx.local_tickets = [_ticket()]
@@ -225,7 +225,7 @@ def test_lost_update_backfill_and_snapshot_records_both_survive(tracker, pc):
     instances each loading a pre-write copy, whichever saved last would drop the
     other's record. Both must be on disk after the single save.
     """
-    reconcile = importlib.import_module("rebar_reconciler.reconcile")
+    reconcile = importlib.import_module("rebar.reconciler.reconcile")
 
     ctx = reconcile._PassContext(repo_root=tracker, pass_id="pass-5")
     ctx.local_tickets = [_ticket("src-local", (("blocks", "dst-local"),))]
@@ -250,7 +250,7 @@ def test_lost_update_backfill_and_snapshot_records_both_survive(tracker, pc):
 
 
 def test_no_write_mode_backfills_nothing(tracker, monkeypatch):
-    reconcile = importlib.import_module("rebar_reconciler.reconcile")
+    reconcile = importlib.import_module("rebar.reconciler.reconcile")
     calls: list[str] = []
     monkeypatch.setattr(
         persist_phase, "confirm_peer_links", lambda _ctx: calls.append("called") or 0
@@ -270,7 +270,7 @@ def test_no_write_mode_backfills_nothing(tracker, monkeypatch):
 
 
 def test_fail_open_backfill_failure_does_not_break_the_pass(tracker, monkeypatch, capsys):
-    reconcile = importlib.import_module("rebar_reconciler.reconcile")
+    reconcile = importlib.import_module("rebar.reconciler.reconcile")
 
     def _boom(_ctx):
         raise RuntimeError("backfill exploded")

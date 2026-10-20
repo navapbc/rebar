@@ -74,15 +74,15 @@ _COMPOSITION_ROOT_RELPATHS: frozenset[str] = frozenset(
 # Provider-credential boundaries own the credential-read category.
 _CREDENTIAL_BOUNDARY_RELPATHS: frozenset[str] = frozenset(
     {
-        "_engine/rebar_reconciler/runtime.py",
-        "_engine/rebar_reconciler/access_check.py",
-        "_engine/rebar_reconciler/adapters/jira_datacenter/settings.py",
-        "_engine/rebar_reconciler/adapters/jira/acli_subprocess.py",
+        "reconciler/runtime.py",
+        "reconciler/access_check.py",
+        "reconciler/adapters/jira_datacenter/settings.py",
+        "reconciler/adapters/jira/acli_subprocess.py",
     }
 )
 
 # The backend-selection boundary owns the backend-reload category (whole package).
-_BACKEND_PACKAGE_PREFIX = "_engine/rebar_reconciler/"
+_BACKEND_PACKAGE_PREFIX = "reconciler/"
 
 # Owner tokens carried by an Access.
 _OWNER_COMPOSITION = "composition"
@@ -131,10 +131,10 @@ def derive_credential_names() -> dict[str, str]:
 def derive_backend_keys() -> set[str]:
     """Return the set of backend keys registered via ``@register("<literal>")``.
 
-    AST-scans the adapter packages under ``_engine/rebar_reconciler/adapters/`` rather
+    AST-scans the adapter packages under ``reconciler/adapters/`` rather
     than reading ``_backend_registry._REGISTRY`` (empty until the adapters import).
     """
-    base = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "adapters"
+    base = REPO_ROOT / "src" / "rebar" / "reconciler" / "adapters"
     keys: set[str] = set()
     if not base.exists():
         return keys

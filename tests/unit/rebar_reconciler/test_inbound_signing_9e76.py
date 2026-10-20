@@ -20,8 +20,8 @@ import pytest
 import rebar
 from rebar._commands._seam import tracker_dir
 from rebar.attest import authorship, dsse, sshsig
+from rebar.reconciler import inbound_translate
 from rebar.reducer import reduce_ticket
-from rebar_reconciler import inbound_translate
 
 try:
     sshsig.ensure_available()

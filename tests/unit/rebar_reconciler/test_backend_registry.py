@@ -13,12 +13,12 @@ from __future__ import annotations
 import dataclasses
 
 from rebar.config import load_config
-from rebar_reconciler._backend_registry import (
+from rebar.reconciler._backend_registry import (
     _reset_registry_for_test,
     register,
     select_backend,
 )
-from rebar_reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.adapters.jira.backend import JiraBackend
 
 from .backend_support import FakeBackend
 

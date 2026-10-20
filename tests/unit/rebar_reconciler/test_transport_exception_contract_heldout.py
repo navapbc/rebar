@@ -28,12 +28,12 @@ import urllib.error
 
 import pytest
 
-from rebar_reconciler import dispatch_apply_phases, outbound_differ
+from rebar.reconciler import dispatch_apply_phases, outbound_differ
 
 
 def _dc_error(status: int):
     """The error a DC transport call raises after translation."""
-    from rebar_reconciler._backend import BackendHTTPError
+    from rebar.reconciler._backend import BackendHTTPError
 
     return BackendHTTPError(
         url="http://jira.example/rest/api/2/issue/DC-1",
@@ -63,7 +63,7 @@ class _RaisingClient:
 
 
 def test_backend_http_error_is_declared_on_the_port() -> None:
-    from rebar_reconciler import _backend
+    from rebar.reconciler import _backend
 
     assert hasattr(_backend, "BackendHTTPError"), (
         "the port must DECLARE the transport error contract — a backend that has to guess "
@@ -75,7 +75,7 @@ def test_backend_http_error_subclasses_urllib_http_error() -> None:
     """HELD-OUT edge, and the keystone of the whole design. If this is not a subclass,
     the two core ``except urllib.error.HTTPError`` clauses stop matching and every other
     assertion here becomes false — while an isinstance-only test would still pass."""
-    from rebar_reconciler._backend import BackendHTTPError
+    from rebar.reconciler._backend import BackendHTTPError
 
     assert issubclass(BackendHTTPError, urllib.error.HTTPError)
 
@@ -180,7 +180,7 @@ def test_no_core_module_names_a_vendor_exception(module: str) -> None:
     abandoned and the seam leaked a second time."""
     import pathlib
 
-    root = pathlib.Path(__file__).resolve().parents[3] / "src/rebar/_engine/rebar_reconciler"
+    root = pathlib.Path(__file__).resolve().parents[3] / "src/rebar/reconciler"
     text = (root / module).read_text()
     assert "JIRAError" not in text, (
         f"{module} names a vendor-specific exception — translate at the adapter boundary "

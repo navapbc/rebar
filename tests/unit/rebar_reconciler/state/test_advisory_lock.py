@@ -10,39 +10,25 @@ Module loading follows the importlib.util.spec_from_file_location convention.
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import subprocess
-import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-LOCK_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_advisory_lock.py"
-MODE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mode.py"
+LOCK_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "_advisory_lock.py"
+MODE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "mode.py"
 
 
 def _load_mode_module() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("rebar_reconciler_mode", MODE_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["rebar_reconciler_mode"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.mode")
 
 
 def _load_advisory_lock_module() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("rebar_reconciler_advisory_lock", LOCK_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["rebar_reconciler_advisory_lock"] = mod
-    try:
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    except Exception:
-        sys.modules.pop("rebar_reconciler_advisory_lock", None)
-        raise
-    return mod
+    return importlib.import_module("rebar.reconciler._advisory_lock")
 
 
 @pytest.fixture(scope="module")
@@ -134,7 +120,7 @@ def test_git_adapter_patches_are_shared_across_package_and_by_path_loaders(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Both standalone lock seams reuse the canonical package module object."""
-    from rebar_reconciler import git_adapter
+    from rebar.reconciler import git_adapter
 
     remote_calls: list[tuple[Path, str]] = []
     git_calls: list[tuple[str, ...]] = []

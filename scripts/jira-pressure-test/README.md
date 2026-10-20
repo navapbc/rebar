@@ -19,7 +19,7 @@ Each probe validates the following requirements before it invokes the ticket CLI
 - The checkout Python at `.venv/bin/python` is executable.
 - The checkout ticket command at `.venv/bin/rebar` is executable unless `REBAR_TICKET_CLI` selects another executable.
 - The engine directory at `src/rebar/_engine` exists unless `REBAR_ENGINE_DIR` selects another directory.
-- The checkout Python can import `rebar_reconciler` from the selected engine directory.
+- The checkout Python can import `rebar.reconciler` from the selected engine directory.
 - The selected Jira adapter exposes each callable operation used by the probe.
 
 ## Run the probes

@@ -13,13 +13,13 @@ import dataclasses
 import pytest
 
 from rebar.config import load_config
-from rebar_reconciler._backend_registry import (
+from rebar.reconciler._backend_registry import (
     BackendRegistryError,
     _reset_registry_for_test,
     register,
     select_backend,
 )
-from rebar_reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.adapters.jira.backend import JiraBackend
 
 from .backend_support import FakeBackend
 
@@ -63,7 +63,7 @@ def test_jira_transport_matches_resolve_jira_settings():
     # Equivalence: select_backend builds a JiraBackend whose transport is an
     # AcliClient constructed from the SAME resolve_jira_settings() values as the
     # pre-story direct construction (asserted on resolved settings, not a live call).
-    from rebar_reconciler.adapters.jira import acli, acli_subprocess
+    from rebar.reconciler.adapters.jira import acli, acli_subprocess
 
     settings = acli_subprocess.resolve_jira_settings()
     transport = select_backend(load_config()).transport

@@ -1,20 +1,17 @@
 """RED tests for invariants.check_dual_identity_complete + report_schema_drift (story 7a75)."""
 
-import importlib.util
+import importlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-INV_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "invariants.py"
+INV_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "invariants.py"
 
 
 def _load_invariants():
-    spec = importlib.util.spec_from_file_location("invariants_under_test", INV_PATH)
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
+    return importlib.import_module("rebar.reconciler.invariants")
 
 
 @pytest.fixture(scope="module")

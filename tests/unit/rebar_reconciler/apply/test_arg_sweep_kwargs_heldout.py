@@ -9,25 +9,20 @@ would instead fail the enabled RUF100 rule.
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import subprocess
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location("arg_sweep_heldout_applier", APPLIER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["arg_sweep_heldout_applier"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
@@ -103,7 +98,7 @@ def test_repo_root_keyword_is_inert_for_a_leaf_that_ignores_it(applier):
 def _dc_backend():
     import importlib.util
 
-    from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+    from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
     support_path = Path(__file__).resolve().parents[1] / "backend_support.py"
     spec = importlib.util.spec_from_file_location("arg_sweep_backend_support", support_path)
@@ -157,10 +152,10 @@ def test_map_local_to_remote_accepts_every_protocol_keyword(applier):
 @pytest.mark.parametrize(
     "rel_path",
     [
-        "src/rebar/_engine/rebar_reconciler/adapters/jira_family/outbound_mapper.py",
-        "src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/backend.py",
-        "src/rebar/_engine/rebar_reconciler/apply_inbound.py",
-        "src/rebar/_engine/rebar_reconciler/apply_outbound.py",
+        "src/rebar/reconciler/adapters/jira_family/outbound_mapper.py",
+        "src/rebar/reconciler/adapters/jira_datacenter/backend.py",
+        "src/rebar/reconciler/apply_inbound.py",
+        "src/rebar/reconciler/apply_outbound.py",
     ],
 )
 @pytest.mark.allow_unharnessed_subprocess(

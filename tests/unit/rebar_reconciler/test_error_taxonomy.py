@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler._errors import JiraAPIError, ReconcilerError, RetryExhaustedError
+from rebar.reconciler._errors import JiraAPIError, ReconcilerError, RetryExhaustedError
 
 
 def test_retry_exhausted_is_one_object_across_both_surfaces() -> None:
     """AC1: the acli and applier re-exports are the SAME object (the formerly-divergent bodies)."""
-    from rebar_reconciler.adapters.jira.acli import RetryExhaustedError as FromAcli
-    from rebar_reconciler.applier import RetryExhaustedError as FromApplier
+    from rebar.reconciler.adapters.jira.acli import RetryExhaustedError as FromAcli
+    from rebar.reconciler.applier import RetryExhaustedError as FromApplier
 
     assert FromAcli is FromApplier is RetryExhaustedError
 
@@ -34,8 +34,8 @@ def test_retry_exhausted_caught_by_runtime_exception_and_base() -> None:
 def test_jira_api_error_single_body_across_surfaces() -> None:
     """AC4: one ``JiraAPIError`` body, ``__init__(message, status_code)`` unchanged, both surfaces
     import the SAME object; it is a ``ReconcilerError``."""
-    from rebar_reconciler.applier import JiraAPIError as FromApplier
-    from rebar_reconciler.batch_dispatch import JiraAPIError as FromBatch
+    from rebar.reconciler.applier import JiraAPIError as FromApplier
+    from rebar.reconciler.batch_dispatch import JiraAPIError as FromBatch
 
     assert FromApplier is FromBatch is JiraAPIError
     err = JiraAPIError("nope", 404)
@@ -47,7 +47,7 @@ def test_batch_retry_loop_chains_cause(monkeypatch: pytest.MonkeyPatch) -> None:
     """AC3 (batch path): ``_call_with_retry`` chains the underlying cause (the prior
     ``raise RetryExhaustedError(str(last_exc))`` DROPPED ``__cause__``) and records
     ``last_exception``/``attempts``."""
-    from rebar_reconciler import batch_dispatch, dispatch_one
+    from rebar.reconciler import batch_dispatch, dispatch_one
 
     # _call_with_retry (and its module-level ``time``) now lives in dispatch_one and
     # is re-exported by batch_dispatch; patch time at its point of use.

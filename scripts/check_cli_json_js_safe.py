@@ -25,7 +25,7 @@ SCAN ROOTS — the user-facing CLI ``--output json`` surface only: ``src/rebar/_
 ``src/rebar/_commands``, ``src/rebar/_engine_support`` and ``src/rebar/signing.py``. This DOES
 cover the CLI LLM/eval verbs that live under ``src/rebar/_cli`` (e.g. ``_llm_eval_commands.py``),
 which share the ``--output json`` wire contract. The structured-logging stream
-(``rebar._logging``) and the reconciler daemon (``src/rebar/_engine/rebar_reconciler``) are
+(``rebar._logging``) and the reconciler daemon (``src/rebar/reconciler``) are
 DIFFERENT contracts, live outside these roots, and are out of scope.
 
 SANCTION — ``# js-safe-ok: <reason>``, with a MANDATORY reason, honoured on the offending line,

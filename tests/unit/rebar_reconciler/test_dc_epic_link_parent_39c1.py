@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
 
 class _FakeIssue:
@@ -250,7 +250,7 @@ def test_subtask_parent_still_uses_fields_parent() -> None:
 
 def test_the_emit_gate_and_dc_apply_now_overlap() -> None:
     """Compose the real epic-only emit gate with DC apply and require acceptance."""
-    from rebar_reconciler.outbound_field_diff import _resolve_local_parent
+    from rebar.reconciler.outbound_field_diff import _resolve_local_parent
 
     class _Bindings:
         def get_jira_key(self, local_id: str) -> str | None:

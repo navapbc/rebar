@@ -8,6 +8,7 @@ event files, branch tips, and compatibility behavior rather than implementation 
 
 from __future__ import annotations
 
+import importlib
 import json
 import subprocess
 from pathlib import Path
@@ -16,15 +17,14 @@ import pytest
 
 import rebar
 from rebar import config as _config
-from rebar._lib_ops import _engine_module
 from rebar._store import compat, ensures
 from rebar._store.compat import StoreIncompatibleError
 
 
 def _projects_store():
-    """The embedded ``rebar_reconciler.projects_store`` module, loaded through the
+    """The embedded ``rebar.reconciler.projects_store`` module, loaded through the
     supported engine loader (it is not importable as ``rebar._engine.*``)."""
-    return _engine_module("rebar_reconciler.projects_store")
+    return importlib.import_module("rebar.reconciler.projects_store")
 
 
 _ORIGINAL_UNIT_IDS = {

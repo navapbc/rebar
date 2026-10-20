@@ -22,15 +22,15 @@ from _cloud_mutation_support import (
 
 engine_on_path()
 
-from rebar_reconciler.batch_dispatch import coordinate_and_fuse  # noqa: E402
-from rebar_reconciler.coordinator import AtomicSignal  # noqa: E402
-from rebar_reconciler.create_route import run_coordinated_outbound_create  # noqa: E402
-from rebar_reconciler.mutation import (  # noqa: E402
+from rebar.reconciler.batch_dispatch import coordinate_and_fuse  # noqa: E402
+from rebar.reconciler.coordinator import AtomicSignal  # noqa: E402
+from rebar.reconciler.create_route import run_coordinated_outbound_create  # noqa: E402
+from rebar.reconciler.mutation import (  # noqa: E402
     Mutation,
     MutationAction,
     MutationDirection,
 )
-from rebar_reconciler.ticket_plan import PlanDisposition, TicketPlan  # noqa: E402
+from rebar.reconciler.ticket_plan import PlanDisposition, TicketPlan  # noqa: E402
 
 # Sentinel re-exported so this module ALSO carries it (the conftest defines the canonical
 # one; a test module may be collected on its own path, so keep it discoverable here too).

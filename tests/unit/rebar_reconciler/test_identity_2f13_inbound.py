@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 import rebar
-import rebar_reconciler.apply_inbound_records as air
+import rebar.reconciler.apply_inbound_records as air
 
 
 @pytest.fixture

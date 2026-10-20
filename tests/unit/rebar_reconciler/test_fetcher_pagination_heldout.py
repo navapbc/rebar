@@ -28,8 +28,8 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler import fetcher
-from rebar_reconciler.fetcher import SilentTruncationError
+from rebar.reconciler import fetcher
+from rebar.reconciler.fetcher import SilentTruncationError
 
 
 class _PageCappingClient:

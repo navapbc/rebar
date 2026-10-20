@@ -190,7 +190,7 @@ def test_pause_and_resume_share_the_durable_control_ref_across_surfaces(
 def test_check_access_returns_a_typed_six_step_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from rebar_reconciler.adapters.jira import acli
+    from rebar.reconciler.adapters.jira import acli
 
     class FakeClient:
         def __init__(self, **_kwargs):

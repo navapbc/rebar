@@ -29,34 +29,22 @@ pending_bug_ticket directive in its result payload.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 MUTATION_PATH = APPLIER_PATH.parent / "mutation.py"
 
 
 def _load_mutation_module():
-    canonical = "rebar_reconciler.mutation"
-    if canonical in sys.modules:
-        return sys.modules[canonical]
-    spec = importlib.util.spec_from_file_location(canonical, MUTATION_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[canonical] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location("applier_conflict_deferral", APPLIER_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["applier_conflict_deferral"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
@@ -146,8 +134,8 @@ def test_inbound_conflict_leaf_does_not_invoke_subprocess(
 
 def _make_fake_acli_mod():
     """Build a minimal stub acli module so apply() can construct its client
-    without importing the real rebar_reconciler/acli.py (which has a known
-    `rebar_reconciler.adapters.jira.adf` ModuleNotFoundError under test load)."""
+    without importing the real reconciler/acli.py (which has a known
+    `rebar.reconciler.adapters.jira.adf` ModuleNotFoundError under test load)."""
     import types
 
     # S4: _load_acli returns the transport (client) directly.

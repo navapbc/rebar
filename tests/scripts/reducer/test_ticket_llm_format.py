@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
 # Ensure src/rebar/_engine/ is on sys.path so that `from rebar.reducer...` resolves.
 _SCRIPTS_DIR = str(Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine")
-if _SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPTS_DIR)
 
 from rebar.reducer.llm_format import shorten_comment, shorten_dep, to_llm  # noqa: E402
 

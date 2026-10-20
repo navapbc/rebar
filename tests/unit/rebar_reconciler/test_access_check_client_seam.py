@@ -15,10 +15,11 @@ for ``sleep_fn`` (ticket 5ea3-76e5-480a-4464).
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 
 import rebar
-from rebar._lib_ops import _engine_module
 
 pytestmark = pytest.mark.unit
 
@@ -76,8 +77,8 @@ def test_client_patch_reaches_the_probe_after_access_check_is_already_imported(
     """The hostile order: import the consumer FIRST, then patch the defining module."""
     # PRECONDITION: access_check is resident in sys.modules before the patch is applied,
     # which is exactly the state a full-suite run leaves it in.
-    access_check = _engine_module("rebar_reconciler.access_check")
-    acli = _engine_module("rebar_reconciler.adapters.jira.acli")
+    access_check = importlib.import_module("rebar.reconciler.access_check")
+    acli = importlib.import_module("rebar.reconciler.adapters.jira.acli")
     assert access_check.run_access_check is not None
 
     monkeypatch.setattr(acli, "AcliClient", _FakeClient)
@@ -96,8 +97,8 @@ def test_an_explicitly_passed_client_cls_still_wins_over_the_seam(
     probe_env: None,
 ) -> None:
     """Call-time resolution must not override an explicit injection (collateral invariant)."""
-    access_check = _engine_module("rebar_reconciler.access_check")
-    acli = _engine_module("rebar_reconciler.adapters.jira.acli")
+    access_check = importlib.import_module("rebar.reconciler.access_check")
+    acli = importlib.import_module("rebar.reconciler.adapters.jira.acli")
 
     class _Unused(_FakeClient):
         pass
@@ -118,8 +119,8 @@ def test_the_probe_still_refuses_to_run_without_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Fail-closed credential handling is unchanged by the seam (collateral invariant)."""
-    access_check = _engine_module("rebar_reconciler.access_check")
-    acli = _engine_module("rebar_reconciler.adapters.jira.acli")
+    access_check = importlib.import_module("rebar.reconciler.access_check")
+    acli = importlib.import_module("rebar.reconciler.adapters.jira.acli")
     monkeypatch.setattr(acli, "AcliClient", _FakeClient)
     _FakeClient.instantiated = 0
 

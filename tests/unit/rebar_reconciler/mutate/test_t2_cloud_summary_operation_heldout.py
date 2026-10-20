@@ -15,10 +15,10 @@ from typing import Any
 
 import pytest
 
-import rebar_reconciler.adapters.jira.acli_rest as _acli_rest
-from rebar_reconciler.adapters.jira import acli
-from rebar_reconciler.adapters.jira import summary_operation as so
-from rebar_reconciler.operation_outcome import (
+import rebar.reconciler.adapters.jira.acli_rest as _acli_rest
+from rebar.reconciler.adapters.jira import acli
+from rebar.reconciler.adapters.jira import summary_operation as so
+from rebar.reconciler.operation_outcome import (
     DelaySource,
     Disposition,
     FailureScope,

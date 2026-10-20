@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler.binding_store import BindingStore
+from rebar.reconciler.binding_store import BindingStore
 
 
 @pytest.fixture
@@ -213,7 +213,7 @@ def test_create_one_defers_instead_of_writing_a_duplicate() -> None:
     Guarding at the write rather than at plan time also reuses the existing deferral
     contract: the mutation is deferred, not dropped, so it is retried on a later pass.
     """
-    from rebar_reconciler.dispatch_one import create_one
+    from rebar.reconciler.dispatch_one import create_one
 
     class _Store:
         def is_keyless_pending_within_grace(self, local_id):
@@ -243,7 +243,7 @@ def test_create_one_defers_instead_of_writing_a_duplicate() -> None:
 def test_create_one_proceeds_normally_once_the_grace_window_has_passed() -> None:
     """The suppression is bounded: a ticket whose create truly never landed must still be
     created. Without this, the fix would trade a duplicate for a permanent omission."""
-    from rebar_reconciler.dispatch_one import create_one
+    from rebar.reconciler.dispatch_one import create_one
 
     class _Store:
         def is_keyless_pending_within_grace(self, local_id):
@@ -289,7 +289,7 @@ def test_the_whole_crash_recover_differ_create_path_creates_exactly_one_issue(st
     store, rules out a fix that is correct at each site and broken at the seam between
     them.
     """
-    from rebar_reconciler.dispatch_one import create_one
+    from rebar.reconciler.dispatch_one import create_one
 
     client = _LaggingIndexClient()  # DC-1 already landed in the crashed pass, unindexed
 
@@ -341,7 +341,7 @@ def test_the_cloud_path_is_unaffected_beyond_the_deferral(store) -> None:
     actually runs — an ordinary new ticket, and a ticket whose create genuinely never
     landed — and neither may pay for the recovery path.
     """
-    from rebar_reconciler.dispatch_one import create_one
+    from rebar.reconciler.dispatch_one import create_one
 
     # 1. The overwhelmingly common Cloud case: a brand-new ticket, no binding at all.
     #    It must be created IMMEDIATELY — no deferral, no extra latency.
@@ -414,7 +414,7 @@ def test_ac3_coordinated_route_defers_within_grace_no_duplicate(store) -> None:
     store.bind_pending("dc-orphan")  # keyless-pending, freshly created → within grace
     assert store.is_keyless_pending_within_grace("dc-orphan") is True
 
-    from rebar_reconciler.dispatch_one import create_one
+    from rebar.reconciler.dispatch_one import create_one
 
     client = _LaggingIndexClient()
     deferred: list = []

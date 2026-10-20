@@ -6,7 +6,7 @@ module (write ticket events under the I2 filename + I5 lock). Any other engine
 top-level import (ticket_output, ticket_reads, ticket_txn, ticket_graph, …) would
 be an undeclared coupling — this test fails on it, statically, by AST.
 
-Sibling ``rebar_reconciler.*`` modules and the stdlib are unrestricted.
+Sibling ``rebar.reconciler.*`` modules and the stdlib are unrestricted.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from _tree_scan import parsed_python_files
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 ENGINE = REPO_ROOT / "src" / "rebar" / "_engine"
-RECON = ENGINE / "rebar_reconciler"
+RECON = ENGINE.parent / "reconciler"
 
 # Engine top-level importable modules/packages (excluding the reconciler itself).
 ENGINE_MODULES = {

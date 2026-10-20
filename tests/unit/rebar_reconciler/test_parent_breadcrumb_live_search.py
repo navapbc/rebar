@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rebar_reconciler import outbound_comments as oc
+from rebar.reconciler import outbound_comments as oc
 
 PARENT_BREADCRUMB_TAG = "<!-- rebar:parent-breadcrumb -->"
 

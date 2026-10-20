@@ -23,25 +23,11 @@ from typing import Any
 
 import pytest
 
-# The engine ships at <repo>/src/rebar/_engine and is NOT importable as
-# `rebar_reconciler` unless that directory is on sys.path — the unit tier gets it
-# from tests/unit/rebar_reconciler/conftest.py, which this tier does not inherit.
-# Without it every test in test_transport.py dies at setup with
-# `ModuleNotFoundError: No module named 'rebar_reconciler'`. That went unnoticed
-# because those tests had never actually executed: they were skipping on a missing
-# `[jira-datacenter]` extra, and the smoke tests in this same directory (which
-# speak raw REST and import nothing from rebar) kept the job green.
-#
-# `tests/_engine_path.py` is the single place the layout is encoded — reuse it
-# rather than re-deriving parent counts, which silently break when a file moves.
+# The reconciler is the ordinary `rebar.reconciler` subpackage, so this tier needs no
+# engine directory on sys.path; only the non-package directories below are added.
 _TESTS_DIR = Path(__file__).resolve().parents[2]
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
-
-from _engine_path import engine_dir  # noqa: E402
-
-if str(engine_dir()) not in sys.path:
-    sys.path.insert(0, str(engine_dir()))
 
 # Share field readiness with the deterministic probe. ``scripts/`` is not an installed package,
 # so expose it explicitly rather than relying on the working directory.

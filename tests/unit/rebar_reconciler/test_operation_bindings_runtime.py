@@ -2,7 +2,7 @@
 
 Contract under test (the NEW public seam this story adds):
 
-    rebar_reconciler.runtime.compose_reconciler_runtime(
+    rebar.reconciler.runtime.compose_reconciler_runtime(
         *, repo_root=None, cli_overrides=None) -> ReconcilerRuntime
 
 composes ONE immutable settings/runtime projection from the S1 operation
@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler.runtime import compose_reconciler_runtime
+from rebar.reconciler.runtime import compose_reconciler_runtime
 
 
 def test_compose_selects_cloud_backend_with_captured_project() -> None:
@@ -74,7 +74,7 @@ def test_datacenter_build_fails_closed_on_missing_base_url() -> None:
     """Ticket 4698-d85c fail-closed half: an empty DC base url raises the TYPED
     BackendEnvError at build — before any transport/client work — mirroring
     _build_cloud's assert_cloud_scope_ready placement."""
-    from rebar_reconciler._backend import BackendEnvError
+    from rebar.reconciler._backend import BackendEnvError
 
     runtime = compose_reconciler_runtime(cli_overrides={"reconciler.backend": "jira-datacenter"})
     with pytest.raises(BackendEnvError) as exc:
@@ -85,7 +85,7 @@ def test_datacenter_build_fails_closed_on_missing_base_url() -> None:
 def test_datacenter_build_fails_closed_on_empty_project(monkeypatch) -> None:
     """Ticket 4698-d85c fail-closed half: an empty DC project scope raises the TYPED
     BackendEnvError at build, so an unset project can never query every project."""
-    from rebar_reconciler._backend import BackendEnvError
+    from rebar.reconciler._backend import BackendEnvError
 
     monkeypatch.setenv("JIRA_PROJECT", "")
     runtime = compose_reconciler_runtime(
@@ -141,7 +141,7 @@ def test_datacenter_build_threads_captured_comment_max_chars(monkeypatch) -> Non
     """Ticket 2048-d289: a DC backend built from a captured scope binds the
     compose-captured comment_max_chars into its sanitizer — the ambient
     resolve_comment_max_chars must never be consulted."""
-    from rebar_reconciler.adapters.jira_datacenter import settings as dc_settings
+    from rebar.reconciler.adapters.jira_datacenter import settings as dc_settings
 
     def _boom() -> int:
         raise AssertionError("ambient resolve_comment_max_chars must not be consulted")
@@ -161,8 +161,8 @@ def test_datacenter_build_threads_captured_comment_max_chars(monkeypatch) -> Non
 def test_datacenter_build_without_scope_keeps_lazy_ambient_resolve(monkeypatch) -> None:
     """Legacy floor: a DC backend constructed WITHOUT a captured scope keeps the
     lazy ambient resolve (bug 049e) — resolution happens on first use, not init."""
-    from rebar_reconciler.adapters.jira_datacenter import settings as dc_settings
-    from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+    from rebar.reconciler.adapters.jira_datacenter import settings as dc_settings
+    from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
     monkeypatch.setattr(dc_settings, "resolve_comment_max_chars", lambda: 123)
     backend = JiraDataCenterBackend(transport=object())
@@ -176,8 +176,8 @@ def test_acli_client_forwards_call_timeout_to_every_subprocess_site(monkeypatch)
     import json as _json
     import subprocess as _subprocess
 
-    from rebar_reconciler.adapters.jira import acli as acli_mod
-    from rebar_reconciler.adapters.jira import acli_subprocess
+    from rebar.reconciler.adapters.jira import acli as acli_mod
+    from rebar.reconciler.adapters.jira import acli_subprocess
 
     recorded: list[tuple[list[str], object]] = []
 

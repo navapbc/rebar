@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
-import importlib.util
 import json
 import os
 import stat
@@ -25,18 +24,7 @@ from typing import Any
 from prepare_reclaim_backup import _bundle_heads, _parse_remote_refs, _remote_snapshot
 from reclaim_bridge_history import ReclaimError, is_partial_clone, rev_parse, run_git
 
-from rebar._engine import engine_dir
-
-_INBOUND_FIELDS_PATH = engine_dir() / "rebar_reconciler" / "inbound_fields.py"
-_INBOUND_FIELDS_SPEC = importlib.util.spec_from_file_location(
-    "_comment_echo_reclaim_inbound_fields", _INBOUND_FIELDS_PATH
-)
-if _INBOUND_FIELDS_SPEC is None or _INBOUND_FIELDS_SPEC.loader is None:
-    raise ImportError(f"cannot load production rich-text normalizer: {_INBOUND_FIELDS_PATH}")
-_INBOUND_FIELDS = importlib.util.module_from_spec(_INBOUND_FIELDS_SPEC)
-sys.modules[_INBOUND_FIELDS_SPEC.name] = _INBOUND_FIELDS
-_INBOUND_FIELDS_SPEC.loader.exec_module(_INBOUND_FIELDS)
-normalize_rich_text = _INBOUND_FIELDS.normalize_rich_text
+from rebar.reconciler.inbound_fields import normalize_rich_text
 
 SCHEMA_VERSION = 1
 UNKNOWN_COMMENT_ID = "__rebar_unknown_comment_id__"

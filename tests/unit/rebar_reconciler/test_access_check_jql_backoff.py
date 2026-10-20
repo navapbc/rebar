@@ -15,9 +15,9 @@ search attempts) — not any private schedule-builder.
 
 from __future__ import annotations
 
-import pytest
+import importlib
 
-from rebar._lib_ops import _engine_module
+import pytest
 
 pytestmark = pytest.mark.unit
 
@@ -67,7 +67,7 @@ def _base_env(**overrides: str) -> dict[str, str]:
 
 def test_default_backoff_is_capped_exponential_over_ten_attempts() -> None:
     """Defaults: 10 attempts, base 3s, cap 30s → sleeps [3,6,12,24,30,30,30,30,30]."""
-    access_check = _engine_module("rebar_reconciler.access_check")
+    access_check = importlib.import_module("rebar.reconciler.access_check")
     client = _NeverVisibleClient()
     delays: list[float] = []
 
@@ -88,7 +88,7 @@ def test_default_backoff_is_capped_exponential_over_ten_attempts() -> None:
 
 def test_backoff_is_recomputed_from_env_overrides() -> None:
     """JIRA_PROBE_JQL_{RETRIES,SLEEP,SLEEP_MAX} recompute the schedule at call time."""
-    access_check = _engine_module("rebar_reconciler.access_check")
+    access_check = importlib.import_module("rebar.reconciler.access_check")
     client = _NeverVisibleClient()
     delays: list[float] = []
 
@@ -111,7 +111,7 @@ def test_backoff_is_recomputed_from_env_overrides() -> None:
 
 def test_backoff_stops_early_when_the_index_becomes_visible() -> None:
     """Once the search returns a hit, no further attempts or sleeps happen."""
-    access_check = _engine_module("rebar_reconciler.access_check")
+    access_check = importlib.import_module("rebar.reconciler.access_check")
 
     class _VisibleOnThirdAttempt(_NeverVisibleClient):
         def search_issues(self, _jql):
@@ -138,7 +138,7 @@ def test_backoff_stops_early_when_the_index_becomes_visible() -> None:
 
 def test_invalid_env_values_fall_back_to_defaults() -> None:
     """Non-numeric / non-positive overrides are ignored (fail safe to the defaults)."""
-    access_check = _engine_module("rebar_reconciler.access_check")
+    access_check = importlib.import_module("rebar.reconciler.access_check")
     client = _NeverVisibleClient()
     delays: list[float] = []
 

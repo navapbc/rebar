@@ -20,8 +20,8 @@ from _nested_pytest import REPO_ROOT, run_nested_pytest
 from _subprocess_env import subprocess_env
 
 from rebar._store import event_append
-from rebar_reconciler import mutation as mutation_mod
-from rebar_reconciler import mutation_payloads, payload_shadow
+from rebar.reconciler import mutation as mutation_mod
+from rebar.reconciler import mutation_payloads, payload_shadow
 
 CORPUS_PATH = (
     Path(__file__).resolve().parents[3]

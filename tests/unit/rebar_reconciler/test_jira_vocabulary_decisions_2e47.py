@@ -25,10 +25,10 @@ def _relation_vocabulary() -> set[str]:
 def _value_maps():
     """The single definition site, reached the way the seam tests reach it.
 
-    ``rebar_reconciler`` is a top-level package on the test path, not
-    ``rebar._engine.rebar_reconciler`` — the engine is loaded dynamically.
+    ``rebar.reconciler`` is a top-level package on the test path, not
+    ``rebar.reconciler`` — the engine is loaded dynamically.
     """
-    from rebar_reconciler.adapters.jira_family import value_maps
+    from rebar.reconciler.adapters.jira_family import value_maps
 
     return value_maps
 
@@ -119,7 +119,7 @@ def test_a_literal_255_character_label_passes_the_sanitizer():
     does TODAY — accepts it — so the per-deployment fix (see the ceiling test above) has to change
     this test deliberately rather than drift past it.
     """
-    from rebar_reconciler.adapters.jira_family import sanitize_label
+    from rebar.reconciler.adapters.jira_family import sanitize_label
 
     label = "x" * 255
     assert len(label) == 255
@@ -129,7 +129,7 @@ def test_a_literal_255_character_label_passes_the_sanitizer():
 
 def test_a_256_character_label_is_rejected():
     """The other side of the literal boundary, so the 255 case is a boundary and not a floor."""
-    from rebar_reconciler.adapters.jira_family import InvalidLabelError, sanitize_label
+    from rebar.reconciler.adapters.jira_family import InvalidLabelError, sanitize_label
 
     with pytest.raises(InvalidLabelError):
         sanitize_label("x" * 256)

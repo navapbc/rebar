@@ -60,12 +60,12 @@ def store(tmp_path: Path, monkeypatch) -> tuple[Path, str, str]:
 
 @pytest.fixture
 def apply_records():
-    return importlib.import_module("rebar_reconciler.apply_inbound_records")
+    return importlib.import_module("rebar.reconciler.apply_inbound_records")
 
 
 @pytest.fixture
 def impossible_links():
-    return importlib.import_module("rebar_reconciler.impossible_links")
+    return importlib.import_module("rebar.reconciler.impossible_links")
 
 
 def _counting_link(monkeypatch) -> list[tuple]:
@@ -472,10 +472,10 @@ def test_the_record_file_is_staged_for_commit_back(monkeypatch):
     would never take effect in production and the bug would survive the fix
     while every unit test still passed. This cell pins the commit-back wiring.
     """
-    git_adapter = importlib.import_module("rebar_reconciler.git_adapter")
+    git_adapter = importlib.import_module("rebar.reconciler.git_adapter")
     # _commit_binding_store_snapshot moved to pass_support.py (ticket
     # piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
-    helpers = importlib.import_module("rebar_reconciler.pass_support")
+    helpers = importlib.import_module("rebar.reconciler.pass_support")
 
     assert git_adapter.IMPOSSIBLE_LINKS_FILE == ".bridge_state/impossible_links.json"
 
@@ -515,7 +515,7 @@ def test_removals_and_healthy_adds_are_untouched(store, apply_records, monkeypat
     # was just written above, so seeding its record is what this cell means by "the peer had
     # it"; without it the removal is DECLINED and this cell would fail for a4bd's reason
     # rather than reporting on the ADD-side skip it exists to guard.
-    from rebar_reconciler.peer_confirmations import open_store as _open_pc
+    from rebar.reconciler.peer_confirmations import open_store as _open_pc
 
     _pc = _open_pc(repo)
     _pc.record(a, b, "blocks")

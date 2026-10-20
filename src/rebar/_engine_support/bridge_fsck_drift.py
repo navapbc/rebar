@@ -24,20 +24,10 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def _load_classify() -> ModuleType:
-    """Load the pure reconciler classifier by path."""
-    import importlib.util
-    import sys
+    """Return the pure reconciler classifier module."""
+    from rebar.reconciler import classify
 
-    src = Path(__file__).resolve().parent.parent / "_engine" / "rebar_reconciler" / "classify.py"
-    name = "rebar_reconciler_classify_fsck"
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, src)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return classify
 
 
 _ALERTING_DRIFT_CLASSES = (

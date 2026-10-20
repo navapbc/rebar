@@ -22,7 +22,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from rebar_reconciler import conflict_bug_filing as cbf
+
+from rebar.reconciler import conflict_bug_filing as cbf
 
 pytestmark = pytest.mark.unit
 

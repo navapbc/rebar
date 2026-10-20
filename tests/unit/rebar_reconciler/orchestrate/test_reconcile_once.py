@@ -1,4 +1,4 @@
-"""Tests for rebar_reconciler/reconcile.py reconcile_once().
+"""Tests for reconciler/reconcile.py reconcile_once().
 
 Covers:
 - Idempotency: two consecutive reconcile_once() calls with unchanged remote
@@ -14,9 +14,8 @@ Covers:
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 import types
 from pathlib import Path
 
@@ -27,18 +26,9 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "fetcher.py"
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-
-
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "reconcile.py"
+FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "fetcher.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 @pytest.fixture(scope="module")
@@ -48,19 +38,19 @@ def reconcile_mod():
         pytest.fail(
             f"reconcile.py not found at {RECONCILE_PATH} — implement the module to make tests pass."
         )
-    return _load_module("reconcile", RECONCILE_PATH)
+    return importlib.import_module("rebar.reconciler.reconcile")
 
 
 @pytest.fixture(scope="module")
 def fetcher_mod():
     """Load fetcher.py."""
-    return _load_module("reconcile_fetcher", FETCHER_PATH)
+    return importlib.import_module("rebar.reconciler.fetcher")
 
 
 @pytest.fixture(scope="module")
 def applier_mod():
     """Load applier.py."""
-    return _load_module("reconcile_applier", APPLIER_PATH)
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 # ---------------------------------------------------------------------------
@@ -311,12 +301,12 @@ def test_excluded_fields_change_does_not_drive_mutations(
         patch.object(fetcher_mod, "_load_acli", return_value=mock_acli_base),
         patch.object(applier_mod, "_load_acli", return_value=mock_acli_base),
     ):
-        applier_mod._load_concurrency_bak = applier_mod._load_concurrency
+        saved_load_concurrency = applier_mod._load_concurrency
         applier_mod._load_concurrency = lambda: ok_concurrency
         try:
             reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
         finally:
-            applier_mod._load_concurrency = applier_mod._load_concurrency_bak
+            applier_mod._load_concurrency = saved_load_concurrency
 
     # Pass 2: same issues but with excluded field added
     with (
@@ -327,7 +317,7 @@ def test_excluded_fields_change_does_not_drive_mutations(
         try:
             result2 = reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
         finally:
-            applier_mod._load_concurrency = applier_mod._load_concurrency_bak
+            applier_mod._load_concurrency = saved_load_concurrency
 
     assert result2["mutation_count"] == 0, (
         f"Changing only an EXCLUDED_FIELDS field must produce mutation_count=0, "
@@ -399,12 +389,12 @@ def test_real_field_change_converges_after_one_pass(
         patch.object(fetcher_mod, "_load_acli", return_value=mock_acli_v1),
         patch.object(applier_mod, "_load_acli", return_value=mock_acli_v1),
     ):
-        applier_mod._load_concurrency_bak2 = applier_mod._load_concurrency
+        saved_load_concurrency2 = applier_mod._load_concurrency
         applier_mod._load_concurrency = lambda: ok_concurrency
         try:
             result1 = reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
         finally:
-            applier_mod._load_concurrency = applier_mod._load_concurrency_bak2
+            applier_mod._load_concurrency = saved_load_concurrency2
 
     # The over-filtering guard, preserved: a key the reconciler has never seen is genuine
     # work and must still be planned. A suppression broad enough to swallow real work
@@ -423,7 +413,7 @@ def test_real_field_change_converges_after_one_pass(
         try:
             result2 = reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
         finally:
-            applier_mod._load_concurrency = applier_mod._load_concurrency_bak2
+            applier_mod._load_concurrency = saved_load_concurrency2
 
     assert result2["mutation_count"] == 0, (
         "the pass planned work for a Jira-side field edit on a key with no local "
@@ -438,13 +428,13 @@ def test_real_field_change_converges_after_one_pass(
 # full differ COMPUTATION but write NOTHING to the local store.
 # ---------------------------------------------------------------------------
 
-MODE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mode.py"
+MODE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "mode.py"
 
 
 @pytest.fixture(scope="module")
 def mode_mod():
     """Load mode.py under the dotted key reconcile_once uses."""
-    return _load_module("rebar_reconciler.mode", MODE_PATH)
+    return importlib.import_module("rebar.reconciler.mode")
 
 
 def _make_jql_partitioned_acli(issues: list[dict]) -> object:
@@ -650,7 +640,7 @@ def test_a_key_absent_from_the_current_snapshot_never_reaches_create_issue(
     # (``outbound_differ._safe_get_issue`` on the reconcile-loaded module) so this
     # offline test never reaches a real transport; a single 404 is below the
     # retire grace, so the walk defers — no mutation, exactly the d103 oracle.
-    ob_mod = sys.modules["reconcile_outbound_differ"]
+    ob_mod = importlib.import_module("rebar.reconciler.outbound_differ")
 
     def _probe_404(_client, _key):
         return ob_mod._DELETED

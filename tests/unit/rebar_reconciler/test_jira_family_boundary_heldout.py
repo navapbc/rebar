@@ -17,8 +17,7 @@ What it pins:
 3. that no re-export shim was left at any pre-move path;
 4. that exactly one dict literal defines each value map WITHIN ``adapters/``;
 5. that no location-pinned module changed path (ADR 0035 §(a));
-6. that the new imports survive a by-path ``spec_from_file_location`` load with no
-   package context — i.e. they are absolute, never relative.
+6. that the new imports are absolute, never relative.
 
 The checker itself is given teeth by ``test_checker_flags_a_synthetic_violation``:
 a tautological graph checker that never fires would pass every assertion here.
@@ -27,18 +26,17 @@ a tautological graph checker that never fires would pass every assertion here.
 from __future__ import annotations
 
 import ast
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 
 import pytest
 from _tree_scan import parsed_python_files
 
-_SRC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine"
-_REC = _SRC / "rebar_reconciler"
+_SRC = Path(__file__).resolve().parents[3] / "src"
+_REC = _SRC / "rebar" / "reconciler"
 _ADAPTERS = _REC / "adapters"
 
-_ROOT_PKG = "rebar_reconciler"
+_ROOT_PKG = "rebar.reconciler"
 _JIRA = f"{_ROOT_PKG}.adapters.jira"
 _FAMILY = f"{_ROOT_PKG}.adapters.jira_family"
 _DC = f"{_ROOT_PKG}.adapters.jira_datacenter"
@@ -196,10 +194,10 @@ def test_checker_flags_a_synthetic_violation() -> None:
     arithmetic below.
     """
     # shared layer -> concrete backend, in all three import spellings
-    assert _violations("from rebar_reconciler.adapters.jira.adf import text_to_adf", _FAMILY)
+    assert _violations("from rebar.reconciler.adapters.jira.adf import text_to_adf", _FAMILY)
     assert _violations("from ..jira import adf", _FAMILY)
     assert _violations("from . import adf", _FAMILY)
-    assert _violations("import rebar_reconciler.adapters.jira.comment_limits", _FAMILY)
+    assert _violations("import rebar.reconciler.adapters.jira.comment_limits", _FAMILY)
     # a module outside the two sanctioned backends consuming the shared layer
     assert _violations(f"from {_FAMILY} import sanitize_label", _ROOT_PKG)
     # sideways edge between sibling adapter packages — BOTH directions.
@@ -209,15 +207,15 @@ def test_checker_flags_a_synthetic_violation() -> None:
     # concrete backend may reach into the other, sharing ONLY via jira_family/.
     assert _violations(f"from {_DC} import x", _JIRA)
     assert _violations(f"from {_JIRA} import x", _DC)
-    assert _violations("from rebar_reconciler.adapters.jira.adf import text_to_adf", _DC)
-    assert _violations("import rebar_reconciler.adapters.jira.comment_limits", _DC)
+    assert _violations("from rebar.reconciler.adapters.jira.adf import text_to_adf", _DC)
+    assert _violations("import rebar.reconciler.adapters.jira.comment_limits", _DC)
     assert _violations("from ..jira import adf", _DC)
 
     # negative controls — the permitted direction must NOT be flagged
     assert not _violations(f"from {_FAMILY} import sanitize_label", _JIRA)
     assert not _violations(f"from {_FAMILY} import sanitize_label", _DC)
-    assert not _violations("from rebar_reconciler.mutation import Mutation", _FAMILY)
-    assert not _violations("from rebar_reconciler.adapters.jira.adf import x", _JIRA)
+    assert not _violations("from rebar.reconciler.mutation import Mutation", _FAMILY)
+    assert not _violations("from rebar.reconciler.adapters.jira.adf import x", _JIRA)
 
 
 # ---------------------------------------------------------------------------
@@ -325,9 +323,9 @@ def test_both_create_paths_resolve_to_the_single_type_definition() -> None:
     """Identity, not equality: the Cloud create path and the DC create path must read
     the SAME object, and Cloud must still expose it under the historical private name
     (``test_outbound_differ_session_log_exclusion`` reads it as a module attribute)."""
-    from rebar_reconciler.adapters.jira import outbound_fields
-    from rebar_reconciler.adapters.jira_datacenter import backend
-    from rebar_reconciler.adapters.jira_family import LOCAL_TYPE_TO_JIRA
+    from rebar.reconciler.adapters.jira import outbound_fields
+    from rebar.reconciler.adapters.jira_datacenter import backend
+    from rebar.reconciler.adapters.jira_family import LOCAL_TYPE_TO_JIRA
 
     assert outbound_fields._LOCAL_TO_JIRA_TYPE is LOCAL_TYPE_TO_JIRA
     assert backend._LOCAL_TO_JIRA_TYPE is LOCAL_TYPE_TO_JIRA
@@ -342,8 +340,8 @@ def test_create_paths_pin_the_issue_type_by_value(local_type: str, jira_type: st
     the duplication mattered is that a drift would change the built ``issuetype``
     field per deployment. The two copies were content-identical before the
     unification, so both paths must still emit these exact values."""
-    from rebar_reconciler.adapters.jira.outbound_fields import _map_local_to_jira_fields
-    from rebar_reconciler.adapters.jira_datacenter.backend import _map_local_to_dc_fields
+    from rebar.reconciler.adapters.jira.outbound_fields import _map_local_to_jira_fields
+    from rebar.reconciler.adapters.jira_datacenter.backend import _map_local_to_dc_fields
 
     ticket = {"ticket_type": local_type, "title": "t", "description": "d"}
     assert _map_local_to_jira_fields(dict(ticket))["issuetype"] == jira_type
@@ -353,8 +351,8 @@ def test_create_paths_pin_the_issue_type_by_value(local_type: str, jira_type: st
 def test_both_cloud_callers_resolve_to_the_single_definition() -> None:
     """The ACLI transport and the Backend port read the SAME object — not equal
     copies. Identity, not equality, is what proves de-duplication."""
-    from rebar_reconciler.adapters.jira import acli, outbound_fields
-    from rebar_reconciler.adapters.jira_family import (
+    from rebar.reconciler.adapters.jira import acli, outbound_fields
+    from rebar.reconciler.adapters.jira_family import (
         LOCAL_PRIORITY_TO_JIRA,
         LOCAL_STATUS_TO_JIRA,
     )
@@ -377,12 +375,11 @@ def test_location_pinned_module_still_at_its_pinned_path(relpath: str) -> None:
     assert (_REC / relpath).is_file(), f"location-pinned module moved: {relpath}"
 
 
-def test_loader_module_still_exists_and_was_not_relocated() -> None:
-    """``_loader.py`` is explicitly out of scope: it resolves the pinned modules by
-    path, so teaching it a new sub-package is ADR 0035 Phase 2's work. That its
-    CONTENT is byte-identical is verified at review time by ``git diff --stat``;
-    what a test can cheaply pin is that it was not moved or deleted."""
-    assert (_REC / "_loader.py").is_file()
+def test_by_path_loader_module_is_gone() -> None:
+    """``_loader.py`` (``lazy_load``) resolved sibling modules by path. The reconciler is
+    now the ordinary ``rebar.reconciler`` package and every module uses plain absolute
+    imports, so the by-path loader is deleted and must not come back."""
+    assert not (_REC / "_loader.py").exists()
 
 
 def test_no_pinned_module_was_copied_into_the_shared_layer() -> None:
@@ -396,31 +393,33 @@ def test_no_pinned_module_was_copied_into_the_shared_layer() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6. the new imports are ABSOLUTE — proven under by-path load
+# 6. the new imports are ABSOLUTE
 # ---------------------------------------------------------------------------
 
 
-def _load_by_path(relpath: str, synthetic_name: str):
-    """Load a module the way the reconciler's dynamic loader and several existing
-    tests do: ``spec_from_file_location`` under a synthetic name, so the module has
-    NO package context (``__package__ == ''``). A relative import fails here with
-    ``ImportError: attempted relative import with no known parent package``."""
+def _relative_imports(path: Path) -> list[str]:
+    """Every relative ``from . import`` in ``path`` (a relative import ties the module to
+    package context; the contract is that these imports are absolute)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return [
+        f"{path.name}:{node.lineno}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.level > 0
+    ]
+
+
+def _load(relpath: str):
+    """Import ``rebar.reconciler.<relpath>`` after proving its imports are absolute."""
     path = _REC / relpath
-    spec = importlib.util.spec_from_file_location(synthetic_name, path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[synthetic_name] = module
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.modules.pop(synthetic_name, None)
-    return module
+    assert _relative_imports(path) == [], f"relative import in {relpath}"
+    dotted = ".".join(Path(relpath).with_suffix("").parts)
+    return importlib.import_module(f"{_ROOT_PKG}.{dotted}")
 
 
-def test_pinned_outbound_fields_still_loads_by_path_after_its_import_rewrite() -> None:
-    """``outbound_fields.py`` keeps its path but its dict literals became an import.
-    It is loaded by path from three existing tests, so that import must be absolute."""
-    module = _load_by_path("adapters/jira/outbound_fields.py", "_j2_probe_outbound_fields")
+def test_pinned_outbound_fields_imports_stay_absolute_after_its_import_rewrite() -> None:
+    """``outbound_fields.py`` keeps its path but its dict literals became an import,
+    which must be absolute."""
+    module = _load("adapters/jira/outbound_fields.py")
     assert module._LOCAL_TO_JIRA_STATUS["idea"] == "IDEA"
     assert module._LOCAL_TO_JIRA_PRIORITY[0] == "Highest"
     # Story bd9e: the type map became an import here too, so it is covered by the
@@ -428,9 +427,9 @@ def test_pinned_outbound_fields_still_loads_by_path_after_its_import_rewrite() -
     assert module._LOCAL_TO_JIRA_TYPE["epic"] == "Epic"
 
 
-def test_relocated_value_map_module_loads_by_path() -> None:
-    """The shared layer's own map module must also survive the no-package-context
-    load mode, since it is now what the by-path parity test reads."""
+def test_relocated_value_map_module_imports_are_absolute() -> None:
+    """The shared layer's own map module must also use absolute imports, since it is
+    now what the parity test reads."""
     family = _ADAPTERS / "jira_family"
     candidates = [
         module.path
@@ -439,7 +438,7 @@ def test_relocated_value_map_module_loads_by_path() -> None:
     ]
     assert candidates, "no module under jira_family/ defines the status map"
     target = candidates[0]
-    module = _load_by_path(str(target.relative_to(_REC)), f"_j2_probe_{target.stem}")
+    module = _load(str(target.relative_to(_REC)))
     status_map = getattr(module, "LOCAL_STATUS_TO_JIRA", None)
     assert status_map is not None, "the shared status map is not exported under a public name"
     assert status_map["idea"] == "IDEA"

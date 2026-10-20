@@ -48,21 +48,10 @@ def test_identity_is_a_registered_ticket_type() -> None:
 
 
 def test_identity_excluded_from_jira_sync() -> None:
-    """identity is in the reconciler's never-sync set (mirrors session_log).
+    """identity is in the reconciler's never-sync set (mirrors session_log)."""
+    import importlib
 
-    The reconciler lives under ``src/rebar/_engine/rebar_reconciler`` which is
-    shadowed by the ``rebar._engine`` module, so load config.py by file path
-    (same approach as the session_log-exclusion test).
-    """
-    import importlib.util
-
-    from _engine_path import engine_dir
-
-    config_path = engine_dir() / "rebar_reconciler" / "config.py"
-    spec = importlib.util.spec_from_file_location("rebar_reconciler_config_ident", config_path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = importlib.import_module("rebar.reconciler.config")
     assert "identity" in mod.EXCLUDED_SYNC_TYPES
 
 

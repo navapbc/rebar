@@ -1,4 +1,4 @@
-"""Unit tests for rebar_reconciler/conflict_resolver.py.
+"""Unit tests for reconciler/conflict_resolver.py.
 
 Tests cover:
   - test_resolve_state_returns_local: local_val always wins.
@@ -14,7 +14,7 @@ Tests cover:
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 from pathlib import Path
 from types import ModuleType
 
@@ -25,17 +25,11 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-CONFLICT_RESOLVER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "conflict_resolver.py"
-)
+CONFLICT_RESOLVER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "conflict_resolver.py"
 
 
 def _load_conflict_resolver() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("conflict_resolver", CONFLICT_RESOLVER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.conflict_resolver")
 
 
 @pytest.fixture(scope="module")

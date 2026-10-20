@@ -1,4 +1,4 @@
-"""Tests for rebar_reconciler/adf.py — ADF round-trip conversion.
+"""Tests for reconciler/adf.py — ADF round-trip conversion.
 
 Tests assert behavioral contracts for:
   - adf_to_text: each ADF node type produces expected plain text
@@ -8,7 +8,7 @@ Tests assert behavioral contracts for:
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 from pathlib import Path
 from types import ModuleType
 
@@ -19,17 +19,11 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-ADF_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "adapters" / "jira" / "adf.py"
-)
+ADF_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "adapters" / "jira" / "adf.py"
 
 
 def _load_adf() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("adf", ADF_PATH)
-    assert spec is not None and spec.loader is not None, f"Cannot load adf module from {ADF_PATH}"
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.adapters.jira.adf")
 
 
 @pytest.fixture(scope="module")

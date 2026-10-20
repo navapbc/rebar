@@ -75,7 +75,7 @@ SEAM_MUTATION_PRIMITIVES = frozenset(
 # RESIDUAL note on this per-file trust boundary). Keyed on the EXACT repo-relative
 # path — matching a bare file name would let any package opt out of the gate by
 # naming a module ``git_adapter.py``.
-_RECONCILER = Path("src/rebar/_engine/rebar_reconciler")
+_RECONCILER = Path("src/rebar/reconciler")
 SEAM_INTERNAL_FILES = frozenset(
     {
         _RECONCILER / "git_adapter.py",
@@ -129,7 +129,7 @@ class Violation:
 _TEACHING = (
     "Store writes go through the event-append/transaction APIs (rebar.tickets /\n"
     "rebar._store.event_append / rebar._commands.txn) or the reconciler seam\n"
-    "(rebar_reconciler/git_adapter.py, _ref_lock.py). If this raw write is\n"
+    "(reconciler/git_adapter.py, _ref_lock.py). If this raw write is\n"
     "genuinely seam-internal (or targets a disposable sandbox repo, not the\n"
     "tracker), add an inline marker with a reason:  # raw-git-ok: <reason>\n"
     "A [seam-composition] hit means the git-adapter's mutation primitives were\n"
@@ -202,7 +202,7 @@ _NO_SEAM = _SeamBindings(frozenset(), frozenset(), enabled=False)
 
 def _names_seam_module(text: str) -> bool:
     """Does *text* name the git-adapter module? Accepts a dotted module path
-    (``rebar_reconciler.git_adapter``) or a file name (``git_adapter.py``)."""
+    (``rebar.reconciler.git_adapter``) or a file name (``git_adapter.py``)."""
     stem = text[:-3] if text.endswith(".py") else text
     return stem.rsplit("/", 1)[-1].rsplit(".", 1)[-1] == SEAM_MODULE_NAME
 
@@ -227,7 +227,7 @@ def _seam_import_bindings(node: ast.Import | ast.ImportFrom) -> tuple[set[str], 
 
 def _seam_loader_receivers(node: ast.Assign) -> set[str]:
     """Names bound by a dynamic module load of the git adapter, e.g.
-    ``ga = _load("rebar_reconciler.git_adapter", "git_adapter.py")``."""
+    ``ga = _load("rebar.reconciler.git_adapter", "git_adapter.py")``."""
     if not isinstance(node.value, ast.Call):
         return set()
     named = any(

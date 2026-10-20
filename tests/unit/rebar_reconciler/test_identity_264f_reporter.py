@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 
 import rebar
-import rebar_reconciler.dispatch_apply_phases as phases
-import rebar_reconciler.dispatch_one as dispatch
+import rebar.reconciler.dispatch_apply_phases as phases
+import rebar.reconciler.dispatch_one as dispatch
 
 
 @pytest.fixture

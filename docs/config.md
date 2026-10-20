@@ -708,7 +708,7 @@ priorities, hierarchy ranks, and create-time defaults) are config-driven overlay
 the built-in hardcoded literals. `mapping` is a *reserved* section (the core loader recognises
 `[mapping]`/`[tool.rebar.mapping]` and never warns/rejects it, even under
 `REBAR_CONFIG_UNKNOWN_KEYS=error`) read raw by
-`rebar_reconciler.mapping_config.load_mapping_config`. The mapping layer is
+`rebar.reconciler.mapping_config.load_mapping_config`. The mapping layer is
 **provider-neutral**: the core (`mapping_config.py`) imports nothing from any vendor adapter and
 carries no vendor value literal; the concrete Jira adapter injects the target's built-in default
 vocabulary and a `Capability` descriptor. An **absent `[mapping]` block reproduces today's
@@ -780,7 +780,7 @@ target's vocabulary lacks (per `Capability`) may not be referenced.
   non-string vocabulary entry, or a **non-integer `hierarchy` rank** — raises
   `MappingConfigError` (a `ConfigError` subclass), failing closed on the same load path as
   every other config error.
-- **In the `rebar_reconciler.config` resolvers** (e.g. `effective_link_map`), an
+- **In the `rebar.reconciler.config` resolvers** (e.g. `effective_link_map`), an
   **out-of-vocabulary** axis value raises `MappingConfigError` when the resolver validates
   against the effective vocabulary — a link mapped outside a declared `link_types` fails the
   pass rather than being approximated.

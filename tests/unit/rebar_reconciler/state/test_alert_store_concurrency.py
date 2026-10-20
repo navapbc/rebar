@@ -15,6 +15,7 @@ docstring for rationale).
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -28,17 +29,11 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-ALERT_STORE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "alert_store.py"
+ALERT_STORE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "alert_store.py"
 
 
 def _load_alert_store() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "alert_store_concurrency_module", ALERT_STORE_PATH
-    )
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.alert_store")
 
 
 @pytest.fixture(scope="module")

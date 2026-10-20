@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
 
 @pytest.mark.parametrize(

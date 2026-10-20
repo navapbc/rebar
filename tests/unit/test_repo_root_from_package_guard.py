@@ -202,7 +202,7 @@ def test_unparseable_source_is_reported_not_skipped(tmp_path: Path) -> None:
 
 
 def test_the_repository_is_clean() -> None:
-    """The drained tree passes (only the two sanctioned sites remain)."""
+    """The drained tree passes (only the one sanctioned site remains)."""
     completed = subprocess.run(
         [sys.executable, str(_SCRIPT)], capture_output=True, text=True, check=False
     )
@@ -227,11 +227,12 @@ def test_make_lint_invokes_the_gate() -> None:
     )
 
 
-def test_the_only_sanctioned_sites_are_the_resolver_seam_and_the_pkg_parent() -> None:
+def test_the_only_sanctioned_site_is_the_resolver_seam() -> None:
     """The sanction exists for a genuine non-checkout package-location derivation, never as a
-    place to park a fix. Exactly two real-tree sites may carry a marker on a ``.parents[`` line:
-    ``config.py`` (the validated resolver seam) and ``rebar_reconciler/__main__.py`` (the
-    sys.path package parent). A third sanctioned site is a regression of the drained class.
+    place to park a fix. Exactly one real-tree site may carry a marker on a ``.parents[`` line:
+    ``config.py`` (the validated resolver seam). The reconciler's ``__main__.py`` no longer
+    prepends a package parent to sys.path, so its former site is gone; a second sanctioned
+    site is a regression of the drained class.
     """
     sanctioned_files: set[str] = set()
     for path in sorted((_REPO_ROOT / gate.SCAN_ROOT).rglob("*.py")):
@@ -242,7 +243,6 @@ def test_the_only_sanctioned_sites_are_the_resolver_seam_and_the_pkg_parent() ->
             window = " ".join(lines[max(0, idx - 1) : idx + 1])
             if gate.BARE_MARKER in window or "# pkg-root-seam" in window:
                 sanctioned_files.add(str(path.relative_to(_REPO_ROOT)))
-    assert sanctioned_files == {
-        "src/rebar/config.py",
-        "src/rebar/_engine/rebar_reconciler/__main__.py",
-    }, f"unexpected sanctioned package-location site(s): {sorted(sanctioned_files)}"
+    assert sanctioned_files == {"src/rebar/config.py"}, (
+        f"unexpected sanctioned package-location site(s): {sorted(sanctioned_files)}"
+    )
