@@ -6,9 +6,8 @@ Follows the importlib loader convention established across this test tree
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -17,20 +16,9 @@ import pytest
 # ---------------------------------------------------------------------------
 # importlib loader — convention per conftest.py
 # ---------------------------------------------------------------------------
-_SRC = (
-    Path(__file__).resolve().parents[4]
-    / "src"
-    / "rebar"
-    / "_engine"
-    / "rebar_reconciler"
-    / "binding_store.py"
-)
+_SRC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler" / "binding_store.py"
 
-_spec = importlib.util.spec_from_file_location("binding_store", _SRC)
-assert _spec and _spec.loader
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = _mod
-_spec.loader.exec_module(_mod)
+_mod = importlib.import_module("rebar.reconciler.binding_store")
 
 BindingStore = _mod.BindingStore
 load_binding_store = _mod.load_binding_store
@@ -339,9 +327,9 @@ class TestRebindStaleReverse:
 
 import inspect  # noqa: E402
 
-from rebar_reconciler import get_rotation as _get_rotation  # noqa: E402
-from rebar_reconciler import peer_state as _peer_state  # noqa: E402
-from rebar_reconciler.binding_repository import BindingRepository  # noqa: E402
+from rebar.reconciler import get_rotation as _get_rotation  # noqa: E402
+from rebar.reconciler import peer_state as _peer_state  # noqa: E402
+from rebar.reconciler.binding_repository import BindingRepository  # noqa: E402
 
 _BRIDGE = Path(".bridge_state")
 

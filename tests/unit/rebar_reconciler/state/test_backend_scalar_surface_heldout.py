@@ -13,13 +13,13 @@ from pathlib import Path
 import pytest
 
 from rebar import config as cfg
-from rebar_reconciler._backend import (
+from rebar.reconciler._backend import (
     Backend,
     BackendAssigneeNotFoundError,
     BackendEnvError,
 )
-from rebar_reconciler.adapters.jira.acli_subprocess import AssigneeNotFoundError
-from rebar_reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.adapters.jira.acli_subprocess import AssigneeNotFoundError
+from rebar.reconciler.adapters.jira.backend import JiraBackend
 
 pytestmark = pytest.mark.unit
 

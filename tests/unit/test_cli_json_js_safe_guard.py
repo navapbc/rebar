@@ -192,7 +192,7 @@ def test_unparseable_source_is_reported_not_skipped(tmp_path: Path) -> None:
     "rel_dir",
     [
         pytest.param("src/rebar/_logging", id="structured-logging-stream"),
-        pytest.param("src/rebar/_engine/rebar_reconciler", id="reconciler-daemon"),
+        pytest.param("src/rebar/reconciler", id="reconciler-daemon"),
         pytest.param("src/rebar/_other", id="unrelated-module"),
     ],
 )

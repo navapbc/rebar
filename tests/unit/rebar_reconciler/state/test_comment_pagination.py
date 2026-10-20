@@ -23,9 +23,9 @@ import subprocess
 
 import pytest
 
-from rebar_reconciler.adapters.jira import acli as acli_mod
-from rebar_reconciler.adapters.jira import acli_cli_ops, acli_subprocess
-from rebar_reconciler.outbound_comments import _diff_comments
+from rebar.reconciler.adapters.jira import acli as acli_mod
+from rebar.reconciler.adapters.jira import acli_cli_ops, acli_subprocess
+from rebar.reconciler.outbound_comments import _diff_comments
 
 
 def _page(comments: list[dict], is_last: bool, start_at: int, total: int) -> str:

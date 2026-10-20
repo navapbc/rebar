@@ -1,4 +1,4 @@
-"""Tests for rebar_reconciler/applier.py.
+"""Tests for reconciler/applier.py.
 
 Covers:
 - Manifest written to the correct path
@@ -11,10 +11,9 @@ Covers:
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import subprocess
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -42,16 +41,11 @@ def _init_git_repo(path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location("applier", APPLIER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["applier"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(autouse=True)
@@ -280,7 +274,7 @@ def test_apply_constructs_client_with_env_derived_args(tmp_path, applier, monkey
     monkeypatch.setenv("JIRA_API_TOKEN", "tok-abc-123")
     monkeypatch.setenv("JIRA_PROJECT", "DIG")
 
-    from rebar_reconciler.adapters.jira import acli
+    from rebar.reconciler.adapters.jira import acli
 
     mock_client, _ = _make_mock_acli_module()
     constructor = MagicMock(return_value=mock_client)
@@ -322,7 +316,7 @@ def test_apply_constructs_client_with_empty_strings_when_env_unset(tmp_path, app
     monkeypatch.delenv("JIRA_API_TOKEN", raising=False)
     monkeypatch.delenv("JIRA_PROJECT", raising=False)
 
-    from rebar_reconciler._backend import BackendEnvError
+    from rebar.reconciler._backend import BackendEnvError
 
     with pytest.raises(BackendEnvError) as excinfo:
         applier.apply([], pass_id, repo_root=tmp_path)

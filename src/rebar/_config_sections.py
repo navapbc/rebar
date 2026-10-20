@@ -152,7 +152,7 @@ _SECTIONS: dict[str, dict] = {
     },
     "reconciler": {
         # Keep in step with the `@register(...)` keys in
-        # `rebar_reconciler/adapters/`: a backend that is registered but absent here
+        # `reconciler/adapters/`: a backend that is registered but absent here
         # is UNREACHABLE — the registry resolves it while config rejects it (the
         # state `jira-datacenter` was in between stories J6 and J7, epic e369).
         "backend": lambda v, k: _as_choice(v, k, {"jira", "jira-datacenter"}),
@@ -207,7 +207,7 @@ _ALIASES: dict[str, dict[str, str]] = {}
 # ``snapshot`` is the repo-snapshot-isolation gate cache/janitor tunables layer
 # (``rebar._snapshot``), resolved env-first by :class:`rebar._snapshot.JanitorConfig`.
 # ``mapping`` is the provider-neutral reconciler mapping-vocabulary layer
-# (``rebar_reconciler.mapping_config``), resolved by :func:`load_mapping_config`.
+# (``rebar.reconciler.mapping_config``), resolved by :func:`load_mapping_config`.
 _RESERVED_SECTIONS: frozenset[str] = frozenset({"llm", "snapshot", "mapping"})
 
 

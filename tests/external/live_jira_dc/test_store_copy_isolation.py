@@ -116,7 +116,7 @@ def test_the_inbound_create_is_PLANNED_for_a_new_dc_issue(
     Use an unfiltered dry-run because the post-filter could hide the create, while an
     unfiltered writing pass would create scrubbed production tickets in the harness.
     """
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     key = _seed_searchable_issue(
         dc_transport, jira_dc_project, track_issue, "rebar J11 slice — planned"
@@ -145,7 +145,7 @@ def test_a_dc_issue_reaches_the_local_store_inbound(
     dc_store_copy_repo: Path, dc_transport: Any, jira_dc_project: str, track_issue: Any
 ) -> None:
     """INBOUND round-trip over the real store copy: an issue created in DC appears locally."""
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     key = _seed_searchable_issue(
         dc_transport, jira_dc_project, track_issue, "rebar J11 slice — inbound"

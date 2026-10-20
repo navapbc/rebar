@@ -6,7 +6,7 @@ scope, including when that explicit project is ``DIG``.
 
 from __future__ import annotations
 
-from rebar_reconciler import runtime as rt
+from rebar.reconciler import runtime as rt
 
 
 def test_resolve_provider_scope_uses_explicit_cloud_project_verbatim(monkeypatch) -> None:

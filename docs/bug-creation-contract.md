@@ -10,7 +10,7 @@ It was extracted from the audit of the three existing auto-file sites (ticket
 |---|---|---|
 | Heartbeat canary | `scripts/canary_bridge.py` `cmd_heartbeat_alert` | `heartbeat-canary` |
 | Binding-drift canary | `scripts/canary_bridge.py` `cmd_binding_drift_alert` | `binding-drift-canary` |
-| Reconciler conflict filer | `src/rebar/_engine/rebar_reconciler/conflict_bug_filing.py` | `reconciler-conflict` |
+| Reconciler conflict filer | `src/rebar/reconciler/conflict_bug_filing.py` | `reconciler-conflict` |
 
 ## The five elements
 

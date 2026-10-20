@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import subprocess
 from pathlib import Path
 from types import ModuleType
@@ -14,24 +14,12 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-MODULE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_concurrency.py"
+MODULE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "_concurrency.py"
 
 
 def _load_module() -> ModuleType:
-    import sys
 
-    spec = importlib.util.spec_from_file_location("_concurrency", MODULE_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    # Register in sys.modules before exec so that dataclass annotation resolution
-    # (which calls sys.modules.get(cls.__module__)) works in Python 3.14+.
-    sys.modules["_concurrency"] = mod
-    try:
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    except Exception:
-        sys.modules.pop("_concurrency", None)
-        raise
-    return mod
+    return importlib.import_module("rebar.reconciler._concurrency")
 
 
 @pytest.fixture(scope="module")

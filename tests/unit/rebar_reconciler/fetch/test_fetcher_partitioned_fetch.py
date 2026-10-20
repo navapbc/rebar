@@ -35,7 +35,7 @@ from itertools import pairwise
 
 import pytest
 
-from rebar_reconciler import fetch_paging
+from rebar.reconciler import fetch_paging
 
 _FMT = "%Y-%m-%d %H:%M"
 _EPOCH = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
@@ -311,7 +311,7 @@ def test_fetch_project_drains_the_measured_working_set_completely() -> None:
     """End-to-end at the fetcher seam: ``_fetch_project`` runs the UNCAPPED active query
     through the partitioned drain and the CAPPED done query through the single-query path,
     so the pass that failed at 01:33 now completes."""
-    from rebar_reconciler import fetcher
+    from rebar.reconciler import fetcher
 
     client = _CreatedWindowClient(_MEASURED_REB_ACTIVE)
     queries = ((_BASE_JQL, None),)
@@ -325,7 +325,7 @@ def test_fetch_project_leaves_the_capped_done_query_unpartitioned() -> None:
     """The done-recent query keeps its top-N semantics: capped at ``_DONE_RECENT_CAP``,
     still a single ``ORDER BY`` query, and never routed through the partitioner (which
     would refuse it)."""
-    from rebar_reconciler import fetcher
+    from rebar.reconciler import fetcher
 
     client = _CreatedWindowClient(3000)
     done_jql = 'project = REB AND statusCategory = "Done" ORDER BY updated DESC'

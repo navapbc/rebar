@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import subprocess
 from pathlib import Path
@@ -181,9 +182,8 @@ def test_mcp_bridge_tools_return_the_public_library_results(
 
 
 def _access_check():
-    from rebar._lib_ops import _engine_module
 
-    return _engine_module("rebar_reconciler.access_check")
+    return importlib.import_module("rebar.reconciler.access_check")
 
 
 @pytest.mark.parametrize(

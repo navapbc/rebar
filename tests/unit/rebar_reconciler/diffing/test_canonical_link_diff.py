@@ -17,8 +17,7 @@ Happy-path oracle: the port members, and an ADD emitted with today's exact paylo
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 
@@ -26,15 +25,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-_REC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, filename: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, _REC / filename)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+_REC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler"
 
 
 class _BS:
@@ -64,14 +55,14 @@ def _link(type_name, inward=None, outward=None):
 
 @pytest.fixture(scope="module")
 def backend():
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     return JiraBackend(transport=object())
 
 
 @pytest.fixture(scope="module")
 def ol() -> ModuleType:
-    return _load("outbound_links_canonical", "outbound_links.py")
+    return importlib.import_module("rebar.reconciler.outbound_links")
 
 
 # ── link_payload_for_relation (emission translation) ─────────────────────────

@@ -7,7 +7,7 @@ comment cannot appear as a clean outcome.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import sys
 import time
@@ -20,48 +20,17 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
-APPLIER_PATH = SCRIPTS_DIR / "rebar_reconciler" / "applier.py"
-ACLI_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "acli.py"
+APPLIER_PATH = SCRIPTS_DIR.parent / "reconciler" / "applier.py"
+ACLI_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "acli.py"
 
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-_ADF_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "adf.py"
-if "rebar_reconciler" not in sys.modules:
-    import types as _types
-
-    _dr = _types.ModuleType("rebar_reconciler")
-    _dr.__path__ = [str(SCRIPTS_DIR / "rebar_reconciler")]
-    sys.modules["rebar_reconciler"] = _dr
-if "rebar_reconciler.adapters.jira.adf" not in sys.modules:
-    _adf_spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler.adapters.jira.adf", _ADF_PATH
-    )
-    _adf_mod = importlib.util.module_from_spec(_adf_spec)
-    sys.modules["rebar_reconciler.adapters.jira.adf"] = _adf_mod
-    _adf_spec.loader.exec_module(_adf_mod)  # type: ignore[union-attr]
-_CL_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "comment_limits.py"
-if "rebar_reconciler.adapters.jira.comment_limits" not in sys.modules:
-    _cl_spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler.adapters.jira.comment_limits", _CL_PATH
-    )
-    _cl_mod = importlib.util.module_from_spec(_cl_spec)
-    sys.modules["rebar_reconciler.adapters.jira.comment_limits"] = _cl_mod
-    _cl_spec.loader.exec_module(_cl_mod)  # type: ignore[union-attr]
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+_ADF_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "adf.py"
+_CL_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "comment_limits.py"
 
 
 @pytest.fixture(scope="module")
 def applier_mod() -> Iterator[ModuleType]:
     name = "applier_create_comment_error_surfaced"
-    mod = _load_module(name, APPLIER_PATH)
+    mod = importlib.import_module("rebar.reconciler.applier")
     try:
         yield mod
     finally:
@@ -71,7 +40,7 @@ def applier_mod() -> Iterator[ModuleType]:
 @pytest.fixture(scope="module")
 def acli_mod() -> Iterator[ModuleType]:
     name = "acli_create_comment_error_surfaced"
-    mod = _load_module(name, ACLI_PATH)
+    mod = importlib.import_module("rebar.reconciler.adapters.jira.acli")
     try:
         yield mod
     finally:

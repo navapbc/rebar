@@ -6,7 +6,7 @@
 forwarded. Deleting the parameter is what restores forwarding, so the fix is observable
 behaviour, not signature hygiene.
 
-Lives here rather than beside the metrics half of the ticket because `rebar_reconciler`
+Lives here rather than beside the metrics half of the ticket because `rebar.reconciler`
 is only importable as a top-level package under this directory's conftest.
 """
 
@@ -19,7 +19,7 @@ from typing import Any
 
 
 def _call_with_retry():
-    from rebar_reconciler.dispatch_one import _call_with_retry as f
+    from rebar.reconciler.dispatch_one import _call_with_retry as f
 
     return f
 

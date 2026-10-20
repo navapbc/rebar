@@ -32,30 +32,20 @@ that asymmetry is deliberate in this story and is filed separately as
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-_ENGINE = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load_module(name: str, path: Path) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+_ENGINE = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def reconcile_mod() -> Any:
-    return _load_module("reconcile_write_boundary_under_test", _ENGINE / "reconcile.py")
+    return importlib.import_module("rebar.reconciler.reconcile")
 
 
 @pytest.fixture(scope="module")
@@ -69,7 +59,7 @@ def mode_mod(reconcile_mod: Any) -> Any:
     would then pass for the wrong reason, or fail for one. Sharing the loader's instance
     removes the question.
     """
-    return reconcile_mod._load("rebar_reconciler.mode", "mode.py")
+    return reconcile_mod._load("rebar.reconciler.mode", "mode.py")
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +157,7 @@ def _drive_load_phase(
     """
     events: list[str] = []
 
-    pass_support = reconcile_mod._load("rebar_reconciler.pass_support", "pass_support.py")
+    pass_support = reconcile_mod._load("rebar.reconciler.pass_support", "pass_support.py")
     monkeypatch.setattr(pass_support, "_read_local_tickets", lambda *a, **k: [])
 
     if stale_selection:
@@ -203,11 +193,10 @@ def _drive_load_phase(
     # binding_recovery.py under a fresh module name builds a DIFFERENT BindingRecovery
     # class, so patching that one patches a class nothing calls: the repair still runs,
     # no "repair" event is ever recorded, and the ordering assertion below becomes
-    # unfalsifiable. binding_store.py resolves `from rebar_reconciler import
+    # unfalsifiable. binding_store.py resolves `from rebar.reconciler import
     # binding_recovery`, which conftest wires to the engine directory, so this is the
     # object that matters. Same hazard as the mode-enum note on the fixture above.
-    sys.path.insert(0, str(_ENGINE.parent))
-    from rebar_reconciler import binding_recovery as recovery
+    from rebar.reconciler import binding_recovery as recovery
 
     real_boundary = recovery.BindingRecovery.repair_at_write_boundary
 
@@ -332,8 +321,7 @@ def test_merely_constructing_the_store_repairs_nothing(tmp_path: Path) -> None:
     at all, so it must stay inert. This is why the repair is a pass-level call and not
     something the loader does on the way in."""
     _seed_overlap(tmp_path)
-    sys.path.insert(0, str(_ENGINE.parent))
-    from rebar_reconciler.binding_store import load_binding_store
+    from rebar.reconciler.binding_store import load_binding_store
 
     store = load_binding_store(tmp_path)
 
@@ -348,9 +336,8 @@ def test_merely_constructing_the_store_repairs_nothing(tmp_path: Path) -> None:
 
 
 def _recovery_over(repo_root: Path) -> Any:
-    sys.path.insert(0, str(_ENGINE.parent))
-    from rebar_reconciler import binding_lifecycle, binding_recovery
-    from rebar_reconciler.binding_repository import BindingRepository
+    from rebar.reconciler import binding_lifecycle, binding_recovery
+    from rebar.reconciler.binding_repository import BindingRepository
 
     repo = BindingRepository(repo_root / ".tickets-tracker")
     return binding_recovery.BindingRecovery(repo, binding_lifecycle.BindingLifecycle(repo))
@@ -388,8 +375,7 @@ def test_a_refused_guard_does_no_classification_at_all(
     """Refusing must be free, not merely harmless. Classifying and then discarding the
     answer would walk every tombstone in the retired file on every read-only command."""
     _seed_overlap(tmp_path)
-    sys.path.insert(0, str(_ENGINE.parent))
-    from rebar_reconciler import binding_recovery
+    from rebar.reconciler import binding_recovery
 
     calls: list[int] = []
     real = binding_recovery.classify_interrupted_retirements
@@ -420,8 +406,7 @@ def test_a_reconfirmed_and_cleared_overlap_still_completes_at_the_boundary(
     guarded entry point did not lose the behavior on the way through.
     """
     _seed_overlap(tmp_path)
-    sys.path.insert(0, str(_ENGINE.parent))
-    from rebar_reconciler.binding_store import load_binding_store
+    from rebar.reconciler.binding_store import load_binding_store
 
     store = load_binding_store(tmp_path)
     store.bind_confirm("loc-A", "DIG-A")
@@ -441,8 +426,7 @@ def test_an_explicitly_unretired_identity_is_not_repaired_at_the_boundary(
     """``unretire`` is the one documented revocation. After it there is no intent left to
     complete, so the live binding is ordinary work again and the pass must not touch it."""
     _seed_overlap(tmp_path)
-    sys.path.insert(0, str(_ENGINE.parent))
-    from rebar_reconciler.binding_store import load_binding_store
+    from rebar.reconciler.binding_store import load_binding_store
 
     assert load_binding_store(tmp_path).unretire("DIG-A") is True
 
@@ -464,8 +448,7 @@ def test_a_repair_failure_happens_before_any_remote_call_and_keeps_the_overlap(
     call — the ordering is what delivers that guarantee, not a try/except. The overlap
     also has to survive so a later pass can retry it."""
     _seed_overlap(tmp_path)
-    sys.path.insert(0, str(_ENGINE.parent))
-    from rebar_reconciler import binding_repository
+    from rebar.reconciler import binding_repository
 
     real_replace = binding_repository.os.replace
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from http import HTTPStatus
 
-from rebar_reconciler._errors import http_status, is_not_found
+from rebar.reconciler._errors import http_status, is_not_found
 
 
 class _StatusCodeExc(Exception):

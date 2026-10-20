@@ -20,16 +20,15 @@ while the key predicted a differently-fitted one.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
-from rebar_reconciler.outbound_comments import (
+from rebar.reconciler.outbound_comments import (
     RECONCILER_MARKER,
     _diff_comments,
     _normalize_comment_body,
@@ -40,7 +39,7 @@ from rebar_reconciler.outbound_comments import (
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DISPATCH_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "dispatch_one.py"
+DISPATCH_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "dispatch_one.py"
 CORPUS_DIR = REPO_ROOT / "tests" / "fixtures" / "cloud_adf_corpus"
 
 #: Long enough to exceed Cloud's serialized-ADF comment ceiling by a wide margin.
@@ -51,7 +50,7 @@ _DC_OVER_LIMIT = "d" * 2_000
 
 
 def _cloud_parts() -> tuple[Any, Any, Any, str]:
-    from rebar_reconciler.adapters.jira.backend import (
+    from rebar.reconciler.adapters.jira.backend import (
         _JiraInbound,
         _JiraOutbound,
         _JiraSanitizer,
@@ -61,7 +60,7 @@ def _cloud_parts() -> tuple[Any, Any, Any, str]:
 
 
 def _dc_parts() -> tuple[Any, Any, Any, str]:
-    from rebar_reconciler.adapters.jira_datacenter.backend import (
+    from rebar.reconciler.adapters.jira_datacenter.backend import (
         _DCInbound,
         _DCOutbound,
         _DCSanitizer,
@@ -90,12 +89,7 @@ def deployment(request):
 @pytest.fixture(scope="module")
 def dispatch():
     """``dispatch_one`` loaded from source (matches the sibling dispatch suites)."""
-    spec = importlib.util.spec_from_file_location("dispatch_one_fit_for_send_test", DISPATCH_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["dispatch_one_fit_for_send_test"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.dispatch_one")
 
 
 def _ticket(body: str) -> dict[str, Any]:
@@ -244,7 +238,7 @@ def _refitter(name: str, codec: Any):
     """Each deployment's REAL comment fitter, as the adapter would apply it."""
     if name == "cloud":
         return lambda text: fit_preserving_marker(text, codec.fit_outbound)
-    from rebar_reconciler.adapters.jira_datacenter import backend as dc_backend
+    from rebar.reconciler.adapters.jira_datacenter import backend as dc_backend
 
     return lambda text: fit_preserving_marker(
         text, lambda inner: dc_backend._truncate_dc_comment_body(inner, _DC_CEILING)
@@ -303,7 +297,7 @@ from _tree_scan import parsed_python_files  # noqa: E402
 import rebar  # noqa: E402
 
 _SRC = pathlib.Path(rebar.__file__).resolve().parent
-_OWNER = "_engine/rebar_reconciler/outbound_comments.py"
+_OWNER = "reconciler/outbound_comments.py"
 _FIT_CALLS = {"fit_comment", "sanitize_comment", "fit_preserving_marker"}
 _WIRE_CALL = "to_wire"
 _FIT_OK_RE = re.compile(r"#\s*comment-fit-ok:(.*)$", re.MULTILINE)
@@ -380,9 +374,7 @@ def test_the_one_legitimate_second_fit_is_marked_with_a_reason() -> None:
     """The Cloud adapter's `add_comment` genuinely composes fit-then-wire: a defensive fit in
     case a body reaches the transport unfitted. It is allowed, and it must SAY so — a marker
     with no reason is itself an offence, or the guard could be silenced by an empty comment."""
-    cloud = (_SRC / "_engine/rebar_reconciler/adapters/jira/acli_cli_ops.py").read_text(
-        encoding="utf-8"
-    )
+    cloud = (_SRC / "reconciler/adapters/jira/acli_cli_ops.py").read_text(encoding="utf-8")
     marker = _FIT_OK_RE.search(cloud)
     assert marker is not None, "the Cloud adapter's defensive fit should carry the marker"
     assert marker.group(1).strip(), "the marker must carry a reason"

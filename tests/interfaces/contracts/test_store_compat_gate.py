@@ -311,23 +311,7 @@ def test_run_ensures_fail_closed_under_incompatible(rebar_repo: Path) -> None:
 
 # ── reconcile _apply_mutations gate (outbound Jira push chokepoint) ───────────
 def _load_reconcile():
-    # `rebar_reconciler` is an engine top-level package (src/rebar/_engine on sys.path),
-    # BUT under pytest a test-dir package `tests/unit/rebar_reconciler/__init__.py`
-    # shadows it — so a naive `from rebar_reconciler import reconcile` is import-order
-    # fragile. Mirror tests/unit/rebar_reconciler/conftest.py: extend whichever
-    # `rebar_reconciler` is bound with the engine dir on its __path__ so the engine's
-    # `reconcile` submodule resolves regardless of collection order.
-    from _engine_path import engine_dir
-
-    engine = engine_dir()
-    if str(engine) not in sys.path:
-        sys.path.insert(0, str(engine))
-    import rebar_reconciler  # may be the test-dir shadow package under pytest
-
-    engine_pkg = str(engine / "rebar_reconciler")
-    if engine_pkg not in getattr(rebar_reconciler, "__path__", []):
-        rebar_reconciler.__path__.append(engine_pkg)
-    from rebar_reconciler import reconcile
+    from rebar.reconciler import reconcile
 
     return reconcile
 
@@ -397,7 +381,7 @@ def test_gate_wired_at_all_write_chokepoints() -> None:
     # check_store_compat's reconciler chokepoint moved from reconcile.py to
     # apply_phase.py (ticket piscine-bullish-cowbird, reconcile.py module-size
     # headroom): apply_mutations still calls it before any write dispatch.
-    reconcile_txt = (src / "_engine" / "rebar_reconciler" / "apply_phase.py").read_text()
+    reconcile_txt = (src / "reconciler" / "apply_phase.py").read_text()
     assert "check_store_compat" in reconcile_txt, "reconcile apply_mutations missing explicit gate"
 
     # No OTHER definition of acquire()/write_lock() bypasses the gate: there is exactly

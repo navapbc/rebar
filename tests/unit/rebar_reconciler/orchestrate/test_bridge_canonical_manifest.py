@@ -9,15 +9,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from rebar_reconciler import __main__ as reconciler_main
-from rebar_reconciler import applier, manifest_renderer
-from rebar_reconciler.mutation import (
+from rebar.reconciler import __main__ as reconciler_main
+from rebar.reconciler import applier, manifest_renderer
+from rebar.reconciler.mutation import (
     Mutation,
     MutationAction,
     MutationDirection,
     serialize_manifest,
 )
-from rebar_reconciler.operation_outcome import (
+from rebar.reconciler.operation_outcome import (
     DelaySource,
     Disposition,
     FailureScope,

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,22 +11,13 @@ import pytest
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RECONCILER = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load_module(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, RECONCILER / filename)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+RECONCILER = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 def test_legacy_engine_route_accepts_filter_local_ids_post_filter() -> None:
-    mode_mod = _load_module("filter_restore_mode", "mode.py")
-    request_mod = _load_module("filter_restore_request", "request.py")
-    pass_support = _load_module("filter_restore_pass_support", "pass_support.py")
+    mode_mod = importlib.import_module("rebar.reconciler.mode")
+    request_mod = importlib.import_module("rebar.reconciler.request")
+    pass_support = importlib.import_module("rebar.reconciler.pass_support")
 
     request = request_mod.normalize_request(
         [
@@ -57,8 +47,8 @@ def test_legacy_engine_route_accepts_filter_local_ids_post_filter() -> None:
 
 @pytest.mark.parametrize("command", ["preview", "sync"])
 def test_primary_bridge_commands_reject_filter_local_ids(command: str) -> None:
-    mode_mod = _load_module(f"filter_restore_mode_{command}", "mode.py")
-    request_mod = _load_module(f"filter_restore_request_{command}", "request.py")
+    mode_mod = importlib.import_module("rebar.reconciler.mode")
+    request_mod = importlib.import_module("rebar.reconciler.request")
 
     with pytest.raises(request_mod.RequestError, match="legacy route"):
         request_mod.normalize_request([command, "--filter-local-ids", "local-1"], mode_mod)
@@ -67,8 +57,8 @@ def test_primary_bridge_commands_reject_filter_local_ids(command: str) -> None:
 def test_removed_command_surfaces_stay_removed() -> None:
     from rebar._cli import _registry
 
-    mode_mod = _load_module("filter_restore_removed_mode", "mode.py")
-    request_mod = _load_module("filter_restore_removed_request", "request.py")
+    mode_mod = importlib.import_module("rebar.reconciler.mode")
+    request_mod = importlib.import_module("rebar.reconciler.request")
 
     assert _registry.route_for("reconcile") is None
     with pytest.raises(request_mod.RequestError, match="reconcile-check has been removed"):

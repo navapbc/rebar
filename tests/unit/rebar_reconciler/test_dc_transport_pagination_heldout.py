@@ -10,16 +10,16 @@ The fake server caps every page below the requested size, matching
 from __future__ import annotations
 
 import ast
+import importlib
 import pathlib
 import re
 
 import pytest
 
-from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
 _DC_ADAPTER_DIR = (
-    pathlib.Path(__file__).resolve().parents[3]
-    / "src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter"
+    pathlib.Path(__file__).resolve().parents[3] / "src/rebar/reconciler/adapters/jira_datacenter"
 )
 _TRANSPORT_SRC = _DC_ADAPTER_DIR / "transport.py"
 
@@ -311,14 +311,11 @@ def test_all_three_whole_project_readers_exist_and_page(method: str) -> None:
 
 import importlib.util  # noqa: E402
 import json as _json  # noqa: E402
-import sys  # noqa: E402
 from unittest.mock import patch  # noqa: E402
 
-from rebar_reconciler._backend import BackendPaginationStallError  # noqa: E402
+from rebar.reconciler._backend import BackendPaginationStallError  # noqa: E402
 
-_FETCHER_PATH = (
-    pathlib.Path(__file__).resolve().parents[3] / "src/rebar/_engine/rebar_reconciler/fetcher.py"
-)
+_FETCHER_PATH = pathlib.Path(__file__).resolve().parents[3] / "src/rebar/reconciler/fetcher.py"
 
 
 class _OffsetBlindClient:
@@ -411,7 +408,7 @@ def test_the_stall_error_is_importable_through_the_transport_facade() -> None:
     """AC4. `transport.py` is the documented re-export facade every DC importer reaches
     through (its own `__all__` docstring says so); a reader that cannot NAME the error
     cannot re-raise it past its fail-open handler."""
-    from rebar_reconciler.adapters.jira_datacenter import transport as _dc_transport
+    from rebar.reconciler.adapters.jira_datacenter import transport as _dc_transport
 
     assert getattr(_dc_transport, "BackendPaginationStallError", None) is (
         BackendPaginationStallError
@@ -434,12 +431,7 @@ def test_the_stall_error_is_importable_through_the_transport_facade() -> None:
 
 
 def _load_fetcher():
-    spec = importlib.util.spec_from_file_location("fetcher_18a4", _FETCHER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["fetcher_18a4"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.fetcher")
 
 
 class _StalledEnrichmentClient:

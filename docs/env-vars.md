@@ -22,8 +22,8 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `GERRIT_PROJECT` | `src/rebar/review_bot/config.py` |  |
 | `GITHUB_STEP_SUMMARY` | `src/rebar/_cli/_bridge_commands.py` |  |
 | `GITHUB_TOKEN` | `src/rebar/mirror_guard.py` |  |
-| `JIRA_API_TOKEN` | `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py`, `src/rebar/_engine/rebar_reconciler/runtime.py`, `src/rebar/config.py` |  |
-| `JIRA_PAT` | `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/settings.py`, `src/rebar/_engine/rebar_reconciler/runtime.py` |  |
+| `JIRA_API_TOKEN` | `src/rebar/config.py`, `src/rebar/reconciler/adapters/jira/acli_subprocess.py`, `src/rebar/reconciler/runtime.py` |  |
+| `JIRA_PAT` | `src/rebar/reconciler/adapters/jira_datacenter/settings.py`, `src/rebar/reconciler/runtime.py` |  |
 | `JIRA_PROJECT` | `src/rebar/_config_resolvers.py` |  |
 | `JIRA_URL` | `src/rebar/_config_resolvers.py` |  |
 | `JIRA_USER` | `src/rebar/_config_resolvers.py` |  |
@@ -132,12 +132,12 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_OPCERT_SHUTDOWN_CANCEL_SECONDS` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_TICKETS_REMOTE_URL` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_PLAN_REVIEW_BUDGET` | `src/rebar/_config_resolvers.py` |  |
-| `REBAR_RECONCILER_CONFLICT_PARENT_ID` | `src/rebar/_engine/rebar_reconciler/apply_inbound.py` |  |
-| `REBAR_RECONCILER_CREATE_ROUTE` | `src/rebar/_engine/rebar_reconciler/create_route.py` |  |
-| `REBAR_RECONCILER_FAIL_SILENT_NOOP` | `src/rebar/_engine/rebar_reconciler/apply_handlers.py` |  |
-| `REBAR_RECONCILER_LOCK_STEAL` | `src/rebar/_engine/rebar_reconciler/_pass_lock_lifecycle.py` |  |
-| `REBAR_RECONCILER_VERBOSE` | `src/rebar/_engine/rebar_reconciler/adapters/jira/outbound_fields.py` |  |
-| `REBAR_RECONCILER_WRITE_FACADE` | `src/rebar/_engine/rebar_reconciler/reconcile_helpers.py` |  |
+| `REBAR_RECONCILER_CONFLICT_PARENT_ID` | `src/rebar/reconciler/apply_inbound.py` |  |
+| `REBAR_RECONCILER_CREATE_ROUTE` | `src/rebar/reconciler/create_route.py` |  |
+| `REBAR_RECONCILER_FAIL_SILENT_NOOP` | `src/rebar/reconciler/apply_handlers.py` |  |
+| `REBAR_RECONCILER_LOCK_STEAL` | `src/rebar/reconciler/_pass_lock_lifecycle.py` |  |
+| `REBAR_RECONCILER_VERBOSE` | `src/rebar/reconciler/adapters/jira/outbound_fields.py` |  |
+| `REBAR_RECONCILER_WRITE_FACADE` | `src/rebar/reconciler/reconcile_helpers.py` |  |
 | `REBAR_ROOT` | `src/rebar/_config_resolvers.py`, `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
 | `REBAR_SNAPSHOT_FETCH_TIMEOUT_SECONDS` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_SNAPSHOT_STALL_ATTEMPTS` | `src/rebar/_config_resolvers.py` |  |

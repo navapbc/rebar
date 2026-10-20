@@ -9,15 +9,14 @@ site — the outbound status preflight was downgraded to NON-FATAL (see
 its raise/catch contract, the nearest real seam.
 """
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 class _Val:
@@ -30,14 +29,7 @@ class _Val:
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location("applier", APPLIER_PATH)
-    m = importlib.util.module_from_spec(spec)
-    # Register in sys.modules before exec so dataclass annotation resolution
-    # (PEP 563 `from __future__ import annotations`) can find the module via
-    # cls.__module__ lookup during _process_class.
-    sys.modules["applier"] = m
-    spec.loader.exec_module(m)
-    return m
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 def test_direction_guard_raises_direction_mismatch_error():

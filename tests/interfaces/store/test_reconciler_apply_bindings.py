@@ -7,30 +7,17 @@ asserts the observable client. Split-install identity has a companion regression
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-ENGINE = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, rel: str):
-    path = ENGINE / rel
-    cached = sys.modules.get(name)
-    if cached is not None and getattr(cached, "__file__", None) == str(path):
-        return cached
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+ENGINE = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 def test_reconcile_once_threads_composed_runtime_transport_into_apply(monkeypatch, tmp_path):
     """A pass composes one runtime and the apply phase receives its captured transport."""
-    reconcile = _load("rebar_reconciler.reconcile", "reconcile.py")
+    reconcile = importlib.import_module("rebar.reconciler.reconcile")
     # Patch the runtime already resolved by ``reconcile``. Non-editable installs can expose
     # checkout and site-packages copies under one key. Loading by path would patch an unused
     # copy and leave apply with ``client=None``.

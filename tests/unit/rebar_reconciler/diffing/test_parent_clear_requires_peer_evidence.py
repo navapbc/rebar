@@ -101,7 +101,7 @@ def _parent_field_of(mutations: list[Any]) -> tuple[bool, Any]:
 
 
 def _inbound(snapshot: dict[str, dict[str, Any]], bindings: _FakeBindingStore) -> list[Any]:
-    inbound_differ = importlib.import_module("rebar_reconciler.inbound_differ")
+    inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
     mutations, _suppressed = inbound_differ.compute_inbound_mutations(
         snapshot,
         bindings,

@@ -67,12 +67,12 @@ def _save_in_threads(stores: list[Any], final_path: Path) -> list[BaseException]
 
 
 def _peer_store(tracker: Path):
-    module = importlib.import_module("rebar_reconciler.peer_confirmations")
+    module = importlib.import_module("rebar.reconciler.peer_confirmations")
     return module, module.PeerConfirmationStore(str(tracker))
 
 
 def _impossible_store(tracker: Path):
-    module = importlib.import_module("rebar_reconciler.impossible_links")
+    module = importlib.import_module("rebar.reconciler.impossible_links")
     return module, module.ImpossibleLinkStore(str(tracker))
 
 
@@ -86,7 +86,7 @@ def _seed_sidecar(path: Path, records: dict[str, dict[str, Any]]) -> None:
 
 def test_peer_confirmations_distinct_concurrent_saves_are_merged(tracker: Path) -> None:
     """Two same-baseline writers adding different records both survive."""
-    module = importlib.import_module("rebar_reconciler.peer_confirmations")
+    module = importlib.import_module("rebar.reconciler.peer_confirmations")
     final = tracker / ".bridge_state" / "peer_confirmations.json"
 
     left = module.PeerConfirmationStore(str(tracker))
@@ -111,7 +111,7 @@ def test_peer_confirmations_distinct_concurrent_saves_are_merged(tracker: Path) 
 
 def test_impossible_links_distinct_concurrent_saves_are_merged(tracker: Path) -> None:
     """The impossible-link sidecar uses the same conflict-safe merge seam."""
-    module = importlib.import_module("rebar_reconciler.impossible_links")
+    module = importlib.import_module("rebar.reconciler.impossible_links")
     final = tracker / ".bridge_state" / "impossible_links.json"
 
     left = module.ImpossibleLinkStore(str(tracker))
@@ -131,7 +131,7 @@ def test_impossible_links_distinct_concurrent_saves_are_merged(tracker: Path) ->
 
 def test_same_key_last_lock_holder_wins(tracker: Path) -> None:
     """Same-key conflicts resolve by publication order under the real lock seam."""
-    module = importlib.import_module("rebar_reconciler.peer_confirmations")
+    module = importlib.import_module("rebar.reconciler.peer_confirmations")
     final = tracker / ".bridge_state" / "peer_confirmations.json"
     key = module.record_key("A", "B", "blocks")
 
@@ -148,7 +148,7 @@ def test_same_key_last_lock_holder_wins(tracker: Path) -> None:
 
 def test_delete_is_not_resurrected_by_later_distinct_key_writer(tracker: Path) -> None:
     """A stale writer adding B must not reintroduce baseline key A after A is deleted."""
-    module = importlib.import_module("rebar_reconciler.peer_confirmations")
+    module = importlib.import_module("rebar.reconciler.peer_confirmations")
     final = tracker / ".bridge_state" / "peer_confirmations.json"
     old_key = module.record_key("A", "B", "blocks")
     new_key = module.record_key("C", "D", "blocks")
@@ -182,7 +182,7 @@ def test_malformed_sidecar_is_preserved_and_logged(
     tracker: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A malformed target fails open; save() does not overwrite prior bytes."""
-    module = importlib.import_module("rebar_reconciler.peer_confirmations")
+    module = importlib.import_module("rebar.reconciler.peer_confirmations")
     final = tracker / ".bridge_state" / "peer_confirmations.json"
     before = b"{ this is not json"
     final.write_bytes(before)
@@ -201,8 +201,8 @@ def test_lock_failure_preserves_prior_bytes_and_fails_open(
     tracker: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Lock/acquire failure is logged with the sidecar path and swallowed."""
-    module = importlib.import_module("rebar_reconciler.peer_confirmations")
-    tx = importlib.import_module("rebar_reconciler.sidecar_transactions")
+    module = importlib.import_module("rebar.reconciler.peer_confirmations")
+    tx = importlib.import_module("rebar.reconciler.sidecar_transactions")
     final = tracker / ".bridge_state" / "peer_confirmations.json"
     _seed_sidecar(final, {})
     before = final.read_bytes()
@@ -228,8 +228,8 @@ def test_atomic_write_failure_preserves_prior_bytes_and_fails_open(
     tracker: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Atomic publication failure leaves the previous complete JSON in place."""
-    module = importlib.import_module("rebar_reconciler.peer_confirmations")
-    tx = importlib.import_module("rebar_reconciler.sidecar_transactions")
+    module = importlib.import_module("rebar.reconciler.peer_confirmations")
+    tx = importlib.import_module("rebar.reconciler.sidecar_transactions")
     final = tracker / ".bridge_state" / "peer_confirmations.json"
     _seed_sidecar(final, {})
     before = final.read_bytes()
@@ -251,8 +251,8 @@ def test_atomic_write_failure_preserves_prior_bytes_and_fails_open(
 
 def test_unchanged_save_is_noop(tracker: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Converged passes do not rewrite unchanged sidecars."""
-    module = importlib.import_module("rebar_reconciler.peer_confirmations")
-    tx = importlib.import_module("rebar_reconciler.sidecar_transactions")
+    module = importlib.import_module("rebar.reconciler.peer_confirmations")
+    tx = importlib.import_module("rebar.reconciler.sidecar_transactions")
     store = module.PeerConfirmationStore(str(tracker))
     store.record("A", "B", "blocks")
     store.save()
@@ -278,7 +278,7 @@ def test_commit_back_pathspec_excludes_retained_lock_files(
     import rebar._store.push
     import rebar.config
 
-    helpers = importlib.import_module("rebar_reconciler.pass_support")
+    helpers = importlib.import_module("rebar.reconciler.pass_support")
     (tracker / ".bridge_state" / "impossible_links.json").write_text("{}", encoding="utf-8")
     (tracker / ".bridge_state" / "impossible_links.json.lock").write_text("", encoding="utf-8")
     (tracker / ".bridge_state" / "peer_confirmations.json").write_text("{}", encoding="utf-8")

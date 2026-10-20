@@ -17,8 +17,7 @@ RED pre-fix:
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
@@ -27,26 +26,8 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
-MAIN_PATH = SCRIPTS_DIR / "rebar_reconciler" / "__main__.py"
-PASS_SUPPORT_PATH = SCRIPTS_DIR / "rebar_reconciler" / "pass_support.py"
-
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-if "rebar_reconciler" not in sys.modules:
-    import types as _types
-
-    _dr = _types.ModuleType("rebar_reconciler")
-    _dr.__path__ = [str(SCRIPTS_DIR / "rebar_reconciler")]
-    sys.modules["rebar_reconciler"] = _dr
-
-
-def _load(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+MAIN_PATH = SCRIPTS_DIR.parent / "reconciler" / "__main__.py"
+PASS_SUPPORT_PATH = SCRIPTS_DIR.parent / "reconciler" / "pass_support.py"
 
 
 # ----------------------------- Facet 2: fail loud -----------------------------
@@ -55,7 +36,7 @@ def _load(name: str, path: Path) -> ModuleType:
 def test_run_pass_exits_nonzero_when_mutations_failed(tmp_path: Path) -> None:
     """A completed pass that recorded real per-mutation failures must fail loud
     (non-zero exit), distinct from the reschedule signal (75)."""
-    main_mod = _load("reconciler_main_faillloud", MAIN_PATH)
+    main_mod = importlib.import_module("rebar.reconciler.__main__")
 
     class _FakeReschedule(Exception):
         pass
@@ -92,7 +73,7 @@ def test_run_pass_exits_nonzero_when_mutations_failed(tmp_path: Path) -> None:
 def test_run_pass_exits_zero_on_clean_pass(tmp_path: Path) -> None:
     """Guard the opposite: a pass with zero failures still exits 0 (no false alarms;
     the benign comment-fallback counts as applied, not a failure)."""
-    main_mod = _load("reconciler_main_clean", MAIN_PATH)
+    main_mod = importlib.import_module("rebar.reconciler.__main__")
 
     def _fake_loader(name: str):
         if name == "reconcile":
@@ -128,7 +109,7 @@ def test_preflight_does_not_abort_on_unmapped_status() -> None:
     """An unmapped local status on a single update mutation must NOT raise
     StatusMappingError (which aborts the entire pass). Post-fix the offending
     mutation is recorded as a per-mutation failure downstream instead."""
-    pass_support_mod = _load("pass_support_preflight", PASS_SUPPORT_PATH)
+    pass_support_mod = importlib.import_module("rebar.reconciler.pass_support")
 
     mutations = [
         {

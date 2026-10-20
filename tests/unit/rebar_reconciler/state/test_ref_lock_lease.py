@@ -17,10 +17,9 @@ Covers the acceptance criteria:
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import logging
 import subprocess
-import sys
 import time
 from pathlib import Path
 from types import ModuleType
@@ -28,23 +27,14 @@ from types import ModuleType
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-REF_LOCK_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_ref_lock.py"
-
-
-def _load(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+REF_LOCK_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "_ref_lock.py"
 
 
 @pytest.fixture(scope="module")
 def rl() -> ModuleType:
     if not REF_LOCK_PATH.exists():
         pytest.fail(f"_ref_lock.py not found at {REF_LOCK_PATH}")
-    return _load("rebar_reconciler_ref_lock_lease", REF_LOCK_PATH)
+    return importlib.import_module("rebar.reconciler._ref_lock")
 
 
 def _git(args: list[str], repo: Path) -> subprocess.CompletedProcess:
@@ -234,7 +224,7 @@ def test_corrupt_blob_not_renewed(rl: ModuleType, repo: Path) -> None:
 def test_steal_emits_structured_log(rl: ModuleType, repo: Path, caplog) -> None:
     rl.acquire(repo, rl.LOCK_REF, holder="holder", lease_secs=120)
     first = rl.read(repo, rl.LOCK_REF)
-    with caplog.at_level(logging.INFO, logger="rebar_reconciler_ref_lock_lease"):
+    with caplog.at_level(logging.INFO, logger="reconciler_ref_lock_lease"):
         rl.try_break_if_stale(repo, rl.LOCK_REF, first=first, holder="thief")
     assert any("expired lease broken" in r.message for r in caplog.records)
 
@@ -242,7 +232,7 @@ def test_steal_emits_structured_log(rl: ModuleType, repo: Path, caplog) -> None:
 def test_renewal_failure_emits_structured_log(rl: ModuleType, repo: Path, caplog) -> None:
     oid = rl.acquire(repo, rl.LOCK_REF, holder="holder", lease_secs=120)
     rl.renew(repo, rl.LOCK_REF, oid=oid)  # advance so the old oid is stale
-    with caplog.at_level(logging.WARNING, logger="rebar_reconciler_ref_lock_lease"):
+    with caplog.at_level(logging.WARNING, logger="reconciler_ref_lock_lease"):
         with pytest.raises(rl.LeaseLostError):
             rl.renew(repo, rl.LOCK_REF, oid=oid)
     assert any("lease lost" in r.message for r in caplog.records)

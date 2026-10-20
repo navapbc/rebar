@@ -38,8 +38,8 @@ from typing import Any, cast
 
 import pytest
 
-from rebar_reconciler.adapters.jira_family import wiki_render
-from rebar_reconciler.adapters.jira_family.wiki_render import (
+from rebar.reconciler.adapters.jira_family import wiki_render
+from rebar.reconciler.adapters.jira_family.wiki_render import (
     _convert,
     _pandoc_path,
     _pandoc_timeout,
@@ -508,9 +508,8 @@ def test_static_replay_output_is_byte_identical_to_the_landed_renderer() -> None
 def _rebar_unimportable():
     """Make a call-time ``import rebar.<...>`` raise ImportError for the duration of the
     ``with`` block only, simulating the stdlib-only pandoc subprocess where ``rebar`` is
-    not on the path. Scoped tightly (restored before any fixture teardown) and leaves
-    ``rebar_reconciler`` — a distinct top-level name — untouched, so already-imported
-    adapter modules keep working."""
+    not on the path. Scoped tightly (restored before any fixture teardown); the adapter
+    modules are imported before the block, so they keep working."""
     real_import = builtins.__import__
 
     def _fake(name, *args, **kwargs):
@@ -526,7 +525,7 @@ def _rebar_unimportable():
 
 
 def test_pandoc_timeout_degrades_when_rebar_unimportable() -> None:
-    from rebar_reconciler.adapters.jira_family import wiki_render
+    from rebar.reconciler.adapters.jira_family import wiki_render
 
     with _rebar_unimportable():
         result = wiki_render._pandoc_timeout()

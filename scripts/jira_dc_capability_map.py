@@ -49,10 +49,15 @@ if str(engine_dir()) not in sys.path:
     sys.path.insert(0, str(engine_dir()))
 
 # Import live vocabularies and limits so the map compares the harness with what ships now.
-from rebar_reconciler.adapters.jira.adf import _ADF_DESCRIPTION_LIMIT  # noqa: E402
-from rebar_reconciler.adapters.jira.comment_limits import _JIRA_COMMENT_MAX_CHARS  # noqa: E402
-from rebar_reconciler.adapters.jira_family.rich_text import WIKI_DESCRIPTION_LIMIT  # noqa: E402
-from rebar_reconciler.adapters.jira_family.value_maps import (  # noqa: E402
+from rebar.llm import gate_source  # noqa: E402
+from rebar.llm.config import LLMConfig  # noqa: E402
+from rebar.llm.contracts import register_contract  # noqa: E402
+from rebar.llm.errors import LLMError  # noqa: E402
+from rebar.llm.runner import RunRequest, get_runner  # noqa: E402
+from rebar.reconciler.adapters.jira.adf import _ADF_DESCRIPTION_LIMIT  # noqa: E402
+from rebar.reconciler.adapters.jira.comment_limits import _JIRA_COMMENT_MAX_CHARS  # noqa: E402
+from rebar.reconciler.adapters.jira_family.rich_text import WIKI_DESCRIPTION_LIMIT  # noqa: E402
+from rebar.reconciler.adapters.jira_family.value_maps import (  # noqa: E402
     JIRA_LABEL_MAX_CHARS,
     JIRA_SUMMARY_MAX_CHARS,
     LOCAL_PRIORITY_TO_JIRA,
@@ -60,12 +65,6 @@ from rebar_reconciler.adapters.jira_family.value_maps import (  # noqa: E402
     LOCAL_TYPE_TO_JIRA,
     RELATION_TO_JIRA_LINK,
 )
-
-from rebar.llm import gate_source  # noqa: E402
-from rebar.llm.config import LLMConfig  # noqa: E402
-from rebar.llm.contracts import register_contract  # noqa: E402
-from rebar.llm.errors import LLMError  # noqa: E402
-from rebar.llm.runner import RunRequest, get_runner  # noqa: E402
 
 _HARNESS_DOCKERFILE = _REPO_ROOT / "tests" / "external" / "live_jira_dc" / "Dockerfile"
 _DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")

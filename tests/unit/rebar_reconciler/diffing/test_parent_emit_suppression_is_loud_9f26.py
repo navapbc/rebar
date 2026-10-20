@@ -38,27 +38,14 @@ adds the missing SIGNAL, it does not add a write.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
-from types import ModuleType
 from typing import Any
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-_REC = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(name: str, path: Path) -> ModuleType:
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+_REC = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 class _Bindings:
@@ -139,7 +126,7 @@ def _diff(
     *,
     remote_parent_id: str | None = None,
 ) -> dict[str, Any]:
-    from rebar_reconciler.outbound_field_diff import diff_canonical_fields
+    from rebar.reconciler.outbound_field_diff import diff_canonical_fields
 
     return diff_canonical_fields(
         ticket,
@@ -373,8 +360,8 @@ def test_the_suppressed_parent_reaches_the_bridge_alert_store(tmp_path: Path) ->
     is only a signal if ``_emit_outbound_field_alerts`` files it. Mirrors the acd0 ``issuetype``
     precedent, which pins exactly this hop for the sibling case.
     """
-    run_differs = _load("run_differs_parent_drop_9f26", _REC / "run_differs.py")
-    alert_store = _load("alert_store_parent_drop_9f26", _REC / "alert_store.py")
+    run_differs = importlib.import_module("rebar.reconciler.run_differs")
+    alert_store = importlib.import_module("rebar.reconciler.alert_store")
 
     dropped: list[tuple[str, str]] = []
     _diff(

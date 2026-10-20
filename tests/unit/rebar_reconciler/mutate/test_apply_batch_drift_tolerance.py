@@ -8,10 +8,9 @@ benign writers refresh the pin and continue, while competing drift raises
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import subprocess
-import sys
 import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -20,15 +19,11 @@ import pytest
 from _subprocess_env import subprocess_env
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 def _load_applier():
-    spec = importlib.util.spec_from_file_location("applier_drift_tolerance", APPLIER_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["applier_drift_tolerance"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
@@ -185,7 +180,7 @@ def _make_committing_acli_module(root: Path, drift_subjects: list):
 
 def _make_real_head_concurrency_module() -> types.ModuleType:
     """Mock _concurrency whose snapshot_head is the REAL one (reads actual HEAD)."""
-    from rebar_reconciler import _concurrency as real_conc
+    from rebar.reconciler import _concurrency as real_conc
 
     mod = types.ModuleType("_concurrency_real_head")
     mod.snapshot_head = real_conc.snapshot_head  # type: ignore[attr-defined]

@@ -15,9 +15,9 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler.adapters.jira_datacenter import retry as _retry
-from rebar_reconciler.adapters.jira_datacenter import summary_executor as se
-from rebar_reconciler.operation_outcome import (
+from rebar.reconciler.adapters.jira_datacenter import retry as _retry
+from rebar.reconciler.adapters.jira_datacenter import summary_executor as se
+from rebar.reconciler.operation_outcome import (
     DelaySource,
     Disposition,
     FailureScope,
@@ -109,7 +109,7 @@ def test_executor_client_rejects_a_nonzero_session_retry():
 def test_executor_client_fails_closed_on_an_empty_pat():
     # An empty/missing PAT would build an anonymous client that silently writes without
     # auth; the executor must fail closed BEFORE constructing it (no factory call).
-    from rebar_reconciler._backend import BackendEnvError
+    from rebar.reconciler._backend import BackendEnvError
 
     called = {"n": 0}
 
@@ -182,7 +182,7 @@ def test_failed_initial_get_is_retryable_and_ends_before_any_put(poison_sleep):
 def test_permanent_http_error_on_initial_get_is_permanent_failure(poison_sleep):
     # A definitive HTTP error (translated to BackendHTTPError at the transport boundary) on the
     # initial GET is conclusive — replay would not help — so it ends permanent_failure.
-    from rebar_reconciler._backend import BackendHTTPError
+    from rebar.reconciler._backend import BackendHTTPError
 
     class _Http(_FakeJira):
         def issue(self, remote_id: str) -> Any:

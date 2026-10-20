@@ -95,7 +95,7 @@ def test_live_rich_text_direct_wire_probe(
     rendered HTML. Sent/raw/rendered diagnostics distinguish applier faults from DC
     storage or rendering faults.
     """
-    from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec
+    from rebar.reconciler.adapters.jira_family.rich_text import WikiTextCodec
 
     _local_id, key = bound_dc_issue
     dc_transport.project = jira_dc_project
@@ -225,7 +225,7 @@ def test_live_rich_text_both_sides_conflict_keeps_local(
     pass. The local body must win and a deduped
     ``outbound-field-conflict:<key>:description`` alert must preserve the remote evidence.
     """
-    from rebar_reconciler import alert_store
+    from rebar.reconciler import alert_store
 
     local_id, key = bound_dc_issue
     dc_transport.project = jira_dc_project

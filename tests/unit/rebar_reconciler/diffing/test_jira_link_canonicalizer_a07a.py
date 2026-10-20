@@ -12,24 +12,14 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
-import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-REC = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
+REC = REPO_ROOT / "src" / "rebar" / "reconciler"
 FIXTURE = REPO_ROOT / "tests" / "fixtures" / "jira" / "issuelinks_map.json"
-
-
-def _load(name: str, filename: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, REC / filename)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
 
 
 def _link(type_name: str, *, inward: str | None = None, outward: str | None = None) -> dict:
@@ -43,7 +33,7 @@ def _link(type_name: str, *, inward: str | None = None, outward: str | None = No
 
 @pytest.fixture(scope="module")
 def link_direction() -> ModuleType:
-    return _load("link_direction_a07a", "link_direction.py")
+    return importlib.import_module("rebar.reconciler.link_direction")
 
 
 @pytest.fixture(scope="module")
@@ -54,10 +44,10 @@ def captured_issuelinks() -> dict[str, list[dict]]:
 @pytest.fixture(params=("cloud", "dc"))
 def backend(request: pytest.FixtureRequest):
     if request.param == "cloud":
-        from rebar_reconciler.adapters.jira.backend import JiraBackend
+        from rebar.reconciler.adapters.jira.backend import JiraBackend
 
         return JiraBackend(transport=object())
-    from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+    from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
     return JiraDataCenterBackend(transport=object())
 
@@ -108,7 +98,7 @@ def test_backend_map_remote_links_delegates_to_core(
 ) -> None:
     sentinel = [("blocks", "DIG-42", "Blocks")]
     calls: list[dict[str, object]] = []
-    link_direction = importlib.import_module("rebar_reconciler.link_direction")
+    link_direction = importlib.import_module("rebar.reconciler.link_direction")
 
     def fake(remote_fields: dict[str, object]) -> list[tuple[str | None, str, str]]:
         calls.append(remote_fields)
@@ -123,8 +113,8 @@ def test_backend_map_remote_links_delegates_to_core(
 def test_cloud_and_dc_match_captured_vectors(
     captured_issuelinks: dict[str, list[dict]], link_direction: ModuleType
 ) -> None:
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
-    from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
     cloud = JiraBackend(transport=object())
     dc = JiraDataCenterBackend(transport=object())

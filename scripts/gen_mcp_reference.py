@@ -93,8 +93,6 @@ def _registrar_tools() -> dict[str, dict[str, str]]:
             allow_jira_sync=ms._allow_jira_sync,
             cap_workflow_payload=ms._cap_workflow_payload,
             bound_list_payload=ms._bound_list_payload,
-            MODE_CAPS=ms.MODE_CAPS,
-            Mode=ms.Mode,
             logger=ms.logger,
         )
         reg(m, ctx)

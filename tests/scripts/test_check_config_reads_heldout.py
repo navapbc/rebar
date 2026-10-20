@@ -249,7 +249,7 @@ def test_real_schema_markers_all_carry_pointers(gate):
 @pytest.mark.parametrize(
     ("field_name", "reader_hint"),
     [
-        # getattr dispatch — _engine/rebar_reconciler/_advisory_lock.py
+        # getattr dispatch — reconciler/_advisory_lock.py
         ("lock_lease_secs", "getattr"),
         # gate_enabled(root, "<key>", ...) string keys — _commands/gates.py
         ("require_plan_review_for_close", "gate_enabled"),

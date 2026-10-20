@@ -56,7 +56,7 @@ _skip = pytest.mark.skipif(not _live_jira_ready(), reason="no live Jira creds / 
 def _snapshot(work: Path, pass_id: str) -> dict[str, Any]:
     """The read-only Jira snapshot for the store's current mapping (writes nothing)."""
     engine_on_path()
-    from rebar_reconciler import fetcher
+    from rebar.reconciler import fetcher
 
     return fetcher.compute_snapshot(pass_id, work)
 

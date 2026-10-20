@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from rebar_reconciler import applier
+from rebar.reconciler import applier
 
 
 def _make_mutations(n: int) -> list:

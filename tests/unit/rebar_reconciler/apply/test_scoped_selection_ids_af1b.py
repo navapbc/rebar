@@ -9,22 +9,15 @@ target.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from typing import Any
 
 _ENGINE_DIR = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine"
-if str(_ENGINE_DIR) not in sys.path:  # pragma: no cover - import bootstrap
-    sys.path.insert(0, str(_ENGINE_DIR))
 
 
 def _load_helper() -> Any:
-    path = _ENGINE_DIR / "rebar_reconciler" / "ticket_planner.py"
-    spec = importlib.util.spec_from_file_location("_af1b_ticket_planner", path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = importlib.import_module("rebar.reconciler.ticket_planner")
     return mod.scoped_selection_ids
 
 

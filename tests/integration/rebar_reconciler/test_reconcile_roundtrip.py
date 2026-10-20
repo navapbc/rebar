@@ -27,13 +27,12 @@ The convergence assertion is the same in every case: after the round-trip the
 inbound differ emits NO change for the field under test (and, where relevant,
 the outbound differ emits none either), so the bridge reaches a fixed point.
 
-Loaded via ``spec_from_file_location`` per the reconciler test-tree convention.
+The differs are imported as ordinary ``rebar.reconciler`` submodules.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 
@@ -42,80 +41,29 @@ import pytest
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    cached = sys.modules.get(name)
-    if cached is not None and getattr(cached, "__file__", None) == str(path):
-        return cached
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
-def test_by_path_loader_preserves_module_identity_for_the_same_source(tmp_path: Path) -> None:
-    """One module object per canonical name/source pair; a different source replaces it."""
-    key = "_roundtrip_loader_identity_probe"
-    first_path = tmp_path / "first.py"
-    second_path = tmp_path / "second.py"
-    first_path.write_text("MARKER = 'first'\n", encoding="utf-8")
-    second_path.write_text("MARKER = 'second'\n", encoding="utf-8")
-
-    try:
-        first = _load_module(key, first_path)
-        same = _load_module(key, first_path)
-
-        assert same is first
-        assert sys.modules[key] is first
-
-        replacement = _load_module(key, second_path)
-
-        assert replacement is not first
-        assert replacement.MARKER == "second"
-        assert sys.modules[key] is replacement
-    finally:
-        sys.modules.pop(key, None)
+RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 # Ticket 4af8: the Jira->remote field mapper (``_map_local_to_jira_fields``) is no longer
 # re-exported on ``outbound_differ`` (the core differ receives it by injection). Load it
-# from its owning vendor leaf for the send-shape helper below — LAZILY, under a flat
-# sys.modules key, so importing this test module at collection time does not exec the leaf
-# (whose ``from rebar_reconciler.adapters.jira.adf import ...`` would bind the engine
-# ``rebar_reconciler`` package name and break the test-package conftest resolution during
-# full-tree collection).
-_OUTBOUND_FIELDS: ModuleType | None = None
-
-
+# from its owning vendor leaf for the send-shape helper below.
 def _outbound_fields() -> ModuleType:
-    global _OUTBOUND_FIELDS
-    if _OUTBOUND_FIELDS is None:
-        _OUTBOUND_FIELDS = _load_module(
-            "_4af8_roundtrip_outbound_fields",
-            RECONCILER_DIR / "adapters" / "jira" / "outbound_fields.py",
-        )
-    return _OUTBOUND_FIELDS
+    return importlib.import_module("rebar.reconciler.adapters.jira.outbound_fields")
 
 
 @pytest.fixture(scope="module")
 def adf() -> ModuleType:
-    return _load_module(
-        "rebar_reconciler.adapters.jira.adf", RECONCILER_DIR / "adapters" / "jira" / "adf.py"
-    )
+    return importlib.import_module("rebar.reconciler.adapters.jira.adf")
 
 
 @pytest.fixture(scope="module")
 def outbound() -> ModuleType:
-    return _load_module("outbound_differ", RECONCILER_DIR / "outbound_differ.py")
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 @pytest.fixture(scope="module")
 def inbound() -> ModuleType:
-    return _load_module("inbound_differ", RECONCILER_DIR / "inbound_differ.py")
+    return importlib.import_module("rebar.reconciler.inbound_differ")
 
 
 # ---------------------------------------------------------------------------

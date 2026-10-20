@@ -31,8 +31,8 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler.binding_lifecycle import BindingLifecycle
-from rebar_reconciler.binding_repository import BindingRepository
+from rebar.reconciler.binding_lifecycle import BindingLifecycle
+from rebar.reconciler.binding_repository import BindingRepository
 
 
 def _tracker(root: Path) -> Path:
@@ -397,7 +397,7 @@ def test_facade_delegates_and_keeps_its_observable_contract(tmp_path: Path) -> N
     """The reconciler, adapters and `bridge fsck` all bind to `BindingStore`. Extraction is
     only safe if the facade's answers are unchanged, so this exercises the same transitions
     through the real public entry point and reloads them."""
-    from rebar_reconciler.binding_store import BindingStore
+    from rebar.reconciler.binding_store import BindingStore
 
     store = BindingStore(_tracker(tmp_path))
     store.bind_pending("loc-P")
@@ -426,7 +426,7 @@ def test_facade_rekey_falls_through_to_absence_when_the_key_is_unchanged(
     fall-through on the facade, and delegates only the re-key mutation. A same-key answer
     must still record an absence exactly as `note_absent` always did — the branch outcomes
     do not move in this slice."""
-    from rebar_reconciler.binding_store import BindingStore
+    from rebar.reconciler.binding_store import BindingStore
 
     class _SameKeyClient:
         def get_issue_by_rest(self, jira_id: str) -> dict[str, Any]:
@@ -446,7 +446,7 @@ def test_facade_rekey_falls_through_to_absence_when_the_key_is_unchanged(
 def test_facade_rekey_reports_a_move_and_updates_both_indexes(tmp_path: Path) -> None:
     """A DIFFERENT current key means the issue moved: report PRESENT (True), re-key, and do
     not record an absence."""
-    from rebar_reconciler.binding_store import BindingStore
+    from rebar.reconciler.binding_store import BindingStore
 
     class _MovedClient:
         def get_issue_by_rest(self, jira_id: str) -> dict[str, Any]:
@@ -479,7 +479,7 @@ def test_facade_rekey_degrades_to_absence_without_a_usable_client(
     """DEGRADES TO TODAY'S BEHAVIOUR in every case it cannot disprove an absence. That is
     what makes the move-detection safe on the shared Cloud path and on an unmigrated store:
     it can only ADD a save, never skip an absence it did not disprove."""
-    from rebar_reconciler.binding_store import BindingStore
+    from rebar.reconciler.binding_store import BindingStore
 
     store = BindingStore(_tracker(tmp_path))
     store.bind_confirm("loc-A", "DIG-A")
@@ -496,7 +496,7 @@ def test_facade_rekey_degrades_to_absence_for_a_legacy_entry_with_no_numeric_id(
 ) -> None:
     """Every pre-7c26 binding has no captured id, so the move question cannot be asked and
     the absence is recorded unchanged."""
-    from rebar_reconciler.binding_store import BindingStore
+    from rebar.reconciler.binding_store import BindingStore
 
     class _Client:
         def get_issue_by_rest(self, jira_id: str) -> dict[str, Any]:

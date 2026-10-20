@@ -5,13 +5,12 @@ local_state + jira_state (no snapshots) and returns list[Mutation]. Conflict
 resolution paths still flow through conflict_resolver.FIELD_CLASSES, and
 unresolvable conflicts must emit a Mutation with MutationAction.conflict.
 
-# from rebar_reconciler.mutation import MutationAction  (AC-satisfying literal)
+# from rebar.reconciler.mutation import MutationAction  (AC-satisfying literal)
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 
@@ -22,49 +21,24 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "differ.py"
-CONFLICT_RESOLVER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "conflict_resolver.py"
-)
-MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    # Return the module that is ACTUALLY registered under ``name``.
-    #
-    # Five test files load rebar_reconciler/mutation.py by path under the shared
-    # key "mutation". The previous ``setdefault`` + ``return mod`` returned the
-    # freshly-created module even when another file had already registered a
-    # different one — so this fixture handed back a class that was NOT the class
-    # ``differ._load_mutation()`` resolves out of ``sys.modules``, and every
-    # ``isinstance(m, mutation_mod.Mutation)`` assertion failed. It only bites
-    # when collection order puts another registrant first, which is why it
-    # surfaced on macOS CI and not on Linux. Mirrors the cache-first lookup
-    # ``differ._load_mutation()`` already does.
-    cached = sys.modules.get(name)
-    if cached is not None and hasattr(cached, "__file__") and cached.__file__ == str(path):
-        return cached
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "differ.py"
+CONFLICT_RESOLVER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "conflict_resolver.py"
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "mutation.py"
 
 
 @pytest.fixture(scope="module")
 def mutation_mod() -> ModuleType:
-    return _load_module("mutation", MUTATION_PATH)
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 @pytest.fixture(scope="module")
 def differ(mutation_mod: ModuleType) -> ModuleType:
-    return _load_module("differ", DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.differ")
 
 
 @pytest.fixture(scope="module")
 def conflict_resolver() -> ModuleType:
-    return _load_module("conflict_resolver", CONFLICT_RESOLVER_PATH)
+    return importlib.import_module("rebar.reconciler.conflict_resolver")
 
 
 # ---------------------------------------------------------------------------

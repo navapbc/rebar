@@ -101,7 +101,7 @@ def test_a_malformed_config_propagates_rather_than_degrading_to_env_only(monkeyp
     test asserted, so adding a well-meaning fallback would have gone unnoticed.
     """
     import rebar.config as _config
-    from rebar_reconciler.adapters.jira_datacenter import settings as _settings
+    from rebar.reconciler.adapters.jira_datacenter import settings as _settings
 
     def _raise(*_a, **_k):
         raise ConfigError("reconciler.base_url: malformed value")
@@ -126,7 +126,7 @@ def test_the_transport_no_longer_carries_a_resolved_statuses_attribute() -> None
 
     Pinned rather than simply deleted: a silent reintroduction would recreate a field that
     looks configurable, is documented as such, and changes nothing."""
-    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+    from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
     transport = JiraDataCenterTransport(client=object(), project="X")
     assert not hasattr(transport, "_resolved_statuses")
@@ -139,7 +139,7 @@ def test_the_transport_no_longer_carries_a_resolved_statuses_attribute() -> None
 
 def test_settings_no_longer_expose_resolved_statuses() -> None:
     """The NamedTuple member went with the transport plumbing it existed to feed."""
-    from rebar_reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
+    from rebar.reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
 
     assert "resolved_statuses" not in JiraDataCenterSettings._fields
 
@@ -166,7 +166,7 @@ def test_a_tls_verification_failure_names_ca_bundle_and_is_not_retried(monkeypat
     pytest.importorskip("requests")
     from requests.exceptions import SSLError
 
-    from rebar_reconciler.adapters.jira_datacenter import transport as _t
+    from rebar.reconciler.adapters.jira_datacenter import transport as _t
 
     calls = {"n": 0}
 
@@ -195,8 +195,8 @@ def test_allow_insecure_does_not_relax_certificate_verification(monkeypatch) -> 
     checks" — and nothing asserted otherwise. The live harness sets exactly this flag, so if it
     did relax verification the harness would be silently exercising an unverified path.
     """
-    from rebar_reconciler.adapters.jira_datacenter import transport as _t
-    from rebar_reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
+    from rebar.reconciler.adapters.jira_datacenter import transport as _t
+    from rebar.reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
 
     captured: dict = {}
 

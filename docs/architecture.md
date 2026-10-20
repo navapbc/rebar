@@ -15,7 +15,7 @@ over one git-backed store.
                             │
               ┌─────────────┼───────────────────────────┐
               ▼             ▼                            ▼
-     append+commit    rebar.reducer              rebar_reconciler/
+     append+commit    rebar.reducer              rebar.reconciler
      (locked write     (pure replay → state)      (Jira bidirectional sync;
       path, I5)                                    runs as a subprocess)
                             │
@@ -28,7 +28,7 @@ over one git-backed store.
 - **The three interfaces** are thin layers over one in-process core:
   - **CLI** (`src/rebar/cli.py` → `rebar._cli`) — an in-process argparse CLI that
     routes each subcommand to its in-process handler; intercepts `reconcile` to
-    route it to `python -m rebar_reconciler`.
+    route it to `python -m rebar.reconciler`.
   - **Library** (`src/rebar/__init__.py`) — a thin public-API namespace that
     re-exports typed in-process functions from the topical `_lib_*` submodules
     (`_lib_writes` / `_lib_gates` / `_lib_reads` / `_lib_ops`) over
@@ -76,9 +76,9 @@ over one git-backed store.
     detection. Excludes `session_log` tickets from the dependency graph (they
     carry non-blocking links only and never block/unblock work); `deps` on a
     `session_log` itself still resolves its own links.
-  - **Reconciler** (`rebar_reconciler/`, shipped as `_engine/` package data) —
+  - **Reconciler** (`src/rebar/reconciler/`, the `rebar.reconciler` subpackage) —
     level-triggered, bidirectional Jira sync, launched as a subprocess
-    (`python -m rebar_reconciler`); the one component with a grandfathered
+    (`python -m rebar.reconciler`); the one component with a grandfathered
     cross-client advisory lock — a single-writer-by-design pass-lock on the
     self-healing `refs/reconciler/*` bare-ref CAS lock (the legacy tickets-branch
     `.reconciler-pass-lock` `file` backend + the `lock_backend` selector were removed
@@ -136,7 +136,7 @@ ADR 0100 remains the historical rationale for this boundary, including the canon
 [ADR 0103](adr/0103-reconciler-operation-coordination.md) records the operation-coordination boundary implemented by epic RP-03 (`unfearful-dejected-verdin`). The outbound mutate path is a one-way dependency chain — **planner → coordinator → adapter** — and each layer depends only on the one below it, never upward:
 
 - **Planner.** The differ/planning layer produces provider-neutral `TicketPlan`s (the desired-state deltas arbitrated by the snapshot, three-way-merge, and echo-suppression contracts of ADRs 0004/0026/0029). It decides *what* the desired state is and emits typed mutations; it holds no retry, fuse, or transport knowledge.
-- **Coordinator.** `rebar_reconciler.batch_dispatch.coordinate_and_fuse` (over `rebar_reconciler.coordinator.coordinate`) owns *how* one logical operation is invoked: the single bounded `retry_budget.RetryBudget` (at most three physical invocations and 15s cumulative sleep), the observe-before-replay decision after an ambiguous commit, and the pass fuse that contains same-scope failure. It routes each `(direction, action)` to exactly one typed owner (`route_for`) with no dual-send and no class-name/duck dispatch, and projects results onto the five-bucket `CutoverReport`.
+- **Coordinator.** `rebar.reconciler.batch_dispatch.coordinate_and_fuse` (over `rebar.reconciler.coordinator.coordinate`) owns *how* one logical operation is invoked: the single bounded `retry_budget.RetryBudget` (at most three physical invocations and 15s cumulative sleep), the observe-before-replay decision after an ambiguous commit, and the pass fuse that contains same-scope failure. It routes each `(direction, action)` to exactly one typed owner (`route_for`) with no dual-send and no class-name/duck dispatch, and projects results onto the five-bucket `CutoverReport`.
 - **Adapter.** The provider adapter (`adapters/jira`, `adapters/jira_datacenter`) performs a single physical, as-atomic-as-the-provider-allows operation and reports a provider-neutral `AtomicSignal`/`OperationOutcome`. It owns venue serialization (Cloud ADF vs DC wiki on the description path; summary is venue-agnostic) but **no retry policy, no fuse, and no cross-operation state**.
 
 **Versioned output.** One logical operation resolves to one `operation_outcome.OperationOutcome` — a frozen, provider-neutral value with a stable `logical_id` across physical invocations, bounded and allowlisted diagnostics (routed through the ADR 0041 sanitization seam), and canonical bytes produced only through the `rebar._store.canonical` seam, so equivalent outcomes serialize byte-identically. Outcomes carry an additive, versioned envelope; the eleven `Disposition` values project onto the five stable pass buckets (`applied, recovered, deferred, failed, skipped`) that sum exactly to the mutation count. Adding a field is additive and never changes existing mutation bytes or the canonical hash.
@@ -147,7 +147,7 @@ ADR 0100 remains the historical rationale for this boundary, including the canon
 
 [ADR 0107](adr/0107-reconciler-typed-mutation-payload-contract.md) records the
 `Mutation.payload` contract: ten typed, `Mapping`-compatible dataclasses in
-`rebar_reconciler/mutation_payloads.py` (one per live `(direction, action)`
+`reconciler/mutation_payloads.py` (one per live `(direction, action)`
 combination — `OutboundCreatePayload`, `OutboundUpdatePayload`,
 `OutboundDeletePayload`, `OutboundProbePayload`, `OutboundConflictPayload`,
 `InboundCreatePayload`, `InboundUpdatePayload`, `InboundCleanLabelPayload`,
@@ -202,8 +202,8 @@ conflated — a recurring confusion for agents scoping bulk-write work:
    writes through here. Default granularity is **one event = one commit**; a few
    inline cores (claim, delete, `rebar store compact --all`) already stage several event files
    into a single commit.
-2. **The Jira reconciler** — `rebar_reconciler/` (shipped as `_engine/` package
-   data) — a **bridge** that syncs the local store ↔ Jira. It is a *client* of the
+2. **The Jira reconciler** — `rebar.reconciler` (`src/rebar/reconciler/`) — a
+   **bridge** that syncs the local store ↔ Jira. It is a *client* of the
    store, not the store itself.
 
 **What they share:** only the low-level single-writer lock (`rebar._store.lock`,
@@ -228,7 +228,7 @@ writes (import/export/migration), the batch-write primitive belongs in
 primitive out of, the reconciler.
 
 **The field-symmetry registration contract.** Every reconciled field must declare
-its symmetry class in `rebar_reconciler/_field_contract.py` — `bidirectional`
+its symmetry class in `reconciler/_field_contract.py` — `bidirectional`
 (value codec round-trips on its canonical preimages; declared lossy edges only),
 `add_wins` (a value added and removed in the same pass stays added — the reducer's
 intra-event TAG_DELTA contract), or `one_way_gated` (removals propagate to the peer
@@ -250,40 +250,38 @@ local store commit-batch; *sync* = push/pull of the `tickets` branch
 
 ### Python package layout & the engine import boundary
 
-The library, CLI, MCP server, and all command/read/write logic are the `rebar`
-package, in-process. The `rebar/_engine/` directory ships as package **data**
-holding the genuine subprocess tooling: the `rebar_reconciler` package,
-`jira-capability-probe.py`, and the alias `resources/` wordlist. The rule (ticket
-`fare-rant-clasp`, Rec 5) is **the in-process library path never puts a generic
-top-level name on `sys.path`**:
+The library, CLI, MCP server, all command/read/write logic, and the Jira reconciler
+are the `rebar` package. The `rebar/_engine/` directory ships as package **data**
+holding only `jira-capability-probe.py` and the alias `resources/` wordlist. The rule
+(ticket `fare-rant-clasp`, Rec 5) is **nothing puts a generic top-level name on
+`sys.path`**:
 
-- **In-process (everything but the reconciler + probe).** The replay engine and
-  the read/write surface are real subpackages: `rebar.reducer`, `rebar.graph`,
-  `rebar._commands`, `rebar._store`, and `rebar._engine_support.*` (reads,
-  resolver, output, gates, …). Nothing inserts the engine dir onto `sys.path`, so
-  after `import rebar` a bare `import rebar_reconciler` (or any `_engine/` module)
-  fails — guarded by
+- **Ordinary subpackages.** The replay engine, the read/write surface, and the
+  reconciler are real subpackages: `rebar.reducer`, `rebar.graph`,
+  `rebar._commands`, `rebar._store`, `rebar._engine_support.*` (reads, resolver,
+  output, gates, …), and `rebar.reconciler`. Nothing inserts the engine dir onto
+  `sys.path`, so after `import rebar` a bare `import rebar_reconciler` (the
+  pre-move top-level name) or any `_engine/` module fails — guarded by
   `tests/unit/test_engine_dir.py::test_library_path_exposes_no_generic_top_level_engine_names`.
-- **Subprocess (the reconciler + Jira probe).** `engine_env()` is the ONE place
-  the engine dir goes on an import path (`PYTHONPATH`), scoped to the subprocess
-  launches `python -m rebar_reconciler` and `jira-capability-probe.py`, so the
-  top-level `rebar_reconciler` package resolves there. It also pins `REBAR_ROOT`
-  (the single repo-root override). The alias wordlist and the in-process ticket-reader CLI are NOT
-  pinned — subprocesses self-resolve them (`rebar.reducer._alias` resolves the
-  bundled wordlist; the reconciler and `validate` call `rebar._engine.in_process_cli`).
+- **Subprocesses (the reconciler pass + Jira probe).** The library launches
+  `python -m rebar.reconciler` and `jira-capability-probe.py` with `sys.executable`,
+  so both resolve `rebar.reconciler` from the parent's import path. `engine_env()`
+  adds nothing to `PYTHONPATH`; it only pins `REBAR_ROOT` (the single repo-root
+  override). The alias wordlist and the in-process ticket-reader CLI are NOT pinned —
+  subprocesses self-resolve them (`rebar.reducer._alias` resolves the bundled
+  wordlist; the reconciler and `validate` call `rebar._engine.in_process_cli`).
 
-The **reconciler** (`rebar_reconciler/`) stays in the engine dir: the library only
-ever reaches it as a subprocess (`python -m rebar_reconciler`) or by loading a
-single file by path (`mode.py` in `mcp_server.py`), never as an in-process package
-import — so it leaks no generic name onto the library path. ACLI integration lives
-in the Jira vendor-adapter sub-package (ADR 0035 §(c)) at
-`rebar_reconciler/adapters/jira/acli.py`, reached via ordinary
-`from rebar_reconciler.adapters.jira import acli` package imports.
+The **reconciler** (`src/rebar/reconciler/`) is imported like any other `rebar`
+subpackage: modules import their siblings as `rebar.reconciler.<module>`, and
+callers outside it (`_lib_ops`, `_bridge_commands`, `_bridge_runner`, the bridge
+repair and fsck commands) import it directly. ACLI integration lives in the Jira
+vendor-adapter sub-package (ADR 0035 §(c)) at `reconciler/adapters/jira/acli.py`,
+reached via `from rebar.reconciler.adapters.jira import acli`.
 
 #### Which tracker the reconciler drives — `reconciler.backend`
 
 The reconciler is not Jira-Cloud-only. `[tool.rebar.reconciler].backend` selects the vendor
-adapter through the in-tree registry (`rebar_reconciler._backend_registry.select_backend`,
+adapter through the in-tree registry (`rebar.reconciler._backend_registry.select_backend`,
 ADR 0035 §(d)); an unknown key raises `BackendRegistryError` naming the registered keys.
 Two keys exist today:
 
@@ -546,7 +544,7 @@ binding unchanged: the two monkeypatch welds in the test suite (`prompts._catalo
 `prompts._prompt_file`) sit on the resolver side and were deliberately not moved. The
 seam is pinned by `tests/unit/test_prompt_model_module_seam.py`.
 
-`src/rebar/_engine/rebar_reconciler/applier.py` was **split** along its
+`src/rebar/reconciler/applier.py` was **split** along its
 dispatch/handlers seam (epic 5ca8 / `self-waltz-ace`): the per-action batch
 orchestration that wraps `batch_dispatch`'s `create_one`/`update_one`/`delete_one`
 (REST-budget counting on create; the 404 / assignee soft-fails, sub-op telemetry,
@@ -562,7 +560,7 @@ seams stay resident in `applier` (the test suite patches them there);
 imports the handlers back without a cycle. This brought `applier.py` back under the
 soft cap (dropped from the allowlist).
 
-`src/rebar/_engine/rebar_reconciler/outbound_differ.py` was **split** along its
+`src/rebar/reconciler/outbound_differ.py` was **split** along its
 three differ seams (epic 5ca8 / `unfed-liner-arson`): the comment-diff cluster
 (`_diff_comments` + `_normalize_comment_body`/`_decorate_outbound_comment`/
 `_map_comments_for_create`/`_is_machine_marker_comment`) moved to
@@ -596,7 +594,7 @@ lazy wrapper that delegates to `reads_cli.main` for backward compatibility (avoi
 import cycle).
 
 Files in the 500–800 band (`_commands/transition.py`, `_commands/composer.py`,
-`_engine_support/next_batch.py`, `llm/runner.py`, and several `rebar_reconciler/`
+`_engine_support/next_batch.py`, `llm/runner.py`, and several `reconciler/`
 modules — `apply_inbound.py`, `_advisory_lock.py`, `acli.py`, `inbound_differ.py`,
 `differ.py`, `batch_dispatch.py`, `acli_cli_ops.py`) are at the ceiling, not over
 it — watch, don't split preemptively.
@@ -754,20 +752,22 @@ promoting a package must not be treated as evidence its port boundaries are type
 1. **`client: Any`.** Satisfies `disallow_untyped_defs`. A call to any member —
    declared or not — is accepted. Promoting a package by spraying `Any` closes the
    ratchet ticket and changes nothing.
-2. **A port annotation imported through `rebar_reconciler.`.** `rebar_reconciler` is not
-   an importable distribution — it is a top-level name created at runtime by injecting
-   `src/rebar/_engine` onto `sys.path`. mypy is never told about that injection, and
-   `ignore_missing_imports = true` is set above, so `from rebar_reconciler._backend import
-   TicketTransport` resolves to `Any`. `reveal_type` on such a parameter prints `Any`,
-   and a call to a bogus member produces no error. The **relative** form
-   (`from ._backend import TicketTransport`) resolves to the real type and restores
-   attribute checking against the same class, metaclass and all.
+2. **A port annotation imported through a name mypy cannot resolve.** Before story
+   gunshy-symmetric-barnacle the reconciler was the top-level name `rebar_reconciler`,
+   created at runtime by injecting `src/rebar/_engine` onto `sys.path`. mypy was never
+   told about that injection, and `ignore_missing_imports = true` is set above, so
+   `from rebar_reconciler._backend import TicketTransport` resolved to `Any`:
+   `reveal_type` on such a parameter printed `Any`, and a call to a bogus member produced
+   no error. Now that the package is `rebar.reconciler`, both the absolute
+   (`from rebar.reconciler._backend import TicketTransport`) and the relative
+   (`from ._backend import TicketTransport`) forms resolve to the real type; any
+   other unresolvable spelling still degrades to `Any` silently.
 
 Route 2 is the dangerous one: the diff shows a correct-looking port annotation, and
 `make typecheck` stays green because it was never going to say anything. This is the
 enabling condition behind [rebar:a357-b747-ece9-4cf5], where a writing reconcile pass
 crashed on `set_entity_property` — a method the core calls from three sites and the port
 never declared. `tests/unit/rebar_reconciler/test_transport_param_typing_cc77.py` fails
-on all three spellings (bare, `Any`, shim-path) for the core reconciler's
+on the bare and `Any` spellings for the core reconciler's
 `client`/`transport` parameters, so a later "annotate it to pass the ratchet" change
 cannot reintroduce the blindness.

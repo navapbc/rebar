@@ -8,6 +8,7 @@ MCP callers never write to stdout/stderr.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import subprocess
@@ -145,9 +146,7 @@ def _is_valid_pause_marker(stderr: str) -> bool:
 
 def _dispositions() -> tuple[Any, ...]:
     """Load the reconciler classification once through its supported package seam."""
-    from rebar._lib_ops import _engine_module
-
-    orchestrator = _engine_module("rebar_reconciler.__main__")
+    orchestrator = importlib.import_module("rebar.reconciler.__main__")
     return tuple(orchestrator._Disposition)
 
 

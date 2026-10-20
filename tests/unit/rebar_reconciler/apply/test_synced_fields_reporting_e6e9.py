@@ -20,7 +20,6 @@ against a stub transport, asserting the reported set on each arm.
 
 from __future__ import annotations
 
-import sys
 import urllib.error
 from pathlib import Path
 from typing import Any
@@ -28,12 +27,10 @@ from typing import Any
 import pytest
 
 _ENGINE = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine"
-if str(_ENGINE) not in sys.path:  # pragma: no cover - import bootstrap
-    sys.path.insert(0, str(_ENGINE))
 
-from rebar_reconciler._errors import JiraAPIError  # noqa: E402
-from rebar_reconciler.apply_handlers import BatchApplyContext, handle_update  # noqa: E402
-from rebar_reconciler.dispatch_one import update_one  # noqa: E402
+from rebar.reconciler._errors import JiraAPIError  # noqa: E402
+from rebar.reconciler.apply_handlers import BatchApplyContext, handle_update  # noqa: E402
+from rebar.reconciler.dispatch_one import update_one  # noqa: E402
 
 _ALL_FIVE = {
     "summary": "pushed title",

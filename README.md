@@ -274,9 +274,9 @@ uv sync --extra dev
 
 > **Packaging note — why rebar installs *unpacked* to disk.** The library, CLI,
 > MCP server, and the whole read/write core run **in-process** in Python. The one
-> component that runs as a subprocess is the Jira **reconciler**, which ships under
-> `src/rebar/_engine/` as package **data** (`python -m rebar_reconciler`, plus the
-> `jira-capability-probe.py` script and the alias wordlist): it is launched and
+> component that runs as a subprocess is the Jira **reconciler** pass (`python -m
+> rebar.reconciler`); the `jira-capability-probe.py` script and the alias wordlist
+> ship under `src/rebar/_engine/` as package **data** and are launched and
 > read from the filesystem as real on-disk files, so the package must be installed
 > unpacked to a real directory and **zipimport / zip-safe bundles (zipapp, shiv,
 > PEX, Lambda zips) are unsupported**. Every standard install satisfies this:

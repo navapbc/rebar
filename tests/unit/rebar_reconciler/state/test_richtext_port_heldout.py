@@ -10,18 +10,18 @@ from pathlib import Path
 
 import pytest
 
-from rebar_reconciler.adapters.jira import adf, comment_limits
-from rebar_reconciler.adapters.jira.backend import JiraBackend
-from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
-from rebar_reconciler.adapters.jira_family.rich_text import cutover_clients
-from rebar_reconciler.outbound_comments import (
+from rebar.reconciler.adapters.jira import adf, comment_limits
+from rebar.reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.adapters.jira.rich_text_codec import AdfCodec
+from rebar.reconciler.adapters.jira_family.rich_text import cutover_clients
+from rebar.reconciler.outbound_comments import (
     _decorate_outbound_comment,
     fit_preserving_marker,
 )
 
 pytestmark = pytest.mark.unit
 
-_REC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_REC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler"
 
 _ADF_HELLO = {
     "type": "doc",

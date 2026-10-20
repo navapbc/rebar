@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from rebar_reconciler import applier, mode, request
+from rebar.reconciler import applier, mode, request
 
 
 def _mutations() -> list[dict]:

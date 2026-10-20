@@ -16,23 +16,13 @@ Follows the reconciler test-tree loader convention (spec_from_file_location).
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 
-_SRC_DIR = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_SRC_DIR = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler"
 
 
-def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, _SRC_DIR / filename)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-BindingStore = _load("_binding_store_for_unbind", "binding_store.py").BindingStore
+BindingStore = importlib.import_module("rebar.reconciler.binding_store").BindingStore
 
 
 def _store(tmp_path: Path) -> BindingStore:

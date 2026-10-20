@@ -12,10 +12,10 @@ import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-MAPPING_CONFIG = REPO_ROOT / "src/rebar/_engine/rebar_reconciler/mapping_config.py"
-ADAPTERS_INIT = REPO_ROOT / "src/rebar/_engine/rebar_reconciler/adapters/__init__.py"
-APPLY_OUTBOUND = REPO_ROOT / "src/rebar/_engine/rebar_reconciler/apply_outbound.py"
-OUTBOUND_DIFFER = REPO_ROOT / "src/rebar/_engine/rebar_reconciler/outbound_differ.py"
+MAPPING_CONFIG = REPO_ROOT / "src/rebar/reconciler/mapping_config.py"
+ADAPTERS_INIT = REPO_ROOT / "src/rebar/reconciler/adapters/__init__.py"
+APPLY_OUTBOUND = REPO_ROOT / "src/rebar/reconciler/apply_outbound.py"
+OUTBOUND_DIFFER = REPO_ROOT / "src/rebar/reconciler/outbound_differ.py"
 JIRA_SYNC_SETUP = REPO_ROOT / "docs/jira-sync-setup.md"
 ENV_VARS = REPO_ROOT / "docs/env-vars.md"
 

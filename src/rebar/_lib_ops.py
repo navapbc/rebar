@@ -16,12 +16,10 @@ import importlib
 import importlib.util
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from rebar import config
-from rebar._engine import engine_dir
 from rebar._errors import RebarError
 
 if TYPE_CHECKING:
@@ -116,7 +114,7 @@ def bridge_projects_list(*, repo_root: str | os.PathLike[str] | None = None) -> 
     from rebar._operation_config import compose_and_bind_operation_snapshot
 
     with compose_and_bind_operation_snapshot(repo_root=repo_root):
-        store = _engine_module("rebar_reconciler.projects_store")
+        store = importlib.import_module("rebar.reconciler.projects_store")
         root = Path(config.repo_root(repo_root))
         return store.read_projects(root)
 
@@ -134,7 +132,7 @@ def bridge_projects_set(
     from rebar._operation_config import compose_and_bind_operation_snapshot
     from rebar._store import lock, push
 
-    store = _engine_module("rebar_reconciler.projects_store")
+    store = importlib.import_module("rebar.reconciler.projects_store")
     root = Path(config.repo_root(repo_root))
     tracker = config.tracker_dir(repo_root)
     with compose_and_bind_operation_snapshot(repo_root=repo_root):
@@ -156,7 +154,7 @@ def bridge_projects_remove(key: str, *, repo_root: str | os.PathLike[str] | None
     from rebar._operation_config import compose_and_bind_operation_snapshot
     from rebar._store import lock, push
 
-    store = _engine_module("rebar_reconciler.projects_store")
+    store = importlib.import_module("rebar.reconciler.projects_store")
     root = Path(config.repo_root(repo_root))
     tracker = config.tracker_dir(repo_root)
     with compose_and_bind_operation_snapshot(repo_root=repo_root):
@@ -169,21 +167,6 @@ def bridge_projects_remove(key: str, *, repo_root: str | os.PathLike[str] | None
         except ValueError as exc:
             raise _invalid_bridge(str(exc)) from exc
         push.commit_and_push_tickets_branch(tracker, message="bridge: update projects mapping")
-
-
-def _engine_module(module_name: str):
-    """Import one embedded reconciler module under its supported package name."""
-    package = "rebar_reconciler"
-    if package not in sys.modules:
-        package_dir = engine_dir() / package
-        spec = importlib.util.spec_from_file_location(
-            package, package_dir / "__init__.py", submodule_search_locations=[str(package_dir)]
-        )
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[package] = module
-        spec.loader.exec_module(module)
-    return importlib.import_module(module_name)
 
 
 def _invalid_bridge(message: str) -> RebarError:
@@ -215,7 +198,7 @@ def _bridge_selection(
         return None, None
     # resolve_selection/SelectionError moved to pass_support.py (ticket
     # piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
-    helpers = _engine_module("rebar_reconciler.pass_support")
+    helpers = importlib.import_module("rebar.reconciler.pass_support")
     try:
         resolved = helpers.resolve_selection(root, tuple(item.strip() for item in selected))
     except helpers.SelectionError as exc:
@@ -238,8 +221,8 @@ def _bridge_run(
     with compose_and_bind_operation_snapshot(repo_root=repo_root):
         root = Path(config.repo_root(repo_root))
         selection_kind, selection_ids = _bridge_selection(root, only, exclude)
-        orchestrator = _engine_module("rebar_reconciler.__main__")
-        mode_mod = _engine_module("rebar_reconciler.mode")
+        orchestrator = importlib.import_module("rebar.reconciler.__main__")
+        mode_mod = importlib.import_module("rebar.reconciler.mode")
         result = orchestrator.run_pass_result(
             repo_root=root,
             target_mode=mode_mod.Mode.DRY_RUN if route == "preview" else mode_mod.Mode.LIVE,
@@ -307,7 +290,7 @@ def bridge_status(
 
     with compose_and_bind_operation_snapshot(repo_root=repo_root):
         root = Path(config.repo_root(repo_root))
-        last_pass = _engine_module("rebar_reconciler.last_pass")
+        last_pass = importlib.import_module("rebar.reconciler.last_pass")
         try:
             result = last_pass.snapshot(
                 root,
@@ -343,7 +326,7 @@ def bridge_pause(reason: str, *, repo_root: str | os.PathLike[str] | None = None
     if who is None:
         raise RebarError("bridge pause requires a configured git user.email")
     paused_at = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
-    ref_lock = _engine_module("rebar_reconciler._ref_lock")
+    ref_lock = importlib.import_module("rebar.reconciler._ref_lock")
     try:
         ref_lock.set_pause(
             root,
@@ -374,7 +357,7 @@ def _bridge_resume_operation(
     """Internal resume result plus whether an active gate was actually cleared."""
     root = Path(config.repo_root(repo_root))
     remote = _bridge_remote(root)
-    ref_lock = _engine_module("rebar_reconciler._ref_lock")
+    ref_lock = importlib.import_module("rebar.reconciler._ref_lock")
     try:
         changed = ref_lock.clear_gate(root, remote=remote)
     except (ref_lock.RefLockError, ref_lock.RefLockTimeoutError) as exc:
@@ -384,7 +367,7 @@ def _bridge_resume_operation(
 
 def bridge_check_access() -> BridgeAccessCheck:
     """Run the live six-step Jira capability check and return its typed verdict."""
-    access_check = _engine_module("rebar_reconciler.access_check")
+    access_check = importlib.import_module("rebar.reconciler.access_check")
     result, _lines, returncode = access_check.run_access_check()
     if returncode == 2:
         message = "bridge access check requires JIRA_URL, JIRA_USER, and JIRA_API_TOKEN"

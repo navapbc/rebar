@@ -9,30 +9,17 @@ Follows the importlib loader convention established across this test tree.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-_SRC = (
-    Path(__file__).resolve().parents[4]
-    / "src"
-    / "rebar"
-    / "_engine"
-    / "rebar_reconciler"
-    / "binding_store.py"
-)
+_SRC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler" / "binding_store.py"
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("binding_store_1e08", _SRC)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.binding_store")
 
 
 _mod = _load()

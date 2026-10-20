@@ -177,7 +177,7 @@ def test_core_parser_package_imports_no_heavy_optional_modules() -> None:
         "uvicorn",
         "starlette",
         "jinja2",
-        "rebar_reconciler",
+        "rebar.reconciler",
     ]
     code = f"""
 import sys, importlib

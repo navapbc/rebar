@@ -7,26 +7,14 @@ back-compat read, and the preserved corrupt-bindings.json fail-closed guard.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-_SRC = (
-    Path(__file__).resolve().parents[4]
-    / "src"
-    / "rebar"
-    / "_engine"
-    / "rebar_reconciler"
-    / "binding_store.py"
-)
-_spec = importlib.util.spec_from_file_location("binding_store_baseline", _SRC)
-assert _spec and _spec.loader
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = _mod
-_spec.loader.exec_module(_mod)
+_SRC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler" / "binding_store.py"
+_mod = importlib.import_module("rebar.reconciler.binding_store")
 
 BindingStore = _mod.BindingStore
 

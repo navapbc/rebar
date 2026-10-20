@@ -13,8 +13,7 @@ _OUTAGE_NODE = (
     "test_plan_review_workflow_outage_degrades_to_unsigned_indeterminate"
 )
 _ENGINE_DIR_NODE = (
-    "tests/unit/test_engine_dir.py::"
-    "test_engine_submodules_resolve_when_the_tests_unit_shadow_is_active"
+    "tests/unit/test_engine_dir.py::test_engine_submodules_resolve_from_a_tests_unit_module"
 )
 _SCRIPTS_IMPORT_NODE = (
     "tests/unit/test_scripts_import_convention.py::test_repro_module_passes_standalone"

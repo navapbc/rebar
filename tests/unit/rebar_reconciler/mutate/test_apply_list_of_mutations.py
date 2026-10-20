@@ -6,60 +6,25 @@ remain empty. Inbound typed mutations raise ``TypeError`` instead of entering ou
 handlers.
 """
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
-
-# Narrow set of sys.modules keys this test owns. Other tests' modules are
-# not evicted so they don't suffer cross-test interference.
-_OWNED_KEYS = (
-    "rebar_reconciler.applier",
-    "rebar_reconciler.mutation",
-)
-
-
-def _load(name: str, path: Path):
-    # Cache on name AND `__file__` (bug 2bc7's audit). Caching on the name alone is the "just cache
-    # on name" fix `test_load_module_identity.py`'s docstring warns about: when another file has
-    # registered a DIFFERENT file's module under the same shared key, this returned that module and
-    # the caller silently tested the wrong source. Validating `__file__` keeps the sharing benefit
-    # while refusing a mismatched hit.
-    cached = sys.modules.get(name)
-    if cached is not None and getattr(cached, "__file__", None) == str(path):
-        return cached
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "mutation.py"
 
 
 @pytest.fixture
 def applier_and_mutation():
-    """Load applier + mutation under canonical keys. Clean up only the
-    specific keys this test installs (NOT any module containing "applier"
-    or "mutation" in its name — that was too broad and risked cross-test
-    interference).
-    """
-    saved = {k: sys.modules.pop(k, None) for k in _OWNED_KEYS}
-    try:
-        mut_mod = _load(_OWNED_KEYS[1], MUTATION_PATH)
-        applier = _load(_OWNED_KEYS[0], APPLIER_PATH)
-        yield applier, mut_mod
-    finally:
-        for k in _OWNED_KEYS:
-            sys.modules.pop(k, None)
-        for k, v in saved.items():
-            if v is not None:
-                sys.modules[k] = v
+    """The shared ``rebar.reconciler`` applier and mutation modules."""
+    return (
+        importlib.import_module("rebar.reconciler.applier"),
+        importlib.import_module("rebar.reconciler.mutation"),
+    )
 
 
 def _make_outbound_create(mut_mod, target="DIG-100", payload=None):

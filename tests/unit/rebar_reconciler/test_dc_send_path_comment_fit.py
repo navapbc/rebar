@@ -13,12 +13,12 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler.adapters.jira_datacenter.backend import (
+from rebar.reconciler.adapters.jira_datacenter.backend import (
     JiraDataCenterBackend,
     _DCSanitizer,
 )
-from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
-from rebar_reconciler.outbound_comments import (
+from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+from rebar.reconciler.outbound_comments import (
     RECONCILER_MARKER,
     _decorate_outbound_comment,
 )

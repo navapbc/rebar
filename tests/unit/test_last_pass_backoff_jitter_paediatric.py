@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import importlib
 import random
-import sys
 from pathlib import Path
 
 import pytest
@@ -25,10 +24,7 @@ _JITTER_CEILING = 1.25  # base * (1 + 0.25)
 
 
 def _last_pass():
-    engine_dir = Path(__file__).resolve().parents[2] / "src" / "rebar" / "_engine"
-    if str(engine_dir) not in sys.path:
-        sys.path.insert(0, str(engine_dir))
-    return importlib.import_module("rebar_reconciler.last_pass")
+    return importlib.import_module("rebar.reconciler.last_pass")
 
 
 class _CollidingRefLock:

@@ -239,7 +239,7 @@ scripts/jira_dc_capability_map.py --print-digest` reads the pin and exits — no
 API key, no LLM. The digest in the artifact's `run_metadata.json` comes from that same
 derivation rather than a constant, so it cannot drift from the image actually built.
 It is also reasonable to re-run after any change to rebar's own Jira-family vocabularies
-(`src/rebar/_engine/rebar_reconciler/adapters/jira_family/value_maps.py` and neighbors) to
+(`src/rebar/reconciler/adapters/jira_family/value_maps.py` and neighbors) to
 re-confirm the diff still reads clean.
 
 Dispatch from the Actions tab (needs the `ANTHROPIC_API_KEY` repository secret); never on

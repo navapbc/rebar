@@ -2,7 +2,7 @@
 
 Only a moved force-with-lease target is a CAS mismatch. Server, hook, quota,
 and transport failures remain fail-closed. CAS verdicts retain Git stderr on
-the established ``rebar_reconciler._ref_lock`` logger. Moved helpers preserve
+the established ``rebar.reconciler._ref_lock`` logger. Moved helpers preserve
 their original patch points and exports.
 """
 
@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler import _ref_lock
+from rebar.reconciler import _ref_lock
 
 REF = "refs/reconciler/lock"
 OLD = "0" * 40
@@ -174,15 +174,15 @@ def test_the_git_patch_point_survives_the_module_split(
 def test_the_cas_verdict_still_logs_on_the_ref_lock_logger(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """CAS evidence remains on the ``rebar_reconciler._ref_lock`` logger."""
+    """CAS evidence remains on the ``rebar.reconciler._ref_lock`` logger."""
     with caplog.at_level(logging.WARNING):
         assert _classify(monkeypatch, CAS_MISMATCH) == "cas-mismatch"
     cas_records = [r for r in caplog.records if "CAS mismatch" in r.getMessage()]
     assert cas_records, (
         f"no CAS-mismatch warning logged: {[r.getMessage() for r in caplog.records]}"
     )
-    assert [r.name for r in cas_records] == ["rebar_reconciler._ref_lock"] * len(cas_records), (
-        "the CAS verdict must be emitted on the rebar_reconciler._ref_lock logger, not on "
+    assert [r.name for r in cas_records] == ["rebar.reconciler._ref_lock"] * len(cas_records), (
+        "the CAS verdict must be emitted on the rebar.reconciler._ref_lock logger, not on "
         f"the sibling module's. got: {[r.name for r in cas_records]}"
     )
 

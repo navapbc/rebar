@@ -26,8 +26,8 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
-from rebar_reconciler.adapters.jira_family.rich_text import (
+from rebar.reconciler.adapters.jira.rich_text_codec import AdfCodec
+from rebar.reconciler.adapters.jira_family.rich_text import (
     WIKI_DESCRIPTION_LIMIT,
     WikiTextCodec,
 )
@@ -112,7 +112,7 @@ def test_adf_over_limit_value_ends_with_the_marker_within_the_serialized_cap() -
     marker requirement is identical."""
     import json
 
-    from rebar_reconciler.adapters.jira import adf
+    from rebar.reconciler.adapters.jira import adf
 
     fitted = AdfCodec().fit_outbound("z" * 200_000)
 
@@ -197,7 +197,7 @@ def test_non_string_values_pass_through_untouched(factory: Any) -> None:
 
 def test_adf_codec_is_a_pass_through_to_the_pinned_adf_module() -> None:
     """``AdfCodec`` WRAPS ``adapters/jira/adf.py``; it must not reimplement it."""
-    from rebar_reconciler.adapters.jira import adf
+    from rebar.reconciler.adapters.jira import adf
 
     codec = AdfCodec()
     text = "some prose that is well within every limit"
@@ -221,7 +221,7 @@ def test_adf_fit_measures_the_serialized_document_not_the_plain_text() -> None:
     inflates the payload, so the limit applies to the serialized document."""
     import json
 
-    from rebar_reconciler.adapters.jira import adf
+    from rebar.reconciler.adapters.jira import adf
 
     fitted = AdfCodec().fit_outbound("z" * 100_000)
 

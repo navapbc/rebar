@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import os
 import stat
-import sys
 import threading
 from pathlib import Path
 
@@ -52,20 +51,7 @@ def test_the_preview_bound_discriminates_blocking_from_ambient_slowness() -> Non
 
 def _load_reconcile_lock():
     """Load the engine lock without claiming the test package's dotted name."""
-    source = (
-        Path(__file__).resolve().parents[3]
-        / "src"
-        / "rebar"
-        / "_engine"
-        / "rebar_reconciler"
-        / "_advisory_lock.py"
-    )
-    spec = importlib.util.spec_from_file_location("_bridge_preview_advisory_lock", source)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return importlib.import_module("rebar.reconciler._advisory_lock")
 
 
 def _install_empty_acli(monkeypatch, tmp_path: Path) -> None:

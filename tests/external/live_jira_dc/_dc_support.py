@@ -164,7 +164,7 @@ def run_reconcile(repo: Path, mode: str, *, only: str | None = None):
     """
     from rebar._engine import engine_env
 
-    argv = [sys.executable, "-m", "rebar_reconciler", "--mode", mode, "--repo-root", str(repo)]
+    argv = [sys.executable, "-m", "rebar.reconciler", "--mode", mode, "--repo-root", str(repo)]
     if only is not None:
         argv += ["--filter-local-ids", only]
     return subprocess.run(
@@ -186,7 +186,7 @@ def run_bridge(
     """
     from rebar._engine import engine_env
 
-    argv = [sys.executable, "-m", "rebar_reconciler", command]
+    argv = [sys.executable, "-m", "rebar.reconciler", command]
     if max_changes is not None:
         argv += ["--max-changes", str(max_changes)]
     if only is not None:

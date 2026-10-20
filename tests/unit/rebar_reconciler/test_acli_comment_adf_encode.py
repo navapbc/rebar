@@ -21,7 +21,7 @@ import pytest
 
 @pytest.fixture
 def acli_ops():
-    from rebar_reconciler.adapters.jira import acli_cli_ops
+    from rebar.reconciler.adapters.jira import acli_cli_ops
 
     return acli_cli_ops
 

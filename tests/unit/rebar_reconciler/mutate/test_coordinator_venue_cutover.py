@@ -14,21 +14,21 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler.adapters.jira import acli
-from rebar_reconciler.adapters.jira.backend import JiraBackend
-from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
-from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
-from rebar_reconciler.apply_handlers import BatchApplyContext
-from rebar_reconciler.batch_dispatch import (
+from rebar.reconciler.adapters.jira import acli
+from rebar.reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+from rebar.reconciler.apply_handlers import BatchApplyContext
+from rebar.reconciler.batch_dispatch import (
     coordinate_and_fuse,
     make_coordinator_dispatch,
     make_guarded_execute,
     map_cutover_report,
     route_for,
 )
-from rebar_reconciler.mutation import Mutation, MutationAction, MutationDirection
-from rebar_reconciler.retry_budget import RetryBudget
-from rebar_reconciler.ticket_plan import PlanDisposition, TicketPlan
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.retry_budget import RetryBudget
+from rebar.reconciler.ticket_plan import PlanDisposition, TicketPlan
 
 pytestmark = pytest.mark.unit
 

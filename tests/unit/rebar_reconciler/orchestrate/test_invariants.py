@@ -1,4 +1,4 @@
-"""Unit tests for rebar_reconciler/invariants.py.
+"""Unit tests for reconciler/invariants.py.
 
 Covers check_at_most_one_local_id end-to-end against a mocked alert_store
 and a mocked subprocess.run for the ticket CLI invocation. Does NOT load
@@ -9,7 +9,7 @@ that test loads reconcile.py too).
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import subprocess
 from pathlib import Path
 from types import ModuleType
@@ -18,15 +18,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-INVARIANTS_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "invariants.py"
+INVARIANTS_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "invariants.py"
 
 
 def _load_invariants() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("invariants", INVARIANTS_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.invariants")
 
 
 @pytest.fixture(scope="module")
@@ -392,7 +388,7 @@ def test_reconciler_repo_root_unset_fallback_is_cwd_independent(
     raises (covered below), so this leg makes the valid package-root precondition
     explicit and then resolves from an unrelated checkout to prove CWD-independence."""
     import rebar.config as cfg_mod
-    from rebar_reconciler import invariants
+    from rebar.reconciler import invariants
 
     monkeypatch.delenv("REBAR_ROOT", raising=False)
     owned_checkout = tmp_path / "owned_checkout"

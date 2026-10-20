@@ -38,19 +38,20 @@ it from the code under test makes the assertion move with the bug and it can nev
 from __future__ import annotations
 
 import ast
+import importlib
 import pathlib
 from typing import Any
 
 import pytest
 
-from rebar_reconciler.adapters.jira.acli import AcliClient
-from rebar_reconciler.adapters.jira.acli_graph import (
+from rebar.reconciler.adapters.jira.acli import AcliClient
+from rebar.reconciler.adapters.jira.acli_graph import (
     RunawayPaginationError,
     _iter_cursor_pages,
 )
 
 _JIRA_ADAPTER_DIR = (
-    pathlib.Path(__file__).resolve().parents[3] / "src/rebar/_engine/rebar_reconciler/adapters/jira"
+    pathlib.Path(__file__).resolve().parents[3] / "src/rebar/reconciler/adapters/jira"
 )
 
 # Module-local literals — see the module docstring. 250 items at 100/page forces THREE
@@ -663,23 +664,15 @@ def test_the_structural_guard_actually_sees_the_three_known_readers() -> None:
 
 import importlib.util  # noqa: E402
 import json as _json  # noqa: E402
-import sys  # noqa: E402
 from unittest.mock import patch  # noqa: E402
 
-from rebar_reconciler._backend import BackendPaginationStallError  # noqa: E402
+from rebar.reconciler._backend import BackendPaginationStallError  # noqa: E402
 
-_FETCHER_PATH = (
-    pathlib.Path(__file__).resolve().parents[3] / "src/rebar/_engine/rebar_reconciler/fetcher.py"
-)
+_FETCHER_PATH = pathlib.Path(__file__).resolve().parents[3] / "src/rebar/reconciler/fetcher.py"
 
 
 def _load_fetcher():
-    spec = importlib.util.spec_from_file_location("fetcher_9a46", _FETCHER_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["fetcher_9a46"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return importlib.import_module("rebar.reconciler.fetcher")
 
 
 class _StallOnFieldServer:

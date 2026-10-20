@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for rebar_reconciler unit tests.
+"""Shared pytest fixtures for rebar.reconciler unit tests.
 
 Divergence scenarios for all 3 resolution classes in conflict_resolver.py.
 
@@ -15,7 +15,7 @@ tree (see
 Rationale:
 
 * It works for module files whose path contains hyphens (e.g.
-  ``rebar_reconciler/acli.py``), which Python's import system cannot resolve as a
+  ``reconciler/acli.py``), which Python's import system cannot resolve as a
   regular module name.
 * It avoids implicit ``sys.path`` requirements — no conftest-level path
   manipulation is needed for tests to find the modules under test.
@@ -30,69 +30,7 @@ should follow the same loader pattern.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
-
 import pytest
-
-# ── Engine path + canonical dotted-key seeding ────────────────────────────────
-# The engine ships at <repo>/src/rebar/_engine. Put it on sys.path so the
-# stdlib-only reconciler packages import directly, and pre-seed the canonical
-# ``rebar_reconciler`` sys.modules keys the reconciler source
-# uses (cosmetic keys loaded via spec_from_file_location) so the few tests that
-# do ``from rebar_reconciler import alert_store`` resolve at
-# collection time.
-_ENGINE_DIR = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine"
-if str(_ENGINE_DIR) not in sys.path:
-    sys.path.insert(0, str(_ENGINE_DIR))
-
-
-def _seed_dotted_namespace() -> None:
-    # Under pytest, this test directory is itself an importable package named
-    # ``rebar_reconciler`` (it has __init__.py), which shadows the engine package
-    # of the same name. That is fine: the reconciler source registers its modules
-    # as FLAT ``rebar_reconciler.<name>`` keys in sys.modules (via
-    # spec_from_file_location), and sys.modules is a flat namespace, so those keys
-    # resolve regardless of which object ``rebar_reconciler`` itself points at.
-    # We only need ``alert_store`` reachable as both the flat key and an attribute
-    # so the few tests that do ``from rebar_reconciler import alert_store`` (and
-    # patch ``rebar_reconciler.alert_store.*``) resolve to the SAME module object
-    # the source loads. Load it from the engine dir under the canonical key.
-    import rebar_reconciler  # the test-dir package under pytest; engine pkg in prod
-
-    # The test-dir package shadows the engine package, so dotted submodule
-    # imports against the ENGINE (e.g. rebar_reconciler/adapters/jira/acli.py's
-    # module-level ``from rebar_reconciler.adapters.jira.adf import ...`` /
-    # ``from rebar_reconciler.adapters.jira.comment_limits import ...``, executed
-    # when reconcile_once loads acli via
-    # _load) would fail to resolve — and _load registers the half-loaded module
-    # in sys.modules before exec, poisoning the cache for sibling tests. Extend
-    # this package's __path__ to include the engine's rebar_reconciler dir so ANY
-    # engine submodule falls through generically, instead of hand-seeding each
-    # one. Already-seeded flat sys.modules keys (e.g. alert_store below) still
-    # win, so their object identity is preserved.
-    #
-    # NOTE: this extension is no longer load-bearing — ``tests/unit/conftest.py``
-    # performs the same bridge for EVERY ``tests/unit`` collection, so by the time
-    # this runs the engine dir is already on the shadow's ``__path__`` and the
-    # append below no-ops. It is kept deliberately, as site-local documentation of
-    # the shadow at the directory that creates it.
-    _engine_pkg = str(_ENGINE_DIR / "rebar_reconciler")
-    if _engine_pkg not in rebar_reconciler.__path__:
-        rebar_reconciler.__path__.append(_engine_pkg)
-
-    key = "rebar_reconciler.alert_store"
-    if key not in sys.modules:
-        asp = _ENGINE_DIR / "rebar_reconciler" / "alert_store.py"
-        spec = importlib.util.spec_from_file_location(key, asp)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[key] = mod
-        spec.loader.exec_module(mod)
-    rebar_reconciler.alert_store = sys.modules[key]  # type: ignore[attr-defined]
-
-
-_seed_dotted_namespace()
 
 
 @pytest.fixture(autouse=True)

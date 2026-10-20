@@ -1,13 +1,12 @@
 """Locate the bundled engine assets and build subprocess environments for them.
 
-The ``rebar/_engine/`` package data holds the Python tooling the library launches
-as subprocesses — the ``rebar_reconciler`` package (Jira sync),
-``jira-capability-probe.py`` (the live preflight), and the alias ``resources/``
-wordlist. This module resolves that directory deterministically (editable or wheel
-install), exposes the in-process ``rebar`` CLI path (:func:`in_process_cli`) the
-reconciler and ``validate`` read tickets through, and builds the subprocess
-environment (:func:`engine_env`) that pins repo-root and import paths for those
-launches.
+The ``rebar/_engine/`` package data holds ``jira-capability-probe.py`` (the live
+preflight the library launches as a subprocess) and the alias ``resources/`` wordlist;
+the Jira reconciler itself is the importable package ``rebar.reconciler``. This module
+resolves that directory deterministically (editable or wheel install), exposes the in-
+process ``rebar`` CLI path (:func:`in_process_cli`) the reconciler and ``validate`` read
+tickets through, and builds the subprocess environment (:func:`engine_env`) that pins
+the repo root for those launches.
 """
 
 from __future__ import annotations
@@ -28,17 +27,16 @@ def engine_dir() -> Path:
     wheel installs (hatchling wheels install unzipped), which the subprocess
     launches require.
 
-    The engine assets (the ``rebar_reconciler`` package + the Jira probe) are
-    exec'd as real files, so the directory MUST be installed UNPACKED to a real
-    on-disk path — zipimport / zip-safe installs are unsupported. We assert that
-    here so a mispackaged install fails loudly at the first engine call instead of
-    with an opaque import error.
+    The engine assets (the Jira probe and the wordlist) are read as real files, so
+    the directory MUST be installed UNPACKED to a real on-disk path — zipimport /
+    zip-safe installs are unsupported. We assert that here so a mispackaged install
+    fails loudly at the first engine call instead of with an opaque import error.
     """
     path = Path(str(importlib.resources.files("rebar") / "_engine")).resolve()
     if not path.is_dir():
         raise RuntimeError(
             f"rebar engine directory is not a real on-disk directory: {path!s}. "
-            "The engine assets (the rebar_reconciler package + Jira probe) must be "
+            "The engine assets (the Jira probe and the wordlist) must be "
             "installed UNPACKED to the filesystem; rebar does not support "
             "zipimport / zip-safe installs. Install from a wheel (hatchling builds "
             "unpacked) or as an editable install — not a zipapp/zip-imported package."
@@ -49,7 +47,7 @@ def engine_dir() -> Path:
 def in_process_cli() -> str:
     """Path to the in-process ``rebar`` CLI used as a single-executable ticket reader.
 
-    The reconciler (``rebar_reconciler/{applier,invariants,reconcile}.py``) and
+    The reconciler (``reconciler/{applier,invariants,reconcile}.py``) and
     ``validate`` invoke this CLI as one executable (``[cli, "list"]``) to read local
     tickets: the ``rebar`` console script (``rebar.cli:main`` → ``rebar._cli.main``),
     which runs fully in-process. They call this resolver directly (no env handoff).
@@ -73,30 +71,15 @@ def wordlist_path() -> Path:
 
 
 def engine_env(repo_root: str | os.PathLike[str] | None = None) -> dict[str, str]:
-    """Environment for the engine subprocesses (reconciler + Jira probe).
+    """Return the environment for an engine subprocess (the reconciler or the Jira probe).
 
-    This is the ONLY place the engine dir is put on an import path — and it is
-    scoped to subprocesses, never the in-process library path (the library imports
-    ``rebar.reducer`` / ``rebar.graph`` / ``rebar._engine_support.*`` directly).
-
-    - Prepends the engine dir to ``PYTHONPATH`` so the top-level
-      ``rebar_reconciler`` package resolves under ``python -m rebar_reconciler``
-      and the absolute-path ``jira-capability-probe.py`` launch (both import
-      ``rebar_reconciler.*``).
-    - Pins ``REBAR_ROOT`` (the single repo-root override) when a repo_root is given.
-
-    The wordlist path and the ticket-reader CLI are NOT pinned: subprocesses
-    self-resolve them (``rebar._alias`` resolves the bundled wordlist directly;
-    the reconciler/validate readers call :func:`in_process_cli`), so there is no
-    env handoff to keep in sync.
+    The reconciler is the importable package ``rebar.reconciler`` (launched as
+    ``python -m rebar.reconciler`` with ``sys.executable``) and the probe imports
+    ``rebar.reconciler.*`` the same way, so nothing is prepended to ``PYTHONPATH``;
+    the child inherits the parent's import path. When ``repo_root`` is given it is
+    pinned as ``REBAR_ROOT``; otherwise an inherited ``REBAR_ROOT`` carries through.
     """
     env = dict(os.environ)
-    eng = str(engine_dir())
-    existing = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = eng + (os.pathsep + existing if existing else "")
-
     if repo_root is not None:
         env["REBAR_ROOT"] = str(Path(repo_root).resolve())
-    # else: an inherited REBAR_ROOT (from os.environ) already carries through —
-    # there is no second var to mirror it to.
     return env

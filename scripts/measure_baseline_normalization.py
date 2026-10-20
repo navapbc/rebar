@@ -65,7 +65,7 @@ def _load_tickets(repo: Path) -> dict[str, dict[str, Any]]:
 
 def _normalized_store(repo: Path, raw_store: dict[str, Any]) -> dict[str, Any]:
     sys.path.insert(0, str(repo / "src" / "rebar" / "_engine"))
-    from rebar_reconciler.inbound_fields import normalize_baseline_value
+    from rebar.reconciler.inbound_fields import normalize_baseline_value
 
     normalized = copy.deepcopy(raw_store)
     for entry in normalized["bindings"].values():
@@ -126,8 +126,8 @@ def _outcomes(
     remote_store: dict[str, Any],
     tickets: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
-    from rebar_reconciler.outbound_field_diff import compute_update_fields
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.outbound_field_diff import compute_update_fields
 
     backend = JiraBackend(transport=object())
     store = _CorpusStore(store_data)

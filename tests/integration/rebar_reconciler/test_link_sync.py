@@ -30,8 +30,7 @@ Empirical context (current state — link sync IS implemented; story 25ae):
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 
@@ -40,26 +39,17 @@ import pytest
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def outbound() -> ModuleType:
-    return _load_module("outbound_differ", RECONCILER_DIR / "outbound_differ.py")
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 @pytest.fixture(scope="module")
 def inbound() -> ModuleType:
-    return _load_module("inbound_differ", RECONCILER_DIR / "inbound_differ.py")
+    return importlib.import_module("rebar.reconciler.inbound_differ")
 
 
 class StubBindingStore:

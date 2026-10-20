@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 # The reconciler engine is on sys.path via the package conftest; import flat.
-from rebar_reconciler.adapters.jira import acli as acli_mod
+from rebar.reconciler.adapters.jira import acli as acli_mod
 
 
 def _issue(key: str) -> dict[str, Any]:

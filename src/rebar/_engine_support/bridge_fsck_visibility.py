@@ -15,7 +15,6 @@ LAZILY, only when the diagnostic runs, so nothing here is reachable from core
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -23,31 +22,14 @@ _JIRA_CRED_KEYS = ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN")
 
 
 def _load_access_check() -> ModuleType:
-    """Lazily load the reconciler ``access_check`` module by its package name.
+    """Import the reconciler ``access_check`` module on first use.
 
-    Mirrors ``_lib_ops._engine_module``: the ``rebar_reconciler`` package lives
-    under the bundled ``_engine`` dir and is loaded via ``spec_from_file_location``
-    with a submodule search location, so ``access_check`` (and its ``acli`` import,
-    an ``[agents]`` optional-extra) is only pulled in when the diagnostic runs.
+    Function-local, so ``access_check`` (and its ``acli`` import, an ``[agents]``
+    optional extra) is only pulled in on diagnostic runs.
     """
-    import importlib
-    import importlib.util
+    from rebar.reconciler import access_check
 
-    package = "rebar_reconciler"
-    if package not in sys.modules:
-        from rebar._engine import engine_dir
-
-        package_dir = engine_dir() / package
-        spec = importlib.util.spec_from_file_location(
-            package,
-            package_dir / "__init__.py",
-            submodule_search_locations=[str(package_dir)],
-        )
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[package] = module
-        spec.loader.exec_module(module)
-    return importlib.import_module("rebar_reconciler.access_check")
+    return access_check
 
 
 def audit_mapped_project_visibility(

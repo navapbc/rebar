@@ -27,10 +27,10 @@ from typing import Any, get_args
 import pytest
 
 from rebar import config as user_cfg
+from rebar.reconciler import config as cfg_mod
+from rebar.reconciler import inbound_fields, outbound_labels
+from rebar.reconciler.adapters.jira_family.value_maps import LOCAL_TYPE_TO_JIRA
 from rebar.types import TicketType
-from rebar_reconciler import config as cfg_mod
-from rebar_reconciler import inbound_fields, outbound_labels
-from rebar_reconciler.adapters.jira_family.value_maps import LOCAL_TYPE_TO_JIRA
 
 pytestmark = pytest.mark.unit
 
@@ -76,7 +76,7 @@ class _NullCodec:
 
 
 def _backend() -> Any:
-    from rebar_reconciler.adapters.jira.backend import JiraBackend
+    from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     return JiraBackend(_NullCodec())  # type: ignore[arg-type]
 
@@ -168,14 +168,14 @@ def test_fail_closed_fires_before_mutation_loop(
     ``MappingConfigError`` from ``compute_outbound_mutations`` UP-FRONT — before any
     per-ticket mutation is built. Simulated by removing a built-in target so the type
     becomes undecided; the gate fires over the distinct project keys before the loop."""
-    from rebar_reconciler import mapping_config, outbound_differ
+    from rebar.reconciler import mapping_config, outbound_differ
 
     proj = _proj(tmp_path, "")
     # Drop a built-in target so 'bug' is a syncable type with no decision anywhere.
     patched = {k: v for k, v in LOCAL_TYPE_TO_JIRA.items() if k != "bug"}
     monkeypatch.setattr(cfg_mod, "LOCAL_TYPE_TO_JIRA", patched, raising=False)
     monkeypatch.setattr(
-        "rebar_reconciler.adapters.jira_family.value_maps.LOCAL_TYPE_TO_JIRA",
+        "rebar.reconciler.adapters.jira_family.value_maps.LOCAL_TYPE_TO_JIRA",
         patched,
         raising=False,
     )
@@ -185,7 +185,7 @@ def test_fail_closed_fires_before_mutation_loop(
 
     # And the gate is wired into the mutation entry point: a well-formed local ticket
     # that WOULD create a mutation raises before any mutation dict is produced.
-    from rebar_reconciler.projects_store import Mapping
+    from rebar.reconciler.projects_store import Mapping
 
     with pytest.raises(mapping_config.MappingConfigError):
         outbound_differ.compute_outbound_mutations(
@@ -201,8 +201,8 @@ def test_type_skip_excludes_ticket_both_consumers(tmp_path: Path) -> None:
     consumers of the effective excluded set — the per-ticket mutation loop AND the
     absent-gets selector — so a SKIP-typed ticket produces no create/update mutation
     and is not selected as an absent GET. Observable: no mutation references it."""
-    from rebar_reconciler import outbound_differ
-    from rebar_reconciler.projects_store import Mapping
+    from rebar.reconciler import outbound_differ
+    from rebar.reconciler.projects_store import Mapping
 
     proj = _proj(tmp_path, '[mapping.projects.REB.type_map]\nbug = "skip"\n')
     mutations, _absent_alive_fields = outbound_differ.compute_outbound_mutations(
@@ -259,12 +259,12 @@ def test_rebar_type_prefix_excluded_all_four_tuples() -> None:
     """The ``rebar-type:`` prefix is a bridge-internal annotation and MUST be filtered by
     all four independent prefix tuples, so a stamped label never leaks into a user-facing
     label set on either the outbound or inbound path."""
-    from rebar_reconciler import (
+    from rebar.reconciler import (
         differ,
         inbound_collection_diffs,
         inbound_translate,
     )
-    from rebar_reconciler import (
+    from rebar.reconciler import (
         outbound_labels as ol,
     )
 

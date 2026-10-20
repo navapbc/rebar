@@ -15,9 +15,9 @@ from pathlib import Path
 import pytest
 
 from rebar import config as cfg
-from rebar_reconciler.adapters.jira_datacenter.backend import _DCSanitizer
-from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec
-from rebar_reconciler.outbound_comments import _decorate_outbound_comment
+from rebar.reconciler.adapters.jira_datacenter.backend import _DCSanitizer
+from rebar.reconciler.adapters.jira_family.rich_text import WikiTextCodec
+from rebar.reconciler.outbound_comments import _decorate_outbound_comment
 
 pytestmark = pytest.mark.unit
 

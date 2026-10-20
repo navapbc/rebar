@@ -214,13 +214,12 @@ def test_a_dc_created_ticket_carries_the_shared_jira_provenance(
     Inbound tickets retain the ``jira-`` ID prefix, so deployment adds no store vocabulary
     or migration.
     """
-    from rebar_reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
-    from rebar_reconciler.adapters.jira_datacenter.transport import (
+    import rebar
+    from rebar.reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
+    from rebar.reconciler.adapters.jira_datacenter.transport import (
         JiraDataCenterTransport,
         build_client_from_settings,
     )
-
-    import rebar
 
     settings = JiraDataCenterSettings(
         url=_BASE,
@@ -249,7 +248,7 @@ def test_a_dc_created_ticket_carries_the_shared_jira_provenance(
 
     # Match the exact derived ID: derivation lowercases the key and the create payload may omit
     # its raw form, while a serialized substring could match an unrelated field (bug 23ed).
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+    from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     expected_local_id = _jira_key_to_local_id(remote_key)
     tickets = rebar.list_tickets(repo_root=str(dc_rebar_repo))
@@ -264,7 +263,7 @@ def test_a_dc_created_ticket_carries_the_shared_jira_provenance(
     # The BINDING is where the DC<->local correspondence actually lives, and it is what the
     # epic's headline criterion is really about. Asserting the ticket exists proves a ticket
     # was created; asserting the binding proves it is bound to THIS DC issue.
-    from rebar_reconciler.binding_store import load_binding_store
+    from rebar.reconciler.binding_store import load_binding_store
 
     bindings = load_binding_store(dc_rebar_repo)
     assert bindings.get_jira_key(expected_local_id) == remote_key, (

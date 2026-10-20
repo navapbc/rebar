@@ -6,8 +6,7 @@ and reject fuzzy or bogus matches before a subprocess can report false success.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -15,43 +14,16 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
-ACLI_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "acli.py"
+ACLI_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "acli.py"
 
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-_ADF_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "adf.py"
-if "rebar_reconciler" not in sys.modules:
-    import types as _types
-
-    _dr = _types.ModuleType("rebar_reconciler")
-    _dr.__path__ = [str(SCRIPTS_DIR / "rebar_reconciler")]
-    sys.modules["rebar_reconciler"] = _dr
-if "rebar_reconciler.adapters.jira.adf" not in sys.modules:
-    _adf_spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler.adapters.jira.adf", _ADF_PATH
-    )
-    _adf_mod = importlib.util.module_from_spec(_adf_spec)
-    sys.modules["rebar_reconciler.adapters.jira.adf"] = _adf_mod
-    _adf_spec.loader.exec_module(_adf_mod)
-# acli.py also imports ``from rebar_reconciler.adapters.jira.comment_limits import ...``
+_ADF_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "adf.py"
+# acli.py also imports ``from rebar.reconciler.adapters.jira.comment_limits import ...``
 # (bug 6afc-20ee-84e5-4dd5). Bootstrap it explicitly alongside adf.
-_CL_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "comment_limits.py"
-if "rebar_reconciler.adapters.jira.comment_limits" not in sys.modules:
-    _cl_spec = importlib.util.spec_from_file_location(
-        "rebar_reconciler.adapters.jira.comment_limits", _CL_PATH
-    )
-    _cl_mod = importlib.util.module_from_spec(_cl_spec)
-    sys.modules["rebar_reconciler.adapters.jira.comment_limits"] = _cl_mod
-    _cl_spec.loader.exec_module(_cl_mod)
+_CL_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "comment_limits.py"
 
 
 def _load_acli():
-    spec = importlib.util.spec_from_file_location("acli_assignee_test", ACLI_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["acli_assignee_test"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.adapters.jira.acli")
 
 
 @pytest.fixture(scope="module")

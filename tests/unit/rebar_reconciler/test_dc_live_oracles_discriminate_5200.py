@@ -10,6 +10,7 @@ lag. Harness-free RED/GREEN checks ensure those exact live oracles expose each d
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import sys
 import urllib.request
@@ -21,7 +22,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_ENGINE = _REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_ENGINE = _REPO_ROOT / "src" / "rebar" / "reconciler"
 
 #: The harness admin, i.e. the value ``_dc_support.ADMIN_USER`` defaults to. Restated as a
 #: literal rather than imported so a mistaken change to that default cannot make these checks
@@ -111,13 +112,7 @@ def test_the_repaired_assign_oracle_passes_on_the_value_the_pass_writes(support:
     USERNAME and not the display name — assert ``== "Administrator"`` and the live cell would go
     red against a perfectly working bridge.
     """
-    spec = importlib.util.spec_from_file_location(
-        "_inbound_translate_for_5200", _ENGINE / "inbound_translate.py"
-    )
-    assert spec and spec.loader
-    translate = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = translate
-    spec.loader.exec_module(translate)
+    translate = importlib.import_module("rebar.reconciler.inbound_translate")
 
     landed = translate._extract_name(dict(_DC_USER_OBJECT))
     assert landed == _DC_USER, (
@@ -436,7 +431,7 @@ class _FakeClient:
 
 
 def _dc_transport_for(issue: _FakeIssue, *, epic_link: str | None = "customfield_10014") -> Any:
-    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+    from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
     return JiraDataCenterTransport(client=_FakeClient(issue, epic_link=epic_link), project="RBJ")
 
@@ -522,13 +517,7 @@ def test_the_two_dc_parent_gates_are_DISJOINT_so_a_pass_cannot_carry_this_row() 
     emit one for. Routing row 12 outbound through a pass would assert a mutation nothing emits
     — the row-14-outbound situation verbatim.
     """
-    spec = importlib.util.spec_from_file_location(
-        "_outbound_field_diff_for_5200", _ENGINE / "outbound_field_diff.py"
-    )
-    assert spec and spec.loader
-    ofd = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = ofd
-    spec.loader.exec_module(ofd)
+    ofd = importlib.import_module("rebar.reconciler.outbound_field_diff")
 
     class _Bindings:
         def get_jira_key(self, local_id: str) -> str:

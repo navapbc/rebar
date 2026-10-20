@@ -11,40 +11,25 @@ Covers task 52f3-f71a-dfaa-4d03:
   - The same-pass follow-on signal is preserved end-to-end (returned in
     the same pass, not deferred).
 
-All collaborators (fetcher, differ, applier, health, invariants) are mocked
-via sys.modules so reconcile._load() picks them up.
+All collaborators (fetcher, differ, applier, health, invariants) are served
+by a patched ``reconcile._load``.
 """
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 import types
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
-
-_RECONCILE_COLLAB_KEYS = (
-    "reconcile_fetcher",
-    "reconcile_differ",
-    "reconcile_applier",
-    "reconcile_health",
-    "reconcile_invariants",
-)
+RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "reconcile.py"
 
 
 def _load_reconcile() -> ModuleType:
-    sys.modules.pop("reconcile", None)
-    spec = importlib.util.spec_from_file_location("reconcile", RECONCILE_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["reconcile"] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.reconcile")
 
 
 def _make_stub_fetcher(snapshot: dict) -> ModuleType:
@@ -102,19 +87,22 @@ def _make_stub_invariants(
     return stub, drift_spy
 
 
-def _install_stubs(*, fetcher, differ, applier, health, invariants) -> None:
-    for key in _RECONCILE_COLLAB_KEYS:
-        sys.modules.pop(key, None)
-    sys.modules["reconcile_fetcher"] = fetcher
-    sys.modules["reconcile_differ"] = differ
-    sys.modules["reconcile_applier"] = applier
-    sys.modules["reconcile_health"] = health
-    sys.modules["reconcile_invariants"] = invariants
+def _install_stubs(*, fetcher, differ, applier, health, invariants):
+    """Patch the shared ``reconcile._load`` so it serves the collaborator stubs."""
+    stubs = {
+        "reconcile_fetcher": fetcher,
+        "reconcile_differ": differ,
+        "reconcile_applier": applier,
+        "reconcile_health": health,
+        "reconcile_invariants": invariants,
+    }
+    reconcile_mod = _load_reconcile()
+    real_load = reconcile_mod._load
 
+    def _load(name: str, relpath: str) -> ModuleType:
+        return stubs[name] if name in stubs else real_load(name, relpath)
 
-def _cleanup_stubs() -> None:
-    for key in (*_RECONCILE_COLLAB_KEYS, "reconcile"):
-        sys.modules.pop(key, None)
+    return patch.object(reconcile_mod, "_load", _load)
 
 
 # ---------------------------------------------------------------------------
@@ -139,18 +127,15 @@ def test_invariant_phase_passes_quarantine_set_to_differ(tmp_path):
     stub_health = _make_stub_health()
     stub_invariants, _ = _make_stub_invariants(quarantine=quarantine)
 
-    _install_stubs(
+    with _install_stubs(
         fetcher=stub_fetcher,
         differ=stub_differ,
         applier=stub_applier,
         health=stub_health,
         invariants=stub_invariants,
-    )
-    try:
+    ):
         reconcile_mod = _load_reconcile()
         reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
-    finally:
-        _cleanup_stubs()
 
     assert differ_spy.call_count == 1
     kwargs = differ_spy.call_args.kwargs
@@ -182,18 +167,15 @@ def test_invariant_phase_passes_seed_mutations_to_differ(tmp_path):
     stub_health = _make_stub_health()
     stub_invariants, _ = _make_stub_invariants(seeds=seeds)
 
-    _install_stubs(
+    with _install_stubs(
         fetcher=stub_fetcher,
         differ=stub_differ,
         applier=stub_applier,
         health=stub_health,
         invariants=stub_invariants,
-    )
-    try:
+    ):
         reconcile_mod = _load_reconcile()
         reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
-    finally:
-        _cleanup_stubs()
 
     assert differ_spy.call_count == 1
     kwargs = differ_spy.call_args.kwargs
@@ -233,18 +215,15 @@ def test_schema_drift_post_emit_filter_invokes_report(tmp_path):
     stub_health = _make_stub_health()
     stub_invariants, drift_spy = _make_stub_invariants()
 
-    _install_stubs(
+    with _install_stubs(
         fetcher=stub_fetcher,
         differ=stub_differ,
         applier=stub_applier,
         health=stub_health,
         invariants=stub_invariants,
-    )
-    try:
+    ):
         reconcile_mod = _load_reconcile()
         reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
-    finally:
-        _cleanup_stubs()
 
     assert drift_spy.call_count == 1, (
         f"Expected report_schema_drift to be called once, got {drift_spy.call_count}"
@@ -287,18 +266,15 @@ def test_same_pass_follow_on_emitted(tmp_path):
     stub_health = _make_stub_health()
     stub_invariants, drift_spy = _make_stub_invariants()
 
-    _install_stubs(
+    with _install_stubs(
         fetcher=stub_fetcher,
         differ=stub_differ,
         applier=stub_applier,
         health=stub_health,
         invariants=stub_invariants,
-    )
-    try:
+    ):
         reconcile_mod = _load_reconcile()
         result = reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
-    finally:
-        _cleanup_stubs()
 
     # The single reconcile_once() call must have invoked report_schema_drift
     # at least once — i.e. the follow-on signal is processed in-pass, not
@@ -321,7 +297,7 @@ def test_real_repair_failure_follow_on_is_surfaced(tmp_path):
     now fires — reading the issue key from the emitter's own 'issue_key' field (the
     production path that was broken; before the fix this asserted 0 calls).
     """
-    from rebar_reconciler.apply_inbound import inbound_repair_property
+    from rebar.reconciler.apply_inbound import inbound_repair_property
 
     # Drive the real emitter's FAILURE path to obtain its GENUINE follow-on shape/kind
     # (binds this test to the emitter — a future kind rename here breaks it, by design).
@@ -353,18 +329,15 @@ def test_real_repair_failure_follow_on_is_surfaced(tmp_path):
     stub_health = _make_stub_health()
     stub_invariants, drift_spy = _make_stub_invariants()
 
-    _install_stubs(
+    with _install_stubs(
         fetcher=stub_fetcher,
         differ=stub_differ,
         applier=stub_applier,
         health=stub_health,
         invariants=stub_invariants,
-    )
-    try:
+    ):
         reconcile_mod = _load_reconcile()
         reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
-    finally:
-        _cleanup_stubs()
 
     # Behavior change: the real emitter's follow-on is now picked up. Before the fix
     # the filter matched 'schema_drift' only, so this count was 0.

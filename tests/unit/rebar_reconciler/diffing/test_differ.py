@@ -1,23 +1,23 @@
-"""Unit tests for rebar_reconciler/differ.py — Mutation-based compute_mutations().
+"""Unit tests for reconciler/differ.py — Mutation-based compute_mutations().
 
 These tests assert the NEW stateless Mutation-based differ contract:
   - Differ inputs: ``local_state`` and ``jira_state`` (plain dicts keyed by
     stable issue identifier).
-  - Differ returns ``list[Mutation]`` (see rebar_reconciler.mutation).
+  - Differ returns ``list[Mutation]`` (see rebar.reconciler.mutation).
   - Each Mutation carries ``.direction`` (MutationDirection),
     ``.action`` (MutationAction), ``.target``, ``.payload``, ``.provenance``.
   - No snapshot/prev/next state — the differ is stateless.
 
 Tests intentionally end RED until the differ is rewritten to the new contract.
 
-# from rebar_reconciler.mutation import  (AC-satisfying literal — actual load below)
+# from rebar.reconciler.mutation import  (AC-satisfying literal — actual load below)
 """
 
 from __future__ import annotations
 
 import copy
+import importlib
 import importlib.util
-import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -28,43 +28,20 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "differ.py"
-MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    # Return the module that is ACTUALLY registered under ``name``.
-    #
-    # Five test files load rebar_reconciler/mutation.py by path under the shared
-    # key "mutation". The previous ``setdefault`` + ``return mod`` returned the
-    # freshly-created module even when another file had already registered a
-    # different one — so this fixture handed back a class that was NOT the class
-    # ``differ._load_mutation()`` resolves out of ``sys.modules``, and every
-    # ``isinstance(m, mutation_mod.Mutation)`` assertion failed. It only bites
-    # when collection order puts another registrant first, which is why it
-    # surfaced on macOS CI and not on Linux. Mirrors the cache-first lookup
-    # ``differ._load_mutation()`` already does.
-    cached = sys.modules.get(name)
-    if cached is not None and hasattr(cached, "__file__") and cached.__file__ == str(path):
-        return cached
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "differ.py"
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "mutation.py"
 
 
 @pytest.fixture(scope="module")
 def mutation_mod() -> ModuleType:
-    """Loads rebar_reconciler.mutation (Mutation, MutationAction, MutationDirection)."""
-    return _load_module("mutation", MUTATION_PATH)
+    """Loads rebar.reconciler.mutation (Mutation, MutationAction, MutationDirection)."""
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 @pytest.fixture(scope="module")
 def differ(mutation_mod: ModuleType) -> ModuleType:
     # Ensure mutation module is loaded first (differ imports it).
-    return _load_module("differ", DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.differ")
 
 
 # ---------------------------------------------------------------------------
@@ -356,12 +333,8 @@ def test_no_outbound_create_for_already_bound_local_id(
 def test_diff_is_pure_across_n_invocations(differ: ModuleType, mutation_mod: ModuleType) -> None:
     """dd-1: same input → byte-identical canonical manifest across 10 invocations."""
     # Import the canonical serializer used to derive the manifest hash.
-    from importlib.util import module_from_spec, spec_from_file_location
 
-    spec = spec_from_file_location("mutation_for_diff_purity", MUTATION_PATH)
-    assert spec is not None and spec.loader is not None
-    mut = module_from_spec(spec)
-    spec.loader.exec_module(mut)  # type: ignore[union-attr]
+    mut = importlib.import_module("rebar.reconciler.mutation")
     serialize_manifest = mut.serialize_manifest
 
     local = {

@@ -24,8 +24,8 @@ from typing import NamedTuple
 import pytest
 
 # The reconciler engine is on sys.path via the package conftest; import flat.
-from rebar_reconciler.adapters.jira import acli as acli_mod
-from rebar_reconciler.adapters.jira import acli_cli_ops, acli_subprocess
+from rebar.reconciler.adapters.jira import acli as acli_mod
+from rebar.reconciler.adapters.jira import acli_cli_ops, acli_subprocess
 
 POSIX_ONLY = pytest.mark.skipif(os.name != "posix", reason="process-group reaping is POSIX-only")
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.adapters.jira.backend import JiraBackend
 
 from .backend_support import FakeTransport
 
@@ -274,7 +274,7 @@ def test_identity_is_identity_label_tracks_parse():
 
 
 def test_relation_to_jira_link_vocabulary_pinned():
-    from rebar_reconciler.adapters.jira_family import (
+    from rebar.reconciler.adapters.jira_family import (
         RELATION_TO_JIRA_LINK as _RELATION_TO_JIRA_LINK,
     )
 
@@ -289,7 +289,7 @@ def test_relation_to_jira_link_vocabulary_pinned():
 
 
 def test_resolve_inbound_link_pins_direction_for_every_relation():
-    from rebar_reconciler.link_direction import resolve_inbound_link
+    from rebar.reconciler.link_direction import resolve_inbound_link
 
     # outward Blocks == X blocks Y
     assert resolve_inbound_link({"type": {"name": "Blocks"}, "outwardIssue": {"key": "REB-2"}}) == (

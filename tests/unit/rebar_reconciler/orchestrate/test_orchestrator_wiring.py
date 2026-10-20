@@ -6,9 +6,8 @@ Follows the importlib loader convention established in conftest.py.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -16,50 +15,37 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-
-
-def _load(dotted_key: str, filename: str):
-    """Load a reconciler sibling module under a stable sys.modules key."""
-    if dotted_key in sys.modules:
-        return sys.modules[dotted_key]
-    path = RECONCILER_DIR / filename
-    spec = importlib.util.spec_from_file_location(dotted_key, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[dotted_key] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
 @pytest.fixture(scope="module")
 def reconcile_mod():
-    return _load("reconcile_wiring_test", "reconcile.py")
+    return importlib.import_module("rebar.reconciler.reconcile")
 
 
 @pytest.fixture(scope="module")
 def mutation_mod():
-    return _load("reconcile_wiring_mutation", "mutation.py")
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 @pytest.fixture(scope="module")
 def mode_mod():
-    return _load("reconcile_wiring_mode", "mode.py")
+    return importlib.import_module("rebar.reconciler.mode")
 
 
 @pytest.fixture(scope="module")
 def binding_store_mod():
-    return _load("reconcile_wiring_binding_store", "binding_store.py")
+    return importlib.import_module("rebar.reconciler.binding_store")
 
 
 @pytest.fixture(scope="module")
 def sync_logger_mod():
-    return _load("reconcile_wiring_sync_logger", "sync_logger.py")
+    return importlib.import_module("rebar.reconciler.sync_logger")
 
 
 @pytest.fixture(scope="module")
 def outbound_differ_mod():
-    return _load("reconcile_wiring_outbound_differ", "outbound_differ.py")
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +144,7 @@ def _stub_modules(
         "reconcile_inbound_differ": inbound_differ,
         "reconcile_sync_logger": sync_logger_module,
         # Keep the real mutation module for typed Mutation construction
-        "reconcile_mutation": _load("reconcile_wiring_mutation", "mutation.py"),
+        "reconcile_mutation": importlib.import_module("rebar.reconciler.mutation"),
         # Expose instances for assertions
         "_binding_store": binding_store_stub,
         "_sync_logger": sync_logger_instance,
@@ -175,7 +161,7 @@ def _patch_and_run(reconcile_mod, stubs, repo_root, pass_id="test-pass", target_
             return stubs[name]
         return original_load(name, relpath)
 
-    pass_support = reconcile_mod._load("rebar_reconciler.pass_support", "pass_support.py")
+    pass_support = reconcile_mod._load("rebar.reconciler.pass_support", "pass_support.py")
     with patch.object(reconcile_mod, "_load", side_effect=fake_load):
         with patch.object(pass_support, "_read_local_tickets", return_value=[]):
             return reconcile_mod.reconcile_once(
@@ -426,7 +412,7 @@ def test_read_local_tickets_live_path_strips_ambient_sync_pull(tmp_path, monkeyp
 
     # _read_local_tickets moved to pass_support.py (ticket
     # piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
-    rh = _load("reconcile_wiring_pass_support", "pass_support.py")
+    rh = importlib.import_module("rebar.reconciler.pass_support")
 
     fake_cli = tmp_path / "rebar-cli"
     fake_cli.write_text("#!/bin/sh\n")  # must exist so the CLI branch runs
@@ -459,7 +445,7 @@ def test_read_local_ticket_full_live_path_strips_ambient_sync_pull(tmp_path, mon
     (no_sync=False) read must strip an ambient REBAR_SYNC_PULL=off."""
     import subprocess
 
-    rd = _load("run_differs_wiring", "run_differs.py")
+    rd = importlib.import_module("rebar.reconciler.run_differs")
 
     fake_cli = tmp_path / "rebar-cli"
     fake_cli.write_text("#!/bin/sh\n")

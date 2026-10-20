@@ -29,7 +29,7 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler import __main__ as reconciler_main
+from rebar.reconciler import __main__ as reconciler_main
 
 
 def _lock_lost_cls() -> type[Exception]:
@@ -38,7 +38,7 @@ def _lock_lost_cls() -> type[Exception]:
     Both the raise site (`main`) and the classification site (`run_pass`) go through
     `_load_sibling_keyed(_ADVISORY_LOCK_KEY, ...)`, which deliberately returns a
     test-pre-seeded `sys.modules` entry when one exists. Importing
-    `rebar_reconciler._advisory_lock` directly instead can therefore hand back a
+    `rebar.reconciler._advisory_lock` directly instead can therefore hand back a
     DIFFERENT class object once another test in the session has seeded a stub under
     that key — `isinstance` then fails and this test goes red for a reason that has
     nothing to do with the behaviour under test (the order-dependent class-identity

@@ -1,7 +1,7 @@
 """HELD-OUT oracle for 264f — the implementation MUST NOT see this file.
 
 Placed under tests/unit/rebar_reconciler/ so the package conftest puts the engine on
-sys.path and seeds the flat ``rebar_reconciler`` namespace (the engine package is
+sys.path and seeds the flat ``rebar.reconciler`` namespace (the engine package is
 shadowed by ``rebar._engine``), letting these modules import directly.
 
 Validates the reconciler integration the happy-path seam cannot: the outbound differ
@@ -13,10 +13,10 @@ is already an accountId (and does not leak the flag to the ACLI subprocess); and
 
 from __future__ import annotations
 
-import rebar_reconciler.adapters.jira.acli as acli
+import rebar.reconciler.adapters.jira.acli as acli
 
 # ticket 625b: the field-diff helpers are now adapter-internal (outbound_fields).
-from rebar_reconciler.adapters.jira import outbound_fields as _of
+from rebar.reconciler.adapters.jira import outbound_fields as _of
 
 
 def _ticket(assignee: str) -> dict:

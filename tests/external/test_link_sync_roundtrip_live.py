@@ -16,13 +16,11 @@ The test also prints the Jira link shape for diagnostics.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import os
 import shutil
-import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
@@ -31,7 +29,7 @@ pytestmark = pytest.mark.external
 # Repo root: tests/external/<this file> -> parents[2] is the repo root.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENGINE_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
-RECONCILER_DIR = ENGINE_DIR / "rebar_reconciler"
+RECONCILER_DIR = ENGINE_DIR.parent / "reconciler"
 
 
 # ---------------------------------------------------------------------------
@@ -52,18 +50,16 @@ _skip = pytest.mark.skipif(
 
 
 def _ensure_engine_on_path() -> None:
-    """Expose the engine directory so outbound apply can import ``rebar_reconciler``.
+    """Expose the engine directory so outbound apply can import ``rebar.reconciler``.
 
-    The leaf imports ``rebar_reconciler.apply_base`` as a package, matching the other client
+    The leaf imports ``rebar.reconciler.apply_base`` as a package, matching the other client
     fixtures.
     """
-    if str(ENGINE_DIR) not in sys.path:
-        sys.path.insert(0, str(ENGINE_DIR))
 
 
 def _build_client():
     _ensure_engine_on_path()
-    from rebar_reconciler.adapters.jira import acli as mod
+    from rebar.reconciler.adapters.jira import acli as mod
 
     return mod.AcliClient(
         jira_url=os.environ["JIRA_URL"],
@@ -71,21 +67,6 @@ def _build_client():
         api_token=os.environ["JIRA_API_TOKEN"],
         jira_project=os.environ["JIRA_PROJECT"],
     )
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    """Load a reconciler differ module standalone (mirrors the integration test).
-
-    The differs are written to be import-via-spec safe (they lazy-load siblings
-    by path), so loading them this way exercises the same standalone path the
-    integration suite uses.
-    """
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
 
 
 def _new_key(created: dict) -> str:
@@ -205,13 +186,13 @@ def test_link_sync_differ_apply_roundtrip_live() -> None:
     _ensure_engine_on_path()
 
     client = _build_client()
-    outbound = _load_module("outbound_differ", RECONCILER_DIR / "outbound_differ.py")
-    inbound = _load_module("inbound_differ", RECONCILER_DIR / "inbound_differ.py")
+    outbound = importlib.import_module("rebar.reconciler.outbound_differ")
+    inbound = importlib.import_module("rebar.reconciler.inbound_differ")
 
     # The outbound apply leaf must be imported as a PACKAGE module (it does
-    # ``from rebar_reconciler.apply_base import ...`` at import time).
-    from rebar_reconciler import apply_outbound
-    from rebar_reconciler.mutation import Mutation, MutationAction, MutationDirection
+    # ``from rebar.reconciler.apply_base import ...`` at import time).
+    from rebar.reconciler import apply_outbound
+    from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
 
     key_a: str | None = None
     key_b: str | None = None
@@ -418,8 +399,8 @@ def test_link_sync_writes_absolute_direction_live(relation: str, a_is_blocker: b
     """
     _ensure_engine_on_path()
     client = _build_client()
-    outbound = _load_module("outbound_differ", RECONCILER_DIR / "outbound_differ.py")
-    from rebar_reconciler.batch_dispatch import update_one
+    outbound = importlib.import_module("rebar.reconciler.outbound_differ")
+    from rebar.reconciler.batch_dispatch import update_one
 
     key_a: str | None = None
     key_b: str | None = None
@@ -439,7 +420,7 @@ def test_link_sync_writes_absolute_direction_live(relation: str, a_is_blocker: b
             "loc-a", deps=[{"target_id": "loc-b", "relation": relation, "link_uuid": "u1"}]
         )
 
-        from rebar_reconciler.adapters.jira.backend import JiraBackend as _JB
+        from rebar.reconciler.adapters.jira.backend import JiraBackend as _JB
 
         links = outbound._diff_links(
             ticket, {"issuelinks": client.get_issue_links(key_a)}, bind, _JB(transport=client)

@@ -22,9 +22,9 @@ import sys
 
 import pytest
 
-from rebar_reconciler import __main__ as reconciler_main
-from rebar_reconciler.adapters.jira import acli as acli_mod
-from rebar_reconciler.adapters.jira import acli_subprocess
+from rebar.reconciler import __main__ as reconciler_main
+from rebar.reconciler.adapters.jira import acli as acli_mod
+from rebar.reconciler.adapters.jira import acli_subprocess
 
 # The exact stderr ACLI emits on a rejected credential, as captured in the failed
 # bridge runs (the ✗ prefix and backticks included, verbatim).

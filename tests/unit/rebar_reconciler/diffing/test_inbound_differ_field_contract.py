@@ -16,55 +16,25 @@ by story a130-2b7c-429c-43d1.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-INBOUND_DIFFER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "inbound_differ.py"
-)
-OUTBOUND_DIFFER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
-)
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    key = f"_field_contract_{name}"
-    if key in sys.modules:
-        del sys.modules[key]
-    spec = importlib.util.spec_from_file_location(key, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[key] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+INBOUND_DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "inbound_differ.py"
+OUTBOUND_DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
 
 
 @pytest.fixture(scope="module")
 def inbound_differ() -> ModuleType:
-    return _load_module("inbound_differ", INBOUND_DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.inbound_differ")
 
 
 @pytest.fixture(scope="module")
 def outbound_differ() -> ModuleType:
-    # Stub ADF to avoid heavy dependency in this contract test
-    _ADF_KEY = "rebar_reconciler.adapters.jira.adf"
-    import types
-
-    adf_stub = types.ModuleType(_ADF_KEY)
-    adf_stub.adf_to_text = lambda x: str(x) if isinstance(x, str) else ""  # type: ignore[attr-defined]
-    _prev = sys.modules.get(_ADF_KEY)
-    sys.modules[_ADF_KEY] = adf_stub
-    mod = _load_module("outbound_differ", OUTBOUND_DIFFER_PATH)
-    if _prev is None:
-        sys.modules.pop(_ADF_KEY, None)
-    else:
-        sys.modules[_ADF_KEY] = _prev
-    return mod
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 # ---------------------------------------------------------------------------

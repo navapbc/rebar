@@ -10,8 +10,8 @@ the write. The legacy route scopes via ``_build_filter_target_set`` (LOCAL IDS â
 KEYS) and applies correctly.
 
 The reconcile pass is driven by ``_sync_only_dispatch_probe.py`` in a CLEAN subprocess: the
-probe (re)loads reconciler modules under flat keys, which collides with pytest's package /
-conftest module seeding when run in-process. A faithful in-memory transport records the
+probe rebinds loader seams on the shared ``rebar.reconciler`` modules and sets process
+environment, which must not leak into pytest's process. A faithful in-memory transport records the
 ``update_issue`` calls; the bug is not codec/DC-specific, so an offline transport reproduces
 it (matching the live in-CI probe for bug af1b; context: external, GH Actions run 33129851229).
 """
@@ -19,7 +19,6 @@ it (matching the live in-CI probe for bug af1b; context: external, GH Actions ru
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -28,7 +27,6 @@ from _subprocess_env import subprocess_env
 
 _HERE = Path(__file__).resolve().parent
 _PROBE = _HERE / "_sync_only_dispatch_probe.py"
-_ENGINE_DIR = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine"
 _EXPECTED = ["update_issue(DIG-1) fields=['description']"]
 
 
@@ -44,14 +42,12 @@ def _run_probe(route: str, base: Path) -> list[str]:
     # inherited overrides and let the probe govern.
     for key in ("REBAR_ROOT", "REBAR_CONFIG", "XDG_CONFIG_HOME"):
         env.pop(key, None)
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = f"{_ENGINE_DIR}{os.pathsep}{existing}" if existing else str(_ENGINE_DIR)
     proc = subprocess.run(
         [sys.executable, str(_PROBE), route, str(base)],
         capture_output=True,
         text=True,
         env=env,
-        cwd=str(_ENGINE_DIR.parents[2]),
+        cwd=str(base.parent),
         check=False,
     )
     marker = "PROBE_RESULT "

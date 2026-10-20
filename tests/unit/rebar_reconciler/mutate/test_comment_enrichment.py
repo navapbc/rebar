@@ -7,33 +7,21 @@ snapshot remains writable. Mock clients keep the suite independent of live Jira.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-_REC = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
+_REC = REPO_ROOT / "src" / "rebar" / "reconciler"
 OUTBOUND_DIFFER_PATH = _REC / "outbound_differ.py"
-
-
-def _load(name: str, path: Path) -> ModuleType:
-    if name in sys.modules:
-        del sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
 
 
 @pytest.fixture(scope="module")
 def outbound_differ() -> ModuleType:
-    return _load("outbound_differ_comment_enrich_test", OUTBOUND_DIFFER_PATH)
+    return importlib.import_module("rebar.reconciler.outbound_differ")
 
 
 class StubBindingStore:
@@ -166,19 +154,11 @@ def test_unenriched_snapshot_falls_back_to_get_comments(
 
 
 def _load_fetcher(name: str) -> ModuleType:
-    fetcher_path = _REC / "fetcher.py"
-    if name in sys.modules:
-        del sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, fetcher_path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+    return importlib.import_module("rebar.reconciler.fetcher")
 
 
 @pytest.mark.unit
-def test_fetcher_enriches_comment_field(tmp_path: Path) -> None:
+def test_fetcher_enriches_comment_field(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """fetch_snapshot merges get_comment_map results into snapshot entries."""
     fetcher_mod = _load_fetcher("fetcher_comment_enrich_test")
 
@@ -198,7 +178,7 @@ def test_fetcher_enriches_comment_field(tmp_path: Path) -> None:
             return {"DIG-90": {"comments": [{"body": "enriched comment"}]}}
 
     # S4: _load_acli returns the transport (client) directly.
-    fetcher_mod._load_acli = lambda: _StubClient()
+    monkeypatch.setattr(fetcher_mod, "_load_acli", lambda: _StubClient())
     (tmp_path / "bridge_state" / "snapshots").mkdir(parents=True)
     output_path = fetcher_mod.fetch_snapshot("test-pass", repo_root=tmp_path)
 
@@ -210,7 +190,7 @@ def test_fetcher_enriches_comment_field(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_fetcher_comment_enrichment_failure_degrades(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """get_comment_map failure → no comment key (per-ticket fallback) + warning."""
     import logging
@@ -233,7 +213,7 @@ def test_fetcher_comment_enrichment_failure_degrades(
             raise RuntimeError("REST comment fetch failed")
 
     # S4: _load_acli returns the transport (client) directly.
-    fetcher_mod._load_acli = lambda: _FailingClient()
+    monkeypatch.setattr(fetcher_mod, "_load_acli", lambda: _FailingClient())
     (tmp_path / "bridge_state" / "snapshots").mkdir(parents=True)
     with caplog.at_level(logging.WARNING):
         output_path = fetcher_mod.fetch_snapshot("test-pass", repo_root=tmp_path)

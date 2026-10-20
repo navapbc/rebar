@@ -1,55 +1,33 @@
-"""Shared helper: locate the bundled rebar engine dir from the tests tree.
+"""Shared helper: locate the engine dir and the ONE canonical reconciler package root.
 
 All conftests import this so there is one place to adjust if the layout moves.
-The engine lives at ``<repo>/src/rebar/_engine`` and the tests tree at
-``<repo>/tests/...``.
+The engine assets (the Jira capability probe and resources) live at
+``<repo>/src/rebar/_engine``; the Jira reconciler is the ordinary subpackage
+``rebar.reconciler`` at ``<repo>/src/rebar/reconciler``.
 
 THE CANONICAL ROOT (bug ``bd2d-3e31-31d9-4a66``, ``ethnic-rubber-shoveler``)
 ---------------------------------------------------------------------------
-The engine can exist TWICE on disk. Under a NON-editable install
-(``uv pip install '.[dev,reviewbot,ui]'`` — what the sweep lanes do) there is the
-CHECKOUT copy at ``<repo>/src/rebar/_engine`` and an INSTALLED copy at
-``<site-packages>/rebar/_engine``, which is what ``rebar._engine.engine_dir()``
-resolves. Under an editable install (``uv sync --locked`` — the merge-gating cell,
-and every dev checkout) the two are one directory, so the split is INVISIBLE there.
+The reconciler package can exist TWICE on disk: the CHECKOUT copy at
+``<repo>/src/rebar/reconciler`` and, under a NON-editable install, an INSTALLED copy
+at ``<site-packages>/rebar/reconciler``. Under an editable install the two are one
+directory, so the split is INVISIBLE there.
 
 ``sys.modules`` is a flat namespace keyed by NAME, so a canonical
-``rebar_reconciler.*`` key can only ever hold ONE of the two copies, and which one
-depends on whichever test registered it first. That is not a hazard the suite can
-merely be careful about: :func:`engine_dir` here is the ONE canonical root, and
-anything a test registers under a canonical ``rebar_reconciler.*`` key must come
-from it. The invariant is enforced at runtime by ``tests/conftest.py``'s
-``_one_engine_root`` autouse guard (which reads the resulting ``sys.modules``
-state, so it sees every registration site regardless of how the module got there)
-and statically by ``tests/unit/test_engine_root_convention.py``.
-
-Why the CHECKOUT wins and the installed copy loses:
-
-* The tests tree exists to test the checkout. It monkeypatches engine modules,
-  reads their source text, and is coverage-measured against ``src/``; under a
-  non-editable install the installed copy is a different file the reviewer never
-  diffed.
-* It is already the overwhelming incumbent: this helper, ``tests/unit/conftest.py``'s
-  ``rebar_reconciler`` shadow ``__path__``, ``tests/unit/rebar_reconciler/conftest.py``
-  and some three hundred test modules spell the checkout.
-* Bug ``9f0b-3d48-b935-428b`` settles the tie. The shadow package's ``__path__``
-  carries the CHECKOUT engine dir, so every ``import_module("rebar_reconciler.X")``
-  in the unit tier binds a checkout module. Making the installed copy canonical
-  would leave those bindings non-canonical and force the by-path loaders'
-  ``__file__`` guard — which is NOT the defect and must stay, per
-  ``tests/unit/rebar_reconciler/diffing/test_load_module_identity.py`` — to evict and
-  rebuild them, reproducing exactly the two-class-objects state that made
-  ``isinstance`` answer False. That failure was observed when bug
-  ``ae96-72a9-8145-4c85``'s first attempt repointed unit-tier files at
-  ``rebar._engine.engine_dir()``, and it is why that attempt was reverted.
-
-``rebar._engine.engine_dir()`` remains correct for PRODUCTION, which launches the
-engine as a subprocess out of the installed package; it is only the tests tree that
-must not reach for it.
+``rebar.reconciler.*`` key can only ever hold ONE of the two copies. Every test now
+reaches the reconciler with a plain ``import`` / ``importlib.import_module``, which
+resolves it inside whichever ``rebar`` package the test process imports. That package's
+``reconciler`` directory is therefore the one canonical root, and anything registered
+under a canonical ``rebar.reconciler.*`` key must come from it — a by-path load of the
+other copy would leave two class objects for one name (bug ``ae96-72a9-8145-4c85``).
+The invariant is enforced at runtime by ``tests/conftest.py``'s ``_one_engine_root``
+autouse guard (which reads the resulting ``sys.modules`` state, so it sees every
+registration site regardless of how the module got there) and statically by
+``tests/unit/test_engine_root_convention.py``.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import sys
 from collections.abc import Iterable, Mapping
@@ -57,12 +35,12 @@ from functools import cache, lru_cache
 from pathlib import Path
 from types import ModuleType
 
-# The two path segments that mark any on-disk copy of the engine, whichever install
-# it belongs to: ``<anything>/rebar/_engine``.
-_ENGINE_MARKER: tuple[str, str] = ("rebar", "_engine")
+# The two path segments that mark any on-disk copy of the reconciler package, whichever
+# install it belongs to: ``<anything>/rebar/reconciler``.
+_ENGINE_MARKER: tuple[str, str] = ("rebar", "reconciler")
 
 #: ``sys.modules`` keys that name an engine module (the package itself, or a submodule).
-_CANONICAL_PREFIX = "rebar_reconciler"
+_CANONICAL_PREFIX = "rebar.reconciler"
 
 # Resolved ONCE at import, with ``os.path`` only, and never recomputed. Import happens at
 # collection, long before any test rebinds ``os.name``; a lazily-resolved equivalent would
@@ -71,7 +49,16 @@ _CANONICAL_PREFIX = "rebar_reconciler"
 # tests/_engine_path.py -> tests -> <repo>
 _REPO_ROOT_STR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 _ENGINE_DIR_STR = os.path.join(_REPO_ROOT_STR, "src", "rebar", "_engine")
-_CANONICAL_ENGINE_ROOT_STR = os.path.realpath(_ENGINE_DIR_STR)
+# The ``reconciler`` directory of the ``rebar`` package this process imports (the checkout's
+# ``src/rebar/reconciler`` under an editable install). Located with ``find_spec`` so
+# resolving it does not import ``rebar``.
+_REBAR_SPEC = importlib.util.find_spec("rebar")
+_REBAR_PKG_DIR_STR = (
+    _REBAR_SPEC.submodule_search_locations[0]
+    if _REBAR_SPEC is not None and _REBAR_SPEC.submodule_search_locations
+    else os.path.join(_REPO_ROOT_STR, "src", "rebar")
+)
+_CANONICAL_ENGINE_ROOT_STR = os.path.realpath(os.path.join(_REBAR_PKG_DIR_STR, "reconciler"))
 
 
 @lru_cache(maxsize=1)
@@ -81,16 +68,21 @@ def repo_root() -> Path:
 
 @lru_cache(maxsize=1)
 def engine_dir() -> Path:
-    """The ONE canonical engine root for the tests tree: the checkout's copy."""
+    """The checkout's engine asset dir (``src/rebar/_engine``)."""
     return Path(_ENGINE_DIR_STR)
 
 
+def canonical_reconciler_root() -> Path:
+    """The ONE canonical ``rebar.reconciler`` package root for this test process."""
+    return Path(_CANONICAL_ENGINE_ROOT_STR)
+
+
 def acli_path() -> Path:
-    return engine_dir() / "rebar_reconciler" / "adapters" / "jira" / "acli.py"
+    return engine_dir().parent / "reconciler" / "adapters" / "jira" / "acli.py"
 
 
 def is_canonical_key(name: str) -> bool:
-    """True for ``rebar_reconciler`` and any ``rebar_reconciler.<sub>`` key."""
+    """True for ``rebar.reconciler`` and any ``rebar.reconciler.<sub>`` key."""
     return name == _CANONICAL_PREFIX or name.startswith(_CANONICAL_PREFIX + ".")
 
 
@@ -116,12 +108,11 @@ def _engine_root_str(path: str | Path) -> str | None:
 
 
 def engine_root_of(path: str | Path) -> Path | None:
-    """The ``.../rebar/_engine`` root ``path`` lives under, or ``None``.
+    """The ``.../rebar/reconciler`` root ``path`` lives under, or ``None``.
 
-    ``None`` means "not an engine file at all" — the ``tests/unit/rebar_reconciler``
-    shadow package and its test subpackages resolve here, and they are legitimate
-    holders of a ``rebar_reconciler.*`` key. Only engine files are subject to the
-    single-root rule, because only they exist twice.
+    ``None`` means "not a reconciler package file at all" (for example a test module
+    under ``tests/unit/rebar_reconciler``). Only reconciler package files are subject
+    to the single-root rule, because only they exist twice.
     """
     root = _engine_root_str(path)
     return None if root is None else Path(root)
@@ -129,7 +120,7 @@ def engine_root_of(path: str | Path) -> Path | None:
 
 @cache
 def _foreign_root(path: str) -> str | None:
-    """The engine root of ``path`` when it is an engine file from a NON-canonical copy.
+    """The reconciler root of ``path`` when it is a package file from a NON-canonical copy.
 
     Returns a STRING rather than a ``Path`` so the whole guard path stays free of
     ``pathlib`` — see :func:`_engine_root_str` for why that matters.
@@ -146,10 +137,10 @@ def _foreign_root(path: str) -> str | None:
 def foreign_engine_registrations(
     modules: Mapping[str, ModuleType] | None = None,
 ) -> list[tuple[str, str]]:
-    """Every canonical ``rebar_reconciler.*`` binding served by a non-canonical engine copy.
+    """Every canonical ``rebar.reconciler.*`` binding served by a non-canonical package copy.
 
     Returns sorted ``(what, path)`` pairs, where ``what`` is either the ``sys.modules``
-    key or ``rebar_reconciler.__path__`` (a foreign entry there makes every LATER
+    key or ``rebar.reconciler.__path__`` (a foreign entry there makes every LATER
     submodule import resolve foreign, so it is the same defect one step earlier).
 
     This reads the resulting import STATE rather than any call site, which is what

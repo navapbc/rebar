@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rebar_reconciler.inbound_differ import _diff_jira_vs_local, compute_inbound_mutations
+from rebar.reconciler.inbound_differ import _diff_jira_vs_local, compute_inbound_mutations
 
 _MD = "# Heading\n\nProse with **bold**.\n\n{code}\nx = 1\n{code}\n"
 

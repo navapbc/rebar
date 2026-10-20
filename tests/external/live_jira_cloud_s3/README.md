@@ -26,7 +26,7 @@ This suite must NEVER write to Jira Cloud. That invariant is enforced three ways
    raise `JiraWriteForbidden`. A scenario is literally unable to invoke an outbound Jira
    mutation. `test_read_only_guard_is_real` proves the guard is not vacuous.
 2. **By construction** — the only Jira-touching code paths used are read-only:
-   - `rebar_reconciler.fetcher.compute_snapshot` — the inbound fetch that WRITES NOTHING
+   - `rebar.reconciler.fetcher.compute_snapshot` — the inbound fetch that WRITES NOTHING
      (it only issues JQL searches); its per-project JQL fan-out is driven by the store's
      `projects.json` mapping.
    - `rebar.bridge_preview` — a dry run (`Mode.DRY_RUN` → `MODE_CAPS = 0` → `persist =

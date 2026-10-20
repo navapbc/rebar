@@ -15,8 +15,8 @@ from typing import Any
 import pytest
 
 # Engine is on sys.path via the package conftest.
-from rebar_reconciler.adapters.jira import acli as acli_mod
-from rebar_reconciler.adapters.jira import acli_cli_ops, acli_subprocess
+from rebar.reconciler.adapters.jira import acli as acli_mod
+from rebar.reconciler.adapters.jira import acli_cli_ops, acli_subprocess
 
 _URL = "https://configured.atlassian.net"
 _USER = "svc@example.com"

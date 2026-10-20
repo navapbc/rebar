@@ -14,9 +14,8 @@ pass to see bound tickets as unbound.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
-import sys
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
@@ -24,34 +23,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "pass_support.py"
-ALERT_STORE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "alert_store.py"
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    key = f"_cbsf_{name}"
-    if key in sys.modules:
-        del sys.modules[key]
-    spec = importlib.util.spec_from_file_location(key, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[key] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "pass_support.py"
+ALERT_STORE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "alert_store.py"
 
 
 @pytest.fixture
 def pass_support_mod() -> ModuleType:
-    mod = _load_module("pass_support", PASS_SUPPORT_PATH)
-    yield mod
-    sys.modules.pop("_cbsf_pass_support", None)
+    return importlib.import_module("rebar.reconciler.pass_support")
 
 
 @pytest.fixture
 def alert_store_mod() -> ModuleType:
-    mod = _load_module("alert_store", ALERT_STORE_PATH)
-    yield mod
-    sys.modules.pop("_cbsf_alert_store", None)
+    return importlib.import_module("rebar.reconciler.alert_store")
 
 
 # ---------------------------------------------------------------------------
@@ -146,17 +129,10 @@ def test_commit_failure_appends_alert(
         result.stdout = ""
         return result
 
-    # Pre-register the alert_store module so _load() in pass_support.py picks it up
-    _alert_key = "rebar_reconciler.alert_store"
-    sys.modules[_alert_key] = alert_store_mod
-
-    try:
-        with patch("subprocess.run", side_effect=_failing_run):
-            result = pass_support_mod._commit_binding_store_snapshot(
-                stub_bs, tmp_path, "test-pass-alert-001"
-            )
-    finally:
-        sys.modules.pop(_alert_key, None)
+    with patch("subprocess.run", side_effect=_failing_run):
+        result = pass_support_mod._commit_binding_store_snapshot(
+            stub_bs, tmp_path, "test-pass-alert-001"
+        )
 
     assert result is False
 
@@ -217,15 +193,7 @@ def test_commit_success_returns_true_no_alert(
 
     stub_bs = MagicMock()
 
-    _alert_key = "rebar_reconciler.alert_store"
-    sys.modules[_alert_key] = alert_store_mod
-
-    try:
-        result = pass_support_mod._commit_binding_store_snapshot(
-            stub_bs, tmp_path, "test-pass-ok-001"
-        )
-    finally:
-        sys.modules.pop(_alert_key, None)
+    result = pass_support_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "test-pass-ok-001")
 
     assert result is True, (
         f"_commit_binding_store_snapshot must return True on success, got {result!r}"
@@ -288,16 +256,10 @@ def test_commit_failure_dedup_suppresses_second_alert(
         result.stdout = ""
         return result
 
-    _alert_key = "rebar_reconciler.alert_store"
-    sys.modules[_alert_key] = alert_store_mod
-
-    try:
-        with patch("subprocess.run", side_effect=_failing_run):
-            pass_support_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "dedup-pass-001")
-            # Second call with same pass_id — should be deduped
-            pass_support_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "dedup-pass-001")
-    finally:
-        sys.modules.pop(_alert_key, None)
+    with patch("subprocess.run", side_effect=_failing_run):
+        pass_support_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "dedup-pass-001")
+        # Second call with same pass_id — should be deduped
+        pass_support_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "dedup-pass-001")
 
     alerts_dir = tmp_path / "bridge_state" / "bridge_alerts"
     if alerts_dir.is_dir():

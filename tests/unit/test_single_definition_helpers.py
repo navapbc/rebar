@@ -4,7 +4,7 @@ Two helpers exist as byte- or AST-identical twins across modules that never shar
 
 * ``_ticket_id`` — AST-identical in ``llm/workflow/steps.py`` and
   ``llm/plan_review/decide_ops.py``;
-* ``_positive_int`` — three identical argparse converters (``rebar_reconciler/request.py``,
+* ``_positive_int`` — three identical argparse converters (``reconciler/request.py``,
   ``_cli/_parsers/advanced/bridge.py``, ``_cli/_parsers/advanced/reconcile.py``).
 
 (The diagnostic-only ``_shadow``/``emit_shadow_snapshot`` twin this file used to guard was
@@ -86,9 +86,9 @@ def test_the_argparse_converter_rejects_non_positive_values() -> None:
     which is exactly what distinguishes it from the ``_config_resolvers`` namesake."""
     import argparse
 
-    # NOT imported from rebar_reconciler.request: `src/rebar/_engine/` has no
+    # NOT imported from rebar.reconciler.request: `src/rebar/_engine/` has no
     # `__init__.py`, so those modules are loaded by path (spec_from_file_location) and
-    # imported FLAT as `rebar_reconciler.*` — see tests/unit/rebar_reconciler/conftest.py.
+    # imported FLAT as `rebar.reconciler.*` — see tests/unit/rebar_reconciler/conftest.py.
     # The consolidated owner is an ordinary module, which is exactly why it can serve all
     # three call sites; the reconciler copy's disappearance is proven by the AST count above.
     from rebar._cli._parsers._common import _positive_int

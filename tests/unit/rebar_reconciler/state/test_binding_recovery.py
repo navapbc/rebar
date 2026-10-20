@@ -42,10 +42,10 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler import binding_lifecycle, binding_recovery, binding_repository
-from rebar_reconciler.binding_recovery import BindingRecovery
-from rebar_reconciler.binding_repository import BindingRepository
-from rebar_reconciler.binding_store import BindingStore
+from rebar.reconciler import binding_lifecycle, binding_recovery, binding_repository
+from rebar.reconciler.binding_recovery import BindingRecovery
+from rebar.reconciler.binding_repository import BindingRepository
+from rebar.reconciler.binding_store import BindingStore
 
 _INDENT = 2
 
@@ -980,7 +980,7 @@ def test_the_facade_grace_names_are_aliases_and_not_a_second_source_of_truth() -
     cheapest oracle for that, and it is what makes the "read-only labels" comment beside
     the aliases enforceable rather than a request.
     """
-    import rebar_reconciler.binding_store as bs
+    import rebar.reconciler.binding_store as bs
 
     assert bs._INDEX_LAG_GRACE_SECONDS is binding_recovery._INDEX_LAG_GRACE_SECONDS
     assert bs._MISSES_BEFORE_UNBIND is binding_recovery._MISSES_BEFORE_UNBIND

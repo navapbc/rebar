@@ -10,7 +10,7 @@ import ast
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "differ.py"
+DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "differ.py"
 
 FORBIDDEN_NAME = "local_to_jira_status"
 

@@ -29,18 +29,14 @@ import json
 import platform
 import re
 import subprocess
-import sys
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-ENGINE_ROOT = REPO_ROOT / "src" / "rebar" / "_engine"
-if str(ENGINE_ROOT) not in sys.path:
-    sys.path.insert(0, str(ENGINE_ROOT))
+from rebar.reconciler.adapters.jira_family import wiki_render
 
-from rebar_reconciler.adapters.jira_family import wiki_render  # noqa: E402
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_CORPUS = REPO_ROOT / "tests" / "fixtures" / "dc_wiki_corpus"
 DEFAULT_OUTPUT = REPO_ROOT / "tests" / "fixtures" / "dc_wiki_legacy_outputs.json"

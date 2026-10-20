@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler._backend import BackendHTTPError
-from rebar_reconciler.adapters.jira_datacenter.transport import (
+from rebar.reconciler._backend import BackendHTTPError
+from rebar.reconciler.adapters.jira_datacenter.transport import (
     IllegalTransitionError,
     JiraDataCenterTransport,
 )
@@ -166,7 +166,7 @@ def test_an_illegal_transition_is_non_fatal_and_lands_in_bridge_alerts(
     it reaches ``record_backstop_failure`` and becomes a ``bridge_alerts`` entry instead.
     The follower mutation is the load-bearing half of "non-fatal".
     """
-    from rebar_reconciler import applier, apply_handlers
+    from rebar.reconciler import applier, apply_handlers
 
     transport = JiraDataCenterTransport(client=_RefusingClient(), project="DIG")
     reached: list[str] = []

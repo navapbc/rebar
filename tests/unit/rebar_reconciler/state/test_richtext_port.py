@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler.adapters.jira import adf
-from rebar_reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.adapters.jira import adf
+from rebar.reconciler.adapters.jira.backend import JiraBackend
 
 pytestmark = pytest.mark.unit
 

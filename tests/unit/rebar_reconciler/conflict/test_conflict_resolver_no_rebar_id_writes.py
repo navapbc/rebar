@@ -19,8 +19,7 @@ the conflict_resolver must not propose writes for the identity marker.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from pathlib import Path
 from typing import Any
 
@@ -31,26 +30,15 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "differ.py"
-CONFLICT_RESOLVER_PATH = (
-    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "conflict_resolver.py"
-)
-APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
-
-
-def _load(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
+DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "differ.py"
+CONFLICT_RESOLVER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "conflict_resolver.py"
+APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
+MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "mutation.py"
 
 
 @pytest.fixture(scope="module")
 def differ():
-    return _load(DIFFER_PATH, "differ_no_rebar_id_writes")
+    return importlib.import_module("rebar.reconciler.differ")
 
 
 # ---------------------------------------------------------------------------
@@ -314,28 +302,17 @@ def test_no_rebar_id_label_writes_per_draft9_case(
 
 @pytest.fixture(scope="module")
 def conflict_resolver():
-    return _load(CONFLICT_RESOLVER_PATH, "conflict_resolver_no_rebar_id_writes")
+    return importlib.import_module("rebar.reconciler.conflict_resolver")
 
 
 @pytest.fixture(scope="module")
 def mutation_mod():
-    return _load(MUTATION_PATH, "mutation_no_rebar_id_writes")
+    return importlib.import_module("rebar.reconciler.mutation")
 
 
 @pytest.fixture(scope="module")
 def applier_mod():
-    # applier imports _errors via relative dotted lookup; seed the canonical
-    # package path so RebarIdLabelWriteError resolves at raise-time.
-    import types as _types
-
-    for _parent in ("rebar_reconciler",):
-        if _parent not in sys.modules:
-            sys.modules[_parent] = _types.ModuleType(_parent)
-    errors_path = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_errors.py"
-    errors_key = "rebar_reconciler._errors"
-    if errors_key not in sys.modules:
-        _load(errors_path, errors_key)
-    return _load(APPLIER_PATH, "applier_no_rebar_id_writes")
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 def test_resolver_unions_rebar_id_label_on_divergent_sides(conflict_resolver) -> None:
@@ -395,7 +372,7 @@ def test_applier_guard_blocks_resolver_rebar_id_label_writes(
     # 3. Invoke the guard directly with an unauthorized leaf name.
     #    outbound_update is NOT in _AUTHORIZED_REBAR_ID_LABEL_WRITERS.
     #    The applier loads its own _errors module under the canonical key
-    #    'rebar_reconciler_errors' (see _load_errors_module); use the re-export.
+    #    'reconciler_errors' (see _load_errors_module); use the re-export.
     error_cls = applier_mod.RebarIdLabelWriteError
 
     # Ensure guard mode is 'raise' regardless of environment.
