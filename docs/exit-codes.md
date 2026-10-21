@@ -42,6 +42,14 @@ routes expose only this canonical contract: **0** success or a benign scheduler 
 classifies one execution once; the route adapter changes only its process status and message,
 never the selected policy, repository effects, or refs.
 
+Canonical 0/1/2 is produced once, in the engine child, for the `preview`/`sync` routes.
+`rebar bridge run` (and the library and MCP `bridge_run`) spawns that child directly as
+`python -m rebar.reconciler preview|sync`, propagates its 0/1/2 exit unchanged, and reads the
+`BRIDGE_STATE:`/`BRIDGE_PAUSED:` line only for the state name. A child exit outside 0/1/2 (a
+signal or a crash) is reported as operational failure `1`, with the child's raw code kept in
+`details.reconcile_returncode`. 3/4/75 survive only on the argument-less direct-engine route,
+which `bridge run` never invokes.
+
 Canonical benign states return 0 with one stable stderr line:
 
 | State | Canonical line |

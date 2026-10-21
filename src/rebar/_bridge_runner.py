@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -18,17 +19,25 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from rebar import config
+from rebar._proc import reap_process_group
 
 if TYPE_CHECKING:
     from rebar.types import BridgeRun
 
-TIMEOUT_SECONDS = 3600
+logger = logging.getLogger(__name__)
 
-MODE_COMMANDS: Mapping[str, tuple[str, ...]] = {
-    "dry-run": ("rebar", "bridge", "preview"),
-    "bootstrap-strict": ("rebar", "bridge", "sync", "--max-changes", "10"),
-    "bootstrap-throttle": ("rebar", "bridge", "sync", "--max-changes", "100"),
-    "live": ("rebar", "bridge", "sync"),
+TIMEOUT_SECONDS = 3600
+# Bounds for reaping a timed-out child's process group (``rebar._proc.reap_process_group``).
+_REAP_GRACE_S = 10.0
+_REAP_DRAIN_S = 5.0
+
+#: Engine route argv per bridge profile; the runner spawns ``python -m rebar.reconciler``
+#: directly so a timeout reaps the engine itself, not a CLI hop above it.
+MODE_ARGS: Mapping[str, tuple[str, ...]] = {
+    "dry-run": ("preview",),
+    "bootstrap-strict": ("sync", "--max-changes", "10"),
+    "bootstrap-throttle": ("sync", "--max-changes", "100"),
+    "live": ("sync",),
 }
 
 REQUIRED_ENV_NAMES = (
@@ -45,6 +54,11 @@ REQUIRED_ENV_NAMES = (
 _PAUSE_PREFIX = "BRIDGE_PAUSED: "
 _PAUSE_KEYS = ("paused", "reason", "who", "paused_at")
 _STATE_PREFIX = "BRIDGE_STATE: "
+_STATE_BY_EXIT: Mapping[int, tuple[str, int]] = {
+    0: ("converged", 0),
+    1: ("operational_failure", 1),
+    2: ("invalid_invocation", 2),
+}
 
 
 def _result(
@@ -84,7 +98,7 @@ def _validate_environment(
         return profile, "Reconcile bridge configuration error: missing required environment: " + (
             ", ".join(missing)
         )
-    if profile not in MODE_COMMANDS:
+    if profile not in MODE_ARGS:
         return profile, f"Unknown bridge profile: {profile}"
     return profile, None
 
@@ -110,18 +124,38 @@ def _validate_checkout(root: Path) -> str | None:
     return None
 
 
-def _run(
+def _engine_argv(profile: str, root: Path) -> tuple[str, ...]:
+    return (sys.executable, "-m", "rebar.reconciler", *MODE_ARGS[profile], "--repo-root", str(root))
+
+
+def _spawn_bounded(
     command: Sequence[str], *, root: Path, environ: Mapping[str, str]
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # raw-git-ok: closed rebar/Python argv only; never invokes git
-        command,
+    """Run *command* with captured output, reaping its whole process group on timeout.
+
+    The child leads its own session on POSIX, so a timeout reaps the child AND anything
+    it spawned through ``rebar._proc.reap_process_group`` before ``TimeoutExpired`` is
+    re-raised for the caller's "timed out" branch.
+    """
+    proc = subprocess.Popen(  # raw-git-ok: closed rebar/Python argv only; never invokes git
+        list(command),
         cwd=root,
-        env=environ,
-        capture_output=True,
+        env=dict(environ),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=TIMEOUT_SECONDS,
-        check=False,
+        errors="replace",
+        start_new_session=(os.name == "posix"),
     )
+    try:
+        stdout, stderr = proc.communicate(timeout=TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        reap_process_group(
+            proc, grace=_REAP_GRACE_S, drain=_REAP_DRAIN_S, label="bridge", logger=logger
+        )
+        raise
+    return subprocess.CompletedProcess(list(command), proc.returncode, stdout, stderr)
 
 
 def _is_valid_pause_marker(stderr: str) -> bool:
@@ -144,28 +178,31 @@ def _is_valid_pause_marker(stderr: str) -> bool:
     )
 
 
-def _dispositions() -> tuple[Any, ...]:
-    """Load the reconciler classification once through its supported package seam."""
+def _benign_states() -> frozenset[str]:
+    """The state names a ``BRIDGE_STATE:`` marker may carry (the engine's exit-0 states)."""
     guarded_pass = importlib.import_module("rebar.reconciler.guarded_pass")
-    return tuple(guarded_pass._Disposition)
+    return frozenset(d.state for d in guarded_pass._Disposition if d.canonical_exit == 0)
 
 
 def _classified_result(returncode: int, stderr: str) -> tuple[str, int]:
-    dispositions = _dispositions()
-    by_state = {disposition.state: disposition for disposition in dispositions}
-    if returncode == 0:
-        states = [
-            line.removeprefix(_STATE_PREFIX)
-            for line in stderr.splitlines()
-            if line.startswith(_STATE_PREFIX)
-        ]
-        if len(states) == 1 and states[0] in by_state:
-            disposition = by_state[states[0]]
-            return disposition.state, disposition.canonical_exit
-    for disposition in dispositions:
-        if disposition.legacy_exit == returncode:
-            return disposition.state, disposition.canonical_exit
-    return "operational_failure", 1
+    """Name the state of one engine run without re-canonicalising its exit.
+
+    The engine child canonicalises ``preview``/``sync`` exits once
+    (``__main__._finish_disposition``), so the runner only reads the state name: a single
+    ``BRIDGE_STATE:`` marker on an exit-0 run names a benign state; otherwise exit 0 is
+    ``converged``, 1 ``operational_failure`` and 2 ``invalid_invocation``, propagated
+    unchanged. An exit outside that contract (a signal death, a crash, a stray legacy
+    3/4/75) is an ``operational_failure`` reported as 1 so ``BridgeRun.returncode`` stays
+    in 0/1/2; the raw code is kept in ``details.reconcile_returncode``.
+    """
+    states = [
+        line.removeprefix(_STATE_PREFIX)
+        for line in stderr.splitlines()
+        if line.startswith(_STATE_PREFIX)
+    ]
+    if returncode == 0 and len(states) == 1 and states[0] in _benign_states():
+        return states[0], 0
+    return _STATE_BY_EXIT.get(returncode, ("operational_failure", 1))
 
 
 def _delivery_command(environ: Mapping[str, str], root: Path) -> tuple[str, ...]:
@@ -212,12 +249,12 @@ def run_bridge(
     stdout = f"Reconciling with bridge profile: {profile}\n"
     stderr = ""
     try:
-        reconciled = _run(MODE_COMMANDS[profile], root=root, environ=active_environ)
+        reconciled = _spawn_bounded(_engine_argv(profile, root), root=root, environ=active_environ)
     except subprocess.TimeoutExpired:
         stderr += f"Reconcile failed: timed out after {TIMEOUT_SECONDS} seconds\n"
         return _result(profile, "operational_failure", 1, stdout=stdout, stderr=stderr)
     except OSError as exc:
-        stderr += f"Reconcile failed: could not start rebar: {exc}\n"
+        stderr += f"Reconcile failed: could not start the reconciler: {exc}\n"
         return _result(profile, "operational_failure", 1, stdout=stdout, stderr=stderr)
 
     stdout += reconciled.stdout
@@ -253,7 +290,7 @@ def run_bridge(
     delivery_environ = _child_env.project_child_env(active_environ, relationship="unrelated")
     delivery_environ["REBAR_SYNC_PUSH"] = "always"
     try:
-        delivered = _run(
+        delivered = _spawn_bounded(
             _delivery_command(active_environ, root), root=root, environ=delivery_environ
         )
     except subprocess.TimeoutExpired:

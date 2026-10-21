@@ -55,7 +55,7 @@ def test_runner_owns_shared_environment_and_timeout_contract() -> None:
     runner = _load_runner()
 
     assert runner.TIMEOUT_SECONDS == 3600
-    assert set(runner.MODE_COMMANDS) == {
+    assert set(runner.MODE_ARGS) == {
         "dry-run",
         "bootstrap-strict",
         "bootstrap-throttle",

@@ -8,6 +8,27 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING: `rebar bridge run` spawns the reconciler engine directly
+
+`rebar bridge run` (and the library and MCP `bridge_run`, which share
+`rebar._bridge_runner.run_bridge`) used to run `rebar bridge sync|preview` as a subprocess,
+which then started the engine with no timeout. When the runner's 3600-second timeout fired it
+killed only that middle process, leaving the engine orphaned and holding the pass lock until
+its lease expired. The runner now starts `python -m rebar.reconciler preview|sync` itself:
+
+- Profiles map directly to engine argv: `dry-run` → `preview`, `live` → `sync`,
+  `bootstrap-strict` → `sync --max-changes 10`, `bootstrap-throttle` → `sync --max-changes 100`,
+  each followed by `--repo-root <root>`. `MODE_COMMANDS` is replaced by `MODE_ARGS`, which holds
+  only the engine route arguments.
+- The engine runs in its own process session; on timeout the runner stops its whole process
+  group through `rebar._proc.reap_process_group` and still reports operational failure `1`.
+- The engine child is the only place canonical 0/1/2 is produced. The runner passes that exit
+  through unchanged and reads `BRIDGE_STATE:` only for the state name. A child exit outside
+  0/1/2 is now operational failure `1`; before this change a stray 3/4/75 was translated to a
+  benign state and delivered.
+
+`bridge_run.schema.json` is unchanged.
+
 ## BREAKING: the reconciler rollback toggles are removed
 
 Three environment variables that switched finished reconciler rollouts back to their old

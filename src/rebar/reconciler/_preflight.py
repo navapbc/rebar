@@ -1,7 +1,7 @@
 """Reconcile-pass project-visibility preflight (ticket a011).
 
-Kept in a sibling module so ``__main__`` stays under the module-size cap. The
-reconcile-pass entrypoint (``__main__.run_pass_result``) calls
+Kept in its own module so the pass body stays small. The pass body
+(``guarded_pass.run_pass_result``) calls
 :func:`project_visibility_preflight` STRICTLY BEFORE ``reconcile.reconcile_once``
 — the only outbound-mutation call — and maps a returned :class:`PreflightAbort`
 into its classified ``PassResult``. A ``None`` return lets the pass proceed.

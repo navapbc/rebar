@@ -30,8 +30,8 @@ def test_legacy_reconcile_cli_is_absent_and_engine_filter_is_retained() -> None:
 
 
 def test_bridge_runner_dry_run_profile_invokes_canonical_preview() -> None:
-    assert "reconcile-check" not in _bridge_runner.MODE_COMMANDS
-    assert _bridge_runner.MODE_COMMANDS["dry-run"] == ("rebar", "bridge", "preview")
+    assert "reconcile-check" not in _bridge_runner.MODE_ARGS
+    assert _bridge_runner.MODE_ARGS["dry-run"] == ("preview",)
 
 
 def test_bridge_status_ignores_retired_reconcile_check_artifact(

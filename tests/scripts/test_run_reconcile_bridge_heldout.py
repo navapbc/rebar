@@ -19,18 +19,36 @@ from test_run_reconcile_bridge import (
 pytestmark = pytest.mark.unit
 
 
-@pytest.mark.parametrize("legacy_rc", [3, 4, 75])
-def test_preview_benign_results_translate_only_at_runner_boundary(
-    tmp_path: Path, legacy_rc: int
+@pytest.mark.parametrize("state", ["in-flight", "legacy-gated", "reschedule"])
+def test_benign_engine_states_pass_through_the_runner_and_deliver(
+    tmp_path: Path, state: str
 ) -> None:
+    # The engine child canonicalises once: a benign state arrives as exit 0 plus one
+    # ``BRIDGE_STATE:`` marker, and the runner only names it.
     checkout, _tracker, origin = bridge_workspace(tmp_path)
     env = runner_env(tmp_path, checkout, mode="dry-run")
-    env["STUB_RC"] = str(legacy_rc)
+    env["STUB_STDERR"] = f"BRIDGE_STATE: {state}\n"
 
     completed = run_bridge(checkout, env)
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert git(origin, "show", "tickets:bridge-event.txt").stdout == "event from bridge\n"
+
+
+@pytest.mark.parametrize("legacy_rc", [3, 4, 75])
+def test_legacy_sentinels_are_not_translated_by_the_runner(tmp_path: Path, legacy_rc: int) -> None:
+    # 3/4/75 belong to the argument-less direct-engine route; the runner never invokes it,
+    # so a sentinel here is an out-of-contract exit, not a benign result to deliver.
+    checkout, _tracker, origin = bridge_workspace(tmp_path)
+    before = git(origin, "rev-parse", "tickets").stdout.strip()
+    env = runner_env(tmp_path, checkout, mode="dry-run")
+    env["STUB_RC"] = str(legacy_rc)
+
+    completed = run_bridge(checkout, env)
+
+    assert completed.returncode == 1
+    assert f"Reconcile failed (exit {legacy_rc})" in completed.stderr
+    assert git(origin, "rev-parse", "tickets").stdout.strip() == before
 
 
 @pytest.mark.parametrize("rc", [1, 2])

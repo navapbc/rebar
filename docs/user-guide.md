@@ -683,12 +683,16 @@ the store or found nothing to do, `1` when a guard refused, and `2` on operation
 Repository-scheduled synchronization is portable across GitHub Actions, Jenkins, and GitLab.
 Each provider prepares a full-history checkout and `.tickets-tracker`, then invokes
 the installed `rebar bridge run` command. The adapter supports `MODE` values
-(`dry-run`, `bootstrap-strict`, `bootstrap-throttle`, and `live`) while routing
-new work through the noun-based `bridge preview` / `bridge sync` commands. It requires
+(`dry-run`, `bootstrap-strict`, `bootstrap-throttle`, and `live`). It requires
 the Jira variables, `REBAR_ENV_ID`, `BRIDGE_RUN_ID`, and the bridge bot name/email before the
 pass starts; a shallow checkout is rejected because it cannot reconcile ticket history safely.
-This shared CI adapter routes `dry-run` to canonical preview and live/bootstrap
-profiles to canonical sync.
+It then starts the reconciler engine directly. The runner routes `dry-run` to canonical preview
+(`python -m rebar.reconciler preview`) and the live and bootstrap profiles to canonical sync
+(`python -m rebar.reconciler sync`; the bootstrap profiles add `--max-changes 10` or
+`--max-changes 100`). The engine runs in its own process session, so when the one-hour
+timeout fires, the runner stops the engine and everything it started instead of leaving an
+orphaned engine holding the pass lock. The run exits with the engine's own 0/1/2 code (see
+[exit-codes.md](exit-codes.md#bridge-routes-canonical-012-and-retained-compatibility-sentinels)).
 
 For an explicit one-off selection, use `rebar bridge run --profile dry-run`. Provider
 templates normally omit `--profile` and supply the established `MODE` environment

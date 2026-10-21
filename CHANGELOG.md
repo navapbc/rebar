@@ -38,6 +38,13 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): `rebar bridge run` starts the reconciler engine directly.** It used to
+  run `rebar bridge sync|preview`, which started the engine again with no timeout, so a timed-out
+  run left the engine orphaned and holding the pass lock. The runner now starts
+  `python -m rebar.reconciler preview|sync` in its own process session and stops the whole
+  process group on timeout. The engine's 0/1/2 exit passes through unchanged. Details in
+  [docs/release-notes.md](docs/release-notes.md).
+
 - **BREAKING (pre-1.0): the three reconciler rollback toggles are removed.**
   `REBAR_RECONCILER_CREATE_ROUTE`, `REBAR_RECONCILER_WRITE_FACADE`, and
   `REBAR_RECONCILER_FAIL_SILENT_NOOP` are no longer read. Every outbound CREATE takes the

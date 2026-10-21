@@ -33,7 +33,7 @@ def _bridge_runner_modes() -> dict[str, tuple[str, ...]]:
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.MODE_COMMANDS
+    return module.MODE_ARGS
 
 
 def _mode_module():
@@ -48,7 +48,7 @@ def test_live_surfaces_drop_legacy_vocabulary_and_keep_preview_profile() -> None
         for token in ("reconcile-check", "RECONCILE_CHECK")
         if token in (ROOT / path).read_text(encoding="utf-8")
     }
-    if _bridge_runner_modes().get("dry-run") != ("rebar", "bridge", "preview"):
+    if _bridge_runner_modes().get("dry-run") != ("preview",):
         violations["src/rebar/_bridge_runner.py"] = "dry-run preview route missing"
     if any(
         member.name == "RECONCILE_CHECK" or member.value == "reconcile-check"

@@ -8,7 +8,6 @@ message, and persisted git state all participate.
 
 from __future__ import annotations
 
-import os
 import shlex
 import subprocess
 import sys
@@ -18,6 +17,7 @@ from pathlib import Path
 import pytest
 import yaml
 from _subprocess_env import subprocess_env
+from test_run_reconcile_bridge import run_bridge
 
 pytestmark = pytest.mark.unit
 
@@ -149,16 +149,12 @@ def _run_block(case: GitCase, block: str, label: str) -> subprocess.CompletedPro
     )
 
 
-def _run_reconciler(case: GitCase, label: str) -> subprocess.CompletedProcess[str]:
-    bin_dir = case.root / f"{label}-bin"
-    bin_dir.mkdir()
-    rebar = bin_dir / "rebar"
-    rebar.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    rebar.chmod(0o755)
+def _run_reconciler(case: GitCase) -> subprocess.CompletedProcess[str]:
+    # The engine is stubbed on the runner's spawn seam and writes nothing
+    # (``STUB_MUTATE=0``); the delivery child is the real ticket-store commit and push.
     env = subprocess_env()
     env.update(
         {
-            "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
             "MODE": "live",
             "BRIDGE_RUN_ID": "test-run-id",
             "BRIDGE_BOT_NAME": "Bridge Bot",
@@ -170,17 +166,10 @@ def _run_reconciler(case: GitCase, label: str) -> subprocess.CompletedProcess[st
             "REBAR_ENV_ID": "reconciler",
             "REBAR_ROOT": str(case.root),
             "XDG_CONFIG_HOME": str(case.root / ".isolated-config"),
+            "STUB_MUTATE": "0",
         }
     )
-    return subprocess.run(
-        [sys.executable, "-m", "rebar.cli", "bridge", "run"],
-        cwd=case.root,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
+    return run_bridge(case.root, env, timeout=60)
 
 
 def test_reconciler_workflow_commits_and_pushes_strictly(tmp_path: Path) -> None:
@@ -196,7 +185,7 @@ def test_reconciler_workflow_commits_and_pushes_strictly(tmp_path: Path) -> None
     success = _seed_case(tmp_path / "success", dirty=True)
     assert "?? inbound.json" in _git(success.tracker, "status", "--porcelain").stdout
     remote_before = _remote_head(success.origin)
-    result = _run_reconciler(success, "reconciler-success")
+    result = _run_reconciler(success)
     assert result.returncode == 0, result.stderr
     assert _remote_head(success.origin) != remote_before
     assert _remote_head(success.origin) == _git(success.tracker, "rev-parse", "HEAD").stdout.strip()
@@ -217,7 +206,7 @@ def test_reconciler_workflow_commits_and_pushes_strictly(tmp_path: Path) -> None
     rejected = _seed_case(tmp_path / "rejected", dirty=True)
     remote_before = _remote_head(rejected.origin)
     _reject_all_pushes(rejected.origin)
-    result = _run_reconciler(rejected, "reconciler-rejected")
+    result = _run_reconciler(rejected)
     assert result.returncode != 0
     assert "push-policy-declined" in result.stderr
     local_head = _git(rejected.tracker, "rev-parse", "HEAD").stdout.strip()

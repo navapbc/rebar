@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import subprocess
-import sys
 import zipfile
 from pathlib import Path
 
@@ -37,6 +35,14 @@ def _install_environment(monkeypatch: pytest.MonkeyPatch, env: dict[str, str]) -
         monkeypatch.setenv(key, value)
 
 
+def _stub_engine(monkeypatch: pytest.MonkeyPatch, harness) -> None:
+    """Put the harness engine stub on the runner's spawn seam (delivery stays real)."""
+    from rebar import _bridge_runner
+
+    stub = harness.engine_stub(_bridge_runner._spawn_bounded)
+    monkeypatch.setattr(_bridge_runner, "_spawn_bounded", stub)
+
+
 def test_python_library_runs_the_packaged_bridge_core(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -45,6 +51,7 @@ def test_python_library_runs_the_packaged_bridge_core(
     env = harness.runner_env(tmp_path, checkout)
     env["REBAR_ROOT"] = str(tmp_path / "wrong-root")
     _install_environment(monkeypatch, env)
+    _stub_engine(monkeypatch, harness)
 
     result = rebar.bridge_run(repo_root=checkout)
 
@@ -68,6 +75,7 @@ def test_mcp_runs_the_same_packaged_core_without_writing_protocol_stdout(
     env = harness.runner_env(tmp_path, checkout)
     env["REBAR_ROOT"] = str(checkout)
     _install_environment(monkeypatch, env)
+    _stub_engine(monkeypatch, harness)
     monkeypatch.chdir(checkout)
     monkeypatch.delenv("REBAR_MCP_READONLY", raising=False)
     monkeypatch.setenv("REBAR_MCP_ALLOW_JIRA_SYNC", "1")
@@ -90,14 +98,7 @@ def test_installed_cli_honors_rebar_root_when_started_outside_the_repo(
     checkout, _tracker, _origin = harness.bridge_workspace(tmp_path)
     env = harness.runner_env(tmp_path, checkout)
 
-    completed = subprocess.run(
-        [sys.executable, "-m", "rebar.cli", "bridge", "run"],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    completed = harness.run_bridge(checkout, env, cwd=tmp_path)
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert Path(env["REBAR_ROOT_FILE"]).read_text(encoding="utf-8").strip() == str(checkout)
