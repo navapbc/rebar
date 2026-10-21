@@ -28,6 +28,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar.reconciler.create_route import _coordinated_create_core
 from rebar.reconciler.outbound_comments import (
     RECONCILER_MARKER,
     _diff_comments,
@@ -135,6 +136,7 @@ def _send_and_capture(dispatch, mutations, *, path: str) -> str:
             },
             client,
             repo_root=REPO_ROOT,
+            create_core=_coordinated_create_core,
         )
     else:
         dispatch.update_one(

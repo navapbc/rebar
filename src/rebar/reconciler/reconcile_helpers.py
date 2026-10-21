@@ -22,7 +22,6 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import json
-import os
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -251,20 +250,6 @@ def _accepts_ticket_plans(fn: Any) -> bool:
     return any(p.name == "ticket_plans" or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
 
 
-def _write_facade_enabled() -> bool:
-    """Whether the reconciler write facade (AC1 runtime threading) is ON.
-
-    AC6 rollback toggle: setting ``REBAR_RECONCILER_WRITE_FACADE`` to a falsey value
-    (``0``/``false``/``off``/``no``) restores the legacy ambient apply path — the pass
-    skips composing/threading the runtime and ``applier.apply`` falls back to its own
-    ambient ``_load_acli`` resolution. Default (unset) is ON, behavior-preserving.
-    """
-    raw = os.environ.get("REBAR_RECONCILER_WRITE_FACADE")  # read-via: rollback-toggle
-    if raw is None:
-        return True
-    return raw.strip().lower() not in {"0", "false", "off", "no"}
-
-
 def _resolve_pass_transport(ctx: Any):
     """Resolve the transport to hand the composed backend, honoring the applier's
     ``_load_acli`` seam so a test that patches it (or a stubbed transport) still drives
@@ -299,10 +284,8 @@ def bind_operation_runtime(ctx: Any, compose: Any) -> None:
     Composition must not crash a read-only pass whose Jira scope is absent: on a
     compose/build failure we re-raise for a persisting (write) pass (fail closed) but fall
     back to the ambient path (``client=None``) for a no-write pass, so dry-run /
-    preview passes keep working. Disabled entirely by AC6's toggle.
+    preview passes keep working.
     """
-    if not _write_facade_enabled():
-        return
     try:
         transport = _resolve_pass_transport(ctx)
         runtime = compose(repo_root=ctx.repo_root)

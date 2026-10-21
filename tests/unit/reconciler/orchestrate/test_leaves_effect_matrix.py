@@ -129,15 +129,11 @@ def _matrix(direction: str, action: str):
 
 
 @_matrix("outbound", "create")
-def _drive_outbound_create(handler, applier, mut_mod, repo_root, monkeypatch):
-    # S4 T3 cutover (2863-c335): the DEFAULT route is the coordinated write-ahead
+def _drive_outbound_create(handler, applier, mut_mod, repo_root):
+    # S4 T3 cutover (2863-c335): the ONLY route is the coordinated write-ahead
     # composition — create_issue fires exactly once, the returned key is contained
     # (label + entity property), NO delete is ever issued (bug 387d), and the leaf
-    # reports the coordinated outcome. The legacy create+delete-rollback path is
-    # reached ONLY under the REBAR_RECONCILER_CREATE_ROUTE rollback toggle.
-
-    # --- Coordinated default -------------------------------------------------
-    monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
+    # reports the coordinated outcome.
     client = MagicMock()
     client.create_issue.return_value = {"key": "PROJ-1"}
     payload = {"summary": "Login page", "key_hint": "PROJ-1", "local_id": "LOCAL-A"}
@@ -166,36 +162,6 @@ def _drive_outbound_create(handler, applier, mut_mod, repo_root, monkeypatch):
     err_client.delete_issue.assert_not_called()
     assert err_result.payload["dependents_released"] is False
     assert err_result.payload["known_key"] is None
-
-    # --- Legacy rollback path (toggle) --------------------------------------
-    monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", "legacy")
-    lclient = MagicMock()
-    lclient.create_issue.return_value = {"key": "PROJ-1"}
-    lpayload = {"summary": "Login page", "key_hint": "PROJ-1"}
-    lmut = _mk(mut_mod, "outbound", "create", target="LOCAL-A", payload=lpayload)
-    lresult = handler(lmut, client=lclient, repo_root=repo_root)
-    assert lclient.create_issue.call_count == 1
-    assert lclient.create_issue.call_args.args == ({"summary": "Login page", "key_hint": "PROJ-1"},)
-    lclient.delete_issue.assert_not_called()
-    assert lresult.payload["coordinated"] is False
-    assert lresult.payload["known_key"] == "PROJ-1"
-    assert lresult.payload["confirmed"] is True
-    assert lresult.payload["dependents_released"] is True
-
-    # Legacy error path: create raises -> rollback delete_issue(key_hint) -> reraise.
-    legacy_err_client = MagicMock()
-    legacy_err_client.create_issue.side_effect = RuntimeError("create boom")
-    legacy_err_mut = _mk(
-        mut_mod,
-        "outbound",
-        "create",
-        target="LOCAL-B",
-        payload={"summary": "x", "key_hint": "PROJ-9"},
-    )
-    with pytest.raises(RuntimeError, match="create boom"):
-        handler(legacy_err_mut, client=legacy_err_client, repo_root=repo_root)
-    legacy_err_client.delete_issue.assert_called_once()
-    assert legacy_err_client.delete_issue.call_args.args == ("PROJ-9",)
 
 
 @_matrix("outbound", "update")

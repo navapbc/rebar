@@ -16,6 +16,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler.create_route import _coordinated_create_core
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
@@ -73,7 +75,7 @@ def test_set_entity_property_called_after_create(applier):
     client = _make_mock_client(create_return={"key": "DIG-999"})
     mutation = _make_create_mutation(local_id)
 
-    applier.create_one(mutation, client, rest_calls=0)
+    applier.create_one(mutation, client, rest_calls=0, create_core=_coordinated_create_core)
 
     client.set_entity_property.assert_called_once_with("DIG-999", "local_id", local_id)
 
@@ -84,7 +86,7 @@ def test_add_label_called_after_create(applier):
     client = _make_mock_client(create_return={"key": "DIG-999"})
     mutation = _make_create_mutation(local_id)
 
-    applier.create_one(mutation, client, rest_calls=0)
+    applier.create_one(mutation, client, rest_calls=0, create_core=_coordinated_create_core)
 
     client.add_label.assert_called_once_with("DIG-999", f"rebar-id:{local_id}")
 
@@ -95,7 +97,7 @@ def test_identity_writes_use_correct_jira_key(applier):
     client = _make_mock_client(create_return={"key": "PROJ-42"})
     mutation = _make_create_mutation(local_id)
 
-    applier.create_one(mutation, client, rest_calls=0)
+    applier.create_one(mutation, client, rest_calls=0, create_core=_coordinated_create_core)
 
     client.add_label.assert_called_once_with("PROJ-42", f"rebar-id:{local_id}")
     client.set_entity_property.assert_called_once_with("PROJ-42", "local_id", local_id)
@@ -108,7 +110,9 @@ def test_identity_writes_not_called_on_dedup_skip(applier, tmp_path):
     client.search_issues.return_value = [existing]  # JQL hit
     mutation = _make_create_mutation("tick-abc4")
 
-    applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+    applier.create_one(
+        mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+    )
 
     client.add_label.assert_not_called()
     client.set_entity_property.assert_not_called()
@@ -119,7 +123,9 @@ def test_identity_writes_not_called_on_budget_defer(applier):
     client = _make_mock_client()
     mutation = _make_create_mutation("tick-abc5")
 
-    result = applier.create_one(mutation, client, rest_calls=200)
+    result = applier.create_one(
+        mutation, client, rest_calls=200, create_core=_coordinated_create_core
+    )
 
     assert result is None
     client.add_label.assert_not_called()
@@ -152,7 +158,9 @@ def test_add_label_transient_5xx_absorbed_by_retry_no_rollback(applier):
 
     with patch.object(dispatch_apply_phases, "time") as mock_time:
         mock_time.sleep = MagicMock()
-        result = applier.create_one(mutation, client, rest_calls=0)
+        result = applier.create_one(
+            mutation, client, rest_calls=0, create_core=_coordinated_create_core
+        )
 
     # create_one must return the create_issue result (rollback NOT triggered).
     assert result == {"key": "DIG-555"}, (
@@ -191,7 +199,9 @@ def test_set_entity_property_transient_5xx_absorbed_by_retry_no_rollback(applier
 
     with patch.object(dispatch_apply_phases, "time") as mock_time:
         mock_time.sleep = MagicMock()
-        result = applier.create_one(mutation, client, rest_calls=0)
+        result = applier.create_one(
+            mutation, client, rest_calls=0, create_core=_coordinated_create_core
+        )
 
     assert result == {"key": "DIG-556"}
     client.delete_issue.assert_not_called()
@@ -215,7 +225,7 @@ def test_label_written_before_entity_property(applier):
     )
 
     mutation = _make_create_mutation(local_id)
-    applier.create_one(mutation, client, rest_calls=0)
+    applier.create_one(mutation, client, rest_calls=0, create_core=_coordinated_create_core)
 
     assert call_order == ["add_label", "set_entity_property"], (
         f"Expected add_label before set_entity_property, got: {call_order}"

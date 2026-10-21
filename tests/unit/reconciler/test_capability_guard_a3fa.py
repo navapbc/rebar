@@ -34,6 +34,7 @@ from pathlib import Path
 import pytest
 
 from rebar.reconciler import dispatch_apply_phases, dispatch_one, pass_io
+from rebar.reconciler.create_route import _coordinated_create_core
 
 # The guard logs through the module that owns it. Target that logger by NAME when asserting:
 # a sibling test in the same session can leave the module logger above INFO, and
@@ -168,7 +169,7 @@ def test_dispatch_comments_absent_capability_is_a_designed_skip(alert_root, capl
     assert (computed, applied) == (0, 0), (
         "a capability-absent skip must increment NEITHER _computed NOR _applied, or "
         "apply_handlers' silent-no-op canary would report a designed skip as the bug-3f04 "
-        "failure mode (and hard-fail the mutation under RECONCILER_FAIL_SILENT_NOOP=1)"
+        "failure mode (and hard-fail the mutation)"
     )
     # AC3b: comment_errors is the FAILURE channel — a skip must not appear there.
     assert comment_errors == [], "a designed skip must not be recorded as a comment failure"
@@ -210,7 +211,11 @@ def test_create_one_absent_capability_is_a_designed_skip(alert_root, tmp_path, c
 
     with caplog.at_level(logging.INFO, logger=_GUARD_LOGGER):
         result = dispatch_one.create_one(
-            mutation, client, repo_root=tmp_path, comment_errors=comment_errors
+            mutation,
+            client,
+            repo_root=tmp_path,
+            comment_errors=comment_errors,
+            create_core=_coordinated_create_core,
         )
 
     assert result == {"key": "DIG-1"}, "the create must still land; only the comment is skipped"

@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from rebar.reconciler.create_route import _coordinated_create_core
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
@@ -109,7 +111,9 @@ def test_get_entity_property_returns_local_id_after_create(applier, tmp_path):
     client = _make_readback_client(issue_key)
     mutation = _make_create_mutation(local_id)
 
-    applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+    applier.create_one(
+        mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+    )
 
     stored_value = client.get_entity_property(issue_key, "local_id")
     assert stored_value == local_id, (
@@ -125,7 +129,9 @@ def test_add_label_includes_rebar_id_label_after_create(applier, tmp_path):
     client = _make_readback_client(issue_key)
     mutation = _make_create_mutation(local_id)
 
-    applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+    applier.create_one(
+        mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+    )
 
     expected_label = f"rebar-id:{local_id}"
     label_calls = client.add_label_calls
@@ -142,7 +148,9 @@ def test_readback_both_assertions_together(applier, tmp_path):
     client = _make_readback_client(issue_key)
     mutation = _make_create_mutation(local_id)
 
-    applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+    applier.create_one(
+        mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+    )
 
     # Assert 1: entity property readback
     stored_local_id = client.get_entity_property(issue_key, "local_id")

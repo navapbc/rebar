@@ -33,6 +33,7 @@ from __future__ import annotations
 import pytest
 
 from rebar.reconciler.binding_store import BindingPersistError, BindingStore
+from rebar.reconciler.create_route import _coordinated_create_core
 from rebar.reconciler.dispatch_one import create_one
 
 
@@ -89,7 +90,13 @@ def test_a_failed_identity_write_does_not_delete_the_created_issue(store, tmp_pa
     client = _IdentityWriteFailsClient()
 
     with pytest.raises(RuntimeError):
-        create_one(_mutation(), client, binding_store=store, repo_root=tmp_path)
+        create_one(
+            _mutation(),
+            client,
+            binding_store=store,
+            repo_root=tmp_path,
+            create_core=_coordinated_create_core,
+        )
 
     assert client.created == ["DC-1"], "precondition: the issue was created"
     assert client.deleted == [], (
@@ -103,7 +110,13 @@ def test_the_binding_is_left_keyed_pending_on_the_created_key(store, tmp_path) -
     an orphan; with it, the deterministic keyed-recovery branch can finish the job."""
     client = _IdentityWriteFailsClient()
     with pytest.raises(RuntimeError):
-        create_one(_mutation(), client, binding_store=store, repo_root=tmp_path)
+        create_one(
+            _mutation(),
+            client,
+            binding_store=store,
+            repo_root=tmp_path,
+            create_core=_coordinated_create_core,
+        )
 
     assert store.is_pending("t1"), "the binding is not pending, so recovery will never retry it"
     assert store.get_jira_key("t1") == "DC-1", (
@@ -117,7 +130,13 @@ def test_recovery_completes_the_identity_write_and_confirms(store, tmp_path) -> 
     less destructive: the next pass finishes the job against the SAME issue."""
     client = _IdentityWriteFailsClient()
     with pytest.raises(RuntimeError):
-        create_one(_mutation(), client, binding_store=store, repo_root=tmp_path)
+        create_one(
+            _mutation(),
+            client,
+            binding_store=store,
+            repo_root=tmp_path,
+            create_core=_coordinated_create_core,
+        )
 
     client.fail_label = False  # the screen is fixed / the transient cleared
     resolved = store.recover_pending_bindings(client)
@@ -133,7 +152,13 @@ def test_no_duplicate_issue_is_created_on_a_later_pass(store, tmp_path) -> None:
     one. Once recovery confirms the binding, the create gate sees it as bound."""
     client = _IdentityWriteFailsClient()
     with pytest.raises(RuntimeError):
-        create_one(_mutation(), client, binding_store=store, repo_root=tmp_path)
+        create_one(
+            _mutation(),
+            client,
+            binding_store=store,
+            repo_root=tmp_path,
+            create_core=_coordinated_create_core,
+        )
     client.fail_label = False
     store.recover_pending_bindings(client)
 
@@ -146,7 +171,13 @@ def test_the_failure_is_still_loud(store, tmp_path) -> None:
     unmasked, so the item is reported failed and an operator investigates."""
     client = _IdentityWriteFailsClient()
     with pytest.raises(RuntimeError) as excinfo:
-        create_one(_mutation(), client, binding_store=store, repo_root=tmp_path)
+        create_one(
+            _mutation(),
+            client,
+            binding_store=store,
+            repo_root=tmp_path,
+            create_core=_coordinated_create_core,
+        )
     assert "appropriate screen" in str(excinfo.value), (
         f"the original write error was masked: {excinfo.value!r}"
     )
@@ -157,7 +188,13 @@ def test_a_bridge_alert_is_still_written(store, tmp_path) -> None:
     destructive half is removed."""
     client = _IdentityWriteFailsClient()
     with pytest.raises(RuntimeError):
-        create_one(_mutation(), client, binding_store=store, repo_root=tmp_path)
+        create_one(
+            _mutation(),
+            client,
+            binding_store=store,
+            repo_root=tmp_path,
+            create_core=_coordinated_create_core,
+        )
 
     alerts = list((tmp_path / ".tickets-tracker").rglob("*BRIDGE_ALERT.json"))
     assert alerts, "no BRIDGE_ALERT was written — the retained issue is now invisible"
@@ -171,7 +208,13 @@ def test_the_alert_does_not_claim_the_issue_was_deleted(store, tmp_path) -> None
 
     client = _IdentityWriteFailsClient()
     with pytest.raises(RuntimeError):
-        create_one(_mutation(), client, binding_store=store, repo_root=tmp_path)
+        create_one(
+            _mutation(),
+            client,
+            binding_store=store,
+            repo_root=tmp_path,
+            create_core=_coordinated_create_core,
+        )
 
     alerts = list((tmp_path / ".tickets-tracker").rglob("*BRIDGE_ALERT.json"))
     body = json.loads(alerts[0].read_text())
@@ -187,7 +230,13 @@ def test_the_alert_does_not_claim_the_issue_was_deleted(store, tmp_path) -> None
 def test_the_happy_path_is_untouched(store, tmp_path) -> None:
     """A successful identity write still labels, sets the property, and confirms."""
     client = _IdentityWriteFailsClient(fail_label=False)
-    create_one(_mutation(), client, binding_store=store, repo_root=tmp_path)
+    create_one(
+        _mutation(),
+        client,
+        binding_store=store,
+        repo_root=tmp_path,
+        create_core=_coordinated_create_core,
+    )
 
     assert client.created == ["DC-1"]
     assert client.deleted == []
@@ -235,7 +284,13 @@ def test_the_binding_persist_failure_branch_also_does_not_delete(tmp_path) -> No
     client = _IdentityWriteFailsClient(fail_label=False)
 
     with pytest.raises(BindingPersistError):
-        create_one(_mutation(), client, binding_store=store, repo_root=tmp_path)
+        create_one(
+            _mutation(),
+            client,
+            binding_store=store,
+            repo_root=tmp_path,
+            create_core=_coordinated_create_core,
+        )
 
     assert client.created == ["DC-1"], "precondition: the issue really was created"
     assert client.deleted == [], (

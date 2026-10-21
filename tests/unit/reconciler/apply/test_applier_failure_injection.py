@@ -18,6 +18,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar.reconciler.create_route import _coordinated_create_core
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
@@ -81,7 +83,9 @@ def test_no_delete_is_issued_on_set_entity_property_failure(applier, tmp_path):
     mutation = _make_create_mutation("tick-fi01")
 
     with pytest.raises(RuntimeError):
-        applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+        applier.create_one(
+            mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+        )
 
     client.delete_issue.assert_not_called()
 
@@ -94,7 +98,9 @@ def test_runtime_error_type_preserved_when_set_entity_property_raises(applier, t
 
     exc_info = None
     try:
-        applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+        applier.create_one(
+            mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+        )
     except Exception as exc:  # noqa: BLE001 — must capture whatever propagates to assert its exact type is RuntimeError (not a wrapper/subclass)
         exc_info = exc
 

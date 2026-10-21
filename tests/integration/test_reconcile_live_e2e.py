@@ -23,6 +23,8 @@ from typing import Any
 
 import pytest
 
+from rebar.reconciler.create_route import _coordinated_create_core
+
 # Serialize Jira round-trips on one xdist worker. The mark requires ``--dist loadgroup``.
 # The credential collection guard rejects other parallel modes.
 pytestmark = [
@@ -811,6 +813,7 @@ def test_c2_hard_delete_recreates_bound_issue(tmp_path, monkeypatch):
         _RecordingClient(),
         repo_root=tmp_path,
         binding_store=store,
+        create_core=_coordinated_create_core,
     )
 
     assert result == {"key": "REB-NEW-1"}

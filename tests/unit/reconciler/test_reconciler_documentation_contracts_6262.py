@@ -18,6 +18,7 @@ APPLY_OUTBOUND = REPO_ROOT / "src/rebar/reconciler/apply_outbound.py"
 OUTBOUND_DIFFER = REPO_ROOT / "src/rebar/reconciler/outbound_differ.py"
 JIRA_SYNC_SETUP = REPO_ROOT / "docs/jira-sync-setup.md"
 ENV_VARS = REPO_ROOT / "docs/env-vars.md"
+CONFIG = REPO_ROOT / "docs/config.md"
 
 
 def _text(path: Path) -> str:
@@ -64,26 +65,21 @@ def test_outbound_diff_config_docs_cover_all_external_inputs_and_override_preced
     assert "Direct `mapping=` / `repo_root=` keyword arguments override" in flat
 
 
-def test_operator_docs_name_rollback_values_defaults_and_consumer_specific_effects() -> None:
-    guide = _text(JIRA_SYNC_SETUP)
-    guide_flat = _squash_ws(guide)
-    assert "`REBAR_RECONCILER_CREATE_ROUTE`" in guide
-    assert "`REBAR_RECONCILER_WRITE_FACADE`" in guide
-    for token in (
-        "legacy",
-        "coordinator",
-        "`0` / `false` / `off` / `no`",
-        "`1` / `true` / `on` / `yes`",
-    ):
-        assert token in guide_flat
-    assert "only the outbound CREATE consumer" in guide_flat
-    assert "legacy create+delete rollback path" in guide_flat
-    assert "composed apply runtime" in guide_flat
-    assert "never deletes a created issue on a post-create failure" in guide_flat
+# The three reconciler rollback toggles were retired (ticket fc96-b268-b737-4b8b):
+# the coordinated create, the composed write facade, and fail-loud sub-op accounting
+# are unconditional, so no operator doc may still advertise a switch for them.
+RETIRED_TOGGLES = (
+    "REBAR_RECONCILER_CREATE_ROUTE",
+    "REBAR_RECONCILER_WRITE_FACADE",
+    "REBAR_RECONCILER_FAIL_SILENT_NOOP",
+)
 
-    env_vars = _text(ENV_VARS)
-    assert "`REBAR_RECONCILER_CREATE_ROUTE`" in env_vars
-    assert "`REBAR_RECONCILER_WRITE_FACADE`" in env_vars
+
+def test_operator_docs_do_not_name_the_retired_rollback_toggles() -> None:
+    for doc in (JIRA_SYNC_SETUP, ENV_VARS, CONFIG):
+        text = _text(doc)
+        for name in RETIRED_TOGGLES:
+            assert name not in text, f"{doc.name} still names retired toggle {name}"
 
 
 def test_operator_docs_explain_baseline_arbitration_write_conditions() -> None:

@@ -21,9 +21,9 @@ read EOF and ACLI aborted with "command cancelled" on every pass forever. The ar
 "self-healing — the differ recomputes the REMOVE next pass" rationale is only true for a
 TRANSIENT failure, so it never healed.
 
-This is the bug-44de silent-divergence class, and ``REBAR_RECONCILER_FAIL_SILENT_NOOP`` was
-structurally blind to it: that canary fires on ``computed > 0 and applied == 0``, and the arm
-inflated ``applied`` to equal ``computed``.
+This is the bug-44de silent-divergence class, and the silent-no-op canary was structurally
+blind to it: that canary fires on ``computed > 0 and applied == 0``, and the arm inflated
+``applied`` to equal ``computed``.
 
 WHAT IS PINNED HERE. Two independent guarantees, because either alone leaves the hole open:
   * the ACCOUNTING — only a proven-gone link counts applied; everything else counts failed and

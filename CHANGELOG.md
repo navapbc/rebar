@@ -38,6 +38,15 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): the three reconciler rollback toggles are removed.**
+  `REBAR_RECONCILER_CREATE_ROUTE`, `REBAR_RECONCILER_WRITE_FACADE`, and
+  `REBAR_RECONCILER_FAIL_SILENT_NOOP` are no longer read. Every outbound CREATE takes the
+  coordinated write-ahead path, which never deletes a created issue; the legacy
+  create+delete path is gone. Every pass composes the operation runtime. An outbound update
+  whose sub-ops were computed but none applied, and a swallowed comment failure on a create
+  or update, now always fail the mutation, so they count toward `mutation_failures` and the
+  pass exits non-zero. Details in [docs/release-notes.md](docs/release-notes.md).
+
 - **BREAKING (pre-1.0): library and MCP `bridge_sync` run the CLI's guarded pass.** They used
   to run an unlocked pass that ignored the bridge pause. Now they honor the pause and the
   reconciler pass lock: a paused bridge returns `state: "paused"` and a pass already in flight

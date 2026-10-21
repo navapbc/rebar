@@ -9,9 +9,8 @@ that silently no-ops (computed but never applied) left the pass green. This pins
   * **Canary** — a kind with sub-ops COMPUTED (post-dedup) but ZERO applied is the
     bug-3f04 failure mode; it is flagged on the outcome (``silent_noop``) and
     WARNed. The test reproduces what the link drop would have triggered.
-  * **Warn-first rollout** — default is warn-only (no ``error``); the
-    ``REBAR_RECONCILER_FAIL_SILENT_NOOP=1`` flag promotes it to a hard per-mutation
-    failure. Promotion and reversion are a pure flag flip (asserted both ways).
+  * **Hard-fail** — the silent no-op is ALWAYS a per-mutation failure (``error``
+    starts ``silent-noop:``) with no environment set; no flag gates it.
   * **No false positive** — an idempotent re-sync whose links are all deduped has
     ``links_computed == 0`` and does NOT fire the canary.
 
@@ -102,18 +101,18 @@ def test_subop_telemetry_surfaced_on_success(applier_mod, acli_mod, tmp_path) ->
     assert "silent_noop" not in outcome
 
 
-def test_silent_noop_canary_warns_by_default(applier_mod, acli_mod, tmp_path, caplog) -> None:
-    """links computed but applied==0 (write fails) → silent_noop flagged + WARNED,
-    but NO error in the default warn-first mode."""
+def test_silent_noop_canary_hard_fails_and_warns(applier_mod, acli_mod, tmp_path, caplog) -> None:
+    """links computed but applied==0 (write fails) → silent_noop flagged + WARNED, AND
+    the mutation hard-fails with a ``silent-noop:`` error, with no environment set."""
     client = _client(existing_links=[])
     client.set_relationship.side_effect = RuntimeError("write boom")
     mut = _link_update([{"action": "add", "type": "Blocks", "to_key": "DIG-2"}])
     mut["_client"] = client
     with caplog.at_level("WARNING"):
-        outcome = _apply(applier_mod, acli_mod, mut, tmp_path, f"warn-{time.time_ns()}")
+        outcome = _apply(applier_mod, acli_mod, mut, tmp_path, f"fail-{time.time_ns()}")
     assert outcome.get("links_applied") == 0
     assert outcome.get("silent_noop") == ["links"]
-    assert not outcome.get("error"), "warn-first default must NOT hard-fail"
+    assert (outcome.get("error") or "").startswith("silent-noop:"), "must hard-fail"
     assert any("silent no-op" in r.message for r in caplog.records)
 
 
@@ -128,27 +127,3 @@ def test_dedup_does_not_trip_canary(applier_mod, acli_mod, tmp_path) -> None:
     assert outcome.get("links_applied") == 0
     assert "silent_noop" not in outcome, "a fully-deduped re-sync must NOT fire the canary"
     assert not outcome.get("error")
-
-
-def test_hard_fail_flag_promotes_and_reverts(applier_mod, acli_mod, tmp_path, monkeypatch) -> None:
-    """The fail-loud invariant is a pure flag flip: REBAR_RECONCILER_FAIL_SILENT_NOOP=1
-    promotes the silent no-op to a per-mutation error; unset reverts to warn-only."""
-
-    def _run() -> dict:
-        client = _client(existing_links=[])
-        client.set_relationship.side_effect = RuntimeError("write boom")
-        mut = _link_update([{"action": "add", "type": "Blocks", "to_key": "DIG-2"}])
-        mut["_client"] = client
-        return _apply(applier_mod, acli_mod, mut, tmp_path, f"flag-{time.time_ns()}")
-
-    # Promoted: hard-fail records a per-mutation error (counts as a failure).
-    monkeypatch.setenv("REBAR_RECONCILER_FAIL_SILENT_NOOP", "1")
-    hard = _run()
-    assert hard.get("silent_noop") == ["links"]
-    assert "silent-noop" in (hard.get("error") or ""), "flag on must hard-fail"
-
-    # Reverted: same code, flag off → warn-only, no error.
-    monkeypatch.delenv("REBAR_RECONCILER_FAIL_SILENT_NOOP", raising=False)
-    warn = _run()
-    assert warn.get("silent_noop") == ["links"]
-    assert not warn.get("error"), "flag off must revert to warn-only"

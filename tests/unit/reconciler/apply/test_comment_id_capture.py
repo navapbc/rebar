@@ -18,6 +18,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar.reconciler.create_route import _coordinated_create_core
+
 _SRC_DIR = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler"
 
 
@@ -76,7 +78,7 @@ def test_create_one_records_comment_id(store):
         "comments": [{"body": "created comment", "local_comment_key": _KEY}],
     }
 
-    create_one(mutation, client, binding_store=store)
+    create_one(mutation, client, binding_store=store, create_core=_coordinated_create_core)
 
     assert store.comment_id_for(_KEY) == "20002"
 
@@ -116,6 +118,7 @@ def test_comment_id_captured_and_persisted(store):
         },
         cloud_client,
         binding_store=store,
+        create_core=_coordinated_create_core,
     )
     assert store.comment_id_for(create_key) == "30001"
 

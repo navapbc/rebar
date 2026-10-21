@@ -13,6 +13,8 @@ from types import ModuleType
 
 import pytest
 
+from rebar.reconciler.create_route import _coordinated_create_core
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "reconcile.py"
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
@@ -148,6 +150,7 @@ def test_create_one_populates_binding_store(applier_mod):
         mock_client,
         repo_root=Path("/tmp"),
         binding_store=mock_binding_store,
+        create_core=_coordinated_create_core,
     )
 
     assert result is not None

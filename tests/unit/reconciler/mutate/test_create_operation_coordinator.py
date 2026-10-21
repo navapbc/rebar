@@ -269,39 +269,22 @@ def test_dependent_held_until_create_and_confirmation_proven(route_mod):
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# AC6 — one coordinator route, one legacy value, no dual-send.
+# AC6 — one coordinator route, no dual-send.
 # ════════════════════════════════════════════════════════════════════════════════
 
 
-def test_create_route_selector_default_and_rollback(route_mod, monkeypatch):
-    """AC6: default is coordinator; a falsey env rolls back to the ONE legacy value; an
-    invalid value raises."""
-    monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
-    assert route_mod.create_route() == route_mod.COORDINATOR_ROUTE
-    for falsey in ("legacy", "0", "false", "off", "no"):
-        monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", falsey)
-        assert route_mod.create_route() == route_mod.LEGACY_ROUTE
-    for truthy in ("coordinator", "1", "true", "on", "yes"):
-        monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", truthy)
-        assert route_mod.create_route() == route_mod.COORDINATOR_ROUTE
-    monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", "banana")
-    with pytest.raises(ValueError):
-        route_mod.create_route()
-
-
-def test_route_for_create_tracks_the_single_selector(route_mod, batch_mod, monkeypatch):
-    """AC6: ``batch_dispatch.route_for('create')`` is decided by the ONE selector, and
-    an ``overrides`` map never applies to create."""
-    monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
+def test_route_for_create_is_always_the_coordinator(batch_mod, monkeypatch):
+    """AC6: ``batch_dispatch.route_for('create')`` is always the coordinator. The retired
+    ``REBAR_RECONCILER_CREATE_ROUTE`` rollback value is ignored, and an ``overrides`` map
+    never applies to create."""
+    monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", "legacy")
     assert batch_mod.route_for("create") == "coordinator"
     assert batch_mod.route_for("create", {"create": "legacy"}) == "coordinator"
-    monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", "legacy")
-    assert batch_mod.route_for("create") == "legacy"
 
 
-def test_no_dual_send_exactly_one_path_per_create(applier_mod, monkeypatch):
-    """AC6: a single create runs EXACTLY ONE path — the coordinated write-ahead (default,
-    never deletes) OR the legacy create+delete-rollback — never both."""
+def test_no_dual_send_exactly_one_path_per_create(applier_mod):
+    """AC6: a single create runs EXACTLY ONE path — the coordinated write-ahead, which
+    never deletes."""
     mut_mod = applier_mod._load_mutation_module()
 
     def _mk():
@@ -315,8 +298,7 @@ def test_no_dual_send_exactly_one_path_per_create(applier_mod, monkeypatch):
 
     from unittest.mock import MagicMock
 
-    # Coordinator default: create succeeds → containment → NO delete, ever.
-    monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
+    # Create succeeds → containment → NO delete, ever.
     c = MagicMock()
     c.create_issue.return_value = {"key": "K-1"}
     res = applier_mod._apply_outbound_create(_mk(), client=c)
@@ -324,21 +306,12 @@ def test_no_dual_send_exactly_one_path_per_create(applier_mod, monkeypatch):
     c.delete_issue.assert_not_called()
     assert res.payload["coordinated"] is True
 
-    # Coordinator default, create FAILS → still NO delete (bug 387d), dependents held.
+    # Create FAILS → still NO delete (bug 387d), dependents held.
     cf = MagicMock()
     cf.create_issue.side_effect = RuntimeError("boom")
     res_f = applier_mod._apply_outbound_create(_mk(), client=cf)
     cf.delete_issue.assert_not_called()
     assert res_f.payload["dependents_released"] is False
-
-    # Legacy toggle: create FAILS → delete-rollback runs and the error re-raises. The
-    # coordinated composition is NOT taken (no coordinated payload) — no dual-send.
-    monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", "legacy")
-    cl = MagicMock()
-    cl.create_issue.side_effect = RuntimeError("boom")
-    with pytest.raises(RuntimeError, match="boom"):
-        applier_mod._apply_outbound_create(_mk(), client=cl)
-    cl.delete_issue.assert_called_once()
 
 
 # ════════════════════════════════════════════════════════════════════════════════

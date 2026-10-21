@@ -3,7 +3,7 @@
 Each supported Cloud/DC combination dispatches once on typed and live batch paths.
 Unowned inbound delete or probe raises provider-neutral ``UnknownActionError`` before
 effects. Explicit protocol fakes keep duck/class dispatch, swallowed writes, duplicate
-retry, legacy create fallback, and remote-delete rollback unreachable.
+retry, and remote-delete rollback unreachable.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-import rebar.reconciler.dispatch_one as dispatch_one
 import rebar.reconciler.typed_dispatch as typed_dispatch
 from rebar.reconciler.apply_base import _load_errors_module, _load_mutation_module
 from rebar.reconciler.apply_handlers import BatchApplyContext, dispatch_mutation
@@ -154,12 +153,10 @@ def test_ac1_typed_census_single_owner_per_supported_route(monkeypatch):
     assert fake.writes == [], "the ownership census must not perform physical writes"
 
 
-def test_ac1_outbound_batch_families_single_physical_owner(tmp_path, monkeypatch):
+def test_ac1_outbound_batch_families_single_physical_owner(tmp_path):
     """AC1 on the LIVE production batch path: ``dispatch_mutation`` drives create/update/
     delete each through EXACTLY ONE physical write of the expected kind — no dual-send.
     """
-    monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
-
     fake = _ProtocolFake()
     store = BindingStore(tmp_path / ".t-create")
     dispatch_mutation(_create_dict("L-c"), _ctx(fake, store, tmp_path))
@@ -233,46 +230,18 @@ def test_ac3_obsolete_whole_operation_delete_retry_removed():
     assert "client.delete_issue(" in src
 
 
-def test_ac3_legacy_create_core_unreachable_from_production(tmp_path, monkeypatch):
-    """AC3: production create never reaches the legacy write-ahead core.
-
-    Spy the legacy create core and drive a production create through the live dispatch
-    with the DEFAULT (coordinated) route — the coordinated owner runs and the legacy
-    core is NEVER invoked.
-    """
-    monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
-    reached: list[bool] = []
-    real = dispatch_one._legacy_create_core
-
-    def _spy(*args, **kwargs):
-        reached.append(True)
-        return real(*args, **kwargs)
-
-    monkeypatch.setattr(dispatch_one, "_legacy_create_core", _spy)
-    fake = _ProtocolFake()
-    store = BindingStore(tmp_path / ".t-legacy-core")
-    dispatch_mutation(_create_dict("L-nolegacy"), _ctx(fake, store, tmp_path))
-    assert reached == [], "production create must not reach the legacy write-ahead core"
-    assert fake.count("create_issue") == 1  # the coordinated typed owner ran instead
-
-
 # ════════════════════════════════════════════════════════════════════════════════
 # AC6 — rollback = code/routing reversion + remote RE-OBSERVATION, never remote delete
 # ════════════════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.parametrize("route", [None, "legacy"])
-def test_ac6_no_remote_delete_on_any_create_route(tmp_path, monkeypatch, route):
-    """AC6: NEITHER create route (coordinated default nor legacy rollback) deletes a
-    remote issue on a create — proven observably: ``delete_issue`` is never called.
+def test_ac6_no_remote_delete_on_any_create_route(tmp_path):
+    """AC6: the create route (the coordinated write-ahead path) never deletes a remote
+    issue on a create — proven observably: ``delete_issue`` is never called.
     """
-    if route is None:
-        monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
-    else:
-        monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", route)
     fake = _ProtocolFake()
-    store = BindingStore(tmp_path / f".t-{route}")
-    dispatch_mutation(_create_dict(f"L-{route}"), _ctx(fake, store, tmp_path))
+    store = BindingStore(tmp_path / ".t-coordinator")
+    dispatch_mutation(_create_dict("L-coordinator"), _ctx(fake, store, tmp_path))
     assert fake.count("create_issue") == 1
     assert fake.count("delete_issue") == 0
 

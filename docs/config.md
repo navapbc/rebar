@@ -382,17 +382,6 @@ The SECRET `JIRA_API_TOKEN` stays env-only — never a config key (see Secrets).
 
 **`jira.project` is the seed default, not the only project a store syncs.** A store records its full set of tracker projects in the committed `.bridge_state/projects.json` mapping on the tickets branch. The mapping belongs to the store rather than to one repository. See [ADR 0097](adr/0097-many-to-many-tracker-projects.md). Manage it with `rebar bridge projects {list,set,remove}`. See the [user guide](user-guide.md#jira). The mapping has the shape `{"version": 1, "legacy_default": "REB", "projects": {"REB": {"repos": ["rebar"]}}}`. Its `projects` key set is the sync list. Its `legacy_default` field identifies the project for pre-mapping tickets that do not have a `bridge_project` field. On a store initialized before the mapping existed, the `projects-seed` ensure unit seeds a mapping whose `legacy_default` is the configured `jira.project` and whose `projects` set is empty at the next `init` or `rebar store fsck --repair`. See [migrations.md](migrations.md). An unset `jira.project` remains empty. Synchronization requires explicit project configuration. The sync list stays empty until an operator adds a project with `rebar bridge projects set`. Each project's `repos` entry records which repositories that project's tickets belong to.
 
-**Env-only reconciler flag — silent-no-op canary** (not a config-file key; epic
-f89d, story 2359). `REBAR_RECONCILER_FAIL_SILENT_NOOP` (default off ⇒ **warn-first**):
-an outbound update whose sub-ops are *computed but none applied*
-(`computed > 0 && applied == 0` — the bug-3f04 link-drop mode; `computed` is counted
-**post-dedup** so an idempotent re-sync never trips it) is always surfaced on the batch
-outcome (`silent_noop` + `links_applied`/`comments_applied`/`labels_applied`) and
-`WARNING`-logged. Set to `1` to **promote** it to a hard per-mutation failure;
-promotion and reversion are a pure flag flip — no other code change. (It is a
-*total* per-kind no-op detector: a partial drop — e.g. 1 of 2 links applied — does
-not fire; the simple `applied == 0` invariant is the contract.)
-
 ### LLM framework (`llm.*`) — optional `[agents]` extra, `[tool.rebar.llm]`
 
 `llm.*` is resolved by the optional `rebar.llm` layer (`LLMConfig.from_env`), NOT

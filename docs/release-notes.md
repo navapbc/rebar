@@ -8,6 +8,25 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING: the reconciler rollback toggles are removed
+
+Three environment variables that switched finished reconciler rollouts back to their old
+behavior are deleted. Setting any of them no longer has an effect:
+
+- `REBAR_RECONCILER_CREATE_ROUTE`: outbound CREATE always takes the coordinated write-ahead
+  path (`rebar.reconciler.batch_dispatch.route_for("create")` is always `"coordinator"`). The
+  legacy create+delete-rollback path is deleted, so a post-create failure never deletes the
+  created issue. `rebar.reconciler.create_route.create_route()` and `LEGACY_ROUTE` are gone,
+  `dispatch_one.create_one` requires its keyword-only `create_core`, and the inbound create
+  `ApplyResult` payload no longer carries a `create_route` key.
+- `REBAR_RECONCILER_WRITE_FACADE`: every pass composes the operation runtime and threads its
+  transport into the apply phase.
+- `REBAR_RECONCILER_FAIL_SILENT_NOOP`: an outbound update whose sub-ops were computed but none
+  applied gets `error: "silent-noop: ..."`, and a create or update with a swallowed comment
+  failure gets `error: "comment-errors: ..."`. Both count toward `mutation_failures`, so the
+  pass exits non-zero. Before this change they failed the mutation only with the variable set
+  to `1`; otherwise they were only logged and recorded on the outcome.
+
 ## BREAKING: library and MCP `bridge_sync` honor the pause and the pass lock
 
 `rebar.bridge_sync` (and the MCP `bridge_sync` tool, which calls it) used to call the pass body

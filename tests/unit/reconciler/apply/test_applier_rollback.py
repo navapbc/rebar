@@ -13,6 +13,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar.reconciler.create_route import _coordinated_create_core
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
@@ -78,7 +80,9 @@ def test_created_issue_is_retained_when_set_entity_property_raises(applier, tmp_
     mutation = _make_create_mutation(local_id)
 
     with pytest.raises(RuntimeError, match="property write failed"):
-        applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+        applier.create_one(
+            mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+        )
 
     client.delete_issue.assert_not_called()
 
@@ -93,7 +97,9 @@ def test_original_exception_propagates_when_set_entity_property_raises(applier, 
     mutation = _make_create_mutation(local_id)
 
     with pytest.raises(RuntimeError) as exc_info:
-        applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+        applier.create_one(
+            mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+        )
 
     assert exc_info.value is original_error
 
@@ -112,7 +118,9 @@ def test_created_issue_is_retained_when_add_label_raises(applier, tmp_path):
     mutation = _make_create_mutation(local_id)
 
     with pytest.raises(RuntimeError, match="label write failed"):
-        applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+        applier.create_one(
+            mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+        )
 
     client.delete_issue.assert_not_called()
 
@@ -128,7 +136,9 @@ def test_original_exception_propagates_when_delete_issue_also_raises(applier, tm
     mutation = _make_create_mutation(local_id)
 
     with pytest.raises(RuntimeError) as exc_info:
-        applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+        applier.create_one(
+            mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+        )
 
     # Must be the original error, not the rollback error
     assert exc_info.value is original_error
@@ -142,7 +152,9 @@ def test_delete_issue_not_called_on_successful_identity_writes(applier, tmp_path
     client.set_entity_property.return_value = None
     mutation = _make_create_mutation(local_id)
 
-    result = applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+    result = applier.create_one(
+        mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+    )
 
     client.delete_issue.assert_not_called()
     assert result == {"key": "DIG-999"}

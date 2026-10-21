@@ -124,19 +124,15 @@ def _apply_inbound_create(
     # (bind_confirm) BEFORE any dependent link/child is released, exactly as the
     # coordinated create composition gates dependents on a confirmed containment
     # (AC5). There is no remote create to double-send on the inbound side, so the
-    # materialization sequence is route-invariant; the selector is consulted here for
-    # symmetry with the outbound cutover (AC6) and surfaced for observability. The
-    # retired/dedup short-circuits above run FIRST and produce zero early effects.
-    from rebar.reconciler.create_route import create_route
-
-    route = create_route()
+    # materialization sequence is route-invariant. The retired/dedup short-circuits
+    # above run FIRST and produce zero early effects.
     _inbound_create_record_binding(mutation, binding_store, local_id, jira_key)
     _inbound_create_writeback_jira(client, jira_key, local_id, tracker_dir)
 
     return ApplyResult(
         mutation.direction,
         mutation.action,
-        {"local_id": local_id, "create_event": str(create_path), "create_route": route},
+        {"local_id": local_id, "create_event": str(create_path)},
     )
 
 

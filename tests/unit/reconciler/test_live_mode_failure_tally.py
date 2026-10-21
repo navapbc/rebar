@@ -18,8 +18,9 @@ code in the only mode production runs.
 
 Three contracts are defeated by this, all in LIVE only:
   * e534-5154-2401-40fb — "isolate + fail loud at the END exits non-zero"
-  * 48c8-5375-f883-462d — REBAR_RECONCILER_FAIL_SILENT_NOOP=1 (ON in the live workflow)
-    is documented to "count toward mutation_failures and drive a non-zero pass exit"
+  * 48c8-5375-f883-462d — a silent sub-op no-op or a swallowed comment failure (always
+    a per-mutation error) must "count toward mutation_failures and drive a non-zero
+    pass exit"
   * 85a1 — the truthful tally; `applied N of N` is printed while mutations failed
 
 Every existing fail-loud/truthful-tally test stubs `reconcile_once` to RETURN a
@@ -198,35 +199,23 @@ def test_persist_and_log_counts_failures_in_live_without_a_manifest(
     )
 
 
-def test_live_failure_reaches_a_non_zero_exit_end_to_end(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Chain the real functions all the way to the exit code.
+def _live_exit_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcomes: list[dict], pass_id: str
+) -> tuple[dict, dict, int]:
+    """Drive the real LIVE chain over ``outcomes``; return ``(tally, result, rc)``.
 
-    The two tests above stop at `_persist_and_log`'s result dict, and every pre-existing
-    fail-loud test stubs `reconcile_once` to RETURN a `mutation_failures` value. Neither
-    covers the link that actually makes a degraded pass loud: the pass classifier's
-    `if failures > 0` operational failure (`guarded_pass.run_pass_result`, rendered by
-    `__main__._render_pass`). That link was unreachable in LIVE for the whole life of
-    the bug, so a test that stops short of it would not have caught c903 — nor would it
-    catch the link being severed again.
-
-    Drives: _emit_mode_manifest (LIVE, real) -> _persist_and_log (real) -> run_pass_result
+    _emit_mode_manifest (LIVE, real) -> _persist_and_log (real) -> run_pass_result
     (real) -> _render_pass (real).
     """
     from rebar.reconciler import __main__ as reconciler_main
     from rebar.reconciler import guarded_pass
 
-    outcomes = [
-        {"action": "create", "key": "OK-1"},
-        {"action": "create", "key": "BAD-1", "error": "stale-binding-404: HTTP Error 404"},
-    ]
     manifest = _write_manifest(tmp_path, outcomes)
     mode_mod = _mode_mod()
 
     # 1. real LIVE emission: unlinks the manifest, hands back the tally
     _action, tally = apply_planning._emit_mode_manifest(
-        mode_mod.Mode.LIVE, mode_mod, outcomes, [], "pass-e2e", manifest, tmp_path, True
+        mode_mod.Mode.LIVE, mode_mod, outcomes, [], pass_id, manifest, tmp_path, True
     )
     assert not manifest.exists()
 
@@ -236,7 +225,7 @@ def test_live_failure_reaches_a_non_zero_exit_end_to_end(
         def close(self, *a: Any, **k: Any) -> None: ...
         def sync_pass_end(self, *a: Any, **k: Any) -> None: ...
 
-    ctx = reconcile._PassContext(pass_id="pass-e2e", repo_root=tmp_path)
+    ctx = reconcile._PassContext(pass_id=pass_id, repo_root=tmp_path)
     ctx.persist = True
     ctx.mutations = outcomes
     ctx.curr_path = tmp_path / "curr.json"
@@ -259,14 +248,97 @@ def test_live_failure_reaches_a_non_zero_exit_end_to_end(
         lambda name: {"reconcile": reconcile_stub, "applier": applier_stub}.get(name),
     )
     rc = reconciler_main._render_pass(
-        guarded_pass.run_pass_result(repo_root=tmp_path, pass_id="pass-e2e"), None
+        guarded_pass.run_pass_result(repo_root=tmp_path, pass_id=pass_id), None
     )
+
+    return tally, result, rc
+
+
+def test_live_failure_reaches_a_non_zero_exit_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Chain the real functions all the way to the exit code.
+
+    The two tests above stop at `_persist_and_log`'s result dict, and every pre-existing
+    fail-loud test stubs `reconcile_once` to RETURN a `mutation_failures` value. Neither
+    covers the link that actually makes a degraded pass loud: the pass classifier's
+    `if failures > 0` operational failure (`guarded_pass.run_pass_result`, rendered by
+    `__main__._render_pass`). That link was unreachable in LIVE for the whole life of
+    the bug, so a test that stops short of it would not have caught c903 — nor would it
+    catch the link being severed again.
+
+    Drives: _emit_mode_manifest (LIVE, real) -> _persist_and_log (real) -> run_pass_result
+    (real) -> _render_pass (real).
+    """
+    outcomes = [
+        {"action": "create", "key": "OK-1"},
+        {"action": "create", "key": "BAD-1", "error": "stale-binding-404: HTTP Error 404"},
+    ]
+    tally, result, rc = _live_exit_code(tmp_path, monkeypatch, outcomes, "pass-e2e")
 
     assert rc == 1, (
         "a LIVE pass with a failed mutation must exit non-zero — this is the whole of "
         "e534's 'fail loud at the END', and the link that was dead in production. "
         f"tally={tally} result={result} rc={rc}"
     )
+
+
+def _silent_noop_link_update() -> tuple[dict, MagicMock]:
+    client = MagicMock()
+    client.update_issue.return_value = {"key": "DIG-1", "ok": True}
+    client.get_issue_links.return_value = []
+    client.set_relationship.side_effect = RuntimeError("write boom")
+    mutation = {
+        "direction": "outbound",
+        "action": "update",
+        "key": "DIG-1",
+        "fields": {"summary": "scalar that succeeds"},
+        "links": [{"action": "add", "type": "Blocks", "to_key": "DIG-2"}],
+        "local_id": "loc-1",
+    }
+    return mutation, client
+
+
+def _partial_comment_drop_update() -> tuple[dict, MagicMock]:
+    client = MagicMock()
+    client.update_issue.return_value = {"key": "DIG-2", "ok": True}
+    client.add_comment.side_effect = [{"id": "1", "body": "lands"}, RuntimeError("too long")]
+    mutation = {
+        "direction": "outbound",
+        "action": "update",
+        "key": "DIG-2",
+        "fields": {"summary": "scalar that succeeds"},
+        "comments": [{"action": "add", "body": "lands"}, {"action": "add", "body": "fails"}],
+        "local_id": "loc-2",
+    }
+    return mutation, client
+
+
+@pytest.mark.parametrize(
+    ("build", "prefix"),
+    [(_silent_noop_link_update, "silent-noop:"), (_partial_comment_drop_update, "comment-errors:")],
+    ids=["silent-noop", "comment-errors"],
+)
+def test_swallowed_subop_failure_fails_the_live_pass_with_no_env_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, build, prefix: str
+) -> None:
+    """48c8: a silent sub-op no-op and a swallowed comment failure ALWAYS fail the
+    mutation — no environment variable gates it — so the LIVE pass exits non-zero.
+
+    The failing outcome comes from the REAL ``handle_update``, then flows through the
+    same real LIVE tally chain as above.
+    """
+    from rebar.reconciler.apply_handlers import BatchApplyContext, handle_update
+
+    mutation, client = build()
+    ctx = BatchApplyContext(client=client, repo_root=tmp_path, pass_id="pass-subop")
+    outcome = handle_update(mutation, ctx).outcome
+    assert (outcome.get("error") or "").startswith(prefix), outcome
+
+    outcomes = [{"action": "create", "key": "OK-1"}, outcome]
+    tally, result, rc = _live_exit_code(tmp_path, monkeypatch, outcomes, "pass-subop")
+    assert result["mutation_failures"] == 1, result
+    assert rc == 1, f"a swallowed sub-op failure must fail the LIVE pass; tally={tally} rc={rc}"
 
 
 # RP-03 S3 T3 — the non-create CUTOVER tally drives the SAME degraded-exit machinery.

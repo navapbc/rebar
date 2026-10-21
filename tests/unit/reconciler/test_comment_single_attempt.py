@@ -20,6 +20,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar.reconciler.create_route import _coordinated_create_core
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DISPATCH_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "dispatch_one.py"
 
@@ -59,7 +61,13 @@ def test_create_path_comment_single_attempt(dispatch, kind, tmp_path):
         "comments": [{"body": "hello"}],
     }
     comment_errors: list[str] = []
-    dispatch.create_one(mutation, client, repo_root=tmp_path, comment_errors=comment_errors)
+    dispatch.create_one(
+        mutation,
+        client,
+        repo_root=tmp_path,
+        comment_errors=comment_errors,
+        create_core=_coordinated_create_core,
+    )
     assert client.add_comment.call_count == 1, "comment must be a SINGLE attempt (no retry)"
     assert len(comment_errors) == 1
     assert "add_comment failed" in comment_errors[0]

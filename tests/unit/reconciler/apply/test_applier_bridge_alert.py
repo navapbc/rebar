@@ -16,6 +16,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar.reconciler.create_route import _coordinated_create_core
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
@@ -74,7 +76,9 @@ def test_bridge_alert_emitted_on_set_entity_property_failure(applier, tmp_path):
     mutation = _make_create_mutation(local_id)
 
     with pytest.raises(RuntimeError, match="property write failed"):
-        applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+        applier.create_one(
+            mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+        )
 
     alert_files = list((tmp_path / ".tickets-tracker" / local_id).glob("*-BRIDGE_ALERT.json"))
     assert len(alert_files) == 1, (
@@ -89,7 +93,9 @@ def test_bridge_alert_tag_is_create_identity_write_failed(applier, tmp_path):
     mutation = _make_create_mutation(local_id)
 
     with pytest.raises(RuntimeError):
-        applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+        applier.create_one(
+            mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+        )
 
     alert_files = list((tmp_path / ".tickets-tracker" / local_id).glob("*-BRIDGE_ALERT.json"))
     assert len(alert_files) == 1
@@ -110,7 +116,9 @@ def test_bridge_alert_emitted_on_add_label_failure(applier, tmp_path):
     mutation = _make_create_mutation(local_id)
 
     with pytest.raises(RuntimeError, match="label write failed"):
-        applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+        applier.create_one(
+            mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+        )
 
     alert_files = list((tmp_path / ".tickets-tracker" / local_id).glob("*-BRIDGE_ALERT.json"))
     assert len(alert_files) == 1, (
@@ -128,7 +136,9 @@ def test_no_bridge_alert_on_successful_identity_writes(applier, tmp_path):
     client.set_entity_property.return_value = None
     mutation = _make_create_mutation(local_id)
 
-    result = applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+    result = applier.create_one(
+        mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+    )
 
     assert result == {"key": "DIG-999"}
     tracker_dir = tmp_path / ".tickets-tracker" / local_id

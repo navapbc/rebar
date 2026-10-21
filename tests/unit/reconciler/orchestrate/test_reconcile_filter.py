@@ -519,12 +519,13 @@ def test_ac4_per_entry_failure_does_not_stop_unrelated_tickets():
 
 
 def test_ac5_route_selection_has_zero_early_effects():
-    """AC5: consulting the create route (default coordinator) is a pure decision — it
+    """AC5: consulting the create route (always the coordinator) is a pure decision — it
     performs no create/search/write. A short-circuited create (filter / read-only /
     tombstone) that never reaches the coordinated composition issues ZERO provider
     calls."""
     route_mod = _load_create_route()
-    assert route_mod.create_route() == route_mod.COORDINATOR_ROUTE
+    batch_mod = importlib.import_module("rebar.reconciler.batch_dispatch")
+    assert batch_mod.route_for("create") == route_mod.COORDINATOR_ROUTE
 
     provider = {"create": 0, "search": 0}
     # A filtered/tombstoned/read-only create is short-circuited BEFORE the composition:

@@ -1,18 +1,17 @@
-"""Provider-neutral CREATE route selector + pure-decision full-create composition.
+"""Provider-neutral pure-decision full-create composition for the CREATE route.
 
-This is the S4 T3 cutover leaf (REB-3115). It gives outbound CREATE exactly ONE
-route governed by ONE rollback selector (no dual-send), and composes the two proven
-pure-decision slices — ``create_coordinator.coordinate_create`` (the durable
-write-ahead + single physical create) and ``create_containment.contain_created``
-(the post-create key containment) — into a single terminal decision that ALSO
-derives the create-before-link / parent-before-child gating verdict.
+This is the S4 T3 cutover leaf (REB-3115). Outbound CREATE has exactly ONE route —
+the coordinated write-ahead path named by :data:`COORDINATOR_ROUTE` (no dual-send,
+no rollback selector) — and this module composes the two proven pure-decision
+slices — ``create_coordinator.coordinate_create`` (the durable write-ahead + single
+physical create) and ``create_containment.contain_created`` (the post-create key
+containment) — into a single terminal decision that ALSO derives the
+create-before-link / parent-before-child gating verdict.
 
 Three things live here:
 
-1. :func:`create_route` — the SINGLE rollback toggle, mirroring
-   ``reconcile_helpers._write_facade_enabled``: default ON (coordinator), a falsey
-   ``REBAR_RECONCILER_CREATE_ROUTE`` rolls back to the legacy value. A caller
-   consults it ONCE and dispatches EXACTLY ONE path.
+1. :data:`COORDINATOR_ROUTE` — the route name ``batch_dispatch.route_for`` reports
+   for every create.
 2. :func:`coordinate_full_create` — the pure-decision composition. It performs ZERO
    real I/O and reads no clock: the eight injected callables are the sole
    side-effect channels, so identical inputs yield equal outputs. It NEVER deletes a
@@ -29,7 +28,6 @@ Cross-sibling value types are imported lazily as plain
 from __future__ import annotations
 
 import importlib.util
-import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -50,32 +48,9 @@ Disposition = _outcome_mod.Disposition
 FailureScope = _outcome_mod.FailureScope
 
 
-# ── The single rollback selector (AC6 — mirrors ``_write_facade_enabled``) ────────
+# ── The single create route ───────────────────────────────────────────────────────
 
 COORDINATOR_ROUTE = "coordinator"
-LEGACY_ROUTE = "legacy"
-
-_LEGACY_TOKENS: frozenset = frozenset({"legacy", "0", "false", "off", "no"})
-_COORDINATOR_TOKENS: frozenset = frozenset({"coordinator", "1", "true", "on", "yes"})
-
-
-def create_route() -> str:
-    """Select EXACTLY ONE create route (never dual-send).
-
-    Default (unset ``REBAR_RECONCILER_CREATE_ROUTE``) is the coordinated write-ahead
-    path (:data:`COORDINATOR_ROUTE`). A falsey value rolls back to the legacy
-    create+delete-rollback value (:data:`LEGACY_ROUTE`); an unrecognized value raises
-    ``ValueError`` so a typo cannot silently mis-route.
-    """
-    raw = os.environ.get("REBAR_RECONCILER_CREATE_ROUTE")  # read-via: rollback-toggle
-    if raw is None:
-        return COORDINATOR_ROUTE  # default: coordinated write-ahead path
-    v = raw.strip().lower()
-    if v in _LEGACY_TOKENS:
-        return LEGACY_ROUTE
-    if v in _COORDINATOR_TOKENS:
-        return COORDINATOR_ROUTE
-    raise ValueError(f"invalid REBAR_RECONCILER_CREATE_ROUTE: {raw!r}")
 
 
 # ── Pure-decision full-create composition ─────────────────────────────────────────
@@ -392,7 +367,7 @@ def _coordinated_create_core(
     """The coordinated create->contain MIDDLE core, adapted to ``create_one``'s contract.
 
     Injected as ``create_one(..., create_core=...)`` by ``apply_handlers.handle_create``
-    when the ``create_route`` selector is the coordinator. Runs the same composition as
+    for every batch create. Runs the same composition as
     :func:`run_coordinated_outbound_create` over the ALREADY-translated ``ticket_data``,
     then maps the terminal :class:`CoordinatedCreateOutcome` back to what ``create_one``
     expects from a create core:
@@ -405,8 +380,7 @@ def _coordinated_create_core(
     * **persist failure** (bind_pending save failed) → RAISE ``BindingPersistError``;
     * **permanent create failure** → RE-RAISE the ORIGINAL create exception object,
       preserving the exact type (esp. ``HTTPError``) so ``handle_create``'s 404 taxonomy
-      is byte-identical (a keyless create response — no exception — returns the dict,
-      matching legacy);
+      is byte-identical (a keyless create response — no exception — returns the dict);
     * **commit_unknown** (ambiguous create, re-observe inconclusive, no key) → DEFER:
       append ``mutation`` to ``deferred_creates`` and return ``None`` so it is retried next
       pass WITHOUT a hard error and WITHOUT a false "applied" — never blind-replaying a

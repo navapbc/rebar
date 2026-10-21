@@ -20,6 +20,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler.create_route import _coordinated_create_core
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
@@ -84,6 +86,7 @@ def test_mapping_json_written_on_jql_hit(applier, tmp_path):
         rest_calls=0,
         events_list=events,
         repo_root=tmp_path,
+        create_core=_coordinated_create_core,
     )
 
     mapping_path = tmp_path / "bridge_state" / "mapping.json"
@@ -104,7 +107,9 @@ def test_mapping_json_preserves_existing_entries(applier, tmp_path):
     client = _make_mock_client(search_return=[existing_issue])
 
     mutation = _make_create_mutation("new-id")
-    applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+    applier.create_one(
+        mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+    )
 
     data = json.loads(mapping_path.read_text())
     assert data.get("old-id") == "DIG-1", "Pre-existing entry should be preserved"
@@ -116,7 +121,9 @@ def test_mapping_json_not_written_on_jql_miss(applier, tmp_path):
     client = _make_mock_client(search_return=[])
 
     mutation = _make_create_mutation("tick-miss1")
-    applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+    applier.create_one(
+        mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+    )
 
     mapping_path = tmp_path / "bridge_state" / "mapping.json"
     assert not mapping_path.exists(), "mapping.json should NOT be created on JQL miss"

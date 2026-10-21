@@ -17,6 +17,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar.reconciler.create_route import _coordinated_create_core
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
@@ -77,7 +79,9 @@ def test_search_called_before_create_on_miss(applier):
     )
 
     mutation = _make_create_mutation("tick-0001")
-    result = applier.create_one(mutation, client, rest_calls=0)
+    result = applier.create_one(
+        mutation, client, rest_calls=0, create_core=_coordinated_create_core
+    )
 
     assert call_order == ["search", "create"], f"Expected search before create, got: {call_order}"
     assert result is not None
@@ -90,7 +94,13 @@ def test_budget_guard_defers_at_200(applier):
     deferred: list = []
     mutation = _make_create_mutation("tick-0002")
 
-    result = applier.create_one(mutation, client, rest_calls=200, deferred_creates=deferred)
+    result = applier.create_one(
+        mutation,
+        client,
+        rest_calls=200,
+        deferred_creates=deferred,
+        create_core=_coordinated_create_core,
+    )
 
     assert result is None, "Expected None from budget-deferred create"
     assert mutation in deferred, "Mutation must be appended to deferred_creates"
@@ -104,7 +114,13 @@ def test_budget_guard_defers_above_200(applier):
     deferred: list = []
     mutation = _make_create_mutation("tick-0003")
 
-    result = applier.create_one(mutation, client, rest_calls=201, deferred_creates=deferred)
+    result = applier.create_one(
+        mutation,
+        client,
+        rest_calls=201,
+        deferred_creates=deferred,
+        create_core=_coordinated_create_core,
+    )
 
     assert result is None
     assert mutation in deferred
@@ -118,7 +134,13 @@ def test_budget_guard_does_not_defer_below_200(applier):
     deferred: list = []
     mutation = _make_create_mutation("tick-0004")
 
-    applier.create_one(mutation, client, rest_calls=199, deferred_creates=deferred)
+    applier.create_one(
+        mutation,
+        client,
+        rest_calls=199,
+        deferred_creates=deferred,
+        create_core=_coordinated_create_core,
+    )
 
     assert deferred == [], "Mutation must NOT be deferred when rest_calls < 200"
     client.search_issues.assert_called_once()
@@ -131,7 +153,9 @@ def test_jql_hit_skips_create_issue(applier, tmp_path):
     client = _make_mock_client(search_return=[existing_issue])
 
     mutation = _make_create_mutation("tick-0005")
-    result = applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
+    result = applier.create_one(
+        mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
+    )
 
     client.create_issue.assert_not_called()
     assert result is not None
@@ -145,7 +169,9 @@ def test_jql_miss_calls_create_issue(applier):
     client = _make_mock_client(search_return=[])
 
     mutation = _make_create_mutation("tick-0006")
-    result = applier.create_one(mutation, client, rest_calls=0)
+    result = applier.create_one(
+        mutation, client, rest_calls=0, create_core=_coordinated_create_core
+    )
 
     client.search_issues.assert_called_once()
     client.create_issue.assert_called_once()
@@ -164,6 +190,6 @@ def test_jql_query_uses_local_id_label(applier):
     client = _make_mock_client(search_return=[])
 
     mutation = _make_create_mutation("tick-0007")
-    applier.create_one(mutation, client, rest_calls=0)
+    applier.create_one(mutation, client, rest_calls=0, create_core=_coordinated_create_core)
 
     client.search_issues.assert_called_once_with('labels = "rebar-id:tick-0007"')

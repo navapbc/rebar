@@ -109,8 +109,8 @@ class _PassContext:
     # RP-04 S3 (AC1): the composed operation runtime's already-built backend and its
     # captured transport, threaded into _apply_mutations so the apply phase forwards the
     # transport as applier.apply(client=...) instead of re-resolving config ambiently via
-    # _load_acli. None when the write facade is disabled (AC6) or composition was skipped
-    # for a no-write pass whose scope is absent.
+    # _load_acli. None when composition was skipped for a no-write pass whose scope is
+    # absent.
     runtime_backend: Any = None
     runtime_transport: Any = None
 

@@ -230,7 +230,7 @@ def _emit_mode_manifest(
         # `mutation_failures` was hardcoded-by-omission to 0 and every computed
         # mutation counted as applied. That silently defeated three contracts:
         # e534 ("isolate + fail loud at the END exits non-zero"), 48c8
-        # (REBAR_RECONCILER_FAIL_SILENT_NOOP driving a non-zero exit) and 85a1
+        # (silent sub-op no-ops driving a non-zero exit) and 85a1
         # (the truthful tally, which printed "applied N of N" while mutations
         # failed). The file still goes away — the no-manifest-in-LIVE contract is
         # unchanged; only the counts survive it.

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import re
 import sys
 import urllib.request
 from pathlib import Path
@@ -169,20 +170,27 @@ def _property_ok(local_id: str) -> tuple[int, dict[str, Any]]:
 def test_the_writer_emits_the_COLON_label_form_and_nothing_emits_the_hyphen(support: Any) -> None:
     """Census the canonical colon-form provenance writers.
 
-    ``dispatch_one.py``, ``apply_inbound_events.py``, and ``binding_recovery.py`` must
-    emit ``rebar-id:<local_id>``; the hyphen form is read-only legacy. File-based source
-    checks catch string literals that semantic references cannot and must be retargeted
-    if a writer moves. The recording-client recovery test is the behavioral authority if
-    it ever disagrees with this location-sensitive census.
+    ``create_route.py`` (the coordinated outbound create, the only create core since the
+    legacy core in ``dispatch_one.py`` was deleted), ``apply_inbound_events.py``, and
+    ``binding_recovery.py`` must emit ``rebar-id:<local_id>``; the hyphen form is
+    read-only legacy. File-based source checks catch string literals that semantic
+    references cannot and must be retargeted if a writer moves. The recording-client
+    recovery test is the behavioral authority if it ever disagrees with this
+    location-sensitive census.
     """
-    writers = ("dispatch_one.py", "apply_inbound_events.py", "binding_recovery.py")
-    for name in writers:
+    writers = {
+        "create_route.py": "self.local_id",
+        "apply_inbound_events.py": "local_id",
+        "binding_recovery.py": "local_id",
+    }
+    for name, local_id_expr in writers.items():
         source = (_ENGINE / name).read_text()
-        assert 'f"rebar-id:{local_id}"' in source, (
+        assert f'f"rebar-id:{{{local_id_expr}}}"' in source, (
             f"{name} no longer writes the colon-form label; row 1's oracle asserts "
             f"{support.REBAR_ID_LABEL_PREFIX!r} and would be wrong"
         )
-        assert 'add_label(keyed, f"rebar-id-{local_id}")' not in source, (
+        hyphen_write = re.search(r'add_label\b[^\n]*f"rebar-id-\{', source)
+        assert hyphen_write is None, (
             f"{name} now writes the HYPHEN form too; row 1's oracle asserts only the colon form"
         )
     assert support.REBAR_ID_LABEL_PREFIX == "rebar-id:"

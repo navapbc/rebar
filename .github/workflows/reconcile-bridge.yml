@@ -241,9 +241,6 @@ jobs:
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           JIRA_PROJECT: ${{ vars.JIRA_PROJECT }}
           REBAR_ENV_ID: ${{ vars.REBAR_ENV_ID || 'reconciler' }}
-          # `REBAR_RECONCILER_FAIL_SILENT_NOOP=1` turns silent suboperation no-ops and swallowed
-          # comment failures into errors. The option defaults to off outside this workflow.
-          REBAR_RECONCILER_FAIL_SILENT_NOOP: "1"
         run: rebar bridge run
 
       - name: Notify on bridge failure

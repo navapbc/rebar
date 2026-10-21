@@ -5,9 +5,8 @@ The create / update / delete / probe / conflict outbound leaf handlers
 dispatched from the typed registry, plus the HEAD-drift subject helpers the
 batch loop uses to distinguish benign external writers from competing
 reconciler writes. The create leaf dispatches exactly one production route: the
-default coordinated write-ahead composition or, under the rollback selector,
-the legacy create+delete path. Every leaf calls _direction_guard, runs its Jira
-side-effects through batch_dispatch._call_with_retry, and returns an
+coordinated write-ahead composition. Every leaf calls _direction_guard, runs its
+Jira side-effects through batch_dispatch._call_with_retry, and returns an
 ApplyResult.
 
 Imports downward only (apply_base, batch_dispatch); never imports applier.
@@ -98,19 +97,12 @@ def _apply_outbound_create(
     if client is None:
         # Stub path: preserved for tests that don't exercise the I/O leaf.
         return ApplyResult(mutation.direction, mutation.action, {})
-    from rebar.reconciler.create_route import (
-        LEGACY_ROUTE,
-        create_route,
-        run_coordinated_outbound_create,
-    )
+    from rebar.reconciler.create_route import run_coordinated_outbound_create
 
-    # ONE selector, ONE path — never both (AC6, no dual-send).
-    if create_route() == LEGACY_ROUTE:
-        return _apply_outbound_create_legacy(mutation, client)
-
-    # Coordinated write-ahead path (default): NEVER deletes on a post-create failure
-    # (bug 387d). The composition captures the returned key, contains it in order, and
-    # gates dependents on a confirmed containment (AC5).
+    # Coordinated write-ahead path, the ONLY create route (AC6, no dual-send): NEVER
+    # deletes on a post-create failure (bug 387d). The composition captures the
+    # returned key, contains it in order, and gates dependents on a confirmed
+    # containment (AC5).
     outcome = run_coordinated_outbound_create(
         mutation, client=client, binding_store=_kwargs.get("binding_store")
     )
@@ -123,46 +115,6 @@ def _apply_outbound_create(
         "dependents_released": outcome.dependents_released,
     }
     return ApplyResult(mutation.direction, mutation.action, payload)
-
-
-def _apply_outbound_create_legacy(mutation, client: TicketTransport) -> ApplyResult:
-    """Legacy create leaf: single create + delete-rollback on failure.
-
-    Preserved verbatim behind the ``REBAR_RECONCILER_CREATE_ROUTE`` rollback toggle
-    (the LEGACY value). This is the create+delete path the coordinated write-ahead
-    composition replaces by default; it is retained ONLY as the rollback escape hatch.
-    """
-    payload = dict(mutation.payload)
-    try:
-        result = _call_with_retry(client.create_issue, payload)
-    except Exception:
-        # Rollback path: if a Jira issue was (likely) created before the failure
-        # surfaced, delete it via the same retry helper so transient delete
-        # failures are also retried. Swallow any rollback error so the ORIGINAL
-        # create exception is what re-raises to the caller.
-        key = payload.get("key_hint") or mutation.target
-        try:
-            _call_with_retry(client.delete_issue, key)
-        except Exception:  # noqa: BLE001 — rollback-must-not-mask-original
-            # Best-effort rollback: swallow delete errors so the original
-            # create exception propagates to the caller unchanged.
-            pass
-        raise
-    known_key = (
-        result.get("key")
-        if isinstance(result, dict)
-        else payload.get("key_hint") or mutation.target
-    )
-    return ApplyResult(
-        mutation.direction,
-        mutation.action,
-        {
-            "coordinated": False,
-            "known_key": known_key,
-            "confirmed": True,
-            "dependents_released": True,
-        },
-    )
 
 
 # Allowlist of fields that can be pushed outbound via update_issue. Other

@@ -1,9 +1,8 @@
 """Verify the S4 T3 create cutover through the live outbound batch path (REB-3115).
 
-Real ``applier.apply`` and ``handle_create`` exercise the single route selector and expose
-create counts, bidirectional bindings, outcomes, and deferrals. Coordinator and legacy
-routes each issue one physical create without dual-send; the coordinator never deletes,
-and the legacy rollback path remains unchanged.
+Real ``applier.apply`` and ``handle_create`` exercise the coordinated create route and
+expose create counts, bidirectional bindings, outcomes, and deferrals. The route issues one
+physical create without dual-send and never deletes.
 """
 
 from __future__ import annotations
@@ -90,16 +89,13 @@ def _ctx(client, store, tmp_path) -> BatchApplyContext:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# handle_create — the SINGLE create_route selector consumption point on the batch path
+# handle_create — the coordinated create core on the batch path
 # ════════════════════════════════════════════════════════════════════════════════
 
 
-def test_coordinator_route_runs_coordinated_core_one_create_binding_confirmed(
-    tmp_path, monkeypatch
-):
-    """Default (unset env) → coordinated core: EXACTLY ONE create, forward+reverse binding
-    confirmed, one remote issue, NO delete."""
-    monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
+def test_coordinator_route_runs_coordinated_core_one_create_binding_confirmed(tmp_path):
+    """Coordinated core: EXACTLY ONE create, forward+reverse binding confirmed, one remote
+    issue, NO delete."""
     client = _FakeClient()
     store = BindingStore(tmp_path / ".tickets-tracker")
     result = handle_create(_mutation("L-coord"), _ctx(client, store, tmp_path))
@@ -115,29 +111,8 @@ def test_coordinator_route_runs_coordinated_core_one_create_binding_confirmed(
     assert ("DIG-1", "local_id", "L-coord") in client.props
 
 
-def test_legacy_route_runs_legacy_core_byte_identical(tmp_path, monkeypatch):
-    """Legacy rollback value → legacy core: same observable create + confirmed binding.
-    Behaviour is byte-identical to the coordinated happy path (this is the rollback)."""
-    monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", "legacy")
-    client = _FakeClient()
-    store = BindingStore(tmp_path / ".tickets-tracker")
-    result = handle_create(_mutation("L-legacy"), _ctx(client, store, tmp_path))
-
-    assert client.creates == 1
-    assert client.deletes == []
-    assert result.outcome["result"] == {"key": "DIG-1", "id": "1001"}
-    assert store.get_jira_key("L-legacy") == "DIG-1"
-    assert store.get_local_id("DIG-1") == "L-legacy"
-
-
-@pytest.mark.parametrize("route", [None, "legacy"])
-def test_success_counts_rest_and_sets_result_both_routes(tmp_path, monkeypatch, route):
-    """(a) A successful create counts one REST call and sets outcome['result'] on BOTH
-    routes (shared prelude/postlude)."""
-    if route is None:
-        monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
-    else:
-        monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", route)
+def test_success_counts_rest_and_sets_result(tmp_path):
+    """(a) A successful create counts one REST call and sets outcome['result']."""
     client = _FakeClient()
     ctx = _ctx(client, BindingStore(tmp_path / ".tickets-tracker"), tmp_path)
     result = handle_create(_mutation("L-ok"), ctx)
@@ -145,14 +120,9 @@ def test_success_counts_rest_and_sets_result_both_routes(tmp_path, monkeypatch, 
     assert result.outcome["result"]["key"] == "DIG-1"
 
 
-@pytest.mark.parametrize("route", [None, "legacy"])
-def test_create_404_soft_fails_pass_continues_both_routes(tmp_path, monkeypatch, route):
+def test_create_404_soft_fails_pass_continues(tmp_path):
     """(b) A create raising HTTPError 404 → per-mutation soft-fail (recorded, pass not
-    aborted) via the shared dispatch backstop, on BOTH routes."""
-    if route is None:
-        monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
-    else:
-        monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", route)
+    aborted) via the shared dispatch backstop."""
     client = _FakeClient()
     client.create_exc = urllib.error.HTTPError("u", 404, "gone", {}, None)  # type: ignore[arg-type]
     ctx = _ctx(client, BindingStore(tmp_path / ".t"), tmp_path)
@@ -162,15 +132,10 @@ def test_create_404_soft_fails_pass_continues_both_routes(tmp_path, monkeypatch,
     assert client.deletes == []
 
 
-@pytest.mark.parametrize("route", [None, "legacy"])
-def test_non_404_httperror_propagates_both_routes(tmp_path, monkeypatch, route):
-    """(c) A non-404 HTTPError propagates fail-fast (the applier re-raises it) on BOTH
-    routes — the coordinated core re-raises the ORIGINAL HTTPError object so the 404
-    taxonomy is byte-identical."""
-    if route is None:
-        monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
-    else:
-        monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", route)
+def test_non_404_httperror_propagates(tmp_path):
+    """(c) A non-404 HTTPError propagates fail-fast (the applier re-raises it) — the
+    coordinated core re-raises the ORIGINAL HTTPError object so the 404 taxonomy is
+    byte-identical."""
     client = _FakeClient()
     client.create_exc = urllib.error.HTTPError("u", 500, "boom", {}, None)  # type: ignore[arg-type]
     with pytest.raises(urllib.error.HTTPError) as exc:
@@ -179,16 +144,10 @@ def test_non_404_httperror_propagates_both_routes(tmp_path, monkeypatch, route):
     assert client.deletes == []
 
 
-@pytest.mark.parametrize("route", [None, "legacy"])
-def test_landed_but_label_fails_alerts_no_delete_no_postlude(tmp_path, monkeypatch, route):
+def test_landed_but_label_fails_alerts_no_delete_no_postlude(tmp_path):
     """(d) The create landed but the rebar-id identity label write fails → a BRIDGE_ALERT
     is emitted, the issue is NEVER deleted (bug 387d), the error is raised, the key is
-    left keyed-pending, and the postlude (user labels/comments) does NOT run. Identical on
-    BOTH routes."""
-    if route is None:
-        monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
-    else:
-        monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", route)
+    left keyed-pending, and the postlude (user labels/comments) does NOT run."""
     client = _FakeClient()
     client.label_exc = RuntimeError("field off screen")
     store = BindingStore(tmp_path / ".tickets-tracker")
@@ -215,14 +174,9 @@ def test_landed_but_label_fails_alerts_no_delete_no_postlude(tmp_path, monkeypat
     assert payload["data"]["tag"] == "create-identity-write-failed"
 
 
-@pytest.mark.parametrize("route", [None, "legacy"])
-def test_persist_failure_raises_binding_persist_error_no_create(tmp_path, monkeypatch, route):
+def test_persist_failure_raises_binding_persist_error_no_create(tmp_path):
     """(e) A write-ahead bind_pending persist failure raises BindingPersistError and skips
-    the create entirely, on BOTH routes (same message shape)."""
-    if route is None:
-        monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
-    else:
-        monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", route)
+    the create entirely."""
     client = _FakeClient()
 
     class _SaveFailsStore(BindingStore):
@@ -236,11 +190,10 @@ def test_persist_failure_raises_binding_persist_error_no_create(tmp_path, monkey
     assert client.deletes == []
 
 
-def test_commit_unknown_defers_no_second_create_no_false_applied(tmp_path, monkeypatch):
+def test_commit_unknown_defers_no_second_create_no_false_applied(tmp_path):
     """(f) Coordinator route: an ambiguous create (timeout) whose re-observation is
     inconclusive → DEFER. The mutation is appended to deferred_creates, NO second create is
     issued, the outcome is not a false 'applied' (result is None), and nothing is deleted."""
-    monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
     client = _FakeClient()
     client.create_exc = TimeoutError("ack lost")  # ambiguous → re-observe
     client.search_result = []  # observe inconclusive
@@ -256,14 +209,9 @@ def test_commit_unknown_defers_no_second_create_no_false_applied(tmp_path, monke
     assert mutation in ctx.deferred_creates  # queued for a later convergence pass
 
 
-@pytest.mark.parametrize("route", [None, "legacy"])
-def test_dedup_hit_short_circuits_before_core_both_routes(tmp_path, monkeypatch, route):
-    """Shared prelude: a dedup JQL hit short-circuits BEFORE the create core on BOTH
-    routes — no create, a dedup sentinel, and the mapping confirmed."""
-    if route is None:
-        monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
-    else:
-        monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", route)
+def test_dedup_hit_short_circuits_before_core(tmp_path):
+    """Shared prelude: a dedup JQL hit short-circuits BEFORE the create core — no create, a
+    dedup sentinel, and the mapping confirmed."""
     client = _FakeClient()
     client.search_result = [{"key": "DIG-DUP"}]
     store = BindingStore(tmp_path / ".tickets-tracker")
@@ -273,14 +221,9 @@ def test_dedup_hit_short_circuits_before_core_both_routes(tmp_path, monkeypatch,
     assert result.outcome["result"]["key"] == "DIG-DUP"
 
 
-@pytest.mark.parametrize("route", [None, "legacy"])
-def test_budget_defer_short_circuits_before_core_both_routes(tmp_path, monkeypatch, route):
+def test_budget_defer_short_circuits_before_core(tmp_path):
     """Shared prelude: at/over the REST-call budget the create is deferred BEFORE any core
-    on BOTH routes — no create, no search, mutation queued."""
-    if route is None:
-        monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
-    else:
-        monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", route)
+    — no create, no search, mutation queued."""
     client = _FakeClient()
     store = BindingStore(tmp_path / ".tickets-tracker")
     ctx = _ctx(client, store, tmp_path)
@@ -293,11 +236,10 @@ def test_budget_defer_short_circuits_before_core_both_routes(tmp_path, monkeypat
     assert mutation in ctx.deferred_creates
 
 
-def test_no_dual_send_dispatch_mutation_issues_exactly_one_create(tmp_path, monkeypatch):
+def test_no_dual_send_dispatch_mutation_issues_exactly_one_create(tmp_path):
     """No-dual-send invariant on the live dispatch table: dispatch_mutation('create') runs
-    create_one exactly once, whose middle core is EITHER coordinated OR legacy — never both.
-    Exactly one physical create_issue under the coordinator route."""
-    monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
+    create_one exactly once with the coordinated middle core: exactly one physical
+    create_issue."""
     client = _FakeClient()
     store = BindingStore(tmp_path / ".tickets-tracker")
     dispatch_mutation(_mutation("L-single"), _ctx(client, store, tmp_path))
@@ -371,16 +313,11 @@ class _SequencedCreateClient(_FakeClient):
         return {"key": f"DIG-{self._seq}", "id": f"{1000 + self._seq}"}
 
 
-@pytest.mark.parametrize("route", [None, "legacy"])
-def test_applier_apply_live_batch_create_one_issue_one_binding(tmp_path, monkeypatch, route):
+def test_applier_apply_live_batch_create_one_issue_one_binding(tmp_path, monkeypatch):
     """The true production entry point: ``applier.apply([create_dict], ...)`` issues EXACTLY
     ONE physical create, confirms a forward+reverse binding, never deletes, and records the
-    create response as the mutation outcome — on BOTH routes."""
-    if route is None:
-        monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
-    else:
-        monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", route)
-    applier = _load_applier(f"applier_live_{route}")
+    create response as the mutation outcome."""
+    applier = _load_applier("applier_live")
     client = _FakeClient()
     monkeypatch.setattr(applier, "_load_acli", lambda: client)
     _init_git_repo(tmp_path)
@@ -401,7 +338,6 @@ def test_applier_apply_live_batch_create_one_issue_one_binding(tmp_path, monkeyp
 
 
 def test_applier_apply_orders_parent_before_child_create_dependency(tmp_path, monkeypatch):
-    monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
     applier = _load_applier("applier_create_ordering")
     client = _SequencedCreateClient()
     monkeypatch.setattr(applier, "_load_acli", lambda: client)
@@ -432,7 +368,6 @@ def test_applier_apply_orders_parent_before_child_create_dependency(tmp_path, mo
 def test_applier_apply_defers_unknown_parent_create_dependency_without_vendor_call(
     tmp_path, monkeypatch
 ):
-    monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
     applier = _load_applier("applier_create_unknown_parent")
     client = _SequencedCreateClient()
     monkeypatch.setattr(applier, "_load_acli", lambda: client)

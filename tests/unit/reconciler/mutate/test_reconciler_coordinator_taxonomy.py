@@ -71,21 +71,16 @@ class _RecordingCreateClient:
         return sum(1 for c in self.calls if c[0] == method)
 
 
-@pytest.mark.parametrize("route", [None, "legacy"])
-def test_s7_create_route_creates_before_label_and_never_deletes(tmp_path, monkeypatch, route):
-    """Both create routes create the issue before labels and never delete it."""
-    if route is None:
-        monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
-    else:
-        monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", route)
+def test_s7_create_route_creates_before_label_and_never_deletes(tmp_path):
+    """The create route creates the issue before labels and never deletes it."""
     fake = _RecordingCreateClient()
-    store = BindingStore(tmp_path / f".bind-{route}")
+    store = BindingStore(tmp_path / ".bind-coordinator")
     ctx = BatchApplyContext(
         client=fake, repo_root=tmp_path, pass_id="s5-create", binding_store=store
     )
     create = {
         "action": "create",
-        "local_id": f"L-{route}",
+        "local_id": "L-coordinator",
         "fields": {"summary": "Reconcile", "issuetype": {"name": "Task"}},
     }
     dispatch_mutation(create, ctx)

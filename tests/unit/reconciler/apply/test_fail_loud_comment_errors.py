@@ -16,16 +16,15 @@ silently failed:
 
 This pins:
 
-  * **Fail-loud gate (flag-flip), PARTIAL drop** — behind
-    ``REBAR_RECONCILER_FAIL_SILENT_NOOP=1``, a ``comment_errors``-carrying outcome
-    whose canary did NOT fire (applied > 0) still gets ``outcome["error"]`` set (so
-    reconcile.py counts it toward ``mutation_failures`` → non-zero exit). Default
-    OFF keeps it non-fatal. Both paths (create + update) and both flag states are
-    asserted — RED before the apply_handlers change (comment_errors → error=None
-    on a partial drop).
+  * **Fail-loud, PARTIAL drop** — with no environment set, a
+    ``comment_errors``-carrying outcome whose canary did NOT fire (applied > 0) still
+    gets an ``outcome["error"]`` starting ``comment-errors:`` (so reconcile.py counts
+    it toward ``mutation_failures`` → non-zero exit). Both paths (create + update) are
+    asserted — RED before the apply_handlers change (comment_errors → error=None on a
+    partial drop).
   * **Same-kind canary coverage** — a TOTAL no-op (computed > 0, applied == 0) on
-    COMMENTS and on LABELS trips ``silent_noop`` (warn-first default: flagged, no
-    error), matching the links coverage already in test_silent_noop_canary.py.
+    COMMENTS and on LABELS trips ``silent_noop`` and hard-fails the mutation, matching
+    the links coverage already in test_silent_noop_canary.py.
 
 Asserts the outcome flags/error, not specific log strings.
 """
@@ -111,13 +110,10 @@ def _update_with_partial_comment_drop(acli_mod, *, key: str) -> tuple[dict, Magi
 
 
 # --------------------------------------------------------------------------- #
-# Fail-loud gate: a PARTIAL comment drop -> mutation failure ONLY behind the flag.
+# Fail-loud: a PARTIAL comment drop -> mutation failure, with no environment set.
 # (The pre-existing canary catches only TOTAL no-ops, so this is genuinely new.)
 # --------------------------------------------------------------------------- #
-def test_partial_comment_drop_promotes_to_error_when_flag_on(
-    applier_mod, acli_mod, tmp_path, monkeypatch
-) -> None:
-    monkeypatch.setenv("REBAR_RECONCILER_FAIL_SILENT_NOOP", "1")
+def test_partial_comment_drop_promotes_to_error(applier_mod, acli_mod, tmp_path) -> None:
     mut, client = _update_with_partial_comment_drop(acli_mod, key="DIG-9100")
     outcome = _apply_one(applier_mod, acli_mod, mut, client, tmp_path, f"fl-on-{time.time_ns()}")
     # Partial: one comment landed, so the canary does NOT fire — proving this
@@ -128,30 +124,17 @@ def test_partial_comment_drop_promotes_to_error_when_flag_on(
         f"got silent_noop={outcome.get('silent_noop')}"
     )
     assert outcome.get("comment_errors"), "the dropped comment must be recorded"
-    assert "comment-errors" in (outcome.get("error") or ""), (
-        f"flag ON must promote a partial comment drop to a per-mutation error; got {outcome}"
+    assert (outcome.get("error") or "").startswith("comment-errors:"), (
+        f"a partial comment drop must be a per-mutation error; got {outcome}"
     )
     assert outcome.get("result") == {"key": "DIG-9100", "ok": True}
 
 
-def test_partial_comment_drop_stays_nonfatal_when_flag_off(applier_mod, acli_mod, tmp_path) -> None:
-    """DEFAULT (flag unset): the partial drop is recorded in comment_errors but is
-    NOT promoted to outcome["error"] (unchanged, non-fatal)."""
-    mut, client = _update_with_partial_comment_drop(acli_mod, key="DIG-9101")
-    outcome = _apply_one(applier_mod, acli_mod, mut, client, tmp_path, f"fl-off-{time.time_ns()}")
-    assert outcome.get("comments_applied") == 1
-    assert outcome.get("comment_errors"), "the dropped comment must be recorded"
-    assert not outcome.get("error"), "flag OFF (default) must keep a partial comment drop non-fatal"
-
-
-def test_create_path_comment_drop_promotes_when_flag_on(
-    applier_mod, acli_mod, tmp_path, monkeypatch
-) -> None:
-    """CREATE path: with the flag on, a swallowed comment failure during outbound
-    CREATE also promotes to outcome["error"] (parity with the update path). The
-    create path has no silent-no-op canary, so even a single failed comment is a
-    clean discriminator (RED: comment_errors → error=None on unmodified code)."""
-    monkeypatch.setenv("REBAR_RECONCILER_FAIL_SILENT_NOOP", "1")
+def test_create_path_comment_drop_promotes_to_error(applier_mod, acli_mod, tmp_path) -> None:
+    """CREATE path: a swallowed comment failure during outbound CREATE also promotes to
+    outcome["error"] (parity with the update path). The create path has no silent-no-op
+    canary, so even a single failed comment is a clean discriminator (RED:
+    comment_errors → error=None on unmodified code)."""
     pass_id = f"cr-on-{time.time_ns()}"
     mutation = {
         "direction": "outbound",
@@ -175,18 +158,19 @@ def test_create_path_comment_drop_promotes_when_flag_on(
     assert target, f"expected an outcome for the create; got {outcomes}"
     outcome = target[0]
     assert outcome.get("comment_errors"), "the failed create-path comment must be recorded"
-    assert "comment-errors" in (outcome.get("error") or ""), (
-        f"flag ON must promote a create-path comment drop to an error; got {outcome}"
+    assert (outcome.get("error") or "").startswith("comment-errors:"), (
+        f"a create-path comment drop must be a per-mutation error; got {outcome}"
     )
 
 
 # --------------------------------------------------------------------------- #
 # Same-kind silent-no-op canary coverage: comments + labels (was links-only).
-# A TOTAL no-op (computed > 0, applied == 0) trips the canary; warn-first default.
+# A TOTAL no-op (computed > 0, applied == 0) trips the canary and hard-fails.
 # --------------------------------------------------------------------------- #
 def test_comments_canary_fires_on_total_noop(applier_mod, acli_mod, tmp_path) -> None:
     """A COMMENTS total no-op (the single comment's add fails: computed=1,
-    applied=0) trips the canary — proving comments coverage, not just links."""
+    applied=0) trips the canary — proving comments coverage, not just links. The
+    silent-no-op reason augments (never replaces) the comment-errors reason."""
     mutation = {
         "direction": "outbound",
         "action": "update",
@@ -205,12 +189,14 @@ def test_comments_canary_fires_on_total_noop(applier_mod, acli_mod, tmp_path) ->
     assert outcome.get("silent_noop") == ["comments"], (
         f"a comments total-no-op must trip the canary; got {outcome.get('silent_noop')}"
     )
-    assert not outcome.get("error"), "warn-first default must not hard-fail"
+    error = outcome.get("error") or ""
+    assert error.startswith("comment-errors:"), f"must hard-fail; got {outcome}"
+    assert "; silent-noop: " in error, f"both sub-op failures must survive; got {error!r}"
 
 
 def test_labels_canary_fires_on_total_noop(applier_mod, acli_mod, tmp_path) -> None:
     """A LABELS total no-op (add_label fails: computed=1, applied=0) trips the
-    canary — proving labels coverage, not just links. Warn-first default."""
+    canary — proving labels coverage, not just links — and hard-fails."""
     mutation = {
         "direction": "outbound",
         "action": "update",
@@ -227,4 +213,4 @@ def test_labels_canary_fires_on_total_noop(applier_mod, acli_mod, tmp_path) -> N
     assert outcome.get("silent_noop") == ["labels"], (
         f"a labels total-no-op must trip the canary; got {outcome.get('silent_noop')}"
     )
-    assert not outcome.get("error"), "warn-first default must not hard-fail"
+    assert (outcome.get("error") or "").startswith("silent-noop:"), f"must hard-fail; {outcome}"

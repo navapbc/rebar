@@ -13,6 +13,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar.reconciler.create_route import _coordinated_create_core
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
@@ -62,7 +64,7 @@ def test_create_one_dispatches_user_supplied_labels(applier):
             {"action": "add", "label": "label-b"},
         ],
     )
-    applier.create_one(mutation, client, rest_calls=0)
+    applier.create_one(mutation, client, rest_calls=0, create_core=_coordinated_create_core)
 
     # add_label must be called for each user label PLUS the rebar-id system label.
     actual_calls = [c.args for c in client.add_label.call_args_list]
@@ -85,7 +87,7 @@ def test_create_one_dispatches_user_supplied_comments(applier):
         local_id=local_id,
         comments=[{"body": "First probe comment"}, {"body": "Second comment"}],
     )
-    applier.create_one(mutation, client, rest_calls=0)
+    applier.create_one(mutation, client, rest_calls=0, create_core=_coordinated_create_core)
 
     actual_bodies = [c.args[1] for c in client.add_comment.call_args_list]
     assert "First probe comment" in actual_bodies, (
@@ -104,7 +106,7 @@ def test_create_one_skips_remove_action_labels(applier):
         local_id=local_id,
         labels=[{"action": "remove", "label": "stale-label"}],
     )
-    applier.create_one(mutation, client, rest_calls=0)
+    applier.create_one(mutation, client, rest_calls=0, create_core=_coordinated_create_core)
 
     # remove_label should not be called for CREATE — there's no prior state to remove from.
     client.remove_label.assert_not_called()
@@ -123,7 +125,9 @@ def test_create_one_label_failure_does_not_abort_create(applier):
         labels=[{"action": "add", "label": "user-label"}],
     )
     # Should not raise; the create succeeded, label dispatch is best-effort.
-    result = applier.create_one(mutation, client, rest_calls=0)
+    result = applier.create_one(
+        mutation, client, rest_calls=0, create_core=_coordinated_create_core
+    )
     assert result is not None
     assert result.get("key") == "DIG-444"
     # delete_issue must NOT be called — label-dispatch failure is post-identity-write
@@ -143,7 +147,7 @@ def test_create_one_no_labels_or_comments_unchanged_behavior(applier):
         "local_id": local_id,
         "fields": {"summary": "bare", "issuetype": {"name": "Task"}},
     }
-    applier.create_one(mutation, client, rest_calls=0)
+    applier.create_one(mutation, client, rest_calls=0, create_core=_coordinated_create_core)
     # Only rebar-id system label written.
     client.add_label.assert_called_once_with("DIG-555", f"rebar-id:{local_id}")
     client.add_comment.assert_not_called()

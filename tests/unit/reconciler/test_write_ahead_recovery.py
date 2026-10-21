@@ -20,6 +20,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar.reconciler.create_route import _coordinated_create_core
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RECON_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
@@ -161,7 +163,13 @@ def test_write_ahead_orders_pending_before_create_and_key_before_label(dispatch,
         "action": "create",
         "fields": {"summary": "s", "issuetype": {"name": "Task"}},
     }
-    dispatch.create_one(mutation, client, repo_root=tmp_path, binding_store=store)
+    dispatch.create_one(
+        mutation,
+        client,
+        repo_root=tmp_path,
+        binding_store=store,
+        create_core=_coordinated_create_core,
+    )
 
     # bind_pending + its save come before create; record_key + its save before label.
     assert order.index("bind_pending") < order.index("create")
@@ -169,7 +177,7 @@ def test_write_ahead_orders_pending_before_create_and_key_before_label(dispatch,
     assert order.index("create") < order.index("record_key")
 
 
-def test_bind_pending_persist_failure_skips_create(dispatch, tmp_path):
+def test_bind_pending_persist_failure_skips_create(dispatch, binding_store_mod, tmp_path):
     """A bind_pending persist (save) failure raises BindingPersistError and
     create_issue is NEVER called (item-scoped skip)."""
     client = MagicMock()
@@ -186,8 +194,14 @@ def test_bind_pending_persist_failure_skips_create(dispatch, tmp_path):
         "action": "create",
         "fields": {"summary": "s", "issuetype": {"name": "Task"}},
     }
-    with pytest.raises(dispatch.BindingPersistError):
-        dispatch.create_one(mutation, client, repo_root=tmp_path, binding_store=store)
+    with pytest.raises(binding_store_mod.BindingPersistError):
+        dispatch.create_one(
+            mutation,
+            client,
+            repo_root=tmp_path,
+            binding_store=store,
+            create_core=_coordinated_create_core,
+        )
 
     client.create_issue.assert_not_called()
 

@@ -28,6 +28,7 @@ from __future__ import annotations
 import pytest
 
 from rebar.reconciler.binding_store import BindingStore
+from rebar.reconciler.create_route import _coordinated_create_core
 
 
 @pytest.fixture
@@ -226,6 +227,7 @@ def test_create_one_defers_instead_of_writing_a_duplicate() -> None:
         client,
         deferred_creates=deferred,
         binding_store=_Store(),
+        create_core=_coordinated_create_core,
     )
 
     assert not client.created, (
@@ -267,6 +269,7 @@ def test_create_one_proceeds_normally_once_the_grace_window_has_passed() -> None
         client,
         deferred_creates=[],
         binding_store=_Store(),
+        create_core=_coordinated_create_core,
     )
     assert client.created, "the create was suppressed even outside the grace window"
 
@@ -314,6 +317,7 @@ def test_the_whole_crash_recover_differ_create_path_creates_exactly_one_issue(st
         client,
         deferred_creates=deferred,
         binding_store=store,
+        create_core=_coordinated_create_core,
     )
 
     total_issues = 1 + len(client.created)  # the pre-existing DC-1 + anything written now
@@ -352,6 +356,7 @@ def test_the_cloud_path_is_unaffected_beyond_the_deferral(store) -> None:
         client,
         deferred_creates=deferred,
         binding_store=store,
+        create_core=_coordinated_create_core,
     )
     assert client.created, "an ordinary new ticket was deferred; the happy path regressed"
     assert deferred == [], "an ordinary new ticket must not be deferred at all"
@@ -366,6 +371,7 @@ def test_the_cloud_path_is_unaffected_beyond_the_deferral(store) -> None:
         client,
         deferred_creates=[],
         binding_store=store,
+        create_core=_coordinated_create_core,
     )
     assert len(client.created) == before + 1, (
         "a ticket past the grace window was still suppressed — the deferral is unbounded, "
@@ -429,6 +435,7 @@ def test_ac3_coordinated_route_defers_within_grace_no_duplicate(store) -> None:
         deferred_creates=deferred,
         repo_root=store._repo_root if hasattr(store, "_repo_root") else None,
         binding_store=store,
+        create_core=_coordinated_create_core,
     )
     assert result is None  # deferred, not created
     assert client.created == []  # NO physical create while inside the grace window

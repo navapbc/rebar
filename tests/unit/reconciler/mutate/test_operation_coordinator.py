@@ -787,13 +787,13 @@ def _always_transient(coordinator_mod):
 
 def test_route_for_defaults_to_coordinator_for_non_create_families(batch_dispatch_mod):
     """AC1/AC6: every non-create family defaults to the ``coordinator`` route.
-    ``create`` is governed by the SINGLE ``create_route`` selector (S4 T3 cutover) and
-    defaults to ``coordinator``; an unrecognized action stays ``legacy``."""
+    ``create`` always takes the ``coordinator`` route (S4 T3 cutover); an unrecognized
+    action stays ``legacy``."""
     bd = batch_dispatch_mod
     for family in ("update", "delete", "probe", "clean_label", "repair_property", "conflict"):
         assert family in bd.NON_CREATE_FAMILIES
         assert bd.route_for(family) == "coordinator"
-    # create is decided by the single create_route selector (default coordinator).
+    # create always takes the coordinated write-ahead route.
     assert bd.route_for("create") == "coordinator"
     assert bd.route_for("totally-unknown") == "legacy"
 
@@ -1206,12 +1206,12 @@ def test_e2e_coordinate_and_fuse_consumes_real_plan_pass(
 
 
 def test_route_for_rejects_override_for_create_family(batch_dispatch_mod):
-    """AC6: ``create`` is governed by the SINGLE ``create_route`` selector, so a
-    per-family ``overrides`` mapping NEVER applies to it (the selector is the one and
-    only control) — a create can never be silently mis-routed through an override. The
-    per-family selector still governs the six non-create families."""
-    # An override for create is IGNORED: create is decided solely by create_route
-    # (default coordinator), not by the non-create overrides map.
+    """AC6: ``create`` always takes the coordinator route, so a per-family
+    ``overrides`` mapping NEVER applies to it — a create can never be silently
+    mis-routed through an override. The per-family selector still governs the six
+    non-create families."""
+    # An override for create is IGNORED: create is always the coordinator, never
+    # routed by the non-create overrides map.
     assert batch_dispatch_mod.route_for("create", {"create": "legacy"}) == "coordinator"
     # a legitimate non-create override is still honored.
     assert batch_dispatch_mod.route_for("update", {"update": "legacy"}) == "legacy"
