@@ -656,7 +656,7 @@ only genuinely multi-project stores.
 Use `--json` for automation, `--target ENVIRONMENT_ID` to select the expected producer, and
 `--max-age 2h` only when age should make an otherwise successful pass stale. Without
 `--max-age`, no implicit age threshold applies. Healthy, paused, and running exit zero; foreign,
-failed, stale, and never-run exit nonzero. The older `rebar bridge-status` spelling has been
+failed, stale, and never-run exit nonzero. The older `bridge-status` spelling has been
 removed; `purge-bridge` remains retired.
 
 The legacy top-level `rebar reconcile` adapter is removed. Use `rebar bridge preview` for live

@@ -107,7 +107,7 @@ def import_tickets(
     dry_run: bool = False,
     repo_root: str | os.PathLike[str] | None = None,
 ) -> dict:
-    """Import tickets from rebar export NDJSON ``source`` into this repo.
+    """Import tickets from ``rebar store export`` NDJSON ``source`` into this repo.
 
     ``source`` is an NDJSON file path, a file object, or an iterable of lines/dicts.
     A provenance import for clean rebar→rebar migration: each ticket gets a fresh
