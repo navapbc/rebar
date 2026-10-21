@@ -66,6 +66,14 @@ def test_routable_set_matches_pinned_help_set() -> None:
     )
 
 
+def test_no_help_artifact_survives_for_a_removed_spelling() -> None:
+    """A removed spelling (``_help_route._REMOVED_SPELLINGS``) keeps no committed help."""
+    from rebar._cli._help_route import _REMOVED_SPELLINGS
+
+    survivors = sorted(set(_REMOVED_SPELLINGS) & set(_help.known_subcommands()))
+    assert survivors == [], f"help artifacts survive for removed spellings: {survivors}"
+
+
 def test_every_known_subcommand_listed_in_overview() -> None:
     """Each known subcommand (minus the allowlist) appears in the overview."""
     known = _help.known_subcommands()
