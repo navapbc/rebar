@@ -154,3 +154,4 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0115 — Terraform structural grounding is in-process, refutation-only hcl2 parsing](0115-terraform-structural-grounding.md)
 - [0117 — Bot alert recovery closes use attested dispositions, not force](0117-bot-alert-disposition.md)
 - [0119 — The MCP tool surface is derived from the library facade (MCP only)](0119-mcp-surface-derived-from-library.md)
+- [0120 — Consolidate the CLI verb surface by hard cutover](0120-cli-verb-consolidation.md)

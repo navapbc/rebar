@@ -8,6 +8,51 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — CLI verb consolidation: 20 spellings removed, `rebar store` added
+
+Twenty top-level CLI spellings were removed with no working aliases (ADR 0120; epic
+toadyish-sulfurous-ovenbird, commits `c0cf1022671` and `7c426ddd71a`). Eleven ticket verbs merged
+into the golden-path verbs, and nine storage-maintenance verbs moved under the new `rebar store`
+family. The visible top-level commands went from 71 to 53.
+
+- Each removed spelling exits `2` with argparse's `invalid choice` error, then a hint line on
+  stderr, for example ``hint: 'rebar fsck' was removed; use `rebar store fsck` instead``. The
+  registry is `_help_route._REMOVED_SPELLINGS`.
+- `rebar store` with no subcommand, or an unknown one, exits `2`. `rebar store <sub> --help`
+  prints that member's options.
+- `rebar store compact` runs one ticket, or the store-wide sweep under `--all`. A sweep-only
+  option (`--dry-run`, `--limit`, `--include-archived`) without `--all` exits `2`.
+- Unchanged: every surviving operation's `--output json` bytes and exit codes, the library
+  functions (`rebar.fsck`, `rebar.tag`, `rebar.export_tickets`, …), MCP tool names, and
+  `OUTPUT_SCHEMAS` keys.
+
+| Removed spelling | Use instead |
+| --- | --- |
+| `rebar exists <id>` | `rebar resolve <id>` (exit 0 found, 1 not found) |
+| `rebar format <id>` | `rebar resolve <id> --display[=MODE]` |
+| `rebar check-ac <id>` | `rebar check <id> --ac` |
+| `rebar clarity-check <id>` | `rebar check <id> --clarity` |
+| `rebar quality-check <id>` | `rebar check <id>` |
+| `rebar tag <id> <tag>` | `rebar edit <id> --add-tag <tag>` |
+| `rebar untag <id> <tag>` | `rebar edit <id> --remove-tag <tag>` |
+| `rebar get-file-impact <id>` | `rebar show <id> --field=file_impact` |
+| `rebar get-verify-commands <id>` | `rebar show <id> --field=verify_commands` |
+| `rebar list-descendants <id>` | `rebar deps <id> --descendants` |
+| `rebar session-logs` | `rebar list --type=session_log --sort=-created --limit=5` |
+| `rebar fsck` | `rebar store fsck` |
+| `rebar fsck-recover` | `rebar store fsck-recover` |
+| `rebar doctor` | `rebar store doctor` |
+| `rebar tracker-maintenance` | `rebar store maintenance` |
+| `rebar tracker-footprint` | `rebar store footprint` |
+| `rebar export` | `rebar store export` |
+| `rebar import` | `rebar store import` |
+| `rebar compact <id>` | `rebar store compact <id>` |
+| `rebar compact-all` | `rebar store compact --all` |
+
+Migration: replace each removed spelling in scripts, CI jobs and shell aliases with its
+replacement. A scheduled compaction job runs `rebar store compact --all`; an `fsck` or `doctor`
+health check runs `rebar store fsck` / `rebar store doctor`.
+
 ## MCP library-backed tools are derived from the library facade
 
 The 48 library-backed MCP tools are now derived at registration from the annotated `rebar.*`

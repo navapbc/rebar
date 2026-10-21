@@ -38,6 +38,36 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): CLI verb consolidation (ADR 0120).** Twenty top-level spellings are
+  removed with no working aliases: eleven ticket verbs merged into `resolve`, `check`, `edit`,
+  `show`, `deps` and `list`, and nine storage verbs moved under the new `rebar store` family.
+  Each old spelling exits 2 with a hint naming its replacement. Library functions, MCP tool
+  names and `--output json` shapes are unchanged. The mapping, also in
+  [docs/release-notes.md](docs/release-notes.md):
+
+  | Removed spelling | Use instead |
+  | --- | --- |
+  | `rebar exists <id>` | `rebar resolve <id>` (exit 0 found, 1 not found) |
+  | `rebar format <id>` | `rebar resolve <id> --display[=MODE]` |
+  | `rebar check-ac <id>` | `rebar check <id> --ac` |
+  | `rebar clarity-check <id>` | `rebar check <id> --clarity` |
+  | `rebar quality-check <id>` | `rebar check <id>` |
+  | `rebar tag <id> <tag>` | `rebar edit <id> --add-tag <tag>` |
+  | `rebar untag <id> <tag>` | `rebar edit <id> --remove-tag <tag>` |
+  | `rebar get-file-impact <id>` | `rebar show <id> --field=file_impact` |
+  | `rebar get-verify-commands <id>` | `rebar show <id> --field=verify_commands` |
+  | `rebar list-descendants <id>` | `rebar deps <id> --descendants` |
+  | `rebar session-logs` | `rebar list --type=session_log --sort=-created --limit=5` |
+  | `rebar fsck` | `rebar store fsck` |
+  | `rebar fsck-recover` | `rebar store fsck-recover` |
+  | `rebar doctor` | `rebar store doctor` |
+  | `rebar tracker-maintenance` | `rebar store maintenance` |
+  | `rebar tracker-footprint` | `rebar store footprint` |
+  | `rebar export` | `rebar store export` |
+  | `rebar import` | `rebar store import` |
+  | `rebar compact <id>` | `rebar store compact <id>` |
+  | `rebar compact-all` | `rebar store compact --all` |
+
 - **MCP library-backed tools are derived from the `rebar.*` signatures** (ADR 0119) through one
   factory and an override table; the advertised tool surface is unchanged and pinned by a
   golden. The name-only MCP/library parity gate is removed.
