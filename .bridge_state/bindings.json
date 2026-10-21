@@ -73641,9 +73641,17 @@
       "updated_at": "2026-08-28T12:17:39Z"
     },
     "b4e1-754d-17b8-40b9": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n`tests/unit/test_repo_isolation_guard.py::test_a_transient_probe_stall_is_re_sampled_rather_than_reported` failed once in a local `make verify` on 2026-10-21 PDT (lane ebf5, tree 155238156af = origin/main ca042ec0f49 plus change 3056 patch set 3): `assert int(state.read_text()) == 3` got 4 (`tests/unit/test_repo_isolation_guard.py:182`). The run was `1 failed, 19791 passed, 87 skipped` at host load average 11-16 with other lanes' suites running. Neither the test nor `tests/_isolation.py` differs from origin/main in that tree; the same code tree (patch set 2, 0e63a6d135e) passed `make verify` with 0 failures, and the test then passed 8 of 8 isolated runs (two of them took ~50 s each, the rest ~1.3 s).\n\nThe test sets `_isolation.GIT_PROBE_TIMEOUT_SECONDS = 0.5` and counts git invocations through a blocking-git shim that stalls exactly one sample. Hypothesis (unproven): under host load an un-stalled sample also exceeds the 0.5 s per-attempt bound, so the guard re-samples it too and the count becomes 4. Alternatives: the shim's state counter races between invocations; the first `head()` call itself retried.\n\n## Approach\nReproduce deterministically (constrain CPU, e.g. run the test under `nice` with a parallel CPU burner bounded by `perl -e 'alarm N'`, or inject a slow first sample in the shim), confirm which sample retried from the shim's own log, then make the assertion express the contract (\"the stalled sample was re-sampled and HEAD was not reported changed\") without depending on wall-clock headroom for the healthy samples, e.g. assert the stalled sample was retried and `after == before`, and count retries per sample rather than total invocations.\n\n## Acceptance Criteria\n- [ ] A deterministic reproduction of the 4-invocation outcome is recorded on this ticket.\n- [ ] The test passes 20 consecutive runs under the same induced load and still fails if the guard reports a transient stall as a HEAD change.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "test_a_transient_probe_stall_is_re_sampled_rather_than_reported fails under full-suite host load (git invoked 4 times, expected 3)"
+      },
       "created_at": "2026-10-21T05:37:42Z",
       "jira_id": "4596782",
       "jira_key": "REB-6722",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-10-21T05:37:45Z"
     },
@@ -107821,7 +107829,10 @@
     "1792553415084781485": "__rebar_unknown_comment_id__",
     "1792554065995237891": "__rebar_unknown_comment_id__",
     "1792555680819683471": "__rebar_unknown_comment_id__",
-    "1792560082306908764": "__rebar_unknown_comment_id__"
+    "1792560082306908764": "__rebar_unknown_comment_id__",
+    "1792561700615888779": "__rebar_unknown_comment_id__",
+    "1792562092895547823": "__rebar_unknown_comment_id__",
+    "1792563886685741001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
