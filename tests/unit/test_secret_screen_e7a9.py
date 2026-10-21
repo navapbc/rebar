@@ -478,9 +478,10 @@ def test_the_inbound_jira_translate_routes_through_the_shared_seam() -> None:
     the two halves of ``finalize_event`` — which silently skipped anything added to the
     seam. Pin the routing so it cannot regress back into a bypass.
     """
-    from _engine_path import engine_dir
+    import importlib
 
-    source = (engine_dir().parent / "reconciler" / "inbound_translate.py").read_text()
+    module = importlib.import_module("rebar.reconciler.inbound_translate")
+    source = Path(module.__file__).read_text()
     assert "_seam.finalize_event(" in source
     assert "_seam._apply_authorship(" not in source
 

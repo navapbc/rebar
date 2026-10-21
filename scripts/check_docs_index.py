@@ -40,7 +40,7 @@ MARKDOWN_SOURCE_EXCLUSIONS = (
     "src/rebar/llm/reviewers",
     "tests/fixtures",
     "tests/scripts/fixtures",
-    "tests/unit/rebar_reconciler/integration_gates",
+    "tests/unit/reconciler/integration_gates",
 )
 
 # Index membership retains the original target extraction behavior.

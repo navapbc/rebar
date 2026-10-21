@@ -19,7 +19,7 @@ through the PRODUCTION ``AcliClient`` methods — no parallel serialization):
 
 Secret-scrubbing (layered, vcrpy-style redaction) runs on every captured payload so
 the committed fixtures carry NO tokens/emails/accountIds. ``FakeAcliClient``
-(tests/integration/rebar_reconciler/jira_contract/_fakes.py) replays these verbatim through the
+(tests/integration/reconciler/jira_contract/_fakes.py) replays these verbatim through the
 production fetcher; ``jira_contract/test_jira_fixtures.py`` independently re-asserts
 the scrub held.
 

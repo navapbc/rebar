@@ -8,7 +8,7 @@ value must flow INBOUND, so the outbound diff has to suppress its local-wins pus
 The gap this file closes: only ``title`` was ever pinned against the module the
 production pass actually executes (``rebar.reconciler.outbound_field_diff``). The
 other four fields are pinned only in
-``tests/unit/rebar_reconciler/diffing/test_inbound_field_sync_directionality.py``
+``tests/unit/reconciler/diffing/test_inbound_field_sync_directionality.py``
 against ``rebar.reconciler.adapters.jira.outbound_fields._diff_fields`` — a function
 that, since ticket 625b re-homed the diff into the vendor-neutral core, has NO
 production caller. Those cells therefore pin a dead code path: they can stay green

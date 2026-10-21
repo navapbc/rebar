@@ -162,7 +162,7 @@ def _mutation_to_batch_dict(mutation) -> dict:
         # Distinguish by action and read the appropriate shape. This branch is
         # now reached only by a raw dict-shaped payload (legacy test fixtures;
         # no production producer builds one — see the route-census guard
-        # test in tests/unit/rebar_reconciler/mutate/).
+        # test in tests/unit/reconciler/mutate/).
         _BOOKKEEPING_KEYS = {
             "changed_fields",
             "comments",

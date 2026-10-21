@@ -230,7 +230,7 @@ def test_unknown_project_skips_and_continues(rehearsal_store: Path) -> None:
     absent project errors in the acli subprocess, that error is caught and the key is
     dropped from the snapshot, and the fetch still returns the REB/DIG results rather than
     aborting. (The single-project boundary still fails closed — see the non-external
-    ``tests/unit/rebar_reconciler/test_fetch_multi_project.py``.)
+    ``tests/unit/reconciler/test_fetch_multi_project.py``.)
     """
     work = rehearsal_store
     rebar.bridge_projects_set("REBGHOST", ["rebar-ghost"], repo_root=str(work))

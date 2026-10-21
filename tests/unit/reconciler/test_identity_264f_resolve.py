@@ -1,5 +1,5 @@
 """AC-coverage for 264f's `/user/search` bootstrap + no-mapping degradation criteria
-(epic gnu-whale-ichor). Placed under tests/unit/rebar_reconciler/ for the package
+(epic gnu-whale-ichor). Placed under tests/unit/reconciler/ for the package
 conftest.
 """
 

@@ -504,7 +504,7 @@ the schedule), and commit the cleared bind-state back to the `tickets` branch.
 
 The producer↔consumer sync contract (epic f89d) is guarded at two tiers:
 
-- **Hermetic (default CI, no live Jira).** `tests/integration/rebar_reconciler/jira_contract/`
+- **Hermetic (default CI, no live Jira).** `tests/integration/reconciler/jira_contract/`
   drives **scrubbed real Jira fixtures** (`tests/fixtures/jira/`, see
   [jira-fixtures.md](jira-fixtures.md)) through the PRODUCTION fetch + differ +
   applier path: the snapshot contract (`test_snapshot_contract.py`), the verified

@@ -12,7 +12,7 @@ objects (pure dataclasses) and calls ``serialize_manifest`` (pure — the
 docstring on that function already says so). It is exercised by the portable
 replay corpus (``tests/fixtures/reconciler/payload_corpus/``) and asserted
 side-effect-free by the effect-spy tests
-(``tests/unit/rebar_reconciler/mutate/test_payload_shadow_effect_spies.py``).
+(``tests/unit/reconciler/mutate/test_payload_shadow_effect_spies.py``).
 
 Callers pass in an already-loaded ``mutation`` module (``mutation_mod``)
 rather than importing ``rebar.reconciler.mutation`` here, mirroring the rest

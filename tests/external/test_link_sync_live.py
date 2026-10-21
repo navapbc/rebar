@@ -33,7 +33,7 @@ def _build_client():
     # The reconciler ships as the stdlib-only ``rebar.reconciler`` package under
     # <repo>/src/rebar/_engine (not a top-level installed package). Put that dir
     # on sys.path so ``from rebar.reconciler import acli`` resolves, mirroring
-    # tests/unit/rebar_reconciler/conftest.py.
+    # tests/unit/reconciler/conftest.py.
 
     from rebar.reconciler.adapters.jira import acli as mod
 

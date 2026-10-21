@@ -2,7 +2,7 @@
 
 `RemoteRef` was port vocabulary that no production code populated: in `src/` there was only the
 frozen dataclass and its docstring, while the TEST DOUBLE
-(`tests/unit/rebar_reconciler/backend_support.py`) had implemented a `remote_ref()` method since
+(`tests/unit/reconciler/backend_support.py`) had implemented a `remote_ref()` method since
 J7. The contract tests therefore ran against a fake strictly MORE capable than production — the
 asymmetry underneath this ticket. `Backend` now declares `remote_ref()` and both real backends
 implement it.

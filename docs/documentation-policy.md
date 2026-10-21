@@ -56,7 +56,7 @@ The source boundary excludes these Markdown sources:
 - `src/rebar/llm/reviewers/**/*.md`.
 - `tests/fixtures/**/*.md`.
 - `tests/scripts/fixtures/**/*.md`.
-- `tests/unit/rebar_reconciler/integration_gates/**/*.md`.
+- `tests/unit/reconciler/integration_gates/**/*.md`.
 - Dot-prefixed root Markdown files.
 - Files ending in `.local.md`.
 

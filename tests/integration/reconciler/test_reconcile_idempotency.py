@@ -1,6 +1,6 @@
 """reconcile_once 1-pass idempotency over an unchanged remote (robe-creek-zealot).
 
-Integration-tier counterpart to tests/unit/rebar_reconciler/test_reconcile_once.py.
+Integration-tier counterpart to tests/unit/reconciler/test_reconcile_once.py.
 The unit tier runs against a NON-git tmp repo, so ``rebar list`` exits 1 and
 ``_read_local_tickets`` returns [] — the outbound differ never sees the
 inbound-created tickets and the idempotency assertion is vacuously green

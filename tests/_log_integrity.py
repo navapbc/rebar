@@ -6,12 +6,11 @@ coverage and stay green, with nothing in the run output distinguishing it from a
 that genuinely verified something (bug 9ac2-e2f1-bb6e-4436).
 
 ``caplog`` captures through a handler on the ROOT logger, so records only reach it if the
-shared parent logger both *emits* them and *propagates* them. There are **two** such shared
-parents, not one — ``rebar._logging`` names both: library code logs under ``rebar.*``, and the
-reconciler subprocess is imported top-level so its modules log under the sibling
-``rebar.reconciler.*`` root. :data:`SHARED_LOGGER_NAMES` is that set, and every primitive here
-operates over all of it; covering only ``rebar`` leaves every ``rebar.reconciler.*`` log
-assertion unprotected (bug 9151-907b-471d-4a38).
+shared parent logger both *emits* them and *propagates* them. There is one shared parent,
+``rebar``: library code logs under ``rebar.*``, and since the reconciler became the
+``rebar.reconciler`` subpackage its modules log under ``rebar`` too. (Before that it was a
+sibling top-level root that needed its own coverage, bug 9151-907b-471d-4a38.)
+:data:`SHARED_LOGGER_NAMES` is that set, and every primitive here operates over it.
 
 For each shared root there are two process-global mutations that silently sever capture, and
 BOTH are real:
@@ -27,8 +26,8 @@ BOTH are real:
 * ``logging.getLogger(<root>).setLevel(...)`` above the record's level — the record is
   dropped at the originating logger before any handler is consulted.
   ``rebar._logging.install_stderr_handler()`` pins it to WARNING; every in-process
-  ``rebar._cli.main(...)`` call in the suite does that to ``rebar``, and every in-process
-  ``rebar.reconciler.__main__.main(...)`` call does it to ``rebar.reconciler``.
+  ``rebar._cli.main(...)`` and ``rebar.reconciler.__main__.main(...)`` call in the suite
+  does that to ``rebar``.
   ``caplog.at_level(INFO)`` without a ``logger=`` argument does NOT rescue this: it raises
   the ROOT level, not the shared parent's.
 
@@ -47,11 +46,10 @@ from __future__ import annotations
 
 import logging
 
-#: The shared parent loggers every rebar record inherits from, and therefore the points that
-#: decide whether ``caplog`` can see them. ``rebar`` covers the library/CLI/MCP surfaces;
-#: ``rebar.reconciler`` is the sibling root the reconciler subprocess's modules log under
-#: (they are imported top-level, so they are NOT children of ``rebar``).
-SHARED_LOGGER_NAMES: tuple[str, ...] = ("rebar", "rebar.reconciler")
+#: The shared parent logger every rebar record inherits from, and therefore the point that
+#: decides whether ``caplog`` can see it. ``rebar`` covers the library/CLI/MCP surfaces and
+#: the ``rebar.reconciler`` subpackage.
+SHARED_LOGGER_NAMES: tuple[str, ...] = ("rebar",)
 
 _REMEDY = (
     "Do not mutate propagation on a shared rebar logger: it is process-global and not "
@@ -105,7 +103,7 @@ def restore_level(levels: dict[str, int]) -> bool:
 
     Unlike propagation, raising these levels is a legitimate side effect of exercising a real
     entrypoint in-process (``rebar._cli.main`` and ``rebar.reconciler.__main__.main`` each
-    install the stderr handler, which pins their own root to WARNING). The LEAK is what must
+    install the stderr handler, which pins ``rebar`` to WARNING). The LEAK is what must
     not survive the test, so this contains it instead of blaming the test: restoring per-test
     is strictly stronger for coverage integrity than a failure would be, because every test
     then starts from the same levels and its log assertions are reproducible regardless of

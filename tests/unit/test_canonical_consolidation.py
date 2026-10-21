@@ -29,7 +29,7 @@ _GOLDEN_MUT_SHA = "95e67c62c5fd9df30df6661be4851aace11db9b2385738ac30b1776610f91
 def _reconciler_modules():
     """Import the engine-rooted ``rebar.reconciler`` modules (own sys.path root).
 
-    Under pytest the ``tests/unit/rebar_reconciler`` package shadows the engine package
+    Under pytest the ``tests/unit/reconciler`` package shadows the engine package
     of the same name. ``tests/unit/conftest.py`` bridges that shadow for every
     ``tests/unit`` collection by appending the engine package dir to the shadow's
     ``__path__``, so engine submodules (``mutation``, ``conflict_resolver``,

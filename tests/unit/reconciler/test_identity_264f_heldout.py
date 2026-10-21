@@ -1,6 +1,6 @@
 """HELD-OUT oracle for 264f — the implementation MUST NOT see this file.
 
-Placed under tests/unit/rebar_reconciler/ so the package conftest puts the engine on
+Placed under tests/unit/reconciler/ so the package conftest puts the engine on
 sys.path and seeds the flat ``rebar.reconciler`` namespace (the engine package is
 shadowed by ``rebar._engine``), letting these modules import directly.
 

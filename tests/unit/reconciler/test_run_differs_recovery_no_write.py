@@ -15,7 +15,7 @@ performs zero remote identity writes; a live pass's recovery is unchanged.
 
 Scope note (AC#3): the create-recovery machinery's own invariants — the keyed-pending
 no-search rule and the three-miss + 3600s keyless conjunction — are pinned unchanged
-by ``tests/unit/rebar_reconciler/state/test_binding_recovery.py``. This test only adds
+by ``tests/unit/reconciler/state/test_binding_recovery.py``. This test only adds
 the persist-axis gate coverage on the ``_run_differs_outbound`` seam.
 """
 

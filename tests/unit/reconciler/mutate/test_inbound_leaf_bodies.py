@@ -242,7 +242,7 @@ def test_inbound_update_status_event_uses_previous_status_not_new(applier, mut_m
 # ``create_after_hard_delete`` follow-on IS the resurrection the operator ruling
 # forbids: once an issue is deleted in Jira it must not be re-created. The
 # tombstone that enforces that lives in ``outbound_differ`` — see
-# tests/unit/rebar_reconciler/test_no_resurrection_after_confirmed_delete_3b5f.py.
+# tests/unit/reconciler/test_no_resurrection_after_confirmed_delete_3b5f.py.
 
 
 # ---------------------------------------------------------------------------

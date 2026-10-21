@@ -9,7 +9,7 @@ recorded there as a per-mutation failure). An empty mapping acts as a
 kill-switch.
 
 Follows the module-loading convention documented in
-``tests/unit/rebar_reconciler/conftest.py``.
+``tests/unit/reconciler/conftest.py``.
 """
 
 from __future__ import annotations

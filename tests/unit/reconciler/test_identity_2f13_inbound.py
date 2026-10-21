@@ -1,7 +1,7 @@
 """AC-coverage for 2f13's inbound-wiring criterion (epic gnu-whale-ichor): applying an
 inbound Jira assignee with an accountId mints/reuses a placeholder identity, and a
 record missing an accountId falls back without failing. Placed under
-tests/unit/rebar_reconciler/ so the package conftest makes the engine importable.
+tests/unit/reconciler/ so the package conftest makes the engine importable.
 """
 
 from __future__ import annotations

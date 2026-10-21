@@ -1,7 +1,7 @@
 """Shared loader for the pure classifier module under test.
 
 Follows the importlib loader convention established across the reconciler test
-tree (see the state/ tests and tests/unit/rebar_reconciler/conftest.py): the
+tree (see the state/ tests and tests/unit/reconciler/conftest.py): the
 module under test is named at the call site so a move/rename surfaces a clear
 loader error rather than a confusing ImportError.
 """

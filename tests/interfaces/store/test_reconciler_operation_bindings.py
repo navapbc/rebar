@@ -15,11 +15,11 @@ import pytest
 
 from rebar._config_coercion import ConfigError
 
-# The engine's ``rebar.reconciler`` package and the ``tests/unit/rebar_reconciler``
+# The engine's ``rebar.reconciler`` package and the ``tests/unit/reconciler``
 # test package share the SAME top-level name. Importing the engine seam at module
 # (collection) scope caches ``sys.modules['rebar.reconciler']`` as the engine, which
 # shadows the test package and breaks the relative-import collection of
-# ``tests/unit/rebar_reconciler/classify/*`` ("not a package"). So the engine dir is
+# ``tests/unit/reconciler/classify/*`` ("not a package"). So the engine dir is
 # put on ``sys.path`` and the seam imported only at RUN time (after collection), the
 # same deferral the sibling held-out tests here use.
 compose_reconciler_runtime = None

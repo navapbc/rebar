@@ -281,7 +281,7 @@ def _diff_jira_vs_local(
 # DIFFERENT name than the inbound differ MUST add an entry here.  Fields
 # whose name is identical in both directions do NOT need an entry.  When
 # adding a new bidirectional field, update this map and add a corresponding
-# assertion in tests/unit/rebar_reconciler/test_inbound_differ_field_contract.py.
+# assertion in tests/unit/reconciler/test_inbound_differ_field_contract.py.
 _OUTBOUND_TO_INBOUND_FIELD: dict[str, str] = {
     "parent": "parent_id",
     "summary": "title",

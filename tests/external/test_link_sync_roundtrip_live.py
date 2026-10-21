@@ -77,7 +77,7 @@ def _new_key(created: dict) -> str:
 
 # ---------------------------------------------------------------------------
 # StubBindingStore — serves both directions over one local_id<->jira_key map
-# (mirrors tests/integration/rebar_reconciler/test_link_sync.py)
+# (mirrors tests/integration/reconciler/test_link_sync.py)
 # ---------------------------------------------------------------------------
 
 

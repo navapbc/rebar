@@ -13,7 +13,7 @@ already stamp are unchanged, and a test can inject an out-of-window timestamp).
 
 These are seam-level oracles over ``alert_store`` directly, complementing the
 through-the-real-path oracle in
-``tests/unit/rebar_reconciler/state/test_binding_repository.py``.
+``tests/unit/reconciler/state/test_binding_repository.py``.
 """
 
 from __future__ import annotations

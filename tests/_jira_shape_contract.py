@@ -6,7 +6,7 @@ return; they are run against BOTH implementations so the fake cannot drift from 
 real client undetected (SWE-at-Google "verified fake"):
 
   * the hermetic ``FakeAcliClient`` — always, in
-    ``tests/integration/rebar_reconciler/test_verified_fake_contract.py``;
+    ``tests/integration/reconciler/test_verified_fake_contract.py``;
   * the real ``AcliClient`` against live Jira — opt-in (``external`` marker +
     ``REBAR_RUN_EXTERNAL`` + creds), in
     ``tests/external/test_verified_fake_contract_live.py``.
@@ -15,7 +15,7 @@ Each function enumerates the REQUIRED keys + their JSON primitive types and asse
 STRUCTURE/TYPE only — never specific values (anti-change-detector; see
 docs/adr/0004-reconciler-snapshot-contract.md). Lives at tests/ root so both tiers
 import it via the ``tests/`` sys.path entry (tests/conftest.py), like the sibling
-``_isolation`` / ``_engine_path`` helpers.
+``_isolation`` / ``_repo_root`` helpers.
 """
 
 from __future__ import annotations

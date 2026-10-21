@@ -141,7 +141,7 @@ ADR 0100 remains the historical rationale for this boundary, including the canon
 
 **Versioned output.** One logical operation resolves to one `operation_outcome.OperationOutcome` — a frozen, provider-neutral value with a stable `logical_id` across physical invocations, bounded and allowlisted diagnostics (routed through the ADR 0041 sanitization seam), and canonical bytes produced only through the `rebar._store.canonical` seam, so equivalent outcomes serialize byte-identically. Outcomes carry an additive, versioned envelope; the eleven `Disposition` values project onto the five stable pass buckets (`applied, recovered, deferred, failed, skipped`) that sum exactly to the mutation count. Adding a field is additive and never changes existing mutation bytes or the canonical hash.
 
-**Future adapter obligations.** A new provider adapter joining this boundary must: expose each supported mutation as a single typed operation returning a provider-neutral signal (no whole-operation retry loop of its own, no `_best_effort` write-swallowing); support the observe step so an ambiguous commit can be resolved by re-observation rather than blind replay (`ReplaySafety.forbidden` for `commit_unknown`); never delete remote work to undo a partial pass (rollback is code/routing reversion plus re-observation); and leave the retry budget, fuse, and pass tally to the coordinator. These obligations are enforced behaviourally by the route census (`tests/unit/rebar_reconciler/mutate/test_coordinator_route_census.py`) and the portable, credential-free Cloud/DC coordinator suite (`tests/unit/rebar_reconciler/mutate/test_reconciler_coordinator.py`).
+**Future adapter obligations.** A new provider adapter joining this boundary must: expose each supported mutation as a single typed operation returning a provider-neutral signal (no whole-operation retry loop of its own, no `_best_effort` write-swallowing); support the observe step so an ambiguous commit can be resolved by re-observation rather than blind replay (`ReplaySafety.forbidden` for `commit_unknown`); never delete remote work to undo a partial pass (rollback is code/routing reversion plus re-observation); and leave the retry budget, fuse, and pass tally to the coordinator. These obligations are enforced behaviourally by the route census (`tests/unit/reconciler/mutate/test_coordinator_route_census.py`) and the portable, credential-free Cloud/DC coordinator suite (`tests/unit/reconciler/mutate/test_reconciler_coordinator.py`).
 
 ### Typed outbound mutation payloads (ADR 0107)
 
@@ -167,9 +167,9 @@ more runtime `"fields" in payload` sniffing for the production path. The
 historical dict-shape heuristic in `_mutation_to_batch_dict` is **retained**,
 but only as an explicit, documented fallback for a raw-dict `Mutation.payload`
 — a genuinely supported, test-exercised construction path (see
-`tests/unit/rebar_reconciler/mutate/test_outbound_update_propagation.py` /
+`tests/unit/reconciler/mutate/test_outbound_update_propagation.py` /
 `test_outbound_create_binding.py`), not a production code path (verified by
-`tests/unit/rebar_reconciler/mutate/test_payload_shadow_route_census.py`'s
+`tests/unit/reconciler/mutate/test_payload_shadow_route_census.py`'s
 source-text census: only `outbound_pass` and `batch_dispatch` import
 `mutation_payloads`; no production module imports the side-effect-free shadow
 comparator, `payload_shadow.py`).
@@ -180,8 +180,8 @@ batch path (`_apply_batch`) — and that list may itself be either typed
 `Mutation`s (the real production shape, always typed after the producer
 cutover above) or already-dict-shaped legacy batch entries (a distinct,
 directly-tested API convention — see
-`tests/unit/rebar_reconciler/mutate/test_apply_list_of_mutations.py` and the
-~50 tests across `tests/unit/rebar_reconciler/apply/` that hand-build dict
+`tests/unit/reconciler/mutate/test_apply_list_of_mutations.py` and the
+~50 tests across `tests/unit/reconciler/apply/` that hand-build dict
 batches to unit-test `_apply_batch`/`create_one`/`update_one`/`delete_one`
 independent of how the input was produced). `apply()` still branches on
 `isinstance(m, MutationShape)` per list entry to decide whether to convert via
@@ -235,7 +235,7 @@ intra-event TAG_DELTA contract), or `one_way_gated` (removals propagate to the p
 only through the `should_propagate_removal` managed-ref gate). The registry is
 declarative — call sites keep their existing mechanisms (`config` status maps,
 `link_direction`, `conflict_resolver.FIELD_CLASSES`, the managed-ref gate) — and
-`tests/unit/rebar_reconciler/test_field_contract_properties.py` enforces it: a
+`tests/unit/reconciler/test_field_contract_properties.py` enforces it: a
 field handled by the conflict resolver or the differ's name-canonicalization map
 without a registry entry fails test collection, and each declared class is
 asserted against the real code path. Adding a reconciled field means declaring its
@@ -294,7 +294,7 @@ The two share one **Jira-family layer**, `adapters/jira_family/` — the value m
 vocabulary, field sanitizers, `rebar-id:` identity convention, and probe classifier exist once
 and are parameterized by two contracts, `RichTextCodec` and `UserIdentityModel`. The dependency
 direction is one-way (`jira_family/` imports neither concrete backend) and is machine-checked by
-`tests/unit/rebar_reconciler/test_jira_family_boundary_heldout.py`. See
+`tests/unit/reconciler/test_jira_family_boundary_heldout.py`. See
 [ADR 0055](adr/0055-jira-family-sub-seam.md).
 
 The Data Center Markdown-to-wiki renderer implements ADR 0096's two-cadence Pandoc boundary.
@@ -767,7 +767,7 @@ Route 2 is the dangerous one: the diff shows a correct-looking port annotation, 
 `make typecheck` stays green because it was never going to say anything. This is the
 enabling condition behind [rebar:a357-b747-ece9-4cf5], where a writing reconcile pass
 crashed on `set_entity_property` — a method the core calls from three sites and the port
-never declared. `tests/unit/rebar_reconciler/test_transport_param_typing_cc77.py` fails
+never declared. `tests/unit/reconciler/test_transport_param_typing_cc77.py` fails
 on the bare and `Any` spellings for the core reconciler's
 `client`/`transport` parameters, so a later "annotate it to pass the ratchet" change
 cannot reintroduce the blindness.

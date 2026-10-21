@@ -11,14 +11,14 @@ rides the existing CI drift gate (``python -m rebar.schemas.gen_types --check``)
 These tests assert OBSERVABLE behaviour only — what the loader returns and what
 the validator accepts — never private names or source text. Edge/error coverage
 (the flat-``comments`` regression, malformed sub-shapes) is owned by
-``tests/integration/rebar_reconciler/jira_contract/test_snapshot_contract.py``,
+``tests/integration/reconciler/jira_contract/test_snapshot_contract.py``,
 which validates real ``fetch_snapshot`` output against this same schema.
 
 The fixture ``tests/fixtures/jira/snapshot_entry_shapes.json`` is DERIVED and
 REDACTED from real fetcher output under ``bridge_state/snapshots/`` (gitignored,
 PII-bearing): every ``emailAddress`` / ``displayName`` / ``accountId`` is replaced
 with a placeholder and every tenant URL dropped. The repo-wide scrub guard in
-``tests/integration/rebar_reconciler/jira_contract/test_jira_fixtures.py`` globs
+``tests/integration/reconciler/jira_contract/test_jira_fixtures.py`` globs
 ``tests/fixtures/jira/*.json``, so it covers this file automatically.
 """
 

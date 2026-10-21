@@ -33,7 +33,7 @@ def _load_errors_module():
 
 
 # Justification for the F841 suppression below: this constant is read by
-# tests/unit/rebar_reconciler/test_errors.py::test_authorized_writers_docstring
+# tests/unit/reconciler/test_errors.py::test_authorized_writers_docstring
 # _documents_full_contract via getattr — static analyzers cannot trace the
 # usage. Do NOT remove; it is the contract artifact for story 4496 dd-1.
 _AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC: str = """  # noqa: F841

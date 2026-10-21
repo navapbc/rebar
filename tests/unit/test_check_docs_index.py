@@ -184,7 +184,7 @@ def test_declared_markdown_source_boundary_is_exact(tmp_path: Path):
         "src/rebar/llm/reviewers/reviewer.md",
         "tests/fixtures/corpus/README.md",
         "tests/scripts/fixtures/copy.md",
-        "tests/unit/rebar_reconciler/integration_gates/story.md",
+        "tests/unit/reconciler/integration_gates/story.md",
         "infra/service/guide.md",
         "scripts/tool/guide.md",
         "tests/external/system/guide.md",

@@ -39,15 +39,6 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 import jira_dc_field_readiness  # noqa: E402
 
-# Reuse the test suite's single engine-layout resolver before importing vendored reconciler code.
-_TESTS_DIR = _REPO_ROOT / "tests"
-if str(_TESTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TESTS_DIR))
-from _engine_path import engine_dir  # noqa: E402
-
-if str(engine_dir()) not in sys.path:
-    sys.path.insert(0, str(engine_dir()))
-
 # Import live vocabularies and limits so the map compares the harness with what ships now.
 from rebar.llm import gate_source  # noqa: E402
 from rebar.llm.config import LLMConfig  # noqa: E402

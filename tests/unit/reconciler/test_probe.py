@@ -40,7 +40,7 @@ point (``test_probe_is_read_only``), distinct from ``check-access`` which create
 throwaway issue.
 
 ``mapping_probe.build_probe`` is resolvable in this test tree because
-``tests/unit/rebar_reconciler/conftest.py`` already puts the engine dir on ``sys.path`` and
+``tests/unit/reconciler/conftest.py`` already puts the engine dir on ``sys.path`` and
 extends ``rebar.reconciler.__path__`` to the engine package, so ``import
 rebar.reconciler.mapping_probe`` binds the SAME module object the CLI handler imports.
 """

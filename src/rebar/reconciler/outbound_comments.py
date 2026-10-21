@@ -255,7 +255,7 @@ def fit_preserving_marker(text: str, fit: Callable[[str], str]) -> str:
     ``fit`` is the caller's vendor fitter (Cloud: ``AdfCodec.fit_outbound``),
     injected as a plain ``Callable[[str], str]`` so this backend-neutral core
     module keeps knowing nothing about any vendor or its numeric limit (pinned by
-    ``tests/unit/rebar_reconciler/test_backend_neutrality.py``). Two properties of
+    ``tests/unit/reconciler/test_backend_neutrality.py``). Two properties of
     every real fitter are relied on and hold by construction: it is idempotent,
     and ``fit(x) == x`` exactly when ``x`` is already within the limit — which is
     the only within-limit oracle available without naming a limit here.
@@ -324,7 +324,7 @@ def fit_comment_as_sent(text: str, fit: Callable[[str], str]) -> str:
     ``fit`` is the caller's vendor fitter, injected as a plain
     ``Callable[[str], str]`` exactly as :func:`fit_preserving_marker` takes it, so
     this backend-neutral core module still names no vendor and no numeric limit
-    (pinned by ``tests/unit/rebar_reconciler/test_backend_neutrality.py``). The
+    (pinned by ``tests/unit/reconciler/test_backend_neutrality.py``). The
     decoration's length is likewise derived from
     :func:`_decorate_outbound_comment`, never restated.
 

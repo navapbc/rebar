@@ -146,7 +146,7 @@ with no `outputSchema` fails the guard rather than slipping through.
 Jira link/relation round-trips ARE covered: link sync is a reconciler capability
 (story 25ae — the reconciler maps a local ticket's `deps` links to Jira
 relationships via `client.set_relationship`), and the round-trips are exercised by
-`tests/integration/rebar_reconciler/test_link_sync.py`. (This entry previously said
+`tests/integration/reconciler/test_link_sync.py`. (This entry previously said
 link sync was "not yet a reconciler capability"; that is stale — it is implemented
 and tested.)
 
@@ -162,6 +162,6 @@ behavioral tests in the inventory above:
 
 | Test | Kind | What it guards (and does NOT prove) |
 |------|------|-------------------------------------|
-| `tests/unit/rebar_reconciler/orchestrate/test_leaves_registry_coverage.py::test_every_leaf_has_nonstub_body_structural_guard` | AST structural | Every registered leaf has a non-stub body (no bare `pass`/`...`). Proves the code exists, not that it behaves correctly. |
-| `tests/unit/rebar_reconciler/orchestrate/test_leaves_effect_matrix.py::test_matrix_covers_every_leaf` | Registry completeness | The effect matrix's key set covers every leaf. Proves the matrix is complete, not that any effect is correct. |
+| `tests/unit/reconciler/orchestrate/test_leaves_registry_coverage.py::test_every_leaf_has_nonstub_body_structural_guard` | AST structural | Every registered leaf has a non-stub body (no bare `pass`/`...`). Proves the code exists, not that it behaves correctly. |
+| `tests/unit/reconciler/orchestrate/test_leaves_effect_matrix.py::test_matrix_covers_every_leaf` | Registry completeness | The effect matrix's key set covers every leaf. Proves the matrix is complete, not that any effect is correct. |
 | `tests/unit/test_llm_timeouts.py::test_no_total_runtime_timer_mechanism` | Source-string search | A specific total-runtime-timer mechanism is absent from the source. Proves absence of a construct, not any runtime timeout behavior. |

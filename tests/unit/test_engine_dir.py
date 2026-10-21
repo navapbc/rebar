@@ -151,7 +151,7 @@ _RECONCILER_PROBE_MODULES = ("rebar.reconciler.classify", "rebar.reconciler.adap
 def test_reconciler_submodules_resolve_to_the_package_source() -> None:
     """``rebar.reconciler`` submodules, imported from a ``tests/unit`` module, are the
     package's own files under ``src/rebar/reconciler/`` — never a test-tree module of the
-    same name (``tests/unit/rebar_reconciler/classify/`` is a test package)."""
+    same name (``tests/unit/reconciler/classify/`` is a test package)."""
     import importlib
 
     reconciler_src = (REPO_ROOT / "src" / "rebar" / "reconciler").resolve()
@@ -163,7 +163,7 @@ def test_reconciler_submodules_resolve_to_the_package_source() -> None:
 
 def test_engine_submodules_resolve_from_a_tests_unit_module(tmp_path: Path):
     """Resolve ``rebar.reconciler`` submodules from a fresh session that collects a
-    ``tests/unit`` module outside ``tests/unit/rebar_reconciler/``.
+    ``tests/unit`` module outside ``tests/unit/reconciler/``.
 
     The child collects this file next to a ``tests/scripts`` module, so the in-process
     probe above runs with only that collection's import state — no full-suite import
@@ -179,7 +179,7 @@ def test_engine_submodules_resolve_from_a_tests_unit_module(tmp_path: Path):
     child_basetemp = nested_basetemp(tmp_path)
     cp = run_nested_pytest(
         tmp_path,
-        str(Path(__file__).resolve()),  # a tests/unit module outside rebar_reconciler/
+        str(Path(__file__).resolve()),  # a tests/unit module outside reconciler/
         str(scripts_test),
         "-k",
         "test_reconciler_submodules_resolve_to_the_package_source"

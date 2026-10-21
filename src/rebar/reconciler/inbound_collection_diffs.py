@@ -48,7 +48,7 @@ def _load_link_direction():
     keeping the import off module scope is what lets these leaves be loaded standalone
     by path, the convention the reconciler tests rely on. (Named by description rather
     than by symbol so this module carries no ADF-entry-point token — see the allowlist
-    in tests/unit/rebar_reconciler/test_rich_text_seam_heldout.py.)
+    in tests/unit/reconciler/test_rich_text_seam_heldout.py.)
     """
     global _LinkDirModule
     if _LinkDirModule is not None:

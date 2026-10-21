@@ -147,7 +147,7 @@ def test_pandoc_colour_oracle_rejects_a_signal_killed_child(
     Found by the Step-7 construct sweep, not named on the ticket: same shape, same tier.
     Seam: ``wiki_render._pandoc_path``, the site's own resolution of the binary to spawn.
     """
-    module = _load("_failopen_wiki", "tests/unit/rebar_reconciler/test_wiki_render.py")
+    module = _load("_failopen_wiki", "tests/unit/reconciler/test_wiki_render.py")
     shim = str(_suicide_shim(tmp_path / "bin", "pandoc"))
     monkeypatch.setattr(module.wiki_render, "_pandoc_path", lambda: shim)
 

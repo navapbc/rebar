@@ -22,7 +22,7 @@ code paths (never re-implementations):
        one_way_gated(links/parent) — should_propagate_removal through the real
          gate: managed → True, unmanaged/absent/malformed → False (fail-open).
      Path-level integration of the gate stays where it already lives
-     (tests/unit/rebar_reconciler/diffing/test_link_removal_sync.py and the
+     (tests/unit/reconciler/diffing/test_link_removal_sync.py and the
      outbound_fields/outbound_field_diff parent tests) — not duplicated here.
 
 MUTATION CHECKS (how this suite kills the bug class):

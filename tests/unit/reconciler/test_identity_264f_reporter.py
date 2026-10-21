@@ -2,7 +2,7 @@
 reporter REST sub-call sets the resolved accountId; an HTTP 4xx (Modify-Reporter not
 granted) or an unresolvable reporter degrades via a soft-fail alert, pops `reporter`
 so other fields still apply, and never fails the sync. Placed under
-tests/unit/rebar_reconciler/ for the package conftest.
+tests/unit/reconciler/ for the package conftest.
 """
 
 from __future__ import annotations
