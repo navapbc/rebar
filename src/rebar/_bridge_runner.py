@@ -146,8 +146,8 @@ def _is_valid_pause_marker(stderr: str) -> bool:
 
 def _dispositions() -> tuple[Any, ...]:
     """Load the reconciler classification once through its supported package seam."""
-    orchestrator = importlib.import_module("rebar.reconciler.__main__")
-    return tuple(orchestrator._Disposition)
+    guarded_pass = importlib.import_module("rebar.reconciler.guarded_pass")
+    return tuple(guarded_pass._Disposition)
 
 
 def _classified_result(returncode: int, stderr: str) -> tuple[str, int]:

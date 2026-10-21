@@ -46,7 +46,10 @@ _READ_REGISTRAR_BUT_WRITE_GATED = frozenset(
 # registrar source: _mcp_reads.fsck, _mcp_llm.sign_review, _mcp_writes.run_workflow).
 _ANNOTATIONS: dict[str, str] = {
     "bridge_run": "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only",
-    "bridge_sync": "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only",
+    "bridge_sync": (
+        "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only; runs the CLI's "
+        "guarded pass: honors the bridge pause and holds the reconciler pass lock"
+    ),
     "bridge_pause": "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only",
     "bridge_resume": "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only",
     "fsck": "the recover path is gated by `REBAR_MCP_READONLY` (plain fsck is read-only)",

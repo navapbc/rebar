@@ -7,7 +7,7 @@ detected BEFORE the pass starts: `main` returns 3, and the workflow prints
 
 Mid-pass the same event is classified as fatal. The heartbeat sets `lock_lost`, the
 `abort_check` closure raises `ReconcileLockLost` — which is a bare `RuntimeError`
-subclass, NOT `applier.RescheduleError` — so `run_pass`'s `except Exception` falls
+subclass, NOT `applier.RescheduleError` — so the pass body's `except Exception` falls
 past the reschedule arm to `return 1`. `.github/workflows/reconcile-bridge.yml`
 whitelists only 0/75/3, so exit 1 hits the `*)` arm and the run goes red.
 
@@ -30,12 +30,14 @@ from typing import Any
 import pytest
 
 from rebar.reconciler import __main__ as reconciler_main
+from rebar.reconciler import guarded_pass
 
 
 def _lock_lost_cls() -> type[Exception]:
     """Resolve ReconcileLockLost exactly as production does.
 
-    Both the raise site (`main`) and the classification site (`run_pass`) go through
+    Both the raise site (`run_guarded_pass`) and the classification site (`run_pass_result`)
+    go through
     `_load_sibling_keyed(_ADVISORY_LOCK_KEY, ...)`, which deliberately returns a
     test-pre-seeded `sys.modules` entry when one exists. Importing
     `rebar.reconciler._advisory_lock` directly instead can therefore hand back a
@@ -45,8 +47,8 @@ def _lock_lost_cls() -> type[Exception]:
     hazard tracked by bug 9f0b). Resolving through the same loader keeps the test
     faithful to the production path and immune to that ordering.
     """
-    advisory = reconciler_main._load_sibling_keyed(
-        reconciler_main._ADVISORY_LOCK_KEY, "_advisory_lock.py"
+    advisory = guarded_pass._load_sibling_keyed(
+        guarded_pass._ADVISORY_LOCK_KEY, "_advisory_lock.py"
     )
     return advisory.ReconcileLockLost  # type: ignore[no-any-return]
 
@@ -67,7 +69,7 @@ def _install_steps(monkeypatch: pytest.MonkeyPatch, reconcile_once_exc: BaseExce
     def _fake_load(name: str) -> Any:
         return {"reconcile": reconcile_stub, "applier": applier_stub}.get(name)
 
-    monkeypatch.setattr(reconciler_main, "_try_load_step", _fake_load)
+    monkeypatch.setattr(guarded_pass, "_try_load_step", _fake_load)
 
 
 def test_lock_lost_mid_pass_exits_reschedule_not_error(
@@ -86,7 +88,9 @@ def test_lock_lost_mid_pass_exits_reschedule_not_error(
         ),
     )
 
-    rc = reconciler_main.run_pass(repo_root=tmp_path, pass_id="2026-07-30T19-50-55")
+    rc = reconciler_main._render_pass(
+        guarded_pass.run_pass_result(repo_root=tmp_path, pass_id="2026-07-30T19-50-55"), None
+    )
 
     assert rc == 75, (
         "losing the pass lock mid-pass is benign contention — the same class of event "
@@ -108,6 +112,8 @@ def test_generic_failure_still_exits_one(monkeypatch: pytest.MonkeyPatch, tmp_pa
     """
     _install_steps(monkeypatch, RuntimeError("genuine unrecoverable failure"))
 
-    rc = reconciler_main.run_pass(repo_root=tmp_path, pass_id="test-pass")
+    rc = reconciler_main._render_pass(
+        guarded_pass.run_pass_result(repo_root=tmp_path, pass_id="test-pass"), None
+    )
 
     assert rc == 1, f"a genuine failure must still be fatal (exit 1), got {rc}"

@@ -43,13 +43,24 @@ def main_mod():
     return _load_main_module()
 
 
+@pytest.fixture(scope="module")
+def guarded_mod():
+    """The guarded-pass module that owns the pass body and its pipeline-load seam."""
+    return importlib.import_module("rebar.reconciler.guarded_pass")
+
+
+def _run_pass(main_mod, guarded_mod, repo_root: Path) -> int:
+    """Run the pass body and render it for the compatibility route (the old ``run_pass``)."""
+    return main_mod._render_pass(guarded_mod.run_pass_result(repo_root=repo_root), None)
+
+
 def _make_stub_reconcile(return_value):
     stub = types.ModuleType("stub_reconcile_truthful")
     stub.reconcile_once = MagicMock(return_value=return_value)  # type: ignore[attr-defined]
     return stub
 
 
-def test_run_pass_prints_applied_count_when_writes_succeed(main_mod, tmp_path, capsys):
+def test_run_pass_prints_applied_count_when_writes_succeed(main_mod, guarded_mod, tmp_path, capsys):
     """When 3 of 10 mutations land in Jira, the OK line must report applied=3.
 
     Fail-loud (Facet 2, reconciler-abort-isolation): a pass with per-mutation
@@ -66,8 +77,8 @@ def test_run_pass_prints_applied_count_when_writes_succeed(main_mod, tmp_path, c
             "manifest_path": str(tmp_path / "manifest.json"),
         }
     )
-    with patch.object(main_mod, "_try_load_step", return_value=stub):
-        rc = main_mod.run_pass(repo_root=tmp_path)
+    with patch.object(guarded_mod, "_try_load_step", return_value=stub):
+        rc = _run_pass(main_mod, guarded_mod, tmp_path)
     out = capsys.readouterr().out
     assert rc != 0, "a pass with mutation_failures > 0 must fail loud (non-zero exit)"
     assert "applied 3" in out or "applied=3" in out, (
@@ -78,7 +89,9 @@ def test_run_pass_prints_applied_count_when_writes_succeed(main_mod, tmp_path, c
     )
 
 
-def test_run_pass_does_not_say_converged_when_applied_nonzero(main_mod, tmp_path, capsys):
+def test_run_pass_does_not_say_converged_when_applied_nonzero(
+    main_mod, guarded_mod, tmp_path, capsys
+):
     """'converged' verb must be reserved for applied=0 confirmation passes.
 
     The historical lying message was 'OK: steady-state pass converged — N
@@ -100,8 +113,8 @@ def test_run_pass_does_not_say_converged_when_applied_nonzero(main_mod, tmp_path
             "manifest_path": str(tmp_path / "manifest.json"),
         }
     )
-    with patch.object(main_mod, "_try_load_step", return_value=stub):
-        main_mod.run_pass(repo_root=tmp_path)
+    with patch.object(guarded_mod, "_try_load_step", return_value=stub):
+        _run_pass(main_mod, guarded_mod, tmp_path)
     out = capsys.readouterr().out
     assert "converged" not in out.lower(), (
         f"'converged' verb leaks onto applied>0 pass — historical lying-message "
@@ -126,7 +139,7 @@ def test_run_pass_empty_stdout_fails_truthful_tally() -> None:
         assert out.strip() != "", "a successful applied>0 pass must not print empty output"
 
 
-def test_run_pass_says_converged_only_when_applied_zero(main_mod, tmp_path, capsys):
+def test_run_pass_says_converged_only_when_applied_zero(main_mod, guarded_mod, tmp_path, capsys):
     """When applied=0, the converged verb is permitted (genuine no-op pass)."""
     stub = _make_stub_reconcile(
         {
@@ -137,8 +150,8 @@ def test_run_pass_says_converged_only_when_applied_zero(main_mod, tmp_path, caps
             "manifest_path": str(tmp_path / "manifest.json"),
         }
     )
-    with patch.object(main_mod, "_try_load_step", return_value=stub):
-        main_mod.run_pass(repo_root=tmp_path)
+    with patch.object(guarded_mod, "_try_load_step", return_value=stub):
+        _run_pass(main_mod, guarded_mod, tmp_path)
     out = capsys.readouterr().out
     assert "converged" in out.lower() or "applied 0" in out, (
         f"applied=0 no-op pass should print converged or applied 0; got: {out!r}"

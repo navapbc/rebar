@@ -11,7 +11,7 @@ an unmapped status. The offending mutation is recorded as a per-mutation failure
 downstream (applier backstop) instead of aborting its siblings.
 
 RED pre-fix:
-  - run_pass returns 0 even when result["mutation_failures"] > 0.
+  - the pass exits 0 even when result["mutation_failures"] > 0.
   - pass_support.preflight_status_mapping raises on the first unmapped status.
 """
 
@@ -26,7 +26,6 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
-MAIN_PATH = SCRIPTS_DIR.parent / "reconciler" / "__main__.py"
 PASS_SUPPORT_PATH = SCRIPTS_DIR.parent / "reconciler" / "pass_support.py"
 
 
@@ -36,7 +35,7 @@ PASS_SUPPORT_PATH = SCRIPTS_DIR.parent / "reconciler" / "pass_support.py"
 def test_run_pass_exits_nonzero_when_mutations_failed(tmp_path: Path) -> None:
     """A completed pass that recorded real per-mutation failures must fail loud
     (non-zero exit), distinct from the reschedule signal (75)."""
-    main_mod = importlib.import_module("rebar.reconciler.__main__")
+    guarded_mod = importlib.import_module("rebar.reconciler.guarded_pass")
 
     class _FakeReschedule(Exception):
         pass
@@ -63,9 +62,11 @@ def test_run_pass_exits_nonzero_when_mutations_failed(tmp_path: Path) -> None:
             return fake
         return None
 
-    with patch.object(main_mod, "_try_load_step", side_effect=_fake_loader):
-        rc = main_mod.run_pass(repo_root=tmp_path, pass_id="test-faillloud")
+    with patch.object(guarded_mod, "_try_load_step", side_effect=_fake_loader):
+        result = guarded_mod.run_pass_result(repo_root=tmp_path, pass_id="test-faillloud")
 
+    assert result.disposition is guarded_mod._Disposition.OPERATIONAL_FAILURE
+    rc = result.disposition.legacy_exit
     assert rc != 0, "a pass with recorded mutation_failures must exit non-zero (fail loud)"
     assert rc != 75, "mutation failures are not a reschedule; must not use EXIT_RESCHEDULE"
 
@@ -73,7 +74,7 @@ def test_run_pass_exits_nonzero_when_mutations_failed(tmp_path: Path) -> None:
 def test_run_pass_exits_zero_on_clean_pass(tmp_path: Path) -> None:
     """Guard the opposite: a pass with zero failures still exits 0 (no false alarms;
     the benign comment-fallback counts as applied, not a failure)."""
-    main_mod = importlib.import_module("rebar.reconciler.__main__")
+    guarded_mod = importlib.import_module("rebar.reconciler.guarded_pass")
 
     def _fake_loader(name: str):
         if name == "reconcile":
@@ -96,9 +97,11 @@ def test_run_pass_exits_zero_on_clean_pass(tmp_path: Path) -> None:
             return fake
         return None
 
-    with patch.object(main_mod, "_try_load_step", side_effect=_fake_loader):
-        rc = main_mod.run_pass(repo_root=tmp_path, pass_id="test-clean")
+    with patch.object(guarded_mod, "_try_load_step", side_effect=_fake_loader):
+        result = guarded_mod.run_pass_result(repo_root=tmp_path, pass_id="test-clean")
 
+    assert result.disposition is guarded_mod._Disposition.CONVERGED
+    rc = result.disposition.legacy_exit
     assert rc == 0, "a clean pass (no failures) must still exit 0"
 
 

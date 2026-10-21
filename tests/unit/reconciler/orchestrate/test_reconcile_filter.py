@@ -411,14 +411,19 @@ class TestFilterLocalIdsLegacyRoute:
 
     def test_filter_local_ids_reaches_legacy_route_post_filter(self, tmp_path, monkeypatch, capsys):
         main_mod = self._load_main()
-        run_pass = MagicMock(return_value=0)
-        monkeypatch.setattr(main_mod, "run_pass", run_pass)
+        guarded_pass = importlib.import_module("rebar.reconciler.guarded_pass")
+        run_pass = MagicMock(
+            return_value=guarded_pass.PassResult(guarded_pass._Disposition.CONVERGED, {})
+        )
+        monkeypatch.setattr(guarded_pass, "run_pass_result", run_pass)
         last_pass = importlib.import_module("rebar.reconciler.last_pass")
         monkeypatch.setattr(
-            last_pass, "finalize_process", MagicMock(side_effect=lambda _repo, _pass_id, run: run())
+            last_pass,
+            "finalize_process",
+            MagicMock(side_effect=lambda _repo, _pass_id, run, **_kw: run()),
         )
         monkeypatch.setattr(last_pass, "release_process_lock", MagicMock())
-        original_load_sibling_keyed = main_mod._load_sibling_keyed
+        original_load_sibling_keyed = guarded_pass._load_sibling_keyed
         advisory = types.SimpleNamespace(
             ReconcileLockLost=RuntimeError,
             check_pass_lock=MagicMock(return_value=False),
@@ -427,7 +432,7 @@ class TestFilterLocalIdsLegacyRoute:
             check_phase_gate=MagicMock(return_value=False),
         )
         monkeypatch.setattr(
-            main_mod,
+            guarded_pass,
             "_load_sibling_keyed",
             lambda key, filename: (
                 advisory

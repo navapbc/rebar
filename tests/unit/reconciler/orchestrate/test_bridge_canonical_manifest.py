@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from rebar.reconciler import __main__ as reconciler_main
-from rebar.reconciler import applier, manifest_renderer
+from rebar.reconciler import applier, guarded_pass, manifest_renderer
 from rebar.reconciler.mutation import (
     Mutation,
     MutationAction,
@@ -97,16 +97,18 @@ def test_preview_bypasses_advisory_lock_and_forwards_existing_route(
     tmp_path: Path, monkeypatch
 ) -> None:
     """Canonical preview runs the ordinary pass without loading lock machinery."""
-    real_loader = reconciler_main._load_sibling_keyed
+    real_loader = guarded_pass._load_sibling_keyed
 
     def load_without_advisory(key: str, relpath: str):
-        if key == reconciler_main._ADVISORY_LOCK_KEY:
+        if key == guarded_pass._ADVISORY_LOCK_KEY:
             raise AssertionError("canonical preview must not load advisory-lock machinery")
         return real_loader(key, relpath)
 
-    run_pass = MagicMock(return_value=0)
-    monkeypatch.setattr(reconciler_main, "_load_sibling_keyed", load_without_advisory)
-    monkeypatch.setattr(reconciler_main, "run_pass", run_pass)
+    run_pass = MagicMock(
+        return_value=guarded_pass.PassResult(guarded_pass._Disposition.CONVERGED, {})
+    )
+    monkeypatch.setattr(guarded_pass, "_load_sibling_keyed", load_without_advisory)
+    monkeypatch.setattr(guarded_pass, "run_pass_result", run_pass)
 
     assert reconciler_main.main(["preview", "--repo-root", str(tmp_path)]) == 0
     kwargs = run_pass.call_args.kwargs

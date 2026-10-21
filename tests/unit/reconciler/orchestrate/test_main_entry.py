@@ -1,14 +1,15 @@
 """Behavioral tests for rebar.reconciler.__main__ entry module.
 
-Tests cover the canonical __main__ API which delegates a single steady-state
-pass to reconcile.reconcile_once(pass_id, repo_root=...):
+Tests cover the canonical pass API: ``guarded_pass.run_pass_result`` delegates a single
+steady-state pass to reconcile.reconcile_once(pass_id, repo_root=...) and classifies it,
+and ``__main__._render_pass`` collapses that classification to a process exit:
 
-  - test_run_pass_returns_0_when_reconcile_succeeds: run_pass() returns 0 when a
-    stubbed reconcile.reconcile_once returns a normal result dict.
-  - test_run_pass_returns_1_when_reconcile_raises: run_pass() returns 1 and does
+  - test_run_pass_returns_0_when_reconcile_succeeds: run_pass_result() classifies a
+    normal reconcile.reconcile_once result dict as converged (exit 0).
+  - test_run_pass_returns_1_when_reconcile_raises: the rendered pass exits 1 and does
     not propagate the exception when reconcile.reconcile_once raises.
   - test_main_returns_0_when_reconcile_succeeds: main() with --repo-root threads
-    through to run_pass() and returns 0.
+    through run_guarded_pass() and returns 0.
 """
 
 from __future__ import annotations
@@ -45,6 +46,12 @@ def main_mod():
     return _load_main_module()
 
 
+@pytest.fixture(scope="module")
+def guarded_mod():
+    """The guarded-pass module that owns the pass body and its pipeline-load seams."""
+    return importlib.import_module("rebar.reconciler.guarded_pass")
+
+
 @pytest.fixture(autouse=True)
 def _git_repo(tmp_path: Path) -> None:
     """Mutating main-path tests provide the git ref store finalization requires."""
@@ -78,8 +85,8 @@ def _make_stub_reconcile(return_value=None, side_effect=None) -> types.ModuleTyp
 # ---------------------------------------------------------------------------
 
 
-def test_run_pass_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
-    """run_pass() returns 0 when reconcile.reconcile_once returns a result dict."""
+def test_run_pass_returns_0_when_reconcile_succeeds(guarded_mod, tmp_path):
+    """run_pass_result() is converged (exit 0) when reconcile_once returns a result dict."""
     stub = _make_stub_reconcile(
         return_value={
             "pass_id": "p-001",
@@ -88,22 +95,23 @@ def test_run_pass_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
         }
     )
 
-    with patch.object(main_mod, "_try_load_step", return_value=stub):
-        rc = main_mod.run_pass(repo_root=tmp_path)
+    with patch.object(guarded_mod, "_try_load_step", return_value=stub):
+        result = guarded_mod.run_pass_result(repo_root=tmp_path)
 
-    assert rc == 0
+    assert result.disposition is guarded_mod._Disposition.CONVERGED
+    assert result.disposition.legacy_exit == 0
     stub.reconcile_once.assert_called_once()
-    # reconcile_once must receive repo_root from run_pass
+    # reconcile_once must receive repo_root from run_pass_result
     call_kwargs = stub.reconcile_once.call_args.kwargs
     assert call_kwargs.get("repo_root") == tmp_path
 
 
-def test_run_pass_returns_1_when_reconcile_raises(main_mod, tmp_path, capsys):
-    """run_pass() returns 1 and does not re-raise when reconcile_once raises."""
+def test_run_pass_returns_1_when_reconcile_raises(main_mod, guarded_mod, tmp_path, capsys):
+    """The rendered pass returns 1 and does not re-raise when reconcile_once raises."""
     stub = _make_stub_reconcile(side_effect=RuntimeError("boom"))
 
-    with patch.object(main_mod, "_try_load_step", return_value=stub):
-        rc = main_mod.run_pass(repo_root=tmp_path)
+    with patch.object(guarded_mod, "_try_load_step", return_value=stub):
+        rc = main_mod._render_pass(guarded_mod.run_pass_result(repo_root=tmp_path), None)
 
     captured = capsys.readouterr()
     assert rc == 1
@@ -112,7 +120,7 @@ def test_run_pass_returns_1_when_reconcile_raises(main_mod, tmp_path, capsys):
     assert "OK:" not in captured.err
 
 
-def test_run_pass_returns_75_on_reschedule_error(main_mod, tmp_path):
+def test_run_pass_returns_75_on_reschedule_error(guarded_mod, tmp_path):
     """F6 regression: RescheduleError must surface as EXIT_RESCHEDULE (75), not 1.
 
     Before F6, run_pass swallowed RescheduleError under the broad
@@ -135,17 +143,19 @@ def test_run_pass_returns_75_on_reschedule_error(main_mod, tmp_path):
             return applier_mod
         return None
 
-    with patch.object(main_mod, "_try_load_step", side_effect=_load_step):
-        rc = main_mod.run_pass(repo_root=tmp_path)
+    with patch.object(guarded_mod, "_try_load_step", side_effect=_load_step):
+        result = guarded_mod.run_pass_result(repo_root=tmp_path)
 
+    assert result.disposition is guarded_mod._Disposition.RESCHEDULE
+    rc = result.disposition.legacy_exit
     assert rc == applier_mod.EXIT_RESCHEDULE, (
-        f"run_pass must return EXIT_RESCHEDULE (75) when reconcile_once raises "
+        f"the legacy route must exit EXIT_RESCHEDULE (75) when reconcile_once raises "
         f"RescheduleError; got {rc}"
     )
     assert rc == 75, f"EXIT_RESCHEDULE must equal 75; got {rc}"
 
 
-def test_canonical_run_pass_maps_reschedule_to_benign_zero(main_mod, tmp_path, capsys):
+def test_canonical_run_pass_maps_reschedule_to_benign_zero(main_mod, guarded_mod, tmp_path, capsys):
     """Canonical sync names a reschedule and exposes only the 0/1/2 contract."""
     applier_mod = importlib.import_module("rebar.reconciler.applier")
     stub_reconcile = _make_stub_reconcile(
@@ -160,17 +170,18 @@ def test_canonical_run_pass_maps_reschedule_to_benign_zero(main_mod, tmp_path, c
         return None
 
     with (
-        patch.object(main_mod, "_try_load_step", side_effect=_load_step),
-        patch.object(main_mod, "_project_visibility_preflight", return_value=None),
+        patch.object(guarded_mod, "_try_load_step", side_effect=_load_step),
+        patch.object(guarded_mod, "_project_visibility_preflight", return_value=None),
     ):
-        rc = main_mod.run_pass(repo_root=tmp_path, route="sync")
+        result = guarded_mod.run_pass_result(repo_root=tmp_path, route="sync")
+        rc = main_mod._render_pass(result, "sync")
 
     assert rc == 0
     assert capsys.readouterr().err == "BRIDGE_STATE: reschedule\n"
 
 
 @pytest.mark.parametrize("missing", ["reconcile_step", "advisory_lock"])
-def test_missing_pipeline_module_raises_instead_of_converging(main_mod, tmp_path, missing):
+def test_missing_pipeline_module_raises_instead_of_converging(guarded_mod, tmp_path, missing):
     """A missing pipeline module is an import failure, never a converged pass.
 
     The by-path loaders once turned an absent ``reconcile.py`` into a graceful no-op and
@@ -179,8 +190,8 @@ def test_missing_pipeline_module_raises_instead_of_converging(main_mod, tmp_path
     ``run_pass_result`` before ``reconcile_once`` runs.
     """
     stub_reconcile = _make_stub_reconcile()
-    real_try_load_step = main_mod._try_load_step
-    real_load_sibling_keyed = main_mod._load_sibling_keyed
+    real_try_load_step = guarded_mod._try_load_step
+    real_load_sibling_keyed = guarded_mod._load_sibling_keyed
 
     def _load_step(name):
         if name == "reconcile":
@@ -190,26 +201,26 @@ def test_missing_pipeline_module_raises_instead_of_converging(main_mod, tmp_path
         return real_try_load_step(name)
 
     def _load_sibling(key, filename):
-        if missing == "advisory_lock" and key == main_mod._ADVISORY_LOCK_KEY:
+        if missing == "advisory_lock" and key == guarded_mod._ADVISORY_LOCK_KEY:
             raise ModuleNotFoundError(f"No module named {key!r}")
         return real_load_sibling_keyed(key, filename)
 
     with (
-        patch.object(main_mod, "_try_load_step", side_effect=_load_step),
-        patch.object(main_mod, "_load_sibling_keyed", side_effect=_load_sibling),
-        patch.object(main_mod, "_project_visibility_preflight", return_value=None),
+        patch.object(guarded_mod, "_try_load_step", side_effect=_load_step),
+        patch.object(guarded_mod, "_load_sibling_keyed", side_effect=_load_sibling),
+        patch.object(guarded_mod, "_project_visibility_preflight", return_value=None),
         pytest.raises(ImportError),
     ):
-        main_mod.run_pass_result(repo_root=tmp_path, route="sync")
+        guarded_mod.run_pass_result(repo_root=tmp_path, route="sync")
 
     stub_reconcile.reconcile_once.assert_not_called()
 
 
-def test_main_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
-    """main() threads --repo-root through to run_pass and returns its exit code.
+def test_main_returns_0_when_reconcile_succeeds(main_mod, guarded_mod, tmp_path):
+    """main() threads --repo-root through run_guarded_pass and returns its exit code.
 
     Advisory-lock guard calls are mocked out so this test remains a pure
-    unit test of the run_pass delegation path; lock integration is covered
+    unit test of the pass delegation path; lock integration is covered
     by test_reconcile_main.py.
     """
     stub = _make_stub_reconcile()
@@ -245,6 +256,7 @@ def test_main_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
     request_stub.RequestError = ValueError
     request_stub.normalize_request = MagicMock(
         return_value=types.SimpleNamespace(
+            route=None,
             repo_root=tmp_path,
             target_mode=_FakeMode.LIVE,
             dry_run_enumerate=False,
@@ -265,9 +277,9 @@ def test_main_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
         raise ImportError(f"Unexpected _load_sibling_keyed call: {filename}")
 
     with (
-        patch.object(main_mod, "_try_load_step", return_value=stub),
-        patch.object(main_mod, "_project_visibility_preflight", return_value=None),
-        patch.object(main_mod, "_load_sibling_keyed", side_effect=_fake_load_sibling),
+        patch.object(guarded_mod, "_try_load_step", return_value=stub),
+        patch.object(guarded_mod, "_project_visibility_preflight", return_value=None),
+        patch.object(guarded_mod, "_load_sibling_keyed", side_effect=_fake_load_sibling),
     ):
         rc = main_mod.main(["--repo-root", str(tmp_path)])
 

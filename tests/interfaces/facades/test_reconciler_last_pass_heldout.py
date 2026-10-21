@@ -16,6 +16,10 @@ def _reconciler_main():
     return importlib.import_module("rebar.reconciler.__main__")
 
 
+def _guarded_pass():
+    return importlib.import_module("rebar.reconciler.guarded_pass")
+
+
 def _configure_origin(repo: Path, tmp_path: Path) -> Path:
     remote = tmp_path / "origin.git"
     subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
@@ -81,21 +85,23 @@ def _advisory(remote: Path, released: list[dict | None]):
 
 
 def _install_main_stubs(
-    reconciler_main,
     monkeypatch: pytest.MonkeyPatch,
     remote: Path,
     released: list[dict | None],
-    rc: int,
+    disposition: str,
 ) -> None:
+    """Stub the guard seams on ``guarded_pass``; the pass body returns *disposition*."""
+    guarded_pass = _guarded_pass()
     advisory = _advisory(remote, released)
-    original_load = reconciler_main._load_sibling_keyed
+    original_load = guarded_pass._load_sibling_keyed
+    result = guarded_pass.PassResult(guarded_pass._Disposition[disposition], {})
 
     def load(key: str, name: str):
         return advisory if name == "_advisory_lock.py" else original_load(key, name)
 
-    monkeypatch.setattr(reconciler_main, "_load_sibling_keyed", load)
-    monkeypatch.setattr(reconciler_main, "_purge_committed_reconciler_locks", lambda _root: None)
-    monkeypatch.setattr(reconciler_main, "run_pass", lambda **_kwargs: rc)
+    monkeypatch.setattr(guarded_pass, "_load_sibling_keyed", load)
+    monkeypatch.setattr(guarded_pass, "_purge_committed_reconciler_locks", lambda _root: None)
+    monkeypatch.setattr(guarded_pass, "run_pass_result", lambda **_kwargs: result)
     monkeypatch.setenv("REBAR_ENV_ID", "reconciler")
 
 
@@ -105,7 +111,7 @@ def test_process_surviving_hard_failure_is_recorded_before_release(
     reconciler_main = _reconciler_main()
     remote = _configure_origin(rebar_repo, tmp_path)
     released: list[dict | None] = []
-    _install_main_stubs(reconciler_main, monkeypatch, remote, released, 1)
+    _install_main_stubs(monkeypatch, remote, released, "OPERATIONAL_FAILURE")
 
     rc = reconciler_main.main(["sync", "--repo-root", str(rebar_repo)])
 
@@ -123,7 +129,7 @@ def test_writer_without_explicit_environment_uses_stable_local_identity(
     reconciler_main = _reconciler_main()
     remote = _configure_origin(rebar_repo, tmp_path)
     released: list[dict | None] = []
-    _install_main_stubs(reconciler_main, monkeypatch, remote, released, 0)
+    _install_main_stubs(monkeypatch, remote, released, "CONVERGED")
     monkeypatch.delenv("REBAR_ENV_ID", raising=False)
     local_id = (rebar_repo / ".tickets-tracker" / ".env-id").read_text().strip()
 
@@ -142,7 +148,7 @@ def test_last_pass_cas_retries_exactly_three_times_with_jittered_backoff(
     reconciler_main = _reconciler_main()
     remote = _configure_origin(rebar_repo, tmp_path)
     released: list[dict | None] = []
-    _install_main_stubs(reconciler_main, monkeypatch, remote, released, 0)
+    _install_main_stubs(monkeypatch, remote, released, "CONVERGED")
     real_run = subprocess.run
     attempts: list[list[str]] = []
 
@@ -192,7 +198,7 @@ def test_persistent_non_cas_push_failure_is_loud_and_still_releases_lock(
     reconciler_main = _reconciler_main()
     remote = _configure_origin(rebar_repo, tmp_path)
     released: list[dict | None] = []
-    _install_main_stubs(reconciler_main, monkeypatch, remote, released, 0)
+    _install_main_stubs(monkeypatch, remote, released, "CONVERGED")
     real_run = subprocess.run
     attempts = 0
 

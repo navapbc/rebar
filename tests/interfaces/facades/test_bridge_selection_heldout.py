@@ -25,7 +25,11 @@ def _production_reconciler():
 
 
 def _run_with_real_preflight(main_mod, argv: list[str]) -> tuple[int, dict, MagicMock, MagicMock]:
-    """Use real ticket/binding reads and replace only the pass lock and execution."""
+    """Use real ticket/binding reads and replace only the pass lock and execution.
+
+    The guard seams live on ``guarded_pass``, which ``main`` hands the request to.
+    """
+    guarded_pass = importlib.import_module("rebar.reconciler.guarded_pass")
     captured: dict = {}
     acquire = MagicMock(return_value=None)
     release = MagicMock(return_value=None)
@@ -33,23 +37,23 @@ def _run_with_real_preflight(main_mod, argv: list[str]) -> tuple[int, dict, Magi
         acquire_pass_lock=acquire,
         release_pass_lock=release,
     )
-    real_load = main_mod._load_sibling_keyed
+    real_load = guarded_pass._load_sibling_keyed
 
     def load_sibling(key: str, filename: str):
         if filename == "_advisory_lock.py":
             return advisory
         return real_load(key, filename)
 
-    def run_pass(**kwargs) -> int:
+    def run_pass(**kwargs):
         captured.update(kwargs)
-        return 0
+        return guarded_pass.PassResult(guarded_pass._Disposition.CONVERGED, {})
 
     with (
-        patch.object(main_mod, "_load_sibling_keyed", side_effect=load_sibling),
-        patch.object(main_mod, "_pause_exit_code", return_value=None),
-        patch.object(main_mod, "_purge_committed_reconciler_locks"),
-        patch.object(main_mod, "_post_pause_preflight", return_value=(False, None)),
-        patch.object(main_mod, "run_pass", side_effect=run_pass),
+        patch.object(guarded_pass, "_load_sibling_keyed", side_effect=load_sibling),
+        patch.object(guarded_pass, "_pause_result", return_value=None),
+        patch.object(guarded_pass, "_purge_committed_reconciler_locks"),
+        patch.object(guarded_pass, "_post_pause_preflight", return_value=(False, None)),
+        patch.object(guarded_pass, "run_pass_result", side_effect=run_pass),
     ):
         rc = main_mod.main(argv)
     return rc, captured, acquire, release

@@ -189,23 +189,6 @@ def _validate_selection_args(only: list[str] | None, exclude: list[str] | None) 
         raise ValueError("only/exclude must contain non-empty identifiers")
 
 
-def _bridge_selection(
-    root: Path, only: list[str] | None, exclude: list[str] | None
-) -> tuple[str | None, set[str] | None]:
-    _validate_selection_args(only, exclude)
-    selected = only if only is not None else exclude
-    if selected is None:
-        return None, None
-    # resolve_selection/SelectionError moved to pass_support.py (ticket
-    # piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
-    helpers = importlib.import_module("rebar.reconciler.pass_support")
-    try:
-        resolved = helpers.resolve_selection(root, tuple(item.strip() for item in selected))
-    except helpers.SelectionError as exc:
-        raise _invalid_bridge(str(exc)) from exc
-    return ("only" if only is not None else "except"), resolved
-
-
 def _bridge_run(
     route: str,
     *,
@@ -220,17 +203,20 @@ def _bridge_run(
 
     with compose_and_bind_operation_snapshot(repo_root=repo_root):
         root = Path(config.repo_root(repo_root))
-        selection_kind, selection_ids = _bridge_selection(root, only, exclude)
-        orchestrator = importlib.import_module("rebar.reconciler.__main__")
         mode_mod = importlib.import_module("rebar.reconciler.mode")
-        result = orchestrator.run_pass_result(
+        request_mod = importlib.import_module("rebar.reconciler.request")
+        guarded_pass = importlib.import_module("rebar.reconciler.guarded_pass")
+        selected = only if only is not None else exclude
+        request = request_mod.ReconcileRequest(
+            route=route,
             repo_root=root,
             target_mode=mode_mod.Mode.DRY_RUN if route == "preview" else mode_mod.Mode.LIVE,
-            selection_kind=selection_kind,
-            selection_ids=selection_ids,
             max_changes=max_changes,
-            route=route,
+            selection_kind=None if selected is None else ("only" if only is not None else "except"),
+            selection_tokens=() if selected is None else tuple(item.strip() for item in selected),
         )
+        # One guarded core for the CLI, the library and MCP (story unadhesive-caloric-sapsucker).
+        result = guarded_pass.run_guarded_pass(request)
         returncode = result.disposition.canonical_exit
         payload = {
             "route": route,

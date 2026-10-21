@@ -346,7 +346,7 @@ def test_crashed_pass_reclaimable_after_lease(
 
 
 def test_heartbeat_sets_lock_lost_on_lease_loss(advisory: ModuleType, repo: Path) -> None:
-    main_mod = importlib.import_module("rebar.reconciler.__main__")
+    guarded_mod = importlib.import_module("rebar.reconciler.guarded_pass")
 
     class _FakeAdvisory:
         ReconcileLockLost = advisory.ReconcileLockLost
@@ -357,12 +357,12 @@ def test_heartbeat_sets_lock_lost_on_lease_loss(advisory: ModuleType, repo: Path
         def renew_pass_lock(self, pass_id, repo_root, oid):
             raise advisory._load_ref_lock().LeaseLostError("stolen")
 
-    hb = main_mod._Heartbeat(_FakeAdvisory(), "pass-1", repo, "abc", interval=0.05)
+    hb = guarded_mod.Heartbeat(_FakeAdvisory(), "pass-1", repo, "abc", interval=0.05)
     hb.start()
     assert hb.lock_lost.wait(timeout=3.0), "heartbeat must set lock_lost on LeaseLostError"
     hb.stop()
 
-    # The main abort-check closure raises ReconcileLockLost once lock_lost is set.
+    # The guarded-pass abort-check closure raises ReconcileLockLost once lock_lost is set.
     lock_lost = hb.lock_lost
 
     def abort_check() -> None:
@@ -419,7 +419,7 @@ def test_purge_committed_reconciler_locks(tmp_path: Path) -> None:
     """The startup migration deletes legacy committed .reconciler-* files from the
     tickets branch; idempotent (a second run is a no-op) and a regression that no
     such path survives."""
-    main_mod = importlib.import_module("rebar.reconciler.__main__")
+    guarded_mod = importlib.import_module("rebar.reconciler.guarded_pass")
     repo = _repo_with_tickets_branch(tmp_path)
     # Seed the legacy committed lock files on the tickets branch.
     for name in (".reconciler-pass-lock", ".reconciler-phase-gate"):
@@ -429,13 +429,13 @@ def test_purge_committed_reconciler_locks(tmp_path: Path) -> None:
     _git(["checkout", "-q", "main" if _has_main(repo) else "master"], repo)
     assert _committed(repo, ".reconciler-pass-lock"), "precondition: legacy lock committed"
 
-    main_mod._purge_committed_reconciler_locks(repo)
+    guarded_mod._purge_committed_reconciler_locks(repo)
     assert not _committed(repo, ".reconciler-pass-lock"), "purge must remove the pass-lock"
     assert not _committed(repo, ".reconciler-phase-gate"), "purge must remove the phase-gate"
 
     # Idempotent: a second run finds nothing and does not error / re-commit.
     head_before = _git(["rev-parse", "tickets"], repo).stdout.strip()
-    main_mod._purge_committed_reconciler_locks(repo)
+    guarded_mod._purge_committed_reconciler_locks(repo)
     assert _git(["rev-parse", "tickets"], repo).stdout.strip() == head_before
 
 

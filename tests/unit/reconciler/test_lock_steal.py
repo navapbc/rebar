@@ -21,12 +21,12 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RECON_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
-# Ensure the package shim so __main__/_advisory_lock resolve sibling imports.
+# The held-lock helpers are imported into guarded_pass, the module the guard sequence reads.
 
 
 @pytest.fixture(scope="module")
-def main_mod():
-    return importlib.import_module("rebar.reconciler.__main__")
+def guarded_mod():
+    return importlib.import_module("rebar.reconciler.guarded_pass")
 
 
 @pytest.fixture(scope="module")
@@ -48,12 +48,12 @@ REPO = Path("/tmp/repo")
 # --------------------------------------------------------------------------- #
 
 
-def test_case1_steal_wins_adopts_new_oid(main_mod, advisory_mod):
+def test_case1_steal_wins_adopts_new_oid(guarded_mod, advisory_mod):
     """(1) steal returns a new oid -> adopt it, proceed (acquired), no acquire call."""
     adv = _fake_advisory(advisory_mod)
     adv.steal_pass_lock.return_value = "newoid123"
     acquire_fn = MagicMock()
-    exit_code, lock_oid, acquired = main_mod._resolve_held_lock(
+    exit_code, lock_oid, acquired = guarded_mod._resolve_held_lock(
         adv, "pass-1", REPO, acquire_fn=acquire_fn
     )
     assert exit_code is None
@@ -63,12 +63,12 @@ def test_case1_steal_wins_adopts_new_oid(main_mod, advisory_mod):
     adv.check_pass_lock.assert_not_called()  # steal won -> no re-read needed
 
 
-def test_case2_live_holder_yields_exit3(main_mod, advisory_mod):
+def test_case2_live_holder_yields_exit3(guarded_mod, advisory_mod):
     """(2) steal None + ref still held (live holder) -> exit 3."""
     adv = _fake_advisory(advisory_mod)
     adv.steal_pass_lock.return_value = None
     adv.check_pass_lock.return_value = True  # still held by a live holder
-    exit_code, lock_oid, acquired = main_mod._resolve_held_lock(
+    exit_code, lock_oid, acquired = guarded_mod._resolve_held_lock(
         adv, "pass-2", REPO, acquire_fn=MagicMock()
     )
     assert exit_code == 3
@@ -76,13 +76,13 @@ def test_case2_live_holder_yields_exit3(main_mod, advisory_mod):
     assert acquired is False
 
 
-def test_case3a_freed_then_acquire_wins_proceeds(main_mod, advisory_mod):
+def test_case3a_freed_then_acquire_wins_proceeds(guarded_mod, advisory_mod):
     """(3a) steal None + ref freed + acquire wins -> proceed with the acquired oid."""
     adv = _fake_advisory(advisory_mod)
     adv.steal_pass_lock.return_value = None
     adv.check_pass_lock.return_value = False  # freed during our steal sleep
     acquire_fn = MagicMock(return_value="acqoid456")
-    exit_code, lock_oid, acquired = main_mod._resolve_held_lock(
+    exit_code, lock_oid, acquired = guarded_mod._resolve_held_lock(
         adv, "pass-3a", REPO, acquire_fn=acquire_fn
     )
     assert exit_code is None
@@ -91,13 +91,13 @@ def test_case3a_freed_then_acquire_wins_proceeds(main_mod, advisory_mod):
     acquire_fn.assert_called_once()
 
 
-def test_case3b_freed_then_acquire_lost_yields_exit3(main_mod, advisory_mod):
+def test_case3b_freed_then_acquire_lost_yields_exit3(guarded_mod, advisory_mod):
     """(3b) steal None + ref freed + acquire lost to a racer -> exit 3."""
     adv = _fake_advisory(advisory_mod)
     adv.steal_pass_lock.return_value = None
     adv.check_pass_lock.return_value = False  # freed
     acquire_fn = MagicMock(side_effect=advisory_mod.ReconcileLockError("lost race"))
-    exit_code, lock_oid, acquired = main_mod._resolve_held_lock(
+    exit_code, lock_oid, acquired = guarded_mod._resolve_held_lock(
         adv, "pass-3b", REPO, acquire_fn=acquire_fn
     )
     assert exit_code == 3
@@ -111,22 +111,22 @@ def test_case3b_freed_then_acquire_lost_yields_exit3(main_mod, advisory_mod):
 
 
 @pytest.mark.parametrize("value", ["0", "false", "no", "off", "", "  Off  "])
-def test_case4_kill_switch_off_disables_steal(main_mod, monkeypatch, value):
+def test_case4_kill_switch_off_disables_steal(guarded_mod, monkeypatch, value):
     """(4) REBAR_RECONCILER_LOCK_STEAL falsy -> steal disabled (main exits 3 on a held
     lock without stealing)."""
     monkeypatch.setenv("REBAR_RECONCILER_LOCK_STEAL", value)
-    assert main_mod._lock_steal_enabled() is False
+    assert guarded_mod._lock_steal_enabled() is False
 
 
 @pytest.mark.parametrize("value", ["1", "true", "yes", "on", "anything"])
-def test_kill_switch_on_by_default(main_mod, monkeypatch, value):
+def test_kill_switch_on_by_default(guarded_mod, monkeypatch, value):
     monkeypatch.setenv("REBAR_RECONCILER_LOCK_STEAL", value)
-    assert main_mod._lock_steal_enabled() is True
+    assert guarded_mod._lock_steal_enabled() is True
 
 
-def test_kill_switch_default_on_when_unset(main_mod, monkeypatch):
+def test_kill_switch_default_on_when_unset(guarded_mod, monkeypatch):
     monkeypatch.delenv("REBAR_RECONCILER_LOCK_STEAL", raising=False)
-    assert main_mod._lock_steal_enabled() is True
+    assert guarded_mod._lock_steal_enabled() is True
 
 
 # --------------------------------------------------------------------------- #

@@ -386,7 +386,12 @@ committed index/aggregate that concurrent clients would both rewrite.
   committed tickets-branch `.reconciler-pass-lock` advanced by a `refs/heads/tickets`
   CAS — and the `[reconciler] lock_backend` selector key were removed pre-1.0; the ref
   backend is the only backend.) This is the one allowed cross-client lock — **not** a
-  precedent for new ones. It keeps I6 cleaner: the lock is no longer a committed
+  precedent for new ones. Every live pass takes it the same way: the CLI
+  (`python -m rebar.reconciler`), the library (`rebar.bridge_sync`) and the MCP
+  `bridge_sync` tool all run `rebar.reconciler.guarded_pass.run_guarded_pass`, which
+  honors the pause ref, takes or steals the lease, heartbeats it, publishes the
+  `refs/reconciler/last-pass` witness and releases the lease in `finally`. It keeps I6
+  cleaner: the lock is no longer a committed
   tickets-branch file needing a `merge=ours` union-merge carve-out.
 
 ### I7 — Derived/aggregate data is computed from replay or stored local-only

@@ -1,78 +1,22 @@
 #!/usr/bin/env python3
-"""rebar.reconciler.__main__ — steady-state pass orchestrator.
+"""rebar.reconciler.__main__ — the ``python -m rebar.reconciler`` command line.
 
 Invoked as ``python -m rebar.reconciler`` (``rebar bridge`` / ``rebar reconcile`` launch it).
-Orchestrates one steady-state pass calling the pipeline modules in sequence:
-  fetcher → differ → applier → mapping → manifest → health
+It parses argv, binds the operation snapshot, runs one pass through
+``guarded_pass.run_guarded_pass`` (the guard sequence the library and MCP share), and
+renders the classified result for the invoking route.
 
-Pipeline modules are imported on demand through the ``_try_load_step`` /
-``_load_sibling_keyed`` seams (plain in-package imports that tests can patch).
-
-Exit codes:
-  0 — the pass converged successfully
-  1 — an unrecoverable error occurred in a pipeline step
+Exit codes: the canonical ``preview``/``sync`` routes use 0/1/2; the compatibility
+route keeps its historical 3/4/75 sentinels (``guarded_pass._Disposition``).
 """
 
 from __future__ import annotations
 
-import datetime
-import importlib
-import importlib.util
 import json
 import sys
-from collections.abc import Callable
-from enum import Enum
-from functools import partial
-from pathlib import Path
-from typing import NamedTuple
 
-from rebar.reconciler._heartbeat import Heartbeat as _Heartbeat
-
-# The pass-lock lifecycle cluster, extracted to a sibling module (module-size cap).
-# Imported INTO this namespace on purpose: main() calls these as module globals, so
-# the suite's patch.object(main_mod, …) targets keep resolving to what main() reads.
-from rebar.reconciler._pass_lock_lifecycle import (
-    _acquire_or_adopt_pass_lock,
-    _lock_steal_enabled,
-    _purge_committed_reconciler_locks,
-    _resolve_held_lock,
-)
-
-# Dotted-name keys used for sys.modules seeding so that both production code
-# and unit tests (which pre-seed sys.modules with these exact keys) share the
-# same module objects and patch() targets resolve correctly.
-_ADVISORY_LOCK_KEY = "rebar.reconciler._advisory_lock"
-_MODE_KEY = "rebar.reconciler.mode"
-_REQUEST_KEY = "rebar.reconciler.request"
-# resolve_selection/SelectionError moved to pass_support.py (ticket
-# piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
-_PASS_SUPPORT_KEY = "rebar.reconciler.pass_support"
-
-
-class _Disposition(Enum):
-    """One semantic pass outcome, translated only at the invoking route."""
-
-    CONVERGED = ("converged", 0, 0)
-    PAUSED = ("paused", 0, 0)
-    IN_FLIGHT = ("in-flight", 0, 3)
-    PHASE_GATE = ("legacy-gated", 0, 4)
-    RESCHEDULE = ("reschedule", 0, 75)
-    OPERATIONAL_FAILURE = ("operational_failure", 1, 1)
-    INVALID_INVOCATION = ("invalid_invocation", 2, 2)
-
-    def __init__(self, state: str, canonical_exit: int, legacy_exit: int):
-        self.state = state
-        self.canonical_exit = canonical_exit
-        self.legacy_exit = legacy_exit
-
-
-class PassResult(NamedTuple):
-    """One classified pass before a route collapses it to a process exit."""
-
-    disposition: _Disposition
-    details: dict[str, object]
-    legacy_message: str | None = None
-    canonical_message: str | None = None
+from rebar.reconciler import guarded_pass
+from rebar.reconciler.guarded_pass import _MODE_KEY, _REQUEST_KEY, PassResult, _Disposition
 
 
 def _finish_disposition(
@@ -96,142 +40,12 @@ def _finish_disposition(
     return disposition.legacy_exit
 
 
-def _load_sibling_keyed(dotted_key: str, filename: str):
-    """Import the in-package sibling *dotted_key* (``filename`` is kept for the test seam).
+def _render_pass(result: PassResult, route: str | None) -> int:
+    """Print one classified pass for *route* and return its process exit code.
 
-    A named seam rather than an inline import so tests can ``patch.object`` the loader.
-    """
-    del filename
-    return importlib.import_module(dotted_key)
-
-
-def _try_load_step(name: str):
-    """Import the in-package pipeline step ``rebar.reconciler.<name>`` (a test seam)."""
-    return importlib.import_module(f"rebar.reconciler.{name}")
-
-
-def _pause_exit_code(advisory, target_mode, mode_mod, repo_root: Path, route: str | None):
-    """Return the pause outcome before any reconciler mutation, if applicable."""
-    if not hasattr(advisory, "read_pause"):
-        return None
-    try:
-        pause = advisory.read_pause(repo_root)
-    except advisory.ReconcileGateError:
-        return _finish_disposition(
-            _Disposition.OPERATIONAL_FAILURE,
-            route,
-            legacy_message=(
-                "ERROR: refs/reconciler/gate is corrupt; run 'rebar bridge resume' to clear it"
-            ),
-        )
-    if pause is None or mode_mod.MODE_CAPS[target_mode] == 0:
-        return None
-    status = {
-        "paused": True,
-        "reason": pause["reason"],
-        "who": pause["who"],
-        "paused_at": pause["paused_at"],
-    }
-    marker = f"BRIDGE_PAUSED: {json.dumps(status, separators=(',', ':'))}"
-    return _finish_disposition(
-        _Disposition.PAUSED,
-        route,
-        legacy_message=marker,
-        canonical_message=marker,
-    )
-
-
-def _post_pause_preflight(
-    advisory, target_mode, repo_root: Path
-) -> tuple[bool, _Disposition | None]:
-    """Check the pre-existing lock and phase guards after the pause decision."""
-    held = advisory.check_pass_lock(repo_root)
-    if held and not _lock_steal_enabled():
-        return held, _Disposition.IN_FLIGHT
-    if advisory.check_phase_gate(target_mode, repo_root):
-        return held, _Disposition.PHASE_GATE
-    return held, None
-
-
-def _optional_request_kwargs(
-    selection_kind: str | None,
-    selection_ids: set[str] | None,
-    max_changes: int | None,
-) -> dict[str, object]:
-    """Return only canonical request fields explicitly supplied by the caller."""
-    kwargs: dict[str, object] = {}
-    if selection_kind is not None:
-        kwargs["selection_kind"] = selection_kind
-    if selection_ids is not None:
-        kwargs["selection_ids"] = selection_ids
-    if max_changes is not None:
-        kwargs["max_changes"] = max_changes
-    return kwargs
-
-
-def _reconcile_exception_result(
-    exc: Exception,
-    *,
-    reschedule_error_cls,
-    lock_lost_cls,
-) -> PassResult:
-    """Classify one failed reconcile_once call without choosing an adapter."""
-    details: dict[str, object] = {"error": str(exc)}
-    if type(exc).__name__ == "SelectionStaleError":
-        return PassResult(_Disposition.INVALID_INVOCATION, details, legacy_message=f"ERROR: {exc}")
-    # Classify credential rejection as INVALID_INVOCATION by exception name, which
-    # avoids importing the Jira adapter.
-    if type(exc).__name__ == "AcliAuthError":
-        details["error_class"] = "auth_failed"
-        message = (
-            "ERROR: Jira credential REJECTED — the reconciler is not authenticated. "
-            "This is a credential problem, not a data problem: rotate the JIRA_API_TOKEN "
-            f"secret (re-running `acli auth login` with the same token cannot help). {exc}"
-        )
-        return PassResult(_Disposition.INVALID_INVOCATION, details, legacy_message=message)
-    if reschedule_error_cls is not None and isinstance(exc, reschedule_error_cls):
-        message = f"RESCHEDULE: reconcile_once signalled reschedule: {exc}"
-        return PassResult(_Disposition.RESCHEDULE, details, legacy_message=message)
-    if lock_lost_cls is not None and isinstance(exc, lock_lost_cls):
-        message = f"RESCHEDULE: pass lock lease lost mid-pass: {exc}"
-        return PassResult(_Disposition.RESCHEDULE, details, legacy_message=message)
-    return PassResult(
-        _Disposition.OPERATIONAL_FAILURE,
-        details,
-        legacy_message=f"ERROR: reconcile_once raised: {exc}",
-    )
-
-
-def run_pass(
-    repo_root: Path | None = None,
-    pass_id: str | None = None,
-    target_mode=None,
-    filter_local_ids: set[str] | None = None,
-    selection_kind: str | None = None,
-    selection_ids: set[str] | None = None,
-    max_changes: int | None = None,
-    route: str | None = None,
-    abort_check=None,
-) -> int:
-    """Execute one steady-state reconciliation pass via reconcile.reconcile_once().
-
-    The pass is classified once, then its route translates that disposition:
-    canonical preview/sync use 0/1/2 while the compatibility route preserves
+    Canonical preview/sync use 0/1/2 while the compatibility route preserves the
     historical 3/4/75 sentinels.
-
-    A missing *pass_id* retains the legacy helper behavior of generating one.
     """
-    result = run_pass_result(
-        repo_root=repo_root,
-        pass_id=pass_id,
-        target_mode=target_mode,
-        filter_local_ids=filter_local_ids,
-        selection_kind=selection_kind,
-        selection_ids=selection_ids,
-        max_changes=max_changes,
-        route=route,
-        abort_check=abort_check,
-    )
     details = result.details
     if details.get("no_write"):
         if route not in {"preview", "sync"}:
@@ -259,111 +73,6 @@ def run_pass(
     )
 
 
-def _project_visibility_preflight(repo_root: Path, target_mode, route: str | None):
-    """Translate the sibling preflight's ``PreflightAbort`` into ``PassResult``.
-
-    The sibling-keyed loader permits pre-seeded test modules.
-    """
-    preflight = _load_sibling_keyed("rebar.reconciler._preflight", "_preflight.py")
-    abort = preflight.project_visibility_preflight(repo_root, target_mode, route)
-    if abort is None:
-        return None
-    return PassResult(
-        _Disposition.OPERATIONAL_FAILURE,
-        dict(abort.details),
-        canonical_message=abort.message,
-        legacy_message=abort.message,
-    )
-
-
-def run_pass_result(
-    repo_root: Path | None = None,
-    pass_id: str | None = None,
-    target_mode=None,
-    filter_local_ids: set[str] | None = None,
-    selection_kind: str | None = None,
-    selection_ids: set[str] | None = None,
-    max_changes: int | None = None,
-    route: str | None = None,
-    abort_check=None,
-) -> PassResult:
-    """Execute and classify one pass, returning its structured detail in-process."""
-    if repo_root is None:
-        from rebar.config import reconciler_repo_root as _owned_repo_root
-
-        repo_root = _owned_repo_root()
-
-    reconcile = _try_load_step("reconcile")
-
-    # Preflight (ticket a011): verify every mapped project + legacy_default is
-    # visible to the backend BEFORE reconcile_once — the only outbound-mutation
-    # call. A missing/invisible key (or an unreachable backend) aborts the pass
-    # here rather than crashing deep in fan-out (the 05b8 incident class).
-    preflight_abort = _project_visibility_preflight(repo_root, target_mode, route)
-    if preflight_abort is not None:
-        return preflight_abort
-
-    applier = _try_load_step("applier")
-
-    if pass_id is None:
-        pass_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-    reschedule_error_cls = getattr(applier, "RescheduleError", None) if applier else None
-    _advisory = (
-        None if route == "preview" else _load_sibling_keyed(_ADVISORY_LOCK_KEY, "_advisory_lock.py")
-    )
-    lock_lost_cls = getattr(_advisory, "ReconcileLockLost", None) if _advisory else None
-
-    try:
-        result = reconcile.reconcile_once(
-            pass_id,
-            repo_root=repo_root,
-            target_mode=target_mode,
-            filter_local_ids=filter_local_ids,
-            abort_check=abort_check,
-            **_optional_request_kwargs(selection_kind, selection_ids, max_changes),
-            **({"route": route} if route is not None else {}),
-        )
-    except Exception as exc:  # noqa: BLE001 — classification owns the process contract
-        return _reconcile_exception_result(
-            exc,
-            reschedule_error_cls=reschedule_error_cls,
-            lock_lost_cls=lock_lost_cls,
-        )
-
-    failures = result.get("mutation_failures", 0)
-
-    if result.get("no_write"):
-        return PassResult(_Disposition.CONVERGED, result)
-    # Per-mutation failures are operational failures; successful fallbacks are
-    # counted as applied by reconcile.py and therefore remain converged.
-    if failures > 0:
-        return PassResult(
-            _Disposition.OPERATIONAL_FAILURE,
-            result,
-            canonical_message=f"ERROR: reconcile completed with {failures} mutation failures",
-        )
-    # RP-03 S3 T3: a degraded cutover pass with no failures (its fuse opened, so matching
-    # work was safety-deferred rather than converged) must still exit non-zero.
-    if result.get("degraded"):
-        return PassResult(
-            _Disposition.OPERATIONAL_FAILURE,
-            result,
-            canonical_message="ERROR: reconcile completed degraded (fuse opened)",
-        )
-    return PassResult(_Disposition.CONVERGED, result)
-
-
-def _resolve_request_selection(request) -> tuple[set[str] | None, str | None]:
-    """Resolve canonical selection tokens before any pass-lock inspection."""
-    if not request.selection_tokens:
-        return None, None
-    helpers = _load_sibling_keyed(_PASS_SUPPORT_KEY, "pass_support.py")
-    try:
-        return helpers.resolve_selection(request.repo_root, request.selection_tokens), None
-    except helpers.SelectionError as exc:
-        return None, str(exc)
-
-
 def _dry_run_enumeration_exit(request) -> int | None:
     """Handle the compatibility directory-enumeration route before lock checks."""
     if not request.dry_run_enumerate:
@@ -387,19 +96,6 @@ def _dry_run_enumeration_exit(request) -> int | None:
     return 0
 
 
-def _run_with_last_pass(
-    repo_root: Path,
-    pass_id: str,
-    target_mode: Enum,
-    run: Callable[[], int],
-    finalize: Callable[[Path, str, Callable[[], int]], int],
-) -> int:
-    """Publish process results only for modes that may mutate external state."""
-    if getattr(target_mode, "value", None) == "dry-run":
-        return run()
-    return finalize(repo_root, pass_id, run)
-
-
 def _bind_operation_snapshot(repo_root):
     """Compose and bind one ``OperationSnapshot`` for the remainder of ``main``.
 
@@ -418,154 +114,33 @@ def _bind_operation_snapshot(repo_root):
 def main(argv: list[str] | None = None) -> int:
     """Entry point for ``python -m rebar.reconciler``.
 
-    Guard sequence (execution order required — reordering breaks dd-2/dd-3/dd-4):
-      1. argparse           — parse --mode (default: live) and --repo-root
-      2. Mode.from_str      — validate mode string BEFORE any fetcher reference (dd-2)
-      3. check_pass_lock    — exit non-zero if another pass is in flight (dd-3)
-      4. check_phase_gate   — exit non-zero if gate file blocks this mode (dd-4)
-      5. acquire_pass_lock  — claim the lock for this pass
-      6. try/finally        — run_pass() with guaranteed release_pass_lock (dd-3)
+    Parse --mode (validated BEFORE any fetcher reference) and --repo-root, bind the
+    operation snapshot, then hand the request to ``guarded_pass.run_guarded_pass``
+    and render its result.
     """
-    # Observability floor: install a stderr handler on the reconciler's own logger
-    # root. The reconciler's modules log under the sibling ``rebar.reconciler.*`` root
-    # (it is imported top-level), so this is distinct from the ``rebar`` root handler.
+    # Observability floor: install a stderr handler on the ``rebar`` logger root,
+    # which the reconciler's ``rebar.reconciler.*`` loggers sit under.
     from rebar._logging import install_stderr_handler
 
     install_stderr_handler("rebar")
 
-    mode_mod = _load_sibling_keyed(_MODE_KEY, "mode.py")
-    request_mod = _load_sibling_keyed(_REQUEST_KEY, "request.py")
+    mode_mod = guarded_pass._load_sibling_keyed(_MODE_KEY, "mode.py")
+    request_mod = guarded_pass._load_sibling_keyed(_REQUEST_KEY, "request.py")
     try:
         request = request_mod.normalize_request(argv, mode_mod)
     except (request_mod.RequestError, ValueError) as exc:
         print(str(exc), file=sys.stderr)  # noqa: T201
         return 2
-    repo_root = request.repo_root
     route = getattr(request, "route", None)
 
-    # Bind one composed operation snapshot through the pass and release it in the
-    # finalizer.
-    operation_snapshot_cm = _bind_operation_snapshot(repo_root)
+    # Bind one composed operation snapshot through the pass and release it after.
+    operation_snapshot_cm = _bind_operation_snapshot(request.repo_root)
     try:
         # This compatibility path remains before mode and advisory-lock checks.
         enumeration_exit = _dry_run_enumeration_exit(request)
         if enumeration_exit is not None:
             return enumeration_exit
-
-        target_mode = request.target_mode
-
-        selection_ids, selection_error = _resolve_request_selection(request)
-        if selection_error is not None:
-            print(f"ERROR: {selection_error}", file=sys.stderr)  # noqa: T201
-            return 2
-        if route == "preview":
-            return run_pass(
-                repo_root=repo_root,
-                target_mode=target_mode,
-                selection_kind=request.selection_kind,
-                selection_ids=selection_ids,
-                route=route,
-            )
-
-        # Step 2: Advisory lock + phase-gate checks.
-        # Load _advisory_lock under the dotted key so tests can pre-seed sys.modules.
-        advisory = _load_sibling_keyed(_ADVISORY_LOCK_KEY, "_advisory_lock.py")
-
-        pause_exit = _pause_exit_code(advisory, target_mode, mode_mod, repo_root, route)
-        if pause_exit is not None:
-            return pause_exit
-
-        # Remove legacy ``.reconciler-*`` ticket-branch locks once. Log Git failures
-        # and continue the pass.
-        if selection_ids is None:
-            _purge_committed_reconciler_locks(repo_root)
-
-        # Use one pass ID as both the lease holder and the run record identifier.
-        pass_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-
-        # Steal an expired pass lock when ``REBAR_RECONCILER_LOCK_STEAL`` permits it.
-        # A held lock otherwise exits with status 3.
-        held, preflight_exit = _post_pause_preflight(advisory, target_mode, repo_root)
-        if preflight_exit is not None:
-            legacy_message = (
-                "reconcile: refs/reconciler/lock is held — another pass in flight"
-                if preflight_exit is _Disposition.IN_FLIGHT
-                else (
-                    "reconcile: refs/reconciler/gate blocks advancement to "
-                    f"{target_mode.value}; clear the gate to advance"
-                )
-            )
-            return _finish_disposition(preflight_exit, route, legacy_message=legacy_message)
-
-        # Resolve a held lock via steal (only reached when steal is enabled — the
-        # kill-switch early-returns above). Cases 1/2/3a/3b live in _resolve_held_lock;
-        # on the freed fork it acquires via acquire_fn, so the returned oid (stolen or
-        # freed-acquired) is adopted below without a second acquire.
-        pre_acquired_oid: str | None = None
-        if held:
-            legacy_exit, pre_acquired_oid, _ok = _resolve_held_lock(
-                advisory,
-                pass_id,
-                repo_root,
-                acquire_fn=lambda: advisory.acquire_pass_lock(pass_id, repo_root),
-            )
-            if legacy_exit is not None:
-                return _finish_disposition(
-                    _Disposition.IN_FLIGHT,
-                    route,
-                    legacy_message=(
-                        "reconcile: refs/reconciler/lock held by a live pass — yielding"
-                    ),
-                )
-
-        # Step 3: acquire (or adopt the stolen lock), run pass, release in finally.
-        acquired = False
-        lock_oid: str | None = None
-        heartbeat: _Heartbeat | None = None
-        abort_check = None
-        from rebar.reconciler import last_pass
-
-        try:
-            lock_oid = _acquire_or_adopt_pass_lock(advisory, pass_id, repo_root, pre_acquired_oid)
-            acquired = True
-            if lock_oid is not None and hasattr(advisory, "_load_ref_lock"):
-                ref_lock = advisory._load_ref_lock()
-                interval = ref_lock.heartbeat_interval(advisory._lock_lease_secs())
-                heartbeat = _Heartbeat(advisory, pass_id, repo_root, lock_oid, interval)
-                heartbeat.start()
-                _lock_lost = heartbeat.lock_lost
-
-                def abort_check() -> None:
-                    if _lock_lost.is_set():
-                        raise advisory.ReconcileLockLost(
-                            f"pass lock lease lost mid-pass (pass_id={pass_id!r}) — aborting"
-                        )
-
-            run_current_pass = partial(
-                run_pass,
-                repo_root=repo_root,
-                pass_id=pass_id,
-                target_mode=target_mode,
-                filter_local_ids=request.filter_local_ids,
-                selection_kind=request.selection_kind,
-                selection_ids=selection_ids,
-                max_changes=request.max_changes,
-                route=route,
-                abort_check=abort_check,
-            )
-
-            return _run_with_last_pass(
-                repo_root,
-                pass_id,
-                target_mode,
-                run_current_pass,
-                last_pass.finalize_process,
-            )
-        except Exception as exc:  # noqa: BLE001 — acquire/heartbeat boundary
-            print(f"ERROR: reconciler process failed before finalization: {exc}", file=sys.stderr)  # noqa: T201
-            return 1
-        finally:
-            last_pass.release_process_lock(advisory, heartbeat, acquired, pass_id, repo_root)
+        return _render_pass(guarded_pass.run_guarded_pass(request), route)
     finally:
         operation_snapshot_cm.__exit__(None, None, None)
 

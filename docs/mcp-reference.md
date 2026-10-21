@@ -71,7 +71,7 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `bridge_projects_set` | Set a bridge project key's repos (REPLACE semantics; idempotent). |
 | `bridge_resume` | Clear the durable reconciliation pause. _(requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only)_ |
 | `bridge_run` | Run one scheduled bridge profile and strictly deliver its ticket events. _(requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only)_ |
-| `bridge_sync` | Apply proposed Jira changes, optionally with an explicit change limit. _(requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only)_ |
+| `bridge_sync` | Apply proposed Jira changes, optionally with an explicit change limit. _(requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only; runs the CLI's guarded pass: honors the bridge pause and holds the reconciler pass lock)_ |
 | `claim_ticket` | Atomically claim an OPEN ticket (-> in_progress + assignee). |
 | `comment_ticket` | Append a comment to a ticket. |
 | `compact_ticket` | Compact a ticket's event log (or all tickets if id omitted). |

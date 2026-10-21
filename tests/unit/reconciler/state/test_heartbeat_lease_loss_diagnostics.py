@@ -27,7 +27,7 @@ from typing import Any
 
 import pytest
 
-from rebar.reconciler import __main__ as reconciler_main
+from rebar.reconciler import guarded_pass
 
 
 class _LeaseLost(Exception):
@@ -57,7 +57,7 @@ def _advisory(ref_lock: Any) -> Any:
 
 
 def _run_heartbeat_once(advisory: Any, tmp_path: Path) -> None:
-    hb = reconciler_main._Heartbeat(advisory, "pass-1", tmp_path, "a" * 40, 0.01)
+    hb = guarded_pass.Heartbeat(advisory, "pass-1", tmp_path, "a" * 40, 0.01)
     hb._run()  # first tick renews, raises LeaseLostError, reports, returns
     assert hb.lock_lost.is_set(), "the lease loss must still abort the pass"
 

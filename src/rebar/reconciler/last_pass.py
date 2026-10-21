@@ -354,17 +354,19 @@ def current_lock_fence(repo_root: Path, pass_id: str) -> int | None:
 def publish_process_result(
     repo_root: Path,
     pass_id: str,
-    exit_code: int,
     *,
+    outcome: str,
     failure_kind: str | None = None,
+    process_exit_code: int,
     outcome_tally: Mapping[str, Any] | None = None,
     degraded: bool | None = None,
 ) -> dict[str, Any]:
-    """Publish a process result while its heartbeat and pass lock remain live."""
-    outcome = "success" if exit_code == 0 else "failure"
-    semantic_failure = failure_kind
-    if outcome == "failure" and semantic_failure is None:
-        semantic_failure = "reschedule" if exit_code == 75 else "operational_failure"
+    """Publish a process result while its heartbeat and pass lock remain live.
+
+    ``outcome`` is ``"success"`` or ``"failure"``; a failure names its ``failure_kind``
+    (``reschedule``, ``operational_failure``, or ``exception``). The caller derives both
+    from the pass disposition, so the witness never depends on a route's exit code.
+    """
     from rebar.config import environment_id_or_none
 
     return publish(
@@ -372,30 +374,64 @@ def publish_process_result(
         pass_id=pass_id,
         environment_id=environment_id_or_none(),
         outcome=outcome,
-        failure_kind=None if outcome == "success" else semantic_failure,
+        failure_kind=None if outcome == "success" else (failure_kind or "operational_failure"),
         lock_fence=current_lock_fence(repo_root, pass_id),
         outcome_tally=outcome_tally,
         degraded=degraded,
-        detail={"process_exit_code": exit_code},
+        detail={"process_exit_code": process_exit_code},
     )
 
 
-def finalize_process(repo_root: Path, pass_id: str, run: Callable[[], int]) -> int:
-    """Run and publish one mutating process before its caller releases the lease."""
-    failure_kind = None
+#: Disposition state -> last-pass failure kind; a state absent here publishes success.
+_FAILURE_KIND_BY_STATE = {
+    "reschedule": "reschedule",
+    "operational_failure": "operational_failure",
+    "invalid_invocation": "operational_failure",
+}
+
+
+def finalize_process(
+    repo_root: Path, pass_id: str, run: Callable[[], Any], *, route: str | None = None
+) -> Any:
+    """Run one mutating pass and publish its witness before the caller releases the lease.
+
+    ``run`` returns a ``guarded_pass.PassResult``; the published outcome follows its
+    disposition (``reschedule`` publishes ``failure_kind=reschedule`` on every route).
+    The recorded ``process_exit_code`` is the exit *route* will return (the canonical
+    code for ``preview``/``sync``, the legacy sentinel otherwise). Returns the pass
+    result, or an operational-failure result when ``run`` raised or the witness could
+    not be published.
+    """
+    from rebar.reconciler.guarded_pass import PassResult, _Disposition
+
     try:
-        exit_code = run()
+        result = run()
     except Exception as exc:  # noqa: BLE001 — process boundary records the hard failure
-        print(f"ERROR: run_pass raised: {exc}", file=sys.stderr)  # noqa: T201
-        traceback.print_exc(file=sys.stderr)
-        exit_code = 1
-        failure_kind = "exception"
+        traceback.print_exc(file=sys.stderr)  # the route prints the ERROR line
+        result = PassResult(
+            _Disposition.OPERATIONAL_FAILURE,
+            {"error": str(exc)},
+            legacy_message=f"ERROR: run_pass raised: {exc}",
+        )
+        failure_kind: str | None = "exception"
+    else:
+        failure_kind = _FAILURE_KIND_BY_STATE.get(result.disposition.state)
     try:
-        publish_process_result(repo_root, pass_id, exit_code, failure_kind=failure_kind)
+        publish_process_result(
+            repo_root,
+            pass_id,
+            outcome="success" if failure_kind is None else "failure",
+            failure_kind=failure_kind,
+            process_exit_code=(
+                result.disposition.canonical_exit
+                if route in {"preview", "sync"}
+                else result.disposition.legacy_exit
+            ),
+        )
     except Exception as exc:  # noqa: BLE001 — publication failure forces nonzero
-        print(f"ERROR: cannot publish reconciler last-pass witness: {exc}", file=sys.stderr)  # noqa: T201
-        return 1
-    return exit_code
+        message = f"ERROR: cannot publish reconciler last-pass witness: {exc}"
+        return PassResult(_Disposition.OPERATIONAL_FAILURE, result.details, legacy_message=message)
+    return result
 
 
 def release_process_lock(

@@ -118,6 +118,7 @@ def test_mutating_reconciler_records_success_before_releasing_lock(
 ) -> None:
     """Process finalization publishes the durable witness while the pass lock is held."""
     reconciler_main = _reconciler_main()
+    guarded_pass = importlib.import_module("rebar.reconciler.guarded_pass")
     remote = _configure_origin(rebar_repo, tmp_path)
     observed: list[str] = []
 
@@ -151,16 +152,17 @@ def test_mutating_reconciler_records_success_before_releasing_lock(
             assert payload is not None, "last-pass must be durable before lock release"
             observed.append(f"release:{pass_id}:{payload['outcome']}")
 
-    original_load = reconciler_main._load_sibling_keyed
+    original_load = guarded_pass._load_sibling_keyed
+    converged = guarded_pass.PassResult(guarded_pass._Disposition.CONVERGED, {})
 
     def load(key: str, name: str):
         if name == "_advisory_lock.py":
             return Advisory
         return original_load(key, name)
 
-    monkeypatch.setattr(reconciler_main, "_load_sibling_keyed", load)
-    monkeypatch.setattr(reconciler_main, "_purge_committed_reconciler_locks", lambda _root: None)
-    monkeypatch.setattr(reconciler_main, "run_pass", lambda **_kwargs: 0)
+    monkeypatch.setattr(guarded_pass, "_load_sibling_keyed", load)
+    monkeypatch.setattr(guarded_pass, "_purge_committed_reconciler_locks", lambda _root: None)
+    monkeypatch.setattr(guarded_pass, "run_pass_result", lambda **_kwargs: converged)
     monkeypatch.setenv("REBAR_ENV_ID", "reconciler")
 
     rc = reconciler_main.main(["sync", "--repo-root", str(rebar_repo)])

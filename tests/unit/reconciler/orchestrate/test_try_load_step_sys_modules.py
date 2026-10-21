@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-MAIN_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "__main__.py"
+GUARDED_PASS_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "guarded_pass.py"
 
 
 def test_try_load_step_registers_module_in_sys_modules():
@@ -23,9 +23,9 @@ def test_try_load_step_registers_module_in_sys_modules():
     __module__='rebar.reconciler.applier' but sys.modules.get('rebar.reconciler.applier')
     returned None, causing dataclasses._is_type to crash.
     """
-    main_mod = importlib.import_module("rebar.reconciler.__main__")
+    guarded_mod = importlib.import_module("rebar.reconciler.guarded_pass")
 
-    applier = main_mod._try_load_step("applier")
+    applier = guarded_mod._try_load_step("applier")
     # Module must be loaded successfully
     assert applier is not None, "_try_load_step('applier') must return the loaded module"
     # Module must be registered in sys.modules under its dotted name

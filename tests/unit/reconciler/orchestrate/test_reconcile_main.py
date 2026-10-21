@@ -1,6 +1,6 @@
 """Behavioral tests for rebar.reconciler.__main__ mode-validation + advisory-lock guards.
 
-These tests verify the guard sequence in main():
+These tests verify the guard sequence main() runs through guarded_pass.run_guarded_pass:
   argparse → Mode.from_str → check_pass_lock → check_phase_gate →
   acquire_pass_lock → try/finally(release) → reconcile_once
 
@@ -38,6 +38,7 @@ _MODE_PATH = _PKG_DIR / "mode.py"
 _ADVISORY_LOCK_KEY = "rebar.reconciler._advisory_lock"
 _MODE_KEY = "rebar.reconciler.mode"
 _MAIN_KEY = "rebar.reconciler.__main__"
+_GUARDED_KEY = "rebar.reconciler.guarded_pass"
 
 
 @pytest.fixture(autouse=True)
@@ -61,12 +62,13 @@ def _git_repo(tmp_path: Path) -> None:
 
 @pytest.fixture(scope="module")
 def _seed_sys_modules():
-    """The shared ``__main__``, ``_advisory_lock`` and ``mode`` modules.
+    """The shared ``__main__``, ``guarded_pass``, ``_advisory_lock`` and ``mode`` modules.
 
-    Returns a dict with keys 'main_mod', 'advisory_lock_mod', 'mode_mod'.
+    Returns a dict with keys 'main_mod', 'guarded_mod', 'advisory_lock_mod', 'mode_mod'.
     """
     return {
         "main_mod": importlib.import_module(_MAIN_KEY),
+        "guarded_mod": importlib.import_module(_GUARDED_KEY),
         "advisory_lock_mod": importlib.import_module(_ADVISORY_LOCK_KEY),
         "mode_mod": importlib.import_module(_MODE_KEY),
     }
@@ -76,6 +78,12 @@ def _seed_sys_modules():
 def main_mod(_seed_sys_modules):
     """Return the loaded __main__ module."""
     return _seed_sys_modules["main_mod"]
+
+
+@pytest.fixture
+def guarded_mod(_seed_sys_modules):
+    """Return the guarded-pass module that owns the pipeline-load seams."""
+    return _seed_sys_modules["guarded_mod"]
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +148,7 @@ def test_pass_lock_blocks_before_fetcher(main_mod, fetcher_sentinel, tmp_path):
     )
 
 
-def test_phase_gate_requires_removal_to_advance(main_mod, fetcher_sentinel, tmp_path):
+def test_phase_gate_requires_removal_to_advance(main_mod, guarded_mod, fetcher_sentinel, tmp_path):
     """main(['--mode=bootstrap-throttle']) exits non-zero when check_phase_gate
     returns True; then proceeds (calls reconcile_once) when check_phase_gate
     returns False.
@@ -187,7 +195,7 @@ def test_phase_gate_requires_removal_to_advance(main_mod, fetcher_sentinel, tmp_
             f"{_ADVISORY_LOCK_KEY}.release_pass_lock",
             return_value=None,
         ),
-        patch.object(main_mod, "_try_load_step", return_value=stub_reconcile),
+        patch.object(guarded_mod, "_try_load_step", return_value=stub_reconcile),
     ):
         rc_open = main_mod.main(["--mode=bootstrap-throttle", "--repo-root", str(tmp_path)])
 
@@ -206,6 +214,7 @@ def test_phase_gate_requires_removal_to_advance(main_mod, fetcher_sentinel, tmp_
 )
 def test_canonical_sync_maps_benign_preflight_to_zero(
     main_mod,
+    guarded_mod,
     tmp_path,
     monkeypatch,
     capsys,
@@ -218,7 +227,7 @@ def test_canonical_sync_maps_benign_preflight_to_zero(
     with (
         patch(f"{_ADVISORY_LOCK_KEY}.check_pass_lock", return_value=lock_held),
         patch(f"{_ADVISORY_LOCK_KEY}.check_phase_gate", return_value=phase_gated),
-        patch.object(main_mod, "run_pass") as run_pass,
+        patch.object(guarded_mod, "run_pass_result") as run_pass,
     ):
         rc = main_mod.main(["sync", "--repo-root", str(tmp_path)])
 
@@ -227,14 +236,16 @@ def test_canonical_sync_maps_benign_preflight_to_zero(
     run_pass.assert_not_called()
 
 
-def test_removed_reconcile_check_mode_rejects_before_operational_work(main_mod, tmp_path):
+def test_removed_reconcile_check_mode_rejects_before_operational_work(
+    main_mod, guarded_mod, tmp_path
+):
     """The removed direct-engine diagnostic mode never reaches locks or a pass."""
-    run_pass = MagicMock(return_value=0)
+    run_pass = MagicMock(side_effect=AssertionError("the pass must not run"))
     pass_lock = MagicMock(side_effect=AssertionError("pass lock must not be read"))
     pause_read = MagicMock(side_effect=AssertionError("pause gate must not be read"))
 
     with (
-        patch.object(main_mod, "run_pass", run_pass),
+        patch.object(guarded_mod, "run_pass_result", run_pass),
         patch(f"{_ADVISORY_LOCK_KEY}.check_pass_lock", pass_lock),
         patch(f"{_ADVISORY_LOCK_KEY}.read_pause", pause_read),
     ):
@@ -246,7 +257,7 @@ def test_removed_reconcile_check_mode_rejects_before_operational_work(main_mod, 
     pause_read.assert_not_called()
 
 
-def test_operation_snapshot_binding_does_not_leak_past_main_return(main_mod, tmp_path):
+def test_operation_snapshot_binding_does_not_leak_past_main_return(main_mod, guarded_mod, tmp_path):
     """Regression for the ticket-ec44 LLM-Review finding: an early ``compose_and_bind_
     operation_snapshot()`` CM whose ``__enter__`` return value nobody references is
     collectible immediately, which silently unwinds the binding right away — but the
@@ -264,13 +275,13 @@ def test_operation_snapshot_binding_does_not_leak_past_main_return(main_mod, tmp
 
     observed: dict[str, object] = {}
 
-    def _run_preview(**kwargs) -> int:
+    def _run_preview(**kwargs):
         snapshot = active_snapshot()
         observed["snapshot"] = snapshot
         observed["repo_root"] = str(snapshot.repo_root) if snapshot is not None else None
-        return 0
+        return guarded_mod.PassResult(guarded_mod._Disposition.CONVERGED, {})
 
-    with patch.object(main_mod, "run_pass", _run_preview):
+    with patch.object(guarded_mod, "run_pass_result", _run_preview):
         rc = main_mod.main(["preview", "--repo-root", str(tmp_path)])
 
     assert rc == 0
@@ -282,7 +293,7 @@ def test_operation_snapshot_binding_does_not_leak_past_main_return(main_mod, tmp
     )
 
 
-def test_lock_released_on_exception(main_mod, tmp_path):
+def test_lock_released_on_exception(main_mod, guarded_mod, tmp_path):
     """When reconcile_once raises, release_pass_lock is still called (finally block)."""
     release_mock = MagicMock()
     stub_reconcile = types.ModuleType("stub_reconcile_exc")
@@ -305,7 +316,7 @@ def test_lock_released_on_exception(main_mod, tmp_path):
             f"{_ADVISORY_LOCK_KEY}.release_pass_lock",
             release_mock,
         ),
-        patch.object(main_mod, "_try_load_step", return_value=stub_reconcile),
+        patch.object(guarded_mod, "_try_load_step", return_value=stub_reconcile),
     ):
         rc = main_mod.main(["--mode=dry-run", "--repo-root", str(tmp_path)])
 
@@ -325,7 +336,7 @@ def test_lock_released_on_exception(main_mod, tmp_path):
         (lambda: SystemExit(2), "SystemExit"),
     ],
 )
-def test_lock_released_on_exception_variants(main_mod, tmp_path, exc_factory, exc_id):
+def test_lock_released_on_exception_variants(main_mod, guarded_mod, tmp_path, exc_factory, exc_id):
     """release_pass_lock is called in finally on RuntimeError AND on SystemExit.
 
     SystemExit is the critical edge case: it inherits from BaseException, so
@@ -355,7 +366,7 @@ def test_lock_released_on_exception_variants(main_mod, tmp_path, exc_factory, ex
             f"{_ADVISORY_LOCK_KEY}.release_pass_lock",
             release_mock,
         ),
-        patch.object(main_mod, "_try_load_step", return_value=stub_reconcile),
+        patch.object(guarded_mod, "_try_load_step", return_value=stub_reconcile),
     ):
         try:
             main_mod.main(["--mode=dry-run", "--repo-root", str(tmp_path)])
@@ -393,7 +404,7 @@ def test_import_does_not_load_fetcher(tmp_path):
     )
 
 
-def test_no_mode_flag_defaults_to_live(main_mod, tmp_path):
+def test_no_mode_flag_defaults_to_live(main_mod, guarded_mod, tmp_path):
     """main([]) with no --mode flag defaults to Mode.LIVE and proceeds normally."""
     stub_reconcile = types.ModuleType("stub_reconcile_live")
     stub_reconcile.reconcile_once = MagicMock(
@@ -421,7 +432,7 @@ def test_no_mode_flag_defaults_to_live(main_mod, tmp_path):
             f"{_ADVISORY_LOCK_KEY}.release_pass_lock",
             return_value=None,
         ),
-        patch.object(main_mod, "_try_load_step", return_value=stub_reconcile),
+        patch.object(guarded_mod, "_try_load_step", return_value=stub_reconcile),
     ):
         rc = main_mod.main(["--repo-root", str(tmp_path)])
 
@@ -429,7 +440,7 @@ def test_no_mode_flag_defaults_to_live(main_mod, tmp_path):
     stub_reconcile.reconcile_once.assert_called_once()
 
 
-def test_main_without_repo_root_does_not_pass_none_to_advisory(main_mod):
+def test_main_without_repo_root_does_not_pass_none_to_advisory(main_mod, guarded_mod):
     """main(['--mode=dry-run']) without --repo-root must NOT pass None to check_pass_lock.
 
     Bug 5be7: __main__.py:151 left repo_root=None when --repo-root was omitted.
@@ -460,7 +471,7 @@ def test_main_without_repo_root_does_not_pass_none_to_advisory(main_mod):
             return_value=None,
         ),
         patch.object(
-            main_mod,
+            guarded_mod,
             "_try_load_step",
             return_value=types.SimpleNamespace(
                 reconcile_once=MagicMock(
@@ -487,7 +498,7 @@ def test_main_without_repo_root_does_not_pass_none_to_advisory(main_mod):
     )
 
 
-def _stub_main_advisory(main_mod, extra_patches=()):
+def _stub_main_advisory(guarded_mod, extra_patches=()):
     """Stub EVERY advisory entry point ``main()`` reaches, plus the reconcile step.
 
     Returns ``(stack, check_pass_lock_mock, read_pause_mock)``; the caller enters *stack*.
@@ -497,7 +508,7 @@ def _stub_main_advisory(main_mod, extra_patches=()):
     runs against the REAL checkout rather than the suite's sandbox (``tests/conftest.py``
     defaults ``REBAR_ROOT`` for every other test — bug dd62 — and notes that a test which
     ``delenv``s it escapes that default). An advisory call left unstubbed therefore reads
-    that checkout's live ``refs/reconciler/gate``. ``_pause_exit_code`` runs BEFORE
+    that checkout's live ``refs/reconciler/gate``. ``_pause_result`` runs BEFORE
     ``_post_pause_preflight``, so a gate ref that is corrupt (``ReconcileGateError``) or
     merely carries a pause marker makes ``main()`` return before ``check_pass_lock`` is ever
     called — failing the assertions below through no fault of the resolution under test.
@@ -513,7 +524,7 @@ def _stub_main_advisory(main_mod, extra_patches=()):
     stack.enter_context(patch(f"{_ADVISORY_LOCK_KEY}.release_pass_lock", return_value=None))
     stack.enter_context(
         patch.object(
-            main_mod,
+            guarded_mod,
             "_try_load_step",
             return_value=types.SimpleNamespace(
                 reconcile_once=MagicMock(
@@ -548,7 +559,9 @@ def _assert_resolved_repo_root(call_args) -> Path:
     return resolved
 
 
-def test_main_resolves_repo_root_even_when_the_ambient_gate_ref_is_corrupt(main_mod, monkeypatch):
+def test_main_resolves_repo_root_even_when_the_ambient_gate_ref_is_corrupt(
+    main_mod, guarded_mod, monkeypatch
+):
     """The resolution assertions must not depend on the enclosing checkout's ref state.
 
     This pins the fix for bug b82c-7461-0d95-44b8. The corruption is injected at the layer
@@ -570,7 +583,7 @@ def test_main_resolves_repo_root_even_when_the_ambient_gate_ref_is_corrupt(main_
     )
 
     stack, check_pass_lock_mock, _read_pause_mock = _stub_main_advisory(
-        main_mod,
+        guarded_mod,
         extra_patches=[
             patch(
                 f"{_ADVISORY_LOCK_KEY}._load_ref_lock",
@@ -592,7 +605,7 @@ def test_main_resolves_repo_root_even_when_the_ambient_gate_ref_is_corrupt(main_
     )
 
 
-def test_main_without_repo_root_passes_resolved_repo_root(main_mod, monkeypatch):
+def test_main_without_repo_root_passes_resolved_repo_root(main_mod, guarded_mod, monkeypatch):
     """The Path passed to check_pass_lock when --repo-root is omitted must contain
     the rebar.reconciler package, confirming it resolves to the actual project root.
 
@@ -609,7 +622,7 @@ def test_main_without_repo_root_passes_resolved_repo_root(main_mod, monkeypatch)
     """
     monkeypatch.delenv("REBAR_ROOT", raising=False)
 
-    stack, check_pass_lock_mock, read_pause_mock = _stub_main_advisory(main_mod)
+    stack, check_pass_lock_mock, read_pause_mock = _stub_main_advisory(guarded_mod)
     with stack:
         main_mod.main(["--mode=dry-run"])
 

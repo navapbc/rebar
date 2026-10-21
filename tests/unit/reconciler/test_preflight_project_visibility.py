@@ -9,7 +9,7 @@ CREATE storm into the wrong project. The preflight fails fast, before any outbou
 
 These tests inject a FAKE transport — no live Jira. They cover both the reusable
 ``access_check`` helper (the single source of truth ticket 9702's fsck diagnostic reuses)
-and the ``__main__.run_pass_result`` wiring that aborts the pass before
+and the ``guarded_pass.run_pass_result`` wiring that aborts the pass before
 ``reconcile.reconcile_once`` (the only outbound-mutation call).
 """
 
@@ -26,7 +26,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ENGINE_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
-MAIN_PATH = ENGINE_DIR.parent / "reconciler" / "__main__.py"
+GUARDED_PASS_PATH = ENGINE_DIR.parent / "reconciler" / "guarded_pass.py"
 
 
 # ---------------------------------------------------------------------------
@@ -42,10 +42,10 @@ def access_check():
 
 
 @pytest.fixture(scope="module")
-def main_mod():
-    if not MAIN_PATH.exists():
-        pytest.fail(f"__main__.py not found at {MAIN_PATH}")
-    return importlib.import_module("rebar.reconciler.__main__")
+def guarded_mod():
+    if not GUARDED_PASS_PATH.exists():
+        pytest.fail(f"guarded_pass.py not found at {GUARDED_PASS_PATH}")
+    return importlib.import_module("rebar.reconciler.guarded_pass")
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +236,7 @@ def test_pagination_non_termination_fails_closed(access_check, tmp_path):
 
 
 # ===========================================================================
-# Wiring-level tests (__main__.run_pass_result aborts BEFORE reconcile_once)
+# Wiring-level tests (guarded_pass.run_pass_result aborts BEFORE reconcile_once)
 # ===========================================================================
 
 
@@ -271,88 +271,88 @@ def _result(status, **kw):
     )
 
 
-def test_wiring_missing_aborts_before_reconcile(main_mod, monkeypatch, tmp_path):
+def test_wiring_missing_aborts_before_reconcile(guarded_mod, monkeypatch, tmp_path):
     _seed_fake_access_check(monkeypatch, _result("missing", missing=("BAD",)))
     _patch_cloud_backend(monkeypatch)
     stub = _stub_reconcile()
     monkeypatch.setattr(
-        main_mod, "_try_load_step", lambda name: stub if name == "reconcile" else None
+        guarded_mod, "_try_load_step", lambda name: stub if name == "reconcile" else None
     )
 
-    res = main_mod.run_pass_result(repo_root=tmp_path, route=None)
+    res = guarded_mod.run_pass_result(repo_root=tmp_path, route=None)
 
     stub.reconcile_once.assert_not_called()
-    assert res.disposition is main_mod._Disposition.OPERATIONAL_FAILURE
+    assert res.disposition is guarded_mod._Disposition.OPERATIONAL_FAILURE
     assert "BAD" in (res.canonical_message or "")
 
 
-def test_wiring_transport_unavailable_aborts(main_mod, monkeypatch, tmp_path):
+def test_wiring_transport_unavailable_aborts(guarded_mod, monkeypatch, tmp_path):
     _seed_fake_access_check(monkeypatch, _result("transport_unavailable", detail="403 Forbidden"))
     _patch_cloud_backend(monkeypatch)
     stub = _stub_reconcile()
     monkeypatch.setattr(
-        main_mod, "_try_load_step", lambda name: stub if name == "reconcile" else None
+        guarded_mod, "_try_load_step", lambda name: stub if name == "reconcile" else None
     )
 
-    res = main_mod.run_pass_result(repo_root=tmp_path, route=None)
+    res = guarded_mod.run_pass_result(repo_root=tmp_path, route=None)
 
     stub.reconcile_once.assert_not_called()
-    assert res.disposition is main_mod._Disposition.OPERATIONAL_FAILURE
+    assert res.disposition is guarded_mod._Disposition.OPERATIONAL_FAILURE
 
 
-def test_wiring_all_visible_proceeds(main_mod, monkeypatch, tmp_path):
+def test_wiring_all_visible_proceeds(guarded_mod, monkeypatch, tmp_path):
     _seed_fake_access_check(monkeypatch, _result("ok"))
     _patch_cloud_backend(monkeypatch)
     stub = _stub_reconcile()
     monkeypatch.setattr(
-        main_mod, "_try_load_step", lambda name: stub if name == "reconcile" else None
+        guarded_mod, "_try_load_step", lambda name: stub if name == "reconcile" else None
     )
 
-    res = main_mod.run_pass_result(repo_root=tmp_path, route=None)
+    res = guarded_mod.run_pass_result(repo_root=tmp_path, route=None)
 
     stub.reconcile_once.assert_called_once()
-    assert res.disposition is main_mod._Disposition.CONVERGED
+    assert res.disposition is guarded_mod._Disposition.CONVERGED
 
 
-def test_wiring_preview_route_skips_probe(main_mod, monkeypatch, tmp_path):
+def test_wiring_preview_route_skips_probe(guarded_mod, monkeypatch, tmp_path):
     fake = _seed_fake_access_check(monkeypatch, _result("missing", missing=("BAD",)))
     _patch_cloud_backend(monkeypatch)
     stub = _stub_reconcile(return_value={"no_write": True, "mutation_count": 0})
     monkeypatch.setattr(
-        main_mod, "_try_load_step", lambda name: stub if name == "reconcile" else None
+        guarded_mod, "_try_load_step", lambda name: stub if name == "reconcile" else None
     )
 
-    main_mod.run_pass_result(repo_root=tmp_path, route="preview")
+    guarded_mod.run_pass_result(repo_root=tmp_path, route="preview")
 
     fake.check_mapped_project_visibility.assert_not_called()
     stub.reconcile_once.assert_called_once()
 
 
-def test_wiring_dry_run_skips_probe(main_mod, monkeypatch, tmp_path):
+def test_wiring_dry_run_skips_probe(guarded_mod, monkeypatch, tmp_path):
     from rebar.reconciler import mode as mode_mod
 
     fake = _seed_fake_access_check(monkeypatch, _result("missing", missing=("BAD",)))
     _patch_cloud_backend(monkeypatch)
     stub = _stub_reconcile()
     monkeypatch.setattr(
-        main_mod, "_try_load_step", lambda name: stub if name == "reconcile" else None
+        guarded_mod, "_try_load_step", lambda name: stub if name == "reconcile" else None
     )
 
-    main_mod.run_pass_result(repo_root=tmp_path, target_mode=mode_mod.Mode.DRY_RUN, route=None)
+    guarded_mod.run_pass_result(repo_root=tmp_path, target_mode=mode_mod.Mode.DRY_RUN, route=None)
 
     fake.check_mapped_project_visibility.assert_not_called()
     stub.reconcile_once.assert_called_once()
 
 
-def test_wiring_non_cloud_backend_skips_probe(main_mod, monkeypatch, tmp_path):
+def test_wiring_non_cloud_backend_skips_probe(guarded_mod, monkeypatch, tmp_path):
     fake = _seed_fake_access_check(monkeypatch, _result("missing", missing=("BAD",)))
     _patch_cloud_backend(monkeypatch, backend="jira-datacenter")
     stub = _stub_reconcile()
     monkeypatch.setattr(
-        main_mod, "_try_load_step", lambda name: stub if name == "reconcile" else None
+        guarded_mod, "_try_load_step", lambda name: stub if name == "reconcile" else None
     )
 
-    main_mod.run_pass_result(repo_root=tmp_path, route=None)
+    guarded_mod.run_pass_result(repo_root=tmp_path, route=None)
 
     fake.check_mapped_project_visibility.assert_not_called()
     stub.reconcile_once.assert_called_once()

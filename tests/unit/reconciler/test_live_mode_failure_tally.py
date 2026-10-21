@@ -13,7 +13,7 @@ tallies with:
         ... mutation_failures = sum(1 for o in outcomes if o.get("error"))
 
 so in LIVE the tally block never runs: failures stay 0 and every computed mutation is
-counted as applied. `__main__.run_pass`'s `if failures > 0: return 1` is therefore dead
+counted as applied. The pass classifier's `if failures > 0: return 1` is therefore dead
 code in the only mode production runs.
 
 Three contracts are defeated by this, all in LIVE only:
@@ -205,14 +205,17 @@ def test_live_failure_reaches_a_non_zero_exit_end_to_end(
 
     The two tests above stop at `_persist_and_log`'s result dict, and every pre-existing
     fail-loud test stubs `reconcile_once` to RETURN a `mutation_failures` value. Neither
-    covers the link that actually makes a degraded pass loud: `run_pass`'s
-    `if failures > 0: return 1`. That link was unreachable in LIVE for the whole life of
+    covers the link that actually makes a degraded pass loud: the pass classifier's
+    `if failures > 0` operational failure (`guarded_pass.run_pass_result`, rendered by
+    `__main__._render_pass`). That link was unreachable in LIVE for the whole life of
     the bug, so a test that stops short of it would not have caught c903 — nor would it
     catch the link being severed again.
 
-    Drives: _emit_mode_manifest (LIVE, real) -> _persist_and_log (real) -> run_pass (real).
+    Drives: _emit_mode_manifest (LIVE, real) -> _persist_and_log (real) -> run_pass_result
+    (real) -> _render_pass (real).
     """
     from rebar.reconciler import __main__ as reconciler_main
+    from rebar.reconciler import guarded_pass
 
     outcomes = [
         {"action": "create", "key": "OK-1"},
@@ -245,17 +248,19 @@ def test_live_failure_reaches_a_non_zero_exit_end_to_end(
     ctx.apply_tally = tally
     result = reconcile._persist_and_log(ctx)
 
-    # 3. real run_pass over that result -> the exit code CI actually sees
+    # 3. real run_pass_result + _render_pass over that result -> the exit code CI actually sees
     applier_stub = types.SimpleNamespace(
         RescheduleError=type("_R", (Exception,), {}), EXIT_RESCHEDULE=75
     )
     reconcile_stub = types.SimpleNamespace(reconcile_once=lambda *a, **k: result)
     monkeypatch.setattr(
-        reconciler_main,
+        guarded_pass,
         "_try_load_step",
         lambda name: {"reconcile": reconcile_stub, "applier": applier_stub}.get(name),
     )
-    rc = reconciler_main.run_pass(repo_root=tmp_path, pass_id="pass-e2e")
+    rc = reconciler_main._render_pass(
+        guarded_pass.run_pass_result(repo_root=tmp_path, pass_id="pass-e2e"), None
+    )
 
     assert rc == 1, (
         "a LIVE pass with a failed mutation must exit non-zero — this is the whole of "
@@ -270,7 +275,7 @@ def test_live_failure_reaches_a_non_zero_exit_end_to_end(
 # five-bucket projection (applied/failed/deferred/skipped/recovered). AC4 requires the
 # EXACT applied/failed/deferred/skipped/recovered tallies plus the nonzero degraded-pass
 # exit to be preserved. These tests prove the cutover tally flows through the EXISTING
-# ``_persist_and_log`` → ``run_pass`` seam (a LIVE dict return routed to
+# ``_persist_and_log`` → ``run_pass_result`` seam (a LIVE dict return routed to
 # ``ctx.apply_tally``) and still exits non-zero when a mutation failed — no change to the
 # reconcile pipeline itself.
 # ════════════════════════════════════════════════════════════════════════════════
@@ -350,10 +355,10 @@ def test_cutover_tally_reaches_a_non_zero_exit_end_to_end(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """AC4: the cutover's five-bucket tally, threaded through the EXISTING LIVE seam
-    (``ctx.apply_tally`` → ``_persist_and_log`` → ``run_pass``), preserves the nonzero
+    (``ctx.apply_tally`` → ``_persist_and_log`` → ``run_pass_result``), preserves the nonzero
     degraded-pass exit — a failed mutation still makes the pass loud."""
     from rebar.reconciler import __main__ as reconciler_main
-    from rebar.reconciler import batch_dispatch
+    from rebar.reconciler import batch_dispatch, guarded_pass
 
     tally = batch_dispatch.build_pass_tally(_t3_cutover_report())
 
@@ -382,11 +387,13 @@ def test_cutover_tally_reaches_a_non_zero_exit_end_to_end(
     )
     reconcile_stub = types.SimpleNamespace(reconcile_once=lambda *a, **k: result)
     monkeypatch.setattr(
-        reconciler_main,
+        guarded_pass,
         "_try_load_step",
         lambda name: {"reconcile": reconcile_stub, "applier": applier_stub}.get(name),
     )
-    rc = reconciler_main.run_pass(repo_root=tmp_path, pass_id="pass-t3")
+    rc = reconciler_main._render_pass(
+        guarded_pass.run_pass_result(repo_root=tmp_path, pass_id="pass-t3"), None
+    )
     assert rc == 1
 
 
@@ -421,7 +428,7 @@ def test_cutover_deferred_only_pass_is_degraded_and_exits_nonzero(
     safety-deferred) must still exit non-zero. The tally carries ``degraded=True`` with
     ``failed_count == 0``; threaded through the LIVE seam it drives an OPERATIONAL exit."""
     from rebar.reconciler import __main__ as reconciler_main
-    from rebar.reconciler import batch_dispatch
+    from rebar.reconciler import batch_dispatch, guarded_pass
 
     report = _t3_degraded_deferred_report()
     tally = batch_dispatch.build_pass_tally(report)
@@ -455,11 +462,13 @@ def test_cutover_deferred_only_pass_is_degraded_and_exits_nonzero(
     )
     reconcile_stub = types.SimpleNamespace(reconcile_once=lambda *a, **k: result)
     monkeypatch.setattr(
-        reconciler_main,
+        guarded_pass,
         "_try_load_step",
         lambda name: {"reconcile": reconcile_stub, "applier": applier_stub}.get(name),
     )
-    rc = reconciler_main.run_pass(repo_root=tmp_path, pass_id="pass-t3d")
+    rc = reconciler_main._render_pass(
+        guarded_pass.run_pass_result(repo_root=tmp_path, pass_id="pass-t3d"), None
+    )
     assert rc == 1
 
 
@@ -469,6 +478,7 @@ def test_legacy_apply_tally_without_degraded_key_stays_converged(
     """A pre-cutover apply_tally (no ``deferred_count`` / ``degraded`` keys) is unchanged:
     the new fields default to 0 / absent so a clean legacy pass stays converged."""
     from rebar.reconciler import __main__ as reconciler_main
+    from rebar.reconciler import guarded_pass
 
     class _Logger:
         def log(self, *a: Any, **k: Any) -> None: ...
@@ -496,11 +506,13 @@ def test_legacy_apply_tally_without_degraded_key_stays_converged(
     )
     reconcile_stub = types.SimpleNamespace(reconcile_once=lambda *a, **k: result)
     monkeypatch.setattr(
-        reconciler_main,
+        guarded_pass,
         "_try_load_step",
         lambda name: {"reconcile": reconcile_stub, "applier": applier_stub}.get(name),
     )
-    rc = reconciler_main.run_pass(repo_root=tmp_path, pass_id="pass-legacy")
+    rc = reconciler_main._render_pass(
+        guarded_pass.run_pass_result(repo_root=tmp_path, pass_id="pass-legacy"), None
+    )
     assert rc == 0
 
 

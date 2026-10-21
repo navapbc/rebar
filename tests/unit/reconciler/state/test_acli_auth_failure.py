@@ -22,7 +22,7 @@ import sys
 
 import pytest
 
-from rebar.reconciler import __main__ as reconciler_main
+from rebar.reconciler import guarded_pass
 from rebar.reconciler.adapters.jira import acli as acli_mod
 from rebar.reconciler.adapters.jira import acli_subprocess
 
@@ -162,10 +162,10 @@ def test_auth_failure_classifies_as_config_not_operational():
     """AC: an operator can tell a credential problem from a data problem without
     opening the log — distinct disposition (exit 2, not 1) AND distinct message."""
     exc = acli_subprocess.AcliAuthError(["acli", "jira", "workitem", "search"], LIVE_AUTH_STDERR)
-    result = reconciler_main._reconcile_exception_result(
+    result = guarded_pass._reconcile_exception_result(
         exc, reschedule_error_cls=None, lock_lost_cls=None
     )
-    assert result.disposition is reconciler_main._Disposition.INVALID_INVOCATION
+    assert result.disposition is guarded_pass._Disposition.INVALID_INVOCATION
     assert result.disposition.canonical_exit == 2
     assert result.details["error_class"] == "auth_failed"
     message = result.legacy_message or ""
@@ -177,10 +177,10 @@ def test_auth_failure_classifies_as_config_not_operational():
 
 def test_ordinary_failure_keeps_the_generic_operational_classification():
     """Regression guard: only auth failures get the new treatment."""
-    result = reconciler_main._reconcile_exception_result(
+    result = guarded_pass._reconcile_exception_result(
         RuntimeError("some data problem"), reschedule_error_cls=None, lock_lost_cls=None
     )
-    assert result.disposition is reconciler_main._Disposition.OPERATIONAL_FAILURE
+    assert result.disposition is guarded_pass._Disposition.OPERATIONAL_FAILURE
     assert "error_class" not in result.details
     assert "reconcile_once raised" in (result.legacy_message or "")
 

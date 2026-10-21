@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import rebar.reconciler.__main__ as main_mod
+from rebar.reconciler import guarded_pass
 
 
 def _capture_run(argv: list[str], tmp_path: Path) -> tuple[int, dict]:
@@ -19,7 +20,7 @@ def _capture_run(argv: list[str], tmp_path: Path) -> tuple[int, dict]:
     tracker.mkdir()
     (tracker / ".env-id").write_text("test-local\n", encoding="utf-8")
     captured: dict = {}
-    real_load = main_mod._load_sibling_keyed
+    real_load = guarded_pass._load_sibling_keyed
     advisory = types.SimpleNamespace(
         acquire_pass_lock=MagicMock(return_value=None),
         release_pass_lock=MagicMock(return_value=None),
@@ -30,16 +31,16 @@ def _capture_run(argv: list[str], tmp_path: Path) -> tuple[int, dict]:
             return advisory
         return real_load(key, filename)
 
-    def run_pass(**kwargs) -> int:
+    def run_pass(**kwargs) -> guarded_pass.PassResult:
         captured.update(kwargs)
-        return 0
+        return guarded_pass.PassResult(guarded_pass._Disposition.CONVERGED, {})
 
     with (
-        patch.object(main_mod, "_load_sibling_keyed", side_effect=load_sibling),
-        patch.object(main_mod, "_pause_exit_code", return_value=None),
-        patch.object(main_mod, "_purge_committed_reconciler_locks"),
-        patch.object(main_mod, "_post_pause_preflight", return_value=(False, None)),
-        patch.object(main_mod, "run_pass", side_effect=run_pass),
+        patch.object(guarded_pass, "_load_sibling_keyed", side_effect=load_sibling),
+        patch.object(guarded_pass, "_pause_result", return_value=None),
+        patch.object(guarded_pass, "_purge_committed_reconciler_locks"),
+        patch.object(guarded_pass, "_post_pause_preflight", return_value=(False, None)),
+        patch.object(guarded_pass, "run_pass_result", side_effect=run_pass),
     ):
         rc = main_mod.main([*argv, "--repo-root", str(tmp_path)])
     captured["advisory"] = advisory
@@ -78,14 +79,14 @@ def test_invalid_max_changes_returns_two_before_lock(
 ) -> None:
     acquire = MagicMock(side_effect=AssertionError("lock must not be acquired"))
     advisory = types.SimpleNamespace(acquire_pass_lock=acquire)
-    real_load = main_mod._load_sibling_keyed
+    real_load = guarded_pass._load_sibling_keyed
 
     def load_sibling(key: str, filename: str):
         if filename == "_advisory_lock.py":
             return advisory
         return real_load(key, filename)
 
-    with patch.object(main_mod, "_load_sibling_keyed", side_effect=load_sibling):
+    with patch.object(guarded_pass, "_load_sibling_keyed", side_effect=load_sibling):
         rc = main_mod.main(["sync", "--max-changes", value, "--repo-root", str(tmp_path)])
 
     assert rc == 2
@@ -98,14 +99,14 @@ def test_unresolved_selection_names_every_identifier_before_lock(
 ) -> None:
     acquire = MagicMock(side_effect=AssertionError("lock must not be acquired"))
     advisory = types.SimpleNamespace(acquire_pass_lock=acquire)
-    real_load = main_mod._load_sibling_keyed
+    real_load = guarded_pass._load_sibling_keyed
 
     def load_sibling(key: str, filename: str):
         if filename == "_advisory_lock.py":
             return advisory
         return real_load(key, filename)
 
-    with patch.object(main_mod, "_load_sibling_keyed", side_effect=load_sibling):
+    with patch.object(guarded_pass, "_load_sibling_keyed", side_effect=load_sibling):
         rc = main_mod.main(
             [
                 "preview",

@@ -8,6 +8,25 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING: library and MCP `bridge_sync` honor the pause and the pass lock
+
+`rebar.bridge_sync` (and the MCP `bridge_sync` tool, which calls it) used to call the pass body
+directly, so it took no reconciler lease, ran no heartbeat, published no last-pass witness, and
+ignored the bridge pause. It now runs the same guarded sequence as `python -m rebar.reconciler`
+(`rebar.reconciler.guarded_pass.run_guarded_pass`):
+
+- Under an active `bridge_pause`, `bridge_sync` returns `state: "paused"` with `returncode` 0 and
+  does not run the pass.
+- When another pass holds `refs/reconciler/lock`, it returns `state: "in-flight"` with
+  `returncode` 0 (an expired lease is stolen and the pass runs as normal).
+- A pass it runs publishes `refs/reconciler/last-pass`, and a rescheduled pass now publishes
+  `outcome=failure`, `failure_kind=reschedule` on every route. Before this change a rescheduled
+  canonical `sync` pass published `success`.
+- An unresolved `only`/`exclude` identifier still raises with returncode 2; its message now
+  starts with `ERROR: `, the same text the CLI prints.
+
+`bridge_run.schema.json` already admits `paused` and `in-flight`, so no schema change.
+
 ## BREAKING: the reconciler is `rebar.reconciler`; `rebar_reconciler` is gone
 
 The Jira reconciler moved from `src/rebar/_engine/rebar_reconciler/` (a top-level package found

@@ -195,13 +195,13 @@ def test_live_uncapped(tmp_path, applier_mod, mode_mod, mutation_mod):
 
 
 def test_target_mode_threaded_to_applier(tmp_path, applier_mod, mode_mod, mutation_mod):
-    """run_pass → reconcile_once → applier.apply must pass the mode kwarg through.
+    """run_pass_result → reconcile_once → applier.apply must pass the mode kwarg through.
 
     Sentinel test: dispatch a known Mode through the call chain and assert it
     reaches applier.apply unchanged (kwarg name preserved end-to-end).
     """
     reconcile_mod = importlib.import_module("rebar.reconciler.reconcile")
-    main_mod = importlib.import_module("rebar.reconciler.__main__")
+    guarded_mod = importlib.import_module("rebar.reconciler.guarded_pass")
 
     sentinel = mode_mod.Mode.BOOTSTRAP_STRICT
     captured: dict = {}
@@ -235,12 +235,12 @@ def test_target_mode_threaded_to_applier(tmp_path, applier_mod, mode_mod, mutati
         return {"pass_id": pass_id, "mutation_count": 0, "manifest_path": ""}
 
     with patch.object(reconcile_mod, "reconcile_once", _fake_reconcile_once):
-        # Force run_pass to use our patched reconcile module.
-        with patch.object(main_mod, "_try_load_step", return_value=reconcile_mod):
-            rc = main_mod.run_pass(
+        # Force run_pass_result to use our patched reconcile module.
+        with patch.object(guarded_mod, "_try_load_step", return_value=reconcile_mod):
+            result = guarded_mod.run_pass_result(
                 repo_root=tmp_path, pass_id="sentinel-pass", target_mode=sentinel
             )
-            assert rc == 0
+            assert result.disposition is guarded_mod._Disposition.CONVERGED
 
     assert captured.get("mode") is sentinel, (
         f"target_mode sentinel must reach applier.apply via mode= kwarg; "
