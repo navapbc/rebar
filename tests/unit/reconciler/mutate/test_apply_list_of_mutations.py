@@ -13,6 +13,8 @@ from unittest.mock import patch
 
 import pytest
 
+from rebar.reconciler.mutation_payloads import OutboundCreatePayload
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "mutation.py"
@@ -32,7 +34,7 @@ def _make_outbound_create(mut_mod, target="DIG-100", payload=None):
         direction=mut_mod.MutationDirection.outbound,
         action=mut_mod.MutationAction.create,
         target=target,
-        payload=payload or {"fields": {"summary": "test"}, "local_id": "local-abc"},
+        payload=payload or OutboundCreatePayload(fields={"summary": "test"}, local_id="local-abc"),
         provenance={"source": "test"},
     )
 
@@ -83,16 +85,11 @@ def test_normalized_dict_is_json_serializable(applier_and_mutation, tmp_path):
 
 
 def test_empty_fields_does_not_fall_through_to_full_payload(applier_and_mutation, tmp_path):
-    """payload.get('fields', payload) — NOT `or payload`. An intentionally
-    empty fields dict must reach _apply_batch as {} (not as the full
-    payload), to prevent leaking local_id / follow_on into batch fields.
-    """
+    """An intentionally empty create field map must reach _apply_batch as {} (not as
+    the full payload), so local_id never leaks into the batch fields."""
     applier, mut_mod = applier_and_mutation
     mutations = [
-        _make_outbound_create(
-            mut_mod,
-            payload={"fields": {}, "local_id": "L1", "follow_on": {"kind": "x"}},
-        ),
+        _make_outbound_create(mut_mod, payload=OutboundCreatePayload(fields={}, local_id="L1")),
     ]
 
     with patch.object(applier, "_apply_batch", return_value=tmp_path / "m.json") as ab:
@@ -102,9 +99,68 @@ def test_empty_fields_does_not_fall_through_to_full_payload(applier_and_mutation
     assert passed_list[0]["fields"] == {}, (
         f"empty fields fell through to full payload: {passed_list[0]['fields']!r}"
     )
-    # local_id / follow_on still preserved as top-level keys
+    # local_id is still preserved as a top-level key
     assert passed_list[0]["local_id"] == "L1"
-    assert passed_list[0]["follow_on"] == {"kind": "x"}
+
+
+def test_plain_dict_create_payload_raises_type_error(applier_and_mutation, tmp_path):
+    """A typed outbound create whose payload is a plain dict has no single unambiguous
+    field map, so the batch form refuses it before any dispatch — inbound included."""
+    applier, mut_mod = applier_and_mutation
+    mutations = [
+        _make_inbound_create(mut_mod, target="local-first"),
+        _make_outbound_create(mut_mod, payload={"fields": {"summary": "x"}}),
+    ]
+
+    with (
+        patch.object(applier, "_apply_typed") as at,
+        patch.object(applier, "_apply_batch", return_value=tmp_path / "m.json") as ab,
+    ):
+        with pytest.raises(TypeError, match="OutboundCreatePayload"):
+            applier.apply(mutations, "pass-plain-create", repo_root=tmp_path, client=object())
+    assert at.call_count == 0
+    assert ab.call_count == 0
+
+
+def test_untyped_batch_element_raises_type_error(applier_and_mutation, tmp_path):
+    """The batch form takes typed Mutations only: a raw dict element raises TypeError
+    before any dispatch, transport load, or write."""
+    applier, _mut_mod = applier_and_mutation
+    fake_client = object()
+
+    with (
+        patch.object(applier, "_apply_batch") as ab,
+        patch.object(applier, "_apply_typed") as at,
+    ):
+        with pytest.raises(TypeError, match="typed Mutations only"):
+            applier.apply([{"action": "update"}], "p", tmp_path, client=fake_client)
+    assert ab.call_count == 0
+    assert at.call_count == 0
+
+
+def test_typed_update_with_plain_dict_changed_fields_converts(applier_and_mutation):
+    """The binding_walk shape — a typed outbound update whose payload is a plain dict
+    carrying ``changed_fields`` — still converts to a batch dict."""
+    applier, mut_mod = applier_and_mutation
+    mutation = mut_mod.Mutation(
+        direction=mut_mod.MutationDirection.outbound,
+        action=mut_mod.MutationAction.update,
+        target="DIG-7",
+        payload={
+            "changed_fields": {"status": "Done"},
+            "comments": [],
+            "labels": [],
+            "links": [],
+        },
+        provenance={"source": "binding_walk"},
+    )
+
+    batch = applier._mutation_to_batch_dict(mutation)
+
+    assert batch["action"] == "update"
+    assert batch["key"] == "DIG-7"
+    assert batch["fields"] == {"status": "Done"}
+    assert batch["comments"] == [] and batch["labels"] == [] and batch["links"] == []
 
 
 def _make_inbound_create(mut_mod, target="local-abc"):

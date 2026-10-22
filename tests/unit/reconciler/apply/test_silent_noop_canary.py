@@ -32,6 +32,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from rebar.reconciler import scratch_retention
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
@@ -71,33 +73,34 @@ def _client(*, existing_links=None) -> MagicMock:
     return c
 
 
-def _link_update(links, *, key="DIG-1") -> dict:
-    return {
-        "direction": "outbound",
-        "action": "update",
-        "key": key,
-        "fields": {"summary": "scalar that succeeds"},
-        "links": links,
-        "local_id": "loc-1",
-    }
+def _link_update(links, *, key="DIG-1") -> Mutation:
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.update,
+        key,
+        OutboundUpdatePayload(
+            changed_fields={"summary": "scalar that succeeds"},
+            links=tuple(links),
+            local_id="loc-1",
+        ),
+        {},
+    )
 
 
-def _apply(applier_mod, acli_mod, mutation, tmp_path, pass_id) -> dict:
-    fake = _make_fake_acli(acli_mod, mutation["_client"])
+def _apply(applier_mod, acli_mod, mutation, client, tmp_path, pass_id) -> dict:
+    fake = _make_fake_acli(acli_mod, client)
     with patch.object(applier_mod, "_load_acli", return_value=fake):
-        applier_mod.apply(
-            [{k: v for k, v in mutation.items() if k != "_client"}], pass_id, repo_root=tmp_path
-        )
+        applier_mod.apply([mutation], pass_id, repo_root=tmp_path)
     manifest = scratch_retention.snapshots_dir(tmp_path) / f"{pass_id}.manifest.json"
     outcomes = json.loads(manifest.read_text()).get("mutations", []) if manifest.is_file() else []
-    return next((o for o in outcomes if o.get("key") == mutation["key"]), {})
+    return next((o for o in outcomes if o.get("key") == mutation.target), {})
 
 
 def test_subop_telemetry_surfaced_on_success(applier_mod, acli_mod, tmp_path) -> None:
     """A successful link add surfaces links_applied on the outcome."""
     mut = _link_update([{"action": "add", "type": "Blocks", "to_key": "DIG-2"}])
-    mut["_client"] = _client(existing_links=[])
-    outcome = _apply(applier_mod, acli_mod, mut, tmp_path, f"telem-{time.time_ns()}")
+    client = _client(existing_links=[])
+    outcome = _apply(applier_mod, acli_mod, mut, client, tmp_path, f"telem-{time.time_ns()}")
     assert outcome.get("links_applied") == 1
     assert "comments_applied" in outcome and "labels_applied" in outcome
     assert "silent_noop" not in outcome
@@ -109,9 +112,8 @@ def test_silent_noop_canary_hard_fails_and_warns(applier_mod, acli_mod, tmp_path
     client = _client(existing_links=[])
     client.set_relationship.side_effect = RuntimeError("write boom")
     mut = _link_update([{"action": "add", "type": "Blocks", "to_key": "DIG-2"}])
-    mut["_client"] = client
     with caplog.at_level("WARNING"):
-        outcome = _apply(applier_mod, acli_mod, mut, tmp_path, f"fail-{time.time_ns()}")
+        outcome = _apply(applier_mod, acli_mod, mut, client, tmp_path, f"fail-{time.time_ns()}")
     assert outcome.get("links_applied") == 0
     assert outcome.get("silent_noop") == ["links"]
     assert (outcome.get("error") or "").startswith("silent-noop:"), "must hard-fail"
@@ -123,8 +125,7 @@ def test_dedup_does_not_trip_canary(applier_mod, acli_mod, tmp_path) -> None:
     existing = [{"type": {"name": "Blocks"}, "outwardIssue": {"key": "DIG-2"}}]
     client = _client(existing_links=existing)
     mut = _link_update([{"action": "add", "type": "Blocks", "to_key": "DIG-2"}])
-    mut["_client"] = client
-    outcome = _apply(applier_mod, acli_mod, mut, tmp_path, f"dedup-{time.time_ns()}")
+    outcome = _apply(applier_mod, acli_mod, mut, client, tmp_path, f"dedup-{time.time_ns()}")
     assert client.set_relationship.call_count == 0, "deduped link must not be re-added"
     assert outcome.get("links_applied") == 0
     assert "silent_noop" not in outcome, "a fully-deduped re-sync must NOT fire the canary"

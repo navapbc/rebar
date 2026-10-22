@@ -21,6 +21,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 APPLIER_PATH = SCRIPTS_DIR.parent / "reconciler" / "applier.py"
@@ -57,6 +60,7 @@ def _make_fake_acli(client: MagicMock) -> MagicMock:
 
 
 def _update(key: str, local_id: str = "loc") -> dict:
+    """A batch dict, the shape the pure ``_cross_project_targets`` helper scans."""
     return {
         "direction": "outbound",
         "action": "update",
@@ -64,6 +68,17 @@ def _update(key: str, local_id: str = "loc") -> dict:
         "fields": {"summary": "x"},
         "local_id": local_id,
     }
+
+
+def _typed_update(key: str, local_id: str = "loc") -> Mutation:
+    """The typed outbound update ``apply()``'s batch form takes."""
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.update,
+        key,
+        OutboundUpdatePayload(changed_fields={"summary": "x"}, local_id=local_id),
+        {},
+    )
 
 
 # --- pure helper unit tests ------------------------------------------------
@@ -102,7 +117,9 @@ def test_apply_refuses_foreign_project_before_any_write(
     fake_client = MagicMock()
     with patch.object(applier_mod, "_load_acli", return_value=_make_fake_acli(fake_client)):
         with pytest.raises(applier_mod.CrossProjectTargetError) as exc:
-            applier_mod.apply([_update("DIG-100")], f"xproj-{int(time.time())}", repo_root=tmp_path)
+            applier_mod.apply(
+                [_typed_update("DIG-100")], f"xproj-{int(time.time())}", repo_root=tmp_path
+            )
     assert "DIG-100" in str(exc.value)
     assert "REB" in str(exc.value)
     fake_client.update_issue.assert_not_called()
@@ -116,7 +133,9 @@ def test_apply_allows_matching_project(applier_mod, acli_mod, tmp_path, monkeypa
     with patch.object(applier_mod, "_load_acli", return_value=_make_fake_acli(fake_client)):
         # Must not raise CrossProjectTargetError (other downstream effects are fine).
         try:
-            applier_mod.apply([_update("REB-1")], f"reb-ok-{int(time.time())}", repo_root=tmp_path)
+            applier_mod.apply(
+                [_typed_update("REB-1")], f"reb-ok-{int(time.time())}", repo_root=tmp_path
+            )
         except applier_mod.CrossProjectTargetError as exc:  # pragma: no cover
             pytest.fail(f"guard wrongly blocked a same-project update: {exc!r}")
 
@@ -155,7 +174,7 @@ def test_apply_allows_a_second_seeded_project_via_store_loading(
     with patch.object(applier_mod, "_load_acli", return_value=_make_fake_acli(fake_client)):
         try:
             applier_mod.apply(
-                [_update("DIG-1")], f"seeded-ok-{int(time.time())}", repo_root=tmp_path
+                [_typed_update("DIG-1")], f"seeded-ok-{int(time.time())}", repo_root=tmp_path
             )
         except applier_mod.CrossProjectTargetError as exc:  # pragma: no cover
             pytest.fail(
@@ -175,7 +194,7 @@ def test_apply_refuses_a_project_outside_the_seeded_set(
     with patch.object(applier_mod, "_load_acli", return_value=_make_fake_acli(fake_client)):
         with pytest.raises(applier_mod.CrossProjectTargetError) as exc:
             applier_mod.apply(
-                [_update("ACME-1")], f"seeded-bad-{int(time.time())}", repo_root=tmp_path
+                [_typed_update("ACME-1")], f"seeded-bad-{int(time.time())}", repo_root=tmp_path
             )
     assert "ACME-1" in str(exc.value)
     fake_client.update_issue.assert_not_called()

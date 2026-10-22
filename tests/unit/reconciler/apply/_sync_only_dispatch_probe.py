@@ -16,7 +16,6 @@ import json
 import os
 import subprocess
 import sys
-import types
 import urllib.error
 import uuid as _uuid
 from pathlib import Path
@@ -125,10 +124,8 @@ class _FakeClient:
         self._s.write_calls.append(f"unassign_issue({key})")
 
 
-def _make_ok_concurrency() -> types.ModuleType:
-    mod = types.ModuleType("_concurrency")
-    mod.snapshot_head = lambda _repo_root: "aabbccdd" * 5  # type: ignore[attr-defined]
-    return mod
+def _ok_snapshot_head(_repo_root) -> str:
+    return "aabbccdd" * 5
 
 
 def _fresh_modules() -> tuple[Any, Any, Any]:
@@ -144,7 +141,7 @@ def _wire(fetcher: Any, applier: Any, state: _FakeJiraState) -> _FakeClient:
     fake = _FakeClient(state)
     fetcher._load_acli = lambda: fake
     applier._load_acli = lambda: fake
-    applier._load_concurrency = lambda: _make_ok_concurrency()
+    applier.snapshot_head = _ok_snapshot_head
     from rebar.reconciler.adapters.jira.backend import JiraBackend
 
     rd = importlib.import_module("rebar.reconciler.run_differs")

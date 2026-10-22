@@ -18,6 +18,7 @@ import pytest
 
 from rebar.reconciler.apply_handlers import BatchApplyContext, dispatch_mutation, handle_create
 from rebar.reconciler.binding_store import BindingPersistError, BindingStore
+from rebar.reconciler.mutation_payloads import OutboundCreatePayload
 
 pytestmark = pytest.mark.unit
 
@@ -248,7 +249,7 @@ def test_no_dual_send_dispatch_mutation_issues_exactly_one_create(tmp_path):
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# The REAL batch entry point: applier.apply([create_dict], ...)
+# The REAL batch entry point: applier.apply([Mutation], ...)
 # ════════════════════════════════════════════════════════════════════════════════
 
 
@@ -272,18 +273,15 @@ def _read_manifest(path: Path) -> dict:
 
 def _typed_create(applier, local_id: str, *, summary: str, requires_create=()):
     mut_mod = applier._load_mutation_module()
-    payload = {
-        "summary": summary,
-        "issuetype": {"name": "Task"},
-        "local_id": local_id,
-    }
-    if requires_create:
-        payload["requires_create"] = list(requires_create)
     return mut_mod.Mutation(
         direction=mut_mod.MutationDirection.outbound,
         action=mut_mod.MutationAction.create,
         target=local_id,
-        payload=payload,
+        payload=OutboundCreatePayload(
+            fields={"summary": summary, "issuetype": {"name": "Task"}},
+            local_id=local_id,
+            requires_create=tuple(requires_create),
+        ),
         provenance={"source": "test"},
     )
 
@@ -314,7 +312,7 @@ class _SequencedCreateClient(_FakeClient):
 
 
 def test_applier_apply_live_batch_create_one_issue_one_binding(tmp_path, monkeypatch):
-    """The true production entry point: ``applier.apply([create_dict], ...)`` issues EXACTLY
+    """The true production entry point: ``applier.apply([Mutation], ...)`` issues EXACTLY
     ONE physical create, confirms a forward+reverse binding, never deletes, and records the
     create response as the mutation outcome."""
     applier = _load_applier("applier_live")
@@ -323,9 +321,15 @@ def test_applier_apply_live_batch_create_one_issue_one_binding(tmp_path, monkeyp
     _init_git_repo(tmp_path)
     store = BindingStore(tmp_path / ".tickets-tracker")
 
-    manifest_path = applier.apply(
-        [_mutation("L-live")], "pass-live", repo_root=tmp_path, binding_store=store
+    mut_mod = applier._load_mutation_module()
+    live = mut_mod.Mutation(
+        direction=mut_mod.MutationDirection.outbound,
+        action=mut_mod.MutationAction.create,
+        target="L-live",
+        payload=OutboundCreatePayload(fields=_mutation("L-live")["fields"], local_id="L-live"),
+        provenance={"source": "test"},
     )
+    manifest_path = applier.apply([live], "pass-live", repo_root=tmp_path, binding_store=store)
 
     assert client.creates == 1
     assert client.deletes == []

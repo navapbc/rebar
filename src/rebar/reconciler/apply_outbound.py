@@ -120,8 +120,7 @@ def _apply_outbound_create(
 # Allowlist of fields that can be pushed outbound via update_issue. Other
 # fields in the changed_fields set are silently dropped — pushing arbitrary
 # fields outbound is a higher-blast-radius change that lands in a follow-up
-# story. Status is governed separately by REBAR_RECONCILER_STATUS_GATING.
-# "parent" is intentionally included but routed to client.set_parent
+# story. "parent" is intentionally included but routed to client.set_parent
 # (REST PUT /rest/api/3/issue/{key} {"fields":{"parent":{"key":K}}}) rather
 # than client.update_issue — ACLI edit does not support reparenting
 # (ticket 8b25-ae7a-efc3-47f6).

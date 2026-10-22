@@ -27,6 +27,8 @@ BATCH_DISPATCH_PATH = SRC / "batch_dispatch.py"
 
 _mut_mod = _load_mutation_module()
 Mutation = _mut_mod.Mutation
+MutationAction = _mut_mod.MutationAction
+MutationDirection = _mut_mod.MutationDirection
 
 _WRITE_METHODS = frozenset(
     {
@@ -184,18 +186,28 @@ def test_ac1_outbound_batch_families_single_physical_owner(tmp_path):
 
 
 def test_ac2_unsupported_action_typed_error_before_any_effect():
-    """AC2: a VALID combo with NO typed leaf (inbound delete / inbound probe) raises a
-    typed, provider-neutral ``UnknownActionError`` BEFORE any effect — zero writes.
+    """AC2: every valid combo has a typed leaf, the unowned inbound delete / inbound probe
+    pairs cannot even be constructed, and a pair that reaches the dispatcher without a leaf
+    still raises a typed, provider-neutral ``UnknownActionError`` BEFORE any effect.
     """
     errs = _load_errors_module()
-    unsupported = [c for c in _supported_combos() if c not in typed_dispatch._LEAVES]
-    assert unsupported, "expected at least one valid-but-unowned combo (inbound delete/probe)"
-    for direction, action in unsupported:
+    assert set(_supported_combos()) == set(typed_dispatch._LEAVES), (
+        "every valid (direction, action) pair must have exactly one typed owner"
+    )
+    for action in (MutationAction.delete, MutationAction.probe):
+        with pytest.raises(ValueError):
+            Mutation(MutationDirection.inbound, action, target="CEN-9", payload={}, provenance={})
+
+    # A pair with no leaf can only reach the dispatcher by bypassing ``__post_init__``.
+    for action in (MutationAction.delete, MutationAction.probe):
         fake = _ProtocolFake()
-        mutation = Mutation(direction, action, target="CEN-9", payload={}, provenance={})
+        mutation = Mutation(
+            MutationDirection.outbound, action, target="CEN-9", payload={}, provenance={}
+        )
+        object.__setattr__(mutation, "direction", MutationDirection.inbound)
         with pytest.raises(errs.UnknownActionError):
             typed_dispatch._apply_typed(mutation, client=fake, repo_root=None)
-        assert fake.writes == [], f"{(direction, action)} performed a write before erroring"
+        assert fake.writes == [], f"(inbound, {action.value}) performed a write before erroring"
 
 
 # ════════════════════════════════════════════════════════════════════════════════

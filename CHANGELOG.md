@@ -38,6 +38,15 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): the reconciler's batch apply takes typed `Mutation`s only.**
+  `rebar.reconciler.applier.apply(mutations, pass_id, ...)` raises `TypeError` for a raw dict
+  element, and for an outbound create whose payload is a plain dict rather than an
+  `OutboundCreatePayload`. `Mutation(inbound, delete)` and `Mutation(inbound, probe)` raise
+  `ValueError`; neither pair had a handler. The unused summary-executor, payload-shadow and
+  `_concurrency` modules are deleted, `snapshot_head` moved to `applier`, and
+  `REBAR_RECONCILER_VERBOSE` is no longer read. Details in
+  [docs/release-notes.md](docs/release-notes.md).
+
 - **BREAKING (pre-1.0): reconciler scratch moves from `<repo>/bridge_state/` to
   `<repo>/.rebar/bridge/`, with bounded retention.** Per-pass snapshots and manifests, sync
   logs, the daily `bridge_alerts/*.jsonl` files, `mapping.json`, and

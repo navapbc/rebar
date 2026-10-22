@@ -9,23 +9,35 @@ from unittest.mock import patch
 import pytest
 
 from rebar.reconciler import applier, scratch_retention
+from rebar.reconciler.mutation_payloads import OutboundCreatePayload
 
 
 def _make_mutations(n: int) -> list:
     mutation_mod = applier._load_mutation_module()
     directions = mutation_mod.MutationDirection
     actions = mutation_mod.MutationAction
-    action_cycle = [actions.create, actions.update, actions.delete]
-    return [
-        mutation_mod.Mutation(
-            direction=directions.inbound if i % 2 == 0 else directions.outbound,
-            action=action_cycle[i % len(action_cycle)],
-            target=f"ISSUE-{i:05d}",
-            payload={"i": i},
-            provenance={"src": "bridge-cap-heldout"},
+    # (inbound, delete) is not a valid pair, so the inbound cycle uses clean_label
+    # in its slot.
+    action_cycles = {
+        directions.inbound: [actions.create, actions.update, actions.clean_label],
+        directions.outbound: [actions.create, actions.update, actions.delete],
+    }
+    out = []
+    for i in range(n):
+        direction = directions.inbound if i % 2 == 0 else directions.outbound
+        action = action_cycles[direction][i % 3]
+        # An outbound create carries a typed payload; the batch form refuses a plain dict.
+        outbound_create = (direction, action) == (directions.outbound, actions.create)
+        out.append(
+            mutation_mod.Mutation(
+                direction=direction,
+                action=action,
+                target=f"ISSUE-{i:05d}",
+                payload=OutboundCreatePayload(fields={"i": i}) if outbound_create else {"i": i},
+                provenance={"src": "bridge-cap-heldout"},
+            )
         )
-        for i in range(n)
-    ]
+    return out
 
 
 @pytest.mark.parametrize(

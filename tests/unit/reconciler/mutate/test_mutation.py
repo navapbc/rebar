@@ -143,6 +143,27 @@ def test_outbound_repair_property_rejected(mut: ModuleType) -> None:
     assert "action" in error_msg, f"ValueError missing 'action' in: {error_msg!r}"
 
 
+@pytest.mark.parametrize("action", ["delete", "probe"])
+def test_inbound_delete_and_probe_rejected(mut: ModuleType, action: str) -> None:
+    """``(inbound, delete)`` and ``(inbound, probe)`` have no leaf handler, so
+    ``_VALID_COMBINATIONS`` excludes them and ``Mutation`` raises ValueError."""
+    with pytest.raises(ValueError, match="direction=inbound"):
+        mut.Mutation(
+            direction=mut.MutationDirection.inbound,
+            action=mut.MutationAction(action),
+            target="issue-123",
+            payload={},
+            provenance={},
+        )
+
+
+def test_valid_combinations_are_the_ten_registered_leaves(mut: ModuleType) -> None:
+    """``_VALID_COMBINATIONS`` is exactly the 10 pairs ``typed_dispatch._LEAVES`` registers."""
+    typed_dispatch = importlib.import_module("rebar.reconciler.typed_dispatch")
+    assert len(mut._VALID_COMBINATIONS) == 10
+    assert mut._VALID_COMBINATIONS == set(typed_dispatch._LEAVES)
+
+
 # ---------------------------------------------------------------------------
 # Immutability and hashability tests
 # ---------------------------------------------------------------------------
@@ -245,7 +266,7 @@ def _build_six_mutations(mut: ModuleType) -> list:
             provenance={"src": "r5"},
         ),
         mut.Mutation(
-            direction=mut.MutationDirection.inbound,
+            direction=mut.MutationDirection.outbound,
             action=mut.MutationAction.probe,
             target="issue-600",
             payload={"probe": True},

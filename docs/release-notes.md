@@ -8,6 +8,38 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING: the reconciler's batch apply takes typed `Mutation`s only
+
+The reconciler's internal Python surface drops code no production pass reached:
+
+- `rebar.reconciler.applier.apply(mutations, pass_id, ...)`, the batch form, takes typed
+  `Mutation`s only. A raw dict element raises `TypeError` before any dispatch or write.
+  `batch_dispatch._mutation_to_batch_dict` raises `TypeError` for an outbound create whose
+  payload is a plain dict; build an `OutboundCreatePayload`. A plain-dict outbound update
+  reads its fields from `changed_fields` only (the `"fields"` fallback is gone), and any other
+  plain-dict action carries no fields.
+- `mutation._VALID_COMBINATIONS` lists exactly the 10 `(direction, action)` pairs that have a
+  leaf handler, and `typed_dispatch` checks at import that its registry matches.
+  `Mutation(inbound, delete)` and `Mutation(inbound, probe)` raise `ValueError`.
+- Deleted modules: `summary_route`, `adapters/jira/summary_operation`,
+  `adapters/jira_datacenter/summary_executor`, `payload_shadow` and `_concurrency`. Also gone:
+  `BatchApplyContext.summary_executor`, `JiraBackend.execute_summary_operation` and
+  `observe_summary_operation`, and `acli_rest.ONE_ATTEMPT_NO_SLEEP` with the `retry_policy`
+  keyword of `get_issue_by_rest`, `_direct_rest_get` and `_rest_urlopen_with_retry`.
+- `snapshot_head` and `EMPTY_REPO_SENTINEL` now live in `applier`. `_recheck_drift`,
+  `make_guarded_execute`, `run_migrated_reroute` and `reroute_migrated_plans` take that
+  `snapshot_head` callable: `snapshot_head=` replaces `concurrency=`.
+- `adapters/jira/outbound_fields.py` keeps only `_map_local_to_jira_fields` and the
+  local→Jira maps. `_diff_fields`, `_extract_jira_field` and the other diff helpers are gone;
+  the pass diffs through `outbound_field_diff.compute_update_fields`.
+  `REBAR_RECONCILER_VERBOSE`, read only by `_diff_fields`, is no longer read.
+- `acli_subprocess._MAX_BACKOFF_S` is gone; the module uses `_errors.MAX_BACKOFF_S` (60 s).
+
+ADR 0107 note: this change makes both deletions of the ADR's "Delete" step (the two-shape
+CREATE branch in `_mutation_to_batch_dict` and `apply()`'s untyped-dict fallback). The step's
+exit criterion, no constructor of a plain-dict `Mutation.payload` in production code, is not
+met: `binding_walk`, `differ`, `invariants` and `run_differs` still build plain-dict payloads.
+
 ## BREAKING: reconciler scratch moves to `.rebar/bridge/` with bounded retention
 
 The reconciler's repo-local scratch directory moves from `<repo_root>/bridge_state/` to

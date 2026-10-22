@@ -22,6 +22,9 @@ from types import ModuleType
 
 import pytest
 
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 ENGINE = REPO_ROOT / "src" / "rebar" / "reconciler"
 
@@ -386,13 +389,15 @@ def test_applier_apply_invokes_abort_check(repo: Path) -> None:
         calls.append(1)
         raise RuntimeError("aborted at checkpoint")
 
-    mutation = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-9000",
-        "fields": {"summary": "should never be applied"},
-        "local_id": "abort-id",
-    }
+    mutation = Mutation(
+        MutationDirection.outbound,
+        MutationAction.update,
+        "DIG-9000",
+        OutboundUpdatePayload(
+            changed_fields={"summary": "should never be applied"}, local_id="abort-id"
+        ),
+        {},
+    )
     with pytest.raises(RuntimeError, match="aborted at checkpoint"):
         applier.apply([mutation], "pass-abort", repo_root=repo, abort_check=abort_check)
     assert calls, "abort_check must be called before applying the mutation"

@@ -15,11 +15,70 @@ every ``isinstance(..., OutboundXPayload)`` assertion below failed).
 
 from __future__ import annotations
 
+import inspect
 import types
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+from rebar.reconciler import (
+    apply_base,
+    batch_dispatch,
+    binding_walk,
+    differ,
+    invariants,
+    mutation,
+    outbound_mutation_builders,
+    outbound_pass,
+    run_differs,
+    typed_dispatch,
+)
+
+_TYPED_PAYLOAD_MODULE_NAME = "mutation_payloads"
+
+_PRODUCTION_MODULES = (
+    typed_dispatch,
+    batch_dispatch,
+    apply_base,
+    differ,
+    outbound_mutation_builders,
+    run_differs,
+    outbound_pass,
+    binding_walk,
+    invariants,
+)
+
+# This story's cutover call sites (ADR 0107 "Cut"/"Delete" step): these are
+# the ONLY production modules allowed to reference the typed payload
+# dataclasses. Every other named production module above must not.
+_CUTOVER_MODULES = (outbound_pass, batch_dispatch)
+
+
+def test_only_the_named_cutover_modules_import_typed_payloads():
+    for module in _PRODUCTION_MODULES:
+        source = Path(inspect.getfile(module)).read_text()
+        references_typed_payloads = _TYPED_PAYLOAD_MODULE_NAME in source
+        if module in _CUTOVER_MODULES:
+            assert references_typed_payloads, (
+                f"{module.__name__} is a named ADR 0107 cutover call site and must "
+                f"reference {_TYPED_PAYLOAD_MODULE_NAME!r}"
+            )
+        else:
+            assert not references_typed_payloads, (
+                f"{module.__name__} references {_TYPED_PAYLOAD_MODULE_NAME!r} — the typed "
+                "payload cutover is scoped to outbound_pass/batch_dispatch only; wiring "
+                "spread further than the ADR's scope"
+            )
+
+
+def test_valid_combinations_are_exactly_the_registered_leaves():
+    # 10 live combinations; the two dead inbound pairs are neither valid nor registered.
+    assert len(mutation._VALID_COMBINATIONS) == 10
+    assert set(typed_dispatch._LEAVES) == mutation._VALID_COMBINATIONS
+    registered = {(d.value, a.value) for d, a in typed_dispatch._LEAVES}
+    assert ("inbound", "delete") not in registered
+    assert ("inbound", "probe") not in registered
 
 
 @pytest.fixture

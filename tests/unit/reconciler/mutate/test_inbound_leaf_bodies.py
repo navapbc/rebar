@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -87,14 +86,11 @@ def _patch_apply_deps(applier, monkeypatch):
     (modules live under the ``rebar.reconciler`` package, not a
     bare ``rebar.reconciler`` package) — so the real load raises ModuleNotFoundError
     before any inbound dispatch happens. Mirror test_e2e_dedup_pass: stub
-    ``_load_acli`` (offline client) and ``_load_concurrency`` (no git in tmp_path).
+    ``_load_acli`` (offline client) and ``snapshot_head`` (no git in tmp_path).
     """
     # S4: _load_acli returns the transport (client) directly.
     monkeypatch.setattr(applier, "_load_acli", lambda: MagicMock())
-
-    fake_conc = types.ModuleType("concurrency_stub")
-    fake_conc.snapshot_head = lambda _repo_root: "deadbeef" * 5  # type: ignore[attr-defined]
-    monkeypatch.setattr(applier, "_load_concurrency", lambda: fake_conc)
+    monkeypatch.setattr(applier, "snapshot_head", lambda _repo_root: "deadbeef" * 5)
 
 
 def _event_files(tracker_dir: Path, local_id: str) -> list[Path]:

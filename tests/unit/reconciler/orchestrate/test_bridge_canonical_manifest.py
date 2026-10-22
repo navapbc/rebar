@@ -17,6 +17,7 @@ from rebar.reconciler.mutation import (
     MutationDirection,
     serialize_manifest,
 )
+from rebar.reconciler.mutation_payloads import OutboundCreatePayload, OutboundUpdatePayload
 from rebar.reconciler.operation_outcome import (
     DelaySource,
     Disposition,
@@ -59,6 +60,27 @@ _CANONICAL_MUTATION_HASH = "ad5bfa390730c7aa763d8187c8dde666d4429cead32f8228a0e5
 
 def _canonical_mutation_set() -> list[Mutation]:
     return [Mutation(d, a, t, dict(p), dict(prov)) for d, a, t, p, prov in _CANONICAL_MUTATIONS]
+
+
+def _outbound_update(key: str, local_id: str, fields: dict) -> Mutation:
+    """A typed outbound update, the shape the outbound pass hands ``apply()``."""
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.update,
+        key,
+        OutboundUpdatePayload(changed_fields=fields, local_id=local_id),
+        {"local_id": local_id},
+    )
+
+
+def _outbound_create(local_id: str, fields: dict) -> Mutation:
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.create,
+        local_id,
+        OutboundCreatePayload(fields=fields, local_id=local_id),
+        {"local_id": local_id},
+    )
 
 
 def test_canonical_mutation_hash_is_a_byte_stable_golden() -> None:
@@ -122,20 +144,8 @@ def test_canonical_uncapped_sync_retains_field_comparable_manifest(
     """Canonical LIVE keeps the same auditable entry shape preview exposes."""
     mode_mod = applier._load_mode_module()
     mutations = [
-        {
-            "direction": "outbound",
-            "action": "update",
-            "key": "DIG-41",
-            "local_id": "local-41",
-            "fields": {"summary": "new summary", "priority": "High"},
-        },
-        {
-            "direction": "outbound",
-            "action": "create",
-            "key": "local-42",
-            "local_id": "local-42",
-            "fields": {"summary": "new ticket"},
-        },
+        _outbound_update("DIG-41", "local-41", {"summary": "new summary", "priority": "High"}),
+        _outbound_create("local-42", {"summary": "new ticket"}),
     ]
     legacy_batch = scratch_retention.snapshots_dir(tmp_path) / "sync.manifest.json"
     legacy_batch.parent.mkdir(parents=True)
@@ -178,14 +188,25 @@ def test_canonical_uncapped_sync_retains_field_comparable_manifest(
                 "action": "create",
                 "target": "local-42",
                 "local_id": "local-42",
-                "fields": {"summary": "new ticket"},
+                "fields": {
+                    "summary": "new ticket",
+                    "comments": [],
+                    "labels": [],
+                    "local_id": "local-42",
+                },
             },
             {
                 "direction": "outbound",
                 "action": "update",
                 "target": "DIG-41",
                 "local_id": "local-41",
-                "fields": {"summary": "new summary", "priority": "High"},
+                "fields": {
+                    "changed_fields": {"summary": "new summary", "priority": "High"},
+                    "comments": [],
+                    "labels": [],
+                    "links": [],
+                    "local_id": "local-41",
+                },
             },
         ],
         "deferred": [],
@@ -198,20 +219,8 @@ def test_canonical_sync_manifest_reports_batch_failures_exactly(
     """Canonical tally reflects the outcomes produced by the real batch seam."""
     mode_mod = applier._load_mode_module()
     mutations = [
-        {
-            "direction": "outbound",
-            "action": "update",
-            "key": "DIG-42",
-            "local_id": "local-42",
-            "fields": {"summary": "accepted"},
-        },
-        {
-            "direction": "outbound",
-            "action": "update",
-            "key": "DIG-41",
-            "local_id": "local-41",
-            "fields": {"summary": "rejected"},
-        },
+        _outbound_update("DIG-42", "local-42", {"summary": "accepted"}),
+        _outbound_update("DIG-41", "local-41", {"summary": "rejected"}),
     ]
     batch_path = scratch_retention.snapshots_dir(tmp_path) / "sync.manifest.json"
     batch_path.parent.mkdir(parents=True)
@@ -302,13 +311,7 @@ def test_canonical_sync_tally_excludes_suppressed_inbound_mutations(
 def test_capped_canonical_sync_reports_plan_tally_and_deferred(tmp_path: Path, monkeypatch) -> None:
     mode_mod = applier._load_mode_module()
     mutations = [
-        {
-            "direction": "outbound",
-            "action": "update",
-            "key": f"DIG-{number}",
-            "local_id": f"local-{number}",
-            "fields": {"summary": str(number)},
-        }
+        _outbound_update(f"DIG-{number}", f"local-{number}", {"summary": str(number)})
         for number in (3, 1, 2)
     ]
     manifest_path = scratch_retention.snapshots_dir(tmp_path) / "sync.manifest.json"
@@ -363,15 +366,7 @@ def test_canonical_sync_tally_degrades_safely_when_batch_manifest_is_unreadable(
     monkeypatch.setattr(applier, "_apply_batch", fake_batch)
 
     result_path = applier.apply(
-        [
-            {
-                "direction": "outbound",
-                "action": "update",
-                "key": "DIG-1",
-                "local_id": "local-1",
-                "fields": {"summary": "one"},
-            }
-        ],
+        [_outbound_update("DIG-1", "local-1", {"summary": "one"})],
         pass_id="canonical-sync-unreadable",
         repo_root=tmp_path,
         mode=mode_mod.Mode.LIVE,

@@ -16,25 +16,24 @@ assignee), not just assignee.
 
 from __future__ import annotations
 
-import importlib
-from pathlib import Path
-from types import ModuleType
+from typing import Any
 
-import pytest
-
-from rebar.reconciler.adapters.jira import outbound_fields as _of  # 625b: adapter-internal
-
-REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
+from rebar.reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.outbound_field_diff import compute_update_fields
 
 
-def _load_differ() -> ModuleType:
-    return importlib.import_module("rebar.reconciler.outbound_differ")
-
-
-@pytest.fixture(scope="module")
-def differ() -> ModuleType:
-    return _load_differ()
+def _diff(ticket: dict, jira: dict, *, prev_jira_fields: dict | None = None) -> dict[str, Any]:
+    """Run the live outbound field diff with the Jira backend's mappers. A
+    ``prev_jira_fields`` entry is the last-synced Jira value (the arbitration baseline)."""
+    backend = JiraBackend(transport=object())
+    return compute_update_fields(
+        ticket,
+        jira,
+        inbound_mapper=backend.inbound,
+        outbound_mapper=backend.outbound,
+        jira_key="DIG-1",
+        prev_snapshot={"DIG-1": prev_jira_fields} if prev_jira_fields else None,
+    )
 
 
 ALICE = {"accountId": "alice", "displayName": "Alice", "emailAddress": "alice@x.com"}
@@ -71,17 +70,17 @@ def _jira(**ov) -> dict:
 # --- Jira-side change, local unchanged -> SUPPRESS outbound (mirror inbound) -----
 
 
-def test_jira_side_assignee_change_suppressed(differ):
+def test_jira_side_assignee_change_suppressed() -> None:
     # last sync: assignee=Alice; local still Alice; Jira now Bob (teammate edit).
-    changed = _of._diff_fields(
+    changed = _diff(
         _ticket(assignee="alice@x.com"), _jira(assignee=BOB), prev_jira_fields={"assignee": ALICE}
     )
     assert "assignee" not in changed, "Jira-side assignee change must mirror inbound, not revert"
 
 
-def test_jira_side_status_change_suppressed(differ):
+def test_jira_side_status_change_suppressed() -> None:
     # local 'open' maps to 'To Do' == prev; Jira now 'In Progress'.
-    changed = _of._diff_fields(
+    changed = _diff(
         _ticket(status="open"),
         _jira(status={"name": "In Progress"}),
         prev_jira_fields={"status": {"name": "To Do"}},
@@ -89,8 +88,8 @@ def test_jira_side_status_change_suppressed(differ):
     assert "status" not in changed, "Jira-side status change must mirror inbound, not revert"
 
 
-def test_jira_side_description_change_suppressed(differ):
-    changed = _of._diff_fields(
+def test_jira_side_description_change_suppressed() -> None:
+    changed = _diff(
         _ticket(description="old body"),
         _jira(description="new body from Jira"),
         prev_jira_fields={"description": "old body"},
@@ -101,16 +100,16 @@ def test_jira_side_description_change_suppressed(differ):
 # --- local change -> local-wins still emits outbound ----------------------------
 
 
-def test_local_assignee_change_still_emits(differ):
+def test_local_assignee_change_still_emits() -> None:
     # last sync: Alice; local changed to Bob; Jira unchanged (Alice).
-    changed = _of._diff_fields(
+    changed = _diff(
         _ticket(assignee="bob@x.com"), _jira(assignee=ALICE), prev_jira_fields={"assignee": ALICE}
     )
     assert changed.get("assignee") == "bob@x.com", "a genuine local change still pushes outbound"
 
 
-def test_local_description_change_still_emits(differ):
-    changed = _of._diff_fields(
+def test_local_description_change_still_emits() -> None:
+    changed = _diff(
         _ticket(description="locally edited"),
         _jira(description="old body"),
         prev_jira_fields={"description": "old body"},
@@ -121,22 +120,19 @@ def test_local_description_change_still_emits(differ):
 # --- degrade: no prev -> local-wins (no regression) -----------------------------
 
 
-def test_no_prev_degrades_to_local_wins(differ):
-    changed = _of._diff_fields(_ticket(assignee="alice@x.com"), _jira(assignee=BOB))
+def test_no_prev_degrades_to_local_wins() -> None:
+    changed = _diff(_ticket(assignee="alice@x.com"), _jira(assignee=BOB))
     assert changed.get("assignee") == "alice@x.com", (
         "without prev, behaviour is unchanged local-wins"
     )
 
 
-# --- title, on the LIVE canonical path (outbound_field_diff) --------------------
+# --- title, on the canonical (local-shape) diff ---------------------------------
 #
-# The cases above drive ``adapters/jira/outbound_fields._diff_fields``, which no
-# production caller reaches any more: since ticket 625b the pass runs
-# ``outbound_field_diff.diff_canonical_fields`` (outbound_differ.py imports
-# ``compute_update_fields`` from it). ``title`` is the one inbound-mirrored field
-# whose local and Jira names differ (``title`` vs ``summary``), and it is the field
-# the module docstring above names first — so it is pinned here against the module
-# the pass actually executes.
+# ``title`` is the one inbound-mirrored field whose local and Jira names differ
+# (``title`` vs ``summary``), so it is pinned directly against
+# ``outbound_field_diff.diff_canonical_fields``, the diff ``compute_update_fields``
+# runs after canonicalizing the snapshot.
 
 
 def _canonical(**ov) -> dict:

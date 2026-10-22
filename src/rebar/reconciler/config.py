@@ -69,8 +69,7 @@ def resolve_jql_backoff(env: dict[str, str] | None = None) -> tuple[int, float, 
 EXCLUDED_SYNC_TYPES: frozenset[str] = frozenset({"session_log", "code_review", "identity"})
 
 # Status mapping: local-side status name -> Jira-side status name.
-# Used by outbound_update v1's status-routing path (gated behind
-# REBAR_RECONCILER_STATUS_GATING) and by the preflight status-mapping scan
+# Used by outbound_update v1's status-routing path and by the preflight status-mapping scan
 # in reconcile.py — preflight aborts a pass when any update mutation
 # references a status absent from this mapping. An empty dict is a valid
 # kill-switch — preflight tolerates an empty mapping when no update

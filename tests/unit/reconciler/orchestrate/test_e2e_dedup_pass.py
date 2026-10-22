@@ -8,7 +8,6 @@ rebar-id label produces zero create_issue calls.
 from __future__ import annotations
 
 import importlib
-import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -96,21 +95,15 @@ class FakeAcliClient:
 
 
 # ---------------------------------------------------------------------------
-# Fake concurrency module (avoids git subprocess calls in tmp_path)
+# Stable tickets-branch HEAD (avoids git subprocess calls in tmp_path)
 # ---------------------------------------------------------------------------
 
 _STABLE_SHA = "deadbeef" * 5  # 40-char stable HEAD for drift guard
 
 
-def _make_fake_concurrency() -> types.ModuleType:
-    """Return a _concurrency stub with a stable HEAD."""
-
-    def _fake_snapshot_head(_repo_root) -> str:
-        return _STABLE_SHA
-
-    mod = types.ModuleType("_concurrency_e2e_stub")
-    mod.snapshot_head = _fake_snapshot_head  # type: ignore[attr-defined]
-    return mod
+def _fake_snapshot_head(_repo_root) -> str:
+    """Stand-in for ``applier.snapshot_head`` with a stable HEAD."""
+    return _STABLE_SHA
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +132,6 @@ def test_pre_existing_rebar_id_produces_zero_creates(tmp_path, differ, applier):
     a caught symptom, not the cause. Regression history: bugs a666/b38a/38fd/4cc1.
     """
     fake_client = FakeAcliClient()
-    fake_concurrency = _make_fake_concurrency()
 
     # S4: _load_acli returns the transport (client) directly.
 
@@ -177,7 +169,7 @@ def test_pre_existing_rebar_id_produces_zero_creates(tmp_path, differ, applier):
     # (no phantom create, no ghost label write-back).
     with (
         patch.object(applier, "_load_acli", return_value=fake_client),
-        patch.object(applier, "_load_concurrency", return_value=fake_concurrency),
+        patch.object(applier, "snapshot_head", _fake_snapshot_head),
     ):
         applier.apply(mutations, "pass-001", repo_root=tmp_path)
 

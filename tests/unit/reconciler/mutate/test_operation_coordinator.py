@@ -831,7 +831,7 @@ def test_coordinate_and_fuse_all_applied_matches_coordinator(
 # ── REROUTE surface HAPPY PATH (handed to the implementer) ───────────────────────
 #
 # The LIVE cutover wires three new ``batch_dispatch`` helpers into ``applier._apply_batch``:
-#   * ``make_guarded_execute(*, abort_check, recheck_drift, concurrency, repo_root,
+#   * ``make_guarded_execute(*, abort_check, recheck_drift, snapshot_head, repo_root,
 #     head_pin_cell, dispatch_fn)`` — builds the coordinator's injected ``execute``
 #     closure, hosting the per-mutation lost-lease ``abort_check()`` FIRST then the
 #     HEAD-drift recheck (threading the mutable head-pin cell), then delegating the
@@ -867,7 +867,7 @@ def test_make_guarded_execute_runs_abort_then_drift_then_dispatch(
     def abort_check():
         order.append("abort")
 
-    def recheck_drift(_concurrency, _repo_root, pin):
+    def recheck_drift(_snapshot_head, _repo_root, pin):
         order.append(("drift", pin))
         return pin + "-next"
 
@@ -879,7 +879,7 @@ def test_make_guarded_execute_runs_abort_then_drift_then_dispatch(
     execute = batch_dispatch_mod.make_guarded_execute(
         abort_check=abort_check,
         recheck_drift=recheck_drift,
-        concurrency=object(),
+        snapshot_head=object(),
         repo_root="/repo",
         head_pin_cell=cell,
         dispatch_fn=dispatch_fn,
@@ -1370,7 +1370,7 @@ def test_guarded_execute_abort_check_raises_before_any_dispatch(
     execute = batch_dispatch_mod.make_guarded_execute(
         abort_check=abort_check,
         recheck_drift=lambda _c, _r, pin: pin,
-        concurrency=object(),
+        snapshot_head=object(),
         repo_root="/repo",
         head_pin_cell=["pin0"],
         dispatch_fn=dispatch_fn,
@@ -1400,7 +1400,7 @@ def test_guarded_execute_hostile_drift_raises_before_dispatch(batch_dispatch_mod
     execute = batch_dispatch_mod.make_guarded_execute(
         abort_check=None,
         recheck_drift=recheck_drift,
-        concurrency=object(),
+        snapshot_head=object(),
         repo_root="/repo",
         head_pin_cell=["pin0"],
         dispatch_fn=dispatch_fn,
@@ -1462,7 +1462,7 @@ def test_guarded_execute_wiring_adds_no_legacy_retry_nesting(
     dispatch_fn = batch_dispatch_mod.make_guarded_execute(
         abort_check=None,
         recheck_drift=lambda _c, _r, pin: pin,
-        concurrency=object(),
+        snapshot_head=object(),
         repo_root="/repo",
         head_pin_cell=head_cell,
         dispatch_fn=lambda _p, _m: coordinator_mod.AtomicSignal(status="applied"),
@@ -1500,7 +1500,7 @@ def test_reroute_passthrough_when_plan_mixes_create_and_noncreate(
         ctx=object(),
         abort_check=None,
         recheck_drift=lambda _c, _r, pin: pin,
-        concurrency=object(),
+        snapshot_head=object(),
         repo_root="/repo",
         head_pin_cell=["pin0"],
         outcomes_sink=[],
@@ -1537,7 +1537,7 @@ def test_reroute_excludes_migrated_keeps_legacy_and_counts_deferred(
         ctx=object(),
         abort_check=None,
         recheck_drift=lambda _c, _r, pin: pin,
-        concurrency=object(),
+        snapshot_head=object(),
         repo_root="/repo",
         head_pin_cell=["pin0"],
         outcomes_sink=sink,

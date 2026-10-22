@@ -18,6 +18,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from rebar.reconciler import scratch_retention
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
 # ---------------------------------------------------------------------------
 # Module loading
@@ -46,11 +48,8 @@ def applier():
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_concurrency():
-    """Return a mock concurrency module with a stable snapshot_head."""
-    mock_concurrency = MagicMock()
-    mock_concurrency.snapshot_head.return_value = "abc1234def567890" * 2
-    return mock_concurrency
+# applier.snapshot_head always returns this SHA, so no drift is detected.
+_STABLE_HEAD = "abc1234def567890" * 2
 
 
 def _make_mock_acli(update_return=None):
@@ -66,18 +65,25 @@ def _make_mock_acli(update_return=None):
     return fake_acli, mock_client
 
 
-def _make_update_mutation(jira_key: str = "DIG-123", labels=None, watchers=None) -> dict:
-    """Return an update mutation dict with set-valued fields."""
+def _update(jira_key: str, fields: dict) -> Mutation:
+    """A typed outbound update Mutation changing ``fields`` on ``jira_key``."""
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.update,
+        jira_key,
+        OutboundUpdatePayload(changed_fields=fields),
+        {},
+    )
+
+
+def _make_update_mutation(jira_key: str = "DIG-123", labels=None, watchers=None) -> Mutation:
+    """Return an update mutation with set-valued fields."""
     fields: dict = {}
     if labels is not None:
         fields["labels"] = labels
     if watchers is not None:
         fields["watchers"] = watchers
-    return {
-        "action": "update",
-        "key": jira_key,
-        "fields": fields,
-    }
+    return _update(jira_key, fields)
 
 
 # ---------------------------------------------------------------------------
@@ -92,14 +98,13 @@ def test_provenance_persisted_for_labels_field(applier, tmp_path):
     mutation = _make_update_mutation("DIG-123", labels=["bug", "backend"])
 
     fake_acli, _ = _make_mock_acli()
-    fake_concurrency = _make_mock_concurrency()
 
     with (
         __import__("unittest.mock", fromlist=["patch"]).patch.object(
             applier, "_load_acli", return_value=fake_acli
         ),
         __import__("unittest.mock", fromlist=["patch"]).patch.object(
-            applier, "_load_concurrency", return_value=fake_concurrency
+            applier, "snapshot_head", return_value=_STABLE_HEAD
         ),
     ):
         applier.apply([mutation], pass_id="test-prov-01", repo_root=tmp_path)
@@ -124,14 +129,13 @@ def test_provenance_labels_contains_field_values(applier, tmp_path):
     mutation = _make_update_mutation("DIG-456", labels=["frontend", "ux"])
 
     fake_acli, _ = _make_mock_acli(update_return={"key": "DIG-456"})
-    fake_concurrency = _make_mock_concurrency()
 
     with (
         __import__("unittest.mock", fromlist=["patch"]).patch.object(
             applier, "_load_acli", return_value=fake_acli
         ),
         __import__("unittest.mock", fromlist=["patch"]).patch.object(
-            applier, "_load_concurrency", return_value=fake_concurrency
+            applier, "snapshot_head", return_value=_STABLE_HEAD
         ),
     ):
         applier.apply([mutation], pass_id="test-prov-02", repo_root=tmp_path)
@@ -152,7 +156,6 @@ def test_provenance_written_atomically(applier, tmp_path):
 
     mutation = _make_update_mutation("DIG-789", labels=["alpha"])
     fake_acli, _ = _make_mock_acli()
-    fake_concurrency = _make_mock_concurrency()
 
     rename_calls: list[tuple[str, str]] = []
     real_replace = os.replace
@@ -163,7 +166,7 @@ def test_provenance_written_atomically(applier, tmp_path):
 
     with (
         patch.object(applier, "_load_acli", return_value=fake_acli),
-        patch.object(applier, "_load_concurrency", return_value=fake_concurrency),
+        patch.object(applier, "snapshot_head", return_value=_STABLE_HEAD),
         patch("os.replace", side_effect=capturing_replace),
     ):
         applier.apply([mutation], pass_id="test-prov-atomic", repo_root=tmp_path)
@@ -191,14 +194,13 @@ def test_provenance_preserves_existing_mapping_entries(applier, tmp_path):
 
     mutation = _make_update_mutation("DIG-999", labels=["ops"])
     fake_acli, _ = _make_mock_acli()
-    fake_concurrency = _make_mock_concurrency()
 
     with (
         __import__("unittest.mock", fromlist=["patch"]).patch.object(
             applier, "_load_acli", return_value=fake_acli
         ),
         __import__("unittest.mock", fromlist=["patch"]).patch.object(
-            applier, "_load_concurrency", return_value=fake_concurrency
+            applier, "snapshot_head", return_value=_STABLE_HEAD
         ),
     ):
         applier.apply([mutation], pass_id="test-prov-preserve", repo_root=tmp_path)
@@ -244,14 +246,13 @@ def test_provenance_multiple_set_valued_fields(applier, tmp_path):
         "DIG-300", labels=["tag-a", "tag-b"], watchers=["alice", "bob"]
     )
     fake_acli, _ = _make_mock_acli()
-    fake_concurrency = _make_mock_concurrency()
 
     with (
         __import__("unittest.mock", fromlist=["patch"]).patch.object(
             applier, "_load_acli", return_value=fake_acli
         ),
         __import__("unittest.mock", fromlist=["patch"]).patch.object(
-            applier, "_load_concurrency", return_value=fake_concurrency
+            applier, "snapshot_head", return_value=_STABLE_HEAD
         ),
     ):
         applier.apply([mutation], pass_id="test-prov-multi-field", repo_root=tmp_path)
@@ -267,20 +268,15 @@ def test_provenance_multiple_set_valued_fields(applier, tmp_path):
 
 def test_non_set_valued_fields_do_not_create_provenance(applier, tmp_path):
     """Update mutations with only non-set-valued fields do not create mapping.json provenance."""
-    mutation = {
-        "action": "update",
-        "key": "DIG-400",
-        "fields": {"status": "Done", "priority": "High"},  # both "state" class
-    }
+    mutation = _update("DIG-400", {"status": "Done", "priority": "High"})  # both "state" class
     fake_acli, _ = _make_mock_acli()
-    fake_concurrency = _make_mock_concurrency()
 
     with (
         __import__("unittest.mock", fromlist=["patch"]).patch.object(
             applier, "_load_acli", return_value=fake_acli
         ),
         __import__("unittest.mock", fromlist=["patch"]).patch.object(
-            applier, "_load_concurrency", return_value=fake_concurrency
+            applier, "snapshot_head", return_value=_STABLE_HEAD
         ),
     ):
         applier.apply([mutation], pass_id="test-prov-no-set", repo_root=tmp_path)

@@ -1,4 +1,5 @@
-"""Unit tests for _concurrency.py's remaining snapshot-head contract."""
+"""Unit tests for ``applier.snapshot_head``, the tickets-branch HEAD read the
+batch applier's drift guard pins and re-checks."""
 
 from __future__ import annotations
 
@@ -13,23 +14,10 @@ import pytest
 # Module loading
 # ---------------------------------------------------------------------------
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-MODULE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "_concurrency.py"
-
-
-def _load_module() -> ModuleType:
-
-    return importlib.import_module("rebar.reconciler._concurrency")
-
 
 @pytest.fixture(scope="module")
-def concurrency() -> ModuleType:
-    """Return the _concurrency module; fail all tests if absent."""
-    if not MODULE_PATH.exists():
-        pytest.fail(
-            f"_concurrency.py not found at {MODULE_PATH} — implement the module to make tests pass."
-        )
-    return _load_module()
+def applier() -> ModuleType:
+    return importlib.import_module("rebar.reconciler.applier")
 
 
 # ---------------------------------------------------------------------------
@@ -71,16 +59,16 @@ def tmp_git_repo(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def test_snapshot_head_returns_nonempty_string(concurrency, tmp_git_repo: Path) -> None:
+def test_snapshot_head_returns_nonempty_string(applier, tmp_git_repo: Path) -> None:
     """snapshot_head() on a real tmp git repo returns a non-empty hex string."""
-    sha = concurrency.snapshot_head(tmp_git_repo)
+    sha = applier.snapshot_head(tmp_git_repo)
     assert isinstance(sha, str)
     assert len(sha) > 0
     # Should look like a hex SHA (at least 7 chars)
     assert all(c in "0123456789abcdef" for c in sha.lower())
 
 
-def test_snapshot_head_returns_sentinel_on_empty_repo(concurrency, tmp_path: Path) -> None:
+def test_snapshot_head_returns_sentinel_on_empty_repo(applier, tmp_path: Path) -> None:
     """F9 regression: snapshot_head must return EMPTY_REPO_SENTINEL on a bare
     repo (``git init`` with no commits), not raise CalledProcessError.
 
@@ -92,13 +80,13 @@ def test_snapshot_head_returns_sentinel_on_empty_repo(concurrency, tmp_path: Pat
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
 
     # Must NOT raise
-    sha = concurrency.snapshot_head(tmp_path)
-    assert sha == concurrency.EMPTY_REPO_SENTINEL, (
+    sha = applier.snapshot_head(tmp_path)
+    assert sha == applier.EMPTY_REPO_SENTINEL, (
         f"snapshot_head on a bare repo must return EMPTY_REPO_SENTINEL; got {sha!r}"
     )
 
 
-def test_snapshot_module_keeps_only_snapshot_head_contract(concurrency) -> None:
-    assert not hasattr(concurrency, "ConcurrencyEvent")
-    assert not hasattr(concurrency, "Result")
-    assert not hasattr(concurrency, "rebase_retry")
+def test_concurrency_module_is_gone() -> None:
+    """``snapshot_head`` lives in ``applier``; the old ``_concurrency`` module is deleted."""
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("rebar.reconciler._concurrency")

@@ -34,8 +34,8 @@ def test_positive_capture_direct_helper_and_llm():
     # a reconciler read. Historically this came through the _rebar_env("SUFFIX") shim and
     # its REBAR_ prefix row; the RP-04 config-ownership cutover (cultish-shadowy-hapuku)
     # drained that shim out of the tree, so it is now a plain inline literal read
-    # (outbound_fields.py) and bug 84c7-486f removed the row it left behind.
-    assert "REBAR_RECONCILER_VERBOSE" in reads
+    # (_pass_lock_lifecycle.py) and bug 84c7-486f removed the row it left behind.
+    assert "REBAR_RECONCILER_LOCK_STEAL" in reads
     # a _llm_int(table, cli, "REBAR_LLM_TIMEOUT", ...) read
     assert "REBAR_LLM_TIMEOUT" in reads
 
@@ -146,12 +146,13 @@ def test_committed_registry_still_documents_the_popped_opcert_key():
     # private key is read then popped. It must stay documented, and the registry must not
     # shrink below its floor. The floor was the 162 keys observed at the time of the fix; it
     # was then the 152 left after the ADR 0086 worker's 13 tuning variables were removed from a
-    # 165-key registry (granitic-realisable-dolphin), and is now the 149 left after the three
-    # retired reconciler rollback toggles were removed (captious-tangled-pigeon).
+    # 165-key registry (granitic-realisable-dolphin), then the 149 left after the three
+    # retired reconciler rollback toggles were removed (captious-tangled-pigeon), and is now
+    # the 148 left after REBAR_RECONCILER_VERBOSE lost its only reader (senile-especial-herring).
     doc = (REPO_ROOT / "docs" / "env-vars.md").read_text()
     assert "REBAR_OPCERT_PRIVATE_KEY" in doc
     count = int(re.search(r"_(\d+) variables\._", doc).group(1))
-    assert count >= 149, f"registry shrank to {count} variables"
+    assert count >= 148, f"registry shrank to {count} variables"
 
 
 def test_dunder_getitem_call_registers_its_key(tmp_path: Path):

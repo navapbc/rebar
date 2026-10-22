@@ -652,7 +652,7 @@ class TrackerConfig:
         "Sets the worktree or symlink directory containing the ticket event store.",
     )
     # Consumers call config.tickets_branch() instead of reading this field: _commands/fsck.py,
-    # _commands/init.py, reconciler/_concurrency.py, opcert_service/workspace.py.
+    # _commands/init.py, reconciler/applier.py, opcert_service/workspace.py.
     # read-via: config.py tickets_branch()
     branch: str = _documented(
         "tickets",

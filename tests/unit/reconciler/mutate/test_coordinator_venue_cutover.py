@@ -108,8 +108,8 @@ def _run_coordinator_cutover(client: Any, repo_root, key: str):
     head_pin_cell = ["pin0"]
     execute = make_guarded_execute(
         abort_check=None,
-        recheck_drift=lambda _concurrency, _repo_root, pin: pin,
-        concurrency=None,
+        recheck_drift=lambda _snapshot_head, _repo_root, pin: pin,
+        snapshot_head=None,
         repo_root=repo_root,
         head_pin_cell=head_pin_cell,
         dispatch_fn=dispatch_fn,

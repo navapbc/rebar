@@ -34,6 +34,8 @@ from pathlib import Path
 
 import pytest
 
+from rebar.reconciler.mutation_payloads import OutboundCreatePayload
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 MUTATION_PATH = APPLIER_PATH.parent / "mutation.py"
@@ -242,7 +244,7 @@ def test_apply_files_pending_bug_tickets_when_apply_batch_raises(
         direction=mut_mod.MutationDirection.outbound,
         action=mut_mod.MutationAction.create,
         target="local-203",
-        payload={"summary": "outbound", "local_id": "local-203"},
+        payload=OutboundCreatePayload(fields={"summary": "outbound"}, local_id="local-203"),
     )
 
     # apply() should re-raise the SimulatedDriftError after deferred filing.

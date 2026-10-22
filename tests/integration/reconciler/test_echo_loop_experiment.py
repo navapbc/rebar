@@ -30,7 +30,7 @@ from pathlib import Path
 from test_reconcile_idempotency import (  # noqa: F401
     _FakeClient,
     _FakeJiraState,
-    _make_ok_concurrency,
+    _ok_snapshot_head,
     git_repo,
     reconciler_modules,
 )
@@ -48,7 +48,7 @@ def _run_pass(reconciler_modules, client, repo_root, monkeypatch, pass_id, *, wi
     fetcher, applier, reconcile = reconciler_modules
     monkeypatch.setattr(fetcher, "_load_acli", lambda: client)
     monkeypatch.setattr(applier, "_load_acli", lambda: client)
-    monkeypatch.setattr(applier, "_load_concurrency", lambda: _make_ok_concurrency())
+    monkeypatch.setattr(applier, "snapshot_head", _ok_snapshot_head)
     if wire_backend:
         from rebar.reconciler.adapters.jira.backend import JiraBackend
 

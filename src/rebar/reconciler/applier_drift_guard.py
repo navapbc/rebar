@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
 from rebar.reconciler.apply_outbound import _drift_is_benign, _get_commit_subject
 
@@ -82,7 +82,7 @@ def _cross_project_targets(
     return offenders
 
 
-def _recheck_drift(concurrency, repo_root: Path, head_pin: str) -> str:
+def _recheck_drift(snapshot_head: Callable[[Path], str], repo_root: Path, head_pin: str) -> str:
     """Re-check the tickets-branch HEAD before a mutation; return the (possibly
     refreshed) pin, or raise HeadDriftError on a competing reconciler write.
 
@@ -97,7 +97,7 @@ def _recheck_drift(concurrency, repo_root: Path, head_pin: str) -> str:
     subject indicates a competing reconciler outbound write — the original intent
     of the detector.
     """
-    current_head = concurrency.snapshot_head(repo_root)
+    current_head = snapshot_head(repo_root)
     if current_head == head_pin:
         return head_pin
     drift_subject = _get_commit_subject(repo_root, current_head)

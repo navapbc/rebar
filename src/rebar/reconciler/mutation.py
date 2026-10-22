@@ -2,8 +2,9 @@
 
 Defines the immutable Mutation value object and its enum vocabulary
 (MutationDirection, MutationAction). Direction/action validity is enforced
-by an explicit allowlist (`_VALID_COMBINATIONS`): clean_label and
-repair_property are inbound-only — they have no outbound semantics.
+by an explicit allowlist (`_VALID_COMBINATIONS`) of the 10 pairs that
+`typed_dispatch._LEAVES` registers a leaf for: clean_label and
+repair_property are inbound-only, and delete and probe are outbound-only.
 """
 
 from collections.abc import Iterable, Mapping
@@ -29,16 +30,21 @@ class MutationAction(StrEnum):
     conflict = "conflict"
 
 
-# All (direction, action) pairs except outbound-with-inbound-only actions.
-_INBOUND_ONLY_ACTIONS: frozenset[MutationAction] = frozenset(
-    {MutationAction.clean_label, MutationAction.repair_property}
-)
-
+# The 10 (direction, action) pairs that have a leaf handler. ``typed_dispatch``
+# checks at import that its registry covers exactly this set.
 _VALID_COMBINATIONS: frozenset[tuple[MutationDirection, MutationAction]] = frozenset(
-    (direction, action)
-    for direction in MutationDirection
-    for action in MutationAction
-    if not (direction is MutationDirection.outbound and action in _INBOUND_ONLY_ACTIONS)
+    {
+        (MutationDirection.outbound, MutationAction.create),
+        (MutationDirection.outbound, MutationAction.update),
+        (MutationDirection.outbound, MutationAction.delete),
+        (MutationDirection.outbound, MutationAction.probe),
+        (MutationDirection.outbound, MutationAction.conflict),
+        (MutationDirection.inbound, MutationAction.create),
+        (MutationDirection.inbound, MutationAction.update),
+        (MutationDirection.inbound, MutationAction.clean_label),
+        (MutationDirection.inbound, MutationAction.repair_property),
+        (MutationDirection.inbound, MutationAction.conflict),
+    }
 )
 
 

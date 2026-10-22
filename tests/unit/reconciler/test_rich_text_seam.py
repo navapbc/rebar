@@ -218,7 +218,6 @@ def test_exactly_one_real_map_fields_to_remote_and_it_is_shared() -> None:
 _ADF_ALLOWLIST = {
     "adapters/jira/adf.py": "the definitions themselves",
     "adapters/jira/rich_text_codec.py": "AdfCodec — the sanctioned Cloud wrapper",
-    "adapters/jira/outbound_fields.py": "location-pinned (ADR 0035 §a), explicitly out of scope",
     "inbound_fields.py": "the inbound seam, explicitly out of scope",
     "inbound_differ.py": "the inbound seam, explicitly out of scope",
     "inbound_translate.py": "historical comment only, out of scope",

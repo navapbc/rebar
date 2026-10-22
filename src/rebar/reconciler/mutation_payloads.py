@@ -4,11 +4,11 @@ action)`` pair (ADR 0107).
 ``rebar.reconciler.mutation.Mutation`` already types its ``direction``/``action``
 fields and constrains valid combinations via ``_VALID_COMBINATIONS``; what remains
 untyped is ``Mutation.payload: Mapping[str, Any]``. This module closes that gap
-with ten frozen, ``Mapping``-compatible payload dataclasses (one per combination
-``_VALID_COMBINATIONS`` allows AND ``typed_dispatch._LEAVES`` actually registers —
-``(inbound, delete)``/``(inbound, probe)`` are dead-by-design per ADR 0028/bug 3b5f
-and are deliberately NOT modeled here; feeding either to :func:`build_typed_payload`
-raises :class:`UnknownMutationKindError`).
+with ten frozen, ``Mapping``-compatible payload dataclasses, one per pair in
+``_VALID_COMBINATIONS`` (the same 10 pairs ``typed_dispatch._LEAVES`` registers).
+``(inbound, delete)`` and ``(inbound, probe)`` are not valid pairs: ``Mutation``
+rejects them, and feeding either to :func:`build_typed_payload` raises
+:class:`UnknownMutationKindError`.
 
 Each payload type is:
 
@@ -24,13 +24,11 @@ Each payload type is:
   so ``serialize_manifest``'s sha256 (an external compatibility surface) is
   unchanged when a typed payload is substituted for its legacy dict twin.
 
-This module intentionally does NOT change any producer (``differ.py``,
-``outbound_mutation_builders.py``, ``run_differs.py``/``outbound_pass.py``,
-``binding_walk.py``, ``invariants.py``): per AC7, production continues
-constructing legacy dict payloads in this story. ``build_typed_payload`` is the
-one new entry point, consumed only by the side-effect-free shadow comparator
-(``payload_shadow.py``) and its tests. Wiring producers to construct these types
-directly is the ADR's "Cut" step, explicitly deferred.
+``outbound_pass.py`` constructs the outbound payload types directly, and
+``batch_dispatch._mutation_to_batch_dict`` reads them. The other producers
+(``binding_walk.py``, ``differ.py``, ``invariants.py``, ``run_differs.py``) still
+build plain-dict payloads. ``build_typed_payload`` lifts a legacy dict payload to
+its typed twin; only tests call it.
 """
 
 from __future__ import annotations
@@ -384,14 +382,12 @@ class InboundConflictPayload(_PayloadMapping):
     """``(inbound, conflict)`` — a human-readable reason plus the Jira key it
     concerns, per the ADR 0107 decision table.
 
-    NOTE (named delta — see ``docs/adr/0107-...md`` Decision §1 and the e9d5
-    shadow-corpus comparison): today's live ``differ.py`` inbound-conflict
-    producers put ``reason`` in ``Mutation.provenance`` (not ``payload``) and
-    often ship an empty payload (or one carrying ``jira_field_snapshot``) — see
-    ``test_payload_shadow_corpus.py::test_inbound_conflict_legacy_shape_is_an_
-    approved_delta``. This type intentionally encodes the ADR's DECIDED contract
-    (not today's producer shape); reconciling producers to it is deferred to the
-    ADR's "Cut" step.
+    NOTE (named delta — see ``docs/adr/0107-...md`` Decision §1): today's live
+    ``differ.py`` inbound-conflict producers put ``reason`` in
+    ``Mutation.provenance`` (not ``payload``) and often ship an empty payload (or
+    one carrying ``jira_field_snapshot``). This type intentionally encodes the
+    ADR's DECIDED contract (not today's producer shape); reconciling producers to
+    it is deferred to the ADR's "Cut" step.
     """
 
     reason: str

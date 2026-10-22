@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib
 import json
 import subprocess
-import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -178,24 +177,12 @@ def _make_committing_acli_module(root: Path, drift_subjects: list):
     return client, client
 
 
-def _make_real_head_concurrency_module() -> types.ModuleType:
-    """Mock _concurrency whose snapshot_head is the REAL one (reads actual HEAD)."""
-    from rebar.reconciler import _concurrency as real_conc
-
-    mod = types.ModuleType("_concurrency_real_head")
-    mod.snapshot_head = real_conc.snapshot_head  # type: ignore[attr-defined]
-    return mod
-
-
 def _run_batch(applier, tmp_path, mutations, drift_subjects, pass_id):
-    """Drive the real _apply_batch with an injecting client. Returns (path, client)."""
+    """Drive the real _apply_batch (and the real applier.snapshot_head, which reads the
+    actual HEAD) with an injecting client. Returns (path, client)."""
     _init_tickets_repo(tmp_path)
     acli_mod, client = _make_committing_acli_module(tmp_path, drift_subjects)
-    concurrency = _make_real_head_concurrency_module()
-    with (
-        patch.object(applier, "_load_acli", return_value=acli_mod),
-        patch.object(applier, "_load_concurrency", return_value=concurrency),
-    ):
+    with patch.object(applier, "_load_acli", return_value=acli_mod):
         path = applier._apply_batch(mutations, pass_id, repo_root=tmp_path)
     return path, client
 
@@ -273,11 +260,7 @@ def test_competing_pass_record_commit_aborts_before_next_jira_call(tmp_path, app
     acli_mod, client = _make_committing_acli_module(
         tmp_path, ["pass_record: 2026-05-28T16-31-54", None]
     )
-    concurrency = _make_real_head_concurrency_module()
-    with (
-        patch.object(applier, "_load_acli", return_value=acli_mod),
-        patch.object(applier, "_load_concurrency", return_value=concurrency),
-    ):
+    with patch.object(applier, "_load_acli", return_value=acli_mod):
         with pytest.raises(applier.HeadDriftError):
             applier._apply_batch(mutations, "pe", repo_root=tmp_path)
     assert client.update_issue.call_count == 1
@@ -294,11 +277,7 @@ def test_empty_subject_lookup_failure_is_non_benign_and_aborts(tmp_path, applier
     _init_tickets_repo(tmp_path)
     # First write commits an EMPTY-subject commit → _get_commit_subject == "".
     acli_mod, client = _make_committing_acli_module(tmp_path, ["", None])
-    concurrency = _make_real_head_concurrency_module()
-    with (
-        patch.object(applier, "_load_acli", return_value=acli_mod),
-        patch.object(applier, "_load_concurrency", return_value=concurrency),
-    ):
+    with patch.object(applier, "_load_acli", return_value=acli_mod):
         with pytest.raises(applier.HeadDriftError):
             applier._apply_batch(mutations, "pf", repo_root=tmp_path)
     assert client.update_issue.call_count == 1
@@ -320,11 +299,7 @@ def test_abort_stderr_reports_exact_mutations_completed(tmp_path, applier, capsy
     acli_mod, client = _make_committing_acli_module(
         tmp_path, ["ticket: STATUS DSO-10", "pass_record: competing", None]
     )
-    concurrency = _make_real_head_concurrency_module()
-    with (
-        patch.object(applier, "_load_acli", return_value=acli_mod),
-        patch.object(applier, "_load_concurrency", return_value=concurrency),
-    ):
+    with patch.object(applier, "_load_acli", return_value=acli_mod):
         with pytest.raises(applier.HeadDriftError):
             applier._apply_batch(mutations, "pg", repo_root=tmp_path)
 

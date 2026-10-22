@@ -12,11 +12,13 @@ All tests mock snapshot_head to return controlled values.
 from __future__ import annotations
 
 import importlib
-import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
 # ---------------------------------------------------------------------------
 # Module loading
@@ -70,16 +72,28 @@ def _make_mock_acli_module() -> tuple[MagicMock, MagicMock]:
     return mock_client, mock_client
 
 
-def _make_mock_concurrency_module(head_sequence: list[str]) -> types.ModuleType:
-    """Return a mock _concurrency module whose snapshot_head pops from head_sequence."""
+def _make_snapshot_head(head_sequence: list[str]):
+    """Return a ``snapshot_head`` stand-in that pops from head_sequence."""
     call_iter = iter(head_sequence)
 
     def _snapshot_head(_repo_root):
         return next(call_iter)
 
-    mock_mod = types.ModuleType("_concurrency_mock")
-    mock_mod.snapshot_head = _snapshot_head  # type: ignore[attr-defined]
-    return mock_mod
+    return _snapshot_head
+
+
+def _update(key: str, **fields) -> Mutation:
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.update,
+        key,
+        OutboundUpdatePayload(changed_fields=fields),
+        {},
+    )
+
+
+def _delete(key: str) -> Mutation:
+    return Mutation(MutationDirection.outbound, MutationAction.delete, key, {}, {})
 
 
 # ---------------------------------------------------------------------------
@@ -97,16 +111,13 @@ def test_drift_mid_pass_raises_head_drift_error(tmp_path, applier):
     # Sequence: pin (stable), iter-1 check (stable), iter-2 check (drifted)
     head_seq = [sha_stable, sha_stable, sha_drifted]
     mock_acli_mod, _mock_client = _make_mock_acli_module()
-    mock_concurrency = _make_mock_concurrency_module(head_seq)
+    snapshot_head = _make_snapshot_head(head_seq)
 
-    mutations = [
-        {"action": "update", "key": "DSO-10", "fields": {"summary": "first"}},
-        {"action": "update", "key": "DSO-11", "fields": {"summary": "second"}},
-    ]
+    mutations = [_update("DSO-10", summary="first"), _update("DSO-11", summary="second")]
 
     with (
         patch.object(applier, "_load_acli", return_value=mock_acli_mod),
-        patch.object(applier, "_load_concurrency", return_value=mock_concurrency),
+        patch.object(applier, "snapshot_head", snapshot_head),
     ):
         with pytest.raises(applier.HeadDriftError):
             applier.apply(mutations, "pass-drift-01", repo_root=tmp_path)
@@ -120,16 +131,13 @@ def test_drift_mid_pass_no_jira_call_after_drift(tmp_path, applier):
     # pin, iter-1 (stable → first mutation runs), iter-2 (drifted → abort)
     head_seq = [sha_stable, sha_stable, sha_drifted]
     mock_acli_mod, mock_client = _make_mock_acli_module()
-    mock_concurrency = _make_mock_concurrency_module(head_seq)
+    snapshot_head = _make_snapshot_head(head_seq)
 
-    mutations = [
-        {"action": "update", "key": "DSO-10", "fields": {"summary": "first"}},
-        {"action": "update", "key": "DSO-11", "fields": {"summary": "second"}},
-    ]
+    mutations = [_update("DSO-10", summary="first"), _update("DSO-11", summary="second")]
 
     with (
         patch.object(applier, "_load_acli", return_value=mock_acli_mod),
-        patch.object(applier, "_load_concurrency", return_value=mock_concurrency),
+        patch.object(applier, "snapshot_head", snapshot_head),
     ):
         with pytest.raises(applier.HeadDriftError):
             applier.apply(mutations, "pass-drift-02", repo_root=tmp_path)
@@ -150,18 +158,14 @@ def test_empty_mutations_no_head_check(tmp_path, applier):
     # Tracks calls made directly by apply() itself.
     direct_snapshot_calls: list = []
 
-    # Build a mock concurrency module whose snapshot_head tracks any direct drift checks.
-    mock_concurrency = types.ModuleType("_concurrency_empty")
-
-    def _fake_snapshot_head(_repo_root):
+    # A snapshot_head stand-in that tracks any direct drift checks.
+    def snapshot_head(_repo_root):
         direct_snapshot_calls.append(1)
         return "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 
-    mock_concurrency.snapshot_head = _fake_snapshot_head  # type: ignore[attr-defined]
-
     with (
         patch.object(applier, "_load_acli", return_value=mock_acli_mod),
-        patch.object(applier, "_load_concurrency", return_value=mock_concurrency),
+        patch.object(applier, "snapshot_head", snapshot_head),
     ):
         manifest_path = applier.apply([], "pass-empty-01", repo_root=tmp_path)
 
@@ -179,17 +183,17 @@ def test_stable_head_all_mutations_dispatched(tmp_path, applier):
     # pin + N iteration checks (3 mutations = pin + 3 iteration checks = 4 calls)
     head_seq = [sha_stable] * 4
     mock_acli_mod, mock_client = _make_mock_acli_module()
-    mock_concurrency = _make_mock_concurrency_module(head_seq)
+    snapshot_head = _make_snapshot_head(head_seq)
 
     mutations = [
-        {"action": "update", "key": "DSO-20", "fields": {"summary": "alpha"}},
-        {"action": "update", "key": "DSO-21", "fields": {"summary": "beta"}},
-        {"action": "delete", "key": "DSO-22"},
+        _update("DSO-20", summary="alpha"),
+        _update("DSO-21", summary="beta"),
+        _delete("DSO-22"),
     ]
 
     with (
         patch.object(applier, "_load_acli", return_value=mock_acli_mod),
-        patch.object(applier, "_load_concurrency", return_value=mock_concurrency),
+        patch.object(applier, "snapshot_head", snapshot_head),
     ):
         manifest_path = applier.apply(mutations, "pass-stable-01", repo_root=tmp_path)
 

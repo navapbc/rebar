@@ -4,28 +4,31 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from rebar.reconciler import applier, mode, request, scratch_retention
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
 
-def _mutations() -> list[dict]:
+def _mutations() -> list[Mutation]:
     return [
-        {
-            "direction": "inbound",
-            "action": "update",
-            "key": "DIG-7",
-            "local_id": "local-7",
-            "fields": {"description": "remote body", "status": "closed"},
-        },
-        {
-            "direction": "outbound",
-            "action": "update",
-            "key": "DIG-8",
-            "local_id": "local-8",
-            "fields": {"summary": "local title"},
-        },
+        Mutation(
+            MutationDirection.inbound,
+            MutationAction.update,
+            "DIG-7",
+            {"description": "remote body", "status": "closed"},
+            {"local_id": "local-7"},
+        ),
+        Mutation(
+            MutationDirection.outbound,
+            MutationAction.update,
+            "DIG-8",
+            OutboundUpdatePayload(changed_fields={"summary": "local title"}, local_id="local-8"),
+            {"local_id": "local-8"},
+        ),
     ]
 
 
@@ -57,7 +60,13 @@ def test_preview_manifest_carries_exact_same_pass_field_drift(tmp_path: Path) ->
             "action": "update",
             "target": "DIG-8",
             "local_id": "local-8",
-            "fields": {"summary": "local title"},
+            "fields": {
+                "changed_fields": {"summary": "local title"},
+                "comments": [],
+                "labels": [],
+                "links": [],
+                "local_id": "local-8",
+            },
         },
     ]
 
@@ -92,12 +101,15 @@ def test_legacy_uncapped_live_keeps_tally_and_removes_manifest(tmp_path: Path, m
         return legacy_batch
 
     monkeypatch.setattr(applier, "_apply_batch", fake_batch)
+    # The inbound mutation dispatches through _apply_typed; keep it offline.
+    monkeypatch.setattr(applier, "_apply_typed", lambda *_a, **_k: SimpleNamespace(payload={}))
     result = applier.apply(
         _mutations(),
         pass_id="legacy-live",
         repo_root=tmp_path,
         mode=mode.Mode.LIVE,
         route="legacy",
+        client=object(),
     )
 
     assert result == {"applied_count": 1, "failed_count": 1}

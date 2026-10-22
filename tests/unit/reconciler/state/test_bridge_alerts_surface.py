@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -99,15 +98,9 @@ def _make_acli_module(issues: list[dict]) -> object:
     return _Client()
 
 
-def _make_ok_concurrency() -> types.ModuleType:
-    """Stub _concurrency module with a stable snapshot head."""
-
-    def _snapshot_head(repo_root: Path) -> str:
-        return "aabbccdd" * 5
-
-    fake = types.ModuleType("_concurrency")
-    fake.snapshot_head = _snapshot_head
-    return fake
+def _ok_snapshot_head(repo_root: Path) -> str:
+    """Stand-in for ``applier.snapshot_head`` with a stable snapshot head."""
+    return "aabbccdd" * 5
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +137,6 @@ def test_alert_emitted_through_stateless_path(
     ]
 
     mock_acli = _make_acli_module(issues_with_violation)
-    ok_concurrency = _make_ok_concurrency()
 
     # Stub the subprocess ticket-create so the invariant check doesn't try to
     # run the real CLI (which is not available in unit-test scope).
@@ -169,8 +161,8 @@ def test_alert_emitted_through_stateless_path(
         patch.object(applier_mod, "_load_acli", return_value=mock_acli),
         patch.object(differ_mod, "compute_mutations", return_value=[]),
         patch("subprocess.run", side_effect=_fake_run),
-        # Patch _load_concurrency on the applier to avoid real git ops.
-        patch.object(applier_mod, "_load_concurrency", return_value=ok_concurrency),
+        # Patch snapshot_head on the applier to avoid real git ops.
+        patch.object(applier_mod, "snapshot_head", _ok_snapshot_head),
     ):
         result = reconcile_mod.reconcile_once("alert-smoke-pass", repo_root=tmp_path)
 

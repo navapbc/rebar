@@ -16,24 +16,33 @@ match is preserved.
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
-from rebar.reconciler.adapters.jira import outbound_fields as _of  # 625b: adapter-internal
-
-REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
-
-
-def _load_differ() -> ModuleType:
-    return importlib.import_module("rebar.reconciler.outbound_differ")
+from rebar.reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.outbound_field_diff import compute_update_fields
 
 
 @pytest.fixture(scope="module")
 def differ() -> ModuleType:
-    return _load_differ()
+    return importlib.import_module("rebar.reconciler.outbound_differ")
+
+
+def _diff(
+    ticket: dict, jira: dict, *, assignee_resolver=None, jira_key: str = ""
+) -> dict[str, Any]:
+    """Run the live outbound field diff with the Jira backend's mappers."""
+    backend = JiraBackend(transport=object())
+    return compute_update_fields(
+        ticket,
+        jira,
+        inbound_mapper=backend.inbound,
+        outbound_mapper=backend.outbound,
+        assignee_resolver=assignee_resolver,
+        jira_key=jira_key,
+    )
 
 
 def _ticket(assignee: str) -> dict:
@@ -60,56 +69,49 @@ def _jira(assignee_dict) -> dict:
 
 
 # A resolver that knows only "alice" (→ an accountId); everything else is
-# unmappable (None, authoritative).
+# unmappable (None, authoritative). Returns (accountId|None, authoritative,
+# is_account_id), the 264f resolver shape.
 def _resolver(assignee: str, jira_key: str):
     if not assignee:
-        return ("", True)
+        return ("", True, False)
     if assignee == "alice":
-        return ("acct-alice", True)
-    return (None, True)  # unmappable → desired unassigned
+        return ("acct-alice", True, False)
+    return (None, True, False)  # unmappable → desired unassigned
 
 
 # --- the core fix: unmappable assignee + unassigned Jira → no emit -----------
 
 
-def test_unmappable_assignee_converges_when_jira_unassigned(differ):
-    changed = _of._diff_fields(
-        _ticket("claude"), _jira(None), assignee_resolver=_resolver, jira_key="REB-1"
-    )
+def test_unmappable_assignee_converges_when_jira_unassigned() -> None:
+    changed = _diff(_ticket("claude"), _jira(None), assignee_resolver=_resolver, jira_key="REB-1")
     assert "assignee" not in changed, (
         f"unmappable assignee with an already-unassigned Jira issue must NOT "
         f"re-emit (convergence); got {changed!r}"
     )
 
 
-def test_unmappable_assignee_unassigns_when_jira_has_someone(differ):
+def test_unmappable_assignee_unassigns_when_jira_has_someone() -> None:
     jira = _jira({"accountId": "acct-bob", "displayName": "Bob"})
-    changed = _of._diff_fields(
-        _ticket("claude"), jira, assignee_resolver=_resolver, jira_key="REB-1"
-    )
+    changed = _diff(_ticket("claude"), jira, assignee_resolver=_resolver, jira_key="REB-1")
     assert changed.get("assignee") == "", "unmappable local → unassign the Jira issue"
 
 
-def test_mappable_assignee_emitted_when_jira_unassigned(differ):
-    changed = _of._diff_fields(
-        _ticket("alice"), _jira(None), assignee_resolver=_resolver, jira_key="REB-1"
-    )
+def test_mappable_assignee_emitted_when_jira_unassigned() -> None:
+    changed = _diff(_ticket("alice"), _jira(None), assignee_resolver=_resolver, jira_key="REB-1")
     assert changed.get("assignee") == "alice", "a mappable assignee is still synced"
 
 
-def test_mappable_assignee_converges_when_already_assigned(differ):
+def test_mappable_assignee_converges_when_already_assigned() -> None:
     jira = _jira({"accountId": "acct-alice", "displayName": "Alice"})
-    changed = _of._diff_fields(
-        _ticket("alice"), jira, assignee_resolver=_resolver, jira_key="REB-1"
-    )
+    changed = _diff(_ticket("alice"), jira, assignee_resolver=_resolver, jira_key="REB-1")
     assert "assignee" not in changed, "already-correct assignee must not re-emit"
 
 
-def test_no_resolver_preserves_legacy_string_match(differ):
+def test_no_resolver_preserves_legacy_string_match() -> None:
     # Without a resolver, behaviour is the permissive string match: local "claude"
     # vs unassigned still fires (unchanged legacy behaviour — the fix is opt-in via
     # the resolver that the live pass supplies).
-    changed = _of._diff_fields(_ticket("claude"), _jira(None))
+    changed = _diff(_ticket("claude"), _jira(None))
     assert changed.get("assignee") == "claude"
 
 

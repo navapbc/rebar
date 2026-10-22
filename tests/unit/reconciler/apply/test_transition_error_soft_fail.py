@@ -33,6 +33,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 APPLIER_PATH = SCRIPTS_DIR.parent / "reconciler" / "applier.py"
@@ -50,6 +53,17 @@ def applier_mod() -> ModuleType:
 @pytest.fixture(scope="module")
 def acli_mod() -> ModuleType:
     return importlib.import_module("rebar.reconciler.adapters.jira.acli")
+
+
+def _update(key: str, fields: dict, *, local_id: str | None = None, **extra) -> Mutation:
+    """A typed outbound update Mutation (``extra``: comments/labels/links tuples)."""
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.update,
+        key,
+        OutboundUpdatePayload(changed_fields=fields, local_id=local_id, **extra),
+        {},
+    )
 
 
 def _read_manifest_outcomes(manifest_path: Path) -> list[dict]:
@@ -70,27 +84,9 @@ def test_transition_runtime_error_soft_fails_batch_continues(
     Post-fix: apply() catches it per-mutation, records an outcome error, and
     continues. All three mutations are attempted; only the bad one has an error.
     """
-    good1 = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-1",
-        "fields": {"summary": "a"},
-        "local_id": "l1",
-    }
-    bad = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-2",
-        "fields": {"status": "idea"},
-        "local_id": "l2",
-    }
-    good2 = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-3",
-        "fields": {"summary": "c"},
-        "local_id": "l3",
-    }
+    good1 = _update("DIG-1", {"summary": "a"}, local_id="l1")
+    bad = _update("DIG-2", {"status": "idea"}, local_id="l2")
+    good2 = _update("DIG-3", {"summary": "c"}, local_id="l3")
 
     fake_client = MagicMock()
 
@@ -140,13 +136,7 @@ def test_transition_runtime_error_alone_does_not_raise(
 ) -> None:
     """Even as the only mutation in the batch, a transition RuntimeError must
     record-and-continue rather than abort."""
-    bad = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-2",
-        "fields": {"status": "idea"},
-        "local_id": "l2",
-    }
+    bad = _update("DIG-2", {"status": "idea"}, local_id="l2")
     fake_client = MagicMock()
     fake_client.update_issue.side_effect = RuntimeError(
         "transition_issue_by_name: no transition reaches 'IDEA' on DIG-2. Available: [none]"

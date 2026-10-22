@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import types
 from pathlib import Path
 
 import pytest
@@ -153,15 +152,9 @@ def _make_acli_module(issues: list[dict]) -> object:
     return _Client()
 
 
-def _make_ok_concurrency() -> types.ModuleType:
-    """Return a stub _concurrency module with a stable snapshot head."""
-
-    def _snapshot_head(repo_root: Path) -> str:
-        return "aabbccdd" * 5
-
-    fake = types.ModuleType("_concurrency")
-    fake.snapshot_head = _snapshot_head
-    return fake
+def _ok_snapshot_head(repo_root: Path) -> str:
+    """Stand-in for ``applier.snapshot_head`` with a stable snapshot head."""
+    return "aabbccdd" * 5
 
 
 def _make_stable_issues() -> list[dict]:
@@ -186,13 +179,12 @@ def _make_stable_issues() -> list[dict]:
     ]
 
 
-def _patch_acli_and_concurrency(fetcher_mod, applier_mod, issues: list[dict]):
-    """Context manager: patch _load_acli in fetcher + applier, and _load_concurrency in applier."""
+def _patch_acli_and_snapshot_head(fetcher_mod, applier_mod, issues: list[dict]):
+    """Context manager: patch _load_acli in fetcher + applier, and snapshot_head in applier."""
     import contextlib
     from unittest.mock import patch
 
     mock_acli = _make_acli_module(issues)
-    ok_concurrency = _make_ok_concurrency()
 
     @contextlib.contextmanager
     def _ctx():
@@ -200,12 +192,12 @@ def _patch_acli_and_concurrency(fetcher_mod, applier_mod, issues: list[dict]):
             patch.object(fetcher_mod, "_load_acli", return_value=mock_acli),
             patch.object(applier_mod, "_load_acli", return_value=mock_acli),
         ):
-            original_load_concurrency = applier_mod._load_concurrency
-            applier_mod._load_concurrency = lambda: ok_concurrency
+            original_snapshot_head = applier_mod.snapshot_head
+            applier_mod.snapshot_head = _ok_snapshot_head
             try:
                 yield
             finally:
-                applier_mod._load_concurrency = original_load_concurrency
+                applier_mod.snapshot_head = original_snapshot_head
 
     return _ctx()
 
@@ -231,7 +223,7 @@ def test_idempotency_two_passes_with_unchanged_remote(
     issues = _make_stable_issues()
     pass_id = "idempotency-pass"
 
-    with _patch_acli_and_concurrency(fetcher_mod, applier_mod, issues):
+    with _patch_acli_and_snapshot_head(fetcher_mod, applier_mod, issues):
         result1 = reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
         result2 = reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
 
@@ -249,7 +241,7 @@ def test_live_pass_persists_prev_snapshot_as_a_bare_key_set(
     """The cross-pass artifact retains membership but no Jira field bodies."""
     issues = _make_stable_issues()
 
-    with _patch_acli_and_concurrency(fetcher_mod, applier_mod, issues):
+    with _patch_acli_and_snapshot_head(fetcher_mod, applier_mod, issues):
         reconcile_mod.reconcile_once("key-set-shape", repo_root=tmp_path)
 
     prev_path = tmp_path / ".tickets-tracker" / ".bridge_state" / "prev_snapshot.json"
@@ -292,7 +284,6 @@ def test_excluded_fields_change_does_not_drive_mutations(
 
     mock_acli_base = _make_acli_module(base_issues)
     mock_acli_excluded = _make_acli_module(issues_with_excluded)
-    ok_concurrency = _make_ok_concurrency()
 
     from unittest.mock import patch
 
@@ -301,23 +292,23 @@ def test_excluded_fields_change_does_not_drive_mutations(
         patch.object(fetcher_mod, "_load_acli", return_value=mock_acli_base),
         patch.object(applier_mod, "_load_acli", return_value=mock_acli_base),
     ):
-        saved_load_concurrency = applier_mod._load_concurrency
-        applier_mod._load_concurrency = lambda: ok_concurrency
+        saved_snapshot_head = applier_mod.snapshot_head
+        applier_mod.snapshot_head = _ok_snapshot_head
         try:
             reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
         finally:
-            applier_mod._load_concurrency = saved_load_concurrency
+            applier_mod.snapshot_head = saved_snapshot_head
 
     # Pass 2: same issues but with excluded field added
     with (
         patch.object(fetcher_mod, "_load_acli", return_value=mock_acli_excluded),
         patch.object(applier_mod, "_load_acli", return_value=mock_acli_excluded),
     ):
-        applier_mod._load_concurrency = lambda: ok_concurrency
+        applier_mod.snapshot_head = _ok_snapshot_head
         try:
             result2 = reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
         finally:
-            applier_mod._load_concurrency = saved_load_concurrency
+            applier_mod.snapshot_head = saved_snapshot_head
 
     assert result2["mutation_count"] == 0, (
         f"Changing only an EXCLUDED_FIELDS field must produce mutation_count=0, "
@@ -380,7 +371,6 @@ def test_real_field_change_converges_after_one_pass(
 
     mock_acli_v1 = _make_acli_module(issues_v1)
     mock_acli_v2 = _make_acli_module(issues_v2)
-    ok_concurrency = _make_ok_concurrency()
 
     from unittest.mock import patch
 
@@ -389,12 +379,12 @@ def test_real_field_change_converges_after_one_pass(
         patch.object(fetcher_mod, "_load_acli", return_value=mock_acli_v1),
         patch.object(applier_mod, "_load_acli", return_value=mock_acli_v1),
     ):
-        saved_load_concurrency2 = applier_mod._load_concurrency
-        applier_mod._load_concurrency = lambda: ok_concurrency
+        saved_snapshot_head2 = applier_mod.snapshot_head
+        applier_mod.snapshot_head = _ok_snapshot_head
         try:
             result1 = reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
         finally:
-            applier_mod._load_concurrency = saved_load_concurrency2
+            applier_mod.snapshot_head = saved_snapshot_head2
 
     # The over-filtering guard, preserved: a key the reconciler has never seen is genuine
     # work and must still be planned. A suppression broad enough to swallow real work
@@ -409,11 +399,11 @@ def test_real_field_change_converges_after_one_pass(
         patch.object(fetcher_mod, "_load_acli", return_value=mock_acli_v2),
         patch.object(applier_mod, "_load_acli", return_value=mock_acli_v2),
     ):
-        applier_mod._load_concurrency = lambda: ok_concurrency
+        applier_mod.snapshot_head = _ok_snapshot_head
         try:
             result2 = reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
         finally:
-            applier_mod._load_concurrency = saved_load_concurrency2
+            applier_mod.snapshot_head = saved_snapshot_head2
 
     assert result2["mutation_count"] == 0, (
         "the pass planned work for a Jira-side field edit on a key with no local "
@@ -473,12 +463,11 @@ def _make_jql_partitioned_acli(issues: list[dict]) -> object:
 
 
 def _patch_partitioned(fetcher_mod, applier_mod, issues: list[dict]):
-    """Like _patch_acli_and_concurrency but with the JQL-partitioned stub."""
+    """Like _patch_acli_and_snapshot_head but with the JQL-partitioned stub."""
     import contextlib
     from unittest.mock import patch
 
     mock_acli = _make_jql_partitioned_acli(issues)
-    ok_concurrency = _make_ok_concurrency()
 
     @contextlib.contextmanager
     def _ctx():
@@ -486,12 +475,12 @@ def _patch_partitioned(fetcher_mod, applier_mod, issues: list[dict]):
             patch.object(fetcher_mod, "_load_acli", return_value=mock_acli),
             patch.object(applier_mod, "_load_acli", return_value=mock_acli),
         ):
-            original = applier_mod._load_concurrency
-            applier_mod._load_concurrency = lambda: ok_concurrency
+            original = applier_mod.snapshot_head
+            applier_mod.snapshot_head = _ok_snapshot_head
             try:
                 yield
             finally:
-                applier_mod._load_concurrency = original
+                applier_mod.snapshot_head = original
 
     return _ctx()
 
@@ -615,7 +604,6 @@ def test_a_key_absent_from_the_current_snapshot_never_reaches_create_issue(
     ]
     acli_v1 = _make_acli_module(issues_v1)
     acli_v2 = _make_acli_module([])  # DIG-9 gone from the working set
-    ok_concurrency = _make_ok_concurrency()
 
     created: list = []
     _orig_create = acli_v2.create_issue
@@ -631,12 +619,12 @@ def test_a_key_absent_from_the_current_snapshot_never_reaches_create_issue(
         patch.object(fetcher_mod, "_load_acli", return_value=acli_v1),
         patch.object(applier_mod, "_load_acli", return_value=acli_v1),
     ):
-        _bak = applier_mod._load_concurrency
-        applier_mod._load_concurrency = lambda: ok_concurrency
+        _bak = applier_mod.snapshot_head
+        applier_mod.snapshot_head = _ok_snapshot_head
         try:
             reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
         finally:
-            applier_mod._load_concurrency = _bak
+            applier_mod.snapshot_head = _bak
 
     # Pass 1 healed the marked-but-unstored key (bug 2392-9389-39f9-4ca6), so the
     # pass-2 walk now probes the BOUND off-window key with a bounded direct GET.
@@ -654,12 +642,12 @@ def test_a_key_absent_from_the_current_snapshot_never_reaches_create_issue(
         patch.object(applier_mod, "_load_acli", return_value=acli_v2),
         patch.object(ob_mod, "_safe_get_issue", _probe_404),
     ):
-        _bak = applier_mod._load_concurrency
-        applier_mod._load_concurrency = lambda: ok_concurrency
+        _bak = applier_mod.snapshot_head
+        applier_mod.snapshot_head = _ok_snapshot_head
         try:
             result2 = reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
         finally:
-            applier_mod._load_concurrency = _bak
+            applier_mod.snapshot_head = _bak
 
     assert created == [], (
         "a key that merely left the fetch window was RESURRECTED: reconcile_once called "

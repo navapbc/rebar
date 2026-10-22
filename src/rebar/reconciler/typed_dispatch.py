@@ -2,11 +2,12 @@
 """Typed-mutation dispatch: the (direction, action) routing table + its dispatcher.
 
 The single cohesive registry the typed-apply path and reconcile.py's dispatch
-table consume. _build_leaves walks mutation._VALID_COMBINATIONS and binds each
-valid (direction, action) pair to its leaf handler (imported from apply_outbound
-/apply_inbound); _LEAF_NAMES is the parallel name map _apply_typed uses to derive
-a leaf_name for the rebar-id audit; _apply_typed looks a mutation up in the
-table, runs the rebar-id write guard, and invokes the handler. applier re-exports all.
+table consume. _build_leaves binds each valid (direction, action) pair to its leaf
+handler (imported from apply_outbound/apply_inbound) and checks that the bound
+pairs are exactly mutation._VALID_COMBINATIONS; _LEAF_NAMES is the parallel name
+map _apply_typed uses to derive a leaf_name for the rebar-id audit; _apply_typed
+looks a mutation up in the table, runs the rebar-id write guard, and invokes the
+handler. applier re-exports all.
 
 Imports downward only (apply_base + the leaf modules); never imports applier.
 """
@@ -44,10 +45,10 @@ from rebar.reconciler.rebar_id_audit import _audit_rebar_id_label_writes
 def _build_leaves() -> dict[tuple[Any, Any], Callable[..., ApplyResult]]:
     """Build the _LEAVES registry.
 
-    Built lazily-but-eagerly (at module import) by walking mutation._VALID_COMBINATIONS
-    and binding the leaf handler for each pair. Only pairs in _VALID_COMBINATIONS
-    are registered — invalid pairs (e.g. outbound + clean_label) are not present
-    by construction.
+    Built eagerly at module import by binding the leaf handler for each pair.
+    The bound pairs must be exactly mutation._VALID_COMBINATIONS, so a pair the
+    allowlist admits always has a handler and an invalid pair (e.g. outbound +
+    clean_label) never does.
     """
     mut_mod = _load_mutation_module()
     D = mut_mod.MutationDirection
@@ -64,9 +65,14 @@ def _build_leaves() -> dict[tuple[Any, Any], Callable[..., ApplyResult]]:
         (D.inbound, A.repair_property): _apply_inbound_repair_property,
         (D.inbound, A.conflict): _apply_inbound_conflict,
     }
-    # Filter to only valid combinations — single source of truth is mutation.py.
     valid = mut_mod._VALID_COMBINATIONS
-    return {k: v for k, v in handlers.items() if k in valid}
+    if set(handlers) != valid:
+        raise RuntimeError(
+            "typed_dispatch leaves do not match mutation._VALID_COMBINATIONS: "
+            f"unhandled={sorted(map(str, valid - set(handlers)))} "
+            f"unlisted={sorted(map(str, set(handlers) - valid))}"
+        )
+    return handlers
 
 
 # The dispatch registry. Keys are (MutationDirection, MutationAction) tuples;

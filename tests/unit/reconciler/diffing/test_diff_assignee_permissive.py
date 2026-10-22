@@ -1,10 +1,9 @@
 """RED tests for Gap 4: assignee permissive match (no canonical-key churn).
 
 Historical bug (bug 85a1 / Gap 4): the outbound differ compared a local
-``assignee`` string against ``_extract_jira_field(jira, "assignee")``,
-which always returned ``displayName``. Local tickets store assignee as
-email, displayName, "Test", or empty depending on how they were created
-(probe vs ticket-create.sh vs Jira-mirror inbound). The bare-string
+``assignee`` string against the Jira assignee's ``displayName`` only. Local
+tickets store assignee as email, displayName, "Test", or empty depending on
+how they were created (probe vs ticket-create.sh vs Jira-mirror inbound). The bare-string
 comparison fired every pass for any non-displayName local — Phase 6
 idempotency churn AND spurious outbound updates.
 
@@ -16,26 +15,18 @@ the diff is taught to recognize equivalent identities.
 
 from __future__ import annotations
 
-import importlib
-from pathlib import Path
+from typing import Any
 
-import pytest
-
-from rebar.reconciler.adapters.jira import outbound_fields as _of  # 625b: adapter-internal
-
-REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
+from rebar.reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.outbound_field_diff import compute_update_fields
 
 
-def _load_differ():
-    return importlib.import_module("rebar.reconciler.outbound_differ")
-
-
-@pytest.fixture(scope="module")
-def differ():
-    if not DIFFER_PATH.exists():
-        pytest.fail(f"outbound_differ.py not found at {DIFFER_PATH}")
-    return _load_differ()
+def _diff(ticket: dict, jira: dict) -> dict[str, Any]:
+    """Run the live outbound field diff with the Jira backend's mappers."""
+    backend = JiraBackend(transport=object())
+    return compute_update_fields(
+        ticket, jira, inbound_mapper=backend.inbound, outbound_mapper=backend.outbound
+    )
 
 
 def _make_ticket(assignee):
@@ -67,62 +58,62 @@ JIRA_USER = {
 }
 
 
-def test_local_email_matches_jira_email(differ):
+def test_local_email_matches_jira_email() -> None:
     """Local stores email; Jira returns dict — diff should NOT fire."""
     ticket = _make_ticket("joe@example.com")
     jira = _make_jira_fields(JIRA_USER)
-    changed = _of._diff_fields(ticket, jira)
+    changed = _diff(ticket, jira)
     assert "assignee" not in changed, (
         f"local email matches Jira emailAddress — no diff expected; got {changed!r}"
     )
 
 
-def test_local_displayname_matches_jira_displayname(differ):
+def test_local_displayname_matches_jira_displayname() -> None:
     """Local stores displayName; same person — diff should NOT fire."""
     ticket = _make_ticket("Joe Oakhart")
     jira = _make_jira_fields(JIRA_USER)
-    changed = _of._diff_fields(ticket, jira)
+    changed = _diff(ticket, jira)
     assert "assignee" not in changed
 
 
-def test_local_accountid_matches_jira_accountid(differ):
+def test_local_accountid_matches_jira_accountid() -> None:
     """Local stores accountId; diff should NOT fire."""
     ticket = _make_ticket("712020:abc-123")
     jira = _make_jira_fields(JIRA_USER)
-    changed = _of._diff_fields(ticket, jira)
+    changed = _diff(ticket, jira)
     assert "assignee" not in changed
 
 
-def test_local_different_user_does_fire(differ):
+def test_local_different_user_does_fire() -> None:
     """When local truly differs (different user identity), diff should fire."""
     ticket = _make_ticket("alice@example.com")
     jira = _make_jira_fields(JIRA_USER)
-    changed = _of._diff_fields(ticket, jira)
+    changed = _diff(ticket, jira)
     assert "assignee" in changed
     assert changed["assignee"] == "alice@example.com"
 
 
-def test_local_unassigned_matches_jira_null(differ):
+def test_local_unassigned_matches_jira_null() -> None:
     """Both unassigned should match."""
     ticket = _make_ticket("")
     jira = _make_jira_fields(None)  # Jira returns None for unassigned
-    changed = _of._diff_fields(ticket, jira)
+    changed = _diff(ticket, jira)
     assert "assignee" not in changed
 
 
-def test_local_unassigned_vs_jira_assigned_does_fire(differ):
+def test_local_unassigned_vs_jira_assigned_does_fire() -> None:
     """Local says unassign but Jira has someone — diff should fire (clear-assignee mutation)."""
     ticket = _make_ticket("")
     jira = _make_jira_fields(JIRA_USER)
-    changed = _of._diff_fields(ticket, jira)
+    changed = _diff(ticket, jira)
     assert "assignee" in changed
     assert changed["assignee"] == ""
 
 
-def test_jira_assignee_missing_emailaddress_falls_back(differ):
+def test_jira_assignee_missing_emailaddress_falls_back() -> None:
     """Some Jira tenants hide email — displayName fallback must still match."""
     user_no_email = {"accountId": "712020:abc-123", "displayName": "Joe Oakhart"}
     ticket = _make_ticket("Joe Oakhart")
     jira = _make_jira_fields(user_no_email)
-    changed = _of._diff_fields(ticket, jira)
+    changed = _diff(ticket, jira)
     assert "assignee" not in changed

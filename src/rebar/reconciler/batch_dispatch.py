@@ -111,15 +111,15 @@ def _mutation_to_batch_dict(mutation) -> dict:
     is written. Every value here MUST be JSON-serializable. Do NOT store
     the original Mutation object as a back-reference — non-serializable.
 
-    ADR 0107 "Cut"/"Delete" step: production (``outbound_pass.py``) now
-    constructs one of the typed payload dataclasses
-    (``mutation_payloads.OutboundCreatePayload`` / ``OutboundUpdatePayload`` /
-    ``OutboundDeletePayload``) directly, so the CREATE payload shape is no
-    longer runtime-ambiguous on that path — read the field maps straight off
-    the dataclass's own named attributes, no ``"fields" in payload``
-    sniffing required. A raw dict payload (legacy test fixtures only —
-    census-verified: no production producer constructs one any more) falls
-    through to the historical two-shape heuristic below, unchanged.
+    A typed outbound create or update payload
+    (``mutation_payloads.OutboundCreatePayload`` / ``OutboundUpdatePayload``,
+    built by ``outbound_pass.py``) is read through its own named attributes.
+    Two production producers still build a plain-dict payload: ``binding_walk``
+    (an outbound update carrying ``changed_fields``) and ``differ`` (an outbound
+    probe carrying ``{}``). A plain-dict update reads its fields from
+    ``changed_fields``; any other plain-dict action carries no fields. A
+    plain-dict create has no single unambiguous field map, so it raises
+    ``TypeError``: build an ``OutboundCreatePayload`` instead.
     """
     from rebar.reconciler.mutation_payloads import (
         OutboundCreatePayload,
@@ -129,69 +129,27 @@ def _mutation_to_batch_dict(mutation) -> dict:
     action_value = getattr(mutation.action, "value", str(mutation.action))
     direction_value = getattr(mutation.direction, "value", str(mutation.direction))
 
-    if isinstance(mutation.payload, OutboundCreatePayload):
-        fields = dict(mutation.payload.fields)
-        local_id = mutation.payload.local_id or ""
-        comments = list(mutation.payload.comments)
-        labels = list(mutation.payload.labels)
-        links = list(mutation.payload.links)
-        follow_on = None
-    elif isinstance(mutation.payload, OutboundUpdatePayload):
-        fields = dict(mutation.payload.changed_fields)
-        local_id = mutation.payload.local_id or ""
-        comments = list(mutation.payload.comments)
-        labels = list(mutation.payload.labels)
-        links = list(mutation.payload.links)
+    if isinstance(mutation.payload, (OutboundCreatePayload, OutboundUpdatePayload)):
+        typed = mutation.payload
+        fields = dict(
+            typed.fields if isinstance(typed, OutboundCreatePayload) else typed.changed_fields
+        )
+        local_id = typed.local_id or ""
+        comments = list(typed.comments)
+        labels = list(typed.labels)
+        links = list(typed.links)
         follow_on = None
     else:
-        payload = dict(mutation.payload) if mutation.payload else {}
-        # Bug 87e4: outbound mutations from reconcile.py have two different
-        # payload shapes depending on action:
-        #
-        #   - CREATE: payload has create fields at the TOP LEVEL (summary,
-        #     description, priority, issuetype, assignee, ...) alongside
-        #     bookkeeping keys (local_id, comments, labels). create_one needs
-        #     the full set of fields.
-        #
-        #   - UPDATE: payload has changed fields under "changed_fields", with
-        #     "comments" and "labels" as separate top-level keys. update_one
-        #     needs ONLY the scalar field changes — passing the whole payload
-        #     would unpack bogus `changed_fields=`, `comments=`, `labels=`
-        #     kwargs to client.update_issue (the original bug symptom).
-        #
-        # Distinguish by action and read the appropriate shape. This branch is
-        # now reached only by a raw dict-shaped payload (legacy test fixtures;
-        # no production producer builds one — see the route-census guard
-        # test in tests/unit/reconciler/mutate/).
-        _BOOKKEEPING_KEYS = {
-            "changed_fields",
-            "comments",
-            "labels",
-            "local_id",
-            "follow_on",
-        }
-        if action_value == "update":
-            raw_changed_fields = payload.get("changed_fields")
-            fields = (
-                dict(raw_changed_fields)
-                if raw_changed_fields is not None
-                else payload.get("fields", {})
+        if action_value == "create":
+            raise TypeError(
+                "an outbound create needs an OutboundCreatePayload, not a plain "
+                f"{type(mutation.payload).__name__} payload (target={mutation.target!r})"
             )
-        elif action_value == "create":
-            # Two CREATE payload shapes coexist:
-            #   - Legacy (test fixtures + older callers): payload has a nested
-            #     "fields" key.  Honor it explicitly (including the
-            #     intentionally-empty {} case — the original "fields=={}
-            #     must NOT fall through to full payload" contract).
-            #   - Top-level spread: bookkeeping keys stripped, everything
-            #     else is a field.
-            if "fields" in payload:
-                fields = payload.get("fields", {})
-            else:
-                fields = {k: v for k, v in payload.items() if k not in _BOOKKEEPING_KEYS}
-        else:
-            # Other actions (delete, probe, etc.) don't carry field maps.
-            fields = payload.get("fields", {})
+        payload = dict(mutation.payload) if mutation.payload else {}
+        # Bug 87e4: an update's scalar changes live under "changed_fields", beside
+        # separate "comments"/"labels" keys; passing the whole payload would unpack
+        # bogus kwargs into client.update_issue.
+        fields = dict(payload.get("changed_fields") or {}) if action_value == "update" else {}
         local_id = payload.get("local_id", "")
         comments = payload.get("comments", [])
         labels = payload.get("labels", [])
@@ -590,7 +548,7 @@ def reroute_ordered_create_plans(*, ticket_plans, mutations, ctx, outcomes_sink)
 
 
 def make_guarded_execute(
-    *, abort_check, recheck_drift, concurrency, repo_root, head_pin_cell, dispatch_fn
+    *, abort_check, recheck_drift, snapshot_head, repo_root, head_pin_cell, dispatch_fn
 ):
     """Build the coordinator's injected ``execute(plan, mutation)`` closure.
 
@@ -604,7 +562,7 @@ def make_guarded_execute(
     def execute(plan, mutation):
         if abort_check is not None:
             abort_check()
-        head_pin_cell[0] = recheck_drift(concurrency, repo_root, head_pin_cell[0])
+        head_pin_cell[0] = recheck_drift(snapshot_head, repo_root, head_pin_cell[0])
         return dispatch_fn(plan, mutation)
 
     return execute
@@ -692,7 +650,7 @@ def run_migrated_reroute(
     ctx,
     abort_check,
     recheck_drift,
-    concurrency,
+    snapshot_head,
     repo_root,
     head_pin_cell,
     outcomes_sink,
@@ -710,7 +668,7 @@ def run_migrated_reroute(
     execute = make_guarded_execute(
         abort_check=abort_check,
         recheck_drift=recheck_drift,
-        concurrency=concurrency,
+        snapshot_head=snapshot_head,
         repo_root=repo_root,
         head_pin_cell=head_pin_cell,
         dispatch_fn=dispatch_fn,
@@ -726,7 +684,7 @@ def reroute_migrated_plans(
     ctx,
     abort_check,
     recheck_drift,
-    concurrency,
+    snapshot_head,
     repo_root,
     head_pin_cell,
     outcomes_sink,
@@ -761,7 +719,7 @@ def reroute_migrated_plans(
         ctx=ctx,
         abort_check=abort_check,
         recheck_drift=recheck_drift,
-        concurrency=concurrency,
+        snapshot_head=snapshot_head,
         repo_root=repo_root,
         head_pin_cell=head_pin_cell,
         outcomes_sink=outcomes_sink,

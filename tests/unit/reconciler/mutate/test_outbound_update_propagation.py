@@ -19,7 +19,7 @@ Two coordinated root causes:
      and comment changes wouldn't propagate from the legacy batch path.
 
 Fix:
-  1. `_mutation_to_batch_dict` reads `payload.get("changed_fields", payload.get("fields", {}))`
+  1. `_mutation_to_batch_dict` reads an update's fields from `changed_fields`
      and ALSO surfaces `comments` and `labels` keys in the returned dict.
   2. `update_one` iterates `mutation.get("labels", [])` calling
      `add_label`/`remove_label` per action, and iterates
@@ -35,6 +35,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+
+from rebar.reconciler.mutation_payloads import OutboundCreatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
@@ -172,12 +174,11 @@ def test_update_one_propagates_comments(applier):
     assert ("DIG-100", "another one") in add_comment_calls
 
 
-def test_mutation_to_batch_dict_extracts_create_fields_from_payload_top_level(applier):
-    """For outbound CREATE mutations, reconcile.py stores fields at the TOP
-    LEVEL of the payload alongside bookkeeping keys (local_id, comments,
-    labels). `_mutation_to_batch_dict` must extract the create fields by
-    stripping bookkeeping keys — NOT pull from a nested `fields` or
-    `changed_fields` key (which doesn't exist for create).
+def test_mutation_to_batch_dict_extracts_create_fields_from_typed_payload(applier):
+    """For outbound CREATE mutations the typed payload carries the create fields
+    beside bookkeeping (local_id, comments, labels). `_mutation_to_batch_dict` must
+    put exactly the create fields in the batch dict's `fields`, never the
+    bookkeeping keys.
 
     Regression for the 'title/summary is empty' error introduced when
     fixing the UPDATE path with an empty-dict default."""
@@ -186,17 +187,17 @@ def test_mutation_to_batch_dict_extracts_create_fields_from_payload_top_level(ap
         direction=mut_mod.MutationDirection.outbound,
         action=mut_mod.MutationAction.create,
         target="local-id-1",
-        payload={
-            # Create fields at top level (matches reconcile.py:525-535).
-            "summary": "New issue",
-            "description": "desc",
-            "issuetype": "Task",
-            "priority": "Medium",
-            # Bookkeeping keys that must NOT leak into fields.
-            "local_id": "local-id-1",
-            "comments": [],
-            "labels": [{"action": "add", "label": "x"}],
-        },
+        payload=OutboundCreatePayload(
+            fields={
+                "summary": "New issue",
+                "description": "desc",
+                "issuetype": "Task",
+                "priority": "Medium",
+            },
+            # Bookkeeping that must NOT leak into fields.
+            local_id="local-id-1",
+            labels=({"action": "add", "label": "x"},),
+        ),
         provenance={"source": "test"},
     )
 

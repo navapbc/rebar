@@ -47,7 +47,6 @@ _JIRA_ADAPTER_MODULES = frozenset(
         "acli_rest",
         "acli_subprocess",
         "adf",
-        "outbound_fields",
         "comment_limits",
     }
 )
@@ -60,6 +59,16 @@ def _recon(modname: str) -> ModuleType:
         "rebar.reconciler.adapters.jira" if modname in _JIRA_ADAPTER_MODULES else "rebar.reconciler"
     )
     return importlib.import_module(f"{package}.{modname}")
+
+
+def _field_diff(ticket: dict[str, Any], jira: dict[str, Any], **kw: Any) -> dict[str, Any]:
+    """Run the live outbound field diff (``outbound_field_diff.compute_update_fields``)
+    with the Jira backend's mappers."""
+    backend_mod = importlib.import_module("rebar.reconciler.adapters.jira.backend")
+    backend = backend_mod.JiraBackend(transport=object())
+    return _recon("outbound_field_diff").compute_update_fields(
+        ticket, jira, inbound_mapper=backend.inbound, outbound_mapper=backend.outbound, **kw
+    )
 
 
 _LIVE_ENV_KEYS = ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN")
@@ -533,11 +542,12 @@ def test_c1_conflict_signal(tmp_path):
     ticket = _local_ticket(description="local-edit")
     jira = _jira_fields(description="jira-edit")
 
-    changed = _recon("outbound_fields")._diff_fields(
+    changed = _field_diff(
         ticket,
         jira,
         jira_key="C1-KEY-1",
-        prev_jira_fields={"description": "baseline"},  # both sides diverged from this
+        # The last-synced Jira value: both sides diverged from this baseline.
+        prev_snapshot={"C1-KEY-1": {"description": "baseline"}},
         conflict_sink=conflict_sink,
     )
 
@@ -562,7 +572,7 @@ def test_c3_field_allowlist_drop_alert(tmp_path):
     run_differs = _recon("run_differs")
 
     dropped_sink: list[tuple[str, str]] = []
-    changed = _recon("outbound_fields")._diff_fields(
+    changed = _field_diff(
         _local_ticket(ticket_type="bug"),  # -> issuetype "Bug"
         _jira_fields(issuetype={"name": "Task"}),
         jira_key="C3-KEY-1",
@@ -600,11 +610,11 @@ def test_c4_429_jittered_backoff(monkeypatch):
     # 429 without Retry-After -> jittered exponential, bounded: 2^(0+1) + U(0,1) in [2,3).
     jittered = sub._rate_limit_backoff(0, "HTTP 429 Too Many Requests")
     assert jittered is not None and 2.0 <= jittered < 3.0
-    # 429 WITH a parseable Retry-After -> honored (and capped at _MAX_BACKOFF_S).
+    # 429 WITH a parseable Retry-After -> honored (and capped at MAX_BACKOFF_S).
     honored = sub._rate_limit_backoff(0, "429 rate limit; Retry-After: 7")
     assert honored == 7.0
     capped = sub._rate_limit_backoff(0, "429; Retry-After: 999999")
-    assert capped == sub._MAX_BACKOFF_S
+    assert capped == sub.MAX_BACKOFF_S
 
     # --- the full retry loop: a 429 exit then success ---
     slept: list[float] = []
@@ -700,7 +710,7 @@ def test_idempotency_zero_mutations_on_noop_pass():
     # local status "open" maps to Jira "To Do"; pre-seed that so the pass is a true noop.
     same_ticket = _local_ticket(description="D", title="T", status="open")
     same_jira = _jira_fields(summary="T", description="D", status={"name": "To Do"})
-    changed = _recon("outbound_fields")._diff_fields(same_ticket, same_jira, jira_key="IDEMP-1")
+    changed = _field_diff(same_ticket, same_jira, jira_key="IDEMP-1")
     assert changed == {}, "a noop pass over just-written data must emit zero field mutations"
 
     # (2) echo suppression: our outbound comment is decorated with the reconciler marker.

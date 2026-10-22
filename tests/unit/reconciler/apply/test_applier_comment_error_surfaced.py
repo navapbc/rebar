@@ -19,6 +19,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from rebar.reconciler import scratch_retention
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
@@ -62,6 +64,17 @@ def _read_manifest_outcomes(repo_root: Path, pass_id: str) -> list[dict]:
     return data.get("mutations", [])
 
 
+def _update(key: str, fields: dict, *, local_id: str | None = None, **extra) -> Mutation:
+    """A typed outbound update Mutation (``extra``: comments/labels/links tuples)."""
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.update,
+        key,
+        OutboundUpdatePayload(changed_fields=fields, local_id=local_id, **extra),
+        {},
+    )
+
+
 def test_add_comment_failure_surfaces_in_outcome(
     applier_mod: ModuleType,
     acli_mod: ModuleType,
@@ -72,14 +85,12 @@ def test_add_comment_failure_surfaces_in_outcome(
     update succeeds and the batch does not abort."""
     pass_id = f"test-pass-comment-err-{int(time.time())}"
 
-    mutation = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-8000",
-        "fields": {"summary": "scalar update that succeeds"},
-        "comments": [{"action": "add", "body": "an oversize comment that fails"}],
-        "local_id": "comment-fail-id",
-    }
+    mutation = _update(
+        "DIG-8000",
+        {"summary": "scalar update that succeeds"},
+        local_id="comment-fail-id",
+        comments=({"action": "add", "body": "an oversize comment that fails"},),
+    )
 
     fake_client = MagicMock()
     fake_client.update_issue.return_value = {"key": "DIG-8000", "ok": True}
@@ -125,14 +136,12 @@ def test_successful_comment_leaves_no_comment_errors(
     """When add_comment succeeds, no comment_errors record is produced (the new
     field must not fire spuriously)."""
     pass_id = f"test-pass-comment-ok-{int(time.time())}"
-    mutation = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-8001",
-        "fields": {"summary": "ok"},
-        "comments": [{"action": "add", "body": "a normal comment"}],
-        "local_id": "comment-ok-id",
-    }
+    mutation = _update(
+        "DIG-8001",
+        {"summary": "ok"},
+        local_id="comment-ok-id",
+        comments=({"action": "add", "body": "a normal comment"},),
+    )
     fake_client = MagicMock()
     fake_client.update_issue.return_value = {"key": "DIG-8001", "ok": True}
     fake_client.add_comment.return_value = {"id": "1", "body": "a normal comment"}

@@ -70,7 +70,6 @@ logger = logging.getLogger(__name__)
 # status is included: bug 85a1 (Gap 8) removed the BY_DESIGN drop —
 # outbound status push now uses REST POST /transitions via
 # ``transition_issue`` (bypasses ACLI's silent-exit-0 failure mode).
-# The typed leaf's REBAR_RECONCILER_STATUS_GATING gate is also gone.
 _OUTBOUND_BATCH_ALLOWLIST = frozenset({"summary", "description", "assignee", "priority", "status"})
 
 

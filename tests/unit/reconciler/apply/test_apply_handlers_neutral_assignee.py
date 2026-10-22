@@ -19,6 +19,8 @@ import pytest
 
 from rebar.reconciler import scratch_retention
 from rebar.reconciler._backend import BackendAssigneeNotFoundError
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
@@ -48,13 +50,13 @@ def test_neutral_assignee_error_soft_fails(applier_mod: ModuleType, tmp_path: Pa
     """Raising the NEUTRAL ``BackendAssigneeNotFoundError`` (not the Jira subclass) from
     the transport must be soft-failed by apply_handlers: apply() returns without raising
     and an assignee alert is recorded."""
-    bad_mutation = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-4276",
-        "fields": {"assignee": "Worktree"},
-        "local_id": "bad-local-id",
-    }
+    bad_mutation = Mutation(
+        MutationDirection.outbound,
+        MutationAction.update,
+        "DIG-4276",
+        OutboundUpdatePayload(changed_fields={"assignee": "Worktree"}, local_id="bad-local-id"),
+        {},
+    )
     fake_client = MagicMock()
     fake_client.update_issue.side_effect = BackendAssigneeNotFoundError(
         "no assignable user matches 'Worktree' for issue='DIG-4276'"

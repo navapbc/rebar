@@ -44,6 +44,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from rebar.reconciler import scratch_retention
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundCreatePayload, OutboundUpdatePayload
 
 _ACLI_FAIL = "ACLI mutation reported FAILURE (exit=0): comment body too long"
 
@@ -78,30 +80,50 @@ def _make_fake_acli(acli_mod: ModuleType, client: MagicMock) -> MagicMock:
     return client
 
 
+def _update(key: str, fields: dict, *, local_id: str | None = None, **extra) -> Mutation:
+    """A typed outbound update Mutation (``extra``: comments/labels/links tuples)."""
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.update,
+        key,
+        OutboundUpdatePayload(changed_fields=fields, local_id=local_id, **extra),
+        {},
+    )
+
+
+def _create(local_id: str, fields: dict, **extra) -> Mutation:
+    """A typed outbound create Mutation (``extra``: comments/labels/links tuples)."""
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.create,
+        local_id,
+        OutboundCreatePayload(fields=fields, local_id=local_id, **extra),
+        {},
+    )
+
+
 def _apply_one(applier_mod, acli_mod, mutation, client, tmp_path, pass_id) -> dict:
     fake = _make_fake_acli(acli_mod, client)
     with patch.object(applier_mod, "_load_acli", return_value=fake):
         applier_mod.apply([mutation], pass_id, repo_root=tmp_path)
     manifest = scratch_retention.snapshots_dir(tmp_path) / f"{pass_id}.manifest.json"
     outcomes = json.loads(manifest.read_text()).get("mutations", []) if manifest.is_file() else []
-    return next((o for o in outcomes if o.get("key") == mutation["key"]), {})
+    return next((o for o in outcomes if o.get("key") == mutation.target), {})
 
 
-def _update_with_partial_comment_drop(acli_mod, *, key: str) -> tuple[dict, MagicMock]:
+def _update_with_partial_comment_drop(acli_mod, *, key: str) -> tuple[Mutation, MagicMock]:
     """A mutation with TWO comments where the FIRST succeeds and the SECOND fails.
     -> comments_computed=2, comments_applied=1 (canary does NOT fire), one
     comment_errors entry. This is the partial-drop gap the canary can't see."""
-    mutation = {
-        "direction": "outbound",
-        "action": "update",
-        "key": key,
-        "fields": {"summary": "scalar update that succeeds"},
-        "comments": [
+    mutation = _update(
+        key,
+        {"summary": "scalar update that succeeds"},
+        local_id=f"loc-{key}",
+        comments=(
             {"action": "add", "body": "first comment that lands"},
             {"action": "add", "body": "second comment whose add fails"},
-        ],
-        "local_id": f"loc-{key}",
-    }
+        ),
+    )
     client = MagicMock()
     client.update_issue.return_value = {"key": key, "ok": True}
     client.add_comment.side_effect = [
@@ -138,13 +160,11 @@ def test_create_path_comment_drop_promotes_to_error(applier_mod, acli_mod, tmp_p
     canary, so even a single failed comment is a clean discriminator (RED:
     comment_errors → error=None on unmodified code)."""
     pass_id = f"cr-on-{time.time_ns()}"
-    mutation = {
-        "direction": "outbound",
-        "action": "create",
-        "local_id": "create-flagged-comment-fail",
-        "fields": {"summary": "a new issue", "issuetype": "Task"},
-        "comments": [{"action": "add", "body": "an oversize comment that fails"}],
-    }
+    mutation = _create(
+        "create-flagged-comment-fail",
+        {"summary": "a new issue", "issuetype": "Task"},
+        comments=({"action": "add", "body": "an oversize comment that fails"},),
+    )
     client = MagicMock()
     client.create_issue.return_value = {"key": "DIG-9200", "ok": True}
     client.search_issues.return_value = []  # JQL dedup miss so create proceeds
@@ -173,14 +193,12 @@ def test_comments_canary_fires_on_total_noop(applier_mod, acli_mod, tmp_path) ->
     """A COMMENTS total no-op (the single comment's add fails: computed=1,
     applied=0) trips the canary — proving comments coverage, not just links. The
     silent-no-op reason augments (never replaces) the comment-errors reason."""
-    mutation = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-9300",
-        "fields": {"summary": "scalar ok"},
-        "comments": [{"action": "add", "body": "the only comment, and it fails"}],
-        "local_id": "loc-9300",
-    }
+    mutation = _update(
+        "DIG-9300",
+        {"summary": "scalar ok"},
+        local_id="loc-9300",
+        comments=({"action": "add", "body": "the only comment, and it fails"},),
+    )
     client = MagicMock()
     client.update_issue.return_value = {"key": "DIG-9300", "ok": True}
     client.add_comment.side_effect = acli_mod.AcliMutationError(
@@ -199,14 +217,12 @@ def test_comments_canary_fires_on_total_noop(applier_mod, acli_mod, tmp_path) ->
 def test_labels_canary_fires_on_total_noop(applier_mod, acli_mod, tmp_path) -> None:
     """A LABELS total no-op (add_label fails: computed=1, applied=0) trips the
     canary — proving labels coverage, not just links — and hard-fails."""
-    mutation = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-9400",
-        "fields": {"summary": "scalar ok"},
-        "labels": [{"action": "add", "label": "needs-triage"}],
-        "local_id": "loc-9400",
-    }
+    mutation = _update(
+        "DIG-9400",
+        {"summary": "scalar ok"},
+        local_id="loc-9400",
+        labels=({"action": "add", "label": "needs-triage"},),
+    )
     client = MagicMock()
     client.update_issue.return_value = {"key": "DIG-9400", "ok": True}
     client.add_label.side_effect = RuntimeError("label write boom")

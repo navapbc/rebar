@@ -209,8 +209,8 @@ def run_coordinator_cutover(client: Any, repo_root, key: str):
     dispatch_fn = make_coordinator_dispatch(ctx=ctx, outcomes_sink=outcomes_sink)
     execute = make_guarded_execute(
         abort_check=None,
-        recheck_drift=lambda _c, _r, pin: pin,
-        concurrency=None,
+        recheck_drift=lambda _s, _r, pin: pin,
+        snapshot_head=None,
         repo_root=repo_root,
         head_pin_cell=["pin0"],
         dispatch_fn=dispatch_fn,

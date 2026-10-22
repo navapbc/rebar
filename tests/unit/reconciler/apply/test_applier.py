@@ -20,11 +20,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from rebar.reconciler import scratch_retention
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundCreatePayload, OutboundUpdatePayload
 
 
 def _init_git_repo(path: Path) -> None:
     """Initialize tmp_path as a minimal git repo so applier.apply()'s
-    concurrency.snapshot_head() (git rev-parse HEAD) succeeds.
+    snapshot_head() (git rev-parse HEAD) succeeds.
 
     apply() reads HEAD via git for the rebase-retry concurrency check; in
     tests we just need any committed HEAD, not a meaningful one.
@@ -95,6 +97,31 @@ def _make_mock_acli_module() -> tuple[MagicMock, MagicMock]:
     return mock_client, mock_client
 
 
+def _create(fields: dict) -> Mutation:
+    """A typed outbound create Mutation (no local id) carrying ``fields``."""
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.create,
+        "local-new",
+        OutboundCreatePayload(fields=fields),
+        {},
+    )
+
+
+def _update(key: str, fields: dict) -> Mutation:
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.update,
+        key,
+        OutboundUpdatePayload(changed_fields=fields),
+        {},
+    )
+
+
+def _delete(key: str) -> Mutation:
+    return Mutation(MutationDirection.outbound, MutationAction.delete, key, {}, {})
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -121,7 +148,7 @@ def test_manifest_written_to_correct_path(tmp_path, applier):
 def test_manifest_has_correct_shape(tmp_path, applier):
     """Manifest JSON contains pass_id, mutation_count, and mutations fields."""
     pass_id = "2026-05-22-pass-02"
-    mutations = [{"action": "create", "fields": {"summary": "Test issue"}}]
+    mutations = [_create({"summary": "Test issue"})]
     mock_acli_mod, _ = _make_mock_acli_module()
     _init_git_repo(tmp_path)
 
@@ -165,7 +192,7 @@ def test_create_action_routes_to_create_issue(tmp_path, applier):
     """
     pass_id = "2026-05-22-pass-04"
     fields = {"summary": "New feature", "issuetype": {"name": "Story"}}
-    mutations = [{"action": "create", "fields": fields}]
+    mutations = [_create(fields)]
     mock_acli_mod, mock_client = _make_mock_acli_module()
     _init_git_repo(tmp_path)
 
@@ -188,7 +215,7 @@ def test_update_action_routes_to_update_issue(tmp_path, applier):
     """'update' action calls client.update_issue with mutation key and fields."""
     pass_id = "2026-05-22-pass-05"
     fields = {"summary": "Updated summary"}
-    mutations = [{"action": "update", "key": "DSO-42", "fields": fields}]
+    mutations = [_update("DSO-42", fields)]
     mock_acli_mod, mock_client = _make_mock_acli_module()
     _init_git_repo(tmp_path)
 
@@ -209,7 +236,7 @@ def test_delete_action_routes_to_delete_issue(tmp_path, applier):
     asserted transition_issue which doesn't exist on the real client.
     """
     pass_id = "2026-05-22-pass-06"
-    mutations = [{"action": "delete", "key": "DSO-99"}]
+    mutations = [_delete("DSO-99")]
     mock_acli_mod, mock_client = _make_mock_acli_module()
     _init_git_repo(tmp_path)
 

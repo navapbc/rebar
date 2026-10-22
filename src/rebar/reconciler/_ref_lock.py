@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # There is deliberately ONE CAS classifier in the reconciler. We load the
 # sibling via the package's by-path loader idiom (the reconciler package is
 # routinely exec'd standalone / shadowed by a test package), matching how
-# _advisory_lock itself loads _concurrency.
+# _advisory_lock itself loads git_adapter.
 # ---------------------------------------------------------------------------
 
 

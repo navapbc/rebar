@@ -228,17 +228,16 @@ def test_inbound_conflict_requires_reason_and_jira_key():
 
 
 # ---------------------------------------------------------------------------
-# Dead-by-design combinations (ADR 0028 / bug 3b5f) — left alone, not modeled.
+# Dead-by-design combinations (ADR 0028 / bug 3b5f) — not valid, not modeled.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("action", ["delete", "probe"])
 def test_inbound_delete_and_probe_are_unregistered(action):
     """(inbound, delete)/(inbound, probe) are dead-by-design (ADR 0028, bug
-    3b5f): typed_dispatch._LEAVES never registers them and neither is ever
-    constructed in production. This story deliberately does NOT model them —
-    see e9d5's boundary note; deletion of the stale _VALID_COMBINATIONS
-    allowance is bug 3b5f's job, not this one's."""
+    3b5f): typed_dispatch._LEAVES never registers them, _VALID_COMBINATIONS
+    excludes them (so ``Mutation`` rejects them), and no payload type models
+    them."""
     with pytest.raises(mp.UnknownMutationKindError):
         mp.build_typed_payload("inbound", action, {})
     with pytest.raises(mp.UnknownMutationKindError):

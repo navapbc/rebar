@@ -162,33 +162,25 @@ producer (`outbound_pass._run_differs_outbound`) now constructs
 directly from each `OutboundMutation`, rather than assembling a raw dict whose
 CREATE shape (top-level-spread fields vs. a nested `"fields"` key) was
 ambiguous downstream. `batch_dispatch._mutation_to_batch_dict` reads a typed
-payload's own named attributes (`.fields` / `.changed_fields`) directly — no
-more runtime `"fields" in payload` sniffing for the production path. The
-historical dict-shape heuristic in `_mutation_to_batch_dict` is **retained**,
-but only as an explicit, documented fallback for a raw-dict `Mutation.payload`
-— a genuinely supported, test-exercised construction path (see
-`tests/unit/reconciler/mutate/test_outbound_update_propagation.py` /
-`test_outbound_create_binding.py`), not a production code path (verified by
-`tests/unit/reconciler/mutate/test_payload_shadow_route_census.py`'s
-source-text census: only `outbound_pass` and `batch_dispatch` import
-`mutation_payloads`; no production module imports the side-effect-free shadow
-comparator, `payload_shadow.py`).
+payload's own named attributes (`.fields` / `.changed_fields`) directly. Two
+production producers still build a plain-dict payload: `binding_walk` (an
+outbound update carrying `changed_fields`) and `differ` (an outbound probe
+carrying `{}`). For a plain dict, `_mutation_to_batch_dict` reads an update's
+fields from `changed_fields` and gives every other action no fields; a
+plain-dict create raises `TypeError`, because it has no single unambiguous
+field map. `tests/unit/reconciler/mutate/test_outbound_pass_typed_payload_cutover.py`
+pins that only `outbound_pass` and `batch_dispatch` import `mutation_payloads`.
 
-`applier.apply()`'s **two call shapes remain**: a single typed `Mutation`
-dispatches through `_apply_typed`, and a **list** dispatches through the legacy
-batch path (`_apply_batch`) — and that list may itself be either typed
-`Mutation`s (the real production shape, always typed after the producer
-cutover above) or already-dict-shaped legacy batch entries (a distinct,
-directly-tested API convention — see
-`tests/unit/reconciler/mutate/test_apply_list_of_mutations.py` and the
-~50 tests across `tests/unit/reconciler/apply/` that hand-build dict
-batches to unit-test `_apply_batch`/`create_one`/`update_one`/`delete_one`
-independent of how the input was produced). `apply()` still branches on
-`isinstance(m, MutationShape)` per list entry to decide whether to convert via
-`_mutation_to_batch_dict` — this is that dual-call-shape API, not residual
-production-path ambiguity: 100% of what the reconciler pass itself emits is
-now a typed `Mutation` with a typed payload, so `_mutation_to_batch_dict` is
-never invoked on an ambiguous shape in production.
+`applier.apply()` has **two call shapes**: a single typed `Mutation`
+dispatches through `_apply_typed`, and a sequence of typed `Mutation`s is the
+batch form. The batch form accepts typed `Mutation`s only: it raises
+`TypeError` for any other element before any write, routes inbound mutations
+through `_apply_typed` one at a time, and converts every outbound mutation
+with `_mutation_to_batch_dict` before the legacy batch path (`_apply_batch`)
+runs. `_VALID_COMBINATIONS` lists exactly the 10 `(direction, action)` pairs
+that `typed_dispatch._LEAVES` registers, and `typed_dispatch` checks at import
+that the two match; `Mutation(inbound, delete)` and `Mutation(inbound, probe)`
+raise `ValueError`.
 
 
 
@@ -554,7 +546,7 @@ behind a `dispatch_mutation` table over a `BatchApplyContext`. `applier._apply_b
 is now a thin sequencer — resolve transport → cross-project guard → HEAD-drift
 recheck loop → per-mutation dispatch + record → manifest-write tail — whose
 per-mutation step is the extracted `_recheck_drift` + `_apply_one` helpers (nesting
-depth ≤ 4). The rebar-id label-write audit guard and the `_load_acli`/`_load_concurrency`
+depth ≤ 4). The rebar-id label-write audit guard and the `_load_acli`/`snapshot_head`
 seams stay resident in `applier` (the test suite patches them there);
 `apply_handlers` imports only downward (`batch_dispatch`/`pass_io`), so `applier`
 imports the handlers back without a cycle. This brought `applier.py` back under the
@@ -569,7 +561,10 @@ three differ seams (epic 5ca8 / `unfed-liner-arson`): the comment-diff cluster
 `_local_matches_prev`/`_parent_clear_is_managed`/`_diff_fields` + the
 `_LOCAL_TO_JIRA_*` maps) to `outbound_fields.py`; and the link-diff cluster
 (`_existing_jira_links`/`_diff_links`/`_diff_link_removals` + the relation maps)
-to `outbound_links.py`. `outbound_differ.py` keeps the `compute_outbound_mutations`
+to `outbound_links.py` (the field-diff half of `outbound_fields.py` was later
+deleted: the pass diffs through `outbound_field_diff.compute_update_fields`, and
+`outbound_fields.py` keeps only `_map_local_to_jira_fields` and the maps).
+`outbound_differ.py` keeps the `compute_outbound_mutations`
 orchestrator + the label/status-annotation differs, and re-exports the moved
 names so `outbound_differ.<name>` keeps resolving for the test suite; each sibling
 imports one-way (its own lazy `_load_adf`/`_load_comment_limits`) so there is no

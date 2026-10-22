@@ -22,6 +22,8 @@ import pytest
 
 from rebar.reconciler import scratch_retention
 from rebar.reconciler.create_route import _coordinated_create_core
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundCreatePayload
 
 # ---------------------------------------------------------------------------
 # Module loading
@@ -66,6 +68,18 @@ def _make_create_mutation(local_id: str = "tick-abc1") -> dict:
         "local_id": local_id,
         "fields": {"summary": f"Reconcile {local_id}", "issuetype": {"name": "Task"}},
     }
+
+
+def _typed_create(local_id: str) -> Mutation:
+    """The typed outbound create ``apply()``'s batch form takes for ``local_id``."""
+    batch = _make_create_mutation(local_id)
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.create,
+        local_id,
+        OutboundCreatePayload(fields=batch["fields"], local_id=local_id),
+        {},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -131,16 +145,11 @@ def test_mapping_json_not_written_on_jql_miss(applier, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Helpers: mock concurrency module for apply() tests
+# Helpers: stable tickets-branch HEAD for apply() tests
 # ---------------------------------------------------------------------------
 
-
-def _make_mock_concurrency():
-    """Return a mock concurrency module with a stable snapshot_head."""
-    mock_concurrency = MagicMock()
-    # Always return the same HEAD SHA so no drift is detected
-    mock_concurrency.snapshot_head.return_value = "abc1234def567890" * 2  # 32-char sha
-    return mock_concurrency
+# applier.snapshot_head always returns this SHA, so no drift is detected.
+_STABLE_HEAD = "abc1234def567890" * 2  # 32-char sha
 
 
 # ---------------------------------------------------------------------------
@@ -156,13 +165,12 @@ def test_manifest_contains_dedup_event_on_hit(applier, tmp_path):
     # Stub accepts kwargs because applier.apply() constructs the client with
     # env-derived (jira_url, user, api_token) credentials.
     fake_acli = mock_client  # S4: _load_acli returns the transport directly
-    fake_concurrency = _make_mock_concurrency()
     with (
         patch.object(applier, "_load_acli", return_value=fake_acli),
-        patch.object(applier, "_load_concurrency", return_value=fake_concurrency),
+        patch.object(applier, "snapshot_head", return_value=_STABLE_HEAD),
     ):
         manifest_path = applier.apply(
-            [_make_create_mutation("tick-ev1")],
+            [_typed_create("tick-ev1")],
             pass_id="test-pass-ev1",
             repo_root=tmp_path,
         )
@@ -182,14 +190,13 @@ def test_manifest_events_empty_on_no_hits(applier, tmp_path):
     # Stub accepts kwargs because applier.apply() constructs the client with
     # env-derived (jira_url, user, api_token) credentials.
     fake_acli = mock_client  # S4: _load_acli returns the transport directly
-    fake_concurrency = _make_mock_concurrency()
 
     with (
         patch.object(applier, "_load_acli", return_value=fake_acli),
-        patch.object(applier, "_load_concurrency", return_value=fake_concurrency),
+        patch.object(applier, "snapshot_head", return_value=_STABLE_HEAD),
     ):
         manifest_path = applier.apply(
-            [_make_create_mutation("tick-noev1")],
+            [_typed_create("tick-noev1")],
             pass_id="test-pass-noev1",
             repo_root=tmp_path,
         )
@@ -205,15 +212,11 @@ def test_manifest_events_populated_for_each_hit(applier, tmp_path):
     # Stub accepts kwargs because applier.apply() constructs the client with
     # env-derived (jira_url, user, api_token) credentials.
     fake_acli = mock_client  # S4: _load_acli returns the transport directly
-    fake_concurrency = _make_mock_concurrency()
 
-    mutations = [
-        _make_create_mutation("tick-multi1"),
-        _make_create_mutation("tick-multi2"),
-    ]
+    mutations = [_typed_create("tick-multi1"), _typed_create("tick-multi2")]
     with (
         patch.object(applier, "_load_acli", return_value=fake_acli),
-        patch.object(applier, "_load_concurrency", return_value=fake_concurrency),
+        patch.object(applier, "snapshot_head", return_value=_STABLE_HEAD),
     ):
         manifest_path = applier.apply(
             mutations,

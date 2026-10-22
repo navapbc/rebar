@@ -19,6 +19,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from rebar.reconciler import scratch_retention
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundCreatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
@@ -62,6 +64,17 @@ def _read_manifest_outcomes(repo_root: Path, pass_id: str) -> list[dict]:
     return data.get("mutations", [])
 
 
+def _create(local_id: str, fields: dict, **extra) -> Mutation:
+    """A typed outbound create Mutation (``extra``: comments/labels/links tuples)."""
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.create,
+        local_id,
+        OutboundCreatePayload(fields=fields, local_id=local_id, **extra),
+        {},
+    )
+
+
 def test_create_add_comment_failure_surfaces_in_outcome(
     applier_mod: ModuleType,
     acli_mod: ModuleType,
@@ -72,13 +85,11 @@ def test_create_add_comment_failure_surfaces_in_outcome(
     issue create succeeds and the batch does not abort."""
     pass_id = f"test-pass-create-comment-err-{int(time.time())}"
 
-    mutation = {
-        "direction": "outbound",
-        "action": "create",
-        "local_id": "create-comment-fail-id",
-        "fields": {"summary": "a new issue", "issuetype": "Task"},
-        "comments": [{"action": "add", "body": "an oversize comment that fails"}],
-    }
+    mutation = _create(
+        "create-comment-fail-id",
+        {"summary": "a new issue", "issuetype": "Task"},
+        comments=({"action": "add", "body": "an oversize comment that fails"},),
+    )
 
     fake_client = MagicMock()
     fake_client.create_issue.return_value = {"key": "DIG-9000", "ok": True}
@@ -126,13 +137,11 @@ def test_create_successful_comment_leaves_no_comment_errors(
     """When add_comment succeeds during CREATE, no comment_errors record is
     produced (the new field must not fire spuriously)."""
     pass_id = f"test-pass-create-comment-ok-{int(time.time())}"
-    mutation = {
-        "direction": "outbound",
-        "action": "create",
-        "local_id": "create-comment-ok-id",
-        "fields": {"summary": "ok", "issuetype": "Task"},
-        "comments": [{"action": "add", "body": "a normal comment"}],
-    }
+    mutation = _create(
+        "create-comment-ok-id",
+        {"summary": "ok", "issuetype": "Task"},
+        comments=({"action": "add", "body": "a normal comment"},),
+    )
     fake_client = MagicMock()
     fake_client.create_issue.return_value = {"key": "DIG-9001", "ok": True}
     fake_client.search_issues.return_value = []

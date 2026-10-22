@@ -17,6 +17,7 @@ from unittest.mock import patch
 import pytest
 
 from rebar.reconciler import scratch_retention
+from rebar.reconciler.mutation_payloads import OutboundCreatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
@@ -63,17 +64,28 @@ def _make_mutations(n: int, mutation_mod) -> list:
     """
     D = mutation_mod.MutationDirection
     A = mutation_mod.MutationAction
-    actions = [A.create, A.update, A.delete]
+    # (inbound, delete) is not a valid pair, so the inbound cycle uses clean_label
+    # in its slot.
+    actions = {
+        D.inbound: [A.create, A.update, A.clean_label],
+        D.outbound: [A.create, A.update, A.delete],
+    }
     out = []
     for i in range(n):
         direction = D.inbound if (i % 2 == 0) else D.outbound
-        action = actions[i % 3]
+        action = actions[direction][i % 3]
+        # An outbound create carries a typed payload; the batch form refuses a plain dict.
+        payload = (
+            OutboundCreatePayload(fields={"i": i})
+            if (direction, action) == (D.outbound, A.create)
+            else {"i": i}
+        )
         out.append(
             mutation_mod.Mutation(
                 direction=direction,
                 action=action,
                 target=f"ISSUE-{i:05d}",
-                payload={"i": i},
+                payload=payload,
                 provenance={"src": "test"},
             )
         )

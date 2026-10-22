@@ -14,6 +14,7 @@ from types import ModuleType
 import pytest
 
 from rebar.reconciler.create_route import _coordinated_create_core
+from rebar.reconciler.mutation_payloads import OutboundCreatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "reconcile.py"
@@ -72,18 +73,18 @@ def test_outbound_create_batch_dict_has_local_id_end_to_end(
     assert om.action == "create"
     assert om.local_id == "probe-1234"
 
-    # This is the EXACT conversion reconcile.py does at lines 527-537.
-    # The fix adds "local_id": om.local_id to the payload.
+    # The conversion outbound_pass._run_differs_outbound does: the typed create
+    # payload carries local_id alongside the fields.
     typed = mutation_mod.Mutation(
         direction=mutation_mod.MutationDirection.outbound,
         action=mutation_mod.MutationAction.create,
         target=om.local_id,
-        payload={
-            **om.fields,
-            "comments": om.comments,
-            "labels": om.labels,
-            "local_id": om.local_id,
-        },
+        payload=OutboundCreatePayload(
+            fields=om.fields,
+            comments=tuple(om.comments),
+            labels=tuple(om.labels),
+            local_id=om.local_id,
+        ),
         provenance={"source": "outbound_differ", "local_id": om.local_id},
     )
 
@@ -102,17 +103,17 @@ def test_mutation_to_batch_dict_preserves_local_id(applier_mod, mutation_mod):
         direction=mutation_mod.MutationDirection.outbound,
         action=mutation_mod.MutationAction.create,
         target="probe-5678",
-        payload={
-            "summary": "Test",
-            "description": "Test desc",
-            "issuetype": "Task",
-            "priority": "Medium",
-            "status": "To Do",
-            "assignee": "",
-            "comments": [],
-            "labels": [],
-            "local_id": "probe-5678",
-        },
+        payload=OutboundCreatePayload(
+            fields={
+                "summary": "Test",
+                "description": "Test desc",
+                "issuetype": "Task",
+                "priority": "Medium",
+                "status": "To Do",
+                "assignee": "",
+            },
+            local_id="probe-5678",
+        ),
         provenance={"source": "outbound_differ", "local_id": "probe-5678"},
     )
     batch_dict = applier_mod._mutation_to_batch_dict(m)

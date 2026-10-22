@@ -24,7 +24,6 @@ import importlib
 import json
 import subprocess
 import sys
-import types
 import urllib.error
 from pathlib import Path
 
@@ -177,12 +176,9 @@ def _make_fake_acli_module(state: _FakeJiraState) -> _FakeClient:
     return _FakeClient(state)
 
 
-def _make_ok_concurrency() -> types.ModuleType:
-    """Pass-through concurrency stub (no git commits; deterministic)."""
-
-    mod = types.ModuleType("_concurrency")
-    mod.snapshot_head = lambda repo_root: "aabbccdd" * 5  # type: ignore[attr-defined]
-    return mod
+def _ok_snapshot_head(_repo_root) -> str:
+    """Stable tickets-branch HEAD stub (no git commits; deterministic)."""
+    return "aabbccdd" * 5
 
 
 # ---------------------------------------------------------------------------
@@ -223,8 +219,7 @@ def _run_pass(reconciler_modules, state, repo_root, monkeypatch, pass_id, *, wir
     fake_mod = _make_fake_acli_module(state)
     monkeypatch.setattr(fetcher, "_load_acli", lambda: fake_mod)
     monkeypatch.setattr(applier, "_load_acli", lambda: fake_mod)
-    ok_concurrency = _make_ok_concurrency()
-    monkeypatch.setattr(applier, "_load_concurrency", lambda: ok_concurrency)
+    monkeypatch.setattr(applier, "snapshot_head", _ok_snapshot_head)
     if wire_backend:
         # The 02c4 RCA's second blocker: the diff phase builds a REAL backend
         # (select_backend(compose_config())), so a bound-but-absent key's direct

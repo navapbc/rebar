@@ -17,6 +17,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from rebar.reconciler import scratch_retention
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
@@ -66,6 +68,17 @@ def _read_alert_records(repo_root: Path) -> list[dict]:
     return out
 
 
+def _update(key: str, fields: dict, *, local_id: str | None = None, **extra) -> Mutation:
+    """A typed outbound update Mutation (``extra``: comments/labels/links tuples)."""
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.update,
+        key,
+        OutboundUpdatePayload(changed_fields=fields, local_id=local_id, **extra),
+        {},
+    )
+
+
 def test_assignee_not_found_soft_fails_batch_continues(
     applier_mod: ModuleType,
     acli_mod: ModuleType,
@@ -74,20 +87,12 @@ def test_assignee_not_found_soft_fails_batch_continues(
     """Record the bad assignee and continue to the valid sibling update."""
     pass_id = f"test-pass-{int(time.time())}"
 
-    good_mutation = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-4275",
-        "fields": {"summary": "still works"},
-        "local_id": "good-local-id",
-    }
-    bad_mutation = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-4276",
-        "fields": {"assignee": "Worktree"},  # the prod-failure assignee
-        "local_id": "bad-local-id",
-    }
+    good_mutation = _update("DIG-4275", {"summary": "still works"}, local_id="good-local-id")
+    bad_mutation = _update(
+        "DIG-4276",
+        {"assignee": "Worktree"},  # the prod-failure assignee
+        local_id="bad-local-id",
+    )
 
     # _apply_batch constructs its own AcliClient via _load_acli();
     # patch the loader so it returns a fake module whose AcliClient
@@ -145,13 +150,7 @@ def test_assignee_not_found_alone_does_not_raise(
     apply() must not raise — it should record-and-continue (returning
     an empty/partial result rather than aborting).
     """
-    bad_mutation = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-4276",
-        "fields": {"assignee": "Worktree"},
-        "local_id": "bad-local-id",
-    }
+    bad_mutation = _update("DIG-4276", {"assignee": "Worktree"}, local_id="bad-local-id")
     fake_client = MagicMock()
     fake_client.update_issue.side_effect = acli_mod.AssigneeNotFoundError(
         "validate_assignee_exists: no assignable user matches 'Worktree'"

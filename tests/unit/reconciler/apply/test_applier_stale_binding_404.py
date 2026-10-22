@@ -20,6 +20,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from rebar.reconciler import scratch_retention
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
@@ -88,6 +90,17 @@ def _read_manifest_outcomes(repo_root: Path, pass_id: str) -> list[dict]:
     return data.get("mutations", [])
 
 
+def _update(key: str, fields: dict, *, local_id: str | None = None, **extra) -> Mutation:
+    """A typed outbound update Mutation (``extra``: comments/labels/links tuples)."""
+    return Mutation(
+        MutationDirection.outbound,
+        MutationAction.update,
+        key,
+        OutboundUpdatePayload(changed_fields=fields, local_id=local_id, **extra),
+        {},
+    )
+
+
 def test_http_404_on_update_soft_fails_batch_continues(
     applier_mod: ModuleType,
     acli_mod: ModuleType,
@@ -96,20 +109,12 @@ def test_http_404_on_update_soft_fails_batch_continues(
     """Record a stale 404 and continue to the valid sibling update."""
     pass_id = f"test-pass-404-{int(time.time())}"
 
-    good_mutation = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-4275",
-        "fields": {"summary": "still works"},
-        "local_id": "good-local-id",
-    }
-    stale_mutation = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-5305",  # deleted probe ticket, stale binding (1e08)
-        "fields": {"status": "in_progress"},
-        "local_id": "stale-local-id",
-    }
+    good_mutation = _update("DIG-4275", {"summary": "still works"}, local_id="good-local-id")
+    stale_mutation = _update(
+        "DIG-5305",  # deleted probe ticket, stale binding (1e08)
+        {"status": "in_progress"},
+        local_id="stale-local-id",
+    )
 
     fake_client = MagicMock()
 
@@ -174,13 +179,7 @@ def test_non_404_http_error_still_propagates(
     current behavior and propagate — we do not blanket-catch HTTP errors.
     """
     pass_id = f"test-pass-500-{int(time.time())}"
-    mutation = {
-        "direction": "outbound",
-        "action": "update",
-        "key": "DIG-9999",
-        "fields": {"status": "in_progress"},
-        "local_id": "five-hundred-id",
-    }
+    mutation = _update("DIG-9999", {"status": "in_progress"}, local_id="five-hundred-id")
     fake_client = MagicMock()
     fake_client.update_issue.side_effect = urllib.error.HTTPError(
         url="https://example.atlassian.net/rest/api/3/issue/DIG-9999/transitions",

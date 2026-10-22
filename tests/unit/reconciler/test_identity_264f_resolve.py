@@ -12,9 +12,8 @@ import pytest
 
 import rebar
 import rebar.reconciler.outbound_differ as differ
-
-# ticket 625b: the field-diff helpers are now adapter-internal (outbound_fields).
-from rebar.reconciler.adapters.jira import outbound_fields as _of
+from rebar.reconciler.adapters.jira.backend import JiraBackend
+from rebar.reconciler.outbound_field_diff import compute_update_fields
 
 
 @pytest.fixture
@@ -85,7 +84,21 @@ def test_assignee_no_mapping_no_search_degrades_to_unassigned() -> None:
     def resolver(assignee, jira_key):  # (accountId|None, authoritative, is_account_id)
         return (None, True, False)
 
-    changed = _of._diff_fields(
-        ticket, {"fields": {"assignee": None}}, assignee_resolver=resolver, jira_key="REB-1"
+    backend = JiraBackend(transport=object())
+    jira = {
+        "summary": "T",
+        "description": "D",
+        "issuetype": {"name": "Task"},
+        "priority": {"name": "Medium"},
+        "status": {"name": "To Do"},
+        "assignee": None,
+    }
+    changed = compute_update_fields(
+        ticket,
+        jira,
+        inbound_mapper=backend.inbound,
+        outbound_mapper=backend.outbound,
+        assignee_resolver=resolver,
+        jira_key="REB-1",
     )
     assert "assignee" not in changed  # unmappable + already-unassigned → no churn

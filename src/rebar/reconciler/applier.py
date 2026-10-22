@@ -29,8 +29,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ._backend import TicketTransport
 
-import importlib
-import importlib.util
 import json
 import logging
 import sys
@@ -52,8 +50,8 @@ logger = logging.getLogger(__name__)
 # The two surfaces coexist:
 #   - apply(mutation: Mutation, *, client=None) -> ApplyResult
 #       Typed single-mutation dispatch via _LEAVES.
-#   - apply(mutations: list[dict], pass_id, repo_root=None) -> Path
-#       Legacy batch dispatch (manifest writer + HEAD-drift guard).
+#   - apply(mutations: Sequence[Mutation], pass_id, repo_root=None) -> Path
+#       Batch dispatch (manifest writer + HEAD-drift guard).
 #
 # Selection is by argument type at the top of apply().
 # Foundational apply primitives live in apply_base.py (single-identity
@@ -225,10 +223,46 @@ def _load_acli():
     return select_backend(compose_config()).transport
 
 
-def _load_concurrency():
-    """Load _concurrency module via importlib."""
-    mod = importlib.import_module("rebar.reconciler._concurrency")
-    return mod
+# Sentinel returned by snapshot_head when the repository has no resolvable
+# ref — i.e., neither a tickets branch nor any HEAD commit. Treated as a
+# stable, never-equal-to-real-SHA value by drift-detection callers.
+EMPTY_REPO_SENTINEL = "EMPTY_REPO"
+
+
+def snapshot_head(repo_root: Path) -> str:
+    """Return the current HEAD SHA of the tickets branch.
+
+    Falls back to HEAD of the current branch when the tickets ref is absent
+    (e.g., in a fresh test repo that has no orphan tickets branch yet). A
+    repository with neither (``git init`` with no commits) returns
+    ``EMPTY_REPO_SENTINEL``, so the drift guard treats every comparison as
+    stable until the first commit lands (F9).
+    """
+    from rebar.config import tickets_branch
+    from rebar.reconciler import git_adapter
+
+    branch = tickets_branch(repo_root)  # configured tracker.branch (default "tickets")
+    result = git_adapter.rev_parse(repo_root, branch)
+    if result.returncode != 0:
+        result = git_adapter.rev_parse(repo_root, "HEAD")
+        if result.returncode != 0:
+            return EMPTY_REPO_SENTINEL
+    return result.stdout.strip()
+
+
+def _typed_batch(mutations) -> list:
+    """Return the batch as a list; raise ``TypeError`` on any untyped element.
+
+    The batch form of :func:`apply` takes typed ``Mutation``s only. Checking
+    every element up front means a bad batch fails before any write.
+    """
+    batch = list(mutations or [])
+    for m in batch:
+        if not isinstance(m, MutationShape):
+            raise TypeError(
+                f"apply() batch form takes typed Mutations only, got {type(m).__name__}"
+            )
+    return batch
 
 
 # Pass-planning policy (mode caps, suppression, manifest) lives in apply_planning.py.
@@ -335,8 +369,9 @@ def apply(
 
     Two call shapes:
       1. Typed single-mutation:  apply(mutation, *, client=None) -> ApplyResult
-      2. Legacy batch:            apply(mutations: list[dict], pass_id, ...) -> Path
-    Selection is by argument type at the top of the function.
+      2. Batch:                   apply(mutations: Sequence[Mutation], pass_id, ...) -> Path
+    Selection is by argument type at the top of the function. The batch form
+    raises ``TypeError`` when any element is not a typed ``Mutation``.
 
     ``synced_fields_out`` (bug e6e9) is an optional out-parameter dict the batch path
     fills with ``local_id -> {vendor_field: value}`` for every outbound write CONFIRMED
@@ -353,14 +388,15 @@ def apply(
 
     if pass_id is None:
         raise TypeError("apply() legacy batch form requires pass_id as the second argument")
+    mutations = _typed_batch(mutations)
 
     # Mode-cap enforcement (story 286b): coerce mode + partition into applied/deferred.
     mode, mode_mod, mutations_input, deferred_for_manifest = _partition_by_mode_cap(
         mode, mutations, max_changes=max_changes
     )
 
-    # Direction-aware dispatch (defect #8): inbound typed Mutations route through
-    # _apply_typed per-mutation; outbound/untyped go to the legacy _apply_batch.
+    # Direction-aware dispatch (defect #8): inbound Mutations route through
+    # _apply_typed per-mutation; outbound ones go to the legacy _apply_batch.
     mutations_list = list(mutations_input)
 
     def _direction_of(m) -> str:
@@ -368,12 +404,16 @@ def apply(
         return str(getattr(d, "value", d) or "")
 
     inbound_typed: list = []
-    outbound_or_untyped: list = []
+    outbound_typed: list = []
     for m in mutations_list:
-        if isinstance(m, MutationShape) and _direction_of(m) == "inbound":
+        if _direction_of(m) == "inbound":
             inbound_typed.append(m)
         else:
-            outbound_or_untyped.append(m)
+            outbound_typed.append(m)
+    # Convert every outbound Mutation to its batch dict now, before any inbound write, so
+    # a malformed outbound mutation (e.g. a plain-dict create payload) fails the pass
+    # before any effect.
+    outbound_list = [_mutation_to_batch_dict(m) for m in outbound_typed]
 
     # suppress_pair follow-on contract (story bd19): a leaf emitting
     # follow_on={'kind':'suppress_pair',...} drops subsequent inbound mutations
@@ -425,14 +465,7 @@ def apply(
         file=sys.stderr,
     )
 
-    # Outbound (or untyped dict — the legacy batch call shape passes
-    # already-dict-shaped mutations directly; see apply()'s own docstring):
-    # normalize typed Mutations to dicts so _apply_batch can iterate, then
-    # route through the legacy batch path.
-    outbound_list = [
-        _mutation_to_batch_dict(m) if isinstance(m, MutationShape) else m
-        for m in outbound_or_untyped
-    ]
+    # Outbound: route the converted batch dicts through the legacy batch path.
     if suppression.suppressed_pairs:
         outbound_list = [
             d for d in outbound_list if not suppression.is_suppressed(d.get("key", ""))
@@ -542,9 +575,6 @@ def _apply_batch(
 
     mutations_with_outcomes: list[dict] = []
 
-    # Load concurrency module once (used both in the fast path and the main loop)
-    concurrency = _load_concurrency()
-
     # Fast path: empty mutation list — skip HEAD check entirely
     if not mutations:
         manifest = {
@@ -605,7 +635,7 @@ def _apply_batch(
 
     # Pin HEAD before first mutation, then sequence — drift recheck → dispatch →
     # record — one mutation at a time (per-mutation step extracted: _apply_one).
-    head_pin_cell = [concurrency.snapshot_head(repo_root)]
+    head_pin_cell = [snapshot_head(repo_root)]
     # LIVE cutover (RP-03 S3 T3): reroute migrated non-create plans inside the drift try.
     create_tally = None
     cutover_tally = None
@@ -622,7 +652,7 @@ def _apply_batch(
             ctx=ctx,
             abort_check=abort_check,
             recheck_drift=_recheck_drift,
-            concurrency=concurrency,
+            snapshot_head=snapshot_head,
             repo_root=repo_root,
             head_pin_cell=head_pin_cell,
             outcomes_sink=mutations_with_outcomes,
@@ -632,7 +662,7 @@ def _apply_batch(
             # the ref-lock heartbeat lost the lease. Defaults to None (no-op).
             if abort_check is not None:
                 abort_check()
-            head_pin_cell[0] = _recheck_drift(concurrency, repo_root, head_pin_cell[0])
+            head_pin_cell[0] = _recheck_drift(snapshot_head, repo_root, head_pin_cell[0])
             _apply_one(mutation, ctx, mutations_with_outcomes)
     except HeadDriftError:
         # Emit abort event as structured log and re-raise for the caller.
