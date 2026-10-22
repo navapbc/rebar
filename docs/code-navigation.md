@@ -54,12 +54,15 @@ find_referencing_symbols("AcliRestMixin/set_entity_property",
   -> {}                                    # zero references
 ```
 
-`grep -rn set_entity_property src/rebar/` finds three real call sites:
+`grep -rn set_entity_property src/rebar/` found three real call sites when this was
+reproduced (line numbers are from that run; ADR 0103 S3 later retired the handler-level
+retry wrapper, so every site now calls the method directly):
 
-- `src/rebar/reconciler/dispatch_one.py:321` —
-  `_call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)`
+- `src/rebar/reconciler/dispatch_one.py:321` — the create path's identity write, which
+  passed `client.set_entity_property` by value into the retry wrapper (now a direct call
+  in `create_route.py`)
 - `src/rebar/reconciler/apply_inbound_events.py:214` —
-  `_call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)`
+  `client.set_entity_property(jira_key, "local_id", local_id)`
 - `src/rebar/reconciler/binding_store.py:517` —
   `client.set_entity_property(keyed, "local_id", local_id)`
 

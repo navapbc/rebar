@@ -33,6 +33,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler import ticket_planner
 from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
 from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
@@ -43,6 +44,29 @@ ACLI_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "acli.py"
 
 _ADF_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "adf.py"
 _CL_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "comment_limits.py"
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 @pytest.fixture(scope="module")
@@ -107,6 +131,7 @@ def test_transition_runtime_error_soft_fails_batch_continues(
                 [good1, bad, good2],
                 f"test-pass-{int(time.time())}",
                 repo_root=tmp_path,
+                ticket_plans=_plans([good1, bad, good2]),
             )
         except RuntimeError as exc:
             pytest.fail(
@@ -145,7 +170,10 @@ def test_transition_runtime_error_alone_does_not_raise(
     with patch.object(applier_mod, "_load_acli", return_value=fake_client):
         try:
             manifest_path = applier_mod.apply(
-                [bad], f"test-pass-solo-{int(time.time())}", repo_root=tmp_path
+                [bad],
+                f"test-pass-solo-{int(time.time())}",
+                repo_root=tmp_path,
+                ticket_plans=_plans([bad]),
             )
         except RuntimeError as exc:
             pytest.fail(f"single bad-transition mutation must not raise: {exc!r}")

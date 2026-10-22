@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from rebar.reconciler import ticket_planner
 from rebar.reconciler.apply_handlers import BatchApplyContext, dispatch_mutation, handle_create
 from rebar.reconciler.binding_store import BindingPersistError, BindingStore
 from rebar.reconciler.mutation_payloads import OutboundCreatePayload
@@ -27,6 +28,29 @@ APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
 
 # ── Fakes ─────────────────────────────────────────────────────────────────────
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 class _FakeClient:
@@ -210,6 +234,29 @@ def test_commit_unknown_defers_no_second_create_no_false_applied(tmp_path):
     assert mutation in ctx.deferred_creates  # queued for a later convergence pass
 
 
+def test_create_timeout_still_yields_timeout_signal_single_attempt():
+    """ADR 0103 S3 edge case 4: with the handler-level retry retired, a ``TimeoutError``
+    from ``create_issue`` still maps to ``CreateSignal(status="timeout")`` (ambiguous →
+    re-observe) after exactly one physical create, never a blind replay."""
+    from rebar.reconciler import create_route
+
+    client = _FakeClient()
+    client.create_exc = TimeoutError("ack lost")
+    seams = create_route._CoordinatedSeams(
+        "L-timeout",
+        {"title": "t"},
+        client=client,
+        binding_store=None,
+        capture=create_route._CreateCapture(),
+    )
+
+    signal = seams.create_execute(None)
+
+    assert signal.status == "timeout"
+    assert "ack lost" in signal.diagnostic
+    assert client.creates == 1
+
+
 def test_dedup_hit_short_circuits_before_core(tmp_path):
     """Shared prelude: a dedup JQL hit short-circuits BEFORE the create core — no create, a
     dedup sentinel, and the mapping confirmed."""
@@ -329,7 +376,9 @@ def test_applier_apply_live_batch_create_one_issue_one_binding(tmp_path, monkeyp
         payload=OutboundCreatePayload(fields=_mutation("L-live")["fields"], local_id="L-live"),
         provenance={"source": "test"},
     )
-    manifest_path = applier.apply([live], "pass-live", repo_root=tmp_path, binding_store=store)
+    manifest_path = applier.apply(
+        [live], "pass-live", repo_root=tmp_path, binding_store=store, ticket_plans=_plans([live])
+    )
 
     assert client.creates == 1
     assert client.deletes == []

@@ -2,8 +2,8 @@
 """Outbound batch-dispatch facade: delete_one + mutation->batch-dict + re-exports.
 
 The bulk of per-mutation dispatch — ``create_one`` / ``update_one`` plus the
-``_call_with_retry`` backoff wrapper, the link-probe helpers, and the
-``_is_illegal_transition_400`` predicate — was extracted to the sibling
+link-probe helpers and the ``_is_illegal_transition_400`` predicate — was extracted
+to the sibling
 ``dispatch_one.py`` (module-size split, ticket b043-9490) and is re-exported here
 so this module stays the stable public surface (``rebar.reconciler.batch_dispatch.*``)
 that ``applier`` / ``apply_handlers`` / ``apply_outbound`` / ``apply_inbound`` and
@@ -34,7 +34,6 @@ from rebar.reconciler._errors import (
     is_not_found,
 )
 from rebar.reconciler.dispatch_one import (
-    _call_with_retry,
     _find_link_id,
     _index_existing_links,
     _is_illegal_transition_400,
@@ -50,7 +49,6 @@ __all__ = [
     "CutoverReport",
     "JiraAPIError",
     "RetryExhaustedError",
-    "_call_with_retry",
     "_find_link_id",
     "_index_existing_links",
     "_is_illegal_transition_400",
@@ -86,8 +84,8 @@ def delete_one(mutation: dict, client: TicketTransport) -> None:
     # surface that we don't use here — delete the Jira issue directly to
     # achieve the desired post-state ("issue gone from Jira").
     #
-    # REB-3115 S5 T1: the obsolete whole-operation ``_call_with_retry`` wrapper is
-    # removed — retry is OWNED by the adapter, not duplicated here. The DC transport
+    # REB-3115 S5 T1: no whole-operation retry wrapper here (ADR 0103 S3 retired the
+    # last one) — retry is OWNED by the adapter, not duplicated here. The DC transport
     # retries connection errors internally (``_with_connection_retry``); the Cloud
     # transport deliberately issues a delete SINGLE-ATTEMPT (a delete is non-idempotent
     # on a timeout, so a whole-operation retry could re-issue a delete that already
@@ -459,15 +457,18 @@ def _create_dependency_satisfied(
     return bool(store is not None and getattr(store, "get_jira_key", lambda _id: None)(dep))
 
 
-def reroute_ordered_create_plans(*, ticket_plans, mutations, ctx, outcomes_sink):
-    """Schedule homogeneous outbound CREATE plans by dependency before the legacy loop.
+def reroute_ordered_create_plans(*, ticket_plans, mutations, ctx, outcomes_sink, before_dispatch):
+    """Schedule homogeneous outbound CREATE plans by dependency.
 
-    The planner can describe create prerequisites in local-id space, but the legacy batch
-    loop still dispatches flat create dicts in input order. This helper consumes only the
-    create plans, dispatches those whose prerequisites are already bound or released by an
-    earlier confirmed create, defers blocked children without a vendor call, appends each
+    The planner can describe create prerequisites in local-id space, while the batch
+    carries flat create dicts in input order. This helper consumes only the create plans,
+    dispatches those whose prerequisites are already bound or released by an earlier
+    confirmed create, defers blocked children without a vendor call, appends each
     observable outcome to ``outcomes_sink``, and removes every consumed create from the
-    following legacy loop.
+    returned remainder (which the applier records as unrouted, dispatching nothing).
+    ``before_dispatch`` runs immediately before each vendor dispatch: the applier passes
+    its per-mutation lost-lease checkpoint and HEAD re-check, so a lost lease or a moved
+    HEAD stops the pass before the next create is issued.
     """
     create_plans = _ordered_create_plans(ticket_plans)
     if not create_plans:
@@ -512,6 +513,7 @@ def reroute_ordered_create_plans(*, ticket_plans, mutations, ctx, outcomes_sink)
             outcomes_sink.append(_make_deferred_create_outcome(batch, "dependency_deferred"))
             released[plan.identity] = False
             continue
+        before_dispatch()
         result = _dispatch_with_backstop(batch, ctx)
         outcomes_sink.append(result.outcome)
         if result.outcome.get("error"):
@@ -571,7 +573,7 @@ def make_guarded_execute(
 def _reraise_dispatch_types():
     """The fail-fast exception tuple the coordinator dispatch re-raises verbatim.
 
-    Mirrors applier._apply_one: HeadDriftError (drift-abort), RescheduleError
+    The legacy per-mutation contract: HeadDriftError (drift-abort), RescheduleError
     (rebase-retry exhausted), and non-404 HTTPError (deliberate fail-fast; the handlers
     soft-fail 404 themselves). Imported from each owning leaf inside the function because
     ``applier`` imports this facade — importing it back at module scope would cycle.
@@ -584,7 +586,7 @@ def _reraise_dispatch_types():
 def _dispatch_with_backstop(batch, ctx):
     """One physical dispatch with the legacy per-mutation failure backstop.
 
-    Parity with applier._apply_one: re-raise the fail-fast control-flow contracts, and
+    The legacy per-mutation contract: re-raise the fail-fast control-flow contracts, and
     record any OTHER exception via ``apply_handlers.record_backstop_failure`` (a
     ``bridge_alerts`` entry + an ``error`` outcome) instead of aborting the whole pass.
     """
@@ -611,8 +613,8 @@ def make_coordinator_dispatch(*, ctx, outcomes_sink, dispatch=None):
         batch = _mutation_to_batch_dict(mutation)
         if dispatch is None:
             # Production route: preserve the pre-dispatch rebar-id label-write
-            # authorization guard (G6) that is resident in the legacy _apply_one but
-            # would otherwise be bypassed when the coordinator route replaces that loop.
+            # authorization guard (G6) that the retired legacy per-mutation loop ran;
+            # without it the coordinator route would bypass the guard.
             # Load the guard from its OWNING leaf module (rebar_id_audit) rather than via
             # applier so the same guard instance runs regardless of applier reload churn.
             audit = importlib.import_module("rebar.reconciler.rebar_id_audit")
@@ -620,7 +622,7 @@ def make_coordinator_dispatch(*, ctx, outcomes_sink, dispatch=None):
                 f"outbound_{batch.get('action', '')}", [audit._BatchAuditView(batch)]
             )
             # Dispatch through the SAME per-mutation failure backstop + fail-fast
-            # re-raise contract _apply_one provides — otherwise the coordinator route
+            # re-raise contract the legacy loop provided — otherwise the coordinator route
             # would lose record_backstop_failure (records + continues) and the
             # HeadDriftError/RescheduleError/HTTPError re-raise semantics.
             result = _dispatch_with_backstop(batch, ctx)
@@ -693,10 +695,10 @@ def reroute_migrated_plans(
 
     A plan is MIGRATED iff it has mutations and EVERY mutation's action routes to the
     coordinator (``route_for(...) == COORDINATOR_ROUTE`` — a non-create family). A plan
-    mixing a create with a non-create action is therefore NOT migrated and stays on the
-    legacy loop. When no plan is migrated (including the common ``ticket_plans is None``
-    case) this is a pure passthrough returning ``(None, mutations)`` — the applier's
-    legacy loop is left untouched. Otherwise the migrated plans are executed via
+    mixing a create with a non-create action is therefore NOT migrated and stays in the
+    remainder, which the applier records as an unrouted failure without dispatching it.
+    When no plan is migrated this is a pure passthrough returning ``(None, mutations)``.
+    Otherwise the migrated plans are executed via
     :func:`run_migrated_reroute` (appending their outcome dicts to ``outcomes_sink`` and
     threading ``head_pin_cell``), the migrated mutations' dicts are filtered out of
     ``mutations`` by ``(action, key)`` (deferred plans dispatch nothing but ARE counted

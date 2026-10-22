@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from rebar.reconciler import scratch_retention
+from rebar.reconciler import scratch_retention, ticket_planner
 from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
 from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
@@ -36,6 +36,29 @@ _ADF_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "adf.py"
 # chain resolves regardless of which sibling test first registered the
 # ``rebar.reconciler`` namespace stub.
 _CL_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "comment_limits.py"
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 @pytest.fixture(scope="module")
@@ -119,6 +142,7 @@ def test_assignee_not_found_soft_fails_batch_continues(
                 [good_mutation, bad_mutation],
                 pass_id,
                 repo_root=tmp_path,
+                ticket_plans=_plans([good_mutation, bad_mutation]),
             )
         except acli_mod.AssigneeNotFoundError as exc:
             pytest.fail(
@@ -162,6 +186,7 @@ def test_assignee_not_found_alone_does_not_raise(
                 [bad_mutation],
                 f"test-pass-solo-{int(time.time())}",
                 repo_root=tmp_path,
+                ticket_plans=_plans([bad_mutation]),
             )
         except acli_mod.AssigneeNotFoundError as exc:
             pytest.fail(f"single-mutation batch with bad assignee must not raise: {exc!r}")

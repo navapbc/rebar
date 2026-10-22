@@ -6,8 +6,8 @@ dispatched from the typed registry, plus the HEAD-drift subject helpers the
 batch loop uses to distinguish benign external writers from competing
 reconciler writes. The create leaf dispatches exactly one production route: the
 coordinated write-ahead composition. Every leaf calls _direction_guard, runs its
-Jira side-effects through batch_dispatch._call_with_retry, and returns an
-ApplyResult.
+Jira side-effects as single transport calls (no handler-level retry, ADR 0103
+S3), and returns an ApplyResult.
 
 Imports downward only (apply_base, batch_dispatch); never imports applier.
 """
@@ -28,7 +28,6 @@ from rebar.reconciler.apply_base import (
 )
 from rebar.reconciler.batch_dispatch import (
     JiraAPIError,
-    _call_with_retry,
     _mutation_to_batch_dict,
     update_one,
 )
@@ -182,7 +181,7 @@ def _apply_outbound_delete(
         # Stub path: preserved for tests that don't exercise the I/O leaf.
         return ApplyResult(mutation.direction, mutation.action, {})
     try:
-        _call_with_retry(client.delete_issue, mutation.target)
+        client.delete_issue(mutation.target)
     except JiraAPIError as exc:
         if is_not_found(exc):
             # Already-gone is the post-state we want — treat as success.
@@ -204,7 +203,7 @@ def _apply_outbound_probe(
     if client is None or not hasattr(client, "get_issue"):
         return ApplyResult(mutation.direction, mutation.action, {})
     try:
-        info = _call_with_retry(client.get_issue, mutation.target)
+        info = client.get_issue(mutation.target)
         return ApplyResult(
             mutation.direction,
             mutation.action,
@@ -229,8 +228,7 @@ def _apply_outbound_conflict(
     payload = dict(mutation.payload or {})
     if client is not None and hasattr(client, "add_comment"):
         try:
-            _call_with_retry(
-                client.add_comment,
+            client.add_comment(
                 mutation.target,
                 f"reconciler conflict detected: {payload.get('reason', 'unspecified')}",
             )

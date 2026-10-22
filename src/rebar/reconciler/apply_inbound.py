@@ -5,10 +5,10 @@ The (inbound, *) leaf handlers dispatched from the typed registry, plus
 inbound_repair_property (the local_id property write _apply_inbound_repair_property
 delegates to). Each leaf reads its Jira-side payload, translates it via
 inbound_translate, and writes local ticket events; rebar-id/property write-backs
-to Jira run through batch_dispatch._call_with_retry.
+to Jira are single transport calls (no handler-level retry, ADR 0103 S3).
 
-Imports downward only (apply_base, batch_dispatch, inbound_translate — none import
-back); never imports applier.
+Imports downward only (apply_base, apply_inbound_events, inbound_translate — none
+import back); never imports applier.
 
 Bug 3b5f removed the ``delete`` and ``probe`` inbound leaves: their producer chain had
 no live emitter, and ``_apply_inbound_delete``'s ``create_after_hard_delete`` follow-on
@@ -51,7 +51,6 @@ from rebar.reconciler.apply_inbound_events import (
 # link store through the rebar facade rather than writing event files (ticket
 # 6f51-f8a4-b4fb-450c).
 from rebar.reconciler.apply_inbound_records import _inbound_update_apply_links
-from rebar.reconciler.batch_dispatch import _call_with_retry
 from rebar.reconciler.inbound_translate import (
     _jira_key_to_local_id,
     _resolve_tracker_dir,
@@ -185,8 +184,8 @@ def _apply_inbound_clean_label(
     `rebar-id-*` labels on the Jira side that need to be removed. The mutation
     payload carries the labels to remove under ``labels_to_remove``; only labels
     that match the ``rebar-id-*`` pattern are removed (defensive filter against a
-    misshapen payload). All client calls go through :func:`_call_with_retry`
-    so transient 5xx/429/timeout failures retry with backoff.
+    misshapen payload). Each removal is one transport call: the leaf does not
+    retry, so a transient failure propagates and the next pass re-diffs.
     """
     mut_mod = _load_mutation_module()
     _direction_guard(mutation, mut_mod.MutationDirection.inbound)
@@ -199,7 +198,7 @@ def _apply_inbound_clean_label(
         # Defensive: only remove labels matching the rebar-id-* pattern.
         if not isinstance(label, str) or not label.startswith("rebar-id-"):
             continue
-        _call_with_retry(client.remove_label, mutation.target, label)
+        client.remove_label(mutation.target, label)
         removed.append(label)
     return ApplyResult(mutation.direction, mutation.action, {"removed": removed})
 

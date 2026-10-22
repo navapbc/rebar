@@ -1,8 +1,9 @@
 """Verify ``handle_update`` keeps summary-only updates on the legacy path.
 
 `handle_update` sends every outbound update, a summary-only one included,
-through `dispatch_one.update_one` and the generic `_call_with_retry`
-wrapper. A confirmed write advances `ctx.synced_fields`.
+through `dispatch_one.update_one`, which makes one transport attempt (ADR 0103
+S3 retired the generic handler-level retry). A confirmed write advances
+`ctx.synced_fields`.
 """
 
 from __future__ import annotations
@@ -10,9 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
-
-import rebar.reconciler.dispatch_one as _dispatch_one
 from rebar.reconciler.apply_handlers import BatchApplyContext, handle_update
 
 
@@ -53,21 +51,3 @@ def test_default_context_routes_summary_only_update_through_legacy(tmp_path: Pat
 
     assert client.calls == [{"summary": "new title"}], "legacy update_issue path was used"
     assert ctx.synced_fields == {"loc-1": {"summary": "new title"}}, "baseline advanced"
-
-
-def test_legacy_route_still_uses_generic_retry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    real = _dispatch_one._call_with_retry
-    seen: list = []
-
-    def spy(fn: Any, *a: Any, **k: Any):
-        seen.append(getattr(fn, "__name__", repr(fn)))
-        return real(fn, *a, **k)
-
-    monkeypatch.setattr(_dispatch_one, "_call_with_retry", spy)
-
-    ctx = _ctx(tmp_path, _StubClient())
-    handle_update(_summary_mutation("new title"), ctx)
-
-    assert "update_issue" in seen, "the legacy route retains generic retry"

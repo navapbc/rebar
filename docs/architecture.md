@@ -545,9 +545,14 @@ the silent-no-op canary, and set-field provenance on update) moved to a sibling
 behind a `dispatch_mutation` table over a `BatchApplyContext`. `applier._apply_batch`
 is now a thin sequencer — resolve transport → cross-project guard → HEAD-drift
 recheck loop → per-mutation dispatch + record → manifest-write tail — whose
-per-mutation step is the extracted `_recheck_drift` + `_apply_one` helpers (nesting
-depth ≤ 4). The rebar-id label-write audit guard and the `_load_acli`/`snapshot_head`
-seams stay resident in `applier` (the test suite patches them there);
+per-mutation step was the extracted `_recheck_drift` + `_apply_one` helpers (nesting
+depth ≤ 4). ADR 0103 S3 later deleted that per-mutation loop and `_apply_one`: the
+ticket-plan reroutes (`batch_dispatch.reroute_ordered_create_plans` and
+`reroute_migrated_plans`) now dispatch every planned dict through
+`batch_dispatch._dispatch_with_backstop`, and `applier._record_unrouted` records any dict
+no plan routes as failed without dispatching it. The rebar-id label-write audit guard and
+the `_load_acli`/`snapshot_head` seams stay reachable from `applier` (the test suite
+patches them there);
 `apply_handlers` imports only downward (`batch_dispatch`/`pass_io`), so `applier`
 imports the handlers back without a cycle. This brought `applier.py` back under the
 soft cap (dropped from the allowlist).

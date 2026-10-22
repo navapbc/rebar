@@ -5,10 +5,11 @@
 its comment states the rule in general terms: "A 404 on a single mutation's target
 means the issue is gone: this is a PER-MUTATION failure, never pass-fatal."
 `handle_create` and `handle_delete` never got that treatment — they call
-`create_one` / `delete_one` with no `try` at all. `applier._apply_one` re-raises
-`urllib.error.HTTPError` ABOVE its per-mutation backstop (`record_backstop_failure`)
-precisely because it assumes "404 soft-failed in the handler", so a 404 from a
-create or a delete escapes `reconcile_once` and aborts the whole pass.
+`create_one` / `delete_one` with no `try` at all. The per-mutation backstop
+(`batch_dispatch._dispatch_with_backstop`, formerly `applier._apply_one`) re-raises
+`urllib.error.HTTPError` ABOVE `record_backstop_failure` precisely because it assumes
+"404 soft-failed in the handler", so a 404 from a create or a delete escapes
+`reconcile_once` and aborts the whole pass.
 
 Observed in production: GHA run 30465914822 (2026-07-29T15:34:55Z) died with
 `ERROR: reconcile_once raised: HTTP Error 404: Not Found` after applying 1 of 30
@@ -16,9 +17,10 @@ planned mutations — 29 valid mutations silently skipped. That directly violate
 acceptance contract of closed bug e534-5154-2401-40fb ("the reconciler applies every
 other (valid) mutation in the pass ... no valid mutation is silently skipped").
 
-These tests drive the real sequencer `applier._apply_one`, not the handler in
-isolation, because the contract under test is "the BATCH continues" — the property
-e534 pinned and the one the production failure broke.
+These tests drive the real per-mutation backstop `_dispatch_with_backstop` that both
+batch reroutes dispatch through, not the handler in isolation, because the contract
+under test is "the BATCH continues" — the property e534 pinned and the one the
+production failure broke.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from typing import Any
 
 import pytest
 
-from rebar.reconciler import applier, apply_handlers
+from rebar.reconciler import apply_handlers, batch_dispatch
 
 
 def _http_error(code: int) -> urllib.error.HTTPError:
@@ -50,10 +52,10 @@ def ctx(tmp_path: Path) -> apply_handlers.BatchApplyContext:
 
 
 def _run_batch(mutations: list[dict], ctx: apply_handlers.BatchApplyContext) -> list[dict]:
-    """Drive the real sequencer over a batch, as `_apply_batch` does."""
+    """Drive the real per-mutation backstop over a batch, as the reroutes do."""
     outcomes: list[dict] = []
     for mutation in mutations:
-        applier._apply_one(mutation, ctx, outcomes)
+        outcomes.append(batch_dispatch._dispatch_with_backstop(mutation, ctx).outcome)
     return outcomes
 
 
@@ -70,7 +72,7 @@ def test_404_on_create_or_delete_is_isolated_and_batch_continues(
     """A 404 from create/delete records a per-mutation failure; the batch goes on.
 
     `update` already behaves this way; create and delete must match, because
-    `_apply_one` re-raises HTTPError on the assumption that the handler soft-failed
+    the backstop re-raises HTTPError on the assumption that the handler soft-failed
     it. The second mutation is the load-bearing assertion: e534's contract is that a
     single bad mutation does not skip the valid ones behind it.
     """

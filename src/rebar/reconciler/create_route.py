@@ -229,7 +229,6 @@ class _CoordinatedSeams:
         self.binding_store = binding_store
         self.capture = capture
         self._errors = importlib.import_module("rebar.reconciler._errors")
-        self._call = importlib.import_module("rebar.reconciler.batch_dispatch")._call_with_retry
         self._persist_error_type = importlib.import_module(
             "rebar.reconciler.binding_store"
         ).BindingPersistError
@@ -287,14 +286,14 @@ class _CoordinatedSeams:
 
     def attach_label(self, _plan, known_key):
         try:
-            self._call(self.client.add_label, known_key, f"rebar-id:{self.local_id}")
+            self.client.add_label(known_key, f"rebar-id:{self.local_id}")
         except Exception as exc:
             self.capture.containment_error = exc
             raise
 
     def set_property(self, _plan, known_key):
         try:
-            self._call(self.client.set_entity_property, known_key, "local_id", self.local_id)
+            self.client.set_entity_property(known_key, "local_id", self.local_id)
         except Exception as exc:
             self.capture.containment_error = exc
             raise

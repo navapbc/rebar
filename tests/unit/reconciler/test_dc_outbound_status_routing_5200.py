@@ -156,18 +156,19 @@ def test_an_illegal_transition_is_non_fatal_and_lands_in_bridge_alerts(
 
     SILENT SOFT-FAILURE IS WHAT LET BUG d067 SURVIVE, so "it did not raise" is not the
     contract — "it did not raise AND it left a record" is. Both halves are asserted, and
-    both are asserted through the REAL sequencer ``applier._apply_one`` rather than by
-    inspecting the exception, because the property is about what the pass does.
+    both are asserted through the REAL per-mutation backstop
+    ``batch_dispatch._dispatch_with_backstop`` rather than by inspecting the exception,
+    because the property is about what the pass does.
 
-    The mechanism the sequencer keys on: ``applier.py:757`` re-raises
-    ``urllib.error.HTTPError`` ABOVE the per-mutation backstop as a fail-fast contract.
+    The mechanism the backstop keys on: ``_reraise_dispatch_types`` re-raises
+    ``urllib.error.HTTPError`` ABOVE ``record_backstop_failure`` as a fail-fast contract.
     ``BackendHTTPError`` subclasses it, so a transport that let Jira's raw rejection escape
     would abort the whole pass over one issue sitting in an unexpected state — the shape of
     bug 449f-f9bf-be90-47fe. ``IllegalTransitionError`` is deliberately not an HTTPError, so
     it reaches ``record_backstop_failure`` and becomes a ``bridge_alerts`` entry instead.
     The follower mutation is the load-bearing half of "non-fatal".
     """
-    from rebar.reconciler import applier, apply_handlers
+    from rebar.reconciler import apply_handlers, batch_dispatch
 
     transport = JiraDataCenterTransport(client=_RefusingClient(), project="DIG")
     reached: list[str] = []
@@ -188,7 +189,7 @@ def test_an_illegal_transition_is_non_fatal_and_lands_in_bridge_alerts(
         {"action": "update", "key": "DIG-1", "local_id": "aaaa-bbbb-cccc-dddd"},
         {"action": "update", "key": "DIG-2", "local_id": "1111-2222-3333-4444"},
     ):
-        applier._apply_one(mutation, ctx, outcomes)
+        outcomes.append(batch_dispatch._dispatch_with_backstop(mutation, ctx).outcome)
 
     assert reached == ["DIG-2"], (
         "an illegal transition must not abort the pass — the mutation behind it must still "
@@ -232,9 +233,10 @@ def test_a_400_illegal_transition_becomes_a_non_fatal_error() -> None:
     """A 400 rejection must not stay an HTTPError, or it aborts the whole pass.
 
     ``BackendHTTPError`` subclasses ``urllib.error.HTTPError``, which
-    ``applier._apply_one`` re-raises above its per-mutation backstop as a fail-fast
-    contract. Letting Jira's raw 400 escape here would therefore kill the pass over one
-    issue in an unexpected state. The type assertion is the mechanism, not a style check.
+    ``batch_dispatch._dispatch_with_backstop`` re-raises above its per-mutation backstop
+    as a fail-fast contract. Letting Jira's raw 400 escape here would therefore kill the
+    pass over one issue in an unexpected state. The type assertion is the mechanism, not
+    a style check.
     """
     transport = JiraDataCenterTransport(
         client=_RejectingClient(400, "Illegal transition"), project="DIG"

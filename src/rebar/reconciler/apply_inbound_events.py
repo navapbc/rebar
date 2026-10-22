@@ -21,7 +21,7 @@ peer-confirmation sidecar stores, and write no event files at all.
 Each helper holds its former body VERBATIM — same computations, same order, same event
 writes. The helpers append to a caller-owned ``written`` list (update) or return the
 values the orchestrator threads onward (create). Imports only downward
-(``batch_dispatch`` / ``inbound_translate`` / ``projects_store``); never imports
+(``inbound_translate`` / ``projects_store``); never imports
 ``apply_inbound`` (so the orchestrator can import these helpers back without a cycle),
 and never imports ``apply_inbound_records`` at module level — the two identity-mint
 calls below reach it function-locally, which keeps that direction of the import graph
@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from ._backend import TicketTransport
 
 from rebar.reconciler import projects_store
-from rebar.reconciler.batch_dispatch import _call_with_retry
 from rebar.reconciler.inbound_translate import (
     _BRIDGE_INTERNAL_TAG_PREFIXES,
     _JIRA_TYPE_MAP,
@@ -265,8 +264,8 @@ def _inbound_create_writeback_jira(
     # Write rebar-id label + local_id entity property back to Jira so the
     # differ recognizes this issue as mirrored on subsequent passes (dedup).
     if client is not None:
-        _call_with_retry(client.add_label, jira_key, f"rebar-id:{local_id}")
-        _call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)
+        client.add_label(jira_key, f"rebar-id:{local_id}")
+        client.set_entity_property(jira_key, "local_id", local_id)
 
     # Bug 221b: bootstrap pre-existing Jira comments so the local ticket has
     # a complete comment history immediately after inbound create.

@@ -101,11 +101,12 @@ def merge_baseline(bindings: dict[str, Any], local_id: str, fields: dict[str, An
     and an untouched field must keep its fetched value.
 
     The caller MUST pass only fields whose write is CONFIRMED landed (per-mutation success,
-    not "the pass ran"). A transition can soft-fail while the pass still exits 0
-    (``applier._apply_one``'s backstop), and a baseline advanced for a push that never
-    landed asserts a sync that did not happen. That failure does NOT self-correct, whereas
-    the bug being fixed here does (after a clobber the baseline advances to Jira's value,
-    local then differs, and the next pass re-pushes). Lagging is recoverable; leading is not.
+    not "the pass ran"). A transition can soft-fail while the pass still exits 0 (the
+    per-mutation backstop ``record_backstop_failure``), and a baseline advanced for a push
+    that never landed asserts a sync that did not happen. That failure does NOT
+    self-correct, whereas the bug being fixed here does (after a clobber the baseline
+    advances to Jira's value, local then differs, and the next pass re-pushes). Lagging is
+    recoverable; leading is not.
 
     A no-op for an unbound local id or an empty overlay, and — like ``set_baseline`` — it
     leaves ``updated_at`` churn-free when nothing actually changes.

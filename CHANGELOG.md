@@ -38,6 +38,15 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): reconciler handlers make one transport attempt.** ADR 0103 S3 retires
+  the handler-level retry wrapper. The transports still retry Cloud REST timeouts and
+  connection faults, ACLI non-zero exits, and Data Center connection faults and opted-in 429s.
+  An HTTP 429 or 5xx on a Cloud REST leg or a Data Center write is no longer retried, so one
+  5xx on an update aborts the pass and the next pass re-diffs. The batch form of
+  `rebar.reconciler.applier.apply` now requires `ticket_plans` and raises `TypeError` without
+  them, and `applier._apply_one` is deleted. Details in
+  [docs/release-notes.md](docs/release-notes.md).
+
 - **BREAKING (pre-1.0): the reconciler's batch apply takes typed `Mutation`s only.**
   `rebar.reconciler.applier.apply(mutations, pass_id, ...)` raises `TypeError` for a raw dict
   element, and for an outbound create whose payload is a plain dict rather than an

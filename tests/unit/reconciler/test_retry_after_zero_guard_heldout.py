@@ -8,18 +8,13 @@ Anthropic transport (``a zero/negative Retry-After is treated as absent``). So a
 treated like an ABSENT header — routed to the already-jittered fallback — and MUST be
 distinguished from a present positive value, which is still honored (and capped).
 
-This test is held out from the fix: it exercises all three 429 backoff surfaces plus the shared
+This test is held out from the fix: it exercises the 429 backoff surfaces plus the shared
 parser, and it is designed to be RED before the guard exists (each surface produces a ``0.0``
-immediate replay) and GREEN after.
+immediate replay) and GREEN after. ADR 0103 S3 retired the handler-level retry wrapper that was
+surface 2, so the DC and ACLI surfaces remain.
 """
 
 from __future__ import annotations
-
-import email.message
-import importlib
-import urllib.error
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -28,11 +23,8 @@ from rebar.reconciler._errors import MAX_BACKOFF_S, parse_retry_after
 from rebar.reconciler.adapters.jira import acli_subprocess
 from rebar.reconciler.adapters.jira_datacenter import retry as _dc_retry
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-DISPATCH_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "dispatch_one.py"
 
-
-# ── the shared parser (single source feeding dispatch + DC) ─────────────────────────────────
+# ── the shared parser (single source feeding the DC surface) ─────────────────────────────────
 def test_parse_retry_after_maps_zero_and_negative_to_absent() -> None:
     """A non-positive ``Retry-After`` parses to ``None`` — the same result as an absent header —
     so every caller routes it to the jittered fallback instead of a zero-second sleep."""
@@ -50,55 +42,6 @@ def test_parse_retry_after_still_honors_a_positive_value() -> None:
     assert parse_retry_after("2") == 2.0
     assert parse_retry_after("0.5") == 0.5
     assert parse_retry_after("30") == 30.0
-
-
-# ── surface 2: dispatch_apply_phases._call_with_retry (raw urllib HTTPError floor) ──────────
-def _load_dispatch():
-    return importlib.import_module("rebar.reconciler.dispatch_one")
-
-
-@pytest.fixture(scope="module")
-def dispatch():
-    if not DISPATCH_PATH.exists():
-        pytest.fail(f"dispatch_one.py not found at {DISPATCH_PATH}")
-    return _load_dispatch()
-
-
-def _http_error(code: int, *, retry_after: str | None = None) -> urllib.error.HTTPError:
-    hdrs = None
-    if retry_after is not None:
-        hdrs = email.message.Message()
-        hdrs["Retry-After"] = retry_after
-    return urllib.error.HTTPError(
-        url="https://example.atlassian.net/rest/api/3/issue/DIG-1/properties/local_id",
-        code=code,
-        msg="err",
-        hdrs=hdrs,  # type: ignore[arg-type]
-        fp=None,
-    )
-
-
-def test_dispatch_429_with_retry_after_zero_uses_jittered_fallback_not_sleep_zero(dispatch):
-    """A 429 whose ``Retry-After`` is ``0`` must NOT collapse to ``time.sleep(0.0)`` — it falls
-    to the ADR-0036 jittered backoff (attempt 0: ``2**1 + jitter`` in ``[2.0, 3.0)``), the same
-    path a header-less 429 takes."""
-    fn = MagicMock(side_effect=[_http_error(429, retry_after="0"), {"ok": True}])
-    with patch("time.sleep") as mock_sleep:
-        result = dispatch._call_with_retry(fn, max_retries=3)
-    assert result == {"ok": True}
-    assert fn.call_count == 2
-    (delay,), _ = mock_sleep.call_args
-    assert delay > 0.0, f"Retry-After: 0 slept {delay} — an immediate synchronized replay"
-    assert 2.0 <= delay < 3.0, f"delay {delay} is not the attempt-0 jittered fallback [2.0, 3.0)"
-
-
-def test_dispatch_429_with_positive_retry_after_is_still_honored(dispatch):
-    """Regression: a present positive ``Retry-After`` is honored verbatim (capped at MAX)."""
-    fn = MagicMock(side_effect=[_http_error(429, retry_after="5"), {"ok": True}])
-    with patch("time.sleep") as mock_sleep:
-        result = dispatch._call_with_retry(fn, max_retries=3)
-    assert result == {"ok": True}
-    mock_sleep.assert_called_once_with(5.0)
 
 
 # ── surface 3: jira_datacenter/retry.py._with_connection_retry ───────────────────────────────

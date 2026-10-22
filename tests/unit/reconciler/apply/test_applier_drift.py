@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler import ticket_planner
 from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
 from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
@@ -26,6 +27,29 @@ from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 def _load_applier():
@@ -120,7 +144,9 @@ def test_drift_mid_pass_raises_head_drift_error(tmp_path, applier):
         patch.object(applier, "snapshot_head", snapshot_head),
     ):
         with pytest.raises(applier.HeadDriftError):
-            applier.apply(mutations, "pass-drift-01", repo_root=tmp_path)
+            applier.apply(
+                mutations, "pass-drift-01", repo_root=tmp_path, ticket_plans=_plans(mutations)
+            )
 
 
 def test_drift_mid_pass_no_jira_call_after_drift(tmp_path, applier):
@@ -140,7 +166,9 @@ def test_drift_mid_pass_no_jira_call_after_drift(tmp_path, applier):
         patch.object(applier, "snapshot_head", snapshot_head),
     ):
         with pytest.raises(applier.HeadDriftError):
-            applier.apply(mutations, "pass-drift-02", repo_root=tmp_path)
+            applier.apply(
+                mutations, "pass-drift-02", repo_root=tmp_path, ticket_plans=_plans(mutations)
+            )
 
     # Only the first mutation's update_issue should have been called
     # F3: fields unpacked as kwargs (real signature: update_issue(key, **kwargs))
@@ -167,7 +195,9 @@ def test_empty_mutations_no_head_check(tmp_path, applier):
         patch.object(applier, "_load_acli", return_value=mock_acli_mod),
         patch.object(applier, "snapshot_head", snapshot_head),
     ):
-        manifest_path = applier.apply([], "pass-empty-01", repo_root=tmp_path)
+        manifest_path = applier.apply(
+            [], "pass-empty-01", repo_root=tmp_path, ticket_plans=_plans([])
+        )
 
     assert direct_snapshot_calls == [], (
         f"snapshot_head (drift guard) should not be called for empty mutations, "
@@ -195,7 +225,9 @@ def test_stable_head_all_mutations_dispatched(tmp_path, applier):
         patch.object(applier, "_load_acli", return_value=mock_acli_mod),
         patch.object(applier, "snapshot_head", snapshot_head),
     ):
-        manifest_path = applier.apply(mutations, "pass-stable-01", repo_root=tmp_path)
+        manifest_path = applier.apply(
+            mutations, "pass-stable-01", repo_root=tmp_path, ticket_plans=_plans(mutations)
+        )
 
     # All three mutations should have been dispatched
     assert mock_client.update_issue.call_count == 2, (
