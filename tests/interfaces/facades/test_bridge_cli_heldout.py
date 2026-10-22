@@ -175,7 +175,7 @@ def test_preview_is_read_only_and_sync_persists_the_binding(
     unrelated = rebar_repo / ".tickets-tracker" / "unrelated-contract.bin"
     unrelated.write_bytes(b"preserve-me-byte-for-byte")
     transport_log = tmp_path / "jira-transport.jsonl"
-    bridge_state = rebar_repo / ".rebar" / "bridge-state" / "bindings.json"
+    bindings_file = rebar_repo / ".rebar" / "bridge-state" / "bindings.json"
 
     def fake_reconciler(argv: list[str], *, env=None) -> int:
         route = argv[3]
@@ -185,8 +185,8 @@ def test_preview_is_read_only_and_sync_persists_the_binding(
         if mode == "dry-run":
             print(json.dumps({"mode": mode, "plan": [{"jira_key": "DIG-42"}]}))
             return 0
-        bridge_state.parent.mkdir(parents=True, exist_ok=True)
-        bridge_state.write_text(
+        bindings_file.parent.mkdir(parents=True, exist_ok=True)
+        bindings_file.write_text(
             json.dumps({"DIG-42": {"local_id": "jira-dig-42"}}) + "\n",
             encoding="utf-8",
         )
@@ -198,12 +198,12 @@ def test_preview_is_read_only_and_sync_persists_the_binding(
     before = _tracker_snapshot(rebar_repo)
     assert _cli.main(["bridge", "preview"]) == 0
     assert _tracker_snapshot(rebar_repo) == before
-    assert not bridge_state.exists()
+    assert not bindings_file.exists()
     preview_log = transport_log.read_text(encoding="utf-8").splitlines()
     assert [json.loads(line)["operation"] for line in preview_log] == ["search"]
 
     assert _cli.main(["bridge", "sync"]) == 0
-    assert json.loads(bridge_state.read_text(encoding="utf-8")) == {
+    assert json.loads(bindings_file.read_text(encoding="utf-8")) == {
         "DIG-42": {"local_id": "jira-dig-42"}
     }
     assert unrelated.read_bytes() == b"preserve-me-byte-for-byte"

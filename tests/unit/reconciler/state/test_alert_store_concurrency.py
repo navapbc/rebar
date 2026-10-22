@@ -24,6 +24,8 @@ from types import ModuleType
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
@@ -76,7 +78,7 @@ def test_concurrent_appends_produce_no_malformed_lines(
         list(pool.map(_append_batch, range(threads)))
 
     # Locate today's JSONL file (append() writes to today's UTC-dated file).
-    store_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    store_dir = scratch_retention.alerts_dir(tmp_path)
     jsonl_files = list(store_dir.glob("*.jsonl"))
     assert len(jsonl_files) == 1, (
         f"Expected exactly one JSONL file in {store_dir}, got {jsonl_files}"

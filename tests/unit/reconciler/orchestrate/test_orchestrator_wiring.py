@@ -14,6 +14,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
@@ -55,7 +57,7 @@ def outbound_differ_mod():
 
 def _make_fake_snapshot(tmp_path: Path, repo_root: Path, jira_snapshot: dict):
     """Write a Jira snapshot file so the fetcher stub can return its path."""
-    snapshots_dir = repo_root / "bridge_state" / "snapshots"
+    snapshots_dir = scratch_retention.snapshots_dir(repo_root)
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     snap_path = snapshots_dir / "test.json"
     snap_path.write_text(json.dumps(jira_snapshot))
@@ -70,8 +72,7 @@ def _setup_repo_root(tmp_path: Path) -> Path:
     tracker.mkdir()
     bridge = tracker / ".bridge_state"
     bridge.mkdir(parents=True)
-    bs_dir = repo_root / "bridge_state"
-    bs_dir.mkdir()
+    scratch_retention.bridge_scratch_dir(repo_root).mkdir(parents=True)
     return repo_root
 
 
@@ -95,7 +96,7 @@ def _stub_modules(
     differ.compute_mutations.return_value = list(legacy_mutations or [])
 
     applier = MagicMock()
-    applier.apply.return_value = repo_root / "bridge_state" / "manifest.json"
+    applier.apply.return_value = scratch_retention.bridge_scratch_dir(repo_root) / "manifest.json"
     # Give applier a search_issues method for binding recovery
     applier.search_issues = MagicMock(return_value=[])
 

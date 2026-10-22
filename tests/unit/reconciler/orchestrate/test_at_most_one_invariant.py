@@ -23,6 +23,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
@@ -276,7 +278,7 @@ def _stubbed_load(reconcile_mod: ModuleType, stubs: dict[str, ModuleType]):
 
 def _make_stub_fetcher(snapshot: dict, pass_id: str, tmp_path: Path) -> ModuleType:
     """Return a stub reconcile_fetcher that writes snapshot to tmp_path and returns the path."""
-    snap_dir = tmp_path / "bridge_state" / "snapshots"
+    snap_dir = scratch_retention.snapshots_dir(tmp_path)
     snap_dir.mkdir(parents=True, exist_ok=True)
     snap_file = snap_dir / f"{pass_id}.json"
     snap_file.write_text(json.dumps(snapshot))
@@ -285,7 +287,7 @@ def _make_stub_fetcher(snapshot: dict, pass_id: str, tmp_path: Path) -> ModuleTy
 
     def _fetch(pid, repo_root):
         # Write the snapshot for this pass
-        out_dir = repo_root / "bridge_state" / "snapshots"
+        out_dir = scratch_retention.snapshots_dir(repo_root)
         out_dir.mkdir(parents=True, exist_ok=True)
         out = out_dir / f"{pid}.json"
         out.write_text(json.dumps(snapshot))
@@ -307,7 +309,7 @@ def _make_stub_applier(tmp_path: Path) -> ModuleType:
     def _apply(mutations, pass_id, repo_root, **kwargs):
         # Bug 85a1: reconcile_once now passes binding_store=; accept and
         # ignore for stub purposes.
-        manifest = repo_root / "bridge_state" / "manifests" / f"{pass_id}.json"
+        manifest = scratch_retention.bridge_scratch_dir(repo_root) / "manifests" / f"{pass_id}.json"
         manifest.parent.mkdir(parents=True, exist_ok=True)
         manifest.write_text(json.dumps({"mutations": len(mutations)}))
         return manifest
@@ -391,7 +393,7 @@ def test_end_to_end_second_write_produces_one_alert_one_bug(tmp_path):
 
     Pass 1: clean snapshot (no violations) → no alerts, no ticket-cli calls.
     Pass 2: 'JIRA-42' has local_ids=['id1','id2'] (violation) → exactly one
-    alert entry in bridge_state/alerts/ and exactly one ticket-cli subprocess call.
+    alert entry in .rebar/bridge/bridge_alerts/ and exactly one ticket-cli subprocess call.
 
     Strategy: patch subprocess on the shared invariants module, then serve it (and the
     collaborator stubs) through a patched ``reconcile._load`` for both passes.
@@ -448,7 +450,7 @@ def test_end_to_end_second_write_produces_one_alert_one_bug(tmp_path):
     # environment has no .tickets-tracker git repo, so the commit step
     # fails gracefully — this is expected and does not affect the invariant
     # being tested here).
-    alerts_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    alerts_dir = scratch_retention.alerts_dir(tmp_path)
     alert_files = list(alerts_dir.glob("*.jsonl")) if alerts_dir.is_dir() else []
     all_alert_lines = []
     for af in alert_files:

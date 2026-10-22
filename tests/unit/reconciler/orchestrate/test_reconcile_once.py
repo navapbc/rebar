@@ -507,7 +507,7 @@ def test_dry_run_reconcile_once_writes_nothing(
     """A DRY_RUN reconcile_once produces ZERO local writes.
 
     The full differ runs (mutation_count reflects the computed plan), but NO
-    file may appear under bridge_state/ or .tickets-tracker/.bridge_state/ —
+    file may appear under .rebar/bridge/ or .tickets-tracker/.bridge_state/ —
     no snapshot, manifest, health record, sync-log, bindings, or prev_snapshot.
     Encodes the fix for ticket yaw-plait-doe (cap-0 modes were persisting).
     """
@@ -546,7 +546,8 @@ def test_dry_run_reconcile_once_writes_nothing(
 def test_live_mode_reconcile_once_still_persists(
     tmp_path, reconcile_mod, fetcher_mod, applier_mod, mode_mod
 ):
-    """Writing modes (LIVE) keep persisting: a snapshot file IS written."""
+    """Writing modes (LIVE) keep persisting: a snapshot file IS written, under the
+    repo-local scratch ``.rebar/bridge/`` and never the pre-move repo-root location."""
     issues = _make_stable_issues()
     pass_id = "live-persists"
 
@@ -557,8 +558,11 @@ def test_live_mode_reconcile_once_still_persists(
 
     after = _snapshot_tree(tmp_path)
     # The snapshot file is the canonical persistence artifact.
-    assert f"bridge_state/snapshots/{pass_id}.json" in after, (
+    assert f".rebar/bridge/snapshots/{pass_id}.json" in after, (
         f"LIVE must persist the snapshot; files: {sorted(after)}"
+    )
+    assert not (tmp_path / "bridge_state").exists(), (
+        f"LIVE wrote to the pre-move repo-root scratch; files: {sorted(after)}"
     )
     assert result.get("no_write") is not True
 

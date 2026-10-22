@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-from rebar.reconciler import dispatch_apply_phases, dispatch_one, pass_io
+from rebar.reconciler import dispatch_apply_phases, dispatch_one, pass_io, scratch_retention
 from rebar.reconciler.create_route import _coordinated_create_core
 
 # The guard logs through the module that owns it. Target that logger by NAME when asserting:
@@ -67,7 +67,7 @@ def alert_root(tmp_path, monkeypatch):
 
 
 def _alerts(root: Path) -> list[dict]:
-    store = root / "bridge_state" / "bridge_alerts"
+    store = scratch_retention.alerts_dir(root)
     if not store.exists():
         return []
     out: list[dict] = []

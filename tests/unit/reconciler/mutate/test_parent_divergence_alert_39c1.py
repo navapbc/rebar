@@ -15,6 +15,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
@@ -32,7 +34,7 @@ def applier():
 
 def _alerts(root: Path) -> list[dict]:
     """Every alert record written under ``root``, in file order."""
-    store = root / "bridge_state" / "bridge_alerts"
+    store = scratch_retention.alerts_dir(root)
     if not store.is_dir():
         return []
     out: list[dict] = []
@@ -134,8 +136,9 @@ def test_a_broken_alert_store_does_not_break_the_pass(applier, tmp_path, monkeyp
     """Alert-store failure does not prevent other mutation fields from landing."""
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
     # Occupy the alert directory's path with a FILE, so mkdir/append raise.
-    (tmp_path / "bridge_state").mkdir()
-    (tmp_path / "bridge_state" / "bridge_alerts").write_text("not a directory")
+    blocked_alerts = scratch_retention.alerts_dir(tmp_path)
+    blocked_alerts.parent.mkdir(parents=True)
+    blocked_alerts.write_text("not a directory")
 
     client = MagicMock()
     client.update_issue.return_value = None

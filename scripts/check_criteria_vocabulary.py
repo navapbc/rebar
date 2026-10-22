@@ -25,8 +25,9 @@ ABBREVIATION_PATTERN = re.compile(r"\bSCs?\b")
 # repository the guard asks git for the file list instead, so `.gitignore` — not this set — is
 # the single source of truth for what is out of scope. That distinction is the whole point of
 # bug d5ae: a denylist over an open-ended filesystem drifts, and when it drifted past
-# `.claude/worktrees/` and `bridge_state/` it produced ~47k violations in gitignored paths and
-# permanently reddened the `make lint` commit gate for anyone who had created a worktree.
+# `.claude/worktrees/` and the reconciler's repo-root scratch directory (now `.rebar/bridge/`)
+# it produced ~47k violations in gitignored paths and permanently reddened the `make lint`
+# commit gate for anyone who had created a worktree.
 EXCLUDED_DIRECTORY_NAMES = frozenset(
     {
         ".git",

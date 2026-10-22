@@ -2,7 +2,7 @@
 
 Ticket 6454-d06e-7361-4e3d converted ``alert_store._atomic_write`` off a hand-rolled
 ``mkstemp`` + ``fsync`` + ``os.replace`` to the authoritative ``rebar._store.fsutil.atomic_write``
-seam. ``bridge_state/bridge_alerts`` is git-ignored LOCAL SCRATCH (not the committed tickets
+seam. ``.rebar/bridge/bridge_alerts`` is git-ignored LOCAL SCRATCH (not the committed tickets
 branch), so the atomic write alone is the whole contract — no commit/publish path. These pins
 prove the conversion is behavior-preserving:
 

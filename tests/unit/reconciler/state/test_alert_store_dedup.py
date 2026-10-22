@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 
-from rebar.reconciler import alert_store
+from rebar.reconciler import alert_store, scratch_retention
 
 
 def _write_record(path, record: dict) -> None:
@@ -21,7 +21,7 @@ def _write_record(path, record: dict) -> None:
 
 def test_in_window_same_key_is_deduped(tmp_path):
     """A record written within the 24h window for a given key is detected."""
-    store_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    store_dir = scratch_retention.alerts_dir(tmp_path)
     store_dir.mkdir(parents=True)
     record = {
         "key": "alert-key-abc",
@@ -43,7 +43,7 @@ def test_in_window_same_key_is_deduped(tmp_path):
 
 def test_stale_timestamp_not_deduped(tmp_path):
     """A record older than 24h does NOT trigger dedup, even if the file is globbed."""
-    store_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    store_dir = scratch_retention.alerts_dir(tmp_path)
     store_dir.mkdir(parents=True)
     # Write a record with a timestamp 25 hours in the past
     stale_ts = time.time_ns() - (25 * 3600 * 1_000_000_000)
@@ -80,7 +80,7 @@ def test_missing_directory_returns_false(tmp_path):
 
 def test_malformed_jsonl_line_skipped(tmp_path):
     """Malformed JSONL lines are silently skipped; valid lines still processed."""
-    store_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    store_dir = scratch_retention.alerts_dir(tmp_path)
     store_dir.mkdir(parents=True)
     today_file = store_dir / "2099-01-01.jsonl"
 
@@ -111,7 +111,7 @@ def test_malformed_jsonl_line_skipped(tmp_path):
 
 def test_patch_bug_filed_updates_record(tmp_path):
     """patch_bug_filed patches the latest unresolved record for a key in-place."""
-    store_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    store_dir = scratch_retention.alerts_dir(tmp_path)
     store_dir.mkdir(parents=True)
     today_file = store_dir / "2099-01-01.jsonl"
 
@@ -145,7 +145,7 @@ def test_patch_bug_filed_skips_non_dict_lines(tmp_path):
     """A non-dict JSONL line (e.g. bare int) is preserved verbatim; the target record is still
     patched.
     """
-    store_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    store_dir = scratch_retention.alerts_dir(tmp_path)
     store_dir.mkdir(parents=True)
     today_file = store_dir / "2099-01-01.jsonl"
 
@@ -183,7 +183,7 @@ def test_patch_bug_filed_skips_non_dict_lines(tmp_path):
 
 def test_patch_bug_filed_atomic_no_temp_leftover(tmp_path):
     """After a successful patch, no stray .tmp.* files remain in the alerts dir."""
-    store_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    store_dir = scratch_retention.alerts_dir(tmp_path)
     store_dir.mkdir(parents=True)
     today_file = store_dir / "2099-01-01.jsonl"
     _write_record(
@@ -209,7 +209,7 @@ def test_patch_bug_filed_atomic_no_temp_leftover(tmp_path):
 
 def test_patch_bug_filed_preserves_non_target_lines_byte_identical(tmp_path):
     """Non-target dict lines are written back byte-identical to their original input."""
-    store_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    store_dir = scratch_retention.alerts_dir(tmp_path)
     store_dir.mkdir(parents=True)
     today_file = store_dir / "2099-01-01.jsonl"
 

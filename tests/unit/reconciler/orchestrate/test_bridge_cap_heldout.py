@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from rebar.reconciler import applier
+from rebar.reconciler import applier, scratch_retention
 
 
 def _make_mutations(n: int) -> list:
@@ -44,7 +44,7 @@ def test_explicit_live_cap_retains_exact_audit_partition(
     ordered_targets = [
         mutation.target for mutation in sorted(mutations, key=applier._mode_sort_key)
     ]
-    fake_manifest = tmp_path / "bridge_state" / "snapshots" / "cap.manifest.json"
+    fake_manifest = scratch_retention.snapshots_dir(tmp_path) / "cap.manifest.json"
     fake_manifest.parent.mkdir(parents=True)
     fake_manifest.write_text(json.dumps({"mutations": []}))
     applied_targets: list[str] = []

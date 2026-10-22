@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from rebar.reconciler import __main__ as reconciler_main
-from rebar.reconciler import applier, guarded_pass, manifest_renderer
+from rebar.reconciler import applier, guarded_pass, manifest_renderer, scratch_retention
 from rebar.reconciler.mutation import (
     Mutation,
     MutationAction,
@@ -137,7 +137,7 @@ def test_canonical_uncapped_sync_retains_field_comparable_manifest(
             "fields": {"summary": "new ticket"},
         },
     ]
-    legacy_batch = tmp_path / "bridge_state" / "snapshots" / "sync.manifest.json"
+    legacy_batch = scratch_retention.snapshots_dir(tmp_path) / "sync.manifest.json"
     legacy_batch.parent.mkdir(parents=True)
 
     def fake_batch(*_args, **_kwargs) -> Path:
@@ -213,7 +213,7 @@ def test_canonical_sync_manifest_reports_batch_failures_exactly(
             "fields": {"summary": "rejected"},
         },
     ]
-    batch_path = tmp_path / "bridge_state" / "snapshots" / "sync.manifest.json"
+    batch_path = scratch_retention.snapshots_dir(tmp_path) / "sync.manifest.json"
     batch_path.parent.mkdir(parents=True)
 
     def fake_batch(*_args, **_kwargs) -> Path:
@@ -266,7 +266,7 @@ def test_canonical_sync_tally_excludes_suppressed_inbound_mutations(
             {"local_id": "local-2"},
         ),
     ]
-    manifest_path = tmp_path / "bridge_state" / "snapshots" / "sync.manifest.json"
+    manifest_path = scratch_retention.snapshots_dir(tmp_path) / "sync.manifest.json"
     manifest_path.parent.mkdir(parents=True)
 
     def fake_typed(mutation, **_kwargs):
@@ -311,7 +311,7 @@ def test_capped_canonical_sync_reports_plan_tally_and_deferred(tmp_path: Path, m
         }
         for number in (3, 1, 2)
     ]
-    manifest_path = tmp_path / "bridge_state" / "snapshots" / "sync.manifest.json"
+    manifest_path = scratch_retention.snapshots_dir(tmp_path) / "sync.manifest.json"
     manifest_path.parent.mkdir(parents=True)
 
     def fake_batch(*_args, **_kwargs) -> Path:
@@ -352,7 +352,7 @@ def test_canonical_sync_tally_degrades_safely_when_batch_manifest_is_unreadable(
     tmp_path: Path, monkeypatch, corrupt: bool
 ) -> None:
     mode_mod = applier._load_mode_module()
-    manifest_path = tmp_path / "bridge_state" / "snapshots" / "sync.manifest.json"
+    manifest_path = scratch_retention.snapshots_dir(tmp_path) / "sync.manifest.json"
     manifest_path.parent.mkdir(parents=True)
 
     def fake_batch(*_args, **_kwargs) -> Path:

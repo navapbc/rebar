@@ -2,7 +2,7 @@
 
 RED task d633: verifies that when apply() or update_one() processes an update mutation
 containing a set-valued field (e.g., "labels"), the provenance_record is persisted to
-bridge_state/mapping.json under mapping[jira_key]["field_provenance"][field_name].
+.rebar/bridge/mapping.json under mapping[jira_key]["field_provenance"][field_name].
 
 All tests use tmp_path for isolation.
 """
@@ -16,6 +16,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
+from rebar.reconciler import scratch_retention
 
 # ---------------------------------------------------------------------------
 # Module loading
@@ -102,7 +104,7 @@ def test_provenance_persisted_for_labels_field(applier, tmp_path):
     ):
         applier.apply([mutation], pass_id="test-prov-01", repo_root=tmp_path)
 
-    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path = scratch_retention.mapping_path(tmp_path)
     assert mapping_path.exists(), "mapping.json must be created after update with set-valued field"
 
     data = json.loads(mapping_path.read_text())
@@ -134,7 +136,7 @@ def test_provenance_labels_contains_field_values(applier, tmp_path):
     ):
         applier.apply([mutation], pass_id="test-prov-02", repo_root=tmp_path)
 
-    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path = scratch_retention.mapping_path(tmp_path)
     data = json.loads(mapping_path.read_text())
     labels_provenance = data["DIG-456"]["field_provenance"]["labels"]
     for label in ["frontend", "ux"]:
@@ -166,7 +168,7 @@ def test_provenance_written_atomically(applier, tmp_path):
     ):
         applier.apply([mutation], pass_id="test-prov-atomic", repo_root=tmp_path)
 
-    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path = scratch_retention.mapping_path(tmp_path)
     # At least one os.replace call should target the mapping.json path
     mapping_renames = [(src, dst) for src, dst in rename_calls if dst == str(mapping_path)]
     assert len(mapping_renames) >= 1, (
@@ -182,7 +184,7 @@ def test_provenance_written_atomically(applier, tmp_path):
 
 def test_provenance_preserves_existing_mapping_entries(applier, tmp_path):
     """Provenance write does not clobber existing mapping.json entries."""
-    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path = scratch_retention.mapping_path(tmp_path)
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
     # Pre-populate with an existing local_id -> jira_key mapping
     mapping_path.write_text(json.dumps({"old-local-id": "DIG-1"}))
@@ -209,7 +211,7 @@ def test_provenance_preserves_existing_mapping_entries(applier, tmp_path):
 def test_concurrent_provenance_writes_merge_distinct_issue_keys(tmp_path):
     """Independent provenance writes must merge rather than snapshot-clobber."""
     pass_io = __import__("rebar.reconciler.pass_io", fromlist=["_persist_field_provenance"])
-    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path = scratch_retention.mapping_path(tmp_path)
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
     mapping_path.write_text(json.dumps({"old-local-id": "DIG-1"}), encoding="utf-8")
     errors: list[BaseException] = []
@@ -254,7 +256,7 @@ def test_provenance_multiple_set_valued_fields(applier, tmp_path):
     ):
         applier.apply([mutation], pass_id="test-prov-multi-field", repo_root=tmp_path)
 
-    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path = scratch_retention.mapping_path(tmp_path)
     data = json.loads(mapping_path.read_text())
     provenance = data["DIG-300"]["field_provenance"]
     assert "labels" in provenance, "Expected 'labels' in field_provenance"
@@ -283,7 +285,7 @@ def test_non_set_valued_fields_do_not_create_provenance(applier, tmp_path):
     ):
         applier.apply([mutation], pass_id="test-prov-no-set", repo_root=tmp_path)
 
-    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path = scratch_retention.mapping_path(tmp_path)
     # mapping.json may or may not exist — if it does, DIG-400 should not have field_provenance
     if mapping_path.exists():
         data = json.loads(mapping_path.read_text())

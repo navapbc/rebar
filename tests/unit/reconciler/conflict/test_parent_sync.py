@@ -21,6 +21,8 @@ from typing import Any
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
@@ -619,8 +621,7 @@ class TestFetcherParentEnrichment:
         # S4: _load_acli returns the transport (client) directly.
         monkeypatch.setattr(fetcher_mod, "_load_acli", lambda: _StubClient())
 
-        bridge_state = tmp_path / "bridge_state" / "snapshots"
-        bridge_state.mkdir(parents=True)
+        scratch_retention.snapshots_dir(tmp_path).mkdir(parents=True)
 
         output_path = fetcher_mod.fetch_snapshot("test-pass", repo_root=tmp_path)
 
@@ -656,8 +657,7 @@ class TestFetcherParentEnrichment:
 
         # S4: _load_acli returns the transport (client) directly.
         monkeypatch.setattr(fetcher_mod, "_load_acli", lambda: _FailingClient())
-        bridge_state = tmp_path / "bridge_state" / "snapshots"
-        bridge_state.mkdir(parents=True)
+        scratch_retention.snapshots_dir(tmp_path).mkdir(parents=True)
 
         # Should NOT raise even though parent enrichment fails
         output_path = fetcher_mod.fetch_snapshot("test-degrade-pass", repo_root=tmp_path)

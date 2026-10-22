@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import NamedTuple
 
+from rebar.reconciler.scratch_retention import divergence_state_path
+
 _CAP_PER_PASS = 5
 
 
@@ -313,7 +315,6 @@ def report_schema_drift(issue_key: str, observed: dict, expected: dict) -> None:
 # voter-observability lane, not per-pass immediate firing.
 _COMMENT_DIVERGENCE_THRESHOLD = 2
 _COMMENT_DIVERGENCE_ALERT_KEY = "bridge-alert:comment-id-divergence"
-_COMMENT_DIVERGENCE_STATE_FILE = "comment_id_divergence.json"
 
 
 def step_comment_divergence(prev_consecutive: int, divergent: bool) -> tuple[int, bool]:
@@ -348,8 +349,8 @@ def check_comment_id_recording(
     Reads the per-pass tallies off the ``BindingStore`` facade
     (``comment_posts_this_pass`` / ``comment_ids_gained_this_pass``; a store or
     double predating them degrades to a no-op), folds the observation into the
-    cross-pass counter persisted at ``bridge_state/comment_id_divergence.json``
-    (local scratch, same residency as ``bridge_state/bridge_alerts``), and on the
+    cross-pass counter persisted at ``.rebar/bridge/comment_id_divergence.json``
+    (local scratch, same residency as ``.rebar/bridge/bridge_alerts``), and on the
     second consecutive divergent pass appends a ``bridge_alerts`` record — deduped
     through ``alert_store.is_deduped``'s 24h window — whose message names the
     invariant and the pass.
@@ -368,7 +369,7 @@ def check_comment_id_recording(
     gained = int(gained_fn())
     divergent = posted > 0 and gained <= 0
 
-    state_path = repo_root / "bridge_state" / _COMMENT_DIVERGENCE_STATE_FILE
+    state_path = divergence_state_path(repo_root)
     consecutive, fire = step_comment_divergence(
         _read_comment_divergence_state(state_path), divergent
     )

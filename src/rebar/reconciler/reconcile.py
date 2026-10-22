@@ -129,9 +129,11 @@ def reconcile_once(
     """Run one reconciler pass: fetch → diff → apply.
 
     Reads the previous snapshot (written at the end of the prior pass) from
-    ``bridge_state/snapshots/<pass_id>.prev.json``, fetches the current
+    ``<tracker>/.bridge_state/prev_snapshot.json``, fetches the current
     remote state, computes mutations, applies them, then advances the prev
     snapshot file so the next call is idempotent against an unchanged remote.
+    Per-pass scratch (snapshots, manifests, sync logs, alerts) lands under
+    ``<repo_root>/.rebar/bridge/`` with bounded retention.
 
     The pass now includes bidirectional sync:
       1. Legacy inbound path (snapshot diff → typed Mutations)

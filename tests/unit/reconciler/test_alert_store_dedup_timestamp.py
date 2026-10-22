@@ -21,6 +21,8 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
+from rebar.reconciler import scratch_retention
+
 _MOD_PATH = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler" / "alert_store.py"
 
 
@@ -47,7 +49,7 @@ def test_appended_record_carries_a_timestamp(tmp_path):
 
     alert_store.append({"key": "k-stamp", "resolved": False}, tmp_path)
 
-    lines = (tmp_path / "bridge_state" / "bridge_alerts").glob("*.jsonl")
+    lines = scratch_retention.alerts_dir(tmp_path).glob("*.jsonl")
     records = []
     import json
 
@@ -79,7 +81,7 @@ def test_legacy_record_without_timestamp_remains_readable(tmp_path):
     import json
 
     alert_store = _load_alert_store()
-    alerts_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    alerts_dir = scratch_retention.alerts_dir(tmp_path)
     alerts_dir.mkdir(parents=True)
     (alerts_dir / "2020-01-01.jsonl").write_text(
         json.dumps({"key": "k-legacy", "resolved": False}) + "\n", encoding="utf-8"

@@ -39,9 +39,9 @@ def test_bridge_status_ignores_retired_reconcile_check_artifact(
 ) -> None:
     last_pass = importlib.import_module("rebar.reconciler.last_pass")
     store = rebar_repo / ".tickets-tracker"
-    bridge_state = store / ".bridge_state"
-    bridge_state.mkdir(parents=True, exist_ok=True)
-    (bridge_state / "reconcile-check.json").write_text(
+    state_dir = store / ".bridge_state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "reconcile-check.json").write_text(
         json.dumps(
             {
                 "total_bindings": 1,

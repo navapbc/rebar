@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from rebar.reconciler import applier, mode, request
+from rebar.reconciler import applier, mode, request, scratch_retention
 
 
 def _mutations() -> list[dict]:
@@ -75,7 +75,7 @@ def test_documented_legacy_dry_run_spelling_remains_valid() -> None:
 
 
 def test_legacy_uncapped_live_keeps_tally_and_removes_manifest(tmp_path: Path, monkeypatch) -> None:
-    legacy_batch = tmp_path / "bridge_state" / "snapshots" / "legacy.manifest.json"
+    legacy_batch = scratch_retention.snapshots_dir(tmp_path) / "legacy.manifest.json"
     legacy_batch.parent.mkdir(parents=True)
 
     def fake_batch(*_args, **_kwargs) -> Path:

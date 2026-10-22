@@ -27,7 +27,7 @@ from typing import Any
 
 import pytest
 
-from rebar.reconciler import binding_repository, get_rotation
+from rebar.reconciler import binding_repository, get_rotation, scratch_retention
 from rebar.reconciler.binding_repository import BindingRepository
 
 # Canonical serialization contract shared by every binding-state file.
@@ -128,8 +128,8 @@ def _temps(root: Path) -> list[Path]:
 
 
 def _alert_lines(root: Path) -> list[dict[str, Any]]:
-    """Every appended alert record (``<repo_root>/bridge_state/bridge_alerts/*.jsonl``)."""
-    alerts_dir = root / "bridge_state" / "bridge_alerts"
+    """Every appended alert record (``<repo_root>/.rebar/bridge/bridge_alerts/*.jsonl``)."""
+    alerts_dir = scratch_retention.alerts_dir(root)
     if not alerts_dir.is_dir():
         return []
     records: list[dict[str, Any]] = []
@@ -608,7 +608,9 @@ def test_alert_persistence_failure_is_swallowed_and_preserves_the_state_write(
     at the alert store (its parent path is a regular file, so ``mkdir`` fails) is
     swallowed, and the state write that preceded it still lands byte-exactly."""
     tracker = _seed(tmp_path, doc=_binding_doc(), raw_retired="{corrupt")
-    (tmp_path / "bridge_state").write_text("not a directory", encoding="utf-8")
+    blocked_scratch = scratch_retention.bridge_scratch_dir(tmp_path)
+    blocked_scratch.parent.mkdir(parents=True, exist_ok=True)
+    blocked_scratch.write_text("not a directory", encoding="utf-8")
 
     repo = BindingRepository(tracker)
     repo.bindings["loc-C"] = {"jira_key": "DIG-C", "state": "confirmed"}
@@ -618,7 +620,7 @@ def test_alert_persistence_failure_is_swallowed_and_preserves_the_state_write(
     live = _bridge(tmp_path) / "bindings.json"
     assert live.read_bytes() == _canonical(repo.data)
     assert json.loads(live.read_text(encoding="utf-8"))["bindings"]["loc-C"]["jira_key"] == "DIG-C"
-    assert (tmp_path / "bridge_state").is_file()
+    assert blocked_scratch.is_file()
     assert _temps(tmp_path) == []
 
 

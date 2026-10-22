@@ -53,6 +53,7 @@ from rebar.reconciler.pass_io import (
     _load_conflict_resolver,
     _persist_field_provenance,
 )
+from rebar.reconciler.scratch_retention import mapping_path as _scratch_mapping_path
 from rebar.reconciler.summary_route import (
     apply_summary_outcome,
     is_exact_summary_update,
@@ -566,7 +567,7 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     jira_key = mutation.get("key", "")
     if jira_key:
         conflict_resolver = _load_conflict_resolver()
-        mapping_path = ctx.repo_root / "bridge_state" / "mapping.json"
+        mapping_path = _scratch_mapping_path(ctx.repo_root)
         for field_name, field_value in mutation.get("fields", {}).items():
             if conflict_resolver.FIELD_CLASSES.get(field_name) == "set":
                 _persist_field_provenance(mapping_path, jira_key, field_name, field_value)

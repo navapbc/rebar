@@ -37,7 +37,7 @@ from typing import Any
 
 import pytest
 
-from rebar.reconciler import apply_planning, reconcile, reconcile_helpers
+from rebar.reconciler import apply_planning, reconcile, reconcile_helpers, scratch_retention
 
 
 def _write_manifest(tmp_path: Path, outcomes: list[dict]) -> Path:
@@ -636,7 +636,7 @@ def _rr_mutate_plan(ticket_plan_mod, identity, muts):
 
 
 def _rr_manifest_outcomes(repo_root: Path, pass_id: str) -> list[dict]:
-    p = repo_root / "bridge_state" / "snapshots" / f"{pass_id}.manifest.json"
+    p = scratch_retention.snapshots_dir(repo_root) / f"{pass_id}.manifest.json"
     if not p.is_file():
         return []
     return json.loads(p.read_text(encoding="utf-8")).get("mutations", [])

@@ -25,6 +25,8 @@ from unittest.mock import patch
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
@@ -169,14 +171,14 @@ def test_fetch_snapshot_uses_split_jqls(tmp_path, fetcher):
 
 
 def test_fetch_snapshot_written_to_correct_path(tmp_path, fetcher):
-    """fetch_snapshot writes the file to bridge_state/snapshots/<pass_id>.json."""
+    """fetch_snapshot writes the file to .rebar/bridge/snapshots/<pass_id>.json."""
     pass_id = "2026-05-24-pass-01"
     mock_acli, _ = _make_paginating_acli(total=5, page_size=100)
 
     with patch.object(fetcher, "_load_acli", return_value=mock_acli):
         result_path = fetcher.fetch_snapshot(pass_id, repo_root=tmp_path)
 
-    expected_path = tmp_path / "bridge_state" / "snapshots" / f"{pass_id}.json"
+    expected_path = scratch_retention.snapshots_dir(tmp_path) / f"{pass_id}.json"
     assert result_path == expected_path
     assert expected_path.exists()
 

@@ -5,6 +5,8 @@ import sys
 import time
 from pathlib import Path
 
+from rebar.reconciler.scratch_retention import alerts_dir
+
 # fcntl is POSIX-only; CI runs on Linux/macOS so we guard the import. On
 # Windows (unsupported by the bridge CI) we fall back to a no-op lock — the
 # caller still gets line-buffered append() semantics, just without the
@@ -16,16 +18,11 @@ else:  # pragma: no cover - Windows fallback, not exercised by CI
 
 _24H_NS = 24 * 3600 * 1_000_000_000
 
-# Canonical state-directory layout for the rebar reconciler. The two-level
-# bridge_state/<feature> structure is part of the documented bridge contract
-# (see the bridge README). Consuming projects override the *location* by
-# passing a different repo_root; the layout itself is fixed.
-_STATE_SUBDIR = "bridge_state"
-_ALERTS_SUBDIR = "bridge_alerts"
-
 
 def _store_dir(repo_root: Path) -> Path:
-    return repo_root / _STATE_SUBDIR / _ALERTS_SUBDIR
+    # The layout (``<repo_root>/.rebar/bridge/bridge_alerts``) is owned by
+    # scratch_retention; consuming projects move it only by passing a different repo_root.
+    return alerts_dir(repo_root)
 
 
 def _today_file(repo_root: Path) -> Path:
@@ -97,7 +94,7 @@ def _atomic_write(path: Path, content: str) -> None:
     parent to already exist and defaults to the umask mode, so BOTH are preserved explicitly
     here: the ``mkdir`` below and ``permissions=0o600`` keep the on-disk bytes AND mode
     byte-identical to before. These alert files live in the git-ignored, local-scratch
-    ``bridge_state/bridge_alerts`` tree (NOT the committed tickets branch), so no commit /
+    ``.rebar/bridge/bridge_alerts`` tree (NOT the committed tickets branch), so no commit /
     publish path is involved — the atomic write alone is the whole contract.
     """
     parent = path.parent

@@ -16,6 +16,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 APPLIER_PATH = SCRIPTS_DIR.parent / "reconciler" / "applier.py"
@@ -50,8 +52,8 @@ def alert_store_mod() -> ModuleType:
 
 
 def _read_alert_records(repo_root: Path) -> list[dict]:
-    # alert_store writes to <repo_root>/bridge_state/bridge_alerts/<date>.jsonl
-    alerts_dir = repo_root / "bridge_state" / "bridge_alerts"
+    # alert_store writes to <repo_root>/.rebar/bridge/bridge_alerts/<date>.jsonl
+    alerts_dir = scratch_retention.alerts_dir(repo_root)
     if not alerts_dir.is_dir():
         return []
     out = []

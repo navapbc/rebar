@@ -8,6 +8,31 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING: reconciler scratch moves to `.rebar/bridge/` with bounded retention
+
+The reconciler's repo-local scratch directory moves from `<repo_root>/bridge_state/` to
+`<repo_root>/.rebar/bridge/`. The files keep their names and layout below that root:
+
+- `snapshots/<pass_id>.json` and `snapshots/<pass_id>.manifest.json`
+- `sync-log-<pass_id>.jsonl`
+- `bridge_alerts/YYYY-MM-DD.jsonl`
+- `mapping.json` and `comment_id_divergence.json`
+
+`rebar.reconciler.scratch_retention` owns the layout (`bridge_scratch_dir`, `snapshots_dir`,
+`alerts_dir`, `sync_log_path`, `mapping_path`, `divergence_state_path`), and every writer
+composes its path through it. `alert_store._STATE_SUBDIR` is deleted.
+
+A writing pass now calls `prune_bridge_scratch(repo_root)` after it closes the sync log. It
+keeps the newest 5 passes of snapshots and manifests (`RETAIN_SNAPSHOT_PASSES`), the newest 5
+sync logs (`RETAIN_SYNC_LOGS`), and the newest 30 daily alert files (`RETAIN_ALERT_DAYS`), and
+never removes `mapping.json` or `comment_id_divergence.json`. Pruning is best-effort: a failure
+logs a warning and never fails the pass. A no-write pass (preview, dry-run) prunes nothing.
+
+`.rebar/*` in `.gitignore` already ignores the new directory, so the dead `bridge_state/` rule is
+removed. Existing `<repo_root>/bridge_state/` directories are not migrated; they are local
+scratch and can be deleted. The committed tracker-side `<tracker>/.bridge_state/` (bindings,
+projects, the previous snapshot, the last-pass detail) is not renamed.
+
 ## BREAKING: `rebar bridge run` spawns the reconciler engine directly
 
 `rebar bridge run` (and the library and MCP `bridge_run`, which share

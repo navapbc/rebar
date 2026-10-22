@@ -57,9 +57,9 @@ def _commit(tracker: Path) -> None:
 
 
 def _write_consistent_binding(tracker: Path, local_id: str, jira_key: str) -> None:
-    bridge_state = tracker / ".bridge_state"
-    bridge_state.mkdir()
-    (bridge_state / "bindings.json").write_text(
+    state_dir = tracker / ".bridge_state"
+    state_dir.mkdir()
+    (state_dir / "bindings.json").write_text(
         json.dumps(
             {
                 "bindings": {
@@ -140,9 +140,9 @@ def _write_projects_mapping(
 ) -> Path:
     """Seed ``.tickets-tracker/.bridge_state/projects.json`` under a repo root."""
     tracker = tmp_path / ".tickets-tracker"
-    bridge_state = tracker / ".bridge_state"
-    bridge_state.mkdir(parents=True, exist_ok=True)
-    (bridge_state / "projects.json").write_text(
+    state_dir = tracker / ".bridge_state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "projects.json").write_text(
         json.dumps(
             {
                 "projects": {key: {"repos": repos} for key, repos in projects.items()},

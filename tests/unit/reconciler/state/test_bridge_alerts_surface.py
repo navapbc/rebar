@@ -2,7 +2,7 @@
 
 Drives reconcile_once() through a minimal scenario that triggers an invariant
 violation (duplicate local_ids on a Jira issue), then asserts that
-alert_store wrote >= 1 record to the bridge_state/bridge_alerts/ directory.
+alert_store wrote >= 1 record to the .rebar/bridge/bridge_alerts/ directory.
 
 Module under test: src/rebar/reconciler/reconcile.py (reconcile module).
 This test exercises the orchestrator path through reconcile_once().
@@ -19,6 +19,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+from rebar.reconciler import scratch_retention
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -124,7 +126,7 @@ def test_alert_emitted_through_stateless_path(
 
     The test asserts:
     1. reconcile_once() completes without exception.
-    2. bridge_state/bridge_alerts/ contains at least one JSONL file with >= 1 record.
+    2. .rebar/bridge/bridge_alerts/ contains at least one JSONL file with >= 1 record.
     3. The record's 'reason' field contains the word 'local_id' — confirming
        the alert originated from the invariant check, not a different code path.
     """
@@ -177,7 +179,7 @@ def test_alert_emitted_through_stateless_path(
     assert result["pass_id"] == "alert-smoke-pass"
 
     # Verify alert_store wrote >= 1 record to the bridge_alerts directory.
-    alerts_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    alerts_dir = scratch_retention.alerts_dir(tmp_path)
     assert alerts_dir.is_dir(), (
         f"alert_store directory not created at {alerts_dir}. "
         "The invariant check may not have run or alert_store.append was not called."

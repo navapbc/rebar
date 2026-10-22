@@ -15,6 +15,8 @@ import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from rebar.reconciler import scratch_retention
+
 # ---------------------------------------------------------------------------
 # Load reconcile.py via importlib (same pattern as test_reconcile_main.py)
 # ---------------------------------------------------------------------------
@@ -186,7 +188,7 @@ class TestReconcileOnceFiltered:
 
         def fetch_snapshot(pass_id, repo_root=None):
             nonlocal snapshot_path
-            out_dir = repo_root / "bridge_state" / "snapshots"
+            out_dir = scratch_retention.snapshots_dir(repo_root)
             out_dir.mkdir(parents=True, exist_ok=True)
             snapshot_path = out_dir / f"{pass_id}.json"
             snapshot_path.write_text(
@@ -272,7 +274,7 @@ class TestReconcileOnceFiltered:
 
         def apply(mutations, pass_id, repo_root, **kwargs):
             applied_mutations.extend(mutations)
-            return repo_root / "bridge_state" / "manifest.json"
+            return scratch_retention.bridge_scratch_dir(repo_root) / "manifest.json"
 
         applier.apply = apply
         applier._applied = applied_mutations

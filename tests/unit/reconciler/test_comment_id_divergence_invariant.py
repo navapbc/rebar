@@ -20,6 +20,8 @@ from pathlib import Path
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 _SRC_DIR = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler"
 
 
@@ -44,7 +46,7 @@ def _fresh_store(binding_store_mod, repo_root: Path):
 
 
 def _alert_records(repo_root: Path) -> list[dict]:
-    alerts_dir = repo_root / "bridge_state" / "bridge_alerts"
+    alerts_dir = scratch_retention.alerts_dir(repo_root)
     records: list[dict] = []
     if not alerts_dir.is_dir():
         return records
@@ -195,7 +197,7 @@ def test_alert_is_deduped_within_window(invariants_mod, binding_store_mod, repo_
 
 def test_corrupt_state_file_fails_open(invariants_mod, binding_store_mod, repo_root):
     """A corrupt debounce-state file degrades to counter 0 without raising."""
-    state = repo_root / "bridge_state" / "comment_id_divergence.json"
+    state = scratch_retention.divergence_state_path(repo_root)
     state.parent.mkdir(parents=True, exist_ok=True)
     state.write_text("{not json", encoding="utf-8")
 

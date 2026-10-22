@@ -30,6 +30,8 @@ from unittest.mock import patch
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 _SRC = REPO_ROOT / "src" / "rebar" / "reconciler"
 
@@ -194,7 +196,7 @@ class _PartialFailClient(_FakeClient):
 
 
 def _alert_records(repo_root: Path) -> list[dict]:
-    alerts_dir = repo_root / "bridge_state" / "bridge_alerts"
+    alerts_dir = scratch_retention.alerts_dir(repo_root)
     records: list[dict] = []
     for path in sorted(alerts_dir.glob("*.jsonl")) if alerts_dir.exists() else ():
         for line in path.read_text(encoding="utf-8").splitlines():

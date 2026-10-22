@@ -5,7 +5,7 @@ timestamp and an event type, plus event-specific keyword fields.
 
 Usage::
 
-    logger = SyncLogger(Path("bridge_state/sync-log-2026-01-01T00-00-00.jsonl"))
+    logger = SyncLogger(Path(".rebar/bridge/sync-log-2026-01-01T00-00-00.jsonl"))
     logger.log("sync_pass_start", pass_id="2026-01-01T00-00-00", mode="live")
     ...
     logger.close()
