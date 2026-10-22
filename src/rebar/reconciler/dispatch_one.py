@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Per-ticket outbound dispatch: create_one / update_one + Jira-call retry.
+"""Per-ticket outbound dispatch: create_one / update_one, one attempt per Jira call.
 
 Extracted from ``batch_dispatch.py`` (module-size split, ticket b043-9490): owns
 the two per-mutation CLI dispatchers that carry the bulk of outbound dispatch —
 ``create_one`` (REST-budget guard, JQL dedup, identity-write + rollback, and
 label/comment propagation) and ``update_one`` (allowlist filter, parent reparent,
 comment-fallback on a 400 illegal-transition, and label/comment/link sub-op
-dispatch) — plus the shared ``_call_with_retry`` backoff wrapper they funnel
-through, the link-probe helpers (``_index_existing_links`` / ``_find_link_id``),
-and the ``_is_illegal_transition_400`` predicate they use.
+dispatch) — plus the link-probe helpers (``_index_existing_links`` /
+``_find_link_id``) and the ``_is_illegal_transition_400`` predicate they use. Each
+Jira call is a single attempt (ADR 0103 S3); retry belongs to the transport.
 
 ``batch_dispatch`` re-exports every name defined here, so the public surface
-``rebar.reconciler.batch_dispatch.{create_one,update_one,_call_with_retry,...}`` is
+``rebar.reconciler.batch_dispatch.{create_one,update_one,...}`` is
 unchanged and importers/tests need no edit. Imports only downward (``_errors`` /
 ``pass_io``); never imports ``batch_dispatch`` or ``applier``, so the facade can
 import these dispatchers back without a cycle.
@@ -26,14 +26,6 @@ from __future__ import annotations
 import json
 import logging
 import sys
-
-# ``_call_with_retry`` moved to dispatch_apply_phases (ticket a3fa, to make room for the
-# capability guards under the 800-LOC module cap), but ``dispatch_one.time`` is a DOCUMENTED
-# retry patch point: test_error_taxonomy.py:61 and test_cloud_rate_limit_sweep_heldout.py:259
-# reach for it as ``monkeypatch.setattr(dispatch_one.time, "sleep", ...)``. That mutates the
-# SHARED ``time`` module object, so it still suppresses the relocated backoff — but only while
-# the attribute resolves here. Kept deliberately; do not drop as "unused".
-import time  # noqa: F401
 import urllib.error
 from collections.abc import Callable
 from pathlib import Path
@@ -50,7 +42,6 @@ from rebar.reconciler._errors import (
     http_status,
 )
 from rebar.reconciler.dispatch_apply_phases import (
-    _call_with_retry,
     _capability_present,
     # Re-exports: the link-probe helpers no longer have a caller in THIS module (the link
     # phase moved to the sibling leaf, ticket 5528), but ``batch_dispatch`` imports them
@@ -239,7 +230,7 @@ def create_one(
                 if action != "add":
                     continue
                 try:
-                    _call_with_retry(client.add_label, jira_key, label_name)
+                    client.add_label(jira_key, label_name)
                 except Exception as exc:  # noqa: BLE001 — best-effort label add; non-fatal, logged to stderr
                     print(  # noqa: T201
                         f"create_one: add_label failed for {jira_key} "
@@ -274,7 +265,7 @@ def create_one(
                 if not body:
                     continue
                 try:
-                    # Story 9622 (D2): SINGLE-attempt (no _call_with_retry) — a
+                    # Story 9622 (D2): SINGLE-attempt (no retry wrapper) — a
                     # comment has no cheap Jira idempotency key, so a retry could
                     # duplicate it; a failed post falls to comment_errors and is
                     # re-emitted by the comment differ next pass.
@@ -493,7 +484,7 @@ def _update_one_apply_parent(
     parent_key = fields.pop("parent", None)
     if _has_parent_op:
         try:
-            _call_with_retry(client.set_parent, issue_key, parent_key)
+            client.set_parent(issue_key, parent_key)
         except urllib.error.HTTPError as exc:
             # Hierarchy guard (ticket 8b25): only an Epic may be a parent; a
             # Task→Task reparent (and any other unmet hierarchy constraint) is
@@ -587,7 +578,7 @@ def _update_one_scalar_update(
             # the common update carries exactly its mapped fields (no bogus kwarg leaks
             # into stubs / the ACLI boundary).
             _extra = {"assignee_is_account_id": True} if assignee_is_account_id else {}
-            result = _call_with_retry(client.update_issue, issue_key, **_extra, **fields)
+            result = client.update_issue(issue_key, **_extra, **fields)
             applied = dict(fields)  # reached ONLY on a completed write
         except RetryExhaustedError:
             # A genuinely transient failure (5xx/429/timeout) that EXHAUSTED its retries is
@@ -680,9 +671,9 @@ def _update_one_dispatch_labels(mutation, client: TicketTransport, issue_key) ->
             _labels_computed += 1
             try:
                 if action == "add":
-                    _call_with_retry(client.add_label, issue_key, label_name)
+                    client.add_label(issue_key, label_name)
                 elif action == "remove":
-                    _call_with_retry(client.remove_label, issue_key, label_name)
+                    client.remove_label(issue_key, label_name)
                 _labels_applied += 1
             except Exception as exc:  # noqa: BLE001 — best-effort label op; non-fatal, logged to stderr
                 print(  # noqa: T201

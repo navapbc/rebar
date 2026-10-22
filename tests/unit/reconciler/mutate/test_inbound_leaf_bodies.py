@@ -15,11 +15,34 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from rebar.reconciler import scratch_retention
+from rebar.reconciler import scratch_retention, ticket_planner
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 MUTATION_PATH = APPLIER_PATH.parent / "mutation.py"
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 def _load_mutation_module():
@@ -334,7 +357,12 @@ def test_apply_honours_suppress_pair_drops_subsequent_inbound(
         payload={"fields": {"summary": "STOMP-2"}},
     )
 
-    applier.apply([conflict, update_1, update_2], pass_id="test-pass", repo_root=fixture_repo)
+    applier.apply(
+        [conflict, update_1, update_2],
+        pass_id="test-pass",
+        repo_root=fixture_repo,
+        ticket_plans=_plans([conflict, update_1, update_2]),
+    )
 
     # The two STOMP updates should NOT have produced EDIT events.
     tracker = fixture_repo / ".tickets-tracker"
@@ -386,7 +414,12 @@ def test_apply_honours_suppress_pair_drops_subsequent_inbound_via_computed_form(
         payload={"fields": {"summary": "SHOULD-BE-DROPPED"}},
     )
 
-    applier.apply([conflict, later], pass_id="test-pass", repo_root=fixture_repo)
+    applier.apply(
+        [conflict, later],
+        pass_id="test-pass",
+        repo_root=fixture_repo,
+        ticket_plans=_plans([conflict, later]),
+    )
 
     tracker = fixture_repo / ".tickets-tracker"
     edits = [

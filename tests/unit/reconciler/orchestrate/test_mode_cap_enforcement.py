@@ -16,11 +16,34 @@ from unittest.mock import patch
 
 import pytest
 
-from rebar.reconciler import scratch_retention
+from rebar.reconciler import scratch_retention, ticket_planner
 from rebar.reconciler.mutation_payloads import OutboundCreatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 @pytest.fixture(scope="module")
@@ -100,7 +123,11 @@ def test_dry_run_does_not_invoke_leaves(tmp_path, applier_mod, mode_mod, mutatio
         patch.object(applier_mod, "_apply_batch") as batch_spy,
     ):
         manifest_path = applier_mod.apply(
-            muts, pass_id="t-dry", repo_root=tmp_path, mode=mode_mod.Mode.DRY_RUN
+            muts,
+            pass_id="t-dry",
+            repo_root=tmp_path,
+            mode=mode_mod.Mode.DRY_RUN,
+            ticket_plans=_plans(muts, mode=mode_mod.Mode.DRY_RUN),
         )
         assert typed_spy.call_count == 0
         assert batch_spy.call_count == 0
@@ -128,6 +155,7 @@ def test_bootstrap_strict_caps_at_10(tmp_path, applier_mod, mode_mod, mutation_m
             pass_id="t-strict",
             repo_root=tmp_path,
             mode=mode_mod.Mode.BOOTSTRAP_STRICT,
+            ticket_plans=_plans(muts, mode=mode_mod.Mode.BOOTSTRAP_STRICT),
         )
     payload = json.loads(Path(manifest_path).read_text())
     assert payload["mode"] == "bootstrap-strict"
@@ -161,6 +189,7 @@ def test_bootstrap_throttle_caps_at_100(tmp_path, applier_mod, mode_mod, mutatio
             pass_id="t-throttle",
             repo_root=tmp_path,
             mode=mode_mod.Mode.BOOTSTRAP_THROTTLE,
+            ticket_plans=_plans(muts, mode=mode_mod.Mode.BOOTSTRAP_THROTTLE),
         )
     payload = json.loads(Path(manifest_path).read_text())
     assert payload["mode"] == "bootstrap-throttle"
@@ -186,7 +215,11 @@ def test_live_uncapped(tmp_path, applier_mod, mode_mod, mutation_mod):
         patch.object(applier_mod, "_apply_batch", return_value=fake_batch_manifest) as batch_spy,
     ):
         manifest_path = applier_mod.apply(
-            muts, pass_id="t-live", repo_root=tmp_path, mode=mode_mod.Mode.LIVE
+            muts,
+            pass_id="t-live",
+            repo_root=tmp_path,
+            mode=mode_mod.Mode.LIVE,
+            ticket_plans=_plans(muts, mode=mode_mod.Mode.LIVE),
         )
         # cap=None — every inbound mutation (~half the 2050) reaches _apply_typed
         # and every outbound batch mutation reaches _apply_batch.
@@ -266,7 +299,11 @@ def test_asymmetric_manifest_dry_run_shape(tmp_path, applier_mod, mode_mod, muta
     """DRY_RUN manifest must contain outbound.totals + inbound[] array."""
     muts = _make_mutations(20, mutation_mod)
     manifest_path = applier_mod.apply(
-        muts, pass_id="t-dry-shape", repo_root=tmp_path, mode=mode_mod.Mode.DRY_RUN
+        muts,
+        pass_id="t-dry-shape",
+        repo_root=tmp_path,
+        mode=mode_mod.Mode.DRY_RUN,
+        ticket_plans=_plans(muts, mode=mode_mod.Mode.DRY_RUN),
     )
     payload = json.loads(Path(manifest_path).read_text())
     assert "outbound" in payload
@@ -294,6 +331,7 @@ def test_asymmetric_manifest_throttle_shape(tmp_path, applier_mod, mode_mod, mut
             pass_id="t-throttle-shape",
             repo_root=tmp_path,
             mode=mode_mod.Mode.BOOTSTRAP_THROTTLE,
+            ticket_plans=_plans(muts, mode=mode_mod.Mode.BOOTSTRAP_THROTTLE),
         )
     payload = json.loads(Path(manifest_path).read_text())
     assert "outbound" in payload and "totals" in payload["outbound"]
@@ -318,6 +356,7 @@ def test_asymmetric_manifest_live_writes_no_file(tmp_path, applier_mod, mode_mod
             pass_id="t-live-nofile",
             repo_root=tmp_path,
             mode=mode_mod.Mode.LIVE,
+            ticket_plans=_plans(muts, mode=mode_mod.Mode.LIVE),
         )
     # Bug c903: LIVE returns the tally (read pre-unlink), not None. The contract this
     # test names — no manifest FILE — is the assertion below, and is unchanged.
@@ -452,7 +491,7 @@ def test_reconcile_once_legacy_caller_omits_mode_kwarg(
 
     monkeypatch.setattr(applier_mod, "apply", _fake_apply)
     # Mirror reconcile.py's legacy branch exactly.
-    applier_mod.apply([], "legacy-caller-test", tmp_path)
+    applier_mod.apply([], "legacy-caller-test", tmp_path, ticket_plans=_plans([]))
     assert "mode" not in captured["kwargs"], (
         "legacy caller (target_mode=None) must not pass mode= to applier.apply; "
         f"got kwargs={captured['kwargs']}"
@@ -537,7 +576,13 @@ def test_manifest_renderer_handles_typed_and_legacy_dict_shapes(applier_mod, mut
 def test_mode_string_coercion(applier_mod, mode_mod, tmp_path):
     """Valid mode strings are coerced to Mode enum members (finding #1)."""
     mutations = []  # empty is fine — we're testing the validation path
-    applier_mod.apply(mutations, "test-coerce", repo_root=tmp_path, mode="dry-run")
+    applier_mod.apply(
+        mutations,
+        "test-coerce",
+        repo_root=tmp_path,
+        mode="dry-run",
+        ticket_plans=_plans(mutations, mode="dry-run"),
+    )
     # DRY_RUN with 0 mutations produces a manifest (path may be None or file)
     # — the key assertion is that it didn't raise.
 
@@ -545,13 +590,21 @@ def test_mode_string_coercion(applier_mod, mode_mod, tmp_path):
 def test_mode_invalid_string_raises(applier_mod, mode_mod, tmp_path):
     """An unrecognised mode string raises TypeError (finding #1)."""
     with pytest.raises((TypeError, ValueError)):
-        applier_mod.apply([], "test-bad", repo_root=tmp_path, mode="NOT_A_MODE")
+        applier_mod.apply(
+            [],
+            "test-bad",
+            repo_root=tmp_path,
+            mode="NOT_A_MODE",
+            ticket_plans=_plans([], mode="NOT_A_MODE"),
+        )
 
 
 def test_mode_arbitrary_object_raises(applier_mod, tmp_path):
     """A non-string non-enum mode raises TypeError (finding #1)."""
     with pytest.raises(TypeError, match="mode must be a Mode enum member"):
-        applier_mod.apply([], "test-obj", repo_root=tmp_path, mode=42)
+        applier_mod.apply(
+            [], "test-obj", repo_root=tmp_path, mode=42, ticket_plans=_plans([], mode=42)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -567,10 +620,18 @@ def test_concurrent_dry_run_produces_separate_manifests(
     muts = _make_mutations(5, mutation_mod)
 
     path_a = applier_mod.apply(
-        list(muts), "pass-alpha", repo_root=tmp_path, mode=mode_mod.Mode.DRY_RUN
+        list(muts),
+        "pass-alpha",
+        repo_root=tmp_path,
+        mode=mode_mod.Mode.DRY_RUN,
+        ticket_plans=_plans(list(muts), mode=mode_mod.Mode.DRY_RUN),
     )
     path_b = applier_mod.apply(
-        list(muts), "pass-beta", repo_root=tmp_path, mode=mode_mod.Mode.DRY_RUN
+        list(muts),
+        "pass-beta",
+        repo_root=tmp_path,
+        mode=mode_mod.Mode.DRY_RUN,
+        ticket_plans=_plans(list(muts), mode=mode_mod.Mode.DRY_RUN),
     )
 
     assert path_a != path_b, "Different pass_ids must produce different manifest paths"

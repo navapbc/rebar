@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from rebar.reconciler import scratch_retention
+from rebar.reconciler import scratch_retention, ticket_planner
 from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
 from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
@@ -37,6 +37,29 @@ _ADF_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "adf.py"
 # chain resolves regardless of which sibling test first registered the
 # ``rebar.reconciler`` namespace stub.
 _CL_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "comment_limits.py"
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 @pytest.fixture(scope="module")
@@ -132,6 +155,7 @@ def test_http_404_on_update_soft_fails_batch_continues(
                 [good_mutation, stale_mutation],
                 pass_id,
                 repo_root=tmp_path,
+                ticket_plans=_plans([good_mutation, stale_mutation]),
             )
         except urllib.error.HTTPError as exc:
             pytest.fail(
@@ -177,6 +201,9 @@ def test_non_404_http_error_still_propagates(
 ) -> None:
     """Only 404 is softened. A 500 (or any non-404 HTTPError) must keep the
     current behavior and propagate — we do not blanket-catch HTTP errors.
+
+    ADR 0103 S3: the handler makes ONE attempt, so the raw 500 propagates from the
+    first call with no backoff in between (no handler retry, no coordinator replay).
     """
     pass_id = f"test-pass-500-{int(time.time())}"
     mutation = _update("DIG-9999", {"status": "in_progress"}, local_id="five-hundred-id")
@@ -190,26 +217,21 @@ def test_non_404_http_error_still_propagates(
     )
     fake_acli_mod = _make_fake_acli(acli_mod, fake_client)
 
-    # RECORD `_call_with_retry`'s 5xx backoff instead of sleeping it. This test used
-    # to drive the real ADR-0036 schedule (2s, 4s, 8s + jitter) for ~16s of pure wall
-    # clock while asserting nothing about it (ticket 5ea3-76e5-480a-4464).
+    # RECORD any backoff instead of sleeping it: a handler-level retry would show up
+    # here as a sleep before the second attempt.
     delays: list[float] = []
     monkeypatch.setattr(time, "sleep", delays.append)
 
     with patch.object(applier_mod, "_load_acli", return_value=fake_acli_mod):
         with pytest.raises(urllib.error.HTTPError):
-            applier_mod.apply([mutation], pass_id, repo_root=tmp_path)
+            applier_mod.apply(
+                [mutation], pass_id, repo_root=tmp_path, ticket_plans=_plans([mutation])
+            )
 
-    # Retry exhaustion is what makes the raw 500 propagate, so pin the LOGICAL
-    # schedule that got us there: three retries at 2**(attempt+1) plus < 1s of
-    # ADR-0036 jitter. Bounds, not equalities, because the jitter is random. Doubles
-    # as the guard — a bypassed seam leaves `delays` empty and fails here.
-    assert len(delays) == 3, f"expected three retry backoffs, got {delays}"
-    for attempt, delay in enumerate(delays):
-        base = 2 ** (attempt + 1)
-        assert base <= delay < base + 1, (
-            f"backoff {attempt} was {delay}, wanted [{base}, {base + 1})"
-        )
+    assert fake_client.update_issue.call_count == 1, (
+        f"a 500 must reach the transport once; got {fake_client.update_issue.call_count}"
+    )
+    assert delays == [], f"no backoff may precede a retry that no longer exists; got {delays}"
 
 
 # ── RP-03 S3 T1: the coordinator's provider-neutral isolation of this same 404 ───────

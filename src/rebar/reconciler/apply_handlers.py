@@ -18,7 +18,7 @@ that wraps the ``batch_dispatch`` Jira-call primitives, one handler per
 All three dispatching handlers share ONE stale-binding-404 soft-fail
 (``_soft_fail_stale_binding_404``, bug 449f-f9bf-be90-47fe): a Jira ``404`` on any
 outbound mutation is per-mutation, never pass-fatal; every other ``HTTPError``
-still propagates fail-fast to ``applier._apply_one``.
+still propagates fail-fast through ``batch_dispatch._dispatch_with_backstop``.
 
 Each handler takes the per-pass :class:`BatchApplyContext` plus a single mutation
 dict and returns a :class:`HandlerResult` the sequencer appends to the manifest.
@@ -138,12 +138,13 @@ def _soft_fail_stale_binding_404(
     the sequencer dispatch the rest of the batch. Only ``handle_update`` used to own
     this logic (bug tan-coin-atone / 6614-43cd-3a48-4f63); ``handle_create`` and
     ``handle_delete`` had NO try/except at all, so a 404 from either leaf escaped
-    ``applier._apply_one`` and aborted the whole pass — GHA run 30465914822 applied
+    the applier's per-mutation step and aborted the whole pass — GHA run 30465914822 applied
     1 of 30 planned mutations and silently skipped 29, violating bug
     e534-5154-2401-40fb's "no valid mutation is silently skipped" contract.
 
     Callers re-raise non-404 ``HTTPError``s themselves: 5xx and friends keep the
-    fail-fast behavior that ``applier._apply_one``'s re-raise arm depends on.
+    fail-fast behavior that ``batch_dispatch._dispatch_with_backstop``'s re-raise arm
+    depends on.
     """
     key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
     logger.warning(
@@ -542,7 +543,7 @@ def handle_delete(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     except urllib.error.HTTPError as exc:
         # Bug 449f-f9bf-be90-47fe: delete_one tolerates the already-gone case it can
         # SEE, but a raw urllib 404 from a REST sub-call escapes it — and with no
-        # try/except here it escaped _apply_one too and killed the pass. A 404 on a
+        # try/except here it escaped the per-mutation backstop too and killed the pass. A 404 on a
         # delete is the most benign failure there is (the target is already gone), so
         # record it per-mutation and continue; non-404 still propagates fail-fast.
         if exc.code != 404:

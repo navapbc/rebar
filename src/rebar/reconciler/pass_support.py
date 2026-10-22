@@ -154,7 +154,7 @@ def preflight_status_mapping(mutations, repo_root: Path | None = None) -> None:
             # misconfigured mutation into a whole-pass outage. Downgrade to
             # NON-FATAL: log a warning to stderr naming the offending status +
             # target and RETURN NORMALLY, letting the mutation flow to the applier
-            # where the per-mutation backstop (_apply_one) records it as a
+            # where the per-mutation backstop (record_backstop_failure) records it as a
             # per-mutation failure (so it still counts toward fail-loud / a
             # non-zero exit). The StatusMappingError class stays defined for other
             # references; the empty-mapping kill-switch and the inbound-skip above

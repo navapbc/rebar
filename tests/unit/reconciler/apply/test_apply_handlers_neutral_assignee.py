@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from rebar.reconciler import scratch_retention
+from rebar.reconciler import scratch_retention, ticket_planner
 from rebar.reconciler._backend import BackendAssigneeNotFoundError
 from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
 from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
@@ -25,6 +25,29 @@ from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 APPLIER_PATH = SCRIPTS_DIR.parent / "reconciler" / "applier.py"
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 @pytest.fixture(scope="module")
@@ -67,6 +90,7 @@ def test_neutral_assignee_error_soft_fails(applier_mod: ModuleType, tmp_path: Pa
                 [bad_mutation],
                 f"test-pass-neutral-{int(time.time())}",
                 repo_root=tmp_path,
+                ticket_plans=_plans([bad_mutation]),
             )
         except BackendAssigneeNotFoundError as exc:
             pytest.fail(

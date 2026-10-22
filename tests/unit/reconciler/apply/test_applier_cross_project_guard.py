@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler import ticket_planner
 from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
 from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
@@ -32,6 +33,29 @@ ACLI_PATH = SCRIPTS_DIR.parent / "reconciler" / "adapters" / "jira" / "acli.py"
 # Bootstrap the rebar.reconciler package namespace + the submodules acli.py imports
 # at load time, so the importlib loader chain resolves under any cwd (mirrors the
 # sibling applier tests).
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 @pytest.fixture(scope="module")
@@ -118,7 +142,10 @@ def test_apply_refuses_foreign_project_before_any_write(
     with patch.object(applier_mod, "_load_acli", return_value=_make_fake_acli(fake_client)):
         with pytest.raises(applier_mod.CrossProjectTargetError) as exc:
             applier_mod.apply(
-                [_typed_update("DIG-100")], f"xproj-{int(time.time())}", repo_root=tmp_path
+                [_typed_update("DIG-100")],
+                f"xproj-{int(time.time())}",
+                repo_root=tmp_path,
+                ticket_plans=_plans([_typed_update("DIG-100")]),
             )
     assert "DIG-100" in str(exc.value)
     assert "REB" in str(exc.value)
@@ -134,7 +161,10 @@ def test_apply_allows_matching_project(applier_mod, acli_mod, tmp_path, monkeypa
         # Must not raise CrossProjectTargetError (other downstream effects are fine).
         try:
             applier_mod.apply(
-                [_typed_update("REB-1")], f"reb-ok-{int(time.time())}", repo_root=tmp_path
+                [_typed_update("REB-1")],
+                f"reb-ok-{int(time.time())}",
+                repo_root=tmp_path,
+                ticket_plans=_plans([_typed_update("REB-1")]),
             )
         except applier_mod.CrossProjectTargetError as exc:  # pragma: no cover
             pytest.fail(f"guard wrongly blocked a same-project update: {exc!r}")
@@ -174,7 +204,10 @@ def test_apply_allows_a_second_seeded_project_via_store_loading(
     with patch.object(applier_mod, "_load_acli", return_value=_make_fake_acli(fake_client)):
         try:
             applier_mod.apply(
-                [_typed_update("DIG-1")], f"seeded-ok-{int(time.time())}", repo_root=tmp_path
+                [_typed_update("DIG-1")],
+                f"seeded-ok-{int(time.time())}",
+                repo_root=tmp_path,
+                ticket_plans=_plans([_typed_update("DIG-1")]),
             )
         except applier_mod.CrossProjectTargetError as exc:  # pragma: no cover
             pytest.fail(
@@ -194,7 +227,10 @@ def test_apply_refuses_a_project_outside_the_seeded_set(
     with patch.object(applier_mod, "_load_acli", return_value=_make_fake_acli(fake_client)):
         with pytest.raises(applier_mod.CrossProjectTargetError) as exc:
             applier_mod.apply(
-                [_typed_update("ACME-1")], f"seeded-bad-{int(time.time())}", repo_root=tmp_path
+                [_typed_update("ACME-1")],
+                f"seeded-bad-{int(time.time())}",
+                repo_root=tmp_path,
+                ticket_plans=_plans([_typed_update("ACME-1")]),
             )
     assert "ACME-1" in str(exc.value)
     fake_client.update_issue.assert_not_called()

@@ -19,9 +19,32 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from rebar.reconciler import scratch_retention
+from rebar.reconciler import scratch_retention, ticket_planner
 from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
 from rebar.reconciler.mutation_payloads import OutboundCreatePayload, OutboundUpdatePayload
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 def _init_git_repo(path: Path) -> None:
@@ -136,7 +159,7 @@ def test_manifest_written_to_correct_path(tmp_path, applier):
     with __import__("unittest.mock", fromlist=["patch"]).patch.object(
         applier, "_load_acli", return_value=mock_acli_mod
     ):
-        manifest_path = applier.apply([], pass_id, repo_root=tmp_path)
+        manifest_path = applier.apply([], pass_id, repo_root=tmp_path, ticket_plans=_plans([]))
 
     expected_path = scratch_retention.snapshots_dir(tmp_path) / f"{pass_id}.manifest.json"
     assert manifest_path == expected_path, (
@@ -155,7 +178,9 @@ def test_manifest_has_correct_shape(tmp_path, applier):
     with __import__("unittest.mock", fromlist=["patch"]).patch.object(
         applier, "_load_acli", return_value=mock_acli_mod
     ):
-        manifest_path = applier.apply(mutations, pass_id, repo_root=tmp_path)
+        manifest_path = applier.apply(
+            mutations, pass_id, repo_root=tmp_path, ticket_plans=_plans(mutations)
+        )
 
     data = json.loads(manifest_path.read_text())
     assert "pass_id" in data, "Manifest missing 'pass_id' field"
@@ -175,7 +200,7 @@ def test_empty_mutations_produces_manifest_with_zero_count(tmp_path, applier):
     with __import__("unittest.mock", fromlist=["patch"]).patch.object(
         applier, "_load_acli", return_value=mock_acli_mod
     ):
-        manifest_path = applier.apply([], pass_id, repo_root=tmp_path)
+        manifest_path = applier.apply([], pass_id, repo_root=tmp_path, ticket_plans=_plans([]))
 
     assert manifest_path.exists(), "Manifest must be written even for empty mutations"
     data = json.loads(manifest_path.read_text())
@@ -199,7 +224,7 @@ def test_create_action_routes_to_create_issue(tmp_path, applier):
     with __import__("unittest.mock", fromlist=["patch"]).patch.object(
         applier, "_load_acli", return_value=mock_acli_mod
     ):
-        applier.apply(mutations, pass_id, repo_root=tmp_path)
+        applier.apply(mutations, pass_id, repo_root=tmp_path, ticket_plans=_plans(mutations))
 
     mock_client.create_issue.assert_called_once()
     _call_args = mock_client.create_issue.call_args
@@ -222,7 +247,7 @@ def test_update_action_routes_to_update_issue(tmp_path, applier):
     with __import__("unittest.mock", fromlist=["patch"]).patch.object(
         applier, "_load_acli", return_value=mock_acli_mod
     ):
-        applier.apply(mutations, pass_id, repo_root=tmp_path)
+        applier.apply(mutations, pass_id, repo_root=tmp_path, ticket_plans=_plans(mutations))
 
     # F3: fields must be unpacked as kwargs (real signature: update_issue(key, **kwargs))
     mock_client.update_issue.assert_called_once_with("DSO-42", **fields)
@@ -243,7 +268,7 @@ def test_delete_action_routes_to_delete_issue(tmp_path, applier):
     with __import__("unittest.mock", fromlist=["patch"]).patch.object(
         applier, "_load_acli", return_value=mock_acli_mod
     ):
-        applier.apply(mutations, pass_id, repo_root=tmp_path)
+        applier.apply(mutations, pass_id, repo_root=tmp_path, ticket_plans=_plans(mutations))
 
     mock_client.delete_issue.assert_called_once_with("DSO-99")
     mock_client.create_issue.assert_not_called()
@@ -309,7 +334,7 @@ def test_apply_constructs_client_with_env_derived_args(tmp_path, applier, monkey
     constructor = MagicMock(return_value=mock_client)
     monkeypatch.setattr(acli, "AcliClient", constructor)
 
-    applier.apply([], pass_id, repo_root=tmp_path)
+    applier.apply([], pass_id, repo_root=tmp_path, ticket_plans=_plans([]))
 
     # AcliClient must have been constructed exactly once with all four env-derived kwargs.
     constructor.assert_called_once()
@@ -348,7 +373,7 @@ def test_apply_constructs_client_with_empty_strings_when_env_unset(tmp_path, app
     from rebar.reconciler._backend import BackendEnvError
 
     with pytest.raises(BackendEnvError) as excinfo:
-        applier.apply([], pass_id, repo_root=tmp_path)
+        applier.apply([], pass_id, repo_root=tmp_path, ticket_plans=_plans([]))
 
     message = str(excinfo.value)
     assert "JIRA_URL" in message

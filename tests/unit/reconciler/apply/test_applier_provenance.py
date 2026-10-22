@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from rebar.reconciler import scratch_retention
+from rebar.reconciler import scratch_retention, ticket_planner
 from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
 from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
@@ -27,6 +27,29 @@ from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 def _load_applier():
@@ -107,7 +130,9 @@ def test_provenance_persisted_for_labels_field(applier, tmp_path):
             applier, "snapshot_head", return_value=_STABLE_HEAD
         ),
     ):
-        applier.apply([mutation], pass_id="test-prov-01", repo_root=tmp_path)
+        applier.apply(
+            [mutation], pass_id="test-prov-01", repo_root=tmp_path, ticket_plans=_plans([mutation])
+        )
 
     mapping_path = scratch_retention.mapping_path(tmp_path)
     assert mapping_path.exists(), "mapping.json must be created after update with set-valued field"
@@ -138,7 +163,9 @@ def test_provenance_labels_contains_field_values(applier, tmp_path):
             applier, "snapshot_head", return_value=_STABLE_HEAD
         ),
     ):
-        applier.apply([mutation], pass_id="test-prov-02", repo_root=tmp_path)
+        applier.apply(
+            [mutation], pass_id="test-prov-02", repo_root=tmp_path, ticket_plans=_plans([mutation])
+        )
 
     mapping_path = scratch_retention.mapping_path(tmp_path)
     data = json.loads(mapping_path.read_text())
@@ -169,7 +196,12 @@ def test_provenance_written_atomically(applier, tmp_path):
         patch.object(applier, "snapshot_head", return_value=_STABLE_HEAD),
         patch("os.replace", side_effect=capturing_replace),
     ):
-        applier.apply([mutation], pass_id="test-prov-atomic", repo_root=tmp_path)
+        applier.apply(
+            [mutation],
+            pass_id="test-prov-atomic",
+            repo_root=tmp_path,
+            ticket_plans=_plans([mutation]),
+        )
 
     mapping_path = scratch_retention.mapping_path(tmp_path)
     # At least one os.replace call should target the mapping.json path
@@ -203,7 +235,12 @@ def test_provenance_preserves_existing_mapping_entries(applier, tmp_path):
             applier, "snapshot_head", return_value=_STABLE_HEAD
         ),
     ):
-        applier.apply([mutation], pass_id="test-prov-preserve", repo_root=tmp_path)
+        applier.apply(
+            [mutation],
+            pass_id="test-prov-preserve",
+            repo_root=tmp_path,
+            ticket_plans=_plans([mutation]),
+        )
 
     data = json.loads(mapping_path.read_text())
     assert data.get("old-local-id") == "DIG-1", "Pre-existing mapping entry must be preserved"
@@ -255,7 +292,12 @@ def test_provenance_multiple_set_valued_fields(applier, tmp_path):
             applier, "snapshot_head", return_value=_STABLE_HEAD
         ),
     ):
-        applier.apply([mutation], pass_id="test-prov-multi-field", repo_root=tmp_path)
+        applier.apply(
+            [mutation],
+            pass_id="test-prov-multi-field",
+            repo_root=tmp_path,
+            ticket_plans=_plans([mutation]),
+        )
 
     mapping_path = scratch_retention.mapping_path(tmp_path)
     data = json.loads(mapping_path.read_text())
@@ -279,7 +321,12 @@ def test_non_set_valued_fields_do_not_create_provenance(applier, tmp_path):
             applier, "snapshot_head", return_value=_STABLE_HEAD
         ),
     ):
-        applier.apply([mutation], pass_id="test-prov-no-set", repo_root=tmp_path)
+        applier.apply(
+            [mutation],
+            pass_id="test-prov-no-set",
+            repo_root=tmp_path,
+            ticket_plans=_plans([mutation]),
+        )
 
     mapping_path = scratch_retention.mapping_path(tmp_path)
     # mapping.json may or may not exist — if it does, DIG-400 should not have field_provenance

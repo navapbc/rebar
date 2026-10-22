@@ -17,6 +17,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from _subprocess_env import subprocess_env
 
+from rebar.reconciler import ticket_planner
+from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
+from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 
@@ -177,18 +181,49 @@ def _make_committing_acli_module(root: Path, drift_subjects: list):
     return client, client
 
 
+def _apply_batch(applier, mutations, pass_id, repo_root):
+    """Call the real ``_apply_batch`` with the batch dicts and the ticket plans for the
+    ``(key, summary)`` updates, as ``applier.apply`` would (ADR 0103 S3: plans required)."""
+    typed = [
+        Mutation(
+            MutationDirection.outbound,
+            MutationAction.update,
+            key,
+            OutboundUpdatePayload(changed_fields={"summary": summary}),
+            {},
+        )
+        for key, summary in mutations
+    ]
+    _, plans = ticket_planner.plan_pass(
+        pass_id=pass_id,
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode="",
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": None},
+        mutations=typed,
+    )
+    return applier._apply_batch(
+        [applier._mutation_to_batch_dict(m) for m in typed],
+        pass_id,
+        repo_root=repo_root,
+        ticket_plans=plans,
+    )
+
+
 def _run_batch(applier, tmp_path, mutations, drift_subjects, pass_id):
     """Drive the real _apply_batch (and the real applier.snapshot_head, which reads the
     actual HEAD) with an injecting client. Returns (path, client)."""
     _init_tickets_repo(tmp_path)
     acli_mod, client = _make_committing_acli_module(tmp_path, drift_subjects)
     with patch.object(applier, "_load_acli", return_value=acli_mod):
-        path = applier._apply_batch(mutations, pass_id, repo_root=tmp_path)
+        path = _apply_batch(applier, mutations, pass_id, tmp_path)
     return path, client
 
 
 # ---------------------------------------------------------------------------
-# Behavioral tests (a)–(g): drive the real _apply_batch loop.
+# Behavioral tests (a)–(g): drive the real _apply_batch (coordinator route).
 # ---------------------------------------------------------------------------
 
 
@@ -197,8 +232,8 @@ def test_benign_unrelated_ticket_commit_continues(tmp_path, applier):
     the pass continue: both outbound updates are still issued and the manifest
     records mutation_count == 2."""
     mutations = [
-        {"action": "update", "key": "DSO-10", "fields": {"summary": "first"}},
-        {"action": "update", "key": "DSO-11", "fields": {"summary": "second"}},
+        ("DSO-10", "first"),
+        ("DSO-11", "second"),
     ]
     # mut1's write commits `ticket: STATUS OTHER-999` (an unrelated ticket).
     subjects = ["ticket: STATUS OTHER-999", None]
@@ -211,8 +246,8 @@ def test_benign_same_ticket_edit_commit_continues(tmp_path, applier):
     """A benign `ticket: EDIT` commit for the ticket being mutated between
     mutations lets the pass continue: both updates issued, manifest count 2."""
     mutations = [
-        {"action": "update", "key": "DSO-10", "fields": {"summary": "first"}},
-        {"action": "update", "key": "DSO-11", "fields": {"summary": "second"}},
+        ("DSO-10", "first"),
+        ("DSO-11", "second"),
     ]
     path, client = _run_batch(applier, tmp_path, mutations, ["ticket: EDIT 6d43-a70d", None], "pb")
     assert client.update_issue.call_count == 2
@@ -224,8 +259,8 @@ def test_benign_ticket_compact_delete_commit_continues(tmp_path, applier):
     mutations — the canonical f058 trigger — lets the pass continue: both
     updates issued, manifest count 2."""
     mutations = [
-        {"action": "update", "key": "DSO-10", "fields": {"summary": "first"}},
-        {"action": "update", "key": "DSO-11", "fields": {"summary": "second"}},
+        ("DSO-10", "first"),
+        ("DSO-11", "second"),
     ]
     subjects = ["ticket: COMPACT 6d43-a70d-871c-4973", None]
     path, client = _run_batch(applier, tmp_path, mutations, subjects, "pc")
@@ -238,9 +273,9 @@ def test_sequential_benign_commits_continue_to_completion(tmp_path, applier):
     mutations — let the pass run to completion: all three updates issued and
     manifest count 3."""
     mutations = [
-        {"action": "update", "key": "DSO-10", "fields": {"summary": "a"}},
-        {"action": "update", "key": "DSO-11", "fields": {"summary": "b"}},
-        {"action": "update", "key": "DSO-12", "fields": {"summary": "c"}},
+        ("DSO-10", "a"),
+        ("DSO-11", "b"),
+        ("DSO-12", "c"),
     ]
     subjects = ["ticket: STATUS DSO-10", "ticket: COMPACT DSO-11", "ticket: EDIT DSO-12"]
     path, client = _run_batch(applier, tmp_path, mutations, subjects, "pd")
@@ -253,8 +288,8 @@ def test_competing_pass_record_commit_aborts_before_next_jira_call(tmp_path, app
     HeadDriftError and aborts BEFORE the second mutation's Jira write is
     issued (update_issue called exactly once)."""
     mutations = [
-        {"action": "update", "key": "DSO-10", "fields": {"summary": "first"}},
-        {"action": "update", "key": "DSO-11", "fields": {"summary": "second"}},
+        ("DSO-10", "first"),
+        ("DSO-11", "second"),
     ]
     _init_tickets_repo(tmp_path)
     acli_mod, client = _make_committing_acli_module(
@@ -262,7 +297,7 @@ def test_competing_pass_record_commit_aborts_before_next_jira_call(tmp_path, app
     )
     with patch.object(applier, "_load_acli", return_value=acli_mod):
         with pytest.raises(applier.HeadDriftError):
-            applier._apply_batch(mutations, "pe", repo_root=tmp_path)
+            _apply_batch(applier, mutations, "pe", tmp_path)
     assert client.update_issue.call_count == 1
 
 
@@ -271,15 +306,15 @@ def test_empty_subject_lookup_failure_is_non_benign_and_aborts(tmp_path, applier
     NON-benign (conservative): HeadDriftError is raised and the second
     mutation's Jira write is never issued (update_issue called once)."""
     mutations = [
-        {"action": "update", "key": "DSO-10", "fields": {"summary": "first"}},
-        {"action": "update", "key": "DSO-11", "fields": {"summary": "second"}},
+        ("DSO-10", "first"),
+        ("DSO-11", "second"),
     ]
     _init_tickets_repo(tmp_path)
     # First write commits an EMPTY-subject commit → _get_commit_subject == "".
     acli_mod, client = _make_committing_acli_module(tmp_path, ["", None])
     with patch.object(applier, "_load_acli", return_value=acli_mod):
         with pytest.raises(applier.HeadDriftError):
-            applier._apply_batch(mutations, "pf", repo_root=tmp_path)
+            _apply_batch(applier, mutations, "pf", tmp_path)
     assert client.update_issue.call_count == 1
 
 
@@ -291,9 +326,9 @@ def test_abort_stderr_reports_exact_mutations_completed(tmp_path, applier, capsy
     then a non-benign commit after the second aborts the third → completed == 2.
     """
     mutations = [
-        {"action": "update", "key": "DSO-10", "fields": {"summary": "a"}},
-        {"action": "update", "key": "DSO-11", "fields": {"summary": "b"}},
-        {"action": "update", "key": "DSO-12", "fields": {"summary": "c"}},
+        ("DSO-10", "a"),
+        ("DSO-11", "b"),
+        ("DSO-12", "c"),
     ]
     _init_tickets_repo(tmp_path)
     acli_mod, client = _make_committing_acli_module(
@@ -301,7 +336,7 @@ def test_abort_stderr_reports_exact_mutations_completed(tmp_path, applier, capsy
     )
     with patch.object(applier, "_load_acli", return_value=acli_mod):
         with pytest.raises(applier.HeadDriftError):
-            applier._apply_batch(mutations, "pg", repo_root=tmp_path)
+            _apply_batch(applier, mutations, "pg", tmp_path)
 
     err = capsys.readouterr().err
     abort_lines = [ln for ln in err.splitlines() if "abort_due_to_drift" in ln]

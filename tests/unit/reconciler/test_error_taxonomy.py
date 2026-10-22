@@ -1,14 +1,13 @@
-"""Pin the reconciler's canonical exception identity and retry metadata.
+"""Pin the reconciler's canonical exception identity.
 
 Both public surfaces must expose the same ``RetryExhaustedError`` from ``_errors`` with
-the required ``RuntimeError`` and ``ReconcilerError`` ancestry. Each retry loop chains its
-cause and records ``last_exception`` and ``attempts``. Oracles use identity, MRO, and
-``__cause__`` rather than source-text heuristics.
+the required ``RuntimeError`` and ``ReconcilerError`` ancestry. ADR 0103 S3 retired the
+batch path's handler-level retry loop, so its cause-chain pin went with it; the type stays
+public for transports that raise it. Oracles use identity and MRO rather than source-text
+heuristics.
 """
 
 from __future__ import annotations
-
-import pytest
 
 from rebar.reconciler._errors import JiraAPIError, ReconcilerError, RetryExhaustedError
 
@@ -41,24 +40,3 @@ def test_jira_api_error_single_body_across_surfaces() -> None:
     err = JiraAPIError("nope", 404)
     assert err.status_code == 404
     assert isinstance(err, ReconcilerError)
-
-
-def test_batch_retry_loop_chains_cause(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AC3 (batch path): ``_call_with_retry`` chains the underlying cause (the prior
-    ``raise RetryExhaustedError(str(last_exc))`` DROPPED ``__cause__``) and records
-    ``last_exception``/``attempts``."""
-    from rebar.reconciler import batch_dispatch, dispatch_one
-
-    # _call_with_retry (and its module-level ``time``) now lives in dispatch_one and
-    # is re-exported by batch_dispatch; patch time at its point of use.
-    monkeypatch.setattr(dispatch_one.time, "sleep", lambda *_a, **_k: None)
-    boom = JiraAPIError("server error", 500)  # 5xx is retryable → the loop exhausts
-
-    def always_500(*_a, **_k):
-        raise boom
-
-    with pytest.raises(RetryExhaustedError) as ei:
-        batch_dispatch._call_with_retry(always_500, max_retries=2)
-    assert ei.value.__cause__ is boom  # chained (previously dropped)
-    assert ei.value.last_exception is boom
-    assert ei.value.attempts == 3  # max_retries + 1

@@ -3,15 +3,16 @@
 
 ``update_one`` is a thin sequencer over per-phase helpers. This leaf owns the allowlist
 filter, the reporter-by-accountId REST sub-call (264f) and its identity / alert-store
-degradation helpers, the single-attempt comment dispatch, the shared ``_call_with_retry``
-backoff hub, and the link-probe helpers.
+degradation helpers, the single-attempt comment dispatch, and the link-probe helpers.
+Every transport call here is a single attempt: ADR 0103 S3 retired the handler-level
+retry wrapper, so any retry lives in the transport itself.
 
 The LINK dispatch phase joined them here (ticket 5528): ``dispatch_one`` crossed the
 800-LOC cap once the delete arm learned to tell a proven-gone link from a failure. Links
 were the natural cluster to move rather than an arbitrary slice — the phase already calls
-four helpers that live here (``_call_with_retry``, ``_capability_present``,
-``_find_link_id``, ``_index_existing_links``), so the move REMOVED cross-module reach
-instead of adding it, and it sits beside its sibling ``_update_one_dispatch_comments``.
+three helpers that live here (``_capability_present``, ``_find_link_id``,
+``_index_existing_links``), so the move REMOVED cross-module reach instead of adding it,
+and it sits beside its sibling ``_update_one_dispatch_comments``.
 The parent reparent, scalar edit and label phases stay in ``dispatch_one``.
 
 This module is a strict LEAF: it imports nothing from ``dispatch_one`` (its only
@@ -34,7 +35,6 @@ if TYPE_CHECKING:
     from ._backend import TicketTransport
 
 import logging
-import random
 import subprocess
 import sys
 import time
@@ -46,12 +46,6 @@ from pathlib import Path
 # capability detection and SupportsComments/SupportsLinks are @runtime_checkable for
 # exactly that.
 from rebar.reconciler._backend import SupportsComments, SupportsLinks
-from rebar.reconciler._errors import (
-    MAX_BACKOFF_S,
-    JiraAPIError,
-    RetryExhaustedError,
-    parse_retry_after,
-)
 from rebar.reconciler.binding_lifecycle import UNKNOWN_COMMENT_ID
 from rebar.reconciler.pass_io import record_capability_gap
 
@@ -71,81 +65,6 @@ logger = logging.getLogger(__name__)
 # outbound status push now uses REST POST /transitions via
 # ``transition_issue`` (bypasses ACLI's silent-exit-0 failure mode).
 _OUTBOUND_BATCH_ALLOWLIST = frozenset({"summary", "description", "assignee", "priority", "status"})
-
-
-def _call_with_retry(fn, *args, max_retries: int = 3, **kwargs):
-    """Call fn(*args, **kwargs) with exponential backoff on retryable failures.
-
-    Retryable: TimeoutError; JiraAPIError 5xx/429; and (story 9622)
-    urllib.error.HTTPError 5xx/429 — the REST floor (acli_rest) raises raw
-    HTTPError, previously uncaught here, so the idempotent REST writes routed
-    through it got zero retry. 429 honors a present integer ``Retry-After``, else
-    ADR-0036 jittered backoff; 5xx uses that backoff.
-    Non-retryable: JiraAPIError / HTTPError 4xx (except 429) — re-raised raw
-    immediately (preserving the 404 / hierarchy-400 semantics). On exhaustion a
-    retried HTTPError re-raises raw; TimeoutError/JiraAPIError raise RetryExhaustedError.
-
-    Args:
-        fn:          Callable to invoke.
-        *args:       Positional arguments forwarded to fn.
-        max_retries: Maximum number of retry attempts after the first failure.
-        **kwargs:    Keyword arguments forwarded to fn.
-
-    Returns:
-        The return value of fn on success.
-
-    Raises:
-        RetryExhaustedError: When all retry attempts are exhausted.
-        JiraAPIError:        Immediately, for non-retryable 4xx (except 429) errors.
-    """
-    delays = [1, 2, 4]
-    last_exc: Exception | None = None
-
-    for attempt in range(max_retries + 1):
-        retry_after: float | None = None
-        try:
-            return fn(*args, **kwargs)
-        except JiraAPIError as exc:
-            # 429 and 5xx are retryable; all other 4xx fail fast
-            if exc.status_code != 429 and 400 <= exc.status_code < 500:
-                raise
-            last_exc = exc
-        except urllib.error.HTTPError as exc:
-            # REST-transport floor (acli_rest raises raw HTTPError): 429/5xx
-            # retryable, other 4xx fail fast (raw). HTTPError.code is the status.
-            if exc.code != 429 and 400 <= exc.code < 500:
-                raise
-            last_exc = exc
-            if exc.code == 429:
-                retry_after = parse_retry_after(
-                    exc.headers.get("Retry-After") if exc.headers else None
-                )
-        except TimeoutError as exc:
-            last_exc = exc
-
-        if attempt < max_retries:
-            if retry_after is not None:
-                delay: float = min(MAX_BACKOFF_S, retry_after)
-            elif isinstance(last_exc, urllib.error.HTTPError):
-                # ADR 0036: 2**(attempt+1) + jitter, capped.
-                delay = min(MAX_BACKOFF_S, 2 ** (attempt + 1) + random.random())
-            else:
-                delay = delays[min(attempt, len(delays) - 1)]
-            time.sleep(delay)
-
-    # On exhaustion of a retried HTTPError, re-raise the ORIGINAL raw HTTPError
-    # (story 9622): downstream catchers switch on raw HTTPError (e.g.
-    # apply_handlers.handle_update softens 404 but re-raises non-404 5xx as
-    # pass-fatal), so wrapping it would silently defeat them. TimeoutError /
-    # JiraAPIError keep the RetryExhaustedError contract.
-    if isinstance(last_exc, urllib.error.HTTPError):
-        raise last_exc
-    # CHAIN the cause (PEP 3134) — the prior `raise RetryExhaustedError(str(last_exc))` dropped
-    # __cause__, losing the underlying failure (epic romp-swath-wince). Populate last_exception /
-    # attempts for post-hoc inspection.
-    raise RetryExhaustedError(
-        str(last_exc), last_exception=last_exc, attempts=max_retries + 1
-    ) from last_exc
 
 
 def _capability_present(
@@ -539,7 +458,7 @@ def _dispatch_link_removes(links, client: TicketTransport, issue_key) -> tuple[i
             continue  # already absent in Jira — idempotent success, nothing to do
         _computed += 1
         try:
-            _call_with_retry(client.delete_issue_link, link_id)
+            client.delete_issue_link(link_id)
             _applied += 1
         except subprocess.CalledProcessError as exc:
             # delete_issue_link shells out via ACLI (raises CalledProcessError, NOT an
@@ -673,9 +592,7 @@ def _update_one_dispatch_links(
             _links_computed += 1
             frm, to = (to_key, issue_key) if entry.get("swap") else (issue_key, to_key)
             try:
-                _link_result = _call_with_retry(
-                    cast("SupportsLinks", client).set_relationship, frm, to, link_type
-                )
+                _link_result = cast("SupportsLinks", client).set_relationship(frm, to, link_type)
                 _links_applied += 1
                 _confirm_link_add(link_confirm, entry, to_key, _link_result)
             except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, counted

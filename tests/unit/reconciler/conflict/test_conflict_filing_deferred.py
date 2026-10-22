@@ -34,11 +34,35 @@ from pathlib import Path
 
 import pytest
 
+from rebar.reconciler import ticket_planner
 from rebar.reconciler.mutation_payloads import OutboundCreatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 MUTATION_PATH = APPLIER_PATH.parent / "mutation.py"
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 def _load_mutation_module():
@@ -186,7 +210,7 @@ def test_apply_files_pending_bug_tickets_after_apply_batch_returns(
         payload={"local_id": "local-101", "reason": "test divergence"},
     )
 
-    applier.apply([mutation], "test-pass", repo_root=fixture_repo)
+    applier.apply([mutation], "test-pass", repo_root=fixture_repo, ticket_plans=_plans([mutation]))
 
     assert len(call_log) == 1, (
         f"apply() must call _file_conflict_bug_ticket exactly once for one "
@@ -249,7 +273,12 @@ def test_apply_files_pending_bug_tickets_when_apply_batch_raises(
 
     # apply() should re-raise the SimulatedDriftError after deferred filing.
     with pytest.raises(_SimulatedDriftError):
-        applier.apply([conflict_mut, outbound_mut], "test-pass", repo_root=fixture_repo)
+        applier.apply(
+            [conflict_mut, outbound_mut],
+            "test-pass",
+            repo_root=fixture_repo,
+            ticket_plans=_plans([conflict_mut, outbound_mut]),
+        )
 
     # The deferred-filing block MUST have run in the finally clause despite
     # the exception.

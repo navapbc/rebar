@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from rebar.reconciler import scratch_retention
+from rebar.reconciler import scratch_retention, ticket_planner
 from rebar.reconciler.create_route import _coordinated_create_core
 from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
 from rebar.reconciler.mutation_payloads import OutboundCreatePayload
@@ -31,6 +31,29 @@ from rebar.reconciler.mutation_payloads import OutboundCreatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 def _load_applier():
@@ -173,6 +196,7 @@ def test_manifest_contains_dedup_event_on_hit(applier, tmp_path):
             [_typed_create("tick-ev1")],
             pass_id="test-pass-ev1",
             repo_root=tmp_path,
+            ticket_plans=_plans([_typed_create("tick-ev1")]),
         )
 
     manifest = json.loads(manifest_path.read_text())
@@ -199,6 +223,7 @@ def test_manifest_events_empty_on_no_hits(applier, tmp_path):
             [_typed_create("tick-noev1")],
             pass_id="test-pass-noev1",
             repo_root=tmp_path,
+            ticket_plans=_plans([_typed_create("tick-noev1")]),
         )
 
     manifest = json.loads(manifest_path.read_text())
@@ -219,9 +244,7 @@ def test_manifest_events_populated_for_each_hit(applier, tmp_path):
         patch.object(applier, "snapshot_head", return_value=_STABLE_HEAD),
     ):
         manifest_path = applier.apply(
-            mutations,
-            pass_id="test-pass-multi",
-            repo_root=tmp_path,
+            mutations, pass_id="test-pass-multi", repo_root=tmp_path, ticket_plans=_plans(mutations)
         )
 
     manifest = json.loads(manifest_path.read_text())
