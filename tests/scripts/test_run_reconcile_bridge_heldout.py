@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 from _subprocess_env import subprocess_env
 from test_run_reconcile_bridge import (
-    ROOT,
     bridge_workspace,
     git,
     run_bridge,
@@ -222,11 +221,7 @@ def test_strict_delivery_failure_is_fatal_and_preserves_diagnostic(tmp_path: Pat
 
 
 def test_legacy_engine_dispositions_remain_visible_to_direct_callers() -> None:
-    sys.path.insert(0, str(ROOT / "src" / "rebar" / "_engine"))
-    try:
-        from rebar.reconciler.guarded_pass import _Disposition
-    finally:
-        sys.path.pop(0)
+    from rebar.reconciler.guarded_pass import _Disposition
 
     assert _Disposition.IN_FLIGHT.legacy_exit == 3
     assert _Disposition.PHASE_GATE.legacy_exit == 4
