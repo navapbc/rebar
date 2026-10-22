@@ -1,41 +1,21 @@
-"""Story 9622: _call_with_retry gains urllib.error.HTTPError retry.
+"""The REST floor's raw ``HTTPError`` contract after ADR 0103 S3.
 
-The REST-transport floor (acli_rest) raises RAW urllib.error.HTTPError, which the
-wrapper previously did not catch — so the idempotent REST writes routed through it
-(set_entity_property, set_parent, update_issue's REST legs) got zero retry.
-
-Covers:
-- 429 with a present integer Retry-After header -> honored
-- 429 without a Retry-After header -> jittered ADR-0036 backoff
-- 5xx -> jittered backoff, then exhaustion re-raises the RAW HTTPError (not
-  RetryExhaustedError, so downstream raw-HTTPError catchers still work)
-- 404 (and other non-429 4xx) -> re-raised raw immediately, no retry
-- acli_rest's raw-HTTPError re-raise is UNCHANGED (no boundary translation)
+Story 9622 taught the handler-level retry wrapper to retry raw
+``urllib.error.HTTPError`` 429/5xx from the REST floor (``acli_rest``). ADR 0103 S3
+retired that wrapper: handlers now make a single transport attempt, so an HTTP
+429/5xx on a Cloud REST leg is not retried by the handler. What remains is the
+floor's own contract, pinned here: ``acli_rest`` re-raises the RAW ``HTTPError``
+(no boundary translation), which the raw-HTTPError catchers downstream rely on.
 """
 
 from __future__ import annotations
 
 import email.message
-import importlib
 import urllib.error
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+import urllib.request
+from unittest.mock import patch
 
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-DISPATCH_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "dispatch_one.py"
-
-
-def _load_dispatch():
-    return importlib.import_module("rebar.reconciler.dispatch_one")
-
-
-@pytest.fixture(scope="module")
-def dispatch():
-    if not DISPATCH_PATH.exists():
-        pytest.fail(f"dispatch_one.py not found at {DISPATCH_PATH}")
-    return _load_dispatch()
 
 
 def _http_error(code: int, *, retry_after: str | None = None) -> urllib.error.HTTPError:
@@ -50,55 +30,6 @@ def _http_error(code: int, *, retry_after: str | None = None) -> urllib.error.HT
         hdrs=hdrs,  # type: ignore[arg-type]
         fp=None,
     )
-
-
-def test_retry_429_honors_retry_after_header(dispatch):
-    """A 429 with an integer Retry-After header sleeps that many seconds, then retries."""
-    fn = MagicMock(side_effect=[_http_error(429, retry_after="5"), {"ok": True}])
-    with patch("time.sleep") as mock_sleep:
-        result = dispatch._call_with_retry(fn, max_retries=3)
-    assert result == {"ok": True}
-    assert fn.call_count == 2
-    # min(MAX_BACKOFF_S, 5) == 5
-    mock_sleep.assert_called_once_with(5.0)
-
-
-def test_retry_429_without_header_uses_jittered_backoff(dispatch):
-    """A 429 with NO Retry-After header falls back to ADR-0036 jittered backoff."""
-    fn = MagicMock(side_effect=[_http_error(429, retry_after=None), {"ok": True}])
-    with patch("time.sleep") as mock_sleep:
-        result = dispatch._call_with_retry(fn, max_retries=3)
-    assert result == {"ok": True}
-    assert fn.call_count == 2
-    # attempt 0: 2**(0+1) + jitter[0,1) -> [2.0, 3.0)
-    (delay,), _ = mock_sleep.call_args
-    assert 2.0 <= delay < 3.0
-
-
-def test_5xx_retries_then_exhaustion_reraises_raw_httperror(dispatch):
-    """A persistent 5xx retries with backoff, then re-raises the RAW HTTPError
-    (NOT RetryExhaustedError) so downstream raw-HTTPError catchers still fire."""
-    err = _http_error(503)
-    fn = MagicMock(side_effect=err)
-    with patch("time.sleep") as mock_sleep:
-        with pytest.raises(urllib.error.HTTPError) as excinfo:
-            dispatch._call_with_retry(fn, max_retries=3)
-    assert excinfo.value is err  # the ORIGINAL exception, not a wrapper
-    assert not isinstance(excinfo.value, dispatch.RetryExhaustedError)
-    assert fn.call_count == 4  # initial + 3 retries
-    assert mock_sleep.call_count == 3
-
-
-def test_404_fast_fails_raw_no_retry(dispatch):
-    """A 404 (absent entity property) is re-raised raw immediately — never retried."""
-    err = _http_error(404)
-    fn = MagicMock(side_effect=err)
-    with patch("time.sleep") as mock_sleep:
-        with pytest.raises(urllib.error.HTTPError) as excinfo:
-            dispatch._call_with_retry(fn, max_retries=3)
-    assert excinfo.value is err
-    assert fn.call_count == 1
-    assert mock_sleep.call_count == 0
 
 
 def test_acli_rest_raw_httperror_raise_unchanged():
@@ -117,19 +48,3 @@ def test_acli_rest_raw_httperror_raise_unchanged():
             )
     assert excinfo.value is err
     assert not isinstance(excinfo.value, RuntimeError)
-
-
-def test_timeout_s_forwards_to_the_wrapped_callable(dispatch):
-    """Ticket 7504: ``timeout_s`` is no longer a named wrapper parameter, so a caller
-    passing ``timeout_s=`` for the wrapped Jira client reaches ``fn`` through
-    ``**kwargs`` instead of being swallowed by the wrapper."""
-    received: dict[str, object] = {}
-
-    def fn(issue_key, **kwargs):
-        received.update(kwargs)
-        return {"key": issue_key}
-
-    result = dispatch._call_with_retry(fn, "DIG-1", timeout_s=60)
-
-    assert result == {"key": "DIG-1"}
-    assert received == {"timeout_s": 60}

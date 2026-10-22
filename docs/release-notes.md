@@ -8,6 +8,35 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING: reconciler handlers make one transport attempt (ADR 0103 S3)
+
+ADR 0103 S3 is done: the handler-level retry wrapper is retired, so every outbound handler
+and inbound write-back makes a single transport attempt and retry lives only in the
+transports.
+
+- `dispatch_apply_phases._call_with_retry` is deleted, with its re-exports from
+  `dispatch_one`, `batch_dispatch` and `applier`. `update_one`, `create_one`, the coordinated
+  create's identity writes, the label, link and parent sub-ops, and the typed outbound and
+  inbound leaves call the transport directly. `dispatch_one.time` is no longer a patch point.
+- Retry left in a pass: Cloud REST timeouts and connection faults (`acli_rest`) and ACLI
+  non-zero exits (`acli_subprocess._run_acli`), 3 attempts each; Data Center connection
+  faults and an opted-in 429 (`_with_connection_retry`). An HTTP 429 or 5xx on a Cloud REST
+  leg (`set_parent`, `set_entity_property`, `update_issue`'s transition and priority) or on
+  any Data Center write is not retried, which reverts story 9622's handler-level `HTTPError`
+  retry.
+- A non-404 `HTTPError` stays fail-fast, so one 5xx on `update_issue` aborts the pass, and so
+  does one on the inbound-create write-back. On a label, link or parent sub-op it counts that
+  sub-op failed. The next pass re-diffs.
+- `RetryExhaustedError` stays public, but rebar no longer raises it; the guards that re-raise
+  it ahead of the transition-rejection handling stay for other transports.
+- The batch form of `applier.apply` requires `ticket_plans` (from
+  `ticket_planner.plan_pass`) and raises `TypeError` without them, even for an empty batch.
+  `applier._apply_batch` takes `ticket_plans` keyword-only and required. The legacy
+  per-mutation loop and `applier._apply_one` are deleted: the create and coordinator reroutes
+  dispatch every planned dict, and a dict no plan routes (a plan mixing a create with a
+  non-create action) is recorded as a failed mutation (`unrouted mutation: <action>`) without
+  a vendor call.
+
 ## BREAKING: the reconciler's batch apply takes typed `Mutation`s only
 
 The reconciler's internal Python surface drops code no production pass reached:

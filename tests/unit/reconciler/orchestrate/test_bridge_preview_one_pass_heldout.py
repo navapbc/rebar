@@ -8,9 +8,32 @@ from types import SimpleNamespace
 
 import pytest
 
-from rebar.reconciler import applier, mode, request, scratch_retention
+from rebar.reconciler import applier, mode, request, scratch_retention, ticket_planner
 from rebar.reconciler.mutation import Mutation, MutationAction, MutationDirection
 from rebar.reconciler.mutation_payloads import OutboundUpdatePayload
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 def _mutations() -> list[Mutation]:
@@ -40,6 +63,7 @@ def test_preview_manifest_carries_exact_same_pass_field_drift(tmp_path: Path) ->
         mode=mode.Mode.DRY_RUN,
         persist=False,
         route="preview",
+        ticket_plans=_plans(_mutations(), mode=mode.Mode.DRY_RUN),
     )
 
     assert rendered["route"] == "preview"
@@ -110,6 +134,7 @@ def test_legacy_uncapped_live_keeps_tally_and_removes_manifest(tmp_path: Path, m
         mode=mode.Mode.LIVE,
         route="legacy",
         client=object(),
+        ticket_plans=_plans(_mutations(), mode=mode.Mode.LIVE),
     )
 
     assert result == {"applied_count": 1, "failed_count": 1}
@@ -124,6 +149,7 @@ def test_legacy_bootstrap_route_keeps_asymmetric_manifest_shape(tmp_path: Path) 
         mode=mode.Mode.BOOTSTRAP_STRICT,
         persist=False,
         route="legacy",
+        ticket_plans=_plans(_mutations(), mode=mode.Mode.BOOTSTRAP_STRICT),
     )
 
     assert set(rendered) >= {"outbound", "inbound", "applied_count", "deferred_count"}

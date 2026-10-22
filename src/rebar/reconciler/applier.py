@@ -11,7 +11,7 @@ lives in sibling modules:
     - apply_inbound.py   — inbound leaf appliers
     - apply_outbound.py  — outbound leaf appliers + HEAD-drift helpers
     - typed_dispatch.py  — the _LEAVES routing table + _apply_typed
-    - batch_dispatch.py  — create_one / update_one / delete_one + _call_with_retry
+    - batch_dispatch.py  — create_one / update_one / delete_one (one attempt each)
                            + JiraAPIError / RetryExhaustedError
     - apply_handlers.py  — the per-action batch handlers (create/update/delete)
                            + BatchApplyContext + dispatch_mutation
@@ -32,7 +32,6 @@ if TYPE_CHECKING:
 import json
 import logging
 import sys
-import urllib.error
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -60,7 +59,7 @@ logger = logging.getLogger(__name__)
 # The cross-project safety guard + HEAD-drift detection cluster (the two exception
 # types plus their two checks) lives in applier_drift_guard.py (split for
 # module-size headroom, ticket 7153-e5ad-5e20-4ae9; the same seam-extraction the
-# clusters above already went through). Re-exported so _apply_batch/_apply_one
+# clusters above already went through). Re-exported so _apply_batch
 # (resident)'s own bare-name references resolve, so batch_dispatch.py's
 # ``applier.HeadDriftError`` attribute read resolves, and so
 # ``applier.<name>``/``applier_mod.<name>`` keeps resolving for existing tests.
@@ -87,11 +86,10 @@ from rebar.reconciler.apply_base import (  # noqa: E402
 )
 
 # Per-action batch handlers + the per-pass context live in apply_handlers.py.
-# Imported (not re-exported) — _apply_batch's per-mutation step dispatches through
-# dispatch_mutation; the handlers wrap batch_dispatch's create/update/delete_one.
+# Imported (not re-exported) — _apply_batch builds the BatchApplyContext the reroutes
+# dispatch through, and records an unrouted batch dict via record_backstop_failure.
 from rebar.reconciler.apply_handlers import (  # noqa: E402
     BatchApplyContext,
-    dispatch_mutation,
     record_backstop_failure,
 )
 
@@ -127,13 +125,12 @@ from rebar.reconciler.apply_outbound import (  # noqa: E402, F401
     _get_commit_subject,
 )
 
-# Outbound batch dispatch + Jira-call retry live in batch_dispatch.py.
-# Re-exported so resident _apply_batch/apply()/outbound leaves and the
-# patch.object(applier, '_call_with_retry'/'JiraAPIError') tests resolve.
+# Outbound batch dispatch lives in batch_dispatch.py. Re-exported so resident
+# _apply_batch/apply()/outbound leaves and the patch.object(applier, 'JiraAPIError')
+# tests resolve.
 from rebar.reconciler.batch_dispatch import (  # noqa: E402
     JiraAPIError,
     RetryExhaustedError,
-    _call_with_retry,
     _is_illegal_transition_400,
     _mutation_to_batch_dict,
     create_one,
@@ -188,8 +185,8 @@ from rebar.reconciler.pass_io import (  # noqa: E402
 # rebar-id label write authorization contract
 # ---------------------------------------------------------------------------
 # rebar-id label-write authorization lives in rebar_id_audit.py.
-# Re-exported so _apply_typed/_apply_batch (resident) and test_errors.py's
-# getattr(applier, ...) reads resolve.
+# Re-exported so test_errors.py's and the label-writer tests' getattr(applier, ...)
+# reads resolve; the batch route runs the guard from rebar_id_audit directly.
 from rebar.reconciler.rebar_id_audit import (  # noqa: E402
     _AUTHORIZED_REBAR_ID_LABEL_ACTIONS,
     _AUTHORIZED_REBAR_ID_LABEL_WRITERS,
@@ -250,12 +247,16 @@ def snapshot_head(repo_root: Path) -> str:
     return result.stdout.strip()
 
 
-def _typed_batch(mutations) -> list:
-    """Return the batch as a list; raise ``TypeError`` on any untyped element.
+def _typed_batch(mutations, ticket_plans) -> list:
+    """Return the batch as a list; raise ``TypeError`` on a plan-less or untyped batch.
 
-    The batch form of :func:`apply` takes typed ``Mutation``s only. Checking
-    every element up front means a bad batch fails before any write.
+    The batch form of :func:`apply` takes typed ``Mutation``s only, plus the pass's
+    ``ticket_plans`` (from ``ticket_planner.plan_pass``): the plans route every
+    mutation, and since ADR 0103 S3 there is no legacy per-mutation loop to fall back
+    to. Checking up front means a bad batch fails before any write.
     """
+    if ticket_plans is None:
+        raise TypeError("apply() batch form requires ticket_plans (ticket_planner.plan_pass)")
     batch = list(mutations or [])
     for m in batch:
         if not isinstance(m, MutationShape):
@@ -305,6 +306,7 @@ __all__ = [
     "RetryExhaustedError",
     "StatusMappingError",
     "UnknownActionError",
+    "_BatchAuditView",
     "_ErrorsModule",
     "_MutationModule",
     "_apply_inbound_clean_label",
@@ -317,8 +319,8 @@ __all__ = [
     "_apply_outbound_delete",
     "_apply_outbound_probe",
     "_apply_outbound_update",
+    "_audit_rebar_id_label_writes",
     "_build_leaves",
-    "_call_with_retry",
     "_cross_project_targets",
     "_direction_guard",
     "_errors_module",
@@ -388,7 +390,7 @@ def apply(
 
     if pass_id is None:
         raise TypeError("apply() legacy batch form requires pass_id as the second argument")
-    mutations = _typed_batch(mutations)
+    mutations = _typed_batch(mutations, ticket_plans)
 
     # Mode-cap enforcement (story 286b): coerce mode + partition into applied/deferred.
     mode, mode_mod, mutations_input, deferred_for_manifest = _partition_by_mode_cap(
@@ -530,9 +532,14 @@ def _apply_batch(
     binding_store=None,
     abort_check=None,
     synced_fields_out=None,
-    ticket_plans=None,
+    *,
+    ticket_plans,
 ) -> Path:
-    """Legacy batch dispatch: write a flat-JSON manifest for a list of dict mutations.
+    """Batch dispatch: route dict mutations by ticket plan and write a flat-JSON manifest.
+
+    ``ticket_plans`` is required: the create reroute and the coordinator reroute
+    dispatch every planned dict. A dict no plan routes (a plan mixing a create with a
+    non-create action) is recorded failed without a vendor call.
 
     Performs HEAD-pin drift detection before each mutation: captures the
     tickets-branch HEAD SHA before the first mutation, then re-checks before
@@ -633,8 +640,8 @@ def _apply_batch(
         binding_store=binding_store,
     )
 
-    # Pin HEAD before first mutation, then sequence — drift recheck → dispatch →
-    # record — one mutation at a time (per-mutation step extracted: _apply_one).
+    # Pin HEAD before first mutation; the reroutes then sequence — drift recheck →
+    # dispatch → record — one mutation at a time.
     head_pin_cell = [snapshot_head(repo_root)]
     # LIVE cutover (RP-03 S3 T3): reroute migrated non-create plans inside the drift try.
     create_tally = None
@@ -658,12 +665,7 @@ def _apply_batch(
             outcomes_sink=mutations_with_outcomes,
         )
         for mutation in mutations:
-            # Per-mutation lost-lease checkpoint (epic dust-troth-naval): raises if
-            # the ref-lock heartbeat lost the lease. Defaults to None (no-op).
-            if abort_check is not None:
-                abort_check()
-            head_pin_cell[0] = _recheck_drift(snapshot_head, repo_root, head_pin_cell[0])
-            _apply_one(mutation, ctx, mutations_with_outcomes)
+            _record_unrouted(mutation, ctx, mutations_with_outcomes)
     except HeadDriftError:
         # Emit abort event as structured log and re-raise for the caller.
         print(  # noqa: T201
@@ -700,36 +702,22 @@ def _apply_batch(
     return manifest_path
 
 
-def _apply_one(mutation: dict, ctx: BatchApplyContext, mutations_with_outcomes: list[dict]) -> None:
-    """Audit-guard, dispatch, and record one mutation's outcome.
+def _record_unrouted(
+    mutation: dict, ctx: BatchApplyContext, mutations_with_outcomes: list[dict]
+) -> None:
+    """Record a batch dict that no ticket plan routed, dispatching nothing.
 
-    The audit guard stays resident here (not in the handlers): it is the
-    pre-dispatch authorization check, and the test suite reaches it via
-    ``applier._audit_rebar_id_label_writes`` / ``applier._BatchAuditView``.
+    The create and coordinator reroutes consume every planned dict. One left over (a
+    plan mixing a create with a non-create action) has no route since ADR 0103 S3
+    retired the legacy per-mutation loop, so it is recorded as a per-mutation failure
+    (a ``bridge_alerts`` entry + an ``error`` outcome) rather than silently dropped.
     """
     action = mutation.get("action", "")
-    # Audit pass: extend the rebar-id label write guard to the legacy batch
-    # dispatch path. create_one/update_one/delete_one all issue outbound Jira
-    # writes, so each batch mutation maps to an outbound_<action> leaf for
-    # guard-name purposes. Without this call, _audit_rebar_id_label_writes was
-    # bypassed for every legacy dict-shaped mutation — only _apply_typed enforced
-    # the contract.
-    _audit_rebar_id_label_writes(f"outbound_{action}", [_BatchAuditView(mutation)])
-    try:
-        result = dispatch_mutation(mutation, ctx)
-    except (HeadDriftError, RescheduleError, urllib.error.HTTPError):
-        # Control-flow / fail-fast contracts — re-raise (see record_backstop_failure):
-        # HeadDriftError (drift-abort), RescheduleError (rebase-retry exhausted), HTTPError
-        # (404 soft-failed in the handler; non-404 deliberately propagates fail-fast).
-        # Bug 449f-f9bf-be90-47fe: that 404 clause held for `update` ONLY — create/delete
-        # wrapped their leaf in nothing, so a 404 from either escaped here and aborted the
-        # pass (1 of 30 mutations applied, GHA run 30465914822). All three handlers now
-        # share the soft-fail, so the invariant this arm asserts holds for every action.
-        raise
-    except Exception as exc:  # noqa: BLE001 — per-mutation failure backstop (records + continues)
-        result = record_backstop_failure(mutation, exc, action, ctx)
+    result = record_backstop_failure(
+        mutation, LookupError(f"unrouted mutation: {action}"), action, ctx
+    )
     mutations_with_outcomes.append(result.outcome)
-    _print_batch_recon(action, result.outcome, soft_failed=result.soft_failed)
+    _print_batch_recon(action, result.outcome, soft_failed=True)
 
 
 def _print_batch_recon(action: str, outcome: dict, *, soft_failed: bool) -> None:

@@ -10,7 +10,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from rebar.reconciler import __main__ as reconciler_main
-from rebar.reconciler import applier, guarded_pass, manifest_renderer, scratch_retention
+from rebar.reconciler import (
+    applier,
+    guarded_pass,
+    manifest_renderer,
+    scratch_retention,
+    ticket_planner,
+)
 from rebar.reconciler.mutation import (
     Mutation,
     MutationAction,
@@ -56,6 +62,29 @@ _CANONICAL_MUTATIONS = (
     ),
 )
 _CANONICAL_MUTATION_HASH = "ad5bfa390730c7aa763d8187c8dde666d4429cead32f8228a0e53a7e6699f83d"
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 def _canonical_mutation_set() -> list[Mutation]:
@@ -171,10 +200,15 @@ def test_canonical_uncapped_sync_retains_field_comparable_manifest(
         repo_root=tmp_path,
         mode=mode_mod.Mode.LIVE,
         route="sync",
+        ticket_plans=_plans(mutations, mode=mode_mod.Mode.LIVE),
     )
 
     assert isinstance(manifest_path, Path)
     payload = json.loads(manifest_path.read_text())
+    # The batch form now always carries ticket plans (ADR 0103 S3), so the manifest adds
+    # their lifecycle-intents block; the field-comparable body below is unchanged.
+    intents = payload.pop("lifecycle_intents")
+    assert sorted(plan["identity"] for plan in intents["plans"]) == ["DIG-41", "local-42"]
     assert payload == {
         "pass_id": "canonical-sync",
         "mode": "live",
@@ -246,6 +280,7 @@ def test_canonical_sync_manifest_reports_batch_failures_exactly(
         repo_root=tmp_path,
         mode=mode_mod.Mode.LIVE,
         route="sync",
+        ticket_plans=_plans(mutations, mode=mode_mod.Mode.LIVE),
     )
 
     payload = json.loads(manifest_path.read_text())
@@ -300,6 +335,7 @@ def test_canonical_sync_tally_excludes_suppressed_inbound_mutations(
         mode=mode_mod.Mode.LIVE,
         route="sync",
         client=object(),
+        ticket_plans=_plans(mutations, mode=mode_mod.Mode.LIVE),
     )
 
     payload = json.loads(result_path.read_text())
@@ -339,6 +375,7 @@ def test_capped_canonical_sync_reports_plan_tally_and_deferred(tmp_path: Path, m
         mode=mode_mod.Mode.LIVE,
         route="sync",
         max_changes=2,
+        ticket_plans=_plans(mutations, mode=mode_mod.Mode.LIVE, max_changes=2),
     )
 
     payload = json.loads(result_path.read_text())
@@ -371,6 +408,9 @@ def test_canonical_sync_tally_degrades_safely_when_batch_manifest_is_unreadable(
         repo_root=tmp_path,
         mode=mode_mod.Mode.LIVE,
         route="sync",
+        ticket_plans=_plans(
+            [_outbound_update("DIG-1", "local-1", {"summary": "one"})], mode=mode_mod.Mode.LIVE
+        ),
     )
 
     payload = json.loads(result_path.read_text())

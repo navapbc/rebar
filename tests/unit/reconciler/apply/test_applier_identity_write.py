@@ -11,6 +11,7 @@ All tests mock AcliClient so no real Jira calls are made.
 from __future__ import annotations
 
 import importlib
+import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -132,83 +133,81 @@ def test_identity_writes_not_called_on_budget_defer(applier):
     client.set_entity_property.assert_not_called()
 
 
-def test_add_label_transient_5xx_absorbed_by_retry_no_rollback(applier):
-    """Regression: a transient 5xx on add_label must be absorbed by _call_with_retry
-    and NOT trigger the rollback branch (delete_issue + BRIDGE_ALERT).
+def _bridge_alerts(tmp_path: Path, local_id: str) -> list[Path]:
+    return list((tmp_path / ".tickets-tracker" / local_id).glob("*-BRIDGE_ALERT.json"))
 
-    Before this fix, add_label was called raw — a single transient 5xx would
-    fall through to the except-clause and delete the just-created Jira issue
-    unnecessarily, even though the next attempt would have succeeded.
+
+def test_add_label_transient_5xx_is_one_attempt_no_rollback(applier, tmp_path):
+    """ADR 0103 S3: a transient 5xx on add_label is NOT retried by the handler.
+
+    The write-ahead create already recorded the key, so the label write is attempted
+    exactly once, the original error propagates, the created issue is NOT deleted, and
+    the identity alert is published for the next pass to retro-attach the label.
     """
     local_id = "tick-trans-5xx"
     client = _make_mock_client(create_return={"key": "DIG-555"})
 
-    # First add_label call raises 503; second call succeeds.
+    # The first add_label call raises 503; a second call would succeed, so a second
+    # call would mean a hidden retry.
     err_503 = applier.JiraAPIError("Service Unavailable", status_code=503)
     client.add_label.side_effect = [err_503, None]
     client.set_entity_property.return_value = None
 
     mutation = _make_create_mutation(local_id)
 
-    # Patch time.sleep to keep the retry backoff cheap in tests.
-    # Ticket a3fa: _call_with_retry moved to dispatch_apply_phases (to make room under the
-    # 800-LOC cap for the capability guards), so patch ``time`` at its NEW point of use —
-    # patching dispatch_one.time would now be inert and reintroduce real backoff sleeps.
-    from rebar.reconciler import dispatch_apply_phases  # point-of-use: the retry lives here
+    with patch("time.sleep") as mock_sleep:
+        with pytest.raises(applier.JiraAPIError) as excinfo:
+            applier.create_one(
+                mutation,
+                client,
+                rest_calls=0,
+                repo_root=tmp_path,
+                create_core=_coordinated_create_core,
+            )
 
-    with patch.object(dispatch_apply_phases, "time") as mock_time:
-        mock_time.sleep = MagicMock()
-        result = applier.create_one(
-            mutation, client, rest_calls=0, create_core=_coordinated_create_core
-        )
-
-    # create_one must return the create_issue result (rollback NOT triggered).
-    assert result == {"key": "DIG-555"}, (
-        f"create_one returned {result!r}; expected the create_issue result. "
-        "A returned-without-error result with no delete_issue call proves the "
-        "transient 5xx was absorbed by _call_with_retry."
+    assert excinfo.value is err_503, "the original add_label error must propagate"
+    assert client.add_label.call_count == 1, (
+        f"add_label must be attempted once; got call_count={client.add_label.call_count}"
     )
-
-    # delete_issue MUST NOT have been called — rollback path must not fire.
+    mock_sleep.assert_not_called()
     client.delete_issue.assert_not_called()
-
-    # add_label was retried (called twice): once raising 503, once succeeding.
-    assert client.add_label.call_count == 2, (
-        f"Expected add_label to be retried after 503; got call_count={client.add_label.call_count}"
-    )
+    client.set_entity_property.assert_not_called()
+    assert len(_bridge_alerts(tmp_path, local_id)) == 1, "identity alert must be written"
 
 
-def test_set_entity_property_transient_5xx_absorbed_by_retry_no_rollback(applier):
-    """Regression: a transient 5xx on set_entity_property must be absorbed by
-    _call_with_retry and NOT trigger the rollback branch.
+def test_set_entity_property_transient_5xx_is_one_attempt_no_rollback(applier, tmp_path):
+    """ADR 0103 S3 edge case 3: a 503 on set_entity_property after create is one call.
 
-    Mirrors the add_label transient-5xx regression test for the second
-    identity-write call site (line ~327 of applier.py).
+    The Cloud REST leg raises a raw ``HTTPError``. It is not retried: one call, the raw
+    error propagates, no ``delete_issue``, and the identity alert is written.
     """
     local_id = "tick-trans-prop"
     client = _make_mock_client(create_return={"key": "DIG-556"})
 
-    # add_label succeeds; set_entity_property raises 502 then succeeds.
     client.add_label.return_value = None
-    err_502 = applier.JiraAPIError("Bad Gateway", status_code=502)
-    client.set_entity_property.side_effect = [err_502, None]
+    err_503 = urllib.error.HTTPError("http://x", 503, "Service Unavailable", {}, None)  # type: ignore[arg-type]
+    client.set_entity_property.side_effect = [err_503, None]
 
     mutation = _make_create_mutation(local_id)
 
-    from rebar.reconciler import dispatch_apply_phases  # point-of-use: the retry lives here
+    with patch("time.sleep") as mock_sleep:
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
+            applier.create_one(
+                mutation,
+                client,
+                rest_calls=0,
+                repo_root=tmp_path,
+                create_core=_coordinated_create_core,
+            )
 
-    with patch.object(dispatch_apply_phases, "time") as mock_time:
-        mock_time.sleep = MagicMock()
-        result = applier.create_one(
-            mutation, client, rest_calls=0, create_core=_coordinated_create_core
-        )
-
-    assert result == {"key": "DIG-556"}
-    client.delete_issue.assert_not_called()
-    assert client.set_entity_property.call_count == 2, (
-        f"Expected set_entity_property to be retried after 502; got "
+    assert excinfo.value is err_503, "the raw HTTPError must propagate unwrapped"
+    assert client.set_entity_property.call_count == 1, (
+        f"set_entity_property must be attempted once; got "
         f"call_count={client.set_entity_property.call_count}"
     )
+    mock_sleep.assert_not_called()
+    client.delete_issue.assert_not_called()
+    assert len(_bridge_alerts(tmp_path, local_id)) == 1, "identity alert must be written"
 
 
 def test_label_written_before_entity_property(applier):

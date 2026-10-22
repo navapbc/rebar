@@ -653,15 +653,6 @@ def test_live_reroute_migrated_update_dispatches_through_coordinator_not_legacy_
     fake_client.update_issue.return_value = {"key": "DIG-100", "ok": True}
     fake_client.search_issues.return_value = []
 
-    seen_apply_one: list = []
-    orig_apply_one = applier._apply_one
-
-    def spy_apply_one(mutation, ctx, sink):
-        seen_apply_one.append(mutation.get("key"))
-        return orig_apply_one(mutation, ctx, sink)
-
-    monkeypatch.setattr(applier, "_apply_one", spy_apply_one)
-
     # G6: the pre-dispatch rebar-id label-write authorization guard must still fire on
     # the coordinator route. The guard lives in its owning leaf module rebar_id_audit;
     # the coordinator dispatch loads it from there, so spy on the source function.
@@ -686,11 +677,11 @@ def test_live_reroute_migrated_update_dispatches_through_coordinator_not_legacy_
     assert "outbound_update" in audited, (
         "the rebar-id label-write audit guard must still run on the coordinator route (G6)"
     )
-    # ...and the migrated mutation did NOT traverse the legacy _apply_one batch loop.
-    assert "DIG-100" not in seen_apply_one, (
-        "a migrated family must not dispatch through the legacy per-mutation nesting (AC5)"
-    )
+    # ...and the coordinator route consumed it: exactly one physical attempt, and no
+    # leftover dict recorded as unrouted (AC5).
+    assert fake_client.update_issue.call_count == 1
     outcomes = _rr_manifest_outcomes(tmp_path, pass_id)
+    assert not any("unrouted" in str(o.get("error") or "") for o in outcomes), outcomes
     assert any(o.get("key") == "DIG-100" and not o.get("error") for o in outcomes), (
         f"the coordinator route must record the applied outcome; got {outcomes}"
     )

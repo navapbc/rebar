@@ -2,7 +2,7 @@
 
 Behavior under test:
   - Each `rebar-id-*` label in payload['labels_to_remove'] triggers exactly one
-    client.remove_label call, routed through _call_with_retry.
+    direct client.remove_label call (no handler-level retry, ADR 0103 S3).
   - Positional args are pinned: (issue_key, label_string).
   - Non-`rebar-id-*` labels are filtered out (defensive).
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -45,22 +45,12 @@ def test_remove_label_payload_pinned(applier):
     client = SimpleNamespace(remove_label=MagicMock(return_value=None))
     mutation = _make_clean_label_mutation(applier, ["rebar-id-abc", "rebar-id-xyz"])
 
-    captured: list[tuple] = []
-    from rebar.reconciler import apply_inbound  # point-of-use: leaf calls retry here
+    result = applier._apply_inbound_clean_label(mutation, client=client)
 
-    real = apply_inbound._call_with_retry
-
-    def spy(fn, *args, **kwargs):
-        captured.append((fn, args, kwargs))
-        return real(fn, *args, **kwargs)
-
-    with patch.object(apply_inbound, "_call_with_retry", side_effect=spy):
-        result = applier._apply_inbound_clean_label(mutation, client=client)
-
-    remove_calls = [c for c in captured if c[0] is client.remove_label]
-    assert len(remove_calls) == 2
-    assert remove_calls[0][1] == ("PROJ-100", "rebar-id-abc")
-    assert remove_calls[1][1] == ("PROJ-100", "rebar-id-xyz")
+    assert client.remove_label.call_args_list == [
+        call("PROJ-100", "rebar-id-abc"),
+        call("PROJ-100", "rebar-id-xyz"),
+    ]
     # ApplyResult reports which labels were removed.
     assert result.payload == {"removed": ["rebar-id-abc", "rebar-id-xyz"]}
 

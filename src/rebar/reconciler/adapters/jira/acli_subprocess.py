@@ -277,10 +277,11 @@ class AcliTimeoutError(Exception):
     whole process group) has already been SIGTERM/SIGKILL-reaped.
 
     Deliberately **NOT** a subclass of the builtin :class:`TimeoutError`
-    (validation spike E4): ``apply_outbound._call_with_retry`` catches
-    ``TimeoutError`` and would otherwise blindly re-retry a timed-out write,
-    re-introducing the duplicate-write bug Jira's non-idempotent create/link
-    makes dangerous.
+    (validation spike E4): a caller that retries on ``TimeoutError`` would
+    otherwise blindly re-retry a timed-out write, re-introducing the
+    duplicate-write bug Jira's non-idempotent create/link makes dangerous. ADR
+    0103 S3 retired the handler-level retry wrapper that motivated this; the type
+    stays distinct as a guard against any such caller.
 
     Carries the command and any partial stdout/stderr captured from the
     original :class:`subprocess.TimeoutExpired` for diagnostics.
@@ -560,8 +561,8 @@ def _run_acli(
       :class:`AcliTimeoutError` immediately — a timed-out Jira write is
       ambiguous (may have committed server-side) and Jira create/link is
       non-idempotent, so a blind retry would duplicate. The terminal error is
-      deliberately not a builtin ``TimeoutError`` so the outer
-      ``_call_with_retry`` won't re-retry it.
+      deliberately not a builtin ``TimeoutError`` so no caller that retries on
+      ``TimeoutError`` re-retries it.
 
     Raises:
         CalledProcessError: if all CalledProcessError attempts are exhausted.

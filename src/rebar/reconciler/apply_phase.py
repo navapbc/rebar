@@ -133,6 +133,7 @@ def apply_mutations(ctx: Any) -> None:
                 **_abort_kw,
                 **_synced_kw,
                 **_client_kw,
+                **_ticket_plans_kw,
             )
         else:
             _max_kw = {"max_changes": ctx.max_changes} if ctx.max_changes is not None else {}

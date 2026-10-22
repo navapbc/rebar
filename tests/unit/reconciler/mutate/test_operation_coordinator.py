@@ -31,6 +31,8 @@ names or source text — so a behavior-preserving refactor cannot break them.
 from __future__ import annotations
 
 import importlib
+import time
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -1438,44 +1440,48 @@ def test_make_coordinator_dispatch_maps_soft_failed_error_to_failed_signal(
     assert len(sink) == 1 and sink[0]["error"] == "boom 500"
 
 
-def test_guarded_execute_wiring_adds_no_legacy_retry_nesting(
-    batch_dispatch_mod, coordinator_mod, mutation_mod, ticket_plan_mod, budget_mod, monkeypatch
+def test_transient_503_on_update_reaches_transport_once_and_propagates_raw(
+    batch_dispatch_mod, mutation_mod, ticket_plan_mod, tmp_path, monkeypatch
 ):
-    """AC5 (wiring half): routing migrated plans through the coordinator via the guarded
-    execute never re-enters the legacy ad-hoc ``dispatch_apply_phases._call_with_retry``
-    nesting — the cutover surface adds no second retry layer around the coordinator's own
-    RetryBudget. (The production ``dispatch_fn`` here is a fake, isolating the wiring.)"""
-    dap = importlib.import_module("rebar.reconciler.dispatch_apply_phases")
-    calls: list = []
+    """AC5 / ADR 0103 S3 (edge case 1): through ``run_migrated_reroute`` with the
+    PRODUCTION coordinator dispatch, a transport whose ``update_issue`` raises
+    ``HTTPError(503)`` once and would then succeed is called exactly ONCE — no
+    handler-level retry and no coordinator replay — the raw 503 propagates fail-fast,
+    and nothing sleeps. (Before S3 the retired handler wrapper slept, retried, and the
+    second call applied.)"""
+    apply_handlers = importlib.import_module("rebar.reconciler.apply_handlers")
+    slept: list = []
+    monkeypatch.setattr(time, "sleep", slept.append)
+    calls: list[str] = []
+    err_503 = urllib.error.HTTPError("http://x", 503, "Service Unavailable", {}, None)  # type: ignore[arg-type]
 
-    def _spy(fn, *a, **k):
-        calls.append(fn)
-        return fn(*a, **k)
+    class _Transport:
+        def update_issue(self, key, **_fields):
+            calls.append(key)
+            if len(calls) == 1:
+                raise err_503
+            return {"key": key}
 
-    monkeypatch.setattr(dap, "_call_with_retry", _spy)
-
-    plans = [
-        _plan(ticket_plan_mod, ident, [_mut(mutation_mod, "outbound", "update", ident)])
-        for ident in ("T-1", "T-2")
-    ]
-    head_cell = ["pin0"]
-    dispatch_fn = batch_dispatch_mod.make_guarded_execute(
-        abort_check=None,
-        recheck_drift=lambda _c, _r, pin: pin,
-        snapshot_head=object(),
-        repo_root="/repo",
-        head_pin_cell=head_cell,
-        dispatch_fn=lambda _p, _m: coordinator_mod.AtomicSignal(status="applied"),
+    plan = _plan(
+        ticket_plan_mod,
+        "T-503",
+        [_mut(mutation_mod, "outbound", "update", "T-503", {"changed_fields": {"summary": "s"}})],
     )
-    report = batch_dispatch_mod.coordinate_and_fuse(
-        plans,
-        execute=dispatch_fn,
-        locate=_t3_locate(_T3_BINDINGS),
-        budget_factory=_budget_factory(budget_mod),
-        now_ms=0,
-    )
-    assert report.tallies["applied"] == 2
-    assert calls == []  # the coordinator route nested no legacy retry wrapper
+    ctx = apply_handlers.BatchApplyContext(client=_Transport(), repo_root=tmp_path, pass_id="p")
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        batch_dispatch_mod.run_migrated_reroute(
+            migrated_plans=[plan],
+            ctx=ctx,
+            abort_check=None,
+            recheck_drift=lambda _c, _r, pin: pin,
+            snapshot_head=None,
+            repo_root=tmp_path,
+            head_pin_cell=["pin0"],
+            outcomes_sink=[],
+        )
+    assert excinfo.value is err_503  # the RAW HTTPError, not a wrapper
+    assert calls == ["T-503"]  # one transport attempt per pass
+    assert slept == []  # no backoff: nothing retried
 
 
 def test_reroute_passthrough_when_plan_mixes_create_and_noncreate(
@@ -1483,7 +1489,8 @@ def test_reroute_passthrough_when_plan_mixes_create_and_noncreate(
 ):
     """A plan mixing a create with a non-create action is NOT fully migrated, so
     ``reroute_migrated_plans`` is a pure passthrough: it returns ``(None, mutations)``
-    and every mutation stays on the legacy loop (no coordinator run, no exclusion)."""
+    and every mutation stays in the remainder (no coordinator run, no exclusion), which
+    the applier records as unrouted since ADR 0103 S3."""
     bd = batch_dispatch_mod
     plan = _plan(
         ticket_plan_mod,
@@ -1506,7 +1513,7 @@ def test_reroute_passthrough_when_plan_mixes_create_and_noncreate(
         outcomes_sink=[],
     )
     assert cutover_tally is None  # a mixed plan is not migrated → no cutover
-    assert remaining == muts  # ...and every mutation is left for the legacy loop
+    assert remaining == muts  # ...and every mutation is left in the remainder
 
 
 def test_reroute_excludes_migrated_keeps_legacy_and_counts_deferred(

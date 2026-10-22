@@ -1,10 +1,11 @@
 """Held-out per-member census of Cloud (ACLI) 429 behavior.
 
-Cloud mutations cross four boundaries: pooled REST and bare ``urlopen`` make one
-attempt; the ACLI subprocess and ``dispatch_one._call_with_retry`` perform bounded
-``Retry-After`` retries; reporter and comment apply phases explicitly remain
-single-attempt. The tables below assign every mutation its transport seam, dispatch
-level, attempt policy, and duplicate-write disposition, while ``_NON_MUTATING``
+Cloud mutations cross three boundaries: pooled REST and bare ``urlopen`` make one
+attempt; the ACLI subprocess performs bounded ``Retry-After`` retries; reporter and
+comment apply phases explicitly remain single-attempt. ADR 0103 S3 retired the
+handler-level retry wrapper, so no dispatch-level retry sits above the transport. The
+tables below assign every mutation its transport seam, dispatch level, attempt policy,
+and duplicate-write disposition, while ``_NON_MUTATING``
 accounts for every read, helper, and constructor so new members cannot inherit a
 policy silently.
 
@@ -137,54 +138,7 @@ def test_bare_urlopen_update_priority_makes_exactly_one_attempt_on_429(
 
 
 # ---------------------------------------------------------------------------
-# 2. DISPATCH-WRAPPED path: reached through ``dispatch_one._call_with_retry``, a 429 IS
-#    retried by design (dispatch_one.py:115-118). The assertion here is a BOUNDED retry
-#    honouring ``Retry-After`` — NOT one attempt.
-# ---------------------------------------------------------------------------
-
-
-def test_dispatch_wrapped_429_is_a_bounded_retry_honouring_retry_after(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from rebar.reconciler import dispatch_one
-
-    slept: list[float] = []
-    monkeypatch.setattr(dispatch_one.time, "sleep", lambda s: slept.append(s))
-
-    calls: list[int] = []
-
-    def _twice_then_ok() -> str:
-        calls.append(1)
-        if len(calls) < 3:
-            raise _http_429(retry_after="5")
-        return "ok"
-
-    assert dispatch_one._call_with_retry(_twice_then_ok, max_retries=3) == "ok"
-    assert len(calls) == 3, "the dispatch wrapper did not retry an opted-in 429"
-    # Retry-After=5 honoured (min(MAX_BACKOFF_S, 5) == 5), not a jittered fallback.
-    assert slept == [5.0, 5.0], f"expected two Retry-After(5s) backoffs, got {slept}"
-
-
-def test_dispatch_wrapped_429_is_bounded_not_infinite(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A persistent 429 exhausts a BOUNDED number of retries then re-raises the raw
-    HTTPError — the retry is bounded by ``max_retries`` (mutation: unbound the loop)."""
-    from rebar.reconciler import dispatch_one
-
-    monkeypatch.setattr(dispatch_one.time, "sleep", lambda _s: None)
-    calls: list[int] = []
-
-    def _always_429() -> str:
-        calls.append(1)
-        raise _http_429(retry_after="1")
-
-    with pytest.raises(urllib.error.HTTPError) as caught:
-        dispatch_one._call_with_retry(_always_429, max_retries=3)
-    assert caught.value.code == 429
-    assert len(calls) == 4, f"expected initial + 3 bounded retries, got {len(calls)} attempts"
-
-
-# ---------------------------------------------------------------------------
-# 3. NON-retrying ``dispatch_apply_phases`` mutations: EXACTLY ONE attempt under a 429,
+# 2. NON-retrying ``dispatch_apply_phases`` mutations: EXACTLY ONE attempt under a 429,
 #    extending ``test_comment_single_attempt.py``'s single-member pin to the sweep.
 # ---------------------------------------------------------------------------
 
@@ -239,7 +193,7 @@ def test_dispatch_comments_makes_exactly_one_attempt_on_429() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 4. ACLI-SUBPROCESS seam: each subprocess-seam mutating member inherits ``_run_acli``'s
+# 3. ACLI-SUBPROCESS seam: each subprocess-seam mutating member inherits ``_run_acli``'s
 #    bounded ``Retry-After`` backoff. Driven through the REAL ``_run_acli`` (a fake ``acli``
 #    binary emitting a 429 on the first call, success after), observed at the ``_run_acli``
 #    boundary via the ``_backoff_sleep`` seam. Asserting ONE attempt here would be WRONG —

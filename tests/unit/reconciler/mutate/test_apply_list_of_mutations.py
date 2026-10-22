@@ -3,21 +3,46 @@
 Outbound ``Mutation`` objects reach ``_apply_batch`` as dictionaries containing its
 expected action, fields, key, local-id, follow-on, and direction values. Empty fields
 remain empty. Inbound typed mutations raise ``TypeError`` instead of entering outbound
-handlers.
+handlers. Since ADR 0103 S3 the batch form also requires ``ticket_plans``, and a dict no
+plan routes is recorded failed rather than dispatched.
 """
 
 import importlib
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from rebar.reconciler.mutation_payloads import OutboundCreatePayload
+from rebar.reconciler import ticket_planner
+from rebar.reconciler.mutation_payloads import OutboundCreatePayload, OutboundUpdatePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "mutation.py"
+
+
+def _plans(mutations, *, mode=None, max_changes=None):
+    """Ticket plans for the outbound ``mutations``, built as ``run_differs`` builds them.
+
+    The batch form of ``applier.apply`` requires ``ticket_plans`` (ADR 0103 S3). Inbound
+    mutations dispatch through ``_apply_typed``, so only the outbound ones are planned.
+    """
+    _, plans = ticket_planner.plan_pass(
+        pass_id="test-pass",
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+        mode=str(getattr(mode, "value", mode) or ""),
+        selection={"kind": None, "ids": []},
+        limits={"max_changes": max_changes},
+        mutations=[
+            m
+            for m in mutations
+            if getattr(getattr(m, "direction", None), "value", None) == "outbound"
+        ],
+    )
+    return plans
 
 
 @pytest.fixture
@@ -48,7 +73,7 @@ def test_list_of_mutation_normalized_to_dict_before_apply_batch(applier_and_muta
     mutations = [_make_outbound_create(mut_mod)]
 
     with patch.object(applier, "_apply_batch", return_value=tmp_path / "m.json") as ab:
-        applier.apply(mutations, "pass-1", repo_root=tmp_path)
+        applier.apply(mutations, "pass-1", repo_root=tmp_path, ticket_plans=_plans(mutations))
 
     assert ab.call_count == 1
     passed_list = ab.call_args[0][0]
@@ -70,7 +95,7 @@ def test_normalized_dict_is_json_serializable(applier_and_mutation, tmp_path):
     mutations = [_make_outbound_create(mut_mod)]
 
     with patch.object(applier, "_apply_batch", return_value=tmp_path / "m.json") as ab:
-        applier.apply(mutations, "pass-2", repo_root=tmp_path)
+        applier.apply(mutations, "pass-2", repo_root=tmp_path, ticket_plans=_plans(mutations))
 
     passed_list = ab.call_args[0][0]
     for m in passed_list:
@@ -93,7 +118,7 @@ def test_empty_fields_does_not_fall_through_to_full_payload(applier_and_mutation
     ]
 
     with patch.object(applier, "_apply_batch", return_value=tmp_path / "m.json") as ab:
-        applier.apply(mutations, "pass-3", repo_root=tmp_path)
+        applier.apply(mutations, "pass-3", repo_root=tmp_path, ticket_plans=_plans(mutations))
 
     passed_list = ab.call_args[0][0]
     assert passed_list[0]["fields"] == {}, (
@@ -117,7 +142,13 @@ def test_plain_dict_create_payload_raises_type_error(applier_and_mutation, tmp_p
         patch.object(applier, "_apply_batch", return_value=tmp_path / "m.json") as ab,
     ):
         with pytest.raises(TypeError, match="OutboundCreatePayload"):
-            applier.apply(mutations, "pass-plain-create", repo_root=tmp_path, client=object())
+            applier.apply(
+                mutations,
+                "pass-plain-create",
+                repo_root=tmp_path,
+                client=object(),
+                ticket_plans=_plans(mutations),
+            )
     assert at.call_count == 0
     assert ab.call_count == 0
 
@@ -133,9 +164,67 @@ def test_untyped_batch_element_raises_type_error(applier_and_mutation, tmp_path)
         patch.object(applier, "_apply_typed") as at,
     ):
         with pytest.raises(TypeError, match="typed Mutations only"):
-            applier.apply([{"action": "update"}], "p", tmp_path, client=fake_client)
+            applier.apply(
+                [{"action": "update"}],
+                "p",
+                tmp_path,
+                client=fake_client,
+                ticket_plans=_plans([{"action": "update"}]),
+            )
     assert ab.call_count == 0
     assert at.call_count == 0
+
+
+def test_batch_form_without_ticket_plans_raises_type_error(applier_and_mutation, tmp_path):
+    """ADR 0103 S3: the batch form requires ``ticket_plans`` — there is no legacy
+    per-mutation loop left to route a plan-less batch — so omitting them raises
+    ``TypeError`` before any dispatch, transport load, or write. An empty batch too."""
+    applier, mut_mod = applier_and_mutation
+
+    with (
+        patch.object(applier, "_apply_batch") as ab,
+        patch.object(applier, "_apply_typed") as at,
+    ):
+        with pytest.raises(TypeError, match="requires ticket_plans"):
+            applier.apply([_make_outbound_create(mut_mod)], "p", tmp_path, client=object())
+        with pytest.raises(TypeError, match="requires ticket_plans"):
+            applier.apply([], "p", tmp_path, client=object())
+    assert ab.call_count == 0
+    assert at.call_count == 0
+
+
+def test_mixed_create_and_noncreate_plan_records_dicts_failed_not_dispatched(
+    applier_and_mutation, tmp_path
+):
+    """ADR 0103 S3: a plan mixing a create with a non-create action is routed by
+    neither the create reroute nor the coordinator reroute. Its dicts are recorded as
+    failed outcomes (``unrouted mutation``) without a vendor call — never dropped, and
+    never dispatched through a retired legacy loop."""
+    applier, mut_mod = applier_and_mutation
+    create = _make_outbound_create(mut_mod, target="DIG-77")
+    update = mut_mod.Mutation(
+        direction=mut_mod.MutationDirection.outbound,
+        action=mut_mod.MutationAction.update,
+        target="DIG-77",
+        payload=OutboundUpdatePayload(changed_fields={"summary": "s"}, local_id="local-abc"),
+        provenance={"source": "test"},
+    )
+    plans = _plans([create, update])
+    assert [sorted(m.action.value for m in p.mutations) for p in plans] == [["create", "update"]]
+    client = MagicMock()
+
+    with patch.object(applier, "_load_acli", return_value=client):
+        manifest_path = applier.apply(
+            [create, update], "pass-mixed-plan", repo_root=tmp_path, ticket_plans=plans
+        )
+
+    outcomes = json.loads(Path(manifest_path).read_text())["mutations"]
+    assert sorted(o["action"] for o in outcomes) == ["create", "update"]
+    for outcome in outcomes:
+        assert "unrouted mutation" in str(outcome.get("error")), outcome
+    assert client.mock_calls == [], (
+        f"an unrouted dict must not reach the vendor: {client.mock_calls}"
+    )
 
 
 def test_typed_update_with_plain_dict_changed_fields_converts(applier_and_mutation):
@@ -187,7 +276,7 @@ def test_inbound_mutations_dispatched_per_mutation_via_apply_typed(applier_and_m
         patch.object(applier, "_apply_typed") as at,
         patch.object(applier, "_apply_batch", return_value=tmp_path / "m.json") as ab,
     ):
-        applier.apply(inbound, "pass-inbound", repo_root=tmp_path)
+        applier.apply(inbound, "pass-inbound", repo_root=tmp_path, ticket_plans=_plans(inbound))
 
     # Each inbound Mutation reached _apply_typed exactly once, in order.
     assert at.call_count == len(inbound), (
@@ -226,7 +315,7 @@ def test_mixed_inbound_and_outbound_partitioned_correctly(applier_and_mutation, 
         patch.object(applier, "_apply_typed") as at,
         patch.object(applier, "_apply_batch", return_value=tmp_path / "m.json") as ab,
     ):
-        applier.apply(mutations, "pass-mixed", repo_root=tmp_path)
+        applier.apply(mutations, "pass-mixed", repo_root=tmp_path, ticket_plans=_plans(mutations))
 
     # Inbound: per-mutation dispatch via _apply_typed (2 of them).
     assert at.call_count == 2
@@ -257,6 +346,6 @@ def test_all_inbound_does_not_crash_when_outbound_batch_is_empty(applier_and_mut
         patch.object(applier, "_apply_batch", return_value=tmp_path / "m.json"),
     ):
         # Should NOT raise.
-        applier.apply(inbound, "pass-all-inbound", repo_root=tmp_path)
+        applier.apply(inbound, "pass-all-inbound", repo_root=tmp_path, ticket_plans=_plans(inbound))
 
     assert at.call_count == 5

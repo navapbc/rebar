@@ -8,11 +8,13 @@ all. A DC writing reconcile pass crashed on `set_entity_property` while
 `isinstance(backend, Backend)`, the backend contract suite, and 1600+ unit tests were all
 green — because a contract suite can only test what the port declares.
 
-WHY THE STRUCTURAL TEST MATCHES ATTRIBUTE ACCESS, NOT CALLS: the reconciler routinely
-passes transport methods as VALUES — `_call_with_retry(client.delete_issue_link, link_id)`
-(`dispatch_one.py:731`), `_call_with_retry(client.set_entity_property, ...)`
-(`dispatch_one.py:321`). A call-form-only scan finds 15 members and silently misses 6. That
-narrow pattern is how the first audit of this seam under-counted, twice.
+WHY THE STRUCTURAL TEST MATCHES ATTRIBUTE ACCESS, NOT CALLS: core code can pass
+transport methods as VALUES — when this story landed, a handler-level retry wrapper took
+`client.delete_issue_link` and `client.set_entity_property` that way, and a call-form-only
+scan found 15 members and silently missed 6. That narrow pattern is how the first audit of
+this seam under-counted, twice. ADR 0103 S3 retired that wrapper, so the core now calls
+those members directly; the value-form teeth test below therefore audits a parsed snippet
+rather than relying on the core still containing a value-form reference.
 
 THE DOMINANT FAILURE MODE IS SILENT. Seven of the twelve have call sites that swallow
 `Exception` at EVERY invocation, so "nothing raised" is true today while nothing works.
@@ -122,23 +124,38 @@ def test_a_transport_missing_a_member_fails_isinstance() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _core_transport_members() -> set[str]:
+def _transport_members(tree: ast.AST) -> set[str]:
     """EVERY attribute access on a client/transport receiver — call form OR value form.
 
     A call-form-only pattern under-counts silently: it returns a smaller, confident,
     wrong number. That is not hypothetical; it is how this seam was mis-audited twice.
     """
+    return {
+        n.attr
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Attribute)
+        and isinstance(n.value, ast.Name)
+        and n.value.id in ("client", "transport")
+        and not n.attr.startswith("_")
+    }
+
+
+def _core_transport_members() -> set[str]:
+    """The audit applied to every core reconciler module."""
     found: set[str] = set()
     for p in sorted(_REC.glob("*.py")):
-        for n in ast.walk(ast.parse(p.read_text())):
-            if (
-                isinstance(n, ast.Attribute)
-                and isinstance(n.value, ast.Name)
-                and n.value.id in ("client", "transport")
-                and not n.attr.startswith("_")
-            ):
-                found.add(n.attr)
+        found |= _transport_members(ast.parse(p.read_text()))
     return found
+
+
+#: Value-form references only: each member is read as a VALUE and never called through
+#: the receiver, the shape a call-form-only audit misses.
+_VALUE_FORM_SNIPPET = """
+def dispatch(client, transport, link_id, key, parent_key):
+    _wrapped(client.delete_issue_link, link_id)
+    setter = transport.set_parent
+    return setter(key, parent_key)
+"""
 
 
 def test_every_transport_member_the_core_reaches_for_is_declared() -> None:
@@ -153,8 +170,8 @@ def test_every_transport_member_the_core_reaches_for_is_declared() -> None:
 
 def test_the_audit_catches_value_form_references() -> None:
     """TEETH. If the audit only matched `client.x(...)` it would miss the value form and
-    silently pass. These two are reached ONLY as values in the core."""
-    members = _core_transport_members()
+    silently pass. These two are reached ONLY as values in the snippet."""
+    members = _transport_members(ast.parse(_VALUE_FORM_SNIPPET))
     for value_only in ("delete_issue_link", "set_parent"):
         assert value_only in members, (
             f"{value_only!r} not found — the audit is matching call forms only and will "
