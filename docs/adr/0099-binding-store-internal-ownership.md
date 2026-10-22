@@ -69,7 +69,7 @@ the four files the binding subsystem keeps on disk:
 | `<tracker_dir>/.bridge_state/bindings.json` | live bindings + reverse index |
 | `<tracker_dir>/.bridge_state/bindings-retired.json` | retired (soft-deleted) tombstones |
 | `<tracker_dir>/.bridge_state/get_rotation.json` | GET-rotation sidecar |
-| `<repo_root>/bridge_state/bridge_alerts/*.jsonl` | best-effort lifecycle alerts |
+| `<repo_root>/.rebar/bridge/bridge_alerts/*.jsonl` | best-effort lifecycle alerts |
 
 Ownership is scoped to the reconciler's binding subsystem: the repository is the only
 reader/writer inside it, and the repository instance is private, so no adapter or

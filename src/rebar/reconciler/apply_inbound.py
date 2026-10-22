@@ -57,6 +57,7 @@ from rebar.reconciler.inbound_translate import (
     _resolve_tracker_dir,
 )
 from rebar.reconciler.pass_io import _write_mapping_atomic
+from rebar.reconciler.scratch_retention import mapping_path as _scratch_mapping_path
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +105,7 @@ def _apply_inbound_create(
                 from rebar.config import reconciler_repo_root as _owned_repo_root
 
                 repo_root = _owned_repo_root()
-            mapping_path = repo_root / "bridge_state" / "mapping.json"
-            _write_mapping_atomic(mapping_path, bound_local_id, jira_key)
+            _write_mapping_atomic(_scratch_mapping_path(repo_root), bound_local_id, jira_key)
             return ApplyResult(
                 mutation.direction,
                 mutation.action,

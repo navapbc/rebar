@@ -99,7 +99,7 @@ def test_report_schema_drift_dedup_key(inv):
 def test_cap_per_pass_invariant(inv):
     """At most _DUAL_IDENTITY_CAP_PER_PASS quarantines per pass (best-effort bounded)."""
     # Patch subprocess and _load_alert_store so report_schema_drift does not
-    # shell out to the real ticket CLI or write to bridge_state/ as a
+    # shell out to the real ticket CLI or write to .rebar/bridge/ as a
     # unit-test side effect.
     mock_alert_store = MagicMock()
     mock_alert_store.is_deduped.return_value = False

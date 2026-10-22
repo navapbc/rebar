@@ -31,6 +31,7 @@ from typing import Any
 
 import pytest
 
+from rebar.reconciler import scratch_retention
 from rebar.reconciler.binding_lifecycle import BindingLifecycle
 from rebar.reconciler.binding_repository import BindingRepository
 
@@ -567,7 +568,7 @@ def _retired_file(root: Path) -> dict[str, Any]:
 
 
 def _alerts(root: Path) -> list[dict[str, Any]]:
-    d = root / "bridge_state" / "bridge_alerts"
+    d = scratch_retention.alerts_dir(root)
     if not d.is_dir():
         return []
     out: list[dict[str, Any]] = []
@@ -963,14 +964,16 @@ def test_an_alert_write_failure_does_not_break_a_retirement(tmp_path: Path) -> N
     parent path occupied by a regular file every append fails, and the retirement must
     still complete and persist."""
     lifecycle, _ = _bind_confirmed(tmp_path)
-    (tmp_path / "bridge_state").write_text("not a directory", encoding="utf-8")
+    blocked_scratch = scratch_retention.bridge_scratch_dir(tmp_path)
+    blocked_scratch.parent.mkdir(parents=True, exist_ok=True)
+    blocked_scratch.write_text("not a directory", encoding="utf-8")
 
     for _ in range(3):
         lifecycle.note_absent("DIG-A")
 
     assert lifecycle.is_retired("DIG-A") is True
     assert _retired_file(tmp_path)["DIG-A"]["local_id"] == "loc-A"
-    assert (tmp_path / "bridge_state").is_file()
+    assert blocked_scratch.is_file()
 
 
 def test_unknown_fields_on_a_retired_entry_survive_a_second_retirement(

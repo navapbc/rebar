@@ -16,6 +16,8 @@ from unittest.mock import patch
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
@@ -101,7 +103,7 @@ def test_dry_run_does_not_invoke_leaves(tmp_path, applier_mod, mode_mod, mutatio
 def test_bootstrap_strict_caps_at_10(tmp_path, applier_mod, mode_mod, mutation_mod):
     """BOOTSTRAP_STRICT: exactly 10 applied + 2040 deferred from 2050 fixture."""
     muts = _make_mutations(2050, mutation_mod)
-    snapshots_dir = tmp_path / "bridge_state" / "snapshots"
+    snapshots_dir = scratch_retention.snapshots_dir(tmp_path)
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     fake = snapshots_dir / "t-strict.manifest.json"
     fake.write_text("{}")
@@ -134,7 +136,7 @@ def test_bootstrap_strict_caps_at_10(tmp_path, applier_mod, mode_mod, mutation_m
 def test_bootstrap_throttle_caps_at_100(tmp_path, applier_mod, mode_mod, mutation_mod):
     """BOOTSTRAP_THROTTLE: exactly 100 applied + 1950 deferred."""
     muts = _make_mutations(2050, mutation_mod)
-    snapshots_dir = tmp_path / "bridge_state" / "snapshots"
+    snapshots_dir = scratch_retention.snapshots_dir(tmp_path)
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     fake = snapshots_dir / "t-throttle.manifest.json"
     fake.write_text("{}")
@@ -162,7 +164,7 @@ def test_live_uncapped(tmp_path, applier_mod, mode_mod, mutation_mod):
     reaches the dispatch surface, (b) LIVE writes no manifest file.
     """
     muts = _make_mutations(2050, mutation_mod)
-    snapshots_dir = tmp_path / "bridge_state" / "snapshots"
+    snapshots_dir = scratch_retention.snapshots_dir(tmp_path)
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     fake_batch_manifest = snapshots_dir / "t-live.manifest.json"
     fake_batch_manifest.write_text("{}")  # legacy batch would write this
@@ -267,7 +269,7 @@ def test_asymmetric_manifest_dry_run_shape(tmp_path, applier_mod, mode_mod, muta
 def test_asymmetric_manifest_throttle_shape(tmp_path, applier_mod, mode_mod, mutation_mod):
     """BOOTSTRAP_THROTTLE manifest: both totals + spot_check sample."""
     muts = _make_mutations(200, mutation_mod)
-    snapshots_dir = tmp_path / "bridge_state" / "snapshots"
+    snapshots_dir = scratch_retention.snapshots_dir(tmp_path)
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     fake = snapshots_dir / "t-throttle-shape.manifest.json"
     fake.write_text("{}")
@@ -291,7 +293,7 @@ def test_asymmetric_manifest_throttle_shape(tmp_path, applier_mod, mode_mod, mut
 def test_asymmetric_manifest_live_writes_no_file(tmp_path, applier_mod, mode_mod, mutation_mod):
     """LIVE mode must NOT write any manifest file."""
     muts = _make_mutations(10, mutation_mod)
-    snapshots_dir = tmp_path / "bridge_state" / "snapshots"
+    snapshots_dir = scratch_retention.snapshots_dir(tmp_path)
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     fake = snapshots_dir / "t-live-nofile.manifest.json"
     fake.write_text("{}")

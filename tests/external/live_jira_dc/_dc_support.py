@@ -16,6 +16,8 @@ from typing import Any
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 BASE = os.environ.get("JIRA_DC_BASE_URL", "http://localhost:2990/jira")
 # The harness's admin account — the ONE user guaranteed to exist and be assignable on a
 # freshly provisioned instance, and the same value `conftest` uses to create the scratch
@@ -512,9 +514,6 @@ def assert_remote_parent_is(
     )
 
 
-_ALERT_STORE_SUBPATH = ("bridge_state", "bridge_alerts")
-
-
 def assert_bridge_alert_for_mutation(
     cp: subprocess.CompletedProcess,
     repo: Path,
@@ -539,7 +538,7 @@ def assert_bridge_alert_for_mutation(
         f"alert store is not evidence of anything either way:\n{cp.stderr[-2000:]}"
     )
 
-    store_dir = repo.joinpath(*_ALERT_STORE_SUBPATH)
+    store_dir = scratch_retention.alerts_dir(repo)
     records: list[dict[str, Any]] = []
     if store_dir.is_dir():
         for jsonl_file in sorted(store_dir.glob("*.jsonl")):

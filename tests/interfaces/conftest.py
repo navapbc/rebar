@@ -145,7 +145,7 @@ def rebar_repo(_rebar_repo_template: Path, tmp_path: Path, monkeypatch: pytest.M
     Sets REBAR_ROOT and cwd to the repo so every interface resolves both the
     ticket store and project-scoped configuration from the same isolated
     checkout. This also keeps the no-repo-root-leak guard from firing on
-    bridge_state/.tickets-tracker writes. Returns the repo path.
+    .rebar/bridge and .tickets-tracker writes. Returns the repo path.
 
     The store is COPIED from a per-worker template rather than built (~22 ms vs
     ~306 ms); ``_clone_template`` re-points it at itself and re-mints its identity.

@@ -31,6 +31,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 APPLIER_PATH = SCRIPTS_DIR.parent / "reconciler" / "applier.py"
@@ -86,7 +88,7 @@ def _apply(applier_mod, acli_mod, mutation, tmp_path, pass_id) -> dict:
         applier_mod.apply(
             [{k: v for k, v in mutation.items() if k != "_client"}], pass_id, repo_root=tmp_path
         )
-    manifest = tmp_path / "bridge_state" / "snapshots" / f"{pass_id}.manifest.json"
+    manifest = scratch_retention.snapshots_dir(tmp_path) / f"{pass_id}.manifest.json"
     outcomes = json.loads(manifest.read_text()).get("mutations", []) if manifest.is_file() else []
     return next((o for o in outcomes if o.get("key") == mutation["key"]), {})
 

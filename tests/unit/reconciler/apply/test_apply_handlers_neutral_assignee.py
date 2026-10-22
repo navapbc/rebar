@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler import scratch_retention
 from rebar.reconciler._backend import BackendAssigneeNotFoundError
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -30,7 +31,7 @@ def applier_mod() -> ModuleType:
 
 
 def _read_alert_records(repo_root: Path) -> list[dict]:
-    alerts_dir = repo_root / "bridge_state" / "bridge_alerts"
+    alerts_dir = scratch_retention.alerts_dir(repo_root)
     if not alerts_dir.is_dir():
         return []
     out = []

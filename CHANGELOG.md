@@ -38,6 +38,17 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): reconciler scratch moves from `<repo>/bridge_state/` to
+  `<repo>/.rebar/bridge/`, with bounded retention.** Per-pass snapshots and manifests, sync
+  logs, the daily `bridge_alerts/*.jsonl` files, `mapping.json`, and
+  `comment_id_divergence.json` now live under `.rebar/bridge/`, which the existing `.rebar/*`
+  ignore rule already covers. After each writing pass the reconciler keeps snapshots and
+  sync logs for the last 5 passes and alert files for the last 30 days; `mapping.json` and
+  `comment_id_divergence.json` are kept. Preview and dry-run passes prune nothing. An old
+  `bridge_state/` directory is not migrated; it is local scratch, so delete it. The committed
+  tracker-side `<tracker>/.bridge_state/` is unchanged. Details in
+  [docs/release-notes.md](docs/release-notes.md).
+
 - **BREAKING (pre-1.0): `rebar bridge run` starts the reconciler engine directly.** It used to
   run `rebar bridge sync|preview`, which started the engine again with no timeout, so a timed-out
   run left the engine orphaned and holding the pass lock. The runner now starts

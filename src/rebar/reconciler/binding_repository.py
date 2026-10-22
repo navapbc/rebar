@@ -6,7 +6,7 @@ keeps on disk:
 * live      ``<tracker_dir>/.bridge_state/bindings.json``
 * retired   ``<tracker_dir>/.bridge_state/bindings-retired.json``
 * rotation  ``<tracker_dir>/.bridge_state/get_rotation.json`` (the GET-rotation sidecar)
-* alerts    ``<repo_root>/bridge_state/bridge_alerts/*.jsonl`` (best-effort lifecycle log)
+* alerts    ``<repo_root>/.rebar/bridge/bridge_alerts/*.jsonl`` (best-effort lifecycle log)
 
 It owns *persistence only*. Lifecycle policy — bind/confirm/retire/tombstone/comment
 bookkeeping — stays with its current owner, which mutates the dictionaries this class

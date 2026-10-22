@@ -200,6 +200,7 @@ from rebar.reconciler.rebar_id_audit import (  # noqa: E402
     _BatchAuditView,
     _is_rebar_id_label_write_mutation,
 )
+from rebar.reconciler.scratch_retention import snapshots_dir  # noqa: E402
 
 # The typed-dispatch routing table + dispatcher live in typed_dispatch.py.
 # Re-exported so apply() (resident) + test_leaves_registry_coverage resolve.
@@ -552,9 +553,9 @@ def _apply_batch(
             "mutations": [],
             "events": [],
         }
-        snapshots_dir = repo_root / "bridge_state" / "snapshots"
-        snapshots_dir.mkdir(parents=True, exist_ok=True)
-        manifest_path = snapshots_dir / f"{pass_id}.manifest.json"
+        manifest_dir = snapshots_dir(repo_root)
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = manifest_dir / f"{pass_id}.manifest.json"
         manifest_path.write_text(json.dumps(manifest, indent=2))
         return manifest_path
 
@@ -661,9 +662,9 @@ def _apply_batch(
     if combined_tally is not None:
         manifest["cutover_tally"] = combined_tally
 
-    snapshots_dir = repo_root / "bridge_state" / "snapshots"
-    snapshots_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = snapshots_dir / f"{pass_id}.manifest.json"
+    manifest_dir = snapshots_dir(repo_root)
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = manifest_dir / f"{pass_id}.manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2))
 
     return manifest_path

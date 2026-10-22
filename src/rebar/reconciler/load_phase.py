@@ -33,6 +33,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from rebar.reconciler.scratch_retention import snapshots_dir, sync_log_path
+
 
 def handle_corrupt_snapshot(
     pass_id: str, repo_root: Path, prev_path: Path, _exc: Exception
@@ -156,7 +158,7 @@ def load_snapshots(
         ensure_selection_current(selection_ids, local_tickets)
 
     # Create write-bearing pass artifacts only after the under-lock staleness check.
-    log_path = repo_root / "bridge_state" / f"sync-log-{pass_id}.jsonl"
+    log_path = sync_log_path(repo_root, pass_id)
     sync_logger = sync_logger_mod.SyncLogger(log_path) if persist else no_op_sync_logger_cls()
     scoped_ids = selection_ids or filter_local_ids
     sync_logger.log(
@@ -176,13 +178,13 @@ def load_snapshots(
             f"local IDs — not a production reconciliation."
         )
 
-    snapshots_dir = repo_root / "bridge_state" / "snapshots"
-    snapshots_dir.mkdir(parents=True, exist_ok=True)
+    snapshots_dir(repo_root).mkdir(parents=True, exist_ok=True)
 
     # Previous snapshot: kept in the ticket store so it survives between GHA runs (the
-    # commit-back step commits that directory; bridge_state/snapshots/ on the main-branch
-    # worktree was ephemeral, so the differ re-derived every mutation each pass). RESOLVED,
-    # not composed — this also seeds ``ctx.tracker_dir`` (consumed by run_differs).
+    # commit-back step commits that directory; the repo-local scratch snapshots on the
+    # main-branch worktree were ephemeral, so the differ re-derived every mutation each
+    # pass). RESOLVED, not composed — this also seeds ``ctx.tracker_dir`` (consumed by
+    # run_differs).
     from rebar.config import tracker_dir as _resolve_tracker_dir
 
     tracker_dir = _resolve_tracker_dir(repo_root)

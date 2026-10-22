@@ -64,6 +64,7 @@ from rebar.reconciler.dispatch_apply_phases import (
     _update_one_filter_fields,
 )
 from rebar.reconciler.pass_io import _write_mapping_atomic, record_parent_divergence
+from rebar.reconciler.scratch_retention import mapping_path as _scratch_mapping_path
 from rebar.reconciler.transition_replay import (
     recorded_hops_for,
     replay_should_drift,
@@ -110,7 +111,7 @@ def create_one(
         rest_calls:       Number of REST calls already issued in this pass.
         deferred_creates: List to append deferred mutations to (budget guard).
         events_list:      List to append structured events to (dedup hit events).
-        repo_root:        Repository root for resolving bridge_state/mapping.json.
+        repo_root:        Repository root for resolving .rebar/bridge/mapping.json.
                           Defaults to four levels above this file when None.
         comment_errors:   Optional list collecting add_comment failures during the
                           post-create comment-dispatch loop (bug ea6d). When
@@ -165,8 +166,7 @@ def create_one(
             from rebar.config import reconciler_repo_root as _owned_repo_root
 
             repo_root = _owned_repo_root()
-        mapping_path = repo_root / "bridge_state" / "mapping.json"
-        _write_mapping_atomic(mapping_path, local_id, hit_key)
+        _write_mapping_atomic(_scratch_mapping_path(repo_root), local_id, hit_key)
 
         # Emit structured event into the caller's events list
         if events_list is not None:

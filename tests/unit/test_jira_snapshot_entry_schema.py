@@ -15,7 +15,7 @@ the validator accepts — never private names or source text. Edge/error coverag
 which validates real ``fetch_snapshot`` output against this same schema.
 
 The fixture ``tests/fixtures/jira/snapshot_entry_shapes.json`` is DERIVED and
-REDACTED from real fetcher output under ``bridge_state/snapshots/`` (gitignored,
+REDACTED from real fetcher output under ``.rebar/bridge/snapshots/`` (gitignored,
 PII-bearing): every ``emailAddress`` / ``displayName`` / ``accountId`` is replaced
 with a placeholder and every tenant URL dropped. The repo-wide scrub guard in
 ``tests/integration/reconciler/jira_contract/test_jira_fixtures.py`` globs

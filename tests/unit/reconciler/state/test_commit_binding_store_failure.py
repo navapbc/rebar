@@ -22,6 +22,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "pass_support.py"
 ALERT_STORE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "alert_store.py"
@@ -137,7 +139,7 @@ def test_commit_failure_appends_alert(
     assert result is False
 
     # Check that an alert was written to bridge_alerts
-    alerts_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    alerts_dir = scratch_retention.alerts_dir(tmp_path)
     assert alerts_dir.is_dir(), (
         f"bridge_alerts directory must be created when an alert is appended. Expected: {alerts_dir}"
     )
@@ -210,7 +212,7 @@ def test_commit_success_returns_true_no_alert(
     )
 
     # No alerts should be written on success
-    alerts_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    alerts_dir = scratch_retention.alerts_dir(tmp_path)
     if alerts_dir.is_dir():
         all_records = []
         for jf in alerts_dir.glob("*.jsonl"):
@@ -261,7 +263,7 @@ def test_commit_failure_dedup_suppresses_second_alert(
         # Second call with same pass_id — should be deduped
         pass_support_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "dedup-pass-001")
 
-    alerts_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    alerts_dir = scratch_retention.alerts_dir(tmp_path)
     if alerts_dir.is_dir():
         all_records = []
         for jf in alerts_dir.glob("*.jsonl"):

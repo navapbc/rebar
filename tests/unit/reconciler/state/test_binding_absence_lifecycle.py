@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 _SRC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler" / "binding_store.py"
 
 
@@ -120,7 +122,7 @@ def test_corrupt_retired_file_fails_open(tracker: Path) -> None:
     bs = BindingStore(tracker / ".tickets-tracker")
     assert bs.is_retired("DIG-X") is False
     # Alert emitted to bridge_alerts.
-    alerts_dir = tracker / "bridge_state" / "bridge_alerts"
+    alerts_dir = scratch_retention.alerts_dir(tracker)
     assert alerts_dir.is_dir(), "fail-open must emit an alert"
     blob = "".join(p.read_text() for p in alerts_dir.glob("*.jsonl"))
     assert "binding-retired-file-corrupt" in blob

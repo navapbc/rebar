@@ -19,6 +19,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 
 def _init_git_repo(path: Path) -> None:
     """Initialize tmp_path as a minimal git repo so applier.apply()'s
@@ -99,7 +101,7 @@ def _make_mock_acli_module() -> tuple[MagicMock, MagicMock]:
 
 
 def test_manifest_written_to_correct_path(tmp_path, applier):
-    """apply() writes manifest to bridge_state/snapshots/<pass_id>.manifest.json."""
+    """apply() writes manifest to .rebar/bridge/snapshots/<pass_id>.manifest.json."""
     pass_id = "2026-05-22-pass-01"
     mock_acli_mod, _ = _make_mock_acli_module()
     _init_git_repo(tmp_path)
@@ -109,7 +111,7 @@ def test_manifest_written_to_correct_path(tmp_path, applier):
     ):
         manifest_path = applier.apply([], pass_id, repo_root=tmp_path)
 
-    expected_path = tmp_path / "bridge_state" / "snapshots" / f"{pass_id}.manifest.json"
+    expected_path = scratch_retention.snapshots_dir(tmp_path) / f"{pass_id}.manifest.json"
     assert manifest_path == expected_path, (
         f"Expected manifest at {expected_path}, got {manifest_path}"
     )

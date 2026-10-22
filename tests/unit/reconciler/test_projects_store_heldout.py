@@ -22,15 +22,15 @@ projects_store = importlib.import_module("rebar.reconciler.projects_store")
 
 
 def _write_record(repo_root: Path, record: dict) -> None:
-    bridge_state = repo_root / ".tickets-tracker" / ".bridge_state"
-    bridge_state.mkdir(parents=True, exist_ok=True)
-    (bridge_state / "projects.json").write_text(json.dumps(record), encoding="utf-8")
+    state_dir = repo_root / ".tickets-tracker" / ".bridge_state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "projects.json").write_text(json.dumps(record), encoding="utf-8")
 
 
 def _write_raw(repo_root: Path, raw: str) -> None:
-    bridge_state = repo_root / ".tickets-tracker" / ".bridge_state"
-    bridge_state.mkdir(parents=True, exist_ok=True)
-    (bridge_state / "projects.json").write_text(raw, encoding="utf-8")
+    state_dir = repo_root / ".tickets-tracker" / ".bridge_state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "projects.json").write_text(raw, encoding="utf-8")
 
 
 def test_resolve_project_explicit_empty_string_is_none(tmp_path: Path) -> None:

@@ -26,6 +26,7 @@ import tempfile
 from pathlib import Path
 
 from rebar.reconciler.inbound_translate import _jira_key_to_local_id
+from rebar.reconciler.scratch_retention import snapshots_dir
 
 
 def _load_mode_module():
@@ -338,9 +339,7 @@ def _emit_mode_manifest(
             repo_root_resolved = _owned_repo_root()
         else:
             repo_root_resolved = repo_root
-        snapshots_dir = repo_root_resolved / "bridge_state" / "snapshots"
-        snapshots_dir.mkdir(parents=True, exist_ok=True)
-        manifest_path = snapshots_dir / f"{pass_id}.manifest.json"
+        manifest_path = snapshots_dir(repo_root_resolved) / f"{pass_id}.manifest.json"
     # Atomic write via tempfile + os.replace to avoid race conditions
     # when concurrent DRY_RUN passes share the same pass_id (finding #3).
     manifest_dir = Path(manifest_path).parent

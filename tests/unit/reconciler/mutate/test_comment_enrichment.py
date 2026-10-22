@@ -14,6 +14,8 @@ from types import ModuleType
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 _REC = REPO_ROOT / "src" / "rebar" / "reconciler"
 OUTBOUND_DIFFER_PATH = _REC / "outbound_differ.py"
@@ -179,7 +181,7 @@ def test_fetcher_enriches_comment_field(tmp_path: Path, monkeypatch: pytest.Monk
 
     # S4: _load_acli returns the transport (client) directly.
     monkeypatch.setattr(fetcher_mod, "_load_acli", lambda: _StubClient())
-    (tmp_path / "bridge_state" / "snapshots").mkdir(parents=True)
+    scratch_retention.snapshots_dir(tmp_path).mkdir(parents=True)
     output_path = fetcher_mod.fetch_snapshot("test-pass", repo_root=tmp_path)
 
     snapshot = json.loads(output_path.read_text())
@@ -214,7 +216,7 @@ def test_fetcher_comment_enrichment_failure_degrades(
 
     # S4: _load_acli returns the transport (client) directly.
     monkeypatch.setattr(fetcher_mod, "_load_acli", lambda: _FailingClient())
-    (tmp_path / "bridge_state" / "snapshots").mkdir(parents=True)
+    scratch_retention.snapshots_dir(tmp_path).mkdir(parents=True)
     with caplog.at_level(logging.WARNING):
         output_path = fetcher_mod.fetch_snapshot("test-pass", repo_root=tmp_path)
 

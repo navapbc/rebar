@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from rebar.reconciler import scratch_retention
 from rebar.reconciler._backend import BackendHTTPError
 from rebar.reconciler.adapters.jira_datacenter.transport import (
     IllegalTransitionError,
@@ -193,7 +194,7 @@ def test_an_illegal_transition_is_non_fatal_and_lands_in_bridge_alerts(
         "an illegal transition must not abort the pass — the mutation behind it must still "
         f"dispatch; reached={reached!r}"
     )
-    alert_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    alert_dir = scratch_retention.alerts_dir(tmp_path)
     alerts = sorted(alert_dir.glob("*.jsonl"))
     assert alerts, (
         "the illegal transition must be OBSERVABLE: a bridge_alerts record is the only "

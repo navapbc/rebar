@@ -27,6 +27,8 @@ from typing import Any
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 _REC = REPO_ROOT / "src" / "rebar" / "reconciler"
 
@@ -79,7 +81,7 @@ def _creates(mutations: list[Any]) -> list[Any]:
 
 
 def _alert_records(repo_root: Path) -> list[dict[str, Any]]:
-    alerts_dir = repo_root / "bridge_state" / "bridge_alerts"
+    alerts_dir = scratch_retention.alerts_dir(repo_root)
     records: list[dict[str, Any]] = []
     for path in sorted(alerts_dir.glob("*.jsonl")) if alerts_dir.exists() else ():
         for line in path.read_text(encoding="utf-8").splitlines():

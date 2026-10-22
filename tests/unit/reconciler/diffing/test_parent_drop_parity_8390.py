@@ -23,7 +23,7 @@ they reach into the Cloud/ACLI adapters, a separate blast radius:
 Both silences were measured at runtime before this file was written, each against a positive control
 proving the observation channel worked: the 400 attach produced ZERO files under ``REBAR_ROOT``
 while a direct ``record_parent_divergence`` under the same root wrote
-``bridge_state/bridge_alerts/<date>.jsonl``; and the CREATE path emitted a mutation with no
+``.rebar/bridge/bridge_alerts/<date>.jsonl``; and the CREATE path emitted a mutation with no
 ``parent`` key and an empty sink, while the same call with an ``epic`` parent emitted
 ``parent="RBJ-1"``.
 
@@ -56,6 +56,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from rebar.reconciler import scratch_retention
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 _REC = REPO_ROOT / "src" / "rebar" / "reconciler"
@@ -159,7 +161,7 @@ def _alert_kinds(repo_root: Path) -> list[str]:
     nothing after the pass exits.
     """
     kinds: list[str] = []
-    for path in sorted((repo_root / "bridge_state" / "bridge_alerts").glob("*.jsonl")):
+    for path in sorted(scratch_retention.alerts_dir(repo_root).glob("*.jsonl")):
         for line in path.read_text().splitlines():
             if line.strip():
                 kinds.append(json.loads(line).get("kind", ""))

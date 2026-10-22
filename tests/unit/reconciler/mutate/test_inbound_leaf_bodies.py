@@ -16,6 +16,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "applier.py"
 MUTATION_PATH = APPLIER_PATH.parent / "mutation.py"
@@ -436,7 +438,7 @@ def test_inbound_create_dedups_against_binding_store(applier, mut_mod, fixture_r
     assert result.payload.get("local_id") == "uuid-bound-7"
 
     # 2. mapping.json records uuid-bound-7 -> DIG-77.
-    mapping_file = fixture_repo / "bridge_state" / "mapping.json"
+    mapping_file = scratch_retention.mapping_path(fixture_repo)
     assert mapping_file.exists(), "dedup guard must write mapping.json"
     mapping = json.loads(mapping_file.read_text())
     assert mapping.get("uuid-bound-7") == "DIG-77"

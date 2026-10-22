@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler import scratch_retention
 from rebar.reconciler.create_route import _coordinated_create_core
 
 # ---------------------------------------------------------------------------
@@ -89,7 +90,7 @@ def test_mapping_json_written_on_jql_hit(applier, tmp_path):
         create_core=_coordinated_create_core,
     )
 
-    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path = scratch_retention.mapping_path(tmp_path)
     assert mapping_path.exists(), "mapping.json should be created on JQL hit"
     data = json.loads(mapping_path.read_text())
     assert data.get("tick-xyz1") == "DIG-42", (
@@ -99,7 +100,7 @@ def test_mapping_json_written_on_jql_hit(applier, tmp_path):
 
 def test_mapping_json_preserves_existing_entries(applier, tmp_path):
     """Existing entries in mapping.json are preserved when a new hit is added."""
-    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path = scratch_retention.mapping_path(tmp_path)
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
     mapping_path.write_text(json.dumps({"old-id": "DIG-1"}))
 
@@ -125,7 +126,7 @@ def test_mapping_json_not_written_on_jql_miss(applier, tmp_path):
         mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
     )
 
-    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path = scratch_retention.mapping_path(tmp_path)
     assert not mapping_path.exists(), "mapping.json should NOT be created on JQL miss"
 
 
@@ -238,7 +239,7 @@ def test_mapping_write_is_atomic_via_temp_rename(applier, tmp_path):
     Strategy: patch os.replace to capture what paths are involved, and verify
     the source path is a sibling temp file (not mapping.json itself).
     """
-    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path = scratch_retention.mapping_path(tmp_path)
 
     rename_calls: list[tuple[str, str]] = []
     real_replace = os.replace
@@ -268,7 +269,7 @@ def test_mapping_write_is_atomic_via_temp_rename(applier, tmp_path):
 
 def test_concurrent_mapping_writes_merge_distinct_keys(applier, tmp_path):
     """Two writers loaded from the same mapping baseline must not clobber keys."""
-    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path = scratch_retention.mapping_path(tmp_path)
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
     mapping_path.write_text(json.dumps({"old-id": "DIG-1"}), encoding="utf-8")
 
@@ -302,7 +303,7 @@ def test_no_partial_mapping_visible_during_write(applier, tmp_path):
     We verify this structurally: os.replace is atomic on POSIX. The test confirms
     the final file is valid JSON after _write_mapping_atomic completes.
     """
-    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path = scratch_retention.mapping_path(tmp_path)
     applier._write_mapping_atomic(mapping_path, "tick-partial1", "DIG-200")
 
     # File must exist and be fully parseable
@@ -322,7 +323,7 @@ def test_load_mapping_returns_empty_dict_for_non_dict_json(
     TypeError. The fix guards with isinstance(data, dict) and returns {} so
     subsequent writes overwrite the corrupt file with a clean dict.
     """
-    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path = scratch_retention.mapping_path(tmp_path)
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
     # Write a JSON list (valid JSON, wrong shape)
     mapping_path.write_text(json.dumps([1, 2, 3]))

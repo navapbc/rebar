@@ -43,6 +43,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 _ACLI_FAIL = "ACLI mutation reported FAILURE (exit=0): comment body too long"
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -80,7 +82,7 @@ def _apply_one(applier_mod, acli_mod, mutation, client, tmp_path, pass_id) -> di
     fake = _make_fake_acli(acli_mod, client)
     with patch.object(applier_mod, "_load_acli", return_value=fake):
         applier_mod.apply([mutation], pass_id, repo_root=tmp_path)
-    manifest = tmp_path / "bridge_state" / "snapshots" / f"{pass_id}.manifest.json"
+    manifest = scratch_retention.snapshots_dir(tmp_path) / f"{pass_id}.manifest.json"
     outcomes = json.loads(manifest.read_text()).get("mutations", []) if manifest.is_file() else []
     return next((o for o in outcomes if o.get("key") == mutation["key"]), {})
 
@@ -152,7 +154,7 @@ def test_create_path_comment_drop_promotes_to_error(applier_mod, acli_mod, tmp_p
     fake = _make_fake_acli(acli_mod, client)
     with patch.object(applier_mod, "_load_acli", return_value=fake):
         applier_mod.apply([mutation], pass_id, repo_root=tmp_path)
-    manifest = tmp_path / "bridge_state" / "snapshots" / f"{pass_id}.manifest.json"
+    manifest = scratch_retention.snapshots_dir(tmp_path) / f"{pass_id}.manifest.json"
     outcomes = json.loads(manifest.read_text()).get("mutations", []) if manifest.is_file() else []
     target = [o for o in outcomes if o.get("local_id") == "create-flagged-comment-fail"]
     assert target, f"expected an outcome for the create; got {outcomes}"

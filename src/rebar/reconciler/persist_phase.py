@@ -29,6 +29,8 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
+from rebar.reconciler.scratch_retention import prune_bridge_scratch
+
 _helpers = importlib.import_module("rebar.reconciler.reconcile_helpers")
 
 _advance_baselines = _helpers._advance_baselines
@@ -159,7 +161,7 @@ def save_and_commit_bindings(
 
     # Advance only Jira-key membership so the next call preserves edge detection
     # without retaining remote field bodies. The full current snapshot remains
-    # available as the per-pass diagnostic artifact under bridge_state/snapshots/.
+    # available as the per-pass diagnostic artifact under .rebar/bridge/snapshots/.
     # In no-write mode prev_path must stay untouched, so this remains inside the
     # persistence gate.
     assert prev_path is not None
@@ -249,6 +251,10 @@ def persist_and_log(
         recovery_failures=recovery_failures,
     )
     sync_logger.close()
+    # Bound the repo-local scratch under .rebar/bridge/ once every artifact of this pass is
+    # written. A no-write pass writes no scratch, so it prunes none either.
+    if persist:
+        prune_bridge_scratch(ctx.repo_root)
 
     result = {
         "pass_id": pass_id,

@@ -15,6 +15,8 @@ from unittest.mock import patch
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "fetcher.py"
 
@@ -152,12 +154,12 @@ def test_unmapped_status_alert_deduped_across_passes(tmp_path, fetcher):
     mock_acli = _make_acli_mock()  # returns the unmapped 'Backlog' issue
 
     # Do NOT patch _load_alert_store: use the real one so append + is_deduped hit
-    # the real JSONL store under tmp_path/bridge_state/bridge_alerts/.
+    # the real JSONL store under tmp_path/.rebar/bridge/bridge_alerts/.
     with patch.object(fetcher, "_load_acli", return_value=mock_acli):
         fetcher.fetch_snapshot("2026-07-06-dedup-pass-1", repo_root=tmp_path)
         fetcher.fetch_snapshot("2026-07-06-dedup-pass-2", repo_root=tmp_path)
 
-    alerts_dir = tmp_path / "bridge_state" / "bridge_alerts"
+    alerts_dir = scratch_retention.alerts_dir(tmp_path)
     records: list[dict] = []
     for jf in sorted(alerts_dir.glob("*.jsonl")):
         for line in jf.read_text(encoding="utf-8").splitlines():

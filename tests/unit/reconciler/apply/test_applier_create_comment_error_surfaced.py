@@ -18,6 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar.reconciler import scratch_retention
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 APPLIER_PATH = SCRIPTS_DIR.parent / "reconciler" / "applier.py"
@@ -53,7 +55,7 @@ def _make_fake_acli(acli_mod: ModuleType, client: MagicMock) -> MagicMock:
 
 
 def _read_manifest_outcomes(repo_root: Path, pass_id: str) -> list[dict]:
-    manifest_path = repo_root / "bridge_state" / "snapshots" / f"{pass_id}.manifest.json"
+    manifest_path = scratch_retention.snapshots_dir(repo_root) / f"{pass_id}.manifest.json"
     if not manifest_path.is_file():
         return []
     data = json.loads(manifest_path.read_text(encoding="utf-8"))

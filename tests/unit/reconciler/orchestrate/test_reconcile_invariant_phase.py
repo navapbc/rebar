@@ -24,6 +24,8 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
+from rebar.reconciler import scratch_retention
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "reconcile.py"
 
@@ -36,7 +38,7 @@ def _make_stub_fetcher(snapshot: dict) -> ModuleType:
     stub = types.ModuleType("reconcile_fetcher")
 
     def _fetch(pid, repo_root):
-        out_dir = repo_root / "bridge_state" / "snapshots"
+        out_dir = scratch_retention.snapshots_dir(repo_root)
         out_dir.mkdir(parents=True, exist_ok=True)
         out = out_dir / f"{pid}.json"
         out.write_text(json.dumps(snapshot))
@@ -52,7 +54,7 @@ def _make_stub_applier() -> ModuleType:
     def _apply(mutations, pass_id, repo_root, **kwargs):
         # Bug 85a1: reconcile_once now passes binding_store= (and may add
         # more kwargs in the future); accept and ignore for stub purposes.
-        manifest = repo_root / "bridge_state" / "manifests" / f"{pass_id}.json"
+        manifest = scratch_retention.bridge_scratch_dir(repo_root) / "manifests" / f"{pass_id}.json"
         manifest.parent.mkdir(parents=True, exist_ok=True)
         manifest.write_text(json.dumps({"mutations": len(mutations)}))
         return manifest

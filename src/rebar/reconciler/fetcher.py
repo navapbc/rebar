@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Fetcher: pull a normalized Jira snapshot and write it to bridge_state/snapshots/.
+"""Fetcher: pull a normalized Jira snapshot and write it to .rebar/bridge/snapshots/.
 
 fetch_snapshot(pass_id) calls AcliClient.search_issues() with the filtered JQL,
 paginates through the working set via ``_iter_pages``, dedups cross-page
 duplicates while emitting an observable alert, enforces the 1000-issue ACLI
 ceiling by raising ``SilentTruncationError``, and writes the normalized snapshot
-as sorted-key JSON to bridge_state/snapshots/<pass_id>.json.
+as sorted-key JSON to .rebar/bridge/snapshots/<pass_id>.json.
 
 Two fetches over identical remote data produce byte-identical files (idempotent).
 """
@@ -42,6 +42,7 @@ from rebar.reconciler.fetch_paging import (  # noqa: F401
     drain,
     enrich_local_id_properties,
 )
+from rebar.reconciler.scratch_retention import snapshots_dir
 
 # Split-JQL contract (bug f6cc-b174-9e9a-435c — single JQL hit 1000-issue
 # ACLI ceiling because DIG has > 1000 issues across active + Done):
@@ -603,7 +604,7 @@ def fetch_snapshot(
 
     Builds the snapshot via :func:`_build_snapshot`, then writes a
     deterministically-ordered JSON file to
-    ``bridge_state/snapshots/<pass_id>.json`` and returns that path. External
+    ``.rebar/bridge/snapshots/<pass_id>.json`` and returns that path. External
     contract (Path return, on-disk file) is unchanged — ~18 callers/tests
     depend on it.
     """
@@ -612,7 +613,7 @@ def fetch_snapshot(
 
     snapshot = _build_snapshot(pass_id, repo_root)
 
-    output_dir = repo_root / "bridge_state" / "snapshots"
+    output_dir = snapshots_dir(repo_root)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{pass_id}.json"
     output_path.write_text(json.dumps(snapshot, sort_keys=True, indent=2))

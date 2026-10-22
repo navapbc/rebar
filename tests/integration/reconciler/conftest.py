@@ -2,7 +2,7 @@
 
 Mirrors the unit-tier reconciler conftest: puts the engine on sys.path and
 redirects the reconciler's repo-root fallback to a per-test temp dir so leaf
-invocations don't write ``.tickets-tracker`` / ``bridge_state`` into the working
+invocations don't write ``.tickets-tracker`` / ``.rebar/bridge`` into the working
 tree (which would trip the repo-root leak guard in tests/conftest.py).
 """
 
