@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"infra/autolander/loop.py","reason":"selection + rebase-routing"},{"path":"infra/autolander/gerrit.py","reason":"thin stdlib Gerrit helper"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783825174630995001,"uuid":"e6f10c28-0969-4c25-8169-92b2016351f9"}

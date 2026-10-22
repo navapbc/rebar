@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"pyproject.toml","reason":"empty allowlist"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782341899646000001,"uuid":"25fcdf86-92ab-4283-ac5f-f3688a253882"}

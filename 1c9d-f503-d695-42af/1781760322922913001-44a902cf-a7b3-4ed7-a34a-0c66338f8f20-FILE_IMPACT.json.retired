@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/_cli/__init__.py","reason":"rebar llm setup wizard"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781760322922913001,"uuid":"44a902cf-a7b3-4ed7-a34a-0c66338f8f20"}

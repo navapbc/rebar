@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/scripts -k cache -q","dd_id":"DD1","dd_text":"same-size rewrite invalidates cache"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1781066899850162000,"uuid":"4fe93888-205d-4c42-b972-643e84ccba7b"}

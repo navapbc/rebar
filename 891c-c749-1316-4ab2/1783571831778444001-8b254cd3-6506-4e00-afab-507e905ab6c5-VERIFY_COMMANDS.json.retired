@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"verify_commands":[{"command":"python -m pytest tests -k \"pending_hint or ensure\" -q","dd_id":"DD1","dd_text":"pending-hint cheap + fail-silent"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1783571831778444001,"uuid":"8b254cd3-6506-4e00-afab-507e905ab6c5"}

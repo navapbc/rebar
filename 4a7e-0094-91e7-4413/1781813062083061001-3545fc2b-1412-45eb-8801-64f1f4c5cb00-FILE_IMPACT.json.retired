@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/_store/sync.py","reason":"union merge in Path 1 + docstring summary"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781813062083061001,"uuid":"3545fc2b-1412-45eb-8801-64f1f4c5cb00"}

@@ -1,0 +1,1 @@
+{"author":"Iso Tester","data":{"file_impact":[{"path":"docs/jira-sync-setup.md","reason":"credentials + setup docs"},{"path":"README.md","reason":"MCP setup credential requirement"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782519471800929001,"uuid":"f0dded17-5916-4648-b911-a870f61da04d"}

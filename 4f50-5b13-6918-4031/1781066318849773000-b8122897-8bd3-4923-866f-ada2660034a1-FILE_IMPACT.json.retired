@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/_engine/ticket-edit.sh","reason":"empty --title guard"},{"path":"tests/scripts/test-ticket-edit.sh","reason":"RED test"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781066318849773000,"uuid":"b8122897-8bd3-4923-866f-ada2660034a1"}

@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"verify_commands":[{"command":"python -m pytest tests/interfaces/store/test_ensure_drift_matrix.py -q","dd_id":"DD1","dd_text":"drift matrix converges + idempotent"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1783652858066314001,"uuid":"425fe858-263c-43fb-b82b-e899d0061086"}

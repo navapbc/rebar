@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"infra/autolander/loop.py","reason":"wipChain state machine + TOCTOU re-drive + hand-back"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783825176714076001,"uuid":"9bdc4cc9-31bc-4882-ae4f-5e0ec297941f"}

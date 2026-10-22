@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"docs/coverage.md","reason":"mark Jira link-sync round-trips as covered; cite test_link_sync.py"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783785230992003001,"uuid":"6cbfda5c-651d-40ba-8e19-63e30e885aaf"}

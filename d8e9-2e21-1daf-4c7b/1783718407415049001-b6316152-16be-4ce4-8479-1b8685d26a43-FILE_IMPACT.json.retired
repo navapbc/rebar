@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"examples/claude-skills/rebar-debug/SKILL.md","reason":"add worktree-switch setup directive at start of skill execution"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783718407415049001,"uuid":"b6316152-16be-4ce4-8479-1b8685d26a43"}

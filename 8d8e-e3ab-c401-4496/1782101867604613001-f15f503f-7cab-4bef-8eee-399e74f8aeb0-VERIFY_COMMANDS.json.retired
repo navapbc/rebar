@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/unit/workflow/test_map_fanout.py -q","dd_id":"concurrency","dd_text":"bounded fan-out + serialized commits + replay"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782101867604613001,"uuid":"f15f503f-7cab-4bef-8eee-399e74f8aeb0"}

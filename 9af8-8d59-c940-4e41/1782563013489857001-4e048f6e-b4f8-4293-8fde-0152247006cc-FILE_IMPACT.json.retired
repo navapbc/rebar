@@ -1,0 +1,1 @@
+{"author":"Iso Tester","data":{"file_impact":[{"path":"tests/interfaces/store/test_snapshot_environments.py","reason":"GHA shallow/detached materialize test + review-code depth limit"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782563013489857001,"uuid":"4e048f6e-b4f8-4293-8fde-0152247006cc"}

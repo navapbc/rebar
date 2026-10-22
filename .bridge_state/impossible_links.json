@@ -1,0 +1,16 @@
+{
+  "records": {
+    "b973-b298-9b5d-4765|78f2-b104-e3c9-4b86|blocks": {
+      "attempts": 1,
+      "digest": "98940272e0471549cc63af7a245177da2f024357dfedc15f0ef4e0a76560f784",
+      "first_seen": 1788586359.789126,
+      "last_seen": 1788586359.789126,
+      "reason": "redundant_ancestry",
+      "relation": "blocks",
+      "skips": 0,
+      "source_id": "b973-b298-9b5d-4765",
+      "target_id": "78f2-b104-e3c9-4b86"
+    }
+  },
+  "version": 1
+}

@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"body":"Done: src/rebar/_reads.py in-process reads replicating each shim's contract. Commit 7d53bc5. Dropped-git-fetch decision documented in _reads.py."},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"COMMENT","timestamp":1781041297330696000,"uuid":"fce219c8-57ce-4302-af87-581fd0b715a0"}

@@ -1,0 +1,7 @@
+# No-op pre-commit config for the tickets orphan branch.
+# The tickets branch carries event-sourced ticket data only — no source
+# code to lint — so no hooks are needed. This empty config exists solely
+# so the pre-commit framework (when installed as a pre-push hook in the
+# host repo) accepts pushes from the .tickets-tracker linked worktree
+# without requiring PRE_COMMIT_ALLOW_NO_CONFIG=1 on every caller.
+repos: []

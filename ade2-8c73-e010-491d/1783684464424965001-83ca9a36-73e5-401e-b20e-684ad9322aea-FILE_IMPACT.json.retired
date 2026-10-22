@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"rebar.toml","reason":"add verify.overlap_enabled=true to [verify] section"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783684464424965001,"uuid":"83ca9a36-73e5-401e-b20e-684ad9322aea"}

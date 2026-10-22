@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"README.md","reason":"front-door restructure: tagline/badges/demo/quickstart"},{"path":"docs/assets/","reason":"new terminal-screenshot demo asset"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783631042104663001,"uuid":"3abdd3f4-7b4f-4e66-8f95-b519b0a50428"}

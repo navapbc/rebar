@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/fs_tools.py","reason":"hardened git-archive snapshot"},{"path":"src/rebar/llm/workflow/snapshot.py","reason":"snapshot code if split out"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781760309332444001,"uuid":"eea8ac52-e42e-4fba-8897-8af4573f8428"}

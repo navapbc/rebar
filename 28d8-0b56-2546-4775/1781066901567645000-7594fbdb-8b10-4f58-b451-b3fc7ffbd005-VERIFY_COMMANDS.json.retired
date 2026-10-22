@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/interfaces/test_mcp.py -k readonly -q","dd_id":"DD1","dd_text":"TRUE/True/YES all enable readonly"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1781066901567645000,"uuid":"7594fbdb-8b10-4f58-b451-b3fc7ffbd005"}

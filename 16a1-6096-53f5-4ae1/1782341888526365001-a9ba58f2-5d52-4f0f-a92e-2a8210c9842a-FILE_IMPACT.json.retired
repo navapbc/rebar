@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/plan_review/","reason":"exemplar remediation"},{"path":"pyproject.toml","reason":"enable BLE001/T201 + allowlist"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782341888526365001,"uuid":"a9ba58f2-5d52-4f0f-a92e-2a8210c9842a"}

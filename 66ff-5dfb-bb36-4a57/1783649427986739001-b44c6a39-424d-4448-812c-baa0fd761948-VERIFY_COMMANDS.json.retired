@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"verify_commands":[{"command":"make test","dd_id":"DD1","dd_text":"full suite green"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1783649427986739001,"uuid":"b44c6a39-424d-4448-812c-baa0fd761948"}

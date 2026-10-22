@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"scripts/check_docs_index.py","reason":"new index-completeness/link checker"},{"path":".github/workflows/test.yml","reason":"wire the gate"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783814663381621001,"uuid":"972cda84-6c53-402d-a8c9-99d236ecb7e5"}

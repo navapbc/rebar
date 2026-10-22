@@ -1,0 +1,1 @@
+{"author":"Iso Tester","data":{"body":"Code committed e6e5d42c: .github/workflows/gerrit-verify.yaml (3-job g2p shape, reuses test.yml checks, SHA-pinned). Operator-pending: verify it dispatches + votes once creds (S4) are set."},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"COMMENT","timestamp":1782966620121804001,"uuid":"b694f673-20f9-46ce-a4b1-99d17b38016f"}

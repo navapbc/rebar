@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"docs/migrations.md","reason":"new first-class reuse guide"},{"path":"CLAUDE.md","reason":"link to migrations.md"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783571824828524001,"uuid":"600cfbba-47bc-41f8-be89-22aff937f026"}

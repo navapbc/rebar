@@ -1,0 +1,17 @@
+.env-id
+.closure-key
+.state-cache
+.scratch/
+.cache.json
+*/.cache.json
+.signing-key
+.ticket-write.lock
+.ticket-write.lock.d/
+.graph-cache.json
+.ensure-applied
+.ensure-hinted
+.opcert-key
+.opcert-key.pub
+*/.archived
+*/.write.lock
+..cache.json.*.tmp

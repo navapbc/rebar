@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":".github/workflows/reconcile-bridge-canary.yml","reason":"canary recovery-close steps must not trip the completion-verification gate"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783457365436951001,"uuid":"842713e1-2b86-4a9e-9ced-99e6b575e4a9"}

@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/prompts.py","reason":"template-var parity + variants"},{"path":"src/rebar/llm/workflow/lint.py","reason":"workflow prompt-ref validation"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781760316678302001,"uuid":"b9f76672-5272-4a39-8900-6eac0450944a"}

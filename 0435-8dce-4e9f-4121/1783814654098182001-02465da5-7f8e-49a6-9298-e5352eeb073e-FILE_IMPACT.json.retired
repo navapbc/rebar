@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":".github/workflows/test.yml","reason":"add golden-path CI job"},{"path":"scripts/probe-rebar.sh","reason":"reuse existing end-to-end probe"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783814654098182001,"uuid":"02465da5-7f8e-49a6-9298-e5352eeb073e"}

@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"tests/unit/test_completion_floor_e2e.py","reason":"replace getsource token-absence test with spy-based side-effect test"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783785199765938001,"uuid":"037a84be-30c6-4906-abf5-eb13ebf3da22"}

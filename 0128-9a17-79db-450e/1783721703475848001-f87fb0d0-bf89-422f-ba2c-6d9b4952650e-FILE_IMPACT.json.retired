@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"infra/autolander/batch.py","reason":"batch assembly + single-run land"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783721703475848001,"uuid":"f87fb0d0-bf89-422f-ba2c-6d9b4952650e"}

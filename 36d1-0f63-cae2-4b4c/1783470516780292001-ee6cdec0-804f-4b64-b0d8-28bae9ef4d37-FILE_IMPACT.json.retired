@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"src/rebar/reducer/_processors.py","reason":"stop positional skip dropping merged-in orphans"},{"path":"src/rebar/reducer/_sort.py","reason":"sort/horizon semantics"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783470516780292001,"uuid":"ee6cdec0-804f-4b64-b0d8-28bae9ef4d37"}

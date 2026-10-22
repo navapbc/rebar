@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"src/rebar/_commands/fsck.py","reason":"snapshot-rebuild repair path"},{"path":"src/rebar/_commands/compact.py","reason":"re-fold from full ordered log incl .retired"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783470518588270001,"uuid":"529d6926-0fc7-4faa-afac-009763c28f7f"}

@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/_engine/rebar","reason":"help wording"},{"path":"src/rebar/_engine/ticket-transition.sh","reason":"usage wording"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781066324994922000,"uuid":"1dbede92-1190-4bd2-94fd-93c502122d81"}

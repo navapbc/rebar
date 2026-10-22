@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"tests/unit/test_lock_stale_reclaim.py","reason":"table-driven malformed/unreadable owner-stamp cases (no reclamation)"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783785223938657001,"uuid":"04623667-94b9-4f06-a0c7-71a420dab956"}

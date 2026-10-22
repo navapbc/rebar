@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"infra/autolander/loop.py","reason":"fresh-Verified await + ancestor-atomic submit"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783825178743538001,"uuid":"6e197c43-63e3-404e-a4f0-38a9e3b02836"}

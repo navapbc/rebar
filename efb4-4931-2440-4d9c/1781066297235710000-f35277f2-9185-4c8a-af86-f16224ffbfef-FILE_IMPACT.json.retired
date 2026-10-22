@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/__init__.py","reason":"derive __version__ from package metadata"},{"path":"tests/interfaces/test_library.py","reason":"version-match guard test"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781066297235710000,"uuid":"f35277f2-9185-4c8a-af86-f16224ffbfef"}

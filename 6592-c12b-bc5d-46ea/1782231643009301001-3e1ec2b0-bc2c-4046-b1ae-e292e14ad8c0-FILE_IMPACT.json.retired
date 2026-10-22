@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/workflow/editor.py","reason":"library + create/edit + write-back endpoints"},{"path":"src/rebar/llm/prompts.py","reason":"write path + checkout detection"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782231643009301001,"uuid":"3e1ec2b0-bc2c-4046-b1ae-e292e14ad8c0"}

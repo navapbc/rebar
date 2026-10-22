@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"infra/gerrit/project.config","reason":"Autosubmit label"},{"path":"infra/gerrit/setup-project.sh","reason":"label ACL provisioning"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783721674960083001,"uuid":"fbd2c063-7bbc-4579-8de8-75d59eb349d0"}
