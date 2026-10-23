@@ -1,17 +1,6 @@
-"""Bound-but-absent re-emitter fix (bug 1e08-1a35-0267-4ca6).
-
-A bound local ticket whose Jira key is ABSENT from a pass's search snapshot
-(deleted, or status=Done beyond the fetcher's _DONE_RECENT_CAP window) used to
-diff every field against "" and re-emit every pass. The fix discriminates on
-membership and, for the absent case, does a bounded direct GET:
-  - 200 (alive, out-of-window) → sync the real diff, no churn,
-  - 404 (deleted)             → emit nothing; retire after GRACE consecutive 404s,
-  - transport error           → emit nothing, defer.
-
-Covers design regression tests #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11, #14.
-
-Behavioral assertions only (emitted mutations, GET call counts, retired-set).
-"""
+"""For a bound key missing from search results, use a bounded direct GET: HTTP 200 diffs
+live fields, 404 defers and retires only after grace, and transport failure defers
+without mutation."""
 
 from __future__ import annotations
 
@@ -37,11 +26,6 @@ def od() -> ModuleType:
 @pytest.fixture
 def binding_store_mod() -> ModuleType:
     return importlib.import_module("rebar.reconciler.binding_store")
-
-
-# ---------------------------------------------------------------------------
-# Stubs
-# ---------------------------------------------------------------------------
 
 
 class StubBindingStore:
@@ -116,9 +100,7 @@ def _ticket(tid: str, **over) -> dict:
     return base
 
 
-# ===========================================================================
-# #7 — _safe_get_issue HTTPError mapping
-# ===========================================================================
+# Map HTTPError.
 
 
 def test_safe_get_issue_404_maps_to_deleted(od):
@@ -151,9 +133,7 @@ def test_safe_get_issue_200_returns_fields(od):
     assert od._safe_get_issue(client, "DIG-1") == {"summary": "S"}
 
 
-# ===========================================================================
-# #1 — bound-but-absent, alive (200), divergent → update IS emitted
-# ===========================================================================
+# Alive absent key can emit updates.
 
 
 def test_absent_alive_divergent_emits_update(od):
@@ -181,9 +161,7 @@ def test_absent_alive_divergent_emits_update(od):
     assert jira_key in store.cleared  # 200 resets counter
 
 
-# ===========================================================================
-# #3 — RED anchor: bound-but-absent never diffs against {}/""
-# ===========================================================================
+# Absence needs live fields.
 
 
 def test_absent_alive_matching_emits_nothing(od):
@@ -218,9 +196,7 @@ def test_absent_alive_matching_emits_nothing(od):
     )
 
 
-# ===========================================================================
-# #2 — bound-but-absent 404 → zero mutations; retire after GRACE; no further GET
-# ===========================================================================
+# A 404 retires after grace.
 
 
 def test_absent_404_emits_nothing_and_notes_absent(od):
@@ -287,9 +263,7 @@ def test_absent_404_retires_after_grace_then_no_further_get(
     )
 
 
-# ===========================================================================
-# #9 — a single 200 resets the absence counter (no premature retirement)
-# ===========================================================================
+# A 200 resets absence.
 
 
 def test_single_200_resets_counter(od, binding_store_mod, tmp_path, monkeypatch):
@@ -330,9 +304,7 @@ def test_single_200_resets_counter(od, binding_store_mod, tmp_path, monkeypatch)
     assert not bs.is_retired(jira_key), "a 200 mid-sequence must reset the consecutive-404 counter"
 
 
-# ===========================================================================
-# #4 — present-with-empty-fields (key IN snapshot) still diffs and emits
-# ===========================================================================
+# Present empty fields still diff.
 
 
 def test_present_empty_fields_still_diffs(od):
@@ -356,9 +328,7 @@ def test_present_empty_fields_still_diffs(od):
     client.get_issue_by_rest.assert_not_called()
 
 
-# ===========================================================================
-# #5 — pending binding (jira_key=None) routes to create, never the absent guard
-# ===========================================================================
+# Pending bindings use CREATE.
 
 
 def test_pending_binding_routes_to_create(od):
@@ -378,9 +348,7 @@ def test_pending_binding_routes_to_create(od):
     client.get_issue_by_rest.assert_not_called()
 
 
-# ===========================================================================
-# #6 — recovered-this-pass binding absent from snapshot → GET 200 syncs same pass
-# ===========================================================================
+# Recovered bindings sync immediately.
 
 
 def test_recovered_this_pass_syncs(od):
@@ -401,9 +369,7 @@ def test_recovered_this_pass_syncs(od):
     assert len(result) == 1 and result[0].fields.get("summary") == "Edited locally"
 
 
-# ===========================================================================
-# #11 — 200 path issues exactly ONE network call (field + comment diff, no double-fetch)
-# ===========================================================================
+# Share one GET for fields and comments.
 
 
 def test_200_path_single_network_call(od):
@@ -441,9 +407,7 @@ def test_200_path_single_network_call(od):
     assert any("brand new local comment" in c["body"] for c in comment_muts[0].comments)
 
 
-# ===========================================================================
-# #14 — idempotency anchor: two passes over unchanged absent-alive → 0 mutations pass 2
-# ===========================================================================
+# Unchanged absent-alive keys converge.
 
 
 def test_idempotency_two_passes(od):
@@ -491,10 +455,7 @@ def test_idempotency_two_passes(od):
     assert r2 == [], "pass 2 must be a no-op (no reintroduced churn)"
 
 
-# ===========================================================================
-# #8 — rotation anti-starvation: N >> K serviced within ceil(N/K) passes;
-#      a dead key behind a saturated budget still retires.
-# ===========================================================================
+# Rotate N keys through K slots within ceil(N/K) passes; dead keys retire.
 
 
 def test_rotation_services_all_within_ceil_n_over_k(od, binding_store_mod, tmp_path, monkeypatch):
@@ -578,9 +539,7 @@ def test_dead_key_behind_saturated_budget_still_retires(
     )
 
 
-# ===========================================================================
-# #10 — _rest_issue_to_snapshot_fields parity on intersecting field VALUES
-# ===========================================================================
+# Direct-GET fields preserve snapshot values.
 
 
 def test_rest_issue_to_snapshot_fields_parity(od):
@@ -611,9 +570,7 @@ def test_rest_issue_to_snapshot_fields_parity(od):
         assert helper_out[k] == fetcher_entry[k], f"value parity mismatch on {k}"
 
 
-# ===========================================================================
-# transport error → emit nothing, defer (counter untouched)
-# ===========================================================================
+# Transport errors defer without advancing absence.
 
 
 def test_transport_error_defers_counter_untouched(od):

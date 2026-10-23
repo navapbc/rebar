@@ -364,14 +364,8 @@ def test_inbound_label_diff(inbound_differ: ModuleType) -> None:
 def test_inbound_label_diff_excludes_colon_form_rebar_id(
     inbound_differ: ModuleType,
 ) -> None:
-    """``rebar-id:<local_id>`` (colon form) must NOT appear as an inbound ADD.
-
-    Pre-fix: ``_EXCLUDED_PREFIXES`` contained only ``("rebar-id-", "imported:")``,
-    so the colon-form canonical rebar-id label written by
-    ``_apply_outbound_create`` / ``_apply_inbound_create`` was treated as a
-    Jira-only user label and emitted as an ADD on every pass — leaking the
-    bridge identifier into local tags.
-    """
+    """Exclude canonical rebar-id: labels from inbound ADD mutations; they are bridge
+    identity markers, not user tags."""
     jira_snapshot = {
         "PROJ-200": {
             "summary": "S",

@@ -1,28 +1,6 @@
-"""An issue link DELETED on the peer must be mirrored onto the local ticket (ticket 2b16).
-
-`inbound_differ._diff_links_inbound` was ADD-ONLY by construction — its docstring opened
-"Reflect Jira issuelinks into rebar relations. ADD-only." and closed "ADD-only (no REMOVE
-mutations)". It iterates the CURRENT `fields.issuelinks` and emits an add per unseen link;
-nothing walked the local `deps` looking for one whose peer counterpart had gone. So a link a
-human deletes in Jira stayed on the rebar ticket forever and no pass ever reported it.
-
-WHY THIS MODULE IS SHAPED THE WAY IT IS
----------------------------------------
-An inbound removal is a WRITE THAT DESTROYS LOCAL DATA, so the interesting assertions here are
-the ones that prove a removal is NOT emitted. `fetcher.py:588-590` states the pre-2b16 safety
-argument outright — "on any failure the enrichment is skipped (differs degrade to 'no Jira
-links' — additive ADD-only sync stays safe)" — and this change VOIDS it: the moment a REMOVE
-path exists, a truncated or failed enrichment makes every issue look link-less. This epic has
-already fixed three silent-truncation defects in this exact data path, all fail-open and all
-silent. The guard oracles (G1..G5) are therefore the ones that protect the product; the
-happy-path oracle alone is satisfied by an unconditional removal, which is a data-loss bug.
-
-Every oracle drives PRODUCTION ENTRY POINTS — `compute_inbound_mutations` and
-`_inbound_update_apply_links` — never a private helper by name. That is deliberate: it is what
-makes the pre-fix run report "no removal was emitted" rather than an `AttributeError` against a
-function that does not exist yet, and it is what makes the end-to-end cell traverse the layer
-(`apply_inbound_records.py:560-562`) where the record used to be silently discarded.
-"""
+"""Mirror a peer-deleted link only when removal is safe. Guard cases prevent a failed or
+truncated link enrichment from appearing as an empty peer set and deleting local
+data. Tests exercise production differ and applier entry points."""
 
 from __future__ import annotations
 
@@ -33,10 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
-# ---------------------------------------------------------------------------
-# Doubles
-# ---------------------------------------------------------------------------
 
 
 class _FakeBindingStore:
@@ -154,9 +128,7 @@ def _one_managed_dep() -> tuple[_FakeBindingStore, dict[str, dict[str, Any]]]:
     return bindings, {"local-a": local_a, "local-b": local_b}
 
 
-# ---------------------------------------------------------------------------
-# The bug: a managed dep whose peer link is gone must be removed
-# ---------------------------------------------------------------------------
+# Remove deps after confirmed peer deletion.
 
 
 def test_peer_deleted_link_emits_a_removal() -> None:
@@ -199,9 +171,7 @@ def test_g1_observed_but_empty_issuelinks_still_removes() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# G1 — never infer a deletion from data we did not observe
-# ---------------------------------------------------------------------------
+# G1: Unobserved data cannot prove deletion.
 
 
 def test_g1_unobserved_issuelinks_emits_no_removal() -> None:
@@ -237,14 +207,7 @@ def test_g1_non_list_issuelinks_emits_no_removal() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# The merge seam itself — the key-presence contract G1 depends on (ticket 6c0a)
-# ---------------------------------------------------------------------------
-#
-# These cells drive ``fetcher.merge_issuelinks_map`` DIRECTLY. They pin the
-# characterization taken from the inline merge BEFORE the 6c0a extraction, so a
-# behaviour change in the extraction (or any later edit to the seam) turns them
-# RED here rather than silently disarming G1 above.
+# Preserve key absence in the production merge so G1 distinguishes unread data.
 
 
 def test_merge_seam_observed_vs_unobserved_key_presence() -> None:
@@ -301,9 +264,7 @@ def test_merge_seam_characterization_pinned_before_extraction() -> None:
         assert result is snapshot, "the seam must mutate and return the SAME snapshot dict"
 
 
-# ---------------------------------------------------------------------------
-# G2 — an unbound target proves nothing
-# ---------------------------------------------------------------------------
+# G2: Unbound proves nothing.
 
 
 def test_g2_unbound_target_emits_no_removal() -> None:
@@ -322,9 +283,7 @@ def test_g2_unbound_target_emits_no_removal() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# G3 — never clobber a ref rebar does not own
-# ---------------------------------------------------------------------------
+# G3: Keep unmanaged refs.
 
 
 def test_g3_unmanaged_dep_emits_no_removal() -> None:
@@ -369,9 +328,7 @@ def test_g3_relations_with_no_peer_link_type_are_never_removed(relation: str) ->
     )
 
 
-# ---------------------------------------------------------------------------
-# G4 — never mirror a removal for a link the outbound side is creating right now
-# ---------------------------------------------------------------------------
+# G4: Preserve same-pass outbound ADD.
 
 
 def test_g4_outbound_add_this_pass_suppresses_the_removal() -> None:
@@ -441,9 +398,7 @@ def test_g4_inbound_add_suppression_is_unchanged() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Steady state, and the relation-vocabulary trap
-# ---------------------------------------------------------------------------
+# Preserve relation vocabulary.
 
 
 def test_steady_state_does_not_churn() -> None:
@@ -481,9 +436,7 @@ def test_inward_blocks_is_not_a_spurious_removal() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# End to end — the record must survive the apply layer and the dep must be GONE
-# ---------------------------------------------------------------------------
+# Verify REMOVE reaches the store.
 
 
 @pytest.fixture
@@ -541,17 +494,8 @@ def _confirm_local_deps(repo: Path, source_id: str) -> None:
 def test_end_to_end_a_peer_deleted_link_leaves_the_dep_gone(
     two_linked_tickets: tuple[Path, str, str],
 ) -> None:
-    """THE ACCEPTANCE ORACLE: differ emit -> payload -> apply -> the dep is POSITIVELY ABSENT.
-
-    A differ-boundary oracle is not sufficient here and that is the whole reason this cell
-    exists. `_inbound_update_apply_links` used to open `if entry.get("action") != "add":
-    continue` (`apply_inbound_records.py:560-562`) and call only `rebar.link`, so a removal
-    record was silently discarded — a differ-only assertion goes GREEN while the store is
-    untouched, which is exactly the silent-failure class this epic exists to end.
-
-    "The apply call did not raise" is deliberately NOT the oracle. The only thing read here is
-    whether the dep is gone from the reduced ticket.
-    """
+    """Exercise differ emission, removal payload, applier, and store projection. A
+    differ-only assertion would miss an applier that silently discards REMOVE."""
     import rebar
 
     repo, a, b = two_linked_tickets
@@ -614,9 +558,7 @@ def test_end_to_end_reapply_is_idempotent(
     )
 
 
-# ---------------------------------------------------------------------------
-# G5 — `rebar.unlink` is pair-scoped, so confirm the relation before removing
-# ---------------------------------------------------------------------------
+# G5: Check relation before pair-scoped unlink.
 
 
 def test_g5_relation_mismatch_removes_nothing_and_logs(
@@ -656,9 +598,7 @@ def test_g5_relation_mismatch_removes_nothing_and_logs(
     )
 
 
-# ---------------------------------------------------------------------------
-# e39f — a pair holding TWO relations converges when the peer drops ONE of them
-# ---------------------------------------------------------------------------
+# Dropping one peer relation retains the other.
 
 
 def _relations_of(repo: Path, source: str, target: str) -> set[str]:

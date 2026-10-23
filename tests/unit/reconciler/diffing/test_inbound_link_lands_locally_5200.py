@@ -1,20 +1,6 @@
-"""DIAGNOSIS repro: does an inbound Jira issuelink actually LAND as a local dep? (ticket 5200)
-
-The live cell ``test_inbound_link_round_trips`` reports "the inbound Jira link did not surface as
-a local dep". "Did not surface" spans three separable stages, and a count of one failure names
-none of them:
-
-  1. the DIFFER — ``inbound_differ._diff_links_inbound`` (defined in the sibling
-     ``inbound_collection_diffs.py`` and re-exported) turning a
-     Jira ``issuelinks`` entry into ``{"action": "add", "target_id", "relation"}``;
-  2. the APPLIER — ``apply_inbound_records._inbound_update_apply_links``
-     (``apply_inbound_records.py:527-560``) writing each of those through ``rebar.link``;
-  3. the STORE PROJECTION — whether the dep then reads back on the ticket the cell inspects,
-     which is the ONE the oracle actually looks at.
-
-This module drives all three against a REAL rebar store in a temp dir (no live Jira), so a red
-here localises the fault to a stage instead of to a direction.
-"""
+"""Trace an inbound Jira link through the production differ, applier, and store
+projection against a real temporary rebar store. The stage-specific assertions locate
+where a missing local dependency was lost."""
 
 from __future__ import annotations
 
@@ -106,14 +92,9 @@ def test_stage1_the_differ_emits_an_add_for_an_outward_blocks_link() -> None:
 
 
 def test_stage1_an_unbound_counterpart_is_skipped_silently() -> None:
-    """THE MECHANISM BEHIND THE LIVE FAILURE, variable 1 of 2: the counterpart is UNBOUND.
-
-    Identical to the passing case above except that ``DC-2`` has no binding. On the pass that
-    first sees a DC-side link target, that is exactly the state: the inbound differ runs at
-    ``run_differs.py:239`` and the binding walk that would adopt ``DC-2`` runs at
-    ``run_differs.py:240``, AFTER it — and nothing is applied until ``reconcile.py:454``. So the
-    link is dropped at ``inbound_differ.py:402-404`` with no mutation, no alert, and no log.
-    """
+    """When the Jira link target is not yet bound, the inbound differ runs before the
+    same-pass binding walk. This test isolates that ordering from the bound-target
+    case."""
     inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
 
     bindings = _FakeBindingStore({"DC-1": "local-a"})  # DC-2 deliberately unbound
@@ -177,9 +158,7 @@ def test_stage1_the_mirror_entry_on_the_far_end_emits_the_inverse() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Stage 2 + 3 — the applier and the projection the live oracle reads
-# ---------------------------------------------------------------------------
+# Verify the applier write and projected dependency.
 
 
 def test_stage2_the_applier_writes_the_dep_onto_the_source_ticket(

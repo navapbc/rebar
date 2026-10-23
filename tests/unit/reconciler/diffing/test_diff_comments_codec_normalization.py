@@ -1,31 +1,6 @@
-"""RED-first tests for ticket a32a: the comment dedup key must be normalized
-the way the description send value is.
-
-``outbound_comments._diff_comments`` builds its Jira-side comparison key by
-decoding whatever wire shape Jira returns (``_normalize_comment_body`` ->
-``inbound_mapper.normalize_rich_text``), but its LOCAL-side key only runs
-through ``sanitizer.fit_comment`` (truncation) — never through a codec's
-``normalize_outbound``. ``outbound_mapper.map_fields_to_remote`` protects the
-description path from exactly this asymmetry by composing
-``normalize_outbound(fit_outbound(value))`` so the sent value is its own
-round-trip fixed point; the comment path has no equivalent.
-
-Every existing dedup test (``test_outbound_differ_comment_dedup.py``,
-``test_diff_comments_adf.py``) uses a transformation applied to BOTH sides
-(ADF decode, marker strip, whitespace strip), so none of them exercise the
-cell this ticket is about: a codec whose OUTBOUND transform is not the
-identity. This file uses the real ``AdfCodec`` (Cloud's actual
-``RichTextCodec`` implementation, whose ``normalize_outbound`` rejoins soft
-wraps via ``adf.normalize_description`` — a real, non-identity transform
-already shipping in this codebase) injected into ``_diff_comments`` via its
-``codec`` parameter, so nothing here is a synthetic stand-in.
-
-Convergence is the entire point (bug 4292's DIG-5301 reached 14 duplicate
-comments from exactly this shape of bug), so every "no mutation expected"
-assertion here is a duplicate-comment regression test, and the "genuinely
-new comment" test is the counter-regression: a fix that makes the key too
-LOOSE would silently swallow real new comments.
-"""
+"""The outbound comment dedup key must match the rich-text codec's send/round-trip form.
+These tests use a non-identity AdfCodec transform that earlier
+symmetric-normalization fixtures could not detect."""
 
 from __future__ import annotations
 
@@ -119,16 +94,8 @@ def test_new_comment_under_non_identity_codec_is_still_emitted(differ, adf_codec
 def test_without_an_injected_codec_todays_baseline_behaviour_is_unchanged(
     differ, adf_codec
 ) -> None:
-    """emersed-specific-mutt flips the ``_resolve_codec`` default from the a32a
-    ``_IdentityCodec`` to the REAL Cloud ``AdfCodec`` (the DC comment-diff
-    dedup-key migration 3388 deferred to this story), so the local dedup key is
-    now normalized the way the LANDED wire is — even when no caller injects a
-    codec. The send path ADF-encodes, so Jira stores the NORMALIZED (soft-wrap
-    rejoined) form, and the un-injected diff converges against it with zero
-    mutations. (Before this story the default was identity and this asserted a
-    verbatim echo; that premise — "Cloud sends plain text, no ADF" — is exactly
-    what this story overturns.)
-    """
+    """Without an injected codec, the default Cloud AdfCodec must normalize a sent soft
+    wrap to the Jira-stored form and emit no duplicate comment."""
     jira_key = "DIG-A32A-3"
     local_raw = "first line of prose\nsoft-wrapped continuation"
     jira_stored = adf_codec.normalize_outbound(local_raw)

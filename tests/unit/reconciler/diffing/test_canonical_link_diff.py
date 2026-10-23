@@ -1,19 +1,6 @@
-"""Ticket eefd: canonical link diff behind SupportsLinks (happy path).
-
-The outbound link differ stops comparing in Jira shape. Two translations move onto the
-``SupportsLinks`` capability (adapter-side, translation only):
-
-* ``map_remote_links(remote_fields)`` -> the canonical link set: entries
-  ``(relation, remote_key, opaque_vendor_type)`` (absorbs today's ``_existing_jira_links``
-  + its direction-agnostic dedup; unknown vendor types -> ``relation=None``).
-* ``link_payload_for_relation(relation)`` -> ``(vendor_type, swap)`` (or None if unmapped).
-
-Core ``_diff_links`` then compares local ``ticket["deps"]`` against the canonical set in
-RELATION vocabulary, taking the SupportsLinks capability as its 4th argument. Emitted
-ADD/REMOVE payloads are unchanged.
-
-Happy-path oracle: the port members, and an ADD emitted with today's exact payload.
-"""
+"""The SupportsLinks port maps vendor links into canonical relations and back to wire
+payloads. These tests preserve the outbound ADD payload and relation-based
+comparison."""
 
 from __future__ import annotations
 

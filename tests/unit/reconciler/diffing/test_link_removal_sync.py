@@ -122,12 +122,8 @@ _INWARD_BLOCKS_LINK = {"id": "10002", "type": {"name": "Blocks"}, "inwardIssue":
 
 
 def test_managed_inward_blocks_removed_maps_to_depends_on(outbound_differ: ModuleType) -> None:
-    """The REMOVE path carries its OWN inward/outward direction logic (a mirror of the ADD
-    path's), pinned to live Jira: an INWARD `Blocks` (A is blocked by B) is `A depends_on B`,
-    so a managed `depends_on` unlinked locally must map back to `depends_on`, not `blocks`.
-    (Previously this fixture paired an OUTWARD Blocks with `depends_on` — the reversed
-    convention that is the sibling of the c8ed/3b86 ADD-path inversion. The absolute
-    mapping is independently pinned by test_link_direction_absolute.py.)"""
+    """An inward Blocks link means A depends_on B; removing that managed local relation
+    must map back to depends_on, preserving absolute direction."""
     store = StubBindingStore({"local-1": "PROJ-1", "local-2": "PROJ-2"})
     child = _child(managed_refs=[["depends_on", "local-2"]], deps=[])  # managed, then unlinked
     result, _ = outbound_differ.compute_outbound_mutations(
@@ -249,16 +245,8 @@ def test_update_one_applies_link_remove(batch_dispatch: ModuleType) -> None:
 
 
 def test_update_one_tolerates_acli_delete_failure(batch_dispatch: ModuleType) -> None:
-    """delete_issue_link shells out via ACLI (subprocess.CalledProcessError, NOT HTTPError).
-    A failure after the link was found in the probe must NOT unwind the pass — update_one
-    does not raise.
-
-    Ticket 5528: this case carries NO stderr, so the link's end-state is unproven and it is
-    counted FAILED, not applied. This assertion previously read ``links_applied == 1``, which
-    encoded the defect: every ACLI delete failure was scored a success, so a pass could report
-    links_applied=N having removed nothing. Idempotent-race coverage now lives in the sibling
-    test below, which supplies the 404 stderr that actually proves the link is gone.
-    """
+    """ACLI delete failures must not abort the pass. Without stderr, the link end state
+    is unproven, so count it failed rather than applied."""
     import subprocess
 
     exc = subprocess.CalledProcessError(1, ["jira", "workitem", "link", "delete"])

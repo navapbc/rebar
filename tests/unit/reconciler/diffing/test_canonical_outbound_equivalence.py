@@ -1,15 +1,6 @@
-"""Ticket 625b: canonical-shape outbound field diff — decision-for-decision equivalence.
-
-The outbound UPDATE path stops comparing in Jira shape: it canonicalizes the remote snapshot
-via the injected ``InboundMapper`` (mirroring the inbound differ) and diffs in LOCAL shape,
-mapping back to Jira shape only at the emission boundary via the injected ``OutboundMapper``.
-
-This suite pins the observable contract: for a matrix of (local, remote) inputs the NEW
-canonical path emits the SAME ``OutboundMutation.fields`` the old vendor-shape ``_diff_fields``
-emitted (golden values captured from the pre-refactor differ). It also proves the snapshot is
-canonicalized through the INJECTED inbound mapper at runtime, and that the differ names no
-vendor snapshot key.
-"""
+"""Outbound field comparison uses the injected inbound mapper to canonicalize remote
+state, then maps emitted updates back through the outbound mapper. These tests
+preserve exact pre-refactor mutations and mapper injection."""
 
 from __future__ import annotations
 

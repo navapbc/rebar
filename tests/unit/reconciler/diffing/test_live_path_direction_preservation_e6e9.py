@@ -165,16 +165,9 @@ def _ids(cases: list[tuple[Any, ...]]) -> list[str]:
 def test_remote_edit_is_suppressed_when_local_matches_baseline(
     field: str, base_val: Any, local_val: Any, remote_val: Any
 ) -> None:
-    """Pin ADR 0026's core arbitration on the LIVE path for every mirrored field: a
-    remote-side edit, with local unchanged since the baseline, must NOT be emitted.
-
-    Why it matters: emitting the field makes the inbound differ drop its own update as
-    a same-pass contradiction (inbound bidirectional suppression, bug 3bf8), so the
-    teammate's Jira-side edit never reaches the local ticket AND the stale local value
-    is pushed back over it — a silent data loss that the pass reports as convergence.
-    Four of these five fields were previously pinned only against the caller-less
-    adapter helper, so the live path could regress undetected.
-    """
+    """For each mirrored field on the live outbound path, suppress local output when
+    local equals baseline and Jira differs. Emitting it would block inbound mirroring
+    and overwrite the Jira edit."""
     baseline = _canonical(**{field: base_val})
     ticket = _ticket(**{field: local_val})
     remote = _canonical(**{field: remote_val})

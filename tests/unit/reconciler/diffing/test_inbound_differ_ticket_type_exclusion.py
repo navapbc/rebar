@@ -1,13 +1,5 @@
-"""Bug 36af: inbound differ must exclude ticket_type from field diffs.
-
-ticket_type sync is an approved exception. Outbound already honors it
-(outbound_differ does not emit ticket_type). The inbound direction was
-silently still diffing it — so a bound ticket with local 'epic' and Jira
-'bug' produced an inbound update that would corrupt the local epic.
-
-This RED test asserts inbound_differ excludes ticket_type from the
-field map, mirroring the outbound exception.
-"""
+"""Ticket type is excluded from inbound field updates as it is outbound; a bound local
+epic must not become a Jira bug through reconciliation."""
 
 from __future__ import annotations
 
@@ -153,17 +145,8 @@ def test_ticket_type_excluded_even_when_other_fields_changed(
 def test_outbound_excludes_issuetype_from_update_mutations(
     outbound_differ: ModuleType,
 ) -> None:
-    """Mirror of bug 36af on the outbound direction.
-
-    Pre-fix: outbound _diff_fields included issuetype in the field map,
-    so a bound ticket with local 'epic' vs Jira 'Bug' produced an
-    outbound update setting issuetype='Epic'. The approved sync
-    exception says ticket_type updates do NOT propagate in either
-    direction once bound.
-
-    issuetype IS still emitted at CREATE (it's a Jira-required field
-    for issue creation) — see test_outbound_create_includes_issuetype.
-    """
+    """Bound ticket updates must exclude issuetype in both directions even when local
+    and Jira types differ. CREATE still emits issuetype because Jira requires it."""
     ticket = {
         "ticket_id": "local-3",
         "title": "Same",

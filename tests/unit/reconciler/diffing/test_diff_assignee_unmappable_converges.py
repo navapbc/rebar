@@ -1,17 +1,6 @@
-"""Bug 9b94: an unmappable local assignee converges (no per-pass churn).
-
-Local tickets store assignees that may be agent identities (`claude`,
-`config-loop`) which are not Jira users. Previously the outbound differ compared
-the raw local string to Jira's (unassigned) state — a permanent mismatch — and
-re-emitted an assignee update EVERY pass; the applier then soft-failed the assign,
-Jira stayed unassigned, and the loop never converged.
-
-The fix resolves the local assignee to a Jira account. A local assignee that maps
-to NO assignable user means "desired = unassigned", so an already-unassigned Jira
-issue is a MATCH and the differ stops re-emitting. A resolvable assignee is still
-synced. With no resolver (no client / fixture path) the legacy permissive string
-match is preserved.
-"""
+"""An unresolvable local assignee means desired unassigned; an already-unassigned Jira
+issue must converge without repeated updates. Resolvable users still sync, and the
+no-resolver path keeps permissive matching."""
 
 from __future__ import annotations
 

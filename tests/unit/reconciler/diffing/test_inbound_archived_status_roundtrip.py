@@ -1,12 +1,5 @@
-"""ADR 0029 #2 — archived/deleted → Done round-trip must not oscillate (bug 444d).
-
-Child 444d adds an outbound ``archived``/``deleted`` → Jira ``Done`` transition.
-Inbound maps Jira ``Done`` → local ``closed``, so without suppression the next
-inbound pass would flip a locally-archived ticket to ``closed`` — an oscillation.
-This asserts the inbound status diff KEEPS a terminal local status when Jira is
-``Done`` (the echo of our own transition), while a genuine non-Done Jira move still
-flows. RED before the inbound_differ guard.
-"""
+"""A Jira Done echo of an outbound archived/deleted transition must not reopen or close
+the terminal local ticket; a genuine non-Done move still applies."""
 
 from __future__ import annotations
 

@@ -1,17 +1,5 @@
-"""RED tests for Gap 4: assignee permissive match (no canonical-key churn).
-
-Historical bug (bug 85a1 / Gap 4): the outbound differ compared a local
-``assignee`` string against the Jira assignee's ``displayName`` only. Local
-tickets store assignee as email, displayName, "Test", or empty depending on
-how they were created (probe vs ticket-create.sh vs Jira-mirror inbound). The bare-string
-comparison fired every pass for any non-displayName local — Phase 6
-idempotency churn AND spurious outbound updates.
-
-The fix makes the assignee comparison shape-tolerant: a local string
-matches a Jira assignee dict if it equals ANY of {emailAddress,
-accountId, displayName}. No production push is changed by this — only
-the diff is taught to recognize equivalent identities.
-"""
+"""A local assignee may match Jira emailAddress, accountId, or displayName. Comparing
+displayName alone caused repeated outbound updates for equivalent identities."""
 
 from __future__ import annotations
 

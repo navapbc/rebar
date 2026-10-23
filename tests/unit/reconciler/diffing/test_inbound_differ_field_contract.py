@@ -1,18 +1,6 @@
-"""Contract tests for inbound_differ._OUTBOUND_TO_INBOUND_FIELD.
-
-Asserts:
-  1. Every outbound field name that differs from its inbound name appears in
-     _OUTBOUND_TO_INBOUND_FIELD (at minimum: ``parent`` → ``parent_id``).
-  2. _build_outbound_context applies the map — so outbound ``parent`` mutations
-     are indexed under ``parent_id`` in the context dict, enabling the scalar
-     suppression in compute_inbound_mutations to match correctly.
-
-Per docs contract: any field whose outbound name differs from its inbound name
-MUST appear in _OUTBOUND_TO_INBOUND_FIELD.  This test is the enforcement gate.
-Canonical reference: the CONTRACT block in inbound_differ.py (cross-direction
-field-name canonicalization); consolidation into _field_contract.py is tracked
-by story a130-2b7c-429c-43d1.
-"""
+"""Outbound field names that differ inbound must map through _OUTBOUND_TO_INBOUND_FIELD.
+In particular, parent maps to parent_id so inbound echo suppression uses the same
+key."""
 
 from __future__ import annotations
 
@@ -113,14 +101,8 @@ def test_build_outbound_context_canonicalizes_parent(
 def test_outbound_to_inbound_field_contains_summary(
     inbound_differ: ModuleType,
 ) -> None:
-    """_OUTBOUND_TO_INBOUND_FIELD must map 'summary' → 'title'.
-
-    outbound_differ emits the title change under the Jira REST field name
-    'summary'; inbound_differ emits it under the local field name 'title'.
-    Bug 0702: this entry was missing, so an outbound title push did not
-    suppress the inbound re-emission of the stale Jira title — the two differs
-    oscillated on the title for bound-but-absent (out-of-window) keys.
-    """
+    """Map outbound Jira summary to local title so inbound echo suppression recognizes
+    the same field."""
     field_map = inbound_differ._OUTBOUND_TO_INBOUND_FIELD
     assert field_map.get("summary") == "title", (
         "_OUTBOUND_TO_INBOUND_FIELD['summary'] must be 'title' so the scalar "
