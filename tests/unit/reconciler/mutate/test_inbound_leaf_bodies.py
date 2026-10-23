@@ -128,11 +128,6 @@ def _read_create(tracker_dir: Path, local_id: str) -> dict:
     raise AssertionError(f"no CREATE event in {tracker_dir / local_id}")
 
 
-# ---------------------------------------------------------------------------
-# 1. inbound create
-# ---------------------------------------------------------------------------
-
-
 def test_inbound_create_writes_local_ticket(applier, mut_mod, fixture_repo):
     mutation = _make_mutation(
         mut_mod,
@@ -167,11 +162,6 @@ def test_inbound_create_via_leaves_registry(applier, mut_mod):
     """Pin the dispatch path: _LEAVES[(inbound, create)] resolves to the leaf."""
     key = (mut_mod.MutationDirection.inbound, mut_mod.MutationAction.create)
     assert applier._LEAVES[key] is applier._apply_inbound_create
-
-
-# ---------------------------------------------------------------------------
-# 2. inbound update
-# ---------------------------------------------------------------------------
 
 
 def test_inbound_update_writes_edit_event(applier, mut_mod, fixture_repo):
@@ -255,20 +245,10 @@ def test_inbound_update_status_event_uses_previous_status_not_new(applier, mut_m
         )
 
 
-# ---------------------------------------------------------------------------
-# 3. inbound delete — REMOVED (bug 3b5f)
-# ---------------------------------------------------------------------------
-# ``_apply_inbound_delete`` and its ``("inbound", "delete")`` registration are gone.
-# Its sole producer (``route_inbound_probe``) was itself unreachable, and its
-# ``create_after_hard_delete`` follow-on IS the resurrection the operator ruling
-# forbids: once an issue is deleted in Jira it must not be re-created. The
-# tombstone that enforces that lives in ``outbound_differ`` — see
-# tests/unit/reconciler/test_no_resurrection_after_confirmed_delete_3b5f.py.
+# Inbound DELETE is absent; a hard-deleted peer must not resurrect locally.
 
 
-# ---------------------------------------------------------------------------
-# 4. inbound repair_property — wires through to inbound_repair_property
-# ---------------------------------------------------------------------------
+# Route repair_property through its inbound leaf.
 
 
 def test_inbound_repair_property_invokes_client(applier, mut_mod):
@@ -285,9 +265,7 @@ def test_inbound_repair_property_invokes_client(applier, mut_mod):
     assert result.payload.get("status") == "ok"
 
 
-# ---------------------------------------------------------------------------
-# 5. inbound conflict — emits suppress_pair follow-on, files a bug
-# ---------------------------------------------------------------------------
+# Conflict suppresses the pair and files a bug.
 
 
 def test_inbound_conflict_emits_suppress_pair(applier, mut_mod, fixture_repo, monkeypatch):
@@ -499,11 +477,6 @@ def test_inbound_create_dedups_against_binding_store(applier, mut_mod, fixture_r
     )
 
 
-# ---------------------------------------------------------------------------
-# 6. Payload shape tolerance (Defect 1)
-# ---------------------------------------------------------------------------
-
-
 def test_inbound_create_accepts_flat_payload(applier, mut_mod, fixture_repo):
     """Differ emits top-level field keys (no nested 'fields' wrapper).
     _apply_inbound_create must accept both shapes.
@@ -581,11 +554,6 @@ def test_inbound_update_accepts_flat_payload(applier, mut_mod, fixture_repo):
     assert edits[-1]["data"]["fields"]["title"] == "Updated flat"
 
 
-# ---------------------------------------------------------------------------
-# 7. Complex object extraction (Defect 2)
-# ---------------------------------------------------------------------------
-
-
 def test_inbound_create_extracts_nested_jira_objects(applier, mut_mod, fixture_repo):
     """Jira REST API returns issuetype/status/priority/assignee as nested dicts."""
     mutation = _make_mutation(
@@ -646,11 +614,6 @@ def test_inbound_update_extracts_nested_jira_objects(applier, mut_mod, fixture_r
     assert fields["title"] == "Updated complex"
     assert fields["priority"] == 3
     assert fields["assignee"] == "Alice"
-
-
-# ---------------------------------------------------------------------------
-# 8. Jira-side dedup write-back (Defect 3)
-# ---------------------------------------------------------------------------
 
 
 def test_inbound_create_writes_back_jira_dedup_markers(applier, mut_mod, fixture_repo):
@@ -725,15 +688,7 @@ def test_inbound_create_no_writeback_without_client(applier, mut_mod, fixture_re
     assert result.payload["local_id"] == "jira-dig-701"
 
 
-# ---------------------------------------------------------------------------
-# 7. Ticket robe-creek-zealot — 1-pass idempotent inbound create
-#
-# _apply_inbound_create must materialise the import in the EXACT state the
-# binding-aware differs would compute for it, so the next pass nets zero
-# mutations: canonical status reverse-map (not lexicographic preimage),
-# rebar-status: annotation precedence, ADF description normalisation,
-# bridge-internal tag filtering, and bind_confirm at creation.
-# ---------------------------------------------------------------------------
+# Inbound create reaches a fixed point across status, annotation, text, tags, and binding.
 
 
 def _read_status_events(tracker_dir: Path, local_id: str) -> list[dict]:

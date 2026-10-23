@@ -1,18 +1,5 @@
-"""Ticket 625b: canonical InboundMapper output + OutboundMapper.resolve_assignee (happy path).
-
-The outbound differ moves to canonical-shape comparison. The Jira InboundMapper's output
-gains three EXACTLY-named canonical keys so the core never reads vendor snapshot shapes:
-
-* ``assignee_identity``  = {"display", "email", "account_id"}  (from Jira assignee dict)
-* ``reporter_identity``  = same fixed shape                    (from Jira reporter dict)
-* ``remote_parent_id``   = bare remote id string               (from Jira parent.key)
-
-The scalar ``assignee`` string stays for existing consumers (additive). The
-``OutboundMapper`` re-homes the assignee resolver fast-path as
-``resolve_assignee(local_val, jira_key) -> (value, authoritative, is_account_id)``.
-
-Happy-path oracle: the canonical keys and resolver contract on JiraBackend.
-"""
+"""The Jira InboundMapper exposes exact canonical identity and remote-parent keys;
+OutboundMapper resolves assignees without requiring vendor shapes in core diffing."""
 
 from __future__ import annotations
 

@@ -1,18 +1,5 @@
-"""Regression test for _direction_guard identity-vs-value bug.
-
-Bug B (discovered during e2e_field_validation_probe run on 2026-05-28):
-  The reconciler used to load mutation.py multiple times by file path (once per
-  importing module). Each load produced a distinct MutationDirection enum
-  class. The previous _direction_guard used ``is not`` (identity) to compare
-  directions, so a Mutation built under load 1 reaching a leaf imported under
-  load 2 fired DirectionMismatchError with the paradoxical message "leaf
-  expects direction=inbound, got direction=inbound".
-
-  The fix compares ``.value`` strings. Since the move to ``rebar.reconciler``
-  every importer shares the one ``rebar.reconciler.mutation`` module, so the
-  duplicate-class case no longer arises in production; the guard still
-  compares by value, which these tests pin with an equal-valued stand-in enum.
-"""
+"""The applier shares one mutation package module. Its direction guard accepts an
+equal-valued member of another Enum class, rather than requiring class identity."""
 
 from __future__ import annotations
 

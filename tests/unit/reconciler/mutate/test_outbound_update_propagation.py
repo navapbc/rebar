@@ -1,31 +1,5 @@
-"""Regression test for Bug 87e4: outbound UPDATE doesn't propagate to Jira.
-
-Bug summary:
-  After local edits to bound tickets, running the reconciler reports OK and
-  emits no errors, but the Jira issues retain their original CREATE-time
-  values. None of the local field changes propagate.
-
-Two coordinated root causes:
-  1. KEY MISMATCH — `reconcile.py` builds outbound update mutations with
-     `payload["changed_fields"]`. `applier._mutation_to_batch_dict` reads
-     `payload.get("fields", payload)`. The fallback returns the WHOLE
-     payload dict (including `comments`, `labels`, `changed_fields` keys),
-     which `update_one` then unpacks via `**fields` to
-     `client.update_issue(**fields)`. Jira silently ignores the bogus
-     `changed_fields=`, `comments=`, `labels=` kwargs and applies nothing.
-  2. NO LABELS/COMMENTS PROPAGATION — `update_one` only calls
-     `client.update_issue`. It never calls `add_label`, `remove_label`,
-     or `add_comment`. So even if the payload mapping were correct, label
-     and comment changes wouldn't propagate from the legacy batch path.
-
-Fix:
-  1. `_mutation_to_batch_dict` reads an update's fields from `changed_fields`
-     and ALSO surfaces `comments` and `labels` keys in the returned dict.
-  2. `update_one` iterates `mutation.get("labels", [])` calling
-     `add_label`/`remove_label` per action, and iterates
-     `mutation.get("comments", [])` calling `add_comment`. Uses
-     `_call_with_retry` to match existing resilience.
-"""
+"""Bound-ticket updates must propagate local changes to Jira through the batch adapter.
+Tests pin key translation, label changes, comment propagation, and the live update call."""
 
 from __future__ import annotations
 

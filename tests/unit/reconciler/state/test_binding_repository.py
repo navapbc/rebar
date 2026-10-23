@@ -1,22 +1,5 @@
-"""Direct characterization oracles for the byte-preserving ``BindingRepository``.
-
-RP-02 S1 T1 (vivacious-widish-indianabat). ``BindingRepository`` is extracted as the sole
-owner of the four binding-state files — live ``bindings.json``, retired
-``bindings-retired.json``, the ``get_rotation.json`` sidecar, and best-effort lifecycle
-alerts. This module is the DIRECT oracle for that ownership: it pins the load rules, the
-exact serialization bytes, the unconditional save boundary, and every ordered
-partial-state failure BEFORE any facade delegation happens (that is T2).
-
-The characterization source on the reviewed base is ``BindingStore._load``,
-``_load_retired``, ``_retired_entries``, ``_save_retired``, ``_alert``, ``save``,
-``_retire``, and ``get_rotation.save``. Behavior here must match those functions exactly;
-a difference is a regression, not an improvement.
-
-Deliberately NOT claimed by these tests: multi-file atomicity, a journal, an eager-load
-rewrite, deep-copied views, tickets-branch publication, or write elision. ``save()``
-remains unconditional — it always attempts rotation persistence before replacing live
-state, even with no in-memory change.
-"""
+"""BindingRepository owns four binding-state files. Characterization tests pin load rules,
+exact bytes, ordered persistence, and lifecycle alert behavior."""
 
 from __future__ import annotations
 

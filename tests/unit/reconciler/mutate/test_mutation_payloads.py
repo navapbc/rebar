@@ -13,10 +13,6 @@ import pytest
 
 from rebar.reconciler import mutation_payloads as mp
 
-# ---------------------------------------------------------------------------
-# (outbound, create)
-# ---------------------------------------------------------------------------
-
 
 def test_outbound_create_round_trips_legacy_shape():
     legacy = {
@@ -58,11 +54,6 @@ def test_outbound_create_is_a_mapping():
     assert len(typed) == 3
 
 
-# ---------------------------------------------------------------------------
-# (outbound, update)
-# ---------------------------------------------------------------------------
-
-
 def test_outbound_update_round_trips_legacy_shape():
     legacy = {
         "changed_fields": {"status": "Done"},
@@ -85,11 +76,6 @@ def test_outbound_update_rejects_unrecognized_field():
         mp.build_typed_payload("outbound", "update", {"changed_fields": {"x": 1}, "bogus": True})
 
 
-# ---------------------------------------------------------------------------
-# (outbound, delete) / (outbound, probe) — no fields at all
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("action", "cls"), [("delete", mp.OutboundDeletePayload), ("probe", mp.OutboundProbePayload)]
 )
@@ -107,11 +93,6 @@ def test_outbound_delete_and_probe_reject_any_field(action):
         mp.build_typed_payload("outbound", action, {"changed_fields": {"x": 1}})
 
 
-# ---------------------------------------------------------------------------
-# (outbound, conflict)
-# ---------------------------------------------------------------------------
-
-
 def test_outbound_conflict_round_trips_legacy_shape():
     legacy = {"reason": "ambiguous local binding", "local_id": "abc123"}
     typed = mp.build_typed_payload("outbound", "conflict", legacy)
@@ -121,11 +102,6 @@ def test_outbound_conflict_round_trips_legacy_shape():
 def test_outbound_conflict_requires_reason():
     with pytest.raises(ValueError, match="reason"):
         mp.build_typed_payload("outbound", "conflict", {})
-
-
-# ---------------------------------------------------------------------------
-# (inbound, create)
-# ---------------------------------------------------------------------------
 
 
 def test_inbound_create_round_trips_flat_legacy_shape():
@@ -142,11 +118,6 @@ def test_inbound_create_allows_empty_fields():
     (differ.py: 'the target itself is the signal') — payload may be empty."""
     typed = mp.build_typed_payload("inbound", "create", {})
     assert typed.as_legacy_dict() == {}
-
-
-# ---------------------------------------------------------------------------
-# (inbound, update)
-# ---------------------------------------------------------------------------
 
 
 def test_inbound_update_round_trips_run_differs_shape():
@@ -173,11 +144,6 @@ def test_inbound_update_rejects_unrecognized_field():
         mp.build_typed_payload("inbound", "update", {"bogus": 1})
 
 
-# ---------------------------------------------------------------------------
-# (inbound, clean_label)
-# ---------------------------------------------------------------------------
-
-
 def test_inbound_clean_label_round_trips():
     legacy = {"labels_to_remove": ["rebar-id-1", "rebar-id-2"]}
     typed = mp.build_typed_payload("inbound", "clean_label", legacy)
@@ -191,11 +157,6 @@ def test_inbound_clean_label_requires_nonempty():
         mp.InboundCleanLabelPayload(labels_to_remove=())
 
 
-# ---------------------------------------------------------------------------
-# (inbound, repair_property)
-# ---------------------------------------------------------------------------
-
-
 def test_inbound_repair_property_round_trips_invariants_shape():
     legacy = {"local_id": "abc123"}
     typed = mp.build_typed_payload("inbound", "repair_property", legacy)
@@ -205,11 +166,6 @@ def test_inbound_repair_property_round_trips_invariants_shape():
 def test_inbound_repair_property_requires_local_id():
     with pytest.raises(ValueError):
         mp.build_typed_payload("inbound", "repair_property", {})
-
-
-# ---------------------------------------------------------------------------
-# (inbound, conflict)
-# ---------------------------------------------------------------------------
 
 
 def test_inbound_conflict_round_trips_adr_decided_shape():
@@ -227,9 +183,7 @@ def test_inbound_conflict_requires_reason_and_jira_key():
         mp.build_typed_payload("inbound", "conflict", {"jira_key": "ABC-1"})
 
 
-# ---------------------------------------------------------------------------
-# Dead-by-design combinations (ADR 0028 / bug 3b5f) — not valid, not modeled.
-# ---------------------------------------------------------------------------
+# Invalid combinations remain unmodeled.
 
 
 @pytest.mark.parametrize("action", ["delete", "probe"])
@@ -247,11 +201,6 @@ def test_inbound_delete_and_probe_are_unregistered(action):
 def test_unknown_combination_raises():
     with pytest.raises(mp.UnknownMutationKindError):
         mp.build_typed_payload("outbound", "clean_label", {})
-
-
-# ---------------------------------------------------------------------------
-# as_legacy_dict() helper — typed and raw-dict payloads alike
-# ---------------------------------------------------------------------------
 
 
 def test_as_legacy_dict_helper_handles_typed_and_raw():

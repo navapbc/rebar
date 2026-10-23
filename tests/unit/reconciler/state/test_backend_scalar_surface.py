@@ -1,16 +1,5 @@
-"""Ticket 97f2: the scalar Backend-port surface (epic bbf1, ADR 0035 §(d)).
-
-The Backend facade gains vendor-neutral scalar members so the reconciler core no
-longer reaches ``adapters.jira`` for project scope / env-readiness:
-
-* ``project`` — the write/create scope with the create-time default applied
-  (Jira: ``resolve_jira_settings(project_default="DIG").project``).
-* ``query_project`` — the read/query scope WITHOUT any create-time default.
-* ``assert_env_ready()`` — raises the neutral ``BackendEnvError`` when a connection
-  essential is missing (Jira: JIRA_URL/JIRA_USER/JIRA_API_TOKEN).
-
-Happy-path oracle: the members exist and return/pass on well-formed configuration.
-"""
+"""The Backend facade supplies neutral project, query_project, and assert_env_ready
+members. Create scope may default; read scope must not inherit that default."""
 
 from __future__ import annotations
 

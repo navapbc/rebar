@@ -1,16 +1,5 @@
-"""Tests for _commit_binding_store_snapshot failure path (Finding 3).
-
-RED → GREEN specification:
-  - commit failure (mock subprocess) → returns False + ERROR logged to stderr
-    + alert appended to alert_store
-  - commit success → returns True, no alert written
-  - call site in the reconcile persist phase: on False, logs loud ERROR naming the
-    consequence (bindings at risk of clobber on next merge); does NOT abort pass
-
-These tests exercise the clobbered-bindings failure class: a silent commit failure
-followed by a ``git merge origin/tickets`` loses bindings and causes the next
-pass to see bound tickets as unbound.
-"""
+"""A binding snapshot commit failure returns false, logs an error, and writes an alert; the
+pass continues while warning that later merges could clobber bindings."""
 
 from __future__ import annotations
 
@@ -47,12 +36,8 @@ def alert_store_mod() -> ModuleType:
 def test_commit_failure_returns_false_and_logs_error(
     tmp_path: Path, pass_support_mod: ModuleType, alert_store_mod: ModuleType, capsys
 ) -> None:
-    """When git commit subprocess fails, _commit_binding_store_snapshot must
-    return False and print an ERROR message to stderr.
-
-    RED: before fix, function returned None and callers could not detect failure.
-    GREEN: function returns False on subprocess error.
-    """
+    """A binding snapshot commit failure returns False and writes an error to stderr so
+    callers can report the clobber risk."""
     # Create bindings.json so the function doesn't early-return True
     tracker_dir = tmp_path / ".tickets-tracker"
     bridge_dir = tracker_dir / ".bridge_state"

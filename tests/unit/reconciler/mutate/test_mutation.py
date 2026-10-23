@@ -1,14 +1,5 @@
-"""RED tests for reconciler/mutation.py.
-
-Tests assert behavioral contracts for:
-  - MutationDirection StrEnum (inbound, outbound)
-  - MutationAction StrEnum (create, update, delete, probe, clean_label, repair_property, conflict)
-  - Mutation frozen dataclass with __post_init__ validation
-  - clean_label and repair_property are inbound-only
-  - Mutation is hashable and immutable (frozen=True, slots=True)
-
-These tests are RED: mutation.py does not yet exist.
-"""
+"""Mutation directions and actions are string enums; a frozen, hashable Mutation validates
+legal combinations, including inbound-only clean_label and repair_property."""
 
 from __future__ import annotations
 

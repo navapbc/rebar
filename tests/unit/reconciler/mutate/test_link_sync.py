@@ -1,22 +1,5 @@
-"""Link/relationship (blocks/relates) sync — RED→GREEN for bug 3f04.
-
-Two independent root causes, both confirmed live and in code:
-
-  OUTBOUND (local → Jira): production routes through the batch path
-  (``batch_dispatch.update_one``), not the typed leaf ``_apply_outbound_update``
-  (which handles links). ``_mutation_to_batch_dict`` surfaced ``comments`` and
-  ``labels`` but OMITTED ``links``, and ``update_one`` had no link dispatch — so
-  the link entry was dropped before any ``set_relationship`` call. The pass still
-  reported ``links=1`` / ``error=None`` / ``applied`` (it counts the mutation, not
-  the link sub-op).
-
-  INBOUND (Jira → local): the snapshot never carried ``issuelinks`` — the fetcher
-  enriched ``parent`` and ``comment`` but not links — so the inbound link differ
-  (and the outbound differ's dedup) read ``jira_fields.get("issuelinks")`` and
-  always saw nothing. Same class as the inbound-comment bug 0ee6.
-
-These tests use stub clients only; no live Jira.
-"""
+"""Link synchronization must survive the production batch path and retain absolute
+inbound/outbound relation direction. These tests pin observable link writes and echoes."""
 
 from __future__ import annotations
 
@@ -120,13 +103,8 @@ def test_update_one_skips_already_present_link(batch: ModuleType) -> None:
 
 
 def test_update_one_swaps_endpoints_for_depends_on(batch: ModuleType) -> None:
-    """A depends_on dep (swap=True) must be written to Jira as "B Blocks A" (bug c8ed).
-
-    depends_on maps to ("Blocks", swap=True): "REB-1 depends_on REB-2" == "REB-2 Blocks
-    REB-1", so REB-2 is the outward/blocker side. The applier previously ignored the swap
-    and wrote "REB-1 Blocks REB-2" (inverted) — backwards Jira links + perpetual inbound
-    cycle-warning noise. It must swap --out/--in for a swap=True entry.
-    """
+    """A depends_on B means B Blocks A in Jira. The applier must swap outbound and
+    inbound endpoints for swap=True."""
     client = _RecordingClient(existing_links=[])
     mutation = _batch_dict(
         "REB-1",

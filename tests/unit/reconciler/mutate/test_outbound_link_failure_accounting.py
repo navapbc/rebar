@@ -1,39 +1,6 @@
-"""Outbound link ops must never score a failure as an applied link (ticket 5528).
-
-WHY THIS MODULE EXISTS. The outbound link-apply loop treated EVERY
-``subprocess.CalledProcessError`` from ``delete_issue_link`` as an idempotent
-concurrent-removal race and incremented ``links_applied``. That arm carried no print, so a
-failing delete left no trace anywhere except ``_run_acli``'s retry-exhausted ``ACLI stderr:``
-line — and the enclosing ``RECON: batch_outcome`` reported ``error=None`` with a nonzero
-``links_applied``.
-
-The measured consequence, from the evidence pass recorded on ticket 5528: across one failed
-Reconcile Bridge run there were 15 occurrences of ``ACLI stderr: X Error: command cancelled``,
-a summed ``links_applied`` of exactly 15 for the whole pass, and zero
-``update_one: ... failed`` lines. The correspondence held per ticket (2 cancellations ->
-``REB-1305 links_applied=2``; 1 -> ``REB-1308 links_applied=1``). Every reported link
-application in that pass was a failure wearing a success's clothes, and no link was actually
-removed. The run ids and the per-ticket tallies live on ticket 5528, which owns that history.
-
-The cause was deterministic rather than a race: ``workitem link create`` / ``link delete``
-prompt for confirmation, ``_run_acli`` spawns with ``stdin=subprocess.DEVNULL``, so the prompt
-read EOF and ACLI aborted with "command cancelled" on every pass forever. The arm's own
-"self-healing — the differ recomputes the REMOVE next pass" rationale is only true for a
-TRANSIENT failure, so it never healed.
-
-This is the bug-44de silent-divergence class, and the silent-no-op canary was structurally
-blind to it: that canary fires on ``computed > 0 and applied == 0``, and the arm inflated
-``applied`` to equal ``computed``.
-
-WHAT IS PINNED HERE. Two independent guarantees, because either alone leaves the hole open:
-  * the ACCOUNTING — only a proven-gone link counts applied; everything else counts failed and
-    is surfaced, so the canary can see it (``test_cancelled_*``, ``test_*_idempotent_*``);
-  * the ROOT CAUSE — ``--yes`` is present on both link subcommands so the prompt never
-    happens (``test_link_*_passes_yes``).
-
-DELIBERATE CHOICE. The argv assertions below spell ``--yes`` as a literal rather than
-importing any constant from the adapter, so the oracle cannot move with the code under test.
-"""
+"""A failed outbound link operation must not count as applied. These tests distinguish
+confirmed idempotent removal from unproven ACLI failures and preserve visible error
+reporting. Both link subcommands pass --yes to avoid interactive cancellation."""
 
 from __future__ import annotations
 

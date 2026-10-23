@@ -30,23 +30,8 @@ from rebar.reconciler.adapters.jira import acli_cli_ops, acli_subprocess
 POSIX_ONLY = pytest.mark.skipif(os.name != "posix", reason="process-group reaping is POSIX-only")
 
 
-# ---------------------------------------------------------------------------
-# Test-only timing windows
-# ---------------------------------------------------------------------------
-# These drive the existing module seams ``_acli_call_timeout`` /
-# ``_ACLI_GRACE_SECONDS`` / ``_ACLI_DRAIN_SECONDS``. The production defaults
-# (120s / 3s / 2s) are untouched — nothing here changes shipped behavior.
-#
-# Direction matters. A reap test needs its fake child to still be HANGING when the
-# deadline fires, and every hanging fake sleeps for an hour, so a SMALLER window
-# makes the timeout MORE certain, never less: no amount of host load can let the
-# child finish first. What a small window could break is ORDERING — three reap
-# tests assert on something the child must have completed first (a grandchild
-# pidfile, a spawn counter, flushed partial stdout). Rather than pick a window big
-# enough to out-race interpreter startup (a wall-clock bet a loaded runner
-# eventually loses), :func:`real_child` makes the parent WAIT for the child to
-# signal readiness, so the injected window is spent purely on the hang. That is
-# what makes these values load-independent rather than merely small.
+# Wait for each hanging child to signal setup before starting its short reap timer.
+# Production timeout defaults are unchanged; completed children get a larger guard.
 _REAP_CALL_TIMEOUT = 0.2
 _REAP_GRACE_SECONDS = 0.1
 _REAP_DRAIN_SECONDS = 0.1
@@ -86,14 +71,10 @@ def _wait_until_gone(pids) -> set[int]:
 
 
 # ---------------------------------------------------------------------------
-# Fake-binary programs (run as the `acli` executable)
+# Fake ACLI programs
 # ---------------------------------------------------------------------------
 
-# Every hanging fake finishes its setup by creating the file named as its LAST
-# argv element. :func:`real_child` polls for that file before handing the process
-# back to ``_run_acli`` — which measures its deadline from ``communicate()``, i.e.
-# AFTER the wrapper returns. So "the child finished setting up" is an observed
-# event, never an inference from elapsed time.
+# A readiness file confirms setup before _run_acli starts its communicate deadline.
 _SIGNAL_READY = """
 def _ready():
     import sys
@@ -240,11 +221,6 @@ def completing_child_timeout(monkeypatch):
     monkeypatch.setattr(acli_subprocess, "_acli_call_timeout", lambda: _COMPLETING_CHILD_TIMEOUT)
 
 
-# ---------------------------------------------------------------------------
-# Core: grandchild reap (the load-bearing assertion)
-# ---------------------------------------------------------------------------
-
-
 @POSIX_ONLY
 def test_grandchild_process_group_reaped(tmp_path, real_child):
     """A hung child + pipe-holding grandchild are reaped; no orphaned group remains.
@@ -280,11 +256,6 @@ def test_grandchild_process_group_reaped(tmp_path, real_child):
             with contextlib.suppress(ProcessLookupError):
                 os.kill(pid, signal.SIGKILL)
         pytest.fail(f"grandchild PID {gpid} survived the process-group reap")
-
-
-# ---------------------------------------------------------------------------
-# Retry semantics on timeout
-# ---------------------------------------------------------------------------
 
 
 @POSIX_ONLY
@@ -346,11 +317,6 @@ def test_acli_timeout_error_is_not_builtin_timeout_error():
     assert not isinstance(err, TimeoutError)
 
 
-# ---------------------------------------------------------------------------
-# Decode-on-kill + partial capture + no-fabricated-success
-# ---------------------------------------------------------------------------
-
-
 @POSIX_ONLY
 def test_truncated_utf8_does_not_crash_reap_path(real_child):
     """errors='replace' -> a truncated multibyte lead must not raise on the reap path.
@@ -404,11 +370,6 @@ def test_check_mutation_failure_not_called_on_killed_child(monkeypatch, real_chi
             retry_on_timeout=False,
         )
     assert called["n"] == 0, "_check_mutation_failure ran on a killed/timed-out child"
-
-
-# ---------------------------------------------------------------------------
-# Classification guard: each read passes True, each write defaults False
-# ---------------------------------------------------------------------------
 
 
 def _make_client():
@@ -494,9 +455,6 @@ def test_delete_routes_through_chokepoint(record_run):
     assert retry is False
 
 
-# ---------------------------------------------------------------------------
-# C4 (943f): 429 rate-limit backoff in the live _run_acli retry loop
-# ---------------------------------------------------------------------------
 import logging  # noqa: E402
 
 _FAKE_429_THEN_OK = r"""
@@ -530,12 +488,8 @@ def test_rate_limit_backoff_none_for_non_429() -> None:
 def test_run_acli_429_retries_with_rate_limit_backoff(
     tmp_path, monkeypatch, caplog, completing_child_timeout
 ) -> None:
-    """A 429 exit routes through the rate-limit backoff (honoring Retry-After), the call
-    succeeds on retry, and NO uniform 2s sleep is used (add-on, not double-sleep).
-
-    Both fake children must COMPLETE here, so the call timeout is a generous
-    hang-guard rather than the module-wide 1s this test used to inherit — that
-    ceiling was a latent flake whenever two interpreter starts exceeded a second."""
+    """A 429 retry honors Retry-After without an extra uniform sleep. Allow both fake
+    child processes time to finish so startup latency does not make the test flaky."""
     monkeypatch.setenv("FAKE_429_COUNTER", str(tmp_path / "n"))
     delays: list[float] = []
     # Patch the narrow retry-backoff SEAM, not the module-global time.sleep. The
@@ -570,11 +524,6 @@ def test_set_relationship_emits_correct_acli_flag_order(record_run):
     assert cmd[cmd.index("--in") + 1] == "FROM-1", f"--in must carry from_key (FROM-1): {cmd!r}"
 
 
-# ---------------------------------------------------------------------------
-# Ticket 2048-d289: explicit per-call timeout (operation-scoped capture)
-# ---------------------------------------------------------------------------
-
-
 @POSIX_ONLY
 def test_explicit_call_timeout_bounds_call_without_ambient_resolve(real_child, monkeypatch):
     """An explicit call_timeout bounds the subprocess wait, and the ambient
@@ -603,17 +552,8 @@ def test_non_positive_call_timeout_falls_back_to_ambient(monkeypatch):
     assert acli_subprocess._effective_call_timeout(45) == 45
 
 
-# ---------------------------------------------------------------------------
-# REB-3115 S1 T2 (AC6) — timeout cleanup passes on non-POSIX too
-# ---------------------------------------------------------------------------
 #
-# The POSIX tests above prove the process-GROUP reap (killpg). AC6 additionally
-# requires the non-POSIX fallback — a plain ``proc.kill()`` + bounded wait — to
-# reap a timed-out child. The shared reaper (``rebar._proc.reap_process_group``,
-# reached through ``acli_subprocess._reap_process_group``) branches on ``os.name``;
-# patching it to a non-"posix" value on this POSIX host drives the fallback branch
-# against a REAL hanging child. ``start_new_session`` is a POSIX-only spawn kwarg
-# but harmless here; only the reap path differs.
+# Force the shared reaper's non-POSIX branch against a real timed-out child.
 
 
 @POSIX_ONLY  # we still need a real fork()able child; only the reaper branch is forced non-POSIX

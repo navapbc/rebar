@@ -1,23 +1,5 @@
-"""Tests for Gap 1: inbound comment propagation.
-
-The design (validated against live Jira during development):
-
-1. **Outbound emits a marker token** — ``<!-- rebar:reconciler-echo -->`` is
-   appended to every outbound comment body so the inbound pass can
-   identify (and filter) our own echoes.
-2. **Inbound set-diff by Jira comment id** — local comments carry an
-   optional ``jira_comment_id`` field; the inbound differ skips any Jira
-   comment whose id is already in the local set.
-3. **ADF→text normalization** — Jira returns comment bodies as ADF dicts;
-   the differ converts via ``adf.adf_to_text`` so the marker filter works
-   on plain text.
-4. **Emit add mutations carrying jira_comment_id** — the applier writes
-   the body locally AND persists the binding so future passes recognise
-   the comment as already-mirrored.
-
-These tests assert each behavior in isolation. End-to-end probe coverage
-lands separately when the applier-side write path is wired.
-"""
+"""Inbound comment sync filters outbound marker echoes, deduplicates by Jira comment ID,
+and converts ADF bodies to local text before emitting mutations."""
 
 from __future__ import annotations
 

@@ -1,16 +1,6 @@
-"""C3 (task 2711) — the ref-lock backend wired into the advisory-lock API.
-
-Covers:
-  * lock_backend=ref: acquire_pass_lock returns an oid and writes refs/reconciler/lock
-    (NOT a .reconciler-* file on the tickets branch); release_pass_lock(oid) tears it down;
-  * a double-acquire raises ReconcileLockError (convergence — single winner);
-  * check_phase_gate reads the refs/reconciler/gate blob (set_gate/read_gate) and blocks
-    a higher mode;
-  * a crashed pass (acquired, never released) is reclaimable after its lease via steal;
-  * the _Heartbeat daemon sets lock_lost when renew raises LeaseLostError, and the main
-    abort-check closure then raises ReconcileLockLost;
-  * applier.apply invokes abort_check at its per-mutation checkpoint and propagates the abort.
-"""
+"""The ref-backed lock admits one owner, checks the phase gate, and reclaims crashed
+holders. Heartbeat LeaseLostError sets lock_lost; the abort check raises
+ReconcileLockLost and propagates through the applier."""
 
 from __future__ import annotations
 

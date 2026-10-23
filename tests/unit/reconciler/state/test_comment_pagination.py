@@ -1,20 +1,5 @@
-"""Comment pagination: get_comments must fetch ALL pages (bug 1f3d / epic 58b0 P1).
-
-``get_comments`` ran ``acli … comment list --key K --json`` with NO ``--paginate``,
-so ACLI returned only the FIRST PAGE (default ``--limit 50``, ``--order +created`` —
-the 50 OLDEST comments) despite both docstrings claiming "Get all comments". The
-outbound comment dedup then re-posted every comment beyond page 1 on every pass,
-inflating 13 Jira issues to Jira's 5000-comment HARD cap. Root cause proven LIVE on
-REB-155: the response was ``{isLast:false, maxResults:50, startAt:0, total:5000}`` —
-50 of 5000 returned.
-
-These pin BOTH halves of the fix against the REAL ``--paginate`` output shape:
-  1. the argv includes ``--paginate`` (both get_comments call sites); and
-  2. the parser flattens ACLI's CONCATENATED per-page objects. Live-verified: a
-     5000-comment issue yields ~101 back-to-back ``{"comments": [...], "isLast": …}``
-     objects — a single ``json.loads`` raises "Extra data" on page 2 and silently
-     drops the rest.
-"""
+"""Both Jira comment call sites pass --paginate and flatten concatenated per-page JSON
+objects. Missing later pages makes outbound dedup repost comments."""
 
 from __future__ import annotations
 

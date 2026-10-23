@@ -1,26 +1,5 @@
-"""Axis 2 — over-length comment length guard + truncation-aware convergence.
-
-Bug 6afc-20ee-84e5-4dd5. Jira Cloud's comment body limit is 32,767 chars.
-``acli ... comment create`` exits 0 even when Jira rejects an over-length body,
-so the add fails silently and the differ re-emits the comment on every pass
-(the outbound comment-sync loop).
-
-The fix has two halves that MUST share one truncation function:
-
-  (send path) acli.add_comment truncates the body so it lands; and
-  (differ path) outbound_differ._diff_comments truncates the expected local body
-    BEFORE the membership test so the previously-truncated-then-landed Jira body
-    matches and the diff stops re-emitting.
-
-Hard constraint: the truncated body is NEVER written back to the local store —
-the local comment keeps its FULL untruncated body.
-
-This module exercises OBSERVABLE behaviour:
-  - the body actually handed to ACLI is within the 32,767-char limit;
-  - a second differ pass over the resulting Jira state emits ZERO comment adds
-    (convergence);
-  - the local ticket's comment still holds the full untruncated body.
-"""
+"""Sending and diffing over-length comments must share one fitter so the landed Jira body
+matches the next-pass dedup key while the local full body remains untruncated."""
 
 from __future__ import annotations
 
@@ -125,17 +104,8 @@ def test_oversize_comment_converges_over_two_passes(
     emitted = comment_mutations_1[0].comments
     assert len(emitted) == 1
     emitted_body = emitted[0]["body"]
-    # The applier hands the emitted (decorated) body to add_comment, which fits it
-    # before it lands. Reproduce that send-path transform by calling exactly what
-    # ``acli_cli_ops.add_comment`` calls, so this model cannot drift from it.
-    #
-    # Bug e339-9709-15fe-419a: this used to model the landed body as
-    # ``comment_limits.truncate_comment_body(emitted_body)``. That stopped being
-    # the send path under `emersed-specific-mutt`, which moved Cloud onto
-    # ``fit_preserving_marker(body, AdfCodec.fit_outbound)`` — a SERIALIZED-ADF
-    # measure that also reserves budget for the marker. Modelling the superseded
-    # helper is why this convergence test stayed green while live convergence was
-    # broken, so the model is now taken from the real send path.
+    # Model the landed decorated body with the Cloud send path's serialized-ADF
+    # fitter and marker budget. Plain truncation would falsely pass convergence.
     from rebar.reconciler.adapters.jira.rich_text_codec import AdfCodec
     from rebar.reconciler.adapters.jira_family.rich_text import cutover_clients
     from rebar.reconciler.outbound_comments import fit_preserving_marker

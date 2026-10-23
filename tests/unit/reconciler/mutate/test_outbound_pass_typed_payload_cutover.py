@@ -1,17 +1,5 @@
-"""Production-flip regression for single-vast-roan / ADR 0107's "Cut" step.
-
-Before this story, ``outbound_pass._run_differs_outbound`` converted each
-``OutboundMutation`` into a typed ``Mutation`` whose ``.payload`` was a raw
-dict (top-level-spread for create, ``changed_fields``/``comments``/``labels``
-keys for update, ``{}`` for delete) — the ambiguous shape
-``batch_dispatch._mutation_to_batch_dict`` had to runtime-sniff. This test
-pins the POST-cutover behavior: the producer now constructs one of the typed
-``mutation_payloads`` dataclasses directly, so the payload shape is
-structurally unambiguous before it ever reaches dispatch.
-
-Confirmed RED against the pre-cutover code (payload was a plain ``dict``, so
-every ``isinstance(..., OutboundXPayload)`` assertion below failed).
-"""
+"""Outbound mutations now carry typed payloads through the production pass. These tests
+reject the former raw-dict shape and preserve create, update, and delete interpretation."""
 
 from __future__ import annotations
 
