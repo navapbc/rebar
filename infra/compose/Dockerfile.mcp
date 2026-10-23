@@ -1,27 +1,14 @@
 # syntax=docker/dockerfile:1
-# ---------------------------------------------------------------------------
-# rebar MCP HTTP transport service image (ADR deft-evolutive-mosasaur /
-# docs/adr/0104-mcp-on-box.md; story cibophobic-holohedral-esok).
-#
-# Builds `rebar-mcp` speaking the Streamable-HTTP transport. The build context is the
-# REPO ROOT (like Dockerfile.opcert / Dockerfile.reviewbot; see docker-compose.yml
-# build.context), so the whole package is available to the locked install.
-#
-# python:3.12-slim is Debian bookworm, whose `openssh-client` is OpenSSH 9.x —
-# comfortably >= 8.9, the floor the op-cert SSHSIG signer requires: the certified MCP
-# tools (review_plan/verify_completion) mint op-certs via `ssh-keygen -Y sign`. The RUN
-# below FAILS THE BUILD if the installed ssh-keygen is older than 8.9, so the
-# requirement can never silently regress (mirrors Dockerfile.opcert).
-# ---------------------------------------------------------------------------
+# MCP serves Streamable HTTP from a locked repository-root build.
+# The certified gates sign SSHSIG with OpenSSH 8.9 or later. The build
+# asserts that floor.
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Runtime deps:
-#  - git: rebar's engine shells out to git for the event store + the authoritative fetch.
-#  - openssh-client (OpenSSH >= 8.9): the certified tools sign op-certs via `ssh-keygen -Y sign`.
-#  - ca-certificates: TLS to the review/tickets remotes.
+# Git backs the ticket store. OpenSSH signs opcerts. CA roots secure
+# the review and tickets remotes.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
@@ -30,19 +17,9 @@ RUN apt-get update \
     && awk -v v="$ver" 'BEGIN { split(v, p, "."); if (p[1] < 8 || (p[1] == 8 && p[2] < 9)) exit 1 }' \
     || { echo "ERROR: OpenSSH >= 8.9 is required (op-cert SSHSIG signing)" >&2; exit 1; }
 
-# ---------------------------------------------------------------------------
-# acli (Atlassian CLI) — the Jira-MUTATING bridge transport shells out to it: the
-# reconciler spawns a bare `acli` subprocess (adapters/jira/acli_subprocess.py,
-# `_DEFAULT_ACLI_CMD = ["acli"]`; ADR 0083). WITHOUT it on PATH every mutating bridge op
-# (`bridge_check_access`, `reconcile`) dies at the transport with
-# `[Errno 2] No such file or directory: 'acli'` (bug royalistic-gorgeable-norwayrat).
-#
-# Provisioned exactly the way CI pins it (.github/workflows/external-integration.yml, the
-# ACLI_VERSION/ACLI_SHA256 repo variables) and the way docs/jira-sync-setup.md documents:
-# an explicit version (NEVER floating "latest") + a sha256 checksum. Arch-aware because
-# this image runs on the AL2023 **arm64** box (docker-compose.yml) while CI is amd64 — a
-# single-arch pin would ship a binary that cannot exec on the box. curl is used only for
-# this download and PURGED in the same layer, so the runtime image stays lean.
+# Pin ACLI and its architecture-specific checksum like CI. The Jira
+# bridge shells out to acli for writes. Install arm64 on the AL2023 host
+# and purge curl after download.
 ARG ACLI_VERSION=1.3.19-stable
 ARG ACLI_SHA256_AMD64=f29fa8b7f01710053c2f4e07723501ebfe448672b669d32d83e961686d383a6d
 ARG ACLI_SHA256_ARM64=72972e74fa9036c5b40175570234a2e79559776c06a3aa29f632a39c7d3674da
@@ -70,28 +47,11 @@ RUN case "${ACLI_VERSION}" in \
 
 WORKDIR /app
 
-# Install THROUGH the committed uv.lock (same verified dependency set as CI/local dev):
-#  - agents: the rebar.llm gate runtime the certified tools drive.
-#  - mcp: the FastMCP server + Streamable-HTTP transport (uvicorn) + pyjwt.
-#  - bedrock: the provider package for the model this deployment is CONFIGURED to use.
-#    `[agents]` is `pydantic-ai-slim[anthropic,retries,duckduckgo]` and has never carried
-#    Bedrock; `[bedrock]` is a deliberately separate opt-in extra so boto3 stays out of the
-#    lean default install (ticket sporadic-bratty-porcupine). rebar.toml pins the model to
-#    `bedrock:us.anthropic.claude-*`, so WITHOUT this extra the container starts clean and
-#    every certified LLM tool fails at gate time with "the optional bedrock provider package
-#    is not installed" — returning an unsigned INDETERMINATE and minting no op-cert (bug
-#    d43e-c24f-dd39-44e9). `--no-dev` excludes the `[dev]` group that supplies boto3 locally
-#    and masked this. The coupling is guarded by tests/unit/test_mcp_on_box_infra.py.
-# Secrets (the static bearer tokens file, the op-cert signing key) are materialized
-# OUTSIDE the app (avians' fetch-secrets slice) and bind-mounted in — the app runtime
-# fetches no SSM parameters and holds no AWS key material of its own. It DOES now carry
-# boto3 (via the bedrock extra above) and DOES call AWS, but only bedrock:InvokeModel,
-# authenticated from the ambient instance-role credential chain — rebar manages no key.
-# The tag MUST equal [tool.uv] required-version in pyproject.toml: uv reads that key itself
-# and refuses to run on a mismatch. `:latest` here was a time bomb — it fired the moment
-# upstream published 0.12.9 against the 0.12.7 pin and took every image build down
-# [rebar:febd-6b13-1976-43be]. scripts/check_uv_pin.py (run by `make lint`) fails the build
-# if this tag ever drifts from pyproject.toml, so the two cannot silently diverge.
+# Install agents, MCP, and Bedrock from uv.lock. The separate Bedrock
+# extra supplies the configured provider. Without it certified LLM gates
+# cannot mint opcerts. Secrets and signing keys arrive through mounts.
+# Bedrock uses the instance role, not an app-managed AWS key. Keep the uv
+# image tag at pyproject.toml's required version. check_uv_pin enforces it.
 COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv
 COPY . /app
 RUN uv sync --locked --no-dev --extra agents --extra mcp --extra bedrock
@@ -104,51 +64,21 @@ ENV REBAR_MCP_TRANSPORT=http \
     REBAR_MCP_HTTP_PORT=8091
 EXPOSE 8091
 
-# Liveness: hit the loopback /health endpoint (unauthenticated custom route — outside
-# the auth + DNS-rebinding middleware, so no bearer / Host allowlist entry is needed).
-# Uses python (already present) rather than curl to avoid an extra apt dependency.
+# Probe unauthenticated loopback /health with the installed Python.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=4).status==200 else 1)"
 
-# ---------------------------------------------------------------------------
-# Ticket-store provisioning entrypoint (mirrors Dockerfile.reviewbot's data-capture
-# entrypoint, story limestone-unethical-zebrafinch).
-#
-# The MCP tools read AND WRITE the rebar ticket store, and nothing else in the image or
-# the compose service populates one: `.dockerignore` excludes `.tickets-tracker` (and
-# `.git`), so the store can never be baked in. With no tracker dir configured the path
-# resolved to the WORKDIR and every tool failed "/app/.tickets-tracker not found".
-#
-# Before the server starts, materialize a PERSISTENT, FULL READ-WRITE tracker on the
-# mounted volume:
-#   1. Configure a PER-URL (not --global) git credential helper for the tickets remote that
-#      echoes username=x-access-token / password=$MCP_TICKETS_PAT — so the fine-grained
-#      contents:write PAT never lands on disk or inside a remote URL.
-#   2. Clone the `tickets` branch ONCE into $REBAR_TRACKER_DIR (single-branch), so writes
-#      accumulate + auto-push instead of living in an ephemeral dir.
-#   3. Converge that clone into a WRITABLE rebar store via the SHARED ensure script
-#      (repo-local git identity + the git-ignored `.env-id` store marker, through rebar's
-#      idempotent ensure-registry). Reused, not forked, from the review-bot.
-# FAILURE POSTURE IS SOFT: no PAT, or a failed clone/ensure, must NOT stop the container
-# booting — the live clone is a DEPLOY-STEP CANARY (it needs the real SSM PAT + a running
-# container), so it is not exercised by the in-repo unit tests.
-#   4. Clone `main` BLOBLESS + single-branch into $MCP_CODE_DIR and point REBAR_ROOT at it,
-#      so the attested LLM gates have an object database to resolve `origin/main` against.
-#      `.dockerignore` excludes `.git` and this image is `COPY . /app`, so /app is a source
-#      copy with no object DB — without this every `source=attested` gate failed with
-#      "cannot resolve ref 'origin/main' to a commit in '.'" and no attestation could be
-#      earned through the deployed server (ADR 0104 §3 designs it to mint both op-cert kinds).
-#      Blobless because a full clone of this repository is prohibitively large and the
-#      snapshot machinery fetches what it needs on demand.
+# Entrypoint provisions a persistent writable tickets clone from the
+# tickets branch. Its URL-scoped credential keeps the PAT off disk and out
+# of remote URLs. The shared ensure script adds identity and store marker.
+# A missing PAT or failed clone does not block server startup.
+# It also creates a blobless main clone for attested gate refs because the
+# image source copy has no Git object database.
 ENV REBAR_TRACKER_DIR=/var/gerrit/site/mcp-tickets \
     MCP_CODE_DIR=/var/gerrit/site/mcp-code \
     REBAR_ROOT=/var/gerrit/site/mcp-code \
     MCP_TICKETS_URL=https://github.com/navapbc/rebar.git
-# The entrypoint is a REAL FILE (infra/scripts/mcp-entrypoint.sh), installed onto PATH the
-# same way Dockerfile.reviewbot installs reviewbot-ensure-tickets.sh. It used to be echoed
-# into existence inside this RUN block, which made it unexecutable outside a container and
-# so untestable — the only available assertions were greps over this Dockerfile's source.
-# As a file it is driven directly by tests/unit/test_mcp_entrypoint_provisioning.py.
+# Install the tested entrypoint file on PATH, then start MCP over HTTP.
 RUN install -m 0755 /app/infra/scripts/mcp-entrypoint.sh /usr/local/bin/mcp-entrypoint.sh
 
 # Boot the MCP server. Transport is HTTP via the env above (main() -> run_mcp).

@@ -23,7 +23,7 @@ _EPIC_FIELD_ID = "customfield_10008"
 class _FakeClient:
     """Serve issue search and Epic Link metadata discovery independently.
 
-    ``fields_ok`` models endpoint failure; ``has_epic_link`` models a successful field
+    ``fields_ok`` models endpoint failure. ``has_epic_link`` models a successful field
     list without an Epic Link entry.
     """
 

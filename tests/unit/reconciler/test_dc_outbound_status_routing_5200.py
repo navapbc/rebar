@@ -2,9 +2,9 @@
 
 The shared dispatcher passes ``status`` to ``update_issue``. Unlike an editable field,
 status must be removed from that payload and routed through
-``transitions.route_status_to_transition``; destination-name resolution alone does not
+``transitions.route_status_to_transition``. Destination-name resolution alone does not
 fix this transport boundary. Tests also preserve co-submitted editable fields, soften
-only Jira's illegal-from-here transition responses, and continue surfacing real outages.
+only Jira's illegal-from-here transition responses, and continue surfacing service outages.
 """
 
 from __future__ import annotations

@@ -1,11 +1,11 @@
 """Pin Data Center's empty-assignee vendor contract (bug 751e).
 
 The differ supplies ``assignee=""``, but ``jira==3.10.5`` uses ``None`` for
-unassigned. ``-1`` and ``"-1"`` select the automatic project assignee; ``""`` performs
+unassigned. ``-1`` and ``"-1"`` select the automatic project assignee. ``""`` performs
 user search and may fail or choose an arbitrary user. The transport must therefore map
 empty input to ``None``. The default suite omits the optional Jira package, so the fake
 reproduces its passthrough and search fallback. Assertions inspect the resulting assignee
-field—absence of an exception cannot detect the guarded silent failure.
+field. Absence of an exception cannot detect the guarded silent failure.
 """
 
 from __future__ import annotations

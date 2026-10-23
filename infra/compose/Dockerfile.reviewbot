@@ -1,26 +1,7 @@
 # syntax=docker/dockerfile:1
-# ---------------------------------------------------------------------------
-# rebar review-bot image (epic d251 / story S2).
-#
-# Builds the FastAPI webhook receiver (src/rebar/review_bot/app.py). The build
-# context is the REPO ROOT (see docker-compose.yml: build.context: ../..), so the
-# whole package is available to `pip install .`.
-#
-# .dockerignore NOTE: there is no infra/compose/.dockerignore here because the build
-# context is the repo root, so a context-root `.dockerignore` (at the repo top) is
-# what Docker honors. To keep the build context lean and avoid leaking secrets, add
-# (or confirm) these entries in the REPO-ROOT .dockerignore:
-#     .git
-#     .venv
-#     .tickets-tracker
-#     infra/compose/.env        <- the ephemeral SSM-sourced secrets file (0600)
-#     **/__pycache__
-#     dist/  build/  *.egg-info
-# (The .env is also git-ignored; excluding it from the build context as well keeps
-# secrets out of image layers.)
-#
-# python:3.12-slim is multi-arch and resolves to arm64 on the t4g (Graviton) box.
-# ---------------------------------------------------------------------------
+# Review-bot webhook receiver built from the repository root.
+# The root .dockerignore excludes Git, virtualenvs, tracker data, and
+# SSM-sourced .env from the image context. The Python base supports arm64.
 FROM python:3.12-slim
 
 # Keep Python lean + predictable in a container.
@@ -29,21 +10,15 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# git is needed at runtime: rebar's engine shells out to git for the event store.
-# curl + ca-certificates: fetch the gitleaks release binary below.
-# openssh-client is needed at runtime for AUTHORSHIP SIGNING (bug beb1): rebar signs each
-# event with SSHSIG via `ssh-keygen -Y sign` (rebar.attest.sshsig), which requires OpenSSH
-# >= 8.9. Without it `sign_event_authorship` raises SshKeygenUnavailable, `_seam` catches it
-# and writes the event UNSIGNED — so the bot silently produced 8880 unsigned events. Debian
-# bookworm (python:3.12-slim) ships OpenSSH 9.2, which satisfies the floor.
+# Git backs the store. OpenSSH 8.9 or later signs event authorship.
+# Without it, the review-bot could write unsigned events. CA roots
+# secure the scanner installer's HTTPS download.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git curl ca-certificates openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Security scanners for the code-review gate's WS5 fail-CLOSED detectors (epic b744 / WS5).
-# The scanner contract is locked in infra/compose/review-scanners.lock.json and installed
-# through the shared provisioner: no latest-release lookup, no fictional Semgrep artifact hash,
-# and no unpinned pip install. The deployed review-bot image is the Graviton (linux/arm64) lane.
+# Install the locked offline scanners for fail-closed code review.
+# The deployment lane is linux/arm64.
 WORKDIR /app
 COPY scripts/install_review_scanners.py /app/scripts/install_review_scanners.py
 COPY infra/compose/review-scanners.lock.json /app/infra/compose/review-scanners.lock.json
@@ -57,54 +32,17 @@ ENV SEMGREP_SEND_METRICS=off \
     SEMGREP_ENABLE_VERSION_CHECK=0
 ENV PATH="/opt/review-scanners/bin:/opt/review-scanners/semgrep-venv/bin:$PATH"
 
-# Copy the whole repo (the build context is the repo root) and install the package
-# with the agents + reviewbot + bedrock extras THROUGH the committed uv.lock (ticket ce5d):
-#   - reviewbot -> fastapi + uvicorn[standard] (the ASGI server)
-#   - agents    -> the rebar.llm runtime the review kernel uses (S4b will exercise it).
-#       This is ALSO what puts the LOCAL web-search backend (`pydantic-ai-slim[duckduckgo]`
-#       -> `ddgs`) in this image: plan-review criterion T1 is BLOCKING and its routing
-#       declares web access, which rebar guarantees on every provider, and Bedrock — this
-#       image's provider — is MEASURED unable to carry the server-side tool, so the local
-#       backend is the ONLY route here (bug 129e). It rides inside `agents` on purpose
-#       rather than as a separate `--extra` line, so no deployment can install the agents
-#       runtime and forget it; the capability construction raises at gate time if it is
-#       absent. Do not narrow the `agents` extra without checking that.
-#   - bedrock   -> pydantic-ai-slim[bedrock], the dependency of the AWS Bedrock provider
-#       that rebar.llm.bedrock_model.build_bedrock_provider imports lazily
-#       (`pydantic_ai.providers.bedrock`) once this container's model-class slots point at
-#       Bedrock (story eb6e).
-#
-#       DECLARED FOR EXPLICITNESS, NOT TO FIX A MISSING IMPORT. That import already
-#       succeeds in this image without this extra, and the reason is worth writing down:
-#       `pydantic_ai/providers/bedrock.py` ships in the BASE pydantic-ai-slim wheel, and
-#       pydantic-ai-slim's own `bedrock` extra contributes only boto3 — which this image
-#       already installs via the `reviewbot` extra above (`reviewbot = [..., "boto3"]`),
-#       at the same version. So the Bedrock provider's dependency is satisfied today only
-#       INCIDENTALLY, by an extra that does not exist for that purpose.
-#
-#       Naming `bedrock` makes the dependency INTENTIONAL and lock-enforced. Without it,
-#       dropping boto3 from the `reviewbot` extra — or pydantic-ai-slim later adding a
-#       bedrock-extra dependency beyond boto3 — would break the provider at gate time in
-#       production, where the cutover ships with NO cross-provider fallback by design.
-#       The declaration is what makes that class of accident impossible rather than latent.
-# `uv sync --locked` refuses a drifted lock, so the image always runs the same
-# verified-importable dependency set as CI and local dev. The project venv lives at
-# /app/.venv; prepending it to PATH replaces the old system-site `pip install .`.
-# The tag MUST equal [tool.uv] required-version in pyproject.toml: uv reads that key itself
-# and refuses to run on a mismatch. `:latest` here was a time bomb — it fired the moment
-# upstream published 0.12.9 against the 0.12.7 pin and took every image build down
-# [rebar:febd-6b13-1976-43be]. scripts/check_uv_pin.py (run by `make lint`) fails the build
-# if this tag ever drifts from pyproject.toml, so the two cannot silently diverge.
+# Install agents, reviewbot, and Bedrock from uv.lock. The agents
+# extra includes local web search for blocking plan reviews. The Bedrock
+# provider currently imports through reviewbot's boto3 dependency, but
+# declaring its own extra keeps the dependency locked if reviewbot changes.
+# Keep the uv image tag at pyproject.toml's required version.
 COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv
 COPY . /app
 RUN uv sync --locked --no-dev --extra agents --extra reviewbot --extra bedrock
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Install the tickets-store ensure helper (bug desirous-judicial-hogget / d220) onto PATH
-# so the entrypoint can converge a freshly-cloned single-branch `tickets` worktree into a
-# writable rebar store on every boot. A fresh single-branch clone lacks a git identity and
-# the git-ignored `.env-id` store marker, so writes would fail "ticket system not
-# initialized" and emit_code_review_artifact would silently swallow it. Copied from /app.
+# Install the shared tickets-store ensure helper for boot convergence.
 RUN install -m 0755 /app/infra/scripts/reviewbot-ensure-tickets.sh /usr/local/bin/reviewbot-ensure-tickets.sh
 
 # The receiver port is single-sourced from the .env (REVIEW_BOT_PORT). The default
@@ -112,20 +50,10 @@ RUN install -m 0755 /app/infra/scripts/reviewbot-ensure-tickets.sh /usr/local/bi
 ENV REVIEW_BOT_PORT=8000
 EXPOSE 8000
 
-# ---------------------------------------------------------------------------
-# Data-capture entrypoint (epic foliaged-merry-collie / story limestone-unethical-zebrafinch).
-#
-# Before the ASGI app starts, wire the reviewbot to PUSH the code_review artifact ticket events
-# it emits to the shared tickets branch:
-#   1. Configure a PER-URL (not --global) git credential helper for the tickets remote that echoes
-#      username=x-access-token / password=$REVIEWBOT_TICKETS_PAT — so the fine-grained
-#      contents:write PAT never lands on disk or inside a remote URL.
-#   2. Materialize a PERSISTENT tickets worktree ONCE (a clone of the `tickets` branch onto the
-#      mounted volume) so artifact writes accumulate + auto-push (REBAR_SYNC_PUSH=always) instead
-#      of living in an ephemeral /tmp dir.
-# Everything is a no-op when REVIEWBOT_TICKETS_PAT is unset (the container still boots + reviews;
-# only the artifact push is inert). The live push is a DEPLOY-STEP CANARY — it needs the real SSM
-# PAT + a running container, so it is NOT exercised by the in-repo unit tests.
+# Data-capture entrypoint.
+# The entrypoint clones a persistent tickets branch and configures a
+# URL-scoped PAT helper so artifact events can auto-push. Without a PAT,
+# reviews still boot while artifact push stays disabled.
 ENV REVIEWBOT_TICKETS_DIR=/var/gerrit/site/reviewbot-tickets \
     REVIEWBOT_TICKETS_URL=https://github.com/navapbc/rebar.git
 RUN set -eux; \
@@ -150,8 +78,6 @@ RUN set -eux; \
     } > /usr/local/bin/reviewbot-entrypoint.sh; \
     chmod +x /usr/local/bin/reviewbot-entrypoint.sh
 
-# Run the ASGI app. Host 0.0.0.0 so the published container port is reachable from
-# the host's nginx. Port is fixed to 8000 inside the container; the host-side port
-# mapping (and nginx upstream) is what REVIEW_BOT_PORT drives in docker-compose.yml.
+# Run uvicorn on container 8000 behind nginx's published host port.
 ENTRYPOINT ["/usr/local/bin/reviewbot-entrypoint.sh"]
 CMD ["uvicorn", "rebar.review_bot.app:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,18 +1,8 @@
-"""``BindingStore.unbind()`` must clear the reverse index on its own authority.
+"""BindingStore.unbind must clear both indexes independently (bug 874a).
 
-Bug 874a (vinifera-farflung-nyala). ``unbind()`` popped the forward entry
-unconditionally but popped the reverse entry ONLY when the forward entry still
-carried a ``jira_key`` — making cleanup of index B conditional on index A, which
-it had just destroyed. ``_retire()`` is the correct model: it pops both indexes
-unconditionally.
-
-The leaked reverse key is not cosmetic: ``rebar bridge fsck`` reports it forever
-as ``store_integrity`` / kind ``reverse_missing_forward``, and until this fix no
-supported surface could remove it (the 13 REB-410..REB-422 orphans repaired under
-nonliteral-spangly-fly had to reach into ``BindingStore._data``).
-
-Follows the reconciler test-tree loader convention (spec_from_file_location).
-"""
+A missing jira_key or forward entry must not strand a reverse key. The public
+unbind path must remove reverse_missing_forward residue without disturbing
+other bindings."""
 
 from __future__ import annotations
 
@@ -30,12 +20,7 @@ def _store(tmp_path: Path) -> BindingStore:
 
 
 def test_unbind_clears_reverse_when_forward_entry_lost_its_jira_key(tmp_path):
-    """RED for 874a: a forward entry without a ``jira_key`` must not strand reverse.
-
-    This is the exact shape of the realised fault — ``reverse[K] = L`` with no
-    usable ``jira_key`` on ``bindings[L]`` to look K up by. Before the fix the
-    reverse pop was skipped entirely and K survived ``unbind()`` forever.
-    """
+    """Unbind a reverse key even when its forward binding has lost jira_key."""
     store = _store(tmp_path)
     store.bind_confirm("local-1", "REB-410")
     # Strip the forward jira_key, leaving reverse[REB-410] -> local-1 intact.

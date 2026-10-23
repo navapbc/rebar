@@ -2,7 +2,7 @@
 
 Default ``search_issues`` returns only 50 items, making later links, comments, or parents
 silently invisible. ``get_issuelinks_map``, ``get_comment_map``, and ``get_parent_map``
-must all traverse the shared pager; a structural census prevents a new direct caller.
+must all traverse the shared pager. A structural census prevents a new direct caller.
 The fake server caps every page below the requested size, matching
 ``jira.search.views.default.max``, so a short page cannot be mistaken for exhaustion.
 """
@@ -302,12 +302,12 @@ def test_all_three_whole_project_readers_exist_and_page(method: str) -> None:
     assert len(result) == 250, f"{method} recovered {len(result)} of 250"
 
 
-# Offset-stall guard (18a4-9df8-6373-4d9f): a server that repeats a non-empty
+# Offset-stall guard (18a4-9df8-6373-4d9f). A server that repeats a non-empty
 # ``startAt`` page would otherwise grow the result forever. Repetition means the read
 # is truncated and must fail loudly. Unlike the generic fetcher, DC cannot accept a
 # repeated short page as exhaustion because ``jira.search.views.default.max`` normally
 # caps every page below the requested size. Both full and capped repeated pages must
-# raise; an offset-honoring server returns distinct issues and completes normally.
+# raise. An offset-honoring server returns distinct issues and completes normally.
 
 import importlib.util  # noqa: E402
 import json as _json  # noqa: E402

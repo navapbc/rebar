@@ -1,15 +1,7 @@
-"""STEP_CREATE must type a missing transport binary as ``transport_unavailable`` (bug ac93-8afd).
+"""A missing ACLI binary produces transport_unavailable at STEP_CREATE.
 
-When the ``acli`` transport binary is absent, ``subprocess.Popen(["acli", ...])`` raises
-``FileNotFoundError``. The six-step probe (``run_access_check``) used to catch that in its broad
-``except Exception`` catch-all and surface it verbatim as
-``reason=exception, detail="[Errno 2] No such file or directory: 'acli'"`` — a raw, untyped leak
-of an infrastructure fault into the probe verdict. ``access_check`` already types an unreachable
-transport elsewhere (``TransportUnavailableError`` / ``ProjectVisibilityResult.status ==
-"transport_unavailable"``); the STEP_CREATE probe must map a missing-transport binary to that same
-typed vocabulary instead of the raw errno string. The verdict/return-code failure signal is
-unchanged — only the leaked exception is wrapped into a typed ``reason``.
-"""
+FileNotFoundError must become the typed probe reason rather than a raw errno.
+The probe still reports failure with the same verdict and return code."""
 
 from __future__ import annotations
 

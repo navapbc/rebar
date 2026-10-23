@@ -1,7 +1,7 @@
 """Pin the intersection of outbound-parent emission and Data Center apply (ticket 39c1).
 
 The shared differ emits only epic parents, while DC's former apply path accepted only
-sub-task parents; neither valid policy could reach the other. Non-sub-task epic
+sub-task parents. Neither valid policy could reach the other. Non-sub-task epic
 membership must use the instance-discovered ``Epic Link`` custom field, never
 ``fields.parent``, which DC silently ignores. The earlier GreenHopper
 ``add_issues_to_epic`` route is deliberately rejected because DC 8.17.1 returns 404.
@@ -29,8 +29,8 @@ class _FakeIssue:
 class _FakeClient:
     """Record the DC parent-write path selected by the transport.
 
-    ``subtask`` controls readback shape; ``epic_calls`` exposes the prohibited Agile
-    route; ``field_calls`` records Epic Link discovery and cache reuse.
+    ``subtask`` controls readback shape. ``epic_calls`` exposes the prohibited Agile
+    route. ``field_calls`` records Epic Link discovery and cache reuse.
     ``epic_link_name`` models
     missing metadata, which must decline without falling back to ``fields.parent``.
     Sub-task field writes update the fake's payload so the production readback verifies
@@ -91,7 +91,7 @@ def _transport(client: _FakeClient) -> JiraDataCenterTransport:
 def test_epic_parent_on_a_non_subtask_is_written_as_an_epic_link() -> None:
     """Write an emitted epic parent through Epic Link for a non-sub-task.
 
-    Assert the custom-field update itself: no-exception or ``fields.parent`` would pass
+    Assert the custom-field update itself. No-exception or ``fields.parent`` would pass
     while preserving DC's silent no-op failure.
     """
     client = _FakeClient(subtask=False)
@@ -249,7 +249,7 @@ def test_subtask_parent_still_uses_fields_parent() -> None:
 
 
 def test_the_emit_gate_and_dc_apply_now_overlap() -> None:
-    """Compose the real epic-only emit gate with DC apply and require acceptance."""
+    """Compose the epic-only emit gate with DC apply and require acceptance."""
     from rebar.reconciler.outbound_field_diff import _resolve_local_parent
 
     class _Bindings:

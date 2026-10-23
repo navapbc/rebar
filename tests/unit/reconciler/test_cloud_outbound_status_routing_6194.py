@@ -1,25 +1,8 @@
-"""The OUTBOUND status must never reach the Cloud ``workitem edit`` field set (bug 6194).
+"""Cloud outbound status must use a transition, never workitem edit.
 
-PARITY GUARD. This is the Cloud mirror of the Data Center pin
-``test_dc_outbound_status_routing_5200.py::test_the_dc_transport_never_edits_status_as_a_field``.
-DC guards the negative half — no ``status`` key in the REST field-edit payload — because
-``status`` is NOT an editable Jira field; it is only reachable through a transition. Cloud has
-always had the correct routing (``adapters/jira/acli.py::update_issue`` pops ``status`` out of
-kwargs and hands it to ``transition_issue`` before building the ``jira workitem edit`` argv),
-but nothing pinned it, so the DC-side guarantee had no Cloud counterpart.
-
-WHY THE NEGATIVE HALF IS WORTH ITS OWN TEST. ``test_update_one_forwards_status_to_client``
-already covers the dispatch layer forwarding ``status`` to the transport, and the transition
-NAME resolution is pinned by ``test_acli_status_resolution_heldout.py``. Neither would fail a
-partial regression that routed the transition correctly but ALSO left ``status`` in the edit
-kwargs — Jira would reject that edit on every pass, exactly the live failure mode story 5200
-diagnosed on DC. That is the gap this file closes.
-
-DETERMINISM. Nothing here spawns a subprocess or touches the network: ``transition_issue`` is
-replaced by a recorder (its own resolution is another file's contract) and the ACLI subprocess
-seam ``acli_subprocess._run_acli`` is replaced by an argv recorder returning canned JSON — the
-same stubbing shape as ``test_acli_status_resolution_heldout.py``.
-"""
+Pin both the positive transition call and the absence of status from edit
+fields. Record transition and ACLI arguments without spawning a subprocess or
+calling the network. This complements the Data Center routing check."""
 
 from __future__ import annotations
 

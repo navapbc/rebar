@@ -1,28 +1,9 @@
-"""Ticket a3fa: capability call sites are GUARDED at runtime, and a designed skip is
-reported distinctly from a real failure.
+"""Capability call sites distinguish an absent port from a failed call.
 
-Four dispatch call sites reach for OPT-IN capability members (`add_comment`,
-`set_relationship`) that the base `TicketTransport` port does not declare. They were
-resolved with `cast("SupportsComments"/"SupportsLinks", client)` — a STATIC assertion with
-no runtime effect — and every one of them sits inside a broad `except Exception`. So a
-transport that does not implement the capability raised an `AttributeError` that was
-SWALLOWED: the sub-op silently never applied and the pass reported success. That conflated
-two states an operator must act on differently:
-
-  * capability ABSENT  — designed, fine to skip (a second backend may legitimately not
-    implement the Protocol). Expected signal: an INFO log + a durable `bridge_alerts`
-    record under `outbound-<capability>-capability-absent`.
-  * capability PRESENT but the call RAISED — a real failure. Expected signal: the
-    pre-existing warning/stderr with the real exception, plus the in-band `comment_errors`
-    capture on the comment paths.
-
-These tests pin the split at all four sites, and pin that a designed skip does NOT trip the
-failure detectors (`comment_errors`, and the `*_computed>0 / *_applied==0` silent-no-op
-canary in `apply_handlers`, which is a FAILURE detector).
-
-MUTATION CHECK (AC5): deleting a guard turns these RED on the alert-kind assertion — the
-capability-absent record is never written — rather than on an incidental `AttributeError`.
-"""
+An absent optional comment or link capability records a durable skip alert
+without tripping failure detectors. A present capability that raises retains
+its warning and comment_errors signal. Tests cover all four dispatch sites
+and fail if a runtime guard is removed."""
 
 from __future__ import annotations
 

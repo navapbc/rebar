@@ -3,7 +3,7 @@
 A missing ``JIRA_PAT`` must raise an error naming the variable before any network call,
 never construct an anonymous client that can misreport permission failures as missing
 projects or silently read a partial view. The guard belongs at client construction, not
-settings resolution: runtime-checkable Protocol probes may evaluate properties on Python
+settings resolution. Runtime-checkable Protocol probes may evaluate properties on Python
 3.11. Settings therefore remain total for Protocol checks while construction enforces the
 security boundary.
 """

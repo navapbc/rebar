@@ -1,23 +1,8 @@
-"""A binding survives its issue MOVING project — bug 7c26-4ac8-04a3-440e.
+"""A moved Jira issue retains its numeric id when its key changes (bug 7c26).
 
-A Jira issue's KEY changes when the issue is moved between projects; its numeric
-``id`` never does. Old keys are normally stacked in Jira's ``moved_issue_key`` table
-so the old key still resolves, but a Data-Center-specific Atlassian KB documents
-third-party apps moving issues via post-functions/automations failing to update that
-table — after which the OLD KEY STOPS RESOLVING ENTIRELY. rebar's bindings are keyed
-on the key, so the absence probe reads that 404 as a deletion, and at GRACE it retires
-the binding: a live issue silently detached from its local ticket.
-
-These cells are driven END-TO-END through ``compute_binding_walk_mutations`` — the
-actual absence probe — rather than by poking a store entry, because the defect IS the
-probe's interpretation of a 404. A test that only asserted ``note_absent_or_rekey``
-re-keys when called would pass while the walk never called it.
-
-Every cell here FAILS against the pre-7c26 code: the walk called ``note_absent``
-unconditionally, so a moved issue accrued grace and retired.
-
-Follows the reconciler test-tree loader convention (spec_from_file_location).
-"""
+Drive the absence probe through compute_binding_walk_mutations. A stale key
+that returns 404 must rekey its binding to the moved issue rather than accrue
+deletion grace and retire a still-present issue."""
 
 from __future__ import annotations
 

@@ -1,32 +1,8 @@
-"""Shared pytest fixtures for rebar.reconciler unit tests.
+"""Fixtures for reconciler unit tests and three conflict-resolution classes.
 
-Divergence scenarios for all 3 resolution classes in conflict_resolver.py.
-
-Test-loading convention
------------------------
-Tests in this directory load modules under test via
-``importlib.util.spec_from_file_location`` rather than ordinary ``import``
-statements. This is the established pattern across the wider reconciler test
-tree (see
-``tests/scripts/test_jira_capability_probe.py``,
-``tests/scripts/test_bridge_fsck.py``,
-``tests/scripts/test_bridge_alert_display.py``).
-
-Rationale:
-
-* It works for module files whose path contains hyphens (e.g.
-  ``reconciler/acli.py``), which Python's import system cannot resolve as a
-  regular module name.
-* It avoids implicit ``sys.path`` requirements — no conftest-level path
-  manipulation is needed for tests to find the modules under test.
-* It keeps each test self-contained: the exact file under test is named at
-  the call site, so a moved or renamed module surfaces a clear loader error
-  rather than a confusing ``ImportError``.
-
-Rewriting these tests to use idiomatic ``import`` would diverge from the
-established convention across the test tree; new tests in this directory
-should follow the same loader pattern.
-"""
+Autouse fixtures sandbox REBAR_ROOT and pin DIG plus Cloud credentials. Tests
+may override those defaults. State, additive, and set divergence fixtures model
+conflict classes. The ACLI stub supplies capped paginated JQL pages."""
 
 from __future__ import annotations
 

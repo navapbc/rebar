@@ -4,8 +4,8 @@ The dispatcher supplies both bridge and Jira field names. DC must translate titl
 ticket type, wrap Jira object-valued fields, omit nulls and bridge-only keys, fit the
 summary, and exclude ``status`` because workflow state is not settable at creation.
 Forwarding the mixed payload directly makes Jira reject ``title``, ``ticket_type``, and
-``status`` and prevents binding. Unit tests cover the pure translation boundaries; the
-live harness covers the resulting create and binding.
+``status`` and prevents binding. Unit tests cover the pure translation boundaries. The
+service harness covers the resulting create and binding.
 """
 
 from __future__ import annotations

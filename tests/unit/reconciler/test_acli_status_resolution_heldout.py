@@ -1,27 +1,8 @@
-"""HELD-OUT pin on the ACLI transition path's status resolution (story J2, epic e369).
+"""Held-out ACLI status-resolution contract for unified Jira mappings (J2).
 
-This file is HELD OUT from the implementation subagent.
-
-J2 unifies the two drifted local->Jira status maps into one definition in
-``adapters/jira_family/``. The two pre-existing copies DISAGREED on exactly one
-key, so a single unified dict cannot preserve both callers — the story decides it
-explicitly rather than smuggling it:
-
-  * ``outbound_fields._LOCAL_TO_JIRA_STATUS`` mapped ``deleted`` -> ``"Done"``
-    (as does ``reconciler/config.py``'s third copy);
-  * ``jira_fields._LOCAL_STATUS_TO_JIRA`` OMITTED ``deleted``, so the ACLI path
-    fell through to ``status.replace("_", " ").title()`` -> ``"Deleted"`` — not a
-    state in the live DIG workflow ({To Do, In Progress, In Review, Done}), so
-    Jira would REJECT that transition rather than apply it.
-
-Two of the three copies already agreed on ``Done``, and ``"Deleted"`` is a latent
-bug rather than behaviour worth preserving. So the unified map adopts
-``deleted`` -> ``"Done"``, and this is J2's ONE declared observable change.
-
-The tests assert through the real production entry point (``acli.transition_issue``)
-and its contractual return value, not against the map object — the map is an
-implementation detail, the resolved transition name is the contract.
-"""
+The former ACLI map omitted deleted and fell back to Deleted, which the DIG
+workflow rejects. The unified mapping resolves deleted to Done. Assert the
+resolved transition through acli.transition_issue, not the internal map."""
 
 from __future__ import annotations
 

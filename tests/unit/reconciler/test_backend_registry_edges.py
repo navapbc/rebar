@@ -1,10 +1,7 @@
-"""HELD-OUT edge/teeth tests for the backend registry (S3, epic bbf1).
+"""Held-out backend-registry edge checks (S3).
 
-The semantics the happy path can't pin: idempotent vs conflicting registration, the
-snapshot/restore round-trip, the unknown-key error, the transport equivalence with the
-pre-story direct construction, and the teeth check that selection is honoured (not
-hard-coded to Jira). Held out from the implementation subagent.
-"""
+Pin idempotent and conflicting registration, snapshot restoration, unknown
+keys, transport equivalence, and selection of the requested backend."""
 
 from __future__ import annotations
 

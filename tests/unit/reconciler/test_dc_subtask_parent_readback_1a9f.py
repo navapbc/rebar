@@ -1,9 +1,9 @@
 """Verify Data Center sub-task parent writes by reading the field back (bug 1a9f).
 
 DC 8.17.1 can return 204 while ignoring ``fields.parent``. Since dispatch softens the
-transport failure, status alone creates silent success; the direct readback must show the
+transport failure, status alone creates silent success. The direct readback must show the
 requested parent. An unchanged value raises ``NotImplementedError`` so dispatch classifies
-the relation as unrepresentable rather than retryable—repeating an accepted-but-ignored
+the relation as unrepresentable rather than retryable. Repeating an accepted-but-ignored
 write cannot help. Readback preserves compatibility if a future DC version honors the
 operation instead of hardcoding a version-wide decline.
 """

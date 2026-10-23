@@ -1,13 +1,8 @@
-"""HELD-OUT capability-detection contract (S2, epic bbf1).
+"""Held-out opt-in capability contract for reconciler backends (S2).
 
-Capabilities are opt-in and detected BEHAVIOURALLY via ``isinstance`` against the
-runtime-checkable capability Protocols — never by structural introspection of method
-names. A backend that does not advertise ``SupportsLinks`` is never asked to sync
-links; one that does is asked. ``FakeBackend`` deliberately implements neither
-capability; ``JiraBackend`` implements links + comments (Jira supports both).
-
-Held out from the implementation subagent.
-"""
+Detect runtime-checkable SupportsLinks and SupportsComments by isinstance.
+Never call an unadvertised capability. FakeBackend advertises neither.
+JiraBackend advertises both."""
 
 from __future__ import annotations
 
