@@ -1,20 +1,9 @@
-"""A single central CLI gate mounts the store before dispatch, so no store-touching command
-can skip it — including the pure intercepts (bug ad9f, discovered from 80af).
+"""Store-touching CLI commands mount an existing tracker before dispatch.
 
-`rebar verify-commit-ticket` is a PURE INTERCEPT dispatched before the arms that call the
-centralized ``ensure_initialized``, and it does not self-manage init — yet it resolves ids
-against the store. In a fresh linked/cloned worktree with no ``.tickets-tracker`` yet, it died
-with "ticket store not found" instead of auto-mounting (attach-to-existing / symlink) the way
-``claim``/``list`` do. The fix hoists the MOUNT (``ensure_initialized(init_only=True)``, already
-a no-op under ``REBAR_TRACKER_DIR`` override and for a genuine first-time init non-interactively)
-to one central gate before both the intercepts and the set-based dispatch.
-
-These pin the CONTRACT (observable ``main()`` behavior), not the wiring:
-* a store-touching PURE INTERCEPT (verify-commit-ticket) auto-mounts + resolves in a fresh
-  clone whose ``origin`` already carries a ``tickets`` branch — no manual ``rebar init``.
-* a store READ arm (list) still auto-mounts there (no regression).
-* a NO-STORE command (explain) is NOT force-mounted: it still runs in a greenfield repo with no
-  ticket store, non-interactively, WITHOUT triggering the first-time-init consent/refusal.
+In a fresh clone with ``origin/tickets``, both the verify-commit-ticket intercept and
+list resolve without manual init. No-store commands such as explain and help remain
+usable in a greenfield repo without mounting or first-time-init consent. These tests
+pin observable ``main()`` behavior, including the ``REBAR_TRACKER_DIR`` override.
 """
 
 from __future__ import annotations
@@ -130,11 +119,7 @@ def test_no_store_command_is_not_force_mounted(tmp_path, monkeypatch, capsys) ->
 def test_help_and_unknown_subcommands_do_not_mount(
     clone_with_origin_tickets, monkeypatch, capsys
 ) -> None:
-    """Bug dd62 (sapient-rutile-penguin): usage/help rendering and the unknown-subcommand
-    rejection are pure reads of the CLI surface — they must not create ``.tickets-tracker``
-    in the repo. This is exactly the attachable-clone case where the central mount would
-    otherwise fire (and did: any CLI help invocation from an unsandboxed cwd leaked a
-    tracker into the repo root)."""
+    """Help, usage, and unknown-command paths never mount a tracker in an attachable clone."""
     clone, _tid = clone_with_origin_tickets
     _use_clone(clone, monkeypatch)
 

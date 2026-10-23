@@ -1,14 +1,8 @@
-"""S1 — optional Streamable-HTTP transport for rebar-mcp + transport hardening.
+"""Streamable-HTTP tests cover config, MCP requests, Origin/DNS protection, and
+fail-closed startup for non-loopback or unauthenticated binds.
 
-Observable-behavior tests for the HTTP transport: config defaults + flat keys, a
-baseline MCP request over the SDK's Streamable-HTTP ASGI entrypoint, the
-DNS-rebinding / Origin protection with explicit loopback defaults, the two
-fail-closed startup gates (non-loopback bind, unauthenticated HTTP), and the
-manifest / doc-generator drift for the new env vars.
-
-The transport is driven in-process via Starlette's ``TestClient`` (which speaks
-httpx over the ASGI app and runs the app lifespan / session-manager context) —
-a unit test cannot cross the Starlette transport/middleware seam.
+Starlette ``TestClient`` exercises the ASGI middleware and lifespan seam. Manifest and
+generated-doc checks keep transport env vars in sync.
 """
 
 from __future__ import annotations
@@ -402,16 +396,11 @@ def test_certified_tool_instrumentation_moves_the_gauge():
 
 
 def test_instrument_certified_tools_fails_loud_on_an_already_async_certified_tool():
-    """Regression guard for the graceful-drain contract (ticket wounded-resident-bushbaby).
+    """Certified tools must be instrumented before offload makes sync bodies async.
 
-    ``wire_health`` instruments FIRST, then offloads — that order is load-bearing, because
-    the offload marks every sync body async and ``instrument_certified_tools`` refuses to
-    touch an async tool. If a future change ever reversed that order (offload first), or a
-    certified tool were natively converted to ``async def``, the instrumenter would meet an
-    already-async CERTIFIED tool and — before this guard — SILENTLY skip it, so the
-    in-flight gauge would stop counting billable work and the SIGTERM drain would fail
-    OPEN with no signal. The guard makes that condition raise, so the misordering fails a
-    test rather than shipping a blind drain."""
+    An already-async certified tool raises. Silently skipping it would leave the
+    in-flight gauge blind and let SIGTERM cut off billable work.
+    """
     from types import SimpleNamespace
 
     from rebar._mcp_health import InFlightGauge, instrument_certified_tools
@@ -451,17 +440,11 @@ def test_wrap_tool_fn_passes_args_and_kwargs_through_and_counts():
 
 
 def test_make_sigterm_handler_drains_gauge_before_stopping_intake_2f46():
-    """Bug 2f46: the SIGTERM handler BODY built by make_sigterm_handler (used by
-    run_http_with_grace) must DRAIN the in-flight gauge to 0 BEFORE it tells uvicorn to
-    exit — not the other way round. Setting ``should_exit`` first (the old behaviour) is
-    exactly what coupled a retiring container to uvicorn's ``timeout_graceful_shutdown``:
-    with the timeout equal to the 1200s certified-op grace, a Streamable-HTTP server then
-    burned the full 1200s waiting for idle held-open client streams even at 0 in-flight,
-    exhausting the two-port blue/green pool (``mcp_retire_cap`` / ``deploy_errors``).
+    """SIGTERM keeps uvicorn running while this response drains within grace.
 
-    Preservation invariant: while a real op is still in flight (gauge > 0) ``should_exit``
-    stays False (the op's streaming response completes normally, never cut short); it flips
-    True only once the gauge reaches 0. This is executed directly, not via a real signal."""
+    ``should_exit`` stays false during an in-flight response, then flips true so the short
+    uvicorn backstop handles idle streams without consuming the 1200s op grace.
+    """
     import threading
 
     from rebar._mcp_health import InFlightGauge, make_sigterm_handler
@@ -496,11 +479,10 @@ def test_make_sigterm_handler_drains_gauge_before_stopping_intake_2f46():
 
 
 def test_run_http_with_grace_decouples_uvicorn_grace_from_op_grace_2f46(monkeypatch):
-    """Bug 2f46: uvicorn's ``timeout_graceful_shutdown`` must be a SHORT backstop,
-    DECOUPLED from the 1200s certified-op drain grace. Binding them (``= int(grace_seconds)``)
-    is what made a retiring container wait the full op grace for idle held-open streams even
-    at 0 in-flight. The certified-op drain is enforced by the in-flight gauge, not by this
-    uvicorn timeout, so shortening it never truncates a real op."""
+    """Uvicorn's short shutdown backstop is separate from the 1200s certified-op grace.
+
+    The gauge enforces op drain. Idle held-open streams must not consume that grace.
+    """
     import signal
 
     import rebar._mcp_health as health
@@ -539,12 +521,11 @@ def test_run_http_with_grace_decouples_uvicorn_grace_from_op_grace_2f46(monkeypa
 
 
 def test_gauge_begin_draining_refuses_new_certified_ops_2f46():
-    """Bug 2f46 (Mechanism 1, intake-stop). Draining the gauge to 0 is only safe if NO new
-    certified op can arrive during the drain and push the gauge back above 0 — otherwise a
-    landing burst pins the retiring container for the full grace and re-creates the
-    port-exhaustion the fix targets. ``begin_draining`` closes NEW certified-op intake: a
-    subsequent ``track`` of a certified tool is REFUSED (raises, does not increment), while
-    an already-counted op and any non-certified call are unaffected."""
+    """``begin_draining`` refuses new certified ops without incrementing the gauge.
+
+    Already-counted ops finish normally. Non-certified calls remain allowed. This keeps
+    a new burst from pinning the retiring container during drain.
+    """
     from rebar._mcp_health import InFlightGauge, MCPRetiringError
 
     gauge = InFlightGauge()
@@ -564,11 +545,10 @@ def test_gauge_begin_draining_refuses_new_certified_ops_2f46():
 
 
 def test_make_sigterm_handler_stops_new_intake_immediately_2f46():
-    """Bug 2f46 (Mechanism 1, intake-stop). The SIGTERM handler must begin draining the
-    gauge (refuse new intake) IMMEDIATELY on signal — before/while it waits for the in-flight
-    op — so a burst arriving mid-drain cannot re-pin the port. Proven by observing that, while
-    the handler is still draining a >0 gauge, the gauge already reports ``draining`` and
-    refuses a new certified op."""
+    """SIGTERM refuses new certified ops immediately, even while an older op drains.
+
+    The gauge reports ``draining`` before the handler waits for zero in-flight work.
+    """
     import threading
 
     from rebar._mcp_health import InFlightGauge, MCPRetiringError, make_sigterm_handler
@@ -629,11 +609,9 @@ def test_mcp_retirement_idle_gauge_sets_should_exit_immediately_under_full_grace
 
 
 def test_mcp_retirement_busy_gauge_is_not_cut_short_by_uvicorn_backstop_40a7():
-    """The short uvicorn backstop is not the certified-op drain deadline.
+    """A busy certified op keeps ``should_exit`` false until drain or its own deadline.
 
-    The handler does not set ``should_exit`` (which starts uvicorn graceful shutdown) until the
-    gauge drains or the injected certified-op deadline elapses, so a busy certified op cannot be
-    truncated merely because the uvicorn backstop is shorter.
+    Uvicorn's shorter backstop starts only after that point.
     """
     from rebar._mcp_health import InFlightGauge, drain_then_exit
 

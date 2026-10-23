@@ -1,19 +1,8 @@
-"""Attestation staleness must NAME the material component that changed (bug 94a3).
+"""Stale-material reasons name only changed signed-manifest components.
 
-Before this change every staleness reason recited a fixed list —
-``description/AC/file_impact/children`` — that named an input which does not exist ("AC" is
-not a basis component; acceptance criteria live inside ``description``) and never said which
-input actually differed. Three agents reached contradictory conclusions about whether ticking
-an AC checkbox invalidates an attestation precisely because the message could not distinguish
-the causes (bugs 846b-1bb5-4cd3-4249, c6c9-cba0-1aa4-47eb and 1909-c1a7-9f20-440f).
-
-These tests pin the diagnostic contract:
-
-* the per-component fingerprints round-trip through the signed manifest;
-* a stale-material reason names the differing component(s) and no others;
-* ticking a checkbox is attestation-SAFE (the 330c normalization, previously only implicit);
-* a pre-330c (raw-description) attestation is not reported as a component edit;
-* the gate OUTCOME is unchanged — the same inputs are still refused with the same verdict.
+Acceptance criteria belong to ``description``. Checkbox-state edits do not stale a review.
+Legacy raw-description attestations remain distinguishable from component edits, and the
+gate verdict remains unchanged.
 """
 
 from __future__ import annotations

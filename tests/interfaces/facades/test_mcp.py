@@ -106,21 +106,10 @@ def test_readonly_truthy_parse_is_case_insensitive(
 def test_readonly_empty_env_is_a_fault_not_a_disable(
     monkeypatch: pytest.MonkeyPatch, val: str
 ) -> None:
-    """An EMPTY ``REBAR_MCP_READONLY`` raises instead of bringing the write surface up.
+    """An empty ``REBAR_MCP_READONLY`` is a configuration fault, not writable mode.
 
-    The row ``("", False)`` used to sit in the case-insensitivity parametrize above,
-    asserting that an empty value left write tools PRESENT. That assertion encoded the
-    OLD contract, and bug b2ff-2588-9bb7-4bd2 changed that contract deliberately: the
-    env layer gates on key PRESENCE, so a ``${VAR}`` expanding to nothing in a
-    compose/systemd/k8s env block silently outranked an explicit ``readonly = true`` and
-    brought the server up writable. Operator ruling 39f8-ae7c ("a fault must error, never
-    silently resolve to a default, even a safe one") makes that a fault.
-
-    So this is a contract change, NOT a test weakened to let a bug pass — the assertion
-    here is strictly STRONGER than the row it replaces (a raise, versus tolerating the
-    write surface). Every other row of that parametrize is untouched: the
-    case-insensitivity coverage this test file exists for (TRUE/Yes/YES/" true ") is
-    fully retained, and only the empty-string row moved here.
+    Key presence can override an explicit readonly setting even when expansion yields
+    an empty value. Other nonempty case-insensitive values remain covered separately.
     """
     monkeypatch.setenv("REBAR_MCP_READONLY", val)
     with pytest.raises(ConfigError) as excinfo:

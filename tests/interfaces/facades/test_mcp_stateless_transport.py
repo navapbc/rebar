@@ -18,20 +18,11 @@ def _http_server():
 
 
 def test_the_http_server_is_stateless_so_a_cutover_cannot_orphan_client_sessions() -> None:
-    """THE BUG. The blue-green deploy swaps the nginx /mcp upstream to a new container the
-    moment it is healthy (observed: 18:54:29Z, "mcp cutover complete: /mcp upstream now
-    127.0.0.1:8093"). MCP streamable-HTTP sessions live IN MEMORY inside the container that
-    minted them, so every client holding an Mcp-Session-Id is instantly orphaned and its next
-    request 404s as "Session expired" — surfaced to the user as an opaque
-    `rmcp::transport::worker` transport error.
+    """The HTTP session manager must be stateless across blue-green cutovers.
 
-    Retiring the old container gracefully cannot help: the upstream has already moved, so no
-    further request reaches it. The only fix that makes this structurally impossible is to hold
-    no per-container session state at all.
-
-    This asserts the mechanism itself — the StreamableHTTPSessionManager's `stateless` flag —
-    rather than the settings kwarg, because the session manager is the object whose in-memory
-    session table produces the 404.
+    Nginx sends requests to the new container immediately. Clients holding an old
+    ``Mcp-Session-Id`` otherwise receive 404 because the session lived in the old
+    container. Check the manager's state flag, not only its settings input.
     """
     srv = _http_server()
 

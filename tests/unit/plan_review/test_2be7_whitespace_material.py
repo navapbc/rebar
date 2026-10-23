@@ -1,25 +1,8 @@
-"""Insignificant whitespace must not stale a signed plan review (bug 2be7).
+"""Plan-review fingerprints ignore trailing and boundary whitespace and AC checkbox state.
 
-The material fingerprint exists so an attestation cannot survive a *substantive* plan
-change. Whitespace at the end of a line, or at the document's boundary, carries no plan
-substance — yet before this change any such difference moved the composite hash and the gate
-reported ``stale-material``. That was routinely hit by the gate's own required close
-workflow: the 433c precheck requires editing the description to tick every AC box, and the
-documented CLI path for that (``--description="$(cat file)"``) strips the trailing newline as
-a shell artifact, forcing a full LLM re-review for a byte that renders as nothing.
-
-The 330c precedent already establishes the shape — AC checkbox STATE is normalized out of the
-fingerprint before hashing — so this is the same mechanism extended, not a parallel one.
-
-These tests pin BOTH halves of the contract, because a canonicalization that is too wide
-silently destroys the gate's guarantee:
-
-* whitespace-only edits keep the fingerprint identical and the attestation ``certified``;
-* every semantically meaningful edit — including a change of *leading* indentation, which
-  restructures markdown list nesting — still moves the fingerprint and still reads
-  ``stale-material``;
-* the pre-330c legacy algorithm (``normalize_checkboxes=False``) still hashes the RAW
-  description, so the 96d1 grandfather keeps reproducing it byte-exactly.
+Content and leading indentation still stale an attestation because indentation can change
+Markdown nesting. The pre-330c algorithm (``normalize_checkboxes=False``) still hashes the
+raw description so older signatures remain byte-compatible.
 """
 
 from __future__ import annotations
@@ -116,11 +99,9 @@ def test_meaningful_edit_still_moves_fingerprint(label: str) -> None:
 
 
 def test_whitespace_only_edit_leaves_attestation_certified(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The gate seam itself: a signed review survives a trailing-newline-only edit.
+    """``compute_validity`` keeps a signed review certified after only a trailing-newline edit.
 
-    ``compute_validity`` is the single dispatcher both the claim gate and the close gate
-    read through, so a ``certified`` verdict here is what ``review-plan --status`` reports
-    and what keeps the close path off ``stale-material``.
+    Both claim and close gates read this verdict.
     """
 
     monkeypatch.setattr(attest, "registry_version", lambda repo_root=None: "rv0")
@@ -162,11 +143,7 @@ def test_meaningful_edit_still_reads_stale_material(monkeypatch: pytest.MonkeyPa
 
 
 def test_legacy_algorithm_still_hashes_the_raw_description() -> None:
-    """The 96d1 grandfather reproduces the PRE-330c algorithm, which normalized nothing.
-
-    If whitespace canonicalization leaked into that path it would stop matching manifests
-    signed before 330c, silently re-breaking the bug the grandfather exists to fix.
-    """
+    """Pre-330c manifests still match the raw-description algorithm without normalization."""
 
     trailing_ws = _DESC.replace("Do the thing.", "Do the thing.  ")
 

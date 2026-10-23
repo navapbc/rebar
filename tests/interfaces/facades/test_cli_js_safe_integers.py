@@ -1,19 +1,8 @@
-"""CLI ``--output json`` must not put a JSON-uninteroperable integer on the wire
-(bug unhelping-creviced-rhino / e127-a3ad-895a-4a2f).
+"""CLI JSON encodes integers outside JavaScript's exact range as decimal strings.
 
-The CLI sibling of ``test_mcp_js_safe_integers``. RFC 8259 section 6 guarantees that
-implementations "agree exactly on their numeric values" only for integers in
-``[-(2**53)+1, (2**53)-1]``. rebar stamps ``time.time_ns()`` timestamps -- 19 digits, far
-outside that range -- and ``--output json`` emitted them as bare JSON numbers, so every
-float64-based consumer of the surface where users are explicitly invited to pipe rebar
-JSON into ``jq``/``node`` read a SILENTLY WRONG value: a stored
-``1787860170488898642`` came back from ``node``'s ``JSON.parse`` as
-``1787860170488898600``.
-
-The fix routes the CLI JSON emitters through the SAME proven seam the MCP surface uses
-(``rebar._mcp_errors.js_safe_result``), so an out-of-range integer goes on the wire as its
-EXACT decimal string. These tests drive the real console script in a SUBPROCESS against a
-real store, asserting on the bytes a shell pipeline would actually receive.
+Nanosecond timestamps exceed ``2**53 - 1``. Emitting them as JSON numbers loses digits in
+float64 clients. These subprocess tests use the installed console script and store to check the
+wire bytes, matching the MCP ``js_safe_result`` behavior.
 """
 
 from __future__ import annotations
@@ -77,16 +66,10 @@ def _cli_json(*args: str) -> Any:
 
 @pytest.fixture
 def ns_ticket(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> str:
-    """A real ticket whose stored ``created_at``/``updated_at`` are nanosecond ints beyond
-    the JS range AND deterministically float64-INEXACT.
+    """Create a stored ticket with timestamps beyond JS's exact range and float64-inexact.
 
-    The stored instants are pinned via the ``REBAR_HLC_NOW`` clock seam (see
-    ``_HLC_INEXACT_BASE_NS``) instead of a wall-clock draw. A wall-clock draw is
-    float64-exact ~1/256 of the time near 1.79e18 (ULP == 256), which left the
-    round-trip-hazard premise in ``test_show_timestamp_round_trips_exactly`` undemonstrable
-    on those draws -- a data-dependent flake (bug ``crashing-arachnidan-impala`` /
-    ``d101-729a``). The precondition below asserts the determinism so a regression to a raw
-    wall-clock draw fails HERE, deterministically.
+    ``REBAR_HLC_NOW`` pins the value so the round-trip hazard is always exercised. The
+    fixture asserts that premise to catch clock regressions.
     """
     monkeypatch.setenv("REBAR_HLC_NOW", str(_HLC_INEXACT_BASE_NS))
     ticket_id = str(rebar.create_ticket("task", "a ticket carrying a nanosecond timestamp"))

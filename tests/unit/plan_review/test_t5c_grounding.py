@@ -1,25 +1,9 @@
-"""T5c grounded-security rewrite rubric-text pins (ticket c97a).
+"""T5c rubric pins ground security findings in the current code and configuration.
 
-The T5c security overlay reviews plans under the gate-wide reviewing stance
-(``_SHARED_PREAMBLE`` in ``plan_review/passes.py``), whose "Evaluate the spec AS
-WRITTEN" line suits spec criteria but not a security criterion — exploitability is a
-property of the system, not of the text. Ticket c97a (operator-approved) gives the
-rubric a criterion-LOCAL override plus three finder instructions, following the
-bfa8 T10 precedent ("severity guidance, not new machinery"):
-
-* GROUNDING OVERRIDE — evaluate against the CURRENT codebase/configuration via the
-  read tools; a control defined elsewhere flips a finding;
-* DEDUP-AT-SOURCE — at most ONE undeclared-access-posture finding per plan (extra
-  surfaces fold into that finding's evidence);
-* GROUNDING DEMOTION — a candidate finding citing neither a read repo artifact nor
-  a quoted plan sentence is pressed at MINOR (demoted, never suppressed);
-* HIGH-class scoping — ONLY the two HIGH classes warrant severity >= major, which
-  keeps lesser findings below the 0.90 blocking bar through the existing
-  severity->priority pipeline (no pass3_decide changes).
-
-These are string pins on the rubric file, the same pattern as
-``test_t10_rubric_contains_major_class_severity_guidance``; the routing/Pass-3
-blocking mechanics are pinned in ``test_criteria_blocking.py``.
+The criterion-local override permits at most one undeclared-access-posture finding per plan,
+demotes ungrounded candidates to MINOR, and reserves major-or-higher severity for the
+two HIGH classes. Existing severity-to-priority routing keeps lesser findings below
+the 0.90 blocking threshold. Routing and Pass 3 are tested separately.
 """
 
 from __future__ import annotations

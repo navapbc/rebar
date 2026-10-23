@@ -1,17 +1,8 @@
-"""CLI + MCP parity for the passed-but-unsigned plan-review state (ticket
-``ammonic-amoral-nabarlek``).
+"""CLI and MCP classify a passed but unsigned plan review consistently.
 
-A plan review that PASSED but whose attestation failed to persist is RETRYABLE, not success:
-the signature the claim gate consumes was never written, so a following ``claim`` still
-fails. That rule used to live only in the CLI, so an MCP agent saw ``verdict: PASS`` and
-walked into a refused claim. The classifier now sits below both front-ends
-(:func:`rebar.llm.plan_review.resign.classify_plan_review_attestation`).
-
-These are HAPPY-PATH tests only — the normal passed-and-signed path plus the basic
-passed-but-unsigned classification — and they assert OBSERVABLE behaviour: the CLI's exit
-code and the exact stderr BYTES, and the MCP tool's returned payload fields. Offline: the
-gate is monkeypatched at ``rebar.llm.review_plan`` (both surfaces call it by module
-attribute), so no model, no network, no ``[agents]`` extra is exercised.
+An unsigned persistence failure is retryable because claim needs the missing signature.
+Tests pin CLI exit and stderr bytes plus MCP payload fields. The shared review call is
+monkeypatched, so these interface checks run without a model or network.
 """
 
 from __future__ import annotations

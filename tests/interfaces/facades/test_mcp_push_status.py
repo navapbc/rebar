@@ -1,18 +1,8 @@
-"""An MCP write tool must tell its caller the ticket events did not reach the remote
-(bug vapoury-attack-lamb).
+"""MCP write results report when ticket events remain local after a rejected push.
 
-The MCP limb of this bug was originally STATIC evidence. It was confirmed end-to-end
-first: with a real bare origin whose real ``pre-receive`` hook declined, the
-``comment_ticket`` tool returned
-
-    ([TextContent(text='ok')], {'result': 'ok'})
-
-while two ticket commits sat stranded locally. The server DOES install a stderr log
-handler, but it writes to the SERVER's stderr — the writing agent reads only the tool
-result, so on this surface the warning is undeliverable, not merely uninformative.
-
-These tests drive the real in-process MCP server (``build_server().call_tool(...)``) — the
-same path an agent takes — against a real declining origin. Nothing is mocked.
+Server stderr does not reach the writing agent, so the tool payload carries delivery
+state. Tests call the in-process server against an initialized origin with a rejecting
+``pre-receive`` hook.
 """
 
 from __future__ import annotations

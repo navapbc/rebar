@@ -1,22 +1,11 @@
-"""G7 blocking enablement at 0.85 plus the rubric abstain/dedup fixes (ticket 28d5).
+"""G7 blocks at 0.85 through plan-review posture and threshold, not code-review
+``blocking_enabled``.
 
-FP verification over all 348 historical G7 findings (ticket 696a): at priority >= 0.85,
-0 clearly-incorrect findings; the 0.80-0.85 band is empty, so 0.85 selects the same
-historical set as 0.80 with less future exposure. Plan-review blocking derives from
-``default_posture: "blocking"`` + ``block_threshold`` (``blocking_enabled`` is the
-code-review gate's convention and is inert here) — the bfa8/c97a pattern: a routing flip
-plus rubric guidance, no ``pass3_decide`` changes, no per-grade machinery.
-
-Kind scoping comes from the EXISTING plan-v4 divergence grading (ADR 0054): G7 maps its
-severity onto the ``divergent_implementation`` axis, where ``contradicts_reality`` and
-``omits_required_site`` score 1.0 and hard-floor impact at 0.85, while
-``incomplete_enumeration`` contributes 0.55 (strictly below every blocking threshold)
-and never floors. These tests drive findings through the REAL plan-review Pass-3
-wrapper with the REAL ``impact_plan`` — the kind grades themselves produce the impact.
-
-Also pinned: the four new rubric rule sentences — abstain-on-unresolvable-parent
-(never a finding), closed-parent-final-state + sibling-handoff, one finding per
-contradicted parent clause, and the floor-kind guidance.
+On the ``divergent_implementation`` axis, ``contradicts_reality`` and
+``omits_required_site`` score 1.0 and floor impact at 0.85.
+``incomplete_enumeration`` scores 0.55 and never floors. Pass 3 and rubric tests
+retain abstention for unresolved parents, closed-parent sibling handoff, and one
+finding per contradicted parent clause.
 """
 
 from __future__ import annotations

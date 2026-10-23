@@ -1,22 +1,9 @@
-"""CLI + MCP interface coverage for ``verify-completion`` / ``verify_completion`` (epic c7c5).
+"""Offline CLI and MCP checks pin ``verify_completion`` interface behavior.
 
-These tests exercise the two non-library interfaces OFFLINE by monkeypatching
-``rebar.llm.verify_completion`` (the CLI and MCP tool both call it by module attribute, so
-the patch is seen) — NO model, NO network, NO ``[agents]`` extra exercised. They assert the
-observable interface contracts:
-
-  CLI ``rebar verify-completion``:
-    * ``--check`` is the offline preflight: exit 0 + a JSON backends report (no stack import);
-    * a missing ``ticket_id`` is a usage error (argparse exits 2);
-    * PASS ⇒ exit 0, FAIL ⇒ exit 1 (scriptable, like ``verify-signature``);
-    * ``-o json`` stdout validates against the canonical ``completion_verdict`` schema;
-    * ``-o text`` renders the verdict + each finding's criterion / detail / citation;
-    * an ``LLMError`` surfaces as ``Error:`` + exit 1 with NO Python traceback.
-
-  MCP ``verify_completion``:
-    * registered; gated OFF by default ⇒ the call errors *because it is gated*;
-    * gate ON + (monkeypatched) ⇒ returns a schema-valid ``completion_verdict`` DICT;
-    * remains a NO_SCHEMA_EXEMPT (advertises no outputSchema — model-produced result).
+CLI preflight, usage errors, PASS/FAIL exits, JSON schema, text findings, and clean
+``LLMError`` output remain scriptable. MCP remains gated off by default, returns a
+schema-valid verdict when enabled, and advertises no output schema. Both surfaces
+share a monkeypatched review call, so no model or network is used.
 """
 
 from __future__ import annotations
