@@ -1,22 +1,6 @@
-"""Claim-gate coverage for the plan-review gate (epic 5fd2).
-
-The gate (rebar._commands.gates.plan_review_precheck, wired into BOTH claim_compute and
-transition_compute's open->in_progress arm) is opt-in via
-``verify.require_plan_review_for_claim``. Unlike the completion CLOSE gate (which
-runs the LLM at close time), the CLAIM gate is a FAST, LOCAL signature check — no LLM, no
-network — and the heavy three-pass review runs OUT-OF-BAND via ``review_plan`` (driven here with
-a FakeRunner, so still no model/network). These tests assert the deterministic behavior:
-
-  * gate OFF (default) → claim without any attestation (today's behavior);
-  * gate ON + no attestation → claim BLOCKED (exit 1), ticket stays open;
-  * review_plan (clean) signs an attestation → claim then SUCCEEDS;
-  * gate ON + --force → claim succeeds, an audit comment records the bypass;
-  * a material edit after review INVALIDATES the attestation → claim blocked again;
-  * bugs / session_logs are EXEMPT (claim succeeds with no attestation);
-  * the DET floor blocks review_plan (no AC) → no signature → claim still blocked;
-  * the REVIEW_RESULT sidecar is reducer-IGNORED (status intact; fsck recognises it);
-  * the claim path makes NO LLM / NO network call (a pure local HMAC verify).
-"""
+"""The optional claim gate performs a local signature check on claim and open-to-progress
+transitions. Review runs separately; missing, stale, or blocked reviews cannot certify,
+while the audited force path and exempt ticket types keep their documented behavior."""
 
 from __future__ import annotations
 
@@ -1285,21 +1269,9 @@ def test_sign_review_cli_success_and_refusal(rebar_repo: Path, capsys) -> None:
     assert "refused" in capsys.readouterr().err.lower()  # text refusal goes to stderr
 
 
-# ── bug 406f: a plan naming a REAL third-party symbol yields no absence-BLOCK ────
-#
-# End-to-end pipeline regression (finder → verify → decide → verdict), NOT a
-# resolver-level unit test. A Pass-1 finder flags a "symbol does not exist /
-# hallucinated" BLOCK-class finding on a third-party symbol the plan names. The
-# Pass-2 verifier (which the real gate runs AGENTICALLY with the `resolve_symbol`
-# tool) re-grounds the cited symbol against the merged grounding oracle: because the
-# symbol IS importable, the oracle REFUTES the asserted absence, the verifier marks
-# `cited_reference_accurate=no`, and Pass-3 DROPS the finding — so no absence-BLOCK
-# survives in `verdict["blocking"]`. Deterministic: no live LLM; the oracle's
-# environment resolution runs even on ctags-blind hosts (the default CI condition).
-#
-# `yaml.safe_load` is used deliberately — PyYAML is a CORE dependency (installed on
-# every CI job), so the third-party path is exercised everywhere, not only on
-# `[agents]` jobs.
+# A real third-party symbol must lose its asserted-absence BLOCK after grounding.
+# The end-to-end finder/verifier/decider path runs without a live LLM; yaml.safe_load
+# is a core dependency, so the importable-member case runs in every CI job.
 
 _TP_SYMBOL = "yaml.safe_load"  # a real, importable core-dependency member
 _ABSENT_SYMBOL = "yaml.this_symbol_does_not_exist_zzz406f"  # importable module, missing attr
@@ -1328,12 +1300,8 @@ def _absence_finding(symbol: str) -> dict:
 
 
 class _GroundingVerifierFake(_GateFake):
-    """A ``_GateFake`` whose Pass-2 verifier RE-GROUNDS each finding's cited symbol
-    against the real grounding oracle — the deterministic stand-in for the agentic
-    verifier's ``resolve_symbol`` tool. When the oracle REFUTES the asserted absence
-    (the symbol is importable), it marks ``cited_reference_accurate=no`` (the veto
-    Pass-3 drops on); otherwise it returns a high-severity accurate verification so a
-    genuinely-absent symbol still BLOCKs."""
+    """Re-ground cited symbols through the real oracle. A refuted absence is vetoed; a
+    genuinely absent symbol retains a blocking verification."""
 
     _SYMBOL_RE = re.compile(r"symbol:([^\s|]+)")
     _INDEX_RE = re.compile(r"### finding index (\d+)")
@@ -1344,14 +1312,8 @@ class _GroundingVerifierFake(_GateFake):
 
     @staticmethod
     def _verification(index: int, cited_reference_accurate: str) -> dict:
-        # High PLAN-severity so a NON-dropped finding clears E4's 0.75 block threshold —
-        # the negative control must be able to actually BLOCK. `impact_plan` reads the
-        # plan-severity axes (NOT the code-review keys); `divergent_implementation`
-        # (a hard-override axis: "the plan will build the wrong thing") graded
-        # "contradicts_reality" — a plan-v4 FLOOR grade — yields impact 1.0, so
-        # priority = validity × impact clears the threshold. The axis moved off the ordinal
-        # none|low|medium|high ladder onto a closed kind set in plan-v4 (story
-        # doggish-nonorganic-tsetsefly); "high" is no longer a valid grade.
+        # A retained finding must clear E4's 0.75 block threshold. The plan-v4
+        # divergent_implementation="contradicts_reality" grade gives it impact 1.0.
         return {
             "index": index,
             "severity_attributes": {
@@ -1541,22 +1503,13 @@ def test_review_plan_cli_text_shows_reuse_on_second_run(rebar_repo: Path, capsys
     assert "reused" in capsys.readouterr().out
 
 
-# ── epic 58f2: sign-on-PASS is a DEFENDED invariant at each public boundary ─────
-#
-# The signing default was already correct on both public plan-review routes, but nothing
-# pinned it at the REAL parser/API boundary — a refactor could silently flip it with no test
-# failing. These tests make the default load-bearing: they assert the flag→kwarg mapping
-# through the actual CLI parser, the library's `sign=True` default, the end-to-end
-# review→claim loop over the real CLI route, the never-sign guard table, and the idempotent
-# reuse path's promise that it emits no SECOND signature.
+# Pin sign-on-PASS at CLI and library boundaries, including parser defaults,
+# review-to-claim, never-sign guards, and idempotent reuse without a second signature.
 
 
 def _capture_review_plan_kwargs(monkeypatch) -> dict:
-    """Swap `llm.review_plan` for a recorder and return the dict it fills in.
-
-    `_llm_commands` does `from rebar import llm` INSIDE each command function, so the
-    attribute is resolved on the module object at call time — patching it here is a genuine
-    parser-boundary interception, not a re-implementation of the dispatch."""
+    """Record the real CLI parser's review_plan arguments by replacing the module attribute at
+    call time."""
     import rebar.llm as _llm_mod
 
     seen: dict = {}
@@ -1808,13 +1761,8 @@ def test_review_plan_help_states_that_pass_signs_by_default(capsys) -> None:
     assert "sign-review" in help_text
 
 
-# ── melancholy-firstborn-shihtzu: an UNATTESTED read is never certifiable ───────
-#
-# `--source local` reads the in-place checkout, uncommitted edits included. It used to sign a
-# fully claim-valid attestation bound to `verified_at_sha=None` — a dirty worktree could mint
-# the artifact the claim gate trusts. ADR 0005 and `_snapshot.repo_snapshot.SOURCE_LOCAL` both
-# document local as "dirty allowed, never signed"; the completion close gate already enforced
-# it. These pin the plan-review half.
+# A local-source review may read uncommitted edits but cannot certify a claim.
+# The plan-review gate must refuse its unsigned PASS and its recovery sidecar.
 
 
 def test_local_source_pass_is_never_signed(rebar_repo: Path) -> None:
@@ -1825,17 +1773,14 @@ def test_local_source_pass_is_never_signed(rebar_repo: Path) -> None:
     verdict = rebar.llm.review_plan(tid, runner=_CLEAN, source="local", repo_root=str(rebar_repo))
     assert verdict["verdict"] == "PASS"  # the review still runs and still passes…
     assert verdict["signature"]["signed"] is False  # …it is simply not certifiable
-    # The refusal is machine-readable POLICY, distinguishable from a signing *failure*
-    # (which carries an `error` key) and from a non-PASS reason (the verdict string).
+    # Policy refusal has a reason, while a signing failure has an error.
     assert verdict["signature"]["reason"] == "local-source-never-signs"
-    # Nothing was written to the ticket either — the durable artifact is absent, not just the
-    # in-verdict flag.
+    # No signature is persisted to the ticket.
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo)).get("signature") in (None, {})
 
 
 def test_local_source_review_leaves_the_claim_gate_blocked(rebar_repo: Path) -> None:
-    """The consequence that makes it a SECURITY property, not a cosmetic flag: a local review
-    cannot buy a claim. This is the exact bypass that was reachable before the fix."""
+    """A local-source review may pass but cannot sign or authorize a claim."""
     from rebar.llm.plan_review import attest
 
     _commit(rebar_repo)
@@ -1850,10 +1795,7 @@ def test_local_source_review_leaves_the_claim_gate_blocked(rebar_repo: Path) -> 
 
 
 def test_no_signed_attestation_can_carry_a_null_verified_at_sha(rebar_repo: Path) -> None:
-    """The invariant behind the rule: a signature asserts "this plan was reviewed against THIS
-    committed tree". An unattested read has no committed tree to name, so any signed
-    attestation must carry a real `verified-at-sha`. Guards against a future change that
-    re-enables local signing without also pinning a SHA."""
+    """Every signed review must name the committed tree it verified."""
     _commit(rebar_repo)
     _enable(rebar_repo)
 
@@ -1870,10 +1812,7 @@ def test_no_signed_attestation_can_carry_a_null_verified_at_sha(rebar_repo: Path
 
 
 def test_sign_review_refuses_to_resign_a_local_source_pass(rebar_repo: Path) -> None:
-    """The completeness gap behind the never-sign guard: the recovery path (`rebar
-    sign-review`) re-signs from the REVIEW_RESULT sidecar, so a local-source PASS sidecar
-    must be refused too — otherwise a dirty-worktree review could still buy a claim via the
-    back door. The sidecar records the resolved source precisely for this refusal."""
+    """sign-review must reject a local-source PASS sidecar, even through the recovery path."""
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _make(rebar_repo)
@@ -1888,9 +1827,7 @@ def test_sign_review_refuses_to_resign_a_local_source_pass(rebar_repo: Path) -> 
 
 
 def test_sign_review_recovery_binds_a_committed_verified_at_sha(rebar_repo: Path) -> None:
-    """The recovery path itself now signs inside an attested gate session, so the recovered
-    attestation carries a real verified-at-sha pin (it used to sign from the working tree
-    with no pin — violating the invariant the review path enforces)."""
+    """Recovered signatures must carry a committed verified-at-sha pin."""
     from rebar import signing
 
     _commit(rebar_repo)

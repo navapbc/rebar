@@ -40,12 +40,7 @@ from rebar.llm.plan_review.attest import current_material_fingerprint
 
 
 def _run_git(*argv: str) -> str:
-    """Run git, surfacing git's own diagnosis on failure.
-
-    NOT ``check=True``: ``CalledProcessError`` renders only ``returned non-zero
-    exit status 128`` and drops the captured stderr, which is the only place git
-    states the cause [rebar:57d2-e356-7eb4-4bf5].
-    """
+    """Surface captured Git stderr on failure; CalledProcessError alone loses Git's diagnosis."""
     proc = subprocess.run(["git", *argv], check=False, capture_output=True, text=True)
     if proc.returncode != 0:
         try:

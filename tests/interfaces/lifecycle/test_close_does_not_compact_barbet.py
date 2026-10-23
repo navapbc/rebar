@@ -1,24 +1,5 @@
-"""Closing a ticket must NOT compact it (bug choosy-arthrodic-barbet).
-
-THE DEFECT. The close's post-write tail called ``_compact_on_close``, which ran compaction
-inline. ``compact_txn._compact_locked`` takes the ONE store write lock and holds it for the
-whole fold — read, reduce, authorship ledger, snapshot write, retire renames, and the git
-add/commit, whose nested ``_store_git_op_lock`` wait and index-lock retry budget stack inside
-that hold with no aggregate ceiling. Measured on the rebar store, a single close held the lock
-for 13m53s and three others the same hour held ~2.5 min each, starving every concurrent
-writer. The 7084 stand-aside probe could not help: the closing process had released the lock
-seconds earlier, so the store always read free to its own probe.
-
-THE FIX (asserted here): compaction is off the close path entirely. It is OPTIONAL
-housekeeping, never a correctness step — an unfolded event log is completely valid and the
-reducer replays it — so removing the trigger changes performance and store size, never stored
-state. ``rebar store compact <id>`` still folds on demand.
-
-Assertions are on OBSERVABLE artifacts only: the files in the ticket dir, the tracker's commit
-subjects, and the reduced ticket state. Nothing here asserts a duration — the lock-scoping
-claim is checked structurally, by sampling for the lock across the close and requiring that no
-COMPACT lands, not by timing anything.
-"""
+"""Closing a ticket writes status without compacting its event log. Compaction remains optional
+and explicit; tests inspect stored artifacts, state, and lock overlap rather than timing."""
 
 from __future__ import annotations
 
@@ -136,19 +117,8 @@ def test_explicit_compact_still_folds_a_closed_ticket(rebar_repo: Path) -> None:
 
 # ── the store lock is never held across a fold during a close ────────────────────────────────
 def test_close_never_holds_the_lock_across_a_fold(rebar_repo: Path) -> None:
-    """Sample (lock held?, fold artifacts present?) every 20ms across a whole close and require
-    that the two are NEVER true at the same instant.
-
-    This is the direct, load-bearing oracle for the lock-scoping claim. Compaction writes its
-    SNAPSHOT and renames the folded sources WHILE holding the store write lock, so on the
-    pre-fix code a fold produced a long run of samples in which the lock dir existed and a
-    SNAPSHOT already sat in the ticket dir. A close that does not compact can never produce
-    such a sample, whatever the machine's speed.
-
-    The oracle is structural, not temporal: it names a forbidden STATE, never a duration, so
-    there is no timing budget to be flaky under load (and none for the wall-clock-assert gate
-    to reject).
-    """
+    """While close holds the store lock, no fold snapshot may appear. This checks the forbidden
+    state without a timing budget."""
     repo = rebar_repo
     tid = _seed_and_claim(repo, "lock is not held across a fold")
     lock_dir = repo / ".tickets-tracker" / ".ticket-write.lock.d"

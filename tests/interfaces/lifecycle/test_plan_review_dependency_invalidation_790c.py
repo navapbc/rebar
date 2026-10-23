@@ -1,28 +1,6 @@
-"""Plan-review dependency-staleness invalidation is consistent across sign paths (bug 790c).
-
-A plan review is valid only while BOTH the subject's OWN plan material AND its dependencies'
-(child/prerequisite) material are unchanged since the review ran — a change to either
-INVALIDATES the review and requires a fresh `rebar review-plan`.
-
-``generation.sign_manifest`` (the in-review sign) already enforces this: ``related_material``
-is part of the immutable generation identity, so a dependency changing mid-review aborts
-signing. But the sanctioned recovery ``resign_plan_review`` (``rebar sign-review``) only guarded
-the subject's OWN material — its dependency-pin staleness check was gated behind
-``verify.enforce_plan_material_pins`` (default ``False``) — so by default it re-certified a
-review that no longer reflected a changed dependency. That is the bug: the two paths disagreed,
-and ``sign-review`` could bypass a correct invalidation.
-
-These pin the CONTRACT (observable ``review_plan`` / ``resign_plan_review`` / CLI output):
-
-* dependency changed since the review  -> BOTH review-plan AND sign-review fail closed
-  (sign-review must not re-certify it), and the message NAMES a dependency change.
-* subject's OWN material changed         -> the run is CANCELLED mid-review (story 2c89):
-  unsigned INDETERMINATE whose finding names the own-material change, no sidecar.
-* only UNRELATED store writes land       -> the PASS still certifies itself, no manual step
-  (d70a scoped these out of generation identity).
-* residual message: a genuine material change requires a fresh `rebar review-plan`; only a
-  TRANSIENT (nothing-changed) failure points to the cheap `rebar sign-review <id>` recovery.
-"""
+"""Review and sign-review must reject changed subject or dependency material while ignoring
+unrelated writes. Own-material drift cancels a running review; transient signing failure
+alone points to sign-review recovery."""
 
 from __future__ import annotations
 
@@ -185,13 +163,8 @@ def test_review_plan_dependency_change_fails_closed(rebar_repo: Path) -> None:
 
 
 def test_review_plan_own_material_change_cancels_mid_run(rebar_repo: Path) -> None:
-    """CRITERION 2 (contract updated by story 2c89): the SUBJECT's OWN material changing
-    mid-review now CANCELS the run at the next between-pass seam instead of paying for
-    the remaining passes and only failing at sign time. The result is an UNSIGNED
-    INDETERMINATE whose finding still NAMES the own-material change (the invalidation
-    reason stays observable), with NO sidecar (a sidecar write would advance the store
-    revision). A DEPENDENCY change deliberately does NOT cancel — see the test above,
-    which still completes and fails closed at sign time naming the dependency."""
+    """Own-material drift cancels before later passes and leaves an unsigned INDETERMINATE with
+    no sidecar; dependency drift still reaches the signing guard."""
     epic, _child = _epic_with_child(rebar_repo)
     runner = _MutatingFake(
         edit_ticket=epic, repo=rebar_repo, new_desc=_DESC + "\n- [ ] OWN plan rewritten\n"

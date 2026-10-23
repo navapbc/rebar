@@ -1,43 +1,5 @@
-"""Is 88d9's inbound parent CLEAR reachable in a REAL bidirectional pass? (37e7-d751-0042-4b94)
-
-THE SUSPECTED DEFECT. A live harness cell cleared a child's Epic Link on the Jira side (two
-independent reads confirmed the parent was gone) and the next inbound pass did NOT clear the
-local ``parent_id``. The proposed mechanism is SAME-PASS OUTBOUND SUPPRESSION, in two links:
-
-  1. The OUTBOUND differ still resolves the local parent (``_resolve_local_parent`` in
-     ``outbound_field_diff.py`` returns the bound epic parent's remote key) and, because the
-     canonicalized remote now says ``remote_parent_id is None``, the two differ — so local-wins
-     emits ``changed["parent"] = <remote key>``. ``parent`` is NOT in
-     ``_INBOUND_MIRRORED_FIELDS``, so no baseline arbitration can defer to inbound here.
-  2. The INBOUND differ canonicalizes that outbound ``parent`` to the inbound name ``parent_id``
-     (``_OUTBOUND_TO_INBOUND_FIELD``) and then DROPS every inbound field the same pass's
-     outbound is writing. The clear 88d9 built is computed and immediately discarded.
-
-If both links hold, 88d9's clear is unreachable in ANY bidirectional pass whenever rebar can
-resolve the parent outbound — which is the normal case for an epic parent.
-
-WHY THIS TIER, AND WHY THE EXISTING CELLS COULD NOT SEE IT
-----------------------------------------------------------
-This is a DIFFER-COMPOSITION defect: neither differ is individually wrong: outbound's local-wins
-SET and inbound's contradiction filter are each the documented, intended behaviour. The bug (if
-it is one) lives only in their COMPOSITION, so it is invisible to any cell that exercises one
-differ alone. That is exactly what the existing 88d9 coverage does:
-
-  * ``test_inbound_parent_clear_88d9.py`` and ``test_parent_clear_requires_peer_evidence.py``
-    pass ``outbound_mutations=None`` — a pass with no outbound context at all;
-  * the one cell that DOES supply outbound context,
-    ``test_same_pass_outbound_parent_write_suppresses_the_clear``, HAND-BUILDS the outbound
-    entry (``_FakeOutbound("DC-1", {"parent": "DC-2"})``). It asserts that a hypothetical
-    outbound parent write suppresses the clear; it never asks whether the REAL outbound differ
-    produces that write in the de-parented scenario. The hand-built double is precisely the
-    thing under test here, so this module must not use one.
-
-So the load-bearing property of this module is the WIRING: the real ``compute_outbound_mutations``
-output is fed verbatim into ``compute_inbound_mutations`` as ``outbound_mutations``, mirroring
-``run_differs._run_differs_inbound``. A unit tier is right because both differs are pure
-functions of (local tickets, snapshot, binding store) — no transport, no store — so the whole
-composition runs in-process with real mappers and only the binding store doubled.
-"""
+"""Exercise real outbound and inbound differs together when Jira removes a parent. Outbound must
+not restore an observed peer removal, but must propagate a later local re-parent."""
 
 from __future__ import annotations
 
@@ -64,13 +26,8 @@ PARENT_LOCAL = "local-parent"
 
 
 class _FakeBindingStore:
-    """Every binding lookup the two differs make, including 88d9's peer-parent evidence.
-
-    ``peer_parents`` records the parent rebar last OBSERVED on the peer. It is populated here
-    because the scenario is a genuine de-parenting of a parent rebar really had synced — without
-    it, ``test_parent_clear_requires_peer_evidence.py``'s gate declines the clear and this module
-    would go green for a reason that has nothing to do with outbound suppression.
-    """
+    """Expose bindings and the parent last observed on Jira; absent peer evidence must not
+    authorize a clear."""
 
     def __init__(self, mapping: dict[str, str], peer_parents: dict[str, str] | None = None) -> None:
         self._by_key = dict(mapping)
@@ -110,12 +67,7 @@ def _bindings() -> _FakeBindingStore:
 
 
 def _local_tickets() -> list[dict[str, Any]]:
-    """The child (parented, managed) and its EPIC parent.
-
-    The parent's ``ticket_type`` is ``epic`` deliberately: ``_resolve_local_parent`` omits a
-    non-epic parent outright (ticket 8b25), so a task parent would make link 1 unreachable for a
-    reason unrelated to the mechanism under test. Epic is also what the live harness cell used.
-    """
+    """Use a managed child and epic parent so outbound parent resolution is active."""
     child = {
         "ticket_id": CHILD_LOCAL,
         "title": "child",
@@ -148,12 +100,7 @@ def _local_tickets() -> list[dict[str, Any]]:
 
 
 def _remote_fields(summary: str, issuetype: str) -> dict[str, Any]:
-    """A Jira snapshot entry that AGREES with its local ticket on every scalar.
-
-    Agreement matters: the question is whether the PARENT field alone drives the suppression,
-    so any spurious scalar divergence would put an unrelated field in the outbound mutation and
-    muddy the diagnostic.
-    """
+    """Keep scalar fields converged so only the parent affects the diff."""
     return {
         "summary": summary,
         "description": "d",
@@ -167,12 +114,7 @@ def _remote_fields(summary: str, issuetype: str) -> dict[str, Any]:
 
 
 def _snapshot() -> dict[str, dict[str, Any]]:
-    """The de-parented remote state, built by the PRODUCTION merge (``fetcher.merge_parent_map``).
-
-    ``{CHILD_KEY: None}`` is the "queried, and Jira has no parent" three-state that 88d9 layer 1
-    introduced — the Epic-Link-cleared state the live harness observed. Hand-poking
-    ``"parent": None`` onto the entry would let the snapshot shape drift away from production.
-    """
+    """Use the production parent-map merge to represent an observed Jira parent clear."""
     fetcher = importlib.import_module("rebar.reconciler.fetcher")
     base = {
         CHILD_KEY: _remote_fields("child", "Task"),
@@ -196,15 +138,8 @@ def backend() -> Any:
 def _run_outbound(
     outbound_differ: ModuleType, backend: Any, bindings: _FakeBindingStore | None = None
 ) -> list[Any]:
-    """The REAL outbound differ over the de-parented scenario; returns its raw mutations.
-
-    No ``client`` is supplied, mirroring the unit path: every key in the scenario IS in the
-    snapshot, so the bound-but-absent direct-GET branch is never reached.
-
-    ``bindings`` is injectable so a cell can vary the OBSERVED PEER PARENT while holding the rest
-    of the scenario fixed. That single value is what separates "the peer removed the parent" from
-    "the local side re-set it", and the two must produce opposite outbound behaviour.
-    """
+    """Run the real outbound differ; varying peer-parent evidence separates removal from local
+    re-parenting."""
     mutations, _absent_alive = outbound_differ.compute_outbound_mutations(
         _local_tickets(),
         _snapshot(),
@@ -231,22 +166,7 @@ def _outbound_fields_for(mutations: list[Any], jira_key: str) -> dict[str, Any]:
 def test_outbound_does_not_re_push_a_parent_the_peer_removed(
     outbound_differ: ModuleType, backend: Any
 ) -> None:
-    """LINK 1, INVERTED: outbound must stay SILENT when the peer removed the parent.
-
-    THIS CELL WAS WRITTEN THE OTHER WAY UP, and the flip is deliberate rather than a fix to a
-    broken test. While the defect existed it characterised link 1 — it asserted that outbound
-    DOES emit ``parent`` here, which is what let the primary cell's red be attributed to the
-    suppression rather than to one of 88d9's own guards declining. Removing the defect
-    necessarily falsifies a cell that characterises the defect, so it could not survive
-    unchanged: its old assertion and the fix are contradictory over the same fixture by
-    construction.
-
-    Re-aimed at the property the fix establishes, it becomes a genuine regression guard, and a
-    sharper one than the primary cell. The primary asserts the OUTCOME (the local parent ends up
-    cleared); this asserts the MECHANISM that produces it (outbound never emits the contradicting
-    write). Restoring the re-push would redden this cell immediately, whereas the primary could
-    in principle be rescued by some other change to inbound's contradiction filter.
-    """
+    """An observed Jira parent removal must not trigger an outbound re-parent."""
     fields = _outbound_fields_for(_run_outbound(outbound_differ, backend), CHILD_KEY)
     assert "parent" not in fields, (
         f"outbound re-pushed parent={fields.get('parent')!r} for a child whose remote parent was "
@@ -259,18 +179,7 @@ def test_outbound_does_not_re_push_a_parent_the_peer_removed(
 def test_outbound_STILL_pushes_a_parent_the_local_side_re_set(
     outbound_differ: ModuleType, backend: Any
 ) -> None:
-    """THE OPPOSITE DIRECTION, and the cell that stops the fix becoming a worse bug.
-
-    Suppressing the outbound push whenever the remote has no parent would be trivially sufficient
-    to green every other cell here — and it would silently discard real local intent, turning
-    "the peer wins a removal it actually made" into "the peer always wins". That is a data-loss
-    bug strictly worse than the one being fixed.
-
-    The discriminator is the OBSERVED PEER PARENT. Here it is a DIFFERENT key from the local
-    parent, which is what "the local side re-parented since we last looked" looks like on disk —
-    identical to the suppressed scenario in every other respect, including the remote being
-    parentless. Outbound must push.
-    """
+    """A local re-parent after the last peer observation must still be sent outbound."""
     re_set = _FakeBindingStore(
         {CHILD_KEY: CHILD_LOCAL, PARENT_KEY: PARENT_LOCAL},
         # We last observed the child under a DIFFERENT parent, so the local value is a change
@@ -296,19 +205,8 @@ def test_outbound_STILL_pushes_a_parent_the_local_side_re_set(
 def test_inbound_clear_survives_a_real_bidirectional_pass(
     outbound_differ: ModuleType, backend: Any
 ) -> None:
-    """THE PROPERTY UNDER TEST: after a full bidirectional pass, the local parent is cleared.
-
-    Jira is authoritatively parentless for this child, rebar had OBSERVED the parent on the peer,
-    and the ref is managed — every one of 88d9's guards is satisfied, so the clear is the correct
-    outcome. The wiring is what makes this cell different from every existing 88d9 cell: the real
-    outbound differ's mutations are handed to ``compute_inbound_mutations`` as
-    ``outbound_mutations``, exactly as ``run_differs._run_differs_inbound`` does. Nothing about
-    the outbound entry is invented here.
-
-    Without this cell, the whole 88d9 feature could be — and appears to have been — dead in every
-    bidirectional pass while its entire unit suite stayed green, because every one of those cells
-    either omits outbound context or supplies a hand-built stand-in for it.
-    """
+    """Feed real outbound mutations into inbound; an observed Jira removal must clear the local
+    parent."""
     inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
 
     outbound_raw = _run_outbound(outbound_differ, backend)

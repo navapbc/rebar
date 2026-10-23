@@ -1,14 +1,6 @@
-"""Happy-path contract for blame-derived caused_by on bug close (ticket 555e).
-
-Tier: interface (library/CLI over a real temp store). Pins the deterministic core:
-an explicit `--caused-by <id>` on a bug close draws a caused_by link from the
-(now-closed) bug to the culprit — proving the flag threads through the close path
-AND that the link is written via the direct-writer that bypasses the closed-source
-guard. This is also the canonical (sole) home for the single-culprit and ambiguous
-git-blame auto-derivation contracts (ticket 6ba3-6406-cba1-4f04 removed the
-AST-identical duplicate from `test_caused_by_autoderive_heldout.py`). The library
-facade and the user-guide advisory remain held out in that companion file.
-"""
+"""Interface coverage for explicit and blame-derived caused_by on bug close. The library and
+CLI must write a link through the closed-source path; this file owns single-culprit and
+ambiguous-blame cases."""
 
 from __future__ import annotations
 

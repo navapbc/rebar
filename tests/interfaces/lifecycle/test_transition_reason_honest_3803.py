@@ -1,31 +1,6 @@
-"""Ticket 3803 — make ``transition --reason`` honest.
-
-Before this change ``rebar transition --help`` advertised ``[--reason=<text>]`` on every
-transition, but on a plain (non-``--force``) transition the value was parsed, threaded
-through two call layers, and then DISCARDED (``transition_core``'s ``close_reason`` param
-was never read). A user closing a ticket with ``--reason="…"`` reasonably believed the
-rationale was recorded — it was not.
-
-The fix makes the flag honest without adding persistence (ed13 deliberately replaced
-free-text close rationale with the bounded ``--class`` vocabulary — see the ticket):
-
-- AC1 (as amended by ticket fc20): ``transition_core`` originally LOST the discarded
-  ``close_reason`` slot outright. fc20's administrative dispositions deliberately
-  re-added it — but the honesty rule this ticket established still holds: the parameter
-  is keyword-only with an empty default, and the value PERSISTS only on a close whose
-  class requires a reason (``obsolete``/``wontfix``); every other call discards nothing
-  silently because nothing is accepted-and-dropped — the guards below pin that.
-- AC3: passing ``--reason`` on a plain (non-force) transition is REFUSED, not silently
-  accepted and dropped — except (fc20) on a close whose ``--class`` is obsolete/wontfix,
-  where the reason is REQUIRED and recorded as ``close_reason``.
-- AC5's historical flag-coexistence remains: ``--reason`` is not rejected merely because
-  ``--force`` is present. Ticket blusterous-earthly-kitten later removed its audit-note
-  fallback role; force audit text now rides only on ``--force=<reason>``.
-
-``open -> blocked`` is used as the neutral probe: it is neither a start-work
-(``in_progress``, plan-review gate) nor a close (completion gate) edge, so it isolates the
-flag semantics from the gates.
-"""
+"""Transition accepts --reason only where the close class records it. Plain transitions reject
+it; obsolete and wontfix require it, while force audit text comes from --force=<reason>. The
+blocked edge isolates flag behavior from claim and close gates."""
 
 from __future__ import annotations
 

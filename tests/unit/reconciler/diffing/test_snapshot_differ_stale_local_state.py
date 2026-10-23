@@ -1,42 +1,6 @@
-"""Bugs 727f and d103: the diff phase must not act on ``local_state`` emissions when its
-``local_state`` argument is not local state.
-
-THE ONE MECHANISM BOTH TICKETS SHARE. ``differ.compute_mutations``'s contract is
-``(local_state, jira_state)`` — the LOCAL source of truth against the Jira working set —
-and ``differ.py``'s module docstring says so precisely because that contract REPLACED the
-legacy ``(prev_snapshot, next_snapshot)`` one. Its sole production caller,
-``run_differs``, was never migrated: ``reconcile.py`` builds ``prev_snapshot`` from the
-persisted earlier FETCH and ``curr_snapshot`` from a fresh FETCH, so BOTH arguments are
-remote Jira state and neither reads ``local_tickets``. At that call site the differ's three
-per-key arms divide cleanly:
-
-* key in ``local_state`` only -> outbound create (``unbound_local``). Here that means "was
-  in the previous fetch, gone from this one" — deleted, or merely aged out of the fetch
-  window. Emitting a create RESURRECTS it. WRONG (ticket d103).
-* key in ``jira_state`` only -> inbound create (``jira_new``). Here that means a genuinely
-  new remote issue. CORRECT, and the snapshot differ's one real job at this call site.
-* key in both -> outbound update (``field_drift``) carrying the STALE prev value. Because
-  ``reconcile.py`` advances ``prev_snapshot`` from the PRE-APPLY fetch, an outbound write
-  applied during pass N is invisible to ``prev`` at pass N+1, so a fully converged pair is
-  re-planned as outbound work — and a read-only pass, which never advances ``prev``,
-  re-plans it forever. WRONG (ticket 727f).
-
-WHY NEITHER IS MERELY COSMETIC. The ``field_drift`` phantom carries the stale prev
-value and is planned every pass, spending the bootstrap mutation cap and making a
-"converged" report untrue. The ``unbound_local`` create is worse — it reaches
-``client.create_issue`` and resurrects the issue, which ADR 0028 Decision para 1 forbids
-("No destructive or terminal action ... may be driven by a key's absence from the fetched
-snapshot").
-
-The LABEL case of the ``field_drift`` echo was already fixed (ticket robe-creek-zealot, the
-bridge-internal-label branch in ``_compute_mutations_emit_both``); every other field was left
-behind. These tests close the remaining fields and the create arm.
-
-NOTE FOR A FUTURE MIGRATION. The suppression under test lives at the CALL SITE, not in the
-differ, precisely so ``compute_mutations``'s documented local-vs-jira contract stays intact for
-callers that honour it. If ``run_differs`` is ever migrated to pass real local state, the
-suppression must be REMOVED in the same change — at that point both emissions become correct.
-"""
+"""The production diff phase compares two remote snapshots, not true local state. Suppress its
+stale outbound update and create arms, preserve genuinely new inbound issues and
+caller-seeded repairs, and never infer deletion from fetch-window absence."""
 
 from __future__ import annotations
 
@@ -129,11 +93,7 @@ def _of_kind(mutations, direction: str, action: str) -> list:
 def test_a_converged_pair_plans_no_outbound_update_after_our_own_write(
     run_differs_mod, differ_mod, monkeypatch
 ):
-    """prev = the pre-apply fetch; curr = the same issue carrying the title WE wrote.
-
-    The pair is converged — the remote already holds the value the reconciler intended —
-    so the diff phase must plan nothing outbound for it.
-    """
+    """A converged post-write snapshot must not plan another outbound update."""
     # The rebar-id label is the marker the reconciler writes back on inbound create,
     # so a bound pair really does carry it in both snapshots.
     bound = ["rebar-id:jira-rb-1"]
@@ -173,15 +133,7 @@ def test_a_converged_pair_plans_no_outbound_update_after_our_own_write(
 def test_a_key_that_left_the_fetch_window_plans_no_outbound_create(
     run_differs_mod, differ_mod, monkeypatch
 ):
-    """A key in ``prev`` but not ``curr`` must NOT be planned as an outbound create.
-
-    Absence from the current fetch means the issue was deleted OR merely aged out of the
-    working-set query (a ``status = Done`` issue beyond the recent cap). Neither licenses a
-    create: ADR 0028 Decision para 1 forbids any terminal action driven by snapshot absence,
-    and a create targeted at the issue's own Jira key RESURRECTS it from the stale prev
-    fields. Deletion is proven only by a bounded direct GET returning 404 (ADR 0028 para 2),
-    which is a different subsystem entirely.
-    """
+    """A key absent from the current fetch window must not be recreated from stale data."""
     bound = ["rebar-id:jira-rb-7"]
     prev = {"RB-7": _issue("an issue that left the window", labels=bound)}
     curr: dict = {}
@@ -258,12 +210,7 @@ def test_key_set_prev_field_drift_never_survives_the_production_filter(
 def test_a_genuinely_new_remote_key_still_plans_its_inbound_create(
     run_differs_mod, differ_mod, monkeypatch
 ):
-    """The edge-triggered inbound-create path must survive the suppression.
-
-    A key present in ``curr`` but not ``prev`` is a Jira issue that appeared since the
-    last pass; planning its ``(inbound, create)`` is the snapshot differ's real job and
-    is what the multi-page pagination coverage depends on.
-    """
+    """A newly observed remote key must still plan an inbound create."""
     prev: dict = {}
     curr = {"RB-9": _issue("a brand new remote issue")}
 
@@ -277,15 +224,7 @@ def test_a_genuinely_new_remote_key_still_plans_its_inbound_create(
 
 
 def test_seed_mutations_survive_the_suppression(run_differs_mod, differ_mod, monkeypatch):
-    """Invariant-seeded mutations are injected by the caller, not derived from the
-    mis-shaped ``local_state``, so the suppression must never touch them.
-
-    ``invariants.check_dual_identity_complete`` seeds repair mutations that the differ
-    cannot derive from state alone; dropping one would silently skip a repair. The seed
-    below deliberately carries the same ``reason`` string as the 727f phantom, so a
-    suppression keyed on the reason ALONE — rather than on the differ's own ``source`` —
-    would eat it.
-    """
+    """Caller-seeded repairs must survive even when their reason resembles a stale diff."""
     mut_mod = importlib.import_module("rebar.reconciler.mutation")
     seed = mut_mod.Mutation(
         direction=mut_mod.MutationDirection.outbound,

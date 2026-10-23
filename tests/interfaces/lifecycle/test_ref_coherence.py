@@ -1,17 +1,6 @@
-"""S4b — claim-gate <-> plan-review ref-resolution coherence (epic raze-vet-ditch,
-amended by bug 72d9 ``athletic-esthetical-polecat``).
-
-Plan-review hashes its file_impact dependency map AT the review's pinned snapshot; the
-claim-gate freshness re-check hashes those paths at the CURRENT gate ref. Both resolve
-through the ONE shared boundary (`attest._hash_basis`) with the same semantics — a
-committed snapshot under the same gate configuration — which is what prevents the
-staleness false-positive ADR 0002 exists for (a mere working-tree edit, or an unrelated
-commit, must not invalidate). They must NOT resolve to the identical tree: re-hashing at
-the signature's own ``verified_at_sha`` compared the manifest against the very tree it
-was generated from, which always matched, so scoped drift was structurally undetectable
-in attested mode (bug 72d9). The back-out (a configured ``source=local`` gate) falls
-back to the working-tree basis on both sides.
-"""
+"""Plan review hashes dependencies at its pinned snapshot; the claim gate rechecks them at the
+current gate ref through the same basis resolver. Committed scoped drift stales, while local
+or unrelated changes do not; local-source mode uses the working tree."""
 
 from __future__ import annotations
 
@@ -65,11 +54,8 @@ def _sign(repo: Path, tid: str, *, attested: bool):
         with gate_source.gate_read_root(handle):
             attest.sign_plan_review(verdict, material=material, repo_root=str(repo))
     else:
-        # Simulate a PRE-S4B (legacy) attestation: working-tree dependency hashes, no
-        # verified-at-sha pin. Minted BELOW the policy seam (build_manifest +
-        # signing.sign_manifest directly) because sign_plan_review's no-null-pin invariant
-        # (bug 5128-0856) now refuses to create these — but stores still hold them, and the
-        # verify side must keep reading them.
+        # Mint a legacy working-tree attestation below the current no-null-pin policy;
+        # verification must still accept records already stored in that shape.
         from rebar import signing
         from rebar.llm.plan_review import relation_snapshot as _rs
         from rebar.llm.plan_review.manifest import build_manifest, registry_version
@@ -196,18 +182,12 @@ def test_hash_basis_resolution(tmp_path, monkeypatch):
     assert basis == str(rebar.config.repo_root(str(repo)))
 
 
-# --------------------------------------------------------------------------------------
-# bug 505d-b2c5-734f-47d9 — a DEGRADED basis must not certify (the claim gate is
-# fail-CLOSED: docs/plan-review-gate.md "| Claim gate | fail-closed |")
-# --------------------------------------------------------------------------------------
+# An attested gate must fail closed when its configured basis cannot resolve.
 def test_attested_claim_gate_refuses_to_certify_when_the_gate_ref_is_unresolvable(
     tmp_path, monkeypatch
 ):
-    """When the configured ATTESTED basis cannot be obtained, ``_hash_basis`` substitutes the
-    in-place working tree. If that tree happens to still hold the REVIEWED content while the
-    gate ref has moved, the drift comparison sees nothing and the gate certifies a stale
-    attestation — turning the fail-closed claim gate fail-OPEN. The substitution must instead
-    be visible to the verdict and block the claim."""
+    """An attested gate whose configured ref cannot resolve must fail closed instead of
+    substituting a matching working tree."""
     repo = _repo(tmp_path, monkeypatch)
     # Pin the PRODUCTION gate ref (the suite default is `HEAD`); `_sign` already reviews at
     # origin/main, so both sides agree — this is the deployed configuration.
@@ -249,16 +229,8 @@ def test_attested_claim_gate_refuses_to_certify_when_the_gate_ref_is_unresolvabl
 def test_pre_s4b_attestation_still_verifies_when_the_gate_ref_is_unresolvable(
     tmp_path, monkeypatch
 ):
-    """The NEGATIVE half of the degraded-basis guard (bug 505d-b2c5-734f-47d9): it must fire
-    ONLY for an attestation whose hashes were produced against a committed snapshot.
-
-    A pre-S4b attestation carries no ``verified_at_sha`` — its hashes were always computed
-    against the working tree, so hashing the working tree is its CORRECT basis, not a
-    substitution. Failing closed here would break every legacy attestation: a fail-closed
-    regression hiding inside a fail-open fix. Paired with
-    ``test_attested_claim_gate_refuses_to_certify_when_the_gate_ref_is_unresolvable``, which
-    proves the guard DOES fire when the pin is present — one test alone cannot tell "fails
-    closed on a degraded basis" from "fails closed on everything"."""
+    """A legacy signature without a committed pin legitimately uses working-tree hashes, so an
+    unresolvable gate ref must not reject it."""
     repo = _repo(tmp_path, monkeypatch)
     monkeypatch.setenv("REBAR_GATE_SOURCE", "attested")
     monkeypatch.setenv("REBAR_GATE_REF", "origin/main")

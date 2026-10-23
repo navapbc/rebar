@@ -1,17 +1,5 @@
-"""Parent DETACH must sync to Jira so the reconciler stops re-parenting (churn bug).
-
-Root cause: the outbound parent sync is asymmetric — it propagates a parent SET to Jira's
-epic-link but NEVER a parent CLEAR. So a local detach (`edit --parent=null`) leaves a STALE
-Jira epic-link, and the inbound differ unconditionally re-applies it every reconcile pass,
-silently reverting the detach within minutes. The fix makes the outbound parent sync
-SYMMETRIC (emit a clear), which also drives the existing same-pass inbound suppression so the
-detach is not reverted.
-
-Managed-ref gating (tan-elbow-mica / story safe-luge-nog): the CLEAR is propagated ONLY for
-a parent we MANAGED (in the ticket's ``managed_refs``). A parent a human set directly in Jira
-on a locally-parentless ticket — one rebar never managed — is left for inbound ADOPT, NOT
-clobbered. So the detached child here carries the parent in ``managed_refs``.
-"""
+"""A local detach clears a managed Jira parent so inbound cannot restore it. A parent set only
+by a Jira user remains available for inbound adoption."""
 
 from __future__ import annotations
 
@@ -148,9 +136,7 @@ def test_never_parented_ticket_emits_no_parent_clear(outbound_differ: ModuleType
 
 
 def test_unmanaged_jira_parent_is_not_cleared(outbound_differ: ModuleType) -> None:
-    """Managed-ref gate (tan-elbow-mica): a parent a human set DIRECTLY in Jira on a
-    locally-parentless ticket — one rebar never managed (absent from managed_refs) — must NOT be
-    cleared. It is left for inbound ADOPT; clearing it would clobber the human's edit."""
+    """A Jira parent outside managed_refs must not be cleared by outbound sync."""
     child = {
         "ticket_id": "local-child",
         "title": "Fix the widget",

@@ -1,19 +1,6 @@
-"""A SYMBOLIC ``--ref`` is pinned to one immutable sha for the whole verify+sign unit
-(bug rookie-fickle-hydra, 3e21-4c5b-3e0d-4e23).
-
-80af added the ``--ref`` carrier and made the pre-sign drift guard re-resolve THAT ref for its
-fresh-sha read, reasoning that "a fixed-commit target is a stable no-op (its tree is immutable)".
-True for a sha; false for a branch. 4de6 then pinned the DEFAULT (no ``--ref``) to one HEAD sha
-at close entry but left an explicitly-supplied ref threaded through as its raw string, so
-``--ref origin/main`` is rev-parsed TWICE — once for verification, once at the drift guard,
-minutes apart. A concurrent ``git fetch`` in that window advances
-``refs/remotes/origin/main``, the guard sees two differing SHAs, refuses to attest, and the
-ticket closes WITHOUT a completion attestation while the command still exits 0.
-
-``origin/main`` is strictly more exposed than the ``HEAD`` case 4de6 fixed: HEAD moves only when
-someone commits in THIS worktree, while a remote-tracking ref lives in the shared common dir and
-moves whenever anyone anywhere fetches.
-"""
+"""A symbolic close --ref is resolved once and pinned through verification and signing. A
+concurrent fetch may advance origin/main, but it must not change the close's basis or leave
+a successful close unsigned."""
 
 from __future__ import annotations
 

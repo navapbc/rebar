@@ -1,40 +1,6 @@
-"""Bug 9f26: an emit-time parent suppression must be OPERATOR-VISIBLE, not a bare return.
-
-THE DEFECT. ``outbound_field_diff._resolve_local_parent`` returns ``(False, None)`` for a parent
-whose local ``ticket_type`` is not ``epic`` — bug 8b25's hierarchy guard, which is correct and
-stays. What is wrong is that the return is **byte-identical to the "unbound this pass, retry next
-pass" return a few lines below it**, and carries no log call of any kind. The caller does nothing
-when ``present`` is false. So a user's parent edit against a non-epic parent never enters
-``fields``, ``dispatch_one._update_one_apply_parent`` never runs, and the whole
-``record_parent_divergence`` / ``bridge_alerts`` apparatus is structurally unreachable: the pass
-exits 0, reports convergence, and the user's hierarchy change is gone with nothing anywhere saying
-so.
-
-WHY THAT IS A DEFECT AND NOT A DESIGN CHOICE, cited. ``pass_io.py``'s own contract for this exact
-shape of failure: "a log line is not a signal: the pass still exits 0 and *nothing durable says the
-hierarchy diverged*". And ``dispatch_one.py``: "Warn-and-continue alone is why 'the parent never
-reached the tracker' stayed invisible through FIVE instances of this class". Ticket 39c1 wired that
-contract into *apply-time* parent failure and left *emit-time* suppression silent — the same
-operator-visible outcome through a different door. This file closes that door.
-
-THE TWO STATES MUST STAY DISTINGUISHABLE, which is why the negative control below is load-bearing
-rather than decoration. A suppressed non-epic parent is a DIVERGENCE (it will never converge — the
-guard suppresses it on every pass, forever). An unbound parent is NOT (it converges next pass, once
-the binding exists). Alerting on both would train operators to ignore the alert, so the fix is only
-correct if it fires for the first and stays silent for the second. Before the fix, no signal
-distinguishes them because both are ``(False, None)``.
-
-THE CHANNEL IS THE EXISTING ONE. ``dropped_field_sink`` already collects ``(jira_key, field)`` for a
-mapped-but-not-emitted field, and ``run_differs._emit_outbound_field_alerts`` already turns it into
-a deduped ``outbound-field-dropped`` bridge alert — the acd0 precedent, pinned for ``issuetype`` by
-``test_outbound_field_conflict_and_drop_alerts.py``. A suppressed parent is the same shape of event,
-so it takes the same channel rather than inventing plumbing. The last test drives the REAL emitter
-so this is not merely an assertion about a list.
-
-THE GUARD IS NOT LIFTED. Every test here also asserts ``parent`` is still absent from ``changed``.
-rebar must keep declining to write a parent the tracker would reject or silently ignore; the fix
-adds the missing SIGNAL, it does not add a write.
-"""
+"""Suppressing a bound non-epic parent write must leave a durable drop alert only when the
+remote parent differs. Unbound and converged cases stay silent; the parent remains out of the
+outbound payload."""
 
 from __future__ import annotations
 
@@ -99,15 +65,7 @@ def _ticket(parent_id: str | None = None) -> dict[str, Any]:
 
 
 def _remote(remote_parent_id: str | None = None) -> dict[str, Any]:
-    """The canonical remote snapshot: converged on every field except as parameterized.
-
-    ``remote_parent_id`` is a PARAMETER and not a hardcoded ``None``, and that is not a
-    convenience. A fixture that pins it to ``None`` can only ever describe a tracker with no
-    parent, so it cannot distinguish "the parent was dropped" from "the parent is already
-    there" — and the second case is the common one, since an inbound-mirrored child arrives
-    carrying whatever parent the tracker holds. Pinning it is how the first version of this
-    file passed while the code alerted on every converged ticket.
-    """
+    """Vary the remote parent while keeping every other field converged."""
     return {
         "title": "T",
         "description": "D",
@@ -148,13 +106,7 @@ def _diff(
 
 @pytest.mark.unit
 def test_a_suppressed_non_epic_parent_is_recorded_as_a_dropped_field() -> None:
-    """The headline: the divergence the guard creates must be REPORTED, not merely created.
-
-    The parent stays out of ``changed`` (8b25 is preserved) AND the drop is recorded, so an
-    operator can see that the hierarchy they asked for is not the hierarchy the tracker holds.
-    Asserted on the sink rather than on a log because a log line is explicitly not the contract
-    (``pass_io.py``: "a log line is not a signal").
-    """
+    """A divergent bound non-epic parent stays out of changed and enters the drop sink."""
     dropped: list[tuple[str, str]] = []
     changed = _diff(
         _ticket("parent-local"),
@@ -177,24 +129,7 @@ def test_a_suppressed_non_epic_parent_is_recorded_as_a_dropped_field() -> None:
 
 @pytest.mark.unit
 def test_an_ALREADY_CONVERGED_non_epic_parent_is_NOT_recorded() -> None:
-    """THE CASE THAT MAKES THE ALERT MEAN SOMETHING — nothing was dropped, so say nothing.
-
-    This is the common shape, not an exotic one. A Jira SUB-TASK's parent genuinely is a
-    non-epic (a Story or Task), and the inbound pass mirrors it into local ``parent_id``. So
-    every inbound-mirrored sub-task in the store sits here: local parent is non-epic, the
-    guard fires, AND the tracker already holds exactly that parent. Nothing is being dropped
-    — there is nothing to drop — and an alert here would fire on every pass for every such
-    ticket, re-filed each time the 24h dedup window rolls.
-
-    That would invert the alert's meaning: ``outbound-field-dropped:...:parent`` would most
-    often mean "nothing was dropped", which is worse than the silence this file set out to
-    fix, because a channel that cries wolf is one operators learn to close. It is also the
-    rule the sibling ``issuetype`` drop already follows — that sink records only when the
-    local value ACTUALLY DIFFERS from the remote one.
-
-    The guard's suppression is unchanged either way: ``parent`` stays out of ``changed``. What
-    is under test is purely whether a NON-divergence is reported as a divergence.
-    """
+    """A matching Jira parent is converged, so suppression must not create an alert."""
     dropped: list[tuple[str, str]] = []
     changed = _diff(
         _ticket("parent-local"),
@@ -218,12 +153,7 @@ def test_an_ALREADY_CONVERGED_non_epic_parent_is_NOT_recorded() -> None:
 
 @pytest.mark.unit
 def test_a_DIVERGENT_non_epic_parent_IS_recorded_even_when_remote_has_another_parent() -> None:
-    """The other side of the same coin: a real divergence must still be reported.
-
-    Guards the over-correction from the test above — a fix that suppresses the alert by
-    comparing against the remote must not go silent when the remote holds a DIFFERENT parent,
-    which is a genuine lost edit and the whole point of the channel.
-    """
+    """A different remote parent is a real dropped edit and must alert."""
     dropped: list[tuple[str, str]] = []
     changed = _diff(
         _ticket("parent-local"),
@@ -242,19 +172,7 @@ def test_a_DIVERGENT_non_epic_parent_IS_recorded_even_when_remote_has_another_pa
 
 @pytest.mark.unit
 def test_an_unbound_NON_EPIC_parent_is_NOT_recorded_because_it_may_still_converge() -> None:
-    """THE LOAD-BEARING NEGATIVE CONTROL — the case that runs INSIDE the guarded branch.
-
-    This is the one that gives the fix teeth, and it is deliberately separate from the epic case
-    below. A non-epic parent that is ALSO unbound reaches the very same suppression branch as the
-    headline test, so it is the only input that can distinguish "record when the parent is bound"
-    from "record whenever the guard fires". A fix that appends unconditionally inside the branch
-    passes every other test in this file and fails only here.
-
-    It must stay silent because boundness is what makes the divergence PERMANENT: an unbound
-    parent has not yet been offered to the tracker at all, so reporting a dropped hierarchy edge
-    for it would file an alert per pass for a condition that is still resolving. A fix that
-    cannot tell these two apart has not fixed anything — it has moved the silence into noise.
-    """
+    """An unbound non-epic parent may resolve next pass and must not alert."""
     dropped: list[tuple[str, str]] = []
     changed = _diff(
         _ticket("parent-local"),
@@ -294,11 +212,7 @@ def test_an_unbound_epic_parent_is_NOT_recorded() -> None:
 
 @pytest.mark.unit
 def test_an_epic_parent_is_emitted_and_not_recorded() -> None:
-    """The accepted shape must be untouched in BOTH respects: still emitted, and not flagged.
-
-    Guards the opposite over-correction from the negative control above — a fix that records the
-    drop by flagging every parent would fire on the one shape that works.
-    """
+    """An accepted epic parent is emitted without a drop alert."""
     dropped: list[tuple[str, str]] = []
     changed = _diff(
         _ticket("parent-local"),
@@ -354,12 +268,7 @@ def test_no_sink_supplied_does_not_break_the_diff() -> None:
 
 @pytest.mark.unit
 def test_the_suppressed_parent_reaches_the_bridge_alert_store(tmp_path: Path) -> None:
-    """The sink is a means, not the end — drive the REAL emitter to the REAL alert store.
-
-    Without this, the tests above could pass while the pair went nowhere: ``dropped_field_sink``
-    is only a signal if ``_emit_outbound_field_alerts`` files it. Mirrors the acd0 ``issuetype``
-    precedent, which pins exactly this hop for the sibling case.
-    """
+    """The real emitter must persist the suppressed-parent alert beyond the in-memory sink."""
     run_differs = importlib.import_module("rebar.reconciler.run_differs")
     alert_store = importlib.import_module("rebar.reconciler.alert_store")
 

@@ -1,15 +1,5 @@
-"""Held-out contracts for blame-derived caused_by (ticket 555e). WITHHELD.
-
-- the LIBRARY facade `rebar.transition(..., caused_by=...)` also draws the link
-  (the ed13-parallel gap: the facade must thread the new param),
-- the user-guide gains a blame-hunt advisory.
-
-The git-blame auto-derivation contracts (single-culprit and ambiguous-blame) are
-NOT duplicated here: they are AST-identical to
-`test_caused_by_autoderive.py::test_blame_autoderives_single_culprit` and
-`::test_ambiguous_blame_draws_no_autolink`, which remain the canonical home for
-that coverage (ticket 6ba3-6406-cba1-4f04).
-"""
+"""Held-out caused_by coverage: the library close facade writes the link, and the user guide
+advises a blame hunt. The companion file owns the single-culprit and ambiguous-blame cases."""
 
 from __future__ import annotations
 

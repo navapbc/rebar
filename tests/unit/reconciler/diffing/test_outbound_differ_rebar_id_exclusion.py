@@ -1,17 +1,4 @@
-"""Regression test for bug 68a4-f9d5-5540-4b95.
-
-The bridge-internal binding label written by applier.py is f"rebar-id:{local_id}"
-(COLON separator — see applier.py around line 601). The outbound differ's
-_EXCLUDED_PREFIXES previously used "rebar-id-" (HYPHEN), so the differ saw the
-rebar-id:<UUID> label on Jira but not in local tags, and emitted a spurious
-label-remove mutation. That tripped the audit guard / produced a Jira
-mutation for a bridge-internal identity label that the differ should not
-touch.
-
-This test asserts that for a bound ticket whose Jira labels include
-"rebar-id:<local_id>" (colon form, as actually written), the outbound differ
-does NOT emit any label mutation for that label.
-"""
+"""The outbound differ must preserve Jira's internal rebar-id:<UUID> binding label."""
 
 from __future__ import annotations
 
@@ -69,13 +56,7 @@ def _make_ticket(
 def test_outbound_differ_excludes_colon_form_rebar_id_label(
     outbound_differ: ModuleType,
 ) -> None:
-    """Jira-side ``rebar-id:<UUID>`` (colon) label must NOT yield a remove mutation.
-
-    Mirrors the real-world case: applier.py writes the binding label with a
-    colon separator, so the Jira snapshot contains "rebar-id:local-1", but the
-    local ticket's tags do not. Without proper exclusion, the differ would
-    emit a remove mutation for this bridge-internal label.
-    """
+    """A Jira-only rebar-id:<UUID> label must not produce a label-removal mutation."""
     local_id = "local-1"
     ticket = _make_ticket(
         ticket_id=local_id,

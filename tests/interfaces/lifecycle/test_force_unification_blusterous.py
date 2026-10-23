@@ -1,18 +1,6 @@
-"""Coverage for the unified ``--force[=<reason>]`` surface (ticket blusterous-earthly-kitten).
-
-``transition`` was brought to ``claim``'s canonical shape: one force-bypass surface whose
-value IS the audit reason, spelled identically across the two verbs and across the library
-and CLI. The redundant ``force_close`` parameter and the ``force`` boolean were retired to
-removed library inputs, and ``--reason`` no longer doubles as the force-bypass note (it feeds
-only ``close_reason``). These tests pin:
-
-  * a bare ``--force`` records ``"(no reason given)"`` — byte-identically for claim and
-    transition, over BOTH the library and the CLI;
-  * ``--force=<reason>`` records ``<reason>`` — again identically for both verbs;
-  * ``--reason`` on a force close is NOT smuggled in as the force note;
-  * the legacy ``rebar.transition(force_close=...)`` / ``force=True`` calls fail loudly at the
-    library boundary and name the replacement ``force="<explicit reason>"`` spelling.
-"""
+"""Claim and transition share force=<reason> across CLI and library. A bare flag records the
+same placeholder, --reason stays a close disposition, and removed force_close or boolean
+force inputs fail clearly."""
 
 from __future__ import annotations
 

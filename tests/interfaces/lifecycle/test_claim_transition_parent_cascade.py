@@ -418,10 +418,8 @@ def test_reopen_cascade_false_suppresses_cascade(rebar_repo: Path) -> None:
 
 
 def test_reactivate_child_reactivates_closed_parent(rebar_repo: Path) -> None:
-    """The bug (paragonite-fruited-minnow): reactivating a closed child straight to
-    ``in_progress`` left its CLOSED parent closed, so the store held a closed parent with
-    an ``in_progress`` child — the invalid state I4a forbids, reached through the one edge
-    into it that the cascade table did not cover."""
+    """Reactivating a closed child must reactivate its closed parent before the child enters
+    progress."""
     parent, child = _closed_chain(rebar_repo, 2)
 
     rebar.transition(child, "closed", "in_progress", repo_root=str(rebar_repo))
@@ -615,21 +613,8 @@ def _chain_in_status(repo: Path, status: str) -> tuple[str, str]:
 def test_every_table_edge_cascades_through_the_real_transition(
     edge: tuple[str, str], eligible: str, rebar_repo: Path
 ) -> None:
-    """Coverage that GROWS WITH THE TABLE, exercised through the REAL surface.
-
-    ``test_the_cascading_edge_table_is_unchanged`` (unit tier) is only a tripwire: adding a
-    fourth row breaks its equality assertion and makes the author look, but updating that
-    literal is all it forces — nothing then obliges the new row to actually cascade. The two
-    bugs this story descends from, ``cranial-sulfur-peafowl`` and ``paragonite-fruited-minnow``,
-    were both "an edge the cascade did not know about", so a tripwire alone leaves the bug
-    class open.
-
-    Parametrising over the LIVE table closes it: a new row mints a new case on import, and
-    that case only passes if ``rebar.transition`` genuinely walks the parent first. It is
-    driven through the library surface rather than through ``cascade_parent_first`` directly,
-    because the injected-walk unit tests pass for ANY row by construction — the walk is
-    table-agnostic. Only the real path can tell you the row is WIRED.
-    """
+    """Every live cascade-table edge must move the parent first through rebar.transition, so
+    adding a table row creates a real interface case."""
     from_status, to_status = edge
     parent, child = _chain_in_status(rebar_repo, from_status)
     assert _status(parent, rebar_repo) == eligible

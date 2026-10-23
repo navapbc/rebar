@@ -1,27 +1,6 @@
-"""Conformance test for the canonical exit-code contract (sub-effort (a) of
-story fatty-cipher-range / ticket urge-index-zoom).
-
-The exit codes 0/1/2/10/11 are load-bearing for agents driving rebar over the CLI,
-but were historically scattered through per-script headers with no single
-source of truth. ``docs/exit-codes.md`` is now that source; this test pins the
-load-bearing paths against it so the contract cannot silently drift.
-
-Canonical contract (see docs/exit-codes.md for the full per-command table):
-  0  — success
-  1  — runtime error: ticket-not-found, invalid input value, missing required
-        positional argument, failed precondition, or a gate "fail" verdict.
-  2  — usage error: an unrecognized CLI ``--option`` (every read command rejects
-        unknown options with 2), plus clarity-check's not-found/usage path (the
-        gate overloads 1 as a fail VERDICT, so not-found cannot also be 1). Also
-        the plan-review gate's non-retryable INDETERMINATE verdict.
-  10 — optimistic-concurrency mismatch (transition/claim/reopen state mismatch).
-  11 — transient/retryable LLM-gate degrade (WAIT_AND_RETRY / RETRY_NOW); an
-        additive code (story authorial-hated-blackbear) distinct from 2. Pinned
-        offline at the CLI-mapping level (a live outage is not reproducible here).
-
-``validate`` is the one documented exception: its exit code is a 0-4 health
-severity bucket, not the standard contract (and it takes NO ticket id).
-"""
+"""The CLI exit-code contract is pinned to docs/exit-codes.md: 0 success, 1 runtime or gate
+failure, 2 usage or terminal indeterminate, 10 concurrency, and 11 retryable gate
+degradation. validate retains its 0-4 health scale."""
 
 from __future__ import annotations
 
@@ -247,11 +226,8 @@ def test_exit_11_documented() -> None:
 
 
 def _documented_subcommands() -> list[str]:
-    """Every name in the doc's per-command table, in document order.
-
-    Parsed from the table rather than hand-listed — a hand-listed copy would be a
-    third master for the same fact, which is what this check exists to prevent.
-    """
+    """Read per-command names from the documentation table in document order; avoid a duplicate
+    command list."""
     from pathlib import Path as _P
 
     doc = _P(__file__).resolve().parents[3] / "docs" / "exit-codes.md"
@@ -274,24 +250,8 @@ def _live_route_names() -> set[str]:
 
 
 def test_every_live_route_is_documented_and_every_doc_row_names_a_real_route() -> None:
-    """The per-command table and ``ROUTES`` are one fact with two masters (mirror F12).
-
-    Set difference, not a count: when this drift was found the two sides had equal-looking
-    totals while disagreeing about members, so a count comparison saw nothing.
-
-    The two sides are NOT the same vocabulary, and conflating them would be its own defect.
-    ``ROUTES`` holds TOP-LEVEL route names; the table documents user-facing INVOCATIONS,
-    which include a route's nested argparse subcommands (`bridge setup`, `bridge fsck`,
-    `bridge check-access` are all real and all dispatched inside the `bridge` route). So the
-    invariant is two-directional but asymmetric:
-
-      * every live route must be documented under some spelling, and
-      * every documented row must BEGIN with a live route name.
-
-    The second is deliberately weaker than "is invocable": proving that needs a subprocess
-    per row, and 80+ spawns do not belong in this tier. It still catches the failure that
-    actually occurs — a row for a command that was removed outright.
-    """
+    """Compare route membership in both directions: each live route appears in the table, and
+    each table row begins with a live top-level route. Nested invocations share that route."""
     documented = _documented_subcommands()
     assert documented, "parsed no rows from the per-command table — the parser has drifted"
     live = _live_route_names()

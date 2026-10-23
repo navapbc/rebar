@@ -1,27 +1,5 @@
-"""Per-project effective-map memoization within one outbound reconcile pass (d378).
-
-Perf-only follow-up to the S2 advisory on 438a-e1d9-29d3-4081: inside
-``compute_outbound_mutations`` the per-project effective config
-(``config.effective_status_map`` / ``effective_type_map`` / ...) was resolved once per
-TICKET, redoing the ``_discover_project_config`` filesystem stat-walk + three-layer
-overlay resolution on every ticket. It must instead be memoized per ``project_key`` per
-pass so the discovery runs once per DISTINCT project, not once per ticket — with
-identical observable output.
-
-Oracles (observable behaviour only — no wall-clock timing assert):
-
-* PERF (call-count proxy): a spy over ``config.effective_status_map`` counts invocations.
-  Over N unbound tickets spanning M distinct projects (M < N) it must be called exactly M
-  times (once per distinct project per pass), not N. Pre-memoization it is called N times
-  (RED-first); reverting the cache re-reddens it.
-* PER-PROJECT KEYING: the spy records the ``project_key`` it was asked for; the set must be
-  exactly the M distinct projects — a cache keyed WITHOUT ``project_key`` (one global slot)
-  would collapse to a single call/key and fail this.
-* OUTPUT UNCHANGED: with distinct per-project ``[mapping.projects.<KEY>.type_map]`` overlays
-  the emitted create mutations must (a) be the full expected set (count + resolved
-  ``_bridge_target_project`` stamp) and (b) each carry ITS OWN project's mapped
-  ``issuetype`` — proving the memoized value returned per ticket is the right project's map.
-"""
+"""Effective mappings are cached once per project within an outbound pass. These tests count
+discovery calls, distinguish project keys, and check each project's create payload."""
 
 from __future__ import annotations
 
