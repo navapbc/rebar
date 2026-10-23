@@ -616,18 +616,49 @@ def _dispatch_with_backstop(batch, ctx):
         return apply_handlers.record_backstop_failure(batch, exc, batch.get("action", ""), ctx)
 
 
-def make_coordinator_dispatch(*, ctx, outcomes_sink, dispatch=None):
-    """Build the single-attempt ``dispatch_fn(plan, mutation)`` for the coordinator.
+def _transient_http_signal(exc, action):
+    """The ``transient`` ``AtomicSignal`` for an HTTP 429/5xx failure, else ``None``.
+
+    ``failure_policy.classify_http_exception`` decides; a ``Retry-After`` header becomes
+    ``provider_delay_ms``, which the retry budget treats as a lower bound.
+    """
+    policy = importlib.import_module("rebar.reconciler.failure_policy")
+    classified = policy.classify_http_exception(exc, action)
+    if classified is None or classified[0] != "transient":
+        return None
+    _status, scope, delay_ms = classified
+    coordinator = importlib.import_module("rebar.reconciler.coordinator")
+    return coordinator.AtomicSignal(
+        status="transient", scope=scope, diagnostic=f"HTTP {exc.code}", provider_delay_ms=delay_ms
+    )
+
+
+def make_coordinator_dispatch(*, ctx, outcomes_sink, dispatch=None, transient_cell=None):
+    """Build the per-attempt ``dispatch_fn(plan, mutation)`` for the coordinator.
 
     Convert the typed mutation to a legacy batch dict, delegate ONE physical attempt to
     ``dispatch`` (defaulting to the lazily-loaded ``apply_handlers.dispatch_mutation``),
     append the returned outcome dict to ``outcomes_sink``, and project the terminal
     ``HandlerResult`` onto an ``AtomicSignal`` — ``permanent``/ticket scope when the
-    outcome carries a truthy ``error``, ``applied`` otherwise.
+    outcome carries a truthy ``error``, ``applied`` otherwise. An HTTP 429/5xx becomes a
+    ``transient`` signal (no outcome appended) so the coordinator's retry budget retries
+    it; the error is kept in ``transient_cell[0]`` for ``retry_budget.TransientRetryBudget``.
+    Any other ``HTTPError`` re-raises fail-fast, as before.
     """
 
     def dispatch_fn(_plan, mutation):
         batch = _mutation_to_batch_dict(mutation)
+        try:
+            return _dispatch_and_record(batch)
+        except urllib.error.HTTPError as exc:
+            signal = _transient_http_signal(exc, batch.get("action", ""))
+            if signal is None:
+                raise
+            if transient_cell is not None:
+                transient_cell[0] = exc
+            return signal
+
+    def _dispatch_and_record(batch):
         if dispatch is None:
             # Production route: the rebar-id label-write guard (G6) and the per-mutation
             # failure backstop the retired legacy loop provided (``_audited_dispatch``).
@@ -644,6 +675,11 @@ def make_coordinator_dispatch(*, ctx, outcomes_sink, dispatch=None):
         return coordinator.AtomicSignal(status="applied")
 
     return dispatch_fn
+
+
+def _retry_clock():
+    """The clock for the production coordinator retry budget (tests replace this)."""
+    return importlib.import_module("rebar.reconciler.retry_budget").WallClock()
 
 
 def map_cutover_report(report) -> dict:
@@ -670,9 +706,14 @@ def run_migrated_reroute(
     physical outcome dict to ``outcomes_sink``. The caller-owned 1-element mutable
     ``head_pin_cell`` is threaded straight through, so the caller observes the refreshed
     (or, on a hostile drift, the last-known) HEAD pin even when a drift raises mid-route.
-    Returns the ``cutover_tally``.
+    An HTTP 429/5xx is retried within the pass by a wall-clock retry budget; when that
+    budget cannot retry, the original ``HTTPError`` propagates. Returns the
+    ``cutover_tally``.
     """
-    dispatch_fn = make_coordinator_dispatch(ctx=ctx, outcomes_sink=outcomes_sink)
+    transient_cell: list = [None]
+    dispatch_fn = make_coordinator_dispatch(
+        ctx=ctx, outcomes_sink=outcomes_sink, transient_cell=transient_cell
+    )
     execute = make_guarded_execute(
         abort_check=abort_check,
         recheck_drift=recheck_drift,
@@ -681,7 +722,14 @@ def run_migrated_reroute(
         head_pin_cell=head_pin_cell,
         dispatch_fn=dispatch_fn,
     )
-    report = coordinate_and_fuse(migrated_plans, execute=execute, locate=None, budget_factory=None)
+    report = coordinate_and_fuse(
+        migrated_plans,
+        execute=execute,
+        locate=None,
+        budget_factory=importlib.import_module(
+            "rebar.reconciler.retry_budget"
+        ).transient_budget_factory(transient_cell, _retry_clock),
+    )
     return map_cutover_report(report)
 
 

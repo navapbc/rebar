@@ -38,6 +38,14 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): coordinator-routed Jira writes retry HTTP 429 and 5xx within the
+  pass.** This partially supersedes "reconciler handlers make one transport attempt" below: an
+  outbound update or delete that fails with a 429 or 5xx is retried by the ADR 0103 retry
+  budget (at most 3 attempts and 15 seconds of sleep, honouring `Retry-After` as a lower
+  bound) instead of aborting the pass. When the budget cannot retry, the error still aborts
+  the pass, and a non-429 4xx still fails at once. Details in
+  [docs/release-notes.md](docs/release-notes.md).
+
 - **BREAKING (pre-1.0): reconciler handlers make one transport attempt.** ADR 0103 S3 retires
   the handler-level retry wrapper. The transports still retry Cloud REST timeouts and
   connection faults, ACLI non-zero exits, and Data Center connection faults and opted-in 429s.

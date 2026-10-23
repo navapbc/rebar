@@ -8,6 +8,27 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING: coordinator-routed Jira writes retry HTTP 429 and 5xx within the pass
+
+This partially supersedes the next entry ("reconciler handlers make one transport attempt").
+Handlers still make one transport attempt each, but a coordinator-routed write that fails
+with an HTTP 429 or 5xx is now retried within the pass by the ADR 0103 retry budget instead
+of aborting it.
+
+- The production coordinator dispatch (`batch_dispatch.make_coordinator_dispatch`) maps a
+  429 or 5xx `HTTPError` through `failure_policy.classify_http_exception` (over
+  `classify_http_error`) onto an `AtomicSignal(status="transient")`, and
+  `run_migrated_reroute` gives each atomic op a fresh `retry_budget.TransientRetryBudget` on
+  the new `retry_budget.WallClock`. That is at most 3 attempts and 15 seconds of cumulative
+  sleep per op, with a delay of 2-3 s then 4-5 s, and an integer `Retry-After` header is a
+  lower bound on the delay.
+- This covers outbound update and delete, the actions the coordinator route dispatches. The
+  create reroute, inbound write-backs and the transports' own retries are unchanged.
+- When the budget cannot retry (3 attempts used, or the next delay would pass the 15 s cap),
+  the original `HTTPError` propagates and aborts the pass, as before. Any other non-404
+  `HTTPError` (a non-429 4xx) still propagates on the first attempt.
+- `make_coordinator_dispatch` takes an optional `transient_cell`.
+
 ## BREAKING: reconciler handlers make one transport attempt (ADR 0103 S3)
 
 ADR 0103 S3 is done: the handler-level retry wrapper is retired, so every outbound handler

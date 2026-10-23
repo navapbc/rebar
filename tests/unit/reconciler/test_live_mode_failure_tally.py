@@ -795,24 +795,38 @@ def test_live_reroute_reraises_non_404_httperror_fail_fast(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Fail-fast parity: a non-404 ``HTTPError`` raised by the physical dispatch on the
-    coordinator route propagates (aborting the pass), exactly as the legacy
-    ``_apply_one`` re-raise arm does — the backstop deliberately does NOT swallow it."""
+    coordinator route propagates (aborting the pass) — the backstop deliberately does NOT
+    swallow it. A 5xx is first retried by the coordinator's retry budget (story
+    inept-unanarchic-foal); a 500 on every attempt exhausts it after 3 calls and the
+    original error propagates. The budget clock is replaced, so nothing really sleeps."""
     import urllib.error
+
+    from rebar.reconciler import batch_dispatch
+
+    class _Clock:
+        def now(self) -> int:
+            return 0
+
+        def sleep_ms(self, _ms: int) -> None:
+            return None
+
+    monkeypatch.setattr(batch_dispatch, "_retry_clock", _Clock)
 
     applier, mutation_mod, ticket_plan_mod = _rr_mods()
     m = _rr_outbound_update(mutation_mod, "DIG-301", "loc-301", {"summary": "5xx"})
     plan = _rr_mutate_plan(ticket_plan_mod, "DIG-301", [m])
 
+    err_500 = urllib.error.HTTPError("https://a.example", 500, "server error", {}, None)
     fake_client = MagicMock()
     fake_client.search_issues.return_value = []
-    fake_client.update_issue.side_effect = urllib.error.HTTPError(
-        "https://a.example", 500, "server error", {}, None
-    )
+    fake_client.update_issue.side_effect = err_500
 
     pass_id = "reroute-e2e-httperror"
     with patch.object(applier, "_load_acli", return_value=fake_client):
-        with pytest.raises(urllib.error.HTTPError):
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
             applier.apply([m], pass_id, repo_root=tmp_path, ticket_plans=[plan])
+    assert excinfo.value is err_500
+    assert fake_client.update_issue.call_count == 3
 
 
 # ════════════════════════════════════════════════════════════════════════════════
