@@ -1,20 +1,9 @@
-"""Thundering-herd hardening of the Anthropic transport backoff (ticket 254e-1770-854b-47a2).
+"""De-correlate Anthropic transport retries with equal jitter (254e).
 
-Held-out RED->GREEN oracle for the two operator-approved parts of the fix, asserted on the
-OBSERVABLE computed wait value returned by the `_build_retry_wait` strategy (never a private
-name):
-
-  Vector A -- no `Retry-After`: the fallback must apply Equal Jitter `uniform(cap/2, cap)` so
-  N co-throttled clients de-correlate, instead of pydantic-ai's default NON-jittered
-  `wait_exponential` (which returns the identical value to every client -> lockstep).
-
-  Vector B -- a zero / negative integer `Retry-After`: it must be treated as ABSENT and fall
-  through to the jittered fallback, NOT honored verbatim as an immediate (0s) synchronized
-  replay.
-
-A positive in-window `Retry-After` is still honored (regression guard). The strategy's RNG is
-injected here for determinism; production binds the process-global `random` module.
-"""
+Without Retry-After, wait uniformly in [cap/2, cap] instead of lockstep
+exponential backoff. Treat zero or negative integer Retry-After as absent.
+Honor positive in-window values. Injected RNG makes the observed wait
+deterministic."""
 
 from __future__ import annotations
 

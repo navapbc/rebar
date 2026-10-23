@@ -1,14 +1,9 @@
-"""Happy-path oracle + shared scaffolding for the fixture-mining heal loop (ticket 1cef).
+"""Visible fixture-heal happy path and shared scaffolding (1cef).
 
-VISIBLE to the implementation subagent: this file specifies the loop's core happy path (a
-gap criterion is attempted and admitted; a spec-covered criterion is out of scope). The edge
-and end-to-end oracle (quarantine breaker, first-encounter un-minable, idempotent filing, the
-budget stop, the cleared-env subprocess, the due-stamp interval) is HELD OUT in
-``test_fixture_heal_heldout.py`` and validated by the orchestrator.
-
-Every assertion targets OBSERVABLE behaviour: the returned ``HealReport``, tickets in a
-temporary store, and the ledger total — never private structure.
-"""
+Attempt and admit an uncovered gap. Leave spec-covered criteria out of
+scope. Assert HealReport, temporary-store tickets, and ledger totals rather
+than private structure. Held-out tests cover quarantine, filing, budget,
+CLI, and due interval."""
 
 from __future__ import annotations
 

@@ -1,18 +1,8 @@
-"""Close landed-work precheck must not print unrelated ambiguity noise (bug af11).
+"""Close precheck scans historical commit IDs without printing unrelated ambiguity (af11).
 
-The completion gate's deterministic referencing-commit precheck
-(``rebar._commands.close_precheck._referencing_commits``) scans EVERY
-reachable commit message and resolves every extracted candidate id through the
-shared resolver. The resolver reports ambiguity to stderr — correct when the USER
-supplied the ambiguous id, pure noise when the precheck is merely walking
-unrelated historical commit references. Contract (ticket af11-ac5f-4e86-4d1d):
-
-- the scan emits NO ambiguity diagnostics for unrelated historical refs;
-- the gate DECISION is unchanged in both directions — a later valid full-ID
-  trailer is still found (True), and absence of one still fails (False);
-- explicit, user-supplied ambiguous ids (resolved outside the scan) keep their
-  diagnostics.
-"""
+close_precheck._referencing_commits must still find a later valid full-ID
+trailer and return false when none exists. Only ambiguity in an explicit
+user-supplied ID keeps its diagnostic."""
 
 from __future__ import annotations
 
@@ -86,12 +76,9 @@ def test_explicit_ambiguous_prefix_keeps_its_diagnostic(scan_env, capsys) -> Non
     assert "Ambiguous prefix" in capsys.readouterr().err
 
 
-# ── completion-signature reporting (bug silvern-dewy-damselfly) ────────────────────────────
-# The close COMMITS, releases the lock, and only THEN attempts to sign. A signing failure
-# therefore leaves a ticket closed-WITHOUT-signature while the command still succeeds — and
-# used to say so only via a stderr line whose text ("flock: could not acquire lock after 60s")
-# described the CLOSE as having failed. These pin the machine-readable marker, its closed cause
-# vocabulary, and the corrected message.
+# Completion-signature reporting (silvern-dewy-damselfly). Close commits
+# before signing. A signing failure leaves a successful close unsigned.
+# The result marker and message must name that outcome and its cause.
 
 
 @pytest.fixture
@@ -258,12 +245,9 @@ def test_a_force_close_reports_its_own_cause(repo, monkeypatch, capsys):
     }
 
 
-# ── force-close reason durability (bug defiant-orthoclase-buck) ────────────────────────────
-# `transition_core` accepted `force_close_reason` and never read it, so the operator's
-# `--force=<reason>` was discarded before reaching the STATUS event. The only durable trace was
-# a best-effort FORCE_CLOSE audit comment written AFTER the close via a SECOND lock acquisition
-# and swallowed on failure — least reliable under exactly the contention that makes
-# force-closing attractive. It now rides the close's own locked write.
+# Force-close reason durability (defiant-orthoclase-buck). Put the operator's
+# reason on the locked STATUS write. The old transition_core dropped it.
+# A later best-effort FORCE_CLOSE comment could fail under contention.
 
 
 def _status_events(repo: Path, ticket_id: str) -> list[dict]:
@@ -341,12 +325,10 @@ def test_transition_core_does_not_accept_a_parameter_it_discards():
         )
 
 
-# ── durable close provenance: completion_expectation (story mechanical-coherent-wolverine) ──
-# "Closed with no attestation" used to collapse gate-off, --force, config-unreadable
-# fail-open, local-source, certifiable-False withholding and signature-append failure into
-# ONE indistinguishable state. The close STATUS event now records WHY a completion signature
-# was or was not EXPECTED (never the outcome — the STATUS commits BEFORE signing is
-# attempted), in the same locked write as the close, folded into reduced state.
+# Completion expectation (mechanical-coherent-wolverine) distinguishes gate-off,
+# force, unreadable config, local source, uncertifiable results, and sign failure.
+# The locked close STATUS event records whether a signature was expected,
+# not its later outcome, because signing follows the commit.
 
 _GATE_ON = "[verify]\nrequire_completion_verification_for_close = true\n"
 # `[verify` never closes its table header -> tomllib raises -> ConfigError (raised out of
@@ -572,14 +554,10 @@ def test_a_legacy_close_event_without_the_field_reads_back_absent(tmp_path):
     )
 
 
-# ── completion-signature reporting on the DEFAULT TEXT channel (bug faulty-floppy-kob) ──────
-# The `completion_signature` marker reaches the library return, the `--output json` branch, and
-# MCP, and the drift / sign_failed branches warn on stderr — but the CLI's DEFAULT (text) output
-# (`_emit_transition_result`'s "transitioned <id>: ... ; unblocked: ..." line) never inspected it.
-# So a close that landed WITHOUT its completion attestation (cause != "signed") printed an
-# unqualified success to a human, or to an agent reading the success line and not stderr. These
-# pin that the text line names the un-signed outcome for every non-`signed` cause, leaves a
-# fully-earned close (and non-completion transitions) byte-for-byte unchanged, and keeps exit 0.
+# Default text output (faulty-floppy-kob) must name unsigned close outcomes.
+# JSON/MCP already expose completion_signature and stderr warns, but the
+# success line once hid it. Preserve signed-close and other transition text,
+# plus exit 0, while naming every non-signed cause.
 
 
 def test_text_output_warns_when_a_close_lands_without_its_signature(repo, monkeypatch, capsys):

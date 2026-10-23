@@ -1,33 +1,10 @@
-"""Oracle for unique-temp cache/artifact writes.
+"""Require unique temporary files for concurrent cache and artifact writes (b0ac).
 
-Ticket b0ac-3c0f-3f64-4344 (silverish-parodic-quoll).
-
-The defect class: a write that derives its temporary filename from the TARGET (or from
-the pid) shares that pathname with every concurrent writer of the same target. The first
-``os.replace`` consumes the shared temp; the second raises ``FileNotFoundError``; a
-best-effort ``except`` swallows it, and that writer is silently lost. Fixed once in
-``completion_verdict_cache`` (89981d8e); these are the remaining sites.
-
-The fix is to route each site through the existing shared helper
-``rebar._store.fsutil.atomic_write``, which creates a UNIQUE same-directory temp via
-``mkstemp`` and publishes it with ``os.replace``. No new helper is introduced.
-
-Two complementary halves, deliberately. The CONCURRENCY half proves the property: two
-writers racing on one logical target both land, with no ``*.tmp`` residue, synchronised
-by a ``threading.Barrier`` at the real ``os.replace`` seam (the shape this class's
-exemplar regression already uses at
-``tests/unit/workflow/test_completion_verdict_cache.py``). Timing sleeps are never the
-mechanism. The ADOPTION half asserts each site routes through the helper; that is a
-structural assertion, which is normally the wrong thing to test — but adoption IS the
-contract here, and it is the only half that fails deterministically BEFORE the fix,
-because the pre-fix and post-fix code publish through different seams.
-
-Both halves were verified by defect-seeded mutation: re-introducing a shared temp name
-inside ``atomic_write`` reddens 2 cases, and reverting the cursor site to its own
-hand-rolled shared temp reddens 2. Before the fix the concurrency half reproduced the
-production failure directly — ``reconcile_cursor_write_error`` emitted for the losing
-writer.
-"""
+Target- or PID-derived temp names collide. One os.replace consumes the file
+and a swallowed FileNotFoundError loses another writer. Existing
+fsutil.atomic_write uses a same-directory mkstemp then replace. Barrier-led
+concurrency tests prove both writers land without residue. Structural checks
+look for helper references at each site. Defect-seeded mutations cover both seams."""
 
 from __future__ import annotations
 

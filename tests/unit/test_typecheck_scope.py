@@ -1,17 +1,8 @@
-"""CI guard: `make typecheck` must mypy `scripts/` too, not just `src/rebar`.
+"""Keep scripts/ under make typecheck (cc99).
 
-Ticket cc99 (follow-up to ae96): ae96 brought `scripts/` under `ruff check` / `ruff
-format` — ``sources = src tests scripts`` in the Makefile — but the ``typecheck`` target
-stayed ``mypy src/rebar``. Several files under ``scripts/`` ARE the CI gates behind the
-Gerrit ``Verified`` vote (``.github/workflows/_build-and-test.yml`` invokes them
-directly), so the gate implementations themselves were type-unchecked. Widening the
-target surfaced 15 real errors across 6 files.
-
-This is the guard for that scope. It fails if the ``typecheck`` target is ever
-re-narrowed to ``src/rebar`` only, so the gap cannot silently reopen. It is the mypy
-sibling of ``test_ci_actionlint_scope.py``, which guards actionlint's scope in ``lint``
-the same way.
-"""
+The earlier lint widening left CI gate scripts outside mypy and later
+surfaced 15 errors in 6 files. This guard prevents narrowing back to
+src/rebar only, alongside the actionlint-scope guard."""
 
 from __future__ import annotations
 

@@ -1,24 +1,10 @@
-"""Sync self-heal under a NARROW clone refspec (bug 5546).
+"""Recover sync from narrow clone refspecs without losing ticket events (5546).
 
-A single-branch clone configures ``+refs/heads/main:refs/remotes/origin/main``. A bare
-``git fetch <remote> <branch>`` only opportunistically writes
-``refs/remotes/<remote>/<branch>`` when the configured refspec COVERS that branch, so under
-a narrow refspec the fetch succeeds (rc=0, FETCH_HEAD only) while
-``rev-parse --verify <remote>/<branch>`` still fails — and ``sync.reconverge``'s guard
-returns before the union merge it was written to perform is ever reached. The tracker then
-never reconverges, which is why a fresh single-branch clone reads ``[]`` for a whole session
-despite ``sync.pull = on``.
-
-The fix fetches with an EXPLICIT refspec so the merge becomes reachable, and gates that merge
-on a conservative safety predicate (AC1's recorded data decision):
-
-* shared ancestry (a ``merge-base`` exists) -> union merge; positive proof of common provenance;
-* no common ancestor + local store carries NO ticket events -> adopt; nothing can be lost;
-* no common ancestor + local store DOES carry ticket events -> refuse, report DIVERGED.
-
-The third case fails toward reporting rather than toward silently absorbing an unrelated
-("orphan") store into the shared tickets branch.
-"""
+A plain fetch can update FETCH_HEAD while leaving origin/tickets absent, so
+reconverge returns before merging. Fetch with an explicit tracking refspec.
+With shared ancestry, union-merge. Without it, adopt only an event-empty
+local store. Refuse and report DIVERGED when an unrelated local store has
+events, rather than publishing orphan history."""
 
 from __future__ import annotations
 

@@ -1,17 +1,9 @@
-"""Happy-path oracle for the plan-review fixture-spec emitter (ticket 092c).
+"""Visible balanced fixture-emitter happy path (092c).
 
-Pins the CORE observable contract of ``rebar.llm.evals.fixture_emit.emit_specs``: given a
-labeled candidate manifest that is BALANCED for a criterion (at least one ``fire`` and one
-``no_fire`` candidate), the emitter writes exactly one ``.eval.yaml`` for that criterion into
-its working directory, named for the criterion's prompt id, and that file passes the REAL
-``validate_eval_spec(strict=True)`` with zero errors while carrying the standard field set
-(``epochs: 3``, ``gate: at_least(2)``, ``coverage_threshold: 1.0``, the deterministic
-``emits_valid_findings`` scorer).
-
-The edge cases (balance/gold refusal counted ``skipped-unbalanced``, the per-side rank-order
-cap, stale-file removal across runs, byte-identical idempotence) live in the held-out suite
-and are validated by the orchestrator — they are NOT in this file.
-"""
+A fire/no_fire manifest yields one prompt-ID-named .eval.yaml passing the
+strict validator with epochs 3, at_least(2), coverage 1.0, and the
+deterministic findings scorer. The held-out suite covers refusal, cap,
+cleanup, and idempotence."""
 
 from __future__ import annotations
 

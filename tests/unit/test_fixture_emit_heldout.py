@@ -1,23 +1,9 @@
-"""Held-out oracle for the plan-review fixture-spec emitter (ticket 092c).
+"""Held-out fixture emitter edges (092c).
 
-These cases are withheld from the implementer and validated by the orchestrator. They pin the
-behavior that separates a real emitter from one that only transcribes the happy path:
-
-- balance refusal — a criterion with candidates on only ONE side of the fire/no-fire axis
-  emits no file and is counted ``skipped-unbalanced`` (AC3);
-- gold refusal — a criterion with no candidate material (only a zero-candidate row) emits no
-  file and is counted ``skipped-unbalanced`` (AC4);
-- the per-side cap — at most 4 cases per side, taken in the manifest's recorded rank order
-  (AC5);
-- output lifecycle — a spec written for a criterion absent from the next manifest does not
-  survive the next run (AC6);
-- idempotence — two runs over the same manifest emit byte-identical trees (AC7);
-- every emitted spec passes the REAL strict validator, and the emitter runs to completion under
-  the repository's default network guard (DoD / AC on the network guard).
-
-Reuses the ``candidate`` row helper and ``balanced_rows`` from the visible happy-path oracle
-so both suites speak the selector's real manifest shape.
-"""
+Refuse one-sided or material-free candidates as skipped-unbalanced. Cap each
+side at four in ranked order. Remove stale specs, emit byte-identical trees
+on repeat runs, pass the strict validator, and complete under the
+default network guard. Reuse visible manifest helpers."""
 
 from __future__ import annotations
 

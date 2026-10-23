@@ -1,15 +1,8 @@
-"""Behavioral tests for the scheduled live-Jira integration canary.
+"""Scheduled Jira service canary wiring (5f39).
 
-Covers the three moving parts wired for ticket 5f39:
-
-* ``_jira_canary_should_fail`` — the pure fail-on-all-skip decision (this is the
-  teeth: it returns True iff the external tier is opted in AND at least one
-  ``jira_live`` test was collected but none executed).
-* ``pytest_collection_modifyitems`` — auto-marks tests in any module that defines a
-  module-level ``_live_jira_ready`` sentinel with the ``jira_live`` marker.
-* The workflow config-as-artifact: ``.github/workflows/external-integration.yml``
-  carries the weekly schedule, the Jira env wiring, and the acli auth step.
-"""
+Fail when the external tier is opted in, jira_live tests were collected,
+and all skipped. Auto-mark modules with _live_jira_ready, and pin the weekly
+workflow's Jira environment and acli auth."""
 
 from __future__ import annotations
 

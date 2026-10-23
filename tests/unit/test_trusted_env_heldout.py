@@ -1,19 +1,9 @@
-"""Held-out adversarial oracle for the trusted-environment config + required-environment check
-(story 42d1 / urban-dihydric-trogon), re-expressed for Option B (story 4214).
+"""Held-out adversarial trusted-environment oracle (42d1, Option B 4214).
 
-NOT shown to the implementation subagent. Cases that separate a real implementation from one that
-fakes the happy path:
-* fail-open — an absent config file means "no required environment" (loader returns None), never a
-  crash;
-* located error — a malformed config raises an error that NAMES the file path (never a silent skip);
-* environment not pinned — a required env absent from the config fails the check;
-* keyid-spoof — a cert whose self-claimed keyid CLAIMS the pinned env but whose signature is by a
-  DIFFERENT key FAILS (the check verifies against the PINNED key, not the cert's claimed keyid);
-* era — a cert whose ONLY matching key is past its `revoked_at_log_position` (relative to the cert's
-  STORAGE ANCHOR) does not certify.
-
-Real ssh-keygen; the era cases run against a real rebar store's tickets-branch position chain.
-"""
+Absent config fails open. Malformed config names its path. An unpinned
+required environment fails. Verify a cert against the pinned key, not a
+spoofed keyid. A revoked key cannot certify after its tickets-branch
+storage-anchor era. Use ssh-keygen and store positions."""
 
 from __future__ import annotations
 

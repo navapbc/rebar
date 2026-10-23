@@ -1,40 +1,15 @@
-"""The per-test hang budget in ``[tool.pytest.ini_options]`` really bites, and is overridable.
+"""Enforce a local per-test budget across setup, call, and teardown (73b8, 797b).
 
-Story ``73b8-2d79-3046-44ce``; full-phase coverage restored by bug ``797b-bbc4-01cf-42d5``.
-Before the story, the budget existed ONLY on the CI command lines, so ``make test`` and a bare
-local ``pytest`` had none: a test that deadlocked locally hung until the developer noticed, and
-the CI-only guard could rot without any local signal (bugs ``e394-9433-c839-4c9f``,
-``9bb7-4430-1202-4d93``). The story's ini initially carried ``timeout_func_only = true``, which
-confined the budget to the test BODY and so left fixture setup and teardown unguarded — the
-exact phase the guard was built for (the ``89d5-61da-b621-47f8`` teardown hang burned a full
-60-minute job cap). Bug ``797b-bbc4-01cf-42d5`` dropped the key back to pytest-timeout's
-upstream default (``False``), so the budget covers setup, call, and teardown; a legitimately
-slow test — including one whose FIXTURES are legitimately slow — raises its own budget with a
-plain ``@pytest.mark.timeout(N)`` marker (the README-sanctioned remedy).
+The ini setting makes bare pytest and make test enforce the same hang guard
+as CI. timeout_func_only must stay absent. Its true value once left fixtures
+unguarded, including a teardown hang. Slow tests and fixtures can raise
+their own limit with @pytest.mark.timeout(N).
 
-The arms and why each exists:
-
-* The CONFIG arm pins the ini keys, including the ABSENCE of ``timeout_func_only`` — its
-  reappearance would silently re-open the fixture blind spot.
-* The POSITIVE arm proves the ini value is not merely *present* but *overridable* — a test
-  that must legitimately run past the budget passes when it carries ``@pytest.mark.timeout(N)``.
-  If the marker stopped winning over the ini, every deliberately-slow test in the tree would
-  start failing and this arm goes red first. It runs out-of-process for the same reason the
-  negative arms do, and for one more: proving the override IN-TREE means sleeping past the
-  configured budget, which pins the arm's wall cost to that budget (at ``timeout = 300`` it
-  would sleep 302 s). The generated project gets a deliberately TINY budget instead, so the arm
-  proves the same thing in seconds no matter what this repo's budget is.
-* The NEGATIVE arms prove the ini keys actually EXPIRE an over-budget test — in the body, in
-  fixture SETUP, and in TEARDOWN — on the installed pytest-timeout, rather than merely being
-  present in ``pyproject.toml``. They cannot be written in-process — a test that must fail
-  cannot be committed — so each runs pytest on a generated project in a subprocess and asserts
-  the ``Timeout`` failure THERE. Without them a pytest-timeout upgrade that renamed or dropped
-  a key (or a reintroduced ``func_only``) would leave the config assertions green while the
-  budget silently stopped biting where it matters.
-* The FIXTURE-REMEDY arm proves the sanctioned escape for a slow-fixture test: with fixture
-  time charged to the test, a plain ``@pytest.mark.timeout(N)`` marker covers the fixture too,
-  so dropping ``func_only`` strands nobody.
-"""
+Config checks pin the keys. Generated-project subprocess tests show body,
+setup, and teardown timeouts actually fire, and a marker overrides the ini
+for a slow body or fixture. A tiny generated budget keeps the proof fast
+independent of this repo's configured value. Subprocesses contain expected
+failures. These arms catch plugin/config drift that text checks miss."""
 
 from __future__ import annotations
 

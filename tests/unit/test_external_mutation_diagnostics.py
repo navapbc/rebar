@@ -1,17 +1,9 @@
-"""The two diagnostics that must name an EXTERNAL cause when there is one (bug f0fb).
+"""Name possible external causes in mutation-test diagnostics (f0fb).
 
-Both guards below fire from state a test did not necessarily produce. A detached
-suite runs while its launching agent keeps working in the same checkout, so a
-concurrent `git commit`, a stray top-level file, or a reaped child process all
-land mid-run. When that happens the diagnostic is the ONLY thing standing between
-the reader and a phantom regression hunt — an agent landing Gerrit 1943 recorded
-that it "nearly chased those as real regressions" off exactly these two messages.
-
-So each message must carry the fact that lets a reader rule the test out:
-* the REPO_ROOT leak guard must not assert as fact that *the test* leaked, and
-* a browser-probe failure must report the child's returncode, so a signal-killed
-  child (a reaped run) is distinguishable at a glance from a product failure.
-"""
+A detached run shares its checkout with other activity. A concurrent file,
+commit, or reaped child can appear mid-test. The guard must not claim the
+test caused it. Browser-probe failures report child returncode so a signal
+is distinguishable from a product failure."""
 
 from __future__ import annotations
 
@@ -32,13 +24,8 @@ from _isolation import (  # noqa: E402
 
 
 def test_leak_message_does_not_assert_the_test_created_the_entry():
-    """A concurrent external write is attributed to whichever test straddles it.
-
-    Reproduced deterministically on 2026-08-20: a bare `touch` from another shell,
-    4s into a detached run, produced `6 passed, 1 error` and blamed an innocent
-    `test_cli_never_invokes_push_and_leaves_source_refs_exact`. The message must
-    not state as fact something the guard cannot know.
-    """
+    """A concurrent external file can cross the leak guard's snapshot window.
+    Report the entry without claiming an innocent test created it."""
     message = leak_failure_message(["EXTERNAL_MUTATION_PROBE"])
 
     assert "EXTERNAL_MUTATION_PROBE" in message
@@ -56,16 +43,8 @@ _AFTER = "018dbb14621111111111111111111111111111111"
 
 
 def test_head_move_message_does_not_prescribe_an_unconditional_reset():
-    """The remedy must not be a bare instruction to destroy uncommitted work.
-
-    Observed firing against a disposable worktree under bug `hot-guessable-ungulate`:
-    the guard ended
-    with `Undo the stray commit(s) with: git reset --hard <sha>` with no condition
-    attached. This checkout hosts ~100 worktrees and several concurrent sessions,
-    so a reader whose HEAD moved because ANOTHER process committed follows that
-    literally and discards a commit that was never theirs, plus every uncommitted
-    change in the worktree.
-    """
+    """A moved HEAD can come from another session. Do not prescribe bare
+    git reset --hard, which could discard that commit and local changes."""
     message = head_move_failure_message(_BEFORE, _AFTER)
 
     reset = f"git reset --hard {_BEFORE[:10]}"
@@ -144,14 +123,9 @@ def test_child_failure_detail_includes_stderr_when_the_child_wrote_any():
 
 
 def test_working_tree_backstop_message_does_not_assert_a_test_made_the_change():
-    """The session backstop diffs two ``git status --porcelain`` snapshots taken
-    around the WHOLE run, so an entry that appeared in that window has no writer
-    attached to it. A concurrent commit, rebase, branch switch or editor save from
-    another process in the same checkout produces an identical diff entry — the
-    misfire `docs/local-dev-env.md` already documents for this guard family. Same
-    finding as its two siblings (bugs `746c-185a` and `hot-guessable-ungulate`),
-    so the text must name that cause instead of asserting the one it cannot know.
-    """
+    """Two git-status snapshots cannot identify who changed a path. Concurrent
+    commits, rebases, branch switches, or saves may produce the same diff.
+    Report the external possibility without assigning blame."""
     message = working_tree_failure_message(["?? EXTERNAL_MUTATION_PROBE"])
 
     # Detection is unchanged: it still fails the run and still names every entry.

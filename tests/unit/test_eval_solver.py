@@ -166,10 +166,9 @@ def test_unknown_prompt_raises() -> None:
         eval_solver.run_case("not-a-reviewer", {"id": "x", "expect": "pass"}, runner=FakeRunner())
 
 
-# ── Per-case rooting of an injected live-style runner (bug undyed-unheedful-conure) ──
-# `_live_solver` builds ONE PydanticAIRunner before any case fixture exists, so its config
-# points at the eval CHECKOUT. These pin that each disposable-store case re-roots that
-# runner at its own fixture, so the agent's file/ticket tools read fixture code.
+# Re-root the eval runner for each disposable case (undyed-unheedful-conure).
+# _live_solver starts at the eval checkout. File and ticket tools must instead
+# read each case's fixture store.
 
 
 def _checkout_rooted_runner(checkout: str) -> PydanticAIRunner:

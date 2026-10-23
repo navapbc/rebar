@@ -1,22 +1,10 @@
-"""Happy-path oracle for the plan-review fixture ADMISSION runner (ticket 67aa).
+"""Visible admission-runner happy path and shared scaffolding (67aa).
 
-Pins the CORE observable contract of ``rebar.llm.evals.fixture_admission.run_admission``:
-given a labeled candidate manifest that is BALANCED for a criterion, where every candidate's
-``review_event_uuid`` resolves to a verified sidecar row carrying the at-review material, the
-runner REHYDRATES each case's finder input from that row's ``description`` (NOT the emitter's
-model-free provenance descriptor), runs the criterion's Pass-1 finder over the rehydrated
-material across ``epochs`` runs, and — when a case's majority verdict REPRODUCES its predicted
-direction — admits the criterion by writing exactly one ``.eval.yaml`` whose dataset carries
-the runnable rehydrated material and which passes the REAL ``validate_eval_spec(strict=True)``.
-
-The edge cases (drift on non-reproduction / unrecoverable material, budget ceiling + actual
-cap halt, no-shadowing skip, unbalanced/mid-raise atomicity, crash-consistent resume, transient
-retry) live in the HELD-OUT suite and are validated by the orchestrator — they are NOT here.
-
-The helpers below (``candidate``/``sidecar_row``/``write_manifest_file``/``ScriptedSolver``/
-``stub_genai_prices``/``case_id``) are the shared test scaffolding and describe the runner's
-injectable seams; the held-out suite imports them.
-"""
+For balanced candidates, resolve verified sidecar material, rehydrate the
+finder input from its description rather than emitter provenance, and run
+Pass-1 across epochs. Majority reproduction admits one strict-valid
+.eval.yaml with runnable material. The held-out suite covers drift,
+budgets, skip dispositions, atomicity, resume, and retry."""
 
 from __future__ import annotations
 
@@ -329,9 +317,8 @@ def test_container_criterion_admits_with_rehydrated_child_material(tmp_path, mon
 
 
 def test_container_criterion_with_legacy_child_strings_is_unrecoverable(tmp_path, monkeypatch):
-    """Legacy corpus rows that only carried child ids are still withheld. That preserves
-    faithfulness: G3/G4 must not run over an impoverished roster when title/description were not
-    persisted at review time."""
+    """Legacy rows with child IDs but no saved titles or descriptions cannot
+    faithfully run G3/G4. Withhold them as unrecoverable."""
     stub_genai_prices(monkeypatch, usd_per_row=0.01)
     crit = "G3"
     rows = [
@@ -372,14 +359,9 @@ def test_container_criterion_with_legacy_child_strings_is_unrecoverable(tmp_path
 
 # ── inline-unadmissible criterion (regression: ISF finder crashes the run) ──────────────
 def test_isf_criterion_is_skipped_not_dispatched(tmp_path, monkeypatch):
-    """An ISF finder needs a real session log, so ``eval_solver`` RAISES for it over an inline
-    fixture. If the runner dispatches an ISF candidate to the solver, that ``ValueError``
-    propagates and crashes the WHOLE admission run — losing every not-yet-processed criterion
-    (observed live during the 67aa AC10 admission run, after several agent-tier criteria had
-    already been admitted). The runner must instead SKIP any criterion in
-    ``eval_solver.INLINE_UNADMISSIBLE_CRITERIA`` the way it skips packaged ones: never dispatch
-    it, admit nothing for it, write no spec and no ledger row, record it in the drift report as
-    ``not-inline-admissible`` — and keep processing the remaining criteria."""
+    """Skip inline-unadmissible ISF criteria before eval_solver, which needs a
+    session log. Write no spec or ledger row, report
+    not-inline-admissible drift, and keep processing other criteria."""
     from rebar.llm.evals import eval_solver
 
     stub_genai_prices(monkeypatch, usd_per_row=0.01)

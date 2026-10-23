@@ -372,20 +372,9 @@ def _tool_use_body(tool_name: str, tool_id: str = "toolu_1") -> dict:
 
 
 def test_midrun_429_self_heals_without_duplicate_comment():
-    """AC (story morbid-uncultured-arcticduck): a MID-RUN transient — a 429 injected on the
-    HTTP request that FOLLOWS a completed comment tool call, then a 200 — self-heals and
-    produces NO DUPLICATE comment.
-
-    Mechanism it pins: retry is owned SOLELY by the httpx ``AsyncTenacityTransport``, which
-    sits BELOW pydantic-ai's agent tool loop (``_build_retrying_anthropic_model``,
-    ``src/rebar/llm/runner.py`` lines 752-753 + 774-792: "a transient blip is re-sent BELOW
-    the agent loop, so completed tool calls are never re-executed"). Re-sending ONE HTTP
-    request never re-enters the loop, so an already-executed tool (the ``comment_ticket``
-    write, ``src/rebar/llm/pai_tools.py`` line 166) cannot fire a second time.
-
-    Observable asserted (not merely restated): the comment tool callback is invoked EXACTLY
-    ONCE even though the follow-up turn is put on the wire TWICE (429 then 200) — i.e. the
-    transport genuinely retried the HTTP request, yet the side-effect did not duplicate."""
+    """After a completed comment tool call, retry the next HTTP request's 429
+    below the agent loop. The request goes out twice (429 then 200), while the
+    callback runs once, proving transport recovery without duplicate writes."""
     comment_calls = {"n": 0}
     sends = {"total": 0, "followup": 0}
 

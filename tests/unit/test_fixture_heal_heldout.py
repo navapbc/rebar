@@ -1,13 +1,8 @@
-"""HELD-OUT edge/E2E oracle for the fixture-mining heal loop (ticket 1cef).
+"""Held-out fixture-heal edge and end-to-end oracle (1cef).
 
-Withheld from the implementation subagent and validated by the orchestrator. Covers every
-disposition the happy path does not: the three-strike quarantine breaker, mixed-kind counter
-accrual, first-encounter un-minable quarantine, idempotent filing, the budget stop, the
-cleared-environment CLI dry-run, and the due-stamp interval boundary.
-
-Shared scaffolding is imported from the visible happy-path module (``test_fixture_heal``), the
-same cross-module pattern the admission oracle uses.
-"""
+Covers three-strike and mixed-kind quarantine, immediate unminable
+quarantine, idempotent filing, per-sweep budget, cleared-environment CLI
+dry run, and due-stamp boundary. Uses visible shared scaffolding."""
 
 from __future__ import annotations
 
@@ -208,15 +203,12 @@ def test_due_stamp_advances_only_after_interval(store) -> None:  # noqa: F811
     assert crit in due.ran
 
 
-# ── Gate-finding oracle (2615 PS2 LLM-Review BLOCK) — production-attempter correctness ────
-# These cover behaviour the happy-path FakeAttempter cannot exercise: the live selection→
-# emit→admission attempter's outcome classification and the loop's budget accounting at a
-# non-default cap. Authored RED-first against the review findings, then fixed.
+# Production-attempter outcomes and non-default budgets (2615). These paths
+# run selection, emit, and admission beyond the happy-path FakeAttempter.
 
 
-# Finding heal.py:255 — a non-default cap must not immediately trip BudgetExceeded. The old
-# code reserved against `cap + LEDGER_RESERVE_USD` only when cap == 25.0, so any other cap
-# left the outer pre-check at `cap - 30 - spent` (negative) and stopped before any work.
+# Reserve against the full configured cap, not only the 25.0 default.
+# Subtracting the fixed ledger reserve otherwise blocks a smaller cap early.
 def test_non_default_cap_reserves_against_the_whole_cap(store, monkeypatch) -> None:  # noqa: F811
     # LEDGER_RESERVE_USD stays at its production default (30.0) — NOT zeroed.
     stub_prices(monkeypatch, usd_per_row=1.0)  # each admit finalizes $1 of real spend
@@ -248,9 +240,8 @@ def _stub_admission(monkeypatch, summary) -> None:
     monkeypatch.setattr(heal_mod, "_run_admission", lambda *args: summary)
 
 
-# Finding heal.py:327 — a transient outage (admission `incomplete`, retries exhausted) must
-# NOT be classified as a reproduction failure, or a passing outage accrues toward a spurious
-# three-strike quarantine.
+# An exhausted transient admission is incomplete, not a reproduction failure.
+# It must not accrue a quarantine strike.
 def test_incomplete_admission_is_not_a_reproduction_failure(tmp_path, monkeypatch) -> None:
     from rebar.llm.evals.fixture_admission import AdmissionSummary
     from rebar.llm.evals.fixture_mining import heal as heal_mod
@@ -264,9 +255,8 @@ def test_incomplete_admission_is_not_a_reproduction_failure(tmp_path, monkeypatc
     assert result.outcome == "incomplete"
 
 
-# Finding heal.py:444 — with several drift entries for one criterion, an un-minable reason is
-# authoritative and must outrank a `non-reproducing` entry regardless of order, so the
-# criterion is quarantined on first sight instead of retried three times.
+# An unminable drift reason outranks non-reproduction regardless of entry
+# order, causing immediate quarantine rather than 3 retries.
 def test_unminable_drift_outranks_reproduction_failure(tmp_path, monkeypatch) -> None:
     from rebar.llm.evals.fixture_admission import AdmissionSummary, DriftEntry
     from rebar.llm.evals.fixture_mining import heal as heal_mod
@@ -293,9 +283,8 @@ def test_unminable_drift_outranks_reproduction_failure(tmp_path, monkeypatch) ->
     assert result.reason == "not-inline-admissible"
 
 
-# Advisory (2615 PS6 tests): the production attempter's SKIPPED_UNBALANCED branch — when the
-# emitter drops a criterion for lacking balanced fire/no-fire material — must classify as
-# SKIPPED_UNBALANCED without ever running admission (no spend, no strike).
+# Unbalanced fire/no-fire material is skipped before admission, without
+# spend or a strike.
 def test_production_attempter_classifies_skipped_unbalanced(tmp_path, monkeypatch) -> None:
     from rebar.llm.evals.fixture_mining import heal as heal_mod
 
@@ -313,10 +302,8 @@ def test_production_attempter_classifies_skipped_unbalanced(tmp_path, monkeypatc
     assert result.outcome == AttemptOutcome.SKIPPED_UNBALANCED
 
 
-# Advisory (2615 PS6 tests): the production attempter's FAILED_REPRODUCE branch — a criterion
-# whose drift entries are all non-unminable (so `_drift_reason` falls back to the first
-# reason) must classify as FAILED_REPRODUCE carrying that reason, so it accrues toward the
-# three-strike quarantine rather than being quarantined on sight.
+# Non-unminable drift becomes FAILED_REPRODUCE with its first reason and
+# accrues toward 3-strike quarantine, rather than immediate quarantine.
 def test_production_attempter_classifies_failed_reproduce(tmp_path, monkeypatch) -> None:
     from rebar.llm.evals.fixture_admission import AdmissionSummary, DriftEntry
     from rebar.llm.evals.fixture_mining import heal as heal_mod
@@ -488,12 +475,8 @@ def test_production_attempter_runs_agentic_admission_inside_gate_read_root(
 # ── Gate-finding oracle (2615 PS3 LLM-Review BLOCK) ──────────────────────────────────────
 
 
-# Finding heal.py:423 — the production solver reports NO usage rows (the live per-case runner
-# does not surface a priceable row today), so nothing was recorded to the ledger and the cap
-# `reserve` read `spent == 0` forever: the budget FAILED OPEN, running every criterion no
-# matter how many. The loop must charge the pre-flight ESTIMATE per attempt so the cap holds
-# even when an attempt records no priceable usage. This mirrors the production path exactly —
-# an ADMITTED outcome carrying an EMPTY `usage_rows`.
+# Empty usage rows from an admitted model attempt still charge its preflight
+# estimate. Otherwise the ledger stays at zero and the budget fails open.
 def test_empty_usage_rows_still_fail_closed_on_budget(store, monkeypatch) -> None:  # noqa: F811
     monkeypatch.setattr(ledger, "LEDGER_RESERVE_USD", 0.0)
     crits = ["project.c1", "project.c2", "project.c3"]
@@ -525,10 +508,8 @@ def incomplete() -> AttemptResult:
     return AttemptResult(outcome=AttemptOutcome.INCOMPLETE)
 
 
-# Finding heal.py:292 — the loop-level contract for a transient outage: repeated INCOMPLETE
-# sweeps must never accrue toward the three-strike quarantine. Even beyond `threshold` sweeps
-# the criterion is neither quarantined nor skipped — it is retried on the next sweep, because
-# an outage is not evidence the fixture is unreliable.
+# Repeated incomplete sweeps are outages, not fixture failures. Even beyond
+# the strike threshold, retry next sweep without quarantine or skip.
 def test_repeated_incomplete_sweeps_never_quarantine(store) -> None:  # noqa: F811
     crit = "project.outage"
     for day in (0, 30, 60, 90):  # four sweeps — past the default threshold of 3
@@ -538,12 +519,8 @@ def test_repeated_incomplete_sweeps_never_quarantine(store) -> None:  # noqa: F8
     assert unreliable_titles(store) == []  # no quarantine ticket ever filed
 
 
-# Finding heal.py:204 — the budget ledger PERSISTS at a fixed path and `_record_spend` appends
-# a charge on every sweep, so cumulative `spent` grows without bound across the scheduled
-# (default 30-day) sweeps and eventually every future sweep trips `reserve`'s cap and
-# self-stops — the cap fails CLOSED forever. `cap_usd` bounds ONE sweep, not all-time spend:
-# each sweep must start from a clean budget, so a prior sweep's spend never counts against a
-# later one. Two sweeps whose per-sweep estimate individually fits the cap must BOTH run.
+# cap_usd bounds each sweep, not all-time ledger spend. Reset budget accounting
+# between scheduled sweeps so 2 individually affordable attempts both run.
 def test_budget_does_not_accumulate_across_sweeps(store, monkeypatch) -> None:  # noqa: F811
     monkeypatch.setattr(ledger, "LEDGER_RESERVE_USD", 0.0)
     crit = "project.persist"
@@ -565,11 +542,8 @@ def _ledger_entries(ledger_path: str) -> list[dict]:
     return [json.loads(line) for line in Path(ledger_path).read_text().splitlines() if line.strip()]
 
 
-# Advisory (2615 tests): _record_spend's fallback branch — usage_rows ARE present but
-# `ledger.finalize` raises UnpriceableRun (the live per-case runner surfaces a bedrock
-# region-prefixed model `genai_prices` cannot resolve) — must swallow the error and charge the
-# deterministic pre-flight estimate, so the cap still holds. Observable: exactly one ledger
-# entry, flagged `estimated`, whose usd is the estimate (NOT a priced finalize entry).
+# If finalize cannot price present usage rows, charge the deterministic
+# preflight estimate once and mark that ledger entry estimated.
 def test_unpriceable_usage_rows_charge_the_estimate(store, monkeypatch) -> None:  # noqa: F811
     import types
 
@@ -595,9 +569,8 @@ def test_unpriceable_usage_rows_charge_the_estimate(store, monkeypatch) -> None:
     assert entries[0]["usd"] == ledger.estimate("tier1", 1)
 
 
-# Advisory (2615 tests): ledger.charge_estimate — the public helper the fail-closed budget
-# relies on — records the given estimate as consumed spend, flagged `estimated: True` so a
-# reader can tell it from a priced finalize entry, and `_spent_so_far` then counts it.
+# charge_estimate records spent USD with estimated=True. _spent_so_far
+# includes it without mistaking it for priced finalization.
 def test_charge_estimate_records_estimated_spend(store) -> None:  # noqa: F811
     ledger_path = paths(store)["ledger_path"]
     ledger.charge_estimate("heal-x", "tier1", "project.k", 3.5, ledger_path=ledger_path)
@@ -616,11 +589,9 @@ def test_charge_estimate_records_estimated_spend(store) -> None:  # noqa: F811
         ledger.reserve(1.0, ledger_path=ledger_path, cap_usd=4.0, reserve_usd=0.0)
 
 
-# ── PS6 BLOCK (error-handling): the live `criteria heal` CLI must surface the sweep outcome ──
-# The non-dry-run handler used to discard the returned HealReport and print nothing, so an
-# operator running the sweep had no way to tell whether it ran, was skipped by the due-stamp,
-# stopped for budget, or which criteria were admitted/quarantined. These tests pin the live
-# path's observable stdout (they stub the attempter + heal loop — no LLM, no credentials).
+# Criteria-heal CLI reports whether the sweep ran, was due-skipped or
+# budget-stopped, and which criteria it admitted or quarantined. Stub the
+# attempter and loop so this stdout check needs no model or credentials.
 def _run_heal_cli(monkeypatch, report):
     import argparse
 

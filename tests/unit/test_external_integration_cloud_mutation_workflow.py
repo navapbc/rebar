@@ -1,14 +1,9 @@
-"""Config-as-artifact gate for the `jira-cloud-mutation-probe` lane (ticket 1d21-887e).
+"""Pin the bounded Jira Cloud mutation lane (1d21).
 
-The epic's Live-External AC requires the RP-03 create-coordinator's create / binding /
-commit-unknown / fuse to be exercised against **live Jira Cloud** in CI. The only existing
-Cloud lane is read-only and gated off, so a new BOUNDED, self-cleaning mutation lane is
-added to ``external-integration.yml``. This test pins that lane's shape directly from the
-workflow YAML (never trusting a comment): it must be dispatchable, wire the run-scoped
-teardown label from the run id, run the capability preflight and the live-Cloud module,
-and ALWAYS sweep its throwaway issues by that label on failure or cancel — so a leaked
-mutation can never survive a crashed run.
-"""
+The read-only lane cannot cover RP-03 create, binding, commit-unknown, and
+fuse behavior. Workflow YAML must expose dispatch, label throwaway issues
+with the run ID, run preflight and external tests, and sweep by label even on
+failure or cancel."""
 
 from __future__ import annotations
 

@@ -1,19 +1,9 @@
-"""The external tier's scratch repo must resolve the suite-wide attested gate ref.
+"""External-tier scratch repos must resolve attested HEAD (8070).
 
-Regression guard for bug ``8070-3f8b-8e71-483b``: every live test in
-``tests/external/`` builds its store with that tier's ``rebar_repo`` fixture. Since
-``tests/conftest.py`` defaults the whole suite to ``REBAR_GATE_SOURCE=attested`` /
-``REBAR_GATE_REF=HEAD``, a scratch repo with an UNBORN ``HEAD`` (``git init`` and no
-commit) makes every gate op fail closed with ``SnapshotRefError`` before it ever reaches
-the behaviour under test — which is what turned the weekly external-integration canary red.
-
-This lives in the default tier on purpose. ``tests/conftest.py`` auto-marks every item
-under ``tests/external/`` as ``external`` (excluded from the default run and gated on live
-credentials), so a guard placed there could only fail in the very weekly job that already
-went ten days unread. Here it costs no credentials and no billable model call, and it
-exercises the tier's REAL repo construction via the extracted
-``build_scratch_rebar_repo`` helper rather than a local re-implementation of it.
-"""
+The tier defaults to an attested HEAD. An unborn scratch repo made every
+external gate fail SnapshotRefError before its intended behavior. This default-
+tier guard uses the build_scratch_rebar_repo helper, so it runs without
+weekly service credentials or model calls."""
 
 from __future__ import annotations
 
@@ -43,13 +33,8 @@ def _load_external_conftest() -> ModuleType:
 def test_external_scratch_repo_resolves_attested_head(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The external tier's repo must resolve an attested snapshot at ``ref=HEAD``.
-
-    Pins the mechanism end to end: build the repo exactly as the live tier does, then ask
-    for a gate handle under the suite's own attested/``HEAD`` default. Before the fix this
-    raised ``SnapshotRefError`` ("cannot resolve ref 'HEAD' ..."); it must now hand back an
-    attested handle pinned to a real commit SHA.
-    """
+    """Build the tier's scratch repo and request its default attested HEAD.
+    The gate must pin a commit SHA instead of raising SnapshotRefError."""
     monkeypatch.setenv("REBAR_GATE_SOURCE", "attested")
     monkeypatch.setenv("REBAR_GATE_REF", "HEAD")
 
