@@ -1,31 +1,6 @@
-"""Inbound bound-but-absent mirroring fix (bug 0702-3b6d-c1db-4ed3).
-
-INBOUND symmetric counterpart to the outbound bug 1e08-1a35-0267-4ca6 fix.
-
-``inbound_differ.compute_inbound_mutations`` iterates ONLY the keys present in
-``jira_snapshot``. A bound local ticket whose Jira key is ABSENT from this
-pass's search snapshot (status=Done beyond the fetcher's ``_DONE_RECENT_CAP``
-window) is therefore NEVER visited inbound, so a Jira-side edit to it is
-silently dropped in the inbound (Jira→local) direction.
-
-Design — single-GET sharing (the least-fragile option):
-  The outbound differ (bug 1e08) already issues the bounded direct GET for
-  these alive keys and computes their real ``fields``. Rather than add a second
-  GET path (and a second budget) to the inbound differ, the outbound differ
-  RECORDS each alive (HTTP 200) bound-but-absent GET into an out-param dict
-  (``absent_alive_fields``). The reconcile orchestrator merges those entries
-  into the snapshot it passes to the inbound differ, so:
-    - each alive bound-but-absent key is GET'd exactly ONCE per pass (shared),
-    - the inbound differ's existing loop handles the merged key with NO new
-      budget/rotation/GET logic,
-    - a 404 key is NEVER recorded (never added to the dict) so inbound never
-      mirrors a deleted issue — retirement stays owned by outbound,
-    - bidir suppression is unchanged: the outbound update mutation for the same
-      key is still passed to inbound, so a field outbound is pushing is
-      suppressed inbound (no oscillation against the 1e08 outbound update).
-
-Behavioral assertions only (emitted mutations, GET call counts).
-"""
+"""Share the outbound bounded direct GET for alive bound keys absent from search results
+with inbound diffing. Merge HTTP 200 fields into the inbound snapshot once per pass;
+never mirror a 404 key."""
 
 from __future__ import annotations
 

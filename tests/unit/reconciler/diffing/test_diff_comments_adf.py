@@ -1,23 +1,6 @@
-"""RED tests for _diff_comments ADF body normalization.
-
-Historical bug (bug 85a1-f581-2252-4a21): Jira comments are returned with
-``body`` as an Atlassian Document Format (ADF) dict, while local comments
-store ``body`` as a plain string. The outbound differ's ``_diff_comments``
-added Jira bodies to ``set[str]`` without normalization, producing two
-defects:
-
-1. **Phase 3+ reconciler crashes** — ``set.add({adf_dict})`` raises
-   ``TypeError: unhashable type: 'dict'``. Probe Phase 4 / Phase 5 status &
-   delete tests both failed with "cannot use 'dict' as a dict key".
-2. **Spurious duplicate comment pushes** — even when the strings would have
-   matched, the dict-vs-string equality check always reported them as
-   different. Probe Phase 2 ``verify-no-duplicate-comments — found 2 copies``
-   regressed because the differ emitted re-add mutations for every comment
-   on every pass.
-
-The fix normalizes both sides through ``adf.adf_to_text`` so canonical
-plain-text comparison drives both the set membership and the diff verdict.
-"""
+"""Jira may return comments as ADF dictionaries while local bodies are strings.
+Normalize both to text before hashing and comparison to avoid crashes and duplicate
+outbound comments."""
 
 from __future__ import annotations
 

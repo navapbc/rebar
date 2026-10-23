@@ -1,11 +1,6 @@
-"""Story d6bd (convergence rollout retired → hardcoded always-on): the outbound
-field diff (``outbound_field_diff.compute_update_fields``) ALWAYS arbitrates against
-the per-binding baseline (get_baseline) instead of prev_snapshot whenever a binding
-store and local id are supplied. The former ``reconciler.baseline_consumer_swap``
-flag is gone; the always-on behavior is what the flag=True path used to do (this
-project ran both rollout flags ``true`` in prod), so these tests pin the flags-true ==
-hardcoded equivalence (AC6) and the cold-start observability.
-"""
+"""Binding baselines, rather than previous snapshots, always arbitrate outbound field
+diffs. These tests preserve the former enabled-flag behavior and cold-start
+reporting."""
 
 from __future__ import annotations
 
@@ -109,17 +104,9 @@ def test_conflict_keys_on_baseline() -> None:
 
 
 def test_dryrun_arbitration_pinned_to_baseline() -> None:
-    """AC6 dry-run zero-diff pin: with a baseline present that DIFFERS from
-    prev_jira_fields, the arbitration outcome must be the BASELINE one (the
-    flags-true behavior this project ran in prod). Direction-suppression fires only
-    because the baseline (not prev_snapshot) is consulted as ``arbitration_prev``.
-
-    local.description == baseline.description, Jira.description differs, and
-    prev_jira_fields.description is STALE (!= local). If arbitration used
-    prev_snapshot the description would be EMITTED; using the baseline it is
-    SUPPRESSED so the inbound differ mirrors Jira's edit. Any behavior change
-    (e.g. reverting to prev_snapshot arbitration) flips this pinned decision.
-    """
+    """With a baseline equal to local but Jira edited and prev_jira_fields stale,
+    dry-run must suppress the outbound field. Consulting prev_jira_fields instead
+    would emit it."""
     store = _FakeStore({"description": "local-edit"})
     changed = _diff(
         _ticket(description="local-edit"),

@@ -1,24 +1,6 @@
-"""Epic a4bd / story 47a0: decline inbound removal of never-peer-confirmed links.
-
-THE DEFECT. ``managed_refs`` marks a ref managed the instant it is created LOCALLY
-and is strictly monotonic, so guard G3 proves "we own this ref" — NOT "the peer ever
-saw it". G4 (the same-pass outbound-ADD suppression) covers that blind spot only when
-the outbound differ re-emits the ADD, and ``outbound_links._diff_links`` dedups ADDs
-direction-agnostically on ``(vendor_type, target_key)``, "intentionally NOT deduped on
-relation". So a local ``blocks`` link whose vendor type collides with an INWARD
-``Blocks`` on the same pair (which reads as ``depends_on`` locally) is never pushed AND
-never G4-protected — and since e39f made removal relation-scoped, its removal record
-reaches the applier and deletes a link the peer never had.
-
-The fix requires POSITIVE EVIDENCE: a removal is honoured only for a link some pass
-actually proved the peer carries. Absence stops being deletion evidence.
-
-Tests drive ``_inbound_update_apply_links`` — the public entry point the sibling 2b16
-suite also uses — against a REAL store, so a decline is observed as "the dep is still
-net-active locally" rather than as a log assertion. That distinction matters: this
-defect class has been silent every time, and a log-shaped assertion would pass against
-an implementation that logged and deleted anyway.
-"""
+"""Managed locally does not prove a link ever reached the peer. Honor inbound removal
+only with positive peer-confirmation evidence; otherwise keep the net-active local
+dependency. Tests exercise the real store through the applier."""
 
 from __future__ import annotations
 
@@ -155,14 +137,9 @@ def test_decline_is_idempotent_across_passes(apply_records, store):
 
 
 def test_vendor_type_collision_scenario_is_protected(apply_records, store, caplog):
-    """AC3. The epic's motivating case, end to end.
-
-    A local ``blocks`` dep whose outbound ADD is permanently deduped by an inward
-    same-vendor-type remote link is never pushed and never G4-protected, so a removal
-    record reaches this path. Before this story the relation matched and e39f's
-    relation-scoped unlink deleted it. It must now be declined: nothing ever proved
-    the peer carried it.
-    """
+    """A local blocks link deduped against an inward same-type peer link was never
+    pushed. Its removal must be declined without positive peer confirmation, leaving
+    the local dependency active."""
     repo, a, b = store
 
     with caplog.at_level(logging.WARNING):

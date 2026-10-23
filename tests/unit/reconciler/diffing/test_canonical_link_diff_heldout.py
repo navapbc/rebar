@@ -1,9 +1,5 @@
-"""Ticket eefd (HELD-OUT edge oracle): canonical link diff edges.
-
-Withheld from the implementer: dedup against an existing remote link (either direction),
-the unmapped-relation skip, the unknown-remote-type ignore, and the depends_on direction
-swap.
-"""
+"""Held-out link-edge oracle: deduplicate either direction, skip unmapped relations,
+ignore unknown remote types, and swap depends_on direction."""
 
 from __future__ import annotations
 

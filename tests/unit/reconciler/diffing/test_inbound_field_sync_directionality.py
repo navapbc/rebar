@@ -1,18 +1,6 @@
-"""Inbound field-sync directionality: a Jira-side edit must flow inbound, not revert.
-
-Bug: the outbound differ used unconditional local-wins — it emitted an outbound
-update whenever local != current Jira, *without* consulting prev_snapshot. So a
-field a teammate changed in Jira (while local was unchanged since the last sync)
-was reverted by local-wins instead of mirrored inbound to local.
-
-Fix: when local is UNCHANGED since the last sync (local matches prev_snapshot) for
-an inbound-mirrored field, suppress the outbound so the inbound differ mirrors the
-Jira-side change. When local actually changed (local != prev), local-wins still
-applies. With no prev entry it degrades to local-wins (no regression).
-
-This applies to ALL inbound-mirrored fields (title/description/priority/status/
-assignee), not just assignee.
-"""
+"""When local equals the previous snapshot, suppress outbound updates for
+inbound-mirrored fields so Jira edits flow inward. A local edit still wins; with no
+previous value, retain local-wins behavior."""
 
 from __future__ import annotations
 
@@ -127,12 +115,7 @@ def test_no_prev_degrades_to_local_wins() -> None:
     )
 
 
-# --- title, on the canonical (local-shape) diff ---------------------------------
-#
-# ``title`` is the one inbound-mirrored field whose local and Jira names differ
-# (``title`` vs ``summary``), so it is pinned directly against
-# ``outbound_field_diff.diff_canonical_fields``, the diff ``compute_update_fields``
-# runs after canonicalizing the snapshot.
+# Pin title/summary translation on the live canonical diff.
 
 
 def _canonical(**ov) -> dict:
@@ -172,16 +155,8 @@ def _live_diff(ticket: dict, remote: dict, baseline: dict | None) -> dict:
 
 
 def test_jira_side_title_change_suppressed_on_the_canonical_path() -> None:
-    """A Jira-side SUMMARY edit, with local unchanged since the baseline, must NOT be
-    reverted by an outbound local-wins push.
-
-    ADR 0026 names the arbitrated set as the five inbound-mirrored scalar fields
-    ``title``/``description``/``priority``/``status``/``assignee`` and mandates
-    "local == baseline -> mirror Jira inbound (suppress outbound)". Emitting ``title``
-    here makes the inbound differ drop its own title update as a contradiction
-    (inbound_differ bidirectional suppression, bug 3bf8), so the Jira-side title never
-    reaches the local ticket and the stale local title is pushed back over it.
-    """
+    """A Jira summary edit must flow inbound when local title is unchanged from
+    baseline; an outbound title push would suppress that inbound edit."""
     baseline = _canonical(title="OLD")
     ticket = {"ticket_id": "loc-1", "ticket_type": "task", **_canonical(title="OLD")}
     remote = _canonical(title="NEW from Jira")

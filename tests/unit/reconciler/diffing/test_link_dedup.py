@@ -1,18 +1,5 @@
-"""Deterministic CI coverage for link-dedup / echo-suppression (bug d843 C1).
-
-The link dedup paths (outbound ``_diff_links`` and inbound
-``_diff_links_inbound``) previously had ZERO deterministic CI coverage — they
-were exercised only in gated external (live-Jira) tests. These two cases pin the
-"already present → no re-emit" contract that the write-safe retry relies on:
-
-  (a) outbound: a local ``blocks`` dep whose Jira ``issuelinks`` ALREADY carries
-      the matching (Blocks, target_key) entry → ``_diff_links`` returns [].
-  (b) inbound: a Jira issuelink ALREADY present in the local ticket's deps →
-      ``_diff_links_inbound`` returns [].
-
-Uses the importlib spec_from_file_location pattern established in the reconciler
-test tree (see conftest.py docstring for rationale).
-"""
+"""Already-present links emit no duplicate ADD in either outbound or inbound diffing.
+These deterministic cases protect write-safe retry behavior."""
 
 from __future__ import annotations
 
@@ -168,13 +155,8 @@ def test_outbound_diff_links_dedup_is_direction_agnostic(outbound_differ, links)
 
 
 def test_inbound_diff_links_skips_already_present(inbound_differ):
-    """A Jira issuelink already represented in the local ticket's deps →
-    _diff_links_inbound returns [] (no churn).
-
-    LIVE-JIRA direction (bug 4b59): DIG-1's issuelinks carrying ``inwardIssue: DIG-2``
-    with type Blocks means 'DIG-1 is blocked by DIG-2' == local-a DEPENDS_ON local-b.
-    (This fixture previously encoded the reversed convention — asserting 'blocks' —
-    which is exactly the anti-oracle that let the inbound inversion ship.)"""
+    """An inward Blocks link means local depends_on. When that dependency already
+    exists, inbound diffing emits no duplicate ADD."""
     binding = StubBindingStore({"local-a": "DIG-1", "local-b": "DIG-2"})
     jira_fields = {"issuelinks": [{"type": {"name": "Blocks"}, "inwardIssue": {"key": "DIG-2"}}]}
     local_ticket = {

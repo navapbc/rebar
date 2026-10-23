@@ -1,20 +1,6 @@
-"""RED→GREEN: inbound comment sync must read the REAL Jira snapshot shape.
-
-Bug 0ee6-58b5-f9bf-4531: the inbound differ read Jira comments from
-``jira_fields["comments"]`` (a flat list under the key ``comments``), but the
-production snapshot never carries that key. The fetcher enriches each snapshot
-entry with the Jira REST ``comment`` field — a NESTED dict
-``{"comments": [...], "total": N}`` under the singular key ``comment`` (see
-``fetcher.py`` ``get_comment_map`` enrichment and ``outbound_differ`` which
-reads ``jira_issue["comment"]["comments"]``). Because the inbound differ read
-the wrong key, ``with_comments`` was structurally 0 fleet-wide and Jira-origin
-comments were never mirrored inbound.
-
-These tests feed the REAL Jira-REST snapshot shape (``comment`` nested) — the
-shape the fetcher actually produces — rather than the fictional flat
-``comments`` shape the legacy unit tests used. They exercise the mechanism end
-to end through ``compute_inbound_mutations``.
-"""
+"""Inbound comment sync reads the fetched Jira REST shape: a singular comment field
+containing nested comments and total. A flat comments key would silently miss
+Jira-origin comments."""
 
 from __future__ import annotations
 

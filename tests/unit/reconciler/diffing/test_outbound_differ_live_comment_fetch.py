@@ -1,24 +1,6 @@
-"""Tests for live comment fetch in outbound_differ when snapshot lacks 'comment' field.
-
-Root cause: fetcher.fetch_snapshot → AcliClient.search_issues (reconciler/acli.py:1021+,
-`acli jira workitem search --jql ... --paginate --json`) returns issue fields WITHOUT
-the `comment` field (Jira search doesn't return comments). So in outbound_differ.py
-`_diff_comments`, `jira_issue.get("comment", {})` is ALWAYS {} on live runs →
-jira_comments=[] → every local comment re-emitted as add on every pass.
-
-Fix: when the snapshot lacks a 'comment' field for a bound ticket with local comments,
-fetch the Jira comments live via client.get_comments(jira_key). If the fetch fails,
-skip comment mutations for that ticket with a loud warning + alert. If the snapshot
-DOES carry a comment field (tests/synthetic), use it as today.
-
-Test cases:
-  (a) snapshot WITHOUT comment field + mock client returning the local comments
-      → NO adds emitted (RED today: adds emitted without touching the client)
-  (b) snapshot without comment field + client returns subset
-      → exactly the missing ones emitted
-  (c) client get_comments raises → no comment mutations + warning/alert asserted
-  (d) snapshot WITH comment field → client NOT called (fixture path preserved)
-"""
+"""Jira search omits the comment field. For a bound ticket with local comments, fetch
+live comments when the snapshot lacks them; on fetch failure emit no comment
+mutations and report the failure. An included snapshot field avoids the fetch."""
 
 from __future__ import annotations
 

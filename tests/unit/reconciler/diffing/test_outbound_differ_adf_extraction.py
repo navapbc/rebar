@@ -1,19 +1,5 @@
-"""Description ADF extraction in the outbound field diff (Fix D2).
-
-Historical bug (bug 85a1-f581-2252-4a21): the fetcher persists Jira's REST
-``description`` field verbatim — as an ADF document (`{"type": "doc",
-"version": 1, "content": [...]}`). The outbound differ's Jira-field extraction
-fell back to ``raw.get("name", raw.get("displayName", ""))``, which returned
-``""`` for ADF dicts because neither key exists. The diff then compared the
-local plain-text description against ``""`` and reported the field as changed
-on every pass — driving the 21-mutation idempotency churn documented in the
-e2e probe Phase 6.
-
-These tests drive the live diff (``outbound_field_diff.compute_update_fields``
-with the Jira backend's mappers): an ADF description is decoded to plain text
-before comparison, so single-line and multi-paragraph descriptions match their
-local plain-string counterparts.
-"""
+"""Decode a Jira ADF description before outbound comparison. Treating its dict as an
+empty string caused repeated updates even when local text matched."""
 
 from __future__ import annotations
 

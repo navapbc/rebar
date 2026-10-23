@@ -1,35 +1,6 @@
-"""A parent REMOVED in Jira must clear the local ``parent_id`` (ticket 88d9).
-
-TWO independent layers each dropped the signal, so the fix is two-layered and so is this
-module:
-
-  1. THE SNAPSHOT NEVER CARRIED "no parent". ``fetcher``'s parent enrichment merged
-     ``client.get_parent_map()`` and, when the mapped parent was None, deliberately left the
-     field ABSENT ("consistent with Jira REST shape"). A de-parented issue then looked
-     identical to one that never had a parent — and identical to one whose read failed.
-  2. THE DIFFER REFUSED TO EMIT A CLEAR: "We do NOT emit parent_id=None to avoid accidentally
-     clearing a locally-set parent when we just can't resolve it yet". That comment names a
-     REAL hazard; it was wrong only in treating ONE unresolvable case as if it covered all of
-     them.
-
-WHY THIS MODULE IS SHAPED THE WAY IT IS
----------------------------------------
-An inbound CLEAR is a WRITE THAT DESTROYS LOCAL DATA, so the interesting assertions here are
-the ones proving a clear is NOT emitted. ``get_parent_map`` returns ``{}`` on ANY REST failure
-(``jira_datacenter/transport.py``: "a failure logs a WARNING and returns {}"), so a broken read
-must never look like "no parent". The happy-path oracle alone is satisfied by an UNCONDITIONAL
-clear, which is a data-loss bug — the guard oracles are the ones that protect the product.
-
-Every snapshot in this file is built by the PRODUCTION merge, ``fetcher.merge_parent_map``, not
-by hand-poking a ``parent`` key onto a finished entry. That is the whole point of layer 1's
-extraction: the unobserved case is produced the way production produces it (by omitting the
-issue from the map), so the guards are pinned against the real shape rather than a copy of it
-that can drift.
-
-The oracles drive PRODUCTION ENTRY POINTS — ``compute_inbound_mutations`` and
-``_apply_inbound_update`` — never a private helper by name, so the pre-fix run reported "no
-parent clear was emitted" rather than an AttributeError against a symbol that did not exist.
-"""
+"""A confirmed Jira parent removal clears local parent_id. The fetcher must distinguish
+an observed None from an omitted or failed parent read; the differ must clear only
+the former. Tests build snapshots through production merge and apply entry points."""
 
 from __future__ import annotations
 
@@ -47,17 +18,9 @@ import pytest
 
 
 class _FakeBindingStore:
-    """The lookups the inbound differ + its bidir suppression use, plus the peer-parent evidence.
-
-    ``peer_parents`` was added after this module's original cells were written against a clear
-    gated on ``managed_refs`` ALONE. That gate shipped and orphaned 63 tickets in production,
-    because ``add_managed_ref`` fires on the LOCAL parent-set event and so never proved the peer
-    ever had the parent (see ``test_parent_clear_requires_peer_evidence.py``). The cells that
-    assert a clear DOES fire keep their intent unchanged — an observed-parentless peer must clear
-    the local parent — but they now have to state the precondition their assertion always
-    silently assumed: that rebar had previously OBSERVED that parent on the peer. A cell that
-    supplies no evidence and still expects a clear is asserting the defect.
-    """
+    """Expose peer-parent confirmation as well as managed refs: a local parent-set marks
+    a ref managed before proving Jira ever held it. The differ and suppression guards
+    need both facts."""
 
     def __init__(self, mapping: dict[str, str], peer_parents: dict[str, str] | None = None) -> None:
         self._by_key = dict(mapping)
@@ -317,27 +280,9 @@ def test_unmanaged_parent_is_adopted_not_clobbered() -> None:
 
 
 def test_same_pass_outbound_parent_write_suppresses_the_clear() -> None:
-    """GUARD 4: the same-pass suppression, which covers GUARD 3's blind spot.
-
-    ``add_managed_ref`` is folded by the parent-set EVENT, so a ref is "managed" the instant
-    it is set LOCALLY — MANAGED alone does NOT prove Jira ever had the parent. In a healthy
-    pass, outbound emits the parent push for exactly that ticket, and
-    ``inbound_differ``'s scalar filter drops any inbound field the same pass's outbound is
-    writing. So a brand-new local parent being pushed is never cleared inbound.
-
-    NARROWED IN SCOPE BY ``339a-57ac-e5f3-4718``, though not one line of it changed. The
-    outbound entry here is HAND-BUILT, so this cell asserts what ``inbound_differ``'s filter
-    does GIVEN such a write — it never asks whether the outbound differ actually produces one.
-    That gap is exactly how 339a hid: outbound was ALSO emitting this push when the peer had
-    removed the parent, in which case the suppression discarded a legitimate clear and the local
-    parent survived forever. Since 339a, outbound emits a parent write in this shape only when
-    the LOCAL side genuinely re-set the parent, so the scenario mocked below is now specifically
-    the local-re-set case — which is the one where suppression is correct.
-
-    The complementary property — that outbound stays silent when the peer removed the parent —
-    cannot be asserted here precisely because this cell fabricates its input. It is covered by
-    ``test_parent_clear_bidirectional_37e7.py``, which composes the two REAL differs.
-    """
+    """A newly set local parent is managed before peer confirmation. Suppress an inbound
+    clear while the outbound pass is pushing that parent, or the local write could be
+    lost."""
     bindings, locals_by_id = _one_managed_parent()
     snap = _snapshot(["DC-1"], {"DC-1": None})
     # Outbound is PUSHING the parent this pass (the outbound field name is "parent").

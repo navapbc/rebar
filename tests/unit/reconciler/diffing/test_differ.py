@@ -380,15 +380,8 @@ def test_diff_returns_mutation_list(differ: ModuleType, mutation_mod: ModuleType
 
 
 # ---------------------------------------------------------------------------
-# dd-1 stress tests: differ purity under repetition and input-key permutation.
-#
-# Intent: determinism stress, not exhaustive (direction, action) coverage.
-# differ.compute_mutations currently emits a subset of _VALID_COMBINATIONS
-# (outbound create/update/delete, inbound create/update/delete, conflict and
-# probe via the unbindable-state path). It does not directly emit
-# clean_label or repair_property — those are produced by downstream stages.
-# These fixtures therefore exercise the pairs the differ actually emits and
-# leave the rest to applier-level tests.
+# Determinism stress covers the mutation pairs emitted by the differ. Downstream
+# clean_label and repair_property pairs belong to applier tests.
 # ---------------------------------------------------------------------------
 
 
@@ -483,22 +476,9 @@ def test_differ_is_pure_across_input_permutations(
 
 
 # ---------------------------------------------------------------------------
-# Bug 4354: snapshot-differ must recognise bound issues via the rebar-id: label
-# even when the fetcher snapshot lacks the local_id entity property.
-#
-# Root cause: fetcher.fetch_snapshot only stores Jira `fields` (which include
-# `labels`) — the `local_id` entity property is never in the snapshot.
-# So the snapshot-differ sees DIG-NNNN in jira_state without local_id,
-# falls into the "in_jira and not in_local" branch with jira_local_id=None,
-# and emits an inbound CREATE. The applier then creates a phantom
-# jira-dig-NNNN local entity AND writes a ghost `rebar-id:jira-dig-NNNN`
-# label back to Jira (verified empirically by labels-probe.sh on 2026-05-29:
-# after binding e486-... to DIG-5029, the next pass produced
-# `['rebar-id:259f-...', 'rebar-id:jira-dig-5029', 'labelprobe-...']` on Jira).
-#
-# Fix: the snapshot-differ must treat any Jira issue carrying a
-# `rebar-id:<local_id>` label as "already managed by the binding-aware
-# differs" and skip it — no inbound CREATE, no inbound conflict.
+# The fetch snapshot carries rebar-id labels but no local_id property. Treat a
+# labeled Jira issue as bound, or the snapshot differ creates a phantom local
+# ticket and ghost rebar-id label. Bound issues emit no inbound CREATE/conflict.
 # ---------------------------------------------------------------------------
 
 

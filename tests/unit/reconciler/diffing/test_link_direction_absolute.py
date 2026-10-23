@@ -1,23 +1,6 @@
-"""ABSOLUTE-direction coverage for inbound issue-link reflection, pinned to
-CAPTURED LIVE-JIRA ground truth (bug 4b59 / epic 58b0 P2).
-
-Why this file exists — the chronic-pattern guard:
-    Every prior link-direction fix (3f04, c8ed, 3b86) was "proven" by a
-    round-trip / self-consistency oracle ("outbound<->inbound AGREE", "a Blocks
-    link exists in EITHER direction"). Such an oracle is INVARIANT UNDER A DOUBLE
-    INVERSION, so two composed inversions (the outbound primitive + the inbound
-    differ) cancel and every audit reads green while absolute direction is wrong.
-    These tests deliberately assert ABSOLUTE direction against a real Jira payload
-    whose ground truth is independently known, so an inverted mapping CANNOT pass.
-
-Ground truth (captured 2026-07-17 from the live REB project, fixtures under
-tests/fixtures/jira/live_ground_truth/):
-    * 0250 (REB-458) BLOCKS ba7e (REB-461)  [local source of truth]
-    * REB-458's issuelinks carry ``outwardIssue: REB-461`` with type.outward "blocks"
-    * REB-461's issuelinks carry ``inwardIssue:  REB-458`` with type.inward "is blocked by"
-  =>  outwardIssue + Blocks  MUST map to rebar ``blocks``
-  =>  inwardIssue  + Blocks  MUST map to rebar ``depends_on``  (X is *blocked by* Y)
-"""
+"""Assert link direction against captured Jira ground truth, rather than a round-trip
+oracle that could hide two inversions. Outward Blocks maps to local blocks; inward
+Blocks maps to local depends_on."""
 
 from __future__ import annotations
 

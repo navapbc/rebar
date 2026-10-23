@@ -1,10 +1,5 @@
-"""Ticket 625b (HELD-OUT edge oracle): assignee-identity equivalence + partial-baseline map.
-
-Withheld from the implementer: the assignee decisions that separate a real canonical
-comparison from a naive one (both-empty match, permissive identity match against the
-canonical assignee_identity), and the partial-`_BASELINE_FIELDS` map_remote_to_local
-presence semantics.
-"""
+"""Held-out equivalence oracle for both-empty and permissive assignee identities, plus
+partial baseline field-presence semantics."""
 
 from __future__ import annotations
 

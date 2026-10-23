@@ -1,13 +1,5 @@
-"""Bug 5886 (audit reliability #7): an inbound Jira status with no mapping must NOT
-silently reopen a closed local ticket.
-
-Before the fix, `_map_jira_to_local_fields` defaulted an unmapped Jira status to
-"open" (`_JIRA_TO_LOCAL_STATUS.get(status_raw, "open")`), so moving a Jira issue bound
-to a CLOSED local ticket into a custom/unmapped workflow state (e.g. "In UAT") produced
-an inbound status change closed→open — corrupting board state with no operator signal.
-The fetcher already emits a deduped unmapped-status alert (fetcher-unmapped-jira-status)
-from the same mapping; the differ must simply leave the local status untouched.
-"""
+"""An unmapped Jira status must leave a closed local ticket closed. The fetcher reports
+the unknown status separately; inbound diffing must not default it to open."""
 
 from __future__ import annotations
 

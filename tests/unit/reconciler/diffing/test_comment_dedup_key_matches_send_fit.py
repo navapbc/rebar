@@ -1,33 +1,6 @@
-"""Bug e339-9709-15fe-419a: the Cloud comment dedup key must apply the SAME fit
-the Cloud send path applies.
-
-``comment_limits.py``'s module docstring states the invariant as a hard
-requirement: "If the two paths used different truncation logic they could never
-agree on the landed body, and the loop would persist. They MUST therefore share
-this one helper so they cannot drift." Ticket `emersed-specific-mutt` broke it on
-Cloud:
-``acli_cli_ops.add_comment`` moved to ``AdfCodec.fit_outbound`` (which measures
-the SERIALIZED ADF against 32,000) while ``_JiraSanitizer.fit_comment`` stayed on
-``comment_limits.truncate_comment_body`` (a PLAIN 32,767-character cap). Bug 5931
-then added a second component: ``fit_preserving_marker`` reserves budget for
-``RECONCILER_MARKER``, which the differ key does not model either.
-
-The consequence is not cosmetic. The body-equality skip is the SECONDARY dedup
-layer guarding a lost comment-id map write (a crash between ``add_comment`` and
-``record_comment_id``); for any over-length comment it can never fire, so such a
-comment re-posts on every pass. That is the shape of failure that put 836
-unmarked duplicates into live Jira.
-
-Data Center already has the shape this file demands of Cloud:
-``test_dc_backend_characterization.py::test_dc_fit_comment_is_the_send_path_fit``
-and ``test_dc_comment_ceiling_049e.py::test_fit_comment_converges_with_sanitize_comment``
-both pin ``fit_comment`` byte-identical to what DC's send path lands. Cloud has no
-such pin — this file is it.
-
-Everything asserted here is an observable output (a returned string, a returned
-mutation list); nothing reads a private name or greps source, so a
-behaviour-preserving refactor cannot turn these red.
-"""
+"""Cloud comment dedup must use the same serialized-ADF fit and marker budget as
+sending. The equality skip is the fallback when comment-ID recording fails; divergent
+fits would repost long comments on every pass."""
 
 from __future__ import annotations
 
@@ -112,17 +85,9 @@ def plain_cutover(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_fit_comment_is_the_text_the_send_path_lands(
     body: str, cutover: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """AC 1 — the differ's key is the text the send path actually put on the wire.
-
-    The two sides meet ONLY at the assertion: the right-hand side is decoded from
-    the ``--body`` argument captured out of a real ``add_comment`` call, the
-    left-hand side comes from the differ's own sanitizer. Neither is computed from
-    the other, so a change to either one alone breaks this.
-
-    Asserted under both ``rich_text_cutover`` settings: whatever the flag is, the
-    two must agree, because they are supposed to BE the same transform. The flag is
-    set through its canonical env override so the real resolution path runs.
-    """
+    """Compare the differ key with a body captured from the real send path under plain
+    and rich cutover. Independent derivation on each side detects drift in either
+    fit."""
     monkeypatch.setenv("REBAR_RECONCILER_RICH_TEXT_CUTOVER", cutover)
     landed = oc._normalize_comment_body(json.loads(_send(body, monkeypatch)), _JiraInbound())
 

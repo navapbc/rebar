@@ -1,8 +1,5 @@
-"""A3 held-out contract oracle: normalized baseline storage is read-equivalent.
-
-These tests assert only observable store and outbound-mutation behavior. They are
-physically withheld from the implementation worker until held-out validation.
-"""
+"""Held-out oracle: normalized baseline storage must preserve observable reads and
+outbound mutations."""
 
 from __future__ import annotations
 

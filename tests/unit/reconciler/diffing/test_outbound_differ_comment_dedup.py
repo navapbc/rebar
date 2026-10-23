@@ -27,10 +27,6 @@ from types import ModuleType
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Module loading
-# ---------------------------------------------------------------------------
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
 OUTBOUND_DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_differ.py"
 
@@ -38,11 +34,6 @@ OUTBOUND_DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "outbound_di
 @pytest.fixture(scope="module")
 def outbound_differ() -> ModuleType:
     return importlib.import_module("rebar.reconciler.outbound_differ")
-
-
-# ---------------------------------------------------------------------------
-# Stub BindingStore
-# ---------------------------------------------------------------------------
 
 
 class StubBindingStore:
@@ -61,11 +52,6 @@ class StubBindingStore:
 
     def is_bound(self, local_id: str) -> bool:
         return local_id in self._bindings
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_jira_snapshot_with_comments(
@@ -136,9 +122,7 @@ def _make_ticket_with_comments(
     }
 
 
-# ---------------------------------------------------------------------------
-# Test 1: All local comments already in Jira (plain-text bodies) → no mutation
-# ---------------------------------------------------------------------------
+# Landed comments emit no ADD.
 
 
 def test_all_local_comments_in_jira_no_mutation_emitted(
@@ -173,9 +157,7 @@ def test_all_local_comments_in_jira_no_mutation_emitted(
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 2: 1 new + 2 already-in-Jira → exactly 1 add emitted
-# ---------------------------------------------------------------------------
+# Emit only new comments.
 
 
 def test_one_new_comment_plus_two_existing_emits_exactly_one_add(
@@ -206,9 +188,7 @@ def test_one_new_comment_plus_two_existing_emits_exactly_one_add(
     assert "Brand new comment" in m.comments[0]["body"]
 
 
-# ---------------------------------------------------------------------------
-# Test 3: Empty Jira comment list → all local comments emitted
-# ---------------------------------------------------------------------------
+# Empty peer list emits all local comments.
 
 
 def test_empty_jira_comments_emits_all_local_as_adds(
@@ -240,9 +220,7 @@ def test_empty_jira_comments_emits_all_local_as_adds(
         )
 
 
-# ---------------------------------------------------------------------------
-# Test 4: ADF bodies from Jira normalised via adf_to_text for comparison
-# ---------------------------------------------------------------------------
+# Decode ADF before comparison.
 
 
 def test_adf_comment_body_deduped_against_local_plain_text(
@@ -276,9 +254,7 @@ def test_adf_comment_body_deduped_against_local_plain_text(
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 5: Whitespace differences normalised (trailing newlines, spaces)
-# ---------------------------------------------------------------------------
+# Ignore trailing whitespace.
 
 
 def test_whitespace_normalisation_prevents_re_emit(
@@ -307,15 +283,7 @@ def test_whitespace_normalisation_prevents_re_emit(
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 6: Marker-decorated Jira comment matched against local plain comment
-#
-# The exact bug 4572 mismatch scenario: a comment was previously pushed
-# outbound with _decorate_outbound_comment() (appending RECONCILER_MARKER).
-# Jira returns it back in the snapshot with the marker still in the body.
-# _normalize_comment_body strips the marker before comparison, so the
-# decorated Jira body must match the undecorated local body → no re-emit.
-# ---------------------------------------------------------------------------
+# Strip RECONCILER_MARKER before dedup.
 
 
 def test_marker_decorated_jira_comment_deduped_against_local_plain(

@@ -133,12 +133,8 @@ def test_human_comment_still_emitted_alongside_excluded_marker(
 def test_bridge_canary_alert_comments_not_emitted(
     outbound_differ: ModuleType,
 ) -> None:
-    """Bug 57d1: the heartbeat canary appends a fresh-TIMESTAMPED
-    ``BRIDGE_CANARY_ALERT: Still stale as of <ts>: ...`` comment every run. The
-    volatile timestamp means the body never matches a prior Jira comment, so
-    pre-fix it re-added every pass and accumulated duplicate Jira comments
-    (20+ observed on DIG-5383). Two such comments with DIFFERENT timestamps must
-    BOTH be excluded from outbound sync — proving the re-emitter is killed."""
+    """Timestamped BRIDGE_CANARY_ALERT comments never deduplicate by body. Exclude every
+    such comment from outbound sync, including distinct timestamps."""
     jira_key = "DIG-5383"
     c1 = "BRIDGE_CANARY_ALERT: Still stale as of 2026-06-04T20:42:59Z: Last successful run was 3h ago."  # noqa: E501 — exact canary fixture string
     c2 = "BRIDGE_CANARY_ALERT: Still stale as of 2026-06-04T23:29:33Z: Last successful run was 6h ago."  # noqa: E501 — exact canary fixture string
