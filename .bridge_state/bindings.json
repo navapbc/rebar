@@ -78441,6 +78441,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-31T07:45:07Z"
     },
+    "c0df-1451-b0f6-4ddf": {
+      "created_at": "2026-10-23T01:49:07Z",
+      "jira_id": "4596910",
+      "jira_key": "REB-6727",
+      "state": "confirmed",
+      "updated_at": "2026-10-23T01:49:10Z"
+    },
     "c0f6-0fc9-fe48-41bc": {
       "baseline": {
         "assignee": {
@@ -108010,7 +108017,20 @@
     "1792670721097856808": "__rebar_unknown_comment_id__",
     "1792672631193652304": "__rebar_unknown_comment_id__",
     "1792678473723206065": "__rebar_unknown_comment_id__",
-    "1792678878706100186": "__rebar_unknown_comment_id__"
+    "1792678878706100186": "__rebar_unknown_comment_id__",
+    "1792718867214653813": "__rebar_unknown_comment_id__",
+    "1792718874121104849": "__rebar_unknown_comment_id__",
+    "1792718922384064245": "__rebar_unknown_comment_id__",
+    "1792718948978073402": "__rebar_unknown_comment_id__",
+    "1792718968514540357": "__rebar_unknown_comment_id__",
+    "1792719037093064525": "__rebar_unknown_comment_id__",
+    "1792719169423619319": "__rebar_unknown_comment_id__",
+    "1792719219766322692": "__rebar_unknown_comment_id__",
+    "1792719233626577303": "__rebar_unknown_comment_id__",
+    "1792719249698973457": "__rebar_unknown_comment_id__",
+    "1792719379512277788": "__rebar_unknown_comment_id__",
+    "1792719564156959507": "__rebar_unknown_comment_id__",
+    "1792719719127142582": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -113242,6 +113262,7 @@
     "REB-6724": "4b07-4291-8d1e-48b2",
     "REB-6725": "3cf0-9fb3-d222-47f4",
     "REB-6726": "b594-de6d-3ebc-490f",
+    "REB-6727": "c0df-1451-b0f6-4ddf",
     "REB-673": "4b56-4682-bb34-4fd1",
     "REB-674": "4e6f-1a2d-482c-435e",
     "REB-675": "7c58-d1b0-899f-4975",
