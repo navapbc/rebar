@@ -1,54 +1,11 @@
-"""Durable memory of inbound link ADDs that can never succeed (bug b8b1).
+"""Remember inbound links whose local graph cannot accept them yet.
 
-The inbound applier used to spend a ``rebar.link`` write on every Jira-sourced
-link record every pass, catch whatever came back, log a WARNING and forget it.
-Three of those failures are not faults at all — they are deterministic verdicts
-from ``rebar.graph._links.add_dependency`` about the shape of the LOCAL ticket
-graph:
-
-* the source ticket is ``closed``;
-* the two endpoints are already in an ancestor-descendant relationship, so the
-  hierarchy expresses the link and a redundant edge is refused;
-* the edge would close a cycle.
-
-None of those can change until the local graph changes, so re-attempting them is
-pure waste. Measured on four consecutive live passes (runs 31568815075 /
-31569179421 / 31569723185 / 31570037358): 19 failures per pass, a byte-identical
-set every time.
-
-This module gives the applier the memory it lacked. Two pieces:
-
-``classify`` turns an exception into one of the three permanent reasons, or
-``None``. ``None`` is the safety valve — an unrecognised failure is NOT recorded
-and keeps the existing retry-next-pass behaviour, so a transient Jira/git/IO
-fault is never mistaken for a structural impossibility.
-
-``ImpossibleLinkStore`` persists ``{source|target|relation: record}`` to
-``<tracker>/.bridge_state/impossible_links.json``. Each record carries a
-**deciding digest** over exactly the structural inputs its validator reads, and
-that digest IS the invalidation key: when it stops matching, the record is
-pruned and the link is attempted once more on its own merits. Nothing expires on
-a timer and nothing needs clearing by hand; deleting the JSON file is still a
-complete manual reset.
-
-The input set is per-reason, because the three validators do not read the same
-things. ``closed_source`` and ``redundant_ancestry`` are decided entirely by the
-two endpoints, so they key on each endpoint's status, parent chain and dep set
-and are undisturbed by changes elsewhere. ``cycle`` is NOT: ``add_dependency``
-resolves the hierarchy first and then walks the TRANSITIVE dependency graph, so
-unlinking or reparenting an intermediate ticket can break the cycle while both
-endpoints stay byte-identical. A cycle record therefore keys on the global
-structure. Over-invalidating costs one extra attempt; under-invalidating would
-suppress a legitimate link indefinitely, so the asymmetry decides the design.
-
-Fail-open throughout: an unreadable store, an uncomputable digest, or an
-unreducible ticket all degrade to "attempt the write", never to "suppress it".
-
-Deliberately a SEPARATE file from ``bindings.json``. The binding store's schema
-is shared with the peer-state channels, and epic a4bd (never-pushed managed
-links vs peer deletions) plans a peer-confirmation record of its own there. A
-distinct file keeps the two changes additive.
-"""
+Classify only closed-source, redundant-ancestry, and cycle errors as structural.
+Unknown errors remain retryable. ImpossibleLinkStore keys each record by source,
+target, and relation with a deciding structural digest. Endpoint chains suffice
+for closed or redundant links. Cycles need the whole dependency graph. A changed
+digest retries the link. Unreadable state or an unavailable digest also retries.
+The separate file avoids changing binding-store schema."""
 
 from __future__ import annotations
 
@@ -75,16 +32,8 @@ PERMANENT_REASONS: frozenset[str] = frozenset(
     {REASON_CLOSED_SOURCE, REASON_REDUNDANT_ANCESTRY, REASON_CYCLE}
 )
 
-# Matched against the *rendered* exception text. Each entry is
-# ``(reason, (required_substring, ...))`` and ALL substrings must be present —
-# two markers rather than one so an unrelated message that happens to contain
-# "is closed" cannot be misfiled as a permanent structural verdict.
-#
-# The exact strings come from rebar/graph/_links.py::add_dependency:
-#   "cannot create {relation} link — source ticket '{id}' is closed. ..."
-#   "cannot create depends_on link — target ticket '{id}' is closed"
-#   "ERROR: redundant link — {a} and {b} are in an ancestor-descendant ..."
-#   "Adding {a} → {b} ({rel}) would create a cycle at {level} level"
+# Require every substring of a known graph error before recording a permanent
+# structural reason. A partial match must remain retryable.
 _SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (REASON_REDUNDANT_ANCESTRY, ("redundant link", "ancestor-descendant")),
     (REASON_CYCLE, ("would create a cycle",)),
@@ -111,22 +60,9 @@ def classify(exc: BaseException | str) -> str | None:
 
 
 def _endpoint_fingerprint(ticket_id: str, tracker_dir: str) -> str:
-    """Structural fingerprint of one endpoint AND every ancestor on its chain.
-
-    Each link in the chain contributes its own status and dep set, not just its
-    id. That is not belt-and-braces: ``add_dependency`` calls
-    ``resolve_hierarchy_link`` FIRST, which can REDIRECT an endpoint to a
-    type-tier ancestor, and the closed-source / redundant / cycle validators
-    then run against that promoted ticket. The deciding status therefore may
-    belong to an ancestor rather than to the id the applier passed in.
-    Fingerprinting the whole chain covers the redirect target wherever the
-    promotion lands, without this module having to re-derive the promotion rule
-    and drift from it.
-
-    Anything non-structural about the tickets (title, description, comments,
-    tags) is excluded on purpose: a comment must not invalidate a record, or the
-    store would churn back to re-attempting on every unrelated edit.
-    """
+    """Hash each endpoint and ancestor status, parent, and dependency set. Hierarchy
+    promotion may move the deciding status to an ancestor. Exclude nonstructural
+    prose and tags so unrelated edits do not reattempt a link."""
     from rebar.graph._loader import reduce_ticket
     from rebar.graph._status import _get_ticket_status
 
@@ -162,21 +98,9 @@ def _endpoint_fingerprint(ticket_id: str, tracker_dir: str) -> str:
 
 
 def _global_structure_fingerprint(tracker_dir: str) -> str:
-    """Fingerprint the WHOLE graph's structure: every ticket's status/parent/deps.
-
-    Needed for the ``cycle`` verdict and only for it. ``check_would_create_cycle``
-    walks the TRANSITIVE dependency graph, and it does so on the
-    hierarchy-RESOLVED (promoted) endpoints rather than the two ids handed to
-    ``rebar.link`` — so unlinking or reparenting some intermediate ticket can
-    break the cycle while leaving both endpoints untouched. Keying a cycle
-    record on the endpoints alone would therefore under-invalidate and suppress
-    a link that has become possible.
-
-    Over-invalidating is the safe direction: a structural change anywhere costs
-    one extra attempt, whereas under-invalidating suppresses a legitimate link
-    until somebody deletes the file by hand. Comments, titles and descriptions
-    are still excluded, so an unchanged *structure* converges to zero writes.
-    """
+    """Hash graph status, parent, and dependencies for cycle verdicts. A change to an
+    intermediate ticket can break a cycle without changing either endpoint. Extra
+    retries after structural changes are safer than suppressing a valid link."""
     from rebar.reducer import reduce_all_tickets
 
     rows: list[str] = []

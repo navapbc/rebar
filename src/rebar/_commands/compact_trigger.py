@@ -1,32 +1,7 @@
-"""The OPERATION-LINKED compaction trigger — the floor that works without CI or cron.
-
-Compaction left the close path (bug ``choosy-arthrodic-barbet``) because
-``_compact_locked`` held the ONE store write lock for the whole fold: measured at 13m53s on a
-single close, starving every concurrent writer. The scheduled sweep
-(``.github/workflows/compact-sweep.yml``) replaced it as the amortized trigger — but a
-schedule needs CI or cron, and an adopter running rebar as a library or CLI has neither. For
-them a CI-only trigger is no trigger: their event logs would grow without bound and nothing in
-the product would ever fold them. **Compaction has to work in environments without local cron
-and CI. That is why the original design was linked to an operation.**
-
-So the operation-linked trigger comes back — without the hold that made it a P0. The P0 was
-never "compaction ran on close"; it was that an operation an agent WAITS ON held the store lock
-for minutes. Here the waited-on operation holds nothing:
-
-* the trigger runs at the very END of the close, AFTER ``txn.transition_core`` released the
-  store lock and after the best-effort push;
-* its decision is two ``O(1)`` checks — no store-wide scan, nothing that grows with the number
-  of tickets;
-* the fold itself happens in a DETACHED worker, so the session returns immediately. The
-  worker's lock profile is exactly that of a manual ``rebar store compact``, which is the accepted
-  baseline, and it never spans an LLM call.
-
-The detach machinery (:mod:`rebar._proc`), the stamped advisory lock
-(:mod:`rebar._store.stamped_lock`) and the Windows no-op are shared helpers. Reusing them
-(rather than writing another dialect) is what lets this inherit the stamped-lock discipline
-fixed in ``knavish-stimulated-bluebottle`` — pid-recycle qualification, refusal-without-proof
-and the wall-clock ceiling — instead of re-deriving a heuristic that gets one of them wrong.
-"""
+"""Operation-linked compaction trigger for environments without cron or CI.
+After close releases the store lock, make bounded eligibility checks and
+start a detached sweep worker. Use shared process and stamped-lock helpers.
+The waited-on close does not hold the lock through a fold."""
 
 from __future__ import annotations
 
@@ -175,18 +150,9 @@ def _spawn_detached_sweep(tracker: str) -> None:
 
 
 def run_sweep(tracker: str) -> None:
-    """Hold the advisory lock and run the store-wide sweep. The detached child's entry point.
-
-    Runs the SAME ``compact-all`` the scheduled workflow runs, so the two triggers cannot fold
-    by different rules.
-
-    Does NOT stamp the sweep itself: :func:`compact.compact_all_cli` stamps when it actually
-    sweeps, and that is the only event the stamp may record. Stamping here — in a ``finally``,
-    whatever happened — put a hole straight through the floor this trigger exists to be. A
-    stand-aside folds nothing, so stamping it would reset the last-sweep clock and suppress the
-    staleness arm for a full interval; under sustained contention every trigger would stand
-    aside, stamp, and go quiet, and the store would never compact while looking freshly swept.
-    A stand-aside must leave the clock alone so the next close tries again."""
+    """Run the same store-wide sweep as the scheduled workflow under its
+    advisory worker lock. Let compact_all_cli stamp only a sweep that ran.
+    A stand-aside leaves the clock unchanged so later closes retry."""
     import contextlib
     import io
 

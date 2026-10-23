@@ -60,32 +60,14 @@ def resolve_jql_backoff(env: dict[str, str] | None = None) -> tuple[int, float, 
     return retries, base, cap
 
 
-# Local ticket types that are NEVER synced to Jira. session_log and code_review
-# tickets are verbose, local, agent-facing artifacts with no place in a Jira project,
-# so compute_outbound_mutations skips them entirely (alongside the excluded-status
-# check). These types are also deliberately ABSENT from outbound_differ's
-# _LOCAL_TO_JIRA_TYPE map so any leak past this filter surfaces rather than
-# silently syncing.
+# These local artifact types never sync to Jira. The outbound type map omits them
+# so a missed exclusion fails visibly.
 EXCLUDED_SYNC_TYPES: frozenset[str] = frozenset({"session_log", "code_review", "identity"})
 
-# Status mapping: local-side status name -> Jira-side status name.
-# Used by outbound_update v1's status-routing path and by the preflight status-mapping scan
-# in reconcile.py — preflight aborts a pass when any update mutation
-# references a status absent from this mapping. An empty dict is a valid
-# kill-switch — preflight tolerates an empty mapping when no update
-# mutations contain a status field.
-#
-# Must stay in lock-step with adapters/jira_family/value_maps.LOCAL_STATUS_TO_JIRA
-# (parity is enforced by tests/unit/reconciler/state/test_config.py). This is a
-# SECOND, INDEPENDENT literal of the same mapping and it is deliberately not an import:
-# this module imports nothing but __future__, and adapters/jira_family is a VENDOR
-# package whose dependency direction is one-way (concrete backends import it; it never
-# imports core back), so importing it here would invert that layering and put this
-# operator-overridable surface — including the empty-dict kill-switch above — behind an
-# adapter import. The parity TEST is what keeps the two honest instead, exactly as it
-# does for jira_to_local_status below. Bug fe15-3bc4-ed70-4b61: before that test, the
-# two could drift silently — mutating "deleted" here to a non-workflow value left 59
-# tests green.
+# Map local statuses to Jira workflow names. Preflight rejects an update whose
+# status is absent here. An empty map is valid when no status update is planned.
+# Keep this independent core literal equal to jira_family.value_maps through the
+# parity test, without importing the adapter into core.
 local_to_jira_status: dict[str, str] = {
     # `idea ↔ IDEA` is a UNIQUE (injective) mapping — no rebar-status: annotation
     # label is needed to reconstruct it inbound. Requires the Jira project workflow
@@ -104,18 +86,9 @@ local_to_jira_status: dict[str, str] = {
     "deleted": "Done",
 }
 
-# Canonical reverse mapping: Jira workflow status -> local status. This is
-# NOT derivable from local_to_jira_status (the forward map is non-injective:
-# blocked/in_progress both map to "In Progress", closed/cancelled/deleted all
-# map to "Done"). The canonical preimage is the UNANNOTATED local status —
-# blocked/cancelled are reconstructed from rebar-status: annotation labels by
-# callers, never from the workflow status alone. Deriving the reverse map by
-# inverting local_to_jira_status (as applier._jira_status_to_local once did,
-# with lexicographic tie-breaking) imported "In Progress" as blocked and
-# "Done" as cancelled — ticket robe-creek-zealot.
-#
-# Must stay in lock-step with inbound_differ._JIRA_TO_LOCAL_STATUS (parity
-# is enforced by tests/unit/reconciler/test_config.py).
+# The reverse status map is canonical because the forward map is not injective.
+# Annotation labels restore blocked or cancelled distinctions. Keep this literal
+# in parity with inbound_fields rather than inverting local_to_jira_status.
 jira_to_local_status: dict[str, str] = {
     "IDEA": "idea",
     "To Do": "open",
@@ -155,15 +128,8 @@ def effective_status_map(project_key: str, root: object = None) -> dict[str, str
     return {k: v for k, v in resolved.status_map.items() if v != mc.SKIP}
 
 
-# Local ticket type -> Jira issue type NAME (S3). Like ``local_to_jira_status`` above,
-# this is a SECOND, INDEPENDENT literal of the same mapping (the SOLE definition site
-# under ``adapters/`` is ``adapters/jira_family/value_maps.LOCAL_TYPE_TO_JIRA``) and it is
-# deliberately NOT an import: this module imports nothing but ``__future__``, and
-# ``adapters/jira_family`` is a VENDOR package whose dependency direction is one-way
-# (concrete backends import it; it never imports core back), so importing it here would
-# invert that layering and put this operator-overridable surface behind an adapter import
-# — the import-graph contract test enforces exactly this. The parity TEST keeps the two
-# honest instead, exactly as it does for ``local_to_jira_status`` / ``jira_to_local_status``.
+# This operator-overridable core type map mirrors jira_family.value_maps through
+# a parity test. Importing the adapter here would invert the dependency direction.
 LOCAL_TYPE_TO_JIRA: dict[str, str] = {
     "bug": "Bug",
     "story": "Story",
@@ -171,16 +137,9 @@ LOCAL_TYPE_TO_JIRA: dict[str, str] = {
     "epic": "Epic",
 }
 
-# Canonical reverse TYPE mapping: Jira issue type name -> local ticket type. Mirrors
-# ``jira_to_local_status`` above: a SECOND, INDEPENDENT literal (deliberately not an
-# import) of ``inbound_fields._JIRA_TO_LOCAL_TYPE``, kept in lock-step with it by a
-# parity test. ``outbound_labels`` imports ONLY this module, so the ``rebar-type:``
-# stamp rule (``_desired_type_annotation``) reads the Jira->local reverse from here
-# rather than reaching into an adapter package (which would invert the one-way
-# core<-adapter layering, exactly as the comment on ``jira_to_local_status`` explains).
-# The built-in type map is bijective, so this is its exact inverse today; a per-project
-# ``type_map`` overlay may collapse two local types onto one Jira type, and THAT lossy
-# case is what the annotation label recovers.
+# The canonical reverse type map stays in core for outbound rebar-type labels.
+# Parity with inbound_fields protects the independent literal. Project mappings
+# may collapse local types, and the label recovers that lost distinction.
 jira_to_local_type: dict[str, str] = {
     "Bug": "bug",
     "Story": "story",
@@ -215,13 +174,8 @@ def effective_type_map(project_key: str, root: object = None) -> dict[str, str]:
 
 
 def effective_excluded_sync_types(project_key: str, root: object = None) -> set[str]:
-    """The EFFECTIVE set of local ticket types NOT synced to Jira for ``project_key``.
-
-    The built-in :data:`EXCLUDED_SYNC_TYPES` (session_log/code_review/identity) UNION
-    every local type mapped to ``mapping_config.SKIP`` in the SAME resolved layer
-    :func:`effective_type_map` uses. Reuses S1's ``SKIP`` sentinel as the type-granular
-    skip signal (no separate axis): a local type mapped to ``SKIP`` is excluded for that
-    project ON TOP of the built-in set."""
+    """Return built-in excluded ticket types plus project types mapped to SKIP in the
+    same resolved layer used by effective_type_map."""
     from rebar.reconciler import mapping_config as mc
 
     cfg = mc.load_mapping_config(root)
@@ -231,21 +185,10 @@ def effective_excluded_sync_types(project_key: str, root: object = None) -> set[
 
 
 def assert_type_decisions_complete(project_key: str, root: object = None) -> None:
-    """Fail-closed gate: every SYNCABLE local ticket type must be DECIDED for a project.
-
-    A syncable type is a member of ``rebar.types.TicketType`` MINUS the built-in
-    :data:`EXCLUDED_SYNC_TYPES`. Each such type must be DECIDED — present in
-    :func:`effective_type_map` (a Jira target) OR in :func:`effective_excluded_sync_types`
-    (mapped to ``SKIP``). An undecided type would be silently coerced to a default Jira
-    type downstream; this gate instead raises :class:`mapping_config.MappingConfigError`
-    naming the undecided type(s) so an operator's incomplete ``[mapping.*.type_map]``
-    (or a newly added ``TicketType`` with no sync decision) fails loudly, up front.
-
-    The built-in :data:`LOCAL_TYPE_TO_JIRA` covers all four syncable types today, so with
-    no ``[mapping]`` block this never fires. The syncable vocabulary and the built-in map
-    are both read at call time (the map via :func:`effective_type_map`, which reads this
-    module's global), so a test may simulate an undecided type by monkeypatching the
-    built-in."""
+    """Require every syncable TicketType to map to Jira or SKIP for this project.
+    Raise MappingConfigError with undecided types before a default issue type could
+    silently take their place. Read the type vocabulary and built-in mapping at call
+    time so current configuration governs the decision."""
     from typing import get_args
 
     from rebar.reconciler import mapping_config as mc
@@ -264,17 +207,9 @@ def assert_type_decisions_complete(project_key: str, root: object = None) -> Non
         )
 
 
-# Local relation -> Jira issue-link TYPE name (S4). Like ``local_to_jira_status`` and
-# ``LOCAL_TYPE_TO_JIRA`` above, this is a SECOND, INDEPENDENT literal of the same mapping
-# (the SOLE definition site under ``adapters/`` is the link-TYPE component of
-# ``adapters/jira_family/value_maps.RELATION_TO_JIRA_LINK``) and it is deliberately NOT an
-# import: this module imports nothing but ``__future__``, and ``adapters/jira_family`` is a
-# VENDOR package whose dependency direction is one-way (concrete backends import it; it never
-# imports core back), so importing it here would invert that layering and put this
-# operator-overridable surface behind an adapter import — the import-graph contract test
-# enforces exactly this. This literal carries the link TYPE only (not the direction ``swap``,
-# which stays with the built-in adapter payload); the parity TEST keeps the two in lock-step,
-# exactly as it does for ``local_to_jira_status`` / ``LOCAL_TYPE_TO_JIRA``.
+# This core relation map keeps only Jira link type names. Link direction remains
+# in the adapter payload. A parity test keeps this independent literal aligned
+# without importing the vendor adapter into core.
 local_to_jira_link: dict[str, str] = {
     "blocks": "Blocks",
     "depends_on": "Blocks",
@@ -310,19 +245,9 @@ def effective_link_map(project_key: str, root: object = None) -> dict[str, str]:
     return {k: v for k, v in resolved.link_map.items() if v != mc.SKIP}
 
 
-# Local priority integer -> Jira priority NAME (S5). Like ``local_to_jira_status``,
-# ``LOCAL_TYPE_TO_JIRA`` and ``local_to_jira_link`` above, this is a SECOND, INDEPENDENT
-# literal of the same mapping (the SOLE definition site under ``adapters/`` is
-# ``adapters/jira_family/value_maps.LOCAL_PRIORITY_TO_JIRA``) and it is deliberately NOT an
-# import: this module imports nothing but ``__future__``, and ``adapters/jira_family`` is a
-# VENDOR package whose dependency direction is one-way (concrete backends import it; it never
-# imports core back), so importing it here would invert that layering and put this
-# operator-overridable surface behind an adapter import — the import-graph contract test
-# enforces exactly this. NOTE the two literals have DIFFERENT key TYPES on purpose: the
-# adapter-side ``LOCAL_PRIORITY_TO_JIRA`` is INT-keyed (``dict[int, str]``, 0-4), while the
-# config seam's keys are STRINGS (a ``[mapping.*.priority_map]`` TOML sub-table has string
-# keys), so this literal is str-keyed. A parity TEST keeps the two honest (the same
-# priority -> name pairs), exactly as it does for the other three axes.
+# The core priority map has string keys for TOML project overrides. The adapter
+# literal has integer keys. A parity test checks their priority-to-name pairs
+# without importing the vendor adapter into core.
 local_to_jira_priority: dict[str, str] = {
     "0": "Highest",
     "1": "High",

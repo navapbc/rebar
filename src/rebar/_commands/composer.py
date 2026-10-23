@@ -108,30 +108,10 @@ def create_core(
     bridge_project: str | None = None,
     repos=None,
 ) -> dict:
-    """Validate, compose, and append a CREATE event; return ``{id, alias, title}``.
-
-    Mirrors ``ticket_create``'s validation order and messages: ticket_type enum
-    (carries the invalid_ticket_type envelope), non-empty title, title ≤ 255, the
-    U+2192→``->`` normalisation, priority 0-4, init check, and parent resolution
-    (exists / has CREATE-or-SNAPSHOT / not closed). Raises :class:`CommandError` on
-    any failure.
-
-    ``source`` (P1.2 import): optional provenance recorded onto the CREATE event so
-    the reducer can surface where an imported ticket came from. Recognised keys —
-    ``source_id``, ``source_created_at``, ``source_author``, ``source_env`` — are
-    copied into the event data when non-None. The new ticket always gets a fresh
-    local id and a fresh HLC timestamp; provenance is additive metadata, never a
-    foreign-timestamp injection.
-
-    ``creation_channel`` (epic jira-reb-977, story 6fe2): the public ingress that
-    produced this genesis CREATE — one of ``cli`` / ``mcp`` / ``python`` / ``jira`` /
-    ``import`` (``unknown`` is projection-only and rejected here). It is REQUIRED
-    (keyword-only, no default) so every converging caller of this internal seam must
-    declare its channel; it is validated via
-    :func:`rebar.reducer._version.validate_creation_channel` and stored UNCONDITIONALLY
-    into the CREATE ``data`` (unlike the present-only ``source_*`` fields), then
-    projected immutably into compiled ticket state.
-    """
+    """Validate and append CREATE, then return id, alias, and title.
+    Validate type, title, priority, initialization, and parent before writing.
+    Optional source fields record import provenance with a fresh local ID and
+    timestamp. Required creation_channel records the validated ingress source."""
     from rebar.reducer import reduce_ticket
     from rebar.reducer._version import validate_creation_channel
 

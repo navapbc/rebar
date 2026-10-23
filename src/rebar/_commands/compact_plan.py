@@ -1,24 +1,6 @@
-"""ONE compaction PLANNER — the derivations the normal fold, the fsck rebuild and crash
-recovery all need (story ``3436-71db-ceff-4ac0``).
-
-Three engines fold the same store and each re-derived the same decisions in its own code:
-``compact_txn`` (the locked transaction), ``compact_rebuild`` (the fsck repair path) and
-``compact_recovery`` (the crash preamble), with the sweep's selection arm in ``compact`` and
-its per-close twin in ``compact_trigger``. The listing, the "is this a SNAPSHOT file" test,
-the SNAPSHOT envelope, the ``*.retired`` rename-back rule and the commit step each existed in
-two or three spellings — which is how the compaction family arrived as six separate bug
-tickets, a fix landing in one copy while its twin stayed broken. The SNAPSHOT-exclusion rule
-for ``source_event_uuids`` is the cautionary one: bug ``aea0`` had to teach it to the fold
-years after the rebuild path already had it.
-
-This module holds the DERIVATIONS only. It decides nothing about I/O policy: whether a
-failure aborts, is logged, or is tolerated stays with the engine that owns that policy —
-which is why ``compact_rebuild``'s forward retire loop (per-file tolerance plus a
-``.snapshot-rebuild.bak`` idempotent restart) is deliberately NOT routed through the fold's
-abort-and-roll-back path. It is a low-level leaf: stdlib plus ``rebar._store`` and
-``rebar.reducer``, reaching ``rebar._commands._seam`` lazily so that ``compact_recovery`` can
-import it without acquiring ``_seam``'s config/resolver chain.
-"""
+"""Shared compaction planner for normal fold, fsck rebuild, and recovery.
+Own candidate listing, snapshot envelope, retired-file restore, and
+commit derivations. Each engine keeps its own failure policy."""
 
 from __future__ import annotations
 

@@ -1,25 +1,10 @@
 #!/usr/bin/env python3
 """Per-ticket outbound dispatch: create_one / update_one, one attempt per Jira call.
 
-Extracted from ``batch_dispatch.py`` (module-size split, ticket b043-9490): owns
-the two per-mutation CLI dispatchers that carry the bulk of outbound dispatch —
-``create_one`` (REST-budget guard, JQL dedup, identity-write + rollback, and
-label/comment propagation) and ``update_one`` (allowlist filter, parent reparent,
-comment-fallback on a 400 illegal-transition, and label/comment/link sub-op
-dispatch) — plus the link-probe helpers (``_index_existing_links`` /
-``_find_link_id``) and the ``_is_illegal_transition_400`` predicate they use. Each
-Jira call is a single attempt (ADR 0103 S3); retry belongs to the transport.
-
-``batch_dispatch`` re-exports every name defined here, so the public surface
-``rebar.reconciler.batch_dispatch.{create_one,update_one,...}`` is
-unchanged and importers/tests need no edit. Imports only downward (``_errors`` /
-``pass_io``); never imports ``batch_dispatch`` or ``applier``, so the facade can
-import these dispatchers back without a cycle.
-
-``JiraAPIError`` / ``RetryExhaustedError`` are the UNIFIED types from ``_errors``
-(epic romp-swath-wince); imported (not defined) here so the ``batch_dispatch`` /
-``applier`` re-exports hand back the SAME objects the ``acli`` surface does.
-"""
+Each Jira call is a single attempt. Transports own retries. create_one guards
+the call budget, deduplicates by identity label, and delegates the write-ahead
+create route. update_one sequences parent, scalar, label, comment, and link
+sub-operations. batch_dispatch re-exports these entry points and error types."""
 
 from __future__ import annotations
 
@@ -43,9 +28,7 @@ from rebar.reconciler._errors import (
 )
 from rebar.reconciler.dispatch_apply_phases import (
     _capability_present,
-    # Re-exports: the link-probe helpers no longer have a caller in THIS module (the link
-    # phase moved to the sibling leaf, ticket 5528), but ``batch_dispatch`` imports them
-    # from here and its __all__ is what the reconciler tests reach for.
+    # Keep these link-probe exports for batch_dispatch and its callers.
     _find_link_id,  # noqa: F401 — re-export for batch_dispatch
     _index_existing_links,  # noqa: F401 — re-export for batch_dispatch
     _record_comment_id,
@@ -86,40 +69,12 @@ def create_one(
     *,
     create_core: Callable[..., dict | None],
 ) -> dict | None:
-    """Create a Jira issue from the mutation's fields, with budget guard and JQL dedup.
-
-    Budget guard: if rest_calls >= _REST_CALL_BUDGET, appends mutation to deferred_creates and
-    returns None without issuing any REST calls.
-
-    JQL dedup: searches for an existing issue with label 'rebar-id:<local_id>' before
-    creating. On hit, skips create_issue(), writes mapping.json atomically, appends a
-    dedup-create-skipped event to events_list, and returns a dedup sentinel.
-    On miss, proceeds with create_issue().
-
-    Args:
-        mutation:         Mutation dict with at least "fields" and optionally "local_id".
-        client:           AcliClient instance.
-        rest_calls:       Number of REST calls already issued in this pass.
-        deferred_creates: List to append deferred mutations to (budget guard).
-        events_list:      List to append structured events to (dedup hit events).
-        repo_root:        Repository root for resolving .rebar/bridge/mapping.json.
-                          Defaults to four levels above this file when None.
-        comment_errors:   Optional list collecting add_comment failures during the
-                          post-create comment-dispatch loop (bug ea6d). When
-                          provided, each failure is appended (string form) so the
-                          caller can surface it in the batch outcome instead of
-                          reporting error=None. Failures stay NON-fatal — the issue
-                          create already succeeded. Passing ``None`` (the default)
-                          preserves the legacy log-only behaviour, mirroring
-                          update_one's comment_errors contract.
-        create_core:      The create->contain MIDDLE core (keyword-only, required).
-                          Production injects the coordinated write-ahead core
-                          (``create_route._coordinated_create_core``).
-
-    Returns:
-        The client.create_issue() result on miss, a dedup sentinel dict on hit,
-        or None when the mutation is budget-deferred.
-    """
+    """Create one Jira issue within the REST budget, or defer it without a call.
+    A keyless pending binding within index-lag grace also defers. Search the rebar-id
+    label first and confirm an existing issue instead of creating a duplicate.
+    Otherwise translate bridge fields, run one selected write-ahead core, then send
+    user labels and comments. Return the create result, dedup sentinel, or None
+    when deferred."""
     # Budget guard: defer without any REST call when at or over the limit
     if rest_calls >= _REST_CALL_BUDGET:
         if deferred_creates is not None:
@@ -206,15 +161,8 @@ def create_one(
     )
     jira_key = result.get("key", "") if isinstance(result, dict) else ""
 
-    # Bug 85a1 (PR #87e4 follow-up): propagate user-supplied labels/comments
-    # from the mutation payload after the identity-write block. The fix was
-    # previously applied only to update_one (lines 1744-1779) — the symmetric
-    # gap in create_one caused outbound CREATE to silently drop every user
-    # label and comment, leaving freshly-created Jira issues with only the
-    # rebar-id system label (Phase 1 of the e2e field-validation probe).
-    # Failures here are logged but non-fatal — the create + identity write
-    # already succeeded; a downstream label/comment dispatch failure must
-    # not roll back the Jira issue.
+    # After identity is durable, send user labels and comments. Their failures are
+    # reported without rolling back the created issue.
     if jira_key:
         labels = mutation.get("labels", []) or []
         if isinstance(labels, list):
@@ -239,13 +187,8 @@ def create_one(
                     )
 
         comments = mutation.get("comments", []) or []
-        # Ticket a3fa: the capability guard is folded INTO this condition rather than placed
-        # inside the loop. Two reasons: the capability is invariant across the loop (checking
-        # per entry would re-decide the same thing N times), and a boolean operand costs zero
-        # McCabe complexity, so the guard does not raise create_one's LOCKED complexity
-        # baseline. It fires only when the mutation actually carries comment sub-ops.
-        # A designed skip is NOT a failure: it does not reach comment_errors (that channel
-        # stays the failure channel) and the create itself still lands.
+        # Check comment capability once when comments exist. A designed skip leaves
+        # comment_errors for failed calls while the create remains successful.
         if (
             isinstance(comments, list)
             and comments
@@ -256,28 +199,18 @@ def create_one(
             for entry in comments:
                 if not isinstance(entry, dict):
                     continue
-                # Story 4cee: send the bytes the dedup key was taken from. An
-                # entry queued before the cutover — and every entry
-                # ``_map_comments_for_create`` emits — carries no ``wire_body``,
-                # so the unfitted body remains the fallback and the adapter's own
-                # fit still covers it.
+                # Send the wire body used for deduplication. Older entries fall back to body.
                 body = entry.get("wire_body") or entry.get("body", "")
                 if not body:
                     continue
                 try:
-                    # Story 9622 (D2): SINGLE-attempt (no retry wrapper) — a
-                    # comment has no cheap Jira idempotency key, so a retry could
-                    # duplicate it; a failed post falls to comment_errors and is
-                    # re-emitted by the comment differ next pass.
+                    # Post comments once because retrying without a Jira idempotency key can
+                    # duplicate them. The next pass handles a failed post.
                     _comment_result = cast("SupportsComments", client).add_comment(jira_key, body)
-                    # emersed-specific-mutt: capture the returned Jira comment ID and
-                    # persist it against the entry's local_comment_key (HLC) via the
-                    # binding_store's write-ahead map, so a re-sync never re-posts it.
+                    # Record local comment identity after a landed post to prevent replay.
                     _record_comment_id(binding_store, entry, _comment_result)
                 except Exception as exc:  # noqa: BLE001 — in-band capture into comment_errors; non-fatal
-                    # Bug ea6d-e4b2-a316-45ec: non-fatal, but surface it so the
-                    # batch outcome no longer reports error=None for an outbound
-                    # CREATE whose comment sub-mutation failed. Mirrors update_one.
+                    # Keep a nonfatal comment failure visible in the batch outcome.
                     if comment_errors is not None:
                         comment_errors.append(f"add_comment failed: {exc!s}")
                     print(  # noqa: T201
@@ -289,16 +222,9 @@ def create_one(
 
 
 def _emit_create_identity_alert(local_id: str, jira_key: str, repo_root: Path | None) -> None:
-    """Emit a BRIDGE_ALERT recording an identity-write failure AFTER a create landed.
-
-    Extracted verbatim from ``create_one``'s post-create rollback branch (bug 387d /
-    ticket 021d). The created Jira issue is NEVER deleted: the write-ahead protocol has
-    already recorded the key (keyed-pending), so recovery retro-attaches the remaining
-    label/property deterministically with no Jira search. This helper only publishes the
-    observability alert; the caller re-raises the original write error. Called by the
-    coordinated core in ``create_route``. An alert-write failure is swallowed so it can
-    never mask the original error.
-    """
+    """Record an identity-write failure after Jira create without deleting the issue.
+    The keyed pending binding supports deterministic recovery. Alert-write failure
+    must not mask the original error."""
     try:
         import time as _time
         import uuid as _uuid
@@ -373,37 +299,10 @@ def update_one(
     link_confirm: Callable[..., None] | None = None,
     binding_store=None,
 ) -> dict | None:
-    """Update an existing Jira issue from the mutation's key and fields.
-
-    Bug 6afc-20ee-84e5-4dd5: comment sub-mutations (the ``comments`` payload)
-    are applied as separate add_comment calls because Jira's edit endpoint
-    cannot carry them. A failed add_comment is NON-fatal (the scalar update
-    already succeeded) but must not be silently swallowed: when ``comment_errors``
-    is provided, each add_comment failure is appended to it (string form) so the
-    caller can surface it in the batch outcome instead of reporting error=None.
-    Passing ``None`` (the default) preserves the legacy log-only behaviour for
-    callers that do not collect comment errors.
-
-    Story E (2359): when ``subop_applied`` (a dict) is provided, it is filled with
-    per-sub-op ``{labels,comments,links}_computed`` and ``..._applied`` counts so
-    the caller can surface telemetry and run the silent-no-op canary. For links,
-    ``links_computed`` counts only adds ATTEMPTED after the already-present dedup
-    skip, so an idempotent re-sync reports ``links_computed == 0`` (no false canary).
-
-    F3: AcliClient.update_issue's real signature is ``update_issue(jira_key, **kwargs)``;
-    the field dict must be unpacked into keyword arguments rather than passed
-    positionally as a single dict — otherwise Jira receives a TypeError on every
-    real update call.
-
-    Comment-fallback on 400 illegal-transition: when Jira rejects a status
-    transition because it is not legal from the current workflow state, we do
-    NOT retry (zero update_issue retries on 400 — it is a state error, not a
-    transient). Instead we post a comment recording the local status change
-    so an operator can see the divergence in Jira, and emit a structured log
-    record to stderr.
-
-    Bug e6e9: ``fields_synced`` collects the fields the scalar ``update_issue`` call
-    ACTUALLY landed — empty on every non-success arm."""
+    """Update an issue through parent, scalar, label, comment, and link phases.
+    Comment and link failures are nonfatal but reach their error sinks and sub-operation
+    counts. These counts distinguish a designed capability skip from a silent no-op.
+    The scalar phase returns only fields whose Jira edit completed for baseline merge."""
     fields = mutation.get("fields", {})
     if not isinstance(fields, dict):
         fields = {}
@@ -460,46 +359,16 @@ def _update_one_apply_parent(
 ) -> bool:
     """Phase: route a parent reparent/clear through client.set_parent (popped from
     ``fields`` before the allowlist filter). Returns whether a parent op was present."""
-    # Parent reparent (ticket 8b25): the production outbound dispatch routes
-    # through this legacy batch path, NOT the typed leaf _apply_outbound_update.
-    # ACLI's ``jira workitem edit`` cannot reparent — the parent must go via
-    # client.set_parent (REST PUT /rest/api/3/issue/{key} {"fields":{"parent"}}).
-    # Before this fix, ``parent`` was not in _OUTBOUND_BATCH_ALLOWLIST, so it
-    # was silently dropped as an "unaccepted field" and set_parent was never
-    # called. The parent never landed, the next snapshot still showed no
-    # parent, and the differ re-emitted the identical parent mutation on every
-    # pass — the perpetual ``fields=['parent']`` re-emission (~230 steady-state
-    # mutations, Phase-6 idempotency churn) AND the parent OUTBOUND CREATE/UPDATE
-    # FAIL in the e2e field-validation probe. Mirror the typed leaf: pop parent
-    # BEFORE the allowlist filter and route it through set_parent, guarding
-    # HTTP 400 hierarchy rejections as non-fatal warnings.
-    # Parent-detach churn fix: distinguish a parent CLEAR (the "parent" key is
-    # PRESENT with a falsy value — emitted when a ticket is detached locally but
-    # Jira still carries the stale epic-link) from "no parent op this mutation"
-    # (the key is ABSENT). ``fields.pop("parent", None)`` collapses both to None,
-    # so key out the *presence* first. ``client.set_parent`` already clears when
-    # passed a falsy key (PUT {"fields":{"parent":None}}), so a CLEAR routes
-    # through the identical call path as a SET.
+    # A present parent key may request SET or CLEAR. Remove it before the scalar
+    # allowlist and use set_parent for both values. Absence means no parent operation.
     _has_parent_op = "parent" in fields
     parent_key = fields.pop("parent", None)
     if _has_parent_op:
         try:
             client.set_parent(issue_key, parent_key)
         except urllib.error.HTTPError as exc:
-            # Hierarchy guard (ticket 8b25): only an Epic may be a parent; a
-            # Task→Task reparent (and any other unmet hierarchy constraint) is
-            # rejected with HTTP 400 carrying a misleading "same project"
-            # message. The guard is NOT vendor-conditional — Data Center reaches
-            # the same verdict by accepting the write and silently ignoring it
-            # (capability map req-0056/req-0058), which is worse, not better.
-            # Treat any 400 as a hierarchy rejection: WARN + continue. Non-400
-            # errors stay non-fatal too — a parent failure must not abort the
-            # rest of the batch.
-            #
-            # Every arm ALSO records a bridge_alerts entry (ticket 39c1 AC4).
-            # Warn-and-continue alone is why "the parent never reached the
-            # tracker" stayed invisible through five instances of this class:
-            # the pass exits 0 and nothing durable reports the divergence.
+            # Treat HTTP 400 as a hierarchy rejection. Continue the batch, but record the
+            # parent divergence in bridge alerts. Other parent failures remain visible too.
             if exc.code == 400:
                 logger.warning(
                     "parent sync skipped: Jira hierarchy rejected %s->%s (HTTP 400)",
@@ -549,16 +418,9 @@ def _update_one_scalar_update(
     assignee_is_account_id=False,
     local_id: str | None = None,
 ):
-    """Phase: the scalar client.update_issue call + the 400 illegal-transition
-    comment-fallback. Returns the update result (or None).
-
-    ``assignee_is_account_id`` (264f) is forwarded to ``client.update_issue`` so that
-    when the assignee is an already-resolved accountId (identity fast path) acli submits
-    it directly and skips the assignable search.
-
-    Returns ``(result, applied_fields)``; ``applied_fields`` (bug e6e9) is assigned on
-    exactly ONE line below, so it stays EMPTY unless ``client.update_issue`` completed.
-    Contract: ``apply_handlers.handle_update``; rationale: ``peer_state.merge_baseline``."""
+    """Run the scalar edit and handle an illegal-transition 400 with its comment fallback.
+    Forward assignee_is_account_id only for a resolved account ID. Return the edit
+    result and applied fields, keeping applied fields empty if the edit failed."""
     # When the only changed field was parent (the common reparent case), the
     # allowlisted set is now empty AND set_parent already did the work — skip
     # the otherwise-empty client.update_issue call so we don't issue a no-op

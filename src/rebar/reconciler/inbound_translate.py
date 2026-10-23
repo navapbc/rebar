@@ -1,28 +1,8 @@
 #!/usr/bin/env python3
 """Jira→local field/event translation for the inbound applier path.
-
-Pure translation + local-event-store IO helpers used by the inbound leaf
-appliers (``apply_inbound``): map Jira issuetype/priority/status to their local
-forms, normalize ADF bodies, and append local ticket events. No Jira writes
-happen here — this is the parse/serialize layer beneath the inbound appliers.
-
-NOTE: ``_write_event_file`` here writes ONE inbound event file per call under the
-store lock (``os.replace``; no ``git add``/``commit`` of its own — it does NOT use
-``stage_and_commit``); the reconciler pass commits via its own orchestration. This
-is a **Jira-sync internal** — NOT the general local-store batch-write mechanism (and
-``applier._apply_batch`` is an OUTBOUND Jira REST sequencer, not a local
-commit-batcher). Local bulk writes (import/export/migration) must not route through
-here; the local batch-write primitive lives in ``rebar._store``. See
-``docs/architecture.md`` "Two writers, one store".
-
-Event writes and reducer reads now go through the in-package store primitives
-(``rebar._store`` / ``rebar.reducer``) directly — Tier E E5b dropped the bare
-``event_append`` / ``ticket_reducer`` compat shims and their ``sys.path`` dances.
-Ticket 21ca: the former ``_load_adf_module`` by-path vendor loader is GONE —
-``_normalize_adf_body`` now routes ADF decode through the Backend port's
-``InboundMapper.normalize_rich_text``, resolved lazily via ``select_backend``.
-This module carries NO ``"rebar.reconciler.adapters.jira"`` literal.
-"""
+This Jira-sync layer decodes rich text through the Backend port and writes
+one uncommitted event file under the store lock per call. Reconciler
+orchestration commits the batch. General local bulk writes use rebar._store."""
 
 from __future__ import annotations
 
@@ -42,17 +22,8 @@ _JIRA_TYPE_MAP: dict[str, str] = {
     "Sub-task": "task",
 }
 
-# rebar-status: annotation labels override the Jira workflow status on inbound
-# (a lossy forward mapping's local status is recovered directly from the label). The
-# shared, generalised recovery helper (``recover_status_label``, imported above and
-# re-exported for the leaf appliers) replaces the retired 2-entry
-# ``_REBAR_STATUS_LABEL_TO_LOCAL`` literal — _apply_inbound_create applies the same
-# precedence so a freshly imported issue lands at the SAME local status the
-# bound-ticket inbound differ would compute on the next pass (ticket robe-creek-zealot).
-
-# Bridge-internal label prefixes that must never leak into local ticket tags
-# at import time. Matches inbound_differ._EXCLUDED_PREFIXES minus "imported:"
-# (which is local-only and appended below, never present on Jira).
+# Status labels restore local status before raw Jira workflow mapping.
+# Bridge labels stay out of imported local tags. The imported tag is local only.
 _BRIDGE_INTERNAL_TAG_PREFIXES: tuple[str, ...] = (
     "rebar-id:",
     "rebar-id-",
@@ -99,21 +70,9 @@ def _jira_key_to_local_id(jira_key: str) -> str:
 
 
 def _jira_status_to_local(jira_status: str) -> str:
-    """Reverse-map a Jira status to a local status using config.jira_to_local_status.
-
-    Uses the CANONICAL reverse map, not an inversion of local_to_jira_status.
-    The forward map is non-injective (blocked/in_progress → "In Progress";
-    closed/cancelled/deleted → "Done"), and the pre-fix lexicographic
-    tie-break over the inverted map picked the WRONG preimage: imported
-    "In Progress" issues materialised locally as blocked and "Done" issues
-    as cancelled (ticket robe-creek-zealot). blocked/cancelled are encoded
-    losslessly via rebar-status: annotation labels — callers that have the
-    issue's labels in hand (e.g. _apply_inbound_create) apply that override
-    BEFORE consulting this workflow-status map, mirroring
-    inbound_differ._map_jira_to_local_fields.
-
-    Unknown / unmapped statuses fall back to "open".
-    """
+    """Map Jira workflow status through the canonical reverse map.
+    Annotation labels take precedence at the caller for lossy mappings such as
+    blocked and cancelled. Unknown statuses become open."""
     if not jira_status:
         return "open"
     try:
@@ -130,12 +89,8 @@ def _event_meta() -> tuple[int, str, str, str]:
     import time as _time
     import uuid as _uuid
 
-    # Function-body ABSOLUTE import (story e622): this module is spec-loaded by
-    # path in tests, so a sibling `rebar.reconciler.*` import would not resolve —
-    # but an absolute `rebar.*` import does. The reconciler event identity
-    # (REBAR_ENV_ID/REBAR_AUTHOR, defaulting to the legacy-Jira signature when
-    # UNSET) is resolved through the owned composition-root accessor so no ambient
-    # env read remains below the seam.
+    # Resolve event identity through the composition root. This absolute import
+    # also works when tests load this module by path.
     from rebar.config import reconciler_event_identity
 
     env_id, author = reconciler_event_identity()
@@ -148,11 +103,8 @@ def _event_meta() -> tuple[int, str, str, str]:
 
 
 def _resolve_tracker_dir(repo_root: Path | None) -> Path:
-    """The RESOLVED ticket store. Delegates to ``rebar.config.tracker_dir``, the single
-    resolver for the FULL precedence: the ``REBAR_TRACKER_DIR`` env override wins
-    verbatim, else the configured ``tracker.dir`` (absolute relocates the store, relative
-    is a dir name under the root). The hand-rolled body this replaced honoured only the
-    env override, so a store relocated by the ``tracker.dir`` KEY was silently missed."""
+    """Return the configured ticket-store path through tracker_dir.
+    The environment override wins over an absolute or root-relative tracker.dir."""
     from rebar.config import tracker_dir
 
     if repo_root is None:
@@ -163,21 +115,9 @@ def _resolve_tracker_dir(repo_root: Path | None) -> Path:
 
 
 def _read_latest_status(tracker_dir: Path, ticket_id: str) -> str:
-    """Return the current status of ``ticket_id`` per the CANONICAL reducer.
-
-    Used as the optimistic-concurrency ``current_status`` of the STATUS event the
-    reconciler pushes, so it must match what every clone's reducer computes. A
-    previous raw "last STATUS file wins" scan diverged from the reducer on two
-    real shapes (ticket vary-ion-fry):
-      * a COMPACTED ticket — its STATUS events are folded into a SNAPSHOT and the
-        standalone files are gone, so the scan returned "open";
-      * a STATUS FORK — resolved by lexically-lower event UUID, not file order.
-    Delegating to ``reduce_ticket`` removes the divergence (it handles SNAPSHOT
-    folding and UUID fork resolution).
-
-    Tolerant of missing / unreadable / error tickets — returns ``"open"`` (the
-    reducer's initial state) in those cases.
-    """
+    """Read ticket status through the canonical reducer for optimistic concurrency.
+    It handles compacted snapshots and status forks. Missing or unreadable
+    tickets fall back to open."""
     ticket_dir = tracker_dir / ticket_id
     if not ticket_dir.is_dir():
         return "open"
@@ -196,21 +136,8 @@ def _read_latest_status(tracker_dir: Path, ticket_id: str) -> str:
 def _write_event_file(
     tracker_dir: Path, ticket_id: str, event_type: str, data: dict[str, Any]
 ) -> Path:
-    """Write a single ticket event JSON file under the unified write lock.
-
-    Acquires the canonical ``.ticket-write.lock`` (I5) via
-    :func:`rebar._store.lock.write_lock` — both the ``fcntl`` and ``mkdir`` legs,
-    so the reconciler mutually excludes local leaf-writes on every platform (the
-    pokey-matte-flute / stiff-mop-lane fixes) — then atomically writes ONE event
-    file under the shared I2 filename contract (temp file + ``os.replace``).
-
-    Tier E E5b: this replaced the bare ``_engine/event_append`` import (resolved by
-    a ``sys.path`` dance) with the in-package store primitives. The on-disk event
-    bytes go through the single canonical serializer
-    ``rebar._store.canonical.canonical_str`` (sorted keys, P1.0) — byte-identical to
-    every other live writer; re-serialisation is replay-safe (the reducer reads
-    parsed keys, not bytes). Returns the path.
-    """
+    """Atomically write one canonical event file under the shared store lock.
+    The reconciler later commits it with its batch. Return the event path."""
     from rebar._store import event_append as _store_event_append
     from rebar._store import hlc as _hlc
     from rebar._store import lock as _store_lock
@@ -227,32 +154,17 @@ def _write_event_file(
         "author": author,
         "data": data,
     }
-    # Authenticated authorship (story 9e76): stamp attribution (author_email / author_id) and
-    # sign (author_sig) INLINE, reusing the same seam helpers as _seam.append_event, so
-    # Jira-sourced reconciler events are attributable + verifiable under `rebar verify-identity`
-    # instead of classifying as unknown-author/unsigned. Done INLINE rather than by routing
-    # through _seam.append_event because append_event commits+pushes eagerly (write_and_push),
-    # which would break the reconciler's batch-commit orchestration — this function deliberately
-    # writes an UNCOMMITTED file. Best-effort + additive: with no resolvable identity or no
-    # signing key the event is written unsigned (older readers ignore the extra keys); a signing
-    # failure is logged, never raised. repo_root is the tracker worktree's parent.
+    # Use shared attribution and signing helpers while leaving the event
+    # uncommitted for reconciler orchestration. Missing identity or signing
+    # material permits an unsigned event.
     from rebar._commands import _seam
 
-    # Route through the SHARED finalize seam rather than calling its two halves directly:
-    # identical attribution + signing behaviour, but it also applies the write-time secret
-    # screen (bug e7a9). Jira comment bodies are UNTRUSTED external input landing in a
-    # store that auto-pushes, so this is the highest-value place for the screen after the
-    # local write verbs — a credential pasted into a Jira comment would otherwise
-    # reproduce the exact push-protection wedge the screen exists to prevent. A refusal
-    # raises CommandError, failing this event's translate loudly instead of publishing it.
+    # Finalize through the shared seam for attribution, signing, and secret
+    # screening. A refused Jira-sourced event fails before publication.
     _repo_root = tracker_dir.parent
     _seam.finalize_event(event, ticket_id, event_type, data, str(tracker_dir), _repo_root)
-    # Ticket 021d: stage the directory and this event together in a scanner-invisible path
-    # and publish with ONE rename. Staging happens only AFTER finalize_event above, which
-    # can refuse an event outright (the secret screen raises CommandError) — under the old
-    # ``mkdir`` first shape that refusal, and a lock timeout, both left an empty ticket
-    # directory behind for fsck to report. Byte parity is unchanged: the same
-    # ``canonical_str`` output, just written through the shared staging helper.
+    # Stage the directory and event after screening, then publish in one
+    # rename. A refusal or lock timeout leaves no empty ticket directory.
     filename = _store_event_append.event_filename(ts, uuid_str, event_type)
     staged = _staging.stage_event(
         str(tracker_dir), ticket_id, filename, canonical_str(event).encode("utf-8")
@@ -271,12 +183,8 @@ def _write_event_file(
 
 
 def _extract_name(val, default=""):
-    """Extract .name or .displayName from a nested Jira field object.
-
-    Jira REST API returns many fields as nested objects (e.g.
-    ``{"name": "Bug", "id": "10002"}``). This helper extracts the human-readable
-    name, falling back to the raw value when it is already a string.
-    """
+    """Extract name or displayName from a Jira field object. Return a raw
+    string unchanged."""
     if isinstance(val, dict):
         return val.get("name") or val.get("displayName") or default
     return val or default
@@ -286,16 +194,7 @@ _TICKET_REDUCER_MODULE = None
 
 
 def _load_ticket_reducer():
-    """Lazy-load the canonical reducer (``rebar.reducer``).
-
-    Used to read the current local state (status / tags) before composing an
-    inbound event. Loaded lazily so test contexts that never hit those branches
-    are not forced to import the reducer package.
-
-    Tier E E5b: replaced the bare ``ticket_reducer`` compat shim (resolved by a
-    ``sys.path`` dance to the engine dir) with the in-package ``rebar.reducer`` —
-    the shim was already a thin re-export of it, so ``reduce_ticket`` is identical.
-    """
+    """Load the canonical reducer only when a branch needs local status or tags."""
     global _TICKET_REDUCER_MODULE
     if _TICKET_REDUCER_MODULE is not None:
         return _TICKET_REDUCER_MODULE
@@ -306,22 +205,9 @@ def _load_ticket_reducer():
 
 
 def _normalize_adf_body(body: Any, inbound_mapper: Any | None = None) -> str:
-    """Coerce a Jira description (rich-text dict or string) to plain text.
-
-    Defense-in-depth: the inbound differ should normalize rich text before
-    surfacing the field, but a raw ADF dict on the wire here would
-    otherwise be written verbatim into an EDIT event's ``description``
-    slot — corrupting the local ticket store (reducer would surface a
-    dict where a string is expected). See bug 1bb2-5da5.
-
-    Ticket 21ca: routed through the Backend port's ``InboundMapper.normalize_rich_text``
-    (Jira: ``adf.adf_to_text`` for a dict, ``str()`` for a string) instead of a private
-    vendor lazy-load — this module carries NO ``"rebar.reconciler.adapters.jira"``
-    literal. ``inbound_mapper`` is the injected Backend-port ``InboundMapper``; ``None``
-    resolves the configured backend's mapper lazily via ``select_backend(load_config())``
-    INSIDE this function (never at import time — this module is spec-loaded standalone
-    in tests).
-    """
+    """Normalize a Jira description to text through the injected inbound mapper.
+    A missing mapper resolves from the configured backend when called. This
+    prevents ADF dictionaries from entering local EDIT events."""
     if inbound_mapper is None:
         from rebar.config import compose_config
         from rebar.reconciler._backend_registry import select_backend

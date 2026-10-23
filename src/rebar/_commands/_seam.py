@@ -1,14 +1,6 @@
-"""Shared infrastructure for Tier B leaf-write commands (history: docs/bash-migration.md §4).
-
-A Tier B command is a small function that (1) validates args, (2) resolves the
-ticket id, (3) composes the event JSON in Python, and (4) appends it through ONE
-narrow seam — ``append_event`` → ``rebar._store.event_append.write_and_push``
-(flock + atomic rename + git commit + best-effort push), the single locked write
-path. This module owns the pieces every leaf command shares: tracker/id resolution,
-the ghost check, event metadata, and the append call. Tier D retired the bash core,
-so all writes route in-process through ``rebar._store`` and invariant I5 (single
-locked write path) holds unchanged.
-"""
+"""Shared write-command seam for ticket resolution, event metadata,
+screening, authorship, and locked append. Leaf commands compose events here
+through rebar._store. The optional batch sink defers commits for import."""
 
 from __future__ import annotations
 
@@ -30,16 +22,9 @@ from rebar._engine_support.resolver import resolve_ticket_id
 
 logger = logging.getLogger(__name__)
 
-# ── Deferred-commit sink (epic cold-stall-chalk / B2) ─────────────────────────
-# The bulk-import batching seam. ``append_event`` is the ONE funnel every write
-# (CREATE via composer, EDIT/parent, comments + file-impact/verify via leaf) flows
-# through. When ``_batch_sink`` holds a buffer, ``append_event`` composes the event
-# and APPENDS ``(ticket_id, event)`` to it instead of committing — the caller then
-# flushes the buffer through ``event_append.batch_stage_and_commit`` (one commit per
-# chunk). Default ``None`` ⇒ every write commits one-event-per-commit exactly as
-# before, so interactive writes keep the per-write durability guarantee and ONLY the
-# importer (which sets this contextvar) is batched. State-reading guards in the
-# callers run BEFORE ``append_event``, so they are unaffected by buffering.
+# An active import buffer collects finalized events for chunk commits.
+# The default keeps one commit per interactive write. Caller state guards run
+# before buffering.
 _batch_sink: contextvars.ContextVar[list[tuple[str, dict]] | None] = contextvars.ContextVar(
     "rebar_batch_sink", default=None
 )
@@ -86,41 +71,20 @@ class CommandError(Exception):
 
 
 class SecretScreenRefused(CommandError):
-    """A write-time secret-screen refusal (bug e7a9), raised by :func:`screen_event`.
-
-    A SUBCLASS of :class:`CommandError` so every existing ``except CommandError`` (and the
-    ``returncode``/message/exit-1 contract) still catches it unchanged — the distinction only
-    matters to a caller that wants to tell a DELIBERATE policy refusal (reviewed material
-    embedded a credential shape) apart from a generic emit failure. The LLM sidecars
-    (ticket 4802) catch this first to surface the blocked audit record LOUDLY instead of
-    swallowing it as a transient error, then still return best-effort ``False``.
-    """
+    """CommandError subtype for a secret-screen policy refusal.
+    LLM sidecars can warn about this refusal before returning their usual
+    best-effort failure result."""
 
 
 def _warn_stderr(message: str | None) -> None:
-    """Print an advisory ``Warning:`` line to stderr, or nothing when there is none.
-
-    Shared by the composer CREATE surface (``composer.create_cli``), the EDIT surface
-    (``composer_edit.edit_cli``) and ``idea.idea_cli`` — it lives on the seam rather than
-    in either composer module so both reach it without an import cycle, and it is the one
-    place the CLI's advisory-warning prefix is spelled. The branch lives here rather than
-    at the call sites because those sit at their locked complexity ceiling
-    (``.github/complexity-baseline.json``).
-    """
+    """Print a shared CLI Warning line only when advisory text exists."""
     if message:
         print(f"Warning: {message}", file=sys.stderr)
 
 
 def warn_secret_screen_refused(ticket_id: str, record_label: str) -> None:
-    """Write an explicit stderr warning that a sidecar audit record was BLOCKED by the
-    write-time secret screen (ticket 4802).
-
-    The three LLM sidecars call this when :class:`SecretScreenRefused` propagates out of their
-    best-effort ``append_event``: a policy refusal (reviewed material — a diff, a plan, a
-    finding — embedded a credential shape) must NOT be swallowed indistinguishably from a
-    transient store error. Matches the ``Warning: ... WITHOUT ...`` house style of
-    ``transition_close``/``close_precheck``; names the ticket, the blocked record, and states
-    the record was NOT written. The caller still returns ``False`` (best-effort preserved)."""
+    """Warn that a ticket's LLM sidecar was blocked by the secret screen and
+    was not written. The caller still reports best-effort failure."""
     import sys
 
     sys.stderr.write(
@@ -133,22 +97,10 @@ def warn_secret_screen_refused(ticket_id: str, record_label: str) -> None:
 
 
 class WriteArgParser(argparse.ArgumentParser):
-    """The ``argparse`` parser the write commands (``claim``/``transition``) use for their
-    value/flag arguments, tuned to preserve the historical hand-rolled-loop contract that
-    ticket churlish (fd48) retired the loop in favour of:
-
-    * ``error()`` is overridden to raise :class:`CommandError` (exit **1**) instead of
-      argparse's default print-usage-and-``exit(2)``. A missing value ("expected one
-      argument") is remapped to the historical ``Error: <flag> requires a value`` prose so the
-      exit code and message stay byte-for-byte what callers/tests pinned.
-    * Constructed with ``add_help=False`` — ``--help`` is served byte-exact by the top-level
-      dispatcher from a golden file, never by this parser — and ``allow_abbrev=False`` so a
-      truncated flag stays an unknown token (no prefix/abbreviation matching, matching the
-      loop's exact-token comparison).
-
-    Callers pair it with ``parse_known_args`` so UNKNOWN tokens are silently skipped, exactly
-    as the loop skipped tokens it did not recognize.
-    """
+    """Preserve write-command errors while using argparse.
+    Raise CommandError with exit 1 and the established missing-value message.
+    Callers disable help and abbreviations and skip unknown tokens through
+    parse_known_args."""
 
     def error(self, message: str) -> None:  # type: ignore[override]
         m = _re.match(r"argument (\S+): expected one argument", message)
@@ -286,19 +238,14 @@ def author_email(repo_root=None) -> str:
     return _git_config("user.email", "", cwd=str(repo_root or config.repo_root()))
 
 
-# Denormalized author-attribution stamped onto every locally-written event envelope
-# (epic gnu-whale-ichor). Cached per canonical repo_root so a batch of writes performs
-# ONE git-config read + ONE identity resolution. The identity pointer changing
-# (``use_identity``) invalidates this via ``_reset_attribution_cache``.
+# Cache email and resolved identity per canonical repository root.
+# An identity-pointer change clears this cache.
 _ATTRIBUTION_CACHE: dict[str, dict] = {}
 
 
 def attribution_fields(repo_root=None) -> dict:
-    """Denormalized author attribution for an event envelope: ``{"author_email": ...}``
-    plus ``{"author_id": <id>}`` ONLY when a current identity resolves (omitted on a
-    miss). Cached per canonical repo_root — the first call per key does exactly ONE
-    ``author_email()`` and ONE ``resolve_current_identity()``; later calls return the
-    cached dict. ``identity`` is imported lazily (it imports from this module)."""
+    """Return cached event author_email and any resolved author_id.
+    Resolve once per canonical repository root. Omit author_id on a miss."""
     from rebar._commands import identity
 
     key = os.path.realpath(str(repo_root or config.repo_root()))
@@ -314,7 +261,7 @@ def attribution_fields(repo_root=None) -> dict:
 
 
 def _reset_attribution_cache() -> None:
-    """Clear the per-repo attribution cache (tests; and on an identity-pointer change)."""
+    """Clear cached attribution after an identity change or in tests."""
     _ATTRIBUTION_CACHE.clear()
 
 
@@ -322,12 +269,8 @@ _TAG_CTRL_RE = _re.compile(r"[\x00-\x1f\x7f]")
 
 
 def validate_tag_name(raw: str) -> str:
-    """Trim a tag name and reject empty/whitespace-only/control-char values (P2.3).
-
-    The single tag-name guard shared by every write path (leaf tag/untag and the
-    edit add/remove/set deltas) so ``rebar.tag``/MCP ``tag_ticket`` can't bypass it.
-    Returns the trimmed name; raises :class:`CommandError` on an invalid one.
-    """
+    """Return a trimmed tag or raise CommandError for empty or control text.
+    All tag write paths share this guard."""
     t = str(raw).strip()
     if not t:
         raise CommandError("Error: tag name must be non-empty / non-whitespace")
@@ -337,12 +280,8 @@ def validate_tag_name(raw: str) -> str:
 
 
 def current_tags(ticket_id: str, tracker: Path) -> list[str]:
-    """The compiled ``tags`` list for a ticket via the shared reducer (single source).
-
-    Mirrors the bash tag helpers, which reduce the ticket (``ticket_show``) to read
-    current tags before composing the next EDIT. Returns ``[]`` when the ticket has
-    no tags or cannot be reduced (the bash helpers swallow show failures too).
-    """
+    """Return reducer-compiled ticket tags, or an empty list if the ticket
+    cannot be reduced."""
     from rebar.reducer import reduce_ticket
 
     try:
@@ -352,18 +291,14 @@ def current_tags(ticket_id: str, tracker: Path) -> list[str]:
         return []
 
 
-# Gate-exempt ticket types for the identity write-gate (mirrors the file-impact /
-# lifecycle exemptions in composer/transition): these are gate-/graph-exempt entities, so
-# requiring an authenticated signature on them would make bootstrapping an identity — or
-# writing a session_log / code_review artifact — impossible under the gate.
+# Keep identity, session logs, and code reviews writable before an
+# authenticated identity exists.
 _AUTHORSHIP_GATE_EXEMPT_TYPES = ("session_log", "code_review", "identity")
 
 
 def _event_ticket_type(ticket_id, event_type, data, tracker) -> str | None:
-    """Best-effort ticket type for the write-gate exemption check. A CREATE carries the
-    type in its data; for a later event we reduce the existing ticket. Any failure yields
-    ``None`` (the gate then treats it as non-exempt — fail toward enforcement). Only reached
-    on the cannot-sign path under an opted-in gate, so the reduce is off the hot path."""
+    """Read type from CREATE data or reduce an existing ticket for signing-gate
+    exemptions. Unknown types remain non-exempt."""
     if event_type == "CREATE":
         t = data.get("ticket_type")
         return t if isinstance(t, str) else None
@@ -378,24 +313,10 @@ def _event_ticket_type(ticket_id, event_type, data, tracker) -> str | None:
 
 
 def _apply_authorship(event: dict, ticket_id, event_type, data, tracker, repo_root) -> None:
-    """Optional write-time authorship signing + the opt-in UX write-gate (epic
-    gnu-whale-ichor / 3183).
-
-    Signing is BEST-EFFORT: when a current identity resolves (``author_id`` is on the
-    envelope) AND ``identity.signing_key`` is configured, sign the event's CANONICAL bytes
-    (the envelope WITHOUT ``author_sig``) as an authorship attestation and store the DSSE
-    envelope under ``author_sig``. No identity / no key ⇒ the SKIP is logged (bug ed5c) and the
-    event is written UNSIGNED; a
-    signing FAILURE is logged and the event is written unsigned too — signing NEVER breaks a
-    write.
-
-    The ONE exception is the UX WRITE-GATE: when ``identity.require_authenticated`` is on and
-    the event CANNOT be signed (no resolvable identity or no signing key), a non-exempt ticket
-    type is REFUSED with a clear message. This gate is a CONVENIENCE (fast local feedback), NOT
-    the security boundary — the real enforcement is the merge-gate ``rebar verify-identity``,
-    which re-verifies signatures against the epoch-scoped keyring in CI. A determined writer can
-    bypass this local gate, but cannot forge a signature the merge-gate will accept.
-    """
+    """Sign canonical event bytes when identity and key are available.
+    Log missing material or signing failures and write unsigned unless the
+    authenticated write gate refuses a non-exempt type with missing material.
+    CI verifies signatures at merge."""
     try:
         cfg = config.compose_config(repo_root)
         require_auth = cfg.identity.require_authenticated
@@ -403,7 +324,7 @@ def _apply_authorship(event: dict, ticket_id, event_type, data, tracker, repo_ro
     except Exception:  # noqa: BLE001 — a malformed config must never break an unrelated write
         return
 
-    # Fast path: nothing configured ⇒ no signing, no gate (the overwhelming common case).
+    # Skip signing and gating when neither is configured.
     if not require_auth and not signing_key:
         return
 
@@ -427,19 +348,12 @@ def _apply_authorship(event: dict, ticket_id, event_type, data, tracker, repo_ro
                 ticket_id,
                 exc_info=True,
             )
-        # Signed (or a failure logged + written unsigned). The write-gate below fires only on
-        # a MISSING identity/key, not on a signing failure when both are present, so return.
+        # A signing attempt ends here even if it logged a failure.
+        # The local write gate only checks missing identity or key.
         return
 
-    # Cannot sign: no resolvable identity or no signing_key configured. Say so OUT LOUD (bug
-    # ed5c-42fc-bb7f-4cf4): this branch used to return in SILENCE whenever the advisory gate was
-    # off, so a writer whose identity failed to resolve wrote unsigned events indefinitely with
-    # no signal anywhere — that is how a review bot emitted ~8900 unsigned, `Unknown`-authored
-    # events for a month before an unrelated fsck audit noticed (bug beb1). Only the signing
-    # FAILURE path above was audible; the SKIP path was not. Reached only when signing is
-    # configured or the gate is on (the unconfigured fast path returned above), so this warns
-    # about a genuine misconfiguration rather than every write on an unsigned store. Logging
-    # only — signing stays BEST-EFFORT and the event is still written unsigned below.
+    # Log missing identity or key when signing is configured or required.
+    # Without a required gate, the event is still written unsigned.
     logger.warning(
         "authorship: signing SKIPPED for event %s on %s — %s; writing unsigned",
         event.get("uuid"),
@@ -462,30 +376,11 @@ def _apply_authorship(event: dict, ticket_id, event_type, data, tracker, repo_ro
 def finalize_event(
     event: dict, ticket_id: str, event_type: str, data: dict, tracker, repo_root
 ) -> None:
-    """Stamp denormalized author attribution AND apply write-time authorship signing / the
-    opt-in write-gate onto ``event`` IN PLACE — the single shared finalize seam that EVERY
-    ticket-event write path routes through (``append_event`` and the transactional cores in
-    ``txn.py`` / ``delete.py``), so signing is uniform and no operation can silently skip it
-    (a new op gets signing for free by routing its writes here).
-
-    NO commit and NO push: the caller owns the atomic write + git commit — ``append_event``
-    commits a single event, while the txn/delete cores atomically commit several events under
-    one held lock, so the shared unit is this pre-commit finalize step, not the commit itself.
-    Best-effort signing (a signing failure logs + writes unsigned). Raises
-    :class:`CommandError` for write-gate refusals: either ``identity.require_authenticated``
-    is on and a NON-exempt event cannot be signed, or the local tracker has no common
-    ancestor with the already-fetched shared store and would strand the event locally.
-    The signing exemption (session_log/code_review/identity) is decided inside
-    ``_apply_authorship``, so every caller inherits the same gate + exemption semantics.
-
-    Also enforces the write-time secret screen (bug e7a9). This — not ``append_event`` —
-    is where the screen has to live: the reconciler's inbound Jira translate, the txn and
-    delete cores, and the NDJSON importer all compose their own events and reach the store
-    WITHOUT ``append_event``, so a screen there would have left a Jira comment carrying a
-    credential able to reproduce the exact push-protection wedge the screen exists to
-    prevent. A payload that already carries ``data["secret_override"]`` has been forced
-    deliberately upstream (see :func:`append_event`) and passes.
-    """
+    """Screen and finalize an event in place before its caller commits.
+    Apply secret screening, refuse an unpublishable store outside a batch,
+    stamp attribution, and run optional authorship signing or the write gate.
+    This shared path covers leaf, transaction, delete, importer, and reconciler
+    writes. It neither commits nor pushes."""
     screen_event(data)
     if _batch_sink.get() is None:
         _refuse_unpublishable_store(tracker)
@@ -569,35 +464,14 @@ def append_event(
     under_lock_check=None,
     allow_secret_pattern: str = "",
 ) -> int | None:
-    """Compose an event and append it through the single locked write path.
-
-    Builds the canonical event envelope (``{timestamp, uuid, event_type, env_id,
-    author, data}``) and commits + pushes IN-PROCESS via
-    ``rebar._store.event_append.write_and_push`` (the canonical committer owns
-    serialisation; it never re-derives the envelope fields composed here). Raises
-    :class:`CommandError` carrying the exit code on failure (e.g. 75 = rebase/merge
-    guard). (Tier D retired the bash seam; ``rebar._store`` is the sole write core.)
-
-    ``allow_secret_pattern`` is the audited force override for the write-time secret
-    screen (bug e7a9): a non-empty reason lets a refused body through and stamps
-    ``data["secret_override"]`` with that reason and the bypassed families, so a forced
-    write is distinguishable from a clean one. CLI-only by design — it is not exposed
-    over MCP.
-    """
-    # Init gate at the single write seam (bug roar-nurse-stomp): every write —
-    # create/edit/link AND the leaf appends (comment/tag/set_*/sign/...) — flows
-    # through here, so enforcing `.env-id` once keeps the precondition consistent
-    # across ALL write commands and guarantees no event is ever appended without an
-    # env_id provenance stamp. (composer/transition keep their own pre-checks for an
-    # early, identical message; this is the backstop none can bypass.)
+    """Compose an event and write it through the locked store path.
+    An allow_secret_pattern reason records a screened-content override in
+    the event. Raise CommandError with the write failure's exit code."""
+    # Require initialized store provenance before any event append.
     if not (Path(tracker) / ".env-id").is_file():
         raise CommandError("Error: ticket system not initialized. Run 'ticket init' first.")
 
-    # Authoritative operation snapshot (RP-04 S2, ticket 3a08): compose-and-bind ONE
-    # snapshot for this write, before the event is appended. Reentrant — a CLI/MCP
-    # caller that already bound one for the whole operation is reused verbatim; a bare
-    # Python-library caller reaching this seam directly composes its own here, so
-    # "Python...writes each compose one snapshot" (AC1) holds regardless of caller.
+    # Bind one operation snapshot, reusing the caller's if already present.
     from rebar._operation_config import compose_and_bind_operation_snapshot
 
     with compose_and_bind_operation_snapshot(repo_root=repo_root):
@@ -624,21 +498,15 @@ def _append_event_body(
     under_lock_check,
     allow_secret_pattern: str,
 ) -> int | None:
-    """The compose/finalize/commit body of :func:`append_event`, run under the bound
-    operation snapshot (split out so the binding wraps it via ONE ``with`` block rather
-    than re-indenting this whole body)."""
+    """Compose, finalize, and commit within the bound operation snapshot."""
     from rebar._store import event_append as _store_append
     from rebar._store import hlc
     from rebar._store.compat import StoreIncompatibleError
     from rebar._store.event_append import StoreError
     from rebar._store.lock import LockTimeout, RebaseGuard
 
-    # The audited force override for the write-time secret screen (bug e7a9). The refusal
-    # itself is enforced in ``finalize_event`` below — the ONE seam every writer routes
-    # through — so all this does is stamp the payload as deliberately forced BEFORE that
-    # check runs. Recording WHY (the operator's reason) plus the bypassed families on the
-    # event itself is what makes a forced write auditable and distinguishable from a clean
-    # one; WHO comes from the envelope's ``author``/attribution stamped just below.
+    # Stamp the override reason and bypassed families before screening.
+    # Event attribution records who performed the write.
     if allow_secret_pattern:
         findings = _secret_screen.screen_event_data(data)
         if findings:
@@ -660,17 +528,10 @@ def _append_event_body(
         "author": author(author_fallback),
         "data": data,
     }
-    # Attribution + optional write-time authorship signing / the opt-in write-gate, via the
-    # SHARED finalize seam (the ONE signing path every write routes through — epic
-    # gnu-whale-ichor / 3183). Runs BEFORE the batch-sink branch so a buffered event is
-    # byte-identical to a directly-committed one (canonical serialization sorts keys, so
-    # envelope order is irrelevant). May raise CommandError ONLY when the write-gate is on
-    # and a non-exempt event cannot be signed.
+    # Finalize before buffering so batch and direct writes carry the same
+    # attribution and signing data.
     finalize_event(event, ticket_id, event_type, data, tracker, repo_root)
-    # Deferred-commit sink (B2): when a batch buffer is active, hand the composed
-    # event to it instead of committing. The caller flushes the buffer via
-    # batch_stage_and_commit. Guards above (init gate, env_id/author/hlc) have run,
-    # so the buffered event is byte-identical to what write_and_push would commit.
+    # Buffer finalized events for import. Otherwise commit and push now.
     sink = _batch_sink.get()
     if sink is not None:
         sink.append((ticket_id, event))

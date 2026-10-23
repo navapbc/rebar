@@ -1,29 +1,7 @@
-"""In-process ``rebar store compact`` (one ticket, or the sweep under ``--all``) — the CLI facade.
-
-Compaction squashes a ticket's event log into ONE SNAPSHOT event under the unified
-write lock: re-list events inside the lock, partition out forward-compat
-unknown-type events (never absorbed/deleted), re-check the threshold, reduce the
-current state, write the SNAPSHOT, retire the originals, invalidate the reducer
-cache, and ``git add -A`` + commit atomically.
-
-Task b2bb split the engines out of this module, leaving the argument parsing and the
-operator-facing reporting here:
-
-* :mod:`rebar._commands.compact_txn` — the locked compaction TRANSACTION
-  (``_compact_locked``) plus the snapshot primitives both engines share.
-* :mod:`rebar._commands.compact_rebuild` — SNAPSHOT reconstruction from the full log
-  (``rebuild_snapshot_from_full_log``), the fsck repair path.
-
-The names those modules own are RE-EXPORTED here so every existing import path —
-``fsck_repair`` / ``fsck_restore`` reaching for ``rebuild_snapshot_from_full_log``, and
-the tests importing ``_snapshot_strip_keys`` / ``_build_authorship_ledger`` — keeps
-resolving against ``rebar._commands.compact`` unchanged.
-
-Reuses ``rebar._store.lock`` (the fcntl+mkdir dual-leg lock),
-``rebar.reducer.reduce_ticket`` (in-process), and ``event_append.event_filename``.
-SNAPSHOT bytes go through the single canonical serializer
-``rebar._store.canonical.canonical_str`` (sorted keys, P1.0).
-"""
+"""CLI facade for ticket compaction and store-wide sweeps.
+The locked fold lives in compact_txn, full-log fsck rebuild in
+compact_rebuild, and shared derivations in compact_plan. This module
+re-exports their established names and reports sweep results."""
 
 from __future__ import annotations
 
@@ -175,31 +153,10 @@ def compact_cli(
 
 # ── compact-all ──────────────────────────────────────────────────────────────
 def _foldable_event_count(ticket_dir: str, now: int, horizon: int) -> int:
-    """How many of *ticket_dir*'s live events the fold would actually squash right now.
-
-    Deliberately asks the SAME question :func:`compact_txn._compact_locked` asks, through the
-    SAME predicate (:func:`rebar._commands._compact_policy.is_foldable`) and the same
-    configured horizon, so selection and work cannot drift. Counting merely LIVE events
-    instead would select a ticket whose excess events are all inside the horizon; the fold
-    would write nothing, and the next sweep would select it again — churn.
-
-    Matches the fold's candidate set exactly — it is the SAME listing
-    (:func:`compact_plan.list_candidates`), ``*.json`` excluding dotfiles, already-retired
-    sources and ``-SYNC.json`` bridge metadata — and, like
-    :func:`compact_txn._parse_candidate_events`, DROPS forward-compat unknown-type events. A
-    newer clone's event type is preserved untouched by the fold rather than squashed, so
-    counting it here would make selection promise work the fold will not do, and a ticket whose
-    excess was all unknown-type would be selected on every sweep forever.
-
-    The ticket's OWN ``-SNAPSHOT.json`` is excluded too, for a different reason: the fold does
-    absorb a prior snapshot into the new one, but a snapshot is already-folded STATE, not
-    pending work. Counting it left every settled ticket reporting one unit of outstanding work
-    forever, which is exactly the kind of permanent off-by-one that turns a threshold into a
-    churn source at low settings.
-
-    An unreadable or undecodable file counts as foldable with an unknown timestamp only when
-    the horizon is off, mirroring ``is_foldable``'s treatment of a ``None`` timestamp — and
-    mirroring the fold, which keeps such a file as a candidate rather than dropping it."""
+    """Count events the locked fold can actually absorb under the horizon.
+    Use the shared candidate listing and foldability rule. Exclude unknown
+    event types, bridge metadata, retired files, and prior snapshots.
+    An unreadable candidate counts only when the horizon is off."""
     return compact_plan.foldable_stats(ticket_dir, now, horizon).count
 
 
@@ -211,38 +168,10 @@ def _scan_snapshot_state(
     snapshot_alpha: float = 0.0,
     include_archived: bool = False,
 ) -> tuple[list[str], int]:
-    """Return (ticket ids worth compacting, count of the rest), sorted by name.
-
-    A ticket is selected on EITHER of two arms — this is a widening of the historical rule,
-    deliberately not a replacement:
-
-    * **Backfill** (the historical arm, preserved): it has no ``-SNAPSHOT.json`` and has at
-      least one foldable event. Every ticket still earns its first SNAPSHOT regardless of size.
-    * **Recurrence** (the new arm): its FOLDABLE event count exceeds *threshold*, whatever its
-      snapshot state.
-
-    The recurrence arm is why this exists. Selecting ONLY on the backfill arm made
-    ``compact-all`` a one-time operation: a ticket folded once and since grown by hundreds of
-    events had a SNAPSHOT, so it was never folded again. That was survivable while every close
-    compacted inline; since compaction left the close path (bug choosy-arthrodic-barbet) this
-    sweep is the store's ONLY standing trigger, and a trigger that cannot re-fire is no
-    trigger.
-
-    Selecting ONLY on the threshold arm would have been a silent regression in the other
-    direction — a ticket with fewer events than the threshold would never get a first SNAPSHOT
-    at all — which is why both arms are kept.
-
-    Both arms converge. After a backfill the ticket has a SNAPSHOT (arm 1 no longer applies)
-    and its live count is back below the threshold (arm 2 does not apply), so the next sweep
-    leaves it alone.
-
-    ``threshold=0`` / ``horizon=0`` keep the historical call shape working — every live event
-    is foldable at horizon 0, so any ticket with events is selected.
-
-    Walks ACTIVE tickets only by default, via the shared iterator
-    (:func:`rebar._store.gitutil._ticket_dirs`): an archived ticket was terminally
-    folded at archive time, so re-scanning it is pure history cost. ``include_archived``
-    restores the full walk (the migration door for tickets archived before the fold existed)."""
+    """Return sorted ticket IDs needing a first snapshot or a recurrence fold,
+    plus the remaining count. Backfill selects snapshotless tickets with any
+    foldable event. Recurrence selects counts above threshold. Scan active
+    tickets by default. include_archived restores migration coverage."""
     from rebar._store.gitutil import _ticket_dirs
 
     needs: list[str] = []
@@ -344,25 +273,9 @@ def _commit_backfill(tracker: str, compacted: int, folded_ids: set[str] | None =
 
 
 def _best_effort_push(tracker: str, *, no_commit: bool, dry_run: bool) -> None:
-    """Honour the sweep's push contract on the paths that commit NOTHING.
-
-    The push is about not stranding commits, so it must not depend on whether this sweep
-    happened to fold anything: an earlier write in the same session can be sitting unpushed,
-    and a sweep is often the last thing to run. Previously this rode along for free because
-    every selected ticket was counted as compacted (even a fold that wrote nothing), so
-    ``compacted > 0`` was effectively "we selected something". Now that the count is honest,
-    a sweep that folds nothing would silently skip the push — so the two are decoupled.
-
-    ``--no-commit`` opts out, exactly as it does for the commit itself, and ``--dry-run`` opts
-    out because a dry run must have NO side effects — pushing is a side effect even when this
-    invocation committed nothing of its own, since it delivers whatever was already pending.
-
-    NOT unconditionally best-effort, despite the name: :func:`rebar._store.push.push_after_commit`
-    deliberately re-raises :class:`OptionalDependencyError` so a misconfigured S3 remote halts
-    loudly with an actionable install message instead of being swallowed. That fail-closed
-    escape is preserved here on purpose — it is the same contract ``_commit_backfill``'s push
-    has always had, and silencing it for the sweep would make the one configuration error the
-    store cannot recover from invisible on its only standing trigger."""
+    """Push pending commits even when a sweep folded nothing.
+    Skip for dry-run or no-commit. Preserve OptionalDependencyError from a
+    misconfigured S3 remote instead of hiding it."""
     if no_commit or dry_run:
         return
     from rebar._store import push
@@ -371,7 +284,7 @@ def _best_effort_push(tracker: str, *, no_commit: bool, dry_run: bool) -> None:
 
 
 def _snapshot_names(ticket_dir: str) -> set[str]:
-    """The ticket dir's current ``*-SNAPSHOT.json`` filenames (empty on any read error)."""
+    """Return snapshot filenames, or empty on read error."""
     try:
         return {n for n in os.listdir(ticket_dir) if n.endswith("-SNAPSHOT.json")}
     except OSError:
@@ -379,15 +292,8 @@ def _snapshot_names(ticket_dir: str) -> set[str]:
 
 
 def _sweep_should_yield(tracker: str, done: int) -> bool:
-    """Whether the sweep should stand aside for a foreground writer, checked BETWEEN tickets.
-
-    The trigger probes the store lock once before starting, which only helps a sweep that was
-    never going to hurt: a run that begins on a quiet store and then folds for minutes never
-    looks again, so every writer arriving mid-run waits it out. Compaction is optional
-    housekeeping — it yields, and the remaining tickets keep for the next pass.
-
-    A separate function rather than an inline branch because ``compact_all_cli`` sits at the
-    C901 threshold and ``.github/complexity-baseline.json`` admits no new debt."""
+    """Check between tickets whether a foreground writer needs the lock.
+    Leave remaining optional folds for a later sweep."""
     if not _lock.write_lock_is_busy(tracker):
         return False
     sys.stdout.write("\n")
@@ -408,21 +314,10 @@ def _sweep_one_ticket(
     *,
     no_commit: bool = False,
 ) -> str:
-    """Fold ONE ticket for the sweep; return its progress character.
-
-    ``"."`` folded, ``"-"`` nothing to fold, ``"E"`` errored. The outcome is decided by the
-    ARTIFACT — did a new ``*-SNAPSHOT.json`` appear — not by the return code, because
-    ``_compact_locked`` returns 0 for a successful fold AND for every no-op branch (below
-    threshold, nothing older than the horizon, no safe placement gap). Counting ``rc == 0`` as
-    work inflated the tally and hid a sweep that folded nothing.
-
-    Each fold COMMITS its own unit inside its locked section (bug
-    compulsory-pernickety-mantis): the sweep used to pass ``--no-commit`` and batch one
-    commit at the end, which left every fold of the run sitting dirty in the shared
-    worktree until ``_commit_backfill`` — a worker killed mid-sweep stranded the whole
-    batch as the tree dirt that wedges reconverge. ``no_commit`` survives only as the
-    operator's explicit ``compact-all --no-commit`` request. The PUSH stays batched
-    (``--skip-sync``; bug prone-octet-cheek) — commits are local and cheap, pushes are not."""
+    """Fold one ticket and return '.', '-', or 'E'.
+    Count work only when a new snapshot appears because a successful return
+    may also mean no fold. Commit each fold under its lock, except when the
+    operator requested no-commit. Pushes remain batched."""
     import contextlib
     import io
 
@@ -438,33 +333,10 @@ def _sweep_one_ticket(
 
 
 def _sweep_position_map(repo_root) -> dict[str, str] | None:
-    """The ONE history walk for a whole sweep, built BEFORE any lock is taken.
-
-    Without this, each ticket's authorship ledger ran its own ``git log --full-history`` walk
-    INSIDE the store write lock (``compact_txn._build_authorship_ledger``). That is bug 7084
-    one scale up: 7084 found the same walk running per signed EVENT and batched it to
-    per-TICKET, which was right for compact-on-close because it folds ONE ticket. Once
-    ``compact-all`` became the standing sweep, per-ticket became the new per-event — thousands
-    of full-history walks, each holding the global write lock, observed live as a fresh git
-    child every few seconds at 100% CPU while every writer in the fleet stalled.
-
-    ``git log`` is read-only and never needed the lock. Building the map once costs one walk
-    for the entire run and leaves the locked section with only the SNAPSHOT write, the renames
-    and the commit.
-
-    MUST be the POSITION-keyed builder. The ledger looks up by position, so the path-keyed
-    :func:`~rebar.attest.authorship.build_introducing_commit_map` would miss every entry and
-    fall silently back to per-event walks — same output, same cost, no error to notice.
-
-    Returns ``None`` — never an empty dict — when the map cannot be built or comes back empty,
-    and that distinction is load-bearing rather than stylistic.
-    :func:`compact_txn._build_authorship_ledger` rebuilds its own per-ticket map only when the
-    argument ``is None``; an empty dict is a perfectly valid map that simply misses every
-    lookup, so passing ``{}`` would send every event down the per-EVENT fallback
-    (``resolve_event_commit``, then ``resolve_position_commit``) INSIDE the store write lock.
-    That is not a degradation to the old behaviour — it is the full bug-7084 pathology, worse
-    than the per-ticket walk this function exists to remove. ``None`` degrades honestly: each
-    fold rebuilds its own per-ticket map, exactly as before this optimisation."""
+    """Build one position-keyed introducing-commit map before the sweep locks.
+    The authorship ledger reads positions, so a path-keyed map would miss.
+    Return None when building fails or yields nothing, allowing per-ticket
+    fallback. An empty dict would trigger per-event history walks in the lock."""
     from rebar.attest import authorship as _authorship
 
     try:

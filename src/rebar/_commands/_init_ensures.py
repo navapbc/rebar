@@ -1,31 +1,7 @@
-"""Tickets-branch convergence units for the ensure registry.
-
-These are the check-then-act, idempotent, drift-correcting **ensure units** that
-:func:`rebar._store.ensures.run_ensures` sweeps on every ``init`` and re-init, plus the
-two tickets-branch content templates the units are the sole readers of.
-
-**Why they are their own module.** They are not part of the ``init`` command's call
-graph: :mod:`rebar._commands.init` provisions the tracker worktree in the HOST repo
-(resolve the repo root, write ``.git/info/exclude``, take the init lock, mount or create
-the ``tickets`` branch, symlink from a linked worktree) and never calls a unit. Their
-sole caller is :func:`rebar._store.ensures._registry`, which lazy-imports them and
-dispatches them by id. They lived in ``init`` only because they own ``_GITIGNORE`` /
-``_GITATTRIBUTES``; that ownership travels here with them.
-
-Every unit is check-then-act, so a converged store reports ``ok`` and makes zero git
-commits. ``run_ensures`` catches a raising unit (skip-and-continue → ``failed``), so a
-unit may raise rather than defend against every failure itself.
-
-The units stay reachable as ``init._<name>``: :mod:`rebar._commands.init` re-exports
-them, because ``ensures._registry()``, the ensure drift-matrix interface test, ADR 0051,
-``docs/migrations.md``, ``docs/scale-envelope.md`` and ``_store/sync.py`` all reach them
-through that path.
-
-``untrack-runtime-markers`` deliberately stays in :mod:`rebar._commands.init`: it is not
-a content converger (it has no template — it repairs a legacy INDEX with
-``git rm --cached``) and it reads the ``_UNTRACK_BATCH`` budget from that module's
-globals.
-"""
+"""Tickets-branch ensure units and their content templates.
+The store registry calls these idempotent, drift-correcting units on init.
+Converged units make no commit. init re-exports them for existing callers.
+Runtime-marker index repair stays in init because it has no template."""
 
 from __future__ import annotations
 
@@ -80,35 +56,11 @@ def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
 
 
 def _gc_config_unit(tracker: str) -> EnsureOutcome:
-    """Keep stock ``git gc`` but run it FOREGROUND on the tickets worktree, never
-    detached (epic 97e7 / P1.4, corrected by bug 88eb / amicable-unsure-barasinga).
-
-    The tickets store is a linked worktree that SHARES the parent repo's object
-    database. WU-1 originally set ``gc.autoDetach=true`` so a triggered gc would fork
-    and "never serialize a foreground ticket write" — but that is exactly the hazard:
-    a DETACHED ``git gc`` / ``git maintenance run --auto`` (git >= 2.47 runs the latter)
-    repacks the SHARED object DB in the background, OUTSIDE rebar's write lock, racing
-    concurrent writers and corrupting the store (``invalid object`` / ``Error building
-    trees`` -> dropped writes; bug 88eb, proven on git 2.54). git's own docs warn a
-    concurrent ``git gc`` "may corrupt the repository". WU-1's "safe by construction"
-    argument only covers SERIAL reachability; it never accounted for a CONCURRENT
-    background repack.
-
-    Fix: keep auto-gc ENABLED (so loose growth is still bounded — the WU-1 goal) but
-    force it to run in the FOREGROUND of the write command that triggers it. That
-    command already holds rebar's write lock, so the repack runs serialized under the
-    lock (no concurrent writer) instead of detaching past it. Three idempotent steps
-    (an existing tracker self-heals on any ensure sweep):
-
-    - ``--unset gc.auto`` sheds any stale ``gc.auto=0`` (auto-gc stays at git's default
-      threshold, so repack still fires and bounds loose-object growth).
-    - ``gc.autoDetach=false`` — a triggered ``git gc --auto`` runs foreground.
-    - ``maintenance.autoDetach=false`` — git >= 2.47 routes auto-maintenance through
-      ``git maintenance run --auto`` and honors THIS knob (``gc.autoDetach`` is only its
-      fallback), so BOTH must be false or the background repack still detaches.
-
-    Check-then-act: acts only when a value is off the desired state, so a converged
-    tracker reports ``ok`` and mutates nothing (ensure-registry unit)."""
+    """Keep automatic garbage collection enabled but in the write lock's
+    foreground. Clear stale gc.auto=0 and set gc.autoDetach and
+    maintenance.autoDetach false. Both auto routes must avoid detached
+    repacking of the shared object database while concurrent writers run.
+    Act only when the tracked configuration differs."""
     changed = False
     if _git(tracker, "config", "--get", "gc.auto").returncode == 0:
         _git(tracker, "config", "--unset", "gc.auto")
@@ -125,14 +77,9 @@ def _gc_config_unit(tracker: str) -> EnsureOutcome:
 
 
 def _merge_ours_unit(tracker: str) -> EnsureOutcome:
-    """Define the ``ours`` merge driver the ``.gitattributes`` references (epic 97e7
-    / WU-3). ``true`` always exits 0, leaving OUR version of a conflicted path in
-    place. Without this, ``merge=ours`` in ``.gitattributes`` is silently ignored
-    and the shared mutable root files conflict on a union reconverge. Local config
-    (per clone; shared by symlinked worktrees via the common git dir).
-
-    Check-then-act: sets the driver only when it is not already ``true`` (ensure-
-    registry unit), so a converged clone reports ``ok``."""
+    """Set the local ours merge driver to true when needed.
+    This makes merge=ours keep the local version of shared root files and
+    lets a converged clone report ok without a write."""
     if _git(tracker, "config", "--get", "merge.ours.driver").stdout.strip() == "true":
         return EnsureOutcome("merge-ours", "ok", "merge.ours.driver=true")
     _git(tracker, "config", "merge.ours.driver", "true")
@@ -185,9 +132,7 @@ def _gitignore_unit(tracker: str) -> EnsureOutcome:
             "chore: add .gitignore for env-id, state-cache, scratch, and reducer cache",
         )
         return EnsureOutcome("gitignore", "changed", "created .gitignore")
-    # Migration (bug stem-ewe-tomb): an existing tracker's committed .gitignore may
-    # predate the lock/cache entries. Append any missing lines (idempotent — the
-    # sweep re-runs harmlessly) so existing stores stop surfacing the artifacts.
+    # Append missing lock and cache ignore lines to older ticket stores.
     existing = set(show.stdout.splitlines())
     missing = [ln for ln in _GITIGNORE.splitlines() if ln and ln not in existing]
     if not missing:
@@ -210,16 +155,9 @@ def _gitignore_unit(tracker: str) -> EnsureOutcome:
 
 # raw-git-ok: store-maintenance command, seam-internal
 def _store_compat_unit(tracker: str) -> EnsureOutcome:
-    """Stamp the COMMITTED store-compatibility record ``.store-compat.json`` (story
-    21dd). A v1.0 rebar reads this record before any mutating/publishing operation and
-    fails CLOSED on a record it cannot interpret (see :mod:`rebar._store.compat`); an
-    ABSENT record is implicit-legacy and passes through, so writing it is purely
-    additive and rollback-safe.
-
-    Tree-checks the committed blob first (like :func:`_gitignore_unit`) so a converged
-    store makes zero commits and reports ``ok``. The record is a COMMITTED tickets-branch
-    file — NOT gitignored — so it must be ``git add``ed + committed by the unit (the
-    ensure sweep itself does not commit)."""
+    """Ensure the committed .store-compat.json record exists.
+    Check the tree first so a converged store makes no commit. An absent
+    record remains readable as legacy. An unrecognized record blocks writes."""
     from rebar._store import compat
 
     if _git(tracker, "show", f"tickets:{compat.COMPAT_FILENAME}").returncode == 0:

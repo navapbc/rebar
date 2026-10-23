@@ -1,12 +1,5 @@
-"""In-process ``claim`` command + the plan-review CLAIM gate.
-
-Extracted from :mod:`rebar._commands.transition` (call-graph seam: the ``claim``
-command cluster) so each module stays within the module-size budget. Owns the claim
-arg parsing (``--assignee`` / ``--force``), the plan-review claim-gate precheck
-(epic 5fd2 — a fast LOCAL signature check, no LLM on the claim path), the locked
-claim core call, and the ``claimed`` confirmation / error-envelope output.
-``transition`` re-exports :func:`claim_cli` + :func:`claim_compute` for callers.
-"""
+"""Claim command with plan-review precheck, parent cascade, and outcome
+formatting. transition re-exports the entry points for existing callers."""
 
 from __future__ import annotations
 
@@ -47,18 +40,9 @@ def _parse_force(args: list[str]) -> str:
 
 
 def _parse_assignee(args: list[str]) -> str | None:
-    """Parse [--assignee[=]<name>] from claim's args (other tokens skipped).
-    Raises :class:`CommandError` on a value-less flag.
-
-    Returns ``None`` when ``--assignee`` is ABSENT (the "unspecified" sentinel that
-    triggers the configured ``ticket.default_assignee`` fallback); returns the given
-    value — possibly an explicit empty string — when the flag IS present (an explicit
-    ``--assignee ""`` clears the assignee and never falls back). Story c36c / f.ffea27.
-
-    Backed by the shared :func:`write_arg_parser` (ticket churlish/fd48): argparse's
-    default (``None``) supplies the absent sentinel, ``parse_known_args`` skips every other
-    token, ``allow_abbrev=False`` keeps a truncation an unknown token, and a value-less
-    ``--assignee`` raises :class:`CommandError` (exit 1) via the parser's ``error`` override."""
+    """Parse optional assignee, skipping unrelated tokens.
+    None means use the configured default. An explicit empty value clears it.
+    A flag without a value raises CommandError."""
     import re
 
     from rebar._cli._parser import ParseError
@@ -76,20 +60,9 @@ def _parse_assignee(args: list[str]) -> str | None:
 
 
 def _config_default_assignee(repo_root=None) -> str:
-    """The configured ``ticket.default_assignee`` (env > file), or ``""`` if unset or
-    unreadable.
-
-    Resolved from ``repo_root`` — the SAME root every other config reader uses
-    (``_engine_support/gates.py``, ``reads.py``, ``verify_opcert.py``), and ``None`` is a
-    valid value meaning "discover", not a missing argument. This used to pass
-    ``os.path.dirname(tracker)`` instead, which is the repo root ONLY when the tracker sits
-    inside the checkout. ``REBAR_TRACKER_DIR`` relocating the store is a SUPPORTED feature
-    (``_config_sources.tracker_dir_override``) and the deployed MCP server uses it — store at
-    ``/var/gerrit/site/mcp-tickets``, repo at ``/app`` — so the lookup landed in a directory
-    with no ``rebar.toml``, returned "", and every claim silently recorded NO assignee.
-
-    A malformed config must never break a claim, so any load error still degrades to no
-    default — which is also why the original failure was silent."""
+    """Read ticket.default_assignee from the repo root, not the tracker
+    location. The environment override wins. Unset or unreadable config
+    returns an empty string, including with a relocated tracker."""
     try:
         return config.compose_config(root=repo_root).ticket.default_assignee or ""
     except Exception:  # noqa: BLE001 — non-critical: fall back to no default, never fail the claim
@@ -97,20 +70,9 @@ def _config_default_assignee(repo_root=None) -> str:
 
 
 def _review_before_claim(ticket_id: str, tracker: str, repo_root) -> None:
-    """The ``claim --review`` pre-claim review (story a114): two-stage sensing.
-
-    Stage 1 asks the shared :func:`gates._plan_review_gate_applies` (gate flag on +
-    non-exempt type); when the gate does NOT apply, a one-line notice is printed and
-    the claim proceeds — never a silent no-op. Stage 2 asks ``llm.claim_gate_check``
-    (fast, local) for currency; only a stale/missing attestation triggers the full
-    ``review_plan(sign=True)``. A non-PASS disposition raises :class:`CommandError`
-    with the ADR-0040 exit mapping (1 BLOCK / 2 INDETERMINATE / 11 retryable) so the
-    claim core is never invoked; a raising ``review_plan`` propagates unhandled
-    (standard CLI error path — the claim is never attempted).
-
-    Runs with NO store flock held: the claim's own event append takes its usual
-    short-lived lock later, and ``review_plan`` takes the lock itself only for the
-    brief under-lock re-check at signing."""
+    """For claim --review, check whether the gate applies and whether its signed
+    review is current. Run full review only when stale or missing. Non-PASS
+    blocks claim. Review runs before the claim's short write lock."""
     from rebar.reducer import reduce_ticket
 
     # repo_root (possibly None -> discover), NOT the tracker's parent: a relocated store
@@ -179,40 +141,22 @@ def claim_compute(
             "Error: ticket system not initialized. Run 'ticket init' first.", returncode=1
         )
 
-    # Default-assignee fallback (story c36c): resolve an UNSPECIFIED assignee (None)
-    # to the configured ticket.default_assignee HERE — before the parent-cascade
-    # recursion below — so a cascaded parent claim inherits the same resolved default
-    # (advisory f7ca28). An explicit "" (clear) is left untouched and never falls back.
+    # Resolve the default before parent cascade. Preserve an explicit empty
+    # assignee as a clear.
     if assignee is None:
         assignee = _config_default_assignee(repo_root)
 
-    # `claim --review` (story a114): sense the gate and, when the attestation is
-    # stale/missing, run the signed review BEFORE anything else — a non-PASS raises
-    # and the claim core is never invoked. NOT propagated through the parent-first
-    # cascade below (the recursive call omits it). No store flock is held here.
+    # Run any needed signed review before claim or parent cascade.
+    # A non-PASS verdict blocks the write.
     if review:
         _review_before_claim(ticket_id, tracker, repo_root)
 
-    # Plan-review start-work gate (opt-in; runs OUTSIDE the lock — a fast LOCAL HMAC
-    # verify, no LLM/network). Blocks (fail-closed) on a missing/stale/wrong
-    # attestation when enabled; --force bypasses with an audit comment. The same
-    # consolidated check guards `transition open -> in_progress` (see _commands/gates.py),
-    # so the two start-work paths can't diverge. The cfg root is repo_root (possibly None,
-    # meaning discover) -- NOT the tracker's parent, which is only the repo root when the
-    # store is co-located; a relocated store resolved an empty config and disabled the gate.
+    # Check signed plan-review currency from the repo root outside the lock.
+    # A reasoned force records the bypass.
     gates.plan_review_precheck(ticket_id, repo_root, repo_root, force_reason=force_reason)
 
-    # Parent-first cascade: if this ticket has an OPEN parent, claim the parent first
-    # (recursively up the chain) so a child is never claimed while its parent is still
-    # open. If the parent claim fails, the child is NOT claimed and the error names the
-    # parent as the cause; a parent that raced OUT of `open` between the lookup and the
-    # locked parent claim is a BENIGN race and the child proceeds. That walk — cycle
-    # guard, TOCTOU re-check and error attribution included — is shared with
-    # `transition`'s cascade in `lifecycle_cascade` (story 4329), so the two verbs cannot
-    # drift on what a raced parent means; only the write primitive below is claim's own.
-    # `_resolve_open_parent` lives in .transition (claim re-exports through it) and
-    # `lifecycle_cascade` is imported alongside it here: a function-body import keeps the
-    # module-level cycle transition -> claim broken.
+    # Claim open parents first. A failed parent blocks the child. A parent
+    # that already left open during the race lets the child proceed.
     from rebar._commands.lifecycle_cascade import cascade_parent_first
     from rebar._commands.transition import _resolve_open_parent
 
@@ -236,8 +180,7 @@ def claim_compute(
 
     env_id = _seam.env_id(config.tracker_dir(repo_root))
     author = _seam.author("Unknown")
-    # claim_core stamps attribution + signs the STATUS + EDIT events via the shared finalize
-    # seam (bug 0ba4), given repo_root.
+    # The shared finalize seam attributes and signs claim events.
     txn.claim_core(
         tracker,
         ticket_id,
@@ -246,19 +189,13 @@ def claim_compute(
         assignee=assignee,
         repo_root=repo_root,
     )
-    # claim_core commits inline (not via write_and_push); push best-effort so a
-    # claim that isn't followed by an append_event write still reaches origin.
+    # Claim commits inline, then pushes best-effort.
     from rebar._store import push
 
     push.push_after_commit(tracker)
 
-    # Best-effort cross-clone claim-loss detection (audit reliability #1, story 3003).
-    # If push_after_commit merged a competing claim that was already on the remote, the
-    # locally-reduced `assignee` (the authoritative ownership field, HLC last-writer-wins)
-    # now reflects that other clone's ownership. Surface the loss so the losing agent stops
-    # instead of duplicating work. When no competing merge is visible (offline, sync.push
-    # off/async, unreachable remote), the assignee is still ours and we return success
-    # unchanged — a resolved fork is still discoverable later via fsck/show.
+    # After push, detect a competing remote claim through the reduced
+    # assignee and report lost ownership.
     if assignee:
         from rebar.reducer import reduce_ticket
 

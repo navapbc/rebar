@@ -1,19 +1,6 @@
-"""Tier B event-composer EDIT surface (docs/bash-migration.md §4).
-
-Extracted from ``composer.py`` along its existing call-graph seam (module-size
-policy): ``edit_core`` (validation + EDIT/TAG_DELTA append, shared by the library
-facade), ``edit_cli`` (flag parsing + output), the ``_edit_govern`` parser-of-record
-check, the EDIT field/flag vocabulary, and the helper cluster they compose from —
-tag-list normalisation, the EDIT ``repos`` normaliser, the promote-only
-``bridge_project`` guard, the TAG_DELTA compiler, the save-time description-cap
-notice, the per-field coercion chain, and the ``--parent`` validation cascade.
-
-This module is a LEAF: it imports only the shared command seam and the resolver
-(plus in-function lazy imports), and NEVER imports ``composer`` — so ``composer``
-can re-export ``edit_core``/``edit_cli`` at module top with no import cycle. That
-re-export keeps every ``rebar._commands.composer.edit_*`` caller and monkeypatch
-site working unchanged.
-"""
+"""EDIT command composition shared by library and CLI.
+This leaf owns field validation, tag deltas, parent checks, and the CLI
+parser. composer re-exports its entry points for existing callers."""
 
 from __future__ import annotations
 
@@ -281,26 +268,10 @@ def edit_core(
     tag_set=None,
     repo_root=None,
 ) -> str | None:
-    """Validate fields and append an EDIT event (mirrors ``ticket_edit``), plus tag
-    add/remove/set deltas as a TAG_DELTA event (P2.3).
-
-    Returns the save-time description-cap warning when this edit wrote a description
-    over ``verify.max_ticket_description_chars`` and the plan-review start-work gate
-    applies (else ``None``); callers emit it on their own channel. Advisory only — the
-    edit has already been appended by then.
-
-    Field guards: unknown-field reject, non-empty title/description, priority 0-4,
-    ticket_type enum, and the ``--parent`` cascade (``null`` detaches; else resolve
-    → exists → not-self → fail-closed status gate (open/in_progress only) → ancestor
-    cycle walk), mapping ``parent`` → ``parent_id`` in the event. Title gets the
-    U+2192→``->`` normalisation; numeric priority is stored as int.
-
-    Tags: ``tag_add``/``tag_remove`` are add/remove deltas; ``tag_set`` (mutually
-    exclusive with add/remove) is a wholesale set COMPILED to a delta against the
-    locally-observed tags (add-wins: a concurrent unobserved remote add survives).
-    (The ``edit_ticket(tags=...)`` set-alias was removed pre-1.0 — DE7; ``tags`` is
-    now just an unknown field, so use ``set_tags``/``add_tags``/``remove_tags``.)
-    """
+    """Validate edits and append EDIT plus any compiled TAG_DELTA.
+    Reject unknown or invalid fields and parent cycles. Tag set becomes an
+    add-wins delta against observed tags. Return an advisory description-cap
+    warning after a successful oversized description edit, otherwise None."""
     from rebar.reducer import reduce_ticket
 
     tracker = tracker_dir(repo_root)
@@ -434,15 +405,8 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
         else:
             fields[name] = val
             set_names.append(name)
-    # Parser of record. edit's accepted grammar is genuinely not argparse-expressible
-    # without a behavior delta: it accepts arbitrary ``--<field>`` keys validated
-    # against ``_EDIT_FIELDS`` — which includes ``repos``, a field ``build_edit`` has no
-    # argument for, so feeding the extracted fields back through the factory would
-    # itself raise — plus dashed-alias mapping, tag-delta comma-accumulation, the
-    # valueless ``--review``, and bespoke ``requires a value``/``unexpected
-    # argument``/``unknown field`` diagnostics. The loop above therefore owns the
-    # accepted grammar. The factory still governs via ``_edit_govern`` (a minimal,
-    # always-argparse-valid argv; a rejecting factory raises → fail).
+    # Keep the custom EDIT grammar here for arbitrary fields, tag deltas,
+    # and exact errors. The factory still governs through _edit_govern.
     _rc = _edit_govern(ticket_id)
     if _rc is not None:
         return _rc
@@ -458,24 +422,16 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode
-    # Mutation confirmation (ticket 6bda-9d58-8546-4638): field NAMES only, never
-    # values — comma-joined in invocation order (deduped).
+    # Confirm field names only, in invocation order.
     from rebar._commands import _confirm
 
     names = ", ".join(dict.fromkeys(set_names))
     _confirm.emit("edited", ticket_id, names, f"edited {ticket_id}: {names}")
-    # Advisory description-cap heads-up (ticket 594b) on the CLI's stderr channel; the
-    # edit already committed, so it never changes the exit code. Emitted BEFORE --review
-    # so the author sees why the review is about to refuse admission.
+    # Warn on stderr after saving and before optional review.
     _warn_stderr(edit_warning)
     if review:
-        # --review (story a114): re-run the signed plan review strictly AFTER the
-        # EDIT event committed (and its short-lived store lock was released) — the
-        # edit stays committed whatever the verdict, and no store flock is held
-        # while the (possibly multi-minute) review runs. A raising review_plan
-        # propagates via the standard CLI error path. NOT atomic against
-        # concurrent store reconvergence — `rebar review-plan <id> --status` is
-        # the cheap currency check.
+        # Run optional plan review after the EDIT commits and releases its lock.
+        # The edit remains saved whatever the review verdict.
         from rebar import llm  # LAZY — preserves optionality
 
         resolved = resolve_ticket_id(ticket_id, str(tracker_dir(repo_root))) or ticket_id

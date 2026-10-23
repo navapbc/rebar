@@ -1,47 +1,12 @@
-"""Level-triggered acting walk (drift classes A + B + C; epic 3006-e198).
+"""The binding walk acts on drift outside the active local snapshot.
 
-The level-triggered controller step. Everywhere else the reconciler iterates the
-ACTIVE local snapshot (``rebar list`` — archived/deleted tickets are dropped) or
-diffs prev-vs-curr fetch snapshots, so two whole regions of the state matrix are
-invisible: a bound pair whose local ticket has LEFT the active set, and a
-Jira-native issue that is present but UNBOUND. Those blind spots are the shared
-root cause of three drift classes:
-
-* **class A (444d)** — a locally archived/deleted ticket never drives its still-live
-  Jira issue to a terminal status (stranded live issues).
-* **class C (13eb)** — a confirmed binding whose Jira issue was deleted is never
-  garbage-collected once the local ticket is archived (dead entries accumulate).
-* **class B (5854)** — a Jira-native issue is never adopted at steady state
-  (edge-triggered inbound-create + a prev_snapshot proxy for "handled").
-
-A + C are healed by ONE iteration over the BINDING STORE that *targeted-reads* the
-off-snapshot local ticket (13eb's contract: "SAME walk as 444d — one shared
-iteration, not two loops"); B is its complement — one iteration over the fetch
-window for keys with no binding. Both feed the pure :func:`classify` and one
-breaker/census. Each cell is classified and dispatched:
-
-* ``TERMINAL_TRANSITION`` → an ordinary outbound ``update {status: Done}`` mutation
-  (the existing transition apply path handles it — no new MutationAction).
-* ``PROBE_GET`` / ``RETIRE_AFTER_GRACE`` → a bounded direct GET; a CONFIRMED 404
-  counted to grace retires the binding (reversible soft-delete). Reuses the
-  binding-store absence machinery UNCHANGED (``note_absent`` / ``clear_absent``).
-
-Safety rails (ADR 0028 §1; lessons L13/L16/L17):
-
-* **Snapshot-absence is NEVER deletion.** A key merely absent from the fetch window
-  routes to a bounded direct GET; only a proven 404 counted to grace retires. A
-  ``TRANSPORT_ERROR`` defers without touching the counter.
-* **The circuit breaker is evaluated over the whole pass BEFORE any state
-  mutation.** A fetch/JQL regression that would mass-retire or mass-transition
-  trips :func:`check_blast_radius` and the walk emits NOTHING and advances NO
-  counter (Argo ``allowEmpty`` / Entra deletion threshold; 13eb guardrail #4).
-
-The walk is READ-ONLY in phase 1 (build a Decision per binding), breaker-gated in
-phase 2, and only mutates state in phase 3. Retirement and counter increments are
-side effects on the binding store (as in the existing bound-but-absent path);
-terminal transitions are returned as typed :class:`Mutation` objects for the
-unified applier.
-"""
+One store walk handles archived or deleted local tickets still bound to Jira
+(class A) and bindings whose Jira issue was deleted (class C). A fetch-window
+walk considers unbound Jira issues for adoption (class B). Snapshot absence alone
+never proves deletion. A bounded direct GET must confirm 404 before grace counting.
+Transport errors defer. The whole-pass blast-radius check runs before counters,
+retirement, or terminal transitions. Dry-run computes decisions without state
+writes. Terminal transitions return typed mutations for the ordinary applier."""
 
 from __future__ import annotations
 
@@ -106,36 +71,12 @@ def compute_binding_walk_mutations(
     persist: bool = True,
     skip_adopt_keys: set[str] | None = None,
 ) -> BindingWalkResult:
-    """Walk the binding store and heal drift classes A + C (see module docstring).
-
-    Args:
-        binding_store: the live :class:`BindingStore` (all_bindings / get_baseline /
-            note_absent / clear_absent / confirmed_count).
-        curr_snapshot: ``{jira_key: fields}`` — this pass's fetch window.
-        active_local_ids: local ids present in the active snapshot; their bindings
-            are ALREADY reconciled by the field differ and its bound-but-absent
-            probe, so the walk skips them (no double-processing).
-        client: the Jira client for bounded direct GETs (None ⇒ cannot probe, so an
-            off-window key stays ``ABSENT_IN_WINDOW`` and is deferred).
-        local_reader: ``local_id → local ticket dict | None`` — a targeted read of
-            an off-snapshot (archived/deleted/gone) ticket.
-        max_acting_fraction: circuit-breaker cap on the acting fraction.
-        classify_mod: the ``classify`` module (injected — the caller loads it via the
-            reconciler loader so this stays free of the test-package import shadow).
-        mutation_mod: the ``mutation`` module (typed Mutation vocabulary).
-        outbound_differ_mod: the ``outbound_differ`` module (its ``_safe_get_issue``
-            probe + ``_DELETED`` / ``_TRANSPORT_ERROR`` sentinels are reused UNCHANGED).
-        grace: consecutive-404 retire threshold (defaults to the env/3 resolution).
-        probe_get: injectable direct-GET (defaults to ``outbound_differ._safe_get_issue``).
-        persist: when False (dry-run/preview), the walk COMPUTES the plan
-            (terminal-transition mutations + a predicted census) but performs NO
-            binding-store side effects — no counter advance, no retirement. The
-            terminal transitions ride the plan and are applied only by a persisting
-            pass. Live grace counting therefore only happens in write mode.
-
-    Returns:
-        A :class:`BindingWalkResult`.
-    """
+    """Classify off-snapshot bindings and unbound Jira issues, then apply the whole-pass
+    blast-radius check before acting. Active local bindings are handled elsewhere.
+    A missing fetch key requires a bounded direct GET. Only confirmed 404s count
+    toward retirement. A failed probe defers. With persist=False, return predicted
+    mutations and census without changing binding state. The result contains terminal
+    mutations, acted-on keys, census, and breaker verdict."""
     mut_mod = mutation_mod
     ob_mod = outbound_differ_mod
 
@@ -278,12 +219,8 @@ def compute_binding_walk_mutations(
                 if kind is DecisionKind.RETIRE_AFTER_GRACE:
                     result.retired.append(jira_key)
                 if persist:
-                    # A 404 is "gone" OR "MOVED to another project and re-keyed"
-                    # (bug 7c26): the store re-asks by immutable numeric id and
-                    # re-keys on a hit. Only an unproven absence increments the
-                    # counter and retires at grace (bindings-retired.json + alert).
-                    # getattr-guarded because this walk is also driven with
-                    # duck-typed stores that predate the move-aware member.
+                    # A confirmed 404 may be a project rekey. Ask by immutable ID before counting
+                    # absence. Keep compatibility with stores lacking the move-aware method.
                     _rekey = getattr(binding_store, "note_absent_or_rekey", None)
                     if _rekey is not None:
                         _rekey(jira_key, client)
@@ -407,28 +344,11 @@ def _adopt_stands_down(
     binding_store: Any,
     local_reader: Callable[[str], Mapping[str, Any] | None],
 ) -> bool:
-    """The L10 guard with its one carve-out: the lost-adopt residue replays.
-
-    An unbound key carrying a rebar-id marker is normally identity-bound elsewhere,
-    so the unbound arm stands down (adopting would double-create the phantom
-    jira-dig-NNNN and can trip the L11 double-bind quarantine). But when an adopt's
-    Jira label write-back survived while the local CREATE + binding were LOST — an
-    ephemeral runner whose final tickets push was rejected (bug 2392-9389-39f9-4ca6,
-    the REB-3510 incident) — that stand-down is permanent unbound_jira drift: no
-    recovery path ever re-links a marked-but-unstored key. The residue is provable
-    from local state alone, so it falls through to the ordinary ADOPT arm (an
-    idempotent replay — the deterministic local id converges on the same ticket,
-    binding, and label) exactly when ALL of:
-
-    * the key's ONLY marker is exactly the DETERMINISTIC inbound id for this key
-      (a UUID marker from an outbound bind, a foreign ghost marker, or multiple
-      markers is ambiguous identity — human-owned, keeps standing down);
-    * the binding store holds NO entry for that id (a pending write-ahead entry is
-      owned by ``BindingRecovery.recover_pending_bindings``);
-    * a targeted local read finds NO local ticket for it (a surviving ticket means
-      only the binding is missing — a store-integrity repair, not this class; a
-      replayed create would append a duplicate CREATE event).
-    """
+    """Reject marked unbound issues unless the marker proves a lost adopt.
+    A single marker must equal this key's deterministic inbound ID, with no binding
+    entry and no local ticket. That residue may replay ADOPT idempotently. Foreign or
+    multiple markers, a pending binding, or a surviving ticket remain outside this
+    repair path."""
     marked = _marked_local_ids(fields)
     if not marked:
         return False  # unmarked → the ordinary adopt arm handles it
