@@ -1,10 +1,6 @@
-"""Plan-review impact redesign (story fishable-apivorous-redhead).
-
-Covers ``decide.impact_plan`` (severity-first MAX + hard-override floor + detection amplifier)
-and the per-gate ``impact_fn`` dispatch threaded through ``pass3_decide`` / ``pass3_over_findings``.
-
-Proving command:
-    .venv/bin/pytest tests/unit/test_impact_plan.py -v
+"""Plan-review impact uses the maximum severity, a hard-override floor, and
+a detection amplifier. These tests pin impact_plan and its per-gate dispatch
+through pass3_decide and pass3_over_findings.
 """
 
 from __future__ import annotations
@@ -226,10 +222,9 @@ def test_pass3_over_findings_threads_impact_fn() -> None:
 
 # ── plan-v5 kind sets: undecomposed + dod_uncertifiable (story fixable-angular-caribou) ──
 def test_undecomposed_bundling_is_advisory_and_never_floors() -> None:
-    # The class the conversion exists for: 23 of the 30 recorded `undecomposed` gradings say
-    # "this plan bundles N independently-releasable outcomes" — a right-sizing note on a plan
-    # that is executable as written — yet every one of them floored to 0.85 under the ordinal
-    # ladder. It must now contribute below every blocking threshold instead.
+    # Bundling separable but executable outcomes is an advisory decomposition
+    # finding. It must remain below blocking thresholds instead of inheriting the
+    # former 0.85 ordinal floor.
     assert impact_plan({"undecomposed": "bundles_separable_slices"}) == UNDECOMPOSED_BUNDLED_CONTRIB
     assert impact_plan({"undecomposed": "bundles_separable_slices"}) < 0.85
 

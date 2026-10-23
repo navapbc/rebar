@@ -1,12 +1,6 @@
-"""Pathspec-scoped locked commit seam (ticket 11a9-b11b-e93d-4832).
-
-``reconcile_helpers._commit_binding_store_snapshot`` was the last reconciler write
-composing ``git_adapter.add`` + ``commit`` outside the locked store transaction, held
-there because the only seam, ``commit_and_push_tickets_branch``, stages with ``-A`` —
-which sweeps in ``.bridge_state/last-pass.json`` and advances the tickets HEAD on every
-idempotent pass (ticket 6454-d06e reverted that conversion). These tests pin the seam
-that removes the reason for the marker: ``commit_tickets_branch`` commits ONLY a caller
-pathspec, under the shared write lock, and never pushes.
+"""commit_tickets_branch stages only the caller's pathspec under the
+shared write lock and does not push. This keeps a binding-store snapshot
+commit from staging unrelated bridge state.
 """
 
 from __future__ import annotations

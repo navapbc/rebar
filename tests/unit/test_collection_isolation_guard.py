@@ -1,20 +1,6 @@
-"""Oracle for the unit-tier subprocess-isolation collection guard.
-
-Ticket 15f2-f3d4-ffcd-4223 (washedup-ropeable-hammerkop).
-
-``tests/conftest.py:486-513`` already provides the isolation root: a session-scoped
-sandbox repo plus an autouse fixture that sets ``REBAR_ROOT``, per xdist worker. It
-reaches subprocesses purely by ENVIRONMENT INHERITANCE, so a test that builds its own
-``env=`` dict from scratch silently drops ``REBAR_ROOT`` and its child falls back to the
-git toplevel of the cwd — the real checkout.
-
-Nothing stops that today. This guard is the missing enforcement: a collection-time AST
-scan, with the predicate factored into ``tests/_subprocess_isolation.py`` so it is
-testable without spawning pytest — mirroring the ``_live_jira_confinement`` split that
-``pytest_collection_modifyitems`` already uses.
-
-Detection is AST, never regex: a naive ``run(`` pattern matches 126 ``asyncio.run`` call
-sites in this tier alone.
+"""The unit-tier collection guard catches subprocess calls that replace
+the inherited environment and lose REBAR_ROOT. It scans AST at collection
+time, distinguishing subprocess launches from unrelated run methods.
 """
 
 from __future__ import annotations
@@ -525,15 +511,9 @@ def test_a_controller_side_failure_raises_usage_error_not_pytest_fail():
 
 
 def test_the_live_unit_tier_collects_clean(tmp_path):
-    """Introduction condition (AC2): every real hazard is fixed or explicitly marked, so
-    the tier collects. This runs the guard through pytest's own collection rather than
-    re-deriving it, which is the only way to exercise the real marker resolution.
-
-    Routed through ``tests/_nested_pytest.run_nested_pytest`` — the repository's single
-    sanctioned nested-pytest launcher, which owns the child's ``--basetemp``. Spawning
-    pytest directly here would have been an unmarked second launch site, which is exactly
-    the discipline this change exists to enforce; taking the escape hatch in the change
-    that adds the guard would be poor form.
+    """Collect the unit tier through the sanctioned nested-pytest launcher.
+    This exercises the installed guard and marker resolution after hazardous
+    subprocess calls are fixed or marked.
     """
     from _nested_pytest import run_nested_pytest
     from _subprocess_env import subprocess_env

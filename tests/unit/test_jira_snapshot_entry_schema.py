@@ -1,25 +1,7 @@
-"""Happy path for the packaged Jira snapshot-entry contract (ticket 8537).
-
-ADR 0004 always claimed the snapshot-entry shape had "a single source of truth …
-both the fetcher's output and the differs' expectations target it", but the
-hand-rolled Python module holding it was imported by no production code and sat
-outside the machinery that keeps the other ~90 schemas honest. The contract now
-lives in ``src/rebar/schemas`` as ``jira_snapshot_entry.schema.json``, so it is
-loadable via ``schemas.load()`` and its generated ``JiraSnapshotEntry`` TypedDict
-rides the existing CI drift gate (``python -m rebar.schemas.gen_types --check``).
-
-These tests assert OBSERVABLE behaviour only — what the loader returns and what
-the validator accepts — never private names or source text. Edge/error coverage
-(the flat-``comments`` regression, malformed sub-shapes) is owned by
-``tests/integration/reconciler/jira_contract/test_snapshot_contract.py``,
-which validates real ``fetch_snapshot`` output against this same schema.
-
-The fixture ``tests/fixtures/jira/snapshot_entry_shapes.json`` is DERIVED and
-REDACTED from real fetcher output under ``.rebar/bridge/snapshots/`` (gitignored,
-PII-bearing): every ``emailAddress`` / ``displayName`` / ``accountId`` is replaced
-with a placeholder and every tenant URL dropped. The repo-wide scrub guard in
-``tests/integration/reconciler/jira_contract/test_jira_fixtures.py`` globs
-``tests/fixtures/jira/*.json``, so it covers this file automatically.
+"""The packaged Jira snapshot-entry schema loads through schemas.load and
+generates JiraSnapshotEntry under the CI drift check. Tests pin loader and
+validator behavior. Integration tests check fetcher output. The redacted
+fixture omits tenant identity data.
 """
 
 from __future__ import annotations

@@ -1,24 +1,7 @@
-"""4802: an LLM sidecar's write-time secret-screen REFUSAL must surface LOUDLY, not be
-swallowed indistinguishably from a generic emit failure.
-
-THE DEFECT. The three LLM sidecars (completion / plan-review / code-review) wrap their
-``append_event`` in ``except Exception: logger.warning(...); return False``. The write-time
-secret screen (bug e7a9) raises from inside ``append_event`` when reviewed MATERIAL (a diff, a
-plan, a finding detail) embeds a credential shape. That refusal was caught by the SAME broad
-handler as a transient store error — logged once and dropped, with no distinct signal that the
-gate's own audit trail was blocked by a policy refusal.
-
-THE FIX (asserted here):
-- the refusal is a distinct exception subclass (``SecretScreenRefused``, a ``CommandError``
-  subclass so every ``except CommandError`` still catches it);
-- each sidecar catches it FIRST and writes an EXPLICIT ``Warning: ... WITHOUT ...`` stderr line
-  that names the ticket, states the audit record was BLOCKED by the write-time secret screen,
-  and makes clear the record was NOT written;
-- best-effort is preserved: ``emit`` still returns ``False`` and never raises, and a refusal is
-  NOT retried like a transient LockTimeout.
-
-Assertions are on OBSERVABLE behaviour (captured stderr, the returned bool), never a private
-name.
+"""A write-time SecretScreenRefused from a completion, plan-review, or code-review
+sidecar must print a distinct warning that the audit record was blocked and not
+written. The best-effort emit call still returns False and does not retry the
+policy refusal as a transient store error.
 """
 
 from __future__ import annotations

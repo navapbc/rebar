@@ -1,22 +1,6 @@
-"""Contract tests for the `PreToolUse` grep reminder hook (story tired-stonebroke-sable,
-epic frail-tsarist-trout).
-
-The hook re-surfaces Serena's symbol tools at the moment an agent reaches for `grep`, because
-launch-time guidance in `AGENTS.md` decays: by mid-task, one line of a long document has no
-salience against what is in working memory.
-
-These tests EXECUTE the script against the documented `PreToolUse` stdin envelope, because
-that is the only thing CI can re-check. The hook itself cannot be observed firing from an
-authoring worktree — Claude Code resolves project settings to the main checkout, shared across
-worktrees — so a session transcript is corroboration, never the evidence of record.
-
-Two properties matter more than the trigger, and both are safety properties:
-
-* **It can never block.** A reminder that can deny a call would make every false positive an
-  outage. So: never a non-zero exit, and never a `permissionDecision` key (which would also
-  suppress the permission prompt, changing this repo's security posture).
-* **It can never be wrong.** The message names the ONE case where `grep` is genuinely correct,
-  so an agent that reads it and continues with `grep` has been helped, not overridden.
+"""Execute the PreToolUse grep reminder with its documented stdin envelope.
+The hook must never block a tool call or suppress a permission prompt. Its text
+must also name the case where grep is the correct navigation tool.
 """
 
 from __future__ import annotations

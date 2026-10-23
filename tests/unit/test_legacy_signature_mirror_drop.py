@@ -34,10 +34,8 @@ def _apply(state, manifest, **kw):
     process_signature(state, ev, ev["data"])
 
 
-# ── strip-key policy ───────────────────────────────────────────────────────────
-# Task 7ed9 removed the ``emit_legacy_signature_mirror`` rollback toggle and the
-# "flag true → mirror persisted" path; the mirror is now UNCONDITIONALLY stripped, so
-# the former rollback test (``test_strip_keys_keep_mirror_on_rollback``) is gone.
+# The legacy signature-mirror rollback flag is retired. Strip mirror keys
+# unconditionally, so a rollback branch must not restore them.
 def test_strip_keys_always_drop_mirror() -> None:
     keys = _snapshot_strip_keys()
     assert "updated_at" in keys and "signature" in keys

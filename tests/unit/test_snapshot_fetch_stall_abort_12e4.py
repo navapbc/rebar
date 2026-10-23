@@ -1,14 +1,6 @@
-"""A stalled snapshot fetch must abort on throughput, not burn the wall-clock ceiling.
-
-Ticket ``12e4``. ``git fetch`` of the GitHub mirror intermittently wedges with the socket
-open and no bytes moving; bounded only by ``_GIT_TIMEOUT`` it consumed 300s per review.
-The fix hands git a *throughput-keyed* abort (``http.lowSpeedLimit`` / ``http.lowSpeedTime``).
-
-The tests below deliberately assert on the **reason** a fetch failed, never on how long it
-took: a wall-clock assertion would flake in CI and — worse — would still pass if someone
-"fixed" this by lowering the timeout, which is exactly the wrong fix. The discriminator is
-:func:`test_slow_but_progressing_remote_is_not_aborted`: it drives a remote that dribbles
-bytes continuously, and it fails for any implementation keyed on elapsed time.
+"""A stalled snapshot fetch must abort for low throughput rather than a short
+wall clock. The test checks the failure reason, while a companion remote that
+keeps sending bytes must survive the same elapsed interval.
 """
 
 from __future__ import annotations
@@ -39,14 +31,9 @@ def repo(tmp_path):
 
 @pytest.fixture
 def tight_stall(monkeypatch):
-    """Shrink the abort window so the test is quick; the *mechanism* is unchanged.
-
-    One second is the smallest window git's ``http.lowSpeedTime`` expresses, and the
-    sibling dribble test below already proves git honors it. Shrinking it is safe in
-    one direction only: the remote sends ZERO bytes, so a shorter window makes the
-    stall abort more certain, never less — a loaded host can delay the abort but
-    cannot manufacture throughput. Nothing here asserts elapsed time; the pass
-    condition is the failure REASON, under a ceiling 60x the window.
+    """Use the shortest supported http.lowSpeedTime for a zero-byte stall. The
+    sibling test pins progress handling. This one asserts the low-speed failure
+    reason without depending on elapsed time.
     """
     monkeypatch.setenv("REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC", "1000")
     monkeypatch.setenv("REBAR_SNAPSHOT_STALL_WINDOW_SECONDS", "1")

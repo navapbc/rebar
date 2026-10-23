@@ -1,17 +1,7 @@
-"""The materialization fetch's wall-clock ceiling is configurable/scaled, not a fixed 300s.
-
-Ticket ``8d34`` (curly-open-swan). The completion-verifier's repo-materialization fetch was
-bounded by a HARD ``_GIT_TIMEOUT = 300`` wall clock. On a large/cold store an HONEST
-``--no-filter`` transfer legitimately runs longer than 300s while staying ABOVE the low-speed
-floor, so the throughput-keyed stall-abort never fires — yet the fixed wall clock cuts it off
-and the verifier fails closed verdict-less.
-
-The fix keeps the stall-abort as the real guard against a wedged remote and turns the
-wall-clock into a GENEROUS, TUNABLE backstop: ``REBAR_SNAPSHOT_FETCH_TIMEOUT_SECONDS`` over a
-default scaled well above 300. These tests assert the effective ``timeout`` handed to the
-child and the resolver, NEVER elapsed time (a wall-clock assertion would flake and would still
-pass under the buggy fixed cap). They are distinct from the stall-abort tests in
-``test_snapshot_fetch_stall_abort_12e4.py``.
+"""The snapshot fetch wall-clock timeout is a configurable backstop above the
+former fixed 300-second limit. Low-speed settings detect a stalled transfer.
+These tests inspect the timeout passed to the child and its resolver rather
+than elapsed wall time.
 """
 
 from __future__ import annotations

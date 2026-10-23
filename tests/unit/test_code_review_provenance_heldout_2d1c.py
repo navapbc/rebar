@@ -1,19 +1,7 @@
-"""Held-out validation for bug 2d1c — authored independently of the implementation.
-
-`rebar review-code --ref <sha> --source attested` accepted both values and dropped
-them at the shim, so `--source attested` silently reviewed the dirty working tree and
-returned a result indistinguishable from a successful attested run. `_mcp_llm` tells
-MCP callers the result carries `source`/`verified_at_sha`/`signable`, so this was a
-false promise on the boundary that decides whether a code review can be SIGNED.
-
-That framing sets what is worth testing. The dangerous direction is not "provenance is
-missing" (loud, caught immediately) but "provenance is present and WRONG" — above all a
-result that claims to be signable when nothing was pinned. These tests hammer that:
-every path must carry the three keys, and no path that failed to pin a source may ever
-come back signable.
-
-Assertions are on the returned contract and on what reaches the gate request; nothing
-pins private names or source text.
+"""Held-out provenance checks prevent an unpinned review from claiming
+source, verified_at_sha, or signable status it did not earn. The CLI ref and
+source arguments must reach the gate request, and every return path reports
+the review handle's provenance.
 """
 
 from __future__ import annotations

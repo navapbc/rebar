@@ -1,15 +1,7 @@
-"""HELD-OUT oracle for TS3 (117b) — the implementation MUST NOT see this file.
-
-The approved-design behaviour the happy path cannot cover:
-- the SNAPSHOT authorship ledger records {event_uuid, content_hash, signature,
-  signer_pubkey, position} and a compacted signed event verifies from the ledger ALONE;
-- `key_not_valid_at_era` is emitted for a valid signature by a since-revoked key (distinct
-  from bad-signature / unknown-author);
-- `bad-signature` for a signature that verifies against no key the identity ever held;
-- `verify_signature_result.schema.json` (the SEPARATE verify-signature command) is unchanged;
-- `rebar.create_placeholder` is absent and `rebar.ensure_identity_for` remains the idempotent
-  placeholder entrypoint.
-Observable behaviour only.
+"""Held-out TS3 checks verify compacted events from the snapshot authorship
+ledger alone. Revoked-key signatures get key_not_valid_at_era, while signatures
+matching no historical key get bad-signature. The separate verify-signature
+schema stays unchanged, and ensure_identity_for remains the placeholder entrypoint.
 """
 
 from __future__ import annotations

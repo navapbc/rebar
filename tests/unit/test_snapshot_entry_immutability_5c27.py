@@ -1,23 +1,7 @@
-"""Bug 5c27-7926: snapshot-store entries must be immutable — reads must not write into them.
-
-``<store>/tickets-<sha>/`` is documented as an immutable, content-addressed entry
-(ADR 0005 D2), but every ticket read through a pinned root wrote a derived reducer cache
-(``.cache.json``) INSIDE the entry (``reducer/_api.py`` via ``write_cache``, plus the
-corrupt-CREATE replay path in ``reducer/_processors.py``). Measured in the wild: 4,844
-``.cache.json`` files inside one live entry, all created by reads after materialization.
-
-Why it matters: (1) bug 8386's fix hardlinks unchanged blobs between adjacent entries, so
-an in-place write inside an entry would corrupt every entry sharing the inode — today that
-is prevented only by ``atomic_write`` publishing via ``os.replace``; (2) the janitor's
-reverify pass records a TOFU digest over the entry's contents, so post-read writes make a
-clean entry look corrupt and evict it; (3) it inflates the store.
-
-The fix keeps the reducer cache OUT of snapshot entries (the cache write is disabled when
-the ticket dir lies inside a store entry — the ticket's sanctioned least-behavioral option)
-and pins the rename-over contract in ``_store/fsutil.py`` so a future in-place write cannot
-silently corrupt shared inodes.
-
-Everything here is offline: no network, no LLM.
+"""Reads through a content-addressed snapshot entry must not write reducer
+cache files inside it. The tests pin cache suppression and atomic replacement
+so post-read writes cannot alter a verified entry or a hardlinked neighboring
+entry. The check runs offline.
 """
 
 from __future__ import annotations

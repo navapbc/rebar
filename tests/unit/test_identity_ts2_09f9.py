@@ -1,10 +1,6 @@
-"""Happy-path oracle for TS2 (09f9, epic gnu-whale-ichor transition): git-commit-ancestry
-key validity (replaces the HLC-epoch model).
-
-The ONLY TS2 test the implementation sees. Pins the approved-design happy path: a genesis
-key lands in the keyring as a POSITION-based record (no epoch fields), and an authorship
-signature by that key verifies at the commit of an event written after the key was added.
-The security/boundary/backdating/intra-commit/fail-closed cases are held out.
+"""TS2 happy-path check. A genesis key enters the position-based keyring, and
+an event written after that addition verifies at its commit. Revocation,
+backdating, same-commit ordering, and failure cases remain in the held-out suite.
 """
 
 from __future__ import annotations

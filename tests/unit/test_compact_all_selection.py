@@ -1,24 +1,7 @@
-"""`compact-all` must RECUR, not just backfill (story gaudy-gangrenous-basilisk).
-
-THE DEFECT. `_scan_snapshot_state` split ticket dirs into "lacking a `-SNAPSHOT.json`" and
-"already has one", and compacted only the former. A ticket folded once and since grown by
-hundreds of live events was counted as `already` and never folded again — so `compact-all` was
-a one-time BACKFILL. That was tolerable while every close compacted inline; once compaction
-left the close path (bug choosy-arthrodic-barbet) this sweep became the store's ONLY standing
-trigger, and a trigger that never re-fires is no trigger.
-
-THE FIX (asserted here): selection is by FOLDABLE event count against `compact.threshold`,
-whatever a ticket's snapshot state. Two properties matter and are tested separately:
-
-* it WIDENS — an already-snapshotted ticket over threshold is now selected, while
-  under-threshold tickets and the historical backfill case behave as before;
-* it CONVERGES — selection counts only events the fold would actually squash (older than the
-  compaction horizon), so a ticket whose excess events are all inside the horizon is not
-  selected, and a pass that folds nothing is not reported as work.
-
-The convergence half is the subtle one: counting merely LIVE events would select such a
-ticket, the fold would write nothing, the driver would count it as compacted, and the next
-sweep would select it again — churn plus a false tally.
+"""compact --all selects tickets by foldable event count, including tickets
+with an earlier snapshot. Events inside the horizon do not trigger a fold.
+A pass that folds nothing reports no compaction work, preventing repeated
+selection and false totals.
 """
 
 from __future__ import annotations
@@ -257,15 +240,9 @@ def test_a_pass_that_folds_nothing_is_not_counted_as_compacted(
 def test_a_sweep_that_folds_nothing_still_pushes(
     store: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The regression that motivated `_best_effort_push`.
-
-    Before honest counting, every selected ticket incremented `compacted` — even a fold that
-    wrote nothing — so `compacted > 0` really meant "we selected something" and the commit+push
-    tail behind it effectively always ran. Making the count honest silently disabled the push on
-    any sweep that folded nothing. The push exists so an earlier unpushed write in the session
-    is not stranded, which has nothing to do with what THIS sweep folded, so the two are
-    decoupled — and that decoupling needs a test, or the next honest-counting-style change
-    re-breaks it invisibly."""
+    """A sweep that folds nothing still attempts the best-effort push. Earlier
+    unpublished writes must not depend on this sweep's compacted count.
+    """
     from rebar._store import push as _push
 
     repo = store

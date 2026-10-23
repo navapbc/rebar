@@ -1,13 +1,7 @@
-"""HELD-OUT oracle for bug 0ba4 (txn signing gap).
-
-The transactional write path (transition / claim / close, and delete) must sign its STATUS /
-EDIT events through the SAME shared finalize+sign seam that ``append_event`` uses — so
-CREATE/COMMENT and transitions/claims are signed identically, and enabling
-``identity.require_authenticated`` does not break the ticket workflow. Before the fix these
-events carried attribution (``author_id``) but no ``author_sig``.
-
-These assertions target observable event bytes (``author_sig`` presence) and the merge-gate
-verdict — never internal function names — so they survive a behaviour-preserving refactor.
+"""Transactional STATUS and EDIT writes, including claim, transition, close,
+and delete, must use the shared event-signing seam. Their author_sig bytes and
+merge-gate verdict match CREATE and COMMENT writes when authenticated identity
+is required.
 """
 
 from __future__ import annotations

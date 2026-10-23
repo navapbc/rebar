@@ -1,9 +1,7 @@
-"""HELD-OUT edge oracle for the `kind` wire-value cutover (story b320, ADR 0101).
-
-Withheld from the implementation subagent. The risk here is NOT that the new value fails to
-emit — it is that the ~827 tickets in the live store holding `kind: "operator-attested"` in
-immutable COMPLETION_VERDICT events stop rendering, silently, because `kind` is an
-unconstrained schema string with no enum and nothing validates a mismatch.
+"""Held-out kind wire-value check. Existing COMPLETION_VERDICT events with
+kind operator-attested must still render after the new value begins emitting.
+The schema treats kind as an unconstrained string, so this needs an explicit
+compatibility oracle.
 """
 
 from __future__ import annotations

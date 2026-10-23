@@ -1,14 +1,6 @@
-"""Held-out RED->GREEN oracle for paediatric-orchestral-anemone (ad7b-6928-49fe-475a).
-
-Contract (cited: baldish-regainable-steed e4a6 merged `_cas_backoff` jitter, the Jira DC
-transport jitter idiom `adapters/jira_datacenter/retry.py:182`, and this bug's AC): the
-CAS-publication backoff in `last_pass.publish` must be JITTERED so two reconciler passes
-that collide once do NOT wake in lockstep. Each delay must land in `[base, 1.25*base]`
-(escalation preserved, always >= base), and two independent colliding passes must produce
-DIFFERENT delay sequences. At zero contention (CAS wins first attempt) there is no sleep.
-
-RED (current fixed `(0.1, 0.2)[attempt]` schedule): both passes sleep an identical
-`[0.1, 0.2]`, so the two sequences are byte-identical -> lockstep. GREEN after jitter.
+"""CAS publication backoff adds jitter while preserving each base delay.
+Colliding passes must receive different sequences within base to 1.25 times
+base. A first-attempt CAS success does not sleep.
 """
 
 from __future__ import annotations

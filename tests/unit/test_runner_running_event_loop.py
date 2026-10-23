@@ -1,24 +1,7 @@
-"""The synchronous LLM drive must work on a thread that already has a RUNNING event loop
-(bug f643 — ``superior-trifling-dunlin``).
-
-rebar drives pydantic-ai synchronously: ``agent.run_sync`` and
-:func:`rebar.llm.model_classes.entered_fallback_model` both reach
-``loop.run_until_complete(...)``, which is legal ONLY on a thread whose loop is not already
-running. Under the CLI the calling thread is a bare main thread, so it is. Under the MCP
-server it is NOT: the python ``mcp`` SDK invokes a SYNC ``@mcp.tool`` function DIRECTLY
-inside the ASGI request coroutine (``mcp/server/fastmcp/utilities/func_metadata.py`` —
-``return fn(**arguments_parsed_dict)``, no thread offload), so the whole tool body executes
-on the event-loop thread with that loop running and every ``run_until_complete`` raises
-``RuntimeError: This event loop is already running``.
-
-Live symptom: ``review_plan`` through the deployed server reported
-``verify_error: "step 'review@then/prerequisite_verify' failed: This event loop is already
-running"`` with ``verify_requests: 0`` while the Pass-1 finders succeeded — the finders run
-in ``plan_review.pass1``'s ``ThreadPoolExecutor`` (bare threads, no running loop) whereas a
-plain ``prompt:`` step runs INLINE on the caller's thread.
-
-These tests therefore drive the runner from INSIDE a running loop. A regression that only
-restores the no-loop (CLI) path leaves them red, which is the whole point.
+"""Synchronous agent execution must work when the caller already has a running event
+loop. MCP invokes synchronous tool bodies on the ASGI loop thread, where nested
+run_until_complete fails. The runner offloads that work and preserves the gate
+session context. These tests exercise the running-loop path directly.
 """
 
 from __future__ import annotations
@@ -141,10 +124,10 @@ def test_running_loop_and_no_loop_produce_the_same_verdict() -> None:
 
 
 def test_a_sync_mcp_tool_body_really_does_run_on_the_loop_thread() -> None:
-    """Pin the ENVIRONMENTAL premise the tests above encode, so a future ``mcp`` SDK bump
-    that starts offloading sync tools tells us the guard's motivation changed instead of
-    silently making these tests vacuous. (This also refutes the claim at
-    ``rebar/_mcp_health.py`` that sync MCP tools run on ``anyio.to_thread`` workers.)"""
+    """Pin the SDK premise that a synchronous MCP tool body executes on the request's
+    event-loop thread. An SDK change that offloads it should make this test expose the
+    changed environment.
+    """
     pytest.importorskip("mcp")
     from mcp.server.fastmcp import FastMCP
     from mcp.shared.memory import create_connected_server_and_client_session
@@ -166,15 +149,9 @@ def test_a_sync_mcp_tool_body_really_does_run_on_the_loop_thread() -> None:
 
 
 def test_the_gate_session_survives_the_hop_off_the_event_loop() -> None:
-    """The offload must carry the caller's CONTEXT, not just its work.
-
-    ``gate_context`` warns that a ContextVar is inherited by asyncio tasks but NOT by raw
-    threads. ``PydanticAIRunner.run`` calls ``assert_gated("agentic filesystem tools")``,
-    which reads the ``_in_gate_session`` ContextVar — so an offload that hands the drive to
-    a bare worker would make every AGENTIC run under MCP fail closed with "not in a gate
-    session", trading one loop bug for a worse one. The offline ``model_override`` harness
-    is exempt from ``assert_gated``, so no other test in this file would notice: this one
-    pins the propagation directly, at the seam that performs it.
+    """The runner's thread offload must copy the gate-session ContextVar. A bare worker
+    thread loses that context, so assert_gated would refuse agentic filesystem tools
+    even though the caller entered a gate session.
     """
     from rebar.llm.gate_context import gate_session, in_gate_session, use_code_root
     from rebar.llm.model_classes import drive_off_event_loop

@@ -1,10 +1,6 @@
-"""Regression test for the `_json_or` opportunistic narrowing (epic ring-gun-jot, 8d01).
-
-`rebar._json_or` previously caught a blind `except Exception` and returned a sentinel
-default on ANY failure — masking genuine bugs (e.g. a TypeError from passing a non-str)
-in the `import rebar` hot path. It was narrowed to `json.JSONDecodeError`, the only
-expected failure (malformed/empty quality-gate subprocess output). This test pins both
-the preserved fail-soft behavior AND the now-unmasked programming error.
+"""_json_or defaults only on JSONDecodeError from malformed subprocess
+output. A programming error such as a non-string input must propagate instead
+of being hidden by a broad exception handler.
 """
 
 from __future__ import annotations

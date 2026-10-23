@@ -1,38 +1,7 @@
-"""Every LLM-calling step in the code-review gate declares its model CLASS (ticket 3768).
-
-One env var cannot express four passes. `code-review.yaml` used to declare a model on exactly ONE
-of its five LLM-calling steps, so the other four inherited the run's single resolved `cfg.model` —
-which is fine on the default Anthropic path and wrong everywhere else: a Bedrock run sent every
-unclassed pass to whatever single model the operator named, losing the deliberate
-opus-for-Pass-1 / sonnet-for-the-verifier split.
-
-THE FIVE LLM STEPS, and the trap in how two of them must declare it:
-
-    base     :67   Pass-1 finder, single-shot   step-level  `model: frontier`
-    round_a  :77   Pass-1 finder, BATCH         inside batch:  `model_ladder: [frontier]`
-    round_b  :109  Pass-1 finder, BATCH         inside batch:  `model_ladder: [frontier]`
-    verify   :143  Pass-2 verifier              step-level  `model: standard`   (landed by 172e)
-    coach    :182  Pass-4 coach                 step-level  `model: standard`
-
-A STEP-LEVEL `model:` ON A BATCH STEP IS A SILENT NO-OP — this is the whole reason the batch rows
-look different, and it is why this file asserts WHERE the declaration lives, not merely that one
-exists. `interpreter.py` builds `BatchRunRequest` from the `batch:` sub-dict only
-(`model_ladder=tuple(batch.get("model_ladder") or ())`) and never passes the enclosing step's
-`model:`; `runners.py` computes `resolve_model_string(ladder[0]) if ladder else None`, whose
-comment says an empty ladder means "no per-step model, NOT a resolved class". Because `model` IS a
-legal step key (`schema.py`'s `_STEP_ORDER`), writing it on a batch step VALIDATES CLEANLY and is
-then discarded. A test checking only "every LLM step names a class somewhere" would PASS while
-two Pass-1 fan-outs silently kept inheriting `cfg.model`.
-
-WHY ONE RUNG, NOT plan-review's `[trivial, standard, frontier]`: a multi-rung ladder escalates
-criterion, so the model that answers a given criterion is not determinate — and this ticket's
-criterion requires asserting THE resolved model per pass. One rung keeps that assertion writable.
-Adopting escalation for cost is a separate change with a different oracle.
-
-`resolve_verifier_model` is deliberately NOT involved. It still carries the superseded equality rule
-but has zero callers under `src/rebar`, pinned by
-`test_code_review_verifier_class.py::test_the_superseded_equality_rule_has_no_production_consumers`.
-Adding a caller would reintroduce the defect 172e removed.
+"""Each code-review LLM pass declares a model class. Base uses frontier,
+Round A and B set frontier inside their batch model_ladder, and verify and
+coach use standard. A step-level model on a batch step parses but is ignored,
+so tests pin declaration placement and Bedrock provider resolution.
 """
 
 from __future__ import annotations
@@ -92,12 +61,9 @@ def test_every_llm_step_declares_the_expected_class() -> None:
 
 
 def test_the_batch_steps_declare_inside_batch_not_at_step_level() -> None:
-    """THE NO-OP GUARD, and the reason this file exists in this shape.
-
-    `model:` at step level on a batch step parses fine and is then thrown away, so "fixing" these
-    two steps that way would leave both Pass-1 fan-outs on `cfg.model` while every
-    declaration-exists check still passed. Assert the declaration sits where the batch runner reads
-    it, and that the decoy key is absent.
+    """Batch model_ladder must carry each Pass-1 class inside batch config.
+    A step-level model key on a batch step is accepted by the schema but ignored
+    by the batch runner.
     """
     steps = _steps()
     for sid in _BATCH_STEPS:
@@ -161,9 +127,9 @@ def test_the_resolved_model_per_pass_follows_a_bedrock_configuration(monkeypatch
 
 
 def test_no_pass_resolves_to_anthropic_when_configured_for_bedrock(monkeypatch, tmp_path) -> None:
-    """The cross-provider guard. A bare `claude-*` id infers provider `anthropic`, so if any pass
-    resolved to a bare name the gate would send that pass to DIRECT ANTHROPIC during a Bedrock run —
-    a split brain where the pass doing most of the work never reaches the provider under test."""
+    """During a Bedrock review, every pass must resolve to Bedrock. A bare
+    Claude id would select direct Anthropic and split the gate across providers.
+    """
     cfg_file = tmp_path / "classes.toml"
     cfg_file.write_text(
         "[llm.model_classes]\n"

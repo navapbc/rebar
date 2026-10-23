@@ -1,28 +1,8 @@
-"""Bug 895c — a provider-native structured-output grammar rebar cannot get compiled.
-
-The defect: story 18ae's exact-model-id row set ``native_structured_output: True`` for
-``us.anthropic.claude-sonnet-4-6``, which flipped that model from ``PromptedOutput`` to
-``NativeOutput``. rebar then sent Bedrock the Pass-2 verification contract as a JSON Schema for
-constrained decoding. Anthropic compiles that schema into a grammar under a documented
-**180-second compilation timeout** and a documented **24-optional-parameter** complexity cap; the
-verification contracts carry 22-36 optional parameters (every field declares a ``default=``, so
-every field is optional in JSON Schema). Bedrock answered HTTP 400 ``ValidationException`` —
-"Grammar compilation timed out" (~185s) or "Schema is too complex" (~50-60s) — 27 times across
-both gates, and every review degraded to INDETERMINATE/unsigned.
-
-MEASURED live (us-east-1, serial, one variable changed at a time):
-
-    review_result             10 optional  NATIVE  OK      14.0s
-    completion_verdict        14 optional  NATIVE  OK      29.0s
-    verification              22 optional  NATIVE  FAIL   185.3s   <- fails UNDER the published cap
-    plan_review_verification  31 optional  NATIVE  FAIL   185.4s
-    code_review_verification  36 optional  NATIVE  FAIL   185.4s
-    plan_review_verification  (identical payload, PROMPTED)  OK     11.2s
-
-The bound is therefore set BELOW Anthropic's published 24 — ``verification`` proves the published
-number under-predicts. These tests assert only through the PUBLIC seams (``output_mode`` and the
-failure translator), never an internal helper name, so a behaviour-preserving refactor cannot
-redden them.
+"""Provider-native schema compilation can reject complex verification contracts.
+These tests pin the public output-mode fallback and translate both Bedrock grammar
+timeouts and schema-complexity errors without reporting a provider outage. The
+bound stays below the published optional-parameter limit because a 22-optional
+verification contract failed in the measured provider call.
 """
 
 from __future__ import annotations
@@ -147,14 +127,9 @@ def test_a_non_native_model_is_unaffected_by_the_complexity_gate():
 
 
 def test_schema_complexity_rejection_is_translated_not_reported_as_an_outage():
-    """AC1. A schema-complexity rejection is a PERMANENT property of the request — retrying is
-    guaranteed to fail (it did, 27 times, at ~185s each). Reporting it as a generic provider
-    outage tells the operator to wait for a provider that is not down.
-
-    Both wire shapes are modelled, exactly as the sibling sampling-parameter translator's test
-    does: pydantic-ai's ModelHTTPError carries ``status_code`` as an ATTRIBUTE, while boto3 puts
-    ``ValidationException`` in the text with no status code. The message strings are the
-    MEASURED ones, not invented.
+    """Schema-complexity rejection is permanent for the request, so it must not be
+    reported as a transient outage. The translator handles both pydantic-ai's
+    status_code attribute and boto3's text-only ValidationException.
     """
     from rebar.llm.failure import translate_schema_complexity_rejection
 
@@ -204,17 +179,9 @@ def test_unrelated_provider_failures_are_not_swallowed_by_the_translation():
         ), f"must not translate an unrelated failure: {unrelated}"
 
 
-# ── Variant B: the client-side rejection (added AFTER the fix existed) ──────────────────────
-#
-# HONESTY NOTE: unlike everything above, these two were written after the implementation, so
-# they were never observed RED-first against an unfixed tree. They are mutation-verified
-# instead — removing the variant-B rule turns them red — which is weaker evidence than
-# RED-first but stronger than an unmutated assertion. Recorded rather than glossed.
-#
-# The measured failure (botocore 1.40.61, main checkout): a native call is rejected by boto3
-# BEFORE it is sent, in 0.0s, for EVERY contract however small — `ticket_digest` is 722 bytes.
-# So this variant is not about complexity at all, and its message shares no vocabulary with
-# variant A: a translator matching only variant A's phrases would miss it entirely.
+# Botocore can reject native outputConfig before sending a request, even for a
+# small contract. This client-side message differs from provider grammar failures.
+# The mutation-checked tests cover that separate translation rule.
 
 
 def test_the_client_side_outputConfig_rejection_is_also_translated():

@@ -1,18 +1,7 @@
-"""Criteria-synonym normalization before routing (ticket d890-e711-156e-444b).
-
-On the code-v3 corpus the model emitted ``sec`` (8) and ``documentation`` (5) — synonyms of
-the packaged criteria ``security`` and ``docs``. Because they matched no known criterion id
-they fell to the default 0.95 posture instead of their criterion's tuned routing.
-``registry.normalize_criteria`` is a synonym MAPPING, not a whitelist: a label already
-present in the EFFECTIVE vocabulary (project overlay included, never the packaged index
-alone) is never rewritten; a ``CRITERIA_SYNONYMS`` key maps to its canonical id; any other
-label passes through UNCHANGED, so prompt-specified open dimensions (maintainability /
-correctness / edge-cases) and project criteria are unaffected. ``code_review_decide``
-applies it BEFORE the pass3 threshold lookup and before nit-suppression, so a normalized
-label gets its criterion's tuned routing.
-
-Proving command:
-    .venv/bin/pytest tests/unit/test_code_review_criteria_normalization.py -v
+"""Normalize code-review criterion synonyms before threshold routing and nit
+suppression. Labels in the effective vocabulary, including project criteria,
+remain unchanged. Known synonyms map to their canonical ids, while unknown
+open dimensions pass through.
 """
 
 from __future__ import annotations

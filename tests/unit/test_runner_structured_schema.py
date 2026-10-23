@@ -1,17 +1,7 @@
-"""The prompted structured-output path MUST convey the output schema to the model.
-
-Root cause (epic 5ca8 / joe-debug): the Anthropic ``PromptedOutput`` path in
-``_pai_structured`` generated FREE TEXT without telling the model the JSON shape, so
-the model emitted plausible-but-divergent keys (e.g. ``{"findings": [{"attributes",
-"sub_answers"}]}`` instead of ``{"verifications": [{"severity_attributes",
-"binary"}]}``). Tolerant parsing then found no ``verifications`` key and defaulted to
-an EMPTY list — so every plan-review finding got ``no-verification`` and the verdict
-was forced INDETERMINATE.
-
-This test pins the load-bearing CONTRACT: a ``mode="structured"`` run conveys the
-output schema to the model. The FunctionModel emits the correct shape ONLY when the
-schema reached its prompt, and otherwise reproduces the real divergent shape — so the
-run yields usable structured output iff the schema was conveyed.
+"""Prompted structured output must include its schema in the model prompt. A model
+that does not see the schema can return plausible keys without verifications, which
+the parser treats as an empty list and forces an indeterminate verdict. The fake
+model returns the expected shape only when the schema is present.
 """
 
 from __future__ import annotations

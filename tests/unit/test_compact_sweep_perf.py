@@ -1,27 +1,7 @@
-"""The store-wide sweep must not walk git history per ticket, or under the store lock
-(bug mesodermic-vaporish-seaslug).
-
-THE DEFECT. `_compact_locked` built each SNAPSHOT's authorship ledger via
-`_build_authorship_ledger`, which ran `build_ticket_position_commit_map` — one
-`git log --full-history` walk PER TICKET, INSIDE the store write lock. Live operator
-profiling: "the compaction spawns a fresh git log --full-history child every few seconds, each
-at ~100% CPU, holding the global write lock throughout."
-
-This is bug 7084 one scale up. 7084 found the same walk running per signed EVENT (6.78s/event
-on a 71,041-commit branch; 47.5s of a 48.1s compact-on-close whose real mutation is ~0.4s) and
-batched it to per-TICKET — correct for compact-on-close, which folds ONE ticket. Once
-`compact-all` became the standing sweep, per-ticket became the new per-event.
-
-THE FIX. `git log` is read-only and never needed the lock: the sweep builds ONE position→commit
-map before taking any lock and threads it into every fold, so no walk runs inside the critical
-section and the whole run costs one walk.
-
-The walk-count assertions here are deliberately structural — they count invocations, never
-elapsed time — and they count BOTH the per-sweep builder AND the per-ticket/per-event
-resolvers. That second half is the point: the path-keyed `build_introducing_commit_map` looks
-equally applicable but would miss every lookup (the ledger queries by POSITION), so every event
-would fall silently back to a per-event walk with identical output and unchanged cost. A
-ledger-parity test cannot catch that; a fallback count can.
+"""A store-wide sweep builds one position-to-commit map before taking the
+write lock and shares it across ticket folds. Tests count both map builds
+and fallback history walks so a map keyed by the wrong identity cannot
+silently restore per-event git log work.
 """
 
 from __future__ import annotations
@@ -89,21 +69,10 @@ def _age(tdir: Path, by_ns: int = _HOUR_NS) -> None:
 
 
 def _sign_and_commit(repo: Path, tdir: Path) -> None:
-    """Give every live event an ``author_sig`` and COMMIT the result.
-
-    Both halves are load-bearing, and their absence made three assertions in this file vacuous
-    before the review caught it:
-
-    * `_build_authorship_ledger` SKIPS any event without an `author_sig`, so an unsigned
-      fixture produces an EMPTY ledger — a parity assertion then compares `[] == []` and a
-      "no per-event fallback" assertion holds because the map is never consulted at all.
-    * the position map is built from `git log`, so an event that is not COMMITTED cannot be in
-      it; the ledger would fall back to the per-event resolver and the fixture would prove the
-      opposite of what it claims.
-
-    The signature is synthetic: `identify_signer` will fail to resolve it and record a null
-    `signer_pubkey`, which is the documented behaviour for a foreign/forged signature — the
-    entry is still recorded, which is all these tests need.
+    """Commit each signed fixture event before building the authorship ledger.
+    Unsigned events are skipped, and uncommitted events are absent from the git
+    position map. A synthetic signature still produces a ledger entry with an
+    unresolved signer key.
     """
     for path in sorted(tdir.glob("*.json")):
         if path.name.startswith("."):
@@ -249,14 +218,8 @@ def test_ledger_is_identical_with_and_without_a_prebuilt_map(store: Path) -> Non
 
 
 def test_the_map_argument_is_optional_for_the_rebuild_path(store: Path) -> None:
-    """`compact_rebuild` calls `_build_authorship_ledger` WITHOUT the new argument, so omitting
-    it must keep working — the compatibility contract that lets the rebuild path stay untouched.
-
-    Asserts the ledger's CONTENT, not just its type. An earlier version of this test checked
-    only `isinstance(ledger, list)`, which `_build_authorship_ledger` returns for essentially
-    any input: a broken `None`-default branch yielding empty or wrong `commit_sha` values would
-    have sailed through it. A test that cannot fail is worse than no test, because it reads as
-    coverage.
+    """compact_rebuild omits the optional position map. The ledger must still
+    contain the expected commit SHAs, not merely return a list.
     """
     from rebar.attest import authorship
 
@@ -287,15 +250,8 @@ def test_the_map_argument_is_optional_for_the_rebuild_path(store: Path) -> None:
 
 # ── the compaction commit contains only what the sweep folded ────────────────────────────────
 def test_the_sweep_commit_does_not_steal_a_concurrent_writers_event(store: Path) -> None:
-    """`git add -A` staged the whole worktree, so a concurrent writer's event file — present
-    for the milliseconds between its rename and its own commit — was swept into the compaction
-    commit and landed under a "chore: backfill SNAPSHOT files" message. Not data loss, but
-    another session's event committed by us, under a message that does not describe it.
-
-    The bystander is a SETTLED ticket: already folded, and below the threshold afterwards, so
-    the sweep has no business touching it. That is the faithful shape — a quiet ticket someone
-    else is appending to — and it is what makes the assertion meaningful. A bystander that the
-    sweep would legitimately fold proves nothing, because staging its directory is then correct.
+    """The sweep stages only its fold paths. A concurrent writer's event in
+    a settled bystander ticket must remain outside the compaction commit.
     """
     repo = store
     tid = _seed(repo, "swept", comments=3)
@@ -379,13 +335,9 @@ def test_the_sweep_yields_when_a_writer_takes_the_lock_mid_run(
 def test_a_failed_map_build_degrades_to_per_ticket_not_per_event(
     store: Path, monkeypatch: pytest.MonkeyPatch, walk_counts: dict[str, int]
 ) -> None:
-    """`_build_authorship_ledger` rebuilds its own per-ticket map only when the argument IS
-    NONE. An empty dict is a perfectly valid map that just misses every lookup, so handing it
-    `{}` on a git failure would send every event down the per-EVENT fallback INSIDE the store
-    write lock — not a degradation to the old behaviour but the full bug-7084 pathology, worse
-    than the per-ticket walk this change removes.
-
-    So a failed build must yield None, and the folds must fall back to one walk PER TICKET.
+    """A failed sweep map build passes None so each ticket builds one fallback
+    map. Passing an empty dict would miss every position and trigger per-event
+    history walks under the write lock.
     """
     from rebar.attest import authorship
 

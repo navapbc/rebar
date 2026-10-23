@@ -19,18 +19,11 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture(autouse=True)
 def _local_gate_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin THIS module to the in-place (``local``) gate read.
-
-    These are unit tests of WS4 gate DISPATCH logic (enabled/disabled/override/degrade)
-    over a bare diff string — they own no repo, so under the suite-wide
-    ``attested``/``ref=HEAD`` default (tests/conftest.py) ``resolve_gate_handle`` targets
-    the AMBIENT checkout via the snapshot layer's cwd fallback. On CI's shallow,
-    blobless-fetched checkout, ``materialize_tickets`` then degenerates into per-object
-    lazy HTTPS fetching inside ``git checkout-index`` — the mechanism that hung every
-    pytest lane at 99% for hours (bug hunt on 72d9/968; faulthandler stacks pinned the
-    blocked frame to exactly these tests). A local read is the correct repo-less
-    semantics here and is what these tests always exercised before the suite default
-    flipped; code-review results are unsigned under either source."""
+    """These repo-less WS4 dispatch tests use a local gate read. An attested
+    read would snapshot the ambient checkout and fetch tickets unnecessarily,
+    while the tests only exercise enabled, disabled, override, and degrade logic
+    over a supplied diff.
+    """
     monkeypatch.setenv("REBAR_GATE_SOURCE", "local")
     monkeypatch.delenv("REBAR_GATE_REF", raising=False)
 
@@ -76,12 +69,9 @@ def test_produce_verdict_disabled_is_inert_and_makes_zero_llm_calls(monkeypatch)
 
 
 def test_review_code_runs_gate_even_when_config_key_is_off(monkeypatch):
-    # Bug 5b32-37c4-f99a-4315: an explicit `review_code()` call (CLI `rebar review-code`,
-    # library, MCP) IS the operator's statement of intent — `verify.enable_code_review` must
-    # not gate its AVAILABILITY (mirroring review-plan, where config controls whether the
-    # gate is REQUIRED, never whether the operation is invocable). The config key keeps its
-    # enablement meaning only for dispatch-level callers that leave `enabled=None`
-    # (test_produce_verdict_disabled_is_inert_and_makes_zero_llm_calls above).
+    # An explicit review_code call runs even when verify.enable_code_review is
+    # off. That setting controls required automatic dispatch when enabled is unset,
+    # not the availability of an operator-requested review.
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: False)
     from rebar.llm.code_review import detectors as _det
     from rebar.llm.code_review import review_code
@@ -264,14 +254,9 @@ def test_sidecar_payload_anchors_on_the_explicit_target_ticket():
 
 
 def test_sidecar_round_trips_a_findings_pass2_verification_block():
-    """Regression pin (bug abdominal-grieving-nandu): the Pass-2 ``verification`` block must
-    survive into the persisted payload, in every findings bucket.
-
-    ``build_payload`` persists findings by FIELD-SPREAD (``_with_norm_ids`` returns
-    ``{**f, "norm_id": ...}``), where plan-review's ``_slim`` is a field-SELECTION that names
-    ``verification`` explicitly. The spread is what makes the block survive today — nothing names
-    it — so a refactor to selection-style would silently drop it and destroy the offline
-    calibration corpus. This pins the outcome, whichever mechanism provides it.
+    """Pass-2 verification must survive into persisted findings in every bucket.
+    The current field-spread payload carries it. A future field-selection rewrite
+    must retain the same observable content.
     """
     from rebar.llm.code_review import sidecar
 

@@ -1,22 +1,7 @@
-"""Single definitions for the token-identical helpers (story 7931-faee-53ba-47b1).
-
-Two helpers exist as byte- or AST-identical twins across modules that never share code:
-
-* ``_ticket_id`` — AST-identical in ``llm/workflow/steps.py`` and
-  ``llm/plan_review/decide_ops.py``;
-* ``_positive_int`` — three identical argparse converters (``reconciler/request.py``,
-  ``_cli/_parsers/advanced/bridge.py``, ``_cli/_parsers/advanced/reconcile.py``).
-
-(The diagnostic-only ``_shadow``/``emit_shadow_snapshot`` twin this file used to guard was
-retired once ticket ec44 migrated its last two callers — ``_mcp_llm`` and ``_lib_ops`` — onto
-the authoritative ``compose_and_bind_llm_config`` / ``compose_and_bind_operation_snapshot``
-bindings; see ``tests/unit/test_operation_snapshot.py`` and
-``tests/interfaces/contracts/test_llm_config_authoritative_binding.py`` for its successor
-coverage.)
-
-These helpers carry no distinctive atom to scan for, so the guard is the definition COUNT —
-branch 4 of the parent epic's guard rule. The behavioural tests below exist because a
-definition count alone would be satisfied by a helper that forwards the WRONG arguments.
+"""Count the definitions of _ticket_id and _positive_int across their modules.
+The former has two AST-identical copies. The latter has three argparse copies.
+Behavioral tests ensure a helper with the right name still forwards the right
+arguments. The retired snapshot-binding twin has separate successor coverage.
 """
 
 from __future__ import annotations

@@ -1,15 +1,7 @@
-"""HELD-OUT oracle for TS2 (09f9) — the implementation MUST NOT see this file.
-
-The security-critical git-commit-ancestry key-validity behaviour (replacing HLC-epoch):
-- the resolved key record binds real tickets-branch commit SHAs (added/revoked);
-- an unsigned NON-genesis key-add is refused;
-- validity respects the revocation boundary via commit ancestry (pass before, fail after);
-- a BACKDATED filename timestamp does NOT change the governing commit — the killer test
-  that commit-ancestry beats HLC backdating;
-- intra-commit refinement orders a KEY event vs an event in the SAME commit by position;
-- git failures are fail-closed (non-verified, never raise);
-- replay never rejects and the HLC-epoch surface is gone; the reducer stays pure.
-Observable behaviour only.
+"""Held-out TS2 checks bind key additions and revocations to tickets-branch commit
+ancestry. A backdated event filename cannot move the governing commit. Same-commit
+event order refines validity, unsigned non-genesis key additions fail, and git
+errors fail closed without breaking replay.
 """
 
 from __future__ import annotations

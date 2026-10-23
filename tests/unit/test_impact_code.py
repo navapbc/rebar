@@ -1,29 +1,8 @@
-"""Code-review impact model — code-v4 (bug obese-dihedral-ermine).
-
-Covers ``decide.impact_code``, the code-v4 maintainability-lane split (serious undamped /
-moderate prod_impact-keyed / debt churn-amplifier-only), the two lane-scoped trigger maps
-derived from the single ``trigger_likelihood`` field, the consequence-lane-only reversibility
-floor, the new serious-maint binary ``forbids_contract_allowed_state``, the per-gate
-``impact_fn`` dispatch, the DET-enrichment helpers, and the labeled-fixture calibration
-(HIGH vs NIT separation) re-verified under v4.
-
-v4 model (per lane, all ∈ [0,1]):
-  prod_lane      = MAX(tier of TRUE prod binaries) × prod_trigger_mult
-                   (common 1.0 / sometimes 0.6 / rare 0.25)
-  serious_maint  = MAX(tier of TRUE serious-maint binaries) × 1.0   (UNDAMPED — no churn)
-  moderate_maint = MAX(tier of TRUE moderate-maint binaries)
-                   × prod_impact_mult(high/med 1.0, low 0.6, none 0.5)
-                   × moderate_trigger_mult(rare 0.75, sometimes/common 1.0)
-  debt_lane      = MAX(tier of TRUE debt binaries) × churn_amp
-                   (churn_amp = 1.0 + 0.5·min(churn90,30)/30 ∈ [1.0,1.5] — AMPLIFIER ONLY)
-  impact_base      = MAX over the four lanes
-  consequence_base = MAX(prod, serious_maint, moderate_maint)   (EXCLUDES debt)
-  amp   = 1.0 if silent_failure|escapes_automation else 0.8
-  floor = 0.6 iff consequence_base > 0 AND hard_to_reverse_surface (debt NEVER floors)
-  impact = round(max(min(1.0, impact_base × amp), floor), 4)
-
-Proving command:
-    .venv/bin/pytest tests/unit/test_impact_code.py -v
+"""Code-v4 impact tests pin four lanes. Production impact uses trigger
+likelihood, serious maintainability is undamped, moderate maintainability uses
+production impact and trigger factors, and debt uses churn as an amplifier only.
+The reversibility floor excludes debt. Tests also pin per-gate dispatch and
+calibrated high-versus-nit decisions.
 """
 
 from __future__ import annotations
@@ -442,11 +421,10 @@ def test_version_signal_alone_abstains() -> None:
 
 
 def test_citric_preregal_ladybird_replay_clears_flips() -> None:
-    # The escaped FN: [regression, deletion-impact, tests] finding naming the removed public
-    # API rebar.llm.review_ticket + a broken external test was labeled capability_degraded +
-    # reachable_path_without_automated_coverage with trigger rare — impact 0.30-shaped, below
-    # deletion-impact@0.60 / api-compat@0.51. With the export-keyed removed-public-symbol
-    # sub-answer set (and no version signal) it clears both flips.
+    # A removed public review_ticket export with a broken external test is a
+    # reachable untested regression, not rare low-impact debt. The export-keyed
+    # removed-symbol answer raises impact enough to clear deletion-impact and
+    # api-compat blocking thresholds without relying on a version signal.
     citric = {
         "capability_degraded": True,
         "reachable_path_without_automated_coverage": True,

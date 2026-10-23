@@ -1,17 +1,7 @@
-"""The four-pass code-review gate must run its agentic passes inside the SAME snapshot-gate
-session pattern as every other code-reading gate (operations.review_ticket / review_plan /
-verify_completion): ``resolve_gate_handle -> apply_handle -> gate_read_root``, in ATTESTED
-mode, so the agent gets BOTH a pinned code snapshot AND a pinned clone of the ticket store.
-
-The ticket-store clone is the load-bearing REQUIREMENT (epic raze-vet-ditch): the reviewed
-project's tickets live on the orphan ``tickets`` branch, ABSENT from any code checkout, so
-without it the agent's rebar ticket tools error on a missing ``.tickets-tracker`` and cannot
-use the ticket system. Two regressions this pins: (1) the WS4 single->four-pass swap
-(``produce_code_review_verdict``) dropped the ``gate_read_root`` wrapping the retired
-single-pass ``review_code`` had, so a real ``PydanticAIRunner`` review fail-closed at the
-'base' step; (2) a first remediation used LOCAL mode — which marks the session but does NOT
-materialize the ticket clone — so the agent still had no ticket access. The gate must run
-ATTESTED (like plan review), with both the code root AND the ticket root active.
+"""Code review runs agentic passes in an attested gate session with a pinned
+code snapshot and tickets-branch clone. Both roots must be active so ticket
+tools can read the reviewed project's store while code tools read the pinned
+tree.
 """
 
 from __future__ import annotations
@@ -147,18 +137,10 @@ def test_code_review_gate_runs_attested_with_code_and_ticket_roots(
 def test_code_review_gate_runner_is_rebuilt_from_rerooted_ticket_store(
     repo_with_origin, tmp_path, monkeypatch
 ):
-    """RED for bug pelt-mead-aeon: the runner that EXECUTES the passes must carry the
-    RE-ROOTED cfg (``tickets_path`` = materialized store), not the pre-snapshot cfg.
-
-    ``produce_code_review_verdict`` built ``runner_sel`` from cfg BEFORE ``apply_handle``
-    re-rooted it, then handed that stale runner to the passes. ``get_runner(cfg,
-    override=runner_sel)`` returns the override verbatim and ``PydanticAIRunner.run`` reads
-    its OWN baked-in ``self._config`` — so the agent's ``rebar_tools`` ran against the bare
-    clone (``tickets_path`` None → falls back to ``repo_path``) and errored on a missing
-    ``.tickets-tracker``, casting no vote. This asserts on the RUNNER actually used
-    (``agent_runner._runner._config``), NOT the ``RunnerAgentStep.config`` (which the sibling
-    test already covers), and takes the PRODUCTION path (``runner=None``) so the rebuild is
-    actually exercised — an injected runner would mask it.
+    """The executing runner must be rebuilt after the ticket store is rerooted.
+    An earlier runner retains the bare checkout config and sends ticket tools to
+    a missing store. This test inspects the runner passed to the gate,
+    not only the step config.
     """
     repo, _tid = repo_with_origin
     monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "gate-store"))
