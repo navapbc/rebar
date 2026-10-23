@@ -1,24 +1,7 @@
-"""``_intersect_capabilities`` — cache capability follows the SERVING (primary) provider.
-
-Regression coverage for bug ``96f3-af59-ba26-4159`` (prompt caching silently disabled since
-2026-08-12). ``_intersect_capabilities`` used to collapse ``prompt_cache_style`` to ``"none"``
-whenever a fallback chain's candidates disagreed, on the premise that provider-specific cache
-keys "would error on the candidate that does not share it". That premise is FALSE: the cache
-directive is a set of provider-scoped ``ModelSettings`` keys (``bedrock_cache_*`` vs
-``anthropic_cache_*``); ``pydantic_ai.settings.merge_model_settings`` is a plain dict union with
-no key validation, and each provider model reads ONLY its own ``*_cache_*`` keys via
-``model_settings.get(...)`` — so a foreign key is a silent ``.get()`` miss, never an error
-(mirrors LiteLLM: an inapplicable/below-threshold cache directive is "silently skipped … no
-error is returned").
-
-Therefore cache capability is a property of the RESOLVED serving model and must follow the
-PRIMARY candidate (which serves ~99.6% of calls per ``.rebar/usage.jsonl``); a rare fallback
-runs uncached-but-correct. Fields that CAN hard-fail cross-provider (``supports_temperature`` →
-HTTP 400, native-output routing, thinking, web provenance) stay conservatively intersected.
-
-Authoritative contract: operator decision on ticket 96f3-af59 (reverses the documented intent in
-``rebar.toml`` [llm.model_classes] and ADR 0059 §7), grounded in the proven ignored-not-errored
-behavior of the pinned pydantic-ai.
+"""Prompt caching follows the serving primary provider. Provider-specific cache
+settings are ignored by another provider, so a fallback can run uncached. In
+contrast, temperature, native output, thinking, and web-provenance settings can
+fail across providers and remain conservatively intersected.
 """
 
 from __future__ import annotations
@@ -96,16 +79,11 @@ def test_hard_fail_fields_stay_conservatively_intersected_on_mixed_chain():
 
 @pytest.mark.parametrize("execution_mode", ["single", "agentic"])
 def test_fallback_fires_primary_cache_directive_is_inert_on_anthropic_arm(execution_mode):
-    """THE soundness proof for option (a): when the rare Anthropic fallback ACTUALLY serves, the
-    Bedrock-primary cache directive it receives must be a no-op, NOT a provider rejection.
-
-    This is the exact hazard the old collapse-to-none claimed to prevent. It refutes that premise
-    at the seam: the chain (Bedrock primary) yields ``"bedrock"``, ``cache_settings_for`` emits
-    ONLY ``bedrock_cache_*`` keys, and merging them into the Anthropic arm's settings (the plain
-    dict union pydantic-ai performs per candidate) leaves every ``anthropic_cache_*`` read — the
-    only keys ``AnthropicModel`` consults — as ``None``. So the fallback applies no caching, adds
-    no top-level ``cache_control``, and cannot reach the ``anthropic_cache`` /
-    ``anthropic_cache_messages`` mutual-exclusion ``UserError``: uncached-but-correct, no error."""
+    """A Bedrock-primary cache directive is inert on an Anthropic fallback. The
+    settings merge retains bedrock_cache keys, while Anthropic reads only
+    anthropic_cache keys. The fallback therefore runs uncached without a provider
+    rejection or mutually exclusive cache settings.
+    """
     from pydantic_ai.models.anthropic import AnthropicModelSettings
     from pydantic_ai.settings import merge_model_settings
 

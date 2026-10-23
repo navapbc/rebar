@@ -1,22 +1,6 @@
-"""Code review's Pass-2 verifier resolves the `standard` class (task 172e, the remaining gap).
-
-Change 1119 moved plan-review's `_verifier_cfg` and the completion verifier onto the standard
-class; `tests/unit/test_verifier_class.py` covers those. CODE REVIEW was left behind, and it was
-the worst-affected path: `workflow/gates/code-review.yaml`'s `verify` step declared no `model:` at
-all, so it fell through to `cfg.model` — the FRONTIER model. Two measured consequences:
-
-* no cost downgrade on Pass-2, the pass that runs once per merged finding;
-* the step's `temperature: 0` NEVER took effect. pydantic-ai's Anthropic adapter silently drops
-  temperature for the frontier model, so the greedy determinism the verification contract depends
-  on was never actually in force.
-
-Adding `model: standard` only became possible once sibling 7761 taught `config.resolve_model` to
-resolve reserved class names; before that it would have passed the LITERAL string `standard` to the
-runner as if it were a model id. The workflow engine reaches it at `workflow/runs.py`:
-`resolve_model(cfg, step=ctx.step.get("model"), workflow=ctx.workflow.get("model"))`.
-
-THE OBSERVABLE here is the model id the engine would resolve for that step — the YAML declaration
-run through the real `resolve_model` — not a hand-rolled reimplementation of the lookup.
+"""The code-review Pass-2 verifier resolves the standard model class.
+Tests run the workflow declaration through its resolver so a missing
+model key cannot silently inherit the frontier default.
 """
 
 from __future__ import annotations
@@ -170,15 +154,9 @@ def test_a_literal_step_model_still_round_trips_unchanged(bedrock_classes) -> No
 
 
 def test_the_superseded_equality_rule_has_no_production_consumers() -> None:
-    """AC: enumerate the consumers of `resolve_verifier_model` and assert none selects a verifier
-    by equality against the default model.
-
-    `review_kernel.verify.resolve_verifier_model` still carries the SUPERSEDED rule
-    (`verifier_default if model == default_model else model`) and remains exported + documented in
-    docs/review-kernel.md, so it is deliberately not deleted here. What must stay true is that
-    NOTHING under src/rebar calls it: a new caller would silently reintroduce the exact defect
-    172e removed, because provider-qualifying a model defeats the equality test. If this fails,
-    either drop the new call site or finish retiring the helper — do not relax the assertion.
+    """No src/rebar caller may select a verifier through the superseded
+    resolve_verifier_model equality rule. A provider-qualified model can defeat
+    that comparison, so new callers must use class resolution.
     """
     src = _REPO_ROOT / "src" / "rebar"
     callers = sorted(

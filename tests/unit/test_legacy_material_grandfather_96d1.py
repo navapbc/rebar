@@ -1,17 +1,7 @@
-"""Pre-normalization attestations are grandfathered on read (bug 96d1).
-
-Commit "330c: box flips no longer stale attestations" changed ``material_fingerprint`` to
-normalize AC checkbox state before hashing — with no grandfathering. Every completion
-attestation signed BEFORE that change embeds ``[x]`` in its hash basis (the 433c close gate
-requires all boxes checked at close), so the normalized recompute in ``compute_validity``
-can never match and an UNCHANGED ticket reads ``stale-material``. Cascade: an epic whose
-children were certified pre-330c closes with ``certifiable=False`` and silently lands
-WITHOUT a completion signature (observed on epic 2f4c-7e5c-e782-4e97).
-
-These tests pin the grandfather contract: a signed ``material:`` hash that byte-exactly
-matches the LEGACY (non-normalized) recomputation of the CURRENT ticket material is NOT a
-material edit — nothing changed, not even box state — so validity holds. A real text edit
-still invalidates (the fallback must not weaken staleness detection).
+"""A legacy signed material hash remains valid when it matches the current
+ticket under the pre-normalization fingerprint rule. A text edit still stales
+it. This preserves pre-normalization completion attestations without weakening
+material-change detection.
 """
 
 from __future__ import annotations

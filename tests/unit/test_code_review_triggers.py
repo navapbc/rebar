@@ -1,21 +1,7 @@
-"""S1 (054b decorous-ethnic-xiaosaurus): project-extensible triggers for BUILT-IN code-review
-overlays.
-
-A project ``.rebar/criteria_routing.json`` ``code_review`` entry keyed by a BUILT-IN overlay id
-(a member of ``registry.OVERLAY_IDS``) may carry two ADDITIVE keys:
-
-* ``trigger_tokens`` — literal substrings matched case-sensitively against the added (``+``) and
-  removed (``-``) lines of the unified diff (the ``+++``/``---`` file headers excluded), extending
-  ``registry.content_triggered_overlays``;
-* ``applies_to`` — file globs UNIONED with the overlay's committed globs, extending
-  ``registry.glob_triggered_overlays``.
-
-Both are consumed with ``repo_root`` threaded from the single call site
-``code_review.workflow_ops.overlay_union`` (which reads ``ctx.repo_root``). Oracle: the overlay-id
-lists the trigger functions return, and the ``include_<overlay>`` flags the ``overlay_union`` step
-emits.
-
-This module is the shared home for the concurrency-overlay epic's trigger tests (S1/S2/S5).
+"""Project routing may add trigger_tokens and applies_to globs to built-in
+code-review overlays. Content tokens match diff lines, globs extend committed
+paths, and overlay_union reads the effective routing through repo_root. Tests
+pin both trigger lists and emitted include flags.
 """
 
 from __future__ import annotations
@@ -134,10 +120,8 @@ def test_overlay_union_step_threads_repo_root(tmp_path):
     assert out_no_root["include_performance"] is False
 
 
-# ══════════════════════════════════════════════════════════════════════════════════════════
-# S2 (bd21 errable-tricksome-ape): register the "concurrency" built-in overlay + its COMMITTED
-# high-precision trigger tokens. Happy-path spec (the implementer sees ONLY this block).
-# ══════════════════════════════════════════════════════════════════════════════════════════
+# The built-in concurrency overlay has committed high-precision trigger
+# tokens. This block pins vocabulary membership and those triggers.
 def test_concurrency_registered_in_overlay_vocabulary():
     """The `concurrency` id is a first-class member of the closed overlay vocabulary."""
     assert "concurrency" in reg.OVERLAY_IDS
@@ -228,14 +212,9 @@ def test_overlay_union_emits_include_concurrency():
     assert out2["include_concurrency"] is False
 
 
-# ── S5 dogfood: the PROJECT noisy-tier concurrency tokens fire only under this repo's
-# ── S5 dogfood: the PROJECT noisy-tier concurrency tokens fire only under a project's
-#    effective routing (config-effect contrast, shared test-design standard §6). A `.lock`-style
-#    substring is a project token DELIBERATELY absent from the committed high-precision list, so
-#    it fires the `concurrency` overlay when content_triggered_overlays reads a project overlay,
-#    and does NOT fire under committed-only routing. A test that only parsed the JSON would miss
-#    the read-but-miswired class; this asserts the observable trigger outcome differs across the
-#    two routing states — hermetically, on a fixture overlay.
+# Project-only concurrency tokens must fire under effective project
+# routing but not committed-only routing. A fixture .lock token proves the
+# overlay uses the project configuration instead of merely parsing it.
 def test_project_concurrency_tokens_fire_only_under_repo_routing(tmp_path):
     # HERMETIC mechanism test: a fixture overlay (not this checkout's live config) proves the
     # config-effect contrast, so the mechanism is exercised even if the dogfood entry changes.

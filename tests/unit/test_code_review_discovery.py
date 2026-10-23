@@ -1,21 +1,7 @@
-"""RP-06 S3 — cut code review over to the shared effective-policy discovery kernel.
-
-Behavioral oracle for the cutover: the code-review Round-A/Round-B fan-in now compiles a
-``DiscoveryStagePlan`` from the effective ``CriteriaSnapshot`` and executes it through the
-shared ``review_kernel.execute_stage`` kernel, producing trustworthy per-unit execution FACTS
-(success/shed/failed/skipped/cancelled) that drive:
-
-* the internal discovery TRACE recorded in the batch journal (never in the review response);
-* explicit-budget shedding BEFORE any model call;
-* partial-failure resilience (an exhausted local criterion never erases earlier successes and
-  never blocks independent criteria);
-* the snapshot-driven selection deltas (effective disable/retune, project applicability, project
-  DET) that the shadow-contract comparison allowlists.
-
-The model boundary is faked BELOW the discovery kernel: the fake ``agent_runner`` returns canned
-structured output per prompt, or raises to simulate an RP-01 local exhaustion / systemic outage.
-Assertions are on observable behavior only — the aggregated findings, the exact per-unit trace
-kinds, the journal, and the unchanged public response shape — never private structure.
+"""Code-review discovery compiles effective criteria into a shared stage plan.
+Tests pin per-unit execution facts, budget shedding before model calls,
+independent success after local failure, and snapshot-driven selection while
+the public response shape remains stable.
 """
 
 from __future__ import annotations

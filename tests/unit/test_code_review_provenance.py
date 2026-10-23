@@ -1,16 +1,6 @@
-"""``review_code`` must WIRE its ``ref``/``source`` and STAMP the resulting provenance.
-
-The shim used to declare ``ref``/``source`` and then drop both: neither reached the
-``CodeReviewRequest``, and the returned ``review_result`` carried none of the
-``source``/``verified_at_sha``/``signable`` keys the MCP ``review_code`` tool documents. So
-``--source attested`` silently reviewed the dirty working tree and returned an unsignable
-result indistinguishable from a successful attested run — on the trust boundary that decides
-whether a code review can be signed.
-
-Pinned here: an explicit ``ref`` selects the REVIEWED commit (it lands on the request's
-``head``, which is the one ref the gate pins its snapshot at), ``source`` reaches the request,
-and the returned result carries the provenance of the handle the review ACTUALLY ran under —
-for each ``source`` value.
+"""review_code forwards ref and source into the gate request and returns
+the provenance of the handle actually used. An explicit ref selects the
+reviewed commit. An unpinned tree cannot be reported as signable.
 """
 
 from __future__ import annotations

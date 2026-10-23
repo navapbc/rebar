@@ -1,28 +1,7 @@
-"""Guard for bug 291e-7b48-3f24-41c6: sibling imports under ``scripts/`` need a path insert.
-
-Companion to ``test_tests_import_convention.py`` (bug a371), which AST-scans for
-``tests.``-rooted imports **under** ``tests/``. That guard covers one half of the class; this
-covers the other.
-
-``scripts/`` is not a package and its modules are not installed, so when one script imports
-another by bare name (``canary_bridge`` -> ``alert_dedup``) the import resolves only if
-``scripts/`` already sits on ``sys.path``. It does under ``python scripts/<x>.py`` — the
-script's own directory leads ``sys.path`` — and it does during a FULL test session, because
-``tests/scripts/conftest.py`` inserts repo-root ``scripts/`` at collection time and that
-process-wide side effect leaks into every module collected afterwards.
-
-It does NOT under a subset run. ``tests/unit/test_reconcile_bridge_canary_class.py`` loads
-``scripts/canary_bridge.py`` via ``importlib.util.spec_from_file_location``, which adds no
-path entry; run that file alone and the bare import raises ``ModuleNotFoundError: No module
-named 'alert_dedup'`` while the full suite stays green. The load happens in a module-scoped
-fixture, so the error surfaces at test SETUP rather than at collection — which is why the
-dynamic check below runs the module instead of merely collecting it. A test that passes in
-CI and fails when run directly trains people to distrust the suite, so this is a standing
-guard rather than a one-off repair.
-
-The convention it enforces: any ``scripts/`` module importing an insert-dependent sibling
-must first put that directory on ``sys.path``, derived from ``__file__`` so it holds under
-every invocation style.
+"""A scripts module that imports a sibling by bare name must first insert its
+own directory into sys.path. Full-suite collection can hide a missing insert
+because tests/scripts/conftest.py adds that path globally. This guard also runs
+the affected unit test alone, where importlib's path loader does not add it.
 """
 
 from __future__ import annotations
@@ -140,17 +119,9 @@ def test_every_sibling_import_under_scripts_is_preceded_by_a_path_insert() -> No
 
 
 def test_repro_module_passes_standalone(tmp_path: Path) -> None:
-    """The reported reproduction PASSES when run entirely on its own (bug 291e).
-
-    Runs the BARE ``pytest`` console script from a cwd outside the repository, so neither
-    the repo root nor ``scripts/`` can reach ``sys.path`` by accident — the exact condition
-    under which the reported ``ModuleNotFoundError: No module named 'alert_dedup'`` fired.
-    This is the dynamic counterpart to the static scan above: the scan pins the convention,
-    this pins the observable symptom.
-
-    The module is EXECUTED, not merely collected. The reported failure surfaces when the
-    module-scoped fixture loads ``canary_bridge.py`` by path, so ``--collect-only`` never
-    reaches it and would report green against the live defect.
+    """Run the reproduced unit module with bare pytest from outside the repository.
+    Execute its fixture, since collecting the module alone would not reach the
+    path-loaded canary_bridge import that exposed the missing sibling path.
     """
     console_script = Path(sys.executable).parent / "pytest"
     if not console_script.exists():  # pragma: no cover - environment without the script

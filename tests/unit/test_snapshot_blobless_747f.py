@@ -1,23 +1,7 @@
-"""Bug 747f — the attested snapshot path must not DEPEND on git's lazy blob fetch.
-
-``_fetch_origin`` fetches with ``--filter=blob:none`` unconditionally, which both strips
-blobs from the fetch AND latches the clone into a promisor remote
-(``remote.<name>.promisor=true``). ``_materialize_tree`` then runs ``git read-tree`` (no
-``-u``) + ``git checkout-index``, and *neither* of those primitives implements git's
-batching prefetch: ``prefetch_cache_entries()`` lives in ``unpack-trees.c``'s
-``check_updates()``, which only runs when the working tree is updated, and
-``builtin/checkout-index.c`` has no prefetch at all. So every missing blob becomes its own
-sequential ``git fetch`` RPC — on the ~25k-file tickets tree, hours.
-
-The invariant this file pins is deliberately stronger than "it is fast": with
-``GIT_NO_LAZY_FETCH=1`` set, materialization must still produce the complete tree. That is
-only true if the blobs were obtained up front, in one RPC, rather than lazily one at a
-time. Before the fix this yields ZERO files (``checkout-index`` errors "unable to read
-sha1 file" for every path).
-
-``GIT_NO_LAZY_FETCH`` is documented/user-facing from git 2.45 (it is SILENTLY IGNORED on
-older git, which is exactly why it is usable as a test assertion but must never be a
-production guard), so these tests skip below that floor.
+"""Snapshot materialization must work with GIT_NO_LAZY_FETCH=1. A blobless
+fetch otherwise leaves checkout-index to request missing blobs one at a time.
+The test requires all blobs to be obtained before materialization, and skips
+on Git versions that ignore GIT_NO_LAZY_FETCH.
 """
 
 from __future__ import annotations

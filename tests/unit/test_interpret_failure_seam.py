@@ -1,22 +1,7 @@
-"""``interpret_failure()`` — the except spine lifted out of ``PydanticAIRunner.run()`` (task
-e6bd, ADR 0056 decision 3).
-
-The spine is three arms in a LOAD-BEARING order:
-
-    except UsageLimitExceeded  -> LLMRunnerError   (a step-budget stop, not an outage)
-    except LLMError            -> re-raise         (already typed; just enrich it)
-    except Exception           -> sampling-parameter rejection FIRST, else LLMUnavailableError
-
-Order is the whole contract, and Python's own type lattice hides the bug if it is lost:
-
-* ``UsageLimitExceeded`` is a plain ``Exception``, so a broad-arm-first spine silently
-  reclassifies a budget stop as a provider OUTAGE;
-* ``LLMConfigError`` is a SUBCLASS of ``LLMUnavailableError``, so ``isinstance`` cannot tell a
-  correctly-translated sampling rejection from the broad fallback. Every arm-ordering assertion
-  here therefore checks ``type(...) is``, never ``isinstance``.
-
-These are behavioural assertions on a callable's raised type and attached metadata — no private
-names, no source text — so a later rename or re-extraction inside the cluster does not break them.
+"""interpret_failure preserves exception ordering. UsageLimitExceeded becomes
+a typed budget stop, existing LLMError keeps its type, and other failures first
+check for sampling-parameter rejection before becoming LLMUnavailableError.
+Tests compare exact types because LLMConfigError subclasses LLMUnavailableError.
 """
 
 from __future__ import annotations
@@ -76,11 +61,10 @@ def test_step_budget_stop_becomes_a_runner_error():
 
 
 def test_step_budget_stop_raises_the_typed_budget_subclass():
-    """fd84: the budget stop must be identifiable PURELY BY TYPE. interpret_failure attaches
-    the same run_shape() dict (same key set) to every exception it raises, so diagnostic-
-    shape sniffing cannot tell the budget branch from a sampling rejection or an outage; the
-    subclass is the only reliable discriminator, and it is what routes the completion gate
-    into bounded recovery instead of propagating verdict-less."""
+    """A step-budget stop has its own exception type even though other failures
+    carry the same diagnostic shape. That type routes completion into bounded
+    recovery instead of an outage path.
+    """
     with pytest.raises(LLMRunnerError) as caught:
         interpret_failure(UsageLimitExceeded("limit"), [], _ctx())
     assert type(caught.value) is LLMBudgetExhaustedError, (
@@ -114,11 +98,10 @@ def test_an_unknown_provider_failure_becomes_llm_unavailable():
 
 
 def test_a_sampling_rejection_is_translated_before_the_broad_classification():
-    """THE ordering property. A sampling-parameter rejection must become the typed config
-    error, which is actionable, rather than the opaque outage the broad arm produces.
-
-    ``type(...) is`` is mandatory: LLMConfigError subclasses LLMUnavailableError, so an
-    isinstance check would pass even if the translation were dropped entirely."""
+    """Translate a sampling-parameter rejection before the generic outage arm.
+    Check exact type because LLMConfigError is a subclass of LLMUnavailableError
+    and an isinstance assertion would miss the ordering regression.
+    """
     with pytest.raises(LLMUnavailableError) as caught:
         interpret_failure(_Rejection(), [], _ctx())
     assert type(caught.value) is LLMConfigError, (

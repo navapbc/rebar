@@ -1,23 +1,7 @@
-"""Crash-atomic compaction fold (bug compulsory-pernickety-mantis, e72e-259d-5ee7-4e73).
-
-THE DEFECT. The fold mutated the SHARED tracker worktree in separate, unguarded steps —
-SNAPSHOT write, source retirement (``*.retired`` renames), ``git add`` + commit — with no
-whole-fold atomicity. A detached sweep worker that died, was SIGKILLed, or hit any exception
-between the first mutation and the commit left the tree DIRTY (an untracked SNAPSHOT plus
-tracked-file deletions), which then wedged every session sharing the store:
-``sync._union_merge``'s ``git merge origin/tickets`` aborts on a dirty tree, stranding local
-ticket commits off origin.
-
-THE INVARIANT (asserted here): at every instant the tracker worktree is either in the
-pre-fold state or the fully-committed post-fold state. A killed worker leaves nothing dirty
-that the next sweep does not converge, and recovery is idempotent.
-
-THE MECHANISM: an INTENT JOURNAL (commit-pending sentinel) written OUTSIDE the worktree
-(under the tracker's git dir) before the first mutation, discarded on every completed
-outcome. Recovery reverts ONLY a live journal whose recorded snapshot exists on disk and is
-not in HEAD — so the intentionally-retained SNAPSHOT_INCONSISTENT state (which has no
-journal by construction) is never touched, and ``fsck --repair-snapshots`` remains its sole
-owner.
+"""A fold must leave the shared tracker in either its prior state or a
+committed snapshot state after a crash. An intent journal outside the worktree
+guides idempotent recovery without touching intentionally inconsistent
+snapshots that belong to fsck repair.
 """
 
 from __future__ import annotations

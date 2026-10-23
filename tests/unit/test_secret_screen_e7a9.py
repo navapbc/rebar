@@ -1,30 +1,8 @@
-"""The event-write seam must REFUSE secret-bearing bodies (bug e7a9).
-
-On 2026-08-03 a session posted a comment carrying a full environment dump with seven
-live credentials. GitHub push protection then rejected ``refs/heads/tickets`` (GH013),
-so EVERY session's store writes queued local-only — a full store-sharing outage caused
-by one comment. rebar itself had no write-time guard: ``append_event`` accepted any
-body, and the only control that stopped the leak lived outside this project.
-
-The operator decision (recorded on e7a9, 2026-08-07) is **REFUSE, with an allowed force
-override**. Redaction was rejected: silently rewriting a caller's payload makes the
-stored event differ from what the caller believes it wrote, and in an event-sourced
-store that divergence is unrecoverable. These tests pin the resulting contract:
-
-* a live-shaped credential in a comment / description / edit body is refused and the
-  event does **not** land;
-* the refusal names WHICH detector fired and WHERE, so the override is an informed
-  choice rather than a blind retry;
-* the refusal never echoes the secret — not in the exception, not on stderr, not in
-  the log records, not on disk. A guard that leaks while reporting is worse than none;
-* benign look-alikes (truncated placeholders, regex literals — the corpus says these
-  are the COMMON case, and a naive screen would have refused e7a9's own filing) pass;
-* ``--allow-secret-pattern=<reason>`` lands the write and records it as forced (who,
-  why) so a forced write is auditable and distinguishable from a clean one.
-
-Every credential-shaped string in this file is SYNTHESISED at runtime by
-:func:`_fake_secret` — no live-shaped literal is committed, so this suite cannot itself
-trip a secret scanner (or become the leak it guards against).
+"""The event-write seam rejects credential-shaped comment, description, and edit
+bodies before an event lands. Refusals name the detector and location without
+echoing the value. Benign look-alikes pass. The reason-bearing
+--allow-secret-pattern override records a forced write for audit. Credential
+fixtures are synthesized at runtime so the suite does not commit secret shapes.
 """
 
 from __future__ import annotations
@@ -58,16 +36,10 @@ def _fake_secret(prefix: str, length: int, alphabet: str = _ALPHABET) -> str:
 
 
 def _pem_banner(kind: str) -> str:
-    """A PEM begin-banner assembled at runtime rather than held as a source literal.
-
-    Same discipline as :func:`_fake_secret`, for the same reason: the repo-wide secret
-    scanner cannot tell a test fixture's banner from a real one, and flagged the literal
-    form here. It must NOT be silenced with a scanner allowlist — measured behaviour is
-    that once the FIRST private-key match in a file is allowlisted, a genuine key later
-    in that same file is no longer reported, so an allowlist entry keyed on this fixture
-    would disarm the detector on precisely the file that must stay armed. Assembling the
-    banner leaves the scanner fully active here and still exercises the shipped pattern,
-    which matches the banner text, not the source spelling.
+    """Assemble the PEM begin banner at runtime so the repository secret scanner
+    remains active on this test file. An allowlist for a literal fixture would also
+    hide a later private key in the same file. The assembled banner still exercises
+    the shipped detector.
     """
     return "-----BEGIN " + kind + " PRIVATE KEY" + "-----"
 
@@ -91,10 +63,9 @@ _LIVE_SHAPES: tuple[tuple[str, str], ...] = (
     ("private key", f"\n{_pem_banner('OPENSSH')}\nb3BlbnNzaC1rZXk\n"),
 )
 
-# Verbatim benign strings from the live store's own sweep (recorded on e7a9): a
-# truncated placeholder and a REGEX LITERAL, both in prose DESCRIBING the screen. Two
-# of the five real matches were e7a9's own CREATE and EDIT events, so a screen that
-# fires here refuses the filing of the very bug it implements.
+# These benign examples come from the ticket-store screen audit. A truncated
+# placeholder and a regex literal must pass so the screen does not reject prose
+# that describes its own detector.
 _BENIGN: tuple[str, ...] = (
     "sk-ant-api03-...'), Bearer headers, and request-body",
     "sk-ant-api03-[A-Za-z0-9_-]{93,}) and Bearer token pa",
@@ -500,21 +471,10 @@ def test_override_requires_a_reason(ticket: str, rebar_repo: Path) -> None:
 def test_the_cli_forced_write_log_names_the_family_and_not_the_secret(
     ticket: str, rebar_repo: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The CLI forced-write audit log must name WHICH detector was bypassed, never WHAT.
-
-    CodeQL flags this log site (``py/clear-text-logging-sensitive-data``) because the
-    logged expression reads out of the event ``data`` payload, which by construction may
-    carry a credential shape — that is what the screen just detected. What it actually
-    reads is ``secret_override["families"]``, assembled by
-    :func:`rebar.secret_screen.override_record` from ``SecretFinding.family``, a literal
-    from the module-level pattern table; :class:`~rebar.secret_screen.SecretFinding` has
-    no value field at all. That makes the alert a taint over-approximation rather than a
-    leak — and this test is what keeps it one, so a future edit cannot start logging the
-    value (or a prefix of it) without failing here.
-
-    The library route (``allow_secret_pattern=`` passed to ``append_event``) is pinned by
-    ``test_force_override_lands_the_write_and_records_it_as_forced``; this covers the
-    OTHER site, the CLI route through ``forced_secret_write`` -> ``screen_event``.
+    """The CLI forced-write log names the bypassed detector family without printing
+    the detected value. The family comes from SecretFinding metadata, which carries
+    no value field. This test protects the CLI log site separately from the library
+    override path.
     """
     from rebar._commands import main as commands_main
 
@@ -553,14 +513,9 @@ def test_the_cli_forced_write_log_names_the_family_and_not_the_secret(
 def test_usage_errors_never_echo_the_override_reason(
     ticket: str, rebar_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The three CLI usage-error prints must not carry the ``--allow-secret-pattern`` value.
-
-    CodeQL's sensitive-data heuristic flags :func:`rebar._commands._extract_allow_secret`
-    on its NAME and taints its whole return tuple, so plain argv inherits a "secret"
-    label and every downstream print is reported. Two things make that false, and this
-    test pins both: the flag token is STRIPPED from the returned argv, so its value
-    provably cannot reach these prints; and each print still names the argument it
-    rejected, which is the whole diagnostic point of the message.
+    """CLI usage errors must not echo the --allow-secret-pattern reason. The parser
+    removes that token from returned argv before diagnostic prints, while each error
+    still names the rejected argument.
     """
     from rebar._commands import main as commands_main
 

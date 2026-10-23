@@ -121,25 +121,18 @@ def test_prompted_structured_retry_aggregates_terminal_failure_telemetry():
             model_override=FunctionModel(malformed_then_truncated),
         ).run(request)
 
-    # RP-01 S2: on the PROMPTED branch a truncation (finish_reason=length) is reclassified as a
-    # concision retry, so it now CONSUMES the shared output-retry allowance instead of aborting
-    # after the first truncated turn. The invalid reply (call 1) and two truncated retries
-    # (calls 2, 3) exhaust the allowance (N=OUTPUT_RETRIES=2), and the exhaustion is translated
-    # to the SAME terminal UnretryableOutputError whose telemetry still records the last turn.
+    # A prompted-output truncation consumes the shared output-retry allowance. An invalid
+    # reply followed by two truncated retries exhausts OUTPUT_RETRIES=2 and preserves the
+    # last turn in the terminal UnretryableOutputError telemetry.
     diagnostic = caught.value.diagnostic
     assert calls["n"] == 1 + _structured.OUTPUT_RETRIES
     assert diagnostic["requests"] == 1 + _structured.OUTPUT_RETRIES
     assert diagnostic["finish_reason"] == "length"
 
 
-# ---------------------------------------------------------------------------
-# e1b1: the convergence boundary steers instead of hiding tools.
-#
-# The old mechanism (.filtered() emptying the advertised toolset) produced a
-# provider-protocol violation: Bedrock/Anthropic reject a request whose history
-# contains toolUse blocks but whose toolConfig is absent (400). Steering keeps
-# the definitions advertised and answers post-limit calls with a notice.
-# ---------------------------------------------------------------------------
+# After the convergence limit, keep tool definitions advertised and answer later
+# tool calls with a notice. Removing toolConfig while prior toolUse blocks remain makes
+# Bedrock and Anthropic reject the request.
 
 
 def test_steering_keeps_tool_definitions_advertised_past_the_limit():

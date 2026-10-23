@@ -1,12 +1,6 @@
-"""rebar's internal agent must bypass a LOCAL Claude-Code payload optimizer (bug
-sue-skimp-tear).
-
-A loopback ``ANTHROPIC_BASE_URL`` (e.g. headroom on ``127.0.0.1:8787``) is inherited by
-the Anthropic SDK and corrupts rebar's own multi-turn AGENTIC tool-loop requests into an
-empty provider stream, collapsing the plan-review / completion verifiers to INDETERMINATE.
-The runner therefore pins an Anthropic model to the DIRECT public API when
-``ANTHROPIC_BASE_URL`` is a loopback host, respects real (non-loopback) gateways, and
-honours the ``REBAR_LLM_ALLOW_LOCAL_PROXY`` opt-in.
+"""Internal Anthropic agent calls bypass a loopback ANTHROPIC_BASE_URL because a local
+payload optimizer can turn multi-turn tool replies into an empty stream. Non-loopback
+gateways remain configured, and REBAR_LLM_ALLOW_LOCAL_PROXY opts back into loopback.
 """
 
 from __future__ import annotations

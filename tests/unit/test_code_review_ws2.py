@@ -62,18 +62,9 @@ def test_secrets_security_keys_are_the_ws5_blocking_handoff():
     for key in ("secret-detection", "high-critical-security"):
         assert idx[key]["blocking_enabled"] is True, f"{key} is the WS5-flipped blocking criterion"
     assert reg.threshold_for(["high-critical-security"])[1] is True
-    # b9c0 (2026-07-12) added `security` as the first serious-tier AGENT blocking criterion, at
-    # the 9f25-derived threshold. ticket cranial-goodly-seahog then flipped four more from the
-    # code-v3 sidecar calibration (api-compat@0.51, deletion-impact@0.60, regression@0.54,
-    # error-handling@0.50); bug obese-dihedral-ermine flipped `tests`@0.54 from the code-v4
-    # replay. Story 4144-2784-6437-4efb then routed the two remaining un-routed base dimensions
-    # and flipped them at 0.54 off the same block-impact replay (correctness 4.04% of all
-    # changes, edge-cases 1.74%, both inside the 8.0% operator-accepted friction budget; see
-    # docs/experiments/code-review-threshold-calibration.md "Code-v4 friction replay at 0.54").
-    # Ticket 3055-e92d-7063-4a32 then approved `concurrency` from the code-v5 calibration
-    # record, docs/experiments/code-review-threshold-calibration-code-v5.md.
-    # The approved blocking set is now exactly these eleven, and adding a twelfth must be a
-    # deliberate, re-approved change.
+    # The approved code-review blocking set contains 11 criteria, including
+    # code-v5 concurrency. The test rejects any unapproved twelfth criterion while
+    # pinning thresholds already accepted by calibration.
     blocking = [k for k, v in idx.items() if v.get("blocking_enabled")]
     assert set(blocking) == {
         "secret-detection",

@@ -1,11 +1,6 @@
-"""Happy-path oracle for TS3 (117b, epic gnu-whale-ichor transition): the merge-gate +
-ledger reworked to the approved in-toto + commit-ancestry design.
-
-The ONLY TS3 test the implementation sees. Pins the end-to-end happy path: with a current
-identity holding a valid key and `identity.signing_key` configured, an event written
-through the write seam (in-toto Statement `author_sig`) is classified `verified` by
-`rebar verify-identity`. The ledger schema, `key_not_valid_at_era`, forged
-`bad-signature`, and the untouched verify-signature schema are held out.
+"""TS3 happy-path check. A configured signing key writes an in-toto author_sig
+through the event seam, and verify-identity classifies it as verified. Ledger,
+revocation, forged-signature, and schema boundaries stay in the held-out suite.
 """
 
 from __future__ import annotations

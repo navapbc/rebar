@@ -1,18 +1,7 @@
-"""``build_model_settings`` / ``build_usage_limits`` — the settings block lifted out of
-``PydanticAIRunner.run()`` (task 8229, ADR 0056 decision 3).
-
-Two contracts are easy to break silently in this move and are asserted here:
-
-* **Purity.** ``build_model_settings`` decides whether to WITHDRAW ``temperature`` for a model
-  measured to reject it, but the once-per-model dedup logging (``_TEMPERATURE_WITHDRAWN_LOGGED``)
-  must STAY in ``run()``. That set lives in ``runner.py`` while the builder lives in the LEAF
-  module ``structured_run.py``, which may not import ``runner`` at runtime — a rule enforced by
-  ``test_structured_run_seam.py::test_structured_run_has_no_runtime_import_from_runner``.
-* **The returned counters.** ``build_usage_limits`` must hand back ``eff_max_iter`` explicitly.
-  It is NOT recoverable from the ``UsageLimits`` it builds: only ``max(8, eff_max_iter)`` is
-  stored there as ``tool_calls_limit``, and ``max()`` is not invertible — for any
-  ``eff_max_iter <= 8`` the original value is gone. ``run()`` needs it for ``FailureContext``
-  and the telemetry log.
+"""build_model_settings chooses model settings without mutating runner logging
+state. build_usage_limits returns eff_max_iter separately because tool_calls_limit
+stores max(8, eff_max_iter) and cannot recover smaller original values needed by
+failure context and telemetry.
 """
 
 from __future__ import annotations

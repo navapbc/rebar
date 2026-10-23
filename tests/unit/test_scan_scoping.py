@@ -1,24 +1,7 @@
-"""Active-only scan scoping + archive-time terminal fold (story detoxicant-pointless-paperwasp).
-
-THE PROBLEM. The store-walking maintenance surfaces — ``rebar store fsck``'s per-ticket checks
-and ``rebar store compact --all``'s selection sweep — visited EVERY ticket directory, archived or
-not. An archive is a statement that a ticket is settled; re-reading its whole event log on every
-sweep makes maintenance cost grow with store HISTORY instead of store ACTIVITY.
-
-THE FIX (asserted here), in two halves:
-
-* **Terminal fold at archive time**: ``rebar archive`` folds the ticket's entire live log into
-  a SNAPSHOT right before writing the ARCHIVED event, reusing the single-ticket fold path with
-  the incremental gates bypassed (threshold 0, horizon now). An archived ticket therefore
-  carries no unfolded tail — which is what makes skipping it SAFE. A ticket with nothing
-  unfolded is not re-folded (no empty/duplicate SNAPSHOT), and a failed fold aborts the
-  archive (the archived⇒folded invariant is never published falsely).
-
-* **Active-only default scoping**: the shared ticket-dir iterator yields only ACTIVE tickets
-  by default — a dir is skipped only when its ``.archived`` marker exists AND the event log
-  net-confirms archival (marker alone never decides; a stale marker on a reverted archive is
-  still visited). ``--include-archived`` restores the full walk on both ``fsck`` and
-  ``compact-all``.
+"""Archived tickets are terminal-folded before the ARCHIVED event, leaving no
+unfolded tail. The default fsck and compact --all iterators skip a directory only
+when its marker and event log both confirm archival. --include-archived restores
+the full walk. A failed fold aborts archive, and an empty tail is not folded again.
 """
 
 from __future__ import annotations

@@ -1,13 +1,6 @@
-"""Story 1669: the code-review false-positive ledger + advisory telemetry.
-
-Two units, both offline (no live LLM):
-
-* ``compile_fp_ledger`` — drafts no-fire eval cases from ``fp:code-review`` tickets (correct
-  shape, idempotent via the ``compiled`` tag, malformed-ticket skipped, store-error → []). Uses
-  a REAL temporary rebar store (the same idiom as ``test_code_review_scope_intent.py``).
-* ``_attach_code_review_metrics`` — the advisory enrichment on the code-review verdict, driven
-  by a fake ``MemoryRecorder``; the load-bearing assertion is that the enrichment NEVER changes
-  ``verdict['verdict']``.
+"""Offline tests pin the false-positive ledger compiler and advisory metrics.
+Compilation drafts idempotent no-fire cases from tagged tickets and skips
+malformed records. Metrics enrichment must leave the review verdict unchanged.
 """
 
 from __future__ import annotations
@@ -304,11 +297,9 @@ def test_enrichment_never_changes_the_verdict():
         assert "approach_viability_note" in verdict["coverage"]
 
 
-# ── verification_recorded — the missing-recording signal (bug abdominal-grieving-nandu) ───
-# The gap this pins: the sidecar persists each finding's Pass-2 `verification` by field-spread,
-# so a regression that stopped carrying the block would write reviews' worth of unverified
-# findings with nothing erroring. `verification_recorded` makes that absence measurable, and the
-# tier/decision scoping keeps it from firing on the populations that are blockless BY DESIGN.
+# A persisted code-review finding must record whether Pass-2 verification
+# was present. The metric detects missing blocks without treating intentionally
+# blockless tiers and decisions as failures.
 
 
 def _verified(fid: str, **over):

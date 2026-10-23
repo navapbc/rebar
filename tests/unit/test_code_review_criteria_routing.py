@@ -1,16 +1,6 @@
-"""Routing posture for the base-reviewer dimensions `correctness` and `edge-cases` (story 4144).
-
-Both are dimensions the base reviewer always evaluates (its evidence-record contract names
-them) rather than members of the closed `OVERLAY_IDS` escalation vocabulary. Until this story
-neither had a routing entry, so every finding tagged with them resolved through the
-unknown-criterion default (0.95, not blocking) — invisible in the routing file and impossible
-to tune. These tests pin, corpus-free:
-
-  * that both ids are routed explicitly and are NOT overlays;
-  * that the friction budget the routing claims is the one the calibration document records
-    — the numeric bound, not merely that the two files name the same ids;
-  * that the project overlay cannot clobber a packaged posture;
-  * that the replay script's advertised blocking set is the routed one.
+"""Correctness and edge-cases have explicit base-reviewer routing rather than
+the unknown-criterion default. Tests pin their non-overlay status, calibrated
+friction bound, protection from project override, and replayed blocking set.
 """
 
 from __future__ import annotations

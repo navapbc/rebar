@@ -1,16 +1,6 @@
-"""Config-as-artifact gate for the Jira DC capability-map workflow (ticket 259b-b7da-a346-4785).
-
-The mapping job is explicitly an AUTHORING tool, never a test-path component (see the
-workflow's own header comment and ``scripts/jira_dc_capability_map.py``'s docstring): its
-acceptance criteria require that it "cannot run on push, PR, or schedule, and this is
-asserted, not merely configured." This test is that assertion — it parses the workflow's
-``on:`` trigger block directly (never trusting a code comment) and fails if anything other
-than a bare ``workflow_dispatch`` ever appears there.
-
-It also pins the harness-boot shape to the SAME digest-pinned Dockerfile the
-``jira-dc-harness`` job in ``external-integration.yml`` builds, so a future edit cannot
-quietly repoint this job at a different, unpinned image and still call itself "pinned by
-digest" per the ticket's caveat.
+"""The Jira DC capability-map workflow is a manually dispatched authoring
+tool. Tests reject push, pull-request, and schedule triggers and pin its harness
+image to the digest used by external integration.
 """
 
 from __future__ import annotations
@@ -112,29 +102,14 @@ def test_script_is_invoked() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Digest PROVENANCE: the artifact must name the image it actually mapped, and the
-# committed map must not silently outlive the pin it was measured against.
-#
-# "The map may be stale" is this ticket's design premise, not a hypothetical: the
-# capability map has already carried a claim that did not reproduce (the retracted
-# 254-char label ceiling). A map whose provenance is a hand-copied constant, and whose
-# committed answers name no image at all, cannot even be checked for staleness — a
-# re-pin lands and every recorded answer silently describes an image nothing runs.
-# ---------------------------------------------------------------------------
+# The committed capability map records its measured image digest. A map
+# without that provenance cannot be checked for staleness after a harness re-pin.
 
 
 def _run_map_script(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    """Drive the script through its CLI in a subprocess.
-
-    Deliberately NOT an in-process import: ``tests/unit/`` contains its own
-    ``reconciler/`` test package, and pytest puts the test's own directory on
-    ``sys.path`` ahead of the engine, so under pytest ``import rebar.reconciler`` resolves
-    to that shadowing test package and the script's engine imports fail with a spurious
-    ``ModuleNotFoundError``. Driving the real CLI sidesteps the shadowing entirely AND
-    exercises the script as CI actually invokes it — which matters because ``make lint``
-    covers only ``src`` and ``tests``, so nothing else in the local gate would catch a
-    breakage in this file before a billable live run hit it.
+    """Exercise the capability-map script through its CLI subprocess. This
+    checks the executable import and parser path used by CI without depending on
+    the unit test process's import state.
     """
     return subprocess.run(
         [sys.executable, str(_MAP_SCRIPT), *args],
@@ -196,14 +171,8 @@ def test_reported_digest_is_unknown_when_the_dockerfile_stops_pinning(tmp_path: 
 
 
 def test_committed_map_records_the_digest_it_was_measured_against() -> None:
-    """The staleness gate: the committed answers must name their image, and it must be
-    the one we still pin.
-
-    docs/jira-dc-capability-map.md warns that "a stale map after a re-pin describes an
-    image nothing runs anymore" — but nothing enforced it, and the doc recorded no digest
-    at all, so the warning was unfalsifiable. This cell fails the moment the Dockerfile is
-    re-pinned without regenerating the map, which is exactly when the recorded answers stop
-    describing reality.
+    """The committed capability map must name the Docker image digest used to
+    measure it. A harness re-pin without a regenerated map fails this check.
     """
     assert _MAP_DOC.exists(), f"committed capability map missing: {_MAP_DOC}"
     digest = _dockerfile_digest()
@@ -217,13 +186,9 @@ def test_committed_map_records_the_digest_it_was_measured_against() -> None:
 
 
 def test_map_script_is_executable_and_fails_cleanly_offline(tmp_path: Path) -> None:
-    """E2E on the script's own CLI contract.
-
-    ``make lint`` covers only ``src`` and ``tests``, so nothing else in the local gate
-    would catch a syntax or import error in this script — it would surface as a failed
-    step partway into a live, billable CI run. ``--help`` proves the module imports and
-    its parser builds; the offline invocation proves an unreachable harness is a clean
-    non-zero exit rather than a traceback.
+    """Run --help to check the script import and parser, then invoke it against
+    an unreachable harness. The latter must exit cleanly with a nonzero status
+    instead of a traceback.
     """
     helped = _run_map_script("--help")
     assert helped.returncode == 0, f"--help failed: {helped.stderr}"
@@ -247,10 +212,8 @@ def test_map_script_is_executable_and_fails_cleanly_offline(tmp_path: Path) -> N
     )
 
 
-# ---------------------------------------------------------------------------
-# Parity: the targeted Epic-Link probe (bug 1019) is a SECOND live-container
-# authoring tool, so it inherits the same two safety rules.
-# ---------------------------------------------------------------------------
+# The Epic Link container probe also requires manual dispatch and a pinned
+# image digest.
 
 _PROBE_WORKFLOW = _ROOT / ".github" / "workflows" / "jira-dc-epic-link-probe.yml"
 
@@ -304,16 +267,10 @@ def test_probe_does_not_invoke_the_capability_map() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Post-run validation of the Epic-field answer (bug 4a6d-5bbc-44f4-4a56).
-#
-# The map's report is the authority a human uses to update _REQUIRED_FIELDS /
-# _PROJECT_TEMPLATE in tests/external/live_jira_dc/conftest.py. "Epic Link absent"
-# read before the agent's first Jira Software project create is indistinguishable
-# from "this image dropped the Epic fields" — GreenHopper provisions those custom
-# fields ON that create (run 30981084637, bug 941b-f049-5f29-4410). These cells pin
-# that such an answer is REFUSED, and that a genuine degrade still passes through.
-# ---------------------------------------------------------------------------
+# Reject an Epic-field answer gathered before the agent's first Jira
+# Software project creation. That creation provisions the fields, so early
+# absence cannot establish a missing capability. Later confirmed degradation
+# remains reportable.
 
 _SYSTEM_ONLY_FIELDS = [
     {"id": "summary", "name": "Summary"},
@@ -452,11 +409,9 @@ def test_latest_field_read_wins() -> None:
 
 
 def test_script_adds_no_pre_create_field_wait() -> None:
-    """The 941b ban holds: await_required_fields has no call site in this script.
-
-    main() creates no Jira Software project before the agent run, so a wait here would poll
-    for something only the blocked run can produce — the deadlock that bug 941b-f049-5f29-4410
-    landed to remove (runs 30975323866, 30978613228).
+    """The map script must not wait for Jira project fields before its agent
+    creates the project. Such a wait would block on work the agent has not yet
+    performed.
     """
     text = _MAP_SCRIPT.read_text()
     assert "await_required_fields(" not in text, (

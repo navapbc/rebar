@@ -1,16 +1,7 @@
-"""The Pass-1 finder's tokens reach the finalized code-review totals (task 514d).
-
-The review bot's CloudWatch counts come from ``finalize._attach_code_review_metrics``, which
-folds each succeeded step's ``_usage``. The Pass-2 ``verify`` and Pass-3 ``decide`` agent steps
-get theirs attached by the runner, but the Pass-1 finder batch is driven by
-``CodeReviewBatchRunner`` — it dispatches one agent call per overlay and returns ONE step
-output, so unless that runner aggregates and surfaces its own ``_usage`` the whole finder leg is
-invisible and every review under-reports.
-
-These tests wire the two halves together and assert on the FOLDED TOTAL rather than on the
-presence of a key, so they prove the number is complete rather than that a dict has a field.
-The consumer half (``_attach_code_review_metrics``'s arithmetic) is covered by
-``test_review_bot_token_metrics.py`` and is deliberately unchanged here.
+"""Pass-1 finder usage must reach finalized code-review token totals. The
+batch runner aggregates each overlay call into its step usage, and finalization
+folds that with verifier and decide usage. Tests assert the total, not merely
+the presence of a usage key.
 """
 
 from __future__ import annotations

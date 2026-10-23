@@ -1,11 +1,6 @@
-"""Impact-model permissive rollout + versioning + calibration tooling (raptorial-galloping-dragon).
-
-Covers the top-level `impact_model_version` tag on both REVIEW_RESULT sidecar payloads, the
-version-segmented calibration replay (missing tag = skip), the permissive-rollout invariant (no
-impact-graded criterion is a hard block), and the diff-grounded A/B gate.
-
-Proving command:
-    .venv/bin/pytest tests/unit/test_impact_model_versioning.py -v
+"""Impact-model version tags segment calibration replay, and untagged records
+are skipped. The rollout keeps impact-graded criteria advisory while tests pin
+sidecar tags and the diff-grounded A/B gate.
 """
 
 from __future__ import annotations
@@ -87,20 +82,10 @@ def test_code_review_approved_blocking_criteria_set() -> None:
 
     idx = registry.routing_index()
     blocking = {c for c, v in idx.items() if isinstance(v, dict) and v.get("blocking_enabled")}
-    # The APPROVED hard-block set: the two pre-existing exec:DET security detectors; the
-    # `security` AGENT criterion that b9c0 (2026-07-12) flipped on at the 9f25-derived threshold
-    # (the first LLM criterion permitted to block); the four criteria ticket
-    # cranial-goodly-seahog flipped on from the code-v3 sidecar calibration
-    # (docs/experiments/calibrate_code_review_thresholds.py): api-compat@0.51,
-    # deletion-impact@0.60, and the two base dimensions regression@0.54 and error-handling@0.50;
-    # PLUS `tests`@0.54, flipped on by bug obese-dihedral-ermine from the code-v4 replay so the
-    # gate can block consequential test-sufficiency findings; PLUS the two base dimensions story
-    # 4144-2784-6437-4efb routed and flipped at 0.54 off the same block-impact replay
-    # (correctness, edge-cases) — measured at 4.04% and 1.74% of all changes, inside the 8.0%
-    # operator-accepted friction budget recorded on the `tests` entry. Ticket
-    # 3055-e92d-7063-4a32 then approved `concurrency` from the code-v5 calibration record,
-    # docs/experiments/code-review-threshold-calibration-code-v5.md.
-    # Any addition beyond this set must be a deliberate, re-approved change (this pin forces it).
+    # The approved code-review hard-block set contains 11 criteria. It includes
+    # the security detectors, security, api-compat, deletion-impact, regression,
+    # error-handling, tests, correctness, edge-cases, and the code-v5 calibrated
+    # concurrency criterion. New blocking criteria require another explicit approval.
     assert blocking == {
         "secret-detection",
         "high-critical-security",
@@ -120,20 +105,10 @@ def test_code_review_approved_blocking_criteria_set() -> None:
     assert idx["security"].get("exec") == "AGENT" and idx["security"].get("block_threshold") == 0.45
 
 
-# The plan-review criteria whose hard-block posture is APPROVED (set by the threshold-recalibration
-# child #5 / commit 23581b171, "recalibrate criteria thresholds + postures"). Plan-review derives
-# blocking from `default_posture == 'blocking'` (criteria/model.py), NOT `blocking_enabled` (absent
-# here), so THIS is the meaningful permissive invariant: the impact redesign added no NEW blocking
-# criterion. Adding one to the routing fails this test → forces a deliberate re-approval.
-# Calibration 3 (task relishable-ammonitic-hoverfly) demoted T5e to advisory: the plan-v2
-# segmented replay classed it FP-PRONE (validity 0.391, 59% verifier-drop, surviving p90
-# priority 0.27) — see docs/experiments/plan-review-threshold-calibration.md "Calibration 3".
-# Ticket bfa8 (operator-approved blocking pilot) added T3 + T10 at block_threshold 0.90 —
-# the deliberate re-approval this pin exists to force. Ticket c97a (T5c grounded-security
-# rewrite, operator-approved) added T5c at the same 0.90 pilot threshold. Ticket 28d5 added
-# G7 @ 0.85 (FP-verified on ticket 696a; plan-v4 floor-grade kind scoping).
-# Ticket deeb added the evidence-kind trust-bypass guard at 0.95 after a two-run frozen corpus
-# produced 7/7 required findings and zero false accepts across five pass controls.
+# The plan-review hard-block set is pinned through default_posture. T5e was
+# demoted after calibration. T3, T10, T5c, G7, and the evidence-kind trust-bypass
+# guard received explicit approvals. This set prevents an impact-model change
+# from silently adding a blocking criterion.
 _PLAN_REVIEW_APPROVED_BLOCKING = frozenset(
     {
         "COH",

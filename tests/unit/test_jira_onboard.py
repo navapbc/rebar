@@ -1,16 +1,6 @@
-"""b5db: the interactive `rebar bridge setup` wizard + its config writer.
-
-Two surfaces under test:
-
-  * ``rebar.config.write_jira_config`` — the parse(tomllib)->mutate->re-emit writer
-    that persists url/user/project to a REBAR-OWNED ``rebar.toml`` ``[jira]`` section,
-    NEVER editing a user ``pyproject.toml`` and NEVER writing the secret token.
-  * ``rebar._cli._jira_onboard.jira_onboard`` — detect / prompt / persist / validate,
-    routed through ``rebar._cli.main(["bridge", "setup", ...])``.
-
-The bridge check-access subprocess is never actually launched (no live Jira): tests either
-pass ``--no-validate`` or run with ``JIRA_API_TOKEN`` absent (probe skipped), or
-monkeypatch ``_bridge_probe`` to assert the env overlay.
+"""The bridge setup wizard writes URL, user, and project to rebar.toml
+without persisting the API token or changing pyproject.toml. Tests cover its
+CLI prompts and writer. Validation is skipped or stubbed to keep Jira offline.
 """
 
 from __future__ import annotations
@@ -163,12 +153,9 @@ def test_clear_removes_only_the_jira_keys(tmp_path, monkeypatch) -> None:
 
 
 def test_write_rejects_non_https_url_fail_closed(tmp_path, monkeypatch) -> None:
-    """bug bdb8: the writer validates the url scheme BEFORE persisting, so the wizard can
-    never silently write a cleartext url. Fail-closed: a non-https url raises
-    InsecureUrlError and NOTHING is written.
-
-    MUTATION-CHECK (inverse): remove the scheme check in write_jira_config → the write
-    succeeds and this test goes RED (the file appears with the http url).
+    """Reject a non-HTTPS Jira URL before the wizard persists configuration.
+    The inverse mutation test proves that removing the scheme check would write
+    the cleartext URL.
     """
     p = _proj(tmp_path, monkeypatch)
     with pytest.raises(cfg.InsecureUrlError, match="not 'https'"):
