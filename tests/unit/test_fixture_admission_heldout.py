@@ -1,13 +1,9 @@
-"""HELD-OUT edge oracle for the fixture ADMISSION runner (ticket 67aa).
+"""Held-out admission-runner edges (67aa).
 
-Withheld from the implementation subagent and validated by the orchestrator. Covers every
-disposition the happy path does not: drift on non-reproduction and on unrecoverable material,
-the budget ceiling and the post-``finalize`` actual-spend cap halt, the no-shadowing packaged
-skip, unbalanced/mid-raise atomicity, crash-consistent resume, and transient-error retry.
-
-Shared scaffolding is imported from the visible happy-path module (``test_fixture_admission``),
-the same cross-module pattern ``test_fixture_emit_heldout`` uses.
-"""
+Withheld tests cover non-reproduction and unrecoverable-material drift,
+budget and recorded-spend halt, packaged/ISF skips, atomicity after unbalanced
+or raised work, crash resume, and transient retry. Share scaffolding with
+the visible admission suite."""
 
 from __future__ import annotations
 

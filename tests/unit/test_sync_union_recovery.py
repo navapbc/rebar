@@ -1,24 +1,10 @@
-"""Recovery on unrelated histories (epic 97e7 / P1.4, WU-2; narrowed by bug 5546).
+"""Keep local commits reachable through sync recovery (97e7, 5546).
 
-Before WU-2, ``_do_reconverge``'s no-common-ancestor path did
-``git reset --hard origin/tickets``, which ORPHANED every local-only commit into
-the reflog (the sole reason rebar forced ``gc.auto=0``). WU-2 replaced it with
-``git merge --allow-unrelated-histories`` so no local commit is ever discarded — which
-is what makes stock ``git gc`` safe.
-
-**Bug 5546 narrowed WHICH unrelated histories are merged, without weakening that
-invariant.** A store with no common ancestor that carries its OWN ticket events is an
-accidentally-created ORPHAN store, not a divergent copy of the shared tracker; unioning it
-would publish an unrelated store's events onto the shared tickets branch. Sync now REFUSES
-that case and reports DIVERGED (AC1's recorded data decision), and unions an unrelated
-history only when the local store has no ticket events to lose. Refusing discards strictly
-less than merging did, so WU-2's data-safety invariant — every local commit stays reachable
-from HEAD and therefore survives an aggressive ``gc --prune=now`` — is preserved, and these
-tests still assert it. Only the mechanism assertion changed: union -> refusal.
-
-The union path itself is still covered end-to-end (empty-orphan adopt, and the
-shared-ancestry diverged merge) in ``tests/unit/test_sync_narrow_refspec.py``.
-"""
+The old reset orphaned local-only commits. Shared-ancestry divergence now
+union-merges. An unrelated event-empty local store can be adopted. Refuse
+DIVERGED for unrelated local ticket events instead of publishing an orphan
+store. Even on refusal, every local commit stays reachable from HEAD and
+survives aggressive git gc. test_sync_narrow_refspec covers union paths."""
 
 from __future__ import annotations
 

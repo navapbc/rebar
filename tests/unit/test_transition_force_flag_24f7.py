@@ -1,19 +1,9 @@
-"""Ticket 24f7 — `transition` has ONE escape hatch, spelled `--force[=<reason>]`.
+"""Transition uses one reason-bearing --force escape hatch (24f7).
 
-Before this change `transition` carried TWO force flags: a valueless `--force` that
-bypassed the start-work (plan-review) gate on `open -> in_progress`, and a separate
-`--force-close=<reason>` that bypassed the completion-verification / signature gate on a
-close. `claim` meanwhile spelled its single escape hatch `--force[=<reason>]`. Operator
-decision 2026-08-07: collapse the pair into one `--force[=<reason>]` matching `claim`, as a
-CLEAN BREAK with no deprecation alias.
-
-The hazard this file pins down is specific to `transition`'s hand-rolled flag loop: it
-SILENTLY SKIPS unknown tokens. A bare removal of the retired spelling would therefore have
-turned a stale `--force-close="reason"` into a silent no-op — the close would run straight
-through the very gate the operator asked to bypass, and fail (or, worse, succeed unsigned
-by another path) with no hint that the flag was dropped. So the retired spelling must be
-matched EXPLICITLY and rejected loudly.
-"""
+It replaces the separate start-work --force and close --force-close flags,
+matching claim. The hand-written argument loop can silently skip unknown
+tokens, so it must explicitly reject retired --force-close rather than
+ignore an operator's bypass request."""
 
 from __future__ import annotations
 
@@ -145,28 +135,21 @@ def test_truncations_are_not_abbreviation_matched() -> None:
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Every tracked file allowed to still carry the retired spelling, each for a reason that
-# does NOT generalise. Deliberately exact paths, never directory prefixes: a NEW file —
-# including a new frozen corpus under the same directory — must fail this test and force a
-# conscious decision rather than inheriting an exemption it was never weighed for.
+# Exempt exact tracked paths only. A new file, even in a listed directory,
+# must justify its own use of the retired spelling.
 EXEMPT = {
-    # The Cloud ADF corpus generator NAMES the retired flag because its scrub MAPS it to
-    # the current spelling when freezing captured ticket prose into a fixture, so the
-    # committed fixture itself is clean. Removing the mapping would let the retired
-    # spelling back into a tracked file.
+    # The Cloud ADF scrub maps captured old flags to the current spelling.
+    # Removing that map would restore the retired spelling in its fixture.
     "scripts/build_cloud_adf_corpus.py",
-    # Same rationale for the DC wiki corpus generator: it names the retired flag because
-    # its scrub maps it to the current spelling when freezing captured ticket prose.
+    # The DC wiki scrub also maps captured old flags to the current spelling.
     "scripts/build_dc_wiki_corpus.py",
     # Frozen LLM-experiment corpora. Their content is recorded experiment INPUT; rewriting
     # them would corrupt the record the experiments' conclusions rest on.
     "docs/experiments/plan-review-gate/runs/e6_selfconsistency_inputs.jsonl",
     "docs/experiments/plan-review-gate/runs/exp2_agentic.jsonl",
     "docs/experiments/plan-review-gate/runs/operator_attested_ac_corpus.jsonl",
-    # Mined plan-review regression fixture (67aa AC10). Its `input` is recorded review-
-    # sidecar plan text — a captured ticket plan that itself DESCRIBES retiring the flag in
-    # 24f7 — so the retired spelling is part of the frozen experiment INPUT. Rewriting it
-    # would change what the criterion was scored against and corrupt the fixture.
+    # This mined fixture records review-sidecar plan text describing the 24f7
+    # rename. Changing the old flag in that frozen input corrupts its score.
     "docs/experiments/plan-review-gate/fixtures/eval_specs/plan-review-T6.eval.yaml",
     # Historical records that must name the OLD spelling to describe the break itself.
     "CHANGELOG.md",
@@ -177,16 +160,9 @@ EXEMPT = {
 
 
 def _tracked_files() -> list[str]:
-    """Repo-relative POSIX paths of every git-TRACKED file.
-
-    Derived from git rather than from a hand-maintained list of directories to search.
-    That is the load-bearing choice: this guard exists because a file (
-    ``scripts/dependency_audit.py``) landed minutes AFTER the rename was verified by a
-    one-time manual command, carrying a fresh use of the dead flag that nothing re-checked.
-    Anything anyone commits is in scope the moment it lands — no denylist to update, and no
-    way for a new directory to be silently out of view (the same lesson as bug ``d5ae``,
-    where a denylist over an open filesystem was itself the defect).
-    """
+    """Return every git-tracked repo-relative path, including future directories.
+    A manually checked rename missed a later script using the retired flag.
+    This open-tree scan avoids a stale directory list."""
     out = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "ls-files", "-z"],
         capture_output=True,
@@ -197,15 +173,9 @@ def _tracked_files() -> list[str]:
 
 
 def test_retired_spelling_is_absent_from_every_tracked_file() -> None:
-    """No tracked file outside ``EXEMPT`` may contain the retired flag string.
-
-    The parser tests above prove a stale caller FAILS LOUDLY. They cannot prove there is no
-    stale caller — that is a property of the tree, so it needs a tree-wide assertion, and it
-    has to live in the suite rather than in a command someone ran once. ``rebar`` ships
-    scripts that build ``rebar`` argv (the canary bridges, the dependency-advisory canary);
-    a dead flag in one of those is a latent runtime failure on a path that only executes in
-    production, where nothing type-checks the argv.
-    """
+    """Parser tests prove stale flags fail loudly. This tree-wide check finds
+    stale callers in tracked scripts that construct rebar argv, including
+    production-only canary paths outside typechecked Python."""
     needle = RETIRED.encode()
     offenders = []
     for rel in _tracked_files():

@@ -1,23 +1,11 @@
-"""The per-test hang budget must sit ABOVE the band of legitimate test costs.
+"""Keep the per-test hang budget above legitimate CI test costs (3fa7).
 
-Bug ``soppy-logophilic-husky`` (3fa7-94ba-42aa-4623). Story ``bold-abeyant-indri`` lowered
-the budget from 300 s to 20 s on the strength of a local unit-tier run. On the gating
-``ubuntu-latest, py3.13`` leg — the only one that adds ``--cov=rebar`` — roughly fourteen
-whole-tree scanning gates legitimately cost 18.7-29.9 s of ``call`` time, so a 20 s budget
-lands INSIDE that band and expires tests that were going to pass.
-
-That expiry is not survivable and does not announce itself. ``timeout_method = "thread"``
-means pytest-timeout's watchdog calls ``os._exit(1)`` (``pytest_timeout.py:542``), killing
-the xdist worker process outright; only the ``signal`` method reports ``Failed: Timeout``
-(``pytest.fail`` at ``pytest_timeout.py:502``). So an over-tight budget does not surface as
-a timeout verdict on the offending test — it surfaces as ``[gwN] node down: Not properly
-terminated`` plus ``worker 'gwN' crashed``, eleven times a run, on a drifting set of
-innocent tests, with zero ``Failed: Timeout`` lines to explain it.
-
-``test_the_configured_budget_is_the_measured_one`` pins the budget to whatever value is
-currently written down; it cannot tell a measured value from a wrong one. This module
-holds the invariant that value has to satisfy.
-"""
+The coverage-enabled Ubuntu 3.13 gate has about 14 whole-tree scans taking
+18.7 to 29.9 seconds. A 20-second budget killed passing tests. With thread
+mode, pytest-timeout exits the xdist worker instead of reporting Failed:
+Timeout, leaving misleading worker-crashed errors. A config-value test
+cannot prove headroom, so this module checks the measured floor and required
+2x margin."""
 
 from __future__ import annotations
 
@@ -29,29 +17,14 @@ import tomllib
 
 pytestmark = pytest.mark.unit
 
-# The slowest legitimate test BODY on the gating leg, measured under the CI command
-# (`-n 4 --dist worksteal --cov=rebar`) on the last green Verified run before the budget was
-# lowered — a full pass with zero worker crashes, under the then-current `--timeout=300`.
-# Bug soppy-logophilic-husky records the run identifiers and the full durations table.
-#
-#     29.93s call  test_subprocess_env_repr_security.py::
-#                       test_safe_boundary_is_not_unwrapped_in_repository_tests
-#     28.72s call  test_env_registry_helper_coverage.py::
-#                       test_dropping_a_used_helpers_row_fails_loudly_instead_of_shrinking
-#     22.97s call  test_binding_lifecycle_grace_seam_clean_heldout.py::
-#                       test_gate_reports_no_findings_whole_tree
-#     ... eleven more between 18.7s and 22.7s ...
-#
-# These are `call` times: the body IS the whole-tree scan, so no fixture-phase accounting
-# (the ini has no `timeout_func_only`; bug 797b-bbc4-01cf-42d5) can discount them. Raise
-# this number only against a fresh measurement on the gating leg.
+# Slowest legitimate call: 29.93s on a green, crash-free gating run with
+# `-n 4 --dist worksteal --cov=rebar`. Whole-tree scans spend this time in the
+# body, so fixture accounting cannot discount it. Change the floor only after
+# fresh gating-leg measurement (soppy-logophilic-husky).
 _MEASURED_SLOWEST_LEGITIMATE_CALL_SECS = 29.93
 
-# Clearing the worst case by a whisker is not enough. Per-test cost on the runner moves with
-# load, with coverage, and — once workers start dying — with the restarts themselves: in the
-# failing runs (32583448507, 32585303586) the SURVIVING scanners were pushed from ~16 s to
-# 19.0-19.95 s because eleven worker restarts re-paid process and coverage startup. A budget
-# without real headroom converts that ordinary variance into a worker death.
+# Allow 2x headroom for load, coverage, and worker restarts. In failed runs,
+# restart costs moved surviving scans from about 16s to nearly 20s.
 _REQUIRED_HEADROOM = 2.0
 
 

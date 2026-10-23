@@ -1,30 +1,10 @@
-"""The external tier's live tests must actually REACH the live model.
+"""Make external tests reach the model instead of failing earlier (baa8).
 
-Regression guard for bug ``baa8-2c41-d9b9-4642``. Two live tests exist specifically to
-prove the LLM tier runs for real, and both had silently stopped doing so — each for its
-own reason, and each invisible until bug ``8070`` unmasked the tier:
-
-* ``test_execution_mode_live.py`` wrote its ``single_turn`` prompt override into the
-  scratch repo's WORKING TREE and never committed it. A workflow with LLM steps runs
-  inside the snapshot gate (``src/rebar/llm/workflow/runs.py``), and the suite defaults to
-  ``REBAR_GATE_SOURCE=attested`` / ``REBAR_GATE_REF=HEAD`` (``tests/conftest.py``), so
-  ``prompts.get_prompt`` resolves against the materialized snapshot at ``HEAD`` — where an
-  uncommitted override simply does not exist. The step died on ``PromptNotFound`` and the
-  run came back ``status='failed'``.
-* ``test_workflow_live.py``'s plan fixture carried no ``## Testing`` / ``## Verification``
-  section and no AC item with a code span or verification vocabulary, so the BLOCKING DET
-  clarity check ``P10 verification-presence``
-  (``src/rebar/llm/plan_review/det_clarity.py``, added 2026-07-30) failed and the DET-floor
-  short-circuit in ``src/rebar/llm/plan_review/workflow_ops.py`` returned a BLOCK verdict
-  with ``coverage.llm_ran=False`` and ``llm_calls=0`` — never calling the model at all.
-
-Both guards live in the DEFAULT tier on purpose, following the precedent set by
-``tests/unit/test_external_tier_gate_ref.py``: ``tests/conftest.py`` auto-marks everything
-under ``tests/external/`` as ``external``, so an in-tier guard could only fail in the same
-weekly credential-gated job that already went unread for days. These need no credentials
-and make no billable model call — they assert the PRECONDITIONS the live tests depend on,
-against the very artifacts those tests use.
-"""
+The single_turn prompt must be committed into the attested HEAD snapshot.
+An uncommitted override caused PromptNotFound. The plan-review fixture must
+satisfy blocking DET P10 verification presence. Otherwise the floor returns
+BLOCK with llm_ran=False and zero calls. Default-tier guards catch both
+without depending on the weekly credential-gated job."""
 
 from __future__ import annotations
 
@@ -57,15 +37,8 @@ def _load_external_conftest() -> ModuleType:
 def test_external_project_prompt_is_visible_to_an_attested_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A prompt written by the external tier must resolve from the ATTESTED snapshot.
-
-    Drives the real mechanism: build the tier's scratch repo, write a project prompt with
-    the tier's own writer, materialize a gate handle under the suite's attested/``HEAD``
-    default, then resolve the prompt against the snapshot root the gate re-roots onto
-    (``gate_source.gate_read_root``). Before the fix the writer left the file uncommitted,
-    so this raised ``PromptNotFound`` — exactly the ``unknown prompt 'live-verdict'`` that
-    made the live ``single_turn`` run come back ``failed``.
-    """
+    """Write the tier's project prompt, materialize its attested HEAD snapshot,
+    and resolve through gate_read_root. An uncommitted prompt would be absent."""
     monkeypatch.setenv("REBAR_GATE_SOURCE", "attested")
     monkeypatch.setenv("REBAR_GATE_REF", "HEAD")
 
@@ -99,14 +72,8 @@ def test_external_project_prompt_is_visible_to_an_attested_gate(
 def test_external_plan_review_fixture_clears_the_blocking_det_floor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The live plan-review guard's plan must not be blocked by the DET floor.
-
-    ``review_plan`` short-circuits BEFORE the LLM tier on any blocking DET finding, and
-    reports ``coverage.llm_ran=False``. So a plan fixture that trips a blocking DET check
-    turns the live "did we reach a real model?" assertion into a guaranteed failure while
-    spending nothing — the live test can never pass. Asserts the shared fixture plan the
-    live test reviews produces NO blocking DET findings.
-    """
+    """The plan fixture must have no blocking DET findings. Otherwise
+    review_plan stops before the model and llm_ran stays false."""
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path / "repo"))
     conftest = _load_external_conftest()
     plan = conftest.PLAN_REVIEW_FIXTURE_PLAN

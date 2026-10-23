@@ -120,7 +120,7 @@ def test_spot_eval_respects_targeted_gold_floor() -> None:
     assert any("gold set too small" in f for f in rep.gating_failures)
 
 
-# ── 3. the committed recorded live-run evidence still clears the bar ─────────────
+# Recorded service evidence remains within tolerance.
 def test_recorded_live_results_are_within_tolerance() -> None:
     # Re-check the committed measured evidence (the last live run) offline: both the S2
     # relocation and S5 packing spot-evals must have PASSED. This regression-gates the

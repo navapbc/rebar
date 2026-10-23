@@ -1,19 +1,10 @@
-"""Guard for bug a371: no test module may use a ``tests.``-rooted absolute import.
+"""Reject tests.-rooted absolute imports under the bare pytest contract (a371).
 
-Neither ``tests/__init__.py`` nor any ``tests/*/__init__.py`` exists, so a ``tests.``-rooted
-import can only resolve as a PEP-420 namespace package -- which needs the **repository root**
-on ``sys.path``. Nothing in the harness puts it there: pytest's prepend import mode inserts
-only the first ancestor without an ``__init__.py`` (e.g. ``tests/unit``), and
-``tests/conftest.py`` deliberately inserts only ``tests/``. The repo root arrives solely as a
-side effect of ``python -m pytest`` inserting the cwd, so such an import works under
-``python -m pytest`` and dies at collection under the BARE ``pytest`` console script -- which
-is the project's canonical invocation (``Makefile`` ``test`` target;
-``.github/workflows/_build-and-test.yml``).
-
-The failure is invisible in the common ``python -m pytest`` invocation, and on the two
-audit-page modules it was further masked by ``pytest.importorskip`` calls sitting *above* the
-broken import. Hence a standing guard rather than a one-off repair.
-"""
+Without tests/__init__.py, those namespace imports need the repo root on
+sys.path. python -m pytest adds it and can false-green. Bare pytest, used by
+make test and CI, adds only tests/unit while conftest adds tests/. An
+importorskip above the bad import can mask it further, so this standing
+guard scans test modules."""
 
 from __future__ import annotations
 

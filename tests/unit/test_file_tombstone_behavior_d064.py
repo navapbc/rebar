@@ -1,22 +1,9 @@
-"""File-kind tombstones honour the registry's ``behavior`` field (bug d064).
+"""Honor file tombstones' registry behavior (d064).
 
-``_deprecations`` is a typed tombstone registry: each retired input records
-whether encountering it should ``warn`` or hard-``error``. The env and cfg kinds
-route through ``raise_or_warn_env`` / ``raise_or_warn_cfg_key``. The file kind did
-not -- ``raise_or_warn_file`` had zero callers and ``config.py`` hand-rolled an
-unconditional raise for the single registered file tombstone, ignoring the row's
-``behavior`` entirely.
-
-That bypass was invisible only by coincidence: the one registered file entry
-(``.rebar/config.conf``) carries behavior ``error`` and the hand-rolled code
-raised, so registry and code agreed by accident. These tests remove the
-coincidence -- they drive a ``warn``-class file tombstone (which has no coverage
-today) and a downgraded ``.rebar/config.conf``, and assert the *registry row*
-decides the outcome.
-
-Assertions are on observable behavior: whether resolving config raises, and what
-is logged. Nothing pins how ``config.py`` enumerates the rows.
-"""
+The old config.py branch always raised for .rebar/config.conf, whose current
+error row masked that it bypassed raise_or_warn_file. Warn-class and
+downgraded rows must warn rather than raise. Assert observable config
+resolution and logs, not registry traversal."""
 
 from __future__ import annotations
 

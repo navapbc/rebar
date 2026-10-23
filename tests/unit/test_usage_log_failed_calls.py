@@ -1,17 +1,9 @@
-"""A FAILED LLM call must still reach the usage log (bug 8455).
+"""Record failed LLM calls in usage JSONL (8455).
 
-``PydanticAIRunner.run()`` recorded usage only at the END of the method, after the
-``try/except`` whose spine (``interpret_failure``) ALWAYS re-raises — so a call that failed
-wrote NO row at all. Observed live: a Bedrock review whose ``verify`` step 400'd produced five
-healthy rows and nothing whatsoever about the two passes that failed, so the JSONL read as a
-clean five-call review.
-
-Every test here drives the real runner with a model that RAISES and then READS the file,
-because the defect is about what reaches the FILE — reading ``usage_log.py``, or exercising
-``run_shape()`` in isolation, cannot show it. Offline throughout: a ``FunctionModel``
-override with ``ALLOW_MODEL_REQUESTS = False`` (the seam
-``tests/unit/test_usage_log.py::test_runner_records_usage_at_seam`` already uses).
-"""
+Runner.run once logged only after interpret_failure re-raised. A failed
+Bedrock verify left a misleading clean five-call log. Drive the runner
+with a raising FunctionModel and read the file, offline, so the test checks
+persisted rows rather than run_shape in isolation."""
 
 from __future__ import annotations
 

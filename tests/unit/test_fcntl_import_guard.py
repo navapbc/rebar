@@ -1,22 +1,9 @@
-"""``fcntl`` is POSIX-only; importing rebar must not require it.
+"""Keep rebar and lock modules importable without POSIX fcntl (0b31).
 
-Regression for bug ``0b31-aeb5-e734-41c9``. ``fcntl`` has no Windows build, so an
-*unconditional* module-top ``import fcntl`` makes the whole module unimportable off POSIX.
-Four modules did this, and because ``import rebar`` transitively reaches one of them
-(``rebar._commands.doctor_locks``), the entire package — and therefore every test module
-that imports it — failed to *collect* on Windows with ``ModuleNotFoundError: No module
-named 'fcntl'``. Six sibling modules already guard the import
-(``try: import fcntl / except ImportError: fcntl = None``); these four must match.
-
-The contract this pins: with ``fcntl`` absent, ``import rebar`` and each lock module still
-import (collectability). Locking itself is not required to work off POSIX — Windows is not
-a declared support target — only that import/collection succeeds.
-
-Proven by simulating an ``fcntl``-less interpreter in a child process
-(``sys.modules['fcntl'] = None`` makes ``import fcntl`` raise ``ImportError``, exactly as a
-missing module does). A subprocess keeps the parent's already-imported rebar modules from
-masking the result.
-"""
+Unconditional imports once broke Windows collection. Match guarded sibling
+modules. Off-POSIX locking need not work, but imports must. A child process
+sets sys.modules['fcntl']=None so already imported parent modules cannot
+hide an import failure."""
 
 from __future__ import annotations
 

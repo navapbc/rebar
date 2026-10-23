@@ -1,17 +1,9 @@
-"""HELD-OUT oracle for bug ed5c — making a silent, identity-less writer LOUD.
+"""Held-out oracle for loud identity-less writes (ed5c).
 
-Two independent silences let a review bot append ~8900 unsigned, ``Unknown``-authored events
-for a month (bug beb1) with no signal anywhere:
-
-* ``fsck``'s authorship line is a store-wide SUM, so one writer at 0% signed hides behind the
-  volume of writers that are healthy;
-* ``_seam._apply_authorship`` returns without a word when no identity resolves — only a signing
-  FAILURE was ever logged, never a signing SKIP.
-
-These tests pin the observable consequences of closing both, and — as much as the fix itself —
-the FALSE-POSITIVE guard: a store's pre-signing history must stay quiet forever, or the check
-gets muted by its own noise and buys nothing.
-"""
+About 8,900 unsigned Unknown-authored review-bot events were hidden by
+store-wide fsck totals and silent _apply_authorship skips. Check observable
+per-writer signals while keeping pre-signing history quiet to avoid a
+false-positive flood."""
 
 from __future__ import annotations
 

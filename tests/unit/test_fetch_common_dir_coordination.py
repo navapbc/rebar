@@ -1,24 +1,9 @@
-"""Concurrent ref-updating fetches are coordinated by the Git COMMON directory.
+"""Coordinate ref-updating fetches by canonical Git common directory (agrologic).
 
-Regression coverage for bug ``agrologic-oval-bobolink``: two uncoordinated ref-updating
-fetches that share one Git common directory race git's ref compare-and-swap, and the loser
-fails ``cannot lock ref 'refs/remotes/origin/tickets': is at <new> but expected <old>`` — the
-snapshot fetch aborts an attested op, the sync fetch silently drops a freshness round.
-
-The fix has two composed mechanisms, both exercised here at BOTH affected entry points
-(``rebar._store.sync`` and ``rebar._snapshot.git_fetch``):
-
-* a BLOCKING cross-process fetch lock keyed on the canonical (symlink/worktree-resolved) Git
-  common directory, so rebar peers serialize instead of racing; and
-* a bounded retry of the exact CAS mismatch, so a residual race with a NON-rebar git peer
-  (which never takes the lock) recovers rather than surfacing or silently dropping.
-
-The seam-injected tests are the deterministic "observe the failure before the fix" controls:
-a single injected CAS is exactly what a parallel race produces, and WITHOUT the retry the
-sync path would return un-converged and the snapshot path would raise on the first CAS. The
-real-git tests pin the common-dir identity (follows worktrees + symlinks) and prove a
-parallel run of real fetches sharing one common dir converges with zero CAS surfaced.
-"""
+Rebar peers share a blocking cross-process lock across symlinks and worktrees.
+A bounded exact-CAS retry handles non-rebar peers that ignore it. Injected
+mismatch tests show sync and snapshot entry points recover. Concurrent
+fetches converge without surfacing CAS conflicts."""
 
 from __future__ import annotations
 

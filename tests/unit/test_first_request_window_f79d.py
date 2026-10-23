@@ -1,21 +1,11 @@
-"""Story f79d — the context-window check covers the FIRST request (and every request).
+"""Check the first and every kept request against the context window (f79d).
 
-The RCA on ticket [rebar:undamaged-adolescent-sable] proved `_make_wire_projection`'s
-callable only descended into carried `ModelResponse` messages, so a first request — history
-`[ModelRequest]` — was never measured and an input three times the window went straight to
-the provider (a 400 surfaced as `LLMUnavailableError`). These tests pin the repaired class:
-the projection estimates every kept request's authoritative content (instructions + part
-content, at :data:`rebar.llm.pai_retry.CHARS_PER_TOKEN` chars/token) and fails closed with
-:class:`ContextWindowExceededError` BEFORE the provider call.
-
-Sizing note: the fit rule is `estimate + reserve > window` with `estimate = chars // 4`, so
-the oversize fixtures use `window * 8` chars (~2x the window in tokens) — decisively over for
-any reserve — and the admissibility fixture uses `window * 2` chars (the maximal
-first-line bound an op may send, ~window/2 tokens), which must pass.
-
-Every runtime test drives the REAL ``PydanticAIRunner`` over an offline ``FunctionModel``
-(``ALLOW_MODEL_REQUESTS`` off) — no live call can escape.
-"""
+The old projection saw only ModelResponse history, so an oversized first
+ModelRequest reached the provider. Estimate instructions and part content
+at CHARS_PER_TOKEN, then raise ContextWindowExceededError before the call
+when estimate + reserve exceeds window. Oversize fixtures use window*8
+chars. Admissible fixtures use window*2. PydanticAIRunner tests use
+an offline FunctionModel."""
 
 from __future__ import annotations
 

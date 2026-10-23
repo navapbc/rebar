@@ -1,19 +1,10 @@
-"""Happy-path spec for the out-of-band trusted-environment config + required-environment check
-(story 42d1 / urban-dihydric-trogon), re-expressed for Option B (story 4214).
+"""Visible trusted-environment happy path (42d1, Option B 4214).
 
-The ONLY tests the implementation subagent sees. Pins the approved-design happy path:
-* the loader reads `.rebar/trusted_environments.yaml` and exposes an environment's pinned keyring;
-* `verify_required_environment` certifies an op-cert that is genuinely signed by the pinned key of
-  the required environment, with key era-validity judged at the cert's STORAGE ANCHOR.
-
-The adversarial matrix — absent file (fail-open), malformed file (located error), an environment
-not in the pinned set, and the keyid-spoof case (verify against the PINNED key, never the cert's
-self-claimed keyid) — lives in the held-out companion `test_trusted_env_heldout.py`.
-
-Under Option B key era boundaries are TICKETS-BRANCH log positions and validity is anchored on the
-certificate's storage anchor (a tickets-branch commit), so these tests run against a real rebar
-store's position chain. Real ssh-keygen.
-"""
+Load the pinned keyring from .rebar/trusted_environments.yaml and verify a
+cert genuinely signed by the required environment's key at its tickets-branch
+storage-anchor era. ssh-keygen and store positions exercise the path.
+test_trusted_env_heldout covers missing/malformed config, absent environment,
+and spoofed keyid."""
 
 from __future__ import annotations
 

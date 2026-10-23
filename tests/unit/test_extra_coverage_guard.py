@@ -1,24 +1,9 @@
-"""Bug 599e-77da-29dd-482d: a test surface must not be able to vanish from CI unnoticed.
+"""Fail CI when optional-package security tests silently skip (599e).
 
-`pytest.importorskip("fastapi")` is the right call for a suite that must stay runnable in a
-lean install — but it also means the ONLY thing standing between a security test and total
-invisibility is a CI install step remembering an extra. Nothing reported when that memory
-failed: no lane installed the `reviewbot` extra, so 38 tests (the review-bot receiver, the
-opcert service app, the audit UI, and the path-injection + token-redaction guards) skipped in
-every run for months, and a change that broke one of them still earned `Verified +1`.
-
-Two halves are tested here:
-
-  * the RUNTIME guard — with `REBAR_REQUIRE_EXTRAS=1`, `tests/conftest.py` replaces
-    `pytest.importorskip` with a strict variant that RAISES instead of skipping, so the build
-    reddens by module name (collection error for a module-scope call, test error for a
-    function-scope one);
-  * the CI WIRING — the workflow lane that runs pytest actually installs those extras and
-    actually sets that env var, so the guard is armed where it matters.
-
-Deliberately NOT covered by the guard: skips keyed on a missing binary or a version floor
-(`ssh-keygen >= 8.9`, Node for the e2e tier) use `pytest.mark.skipif`, not `importorskip`.
-"""
+Without the reviewbot extra, 38 tests skipped while changes still earned
+Verified +1. With REBAR_REQUIRE_EXTRAS=1, importorskip raises by module or
+test. CI must install the extras and set the variable. Binary/version-floor
+skipif cases remain outside this guard."""
 
 from __future__ import annotations
 

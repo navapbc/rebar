@@ -1,16 +1,9 @@
-"""Held-out oracle for story cef7 — tri-state ``bridge_project`` and ``repos``
-ticket fields with create-time arguments on all three write surfaces, plus the
-promote-only edit guard.
+"""Held-out oracle for tri-state bridge_project and repos fields (cef7).
 
-Only the happy-path CREATE test is handed to the implementer. Everything below the
-``# ── HELD OUT ──`` banner (three-state distinguishability, cross-surface parity,
-the promote-only refusal, and the legacy-replay collateral invariant) is withheld and
-run by the orchestrator against code the implementer never saw.
-
-All assertions target OBSERVABLE behaviour only — the reduced ticket state surfaced by
-``rebar show`` / the library / MCP, process exit codes, and on-disk event replay —
-never private names or source structure.
-"""
+The implementer sees only happy-path create. Withheld tests cover absent,
+empty, and keyed state, CLI/library/MCP parity, promote-only edit refusal,
+and legacy replay. Assert reduced state, exit codes, and event replay rather
+than private names."""
 
 from __future__ import annotations
 
@@ -105,8 +98,7 @@ def test_create_cli_sets_bridge_project_and_repos(repo: Path) -> None:
     assert state["repos"] == ["rebar", "api"]
 
 
-# ── HELD OUT ──────────────────────────────────────────────────────────────────
-# Everything below is withheld from the implementer and run by the orchestrator.
+# ── HELD OUT: orchestrator-only checks ───────────────────────────────────────
 
 
 def test_three_states_are_distinguishable_after_replay(repo: Path) -> None:
@@ -120,15 +112,15 @@ def test_three_states_are_distinguishable_after_replay(repo: Path) -> None:
         repo, _created_id(_cli("create", "task", "sync", "--bridge-project", "REB", cwd=repo))
     )
 
-    # The three are mutually distinguishable.
+    # Distinct states.
     assert absent.get("bridge_project") is None  # legacy / unset — the absent sentinel
     assert empty["bridge_project"] == ""  # explicit never-sync
     assert keyed["bridge_project"] == "REB"  # bound-project sync target
 
-    # "not merely falsy": absent and never-sync are BOTH falsy yet must not collapse.
+    # Both falsy values differ.
     assert absent.get("bridge_project") != empty["bridge_project"]
 
-    # repos is a plain list field: unset defaults to [].
+    # Unset repos defaults to [].
     assert absent.get("repos") == []
 
 
@@ -146,7 +138,7 @@ def test_bridge_project_and_repos_are_parity_across_surfaces(repo: Path) -> None
         repos=["rebar", "api"],
         repo_root=str(repo),
     )
-    # MCP (register the write tools against a fake server, call the create tool)
+    # MCP write-tool registration.
     mcp_tools: dict = {}
 
     class _FakeMcp:
@@ -179,10 +171,8 @@ def test_bridge_project_and_repos_are_parity_across_surfaces(repo: Path) -> None
 
 
 def test_mcp_edit_sets_bridge_project_and_repos_at_parity(repo: Path) -> None:
-    """The MCP edit_ticket tool can set bridge_project and repos, matching the CLI and
-    library edit surfaces. The MCP tool has an enumerated signature (no **fields
-    passthrough), so it must forward these two fields explicitly or the MCP edit surface
-    silently drops them — the parity gap this test pins."""
+    """MCP edit_ticket forwards bridge_project and repos explicitly, matching
+    CLI and library edits. Its enumerated signature has no **fields passthrough."""
     tid = rebar.create_ticket("task", "mcp-edit", repo_root=str(repo))
     assert _state(repo, tid).get("bridge_project") is None
     assert _state(repo, tid).get("repos") == []
@@ -221,7 +211,7 @@ def test_promote_only_refuses_rebind_but_allows_first_set(repo: Path) -> None:
     assert ok.returncode == 0, ok.stderr
     assert _state(repo, unbound)["bridge_project"] == "REB"
 
-    # Bound → refused, value unchanged.
+    # Rebind refused.
     bound = _created_id(_cli("create", "task", "bound", "--bridge-project", "REB", cwd=repo))
     _write_binding(repo, bound, "REB-1")
     before = _state(repo, bound)["bridge_project"]
@@ -231,9 +221,8 @@ def test_promote_only_refuses_rebind_but_allows_first_set(repo: Path) -> None:
 
 
 def test_legacy_create_event_replays_with_new_keys_defaulted(repo: Path) -> None:
-    """A CREATE event written before this change (no bridge_project/repos in its
-    data) still replays cleanly, with the two new keys at their defaults and every
-    other projected field intact — the additive-field collateral invariant."""
+    """Legacy CREATE events lacking bridge_project and repos replay with their
+    defaults while preserving every other projected field."""
     from rebar.reducer import reduce_ticket
 
     tid = "abcd-1234-5678-9abc"
@@ -260,12 +249,12 @@ def test_legacy_create_event_replays_with_new_keys_defaulted(repo: Path) -> None
     )
     state = reduce_ticket(str(tdir))
     assert state is not None
-    # Existing projection is intact.
+    # Preserve projection.
     assert state["ticket_type"] == "task"
     assert state["title"] == "legacy ticket"
     assert state["priority"] == 2
     assert state["tags"] == ["x"]
     assert state["status"] == "open"
-    # The two new keys default (absent bridge_project, empty repos).
+    # Default new keys.
     assert state.get("bridge_project") is None
     assert state.get("repos") == []

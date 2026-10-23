@@ -1,38 +1,13 @@
-"""Plan-review threshold + posture recalibration (story usable-chattery-coelacanth).
+"""Pin approved plan-review routing thresholds (usable-chattery-coelacanth).
 
-The approved pre-redesign changes to `criteria_routing.json`:
-  - lower block_threshold 0.70 -> 0.60 for COH, E2, F1, G5, G6, T5e;
-  - keep T4 @ 0.70 (blocking);
-  - promote to blocking: G1G2 @ 0.70, T1 @ 0.70, T8 @ 0.70, E4 @ 0.75.
-No other criterion changes.
-
-Amended by calibration 3 (task relishable-ammonitic-hoverfly, plan-v2 segmented replay):
-  - T5e demoted to advisory @ 0.95 (FP-PRONE: validity 0.391, verifier drops 59% of its
-    findings, surviving p90 priority 0.27). The other ten blocking criteria KEEP their
-    calibration-2 thresholds; see docs/experiments/plan-review-threshold-calibration.md
-    "Calibration 3".
-
-Amended by ticket bfa8 (operator-approved blocking pilot):
-  - T3 and T10 promoted to blocking @ 0.90 (conservative pilot; the zero-LLM
-    criterion-effectiveness recorder monitors outcomes for a later 0.85 revisit).
-
-Amended by ticket c97a (T5c grounded-security rewrite, operator-approved):
-  - T5c promoted to blocking @ 0.90 alongside the bfa8 pilot pair; the rubric's
-    two-HIGH-class severity scoping keeps lesser findings below the bar.
-
-Amended by ticket 28d5 (G7 blocking enablement, FP-verified on ticket 696a):
-  - G7 promoted to blocking @ 0.85 (0 clearly-incorrect findings at priority >=
-    0.85 over all 348 historical G7 findings; the 0.80-0.85 band is empty). Kind
-    scoping comes from the plan-v4 divergence grading (ADR 0054): only the two
-    floor-grade kinds can reach the bar; incomplete_enumeration never floors.
-
-Amended by ticket deeb (operator-attested evidence-kind trust-bypass guard):
-  - evidence-kind added as blocking @ 0.95 after its frozen two-run corpus produced
-    7/7 required findings, zero false accepts across five pass controls, and stability 1.0.
-
-Proving command:
-    .venv/bin/pytest tests/unit/test_threshold_recalibration.py -v
-"""
+Initial blocking thresholds: COH/E2/F1/G5/G6 at 0.60, T4/G1G2/T1/T8
+at 0.70, E4 at 0.75. No other changes. Calibration 3 moved false-positive
+T5e to advisory 0.95 while retaining the other ten blocking bars. Later
+pilots made T3/T10 and grounded-security T5c blocking at 0.90. The latter
+requires two HIGH severity classes. G7 blocks at 0.85 only for its two
+floor-grade divergence kinds, never incomplete_enumeration. Evidence-kind
+blocks at 0.95 after its two-run corpus met all seven required findings
+with zero false accepts and stable results."""
 
 from __future__ import annotations
 

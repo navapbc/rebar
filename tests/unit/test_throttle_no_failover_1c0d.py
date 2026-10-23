@@ -1,23 +1,10 @@
-"""Bug 1c0d — a retryable primary throttle must NOT be masked as INDETERMINATE by a
-fallback leg's non-retryable failure.
+"""Keep a retryable primary throttle visible through fallback failure (1c0d).
 
-The incident: under a shared Bedrock account the whole fleet throttles at once. The
-frontier chain's primary (`bedrock:opus`) returns a 429 (`WAIT_AND_RETRY`, exit-11
-retryable); `should_fall_back` moves to the direct-Anthropic fallback, which — with no key
-on the box — raises a bare ``TypeError: Could not resolve authentication method`` at auth.
-pydantic-ai's ``FallbackModel`` BARE-RERAISED that terminal ``TypeError`` (its
-``fallback_on`` predicate returned False for it), discarding the collected retryable 429,
-and ``classify_llm_failure`` mapped the lone ``TypeError`` to ``NEEDS_INVESTIGATION`` — a
-hard INDETERMINATE — fleet-wide.
-
-These are the held-out oracle for the fix: the chain must EXHAUST into a
-``FallbackExceptionGroup`` retaining every leg, and the group must be classified by its
-MOST-RECOVERABLE leg, so the retryable primary survives as ``exit 11`` retryable. Assertions
-land on the observable disposition (``resolution_class`` / ``retryable``) only — never on the
-tagging mechanism or any wrapper structure — so the fix is free to be implemented differently.
-
-Everything is local and mocked at the model boundary: ZERO real Bedrock / Anthropic load.
-"""
+When Bedrock returns 429 and direct Anthropic has no key, FallbackModel once
+re-raised the terminal TypeError alone, producing hard INDETERMINATE. The
+chain must retain every leg in FallbackExceptionGroup and classify its most
+recoverable failure as retryable exit 11. Assert the observable disposition,
+not the wrapper mechanism. Model calls are mocked offline."""
 
 from __future__ import annotations
 
