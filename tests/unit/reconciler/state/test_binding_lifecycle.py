@@ -1,27 +1,6 @@
-"""Direct oracles for ``BindingLifecycle`` identity transitions (RP-02 S2 T1).
-
-``dermatoid-brassy-junco``. This is the FIRST lifecycle slice: bind/confirm/unbind, stale
-reverse cleanup, and the immutable-numeric-id re-key. Absence, retirement, tombstones and
-comment identity belong to S2 T2 and are deliberately absent here.
-
-Every transition is asserted on BOTH indexes and then RELOADED through a real
-``BindingRepository``, because a policy that updates only the in-memory forward entry looks
-correct until the next pass reads the file back. The characterization source is
-``BindingStore.bind_pending`` / ``record_pending_key`` / ``bind_confirm`` / ``unbind`` /
-``get_jira_id`` / ``record_jira_id`` and step 4 of ``note_absent_or_rekey`` on the reviewed
-base; behaviour must match those exactly.
-
-Two things this suite deliberately does NOT assert, because they are not existing behaviour
-(verified by search: no ambiguity/abort handling exists in ``binding_store.py``,
-``binding_repository.py`` or ``peer_state.py``):
-
-* there is no ambiguity detection and no safety-abort on a double bind — ``bind_confirm`` is
-  last-writer-wins and pops exactly the one differing old reverse key;
-* nothing sweeps or repairs the reverse index outside the enumerated permitted cases.
-
-The at-most-one-identity invariant holds because of those targeted single-key pops, and that
-is what is pinned. The term "safety-abort" is reserved for RP-02 S3.
-"""
+"""BindingLifecycle transitions update both forward and reverse indexes and survive
+repository reload. These tests cover bind, confirm, unbind, stale reverse cleanup, and
+immutable-ID re-keying."""
 
 from __future__ import annotations
 
@@ -172,12 +151,8 @@ def test_bind_confirm_is_idempotent_on_the_same_key(tmp_path: Path) -> None:
 
 
 def test_bind_confirm_rebind_drops_only_the_differing_old_reverse_key(tmp_path: Path) -> None:
-    """A rebind (hard-delete then re-create binds the same local id to a NEW key) must drop
-    the OLD reverse entry in the SAME operation, or reverse[old] dangles at this local id
-    forever — there is no dedicated rebind method, and only unbind used to clean it.
-
-    Last-writer-wins with ONE targeted pop: no sweep, no ambiguity detection, no abort.
-    """
+    """Rebinding a local ID to a new Jira key must remove the old reverse entry in the
+    same operation with one targeted pop."""
     lifecycle, repo = _lifecycle(tmp_path)
     lifecycle.bind_confirm("loc-A", "DIG-OLD")
     lifecycle.bind_confirm("loc-B", "DIG-KEEP")
@@ -544,18 +519,8 @@ def test_bind_confirm_rebind_does_not_sweep_an_out_of_band_orphan(tmp_path: Path
 
 
 # ===========================================================================
-# RP-02 S2 T2 (sportive-statued-goose) — absence, tombstone, comment identity.
-#
-# These are DIRECT oracles on the policy owner. Facade-level coverage already
-# exists and stays the regression oracle for the extraction
-# (state/test_binding_absence_lifecycle.py, test_binding_store_comment_ids.py,
-# state/test_corrupt_state_guard.py, test_no_resurrection_after_confirmed_delete_3b5f.py);
-# these add the both-index / reload-through-the-repository tier the facade tests
-# do not reach, and they pin the fail-open vs fail-closed asymmetry that makes
-# this cluster dangerous to move.
-#
-# Nothing here may change a THRESHOLD, a stored field, or a disposition. Three
-# confirmed 404s retire; a 200 resets; retired corruption and alert-write
+# Absence, tombstone, and comment-ID policy oracles: check both indexes after reload.
+# Three confirmed 404s retire; a 200 resets. Retired corruption and alert-write
 # failures stay fail-open; live corruption stays fail-closed.
 # ===========================================================================
 
@@ -854,19 +819,9 @@ def test_identical_re_record_performs_no_write_at_all(tmp_path: Path) -> None:
 
 
 def test_a_differing_id_for_a_known_key_overwrites_and_saves(tmp_path: Path) -> None:
-    """Characterized, NOT idealized: a DIFFERENT id for a known key OVERWRITES it.
-
-    The change-gate is equality-only — it short-circuits when the id matches and otherwise
-    assigns and saves. Verified against the pre-extraction implementation this epic
-    extracted from (RP-02 S1, `vivacious-widish-indianabat`): identical logic, so this
-    extraction preserves it.
-
-    The docstring on the reviewed base claimed "a key is never remapped to a different id",
-    which the code does not do. That sentence has been corrected in the moved docstring
-    rather than carried forward as a false statement, and no behavior was changed: making
-    the map genuinely append-only would be a behavior change needing its own ticket, and
-    an overwrite is plausibly wanted when a mirrored comment is recreated.
-    """
+    """A different ID for a known key overwrites it; only an equal ID short-circuits.
+    This characterizes the existing equality-only gate rather than changing its
+    policy."""
     lifecycle, _ = _lifecycle(tmp_path)
     lifecycle.record_comment_id("hlc-1", "10001")
 

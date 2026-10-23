@@ -111,18 +111,8 @@ def _ok_snapshot_head(repo_root: Path) -> str:
 def test_alert_emitted_through_stateless_path(
     tmp_path, reconcile_mod, fetcher_mod, applier_mod, alert_store_mod
 ):
-    """An invariant violation triggers alert_store >= 1 record via reconcile_once().
-
-    Scenario: a Jira snapshot contains one issue with two local_id values
-    (duplicate mapping).  check_at_most_one_local_id() detects the violation
-    and calls alert_store.append() to write an operator-visible alert record.
-
-    The test asserts:
-    1. reconcile_once() completes without exception.
-    2. .rebar/bridge/bridge_alerts/ contains at least one JSONL file with >= 1 record.
-    3. The record's 'reason' field contains the word 'local_id' — confirming
-       the alert originated from the invariant check, not a different code path.
-    """
+    """A duplicate Jira local_id mapping makes reconcile_once append an
+    operator-visible bridge alert and complete without raising."""
     # Snapshot with a duplicate local_ids entry — triggers at-most-one invariant.
     issues_with_violation = [
         {

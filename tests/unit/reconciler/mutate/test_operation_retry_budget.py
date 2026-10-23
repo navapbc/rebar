@@ -1,21 +1,5 @@
-"""[P0] RP-03 S1 T1 — logical-operation outcome + retry-budget contract (happy path).
-
-This file specifies the *correct-behaviour* core of the provider-neutral
-logical-operation contract defined in ticket 7bc2-5203-d5f4-4a4a:
-
-- the four enum member sets (:class:`Disposition`, :class:`FailureScope`,
-  :class:`ReplaySafety`, :class:`DelaySource`) and their lowercase string values,
-- byte-identical canonical serialization through the existing
-  ``rebar._store.canonical.canonical_bytes`` seam,
-- a well-formed bounded diagnostic,
-- the additive-jitter retry schedule (index 0 -> ``[2s,3s)``; index 1 -> ``[4s,5s)``)
-  grounded in ADR 0084 / ``acli_subprocess._rate_limit_backoff``,
-- a stable ``logical_id`` across physical invocations.
-
-Edge/boundary/ambiguity tables (truncation, overflow sentinel, over-budget
-provider delays, exhaustion, observe-before-replay) live in the held-out suite.
-Every clock is injected; these tests perform zero wall-clock sleep.
-"""
+"""Logical operation outcomes retain exact enum values, canonical serialization, and
+additive-jitter retry schedules, stable logical_id, and bounded provider-neutral accounting."""
 
 from __future__ import annotations
 

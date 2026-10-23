@@ -1,17 +1,5 @@
-"""Byte-identity + durability pins for ``alert_store._atomic_write`` after the seam swap.
-
-Ticket 6454-d06e-7361-4e3d converted ``alert_store._atomic_write`` off a hand-rolled
-``mkstemp`` + ``fsync`` + ``os.replace`` to the authoritative ``rebar._store.fsutil.atomic_write``
-seam. ``.rebar/bridge/bridge_alerts`` is git-ignored LOCAL SCRATCH (not the committed tickets
-branch), so the atomic write alone is the whole contract — no commit/publish path. These pins
-prove the conversion is behavior-preserving:
-
-* the on-disk bytes are exactly the string passed in (no trailing newline / re-encoding),
-* the file mode is 0o600 (the prior ``mkstemp`` default, never chmod'd),
-* the parent directory is created when missing (the prior explicit ``mkdir`` is retained,
-  because ``fsutil.atomic_write`` requires the parent to already exist),
-* an existing file is replaced atomically (no partial/truncated destination).
-"""
+"""Local bridge alerts use atomic replacement, create missing parents, and retain exact
+bytes with 0o600 mode. They require no ticket commit or push."""
 
 from __future__ import annotations
 

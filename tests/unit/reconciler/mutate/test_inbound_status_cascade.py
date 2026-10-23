@@ -1,26 +1,6 @@
-"""Inbound STATUS writes run the parent-first cascade (ticket bb73-97de-eeea-4899).
-
-Operator ruling (recorded on the ticket): "rebar should maintain, as an invariant,
-that no non-terminal-state ticket can be a child of a closed ticket." The Jira
-reconciler's inbound-apply path used to write STATUS events directly, bypassing the
-docs/concurrency.md I4a parent-first cascade — an inbound Jira status change moving a
-child into an active status left its closed ancestors closed, composing exactly the
-invalid state the invariant forbids.
-
-Behaviour under test (observable via on-disk events, driving the INBOUND-APPLY path,
-not ``transition_compute``):
-
-  1. An inbound child reactivation (``closed -> in_progress``) under a ``closed``
-     parent writes the parent's STATUS event FIRST (same edge), so both end active.
-  2. The cascade walks the whole eligible ancestor chain (grandparent too).
-  3. No parent / a parent not in the eligible status -> no cascade (child alone).
-  4. A ``* -> closed`` inbound write never cascades (parity with `_CASCADING_EDGES`).
-  5. A same-status inbound write is a suppressed no-op — this is what keeps a
-     cascaded parent from fighting the parent's OWN status mutation later in the
-     same batch, and makes re-applying an inbound payload idempotent.
-  6. The inbound CREATE path cascades too: a create landing at ``in_progress``
-     under an ``open`` local parent pulls the parent along (``open -> in_progress``).
-"""
+"""Inbound status changes use the parent-first cascade so an active child cannot remain
+under a closed ancestor. These tests inspect persisted ticket states after the real
+apply path."""
 
 from __future__ import annotations
 

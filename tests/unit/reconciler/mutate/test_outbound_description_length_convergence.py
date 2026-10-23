@@ -1,19 +1,5 @@
-"""Over-length description guard + truncation-aware convergence (bug 626d follow-up).
-
-Jira's description field shares the 32,767-char hard limit of comments. ACLI
-surfaces an over-length description as a create/edit FAILURE that aborts the whole
-reconciler pass (observed during the REB cutover: a 46,271-char epic description
-killed a live pass after 154 successful creates).
-
-The fix has two halves that MUST share one truncation function:
-
-  (send path) acli create/update truncates the description so it lands; and
-  (differ path) outbound_differ._diff_fields truncates the expected local value
-    BEFORE comparison so the previously-truncated-then-landed Jira body matches and
-    the diff stops re-emitting.
-
-Hard constraint: the truncated description is NEVER written back to the local store.
-"""
+"""Sending and diffing descriptions must share the 32,767-character fit so an over-length
+value lands and the next pass converges while the local full description remains intact."""
 
 from __future__ import annotations
 
@@ -91,13 +77,8 @@ def _make_ticket(ticket_id: str, description: str) -> dict:
     }
 
 
-# A MULTI-LINE oversize description. Historically ``text_to_adf`` wrapped each line
-# in its own paragraph node, inflating the ADF far past the plain-text length — the
-# real failure mode (a 46k-char epic serialized to ~50k ADF). The encoder now rejoins
-# soft-wrapped prose into one paragraph, so these 1,500 marker-free lines collapse
-# into a single paragraph and the ADF is smaller than it used to be; at ~46k plain
-# chars it still exceeds the limit, so the fit must cut it and the two-pass
-# convergence contract below still bites.
+# Soft-wrap rejoin shrinks serialized ADF, but this 46k body still exceeds Jira's
+# limit, exercising the fitter and two-pass convergence.
 _OVERSIZE_DESC = ("X" * 30 + "\n") * 1500
 
 

@@ -1,37 +1,6 @@
-"""Direct oracles for ``BindingRecovery`` — create recovery plus interrupted-retirement
-completion.
-
-RP-02 S3 T1 (``polarized-servile-jenny``). Two halves with DIFFERENT test obligations:
-
-* **Create recovery is a MOVE.** Keyed/keyless pending recovery is lifted out of the
-  facade unchanged, so its oracles are characterization: they must pass identically
-  before and after. The pre-existing facade suites
-  (``test_write_ahead_recovery.py``, ``test_recovery_loud_failures.py``,
-  ``test_index_lag_duplicate_heldout.py``, ``test_identity_write_retention_heldout.py``)
-  remain the regression oracle and are deliberately NOT duplicated here; what this file
-  adds is the direct-module tier those facade tests cannot reach.
-* **Retirement completion is NEW behavior.** So it is specified RED-first: every test
-  below the create-recovery section describes an outcome that does not exist yet.
-
-The state under repair is the one ordered partial state the retired-first protocol
-produces by design (ADR 0099 §5): ``BindingLifecycle.retire`` persists the tombstone
-through ``save_retired()`` and only then drops the live forward/reverse pair through
-``save()``, so a crash between the two leaves ONE exact identity both live and
-tombstoned. Every fixture here creates that state through the real production route —
-``note_absent`` driven to the retirement grace with the live ``os.replace`` failing —
-rather than by hand-writing an inconsistent pair of files.
-
-Two behaviors are pinned here as they ACTUALLY are, against wording that implies
-otherwise:
-
-* A **corrupt live store** cannot produce a safety abort. It fails CLOSED inside
-  ``BindingRepository._load``, so construction raises and repair is never reached. The
-  safety property is real but it is delivered by fail-closed loading, not by an abort
-  value.
-* A **corrupt retired file** fails OPEN to an empty key set, which means a coherent
-  tombstone becomes invisible and therefore yields no completion candidate at all. The
-  live pair is preserved rather than deleted, which is the safe direction.
-"""
+"""BindingRecovery preserves pending-create recovery and completes interrupted retirement.
+A corrupt live store fails closed at load; corrupt retired state fails open and leaves
+the live pair intact."""
 
 from __future__ import annotations
 
@@ -48,11 +17,6 @@ from rebar.reconciler.binding_repository import BindingRepository
 from rebar.reconciler.binding_store import BindingStore
 
 _INDENT = 2
-
-
-# ---------------------------------------------------------------------------
-# Fixtures: the REAL retired-first fault cut
-# ---------------------------------------------------------------------------
 
 
 def _canonical(payload: Any) -> bytes:
@@ -196,11 +160,6 @@ class _SaveCounter:
         mp.setattr(BindingRepository, "save_retired", counted_save_retired)
 
 
-# ---------------------------------------------------------------------------
-# The overlap fixture itself is load-bearing
-# ---------------------------------------------------------------------------
-
-
 def test_the_fault_cut_really_produces_a_live_and_tombstoned_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -213,11 +172,6 @@ def test_the_fault_cut_really_produces_a_live_and_tombstoned_identity(
     assert store.get_jira_key("loc-A") == "DIG-A"
     assert store.get_local_id("DIG-A") == "loc-A"
     assert _retired_on_disk(tmp_path)["DIG-A"]["local_id"] == "loc-A"
-
-
-# ---------------------------------------------------------------------------
-# Completion: the exact-match happy path
-# ---------------------------------------------------------------------------
 
 
 def test_the_exact_overlap_completes_to_a_coherent_retired_only_store(
@@ -268,21 +222,9 @@ def test_completion_leaves_every_unrelated_binding_untouched(
 def test_completion_pops_only_the_named_reverse_key_and_not_every_key_for_that_local(
     tmp_path: Path,
 ) -> None:
-    """Removal of the reverse side is a TARGETED pop of the tombstoned key, never a sweep
-    of every reverse key pointing at that local id.
-
-    The discriminator is an out-of-band orphan: a reverse key the forward entry never
-    named. A targeted pop leaves it; a sweep keyed on ``local_id`` takes it too, and
-    nothing else in this file could tell those apart — every other fixture has exactly one
-    reverse key per local id, which is precisely the blind spot that shipped a tautology
-    earlier in this epic (RP-02 S2 T1).
-
-    Pinning the orphan's SURVIVAL is deliberate, and it is characterization rather than an
-    endorsement: a one-to-one forward/reverse invariant is not claimed anywhere, which is
-    exactly why ``unbind`` carries an orphan sweep of its own and why bridge fsck reports
-    ``reverse_missing_forward`` at all. Repair completes a retirement; it does not
-    opportunistically tidy an index it was not asked about.
-    """
+    """Retirement removes only the tombstoned reverse key. An unrelated orphan reverse
+    key for the same local ID must survive, distinguishing targeted pop from a broad
+    sweep."""
     doc = _live_doc(pairs={"loc-A": "DIG-A"})
     doc["reverse"]["DIG-ORPHAN"] = "loc-A"
     tracker = _seed(
@@ -343,11 +285,6 @@ def test_a_store_with_no_tombstones_completes_nothing(tmp_path: Path) -> None:
     assert (outcome.completed, outcome.aborted) == ((), ())
 
 
-# ---------------------------------------------------------------------------
-# The classifier is PURE
-# ---------------------------------------------------------------------------
-
-
 def test_the_classifier_mutates_nothing_it_is_given(tmp_path: Path) -> None:
     """Classification must be safe to run anywhere, including on a read-only pass, so it
     is a pure function over the three maps and never writes through them."""
@@ -368,11 +305,6 @@ def test_the_classifier_finds_the_exact_overlap() -> None:
 
     assert [(r.jira_key, r.local_id) for r in outcome.completed] == [("DIG-A", "loc-A")]
     assert outcome.aborted == ()
-
-
-# ---------------------------------------------------------------------------
-# Idempotency — the WRITE-COUNTING oracle
-# ---------------------------------------------------------------------------
 
 
 def test_repeating_completion_performs_no_further_save(
@@ -434,11 +366,6 @@ def test_completion_saves_the_live_store_exactly_once(
     recovery.complete_interrupted_retirements()
 
     assert (counter.live, counter.retired) == (1, 0)
-
-
-# ---------------------------------------------------------------------------
-# The mismatch table — zero guessed deletion
-# ---------------------------------------------------------------------------
 
 
 def test_a_forward_entry_naming_a_different_key_aborts_without_deleting(
@@ -603,11 +530,6 @@ def test_an_abort_on_one_tombstone_does_not_block_completing_another(
     assert live["bindings"]["loc-B"]["jira_key"] == "DIG-OTHER"
 
 
-# ---------------------------------------------------------------------------
-# Replace failure — retain the overlap, abort for a later retry
-# ---------------------------------------------------------------------------
-
-
 def test_a_live_replace_failure_retains_the_overlap_and_aborts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -660,11 +582,6 @@ def test_a_replace_failure_leaves_no_temp_file_behind(
     assert leftovers == []
 
 
-# ---------------------------------------------------------------------------
-# Corrupt state: pinned as it really behaves
-# ---------------------------------------------------------------------------
-
-
 def test_a_corrupt_live_store_fails_closed_before_repair_can_run(tmp_path: Path) -> None:
     """An unparseable live store never reaches repair — the repository raises at load.
     Fail-closed loading, not an abort value, is what protects this case; degrading to an
@@ -692,11 +609,6 @@ def test_a_corrupt_retired_file_yields_no_candidate_and_keeps_the_live_pair(
 
     assert (outcome.completed, outcome.aborted) == ((), ())
     assert _live_on_disk(tmp_path)["bindings"]["loc-A"]["jira_key"] == "DIG-A"
-
-
-# ---------------------------------------------------------------------------
-# Tombstone authority vs. automatic liveness signals
-# ---------------------------------------------------------------------------
 
 
 def test_an_explicit_unretire_removes_the_completion_candidate(
@@ -750,11 +662,6 @@ def test_clear_absent_does_not_revoke_the_tombstone(
 
     assert [r.jira_key for r in outcome.completed] == ["DIG-A"]
     assert BindingStore(tracker).is_retired("DIG-A") is True
-
-
-# ---------------------------------------------------------------------------
-# Create recovery: the extraction's direct tier
-# ---------------------------------------------------------------------------
 
 
 class _FakeClient:
@@ -932,11 +839,6 @@ def test_create_recovery_carries_no_write_bearing_or_scope_parameter(tmp_path: P
     params = list(inspect.signature(BindingRecovery.recover_pending_bindings).parameters)
 
     assert params == ["self", "client", "failure_sink"]
-
-
-# ---------------------------------------------------------------------------
-# The facade stays compatible
-# ---------------------------------------------------------------------------
 
 
 def test_the_facade_delegates_create_recovery_unchanged(tmp_path: Path) -> None:

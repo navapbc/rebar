@@ -1,19 +1,5 @@
-"""Bug sole-curbable-stinkpot — ACLI credential rejection must fast-abort and be
-reported as a CREDENTIAL problem, not a generic data failure.
-
-Six scheduled Reconcile Bridge runs over 2026-08-07 -> 2026-08-11 died on the
-FIRST ACLI call of the pass with::
-
-    ✗ Error: unauthorized: use `acli [product] auth login` to authenticate
-
-The historical fast-abort was keyed on ``returncode == 401``. ACLI is a
-subprocess and exits **1**, so that branch was dead code: the deterministic
-failure burned the full 3-attempt retry budget and then surfaced as a generic
-``returned non-zero exit status 1``.
-
-The fakes follow the sibling timeout suite's shape: tiny ``python -c`` programs
-invoked as the ``acli`` binary via ``acli_cmd=[sys.executable, "-c", ...]``.
-"""
+"""ACLI unauthorized exits as subprocess code 1, not HTTP 401. Detect its credential text,
+fast-abort the pass, and report a credential failure instead of retrying it as data."""
 
 from __future__ import annotations
 
@@ -185,15 +171,7 @@ def test_ordinary_failure_keeps_the_generic_operational_classification():
     assert "reconcile_once raised" in (result.legacy_message or "")
 
 
-# ---------------------------------------------------------------------------
-# REB-3115 S1 T2 (AC5) — the real exit-1 unauthorized shape decodes deterministically
-# ---------------------------------------------------------------------------
-#
-# ``decode_acli_triple`` is the deterministic classifier over historical
-# ``(exit, stdout, stderr)`` triples. The real bridge-run credential rejection —
-# exit 1 with the ✗ unauthorized stderr captured verbatim above — must decode to
-# the ``auth_failure`` class (never a generic retryable failure, never
-# fail-loud).
+# Exit-1 unauthorized stderr must decode as auth_failure, not a retryable error.
 
 
 def test_decode_real_exit1_unauthorized_is_auth_failure():

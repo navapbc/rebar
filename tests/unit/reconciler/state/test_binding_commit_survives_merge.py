@@ -1,27 +1,5 @@
-"""Regression test: binding-store snapshot committed to tickets branch after reconciler pass.
-
-Probe TS 1780561673 root cause: ``binding_store.save()`` writes bindings.json only
-to the working-tree filesystem.  Between reconciler passes, the ticket-CLI's
-``_push_tickets_branch()`` may run ``git merge origin/tickets`` which overwrites
-the un-committed local bindings.json with the version from the remote — losing the
-Phase-1 bindings and causing Phase-2 to generate outbound CREATE mutations (dedup-
-skip) instead of UPDATE mutations with the edited field values.
-
-Fix: ``pass_support._commit_binding_store_snapshot`` runs after every
-``binding_store.save()``, staging and committing ``.bridge_state/bindings.json``
-to the tickets orphan branch.  Subsequent ``git merge origin/tickets`` calls in
-the ticket-CLI include the new bindings because they are already on-branch.
-
-RED test (before fix): after a reconciler pass that creates bindings, the bindings
-    are present on-disk but NOT committed to the tickets branch. Simulating a
-    ``git merge origin/tickets`` that restores the old bindings.json leaves the
-    binding store empty → the next reconciler pass sees the ticket as unbound →
-    generates a CREATE mutation instead of an UPDATE.
-
-GREEN test (after fix): ``_commit_binding_store_snapshot`` commits bindings.json
-    to the tickets branch.  Even after a simulated merge that would otherwise
-    overwrite the file, the bindings survive because they are now on-branch.
-"""
+"""Commit binding-store snapshots to the tickets branch after a pass so a later tickets
+merge cannot overwrite uncommitted bindings and recreate already-bound Jira issues."""
 
 from __future__ import annotations
 

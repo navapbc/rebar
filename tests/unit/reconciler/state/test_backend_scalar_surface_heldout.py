@@ -1,10 +1,5 @@
-"""Ticket 97f2 (HELD-OUT edge oracle): the scalar Backend-port surface.
-
-Withheld from the implementer: the edge/boundary contracts that separate a real port
-implementation from one that only satisfies the happy path — the un-defaulted
-fail-closed read scope, the exact BackendEnvError naming, the RuntimeError lineage,
-the neutral-base subclass relationship, and the widened-facade structural check.
-"""
+"""Held-out scalar Backend-port edges: read scope stays un-defaulted, readiness errors name
+the neutral BackendEnvError, and the facade preserves structural compatibility."""
 
 from __future__ import annotations
 

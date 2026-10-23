@@ -162,22 +162,8 @@ class TestRecovery:
         )
 
     def test_recover_pending_not_found_in_jira(self, store: BindingStore) -> None:
-        """A create that genuinely never landed is unbound — but only once absence is
-        CORROBORATED.
-
-        This test previously asserted the unbind after a SINGLE negative search. That
-        assertion encoded bug 21fc: on Jira DC the keyless-pending state is entered exactly
-        when we crashed during create_issue, and the Lucene index is eventually consistent
-        (JRASERVER-70423: a 2,991s lag observed), so one empty search is precisely what a
-        LIVE issue looks like — and unbinding on it made the next pass write a DUPLICATE
-        Jira issue.
-
-        The test's intent is unchanged and still asserted: a truly-absent issue must not
-        strand its ticket pending forever. What changed is that absence must now be
-        corroborated by repeated misses AND an entry older than the index-lag grace window.
-        The complementary guard — that a SINGLE miss does NOT unbind — lives in
-        ``test_index_lag_duplicate_heldout.py``.
-        """
+        """Unbind a pending create only after corroborated absence; one negative Jira
+        search may reflect index lag rather than a missing issue."""
         store.bind_pending("orphan-1")
         # Age the entry past the index-lag grace window; without this the misses alone
         # prove nothing, which is the whole point of the fix.
@@ -201,13 +187,8 @@ class TestRecovery:
     # ------------------------------------------------------------------
 
     def test_recover_colon_form_primary_hit(self, store: BindingStore) -> None:
-        """Client returns a result ONLY for colon-form JQL — binding confirmed.
-
-        This is the RED test: before the fix, the code searches hyphen-form
-        (rebar-id-{id}) which returns no results, so the binding is discarded.
-        After the fix, colon-form (rebar-id:{id}) is the primary search and
-        matches the mock, confirming the binding to DIG-999.
-        """
+        """Colon-form rebar-id JQL finds the pending issue and confirms its binding;
+        hyphen-form search would lose it."""
         store.bind_pending("abc-5678")
 
         def selective_search(jql: str):
@@ -314,15 +295,8 @@ class TestRebindStaleReverse:
 
 
 # ---------------------------------------------------------------------------
-# RP-02 S1 T2 (evadable-curious-mastodon) — repository delegation.
-#
-# T2 routes the facade's persistence through ``BindingRepository`` without
-# changing its mature caller contract. These are CHARACTERIZATION tests: they
-# are green on the pre-delegation facade by design (that is the point — the
-# contract must not move), so their teeth come from defect-seeded mutation of
-# the delegating code, not from a RED-first run. The differential assertions
-# below compare the facade against the repository directly, so they keep
-# meaning after the cutover rather than freezing stale golden bytes.
+# BindingRepository delegation preserves the facade contract; differential
+# assertions compare their behavior without freezing serialized bytes.
 # ---------------------------------------------------------------------------
 
 import inspect  # noqa: E402
@@ -346,16 +320,9 @@ class TestRepositoryDelegation:
     """The facade stays authoritative and byte-compatible over the repository."""
 
     def test_public_call_signatures_unchanged(self) -> None:
-        """AC1. These are the mature caller contract — the reconciler, the adapters and
-        `bridge fsck` all bind to them, so delegation must not reshape a single one.
-
-        Pins the parameter NAMES and KINDS, which is what a caller is actually bound to:
-        dropping or renaming a parameter breaks keyword callers, and reordering breaks
-        positional ones. Deliberately does NOT pin annotation text — reformatting
-        `str | None` to `Optional[str]` changes no observable behaviour, and asserting
-        the rendered string would make this a change-detector that fires on a pure
-        type-annotation edit.
-        """
+        """Repository delegation must preserve facade parameter names and kinds for
+        keyword and positional callers; annotation spelling is not part of this
+        contract."""
         expected = {
             "__init__": ["self", "tracker_dir"],
             "get_jira_key": ["self", "local_id"],
@@ -478,17 +445,8 @@ class TestRepositoryDelegation:
     def test_peer_state_and_rotation_remain_independent_owners(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """AC4. `peer_state.py` and `get_rotation.py` keep their own ownership; the
-        repository must not absorb or re-implement them, or their dedicated suites stop
-        being the oracle for that behaviour.
-
-        Asserts that each collaborator IS still reached (membership, not an ordered call
-        trace — the order is delegation mechanism, not contract) and, more importantly,
-        that its OBSERVABLE effect still lands: the baseline round-trips and the rotation
-        stamp reaches the sidecar file. A re-implementation inside the repository would
-        leave the effects working but the collaborators uncalled, which the membership
-        check catches; a broken delegation shows up in the effects.
-        """
+        """Peer-state and rotation collaborators retain ownership. Verify both are
+        called and their observable effects survive repository delegation."""
         called: set[str] = set()
         real_set_baseline = _peer_state.set_baseline
         real_rotation_save = _get_rotation.save
@@ -539,18 +497,8 @@ class TestRepositoryDelegation:
     def test_top_level_insert_on_a_legacy_store_reaches_the_persisted_bytes(
         self, tmp_path: Path
     ) -> None:
-        """AC3 collateral invariant: the facade must ALIAS the repository's document, not
-        hold its own copy of the outer mapping.
-
-        A legacy store has no ``comment_ids`` key, so ``record_comment_id`` creates one
-        with ``setdefault`` — a TOP-LEVEL insert. A shallow copy of the document still
-        shares the inner ``bindings``/``reverse`` dicts, so it looks harmless and every
-        other assertion here still passes; but a brand-new top-level key would land only
-        in the facade's copy and never reach the bytes the repository serializes. Comment
-        identity would be silently lost and every mirrored comment re-posted on the next
-        pass (the DIG-5301 duplicate class). Found by mutation: this is the one delegation
-        defect the rest of the suite cannot see.
-        """
+        """The facade must share the repository document itself, not a shallow copy:
+        adding a top-level comment_ids key must remain visible to both."""
         bridge = tmp_path / _BRIDGE
         bridge.mkdir(parents=True)
         (bridge / "bindings.json").write_text(

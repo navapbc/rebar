@@ -1,29 +1,6 @@
-"""Bug e6e9 — the baseline must record what rebar SYNCED, not what it last FETCHED.
-
-The defect: ``reconcile_helpers._advance_baselines`` advanced the ADR-0026 baseline from the
-pass-START snapshot, which is fetched BEFORE the outbound apply. For any field rebar
-itself pushed in that pass, the baseline was left holding Jira's PRE-push value. ADR 0026
-makes ``local == baseline`` the sole direction signal, read as "local did not change, so a
-differing remote is a Jira-side edit — suppress outbound and let inbound mirror it". A
-REVERT to the pre-push value lands exactly in that window: local equals the stale baseline,
-outbound stands down, and the inbound differ (which has no arbitration of its own and can
-only clobber a field outbound left silent) mirrors Jira's now-stale value back over the
-local revert.
-
-Observed in production on ``858c-786a-13be-4332`` (open -> closed) and
-``556a-5a1f-adb3-4139`` (open -> in_progress), and 18 days earlier on 8 tickets at once.
-
-Three properties are pinned here, and the third is what makes the fix safe rather than
-dangerous:
-
-1. **ABA** — push A, revert to B before the next pass, and the revert SURVIVES.
-2. **Held firm** — a genuine Jira-side edit against a truly unchanged local value still
-   flows inbound. Without this the fix could silently degrade into the rejected option B
-   (never let inbound win) and nobody would notice.
-3. **Soft-fail** — a push that did NOT land must NOT advance the baseline. A transition can
-   soft-fail while the pass still exits 0, and a falsely-advanced baseline does not
-   self-correct, whereas today's clobber does. Lagging is recoverable; leading is not.
-"""
+"""Advance the sync baseline to applied values, not the pre-apply snapshot. Genuine
+remote edits still flow inbound when local state is held firm; soft-failed outbound
+writes do not advance the baseline."""
 
 from __future__ import annotations
 
@@ -139,18 +116,8 @@ def test_local_revert_survives_the_pass_after_our_own_push(
     local_field: str,
     reverted_local: Any,
 ) -> None:
-    """A -> B -> A: the operator's revert to the pre-push value must NOT be clobbered.
-
-    Sequence, matching the production incident exactly:
-      * Pass N fetches Jira (still holding B) BEFORE applying, then rebar pushes A.
-      * The operator reverts local back to B inside that window.
-      * Pass N+1 must still emit the field outbound, because local (B) genuinely differs
-        from what was last SYNCED (A). If it does not, the inbound differ sees a field
-        outbound left silent and mirrors Jira's A back over the revert.
-
-    Before the fix the baseline held B (the pass-start fetch), so local B == baseline B,
-    the guard fired, and the field was suppressed — the clobber.
-    """
+    """After rebar pushes A, a later local revert to B must still emit outbound because
+    B differs from the last synced value A, not the pre-apply fetch."""
     store = _store(tmp_path)
     pass_start_fetch = {"REB-1": _vendor_snapshot_entry()}
 

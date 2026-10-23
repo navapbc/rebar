@@ -1,25 +1,5 @@
-"""Collapsed outbound-update path — combined multi-sub-op parity + delegation.
-
-Story D (33d0) of epic f89d. Outbound update application is now a SINGLE path:
-``batch_dispatch.update_one``. The typed leaf ``_apply_outbound_update`` no longer
-carries a parallel implementation — it converts the Mutation to the batch dict and
-delegates to ``update_one`` (mirroring ``_apply_outbound_delete``).
-
-This file is the parity gate for the collapse:
-
-  * ``test_combined_all_subops_*`` drives fields + status + label add/remove +
-    comments + links + parent through ``update_one`` in ONE update and asserts each
-    sub-op took effect — the behavioral parity the collapse must preserve.
-  * ``test_typed_leaf_delegates_to_update_one`` proves the typed leaf produces the
-    SAME client effects as the batch path (one source of truth) and no longer
-    returns its own sub-op counters (those move to story E).
-  * the link tests retarget bug-d843's richer link-dedup behaviors (direction-
-    agnostic dedup, one cached probe per loop, best-effort probe fallback) at the
-    PRODUCTION path, since the typed-leaf copies were deleted.
-
-Effects only — no mock-call-count-as-contract, no golden payloads (see
-docs/adr/0004-reconciler-snapshot-contract.md).
-"""
+"""The typed outbound update leaf delegates to the single batch update path. These tests
+preserve combined field, status, parent, comment, label, and link effects."""
 
 from __future__ import annotations
 

@@ -1,32 +1,6 @@
-"""Held-out behavioral oracle for RP-03 S3 T1 — provider-neutral non-create coordinator.
-
-This oracle pins the OBSERVABLE contract of two new pure/policy modules that
-coordinate atomic non-create postconditions (update / delete / probe /
-clean_label / repair_property / conflict) over the S2 immutable plans:
-
-``rebar.reconciler.failure_policy``
-    The normalization policy. Projects the 11-member ``operation_outcome.Disposition``
-    vocabulary onto the five exact AC6 outcome buckets, classifies broad vs
-    ticket-local ``FailureScope``, maps adapter signal-statuses and S2 ``DeferReason``s
-    onto dispositions, and classifies a raw HTTP status code (+ action) into a
-    provider-neutral (signal-status, scope) pair — the ticket-local 404 / permanent
-    4xx / idempotent already-gone delete rule (AC3/AC4). PURE: no I/O, no clock.
-
-``rebar.reconciler.coordinator``
-    ``coordinate(ticket_plans, *, execute, budget_factory=None, locate=None)`` —
-    executes each mutate plan's atomic postconditions ONCE in dependency order,
-    calling the injected ``execute`` adapter through the S1 ``RetryBudget`` for
-    transient retries. On a late failure it PRESERVES proven earlier postconditions
-    and never replays the compound mutation (AC2). It honors the S2 pre-effect
-    dispositions, enforces inter-plan dependencies (a blocked prerequisite defers
-    the dependent with no out-of-order mutation), isolates ticket-local failures,
-    and stops a broad authoritative failure only within its declared scope while
-    independent tickets/endpoints continue (AC4/AC5). Its DECISION logic performs
-    zero I/O — the injected ``execute`` adapter is the sole side-effect channel.
-
-Assertions are OBSERVABLE ONLY (enums / buckets / tuples / counts) — never private
-names or source text — so a behavior-preserving refactor cannot break them.
-"""
+"""Provider-neutral failure policy and coordinator map non-create plans to exact outcome
+buckets, retry decisions, and atomic postconditions. Held-out tests assert externally
+visible results."""
 
 from __future__ import annotations
 
@@ -730,25 +704,10 @@ def test_e2e_blocked_prereq_plan_is_deferred_by_coordinator(
 # ════════════════════════════════════════════════════════════════════════════════
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-# RP-03 S3 T3 — cut over non-create routing (selector + coordinate_and_fuse).
-#
-# These pin the OBSERVABLE contract of the cutover surface added to
-# ``rebar.reconciler.batch_dispatch``:
-#   * ``route_for(action, overrides=None)`` — the internal per-family selector whose
-#     six non-create families default to the ``coordinator`` route with ``legacy`` as
-#     the internal rollback value (AC1; never dual-send: exactly one route returned).
-#   * ``coordinate_and_fuse(ticket_plans, *, execute, locate, budget_factory, now_ms,
-#     cooldown_ms)`` — runs the S3 T1 coordinator then the S3 T2 fuse over its
-#     normalized terminal outcomes, projecting the five AC buckets, attaching a
-#     ``FuseDecision`` (exact scope / reason / retry_not_before) to remaining matching
-#     work once a scope opens while independent scopes continue (AC2/AC3/AC4/AC5),
-#     and exposing an exact 5-bucket tally + a degraded flag.
-#   * ``build_pass_tally(report)`` — projects the 5-bucket report onto the
-#     applied/failed/deferred/skipped/recovered counts the LIVE pass tally consumes.
-# Assertions are OBSERVABLE ONLY (route strings / bucket strings / decision fields /
-# counts).
-# ════════════════════════════════════════════════════════════════════════════════
+# ``route_for`` selects exactly one coordinator/legacy route for six non-create
+# families. ``coordinate_and_fuse`` opens scoped fuses while independent scopes
+# continue; ``build_pass_tally`` maps five outcome buckets and degraded state to
+# live counts. Assertions inspect only routes, decisions, and counts.
 
 
 @pytest.fixture(scope="module")
@@ -830,23 +789,10 @@ def test_coordinate_and_fuse_all_applied_matches_coordinator(
         assert report.outcome_for(identity).fuse_decision is None
 
 
-# ── REROUTE surface HAPPY PATH (handed to the implementer) ───────────────────────
-#
-# The LIVE cutover wires three new ``batch_dispatch`` helpers into ``applier._apply_batch``:
-#   * ``make_guarded_execute(*, abort_check, recheck_drift, snapshot_head, repo_root,
-#     head_pin_cell, dispatch_fn)`` — builds the coordinator's injected ``execute``
-#     closure, hosting the per-mutation lost-lease ``abort_check()`` FIRST then the
-#     HEAD-drift recheck (threading the mutable head-pin cell), then delegating the
-#     physical op to ``dispatch_fn``. It is the SOLE side-effect channel.
-#   * ``make_coordinator_dispatch(*, ctx, outcomes_sink, dispatch=None)`` — builds the
-#     single-attempt ``dispatch_fn(plan, mutation)``: convert the typed mutation to the
-#     legacy batch dict, delegate ONE physical attempt to the per-call dispatch
-#     (``apply_handlers.dispatch_mutation`` by default — which stamps the
-#     ``rebar-id:<local_id>`` label), append the outcome dict to ``outcomes_sink``, and
-#     project the terminal HandlerResult onto an ``AtomicSignal``.
-#   * ``map_cutover_report(report)`` — project a ``CutoverReport`` onto the LIVE
-#     pass-tally block (applied/failed/deferred/skipped/recovered + degraded) that
-#     ``apply_planning.derive_pass_tally`` consumes.
+# ``make_guarded_execute`` checks lease before HEAD drift before dispatch; it is
+# the sole side-effect channel. ``make_coordinator_dispatch`` makes one attempt,
+# records the outcome, and returns an AtomicSignal. ``map_cutover_report`` maps
+# five live counts and degraded state for pass-tally consumers.
 
 
 class _FakeHandlerResult:

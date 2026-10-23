@@ -1,16 +1,5 @@
-"""The RECONCILER_MARKER must survive outbound comment truncation (bug 5931).
-
-``_decorate_outbound_comment`` appends ``RECONCILER_MARKER`` as the LAST characters
-of the outbound body, and every comment fitter truncates from the RIGHT. So for any
-body over Jira's limit the send path cut the marker off, and the comment landed
-UNMARKED — invisible to the inbound loop-breaker
-(``inbound_collection_diffs.py``'s ``RECONCILER_MARKER in body_text`` test) and to
-any marker-based cleanup. 836 such comments accumulated live across REB-1567,
-REB-1931 and REB-2605.
-
-The oracle is the observable send payload: the ``--body`` argument the Cloud comment
-path hands ACLI. Hermetic — the acli subprocess is stubbed; no acli, no Jira.
-"""
+"""Reserve space for RECONCILER_MARKER before fitting a comment. Right-side truncation must
+not strip the echo marker and create untracked duplicates."""
 
 from __future__ import annotations
 

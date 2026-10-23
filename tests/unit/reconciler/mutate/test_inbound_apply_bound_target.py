@@ -1,25 +1,6 @@
-"""Tests for `_apply_inbound_update` field/target pipeline (bug 1bb2-5da5).
-
-Behaviour under test (observable via on-disk events):
-
-  1. When payload includes ``local_id`` (set by reconcile.py for bound
-     tickets), the EDIT event is written under that local UUID directory —
-     NOT a ``jira-dig-NNN/`` directory derived from ``mutation.target``.
-     This prevents duplicate ticket creation + silent data loss when the
-     reconciler updates a bound UUID ticket from Jira.
-  2. The applier accepts the differ's LOCAL-keyed field shape
-     (``title``, ``ticket_type``) — the inbound differ has already mapped
-     Jira → local names. Both the new local-keyed names AND the legacy
-     ``summary`` (Jira-keyed) name are accepted for back-compat.
-  3. ADF (Atlassian Document Format) description dicts are normalized to
-     plain text before being written. Without normalization, the EDIT
-     event would carry the raw ADF dict and the reducer would store the
-     description as a `dict`, not a string.
-  4. When ``status`` arrives already mapped to a local value
-     (``"open"`` / ``"in_progress"`` / ``"done"`` / ``"closed"``), the
-     applier does NOT re-run the Jira→local mapper (which would double-
-     map e.g. ``"in_progress"`` → empty/garbage).
-"""
+"""Inbound updates write under the bound local UUID, not a jira-key directory.
+Tests preserve ADF description normalization, field mapping, and already-local status
+without a second mapping pass."""
 
 from __future__ import annotations
 
@@ -362,15 +343,8 @@ def test_inbound_contradictory_add_remove_dedups_add_wins(tmp_path, applier):
 
 
 def test_inbound_label_add_does_not_wipe_tags_when_reducer_fails(tmp_path, applier, monkeypatch):
-    """Bug bc8f-775e-9a34-44d1: when the reducer raises (or returns None) the
-    labels-apply block previously fell back to an empty current_tags list and
-    wrote an EDIT whose fields.tags contained ONLY the newly-added label —
-    wiping ALL pre-existing tags. Reproduces the live probe symptom where
-    ticket b2e9 lost its 'labelprobe-...' tag after T1's bidirectional pass.
-
-    Fix: when current_tags cannot be reliably read, the labels EDIT must
-    NOT be written; the next reconciler pass will retry.
-    """
+    """If tag reduction fails, do not emit a label EDIT built from an empty tag list:
+    it would erase existing tags."""
     tracker_dir = tmp_path / ".tickets-tracker"
     tracker_dir.mkdir()
     local_uuid = "bc8f0001-0000-0000-0000-000000000001"
@@ -417,13 +391,8 @@ def test_inbound_label_add_does_not_wipe_tags_when_reducer_fails(tmp_path, appli
 
 
 def test_inbound_label_add_does_not_wipe_tags_when_ticket_dir_missing(tmp_path, applier):
-    """Companion to bc8f RED test: when the ticket dir doesn't exist yet
-    (e.g., race with concurrent CREATE), reduce_ticket returns None and the
-    pre-fix code wrote an EDIT containing ONLY the new label. The fix must
-    not write such an EDIT, since there are no pre-existing tags to preserve
-    AND the directory itself doesn't exist — the next pass will retry once
-    the CREATE has landed.
-    """
+    """If a concurrent CREATE has not produced the ticket directory, defer the label
+    EDIT until a later pass; there are no safe existing tags to merge."""
     tracker_dir = tmp_path / ".tickets-tracker"
     tracker_dir.mkdir()
     local_uuid = "bc8f0002-0000-0000-0000-000000000002"

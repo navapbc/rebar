@@ -1,15 +1,5 @@
-"""0ac6 (slice 2): route the reconciler.* tunables through the typed Config as the
-config-FILE layer, so a `[tool.rebar.reconciler]` / `rebar.toml` value is actually
-CONSUMED (not just shown by `rebar config`).
-
-Covers the four consumers — acli_subprocess._acli_call_timeout (jira_cli_timeout),
-_advisory_lock._resolve_retry_budget (lock_max_retries), outbound deletion-probe
-budget (deletion_probe_limit), rebar_id_audit._resolve_id_guard_bypass
-(id_guard_bypass_unsafe) — across config LOCATIONS (pyproject, rebar.toml, XDG user,
-env, `rebar -c`) and asserts precedence CLI > env > project > user > default, the
-ergonomic canonical env names (REBAR_JIRA_CLI_TIMEOUT, REBAR_UNSAFE_ID_GUARD_BYPASS)
-and the id-guard fail-CLOSED default; EV-3c aliases are cleanly removed.
-"""
+"""Reconciler tunables reach their consumers with CLI > env > project > user > default
+precedence. The unsafe ID guard stays fail-closed by default."""
 
 from __future__ import annotations
 

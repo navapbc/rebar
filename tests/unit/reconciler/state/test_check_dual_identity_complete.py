@@ -119,16 +119,8 @@ def test_cap_per_pass_invariant(inv):
 
 
 def test_report_schema_drift_dedup_skips_second_call(inv, tmp_path):
-    """report_schema_drift must not fire subprocess when alert_store says the
-    key is already deduped (within the 24h window).
-
-    This is the regression guard for the bug that produced 12+ duplicate
-    "schema drift: L-16" tickets: report_schema_drift() was calling
-    subprocess.run() unconditionally on every call without first checking
-    alert_store.is_deduped(). Repeated reconciler passes each hit the
-    _DUAL_IDENTITY_CAP_PER_PASS and called report_schema_drift() again,
-    filing a new ticket each time.
-    """
+    """Within the alert-store dedup window, schema drift must not spawn another ticket
+    subprocess; repeated passes previously filed duplicate L-16 reports."""
     mock_alert_store = MagicMock()
     mock_alert_store.is_deduped.return_value = True  # simulate: already filed
 
