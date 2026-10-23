@@ -1,13 +1,8 @@
-"""Write-tool registrar for the rebar MCP server.
+"""Register MCP write tools only when the server permits writes.
 
-``register_write_tools(mcp, ctx)`` registers the ``REBAR_MCP_READONLY``-gated write tools.
-The library-backed writes are DERIVED from the annotated ``rebar.*`` signatures
-(``rebar._mcp_derive`` plus the override table ``rebar._mcp_tool_specs``, ADR 0119); only
-``run_workflow`` (MCP-only: an async start ack over a background run) is written here.
-
-The read-only gate is enforced at REGISTRATION time: when the server is read-only NO write
-tool is registered (so they are absent from ``list_tools()``), which this registrar
-reproduces by returning early.
+Library-backed tools derive from ``rebar.*`` signatures and spec overrides;
+``run_workflow`` is the MCP-only async tool defined here. Read-only mode registers
+no write tools, keeping them absent from ``list_tools()``.
 """
 
 from __future__ import annotations
@@ -19,7 +14,7 @@ from rebar._opcert_binding import spawn_context_daemon
 
 
 def register_write_tools(mcp, ctx) -> None:
-    """Register the write tools on ``mcp`` — a no-op on a read-only server."""
+    """Register write tools unless this server is read-only."""
     if ctx.readonly():
         return
     _allow_llm = ctx.allow_llm
@@ -84,11 +79,8 @@ def register_write_tools(mcp, ctx) -> None:
         )
 
         def _bg() -> None:
-            # Step failures already persist a failed step record via the executor.
-            # A failure BEFORE the executor loop (workflow-not-found, validation
-            # error) would otherwise leave the run stuck at 'running' forever, so
-            # flip the run record to 'failed' here — a poller then settles instead
-            # of spinning to its timeout.
+            # Record failures before the executor loop so polling cannot remain
+            # stuck at ``running``; step failures persist through the executor.
             try:
                 _wf_runs.run(
                     workflow,

@@ -1,15 +1,7 @@
-"""Same-environment op-cert verify path, split from ``_opcert_signing`` (module-size cap).
+"""Verify DSSE op-certs, their signed subjects, and environment trust roots.
 
-This module owns the ``rebar.opcert.v1`` DSSE verify machinery: the subject-binding check,
-the environment-pinning resolution (``verify.require_environment`` +
-``verify.opcert_enforce_since``), the trust-root assembly, and the top-level
-:func:`verify_opcert_record`. It is carved out of ``_opcert_signing`` purely to keep both units
-under the module-size cap (docs/architecture.md, ``.github/module-size-limit.txt``); the split is
-along the existing mint/verify call-graph seam (mint never calls into verify). It imports the two
-custody helpers it needs (:func:`opcert_principal`, :func:`_opcert_own_public_keys`) from
-``_opcert_signing`` LAZILY inside the functions that use them -- matching this module family's
-existing lazy-import style -- so neither import direction forms a cycle regardless of which module
-is loaded first (``_opcert_signing`` re-exports :func:`verify_opcert_record` at end-of-file).
+Mint and verify live in separate call clusters. Custody helpers load lazily to
+avoid a cycle with ``_opcert_signing`` and its verifier re-export.
 """
 
 from __future__ import annotations
@@ -22,25 +14,11 @@ from rebar import config
 def _opcert_subject_binding_error(
     envelope, bound: dict, ticket_id: str, expected_kind
 ) -> dict | None:
-    """Return a ``mismatch`` result-fragment if the op-cert's SIGNED subject does not bind
-    ``ticket_id`` + ``expected_kind`` (finding A), else ``None`` (binding holds).
+    """Reject signed-subject digest, ticket, or kind mismatches.
 
-    ``bound`` is the SIGNED in-toto predicate (from :func:`opcert.opcert_from_record`); the caller
-    has already verified the DSSE signature over the payload, so ``bound`` and the envelope's
-    subject digest are authenticated. This mirrors :func:`opcert.verify_opcert`'s Phase-0 subject
-    check for the same-environment local path (which has NO caller-supplied expected material /
-    commit — the merge-gate's era/keyring recompute is deliberately NOT reproduced here). It
-    confirms the authenticated subject actually names the ticket + attestation-kind slot being
-    verified, defeating a cross-ticket / cross-kind replay of an otherwise-valid cert:
-
-      * a valid cert the environment signed for ticket X, copied onto ticket Y's record →
-        ``bound ticket_id`` (X) != ``ticket_id`` (Y) → ``mismatch``;
-      * a valid cert signed for kind K1, filed under kind K2's slot → ``bound kind`` (K1) !=
-        ``expected_kind`` (K2) → ``mismatch``.
-
-    Also recomputes the subject digest from the signed predicate and requires it to equal the
-    envelope's own signed subject digest (a consistency check: a predicate that disagrees with the
-    signed subject is rejected)."""
+    The caller has verified the DSSE signature. This check prevents replay of a
+    valid cert across tickets or attestation slots.
+    """
     from rebar.attest import opcert
 
     bound_ticket = bound.get("ticket_id")
@@ -98,16 +76,11 @@ def _opcert_subject_binding_error(
 
 
 def _required_environment(repo_root) -> str | None:
-    """``verify.require_environment`` — the environment an operator has REQUIRED op-certs to come
-    from — or ``None`` when unset (the default, and this project's posture).
+    """Read the optional required environment; default to no identity gate.
 
-    Unset is the operator-ruled current policy: environment identity is not a gate (bug c21f).
-    Setting it re-enables the trusted-set restriction, which is a deferred FUTURE feature; the
-    runbook (``infra/runbooks/mcp-opcert-enforcement-flip.md``) sets it together with
-    ``verify.opcert_enforce_since``, the merge gate's grandfather boundary — a MERGED-LOG anchor
-    that has no meaning on this local, per-record path, so only the environment key is read here.
-    Fails OPEN on an unreadable config: an absent/broken ``rebar.toml`` must not silently turn a
-    restriction ON that the operator never configured."""
+    The merged-log enforcement boundary belongs to the merge gate, not this
+    per-record check. Unreadable config cannot enable a restriction.
+    """
     try:
         return config.compose_config(root=repo_root).verify.require_environment or None
     except Exception:  # noqa: BLE001 — no readable config ⇒ no required environment
@@ -134,18 +107,11 @@ def _pinned_environment_keys(principal: str, repo_root) -> list[str]:
 def _opcert_trust_root(
     principal: str, own_principal: str, tracker: str, envelope, repo_root, required_env: str | None
 ) -> tuple[list[str], str | None]:
-    """The keys to verify ``envelope`` under, plus the ``trust_basis`` label naming their source.
+    """Choose own, pinned, or embedded signer keys and label the trust basis.
 
-    Strongest first: this environment's OWN key when it is the signer; then the key PINNED
-    out-of-band for that environment; then — only while the trusted-set restriction is OFF — the
-    signer's own key as carried inside the SSHSIG blob. That last basis is self-consistent rather
-    than pinned: ``ssh-keygen -Y verify`` still checks the signature, namespace and principal
-    binding in full, so a forged or altered envelope is still rejected; what it does not establish
-    is that the key belongs to a KNOWN environment. Under the operator's current policy that is
-    precisely the property that is not gated, and the label makes the weaker basis visible.
-
-    With ``verify.require_environment`` SET the envelope-key fallback is withheld: enforcement must
-    bind to the PINNED key, never to a key the certificate supplies about itself."""
+    Embedded keys prove signature consistency but not known environment identity;
+    required-environment policy disables that fallback.
+    """
     from rebar._opcert_signing import _opcert_own_public_keys
 
     if principal == own_principal:
@@ -167,44 +133,13 @@ def _opcert_trust_root(
 def verify_opcert_record(
     record: dict, ticket_id: str, *, kind: str | None = None, repo_root=None
 ) -> dict:
-    """Verify an ``envelope``-bearing op-cert record. The SIGNATURE is the gate; the signing
-    ENVIRONMENT is not (bug c21f).
+    """Verify a DSSE record under the strongest available trust basis.
 
-    Operator policy, verbatim: *"Certification environment should not currently be a gate. Any
-    certification is as good as any other certification right now. Limited to a trusted set of
-    environments is a future feature, but not currently in use."* So a cert minted by the on-box
-    MCP server certifies for a local CLI worktree and vice versa — identity alone never refuses.
-    This mirrors the same call already made for the bugfix-size gate (bug 846b): gate on the FACT
-    of certification, never on its SOURCE.
-
-    Translation table (the wrapper's contract; downstream readers see the uniform verify shape):
-      * ``verify.require_environment`` SET (the opt-in future feature, unset by default) and the
-        cert's principal is not that environment → ``foreign_key``, without invoking the scheme;
-      * otherwise the scheme runs — ``registry.verify(OPCERT_KIND, envelope, trust_root)`` against
-        the strongest available trust root (see :func:`_opcert_trust_root`), THEN the SIGNED
-        subject-binding check (:func:`_opcert_subject_binding_error`), mapping
-        ``verified → certified`` and passing the scheme ``verdict``/``reason`` through
-        (``certified`` / ``mismatch`` / ``invalid`` / ``unavailable`` / ``unknown_kind`` /
-        ``unknown_scheme``). ``mismatch`` and ``unsigned`` keep their exact meaning: not gating on
-        environment is NOT gating on nothing, and an altered/forged envelope is still refused.
-
-    ``trust_basis`` names WHICH key certified — ``own_key`` / ``pinned_environment`` /
-    ``envelope_key`` — so a weaker basis is VISIBLE rather than silently folded into ``certified``.
-
-    SECURITY (findings A + B):
-      * ``kind`` is the attestation-kind SLOT being verified (threaded from ``verify_signature`` /
-        ``verify_attestations``; ``None`` for the legacy most-recent path, which falls back to the
-        manifest-derived kind — the slot key the reducer would file the record under). The SIGNED
-        subject must bind ``ticket_id`` + this kind, or the cert is a replay and is rejected
-        (``mismatch``) — the signature verifying is necessary but NOT sufficient.
-      * the bound ``{material_fingerprint, merged_log_commit, manifest}`` surfaced into the result
-        (the last as ``signed_manifest``) are sourced from the SIGNED payload (the in-toto predicate
-        via ``opcert.opcert_from_record``), NEVER the attacker-writable plaintext record mirror, so
-        ``compute_validity`` compares freshness (stale-code / stale-regver) and material against
-        authenticated values (verify-then-extract).
-
-    ``key_id`` carries the record's ``principal`` (keeping ``drift_refresh_candidate``'s provenance
-    read working). Never CREATES a key — verification is read-only."""
+    Environment identity is advisory unless ``verify.require_environment`` is set.
+    Signature, principal, and signed ticket/kind binding still gate certification.
+    Return authenticated material, commit, and manifest for freshness checks;
+    verification never creates a key.
+    """
     from rebar._opcert_signing import opcert_principal
     from rebar.attest import authorship, opcert, registry
     from rebar.attest.opcert import OPCERT_KIND
@@ -238,30 +173,16 @@ def verify_opcert_record(
             verified_at_sha_from_manifest(manifest) or record.get("verified_at_sha")
         ),
         "rebar_version": rebar_version_from_manifest(manifest),
-        # SECURITY (finding B): the AUTHENTICATED material fingerprint + bound code commit, sourced
-        # from the SIGNED payload (never the plaintext record mirror). compute_validity reads THESE
-        # for op-cert (algorithm="sshsig") records so a mutated plaintext mirror cannot flip a
-        # freshness/material verdict. Absent (None) for a malformed/undecodable envelope.
+        # Freshness reads signed material and commit, not the mutable record mirror.
         "material_fingerprint": bound.get("material_fingerprint"),
         "merged_log_commit": bound.get("merged_log_commit"),
-        # SECURITY (stale-code / stale-regver findings): the AUTHENTICATED manifest, sourced from
-        # the SIGNED payload (the in-toto predicate's ``manifest``), NEVER the plaintext record
-        # mirror. compute_validity's plan-review branch reads THIS (via _authoritative_manifest) for
-        # manifest_deps (stale-code), manifest_regver (stale-regver), and the pinned-SHA basis, so a
-        # mutated plaintext manifest cannot flip a freshness verdict. ``None`` for a legacy op-cert
-        # minted before the manifest was bound; the reader then falls back to the plaintext manifest
-        # (which is that record's only manifest — no weakening vs. today's behaviour).
+        # Prefer the signed manifest for stale-code and stale-registry checks;
+        # legacy certs without one fall back to their sole plaintext manifest.
         "signed_manifest": bound.get("manifest"),
-        # Unspoofable op-cert marker: set by THIS code path, which is selected on the
-        # ``record.envelope`` presence — NOT the attacker-writable ``algorithm`` field. Keyed on
-        # this (not ``algorithm``) so an attacker cannot force the plaintext-manifest material path
-        # by mutating ``algorithm`` while keeping the envelope.
+        # This verified path, not the mutable algorithm field, marks an op-cert.
         "opcert": True,
-        # Which key certified this cert (bug c21f). ``None`` until a trust root is chosen; then
-        # ``own_key`` (this environment's) / ``pinned_environment`` (a key pinned out-of-band in
-        # ``.rebar/trusted_environments.yaml``) / ``envelope_key`` (the signer's own key, carried
-        # inside the SSHSIG blob — self-consistent, but not tied to a KNOWN environment). Surfaced
-        # so the weakest basis is visible to readers and audits, never silent.
+        # Expose own, pinned, or embedded-key trust; the last does not establish
+        # a known environment and must remain visible to audit readers.
         "trust_basis": None,
     }
 
@@ -323,10 +244,8 @@ def verify_opcert_record(
             "reason": verdict.reason,
         }
 
-    # SECURITY (finding A): the signature verifies — but a valid cert can be a REPLAY. Enforce the
-    # SIGNED subject binding: the cert must bind THIS ticket + THIS attestation-kind slot. The slot
-    # is the threaded `kind`; for the legacy most-recent path (`kind is None`) fall back to the
-    # manifest-derived kind (the key the reducer files the record under).
+    # Even a valid signature can be replayed; require its signed ticket and kind.
+    # The latest-record path derives kind from the manifest.
     expected_kind = kind if kind is not None else attestation_kind(manifest, record)
     binding_error = _opcert_subject_binding_error(envelope, bound, ticket_id, expected_kind)
     if binding_error is not None:

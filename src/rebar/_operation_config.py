@@ -1,31 +1,10 @@
-"""The per-operation, immutable, NON-SECRET configuration authority (RP-04 S1/S2).
+"""Bind one immutable, non-secret configuration snapshot per operation.
 
-One concern: compose ONE ``OperationSnapshot`` per operation — a frozen, serializable
-record of the effective non-secret config values, their source-kind provenance, the
-selected repository root, and an envelope version — and thread it through the CLI,
-MCP, and shared command/store entry points as the AUTHORITATIVE binding for that
-operation (RP-04 S2, ticket 3a08): :func:`compose_and_bind_operation_snapshot` composes
-exactly once per operation and binds it to a context-local "active operation" so
-downstream store helpers (``rebar.config.tracker_dir`` / ``tickets_branch`` /
-``tickets_remote``) consume the SAME already-resolved values instead of re-reading
-ambient env/config, for the duration of that operation. LLM-specific resolution (the
-``rebar.llm`` / reconciler surfaces) has its own AUTHORITATIVE composer —
-:func:`rebar.llm.config_binding.compose_and_bind_llm_config` (ticket ec44) — because
-``llm`` is a reserved config section this general snapshot never carries; the
-diagnostic-only shadow path (:func:`emit_shadow_snapshot`) that both migrations
-started from has been retired now that every production call site is cut over.
-
-The snapshot delegates rather than reimplements:
-
-* root selection → :func:`rebar._config_sources.repo_root`
-  (explicit > ``REBAR_ROOT`` > git top-level > cwd),
-* precedence + provenance → :func:`rebar.config.resolve_with_sources`
-  (defaults < user < project < env < cli),
-* canonical serialization / fingerprinting → :mod:`rebar._store.canonical`.
-
-It carries ONLY non-secret material: :meth:`OperationSnapshot.build` rejects any leaf
-that is not a JSON primitive (or a nested list/dict of primitives), so a pydantic
-``SecretStr``/``SecretBytes`` or a live client object can never enter the snapshot.
+CLI, MCP, command, and store calls share its resolved values and provenance
+through a context-local binding. Root selection, layered resolution, and canonical
+serialization delegate to their existing seams. JSON-only validation excludes
+secrets and live objects. LLM configuration uses its separate reserved-section
+composer.
 """
 
 from __future__ import annotations
@@ -51,18 +30,10 @@ ENVELOPE_VERSION: int = 1
 
 @functools.cache
 def _source_kinds() -> frozenset[str]:
-    """The provenance source-kind vocabulary, DERIVED from :data:`rebar.config.LAYER_ORDER`.
+    """Cache known source kinds from ``LAYER_ORDER`` without an import cycle.
 
-    The import is DEFERRED (and the result cached) because a module-scope
-    ``from rebar.config import LAYER_ORDER`` would close an import cycle: ``rebar.config``
-    imports :data:`ENVELOPE_VERSION`, :class:`OperationSnapshot` and :func:`active_snapshot`
-    FROM this module, so this module is the leaf and must not import ``rebar.config`` while
-    ``rebar.config`` is still executing. This is the same deferred-import pattern
-    :func:`compose_operation_snapshot` already uses for this same cycle.
-
-    ``LAYER_ORDER`` is a tuple because precedence is ordered, but the sole consumer here
-    (:meth:`OperationSnapshot.build`) uses this purely as a membership test, so the
-    order-losing conversion to a ``frozenset`` costs nothing."""
+    Validation needs membership, so losing layer order is harmless.
+    """
     from rebar.config import LAYER_ORDER
 
     return frozenset(LAYER_ORDER)
@@ -79,12 +50,10 @@ def _plain(mapping: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]
 
 
 def _validate_jsonish(value: Any, *, path: str) -> None:
-    """Reject any leaf that is not a JSON primitive or a nested list/dict of them.
+    """Reject secrets and live objects outside nested JSON primitives.
 
-    This is the secret/live-object screen: a pydantic ``SecretStr``/``SecretBytes``,
-    ``bytes``, or any arbitrary object is not a JSON primitive and raises
-    :class:`TypeError`. ``bool`` is admitted (it is an ``int`` subclass and a JSON
-    primitive)."""
+    ``bool`` remains valid; non-string dictionary keys and other leaves raise.
+    """
     if value is None or isinstance(value, (bool, int, float, str)):
         return
     if isinstance(value, (list, tuple)):
@@ -110,12 +79,10 @@ class OperationProjection:
 
 @dataclasses.dataclass(frozen=True)
 class OperationSnapshot:
-    """One immutable, serializable, non-secret configuration authority per operation.
+    """Immutable operation config with frozen values, sources, root, and version.
 
-    Fields are read-only (the mappings are :class:`~types.MappingProxyType` at both
-    levels). Construct via :meth:`build` (validating) or :meth:`from_document`
-    (rebuild from :meth:`canonical_document`); :func:`compose_operation_snapshot` is
-    the central composer that resolves config and calls :meth:`build`."""
+    ``build`` validates; ``from_document`` restores canonical data.
+    """
 
     envelope_version: int
     repo_root: str
@@ -131,12 +98,7 @@ class OperationSnapshot:
         values: Mapping[str, Mapping[str, Any]],
         sources: Mapping[str, Mapping[str, str]],
     ) -> OperationSnapshot:
-        """The validating constructor: reject secret/live material and freeze.
-
-        Every leaf in ``values`` must be a JSON primitive (or a nested list/dict of
-        them); a ``SecretStr``/``SecretBytes`` or arbitrary object raises
-        :class:`TypeError`. ``sources`` labels must be known source kinds. The stored
-        mappings are frozen read-only at both levels."""
+        """Reject non-JSON values and unknown source kinds, then freeze both maps."""
         for sect, keys in values.items():
             for key, value in keys.items():
                 _validate_jsonish(value, path=f"{sect}.{key}")
@@ -205,14 +167,10 @@ def compose_operation_snapshot(
     cli_overrides: dict | None = None,
     repo_root: str | os.PathLike[str] | None = None,
 ) -> OperationSnapshot:
-    """Compose the one ``OperationSnapshot`` for an operation (the central composer).
+    """Resolve one snapshot using the shared root and layered config seams.
 
-    Delegates every layer: root selection to
-    :func:`rebar._config_sources.repo_root`, precedence + provenance to
-    :func:`rebar.config.resolve_with_sources`, and (later) serialization to
-    :mod:`rebar._store.canonical`. A malformed selected config makes
-    ``resolve_with_sources`` raise :class:`~rebar.config.ConfigError`; that propagates
-    (fail-fast, before any effect) rather than being caught here."""
+    Propagate malformed-config errors before the operation takes effect.
+    """
     from rebar import _config_sources
     from rebar import config as _config
 
@@ -227,37 +185,20 @@ def compose_operation_snapshot(
     )
 
 
-# ── Authoritative binding (RP-04 S2, ticket 3a08) ──────────────────────────────
-#
-# The reconciler runtime (``reconciler/runtime.py``) already demonstrates
-# the pattern this reuses: compose ONE snapshot, derive a binding from it, and hold that
-# binding for the whole operation instead of re-resolving ambient state per read. Here
-# the "binding" is the snapshot itself, held in a context-local (``contextvars``) slot so
-# nested store/config calls within the SAME operation observe it without threading an
-# explicit parameter through every intermediate call site.
+# Bind one snapshot context-locally so nested store/config calls reuse its values.
 _active_snapshot: contextvars.ContextVar[OperationSnapshot | None] = contextvars.ContextVar(
     "rebar_active_operation_snapshot", default=None
 )
 
 
 def active_snapshot() -> OperationSnapshot | None:
-    """The :class:`OperationSnapshot` bound for the CURRENTLY-EXECUTING operation, or
-    ``None`` when no operation has composed-and-bound one (e.g. a bare Python-library
-    call made outside the CLI/MCP entry points, or a malformed config that made
-    composition fail — see :func:`compose_and_bind_operation_snapshot`). Store/config
-    helpers consult this FIRST, before falling back to their own ambient resolution, so
-    they see the one value composed for this operation rather than a fresh live read."""
+    """Return this operation's bound snapshot, or ``None`` for ambient fallback."""
     return _active_snapshot.get()
 
 
 @contextmanager
 def bind_operation_snapshot(snapshot: OperationSnapshot) -> Iterator[OperationSnapshot]:
-    """Bind an already-composed *snapshot* as the active operation for the block.
-
-    Not reentrant-aware by itself (that policy lives in
-    :func:`compose_and_bind_operation_snapshot`) — this is the low-level primitive:
-    set, yield, and ALWAYS reset via the token on exit (including on an exception),
-    so a nested binding never leaks past its own scope."""
+    """Bind a snapshot for this block and always reset its context token."""
     token = _active_snapshot.set(snapshot)
     try:
         yield snapshot
@@ -271,24 +212,12 @@ def compose_and_bind_operation_snapshot(
     cli_overrides: dict | None = None,
     repo_root: str | os.PathLike[str] | None = None,
 ) -> Iterator[OperationSnapshot | None]:
-    """Compose the ONE :class:`OperationSnapshot` for an operation and bind it active
-    for the block — the authoritative counterpart to :func:`emit_shadow_snapshot`.
+    """Compose once per operation, reusing an existing context binding.
 
-    Reentrant BY DESIGN: if an operation snapshot is ALREADY bound (e.g. the CLI's
-    top-level dispatch already composed one and a nested command/store seam calls this
-    again for the same operation), the EXISTING snapshot is reused verbatim — never
-    recomposed — so "compose exactly once per operation" holds even when multiple seams
-    call this helper while serving the same operation.
-
-    Fails OPEN, matching :func:`emit_shadow_snapshot`'s existing swallow discipline:
-    some legacy operations (e.g. ``bridge setup --reset``, which only clears a
-    malformed section) must keep working even when the ambient config does not parse.
-    A malformed/insecure config (or any other composition failure) is caught here,
-    logged REDACTED (exception type name only), and the block runs with NO snapshot
-    bound — downstream store/config helpers then fall back to their own ambient
-    resolution exactly as they did before this seam existed, so a real operation that
-    NEEDS a valid config still fails fast on ITS OWN read, at the same point it always
-    did (AC3); this seam merely stops SUCCESSFUL composition from being re-done."""
+    Composition failure logs only its exception type and yields no snapshot so
+    legacy cleanup can proceed. A later config-dependent read still raises at
+    its normal boundary.
+    """
     existing = active_snapshot()
     if existing is not None:
         yield existing
@@ -296,12 +225,8 @@ def compose_and_bind_operation_snapshot(
     try:
         snapshot = compose_operation_snapshot(cli_overrides=cli_overrides, repo_root=repo_root)
     except Exception as exc:  # fail open; see docstring above
-        # WARNING carries only the redacted exception type name (no values/paths/
-        # secrets) so it is safe on every surface. DEBUG additionally carries the
-        # traceback: an unexpected exception here (e.g. an AttributeError/TypeError
-        # bug in resolve_with_sources, not a config-validity ConfigError) is still
-        # fully diagnosable by an operator with debug logging enabled, without
-        # weakening the fail-open guarantee for the operation itself.
+        # Warn with the exception type only; DEBUG retains the traceback without
+        # exposing config values in the ordinary warning.
         logger.warning("operation snapshot composition skipped: %s", type(exc).__name__)
         logger.debug("operation snapshot composition failure detail", exc_info=exc)
         yield None
@@ -311,19 +236,11 @@ def compose_and_bind_operation_snapshot(
 
 
 def bind_operation_snapshot_for_tools(mcp: Any) -> Any:
-    """Wrap an MCP server so every tool it registers runs under
-    :func:`compose_and_bind_operation_snapshot`.
+    """Bind one config snapshot around each registered MCP read/write tool.
 
-    Applied ONLY to the read/write tool registrars in ``mcp_server.py::build_server``
-    (mirroring :func:`rebar._lib_warn.suppress_library_double_advisory`'s exact proxy
-    pattern) — NOT to the LLM registrar, which intentionally stays on the diagnostic-only
-    shadow path pending ticket ec44. Each tool call composes-and-binds ONE snapshot for
-    its own duration (MCP tools have no ambient caller-supplied root, so ``repo_root`` is
-    left unset and resolved the same way :func:`emit_shadow_snapshot` already does for
-    this surface); nested command/store seams invoked from within the tool body reuse
-    this SAME binding via ``compose_and_bind_operation_snapshot``'s reentrancy guarantee,
-    rather than recomposing. The returned proxy delegates every attribute other than
-    ``tool`` to ``mcp`` unchanged and preserves async tools."""
+    Nested calls reuse it; the proxy preserves async tools and delegates other
+    attributes. LLM tools use their separate config binding.
+    """
 
     class _BindingRegistrar:
         def __init__(self, inner: Any) -> None:

@@ -1,36 +1,10 @@
-"""The write-time secret screen: refuse event bodies carrying live credentials (bug e7a9).
+"""Refuse live credential shapes before ticket events reach the shared store.
 
-On 2026-08-03 a session posted a comment containing a full environment dump with seven
-live credentials. GitHub push protection rejected ``refs/heads/tickets`` (GH013), so
-EVERY session's store writes queued local-only — a store-sharing outage caused by one
-comment, stopped only by a control outside this project. This module is that control,
-inside it.
-
-Design, per the operator decision recorded on e7a9 (2026-08-07) — **REFUSE, with an
-allowed force override**:
-
-* **Refuse, never redact.** Silently rewriting a caller's payload makes the stored event
-  differ from what the caller believes it wrote, and in an append-only event store that
-  divergence is unrecoverable. Refusing is loud, reversible, and leaves the caller in
-  control.
-* **Report the family and the location, never the value.** A finding carries the matched
-  family, the field path, and the line number — and nothing derived from the secret
-  itself, not even a truncated prefix. A guard that leaks the secret while reporting it
-  is worse than no guard, so :class:`SecretFinding` structurally cannot hold one.
-* **Live shapes only.** The store's own corpus says DESCRIPTIONS of credentials are the
-  common case: sweeping 3,299 ticket dirs for ``sk-ant-api03`` found five matches and
-  none was a credential — two were e7a9's own CREATE and EDIT events. So each pattern
-  demands the full live length, and the high-entropy families additionally demand a
-  Shannon-entropy floor, which separates a real key from ``sk-ant-api03-...`` (truncated)
-  and ``sk-ant-api03-[A-Za-z0-9_-]{93,}`` (a regex literal) without having to infer
-  intent. Measured: sweeping the live store's 25,125 events with the table below refuses
-  exactly ONE, and that one is ``AKIAIOSFODNN7EXAMPLE`` — AWS's own published doc example,
-  quoted in a ticket about secret scanning, and recoverable via the override. Zero hits
-  across this repo's docs and source. That is what makes the screen safe on by default.
-
-:func:`scan_text` is a pure ``str -> findings`` function with no I/O, so it is reusable
-outside the store seam; :mod:`rebar.llm.workflow.lint` consumes :data:`SECRET_PATTERNS`
-for its workflow-file sweep rather than keeping a second, drifting table.
+Never alter a caller's payload. Report only credential family and location, never
+the value or its prefix; an audited force override remains available. Full-length
+patterns, with entropy checks for selected families, spare common truncated and
+regex examples; a full-shape documentation key can still match.
+Pure scanning and the pattern table are shared with workflow lint.
 """
 
 from __future__ import annotations
@@ -50,26 +24,13 @@ __all__ = [
     "screen_event_data",
 ]
 
-# Shannon entropy (bits/char) a matched body must clear for the high-entropy families.
-# A real 95-char base62 key sits near 5.9; the benign look-alikes in the store's corpus
-# are either too short to match at all or are low-entropy prose fragments.
+# Require this entropy floor for high-entropy key families; short or repetitive
+# examples cannot pass it.
 _MIN_ENTROPY = 3.0
 
-# ``(family, pattern, entropy_checked)``. Every pattern demands the LIVE length — a
-# truncated placeholder or a bracket-expression regex literal cannot reach it.
-#
-# The entropy-checked families match a FIXED-WIDTH window (``{n}``, no upper-open
-# quantifier and no trailing boundary) rather than a greedy run. That is deliberate and
-# security-relevant: with a greedy ``{80,}`` plus a trailing lookahead, appending
-# same-character-class padding after a real key — ``<key>`` + 400 ``-`` characters, which
-# is what an ASCII rule in a log or an env dump looks like — both dragged the whole-match
-# entropy under the floor AND pushed the boundary out, so the screen FAILED OPEN on a
-# genuine credential. A fixed window is measured on the key's own bytes, so nothing
-# appended after it can dilute the entropy or move the match.
-#
-# Families where the shape alone is decisive (fixed total length, or a literal header)
-# skip the entropy check and keep a trailing negative lookahead — a lookahead rather than
-# ``\b`` because several charsets end in ``-``/``_``, where ``\b`` misbehaves.
+# Patterns require live lengths. Entropy-checked families use fixed-width windows
+# so appended padding cannot dilute a real key's entropy. Shape-only families
+# use a negative lookahead because ``\b`` mishandles trailing ``-`` or ``_``.
 _TOKEN_TAIL = r"(?![A-Za-z0-9_-])"
 
 SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str], bool], ...] = (
@@ -89,15 +50,8 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str], bool], ...] = (
     ),
     ("PyPI API token", re.compile(r"\bpypi-AgE[A-Za-z0-9_-]{50}"), True),
     ("Stripe live key", re.compile(r"\bsk_live_[A-Za-z0-9]{24}"), True),
-    # Anchored to a whole line: a real PEM block puts its banner on its own line, whereas
-    # prose ENUMERATING the banners (a backticked `BEGIN RSA PRIVATE KEY`, which is what a
-    # ticket about secret scanning looks like) always has surrounding text. Sweeping the
-    # 25,125-event live store, this anchor is the difference between refusing that ticket
-    # and not. (This comment abbreviates the banner instead of quoting it in full: the
-    # repo-wide scanner cannot tell a documented banner from a real one and flagged the
-    # full form here — the very false positive this pattern is tuned against. Abbreviating
-    # is preferred over a scanner allowlist, which would disarm the detector on the file
-    # that most needs it armed.)
+    # A PEM banner occupies a whole line; prose that names one does not.
+    # Keep the example abbreviated so the repo scanner stays active here.
     (
         "private key block",
         re.compile(r"^\s*-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\s*$"),
@@ -118,12 +72,7 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str], bool], ...] = (
 
 @dataclass(frozen=True)
 class SecretFinding:
-    """One detection: WHICH family fired and WHERE — never the value.
-
-    The absence of a value field is the point, not an omission: the refusal path is
-    reported to stderr and logs, so a finding that carried the secret (or a prefix of
-    it) would turn the guard into a second leak channel.
-    """
+    """A credential family and location, without secret material for logs to leak."""
 
     family: str
     field: str
@@ -145,11 +94,9 @@ def _entropy(value: str) -> float:
 
 
 def iter_line_matches(line: str) -> Iterator[tuple[str, re.Match[str]]]:
-    """Yield ``(family, match)`` for each family matching *line*, at most once each.
+    """Yield at most one entropy-qualified match per family on a line.
 
-    The shared primitive: the store's refusal path and
-    :mod:`rebar.llm.workflow.lint`'s workflow-file sweep both drive off this, so the
-    pattern table and its entropy floor have exactly one definition to keep current.
+    Store refusal and workflow lint share this pattern table.
     """
     for family, pattern, entropy_checked in SECRET_PATTERNS:
         for match in pattern.finditer(line):
@@ -176,14 +123,7 @@ _MAX_KEY_SEGMENT = 32
 
 
 def _safe_segment(key: object) -> str:
-    """A dict key rendered safe to print in a refusal.
-
-    The field path is printed to stderr and logs, so a key is a leak channel just like a
-    value: an event whose payload key IS a credential (``{"<key>": ...}``) would
-    otherwise be echoed verbatim by the refusal that was meant to contain it. Any key
-    that itself matches a credential shape is replaced, and every key is length-capped so
-    a long opaque blob cannot ride along in the path.
-    """
+    """Redact credential-shaped keys and cap path segments before logging them."""
     text = str(key)
     if next(iter_line_matches(text), None) is not None:
         return "<redacted-key>"
@@ -191,14 +131,7 @@ def _safe_segment(key: object) -> str:
 
 
 def screen_event_data(data: object, *, prefix: str = "data") -> list[SecretFinding]:
-    """Findings across every string reachable in an event's ``data`` payload.
-
-    Walks dicts and lists so free text is screened wherever it lives — ``body`` on a
-    COMMENT, ``title``/``description`` on a CREATE, ``fields.description`` on an EDIT —
-    without this module needing to know each writer's shape. Dict KEYS are screened too:
-    an imported or library-supplied payload can put a credential in a key just as easily
-    as in a value.
-    """
+    """Scan nested event strings and dictionary keys without assuming event shape."""
     findings: list[SecretFinding] = []
     if isinstance(data, str):
         findings.extend(scan_text(data, field=prefix))
@@ -215,11 +148,9 @@ def screen_event_data(data: object, *, prefix: str = "data") -> list[SecretFindi
 
 
 def override_record(findings: Iterable[SecretFinding], reason: str) -> dict[str, object]:
-    """The audit stamp a forced write carries on its event: WHY, and what was bypassed.
+    """Record the override reason, credential families, and locations only.
 
-    Carries no material derived from the secret — only the operator's reason, the family
-    names, and the field/line locations. WHO comes from the event envelope's ``author``
-    and attribution fields, which every write path stamps.
+    Event attribution supplies the operator identity; no secret material is stored.
     """
     materialised = list(findings)
     return {

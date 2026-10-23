@@ -59,14 +59,7 @@ _GIT_TIMEOUT = 120
 # Pure verdict functions (no I/O — fully unit-testable)
 # ===========================================================================
 def replication_verdict(gerrit_sha: str | None, github_sha: str | None) -> dict[str, Any]:
-    """In sync iff both SHAs are present and equal.
-
-    A transient divergence (replication runs ~15s behind a submit) is expected and is NOT
-    treated specially here — this function reports the instantaneous truth. The evaluation
-    window that absorbs transient lag lives in the callers: the CLI/``run()`` path re-samples
-    via ``_replication_check_with_lag_tolerance``, and the CloudWatch alarm applies a
-    sustained-divergence window.
-    """
+    """Report instantaneous SHA equality; callers handle replication lag."""
     if not gerrit_sha or not github_sha:
         return {
             "check": "replication",
@@ -86,12 +79,9 @@ def replication_verdict(gerrit_sha: str | None, github_sha: str | None) -> dict[
 
 
 def ruleset_verdict(ruleset: dict[str, Any] | None) -> dict[str, Any]:
-    """Enforce the full mirror-lock contract on a GitHub ruleset object.
+    """Require an active main-only lock with all rules and deploy-key-only bypass.
 
-    ``ruleset`` is the GitHub Rulesets API object (with ``rules`` + ``bypass_actors``), or
-    ``None`` when no ruleset named ``gerrit-mirror-lock-main`` exists (deleted → unprotected).
-    Healthy iff the lock is active, branch-targeted at ``refs/heads/main`` only, carries all
-    three rules, and its bypass is the deploy key alone.
+    ``None`` means the named ruleset is absent and main is unprotected.
     """
     reasons: list[str] = []
     if ruleset is None:
@@ -334,12 +324,10 @@ def _replication_check_with_lag_tolerance(
     attempts: int = 3,
     delay_seconds: float = 45.0,
 ) -> dict[str, Any]:
-    """Replication check that absorbs transient replication lag by re-sampling.
+    """Resample present but unequal SHAs to absorb temporary replication lag.
 
-    Takes up to ``attempts`` samples spaced ``delay_seconds`` apart. An in-sync or
-    missing-SHA sample returns immediately; only a genuine divergence (both SHAs present,
-    unequal) triggers a wait + re-sample. All-diverged distinguishes a *stalled* mirror
-    (GitHub tip never moved) from one that is moving but never converged.
+    Return immediately for sync or missing SHAs; persistent divergence
+    distinguishes a stationary mirror from one moving without convergence.
     """
     github_shas: list[str] = []
     verdict: dict[str, Any] = {}

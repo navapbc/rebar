@@ -1,16 +1,8 @@
-"""Non-interactive S3 "auto-doctor": heal git-remote-s3's multi-bundle state LOSSLESSLY.
+"""Losslessly heal multiple S3 bundles advertising one ticket-store ref.
 
-When the ticket store's remote is an ``s3://`` URL served by ``git-remote-s3``, concurrent or
-legacy pushes can leave TWO ``<sha>.bundle`` objects for one ref. ``git ls-remote`` then returns
-the ref at two SHAs, a fresh clone hard-fails (``multiple updates for ref not allowed``), and the
-push path stalls. Upstream's ``git-s3 doctor`` is interactive-only AND discards a divergent head
-(data loss). :func:`heal_multi_bundle` instead folds every head into the PUBLISHED ref
-(``refs/heads/<ref>``, never the tracker's checked-out HEAD) by iterated 2-parent merges under
-rebar's write lock, writes the merged tip as a NEW bundle FIRST, then deletes the originals — so
-at every instant ≥1 bundle carrying the full merged history exists remotely.
-
-This module is OPTIONAL and import-safe: ``git_remote_s3`` / boto3 are imported ONLY lazily
-inside functions, guarded by :func:`rebar._optional.require_s3_helper`.
+Fold all heads into the published ref under the write lock, upload its merged bundle
+before deleting originals, and leave the checked-out branch out of unrelated merges.
+The optional S3 helper loads only inside guarded functions.
 """
 
 from __future__ import annotations
@@ -45,17 +37,10 @@ class S3DoctorConflict(Exception):
 
 # raw-git-ok: locked store seam internal
 def _git(base: str, *args: str) -> subprocess.CompletedProcess:
-    """Run one doctor git invocation through rebar's SHARED self-healing git seam.
+    """Run idempotent doctor git operations through the bounded write seam.
 
-    Routed through :func:`gitutil.run_git_write` rather than raw ``run_git`` (bug
-    wrongful-chemic-squeaker): the doctor was the one store git caller outside that seam, so
-    a transient runner-FS read blip that every other store write rides out unassisted instead
-    aborted the whole heal — three times on CI. Adopting the seam is reuse, not new policy:
-    the doctor inherits the per-store advisory git-op lock, the bounded index/ref-lock retry
-    and the transient read-fault retry from the one implementation, and keeps its own
-    :data:`_GIT_TIMEOUT` watchdog. Every op reached through here is idempotent — reads,
-    merges under the write lock, disposable scratch-ref updates, and a bundle write to a
-    caller-owned temp file — which is the precondition the retry wrappers document.
+    Its shared lock and retries cover transient object reads and index/ref locks;
+    the doctor retains its own timeout.
     """
     return run_git_write(base, *args, check=False, timeout=_GIT_TIMEOUT)
 
@@ -81,11 +66,10 @@ def heal_multi_bundle(
     *,
     s3remote_factory: Callable[[str], Any] | None = None,
 ) -> dict:
-    """Losslessly collapse a ref's multiple bundles into one merged bundle.
+    """Merge a ref's bundles in the tracker and publish one lossless bundle.
 
-    ``base_path`` is the local tracker git repo where the merge happens; ``remote`` is the git
-    remote NAME (its URL is resolved via ``git remote get-url``); ``ref`` is the remote ref.
-    ``s3remote_factory`` is the single injection seam: ``(remote_url) -> S3Remote-like``.
+    ``remote`` names the configured Git remote; ``s3remote_factory`` injects its
+    S3 client from the resolved URL.
     """
     if s3remote_factory is None:
         s3remote_factory = _default_factory
@@ -166,27 +150,16 @@ def _heal_locked(base_path: str, ref: str, s3: Any) -> dict:
 
 
 def _on_published_ref(base_path: str, ref: str) -> bool:
-    """True when the tracker's worktree has *ref* itself checked out (not a side branch or a
-    detached HEAD). The fold no longer depends on this — it targets ``refs/heads/<ref>``
-    directly — but publishing does: moving a branch that a worktree is sitting on has to take
-    the index and worktree with it."""
+    """Check whether *ref* is checked out and must move with its index and worktree."""
     return _git(base_path, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip() == ref
 
 
 def _require_clean_worktree_on_ref(base_path: str, ref: str) -> None:
-    """Refuse the heal when *ref* IS checked out and its worktree is dirty.
+    """Refuse a dirty checked-out published ref before downloading bundles.
 
-    This is all that survives of the blanket refusal from bug gnarled-acardiac-bettong, which
-    rejected every tracker not sitting on the published ref. The fold now merges into
-    ``refs/heads/<ref>`` itself (see :func:`_fold_heads`), so a side branch or a detached HEAD
-    heals normally and cannot leak its commits into the ticket history.
-
-    The one case still worth refusing is narrow: when *ref* is checked out the heal advances the
-    worktree onto the merged tip, and uncommitted changes there would be destroyed. Today's
-    ``git merge`` fold already fails on such a tracker — this only makes the refusal EARLY (before
-    any bundle is downloaded) and explicit, and keeps it on the module's established loud channel,
-    which the sole caller in ``_store/push.py`` logs with its hint and escalates under ``strict``.
-    Runs AFTER the single-bundle no-op check, so a store with nothing to heal is unaffected.
+    Healing a side branch or detached HEAD is safe because folding targets the
+    published ref. Advancing that ref's checked-out worktree would overwrite tracked
+    changes, so report the conflict after the single-bundle no-op check.
     """
     if not _on_published_ref(base_path, ref):
         return
@@ -241,21 +214,11 @@ def _fetch_heads(
 
 
 def _fold_heads(base_path: str, ref: str, head_refs: list[str]) -> str:
-    """Fold every head into ``refs/heads/<ref>`` by iterated 2-parent merges, under the lock.
+    """Fold heads into the published ref with worktree-free two-parent merges.
 
-    The fold starts from the PUBLISHED ref's tip and never consults the worktree's HEAD, so the
-    result no longer depends on which branch the tracker happens to have checked out — the defect
-    bug gnarled-acardiac-bettong proved and papered over with a blanket refusal. ``git merge``
-    cannot do this (it only merges into the checked-out branch), so each step is
-    ``merge-tree --write-tree`` + ``commit-tree``: a worktree-free merge that still applies the
-    tickets branch's merge policy (``.gitattributes`` maps ``.bridge_state/* merge=ours``, and
-    the tracker configures the ``ours`` driver; UUID-named event dirs never collide), so the fold
-    stays lossless. Both flags used here are inside rebar's declared Git floor of 2.38.
-
-    A real conflict exits non-zero and raises :class:`S3DoctorConflict`; unlike the old ``git
-    merge`` there is no worktree or index state to abort, so the tracker is untouched by a failed
-    fold. An empty ``head_refs``, or heads already reachable from the tip, leave the tip as-is.
-    Returns the folded sha; the caller publishes it.
+    Start at that ref, never the checked-out HEAD. ``merge-tree`` and ``commit-tree``
+    honor the ticket merge policy without touching the index. Reachable heads leave
+    the tip unchanged; conflicts raise ``S3DoctorConflict`` before publication.
     """
     branch = f"refs/heads/{ref}"
     with _lock.write_lock(base_path, timeout=_WRITE_LOCK_TIMEOUT, attempts=1, dual_window=True):
@@ -303,15 +266,10 @@ def _fold_heads(base_path: str, ref: str, head_refs: list[str]) -> str:
 
 # raw-git-ok: locked store seam internal (the doctor's ref-publish step, under the fold's lock)
 def _publish_ref(base_path: str, ref: str, merged_sha: str) -> None:
-    """Move ``refs/heads/<ref>`` onto *merged_sha*, keeping the worktree consistent.
+    """Publish the merged ref while preserving the checked-out worktree state.
 
-    Two shapes, differing only in how the branch moves. When *ref* is NOT checked out the branch
-    is a plain ref: ``update-ref`` moves it, and the worktree (whatever branch it is on) is left
-    completely alone — that is what stops a side branch's commits from reaching the ticket
-    history. When *ref* IS checked out, moving the ref alone would strand the index and worktree
-    at the old tip and make every merged file look deleted, so ``reset --hard`` moves branch,
-    index and worktree together — the same end state the old ``git merge`` fold produced.
-    :func:`_require_clean_worktree_on_ref` has already established there is nothing to lose.
+    Update a branch-only ref directly. For a clean checked-out ref, reset branch,
+    index, and worktree together; the earlier cleanliness guard prevents data loss.
     """
     branch = f"refs/heads/{ref}"
     if _on_published_ref(base_path, ref):
@@ -333,15 +291,10 @@ def _publish_and_prune(
     merged_sha: str,
     original_keys: list[str],
 ) -> list[str]:
-    """Write the merged tip as a NEW bundle FIRST, then delete the original bundles.
+    """Upload the published ref's merged bundle before deleting old bundles.
 
-    The bundle is built from ``refs/heads/<ref>`` — the ref the fold just published — and NEVER
-    from a bare ``HEAD``, which off the published ref names the tracker's own checked-out branch
-    and would put its unrelated commits into the ticket store (bug gnarled-acardiac-bettong).
-    ``HEAD`` is still listed alongside it in the case where it genuinely resolves to the same
-    commit, preserving the historical two-name bundle for the ordinary on-ref tracker; the S3
-    remote's own HEAD marker is written separately by ``init_remote_head``, so a bundle without
-    the ``HEAD`` entry still advertises correctly.
+    Include ``HEAD`` only when it names that same commit; an unrelated checked-out
+    branch must never enter the ticket bundle. The remote advertises HEAD separately.
     """
     merged_key = f"{s3.prefix}/{ref}/{merged_sha}.bundle"
     bundle_refs = [f"refs/heads/{ref}"]
@@ -353,9 +306,8 @@ def _publish_and_prune(
     try:
         create = _git(base_path, "bundle", "create", bundle_path, *bundle_refs)
         if create.returncode != 0:
-            # A bundle failure that survived the seam's retries is NOT a heads conflict, so
-            # the default hint's "run rebar store fsck-recover" would be the wrong tool: the merge
-            # already succeeded and it is the object store that could not be READ.
+            # A persistent bundle read failure follows a successful merge; diagnose
+            # the object store rather than treating it as a heads conflict.
             hint = None
             if is_transient_object_read_error(create.stderr or create.stdout or ""):
                 hint = (

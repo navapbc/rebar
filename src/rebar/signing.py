@@ -1,23 +1,9 @@
-"""Environment-bound manifest signing for tickets — the entry module of the signing family.
+"""Sign ticket manifests with environment-bound Ed25519 op-certs.
 
-Writes mint ``rebar.opcert.v1`` DSSE op-certs with an environment Ed25519 key; reads dispatch by
-record shape. Signatures persist as append-only ``SIGNATURE`` events through the shared locked write
-path. The legacy symmetric HMAC-SHA256 scheme is RETIRED (2026-09): no key custody remains, and any
-non-envelope record (every attestation minted before 2026-07-15) reads ``unsigned`` through
-:func:`retired_scheme_verdict`. The record itself is never mutated.
-
-This module owns the concerns that need the whole picture — scheme DISPATCH
-(:func:`verify_attestation_record`), the op-cert sign path, the resolve/reduce read path, and the
-two CLI arms — and re-exports the layers beneath it so ``rebar.signing`` stays the single import
-point for the entire surface (story f5c1-e41d split it along the seams that already existed):
-
-* :mod:`rebar._signing_manifest` — the signed-manifest vocabulary + gate-code provenance (a
-  stdlib-only leaf).
-* :mod:`rebar._opcert_signing` — the op-cert env-key custody + mint/verify machinery (story 8d8e).
-
-Direction is ``signing -> _signing_manifest``, acyclic; there are no back-edges. A re-exported
-symbol is an ALIAS: its in-family consumers resolve it in its DEFINING module, so tests must
-monkeypatch it there, not here — see those modules' docstrings.
+Persist DSSE envelopes as locked ``SIGNATURE`` events. Legacy HMAC records remain
+unchanged but read unsigned. This entry module dispatches by record shape and
+re-exports manifest and key-custody layers; patch re-exported names at their
+defining modules.
 """
 
 from __future__ import annotations
@@ -53,11 +39,8 @@ from rebar._signing_manifest import (
     verified_at_sha_subject,
 )
 
-# The re-export contract: ``rebar.signing`` is the single import point for the whole family, so
-# every name the sibling modules define is listed here — the PRIVATE ones deliberately, because
-# they are reached by `rebar/llm/build_drift.py` (`_gate_commit_sha`) and by tests, and without
-# the declaration a linter reads each re-export as an unused import and an auto-fix deletes it.
-# Sorted (RUF022), not grouped by origin — the import block above shows which module owns what.
+# Keep public and relied-on private aliases here for the single signing import
+# point; sorted exports also protect them from unused-import autofixes.
 __all__ = [
     "HMAC_RETIRED_ON",
     "LEGACY_HMAC_ALGORITHM",
@@ -88,10 +71,7 @@ __all__ = [
     "verify_signature",
 ]
 
-# The gated OP-CERT kinds (story 8f1d, contract phase): signed + accepted EXCLUSIVELY as
-# asymmetric op-certs (rebar.opcert.v1 DSSE/SSHSIG). The legacy symmetric HMAC scheme is retired
-# for them (a shared HMAC secret would let any verifier forge a verdict), and since 2026-09 it is
-# retired for every kind: no HMAC key custody or verifier remains.
+# These gated kinds require asymmetric DSSE op-certs; HMAC verification is retired.
 OPCERT_KINDS = frozenset({"plan-review", "completion-verifier"})
 
 # The retired symmetric scheme's algorithm tag — recognised on READ only (to word the verdict
@@ -139,17 +119,11 @@ def verify_attestation_record(
     kind: str | None = None,
     repo_root=None,
 ) -> dict:
-    """Shape-aware verify dispatch.
+    """Verify DSSE envelopes; report other records unsigned in the same shape.
 
-    An ``envelope``-bearing record (a ``rebar.opcert.v1`` DSSE op-cert) routes to the op-cert
-    verifier; anything else — a legacy HMAC record or no record at all — reads ``unsigned`` via
-    :func:`retired_scheme_verdict` (HMAC retired 2026-09; re-running the gate mints an op-cert).
-    The result shape is uniform either way, so downstream readers (``verify_signature``,
-    ``compute_validity``, ``signature_findings``) are unchanged.
-
-    ``kind`` is the attestation-kind SLOT this record was fetched from; it is threaded to the
-    op-cert verifier so it can enforce the SIGNED subject binding (cross-ticket / cross-kind replay
-    defense, finding A). ``repo_root`` locates the tracker for the op-cert principal + pubkey."""
+    Pass the selected ``kind`` for signed-subject replay checks and ``repo_root``
+    for trusted principal and key lookup.
+    """
     if isinstance(record, dict) and record.get("envelope"):
         return verify_opcert_record(record, ticket_id, kind=kind, repo_root=repo_root)
     return retired_scheme_verdict(record)
@@ -165,12 +139,11 @@ def _sign_manifest_under_lock(
     under_lock_check=None,
     signer=None,
 ) -> dict:
-    """Sign a manifest of verified steps for a ticket; append a SIGNATURE event.
-    Delegates to :func:`rebar._opcert_signing.mint_opcert_record` (one Ed25519 DSSE op-cert per
-    verdict, persisted through the locked write path); a degraded/invalid sign raises
-    :class:`SigningError`, recorded by callers as an in-band ``{signed: false}`` outcome. ``kind``
-    is an UNSIGNED routing hint (authoritative kind is signed ``manifest[0]``); ``signer`` (story
-    6f14) is an OPTIONAL startup op-cert binding forwarded to the mint (omit for env/genesis)."""
+    """Mint one Ed25519 verdict and append its SIGNATURE under the lock.
+
+    Signing failure raises ``SigningError``. ``kind`` is only a routing hint;
+    the manifest signs authority. Forward an optional startup signer binding.
+    """
     from rebar._commands._seam import CommandError, append_event
 
     resolved, record = _prepare_manifest_event(
@@ -241,10 +214,7 @@ def sign_manifest(
 
 # ── Read path (resolve the ticket, pick the record, verify it) ────────────────
 def _resolve_and_reduce(ticket_id: str, repo_root):
-    """Shared verify boilerplate: resolve the id and reduce the ticket.
-
-    Returns ``(resolved_id, state)``; raises :class:`SigningError` (exit 1) when the ticket
-    cannot be resolved."""
+    """Resolve and reduce a ticket, raising ``SigningError`` if absent."""
     if not ticket_id:
         raise SigningError("Error: ticket_id must be non-empty")
     tracker = str(config.tracker_dir(repo_root))
@@ -274,16 +244,10 @@ def _resolve_and_reduce(ticket_id: str, repo_root):
 
 
 def most_recent_attestation(state: dict):
-    """The most-recent signed attestation of ANY kind — the semantics the legacy
-    single-slot ``state['signature']`` mirror provided, now sourced from the kind-keyed
-    ``state['attestations']`` map (352b contract phase). "Most recent" = the record with
-    the greatest ``signed_at`` (ties broken by iteration/replay order, so the last-processed
-    wins — matching the mirror's last-writer-wins).
+    """Select the latest kind-keyed attestation, falling back to the legacy mirror.
 
-    Falls back to the legacy ``state['signature']`` mirror only when the map is absent/empty
-    — e.g. a pre-attestations snapshot the read-side fold-in did not populate. Post-feature
-    snapshots always carry ``attestations`` (and old snapshots are folded into it on read),
-    so the fallback is a defensive belt-and-suspenders, not the common path."""
+    Highest ``signed_at`` wins; replay order breaks ties.
+    """
     att = state.get("attestations")
     if isinstance(att, dict) and att:
         # max() keeps the LAST max on ties (stable), i.e. the last-processed of equal
@@ -293,11 +257,7 @@ def most_recent_attestation(state: dict):
 
 
 def _record_for_kind(state: dict, kind: str | None):
-    """The signature record to verify for ``kind``. ``kind=None`` returns the most-recent
-    attestation of any kind (via :func:`most_recent_attestation` — the pre-attestations
-    "verify the latest signature" behavior, now map-sourced). An explicit kind returns
-    ``state['attestations'][kind]`` STRICTLY (None when that kind is absent → an honest
-    ``unsigned``); a different-kind record is never substituted for a requested kind."""
+    """Select the latest record or strictly the requested kind, never a substitute."""
     if kind is None:
         return most_recent_attestation(state)
     att = state.get("attestations")
@@ -305,17 +265,11 @@ def _record_for_kind(state: dict, kind: str | None):
 
 
 def verify_signature(ticket_id: str, *, kind: str | None = None, repo_root=None) -> dict:
-    """Certify a ticket's recorded verified-steps against its signature.
+    """Verify a ticket's latest or explicitly selected attestation.
 
-    Resolves the id, reduces the ticket, and verifies one signature record. Returns the verdict
-    dict (see :func:`verify_attestation_record`) with the resolved ``ticket_id`` attached.
-    Raises :class:`SigningError` (exit 1) only when the ticket itself cannot be resolved.
-
-    ``kind`` selects WHICH attestation to verify (epic dark-acme-lumen): ``None`` (default)
-    verifies the legacy most-recent ``signature`` mirror — exact pre-attestations behavior, so
-    every existing no-kind caller is unchanged — while an explicit kind (e.g. ``"plan-review"``
-    / ``"completion-verifier"``) verifies THAT kind strictly from the kind-keyed map. Use
-    :func:`verify_attestations` for all kinds at once."""
+    Return the verdict with resolved ticket ID; unresolved tickets raise
+    ``SigningError``. Use ``verify_attestations`` to check every kind.
+    """
     resolved, state = _resolve_and_reduce(ticket_id, repo_root)
     result = verify_attestation_record(
         _record_for_kind(state, kind), resolved, kind=kind, repo_root=repo_root
@@ -327,10 +281,10 @@ def verify_signature(ticket_id: str, *, kind: str | None = None, repo_root=None)
 
 
 def verify_attestations(ticket_id: str, *, repo_root=None) -> dict:
-    """Verify EVERY attestation kind on a ticket: returns ``{kind: verdict_dict}`` (each a
-    :func:`verify_attestation_record` result with ``ticket_id`` + ``kind`` attached), kinds
-    sorted. ``{}`` when the ticket carries no attestations. No LLM, no network — a pure local
-    verify per kind. Raises :class:`SigningError` only when the ticket cannot be resolved."""
+    """Verify each kind locally and return sorted kind-to-verdict entries.
+
+    Return ``{}`` without attestations; unresolved tickets raise ``SigningError``.
+    """
     resolved, state = _resolve_and_reduce(ticket_id, repo_root)
     att = state.get("attestations")
     out: dict = {}
@@ -378,16 +332,10 @@ def sign_cli(argv: list[str]) -> int:
 
 
 def verify_signature_cli(argv: list[str]) -> int:
-    """``rebar verify-signature <ticket_id> [--kind <kind>] [--output json]``.
+    """CLI check for one latest or ``--kind``-selected signature.
 
-    Verifies a SINGLE attestation and returns its verdict (json = the verdict dict, report =
-    one ``SIGNATURE: …`` line) — exit 0 iff ``certified``; exit 1 for
-    mismatch/foreign_key/unsigned; the SigningError exit code on an unresolved ticket.
-    Without ``--kind`` this verifies the most-recent signature (exact pre-attestations
-    behavior). With ``--kind K`` (``--kind K`` or ``--kind=K``) it verifies that kind strictly
-    from the kind-keyed map — the per-ticket CI-gate form (epic dark-acme-lumen). The full
-    per-kind set is available via the library ``verify_attestations`` and the ``attestations``
-    field of ``rebar show``.
+    JSON returns the verdict; report prints one line. Exit 0 only when certified,
+    1 for an unsigned or invalid record, or the ticket-resolution error code.
     """
     import sys
 

@@ -1,15 +1,10 @@
-"""Best-effort push of the tickets branch.
+"""Push ``HEAD:tickets`` under the configured sync policy. Default delivery is best-effort;
+strict delivery raises ``PushDeliveryError``, and S3 preflight can raise
+``OptionalDependencyError`` regardless of strictness.
 
-Faithful port of ``_push_tickets_branch`` (ticket-lib.sh). Honours the ``sync.push``
-policy (``always`` | ``async`` | ``off``, default ``always``; env ``REBAR_SYNC_PUSH``
-or a config file — resolved via the typed config),
-pushes ``HEAD:tickets`` (the detached-HEAD commit, bug 27d8-b230), retries ≤3, and
-reconciles a non-fast-forward by **merging** ``origin/tickets`` (never rebasing —
-merge is atomic, no rebase-merge state to strand picks; 637b Fix 3), including the
-dirty-working-tree set-aside→merge→restore dance (bug 12a6) — which uses a stash COMMIT
-OBJECT, never the repo-global ``refs/stash`` stack every worktree shares (bug 2fa6).
-ALWAYS returns ``None`` (best-effort): a push failure never fails the caller; ``fsck``
-reports ``PUSH_PENDING`` while the local branch is ahead of origin.
+Non-fast-forward recovery merges the remote branch, preserving a dirty worktree with
+a temporary stash commit outside the shared ``refs/stash`` stack. Failed delivery
+leaves local commits for retry and appears as ``PUSH_PENDING`` in fsck.
 """
 
 from __future__ import annotations
@@ -38,19 +33,12 @@ logger = logging.getLogger(__name__)
 
 
 def _push_mode(root: str | None = None) -> str:
-    """The outbound push policy (``always`` | ``async`` | ``off``), resolved through
-    the typed config (``sync.push``; env ``REBAR_SYNC_PUSH`` or a config file).
-    ``root`` is passed explicitly (the repo dir
-    holding the tracker) so resolution is pure stat-based discovery — it never shells
-    out to ``git`` for root detection, which would conflict with callers that mock
-    subprocess. Best-effort: a malformed config falls back to the ``always`` default —
-    a bad config must never break (or silently disable) the auto-push.
+    """Resolve ``always``/``async``/``off`` from a bound gate or typed config.
 
-    STARTUP BINDING (story 6f14): when a bound op-cert gate is active it threads a
-    context-local push policy (:func:`rebar._opcert_binding.current_push_mode`, ``off``
-    for the gate service), which takes precedence over the env/config so the trusted gate
-    never pushes a per-job SIGNATURE write — without patching ``REBAR_SYNC_PUSH`` in the
-    process env."""
+    A bound gate's policy takes precedence so its signature writes do not push.
+    Config discovery uses the explicit root without invoking git; malformed config
+    falls back to ``always`` without breaking or disabling delivery.
+    """
     from rebar._opcert_binding import current_push_mode
 
     bound = current_push_mode()
@@ -74,14 +62,9 @@ def _git(base: str, *args: str, env: dict | None = None) -> subprocess.Completed
     return run_git_bounded(base, *args, env=env, timeout=_GIT_TIMEOUT, runner=run_git)
 
 
-# ── Push-recovery (stash/dirty-tree + non-fast-forward) now lives in push_recovery.py ──
-# That cluster is monkeypatch-sensitive: ~25 tests patch ``push._git``, and 8 of the 9 moved
-# functions shell out through it. The moved code resolves ``core._git`` / ``core.logger`` from
-# the module handed in as ``core`` at CALL time, so these two shims pass THIS module and thereby
-# preserve the historical ``push._recover_*`` call signatures — push_tickets_branch's call and
-# test_push_shared_stash_2fa6's direct ``_recover_dirty_merge`` call both keep working against
-# the patched ``push._git``. The remaining members are re-exported so ``push.<symbol>`` attribute
-# access (and ``_resolve_conflicted_apply.__doc__``) survives the move.
+# Recovery lives in push_recovery.py. These shims pass this module at call time so
+# patches to ``push._git`` still reach recovery; re-exports preserve public attributes
+# and ``_resolve_conflicted_apply.__doc__``.
 from rebar._store.push_recovery import (  # noqa: E402, F401 — re-exported for push.<symbol>
     _PUSH_MERGE_LOCK_TIMEOUT,
     _fetch_for_recovery,
@@ -116,11 +99,9 @@ def _recover_non_fast_forward(
 
 
 def _require_s3_helper_if_s3_url(remote_url: str) -> None:
-    """Fail closed on an s3://|s3+zip:// remote whose git-remote-s3 helper is missing/too old.
+    """Require a compatible helper for S3 remotes regardless of ``strict``.
 
-    A deliberate exception to push_tickets_branch's best-effort contract: raises
-    OptionalDependencyError UNCONDITIONALLY (independent of `strict`), because a misconfigured
-    S3 remote must halt loudly rather than be swallowed. A no-op for any other scheme.
+    Raise ``OptionalDependencyError`` for a missing or old helper; other schemes pass.
     """
     if remote_url.startswith("s3://") or remote_url.startswith("s3+zip://"):
         from rebar._optional import require_s3_helper
@@ -129,11 +110,9 @@ def _require_s3_helper_if_s3_url(remote_url: str) -> None:
 
 
 def _require_s3_helper_for_configured_remote(base_path: str) -> None:
-    """Resolve the configured remote for ``base_path`` and fail closed if it is an S3 URL.
+    """Preflight S3 helpers in the async parent, whose child discards stderr.
 
-    Used by the async delivery arm to surface a misconfigured-S3 error IN THE PARENT (the
-    detached child's stderr is discarded). A malformed config or an unavailable git binary
-    simply skips this best-effort preflight.
+    Skip this best-effort check when config or git is unavailable.
     """
     from rebar.config import ConfigError, tickets_remote
 
@@ -182,15 +161,8 @@ def push_tickets_branch(
         # Fail fast IN THE PARENT on a misconfigured S3 remote — the detached child's stderr
         # is discarded, so the actionable message would otherwise be lost.
         _require_s3_helper_for_configured_remote(base_path)
-        # Detach a synchronous push (REBAR_SYNC_PUSH=always) that survives parent exit,
-        # via the shared detached-rebar-child spawner (rebar._proc.spawn_detached), which
-        # owns the PYTHONPATH bootstrap, the -c re-entry stub, the detach flags and the
-        # durable-cwd anchor (bug 3198-438c-72a5-470f).
-        # RP-04 S3 (AC4): a git-push child needs NO Jira send credential, so project the
-        # parent env as an "unrelated" sibling — stripping every adapter-owned secret name
-        # (JIRA_API_TOKEN / JIRA_PAT) while preserving all native git/ssh/proxy/CA config.
-        # project_child_env returns a fresh dict and never mutates os.environ; env
-        # construction stays HERE so consolidation cannot drop the secret-stripping.
+        # Spawn a detached synchronous push with a durable cwd. An unrelated child
+        # needs git/ssh/proxy settings but no Jira credentials; project a fresh env.
         from rebar import _child_env
         from rebar._proc import spawn_detached
 
@@ -205,16 +177,12 @@ def push_tickets_branch(
                 stderr=subprocess.DEVNULL,
             )
         except OSError as exc:
-            # Observability gap (audit 3.2): a failed detached spawn used to be swallowed
-            # silently, so an async push that never started looked identical to one that
-            # succeeded. Log it; the push simply stays pending (fsck surfaces PUSH_PENDING).
+            # Report a failed spawn; fsck still exposes the pending push.
             logger.warning("async tickets-branch push spawn failed: %r", exc)
         return
 
-    # mode: always (default) — synchronous best-effort push.
-    # Branch + remote resolved from the MAIN repo config (the tracker's parent), matching
-    # _push_mode. Best-effort: on a malformed config, skip rather than push to a guessed
-    # branch/remote (a wrong refspec would publish to the wrong place).
+    # Resolve the synchronous destination from the main repo; malformed config
+    # skips delivery rather than guessing a branch or remote.
     from rebar.config import ConfigError, tickets_branch, tickets_remote
 
     try:
@@ -223,9 +191,7 @@ def push_tickets_branch(
     except ConfigError as exc:
         _raise_if_strict(strict, "invalid-destination", str(exc), base_path, remote_ref)
         return
-    # Guard on the CONFIGURED remote specifically (not "some remote exists"): if it is not a
-    # configured git remote there is nothing to push to — skip quietly (a local-only store
-    # is a supported mode, and fsck's PUSH_PENDING surfaces the unpushed commits).
+    # A local-only store may lack its configured remote; fsck reports any backlog.
     remote_url = _git(base_path, "remote", "get-url", remote)
     if remote_url.returncode != 0:
         _raise_if_strict(
@@ -309,12 +275,8 @@ def push_tickets_branch(
         )
         return
 
-    # Keep the literal "failed after N retries" wording — two negative assertions
-    # (test_epoch_guard_matrix / test_epoch_guard_reconciliation) prove this line is
-    # ABSENT in their scenarios, so it is appended to, never reworded. Bug 2a76 adds
-    # the last rejection reason and the escalating backlog size. Bug 3ff9 keys the
-    # LEVEL on _terminal_severity: a lost contention race whose backlog is not growing
-    # is expected/self-healing and reports at INFO, not WARNING.
+    # Preserve the asserted "failed after N retries" wording. Severity follows
+    # backlog growth: a non-growing contention race reports at INFO.
     level, backlog = _terminal_severity(base_path, remote_ref, stderr)
     _raise_if_strict(
         strict,
@@ -333,16 +295,10 @@ def push_tickets_branch(
 
 
 def _ignore_lock_artifacts(base_path: str) -> bool:
-    """Keep the lock's own files out of Git even in an implicit-legacy store.
+    """Exclude lock files before staging, including in legacy stores.
 
-    Runs BEFORE the write lock (the exclusion must exist before anything stages), so two
-    first-time callers race by construction. The append is therefore ONE ``os.write`` to an
-    ``O_APPEND`` fd, applied atomically at end-of-file on POSIX (this project's declared
-    support surface), so a race cannot tear a pattern into a half-line that would silently
-    stop excluding it. The prior buffered two-write append merely happened to coalesce under
-    CPython buffering; this makes that guarantee explicit rather than incidental. A racing
-    pair can still append the same WHOLE line twice: tolerated by design, since git applies
-    a repeated pattern identically and de-duplicating would need a lock forbidden here.
+    This runs before the write lock. One POSIX ``O_APPEND`` write prevents racing
+    callers from tearing a pattern; duplicate complete lines are harmless.
     """
     resolved = _git(base_path, "rev-parse", "--git-path", "info/exclude")
     if resolved.returncode != 0 or not resolved.stdout.strip():
@@ -397,16 +353,12 @@ def _locked_commit_phase(
     author_name: str | None,
     author_email: str | None,
 ) -> bool:
-    """The write-locked stage+commit shared by the tickets-branch commit seams.
+    """Stage and commit under the store lock, with optional scoped paths.
 
-    ``paths=None`` stages everything (``git add -A``, the historical behaviour);
-    a sequence stages ONLY those paths (``git status/add -- <paths>``), so a caller
-    with a deliberate selective file set — the reconciler's binding-store snapshot,
-    which must never sweep in ``.bridge_state/last-pass.json`` (ticket 6454-d06e) —
-    can commit through the shared lock. Returns ``True`` when the locked phase
-    completed (a commit was made, or there was nothing to commit); ``False`` when it
-    was skipped in non-strict mode (strict callers get a raised
-    :class:`PushDeliveryError` instead)."""
+    ``paths=None`` stages all changes; a sequence stages only its paths, keeping
+    unrelated bridge state out of selective snapshots. Return ``True`` for a commit
+    or clean tree, ``False`` for a non-strict failure; strict failures raise.
+    """
     from rebar._store import lock as _lock
 
     remote_ref = "origin/tickets"
@@ -452,12 +404,8 @@ def _locked_commit_phase(
                 return False
             if dirty.stdout:
                 if paths is not None:
-                    # Stage exactly the dirty subset the scoped status reported: every
-                    # such path matches by construction, whereas `git add` fails hard
-                    # on a pathspec that matches no file at all. Porcelain paths are
-                    # TOP-LEVEL-relative while a bare `add` pathspec is CWD-relative
-                    # (they differ when the tracker is a subdirectory of its repo), so
-                    # the `:(top)` pathspec magic anchors each at the worktree root.
+                    # Stage only reported dirty paths. Anchor porcelain's root-relative
+                    # names with ``:(top)`` so subdirectory trackers resolve them.
                     staged = _git(  # raw-git-ok: locked store seam internal
                         canonical,
                         "add",
@@ -507,15 +455,11 @@ def commit_tickets_branch(
     author_name: str | None = None,
     author_email: str | None = None,
 ) -> bool:
-    """Commit pending tracker changes under the write lock — commit only, NO push.
+    """Commit under the write lock without pushing; callers handle delivery.
 
-    The pathspec-capable sibling of :func:`commit_and_push_tickets_branch` for callers
-    whose delivery is handled elsewhere (the reconciler's binding-store snapshot relies
-    on the GHA commit-back / next store push, and must preserve its historical no-push
-    behaviour). ``paths`` scopes staging to exactly those tracker-relative paths;
-    ``None`` stages everything. Returns ``True`` when the locked phase completed
-    (commit made, or nothing to commit); non-strict failures return ``False``, strict
-    ones raise :class:`PushDeliveryError`."""
+    ``paths`` limits staging; ``None`` stages all changes. Return ``True`` for a
+    commit or clean tree, ``False`` for non-strict failure; strict failure raises.
+    """
     from rebar._store import lock as _lock
 
     return _locked_commit_phase(
@@ -536,12 +480,10 @@ def commit_and_push_tickets_branch(
     author_name: str | None = None,
     author_email: str | None = None,
 ) -> None:
-    """Commit all pending tracker changes under its write lock, then push.
+    """Commit under the lock, then push even if the tracker was clean.
 
-    A clean tracker can still be ahead of its remote, so delivery always follows a
-    successful locked phase.  Default callers retain pending content after a local
-    failure and return best-effort; strict callers receive a classified
-    :class:`PushDeliveryError`.
+    Non-strict failures retain pending changes; strict failures raise a classified
+    ``PushDeliveryError``.
     """
     from rebar._store import lock as _lock
 
@@ -560,18 +502,11 @@ def commit_and_push_tickets_branch(
 
 
 def push_after_commit(tracker: str | os.PathLike) -> None:
-    """Best-effort auto-push for the inline-commit write paths.
+    """Push commits from inline transition, reopen, claim, compact, and delete paths.
 
-    ``transition`` / ``reopen`` / ``claim`` (txn.py), ``compact`` (compact.py), and
-    ``delete`` (delete.py) do their own locked rename+commit rather than going
-    through :func:`rebar._store.event_append.write_and_push`, so they must trigger
-    the same best-effort push the ``append_event`` family gets — otherwise a
-    trailing status/compact/delete (the LAST write of a session) strands its commit
-    as ``PUSH_PENDING`` (bug ``prone-octet-cheek``). Resolves the canonical tracker
-    and pushes ``HEAD:tickets`` per the ``sync.push`` policy; never raises
-    (``push_tickets_branch`` is itself best-effort). Call AFTER the locked commit
-    has released the store lock — the push runs its own fetch/merge and must not
-    nest inside the write lock."""
+    Call after releasing the write lock: delivery may fetch and merge. The
+    configured policy applies, and non-strict failures leave ``PUSH_PENDING``.
+    """
     try:
         from rebar._store import lock as _lock
 
