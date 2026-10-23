@@ -1,16 +1,7 @@
-"""Cycle-capable relations come from one set (mirror F4).
+"""Keep cycle-capable relation names in the canonical set.
 
-Ticket cacb-8d57-efff-4ab1 (unsainted-dainty-xiphias).
-
-`_BLOCKING_RELATIONS` is canonical, but `_graph.py` hardcoded a five-element COMPLEMENT and
-`_links.py` hardcoded the positive pair, neither importing it. The prose had already drifted:
-both files named four non-blocking relations, omitting `caused_by`, and `_graph.py` did so two
-lines above a five-element code list.
-
-The failure a future miss produces is quiet: a new non-blocking relation falls through to the
-`else`, is cycle-checked as though it were `blocks`, and a valid link is REJECTED with
-CyclicDependencyError — a refusal to record a true relationship, not a crash.
-"""
+A stale local complement can treat a non-blocking relation as blocking and
+reject a valid link with CyclicDependencyError."""
 
 from __future__ import annotations
 
@@ -34,13 +25,8 @@ def test_blocking_is_a_proper_subset_of_the_relation_vocabulary() -> None:
 
 @pytest.mark.parametrize("module", [_graph, _links])
 def test_neither_site_re_lists_relation_names(module) -> None:
-    """AC1. Matches shape, not spelling, so reordering the tuple cannot evade it.
-
-    PROPER subsets only. A literal naming ALL seven relations is `_links.CANONICAL_RELATIONS`
-    — a different mirror (the vocabulary itself, not the cycle-capable subset) with its own
-    ticket in this epic, `glistening-dying-diplodocus` (F8). Flagging it here would pull that
-    work into this change.
-    """
+    """Find proper literal subsets of relation names regardless of tuple order.
+    The full canonical vocabulary is outside this guard."""
     members = set(get_args(Relation))
     tree = ast.parse(inspect.getsource(module))
     offenders = []

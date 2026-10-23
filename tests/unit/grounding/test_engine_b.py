@@ -1,19 +1,9 @@
-"""Unit tests for Engine B — the detector registry + evaluator (story 48d7).
+"""Exercise Engine B's detector registry and evaluator with fixture sources.
 
-Uses the REAL semgrep + ast-grep binaries against a tiny fixture repo. Pins:
-
-* a built-in smell detector MATCHES via the real engine and normalizes to a valid
-  evidence record (``ev.validate`` passes);
-* a schema-INVALID detector is quarantined as ``abstain(invalid_detector)`` and
-  does NOT abort the scan (spike E1 — the key test);
-* a detector for an absent language/file is skipped with a coverage record;
-* a missing metric binary (scc/lizard) -> ``abstain(no_tool)``;
-* project-local ``.rebar/detectors/`` override works (last-wins);
-* the registry caches and rebuilds on a detector-dir mtime change;
-* a missing engine binary still fails open to ``abstain(no_tool)``.
-
-Every emitted record must pass ``ev.validate``.
-"""
+Installed structural engines produce validated evidence. Invalid rules and absent
+language, engine, or metric tools yield visible abstentions without stopping
+other detectors. Project rules override built-ins, and the registry rebuilds
+when detector-directory mtime changes."""
 
 from __future__ import annotations
 
@@ -146,8 +136,7 @@ def test_builtin_smell_matches_via_real_engine(js_repo: Path) -> None:
 
 @pytest.mark.skipif(not _HAVE_SEMGREP, reason="opengrep/semgrep not installed")
 def test_invalid_detector_is_quarantined_and_does_not_abort_scan(js_repo: Path) -> None:
-    # The KEY test (spike E1): a schema-invalid rule alongside good ones must be
-    # quarantined as abstain(invalid_detector) WITHOUT aborting the whole scan.
+    # Quarantine an invalid rule without aborting valid detectors.
     d = _project_detectors_dir(js_repo)
     (d / "broken.yaml").write_text(
         "rules:\n  - id: project.broken.rule\n    languages: [javascript]\n"
@@ -186,9 +175,7 @@ def test_absent_language_detector_skipped_with_coverage(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(not _HAVE_SEMGREP, reason="opengrep/semgrep not installed")
 def test_non_relative_paths_glob_is_quarantined_not_a_crash(js_repo: Path) -> None:
-    # B1 regression: a project detector whose envelope declares a NON-RELATIVE
-    # `paths` glob makes Path.glob raise — the whole scan must NOT crash; the bad
-    # detector is quarantined (invalid_detector) and good detectors still run.
+    # Reject a non-relative project glob as invalid_detector while valid rules run.
     d = _project_detectors_dir(js_repo)
     (d / "badpath.yaml").write_text(
         "rules:\n  - id: project.badpath.rule\n    languages: [javascript]\n"
@@ -209,8 +196,7 @@ def test_non_relative_paths_glob_is_quarantined_not_a_crash(js_repo: Path) -> No
 
 
 def test_suffix_ambiguity_attributes_to_most_specific_detector() -> None:
-    # M1 regression: when one declared id is a dotted suffix of another, the
-    # MOST-SPECIFIC (longest) declared id must win — never a wrong-detector envelope.
+    # A dotted suffix collision belongs to the longest declared detector ID.
     from rebar.grounding.detectors.registry import Detector
 
     def _det(did: str) -> Detector:
@@ -431,10 +417,7 @@ def test_missing_opengrep_binary_fails_open(js_repo: Path, monkeypatch: pytest.M
 def test_opengrep_validation_runs_once_per_source_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Ticket 7da8-9d47-9604-4257: `semgrep --validate --config <source>` validates the
-    # WHOLE source file, so detectors sharing one source must not each re-validate it.
-    # Within a single _run_opengrep call, validation is deduplicated per source_path
-    # (call-local only — no persistent or cross-scan caching).
+    # Validate each shared opengrep source once per call, without cross-scan cache.
     from rebar.grounding import harness as _h
 
     def _det(det_id: str, source: Path) -> reg_mod.Detector:
@@ -472,9 +455,8 @@ def test_opengrep_validation_runs_once_per_source_file(
 def test_opengrep_shared_source_validation_failure_fans_out_to_every_detector(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Dedup must preserve the quarantine contract: when a shared source fails
-    # --validate, EVERY detector declared from it gets its own invalid_detector
-    # abstain, exactly as before the dedup.
+    # A shared source failure still gives each detector its own invalid_detector
+    # abstention.
     from rebar.grounding import harness as _h
 
     def _det(det_id: str, source: Path) -> reg_mod.Detector:

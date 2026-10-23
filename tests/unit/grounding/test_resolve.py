@@ -1,19 +1,9 @@
-"""Unit tests for rebar.grounding.resolve — the T1 refutation resolver (Engine A).
+"""Exercise Universal Ctags resolution on Python, JavaScript, and Go fixtures.
 
-These exercise the real universal-ctags binary over a small polyglot fixture
-built in ``tmp_path`` (Python + JavaScript + Go), and assert the spike's two
-load-bearing properties:
-
-* the **0-false-refute guard** (spike E2): a unique bare name → ``refuted``; a
-  common-name collision (defined twice) → ``abstain(ambiguous)``; a dotted/member
-  ref → ``abstain``; a hallucinated name → ``abstain`` (NEVER ``refuted``).
-* **fail-open** (S1 harness): no ctags binary / timeout / unsupported language →
-  ``abstain``, never a raise, never an asserted absence.
-
-Every evidence record emitted is validated against the S1 JSON-Schema contract
-via ``ev.validate``. Tests needing ctags are skipped (not failed) where the
-binary is absent, so the suite stays green on a host without it.
-"""
+Unique bare symbols can refute an absence. Collisions, members, and missing
+names abstain, so the resolver never falsely refutes a specific target.
+Missing tools, timeouts, and unsupported languages also abstain. Every record
+validates, and tests requiring Universal Ctags skip when it is unavailable."""
 
 from __future__ import annotations
 
@@ -179,13 +169,8 @@ def test_import_kind_resolves_like_symbol(repo, index):
 
 @requires_ctags
 def test_spike_e2_naive_false_refutes_guarded_does_not(repo, index):
-    """Mirror spike E2: naive bare name-existence false-refutes; the guard = 0 FR.
-
-    A 'false-refute' = refuting a reference whose SPECIFIC target does not exist
-    (a collision, a member, or a hallucination). The naive resolver (bare
-    name-in-index) false-refutes the collision; the guarded resolver (the one
-    under test) sends every such case to abstain.
-    """
+    """A bare-name lookup falsely refutes a colliding target. The guarded resolver
+    abstains on collisions, members, and missing targets."""
     hazards = [
         ("config", "symbol"),  # collision: exists twice
         ("store.reconcile_tickets", "member"),  # member: not bindable at T1

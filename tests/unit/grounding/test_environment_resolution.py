@@ -1,24 +1,9 @@
-"""Environment-aware symbol resolution (bug 406f / succinct-formable-kite).
+"""Resolve installed dependency symbols beyond the repository-scoped file index.
 
-A plan/code-review reviewer's file tools — and the ctags repo-wide index the
-grounding oracle's T1 lane builds — are REPO-SCOPED: a symbol that lives in a
-third-party dependency under ``site-packages`` is structurally invisible, so the
-reviewer wrongly asserts it "does not exist" and BLOCKs a valid plan/diff.
-
-These tests pin the deterministic fix: :func:`rebar.grounding.resolve.refute_absence`
-(via the oracle facade) now consults the INSTALLED environment through importlib,
-so a symbol importable from an installed dependency resolves as ``refuted`` (its
-asserted absence is disproved) instead of a not-found ``abstain``. An unresolvable
-name still abstains — the lane stays confirm-only and never manufactures an absence.
-
-Third-party symbol under test: ``yaml`` / ``yaml.safe_load`` (PyYAML) — a CORE
-runtime dependency of rebar (``[project].dependencies``), so it is present in the
-DEFAULT install and these third-party-path assertions run on EVERY CI job. The
-``pydantic`` cases add coverage on the ``[agents]`` jobs where that dep is present;
-each is guarded with ``pytest.importorskip`` so it SKIPS cleanly (never fails) on the
-default suite, which does not install ``[agents]``. The stdlib and negative cases
-never import a third-party dep and always run.
-"""
+An importable installed symbol refutes an asserted absence. An unresolved name
+still abstains, so this confirm-only lane never manufactures absence. PyYAML is
+a core dependency tested on every CI job. Optional pydantic cases skip when
+the agents extra is absent. Standard-library and negative cases always run."""
 
 from __future__ import annotations
 

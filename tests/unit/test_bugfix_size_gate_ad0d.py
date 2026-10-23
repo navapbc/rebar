@@ -1,19 +1,9 @@
-"""Ticket ad0d B2 — the Gerrit bugfix-size attestation criterion.
+"""Oversized bug fixes require a valid plan-review attestation.
 
-A bug-fix change whose diff exceeds the size floor (>150 non-test lines) must carry a
-VALID plan-review attestation on its `rebar-ticket:` bug; an oversized fix with a missing /
-unverifiable / stale attestation is BLOCKED at code review with a teaching finding.
-Fail-open on infrastructure trouble: store/verify errors yield an ADVISORY note, never a block.
-
-Vocabulary discipline: the classifier's verdict strings are drawn from exactly
-(a) `compute_validity`'s plan-review-reachable literals and (b) this gate's own `{error}`.
-The coverage test pins the three buckets to that union BY SET EQUALITY so a new verdict literal
-upstream fails here and forces an explicit bucket decision.
-
-Bug 846b removed the cross-host verify layer: the gate asks whether an attested plan review WAS
-COMPLETED, never which environment certified it, because a contributor cannot pin their own
-signing environment and so could never satisfy a source-gated check.
-"""
+The gate blocks missing, stale, or unverifiable reviews above 150 non-test
+lines. Store failures stay advisory. Verdict buckets cover plan-review
+validity values and this gate's error value. Certification source is not
+a requirement."""
 
 from __future__ import annotations
 
@@ -47,15 +37,8 @@ _COMPUTE_VALIDITY_PLAN_REVIEW = {
     "unverifiable-material",
     "incompatible-phase",
 }
-# (b) the gate's own error verdict for read/exception paths.
-#
-# BUG 846b: there is deliberately no third, verify-layer set here any more. The classifier used
-# to verify the op-cert against the PINNED trusted_environments.yaml keyring and could emit
-# `mismatch` / `key_not_valid_at_era` / `invalid` / `unavailable` / `unknown_kind` /
-# `unknown_scheme`. That chain gated on the SOURCE of certification and made the criterion
-# unsatisfiable for every locally-reviewed bug, so it is gone. Those literals are now simply
-# unrecognized — and `bucket_for_verdict` fails OPEN on an unrecognized literal, so the removal
-# can never turn into a surprise block.
+# Gate-owned error verdicts cover read and exception paths. There is no
+# separate signing-environment verdict set. Unknown values fail open.
 _GATE_OWN = {"error"}
 
 
@@ -324,12 +307,8 @@ def test_non_bug_ticket_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_unescalated_under_threshold_diff_never_reads_the_store(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An under-floor diff that is ALSO not a repeat fix reads nothing and says nothing.
-
-    Ticket 1dd5 narrowed this invariant: the repeat-fix predicate now runs on under-floor
-    diffs (that is the point of it), so "no store read below the floor" survives only for a
-    diff that no signal escalates. The predicate is stubbed to "no priors" here; its own
-    history walk is pinned in ``test_bugfix_repeat_fix_1dd5.py``."""
+    """An under-floor diff with no repeat-fix signal does not read the store.
+    The repeat-fix predicate is stubbed to have no priors here."""
 
     def _boom(*a, **k):
         raise AssertionError("store must not be read for an unescalated diff")
@@ -565,11 +544,8 @@ def test_classify_pinned_foreign_environment_reaches_accepted(tmp_path, monkeypa
 
 @_needs_ssh
 def test_classify_unpinned_signing_environment_is_accepted(tmp_path, monkeypatch) -> None:
-    """BUG 846b — THE SOURCE-OF-CERTIFICATION AC. A plan review run and signed in an ordinary
-    developer environment carries a principal that no project pins, and pinning is not something
-    a contributor can grant themselves. Gating on the SOURCE of certification therefore made this
-    criterion unsatisfiable for every locally-reviewed bug. The gate asks only whether an attested
-    plan review WAS COMPLETED — so an unpinned principal, same material, must reach ACCEPTED."""
+    """An attested plan review remains valid when its signing environment is
+    not pinned by the project. The gate checks completion, not source."""
     repo, tracker, tid, _pos = _bug_in_store(tmp_path, monkeypatch)
     env_id = "unpinned-dev@rebar.test"
     _mint_plan_review_record(repo, tracker, tid, "unpinned-env", env_id, tmp_path)

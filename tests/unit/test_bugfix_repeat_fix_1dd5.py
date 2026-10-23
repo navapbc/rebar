@@ -1,15 +1,7 @@
-"""Ticket 1dd5 — escalate a REPEAT FIX to the plan-review attestation gate.
+"""A small bug fix escalates when the same file was fixed twice recently.
 
-The Gerrit bugfix-size gate (ticket ad0d B2) only asks a bug fix for a plan when its diff
-clears the 150-non-test-line floor. A small fix to a file that the branch has ALREADY
-bug-fixed twice in the last week is the other shape of "this is a design change wearing a
-bug label" — and the backtest shows it recalls more later-culprit fixes than the floor does.
-
-These tests pin the new predicate (`repeat_fix.repeat_fix_escalates`) against a git fixture
-repo built in-test — never this repository's own history — and pin how the gate reports the
-escalation. Ticket resolution is stubbed at the `bugfix_size_gate` module seam that the
-predicate reaches through, exactly as the ad0d suite stubs it.
-"""
+Tests build a throwaway Git history and stub ticket resolution at the size
+gate seam. The repeated-fix rule complements the non-test diff-size floor."""
 
 from __future__ import annotations
 
@@ -420,9 +412,7 @@ def test_the_change_under_review_is_not_counted_as_its_own_prior(repo, monkeypat
     assert verdict == _verdict()
 
 
-# ----------------------------------------------------------------------------------------
-# The gate's window ANCHOR (remediation of the LLM-Review block on Gerrit 2079)
-# ----------------------------------------------------------------------------------------
+# The explicit window anchor keeps historical gate and backtest verdicts aligned.
 _DIFF = (
     "diff --git a/src/rebar/hot.py b/src/rebar/hot.py\n"
     "--- a/src/rebar/hot.py\n"
@@ -434,17 +424,8 @@ _DIFF = (
 
 
 def test_the_gate_honours_an_explicit_window_anchor(repo, monkeypatch) -> None:
-    """The gate and the backtest must ask the SAME question of the SAME window.
-
-    Before this, the gate left the anchor at wall-clock ``now`` while the backtest passed the
-    commit's own timestamp, so replaying a historical commit scored it against TODAY's history
-    — and the backtest then reported that number as the gate's recall. Two implementations of
-    one rule, disagreeing silently, which is the exact defect class this epic exists to end.
-
-    Same repository, same paths, two anchors, two verdicts: escalating when the anchor sits
-    just after the priors, and not escalating from today, because by now they have aged out of
-    the window. A gate that ignored the anchor would return the same verdict for both.
-    """
+    """The gate and backtest use the same supplied history-window anchor. Priors
+    inside a historical window escalate. Aged-out priors do not."""
     from rebar.llm.code_review.bugfix_size_gate import escalation_for_diff
 
     _stub_resolution(monkeypatch, {_BUG_TICKET: "bug"})

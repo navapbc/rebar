@@ -1,23 +1,9 @@
-"""S6 / AC2 — refutation-YIELD + false-refute EVAL on an INDEPENDENT real corpus.
+"""Measure refutation yield on cross-file imports in rebar's source tree.
 
-Mirrors spike E3 (88% yield / 0 false-refute on rebar's own source). The corpus is
-**not** a self-planted fixture — it is rebar's OWN source tree (``src/rebar``), a real
-body of real internal cross-file imports. We:
-
-* build a ctags T1 index over ``src/rebar`` with the REAL universal-ctags binary;
-* harvest the real CROSS-FILE INTERNAL references — the relative-import bindings
-  (``from .mod import Name``), which are genuine internal symbols defined elsewhere in
-  the tree (the spike's corpus shape, not stdlib/third-party noise);
-* run :func:`resolve.refute_absence` over each and MEASURE the refute yield (fraction
-  resolved to ``refuted``). The yield is *measured, not hard-asserted to a specific %*
-  (a self-authored fixture would be self-fulfilling) — we only assert it is reasonably
-  high (> 50%), the load-bearing floor;
-* assert ZERO false-refute on a HALLUCINATED control set (every refuted name mutated
-  with an ``_xyzzy`` suffix): every control MUST abstain, never refute.
-
-This is the load-bearing eval of the epic: the T1 floor refutes most real references
-yet structurally cannot manufacture a refutation for a name that does not exist.
-"""
+Universal Ctags indexes the source corpus. The test requires yield above 50%
+without hard-coding the observed rate, then mutates refuted names into missing
+controls and requires zero false refutations. This separates useful resolution
+from invented matches."""
 
 from __future__ import annotations
 
@@ -46,13 +32,9 @@ _YIELD_FLOOR = 0.50
 
 
 def _iter_internal_references(root: str) -> list[dict]:
-    """Harvest CROSS-FILE INTERNAL references from the corpus.
-
-    A relative import (``from .x import Name``, level > 0) binds a name that is DEFINED
-    elsewhere in the same tree — a real cross-file internal reference, exactly the spike
-    corpus. (Absolute imports of stdlib/third-party names are excluded: they are not
-    internal, so a T1 internal-index abstain on them is correct, not a miss.)
-    """
+    """Collect relative imports that refer across files in the source corpus.
+    Exclude absolute standard-library and third-party imports from the internal
+    yield denominator."""
     refs: list[dict] = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d != "__pycache__"]

@@ -1,21 +1,8 @@
-"""Deterministic (offline) lifecycle tests for the R4 lightweight BUG REVIEW TIER (epic 6982).
+"""Offline tests of the advisory bug review tier.
 
-Before R4, the plan-review gate short-circuited EVERY bug to a bare exempt-PASS
-(`workflow_ops.plan_review_precheck` → `orchestrator._exempt_verdict`), so a bug got no
-substantive review. The bug tier instead runs the DET floor + the advisory `necessity` probe
-(`registry.BUG_TIER_CRITERIA`). P1/P10 readiness-floor failures still block; non-readiness
-findings stay advisory for ordinary bugs. These tests pin, with NO live LLM:
-
-* precheck: an ordinarily sized, well-formed bug emits ``run_llm=True`` + ``det_blocking==[]`` +
-  ``coverage.bug_tier`` (and is NOT the bare exempt short-circuit), while
-  session_log/code_review/identity STAY exempt;
-* routing: a bug's included LLM criteria are restricted to ``BUG_TIER_CRITERIA`` (= necessity),
-  and every bug-tier criterion is advisory (so the tier is structurally non-blocking);
-* an end-to-end OFFLINE run on a well-formed bug produces a PASS verdict with
-  ``runner != "exempt"``, no blocking findings, and the necessity finding surfaced as advisory.
-* the reported AC-less / Testing-less bug description keeps P1/P10 as blocking findings and
-  short-circuits before any LLM pass.
-"""
+Ordinary bugs run deterministic readiness checks and the necessity probe
+instead of receiving an exempt verdict. Readiness failures can block.
+Other findings remain advisory. Other exempt ticket types stay exempt."""
 
 from __future__ import annotations
 

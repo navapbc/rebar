@@ -1,15 +1,8 @@
-"""The plan-review guide documents the bug claim-time-exemption / post-RCA review
-SEQUENCE explicitly (ticket 852a-1e41-632d-4087).
+"""The guide orders bug triage before implementation review.
 
-`docs/plan-review-gate.md` already documented two true facts separately -- a bug
-gets a light advisory review tier (not a blanket exemption), and the CLI claim-time
-exemption is a distinct, unchanged axis -- but never stated the operational
-sequence: claim without plan review to do root-cause analysis (RCA) first, then a
-COMPLEX bug (one whose RCA yields an implementation plan + file_impact naming
-non-test paths) must pass full LLM plan review before implementation begins, while
-a SIMPLE bug may proceed through the light tier. These tests pin the corrected,
-explicit sequence language.
-"""
+Claim-time exemption permits root-cause analysis first. A complex bug with
+an implementation plan and non-test impact then needs full plan review.
+A simple bug remains in the light advisory tier."""
 
 from __future__ import annotations
 
@@ -67,16 +60,8 @@ def test_guide_distinguishes_simple_from_complex_bug_disposition():
 
 
 def test_claim_time_exemption_type_registry_includes_bug():
-    """The CLI claim-time exemption DOES include 'bug' -- the structural mechanism
-    behind the claim-without-review-for-RCA sequence documented above.
-
-    Asserted as a VALUE, not as source text. This previously matched the literal
-    `_PLAN_REVIEW_EXEMPT_TYPES = ("bug"` inside `gates.py`, which broke the moment the
-    constant was consolidated into `rebar.types` (mirror F3) even though the exemption
-    itself was unchanged -- a change-detector failing a behaviour-preserving refactor
-    (bug 5550-603c-8059-49ab). Reading the value is also strictly stronger: it catches a
-    change to WHICH types are exempt, which a substring match on one spelling would miss.
-    """
+    """Read the exemption registry value to confirm bugs can be claimed for
+    root-cause analysis before review. A value check survives source moves."""
     from rebar._commands.gates import _PLAN_REVIEW_EXEMPT_TYPES
 
     assert "bug" in _PLAN_REVIEW_EXEMPT_TYPES

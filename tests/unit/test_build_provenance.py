@@ -1,14 +1,8 @@
-"""Held-out oracle for the build-provenance hook fix (story 6168).
+"""Preserve the build commit through source distribution and wheel builds.
 
-`python -m build` builds an sdist, then builds the wheel FROM the extracted sdist (which
-has no `.git`). The old hook baked `COMMIT = git rev-parse --short HEAD` = None on that
-path, so the published WHEEL lost its provenance. The fix is a four-step precedence:
-REBAR_BUILD_COMMIT env → preserve an existing non-null COMMIT (install-from-sdist) → git
-short SHA → None; with a release-context fail-fast when the env var is set but empty.
-
-Tests assert OBSERVABLE behaviour: the COMMIT baked into a REAL built wheel/sdist, the
-build process exit code, and the helper's return/raise — never internals.
-"""
+A wheel built from an extracted sdist has no Git directory. The hook prefers
+REBAR_BUILD_COMMIT, then a retained commit, then Git, and fails on an empty
+release override. Tests inspect built artifacts and process results."""
 
 from __future__ import annotations
 

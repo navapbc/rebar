@@ -1,14 +1,7 @@
-"""Build-drift warning: a gate notices when its own binary predates the ref it pinned.
+"""Warn when the running build predates the pinned reference.
 
-Ticket b273-e0ba-f719-4f1c. The motivating incident was silent: a rebar build predating the
-``verify.overlap_enabled`` -> ``verify.suggest_duplicate_tickets`` rename read the CURRENT
-base ref's config, did not recognise the current key, and ignored the operator's setting.
-
-These tests drive the real ancestry logic against real throwaway git repos rather than
-stubbing the git probes, so "behind", "ahead", and "not in this repo" are decided by git
-exactly as they are in production. Only the RUNNING BUILD's sha is injected — there is no
-other way to pretend the interpreter is a different build.
-"""
+Throwaway Git histories distinguish behind, ahead, and unrelated builds.
+Only the running build SHA is injected."""
 
 from __future__ import annotations
 

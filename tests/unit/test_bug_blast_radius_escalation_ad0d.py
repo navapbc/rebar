@@ -1,26 +1,8 @@
-"""ad0d B1: a bug whose PERSISTED file_impact declares any NON-TEST path ESCALATES out of
-the light advisory bug tier (epic 6982/R4) into the full blocking rubric.
+"""A bug with persisted non-test file impact uses the full blocking review.
 
-The escalation keys on the ticket's declared blast radius — derived deterministically at
-review time by ``orchestrator.bug_blast_radius_escalates`` (no diff exists yet) — and lands
-at the SINGLE routing seam both enforcement steps share:
-
-* ``plan_review_precheck`` (workflow_ops): an escalated bug stops forcing
-  ``det_blocking=[]`` — DET findings keep their real posture and can BLOCK (the DET
-  short-circuit applies exactly as for a non-bug ticket); coverage records
-  ``bug_tier: False`` + ``bug_blast_escalated: True``.
-* ``orchestrator.route_criteria``: an escalated bug routes the FULL criteria set — both the
-  ``BUG_TIER_CRITERIA`` restriction and the packaged ``suppress_types: ["bug"]``
-  applicability axis are lifted (every full-suite criterion carries that suppression, so
-  lifting only the tier restriction would deliver an empty escalation). route_criteria is
-  ALSO the batch-runner fan-in seam (production_batch_runner._project_criteria →
-  route_criteria), so the route-level tests cover that caller.
-
-A bug with NO file_impact, or a test-only one (``tests/**`` / ``conftest.py``), keeps the
-light advisory tier unchanged, and the CLI claim-time bug exemption
-(``rebar._commands.gates._PLAN_REVIEW_EXEMPT_TYPES``) is untouched — bugs stay claimable
-with no attestation regardless of blast radius. All offline: no live LLM.
-"""
+The precheck retains deterministic blocking findings. Criterion routing
+includes the full set rather than the advisory bug tier. Tests also cover
+the batch-runner path and the ordinary test-only bug tier."""
 
 from __future__ import annotations
 

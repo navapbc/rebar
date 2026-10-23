@@ -1,46 +1,17 @@
-"""The cacheable-prefix floor is MODEL-dependent, and the warning must measure the MARKED
-PREFIX against it — not the total ``input_tokens`` (bug e3cd).
+"""Cache warnings use the model's floor and the marked prefix.
 
-Two separable defects, both pinned here.
+The published minimums at
+https://platform.claude.com/docs/en/build-with-claude/prompt-caching are:
 
-DEFECT 1 — the floor was a model-blind global. ``CACHE_MIN_PREFIX_TOKENS = 4096`` was
-commented as the Opus floor and applied to every model. Anthropic publishes a per-model
-minimum and 4096 is only correct for a subset of them:
+* claude-opus-5, fable-5, mythos-5: 512 tokens
+* claude-opus-4-8, sonnet-5, sonnet-4-6, sonnet-4-5: 1024 tokens
+* claude-opus-4-7: 2048 tokens
+* claude-opus-4-6, claude-opus-4-5, claude-haiku-4-5: 4096 tokens
 
-    https://platform.claude.com/docs/en/build-with-claude/prompt-caching
-    (§ "Minimum cacheable prompt length", read 2026-08-02)
-
-        claude-opus-5 / fable-5 / mythos-5                            512
-        claude-opus-4-8 / sonnet-5 / sonnet-4-6 / sonnet-4-5          1024
-        claude-opus-4-7                                               2048
-        claude-opus-4-6 / claude-opus-4-5 / claude-haiku-4-5          4096
-
-The published numbers are CONFIRMED by two independent empirical brackets recorded on the
-ticket (they VERIFY the documented values; they do not define them):
-
-        sonnet-4-6    922 -> no cache, 1042 -> write 1035/read 1035   => ~1024  ✓ doc 1024
-        sonnet-4-5    253 -> no cache, 7930 -> cached                 => <=1024 ✓ doc 1024
-        haiku-4-5    2748 -> no cache, 4749 -> write 4742/read 4742   => (2748,4749] ✓ doc 4096
-
-Note what that costs today: ``claude-opus-4-8`` is rebar's DEFAULT_MODEL and its real floor is
-1024, so the global constant is FOUR TIMES too high on the model rebar runs most.
-
-DEFECT 2 — the predicate compared the wrong quantity. Caching is governed by the size of the
-MARKED PREFIX (the bytes ahead of the ``cache_control`` breakpoint), not by the total billed
-input. A call with a 150-token marked prefix behind a 7000-token unmarked user message clears
-any floor on totals and is uncacheable in fact.
-
-The contract these tests pin:
-
-* the floor is carried per-model on the capability record, at the documented values
-* an unknown/unlisted model keeps the conservative global (never invents a number)
-* the warning measures the MARKED PREFIX against that model's floor
-* a marked prefix that clears a LOW floor but not the old global now warns (the false
-  negative bug e3cd names)
-* the haiku floor is NOT lowered to sonnet's (does not reintroduce the over-warning of 7a79)
-* a large-total / small-marked-prefix call warns and NAMES the sub-floor marked prefix as the
-  cause, instead of reporting the total and implying the wrong remedy
-"""
+Unknown models keep a conservative fallback. A large total input can still
+have an uncacheable marked prefix, so warnings name that prefix rather than
+the total. Tests guard both missed cache failures and false warnings for
+models with higher floors."""
 
 from __future__ import annotations
 
@@ -157,13 +128,8 @@ def test_haiku_floor_is_not_lowered_to_sonnets(caplog):
 
 
 def test_large_total_with_tiny_marked_prefix_warns_and_names_the_marked_prefix(caplog):
-    """The two MEASURED production calls (bug f81d), in the shape they actually have.
-
-    coach_notes shipped system[0] ~150 tok behind an UNMARKED ~6928-token user message. The old
-    predicate compared the 7078 TOTAL against 4096, cleared it, and reported "input_tokens=7078"
-    — true that caching failed, but it named the wrong quantity and so implied the wrong remedy
-    (the prompt looks plenty big). The warning must instead name the 150-token marked prefix and
-    the floor it fell under, because THAT is the changeable thing."""
+    """A large unmarked user message cannot make a tiny marked prefix cacheable.
+    Name the marked prefix and its floor so the warning identifies the remedy."""
     with caplog.at_level(logging.WARNING):
         warn_if_cache_ineffective(
             _usage(7078),
