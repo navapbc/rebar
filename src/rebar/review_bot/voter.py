@@ -1,25 +1,9 @@
-"""The voter — review a patchset and cast the ``LLM-Review`` vote (epic d251 / S4b).
-
-This is the receiver's critical section. Given a Gerrit ``patchset-created`` webhook
-(or a reconciler-synthesized event), it:
-
-1. extracts the change/revision/ref/project and skips non-rebar projects;
-2. takes a per-``(change_id, revision)`` single-flight lock (a webhook + its retries +
-   the backfill reconciler all target the same key, so only one review runs at a time);
-3. short-circuits if the vote is already recorded locally (dedup store) OR already
-   present on Gerrit (the authoritative check) — a webhook + backfill never double-vote;
-4. clones the change ref into a temp working tree, fetches the diff, and runs the
-   ``adapter.code_review_decision`` seam — which first BINDS that tree to the revision
-   the vote will attach to, and refuses the vote outright if they disagree;
-5. maps PASS→``LLM_REVIEW_MAX_VALUE`` / BLOCK→``LLM_REVIEW_BLOCK_VALUE`` and casts the
-   vote via Gerrit REST;
-6. records the dedup row ONLY on a confirmed-successful vote (write-on-success). ANY
-   failure (exception, non-2xx, adapter BLOCK-on-error) logs a structured ``VOTER_ERROR``
-   JSON line and leaves the change unsubmittable — a MAX is NEVER cast on failure.
-
-Fail-closed throughout: a missed/failed review only DELAYS submittability (the change
-stays unsubmittable); it can never let an unreviewed change merge.
-"""
+"""Review a Gerrit revision and cast its LLM-Review vote.
+Webhook and backfill share a per-change-revision lock. Check local dedup
+and Gerrit votes, clone the ref, bind the reviewed tree, run the gate,
+and post the decision. Record dedup only after a successful vote.
+Retryable coverage gaps may defer without voting. A proven tree
+mismatch refuses any vote, and failures never mint an unearned PASS."""
 
 from __future__ import annotations
 
@@ -61,47 +45,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("rebar.review_bot.voter")
 
-# Module-level per-(change_id, revision) single-flight locks. A webhook, its
-# at-least-once retries, and the backfill reconciler all key on the same pair, so
-# routing them through one asyncio.Lock serializes the review (the dedup/Gerrit check
-# inside the lock then makes the later ones a no-op skip).
-# NOTE (PoC scope): this dict grows by one small entry per (change, revision) over
-# the process lifetime — an accepted, bounded leak on the single-box PoC (the box is
-# rebuilt from IaC, and the entry count tracks distinct patchsets reviewed). A
-# longer-lived deployment would add an LRU cap / post-release eviction.
+# Serialize review by change and revision so webhook and backfill
+# cannot vote concurrently. Local and Gerrit checks inside the lock
+# skip a later duplicate. Lock entries persist for this process.
 _locks: dict[tuple[str, str], asyncio.Lock] = {}
 _locks_guard = asyncio.Lock()
 
-# ── in-flight review accounting (bug 34cd; ADR 0068) ─────────────────────────────
-# How many reviews are executing IN THIS PROCESS right now. Exported over ``/health`` so
-# the deploy loop (infra/scripts/autodeploy.sh) can DEFER a container recreation that
-# would otherwise KILL a running review — a recreation mid-review is INVISIBLE to every
-# health signal the box has (the process was asked to stop, so nothing fails and no
-# VOTER_ERROR is emitted), which is how a landing burst can live-lock the LLM-Review gate
-# with `restarts=0` and all alarms OK.
-#
-# Counted around the WHOLE of ``review_and_vote``, including its cheap dedup /
-# already-voted short-circuits, rather than only the expensive clone+LLM region. That
-# over-counts by the few hundred ms such a skip takes, which is deliberate: the two error
-# directions are NOT symmetric — over-counting delays a deploy by one ~2-minute timer tick,
-# under-counting kills a ~10-minute review. Bias toward the recoverable one.
-#
-# A plain int needs no lock: every mutation below happens on the asyncio event-loop thread
-# (the increment/decrement bracket the coroutine's own body, and the blocking work inside
-# is offloaded with ``asyncio.to_thread`` while the count stays held by this coroutine), and
-# ``/health`` is served on that same loop, so a reader never observes a torn value.
+# Count the whole voter call, including cheap skips, for health and
+# deploy deferral. Counter updates stay on the event-loop thread while
+# blocking work is offloaded.
 _in_flight = 0
 
 
 def in_flight_reviews() -> int:
-    """Number of reviews executing in this process right now (0 when idle).
-
-    Covers BOTH review paths — the webhook queue worker and the backfill reconciler —
-    because both funnel through :func:`review_and_vote`. That coverage is the point: the
-    reconciler's inline backfill review is the path that RETRIES a killed review, so a
-    busy-signal blind to it would let the deploy loop keep killing the very work that is
-    supposed to heal the gate.
-    """
+    """Return reviews currently executing through webhook or backfill.
+    The health and deploy paths use this count to avoid interrupting work."""
     return _in_flight
 
 
@@ -133,10 +91,8 @@ def _emit(level: int, event: str, **fields: Any) -> None:
 
 
 def _voter_error(**fields: Any) -> None:
-    """Structured fail-closed marker (greppable: ``VOTER_ERROR``). The stderr print below
-    is the SINGLE line-start marker emission the observability anchor (``^VOTER_ERROR \\{``)
-    counts; the logger copy logs the JSON record body only — it deliberately does not match
-    the anchor, so configured logging cannot double the count (bug f829-152a-b415-44a4)."""
+    """Emit one greppable VOTER_ERROR line on stderr plus a structured
+    log body, without double-counting the marker."""
     record = {
         "event": "VOTER_ERROR",
         "timestamp": time.time(),
@@ -156,11 +112,8 @@ def _voter_error(**fields: Any) -> None:
 
 
 def _publish_voter_error_metric() -> None:
-    """Best-effort direct publish of ``rebar/host:voter_errors`` via boto3 (instance
-    role). The journald → host-probe path (infra/.../observability.sh) is the RELIABLE
-    fallback — in-container boto3 may not reach IMDS for credentials (the container's
-    IMDS hop limit can preclude it), so any ImportError / boto / credential / network
-    failure is silently swallowed and we rely on the journald marker above."""
+    """Publish voter_errors to CloudWatch best-effort. The journald marker
+    remains available when container credentials or network access fail."""
     try:
         import boto3
 
@@ -172,10 +125,8 @@ def _publish_voter_error_metric() -> None:
         pass
 
 
-# ── token-usage observability (ticket clayish-basaltine-bug) ─────────────────
-# Names of the token fields the runner records on each call's `_usage` and that the
-# code-review metrics assembler sums into `coverage['metrics']` (see
-# rebar.llm.code_review.finalize._attach_code_review_metrics).
+# Use the runner's token fields from coverage metrics for usage
+# observability.
 _TOKEN_METRIC_FIELDS = (
     "input_tokens",
     "output_tokens",
@@ -186,13 +137,9 @@ _TOKEN_METRIC_FIELDS = (
 
 
 def _publish_token_usage_metrics(metrics: dict[str, Any]) -> None:
-    """Best-effort publish of the review's per-review LLM token counts to CloudWatch
-    (``rebar/host:review_bot_llm_<field>_tokens``, ``Unit=Count``), mirroring
-    :func:`_publish_voter_error_metric`. ``metrics`` is the verdict's
-    ``coverage['metrics']`` dict (agent-step token totals; the Pass-1 finder batch is a
-    documented follow-up gap). Any missing field contributes 0; a review with no token data
-    publishes nothing. In-container boto3 may not reach IMDS, so any failure is swallowed — the
-    ``LLM_TOKEN_USAGE`` journald marker emitted by the caller is the reliable fallback."""
+    """Publish available review token totals to CloudWatch best-effort.
+    Missing fields contribute zero. No data skips publication. The
+    journald usage marker remains the fallback."""
     data = [
         {
             "MetricName": f"review_bot_llm_{field}",
@@ -212,12 +159,8 @@ def _publish_token_usage_metrics(metrics: dict[str, Any]) -> None:
 
 
 def _emit_token_usage(change_id: str, revision: str, metrics: dict[str, Any]) -> None:
-    """Record the review's LLM token usage: a greppable ``LLM_TOKEN_USAGE`` journald line
-    (the reliable, host-probe-parseable path) plus a best-effort direct CloudWatch publish.
-    Best-effort throughout — the vote is already cast, so token accounting NEVER fails a
-    review (any error is swallowed). The stderr print below is the SINGLE line-start marker
-    emission; the logger copy logs the JSON record body only, so configured logging cannot
-    double a future anchored count (bug f829-152a-b415-44a4)."""
+    """Emit one LLM_TOKEN_USAGE stderr marker and try CloudWatch.
+    Accounting failures cannot change an already cast vote."""
     try:
         record = {
             "event": "LLM_TOKEN_USAGE",
@@ -235,11 +178,8 @@ def _emit_token_usage(change_id: str, revision: str, metrics: dict[str, Any]) ->
 
 
 def _extract(event: dict) -> dict[str, Any] | None:
-    """Pull the fields the voter needs out of a Gerrit ``patchset-created`` payload.
-
-    Gerrit shape: ``change.id``/``change.number``/``change.project`` and
-    ``patchSet.number``/``patchSet.revision``/``patchSet.ref``. Returns ``None`` if the
-    payload is missing the essentials (a malformed event is skipped, not crashed on)."""
+    """Extract change, project, revision, and ref from a patchset event.
+    Return None when required fields are missing."""
     if not isinstance(event, dict):
         return None
     change = event.get("change") or {}
@@ -269,18 +209,9 @@ async def review_and_vote(
     force: bool = False,
     runtime: LLMRuntime | None = None,
 ) -> dict[str, Any]:
-    """Review the patchset described by ``event`` and cast the ``LLM-Review`` vote.
-
-    Returns a small status dict (``{status, change_id, revision, vote_value?}``) for
-    observability/tests. ``status`` is one of ``skipped`` (non-rebar / malformed /
-    already voted), ``voted`` (a vote was cast), or ``error`` (fail-closed: logged
-    VOTER_ERROR, no vote / a BLOCK vote, never MAX-on-failure).
-
-    This is the single funnel for BOTH review paths (the webhook queue worker and the
-    backfill reconciler), so bracketing it with :func:`_counting_in_flight` is what makes
-    ``/health``'s ``in_flight`` count — and therefore the deploy loop's deferral — see
-    every review that a container recreation could kill (bug 34cd).
-    """
+    """Run the shared webhook and backfill voter under in-flight accounting.
+    Return a status record for skipped, deferred, voted, or failed work.
+    Failures remain fail-closed and never cast a maximum vote."""
     with _counting_in_flight():
         return await _review_and_vote(
             event, config=config, gerrit=gerrit, dedup=dedup, force=force, runtime=runtime
@@ -297,15 +228,9 @@ async def _decision_for_clone(
     commit_message: str,
     runtime: LLMRuntime | None = None,
 ) -> tuple[dict[str, Any], str]:
-    """Fetch the diff for the ALREADY-CLONED tree at ``repo_root`` and run the
-    ``adapter.code_review_decision`` seam, taking the merge or non-merge diff path.
-
-    ``revision`` is handed to the seam so the adapter can bind the tree it is about to review
-    to the revision the vote will attach to; a proven disagreement raises
-    ``adapter.ReviewedTreeMismatch``, which the caller turns into a refusal to vote.
-
-    Returns ``(decision, diff_text)`` — the reviewed diff travels back out because it feeds the
-    code_review artifact's change fingerprint after the vote."""
+    """Fetch the cloned revision's merge or ordinary diff and run the adapter.
+    Pass revision for tree-to-vote binding. Return decision and reviewed
+    diff for later artifact fingerprinting."""
     change_id, revision = info["change_id"], info["revision"]
     if not is_merge:
         diff_text = await asyncio.to_thread(gc.get_patch, change_id, revision)
@@ -320,10 +245,8 @@ async def _decision_for_clone(
             runtime=runtime,  # forwarded composed startup runtime (S5)
         )
         return decision, diff_text
-    # 409 guard (S2): a merge (>=2 parents) 409s the bare /patch, so route it through the
-    # auto-merge-delta path instead. Emit the named signal so the otherwise-silent guard is
-    # visible in the logs (fires ONLY on a merge — merge_detection logs is_merge for EVERY
-    # change).
+    # Route merge revisions around bare /patch, which returns 409.
+    # Log the guard when it selects the auto-merge delta.
     _emit(
         logging.INFO,
         "merge_change_409_guard",
@@ -397,10 +320,8 @@ async def _decision_for_review_target(
 
 
 def _guard_decision_auth(cfg: ReceiverConfig) -> dict[str, Any] | None:
-    """AC3 fail-closed guard: the decision-bearing Gerrit auth MUST be present before any
-    dedup/clone/provider work. Returns an error-status dict (and emits the VOTER_ERROR marker)
-    when the auth is missing/blank — the caller then casts NO vote and NEVER falls back to
-    another principal — or ``None`` when a real token is present."""
+    """Refuse before dedup, clone, or provider calls when Gerrit voting auth
+    is blank. Emit VOTER_ERROR and never substitute another principal."""
     try:
         _startup.validate_decision_auth(cfg)
     except _startup.DecisionAuthError as exc:
@@ -410,10 +331,8 @@ def _guard_decision_auth(cfg: ReceiverConfig) -> dict[str, Any] | None:
 
 
 def _resolve_review_runtime(runtime: LLMRuntime | None, cfg: ReceiverConfig) -> LLMRuntime | None:
-    """Forward the composed provider-auth runtime (S5) below the ``review_and_vote`` seam:
-    when a caller did not pass one, compose it from ``cfg`` so the real decision path always
-    reviews under the composed runtime, while callers that stub ``review_and_vote`` (which
-    never reach this funnel) are unaffected."""
+    """Use the supplied provider runtime or compose it from receiver config
+    for the decision path."""
     if runtime is None:
         return _startup.compose_startup_binding(cfg).llm_runtime
     return runtime
@@ -426,11 +345,9 @@ def _handle_retryable_gap(
     change_id: str,
     revision: str,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Handle a retryable coverage-gap decision (ticket 0347; ADR 0069).
-
-    Returns ``(decision, deferred_result)``. Retryable gaps under budget return a
-    vote-less ``deferred`` result. Spent non-low-disk gaps escalate to the existing
-    fail-closed -1; spent low-disk gaps return a terminal no-vote deferral."""
+    """Defer retryable coverage gaps without a vote while attempts remain.
+    After exhaustion, non-disk gaps block with -1. Low disk remains a
+    terminal no-vote deferral."""
     gap_reason = decision.get("gap_reason")
     if gap_reason not in adapter.RETRYABLE_GAP_REASONS:
         return decision, None
@@ -508,14 +425,8 @@ async def _superseded_before_vote(
     force: bool,
     info: dict[str, Any],
 ) -> bool:
-    """True when ``revision`` is no longer the change's current revision and the vote must be
-    SUPPRESSED (bug baa8). Runs immediately before casting, catching a patchset superseded
-    DURING the long review that the app-side pre-review guard could not see.
-
-    FAILS OPEN: a forced /rerun (or any ``manual-rerun`` event) is built FROM the current
-    revision and bypasses the check; and any lookup failure — ``None``, a Gerrit blip, or an
-    unusable revision string — returns ``False`` so the review is voted anyway (swallowing a
-    real review because Gerrit hiccupped is worse than the staleness this guards against)."""
+    """Suppress a vote when Gerrit reports a newer current revision
+    before posting. Manual reruns and failed currency lookups proceed."""
     if force or info["event_type"] == "manual-rerun":
         return False
     try:
@@ -613,14 +524,9 @@ async def _review_and_vote(
             )
             return {"status": "error", "change_id": change_id, "stage": "dedup_check"}
 
-        # Merge detection (epic 88ab / S2): a merge revision (>= 2 parents) cannot use the
-        # bare /patch (409) and must be reviewed on ONLY its auto-merge delta (R1). Detect
-        # here — AFTER the existing-vote check, BEFORE any diff fetch — so the webhook,
-        # reconciler-backfill, and /rerun paths all route through this SAME code (reconcile.py
-        # needs no change). The extra commit GET is accepted overhead. A merge-path REST
-        # failure (commit / files / mergelist / diff) is fail-closed as a -1 COVERAGE-GAP vote
-        # (not a silent no-vote): the merge change is blocked AND visibly flagged as an infra
-        # veto. ``decision`` is pre-set here on a commit-fetch failure so the review is skipped.
+        # Detect merges after the existing-vote guard and before diff fetch.
+        # All entry paths share this decision. Merge REST failure becomes a
+        # visible fail-closed coverage-gap vote.
         decision: dict[str, Any] | None = None
         parent_count = -1  # -1 = commit fetch failed (unknown); logged with the vote below
         commit_message = ""  # the change's commit body (drives scope-intent); "" if unknown
@@ -630,10 +536,7 @@ async def _review_and_vote(
             parent_count = len(commit_info.get("parents") or [])
             commit_message = str(commit_info.get("message") or "")
             is_merge = parent_count >= 2
-            # Detection outcome is logged for EVERY change (not just merges): a merge that
-            # Gerrit flattened to a single parent — or a genuine merge — is then unambiguous
-            # from the logs, without which a mis-detection is silent (the failure mode that
-            # made the S2 live smoke's first merge look like a non-merge).
+            # Log merge detection for every change so path selection is visible.
             _emit(
                 logging.INFO,
                 "merge_detection",
@@ -660,10 +563,8 @@ async def _review_and_vote(
                     runtime=runtime,
                 )
             except adapter.ReviewedTreeMismatch as exc:
-                # The cloned tree is provably NOT the revision this vote would attach to, so
-                # NO vote is honest here — not even a -1, which would certify that this
-                # revision was looked at. Refuse: surface the actionable message and leave the
-                # change unsubmittable, exactly as a setup failure does.
+                # A proven checkout-revision mismatch permits no vote, including -1.
+                # The reviewed tree is not the patchset receiving the label.
                 _voter_error(
                     change_id=change_id,
                     revision_id=revision,
@@ -698,21 +599,14 @@ async def _review_and_vote(
         value = cfg.llm_review_max_value if is_pass else cfg.llm_review_block_value
         message = decision.get("message") or "rebar code review."
 
-        # Pre-vote staleness re-check (bug baa8): the app-side guard runs ONCE, before this
-        # 15–45 min review begins, so a patchset superseded DURING the review is still voted
-        # on — and that vote's comment dispatches a `gerrit-verify` run for the STALE refspec,
-        # which cancels the CURRENT patchset's Verified run. Re-read the change's current
-        # revision immediately before casting and SUPPRESS the vote when it no longer matches.
-        # FAIL OPEN (see :func:`_superseded_before_vote`): any lookup failure → review/vote
-        # anyway. A forced /rerun (or any manual-rerun event) is built FROM the current
-        # revision, so it bypasses the check exactly as the pre-review guard does.
+        # Recheck revision currency before voting because review may
+        # outlast a newer patchset. Suppress proven stale votes, but proceed
+        # on lookup failure or a current-revision manual rerun.
         if await _superseded_before_vote(gc, change_id, revision, force=force, info=info):
             return {"status": "skipped", "reason": "superseded", "change_id": change_id}
 
-        # post_review casts the vote AND anchors findings inline where they resolve to a real
-        # revision path; a rejected comment retries message-only with an explicit notice rather
-        # than silently dropping the text (bug lacquer-grotesque-urson). Its GerritError
-        # contract is unchanged, so the handlers below are untouched.
+        # Post the vote and valid inline findings. On inline rejection,
+        # retry message-only with a notice so finding text remains visible.
         try:
             http_status = await asyncio.to_thread(
                 post_review,
@@ -724,10 +618,8 @@ async def _review_and_vote(
                 decision.get("findings") or [],
             )
         except GerritError as exc:
-            # A 409 "change is closed" is TERMINAL, not a retryable failure: the change was
-            # merged/abandoned (a race past reconcile.py's open-status filter). Record it so
-            # it is never retried, and do NOT emit a VOTER_ERROR / increment voter_errors — a
-            # closed change needs no vote, so this is not an actionable fault (bug c943).
+            # Treat Gerrit 409 for a closed change as terminal. Record the skip
+            # without a VOTER_ERROR or retry.
             if getattr(exc, "status", None) == 409:
                 store.record_vote(change_id, revision, info["event_type"], value)
                 _emit(
@@ -762,9 +654,8 @@ async def _review_and_vote(
             vote_value=value,
             http_status=http_status,
             decision=decision.get("decision"),
-            # merge/parent_count on every vote: correlate a vote with the review path taken
-            # (merge vs /patch) — the single most useful field when debugging "why did this
-            # change get reviewed the way it did". parent_count == -1 means commit fetch failed.
+            # Record merge path and parent count with the vote. A failed commit
+            # fetch uses -1 as parent count.
             merge=is_merge,
             parent_count=parent_count,
         )
@@ -772,15 +663,9 @@ async def _review_and_vote(
         # token counts (from the verdict's coverage.metrics) to journald + CloudWatch. A
         # fail-closed review carries no verdict/metrics → nothing recorded. Best-effort.
         _emit_review_token_usage(decision, change_id, revision)
-        # Data capture (story limestone-unethical-zebrafinch): emit a durable, change-scoped
-        # code_review artifact into the AMBIENT tickets store (repo_root=None — NOT the temp code
-        # clone, which is already deleted) and link it relates_to the change's trailer-cited
-        # tickets. Best-effort: the vote is already cast, so this never fails the review.
-        # emission via ``asyncio.to_thread`` so this SYNCHRONOUS, lock-held store write runs OFF
-        # the event loop (c2ba). Run inline, it blocks the loop for the whole write, which
-        # unenforces the drain and per-review ``wait_for`` bounds and stalls ``/health``. Every
-        # other blocking Gerrit/store call in this coroutine is already offloaded the same way;
-        # this was the lone on-loop residue.
+        # After voting, record a best-effort code_review artifact in the
+        # ambient ticket store and link trailer-cited tickets. Offload its
+        # synchronous store write so shutdown and health remain responsive.
         await asyncio.to_thread(
             emit_code_review_artifact,
             decision,

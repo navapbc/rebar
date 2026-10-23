@@ -1,17 +1,9 @@
-"""Failure INTERPRETATION for the pydantic-ai structured-run seam — the ``except`` spine of
-``PydanticAIRunner.run()`` (``interpret_failure`` + its ``FailureContext`` carrier) plus the
-best-effort raw-reply capture written when the bounded structured-retry is exhausted.
+"""Classify and report structured-run failures for PydanticAIRunner.
 
-Split out of ``structured_run.py`` (task solitary-burly-acouchi) along the existing
-call-graph seam: the run MECHANISM lives there, how a failure is CLASSIFIED and reported
-lives here. The dependency direction is one-way — ``structured_run`` imports this module,
-never the reverse — so future failure-classification logic has an obvious small home instead
-of re-inflating the orchestrator toward the 800-LOC cap.
-
-Leaf module, same convention as ``structured_run``: nothing is imported from ``runner`` at
-runtime, and the heavy provider libraries stay behind function-local imports so
-``import rebar.llm`` remains stdlib-only.
-"""
+This leaf owns interpret_failure, its FailureContext, and best-effort raw-reply
+capture after bounded retries. structured_run owns the execution mechanism and
+imports this failure classifier in one direction. Provider imports remain local
+to functions, and this module does not import runner at runtime."""
 
 from __future__ import annotations
 
@@ -50,25 +42,14 @@ class FailureContext:
 
 
 def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContext) -> NoReturn:
-    """The ``except`` spine of ``PydanticAIRunner.run()`` (ADR 0056 decision 3), lifted out
-    verbatim as a plain function. ALWAYS raises — never returns.
+    """Classify a structured-run failure and always raise it.
 
-    Dispatches on the exception type via ``isinstance``, in exactly this order (the order IS
-    the contract — see the ADR and the module-level test):
-
-    1. ``UsageLimitExceeded`` — rebar's own step-budget stop, not a provider outage.
-    2. ``RunawayToolLoopError`` — the in-flight loop breaker (bug c827); rebar aborting
-       its own repeating run. A special case BEFORE the broad ``LLMError`` arm, whose
-       blanket diagnostic overwrite would lose the guard's raise-time repetition keys —
-       and never the provider-outage sweep.
-    3. ``LLMError`` — already typed; enrich in place and re-raise the SAME object.
-    4. anything else — try the sampling-parameter-rejection translation FIRST (a provider
-       rejecting e.g. ``temperature`` must fail loudly/actionably, not be swept into the
-       broad provider-outage bucket below); only if that returns ``None`` does the generic
-       path run. That generic path raises :class:`LLMInputRejectedError` when — and only
-       when — the classifier's ``resolution_class`` is ``CHANGE_INPUT`` (the provider
-       ANSWERED and rejected the input: a context-length 400, a 413, a content-policy
-       refusal), and :class:`LLMUnavailableError` for every other disposition.
+    Handle UsageLimitExceeded before provider failures. Preserve
+    RunawayToolLoopError's repetition details before the broad LLMError arm.
+    Enrich an existing LLMError and raise the same object. For other exceptions,
+    translate a rejected sampling parameter first. Otherwise classify the
+    disposition. CHANGE_INPUT raises LLMInputRejectedError, while other classes
+    raise LLMUnavailableError.
     """
     from pydantic_ai.exceptions import UsageLimitExceeded
 
@@ -129,16 +110,9 @@ def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContex
             tool_calls_limit=tool_calls_limit,
         )
         raise exc
-    # A SYSTEMIC provider failure (auth / missing key / connection / rate-limit). Unify
-    # into the provider-agnostic LLMUnavailableError so every prompt-using client gets ONE
-    # recognizable "LLM couldn't run" signal — never a swallowed empty result
-    # (fuel-posse-ball). The ONE exception is a provider that ANSWERED and rejected the
-    # INPUT: see `_generic_failure_error` (bug 43d4).
-    # Tried FIRST (story S3/2932): a provider rejecting a sampling parameter (e.g. Bedrock's
-    # "temperature is deprecated for this model" on a model NOT in the capabilities.py
-    # denylist) must fail LOUDLY and ACTIONABLY, not be misclassified as an opaque outage by
-    # the broad LLMUnavailableError path below. Only when this returns None (not a
-    # sampling-parameter rejection) does the existing path run, unchanged.
+    # Translate a rejected sampling parameter before generic classification.
+    # Other provider failures become LLMUnavailableError unless the provider
+    # answered and rejected the input, as _generic_failure_error checks.
     from rebar.llm.failure import translate_sampling_parameter_rejection
 
     sampling_err = translate_sampling_parameter_rejection(exc, ctx.ran_model)
@@ -176,24 +150,13 @@ def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContex
 
 
 def _generic_failure_error(exc: BaseException, resolution: ResolutionClass) -> LLMError:
-    """Pick the exception TYPE for the broad arm of :func:`interpret_failure` from the
-    disposition the classifier already computed (bug 43d4).
+    """Choose the broad failure exception from the classifier's resolution class.
 
-    ``CHANGE_INPUT`` means the provider ANSWERED and rejected the INPUT (an oversized
-    prompt — a context-length 400 or a 413 — or a content-policy refusal): deterministic and
-    caller-fixable, so it must NOT masquerade as an outage. EVERY other disposition (5xx,
-    529, 429, auth/``CHANGE_SETTINGS``, ``NEEDS_INVESTIGATION``) keeps raising
-    :class:`LLMUnavailableError` verbatim — the key is the resolution CLASS, never "4xx" or
-    "not retryable".
-
-    The CHANGE_INPUT prefix deliberately contains NONE of the substrings
-    ``plan_review.sizing.is_context_limit_error`` matches ("context", "token limit",
-    "input length", "exceeds the maximum", …): that predicate tests the WHOLE message, so a
-    prefix carrying one would make every rejected input — a content-filter refusal
-    included — read as a context limit and burn the model-escalation ladder before emitting a
-    bogus "too big to review" finding. ``{exc}`` rides through VERBATIM, so a real
-    context-limit 400 still matches the predicate through the PROVIDER's own words and the
-    size ladder finally engages where it was designed to.
+    CHANGE_INPUT means the provider answered and rejected the input, so it raises
+    LLMInputRejectedError. Every other class raises LLMUnavailableError. Avoid
+    context-limit terms in the added prefix because sizing scans the whole error
+    message. Keep the provider's own text intact so a provider-reported context-limit
+    response still drives model escalation.
     """
     from rebar.llm.failure import ResolutionClass
 

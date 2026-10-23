@@ -334,19 +334,9 @@ ORACLE_GRADE01: dict[str | None, float] = {
     "missing_oracle": 1.0,
 }
 _ORACLE_FLOOR_GRADES = ("broken_oracle", "missing_oracle")
-# divergent_implementation is likewise graded by DIVERGENCE KIND, not the ordinal ladder (story
-# doggish-nonorganic-tsetsefly, plan-v4). Field evidence from the plan-v3 corpus: the axis fired on
-# only 7.72% of findings, and in the "omitted scope site / unenumerated consumer" class it exists to
-# describe it was graded `none` ~90% of the time (1173/1307) — so a plan that provably under-scopes
-# reality scored impact 0.0 and could not block. Grading the axis, rather than merely widening it,
-# follows the ac_unverifiable precedent: a blunt widening would have routed 113 corpus findings into
-# the 0.85 floor at once (4.3% of runs flipping PASS→BLOCK), the same over-fire calibration 3 had to
-# walk back. contradicts_reality/omits_required_site keep the floor; incomplete_enumeration (the
-# omitted site is optional/cosmetic — docs, comments, a redundant mention — and the goal still
-# holds) is coached, never auto-blocked.
-# INVARIANT: DIVERGENCE_INCOMPLETE_CONTRIB stays strictly below the lowest blocking block_threshold
-# in plan_review/criteria_routing.json (0.60) — pinned by test_impact_plan.py, same as
-# UNDERSPECIFIED_ORACLE_CONTRIB, so a future recalibration below it fails loudly.
+# Grade divergence by kind so a missing required site can block while an
+# optional incomplete enumeration receives coaching. Keep the latter's
+# contribution below the lowest blocking threshold, as test_impact_plan pins.
 DIVERGENCE_INCOMPLETE_CONTRIB = 0.55
 DIVERGENCE_GRADE01: dict[str | None, float] = {
     "none": 0.0,
@@ -355,20 +345,9 @@ DIVERGENCE_GRADE01: dict[str | None, float] = {
     "omits_required_site": 1.0,
 }
 _DIVERGENCE_FLOOR_GRADES = ("contradicts_reality", "omits_required_site")
-# undecomposed is graded by DECOMPOSITION KIND, not the ordinal ladder (story
-# fixable-angular-caribou, plan-v5). Ordinal labels are an LLM anti-pattern: models do not apply
-# none|low|medium|high reliably enough for deterministic gate behavior, so the ladder is replaced
-# by narrow semantic kinds that map to floor-vs-advisory in code. Field evidence from the recorded
-# corpus: all 30 gradings were read, and 23 say "this plan bundles N independently-releasable
-# outcomes" — a right-sizing observation on a plan that is executable as written — yet EVERY
-# non-none grade floored to 0.85 and 4 of those blocked. missing_required_child (the plan or its
-# parent commits to work that has no corresponding child/sibling) and no_executable_breakdown (no
-# executable step sequence for the unit's own scope, or an all-or-nothing build whose riskiest
-# unknown is never de-risked first) are genuine gaps and keep the floor; bundles_separable_slices
-# is coached, never auto-blocked.
-# INVARIANT: UNDECOMPOSED_BUNDLED_CONTRIB stays strictly below the lowest blocking block_threshold
-# in plan_review/criteria_routing.json (0.60) — pinned by test_impact_plan.py, same as
-# UNDERSPECIFIED_ORACLE_CONTRIB, so a future recalibration below it fails loudly.
+# Grade decomposition by kind. Missing required work or an executable sequence
+# retains the blocking floor. Bundled but separable slices receive coaching.
+# Keep their contribution below the lowest blocking threshold.
 UNDECOMPOSED_BUNDLED_CONTRIB = 0.55
 UNDECOMPOSED_GRADE01: dict[str | None, float] = {
     "none": 0.0,
@@ -423,42 +402,17 @@ _PLAN_FLOOR_GRADES: dict[str, tuple[str, ...]] = {
 
 
 def impact_plan(attrs: dict[str, Any]) -> float:
-    """Plan-review IMPACT ∈ [0,1]: severity-first MAX + hard override + detection amplifier
-    (story fishable-apivorous-redhead), dispatched into :func:`pass3_decide` via ``impact_fn``.
+    """Score plan-review impact with severity, detection, and kind-based floors.
 
-    1. ``impact_sev`` = MAX over the seven ordinal-mapped plan-severity axes (no averaging);
-    2. DETECTION AMPLIFIER: ``mult`` = 0.8 for a ``self_revealing`` finding, else 1.0; a present
-       ``dod_uncertifiable`` forces 1.0 (a DoD you cannot certify is never "self-revealing").
-       ``amplified = min(1.0, impact_sev * mult)``;
-    3. HARD OVERRIDE (applied LAST, as a floor): the result is floored at 0.85 when any
-       hard-override axis is graded at a FLOOR kind. As of plan-v5 all four override axes are
-       graded by a CLOSED KIND SET rather than the ordinal ladder (``_PLAN_GRADED_AXES``), each
-       with one below-threshold kind that is coached instead of auto-blocked:
-
-       * ac_unverifiable by ORACLE KIND (``ORACLE_GRADE01``, plan-v3, story
-         large-sleepful-needlefish) — broken/missing floor; underspecified_oracle contributes
-         ``UNDERSPECIFIED_ORACLE_CONTRIB``;
-       * divergent_implementation by DIVERGENCE KIND (``DIVERGENCE_GRADE01``, plan-v4, story
-         doggish-nonorganic-tsetsefly) — contradicts_reality/omits_required_site floor;
-         incomplete_enumeration contributes ``DIVERGENCE_INCOMPLETE_CONTRIB``;
-       * undecomposed by DECOMPOSITION KIND (``UNDECOMPOSED_GRADE01``, plan-v5, story
-         fixable-angular-caribou) — missing_required_child/no_executable_breakdown floor;
-         bundles_separable_slices contributes ``UNDECOMPOSED_BUNDLED_CONTRIB``;
-       * dod_uncertifiable by CERTIFICATION KIND (``DOD_GRADE01``, plan-v5, same story) —
-         uncertifiable_outcome/certification_cannot_prove floor; underspecified_certification
-         contributes ``DOD_UNDERSPECIFIED_CONTRIB``.
-
-       Every one of those contributions sits below every blocking threshold, so each axis's
-       specificity-only grade is coached rather than auto-blocked. Ordinal labels were retired
-       here because models do not apply none|low|medium|high reliably enough for deterministic
-       gate behavior; a kind maps to its consequence in code.
-
-    The override is floored AFTER the amplifier on purpose. The ticket's stated compose
-    (``impact_sev = max(impact_sev, 0.85)`` THEN ``× mult``) lets a self-revealing override
-    finding land at 0.85 × 0.8 = 0.68 — BELOW the 0.70 bar — silently defeating the "auto-high"
-    intent (flagged by this ticket's own plan-review, findings COH/E1/G6). Flooring last
-    guarantees an override finding is always ≥ 0.85, mirroring impact_code's reversibility
-    floor. All three mechanisms (MAX, override, amplifier) are present, per AC2."""
+    Take the maximum ordinal severity, then apply the self-revealing multiplier
+    unless dod_uncertifiable is present. Floor the result at 0.85 after that
+    multiplier when a hard-override kind applies, so detection cannot turn a
+    blocking override into an advisory. The four graded axes are
+    ac_unverifiable, divergent_implementation, undecomposed, and
+    dod_uncertifiable. Each also has a narrower specificity kind that contributes
+    below blocking thresholds and receives coaching. Kind mappings, rather than
+    model-selected ordinal labels, determine those consequences.
+    """
     contribs = [
         _SEV01.get(attrs.get(a), 0.0) for a in _PLAN_SEVERITY_AXES if a not in _PLAN_GRADED_AXES
     ]

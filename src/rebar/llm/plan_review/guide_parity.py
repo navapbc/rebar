@@ -1,36 +1,11 @@
-"""Guide↔criterion PIN parity — the drift gate for criterion ids cited in PROSE guides.
+"""Pin each criterion cited by a packaged author guide to its registry rubric.
 
-WHY this exists (bug 828a). The packaged author-facing guides under ``rebar._guides``
-(:data:`~rebar.llm.plan_review.registry.AUTHOR_GUIDES`) cite criterion ids inline — "name the
-alternative you rejected (G6)" — as if the sentence were the criterion. It isn't: the
-authoritative text is the criterion's rubric in the registry. In 828a the plan guide told
-authors to name a rejected alternative while G6 had been written to explicitly NOT require one,
-and the contradiction shipped for a month because NOTHING coupled the prose to the registry.
-The pre-existing parity gate (``registry.validate_criteria_guide``) is scoped to the GENERATED
-``docs/plan-review-criteria-guide.md``; a hand-written guide is invisible to it.
-
-WHY a digest pin and not a content check. No deterministic gate can decide whether a sentence
-faithfully paraphrases a rubric — that is a semantic judgement. What a gate CAN guarantee is
-that a cited criterion never changes SILENTLY: pin a digest of each cited criterion's rendered
-authoritative text, and when the criterion moves, the pin stops matching and CI fails with an
-instruction to re-read the criterion, confirm the guide's claim still holds, and re-pin. The
-gate converts an invisible semantic drift into a loud, cheap, human-decidable moment.
-
-Design notes that matter:
-
-* **The regenerated artifact is a DERIVED PIN MANIFEST, never the prose.** This reuses the
-  repo's regenerate-in-place + parity-diff contract (``reviewers/index.json``,
-  ``docs/plan-review-criteria-guide.md``), but nothing here ever rewrites a hand-authored
-  guide — an author's words are their own.
-* **Extraction depends on the id VOCABULARY only** — never on headings, fences, tables, or any
-  other markup. Ordinary prose edits (reflowing a paragraph, moving a section) therefore cannot
-  break the gate, and a citation in any surrounding syntax — ``(G6)`` or ``(`G6`)`` — is caught
-  by construction, because a backtick is not a word character.
-* **The pins are computed from the PACKAGED built-ins** (``load_criteria(repo_root="")``),
-  exactly as :func:`registry.regenerate_criteria_guide` does, so a project's
-  ``.rebar/criteria_routing.json`` overlay can never rotate the shipped pins and turn every
-  downstream checkout red.
-"""
+A digest of the rendered rubric makes changes to cited criteria fail the parity
+check until the guide is reviewed and the pin is regenerated. The check cannot
+judge a paraphrase's meaning. It never rewrites hand-authored prose. Citation
+extraction uses the closed criterion-id vocabulary, independent of guide markup.
+Pins come from packaged built-ins, so project overlays cannot rotate the
+shipped manifest."""
 
 from __future__ import annotations
 

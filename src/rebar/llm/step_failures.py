@@ -1,40 +1,11 @@
-"""Run-scoped tally of LLM step calls that FAILED but did not fail the run (ticket
-eclectic-industrial-argali).
+"""Count LLM calls that failed in a run that still produced a verdict.
 
-**The gap this closes.** Most LLM sub-steps are deliberately non-fatal: the novelty /
-contradiction / completion sub-calls degrade to "score nothing", the epic bug screen degrades
-open, and so on. Each one logs a warning and nothing else, so a run in which EVERY such call
-died emits a verdict byte-identical to a run in which none was needed. A caller consuming the
-gate's JSON cannot tell the difference, and repeated silent degradation stays invisible unless
-someone scrapes the logs.
-
-**The design.** Every LLM call in the system funnels through one except block —
-:meth:`rebar.llm.runner.PydanticAIRunner.run`'s — which already knows the step's call label
-and already writes a spend row. This module is the in-memory counterpart of that spend row:
-a run-scoped sink the runner records into and the verdict assembler drains, so the count
-rides out on ``coverage.llm_step_failures``.
-
-It deliberately mirrors ``review_kernel/telemetry.py``'s contract-violation sink: a
-:class:`contextvars.ContextVar` activated once per gate run, a ``record`` that is a silent
-no-op outside an active scope, and a destructive ``drain``. It is ADDITIVE observability —
-it never changes a verdict, an exit code, a signature, or a provenance stamp, and it never
-alters what any swallow site does.
-
-**Layering.** This module imports only the standard library, on purpose. The recording site
-lives in the LOW ``rebar.llm.runner`` layer while the draining site lives in the HIGH
-plan-review layer; a leaf sink lets both depend on it without the layering inversion
-``build_drift.py`` documents (high pushes into low, never the reverse).
-
-**"Non-fatal" needs no classification here.** A fatal failure aborts the run and returns a
-degraded verdict that never reaches the drain, so every failure that appears in a produced
-verdict is by construction one the run survived. The runner records unconditionally; what
-makes the tally "non-fatal" is which runs live long enough to report it.
-
-**Concurrency.** One sink object is shared by every call inside a run — including calls a
-batch runner drives concurrently — so the counter increments are taken under a module-level
-lock. The lock guards only two integer bumps on an in-memory dict (never I/O, never an LLM
-call), so it cannot deadlock a caller and cannot become a contention point.
-"""
+A run-scoped context sink lets the low-level runner record failures and the
+plan-review assembler drain them into coverage.llm_step_failures. Recording
+outside an active run is a no-op. This tally adds observability without changing
+the verdict or a swallowed error. Fatal runs never reach the drain. Concurrent
+calls share a sink whose integer updates are protected by a short lock. This
+stdlib-only leaf keeps the runner independent of the higher review layer."""
 
 from __future__ import annotations
 

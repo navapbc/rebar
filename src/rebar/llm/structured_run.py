@@ -1,27 +1,9 @@
-"""The structured-output execution cluster — a LEAF module split out of ``runner.py``
-(task 2682) purely to buy back LOC headroom against the 800-line module-size cap.
+"""Drive bounded structured-output calls and their usage budgets.
 
-``runner.py`` sat at exactly 800 LOC (the repo's hard cap in
-``.github/module-size-limit.txt``), and two queued provider-seam stories need to add
-lines to it. This module holds the bounded structured-output retry driver
-(``_pai_structured``) and its small support cluster — usage extraction and the
-per-request iteration/token-budget helpers — verbatim, with no behaviour change.
-
-This module itself later reached the cap and was split the same way (task
-solitary-burly-acouchi), by RESPONSIBILITY along the seams that already existed: the run
-MECHANISM stayed here, cache-effectiveness DIAGNOSTICS moved to ``cache_diagnostics``, and
-failure INTERPRETATION moved to ``run_failure``. Both are one-way dependencies (this module
-imports them, never the reverse), so new diagnostics or failure-classification logic has its
-own small home instead of re-inflating this one. Their public names are re-exported below so
-every pre-split import path — ``from rebar.llm.structured_run import interpret_failure`` and
-friends — keeps resolving unchanged.
-
-Leaf module (the ``anthropic_model.py`` / ``capabilities.py`` convention): this module
-imports NOTHING from ``runner`` at runtime — the one annotation that names
-``RunRequest`` is deferred via ``from __future__ import annotations`` +
-``TYPE_CHECKING``, so ``import rebar.llm`` stays stdlib-only and the dependency
-direction is one-way (``runner`` -> ``structured_run``, never back).
-"""
+Cache diagnostics and failure classification reside in separate leaf modules,
+which this module imports in one direction and re-exports for existing callers.
+It never imports runner at runtime. The RunRequest annotation is deferred, so
+the import path stays light and the dependency direction remains one-way."""
 
 from __future__ import annotations
 
@@ -396,19 +378,9 @@ def build_model_settings(
     # doesn't truncate (finish_reason=length), without mutating a shared runner's self._config.
     # A request can only RAISE the configured floor, never lower it.
     eff_max_tokens = effective_max_tokens(cfg.max_tokens, getattr(req.config, "max_tokens", None))
-    # Clamp to the RESOLVED model's published output ceiling (bug 1019-e1e9-5117-4795). The cap
-    # above is monotonically RAISED — `max_output_cfg` lifts it to the ceiling of whichever model
-    # was resolved at the time and never lowers it again — so a cap raised for a 128K verifier
-    # rides into a later call that resolves to the 64K trivial model. Anthropic's API tolerated
-    # the oversized ask; Bedrock rejects it outright with
-    # `ValidationException: The maximum tokens you requested exceeds the model limit`, and the
-    # call never runs. Asking a model for more output than it accepts cannot produce a larger
-    # answer — only a guaranteed failure — so clamping here loses nothing.
-    #
-    # Applied ONLY to a model the ceiling table actually knows. `model_max_output_tokens` falls
-    # back to the configured default (16000) for an unmapped model, and clamping to THAT would
-    # silently shrink a deliberate operator floor on any model outside the gate ladder — a
-    # regression worse than the bug. An unmapped model keeps today's behaviour.
+    # A cap raised for an earlier model can exceed this model's output ceiling.
+    # Clamp only when its ceiling is known. The table's default for an unmapped
+    # model must not shrink a deliberate operator floor.
     _ceiling = _known_model_output_ceiling(resolved)
     if _ceiling is not None:
         eff_max_tokens = min(eff_max_tokens, _ceiling)
@@ -440,30 +412,16 @@ def build_model_settings(
 
 
 def build_usage_limits(cfg: LLMConfig, req: RunRequest, UsageLimits) -> tuple[Any, int, int]:
-    """Compute the per-call step budget (ADR 0056 decision 3), lifted out of
-    ``PydanticAIRunner.run()`` verbatim. ``UsageLimits`` is threaded in as a parameter (rather
-    than imported here) because ``run()`` already imports it lazily from ``pydantic_ai.usage``
-    (heavy libraries stay out of module top per this package's convention).
+    """Build per-request model and tool-call limits for a structured step.
 
-    pydantic-ai's ``request_limit`` counts MODEL REQUESTS (~1 per tool-call cycle). Halve
-    ``cfg.max_iterations`` (authored as ~2 steps per tool-call cycle) so a given
-    ``max_iterations`` allows the intended number of cycles (and we DON'T silently inherit
-    pydantic-ai's default ``request_limit=50``). ``request_limit`` bounds model TURNS, not tool
-    calls WITHIN a turn — a failing/re-called tool can spray many calls in few turns
-    (pydantic-ai #2593); ``tool_calls_limit`` is the in-turn backstop so a failing/looping
-    tool cannot burn the whole budget (the retry-to-exhaustion failure mode), set generously
-    above the expected ``~max_iterations/2`` tool calls so it only trips on a genuine runaway.
-    The step budget is PER-REQUEST: a caller may raise ``max_iterations`` for THIS call via
-    ``req.config`` — needed so a finding-rich Pass-2 verifier gets a scaled budget without a
-    shared runner's ``self._config`` changing under other steps (bug 59bc); it can only RAISE
-    the floor, never lower it. ``self._config`` (``cfg``) is the floor; ``req.config`` is the
-    per-call override.
-
-    Returns ``(usage_limits, req_limit, eff_max_iter)`` — ``req_limit``/``eff_max_iter`` are
-    handed back explicitly because neither is recoverable from the built ``UsageLimits``: only
-    ``max(8, eff_max_iter)`` is stored there as ``tool_calls_limit``, and ``max()`` is not
-    invertible for ``eff_max_iter <= 8``. ``run()`` needs both for ``FailureContext`` and the
-    telemetry log."""
+    request_limit counts model turns, so halve max_iterations, which describes
+    roughly two steps per tool cycle. A separate tool_calls_limit catches repeated
+    tool calls within one turn. The request config may raise the shared config's
+    iteration floor without mutating another step's budget. Return UsageLimits
+    along with the effective iteration and request limits because the stored
+    tool-call bound cannot recover their values for failure telemetry. UsageLimits
+    is passed in to keep heavy provider imports local to the runner.
+    """
     eff_max_iter = effective_max_iterations(
         cfg.max_iterations, getattr(req.config, "max_iterations", None)
     )

@@ -1,23 +1,8 @@
-"""Receiver configuration — all knobs sourced from the environment (epic d251 / S4b).
-
-Nothing here is hardcoded into the decision logic: the verdict→label mapping
-(``LLM_REVIEW_MAX_VALUE`` / ``LLM_REVIEW_BLOCK_VALUE``),
-the Gerrit endpoint + bot credential, the dedup DB path, and the reconcile cadence
-are all read from environment variables. On the box those variables are populated
-from SSM by ``infra/scripts/fetch-secrets.sh`` and handed to the container via the
-compose ``.env`` (ADR-0008), so this module never reaches for AWS itself.
-
-The ``LLM-Review`` value mapping (and the label range) is owned by d251's
-``project.config`` (ADR-0013) and re-derived here as integers so b744-WS6 can change
-the *scoring* without touching the *casting*. The PASS/BLOCK decision itself comes
-from the four-pass gate's deterministic Pass-3 blocker (via ``criteria_routing.json``
-per-criterion thresholds) — the once-vestigial blocking-severity threshold that used
-to live here has since been removed entirely (see ``adapter.py``).
-
-Importing this module must NOT require ``fastapi`` or the ``agents`` extra — it is
-plain stdlib so ``rebar.review_bot.config`` can be read by tests and the reconciler
-without standing up the ASGI app.
-"""
+"""Environment-backed receiver settings and logging helpers.
+SSM supplies deployment variables before startup. Verdict thresholds come
+from the four-pass gate, while this module supplies Gerrit label values,
+timeouts, endpoint settings, and token redaction without importing FastAPI
+or the agents extra."""
 
 from __future__ import annotations
 
@@ -32,49 +17,24 @@ from pathlib import Path
 #: (``app._worker``) and the backfill reconciler so both bound a single review identically.
 DEFAULT_REVIEW_TIMEOUT_SECONDS = 1200
 
-#: Bounded grace (seconds) to DRAIN the in-memory review queue on shutdown BEFORE the worker is
-#: cancelled, so a routine autodeploy restart doesn't abandon acknowledged (``202``) webhooks.
-#: Sized to the per-review timeout above (ticket 0347): the drain exists to let the IN-FLIGHT
-#: review finish (``queue.join()`` waits for it, and the review is already wall-clock-bounded
-#: by ``REVIEW_TIMEOUT_SECONDS``), and the previous 45s covered only queued-but-idle work —
-#: a deploy landing mid-review (observed at 260–911s) cancelled the worker and the
-#: teardown-corrupted review fail-closed a ``-1`` that then suppressed the backfill reconciler.
-#: An EMPTY queue drains instantly, so a no-review deploy pays nothing. Anything still queued
-#: when the window elapses is left for the backfill reconciler (fail-safe, never fail-lose).
-#: Keep it below the container ``stop_grace_period`` (see docker-compose.yml) so the drain
-#: completes before Docker escalates SIGTERM → SIGKILL.
-#:
-#: Lives here rather than in ``app`` for the same reason as the review timeout above: the
-#: container's ``stop_grace_period`` is sized against this value, so the test that asserts that
-#: relationship must be able to read it WITHOUT importing the fastapi-laden ``app`` module (the
-#: ``reviewbot`` extra is not installed in the default test tier).
-#: The bounded two-phase shutdown (drain, then cancel) this budget bounds is recorded in ADR 0067.
+#: Drain acknowledged reviews for up to the review timeout before cancel.
+#: An empty queue returns promptly. Backfill recovers work left queued.
+#: Keep this setting readable without importing FastAPI and below the
+#: container stop deadline.
 DEFAULT_SHUTDOWN_DRAIN_SECONDS = 1200
 
-#: Bounded window (seconds) for the lifespan's post-drain ``cancel`` + ``await`` of the
-#: background tasks (``SHUTDOWN_CANCEL_SECONDS``). Cancelling a task blocked in an
-#: ``asyncio.to_thread`` offload unwinds the coroutine at its await point immediately, but a
-#: task slow to honor cancellation — a shielded cleanup, a synchronous ``finally``, or the
-#: orphaned OS thread of a to_thread worker that CANNOT be force-cancelled — would otherwise
-#: make the join unbounded. Bounding it lets total shutdown have an upper bound
-#: (drain + cancel); anything still running is abandoned (the process is exiting anyway) and
-#: its in-flight store write is bounded independently by ``event_append``'s per-git timeout.
-#: Lives here (not in ``app``) for the same reason as the two budgets above: the container's
-#: ``stop_grace_period`` is sized against it, and that test must read it WITHOUT importing the
-#: fastapi-laden ``app`` module.
+#: Bound post-drain task cancellation and await. Offloaded OS work may
+#: continue after coroutine cancellation, so hard exit has its own grace.
+#: Expose this budget without importing the app.
 DEFAULT_SHUTDOWN_CANCEL_SECONDS = 10
 
-#: Max review attempts per ``(change_id, revision)`` before a RETRYABLE coverage gap stops
-#: deferring vote-less and escalates to the fail-closed ``-1`` (ticket 0347). Attempts are
-#: counted in the receiver's ``review_attempts`` ledger (see ``dedup.py``); the budget is
-#: reset by a successful vote or an explicit ``reset_attempts`` (the bb9b re-trigger).
-#: The defer→escalate contract this budget bounds is recorded in ADR 0069.
+#: After this many attempts at one change revision, a retryable
+#: coverage gap escalates from vote-less deferral to a fail-closed vote.
+#: A successful vote or explicit reset clears the attempt ledger.
 DEFAULT_RETRYABLE_GAP_MAX_ATTEMPTS = 3
 
-#: Default ceiling (seconds) on how far the backfill reconciler may hold its persisted cursor
-#: BEHIND the newest event it has seen, in order to re-fetch a candidate it abandoned for a
-#: retryable reason (bug 9f63). Bounds the poison-pill case: a candidate that fails forever
-#: must not pin the cursor forever. 24h.
+#: Limit how long a retryable candidate can hold back the backfill
+#: cursor. The default 24 hours bounds a permanent poison pill.
 DEFAULT_RECONCILE_MAX_HOLDBACK_SECONDS = 86400
 
 #: Marker attribute stamped on the handler this module installs, so :func:`configure_logging`
@@ -83,12 +43,8 @@ _REVIEWBOT_LOG_HANDLER_MARKER = "_reviewbot_handler"
 
 
 def review_timeout_seconds() -> float:
-    """Per-review wall-clock timeout from ``REVIEW_TIMEOUT_SECONDS`` (default
-    :data:`DEFAULT_REVIEW_TIMEOUT_SECONDS`). A missing / unparseable / non-positive value
-    falls back to the default (a 0 or negative timeout would abandon every review instantly).
-
-    Single-sourced here (not in ``app``) so ``reconcile`` can bound a backfill review with the
-    SAME timeout the live worker uses without importing the fastapi-laden ``app`` module."""
+    """Return a positive REVIEW_TIMEOUT_SECONDS or the shared default.
+    Both worker and backfill use this setting without importing the app."""
     raw = os.environ.get("REVIEW_TIMEOUT_SECONDS")
     if not raw:
         return float(DEFAULT_REVIEW_TIMEOUT_SECONDS)
@@ -129,28 +85,10 @@ def shutdown_cancel_seconds() -> float:
 
 
 def shutdown_force_exit_grace_seconds() -> float:
-    """Grace (seconds) AFTER the bounded cancel before the lifespan force-exits the process.
-
-    ADR 0067's ``total shutdown <= drain + cancel`` is a PROCESS-level bound, but the asyncio
-    side cannot deliver it alone: a review's blocking work runs in an ``asyncio.to_thread``
-    offload on the default, non-daemon ThreadPoolExecutor. Cancelling a task parked there
-    unwinds the coroutine at once (so the bounded ``gather`` succeeds) but the OS thread keeps
-    running the abandoned review, and NEITHER ``asyncio.run``'s ``shutdown_default_executor``
-    join NOR interpreter finalization can force-cancel it — both simply JOIN it (empirically the
-    process outlives ``drain + cancel`` by the whole remaining review). Only ``os._exit`` can
-    force the process down, so the lifespan arms a hard deadline; this is that deadline's grace.
-
-    Sized so the force-exit NEVER preempts a LEGITIMATE bounded store write mid-lock (which
-    would orphan the ``mkdir`` write-lock dir exactly as a mid-write SIGKILL does — the hazard
-    the container ``stop_grace_period`` is sized to avoid): an abandoned ``event_append`` store
-    write needs at most the lock-acquisition budget plus one bounded git call to finish and
-    RELEASE its lock, so the grace is that sum. With this grace the worst-case total
-    (``drain + cancel + grace``) still lands strictly BELOW ``stop_grace_period`` (see
-    docker-compose.yml), so the controlled force-exit fires before Docker's own SIGKILL —
-    guaranteeing the port is released for the replacement even when the recreate path's SIGKILL
-    escalation is unreliable (the 2026-08-28 22-minute zombie).
-
-    Derived from the store's own budgets (not a bare literal) so raising either tracks here."""
+    """Return the lock-acquisition plus git-call budget after bounded cancel.
+    A blocked to_thread worker may survive coroutine cancellation. The
+    hard-exit grace gives a store write time to release its lock and still
+    precedes the container stop deadline."""
     from rebar._store import lock as _lock
     from rebar._store.event_commit_git import _GIT_TIMEOUT
 
@@ -158,32 +96,9 @@ def shutdown_force_exit_grace_seconds() -> float:
 
 
 def configure_logging() -> None:
-    """Attach a stdout handler to the ``rebar`` logger so the review-bot's structured
-    ``_emit()`` INFO events (``voter_voted`` / ``voter_skip`` / ``merge_detection`` / all
-    ``reconcile_*``) reach stdout → journald.
-
-    Why this is needed: the container runs ``uvicorn rebar.review_bot.app:app``; uvicorn
-    configures only its own ``uvicorn.*`` loggers and never the root or ``rebar.*`` loggers,
-    so a ``logging.getLogger("rebar.review_bot.voter").info(...)`` record has no handler and
-    falls through to Python's ``lastResort`` — which emits WARNING and above only. Every INFO
-    ``_emit`` line was therefore silently dropped, blinding operators (only the
-    ``print()``-to-stderr markers ``VOTER_ERROR`` / ``ARTIFACT_EMIT_ERROR`` survived).
-
-    Idempotent (marker-guarded); level from ``REVIEW_BOT_LOG_LEVEL`` (default INFO, invalid →
-    INFO). Targets the ``rebar`` logger specifically (not root) to avoid duplicating uvicorn's
-    access logs.
-
-    Deliberately does NOT touch ``propagate`` (bug b718). It used to set
-    ``logging.getLogger("rebar").propagate = False`` "so records do not double-log through
-    uvicorn/root" — but that mutation is process-global and never restored, and under uvicorn
-    it buys nothing: uvicorn's logging config sets up only the ``uvicorn.*`` loggers and adds
-    no root handler, so a propagated ``rebar.*`` record finds no second sink. Because the
-    marker-guarded handler above is installed at most once, each record is emitted exactly
-    once either way (pinned by ``test_configure_logging_is_idempotent``). The cost of the
-    mutation was severe: pytest's ``caplog`` captures through a handler on the ROOT logger, so
-    one call anywhere in a process — and ``rebar.review_bot.app`` calls this at IMPORT time —
-    silently voided every later ``caplog`` assertion on a ``rebar.*`` logger for the rest of
-    that process, with the affected assertions still reporting success."""
+    """Add one stdout handler to the rebar logger for structured INFO events.
+    Use REVIEW_BOT_LOG_LEVEL with INFO fallback. Leave propagation unchanged
+    so root handlers such as pytest caplog still receive records."""
     level_name = os.environ.get("REVIEW_BOT_LOG_LEVEL", "INFO").strip().upper()
     level = getattr(logging, level_name, logging.INFO)
     if not isinstance(level, int):  # e.g. an attr that exists but is not a level constant
@@ -201,13 +116,8 @@ def configure_logging() -> None:
 #: installed, so :func:`install_access_log_redaction` is idempotent under a reload/re-import.
 _ACCESS_REDACTION_MARKER = "_reviewbot_access_redaction"
 
-#: Scrub the VALUE of any ``token=<secret>`` in a logged URL/request line. Case-insensitive on
-#: the key; the value runs to the next ``&`` / whitespace / quote so the route and remaining
-#: query params (e.g. ``change=1323``) are preserved for the observability greps. This is the
-#: belt-and-suspenders backstop (ticket 66af option c): the token now travels in a header
-#: (``X-Rebar-Token``) which uvicorn's access log never records, but any request line that still
-#: carries a query token — a legacy caller, a future endpoint, a regression — is scrubbed here
-#: before it can reach stderr → journald.
+#: Scrub token query values before access-log formatting while
+#: preserving routes and other query fields. Headers avoid request-line tokens.
 _TOKEN_QUERY_RE = re.compile(r"(?i)(token=)[^&\s\"']*")
 
 
@@ -219,15 +129,8 @@ def _redact_token(value: object) -> object:
 
 
 class TokenRedactingFilter(logging.Filter):
-    """A :class:`logging.Filter` that scrubs ``token=<secret>`` out of a log record before it
-    is formatted, then always passes the record through (``return True`` — this redacts, it
-    does not drop).
-
-    uvicorn's access logger emits the request line as ``%``-args
-    (``client, method, full_path, http_version, status``) against a ``'%s - "%s %s ..."'``
-    template, so the query string lives in one of ``record.args``; we scrub each string arg
-    (and, defensively, ``record.msg`` for any pre-formatted line) rather than the final
-    message, so redaction happens regardless of how the handler formats the record."""
+    """Replace query-token values in a log record's string args and message
+    before formatting. Always pass the redacted record onward."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
@@ -241,12 +144,9 @@ class TokenRedactingFilter(logging.Filter):
 
 
 def install_access_log_redaction() -> None:
-    """Attach :class:`TokenRedactingFilter` to the ``uvicorn.access`` logger (idempotent).
-
-    Called at import from ``rebar.review_bot.app`` alongside :func:`configure_logging`. The
-    primary defence for the token leak is moving the secret into the ``X-Rebar-Token`` header
-    (app.py), which keeps it out of the access-logged request line entirely; this filter is the
-    backstop for any request line that still carries ``?token=`` (ticket 66af)."""
+    """Install the token filter once on uvicorn.access.
+    Header authentication avoids request-line logging. The deployed Gerrit
+    webhook uses query-token authentication, so this filter protects it."""
     access = logging.getLogger("uvicorn.access")
     if getattr(access, _ACCESS_REDACTION_MARKER, False):
         return
@@ -292,24 +192,14 @@ class ReceiverConfig:
     reconcile_interval_seconds: int = 300
     #: Attempts before a retryable coverage gap escalates to the fail-closed ``-1``.
     retryable_gap_max_attempts: int = DEFAULT_RETRYABLE_GAP_MAX_ATTEMPTS
-    #: Poison-pill ceiling (seconds) on the reconciler's cursor low-water mark (bug 9f63).
-    #: The reconciler holds its cursor back to the oldest candidate it abandoned for a
-    #: RETRYABLE reason so the next pass can re-fetch it (the events-log ``?t1=`` window is a
-    #: SERVER-SIDE inclusive lower bound, so anything left behind the cursor is gone forever).
-    #: A candidate that fails on EVERY pass would otherwise pin the cursor permanently and grow
-    #: the fetch window without bound, so the hold-back is clamped to at most this far behind
-    #: the newest event seen; when the ceiling releases a still-failing candidate the greppable
-    #: ``RECONCILE_DEGRADED reason=holdback_expired`` marker is emitted so the stuck change is
-    #: surfaced loudly rather than dropped in silence. Default 24h — long enough to ride out an
-    #: LLM/Gerrit outage, short enough that the window stays cheap.
+    #: Hold the reconciler cursor behind retryable candidates, but no
+    #: more than 24 hours behind the newest event. An expired holdback emits
+    #: RECONCILE_DEGRADED so the stuck change stays visible.
     reconcile_max_holdback_seconds: int = DEFAULT_RECONCILE_MAX_HOLDBACK_SECONDS
     #: The Gerrit project the bot reviews; non-matching projects are skipped.
     project: str = "rebar"
-    #: Remote holding the rebar ``tickets`` branch, fetched alongside the change clone so the
-    #: code-review gate can materialize the ticket-store snapshot (the agent's ticket access —
-    #: a requirement). The store lives on the orphan ``tickets`` branch, which is NOT on Gerrit
-    #: (Gerrit carries only ``main`` + change refs) — it is on the public GitHub mirror, so we
-    #: fetch it from there (public repo → no auth). See clone_change_ref.
+    #: Fetch the tickets branch from the GitHub mirror beside the
+    #: Gerrit change clone. Gerrit does not host this orphan branch.
     tickets_remote: str = "https://github.com/navapbc/rebar"
     #: Persisted reconciler cursor (last-processed events-log event time). Empty →
     #: derive it next to the dedup DB (``<dedup dir>/reconcile_cursor``). Survives a

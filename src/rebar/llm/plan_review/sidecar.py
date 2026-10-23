@@ -294,17 +294,9 @@ def latest_review_timestamp(ticket_id: str, *, repo_root=None) -> int | None:
         return None
 
 
-# ── normalized finding fingerprint (OBSERVABILITY-ONLY — sidecar payload, never the
-#    surfaced verdict) ──────────────────────────────────────────────────────────────
-# The caller-visible finding ``id`` (orchestrator.mint_finding_id) hashes the EXACT
-# finding text, so the Pass-1 finder re-wording the same defect on a re-review mints a
-# DIFFERENT id — which makes "did this finding survive a revision?" unmeasurable from the
-# exact id alone (it reads as ~100% resolved for every LLM criterion, vs the deterministic
-# floor where the text is stable). ``norm_id`` is a coarser, reword-tolerant fingerprint
-# (significant-token set + criteria, order-insensitive) so offline calibration can join the
-# SAME defect across re-reviews at a granularity finer than criterion-load-delta. It is
-# additive to the sidecar event ONLY — the surfaced verdict findings are untouched, so the
-# library / MCP / CLI return shape does not change.
+# norm_id groups reworded findings by criterion and significant-token set for
+# offline recall analysis. It is stored only in the sidecar and leaves the
+# exact-text finding id and surfaced verdict unchanged.
 _NORM_STOP_TOKENS = 3  # drop tokens this short or shorter as low-signal noise
 
 
@@ -359,24 +351,14 @@ def _decision_margin(finding: dict[str, Any]) -> float | None:
     return round(float(priority) - float(threshold), 4)
 
 
-# ── recall: prior-review concerns re-surfaced POST-Pass-1 (story disused-unpoliced-solenodon) ──
-# Verdict-flips on identical material are a RECALL problem: the fresh finder MISSES a valid finding
-# a prior review caught. `prior_concerns()` returns the prior findings worth re-checking; run_pass1
-# adds the ones the fresh finder missed (matched by norm_id) as post-Pass-1 candidates for the
-# UNCHANGED Pass-2 verifier — the finder itself NEVER receives prior findings (independence by
-# construction; the pinned test_prior_findings_only_reach_the_novelty_seam + ADR 0008 Inv. 1 hold).
+# Recall missed prior findings only after the independent fresh finder runs.
+# Match by norm_id and send candidates to the unchanged Pass 2 verifier.
 RECALL_MIN_PRIORITY = 0.5  # "near/above the bar": the 0.60-0.70 blocking bars, minus a margin
 RECALL_CAP = 12  # cap the recalled-candidate set to bound the added Pass-2 verification cost
 
-# The decisions a finding was actually SURFACED to the client under (the lowercase strings
-# pass3_decide emits). ``build_payload`` persists the FULL finding set — blocking + advisory +
-# overflow + indeterminate + DROPPED — into ``findings`` for offline calibration, so any consumer
-# that reads a prior sidecar's ``findings`` as a RE-REVIEW SIGNAL (recall re-surfacing; the
-# rising-floor novelty prior set) MUST filter to surfaced-only first. Otherwise a finding
-# permanently dropped for convergence re-enters the prior set and re-matches on recurrence, scoring
-# LOW novelty ("carryover") and thereby ESCAPING the floor that dropped it — defeating the intended
-# permanent drop (bug old-frilly-plankton). This is the single shared vocabulary so the two
-# consumers can never disagree about which prior findings a re-review may reason against.
+# Sidecars retain dropped and indeterminate findings for calibration. Recall
+# and novelty priors must use only surfaced decisions so a dropped finding
+# cannot return as carryover and escape the rising floor.
 SURFACED_DECISIONS = ("block", "advisory")
 
 
@@ -415,43 +397,16 @@ def _material_changed(ticket_id: str, result: Mapping[str, Any], *, repo_root=No
 def prior_concerns(
     ticket_id: str, *, repo_root=None, coverage: MutableMapping[str, Any] | None = None
 ) -> list[dict[str, Any]]:
-    """The prior-review findings worth re-checking on this ticket: from the most-recent
-    REVIEW_RESULT sidecar, those that scored NEAR/ABOVE the bar — ``priority >=
-    RECALL_MIN_PRIORITY`` AND ``decision`` in ``{"block", "advisory"}`` (the lowercase strings
-    pass3_decide emits; excludes "dropped"/"indeterminate") — highest-priority first, capped at
-    ``RECALL_CAP``.
+    """Return prior surfaced findings worth checking against unchanged material.
 
-    TWO ELIGIBILITY GUARDS beyond the score filter (bug deceitful-flannel-jerboa) — without
-    them recall is not a one-shot backstop but a permanent RATCHET, and a finding the plan has
-    since fixed replays verbatim on every later review, forever:
-
-    - **The prior finding must carry GROUNDING EVIDENCE.** A recalled candidate is injected with
-      the concern's evidence so Pass-2 can re-ground it against the CURRENT plan; a prior
-      finding that persisted NO evidence gives the verifier nothing to test, so
-      ``evidence_entails_finding`` degenerates into confirming a bare assertion and the
-      ``claims_absence``/``absence_confirmed_in_context`` veto in ``decide.py`` never fires.
-      Excluding those is also what BREAKS the ratchet: an evidence-less surfaced finding is
-      exactly what a previous recall injection leaves behind (``run_pass1`` injected
-      ``evidence: []``, and ``build_payload._slim`` persists it), so a replay can never seed
-      another replay. Works against already-written v2 sidecars — no migration.
-    - **The material must be UNCHANGED.** Recall exists for verdict-flips on IDENTICAL material
-      (see this section's header): there, a finding the fresh finder missed is a finder miss
-      worth re-checking. When the ticket's material has CHANGED since the prior review, the
-      fresh finder's silence is evidence the EDIT RESOLVED the finding, not a miss — replaying
-      it verbatim is memory, not review. So a prior sidecar whose ``material_fingerprint``
-      differs from ``attest.current_material_fingerprint`` suppresses recall entirely. Both
-      fingerprints must be present to compare; a missing one leaves recall enabled (best-effort,
-      the sidecar's standing posture).
-
-    Best-effort and NEVER raises (mirrors the sidecar's observability posture): a missing or
-    unreadable sidecar returns ``[]`` and recall becomes a no-op. Each concern carries the prior
-    ``finding``/``suggested_fix``/``criteria``/``location``/``evidence``/``impact`` + its
-    ``norm_id`` so the caller can inject a re-groundable candidate and match it against the
-    fresh findings without recomputing the fingerprint.
-
-    ``coverage`` is an OPTIONAL observability sink: when supplied, a suppressed or narrowed
-    recall stamps ``coverage["recall_suppressed"]`` with the reason, so a review that returned
-    no candidates records WHY rather than looking identical to "no prior review"."""
+    Read the latest REVIEW_RESULT and select block or advisory decisions above
+    RECALL_MIN_PRIORITY, ordered by priority and capped at RECALL_CAP. Each finding
+    must carry evidence so Pass 2 can test it against the current plan. When both
+    material fingerprints exist and differ, suppress recall because the plan moved.
+    Missing fingerprints retain best-effort recall. An unreadable sidecar returns
+    an empty list. Preserve the finding's evidence and norm_id for re-grounding and
+    matching. When supplied, coverage records why candidates were suppressed.
+    """
     try:
         result = latest_review_result(ticket_id, repo_root=repo_root)
         if not result:

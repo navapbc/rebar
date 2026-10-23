@@ -1,35 +1,11 @@
-"""The structured-output reliability stack (1268) — deterministic where possible.
+"""Validate structured model output with deterministic recovery where possible.
 
-Workflow LLM output feeds DETERMINISTIC steps, so schema-conformance is load-bearing.
-The research (docs/experiments/workflow-remediation-pocs/structured-output-research.md)
-converged on a LAYERED, deterministic-where-possible stack that RETIRES the
-second-interpreter LLM (using another non-deterministic model to "fix" output is a
-recognized anti-pattern):
-
-  (1) provider-native CONSTRAINED decoding / strict json_schema where the provider
-      offers it (:func:`output_mode` -> NativeOutput), else cross-provider
-      PromptedOutput. PromptedOutput is also the mode used under extended thinking
-      UNLESS the model is MEASURED to accept a native output constraint under thinking
-      (``caps.native_output_with_thinking``); the documented Anthropic 400 was
-      ``tool_choice`` x thinking ("Thinking may not be enabled when tool_choice forces
-      tool use"), NOT ``outputConfig`` json_schema x thinking, which succeeds on the wire
-      today (measured E1) — see :func:`output_mode`; it is not a relic of any earlier
-      forced-tool mechanism;
-  (2) DETERMINISTIC tolerant parse of near-miss output (:func:`tolerant_parse`, via
-      json-repair — NO LLM): strips markdown fences, repairs trailing commas / unclosed
-      braces / smart quotes;
-  (3) Pydantic validation + NORMALIZING validators, with numeric/length BOUNDS in the
-      validators (NOT the JSON Schema, to stay inside Anthropic's strict-grammar
-      subset) — :func:`validate_to`;
-  (4) a SINGLE bounded retry to the SAME model with the validation error fed back is
-      the accepted fallback (configured on the agent; the deterministic Pydantic
-      validator is the arbiter, not a second model).
-
-Anthropic ``stop_reason`` in {refusal, max_tokens} is surfaced as a clear error
-(:func:`check_stop_reason`) rather than silently treated as empty output. json-repair
-is a lean (no-LLM) dependency; pydantic is imported lazily so ``import rebar.llm`` stays
-stdlib-only.
-"""
+output_mode selects provider-native constraints when supported, including
+measured thinking-compatible native output, and otherwise prompts for the
+schema. A tolerant parser repairs near-miss JSON without another model.
+Pydantic then normalizes and checks bounded values. One bounded retry to the
+same model can include validation feedback. Refusal and max-token stop reasons
+raise clear errors. Lazy Pydantic loading keeps the package import light."""
 
 from __future__ import annotations
 
@@ -63,65 +39,19 @@ SENTINEL_DIRECTIVE = (
 )
 
 
-# ── Layer-1 schema-complexity bound (bug 895c) ─────────────────────────────────
-# Native/constrained decoding does not merely "prefer" a small schema — Anthropic COMPILES
-# the contract's JSON Schema into a decoding grammar, under a documented 180-second
-# compilation timeout and documented complexity caps (24 optional parameters, 16
-# union-typed parameters). Past that the request does not degrade, it 400s
-# (`ValidationException`: "Grammar compilation timed out." at ~185s, or "Schema is too
-# complex." at ~50-60s) — and it does so on EVERY retry, forever, because the schema is a
-# property of the contract, not of the request. rebar's Pass-2 verification contracts are
-# all-optional by construction (every field declares a `default=`, so every field is
-# optional in JSON Schema), which is exactly the axis the compiler charges for.
-#
-# MEASURED live (us-east-1, serial, one variable at a time), optional-parameter count vs
-# native result:
-#
-#     review_result             10 optional   NATIVE  OK      14.0s
-#     completion_verdict        14 optional   NATIVE  OK      29.0s
-#     verification              22 optional   NATIVE  FAIL   185.3s
-#     plan_review_verification  31 optional   NATIVE  FAIL   185.4s
-#     code_review_verification  36 optional   NATIVE  FAIL   185.4s
-#     plan_review_verification  (identical payload, PROMPTED)  OK  11.2s
-#
-# Schema BYTE size is NOT the predictor: stripping every description (8,719 -> 2,403 bytes)
-# still failed, while a 4,022-byte contract passed. Optional-parameter count is.
-#
-# The bound sits at 16 — BELOW Anthropic's published 24 — because the published number
-# UNDER-predicts: `verification` fails at 22, two under the documented cap. 16 sits inside
-# the measured gap (14 = largest measured PASS, 22 = smallest measured FAIL) and deliberately
-# nearer the PASS side, so it keeps every contract measured to work on the native path,
-# refuses every contract measured to hang, and leaves headroom for a contract that grows a
-# field or two. The union bound (12) mirrors the same conservatism against the published 16;
-# the largest union count on any measured-PASSING contract is 9 (review_result,
-# completion_verdict), so it downgrades nothing that is known to work.
-# Downgrading is CHEAP and always safe (the prompted path returned the identical verdict in
-# 11.2s); exceeding the bound is a guaranteed ~185s failure, so the asymmetry is deliberate.
+# Native decoding compiles the schema and repeatedly fails on oversized
+# contracts. The largest measured passing contract has 14 optional fields and
+# the smallest failing one has 22. Bound optional fields at 16, below the
+# published 24, and union fields at 12, above the largest measured passing 9.
+# Prompted output handles contracts outside these bounds.
 _NATIVE_MAX_OPTIONAL_PROPERTIES = 16
 _NATIVE_MAX_UNION_PROPERTIES = 12
 
 
-# ── Layer-1 STACK-capability gate (bug 895c, variant B) ────────────────────────
-# The complexity bound above assumes the native request at least REACHES the provider. On an
-# older botocore it does not: boto3 validates Converse's input shape CLIENT-SIDE, and a
-# botocore whose `bedrock-runtime` service model predates `outputConfig` rejects the request
-# in 0.0s before a byte is sent:
-#
-#     FAILED in 0.0s: Parameter validation failed: Unknown parameter in input: "outputConfig",
-#     must be one of: modelId, messages, system, inferenceConfig, toolConfig, …
-#
-# MEASURED: botocore 1.43.64 carries `outputConfig`; botocore 1.40.61 does not. The 1.40.61
-# failure hit the (since-removed) digest contract — 722 BYTES, 4 optional properties — so this
-# is NOT the complexity failure wearing a different hat: on an under-versioned stack EVERY native
-# call fails regardless of schema size, and it degrades silently (the then-live overlap
-# step logged only a warning). Error-string matching could never have caught this from the
-# complexity phrases — the two failures share no vocabulary — which is why the gate, not the
-# fallback, is the load-bearing half.
-#
-# Scoped to BEDROCK via `caps.prompt_cache_style == "bedrock"`, the capability record's
-# existing Bedrock discriminator (a profile exposing `bedrock_supports_prompt_caching`) — a
-# fact read off the model PROFILE, never a provider-name string, per story S2. Non-Bedrock
-# providers do not go through botocore and are untouched.
+# An older Bedrock client can reject outputConfig before any request reaches
+# the provider, even for a small schema. Measured botocore 1.43.64 supports it
+# and 1.40.61 does not. Gate native output on stack support first, scoped by
+# the model profile's Bedrock capability, without changing other providers.
 
 
 @lru_cache(maxsize=1)
@@ -217,46 +147,16 @@ def native_output_within_bound(model_cls) -> bool:
 
 
 def output_mode(model_cls, caps, *, thinking: bool = False):
-    """Select the Pydantic AI output mode for ``model_cls`` (layer 1).
+    """Select native structured output only when the call, contract, and stack support it.
 
-    NativeOutput when ``caps.native_structured_output`` (a :class:`rebar.llm.capabilities.
-    ModelCapabilities`, read from the model's PROFILE — never a provider-name string, story
-    S2); PromptedOutput for everyone else (the broadest, and — crucially — not a
-    constrained/native output mode). ``thinking`` withdraws NativeOutput ONLY when the model is
-    not MEASURED to accept native output under extended thinking
-    (``caps.native_output_with_thinking``): the exact gate is
-    ``native_structured_output and (not thinking or native_output_with_thinking)``.
-
-    The old blanket "thinking forces prompted" rested on a stale rationale — the documented
-    Anthropic 400 was ``tool_choice`` x thinking ("Thinking may not be enabled when tool_choice
-    forces tool use"), NOT ``outputConfig`` json_schema x thinking, which succeeds on the wire
-    today (measured E1: sonnet adaptive, haiku budget 2048). So native-under-thinking is gated
-    per-model by a MEASURED capability fact, defaulting fail-closed to False so no cell flips
-    until the rows story records measured PASS cells. This branch is reached only from the
-    no-tools single-shot path (:func:`rebar.llm.structured_run`): tools x thinking x native
-    suppresses tool calling (E1: 2/2 skipped), so the agentic runner never consults it — the
-    no-tools scoping is structural, not a parameter. Deliberately does NOT read
-    ``caps.supports_thinking`` — the constraint is a property of the CALL, so the caller's
-    ``thinking`` argument is authoritative; ``supports_thinking`` exists for signed provenance.
-
-    NativeOutput is additionally gated on SCHEMA COMPLEXITY (bug 895c): a contract whose JSON
-    Schema exceeds :func:`native_output_within_bound` is routed to PromptedOutput even on a
-    native-capable model, because the provider compiles that schema into a decoding grammar and
-    400s (`Grammar compilation timed out.` / `Schema is too complex.`) after ~185s on every
-    attempt — a permanent, un-retryable failure of that STEP, burning ~185s per run. Scope
-    the claim there: a failing step does not necessarily fail its whole gate (a review has
-    been observed certifying seconds after one such step failed), so this is a step-level
-    correctness-and-latency fix, not a gate-outage fix. Not a slow success either. This is a
-    BOUND, not a disable: contracts within it (``review_result``, ``completion_verdict``) keep
-    the native path. The gate reads only ``model_cls``, never the model id, so it stays a
-    property of the CONTRACT — the same reason the thinking gate reads the call, not the
-    profile.
-
-    NativeOutput is FURTHER gated on whether the installed stack can send a native output
-    constraint at all (:func:`native_output_stack_supported`, bug 895c variant B): an
-    under-versioned botocore rejects Bedrock's ``outputConfig`` client-side in 0.0s for EVERY
-    contract, however small. That check runs FIRST, because when it fails the contract's size
-    is irrelevant."""
+    Use capability facts from the model profile, never a provider-name guess.
+    Thinking permits native output only when that combination was measured for
+    the model. A schema above native_output_within_bound uses PromptedOutput to
+    avoid permanent grammar-compilation failures. Check stack support first so
+    an older client cannot reject outputConfig even for small schemas. The
+    thinking argument describes this call. This no-tools path does not make
+    claims about agentic tool calls under thinking.
+    """
     from pydantic_ai import NativeOutput, PromptedOutput
 
     if caps.native_structured_output and (not thinking or caps.native_output_with_thinking):
@@ -416,18 +316,9 @@ def validate_to(model_cls, data: Any):
     Anthropic's strict-grammar subset); they fire here."""
     from pydantic import ValidationError
 
-    # Unwrap a top-level JSON array carrying exactly one object: some models emit their
-    # lone structured result wrapped in a top-level JSON array instead of the bare object
-    # — either as a bare one-element list, or (reasoning models) as an array that
-    # concatenates echoed intermediate arrays it reasoned over with the real result as
-    # the sole dict element, e.g. [["open","in_progress"], {"verdict":"PASS", …}]. Both
-    # otherwise deterministically fail validation ("got list") and, for the
-    # completion-verifier, block a close fail-closed (bug artsy-chain-hold /
-    # dash-lure-slag / slit-rubble-braid). We unwrap when the top-level list holds
-    # exactly one dict element (regardless of accompanying non-dict noise); a list with
-    # zero dicts, or two-or-more dicts (genuinely ambiguous — which object?), stays
-    # ambiguous and is still rejected below. Only the top-level elements are considered —
-    # we never recurse into or flatten nested lists.
+    # Accept a top-level list only when exactly one element is a dict.
+    # Other elements may be echoed reasoning arrays. Zero or multiple dicts
+    # remain invalid. Nested lists are never flattened.
     if isinstance(data, list):
         dict_elems = [item for item in data if isinstance(item, dict)]
         if len(dict_elems) == 1:

@@ -1,33 +1,11 @@
-"""The cheap re-sign path for a plan-review attestation (ticket middle-actinium-thrush).
+"""Recover a signable plan-review PASS when its signing step failed.
 
-A ``rebar review-plan`` that computes a signable PASS but whose SIGN step fails (recorded
-as ``signature.signed=False`` + ``error``) leaves the expensive verdict WITHOUT the durable
-product the claim gate consumes — the asymmetric op-cert (plan-review) attestation. Re-running
-the full multi-pass LLM
-review to recover it is ~10 minutes of billable work for a result already computed and
-persisted in the ``REVIEW_RESULT`` sidecar.
-
-:func:`resign_plan_review` is the recovery: it reads the LATEST persisted ``REVIEW_RESULT``
-sidecar (NO LLM, NO network), verifies the recorded verdict is a signable PASS AND that the
-plan/material has not changed since the review (the sidecar's recorded material fingerprint
-still equals the freshly-recomputed one), reconstructs the minimal verdict, and calls
-:func:`attest.sign_plan_review` to persist the SAME attestation a normal signing PASS would
-have written — so a subsequent ``claim`` passes the gate.
-
-STALENESS GUARD: the recorded fingerprint must equal ``current_material_fingerprint`` NOW.
-If the plan drifted the old verdict is stale, so we REFUSE (and tell the user to run a full
-``rebar review-plan``) rather than sign a verdict that no longer describes the plan. A
-positively-detected DEPENDENCY-material drift (a pinned direct child/prerequisite's material
-changed or was lost — pin_status ``stale-pin-drift``/``stale-pin-missing``) now invalidates
-UNCONDITIONALLY, regardless of ``verify.enforce_plan_material_pins`` (bug 790c): sign-review
-must not bypass the dependency invalidation ``sign_manifest`` already enforces at review time.
-Only the metadata-quality pin states (``legacy-unpinned``/``malformed-pin``) stay governed by
-the enforce flag.
-
-Optionality: stdlib + core signing only (the sidecar reader, the attestation machinery, and
-``current_material_fingerprint`` are all import-light) — it does NOT need the ``[agents]``
-extra or a model key, because it never runs the LLM tiers.
-"""
+Read the latest persisted REVIEW_RESULT without an LLM or network call. Sign
+only when the verdict passed and its material fingerprint still matches the
+current plan. Changed or missing pinned dependency material always invalidates
+the result. Legacy or malformed pin metadata follows the configured enforcement
+flag. A successful re-sign creates the same attestation the claim gate consumes.
+This path needs only core signing and sidecar readers, not the agents extra."""
 
 from __future__ import annotations
 
@@ -442,17 +420,8 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     }
 
 
-# --------------------------------------------------------------------------------------
-# The passed-but-unsigned classifier (ticket ammonic-amoral-nabarlek)
-#
-# The rule "a plan review that PASSED but whose attestation FAILED to persist is RETRYABLE,
-# not success" used to live only in the CLI (`_cli/_llm_commands.py`), so the MCP surface —
-# the one autonomous agents actually drive — returned `verdict: PASS` raw and the agent
-# proceeded to `claim`, which the gate then refused because the signature it consumes was
-# never written. The discrimination now lives HERE, below both front-ends: this module
-# already owns `resign_plan_review`, the recovery the classifier names, and is import-light
-# by contract (no `[agents]` extra), so a front-end can always reach it.
-# --------------------------------------------------------------------------------------
+# A PASS whose attestation failed to persist is retryable, not claimable.
+# Keep this classifier below CLI and MCP so both surface sign-review recovery.
 
 #: Attestation persisted — ``signature.signed`` is true.
 ATTESTATION_SIGNED = "signed"
