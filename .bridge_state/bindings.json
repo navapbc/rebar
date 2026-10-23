@@ -48680,6 +48680,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-21T23:36:30Z"
     },
+    "794d-b458-5d78-42c4": {
+      "created_at": "2026-10-23T08:45:54Z",
+      "jira_id": "4596913",
+      "jira_key": "REB-6730",
+      "state": "confirmed",
+      "updated_at": "2026-10-23T08:46:00Z"
+    },
     "794e-7479-5f21-49db": {
       "baseline": {
         "assignee": {
@@ -98015,9 +98022,17 @@
       "updated_at": "2026-09-05T09:38:14Z"
     },
     "f154-507e-1162-4c9e": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Observation\nIn tests/unit/reconciler/orchestrate/test_mode_cap_enforcement.py, test_spot_check_sampling_is_deterministic_across_runs calls _fresh_renderer() twice. That helper calls importlib.import_module(\"rebar.reconciler.manifest_renderer\") with the same name in one Python process, so both calls return the cached module. The test then calls render_throttle twice and compares the nonempty spot_check keys. Its helper comment and assertion describe fresh module loads and per-process Python hash randomization, but the test never starts another process or changes PYTHONHASHSEED. This was found during the comment-remediation review of intangible-corruptful-numbat; the prose-only patch must leave this unlisted helper/assertion unchanged.\n\n## Plan\nCreate a controlled cross-process regression check that renders the same mutation fixture under at least 2 explicit distinct PYTHONHASHSEED values, captures the selected spot-check keys, and asserts the same nonempty selection. Keep the test hermetic and preserve the existing in-process assertion as useful separate coverage if desired. Correct the helper/comment/assertion to describe what each check proves.\n\n## Acceptance criteria\n- Given the same 200-mutation fixture and 2 distinct PYTHONHASHSEED values, when independent Python processes render the spot-check selection, then they return the same nonempty ordered keys.\n- Given the existing in-process check, when it runs, then its comment and assertion describe only the behavior it actually observes.\n- Focused mode-cap tests and make verify pass after the test change.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Make spot-check determinism test exercise distinct hash seeds"
+      },
       "created_at": "2026-10-23T07:45:01Z",
       "jira_id": "4596912",
       "jira_key": "REB-6729",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-10-23T07:45:05Z"
     },
@@ -108262,7 +108277,28 @@
     "1792735177835485845": "__rebar_unknown_comment_id__",
     "1792735187376686464": "__rebar_unknown_comment_id__",
     "1792739481140469983": "__rebar_unknown_comment_id__",
-    "1792739492314361292": "__rebar_unknown_comment_id__"
+    "1792739492314361292": "__rebar_unknown_comment_id__",
+    "1792741992635926335": "__rebar_unknown_comment_id__",
+    "1792742006310883619": "__rebar_unknown_comment_id__",
+    "1792743255944894449": "__rebar_unknown_comment_id__",
+    "1792743272421173931": "__rebar_unknown_comment_id__",
+    "1792743280839420340": "__rebar_unknown_comment_id__",
+    "1792743286216734928": "__rebar_unknown_comment_id__",
+    "1792743807703534287": "__rebar_unknown_comment_id__",
+    "1792743833926296809": "__rebar_unknown_comment_id__",
+    "1792743843779860840": "__rebar_unknown_comment_id__",
+    "1792743852119865490": "__rebar_unknown_comment_id__",
+    "1792744382460519566": "__rebar_unknown_comment_id__",
+    "1792744398930536003": "__rebar_unknown_comment_id__",
+    "1792744646900925621": "__rebar_unknown_comment_id__",
+    "1792744717649040625": "__rebar_unknown_comment_id__",
+    "1792744729598533314": "__rebar_unknown_comment_id__",
+    "1792744733984054158": "__rebar_unknown_comment_id__",
+    "1792744750234439177": "__rebar_unknown_comment_id__",
+    "1792744781841901535": "__rebar_unknown_comment_id__",
+    "1792744806499292461": "__rebar_unknown_comment_id__",
+    "1792744818965643832": "__rebar_unknown_comment_id__",
+    "1792744831911800557": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -113498,6 +113534,7 @@
     "REB-6728": "4dd1-7963-e15e-4e2c",
     "REB-6729": "f154-507e-1162-4c9e",
     "REB-673": "4b56-4682-bb34-4fd1",
+    "REB-6730": "794d-b458-5d78-42c4",
     "REB-674": "4e6f-1a2d-482c-435e",
     "REB-675": "7c58-d1b0-899f-4975",
     "REB-676": "a010-aec8-c088-4314",
