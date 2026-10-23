@@ -74026,6 +74026,21 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:29Z"
     },
+    "b594-de6d-3ebc-490f": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Observation\n`batch_dispatch.reroute_migrated_plans` (`src/rebar/reconciler/batch_dispatch.py:688-745` on origin/main dcb35ce77fe) selects a plan as migrated when every mutation's action is in `NON_CREATE_FAMILIES` and routes to the coordinator. It never checks direction. Its sibling `_ordered_create_plans` (`:395-406`) does check `direction == \"outbound\"`.\n\n`run_differs` plans every typed mutation, inbound and outbound (`run_differs.py:299-313`), and `apply_phase` passes those plans to `applier.apply`. So an inbound `update`, `conflict` or `repair_property` plan qualifies, and `run_migrated_reroute` dispatches it through `make_coordinator_dispatch` \u2192 `apply_handlers.dispatch_mutation`, the outbound handlers.\n\nReproduction: fake transport, real `applier.apply`, plans from `ticket_planner.plan_pass`. The probe is `inbound_probe/apply_e2e.py` in the `lane-ebf5` scratch directory.\n- With 1 inbound update for DIG-1 (payload `fields` plus 1 Jira comment) and 1 outbound update for DIG-2, the transport receives `update_issue('DIG-1')`, `add_comment('DIG-1', 'jira comment')` and `update_issue('DIG-2')`. The Jira-side change is written back to Jira, and the Jira comment is posted to Jira again.\n- With the inbound update alone, the transport receives no calls, because `_apply_batch` is not reached when there are no outbound dicts.\n- Same result at f5f666702b4. The selection filter has been unchanged since d49466b5e96 (2026-08-25, \"Wire live coordinator+fuse non-create reroute\").\n\nUnverified: a live pass. The fake transport accepts every call, so whether the real outbound comment path deduplicates against existing Jira comments has not been checked.\n\n## Hypotheses\n- (a) Live passes that contain both inbound updates and any outbound mutation echo the inbound field values and comments back to Jira, possibly creating duplicate Jira comments.\n- (b) A later guard in the real transport or the outbound comment handler suppresses the echo, so the defect is latent.\n\nThese remain unproven.\n\n## Approach\n1. Add a regression test that reproduces the probe: an inbound update plus an outbound update through `applier.apply` with plans from `plan_pass`. It asserts the transport receives no write for the inbound target.\n2. Restrict `reroute_migrated_plans` to plans whose mutations are all `outbound`, matching `_ordered_create_plans`. Inbound mutations keep dispatching through `_apply_typed`.\n3. Check the live bridge-run history and Jira for duplicate comments on issues that had inbound comment syncs since 2026-08-25. This tests hypothesis (a).\n\n## Acceptance Criteria\n- [ ] The regression test fails on dcb35ce77fe and passes with the fix.\n- [ ] `reroute_migrated_plans` selects only all-outbound plans; a unit test covers inbound update, conflict and repair_property plans.\n- [ ] [non-codebase] The live check result for hypothesis (a) is recorded on this ticket.\n  provenance: environment=production Jira; principal=bridge bot; privilege_posture=production-equivalent; instrument=live-call \u2014 issue keys and comment ids recorded on the ticket",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Coordinator reroute dispatches inbound update plans through the outbound handlers"
+      },
+      "created_at": "2026-10-22T20:38:27Z",
+      "jira_id": "4596876",
+      "jira_key": "REB-6726",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-10-22T20:38:32Z"
+    },
     "b5a4-e065-a252-4bc5": {
       "baseline": {
         "assignee": {
@@ -113226,6 +113241,7 @@
     "REB-6722": "b4e1-754d-17b8-40b9",
     "REB-6724": "4b07-4291-8d1e-48b2",
     "REB-6725": "3cf0-9fb3-d222-47f4",
+    "REB-6726": "b594-de6d-3ebc-490f",
     "REB-673": "4b56-4682-bb34-4fd1",
     "REB-674": "4e6f-1a2d-482c-435e",
     "REB-675": "7c58-d1b0-899f-4975",
