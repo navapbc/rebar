@@ -1,9 +1,4 @@
-"""Performance & scan-efficiency (build-1000, single-batch scan, hierarchy benchmark)
-
-Split from the former monolithic tests/scripts/test_ticket_graph.py along
-graph-concern seams. The `graph` fixture + autouse git-isolation fixture live in
-conftest.py; event-writing helpers + the module loader in _helpers.py.
-"""
+"""Test graph cache invalidation, batch scanning, and performance."""
 
 from __future__ import annotations
 
@@ -32,17 +27,7 @@ def test_private_reducer_shims_are_absent(graph: ModuleType) -> None:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_graph_cache_invalidated_on_new_link(graph: ModuleType, tmp_path: Path) -> None:
-    """Graph cache is invalidated when a new LINK event is added to a ticket.
-
-    Setup:
-        - ticket-a: closed (blocks ticket-b)
-        - ticket-b: open
-        - First call: build_dep_graph('ticket-b') → ready_to_work=True (only blocker closed)
-        - Add new blocker: ticket-c (open) blocks ticket-b
-        - Second call: build_dep_graph('ticket-b') → ready_to_work=False (new blocker open)
-
-    Expected: second call reflects the new dependency — cache was invalidated.
-    """
+    """Invalidate the graph cache when a new open blocker is linked."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -72,11 +57,9 @@ def test_graph_cache_invalidated_on_new_link(graph: ModuleType, tmp_path: Path) 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_graph_cache_key_invalidated_on_same_size_rewrite(tmp_path: Path) -> None:
-    """Bug zonal-folly-ditch (sibling of reducer bug 1d76): the graph cache key
-    must fold in mtime so a same-BYTE-LENGTH in-place rewrite of an event file
-    (git checkout/rebase of the tickets branch, fsck-recover cherry-pick)
-    invalidates the cache — filename+size alone cannot see it and would serve a
-    stale graph through deps/ready/next-batch.
+    """Invalidate the graph cache on an equal-size event rewrite with changed mtime.
+
+    Filename and byte length alone can return stale dependency and readiness results.
     """
 
     from rebar.graph._cache import _compute_cache_key
@@ -104,28 +87,13 @@ def test_graph_cache_key_invalidated_on_same_size_rewrite(tmp_path: Path) -> Non
     )
 
 
-# ── RED MARKER BOUNDARY ──────────────────────────────────────────────────────
-# Tests below this line are expected to FAIL (RED) until ticket-graph.py is
-# refactored to use a single reduce_all_tickets call for deps operations.
-# The .test-index RED marker points to the first test below:
-# test_build_dep_graph_single_batch_scan
-# Tests ABOVE this line are GREEN and must always pass.
+# Batch-scan tests below pin a single preload and no per-ticket reduction.
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_build_dep_graph_single_batch_scan(graph: ModuleType, tmp_path: Path) -> None:
-    """build_dep_graph must use a single reduce_all_tickets call instead of per-ticket scans.
-
-    Setup:
-        - A tracker with 5 tickets: ticket-a (closed, blocks ticket-e), ticket-b,
-          ticket-c, ticket-d (all open), ticket-e (open, target ticket).
-
-    Expected: reduce_all_tickets is called exactly once during build_dep_graph.
-
-    Currently RED: build_dep_graph calls _loader.reduce_ticket per-ticket via
-    _compute_dep_graph and _find_direct_blockers. It does not call reduce_all_tickets.
-    """
+    """Build the graph with exactly one reduce_all_tickets call."""
     from unittest.mock import patch
 
     tracker_dir = tmp_path / "tracker"
@@ -162,18 +130,7 @@ def test_build_dep_graph_single_batch_scan(graph: ModuleType, tmp_path: Path) ->
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_find_direct_blockers_no_per_ticket_scan(graph: ModuleType, tmp_path: Path) -> None:
-    """_find_direct_blockers must not call _loader.reduce_ticket directly — use pre-loaded state.
-
-    Setup:
-        - ticket-blocker: open, blocks ticket-target
-        - ticket-target: open
-
-    Pre-loaded state dict is passed in. _loader.reduce_ticket must NOT be called.
-
-    Currently RED: _find_direct_blockers calls _loader.reduce_ticket directly for each
-    ticket dir it scans. After refactor, it must accept a pre-loaded all_states
-    dict and use that instead.
-    """
+    """Find direct blockers from preloaded state without per-ticket reduction."""
     from unittest.mock import patch
 
     tracker_dir = tmp_path / "tracker"
@@ -191,7 +148,7 @@ def test_find_direct_blockers_no_per_ticket_scan(graph: ModuleType, tmp_path: Pa
         return real_reduce_ticket(*args, **kwargs)
 
     with patch.object(graph._loader, "reduce_ticket", side_effect=spy_reduce_ticket):
-        # After refactor, _find_direct_blockers should accept all_states and not call reduce_ticket.
+        # Preloaded lookup skips reduce_ticket.
         graph._find_direct_blockers("ticket-target", str(tracker_dir))
 
     assert len(reduce_ticket_calls) == 0, (
@@ -205,18 +162,7 @@ def test_find_direct_blockers_no_per_ticket_scan(graph: ModuleType, tmp_path: Pa
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_compute_dep_graph_children_use_preloaded_state(graph: ModuleType, tmp_path: Path) -> None:
-    """_compute_dep_graph must not call _loader.reduce_ticket for children discovery.
-
-    Setup:
-        - parent-epic: epic with 3 child stories
-        - story-a, story-b, story-c: open stories with parent_id=parent-epic
-
-    Expected: _loader.reduce_ticket is NOT called during _compute_dep_graph. All state
-    lookups should use a pre-loaded all_states dict passed in from build_dep_graph.
-
-    Currently RED: _compute_dep_graph calls _loader.reduce_ticket for each directory entry
-    to discover children. After refactor, it must use pre-loaded state.
-    """
+    """Discover child tickets from preloaded state, without reduce_ticket calls."""
     from unittest.mock import patch
 
     tracker_dir = tmp_path / "tracker"

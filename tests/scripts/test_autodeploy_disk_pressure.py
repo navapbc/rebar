@@ -1,18 +1,7 @@
-"""autodeploy must reclaim docker garbage on the quiescent-main no-op tick (story 28f9).
+"""Test pressure-triggered Docker reclaim on an autodeploy no-op tick.
 
-``prune_docker_caches`` only runs on autodeploy's deploy and backoff paths. When ``main`` is
-quiescent every ~2-min timer tick hits the "up to date … no-op" early exit (autodeploy.sh:228)
-and returns WITHOUT pruning, so nothing reclaims the 30G root disk between deploys. On
-2026-08-04/06 that left the box pinned at 92-96% for ~39h and held ``rebar-root-disk-pressure``
-in ALARM. The fix adds a pressure-triggered, throttled reclaim to the no-op path: when root
-``/`` usage is at/above ``DISK_PRESSURE_PCT`` and the throttle window has elapsed, run the same
-``prune_docker_caches`` the deploy path uses, and emit a countable ``AUTODEPLOY_DISK_PRESSURE``
-journal marker.
-
-The harness follows ``test_autodeploy_review_drain.py``: stub the box's binaries onto PATH and
-run the REAL script, so these assertions bind the shipped bash rather than a reimplementation.
-The tests drive the NO-OP path (``TARGET == DEPLOYED``) and control the reported disk percent
-via a file-backed ``df`` stub.
+A quiet main branch still needs throttled reclaim above DISK_PRESSURE_PCT, with a
+countable marker. Stub box commands while running the shipped script.
 """
 
 from __future__ import annotations
@@ -288,9 +277,7 @@ def test_pressure_marker_emitted_once_on_trigger(box: dict[str, object]) -> None
 def test_pressure_reclaim_logs_free_space_before_after_and_the_delta(
     box: dict[str, object],
 ) -> None:
-    """`observability.sh` claims its marker lets an incident sweep distinguish "the reclaim gate
-    never ran" from "it ran and reclaimed nothing". It cannot — it counts invocations. The log
-    line is what makes that claim true: free space before, after, and the delta, every time."""
+    """Log free space before and after reclaim. The marker counts attempts only."""
     _set_pct(box, 90, after=40)
     result = _run(box, DISK_PRESSURE_PCT="80")
     journal = result.stdout + result.stderr
@@ -402,9 +389,7 @@ def test_a_throttled_pressured_tick_leaves_the_streak_unchanged(box: dict[str, o
 def test_persistence_marker_fires_at_the_third_consecutive_ineffective_cycle(
     box: dict[str, object],
 ) -> None:
-    """Three consecutive reclaims that each left the disk pressured — the actionable condition
-    no existing signal expresses. The threshold alarm flaps with the disk and
-    AUTODEPLOY_DISK_PRESSURE counts invocations, so neither can say "reclaim is ineffective"."""
+    """Alert after 3 consecutive reclaims leave the disk pressured."""
     _set_pct(box, 92)
     results = [_run(box, DISK_PRESSURE_PCT="80", PRESSURE_PRUNE_MIN_INTERVAL="0") for _ in range(3)]
     streaks_context = f"streak={_streak(box)}"
@@ -428,15 +413,12 @@ def test_persistence_marker_fires_at_the_third_consecutive_ineffective_cycle(
 def test_a_single_pressured_cycle_that_recovers_never_emits_the_marker(
     box: dict[str, object],
 ) -> None:
-    """NEGATIVE CONTROL — the discriminator this whole counter exists for. One pressured cycle
-    followed by relief must emit NOTHING: a marker that fires on any pressure is just the
-    flapping `rebar-root-disk-pressure` threshold alarm we already have, which sat in ALARM for
-    ~11h saying nothing actionable. Only PERSISTENCE may speak."""
+    """A pressured cycle followed by relief emits no persistence marker."""
     _set_pct(box, 92)
     pressured = _run(box, DISK_PRESSURE_PCT="80", PRESSURE_PRUNE_MIN_INTERVAL="0")
     assert _streak(box) == 1, f"the pressured cycle counts one\n{pressured.stderr}"
 
-    _set_pct(box, 55)  # the disk recovered before the next tick
+    _set_pct(box, 55)  # recovered before the next tick
     relieved = _run(box, DISK_PRESSURE_PCT="80", PRESSURE_PRUNE_MIN_INTERVAL="0")
 
     context = (
@@ -454,10 +436,7 @@ def test_a_single_pressured_cycle_that_recovers_never_emits_the_marker(
 def test_the_persistence_marker_is_distinct_from_the_invocation_counter(
     box: dict[str, object],
 ) -> None:
-    """The two markers must be separately countable. AUTODEPLOY_DISK_PRESSURE counts INVOCATIONS
-    (it fires on every triggered prune, including the first); the persistence marker fires only
-    at the alarm threshold. If they shared a token the "reclaim is ineffective" signal would be
-    drowned by ordinary reclaims."""
+    """Keep the reclaim-attempt and ineffective-reclaim markers distinct."""
     _set_pct(box, 92)
     first = _run(box, DISK_PRESSURE_PCT="80", PRESSURE_PRUNE_MIN_INTERVAL="0")
     assert len(_markers(first, "AUTODEPLOY_DISK_PRESSURE")) == 1, first.stderr

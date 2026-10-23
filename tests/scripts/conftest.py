@@ -1,9 +1,4 @@
-"""Pytest fixtures for bridge field-coverage tests.
-
-Constants and helper functions live in bridge_test_helpers.py — import from
-there in test files.  This conftest.py only provides pytest fixtures that are
-auto-discovered by pytest regardless of working directory.
-"""
+"""Pytest-discovered bridge fixtures. Shared helpers are defined in bridge_test_helpers."""
 
 from __future__ import annotations
 
@@ -27,10 +22,7 @@ if _TESTS_SCRIPTS_DIR not in sys.path:
 # Ensure the bundled engine scripts are importable for tests that load modules by path.
 _SCRIPTS_DIR = str(Path(__file__).resolve().parents[2] / "src" / "rebar" / "_engine")
 
-# Ensure repo-root `scripts/` is importable. Those modules import each other by bare name
-# (e.g. canary_bridge -> alert_dedup), which resolves at runtime because `python
-# scripts/<x>.py` puts scripts/ at sys.path[0] — but a test loading them via
-# importlib-from-path gets no such entry (bug 63e8).
+# Import repo scripts by bare name as production script entrypoints do.
 _REPO_SCRIPTS_DIR = str(Path(__file__).resolve().parents[2] / "scripts")
 if _REPO_SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _REPO_SCRIPTS_DIR)
@@ -59,14 +51,7 @@ def acli_mod() -> ModuleType:
 def acli_capture(
     acli_mod: ModuleType,
 ) -> tuple[Any, list[list[str]], Any]:
-    """Provide an AcliClient with a fake _run_acli that captures commands.
-
-    Returns:
-        (client, captured_cmds, fake_run_acli) — the client is pre-configured
-        with test credentials; captured_cmds accumulates every command list
-        passed to _run_acli; fake_run_acli is the callable for use with
-        patch.object.
-    """
+    """Return a configured AcliClient, captured command lists, and its fake runner."""
     captured_cmds: list[list[str]] = []
 
     def fake_run_acli(
@@ -96,27 +81,13 @@ def acli_capture(
     return client, captured_cmds, fake_run_acli
 
 
-# ---------------------------------------------------------------------------
-# urllib seam mock (bug 3775)
-# ---------------------------------------------------------------------------
-# AcliClient.create_issue() routes through the module-level create_issue ->
-# _verify_created_issue, which calls urllib.request.urlopen directly when
-# JIRA_URL / JIRA_USER / JIRA_API_TOKEN are present in the environment (a
-# silent env-var behaviour switch). Under the socket guard (tests/conftest.py
-# _network_guard) that real GET raises RuntimeError. This fixture mocks the
-# urlopen seam so create_issue tests stay fully offline without an
-# allow_network bridge. Mirrors the _mock_urlopen_verify helper landed for
-# test_acli_integration.py (bug 1c68).
+# Mock urllib's verify-after-create GET. Credential-bearing environments otherwise
+# trigger a network socket through AcliClient.create_issue during offline tests.
 
 
 @pytest.fixture
 def mock_jira_verify() -> Iterator[MagicMock]:
-    """Patch urllib.request.urlopen so _verify_created_issue stays offline.
-
-    Returns a well-formed Jira issue GET response (key "TEST-1") so the
-    verify-after-create REST path resolves without a real socket. Tests using
-    this fixture exercise the create payload/argv, not the verify response.
-    """
+    """Keep verify-after-create offline with a valid TEST-1 issue response."""
     body = json.dumps({"key": "TEST-1", "summary": "Test", "status": {"name": "To Do"}}).encode(
         "utf-8"
     )

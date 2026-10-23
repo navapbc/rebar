@@ -1,15 +1,6 @@
-"""Shared test helper: crash-safe git commit counting.
+"""Count commits through git with a retry for transient rev-list failures.
 
-``git rev-list --count <ref>`` can transiently fail under CI load (rc!=0 with
-empty stdout — e.g. a background gc/pack race). The naive ``int(r.stdout.strip())``
-turns that transient into an opaque ``ValueError: invalid literal for int() with
-base 10: ''`` that masks git's real error and flakes whatever test called it
-(bug efb7-09de, re-confirmed live on CI as cf3a). This helper is the single home
-for the correct pattern: retry the transient, and on a persistent failure raise a
-clear diagnostic that surfaces git's stderr instead of the opaque int('') crash.
-
-Import it bare (``from _git_counts import commit_count``) like the other shared
-root helpers — ``tests/`` is on ``sys.path`` (see tests/conftest.py).
+Persistent failures report git stderr rather than raising an opaque int conversion error.
 """
 
 from __future__ import annotations

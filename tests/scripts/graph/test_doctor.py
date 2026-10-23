@@ -1,10 +1,6 @@
-"""``doctor`` — classification, repair ordering, and the fail-safe paths.
+"""Check doctor classification, repair ordering, and failure containment.
 
-The command finds blocking edges that predate the structural link rule (ticket
-7ab3-9df0-7a90-4ffd) and optionally repairs them. The properties worth pinning are
-less about the happy path than about what happens when a repair CANNOT complete:
-no failure path may lose a dependency, and a pair that cannot be unlinked
-relation-precisely must be declined rather than guessed at.
+A failed repair must retain its dependency. Ambiguous relation unlinking is refused.
 """
 
 from __future__ import annotations
@@ -343,17 +339,10 @@ def _seed_link(tracker: Path, source: str, target: str, relation: str, suffix: s
 def test_repair_force_writes_the_pre_repair_tag_and_repoints_it(
     graph: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`--repair` pre-tags the pre-run OID, and a SECOND run RE-POINTS the tag.
+    """Tag the pre-repair HEAD as the rollback anchor on every repair run.
 
-    The tag is the run's rollback anchor, so it must be written before the first
-    write. It is force-written (``git tag -f``) precisely so a resumed or repeated
-    repair re-anchors to that run's starting state instead of failing because the
-    tag already exists.
-
-    This fixture builds a REAL git-backed tracker. The shared synthetic tracker is
-    not a git repo, so ``rev-parse HEAD`` returns empty, ``_pre_tag`` short-circuits
-    and never tags — which would make every assertion here compare "" to "" and pass
-    vacuously.
+    Use a Git-backed tracker so the tag and HEAD assertions cannot pass on empty values.
+    A repeated run repoints the tag to its own starting commit.
     """
     from rebar._commands import doctor
     from rebar._store.gitutil import run_git
@@ -459,17 +448,10 @@ def _git_backed(tracker: Path) -> None:
 def test_run_repair_does_not_hold_a_lock_that_blocks_its_own_writes(
     graph: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`run_repair` must not hold the tracker write lock across its own writes.
+    """Do not hold the non-reentrant tracker lock across repair's own writes.
 
-    Every event write takes that lock for itself
-    (append_event -> write_and_push -> stage_and_commit -> write_lock), and it is
-    NOT re-entrant. An outer hold made each inner acquisition block for its full
-    60s timeout and then fail, so a pass repaired NOTHING while serialising the
-    tracker for every other writer — the observed production symptom was 18
-    findings and zero progress in ten minutes.
-
-    Against the pre-fix implementation this test fails twice over: the finding comes
-    back `unrepairable` carrying a flock timeout, and the call takes ~60s per item.
+    Each event write takes the lock. An outer hold would make the repair time out without
+    progress and block other writers.
     """
     from rebar._commands import doctor
 
@@ -626,17 +608,10 @@ def test_repair_refuses_while_a_reconciler_pass_is_in_flight(
 def test_unrepairable_finding_leaves_its_edge_and_the_run_continues(
     graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
 ) -> None:
-    """One unrepairable finding must not cost the run its other repairs.
+    """Leave an unrepairable edge intact and continue other repairs.
 
-    `add_dependency` refuses a link whose source is closed, which is correct — a
-    closed ticket depending on something is meaningless — so a mis-escalated edge
-    whose RESOLVED source has since closed can never be rewritten. This is the real
-    residual class on this repository's own tracker, not a hypothetical.
-
-    Three things are asserted together, because any one alone would let a
-    regression through: the unrepairable edge SURVIVES untouched, an unrelated
-    finding in the SAME run is still repaired, and the exit status still reports
-    outstanding work.
+    A closed resolved source cannot be relinked. The same run must repair unrelated
+    findings and still return a status reporting outstanding work.
     """
     from rebar._commands import composer, doctor
 

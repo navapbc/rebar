@@ -1,9 +1,4 @@
-"""Graph traversal, ready_to_work, and tombstone/archived-as-closed
-
-Split from the former monolithic tests/scripts/test_ticket_graph.py along
-graph-concern seams. The `graph` fixture + autouse git-isolation fixture live in
-conftest.py; event-writing helpers + the module loader in _helpers.py.
-"""
+"""Test graph traversal, readiness, and terminal blocker status."""
 
 from __future__ import annotations
 
@@ -25,14 +20,7 @@ from _helpers import (
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_graph_ready_to_work_all_blockers_closed(graph: ModuleType, tmp_path: Path) -> None:
-    """Ticket B is ready_to_work=True when its only blocker (A) is closed.
-
-    Setup:
-        - ticket-a: closed (blocks ticket-b)
-        - ticket-b: open
-
-    Expected: build_dep_graph('ticket-b', tracker_dir)['ready_to_work'] == True
-    """
+    """Mark a ticket ready when its sole blocker is closed."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -50,14 +38,7 @@ def test_graph_ready_to_work_all_blockers_closed(graph: ModuleType, tmp_path: Pa
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_graph_ready_to_work_blocker_still_open(graph: ModuleType, tmp_path: Path) -> None:
-    """Ticket B is ready_to_work=False when its blocker (A) is still open.
-
-    Setup:
-        - ticket-a: open (blocks ticket-b)
-        - ticket-b: open
-
-    Expected: build_dep_graph('ticket-b', tracker_dir)['ready_to_work'] == False
-    """
+    """Keep a ticket unready while its sole blocker remains open."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -75,15 +56,7 @@ def test_graph_ready_to_work_blocker_still_open(graph: ModuleType, tmp_path: Pat
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_graph_ready_to_work_direct_blockers_only(graph: ModuleType, tmp_path: Path) -> None:
-    """Ticket B is ready_to_work=False when at least one direct blocker is open.
-
-    Setup:
-        - ticket-a: open  (blocks ticket-b)
-        - ticket-c: closed (blocks ticket-b)
-        - ticket-b: open
-
-    Expected: ready_to_work=False because ticket-a (direct blocker) is still open.
-    """
+    """Any open direct blocker keeps a ticket unready despite closed peers."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -141,19 +114,10 @@ def test_graph_deps_output_schema(graph: ModuleType, tmp_path: Path) -> None:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_graph_archived_ticket_treated_as_closed(graph: ModuleType, tmp_path: Path) -> None:
-    """A missing blocker directory (archived/tombstoned) is treated as satisfied.
+    """Treat an absent blocker directory as satisfied.
 
-    Setup:
-        - ticket-a: directory MISSING (was archived — its dir does not exist)
-        - ticket-b: open, has a LINK event (depends_on ticket-a) in ticket-b's own dir
-
-    Since ticket-a's directory is absent, it is treated as closed → ready_to_work=True.
-
-    Note: The LINK event is stored in ticket-b's directory using relation='depends_on'
-    with target_id='ticket-a'. This means ticket-b knows it depends on ticket-a, and
-    the relationship is discoverable even when ticket-a's directory is absent.
-    This tests tombstone resolution: the implementation must treat a missing blocker
-    directory as closed, not as an error.
+    The dependent retains its depends_on LINK, but archival or deletion cannot block it
+    forever.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -210,15 +174,7 @@ def test_graph_archived_ticket_treated_as_closed(graph: ModuleType, tmp_path: Pa
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_graph_tombstone_tombstone_json_respected(graph: ModuleType, tmp_path: Path) -> None:
-    """A blocker with .tombstone.json {'status': 'closed'} is treated as closed.
-
-    Setup:
-        - ticket-a: directory exists but contains only .tombstone.json
-        - ticket-a blocks ticket-b
-        - ticket-b: open
-
-    Expected: ready_to_work=True because .tombstone.json signals closed status.
-    """
+    """Treat a blocker with a closed tombstone as satisfied."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -245,29 +201,14 @@ def test_graph_tombstone_tombstone_json_respected(graph: ModuleType, tmp_path: P
 def test_ready_to_work_when_blocker_has_deleted_tombstone(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """A blocker with .tombstone.json {'status': 'deleted'} is treated as terminal (satisfied).
-
-    Setup:
-        - ticket-a: has CREATE event (so reduce_all_tickets includes it) AND
-          .tombstone.json {"status": "deleted"}; blocks ticket-b
-        - ticket-b: open
-
-    Expected: ready_to_work=True because a "deleted" tombstone status is terminal.
-
-    Regression test: _graph.py treats "deleted" as a terminal status alongside "closed".
-    _get_ticket_status returns "deleted" for ticket-a (reads .tombstone.json),
-    and the terminal-status check now recognises "deleted" → blocker is terminal
-    → ready_to_work=True.
-    """
+    """Treat a blocker with a deleted tombstone as terminal and satisfied."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
     _write_ticket(tracker_dir, "ticket-b", status="open")
 
-    # Write ticket-a with a CREATE event so it appears in reduce_all_tickets results,
-    # then add .tombstone.json with status="deleted" to simulate a deleted ticket.
-    # _get_ticket_status reads .tombstone.json first and returns "deleted",
-    # but the current check `status != "closed"` fails to recognise "deleted" as terminal.
+    # Keep a CREATE event so reduction sees the blocker. Its deleted tombstone
+    # then supplies the terminal status.
     _write_ticket(tracker_dir, "ticket-a", status="open")
     ticket_a_dir = tracker_dir / "ticket-a"
     tombstone = {"status": "deleted", "deleted_at": 1700000000}

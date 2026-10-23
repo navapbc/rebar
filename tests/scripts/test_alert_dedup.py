@@ -1,14 +1,7 @@
-"""Oracle suite for scripts/alert_dedup.py — the SHARED bug-filer dedup (bug 63e8).
+"""Test shared alert deduplication and canary adoption.
 
-Bug 63e8 requires the scheduled dependency-advisory lane to reuse the heartbeat canary's
-dedup rather than grow a second one. The canary's helpers were not reusable as-is: they
-were module-private and the marker was hard-coded, so two lanes sharing them would have
-collapsed onto one marker and muted each other's accumulation caps. They were therefore
-extracted here with the marker lifted to a parameter.
-
-These tests pin BOTH halves of that claim: the extracted primitives behave as specified,
-AND ``canary_bridge`` still routes through them (an extraction that left a copy behind
-would be exactly the second implementation the ticket forbids).
+Each lane has its own marker namespace and accumulation cap. Canary_bridge must use
+the shared primitives rather than a second implementation.
 """
 
 from __future__ import annotations
@@ -92,13 +85,9 @@ JS_SAFE_MAX = 2**53 - 1
 
 
 def test_recent_marker_comment_accepts_the_string_wire_form(dedup: ModuleType) -> None:
-    """Bug e127: `--output json` emits an out-of-JS-safe-range ns timestamp as a STRING.
+    """Accept a decimal-string nanosecond timestamp from JSON output.
 
-    Both lanes that share this helper (canary_bridge, dependency_audit) type-checked the
-    comment ``timestamp`` with ``isinstance(ts, (int, float))``. A string fails that check,
-    so every marker comment is skipped, this helper always returns False, and the 24h
-    accumulation cap silently stops working -- appending a marker comment on EVERY cycle
-    to the ticket the lane already filed. It is fail-soft, so nothing raises.
+    Skipping that wire form would defeat the 24-hour marker cap without raising.
     """
     now = 1_700_000_000
     ns = (now - 60) * 10**9

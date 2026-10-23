@@ -1,25 +1,8 @@
-"""Optional-extra coverage guard — bug 599e-77da-29dd-482d.
+"""Make missing Python extras fail collection when CI requires them.
 
-``pytest.importorskip("fastapi")`` is the right call for a suite that must stay runnable in a
-lean install — but it also means a whole test surface can VANISH from CI with nothing
-reporting it. That is exactly what happened: no CI lane installed the ``reviewbot`` extra, so
-38 tests — the review-bot receiver, the opcert service app, the audit UI, and the
-path-injection + token-redaction SECURITY guards — silently no-op'd for months while changes
-that broke them still earned ``Verified +1``.
-
-The fix is two-sided. The CI pytest lane now installs every test-bearing extra; this module is
-what keeps it that way. When ``REBAR_REQUIRE_EXTRAS=1`` is set (the CI pytest steps set it),
-:func:`install` swaps ``pytest.importorskip`` for a strict variant that RAISES instead of
-skipping, so a lost extra reddens the build by module name — at collection for a module-scope
-call, as a test error for a function-scope one.
-
-Deliberately out of scope: skips keyed on a missing *binary* or a version floor
-(``ssh-keygen >= 8.9``, Node for the e2e tier) are ``pytest.mark.skipif``, not
-``importorskip``, and stay skippable. The guard covers the one failure mode it is named for —
-a test that does not run because nobody installed its Python extra.
-
-Lives next to ``tests/conftest.py`` rather than inside it so the guard is importable (and
-therefore directly testable) without re-executing a conftest.
+When REBAR_REQUIRE_EXTRAS=1, install replaces pytest.importorskip with an error so a test
+surface cannot silently disappear. Binary and version-floor skips remain outside this guard.
+The separate module lets its behavior be tested without importing conftest again.
 """
 
 from __future__ import annotations

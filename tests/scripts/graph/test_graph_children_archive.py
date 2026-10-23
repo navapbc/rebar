@@ -1,9 +1,4 @@
-"""Parent-child (children) and archive exclusion
-
-Split from the former monolithic tests/scripts/test_ticket_graph.py along
-graph-concern seams. The `graph` fixture + autouse git-isolation fixture live in
-conftest.py; event-writing helpers + the module loader in _helpers.py.
-"""
+"""Test parent-child traversal and archived-ticket exclusion."""
 
 from __future__ import annotations
 
@@ -25,12 +20,7 @@ from _helpers import (
 
 
 def test_build_dep_graph_includes_children(graph: ModuleType, tmp_path: Path) -> None:
-    """build_dep_graph must return a 'children' field listing tickets whose
-    parent_id matches the queried ticket.
-
-    Bug 8cbf-e13b: ticket deps returns empty deps for epics with parent-linked
-    children because it only traverses dependency links, not parent_id.
-    """
+    """Include tickets whose parent_id matches the queried ticket as children."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -73,19 +63,9 @@ def test_build_dep_graph_children_empty_when_no_children(graph: ModuleType, tmp_
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_compute_archive_eligible_regression(graph: ModuleType, tmp_path: Path) -> None:
-    """compute_archive_eligible must still see ALL tickets (including archived) — regression guard.
+    """Exclude already archived tickets from the eligible archive result.
 
-    GREEN: This test passes today and must continue passing after archived exclusion
-    is implemented. Placed BEFORE the RED marker so regressions are caught, not tolerated.
-
-    Setup:
-        - ticket-already-archived: closed + ARCHIVED event (already archived)
-        - ticket-eligible: closed, no blockers, no dependents (should be eligible)
-        - ticket-open: open (seed for BFS — not eligible itself)
-
-    Expected:
-        compute_archive_eligible returns ticket-eligible (not ticket-already-archived,
-        since it's already archived).
+    An open ticket is not eligible. A closed ticket is.
     """
 
     tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
@@ -125,18 +105,7 @@ def test_compute_archive_eligible_regression(graph: ModuleType, tmp_path: Path) 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_transitive_traversal_includes_archived_midchain(graph: ModuleType, tmp_path: Path) -> None:
-    """Transitive blocker traversal must NOT skip archived tickets mid-chain — regression guard.
-
-    GREEN: This test passes today and must continue passing after archived exclusion
-    is implemented. Placed BEFORE the RED marker so regressions are caught, not tolerated.
-
-    Setup:
-        - ticket-a: open, blocks ticket-b
-        - ticket-b: open, ARCHIVED, blocks ticket-c
-        - ticket-c: open (the ticket we query)
-
-    Expected: check_would_create_cycle('ticket-c', 'ticket-a', 'blocks', ...) == True
-    """
+    """Traverse through an archived middle ticket when checking a blocker cycle."""
 
     tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
     tracker_dir.mkdir(parents=True)
@@ -169,23 +138,9 @@ def test_transitive_traversal_includes_archived_midchain(graph: ModuleType, tmp_
 def test_check_would_create_cycle_no_false_positive_for_transitive_depends_on(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """check_would_create_cycle must NOT raise for a redundant transitive depends_on edge.
+    """Treat A depends_on B as redundant when A already needs C and C needs B.
 
-    Regression guard for bug 122a-6b11: when A depends_on C and C depends_on B,
-    the edge A depends_on B is a redundant transitive edge — not a cycle.
-    The previous implementation incorrectly flagged this as a cycle because A is
-    reachable from B by traversing depends_on edges backward (B←C←A), which is
-    the reverse direction and does not constitute a cycle.
-
-    Setup:
-        - ticket-a: open
-        - ticket-b: open
-        - ticket-c: open
-        - ticket-a depends_on ticket-c  (A needs C)
-        - ticket-c depends_on ticket-b  (C needs B)
-
-    Action: check_would_create_cycle('ticket-a', 'ticket-b', 'depends_on', ...)
-            must return False — adding A depends_on B is redundant but not a cycle.
+    Reverse reachability along that chain does not create a cycle.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -218,19 +173,7 @@ def test_check_would_create_cycle_no_false_positive_for_transitive_depends_on(
 def test_add_dependency_allows_redundant_transitive_depends_on(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """add_dependency must NOT raise CyclicDependencyError for a redundant transitive edge.
-
-    Regression guard for bug 122a-6b11: ticket link <A> <B> depends_on was
-    rejected with 'would create a cycle' when A→C→B already existed.
-
-    Setup:
-        - ticket-a, ticket-b, ticket-c: all open
-        - ticket-a depends_on ticket-c
-        - ticket-c depends_on ticket-b
-
-    Action: add_dependency('ticket-a', 'ticket-b', tracker_dir, 'depends_on')
-            must NOT raise — the edge is redundant but valid.
-    """
+    """Allow add_dependency to add a redundant A-to-B edge through A-to-C-to-B."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -252,30 +195,14 @@ def test_add_dependency_allows_redundant_transitive_depends_on(
         )
 
 
-# ── RED MARKER BOUNDARY ──────────────────────────────────────────────────────
-# Tests below this line are expected to FAIL (RED) until archived exclusion is
-# implemented in ticket-graph.py. The .test-index RED marker points to the first
-# test below (test_build_dep_graph_excludes_archived_children).
-# Tests ABOVE this line are GREEN regression guards that must always pass.
+# Archive-exclusion cases below this boundary were the implementation targets.
+# Earlier cases protect existing graph behavior.
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_build_dep_graph_excludes_archived_children(graph: ModuleType, tmp_path: Path) -> None:
-    """build_dep_graph must exclude archived tickets from the children list by default.
-
-    Setup:
-        - epic-001: open epic
-        - story-active: open, parent_id=epic-001 (not archived)
-        - story-archived: open, parent_id=epic-001, then ARCHIVED event written
-
-    Expected (default exclude_archived=True):
-        result['children'] contains only story-active, not story-archived.
-
-    This test is RED — archived exclusion is not yet implemented.
-    To make it GREEN: add exclude_archived parameter to build_dep_graph
-    (default True) and filter children by archived status.
-    """
+    """Exclude archived children from build_dep_graph's default result."""
 
     tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
     tracker_dir.mkdir(parents=True)
@@ -306,19 +233,7 @@ def test_build_dep_graph_excludes_archived_children(graph: ModuleType, tmp_path:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_build_dep_graph_excludes_archived_blockers(graph: ModuleType, tmp_path: Path) -> None:
-    """build_dep_graph must exclude archived tickets from the blockers list by default.
-
-    Setup:
-        - ticket-active-blocker: open, blocks ticket-target
-        - ticket-archived-blocker: open, blocks ticket-target, then ARCHIVED event written
-        - ticket-target: open
-
-    Expected (default exclude_archived=True):
-        result['blockers'] contains only ticket-active-blocker,
-        not ticket-archived-blocker.
-
-    This test is RED — archived exclusion in blockers is not yet implemented.
-    """
+    """Exclude archived blockers from build_dep_graph's default result."""
 
     tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
     tracker_dir.mkdir(parents=True)

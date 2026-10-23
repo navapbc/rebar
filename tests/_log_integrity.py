@@ -1,45 +1,9 @@
-"""Shared primitives for the caplog coverage-integrity guard (see tests/conftest.py).
+"""Protect caplog assertions from silent loss of rebar logger records.
 
-A ``caplog`` assertion whose records never arrive DOES NOT FAIL — ``assert not
-[unexpected]`` is trivially true against an empty list. So a test can lose 100% of its
-coverage and stay green, with nothing in the run output distinguishing it from a test
-that genuinely verified something (bug 9ac2-e2f1-bb6e-4436).
-
-``caplog`` captures through a handler on the ROOT logger, so records only reach it if the
-shared parent logger both *emits* them and *propagates* them. There is one shared parent,
-``rebar``: library code logs under ``rebar.*``, and since the reconciler became the
-``rebar.reconciler`` subpackage its modules log under ``rebar`` too. (Before that it was a
-sibling top-level root that needed its own coverage, bug 9151-907b-471d-4a38.)
-:data:`SHARED_LOGGER_NAMES` is that set, and every primitive here operates over it.
-
-For each shared root there are two process-global mutations that silently sever capture, and
-BOTH are real:
-
-* ``logging.getLogger(<root>).propagate = False`` — nothing under that root reaches the
-  root handler. ``rebar.review_bot.config.configure_logging()`` did exactly this (bug
-  b718), at module-import time, and never restored it. On pytest >= 8.4 this is only
-  PARTLY mitigated: ``_pytest.logging.catching_logs.__enter__`` attaches the capture
-  handler to every logger that is ALREADY non-propagating, but its own comment records the
-  hole — "will miss loggers that *become* non-propagating after the ``__enter__``". Code
-  that flips it mid-test therefore voids the rest of that test's assertions silently, and
-  the mitigation is an implementation detail we should not be relying on.
-* ``logging.getLogger(<root>).setLevel(...)`` above the record's level — the record is
-  dropped at the originating logger before any handler is consulted.
-  ``rebar._logging.install_stderr_handler()`` pins it to WARNING; every in-process
-  ``rebar._cli.main(...)`` and ``rebar.reconciler.__main__.main(...)`` call in the suite
-  does that to ``rebar``.
-  ``caplog.at_level(INFO)`` without a ``logger=`` argument does NOT rescue this: it raises
-  the ROOT level, not the shared parent's.
-
-Neither is restored, both are invisible, and — because the victim is never the culprit —
-the red (when there is one at all) lands on an unrelated test far from the code that did
-it, in an order-dependent way that ``-n <N> --dist worksteal`` makes non-reproducible.
-
-These primitives let the conftest guard fail CLOSED at the SOURCE for the propagation
-vector, and CONTAIN the level vector per-test so no assertion inherits a poisoned logger.
-Keeping them here lets the guard's self-test
-(``tests/unit/test_caplog_coverage_integrity.py``) exercise the *same* logic instead of a
-copy that could drift.
+The shared rebar parent covers library and reconciler logs. Disabling propagation can
+hide records from caplog and must fail at the source. Raising the parent level can also
+hide records. Restore it after each test because an entrypoint may legitimately change it.
+Tests and the root conftest share these primitives.
 """
 
 from __future__ import annotations
@@ -99,15 +63,10 @@ def current_level() -> dict[str, int]:
 
 
 def restore_level(levels: dict[str, int]) -> bool:
-    """Put every shared root's level back to *levels*; report whether any of them moved.
+    """Restore shared logger levels and report whether they changed.
 
-    Unlike propagation, raising these levels is a legitimate side effect of exercising a real
-    entrypoint in-process (``rebar._cli.main`` and ``rebar.reconciler.__main__.main`` each
-    install the stderr handler, which pins ``rebar`` to WARNING). The LEAK is what must
-    not survive the test, so this contains it instead of blaming the test: restoring per-test
-    is strictly stronger for coverage integrity than a failure would be, because every test
-    then starts from the same levels and its log assertions are reproducible regardless of
-    run order.
+    Entry points may raise rebar to WARNING. Restoring the prior level after each test keeps
+    later caplog assertions independent of run order.
     """
     moved = False
     for name, level in levels.items():

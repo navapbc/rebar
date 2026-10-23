@@ -1,25 +1,8 @@
-"""Live-Jira xdist confinement guard — make an inert ``xdist_group`` mark LOUD.
+"""Require loadgroup scheduling when external Jira tests use xdist_group.
 
-``pytest-xdist`` honours ``@pytest.mark.xdist_group(...)`` in EXACTLY ONE scheduler:
-``--dist loadgroup``. Under ``--dist load`` (xdist's default) and ``--dist worksteal`` the
-mark is parsed and then silently DISCARDED — no error, no warning. Verified at runtime
-against xdist 3.8.0 with 8 tests sharing one group under ``-n 4``:
-
-* ``--dist load``      -> gw0 gw0 gw1 gw1 gw2 gw2 gw3 gw3 (scattered)
-* ``--dist worksteal`` -> gw0 gw0 gw0 gw0 gw1 gw1 gw1 gw1 (scattered)
-* ``--dist loadgroup`` -> all 8 on gw0 (confined)
-
-The live-Jira reconciler round-trips rely on that mark for isolation: they share one live
-Jira project and assert on its eventual consistency, so cross-worker interleaving makes them
-flake (story 8d36-a15a-fcbd-4ebd). A silently-ignored mark reads as protection while
-providing none — so this module turns that case into a collection failure instead.
-
-Deliberately narrow: it fires only when the tests would ACTUALLY run live (credentials plus
-an ``acli`` binary are present). CI's integration lane runs ``--dist worksteal`` with no
-credentials and no ``acli``; that case is a silent no-op, so the guard never reddens CI.
-
-Kept out of ``tests/conftest.py`` as a PURE predicate so it is directly callable and
-testable without spawning pytest.
+Other xdist schedulers ignore the marker and can interleave tests sharing one Jira
+project. The guard is inert without Jira credentials and acli. Its pure predicate stays
+separate from conftest for direct tests.
 """
 
 from __future__ import annotations

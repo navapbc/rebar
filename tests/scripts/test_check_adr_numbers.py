@@ -1,29 +1,7 @@
-"""Happy-path contract for the ADR-number uniqueness / bijection gate (story 0743).
+"""Test ADR number uniqueness, marker bijection, and link integrity.
 
-The gate proves ADR numbers are unique and collision-proof. Every ADR file
-``docs/adr/NNNN-slug.md`` is paired with a per-number marker file
-``docs/adr/.numbers/NNNN`` whose content is that ADR's filename. Two ADRs claiming
-one number produce an add/add marker conflict that Rebase-If-Necessary cannot
-auto-resolve (that is git's job); this gate is the CI backstop that asserts, on the
-merged tree, that the bijection actually holds and that no cross-reference dangles.
-
-API contract (scripts/check_adr_numbers.py):
-  - DEFAULT_ADR_DIR: Path                                  # repo docs/adr
-  - MARKERS_DIRNAME: str                                   # ".numbers"
-  - check(adr_dir: Path, docs_dir: Path | None = None) -> list[str]  # error strings, [] == clean
-  - main(argv: list[str] | None = None) -> int            # 0 clean, 1 failures
-
-Rules (each violation contributes >=1 error string):
-  1. bijection: every ADR file has a marker; every marker maps to exactly one ADR.
-  2. marker content == the ADR filename it names.
-  3. no two ADR files share a number.
-  4. no two markers share content.
-  5. a marker's ``NNNN`` name matches the number-prefix of the ADR it names.
-  6. referential integrity: every ``adr/NNNN-slug(.md)`` markdown link target under
-     ``docs/`` (and inside ``docs/adr/*.md`` bodies) resolves to an existing ADR file.
-
-Edge shapes (each rule's failure path, exit codes, CI wiring, real-tree cleanliness)
-are HELD OUT in test_check_adr_numbers_heldout.py.
+Each ADR filename has one matching numbered marker. Duplicate numbers, mismatched
+marker content, or dangling ADR links produce gate errors. Held-out tests cover edges.
 """
 
 from __future__ import annotations

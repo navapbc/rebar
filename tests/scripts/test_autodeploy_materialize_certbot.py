@@ -1,18 +1,7 @@
-"""autodeploy re-materializes the host certbot renew timer on an installer-source change
-(ticket c593-f058-c488-406c).
+"""Reinstall host certbot units when their installer source changes.
 
-The systemd timer runs ``certbot renew`` from unit files at
-``/etc/systemd/system/certbot-renew.{service,timer}`` — files that only
-``install-certbot-timer.sh`` ever writes. ``infra/scripts/`` is in no autodeploy trigger
-path (not BOT_PATHS, not CONFIG_PATHS), so a change to the installer reached the box's
-``/opt/rebar`` copy at best via rsync but NEVER refreshed the installed units — the same
-drift class the observability sibling fixed (commit ffcf2c662 / ticket 1d63).
-
-This test drives autodeploy.sh under a PATH shim where ``main`` has advanced and ``git
-diff`` reports *only* ``infra/scripts/install-certbot-timer.sh`` changed (so the heavy
-review-bot rebuild block is skipped). It asserts autodeploy re-runs the idempotent
-``install-certbot-timer.sh`` — proved by a marker the stubbed installer writes — and that
-an unrelated-only diff does NOT trigger the certbot block.
+The host timer uses installed units, not the rsynced source copy. An unrelated diff
+must not trigger this installation.
 """
 
 from __future__ import annotations

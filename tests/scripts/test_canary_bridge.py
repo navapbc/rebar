@@ -1,32 +1,8 @@
-"""Oracle suite for scripts/canary_bridge.py (ticket e602-1354-6778-4c0f).
+"""Test canary heartbeat and binding-drift classification and alert lifecycles.
 
-The reconcile-bridge-canary workflow's classification + alert-lifecycle logic
-migrates out of YAML run-blocks into ``scripts/canary_bridge.py`` (Tier 3 of
-the shell->Python strangler-fig). This suite pins the module contract:
-
-Subcommands (argv[0]):
-- ``check-heartbeat``    — classify reconcile-bridge.yml staleness from the
-  GitHub Actions API (via the injected runner calling ``gh api``); emit
-  ``stale`` / ``last_run_ago`` / ``status_msg`` to $GITHUB_OUTPUT.
-- ``heartbeat-alert``    — find/open/comment/close the ``heartbeat-alert``
-  bug-ticket lifecycle against the rebar CLI (via the runner).
-- ``check-binding-drift`` — run ``rebar bridge fsck --output json``, tolerate
-  its designed exit-1-on-findings, classify ``binding_drift`` and
-  ``store_integrity``; emit
-  ``drift_found`` / ``drift_total`` / ``drift_summary`` to $GITHUB_OUTPUT.
-- ``binding-drift-alert`` — same lifecycle shape for ``binding-drift-alert``.
-
-Seams (keyword-only params of ``main``):
-- ``runner(argv) -> (returncode, stdout, stderr)`` — every external command
-  (``gh``, ``rebar``) goes through it; unit tests inject a fake.
-- ``environ`` — mapping read instead of os.environ.
-- ``now_epoch`` — int unix time used for age math and timestamps.
-
-Failure dispositions (each preserved from the YAML, NOT a blanket rule):
-- alert-lifecycle WRITES (create/comment/transition) fail LOUD -> exit != 0;
-- dedup FINDs (``rebar list``) fail SOFT -> treated as "no existing alert";
-- ``bridge fsck`` exit 1 with valid JSON is finding data (the signal), never an
-  error; operational failures and invalid/partial JSON fail closed.
+All gh and rebar calls use the injected runner. Environment and time are injected.
+Lifecycle writes fail loudly, dedup reads fail softly, and bridge fsck exit 1 with
+valid finding JSON is signal data. Invalid or partial JSON fails closed.
 """
 
 from __future__ import annotations

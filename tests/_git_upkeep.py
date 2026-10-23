@@ -1,59 +1,8 @@
-"""Shared test helper: fixture bare remotes that leave no background git upkeep.
+"""Create fixture bare remotes with background Git upkeep disabled.
 
-At git's DEFAULTS a bare repository's ``receive-pack`` runs ``run_auto_maintenance()``
-after every push, spawning ``git maintenance run --auto --quiet --detach`` — a child
-process that OUTLIVES the push. ``subprocess.run([... "push" ...])`` returning is
-therefore NOT a happens-before edge for that repository's object database. A fixture
-that pushes into a bare remote and then COPIES or byte-walks it races a concurrent
-repack: entries vanish mid-walk and the copy raises.
-
-Measured on git 2.55, replaying a fixture's own construction sequence under
-``GIT_TRACE2_EVENT`` (bug b394-6198-6010-42f7):
-
-===========================  ==========================  ===================
-remote posture               maintenance children        detached children
-===========================  ==========================  ===================
-git defaults                 1 (``--detach``)            1
-``autoDetach`` pins only     1 (``--no-detach``)         0
-all of the pins below        0                           0
-===========================  ==========================  ===================
-
-The mutation is real, not theoretical. With the remote holding 880 loose objects,
-12 runs at git's defaults left 22 loose objects behind by the time the last push
-returned — whole fanout directories packed away and pruned — and one run was caught
-mid-repack at 154, a different value at the same sampling point. Pinned, all 12 runs
-left the object database untouched at 880. That is the race the ticket store's own CI
-caught as a vanished ``objects/maintenance.lock`` and as pruned ``objects/2c``
-directories (bugs 5b74-5d8f-a6b4-4674 and dca1-f641-caeb-4df4).
-
-rebar pins the two ``autoDetach`` keys on every store it OWNS (``_commands/init.py``'s
-gc-config ensure unit; bug 88eb, ADR 0051), which is why maintenance children against
-rebar-owned trackers already run ``--no-detach``. A bare remote built by a test fixture
-is owned by no rebar code, so it must be pinned here.
-
-The third key is the direct fix: a throwaway fixture remote has no reason to run upkeep
-at all, and it drops a push's maintenance children to ZERO. The two ``autoDetach`` pins
-are defence in depth for any other trigger — they do not suppress maintenance, they force
-it into the FOREGROUND, so the git command that triggered it cannot return while it is
-still running. Either way no mutator survives the push.
-
-This REMOVES the concurrent mutator rather than tolerating it: no retry, no sleep, no
-timing bound, no ignore predicate, and no assertion weakened. A push that genuinely
-cannot succeed still fails.
-
-**The second amplifier: a LOCAL ``git clone``** (bug 57d2-e356-7eb4-4bf5). A clone whose
-source is a local path does not use the transport; it hardlinks or copies every entry it
-finds under the source's ``objects/``, exactly the wholesale walk ``copytree`` performs.
-Entries the detached maintenance child prunes between readdir and copy make git die with
-exit 128 -- ``failed to copy file to '<dst>/.git/objects/<sha>'``, ``unable to read sha1
-file``, or ``unable to parse commit``, one race with three faces. Measured on git 2.55,
-push-then-local-clone in a loop against one bare remote seeded like a ticket store, 8
-concurrent workers x 120 iterations on a loaded host: **unpinned 5/960 clones exited 128;
-pinned 0/960**. ``tests/unit/test_bare_clone_source_upkeep_sweep.py`` is the tree sweep
-that keeps a new fixture from cloning an unpinned remote.
-
-Import it bare (``from _git_upkeep import init_bare_remote``) like the other shared root
-helpers — ``tests/`` is on ``sys.path`` (see tests/conftest.py).
+A push may return while detached maintenance still rewrites the object store. Tests that
+copy or locally clone that remote can then race pruning. Pin autoDetach and disable
+fixture upkeep before any push. A push failure still propagates.
 """
 
 from __future__ import annotations
@@ -102,15 +51,9 @@ def init_bare_remote(
     initial_branch: str | None = None,
     env: Mapping[str, str] | None = None,
 ) -> Path:
-    """Create a bare repository at *remote*, pinned before anything can be pushed.
+    """Initialize a bare remote and pin upkeep before its first push.
 
-    The pins are applied in the same call that creates the repository, so there is no
-    window in which a push could reach an unpinned remote.
-
-    *initial_branch* names the repository's initial ``HEAD`` branch, the
-    ``--initial-branch=tickets`` that several ticket-store fixtures need. It is a
-    parameter rather than a reason to hand-roll ``git init --bare`` beside this
-    helper, because hand-rolling is what leaves a remote unpinned.
+    initial_branch selects its HEAD branch, including ticket-store fixtures that need tickets.
     """
     remote.parent.mkdir(parents=True, exist_ok=True)
     branch = [f"--initial-branch={initial_branch}"] if initial_branch else []

@@ -1,9 +1,4 @@
-"""resolve_hierarchy_link escalation (SC1/3/5/10/11, structural comparability)
-
-Split from the former monolithic tests/scripts/test_ticket_graph.py along
-graph-concern seams. The `graph` fixture + autouse git-isolation fixture live in
-conftest.py; event-writing helpers + the module loader in _helpers.py.
-"""
+"""Test structural hierarchy resolution and ancestor comparability."""
 
 from __future__ import annotations
 
@@ -23,16 +18,7 @@ from _helpers import (
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_resolve_hierarchy_link_same_parent_story_sc1(graph: ModuleType, tmp_path: Path) -> None:
-    """SC1: Two tasks sharing the same parent story → original IDs unchanged.
-
-    Setup:
-        - story-parent: story (no parent)
-        - task-a: task with parent_id=story-parent
-        - task-b: task with parent_id=story-parent
-
-    Expected: resolved_source=task-a, resolved_target=task-b,
-              was_redirected=False, is_redundant=False
-    """
+    """Keep sibling tasks unchanged, without redirect or redundancy."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -61,23 +47,9 @@ def test_resolve_hierarchy_link_same_parent_story_sc1(graph: ModuleType, tmp_pat
 def test_resolve_hierarchy_link_cross_story_same_epic_sc3(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """SC3 (structural semantics): cross-story task pair → escalated to the stories.
+    """Resolve tasks under separate stories to those stories below their common epic.
 
-    The endpoints do not share a parent, so they are not comparable as given. Their
-    nearest common ancestor is epic-root, and each escalates to its own ancestor
-    directly below it — the parent stories. Ticket type plays no part: this held
-    the opposite expectation under the former type-tier rule, where both endpoints
-    were leaf tier and therefore linked directly.
-
-    Setup:
-        - epic-root: epic (no parent)
-        - story-a: story with parent_id=epic-root
-        - story-b: story with parent_id=epic-root
-        - task-a1: task with parent_id=story-a
-        - task-b1: task with parent_id=story-b
-
-    Expected: resolved_source=story-a, resolved_target=story-b,
-              was_redirected=True, is_redundant=False
+    Structural ancestry, not ticket type, determines the redirected endpoints.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -108,24 +80,9 @@ def test_resolve_hierarchy_link_cross_story_same_epic_sc3(
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_resolve_hierarchy_link_cross_epic_sc5(graph: ModuleType, tmp_path: Path) -> None:
-    """SC5 (structural semantics): cross-epic task pair → escalated to the epics.
+    """Resolve tasks in disjoint epic trees to their epic roots.
 
-    The two tasks live in different trees. Both epics are parentless, and parentless
-    tickets count as siblings of one another, so the nearest common ancestor is the
-    virtual root and each endpoint escalates to its own real root. This held the
-    opposite expectation under the former type-tier rule, where both endpoints were
-    leaf tier and therefore linked directly.
-
-    Setup:
-        - epic-a: epic (no parent)
-        - epic-b: epic (no parent)
-        - story-a: story with parent_id=epic-a
-        - story-b: story with parent_id=epic-b
-        - task-a1: task with parent_id=story-a
-        - task-b1: task with parent_id=story-b
-
-    Expected: resolved_source=epic-a, resolved_target=epic-b,
-              was_redirected=True, is_redundant=False
+    The virtual root makes parentless epics siblings. Both leaves redirect upward.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -157,15 +114,7 @@ def test_resolve_hierarchy_link_cross_epic_sc5(graph: ModuleType, tmp_path: Path
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_resolve_hierarchy_link_orphan_ticket_sc10(graph: ModuleType, tmp_path: Path) -> None:
-    """SC10: Tickets with no parent_id → original IDs unchanged.
-
-    Setup:
-        - orphan-a: task (no parent)
-        - orphan-b: task (no parent)
-
-    Expected: resolved_source=orphan-a, resolved_target=orphan-b,
-              was_redirected=False, is_redundant=False
-    """
+    """Keep two parentless tickets unchanged without redirect."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -191,14 +140,7 @@ def test_resolve_hierarchy_link_orphan_ticket_sc10(graph: ModuleType, tmp_path: 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_resolve_hierarchy_link_unreadable_ticket_sc11(graph: ModuleType, tmp_path: Path) -> None:
-    """SC11: If ticket state cannot be reduced → AttributeError or returns error dict.
-
-    Setup:
-        - ticket-ok: valid task
-        - missing-ticket: does not exist in tracker
-
-    Expected: resolve_hierarchy_link returns a dict with 'error' key (not silent fallthrough)
-    """
+    """Return an error for an endpoint that cannot be reduced."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -220,15 +162,7 @@ def test_resolve_hierarchy_link_unreadable_ticket_sc11(graph: ModuleType, tmp_pa
 def test_resolve_hierarchy_link_is_redundant_direct_parent(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """is_redundant=True when source IS the direct parent of target.
-
-    Setup:
-        - story-parent: story (no parent)
-        - task-child: task with parent_id=story-parent
-
-    Expected: resolved_source=story-parent, resolved_target=task-child (or vice versa),
-              is_redundant=True (because story-parent is the direct parent of task-child)
-    """
+    """Mark a direct parent-child pair redundant."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -248,11 +182,7 @@ def test_resolve_hierarchy_link_is_redundant_direct_parent(
 def test_resolve_hierarchy_link_non_blocking_never_promoted(
     graph: ModuleType, tmp_path: Path, relation: str
 ) -> None:
-    """(a) Non-blocking relations are NEVER promoted — exact pair, was_redirected=False.
-
-    Even with a maximal tier gap (task ↔ epic), a non-blocking relation links the
-    exact source/target the caller passed.
-    """
+    """Keep exact endpoints for non-blocking relations across hierarchy levels."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -277,12 +207,7 @@ def test_resolve_hierarchy_link_non_blocking_never_promoted(
 def test_resolve_hierarchy_link_task_to_epic_promotes_to_epic(
     graph: ModuleType, tmp_path: Path, relation: str
 ) -> None:
-    """(b) blocks/depends_on between a task and an epic promotes the task to its epic.
-
-    task-leaf (tier 0) under story-mid under epic-root, linked to epic-other
-    (tier 2). The lower endpoint (task) is promoted up its chain to its epic
-    ancestor → epic-root ↔ epic-other.
-    """
+    """Promote a task-to-epic blocking edge to the task's epic ancestor."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -334,22 +259,14 @@ def test_resolve_hierarchy_link_task_to_story_promotes_to_story(
 def test_resolve_hierarchy_link_cousins_escalate_to_their_parents(
     graph: ModuleType, tmp_path: Path, type_a: str, type_b: str
 ) -> None:
-    """(c) Cousins do NOT share a parent, so a blocking link escalates to their parents.
-
-    Comparability is structural, so ticket type is irrelevant here: task/task,
-    task/bug and bug/bug all behave identically. The pair's nearest common ancestor
-    is epic-root, so each endpoint escalates to its own parent story.
-
-    This inverts the former type-tier expectation, under which task and bug were
-    both leaf tier and cousins therefore linked directly.
-    """
+    """Promote cousin endpoints to their parent stories regardless of ticket type."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
     _write_ticket(tracker_dir, "epic-root", ticket_type="epic")
     _write_ticket(tracker_dir, "story-a", parent_id="epic-root", ticket_type="story")
     _write_ticket(tracker_dir, "story-b", parent_id="epic-root", ticket_type="story")
-    # cousins: different parent stories
+    # separate parent stories
     _write_ticket(tracker_dir, "leaf-a", parent_id="story-a", ticket_type=type_a)
     _write_ticket(tracker_dir, "leaf-b", parent_id="story-b", ticket_type=type_b)
 
@@ -367,21 +284,10 @@ def test_resolve_hierarchy_link_cousins_escalate_to_their_parents(
 def test_resolve_hierarchy_link_disjoint_trees_escalate_to_their_roots(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """(d) Across disjoint trees, each endpoint escalates to its own root.
+    """Resolve disjoint-tree links to each endpoint's own root.
 
-    Parentless tickets are siblings of one another, so the nearest common ancestor
-    of two disjoint trees is the virtual root and each endpoint resolves to the
-    real root beneath it.
-
-    An orphan task blocking an epic is therefore already at that level: both are
-    roots, so nothing moves and was_redirected stays False.
-
-    A task whose only ancestor is a STORY, linked to an unrelated EPIC, escalates
-    to that story — the task's own root — and reports was_redirected=True.
-
-    These assertions are unchanged from when this test covered the type-tier
-    fallback; only the name and rationale change, since the structural rule
-    produces the same endpoints by a different route.
+    A parentless task and epic stay unchanged. A task under a root story redirects to
+    that story. The virtual root supplies their common ancestor.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -406,11 +312,7 @@ def test_resolve_hierarchy_link_disjoint_trees_escalate_to_their_roots(
     assert res_fallback["was_redirected"] is True, res_fallback
 
 
-# ---------------------------------------------------------------------------
-# Structural comparability (story affe-2b42-4ee4-4e12): the rule replacing the
-# former type-tier promotion. Regression cover for bugs 1803-df54-18bb-4881 and
-# jira-reb-1582.
-# ---------------------------------------------------------------------------
+# Structural comparability covers redirected edges and ancestor refusal.
 
 
 @pytest.mark.unit
@@ -418,13 +320,7 @@ def test_resolve_hierarchy_link_disjoint_trees_escalate_to_their_roots(
 def test_resolve_hierarchy_link_task_and_story_siblings_link_directly(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """Bug 1803 repro: a task and a story that share a parent epic link as given.
-
-    Under the former type-tier rule the task was promoted toward the story's tier,
-    found no story ancestor, and fell back to the chain root — the epic — so the
-    store recorded the epic depending on its own child and the requested edge was
-    never written. Structurally the two ARE siblings, so nothing escalates.
-    """
+    """Link task and story siblings directly under their shared epic."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -448,12 +344,7 @@ def test_resolve_hierarchy_link_task_and_story_siblings_link_directly(
 def test_resolve_hierarchy_link_jira_reb_1582_worked_example(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """The worked example from bug jira-reb-1582, asserted in both directions.
-
-    Epic A parents Task B and Story C; Story C parents Task D. A dependency
-    between Task D and Task B escalates to Story C and Task B, while a dependency
-    between Task B and Story C — already siblings — is recorded directly.
-    """
+    """Resolve Task D-to-Task B to Story C-to-Task B. Keep sibling B-to-C direct."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -480,12 +371,7 @@ def test_resolve_hierarchy_link_jira_reb_1582_worked_example(
 def test_resolve_hierarchy_link_grandparent_pair_is_redundant(
     graph: ModuleType, tmp_path: Path, relation: str
 ) -> None:
-    """An ancestor/descendant blocking pair is refused, not just a direct parent.
-
-    The guard is evaluated on the RESOLVED pair, so it covers a grandparent and
-    grandchild — two hops apart — as well as the direct parent-child case that the
-    pre-existing guard already caught.
-    """
+    """Refuse blocking edges between any ancestor and descendant after resolution."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -505,12 +391,7 @@ def test_resolve_hierarchy_link_grandparent_pair_is_redundant(
 def test_resolve_hierarchy_link_grandparent_pair_allowed_for_non_blocking(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """The widened blocking predicate must not leak into non-blocking relations.
-
-    `is_redundant` for a non-blocking relation keeps its original meaning — the
-    direct parent-child case only — so a grandparent/grandchild `relates_to` is
-    still recorded exactly as given.
-    """
+    """Keep non-blocking grandparent links. Only direct parent-child is redundant."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -531,13 +412,7 @@ def test_resolve_hierarchy_link_grandparent_pair_allowed_for_non_blocking(
 def test_resolve_hierarchy_link_deep_chain_escalates_to_nca_children(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """A chain deeper than two hops resolves against the NCA, not the chain root.
-
-    The former ancestor walk stopped after two hops, so a four-level chain could
-    not see its own root and resolution fell back to whatever it had reached. Here
-    the two leaves sit four levels down in different sub-trees whose nearest common
-    ancestor is the epic, so each escalates to its own story — NOT to the epic.
-    """
+    """Resolve deep cousin leaves to their stories below the nearest common epic."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 

@@ -1,22 +1,8 @@
-"""Repo-wide pytest configuration.
+"""Configure repository-wide pytest isolation and tier selection.
 
-Provides an autouse fixture that prevents tests from creating new top-level
-entries in REPO_ROOT. Tests that write to disk must use ``tmp_path`` or
-another sandboxed location. If new entries appear, the test fails with a message
-naming them. The guard reports only — it never removes what it names, because a
-snapshot diff cannot tell a test's own leak from a concurrent write by anything
-else sharing this checkout.
-
-This guard catches the most common leak shape — relative-path writes from
-mis-routed tracker_dir/cwd handling (the failure mode that put
-``depends_on/tkt-src3`` at the repo root). It does NOT catch writes that
-target an existing top-level dir (e.g. ``src/rebar/_engine/x.json``); for
-that level of guarantee, run ``git status --porcelain`` in CI.
-
-Also provides a network-escape guard for tests/unit/** and tests/scripts/**.
-Any test in those tiers that opens a real socket raises ``RuntimeError`` with a
-clear message. Tests that legitimately need network access (none expected in
-these tiers) may opt out via ``@pytest.mark.allow_network``.
+Tests use sandbox paths. Report repo-root changes without deleting them because the
+snapshot cannot identify their writer. Unit and script tests block unexpected sockets.
+allow_network marks explicit exceptions.
 """
 
 from __future__ import annotations
@@ -136,12 +122,8 @@ if _TESTS_DIR not in sys.path:
     sys.path.insert(0, _TESTS_DIR)
 
 
-# --- Optional-extra coverage guard (bug 599e-77da-29dd-482d) ----------------------
-# A whole test surface can silently vanish from CI: with no lane installing the `reviewbot`
-# extra, 38 tests behind `pytest.importorskip("fastapi")` — including SECURITY guards —
-# no-op'd for months. With REBAR_REQUIRE_EXTRAS=1 (set by the CI pytest steps) those skips
-# become hard errors instead. Lives in tests/_extra_guard.py so it is directly testable;
-# imported here because a conftest is the earliest hook that runs before any test module.
+# Turn missing Python extras into collection errors when REBAR_REQUIRE_EXTRAS=1.
+# Import the directly tested guard before test modules can call importorskip.
 import _extra_guard  # noqa: E402  (needs _TESTS_DIR on sys.path, set just above)
 from _sandbox_capabilities import (  # noqa: E402
     collect_counted_skips_from_worker,
@@ -157,13 +139,10 @@ _extra_guard.install()
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Enforce the declared Git floor, then register custom markers.
+    """Enforce the shared Git version floor before registering markers.
 
-    The floor is checked FIRST and fails the whole session (it never skips): the
-    two-clone convergence regressions need ``git merge-tree --write-tree`` (Git 2.38+),
-    and a regression that quietly does not run reads as coverage while providing none —
-    ticket 980d-83ac-a6bb-4edb. The declared value lives in
-    ``.github/git-version-floor.txt``, shared with the contributor docs and the CI gate.
+    Convergence tests require merge-tree --write-tree. An older Git fails the session
+    instead of silently skipping the regression. CI and docs read the same floor file.
     """
     import _git_floor
 
@@ -246,16 +225,8 @@ def _register_counted_skip_xdist_hooks(config: pytest.Config) -> None:
 
 _EXTERNAL_DIR = _REPO_ROOT / "tests" / "external"
 
-# Path fragments (matched against each item's repo-relative POSIX path) that select
-# the OS-sensitive tests forming the reduced macOS compatibility suite (story
-# ci-runtime-round2). The full suite runs on Linux; macOS runs only `platform_compat`
-# + the `integration` tier (which already exercises cross-process locking end-to-end),
-# because the macOS runner is ~3.7x slower per test (process-spawn + git-store fixture
-# overhead) yet its unique value is platform behaviour, not extra test breadth. The
-# seams whose behaviour genuinely differs between Darwin and Linux: advisory/stale file
-# locking (flock/fcntl/mkdir), atomic directory/rename semantics, subprocess timeout
-# (gtimeout vs timeout), and cross-process git contention. Keyed on path (not per-file
-# markers) so the selection lives in ONE reviewable place.
+# Select macOS tests by repo-relative path. Linux runs the full suite. MacOS keeps
+# platform-sensitive locking, rename, timeout, and Git-contention coverage.
 _PLATFORM_COMPAT_PATH_FRAGMENTS = (
     "/store/",  # store lock / atomic-rename / merge-recovery (unit + interfaces)
     "test_lock",  # advisory / stale / retry / age-ceiling / holder-labelling lock tests
@@ -279,22 +250,10 @@ def _is_platform_compat_path(relative_posix: str) -> bool:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Confine the ``external`` tier to tests/external/ (bug 4a48-6dd5-aef3-4c8e).
+    """Mark external tests by directory and reject external marks outside that tier.
 
-    Two structural guarantees:
-
-    (a) Auto-apply the ``external`` marker to every collected item whose file
-        lives under tests/external/, so existing tests need no per-file edits and
-        the default selection ``-m "not integration and not external"`` reliably
-        excludes the whole tier by directory.
-
-    (b) Hard-FAIL collection if any item carries the ``external`` marker but is
-        NOT under tests/external/ — a live/billable test must never hide in
-        another tier. This is the one unambiguous confinement rule; it does not
-        require a tier marker on the many existing non-external tests.
-
-    Also auto-applies the ``platform_compat`` marker by path (the reduced macOS
-    compatibility suite; see ``_PLATFORM_COMPAT_PATH_FRAGMENTS``).
+    The default selection excludes the whole external tier. Also mark the reduced macOS
+    platform_compat selection by path.
     """
     misplaced: list[str] = []
     for item in items:
@@ -322,33 +281,16 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             pytrace=False,
         )
 
-    # (c) Hard-FAIL collection when the live-Jira tests carry an xdist_group mark that
-    #     the selected scheduler will silently DISCARD — pytest-xdist honours the mark
-    #     only under `--dist loadgroup`. Pure predicate in tests/_live_jira_confinement.py
-    #     so it is testable without spawning pytest; a no-op unless live creds are present.
-    #
-    #     UsageError, not pytest.fail(), UNLIKE arm (b) above: this arm can only fire under
-    #     `-n>0`, and from the xdist controller's collection hook a pytest.fail() escapes as a
-    #     20-line `INTERNALERROR>` traceback that buries the message under a stack the reader
-    #     did not cause. The condition IS a usage error — the wrong `--dist` for this selection
-    #     — so UsageError renders it as a clean `ERROR: …` banner (exit 4) with the remedy
-    #     legible. A guard whose whole value is a clear message must not look like a crash.
+    # External Jira tests need loadgroup for xdist_group isolation. Report a UsageError
+    # when credentials make them runnable under a scheduler that ignores the mark.
     import _live_jira_confinement
 
     unconfined = _live_jira_confinement.unconfined_live_jira_reason(config, items)
     if unconfined is not None:
         raise pytest.UsageError(unconfined)
 
-    # (d) Hard-FAIL collection when a UNIT-tier test spawns a child that escapes the tier's
-    #     isolation root. `_default_rebar_root_to_sandbox` reaches children only by ENVIRONMENT
-    #     INHERITANCE, so a hand-built `env=` silently drops REBAR_ROOT and the child falls back
-    #     to the git toplevel of its cwd — the real checkout. Pure AST predicate in
-    #     tests/_subprocess_isolation.py so it is testable without spawning pytest.
-    #
-    #     UsageError for the same reason arm (c) uses it: from the xdist controller a
-    #     pytest.fail() escapes as a 20-line `INTERNALERROR>` traceback that buries the
-    #     message under a stack the reader did not cause. A guard whose whole value is a
-    #     clear message must not look like a crash.
+    # Reject unit children whose environment drops the sandbox REBAR_ROOT.
+    # UsageError keeps the collection diagnosis legible under xdist.
     import _subprocess_isolation
 
     unharnessed = _subprocess_isolation.unharnessed_subprocess_reason(
@@ -438,29 +380,16 @@ def _network_guard(request: pytest.FixtureRequest) -> Iterator[None]:
 
 
 def _is_coverage_artifact(name: str) -> bool:
-    """coverage.py's own data files are NOT test leaks.
+    """Recognize coverage.py data files created by pytest-cov workers.
 
-    Under pytest-xdist (`-n>0`) with ``parallel = true`` (see docs/coverage.md), each
-    worker process writes a per-process data file — ``.coverage.<host>.<pid>.<rand>`` —
-    to the CWD (repo root) when it finishes, and pytest-cov combines them into a single
-    ``.coverage`` at session end. Because workers finish at different times, a file
-    written by a done worker would otherwise be observed as a "new entry" by the
-    per-test leak snapshot of a still-running worker and spuriously fail that test
-    (story 8d36; back when the guard also deleted what it reported, the same diff
-    additionally destroyed the data file and collapsed the combine). These names are
-    all gitignored and produced by the coverage plugin, not the test body, so the leak
-    guard skips them (it never fails on them).
+    Other workers may finish during a test's repo-root snapshot. Their gitignored coverage
+    files belong to the plugin and must not be reported as test leaks.
     """
     return name == ".coverage" or name.startswith(".coverage.") or name == "coverage.xml"
 
 
-# Tool/framework cache directories the toolchain may materialize under REPO_ROOT
-# during a run. Like coverage.py's data files (``_is_coverage_artifact``) these are
-# gitignored (see ``.gitignore``) and written by the framework, not by a test body,
-# so their appearance is not a REPO_ROOT leak. ``.pytest_cache`` in particular is
-# written by the floor-leg pytest despite ``-p no:cacheprovider``, tripping the
-# guard at teardown (piecemeal-mycologic-duckling); exempting the whole gitignored
-# tool-cache class keeps the guard portable across pytest versions and CI providers.
+# Ignore gitignored tool caches created by the framework during tests. Their
+# appearance under the repo root is not evidence that a test wrote there.
 _TOOLING_CACHE_ARTIFACTS = frozenset(
     {
         ".pytest_cache",
@@ -494,20 +423,8 @@ def _no_repo_root_leaks() -> Iterator[None]:
         after = _repo_leak_snapshot(_REPO_ROOT)
         leaked = {name for name in (after - before) if not _is_framework_artifact(name)}
         if leaked:
-            # REPORT ONLY — never delete. Do not "restore cleanup" here.
-            #
-            # A before/after set difference proves only that an entry APPEARED
-            # under REPO_ROOT during a wall-clock window. Deleting it asserts the
-            # strictly stronger "this test created it", which the guard has no
-            # evidence for and cannot obtain: any other process writing into this
-            # same checkout (a concurrent git, an editor, another agent running
-            # rebar) produces an indistinguishable diff entry, and every proxy for
-            # ownership — mtime, birthtime, name shape — is satisfied equally by a
-            # legitimate external write. Reproduced 1/1: a bare `touch` from a
-            # separate shell mid-test was unlinked and blamed on an innocent test.
-            # Since no attribution signal exists, the deletion is removed outright
-            # rather than made conditional; the failure message tells the reader
-            # nothing was removed so they can clean up a genuine leak themselves.
+            # Report new repo-root entries without deleting them. A snapshot proves
+            # appearance, not which test or concurrent process wrote the entry.
             pytest.fail(_leak_failure_message(leaked))
 
 
@@ -554,18 +471,12 @@ def _remove_readonly_run_snapshots(tmp_path: Path, _isolate_user_config: None) -
 
 @pytest.fixture(autouse=True)
 def _bound_review_bot_shutdown_drain(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep tests from inheriting the review bot's 20-minute production drain, and make the
-    hard-shutdown force-exit inert for the whole suite.
+    """Make review-bot hard-shutdown process exit inert during tests.
 
-    The review-bot lifespan arms a daemon ``threading.Timer`` that calls
-    ``app._force_process_exit`` (``os._exit``) when an orphaned ``asyncio.to_thread`` offload
-    outlives the bounded cancel (bug 9d40-1db8-1bcc-4f91). Many test files across tiers drive
-    that lifespan; a real timer armed by one test can fire ``os._exit`` mid-run and kill the
-    pytest-xdist worker executing an UNRELATED test (seen as "worker 'gwN' crashed"). Patching
-    the module seam to a no-op keeps the arming/gating logic exercised while making the actual
-    process kill inert. Tests that assert the force-down monkeypatch this same seam to a recorder
-    inside the test body, which takes precedence. Guarded on import because the review-bot ``app``
-    module needs the optional ``fastapi`` extra, absent in the default test tier."""
+    A lifespan timer from one test can otherwise kill an unrelated xdist worker. Patching
+    the exit seam keeps drain logic testable. Force-down tests replace it with a recorder.
+    Skip the patch when the optional review-bot module is unavailable.
+    """
     monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "1.0")
     try:
         from rebar.review_bot import app as _review_bot_app
@@ -588,54 +499,25 @@ def _rebar_root_sandbox_repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def _default_rebar_root_to_sandbox(
     _rebar_root_sandbox_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Default repo/gate storage to a sandbox for every test (bug dd62 fallout).
+    """Default repo and gate storage to this worker's sandbox.
 
-    Without this, any test that drives the CLI/library WITHOUT setting ``REBAR_ROOT``
-    resolves the repo root to the developer/CI CHECKOUT (git toplevel of the cwd) — and a
-    real, mount-eligible command then auto-attaches ``.tickets-tracker`` into the real
-    repo root (bug ad9f's central mount). Under xdist that single creation lands inside
-    the per-test snapshot window of EVERY concurrently running test, so the repo-root
-    leak guard flags a random spray of victims — the CI failure mode this closes.
-
-    Precedence is preserved: a test-owned fixture (``rebar_repo`` et al.) monkeypatches
-    ``REBAR_ROOT`` AFTER this autouse default and wins; a test that ``delenv``s it still
-    gets the cwd fallback it asked for. Only the implicit
-    tests-run-against-the-checkout default is removed.
-
-    The same sandbox also keeps gate-admission tests off the host-global operator slots:
-    child CLI/library processes inherit ``REBAR_GATE_TMPDIR`` from the test environment,
-    while test-owned fixtures can still monkeypatch a narrower gate store after this
-    autouse default."""
+    Implicit CLI and child calls must not attach a tracker to the checkout or use host-global
+    gate slots. Test-owned fixtures may override REBAR_ROOT or REBAR_GATE_TMPDIR afterward.
+    an explicit deletion still selects the cwd fallback.
+    """
     monkeypatch.setenv("REBAR_ROOT", str(_rebar_root_sandbox_repo))
     monkeypatch.setenv("REBAR_GATE_TMPDIR", str(_rebar_root_sandbox_repo.parent / "gate-store"))
 
 
 @pytest.fixture(autouse=True)
 def _gate_source_attested_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default the code-reading gates to ``source=attested``/``ref=HEAD`` for the offline
-    test suite (epic raze-vet-ditch; retargeted by melancholy-firstborn-shihtzu).
+    """Use the local HEAD commit as the offline suite's attested gate source.
 
-    In production the gates default to ``source=attested``/``ref=origin/main`` — they fetch
-    + materialize a snapshot at the pinned SHA. The suite runs OFFLINE on disposable
-    ``tmp_path`` repos with no ``origin``, so ``origin/main`` cannot resolve.
-
-    This USED to default to ``source=local`` (read the in-place checkout), which resolves
-    offline but is **unsignable by contract** — ADR 0005 and
-    ``_snapshot.repo_snapshot.SOURCE_LOCAL`` both document local as "dirty allowed, never
-    signed". That made a defect (plan review signing a local read) load-bearing for ~47
-    lifecycle tests, so the defect could not be fixed without the suite going red.
-
-    ``ref=HEAD`` is the offline-safe attested basis — it resolves from the LOCAL object DB
-    with no remote, and is the same recipe the completion close gate already uses
-    (``source="attested", ref="HEAD", fetch=False``). Gate logic is now exercised against an
-    immutable pinned tree, as in production.
-
-    Consequence for test authors: **code drift must be COMMITTED to be visible.** Writing a
-    file into the worktree no longer changes what the gate reads, because the gate reads the
-    pinned snapshot — which is the honest meaning of drift (the attested basis moved), not an
-    artifact. A test that specifically needs the in-place read sets ``REBAR_GATE_SOURCE`` or
-    passes ``source="local"`` explicitly (an explicit arg wins), and must then expect NO
-    signature."""
+    Production defaults to origin/main, which disposable test repos may lack. Local-source
+    reads cannot sign. HEAD supplies a committed source without a fetch. Tests that need
+    in-place reads choose source=local explicitly and expect no signature. Code drift must
+    be committed before an attested gate can see it.
+    """
     if "REBAR_GATE_SOURCE" not in os.environ:
         monkeypatch.setenv("REBAR_GATE_SOURCE", "attested")
         monkeypatch.setenv("REBAR_GATE_REF", "HEAD")
@@ -643,17 +525,11 @@ def _gate_source_attested_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _identity_enforcement_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Force the authenticated-authorship write-gate OFF for the suite (story ad42).
+    """Disable ambient identity enforcement for in-process tests.
 
-    A stray global ``REBAR_IDENTITY_REQUIRE_AUTHENTICATED=1`` in the environment would
-    otherwise break the suite broadly: every create/mutate of a non-exempt ticket type
-    fails with the "cannot be signed" CommandError when no identity + signing key is
-    configured. This guard pins the enforcement flag to ``0`` for the in-process suite so
-    results never depend on an ambient global. Unlike the gate-source default above this is
-    UNCONDITIONAL (it must override a stray ``=1``, not defer to it). The dedicated identity
-    enforcement tests (``tests/unit/test_identity_*``) are unaffected: they build their own
-    subprocess ``env`` dict with the flag set explicitly and pass ``env=`` to
-    ``subprocess.run``, so their value wins in the child process regardless of this default."""
+    A host-wide authenticated-authorship flag would break unrelated ticket mutations.
+    Dedicated enforcement tests set their own child environment explicitly.
+    """
     monkeypatch.setenv("REBAR_IDENTITY_REQUIRE_AUTHENTICATED", "0")
 
 
@@ -675,44 +551,22 @@ def _compaction_horizon_zero_by_default(monkeypatch: pytest.MonkeyPatch) -> None
 
 @pytest.fixture(autouse=True)
 def _compaction_trigger_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No DETACHED compaction workers in the offline suite (story gaudy-gangrenous-basilisk).
+    """Disable detached compaction workers in the offline suite by default.
 
-    In production ``compact.trigger`` defaults to ``async``: a close spawns a detached worker
-    that folds out of band, which is the compaction floor for stores with no CI and no cron.
-    In a test suite that is actively harmful, and measurably so — with it on, detached children
-    outlive the tests that spawned them and race the NEXT test's writes against the same temp
-    store, producing "git commit failed" / "git operation failed" errors scattered across
-    unrelated interface tests. The child is doing legitimate work; it is simply not this
-    process's work, and a unit suite must not have background writers.
-
-    Same shape as the network and repo-commit guards above: the ambient default is the safe
-    one, and a test that specifically exercises the trigger sets ``REBAR_COMPACT_TRIGGER``
-    itself (``always`` to fold inline and assert on it, or ``async`` with the spawn stubbed) —
-    an explicit value wins over this default."""
+    They can outlive one test and race the next against its temporary store. Tests of the
+    trigger set REBAR_COMPACT_TRIGGER explicitly and retain control of the worker.
+    """
     if "REBAR_COMPACT_TRIGGER" not in os.environ:
         monkeypatch.setenv("REBAR_COMPACT_TRIGGER", "off")
 
 
 @pytest.fixture(autouse=True)
 def _no_ambient_model_classes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Scrub the nine ``REBAR_LLM_<CLASS>_<FIELD>`` model-class overrides (task 7761).
+    """Remove ambient model-class overrides before each test.
 
-    The project-config layer is already sandboxed — ``REBAR_ROOT`` points at a scratch repo, so
-    a ``[tool.rebar.llm.model_classes]`` table in rebar's OWN pyproject is never read. The ENV
-    layer had no such guard, and since 7761 it matters: ``sizing.models_at_or_above`` and
-    ``config.resolve_model`` now resolve model-CLASS names, so they read the class config where
-    they previously read only the ``MODEL_LADDER`` constant. A developer or CI runner with
-    ``REBAR_LLM_STANDARD_MODEL`` exported — exactly what an operator retargeting the standard
-    class onto Bedrock has set — otherwise gets a spurious failure in
-    ``test_plan_review.py::test_is_context_limit_error_and_ladder``, whose ladder assertion is
-    written with literal BARE ids (MEASURED: index 1 becomes
-    ``bedrock:us.anthropic.claude-sonnet-4-6``). That failure names an unrelated test and reads
-    as a regression in the size ladder, so it is expensive to diagnose.
-
-    UNCONDITIONAL, like the identity guard above rather than the horizon default: the point is to
-    override a stray ambient value, not defer to it. Tests that exercise the override mechanism
-    itself (``tests/unit/test_model_classes.py``) call ``monkeypatch.setenv`` in their own body,
-    which runs after every fixture, so their value still wins."""
+    Operator settings can change model selection and invalidate tests written against the
+    default ladder. Tests exercising overrides set their values after this fixture.
+    """
     for class_name in ("TRIVIAL", "STANDARD", "FRONTIER"):
         for field in ("MODEL", "PROVIDER", "ENDPOINT"):
             monkeypatch.delenv(f"REBAR_LLM_{class_name}_{field}", raising=False)
@@ -795,23 +649,10 @@ def block_extra() -> Iterator[Any]:
     importlib.invalidate_caches()
 
 
-# ── Repo-isolation guard (no test may commit to / mutate this checkout) ───────
-#
-# Tests operate on disposable trackers under tmp_path, never the rebar checkout.
-# Two ways a test can break that, both invisible to the top-level leak guard
-# above:
-#   1. Commits — a write path (e.g. ticket-graph's _write_link_event running
-#      ``git -C <tracker> commit``) against a tracker that is NOT its own git
-#      repo: git walks UP and commits into this checkout. This once leaked dozens
-#      of ``ticket: link ...`` commits onto main.
-#   2. Working-tree writes into EXISTING tracked dirs (e.g. src/rebar/_engine/x),
-#      which `_no_repo_root_leaks` (new top-level entries only) cannot see.
-#
-# The per-test fixture catches (1) and pinpoints the offender; the session
-# backstop catches (2) anywhere in the tree. Both are cheap (a couple of `git`
-# calls). Opt a deliberate exception out with ``@pytest.mark.allow_repo_writes``.
-# Detection primitives live in tests/_isolation.py so the guard's self-test can
-# exercise the same code (tests/unit/test_repo_isolation_guard.py).
+# Keep tests in disposable trackers. A nested tracker without its own Git repo can
+# commit into this checkout. Writes into existing tracked dirs evade the top-level
+# entry guard. Per-test HEAD and session status checks cover both cases. Deliberate
+# exceptions use allow_repo_writes. Shared predicates reside in _isolation.py.
 
 from _isolation import head as _repo_head  # noqa: E402
 from _isolation import head_move_failure_message as _head_move_failure_message  # noqa: E402
@@ -835,42 +676,10 @@ def _no_repo_commits(request: pytest.FixtureRequest) -> Iterator[None]:
         pytest.fail(_head_move_failure_message(before, after))
 
 
-# ── caplog coverage integrity (bug 9ac2) ─────────────────────────────────────
-#
-# Every other gate in this repo fails closed; an unreachable log assertion fails
-# OPEN. `assert not [unexpected]` is trivially true against an empty list, so a
-# test whose caplog records never arrive verifies nothing and still reports
-# success — indistinguishable, in the run output, from a real verification.
-#
-# caplog captures via a handler on the ROOT logger, so records only reach it if
-# the shared parent logger both emits and propagates them. There are TWO shared
-# parents — `rebar` for the library/CLI/MCP surfaces and the sibling
-# `rebar.reconciler` for the reconciler subprocess's top-level-imported modules —
-# and both are guarded (_log_integrity.SHARED_LOGGER_NAMES). Two process-global,
-# never-restored mutations sever capture under either, and both are real:
-#   * propagate = False — nothing under that root reaches the root handler
-#     (rebar.review_bot.config.configure_logging did this at import time; b718).
-#     pytest >= 8.4 re-attaches the capture handler to loggers that are ALREADY
-#     non-propagating, so the damage is bounded to the test that flips it
-#     mid-capture — but that window is silent, and the mitigation is an internal
-#     detail of _pytest.logging, not a contract;
-#   * setLevel(WARNING) — INFO/DEBUG records are dropped at the originating
-#     logger, and caplog.at_level(INFO) without a `logger=` argument cannot undo
-#     it because it raises the ROOT level (rebar._logging.install_stderr_handler
-#     does this; every in-process rebar._cli.main() call leaks it onto `rebar`,
-#     and every in-process rebar.reconciler.__main__.main() call leaks it onto
-#     `rebar.reconciler` — bug 9151, an INFO assertion in the a4bd inbound-removal
-#     suite going order-dependently red under -n 3 --dist worksteal).
-#
-# The two are handled differently on purpose. Disabling propagation is never
-# legitimate, so it FAILS the test that did it — at the SOURCE, not at whichever
-# unrelated victim happens to run next. Raising the level IS a legitimate side
-# effect of exercising a real entrypoint, so it is CONTAINED: restored per-test,
-# which is strictly stronger for coverage integrity than blame would be, because
-# every test then starts from the same level and its log assertions hold
-# regardless of run order. Detection lives in tests/_log_integrity.py so the
-# guard's self-test (tests/unit/test_caplog_coverage_integrity.py) runs the same
-# code.
+# Keep caplog assertions from passing with no records. The rebar parent covers
+# library, CLI, MCP, and reconciler logs. A test that disables propagation fails at
+# source. An entrypoint that raises the logger level is restored after the test.
+# Both guards share _log_integrity primitives with their direct tests.
 
 import _log_integrity  # noqa: E402
 

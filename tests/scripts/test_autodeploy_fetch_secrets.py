@@ -1,19 +1,7 @@
-"""autodeploy re-runs fetch-secrets.sh before `docker compose up` so new/rotated
-SSM-backed env keys reach the review-bot container on deploy without a manual boot
-(ticket f600 / incident 2731 AC2).
+"""Refresh SSM secrets before a review-bot deploy, including secrets-only changes.
 
-The container .env is SSM-sourced (``fetch-secrets.sh``) and rsync-EXCLUDED, so a new
-env key added via ``fetch-secrets.sh``/``ssm.tf`` would never reach the box on deploy —
-those paths are NOT in ``BOT_PATHS``. autodeploy therefore triggers the review-bot
-redeploy on ``BOT_PATHS`` OR ``SECRETS_PATHS`` and re-runs ``fetch-secrets.sh`` right
-before ``compose up``.
-
-These tests drive autodeploy.sh under a PATH shim where ``main`` advanced and ``git
-diff`` reports only ``infra/scripts/fetch-secrets.sh`` changed (a secrets-only deploy).
-They assert (1) fetch-secrets runs, and runs BEFORE ``compose up`` (ordering proof via a
-shared command log); and (2) a fetch-secrets FAILURE aborts the deploy fail-safe — no
-build/up, a backoff recorded — so the running bot is never left on a stale/half-written
-secrets file.
+Fetch failure stops build/up and records backoff so the running bot is not replaced
+with stale or incomplete secrets.
 """
 
 from __future__ import annotations

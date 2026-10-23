@@ -1,10 +1,4 @@
-"""Shared helpers for the ticket-graph test split.
-
-Extracted from the former monolithic tests/scripts/test_ticket_graph.py so the
-seam-split files share one definition of the event-writing helpers + the module
-loader, instead of duplicating them (``_write_ticket`` alone has 145 call sites).
-The `graph` fixture + autouse git-isolation fixture live in conftest.py.
-"""
+"""Shared graph-test event writers and module loader. Fixtures are defined in conftest."""
 
 from __future__ import annotations
 
@@ -86,11 +80,7 @@ def _write_blocks_link(
     link_uuid: str | None = None,
     timestamp: int = 1500,
 ) -> None:
-    """Write a LINK event in blocker_id's directory: blocker_id blocks blocked_id.
-
-    Follows the schema used by ticket-link.sh: LINK event is stored in the
-    blocker's directory with data.target_id=blocked_id and data.relation='blocks'.
-    """
+    """Store blocker_id blocks blocked_id as a LINK in the blocker's directory."""
     if link_uuid is None:
         link_uuid = f"link-{blocker_id}-blocks-{blocked_id}"
     blocker_dir = tracker_dir / blocker_id
@@ -112,11 +102,7 @@ def _write_blocks_link(
 
 
 def _write_archive_event(tracker_dir: Path, ticket_id: str, timestamp: int = 3000) -> None:
-    """Write an ARCHIVED event to ticket_id's directory.
-
-    This marks the ticket as archived in the event-sourced state.
-    The ticket-reducer.py handles ARCHIVED events by setting state['archived'] = True.
-    """
+    """Write the ARCHIVED event that marks ticket_id archived in reduced state."""
     ticket_dir = tracker_dir / ticket_id
     ticket_dir.mkdir(parents=True, exist_ok=True)
     archive_event = {

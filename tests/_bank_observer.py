@@ -1,36 +1,9 @@
-"""Shared bookkeeping seams for the completion-banking behavioral eval.
+"""Shared completion-banking observations for external and unit tests.
 
-``make_observed_upsert`` is the signature-faithful bookkeeping wrapper for
-``CriterionBank.upsert``. The completion-banking behavioral eval (``tests/external``)
-monkeypatches ``CriterionBank.upsert`` with a stub that records which criteria are banked
-while still delegating to the real upsert. That stub MUST stay faithful to the real
-``upsert`` signature: the real method carries keyword-only ``evidence_sufficient`` and
-``seeded`` markers (framework-set on the bounded-fallback and cache-seed paths), and
-production passes them. A stub that only accepts ``source`` silently drops those kwargs and
-raises ``TypeError`` the moment the verifier enters the bounded-fallback path — the exact
-drift that broke the live bedrock arm (bug ``9c7c-4844-f53c-4eac``).
-
-``make_response_counting_wrap`` and ``bounded_bank_gaps`` are the eval's measurement and
-oracle, denominated in evidence RESPONSES (distinct ``ctx.run_step`` values at which a
-governed repository tool actually executed). That is the unit the completion evidence policy
-enforces (``max_evidence_responses`` counts run_steps in
-``src/rebar/llm/completion_tool_policy.py``); an executed-CALL denomination went stale when
-commit ``e1352535ace`` (ticket ``dd41-239d-6e09-4a86``) deliberately let batched governed
-reads execute, decoupling calls from responses (bug ``9507-4676-27af-4344``).
-
-The measured contract is SYSTEM-level boundedness (operator ruling on ticket
-``6543-24a7-d2fb-4ff9``): a durable bank write counts regardless of actor — a genuine model
-``record_criterion_verdict`` upsert and the policy's silent bounded-fallback insufficiency
-snapshot are both banking events. Only ``seeded=True`` cache seeds are excluded: they are
-pre-run state, not run progress. dd41 also removed the steering pressure that once made the
-model interleave genuine records, so an actor-filtered (``source == "tool"``) observation
-rejects intended behavior (run 32575679530: genuine first banks ``[6,7,8,9,9]`` while the
-policy's fallbacks held the bound on schedule).
-
-Factoring these here lets the live eval and fast, live-dependency-free unit regressions
-(``tests/unit/test_completion_bank_observer_forwarding.py``,
-``tests/unit/test_completion_banking_oracle.py``) share one implementation, so drift is
-exercised by the unit tier rather than only surfacing on a live provider arm.
+The upsert wrapper forwards keyword-only arguments unchanged, including evidence_sufficient
+and seeded. Banking counts durable model records and policy fallback snapshots, but excludes
+seeded pre-run state. Evidence gaps count distinct executed run steps, matching the policy's
+max_evidence_responses limit. Synthetic notices do not count as executed responses.
 """
 
 from __future__ import annotations
@@ -46,17 +19,10 @@ def make_observed_upsert(
     calls_at_first_write: list[int],
     evidence_calls: Callable[[], int],
 ) -> Callable[..., Any]:
-    """Build a drop-in ``CriterionBank.upsert`` replacement that records the first durable
-    bank write of each criterion (into ``writes`` / ``calls_at_first_write``) and then
-    forwards verbatim to ``original_upsert``.
+    """Record each criterion's first durable write and forward every upsert argument.
 
-    The bookkeeping is actor-agnostic (ticket ``6543-24a7-d2fb-4ff9``): a genuine model
-    record and the policy's bounded-fallback insufficiency snapshot both count as banking
-    events. Only ``seeded=True`` cache seeds are excluded — pre-run seeded state is not run
-    progress. Every keyword argument other than ``seeded`` (which the bookkeeping inspects)
-    is passed through unchanged via ``**kwargs``, so ``source``, ``evidence_sufficient``, and
-    any future keyword-only param the real ``upsert`` grows flow through without the stub
-    having to know about them.
+    Model records and bounded-fallback snapshots count. Seeded cache entries do not count as
+    run progress. Keyword-only arguments pass through unchanged.
     """
 
     def observed_upsert(
@@ -80,19 +46,11 @@ def make_response_counting_wrap(
     original_wrap: Callable[..., list],
     evidence_steps: set[int],
 ) -> Callable[..., list]:
-    """Build a drop-in ``wrap_completion_evidence_policy`` that also counts evidence responses.
+    """Wrap governed tools and count distinct run steps that actually execute.
 
-    The returned function calls ``original_wrap`` (the real policy layer) and wraps each
-    policy-governed toolset so that every governed evidence tool call that actually EXECUTED
-    adds its ``ctx.run_step`` to ``evidence_steps``. A call the policy answered with a
-    synthetic notice (``COMMIT_STEERING_NOTICE`` or ``ALL_CRITERIA_BANKED_NOTICE``) never
-    executed, so it is not counted; an executed call whose result carries the appended
-    ``BOUNDED_FALLBACK_NOTICE`` did execute and is counted. ``len(evidence_steps)`` is the
-    number of evidence responses so far — the exact unit ``max_evidence_responses`` bounds.
-
-    A bounded-fallback bank fires inside the policy layer before this outer counter records
-    the triggering step, so a snapshot taken at that bank can read one response low. That
-    direction is conservative for a ``<= max_gap`` oracle bound.
+    Synthetic policy notices do not count. An executed call carrying a fallback notice does.
+    The policy may bank before this outer wrapper records the triggering step, so a bank
+    snapshot can be one response low.
     """
     from dataclasses import dataclass
 
@@ -121,16 +79,10 @@ def make_response_counting_wrap(
 
 
 def bounded_bank_gaps(trial: dict[str, Any], expected_criteria: int, *, max_gap: int = 3) -> bool:
-    """The banking oracle: every criterion banked incrementally within bounded evidence gaps.
+    """Require first banks within max_gap executed responses of each prior first bank.
 
-    ``trial["responses_at_bank"]`` holds, per criterion in first-bank order, the number of
-    evidence responses observed when that criterion first DURABLY banked — by the model's
-    genuine record or by the policy's bounded-fallback snapshot, whichever wrote first
-    (system-level boundedness, the contract ruled on ticket ``6543-24a7-d2fb-4ff9``). The
-    first bank must land within ``max_gap`` evidence responses, and each later first-bank
-    within ``max_gap`` of the previous one — mirroring the policy's per-current-criterion
-    ``max_evidence_responses`` enforcement. A trial that banked nothing, banked late, or
-    ended without a verdict fails.
+    Count durable model and bounded-fallback writes, excluding seeded state. A trial with no
+    banks, a late bank, or no final verdict fails.
     """
     points = trial["responses_at_bank"]
     if not points:
