@@ -1,18 +1,8 @@
-"""Exit-code contract for infra/scripts/observability.sh (ticket 8a37).
+"""Require the observability oneshot to exit 0 when probes are healthy.
 
-observability.sh is run by a systemd oneshot timer (install-observability.sh).
-A oneshot service is only recorded ``active (exited)`` when its process exits 0;
-a nonzero exit marks the unit ``failed`` and trips the deploy/health alarms —
-masking real failures behind a probe that is itself always red.
-
-The bug: on a healthy box every metric section is a no-op-or-success, and the
-script's terminal statement is ``[ "$oos" -gt 0 ] && logger …``. When the mirror
-is in sync ``oos=0``, so ``[ 0 -gt 0 ]`` is false, the ``&&`` short-circuits, and
-that false test — the last command in the script, under ``set -uo pipefail`` with
-no ``set -e`` and no trailing ``exit 0`` — becomes the script's exit status: 1.
-
-This test drives the whole script under a PATH shim that makes the mirror check
-report *in sync* (the healthy path) and asserts the process exits 0.
+An in-sync mirror makes the terminal conditional false; that shell status
+must not mark the systemd service failed. A PATH shim exercises the whole
+script's healthy path.
 """
 
 from __future__ import annotations

@@ -1,18 +1,9 @@
-"""The mirror/replication probes publish on EVERY path, never silently (ticket bff5-9163-cddd-4158).
+"""Check that mirror and replication probes publish a heartbeat on every path.
 
-``rebar/host`` alarms treat missing data as *breaching*, which is only sound while the
-publisher is a genuine heartbeat: a healthy run must still put a datapoint. Two sections
-used to fall silent instead.
-
-* §5 ``mirror_out_of_sync`` published nothing when the Gerrit REST read or the GitHub
-  ``git ls-remote`` failed. That was a FAIL-OPEN on the old ``notBreaching`` alarm and is an
-  ambiguous non-signal on the new one, so a failed comparison now publishes ``1``.
-* §3 ``replication_errors`` published nothing when ``$REPL_LOG`` was absent (a rebuilt host,
-  a site volume that has not mounted, a Gerrit that has never started). It now publishes a
-  ``0`` heartbeat there; ``mirror_out_of_sync`` owns the "replication actually stopped" case.
-
-Every assertion is on the ``aws cloudwatch put-metric-data`` argv the script emits — no
-network, no AWS, no real ``git``.
+A failed Gerrit or GitHub comparison publishes ``mirror_out_of_sync=1``. An
+absent replication log publishes ``replication_errors=0``; mirror status carries
+the stopped-replication signal. Assertions inspect CloudWatch command arguments
+without network, AWS, or real Git.
 """
 
 from __future__ import annotations
@@ -147,13 +138,10 @@ def test_diverged_shas_publish_one(tmp_path: Path) -> None:
 def test_a_failed_fetch_publishes_one_rather_than_nothing(
     tmp_path: Path, gerrit_sha: str | None, github_sha: str | None, failed_side: str
 ) -> None:
-    """The regression guard: an unmakeable comparison must not fall silent.
+    """Publish ``1`` when either mirror read fails instead of claiming sync.
 
-    Silence is the one value this section may not emit. On the old ``notBreaching`` alarm it
-    read as health (the fail-open this ticket fixes); on the current ``breaching`` alarm it is
-    indistinguishable from a dead probe. ``1`` is the honest report — ``0`` would assert the
-    in-sync claim the failed comparison cannot make — and the alarm's 300/3/2 window
-    (``monitoring_ws7.tf``) absorbs an isolated blip.
+    The alarm treats missing data as breaching; a failed comparison must still
+    publish. Its 300/3/2 window absorbs an isolated failure.
     """
     env, aws_log = _environment(tmp_path, gerrit_sha=gerrit_sha, github_sha=github_sha)
 
@@ -168,12 +156,10 @@ def test_a_failed_fetch_publishes_one_rather_than_nothing(
 
 
 def test_replication_errors_publishes_a_zero_heartbeat_without_a_log(tmp_path: Path) -> None:
-    """§3 must publish even when ``$REPL_LOG`` is absent, or its alarm is not a heartbeat.
+    """Publish ``replication_errors=0`` when the log is absent.
 
-    ``monitoring_s5.tf`` sets ``treat_missing_data = "breaching"`` on the stated ground that
-    the probe publishes every interval. A host whose replication log has not been created yet
-    would otherwise emit no datapoint at all and page continuously for a reason that has
-    nothing to do with a replication failure.
+    The alarm treats missing datapoints as breaching, so a new host still needs
+    this zero heartbeat.
     """
     env, aws_log = _environment(tmp_path, repl_log_lines=None)
 

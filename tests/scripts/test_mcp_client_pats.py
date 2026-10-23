@@ -1,29 +1,9 @@
-"""MCP per-client bearer PAT credential handling (ticket exuberant-blockish-avians,
-epic jira-reb-3527 "Enable MCP on AWS"; ADR 0104 §1 static verifier + per-client PATs).
+"""Check per-client MCP bearer PAT handling without live AWS.
 
-The per-client bearer PATs the ``static`` verifier authenticates are treated like every
-other box secret: SSM-sourced, materialized on-box, gitignored, NEVER committed (gotcha
-f600 — the box ``.env`` is rsync-EXCLUDED, so a rotated SSM secret is materialized on-box
-at deploy, not baked into the rsync'd tree).
-
-Three oracles (the ACs):
-
-1. GUARD — the real local client-credential config path is gitignored (``git check-ignore``
-   returns it) and no tracked file in the tree carries a real-PAT pattern (negative control:
-   the committed placeholder template passes; a planted real-looking secret is detected).
-2. MATERIALIZE — ``fetch-secrets.sh`` materializes each per-client PAT from SSM into the
-   0600 rsync-excluded env source (``.env`` as ``MCP_CLIENT_PAT_*``) and emits the tokens
-   JSON the ``static`` verifier reads (``mcp-static-tokens.json``, ``token_env`` records —
-   never a plaintext token, never the raw value in the tokens file). Driven by a STUBBED
-   aws/SSM sink feeding a known value (no live AWS). The tokens file is ALWAYS created,
-   even when a slot is blank (bug beb1), and a blank slot's record is OMITTED so
-   ``_parse_static_record`` never sees an empty ``token_env``.
-3. VERIFIER CONTRAST — the real ``StaticBearerVerifier`` over the materialized tokens file
-   accepts a request bearing a materialized PAT and rejects an unknown token (→ 401)
-   through the real ``_load_static_tokens`` read path.
-
-Plus a runbook oracle: operator-driven rotation (re-materialize + restart the rebar-mcp
-process so the init-time verifier re-reads; autodeploy no-ops on a value-only rotation).
+Credentials come from SSM into a gitignored, rsync-excluded 0600 env file.
+The static verifier's tokens file contains env names, never plaintext PATs;
+blank slots are omitted while the file still exists. Tests contrast accepted
+materialized PATs with rejected unknown tokens and cover restart-based rotation.
 """
 
 from __future__ import annotations

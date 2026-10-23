@@ -1,20 +1,8 @@
-"""Non-`site/` debris on the Gerrit DATA volume is censused and published (task 3e92).
+"""Check the data-volume debris census outside ``site/`` and ``lost+found``.
 
-The `/var/gerrit` disk-fill incident (bug 5a05-0e52-33a0-48bf, wakeful-ordinary-chicken)
-was 65% one-off investigation evidence: two
-`epoch-probe-*` dumps of ~5.2G each under
-`/var/gerrit/rebar-quiet-window-evidence/`, written by ad-hoc operator/agent shell rather
-than by any rebar process. `rebar/host:disk_used_percent` reports how full the volume is and
-structurally cannot report what it is full of, so the debris read as ordinary repository
-growth until a human ran `du` mid-incident.
-
-rebar cannot PREVENT that write — no rebar code path produced it — so the remediation is
-detection: `observability.sh` §2c sums every top-level entry under `$DATA_MOUNT` that is not
-`site` or `lost+found` and publishes `rebar/host:data_disk_debris_bytes` every tick. These
-tests drive the REAL `observability.sh` over a synthetic mount point and assert it detects
-planted debris, stays at 0 on a `site/`-only tree, and publishes NOTHING when the mount is
-absent (so the alarm's `treat_missing_data = "breaching"` pages instead of a fabricated 0
-asserting a volume nobody observed was clean).
+The real script measures top-level non-site entries with ``du`` and publishes
+``data_disk_debris_bytes`` on observed mounts. A site-only tree publishes 0;
+an absent mount publishes nothing rather than a fabricated clean reading.
 """
 
 from __future__ import annotations

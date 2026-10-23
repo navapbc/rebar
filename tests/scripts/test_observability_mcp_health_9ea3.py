@@ -1,25 +1,8 @@
-"""The MCP serving path is probed and published as a 1/0 heartbeat (bug 9ea3-7d07-ea55-4496).
+"""Check the MCP serving path through TLS and nginx with a 1/0 heartbeat.
 
-On 2026-09-02 the mcp container was OOM-killed mid-gate. nginx stayed healthy while its
-single-server ``upstream rebar_mcp`` kept pointing at the dead backend, so ``/mcp`` returned
-502 for ~12 hours and a HUMAN reported it: no metric watched the serving path at all.
-``observability.sh`` §1b now GETs ``https://<domain>/mcp`` — through TLS, nginx, and the
-materialized upstream include, exactly what a client hits — and publishes
-``rebar/host:mcp_healthy``.
-
-Two properties are load-bearing and are what these tests pin:
-
-* **401 is the healthy code.** ``/mcp`` requires a bearer PAT, so an unauthenticated probe is
-  answered 401 by the app's own auth middleware, which nginx cannot synthesise for that
-  location. A "2xx == healthy" rule would report a healthy server as DOWN.
-* **It is a heartbeat, not an event.** A value is published on EVERY tick including the
-  unhealthy and probe-failed paths. ``monitoring_9ea3.tf`` sets
-  ``treat_missing_data = "breaching"`` on exactly that ground, so a silent bad path would
-  leave the alarm with no datapoint — the fail-open ticket bff5-9163-cddd-4158 removed.
-
-Every assertion is on the ``aws cloudwatch put-metric-data`` argv the script emits — no
-network, no AWS, no real ``curl``.
-"""
+Unauthenticated ``/mcp`` returning 401 proves the app is serving; a failed
+probe or bad upstream publishes 0 on every tick. Assertions inspect the real
+script's CloudWatch command arguments without network or real curl."""
 
 from __future__ import annotations
 
@@ -166,13 +149,10 @@ def test_a_healthy_probe_never_publishes_zero(tmp_path: Path) -> None:
 def test_an_unhealthy_serving_path_publishes_zero_not_nothing(
     tmp_path: Path, code: str, what_it_means: str
 ) -> None:
-    """Silence is the one value this section may not emit on the bad path.
+    """Publish 0 for an unhealthy MCP path rather than a missing datapoint.
 
-    ``monitoring_9ea3.tf`` treats missing data as breaching, so publishing nothing would
-    still eventually alarm — but only via the dead-publisher path, which is indistinguishable
-    from a crashed probe and points the responder at the wrong system. 0 is the honest,
-    actionable report, and it is what the alarm's 300/3/2 window is sized to latch.
-    """
+    The alarm distinguishes an actionable upstream failure from a silent probe;
+    its 300/3/2 window latches repeated zeros."""
     env, aws_log = _environment(tmp_path, mcp_code=code)
 
     _run(env)
@@ -225,19 +205,10 @@ def test_reviewbot_degraded_gerrit_auth_publishes_unhealthy(tmp_path: Path) -> N
 
 
 def test_upstream_lost_mid_gate_latches_a_sustained_zero(tmp_path: Path) -> None:
-    """AC(c): the loss of the MCP upstream WHILE A GATE JOB IS ACTIVE is covered.
+    """Keep reporting 0 after the MCP upstream disappears during a gate.
 
-    The 2026-09-02 shape exactly: a plan-review gate was ~3 minutes in when the kernel
-    OOM-killed the container, and nginx — whose ``upstream rebar_mcp`` is one server line
-    with no failover — kept proxying to the corpse. From the edge that is indistinguishable
-    from any other dead backend, which is the point: the probe needs no knowledge of gate
-    activity to see it, and an in-flight gate cannot mask it.
-
-    Three consecutive ticks are asserted, not one, because the alarm latches on
-    ``datapoints_to_alarm = 2`` of ``evaluation_periods = 3``. A probe that reported the
-    outage once and then fell silent (or recovered to 1 because a *later* container exists on
-    some other port) would never reach that count, and the 12-hour blind window would reopen.
-    """
+    Three consecutive ticks cover the alarm's 2-of-3 threshold. A live gate
+    cannot mask a dead single-server nginx upstream."""
     env, aws_log = _environment(tmp_path, mcp_code="502")
 
     _run(env)

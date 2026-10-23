@@ -1,26 +1,9 @@
-"""Contract for scripts/normalize_ci_conclusion.py (tickets bad2, 9d07).
+"""Check CI conclusion normalization before Gerrit's Verified vote.
 
-Tier: scripts (drives the Python script via subprocess).
-
-The Verified vote job aggregates this run's jobs with im-open/workflow-conclusion,
-which sets WORKFLOW_CONCLUSION to one of {success, failure, cancelled, skipped} —
-`skipped` being its fallback when none of success/failure/cancelled is observed.
-That value used to be piped VERBATIM into lfreleng-actions/gerrit-review-action's
-`vote-type`, whose domain is ONLY {clear, success, failure, cancelled}. On `skipped`
-the action hit its default branch (`::error::Unknown vote-type ...; exit 1`) BEFORE
-posting any label — so a green CI change got NO Verified vote and was un-landable.
-
-This script normalizes WORKFLOW_CONCLUSION into the action's vote-type domain, given
-the raw conclusion plus a signal of whether any needed job actually failed/cancelled:
-  success              -> success
-  failure              -> failure
-  cancelled            -> cancelled
-  skipped (no failure) -> success   (benign fallback: nothing failed)
-  skipped (failure obs)-> failure   (fail-closed: a real failure was observed)
-  empty / unknown      -> failure   (fail-closed anomaly; never out-of-domain)
-
-The KEY invariant: the emitted vote-type is ALWAYS in {success, failure, cancelled}
-— `skipped` (or anything else) must NEVER reach the action verbatim.
+``skipped`` maps to success when no needed job failed, otherwise failure.
+Unknown or empty conclusions fail closed. Output stays within ``success``,
+``failure``, and ``cancelled`` so the vote action never receives unsupported
+``skipped``.
 """
 
 from __future__ import annotations

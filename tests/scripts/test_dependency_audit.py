@@ -1,26 +1,9 @@
-"""Oracle suite for scripts/dependency_audit.py (bug 63e8-9235-220f-4201).
+"""Check dependency-audit lane routing and advisory lifecycle.
 
-The defect this pins: a committed `uv.lock` turns any new advisory against a PINNED
-transitive dependency into a build stoppage for every change in flight — six changes
-across five work streams went red at once on click 8.2.1 / PYSEC-2026-2132, none of them
-at fault. The fix routes the verdict by LANE, and the whole of it is:
-
-    gerrit + does-not-touch-the-dependency-map  ->  NOT blocking
-    everything else with a CRITICAL/HIGH finding ->  blocking
-
-A workflow that is only eyeballed is how this class of defect survives, so the decision
-logic lives in a module and these tests are what actually prove it. The three claims the
-ticket demands by test are:
-
-* a dependency-map-touching change IS blocked by an advisory
-  — ``test_gerrit_lane_blocks_when_dependency_map_touched``
-* a change that does NOT touch it is NOT blocked
-  — ``test_gerrit_lane_does_not_block_when_map_untouched``
-* the release gate blocks on an outstanding advisory
-  — ``test_release_lane_blocks``
-
-Seams (keyword-only params of ``main``): ``runner(argv) -> (rc, stdout, stderr)`` for
-every external command (pip-audit, curl, git, rebar), ``environ``, ``now_epoch``.
+High/critical findings block release and dependency-map changes; unrelated
+Gerrit changes report findings without blocking. Injected runner, environment,
+and clock seams keep external commands deterministic. Missing audit verdicts
+cannot close an advisory ticket.
 """
 
 from __future__ import annotations
@@ -305,7 +288,7 @@ def test_gate_gerrit_uses_git_diff_when_changed_files_absent(mod: ModuleType) ->
 
 
 def test_gate_gerrit_fails_closed_when_the_diff_is_unresolvable(mod: ModuleType) -> None:
-    """A shallow checkout must never be the reason an advisory goes unblocked."""
+    """Block the advisory when a shallow checkout cannot resolve the diff."""
     runner = gate_runner(audit_json(CLICK_ADVISORY), severity="HIGH")
     runner.responses[("git", "diff")] = (128, "", "fatal: bad revision 'HEAD^'")
     rc = mod.main(["gate", "--lane", "gerrit"], runner=runner, environ={}, now_epoch=0)
@@ -334,7 +317,7 @@ def test_gate_reports_db_unreachable_as_infrastructure(
 
 
 def test_a_real_finding_is_not_retried(mod: ModuleType) -> None:
-    """`recheck` can never clear a real finding — so a finding must not loop the retry."""
+    """Report a real finding once without retrying the audit."""
     runner = gate_runner(audit_json(CLICK_ADVISORY), severity="HIGH")
     mod.main(["gate", "--lane", "release"], runner=runner, environ={}, now_epoch=0)
     assert sum(1 for call in runner.calls if call[0] == "pip-audit") == 1
@@ -439,18 +422,10 @@ def test_advisory_alert_closes_the_ticket_when_the_advisory_clears(mod: ModuleTy
 def test_advisory_alert_close_argv_survives_the_real_transition_parser(
     mod: ModuleType,
 ) -> None:
-    """The auto-close argv must be accepted by the REAL `rebar transition` flag parser.
+    """Parse the generated advisory close flags through the real transition parser.
 
-    Regression for ticket 24f7. The advisory auto-close builds a `rebar transition …`
-    argv by hand and this suite's `FakeRunner` never executes it, so the flags were only
-    ever checked positionally (`transitions[0][2:5]`). When 24f7 renamed the close-gate
-    escape hatch, this builder kept emitting the retired spelling and nothing here
-    noticed — the break would only have surfaced in production, on the workflow run that
-    tries to auto-close a cleared advisory.
-
-    Asserting the exact flag string would just move the same blind spot. Instead, feed
-    the generated argv to the actual parser: any future rename or removal of a flag this
-    builder emits fails HERE, whatever it is renamed to.
+    This catches stale hand-built flags that a FakeRunner would accept. Cleared
+    advisories use the attested ``env_integration`` disposition, not force.
     """
     from rebar._commands.transition import _parse_flags
 
@@ -474,13 +449,9 @@ def test_advisory_alert_close_argv_survives_the_real_transition_parser(
     )
 
 
-# ── A missing audit verdict is NOT an all-clear (bug 7147-6ea7-90b4-44b1) ──────────
-#
-# `BLOCKING` is `${{ steps.audit.outputs.blocking }}` and the audit step is
-# `continue-on-error`, so a CRASHED audit sets no output and BLOCKING arrives "". The
-# original `environ.get("BLOCKING", "false") == "true"` read that as False and took the
-# CLOSE arm — force-closing the open p1 vulnerability ticket with "advisories cleared",
-# run green. These oracles pin the tri-state: only an explicit verdict may drive an arm.
+# ── Missing audit output is not an all-clear ───────────────────────────────────
+# A crashed continue-on-error audit leaves BLOCKING unset. Only explicit true
+# or false may trigger an advisory action; missing output writes nothing.
 
 
 def _open_advisory_ticket_runner() -> FakeRunner:
@@ -508,11 +479,7 @@ def _open_advisory_ticket_runner() -> FakeRunner:
 def test_only_an_explicit_false_verdict_may_close_the_advisory_ticket(
     mod: ModuleType, overlay: dict[str, str], expected_rc: int, expected_transitions: int
 ) -> None:
-    """Pin exactly which BLOCKING values may close an open advisory ticket.
-
-    The whole defect is that this table used to have `{}` and `""` in the same row as
-    `"false"`. An absent or unrecognised verdict must reach NO arm at all.
-    """
+    """Close only for explicit ``BLOCKING=false``; reject unknown verdicts."""
     runner = _open_advisory_ticket_runner()
     env = {"ADVISORY_IDS": "", "ADVISORY_SUMMARY": "", "RUN_URL": ""} | overlay
     rc = mod.main(["advisory-alert"], runner=runner, environ=env, now_epoch=0)
@@ -522,7 +489,7 @@ def test_only_an_explicit_false_verdict_may_close_the_advisory_ticket(
 
 @pytest.mark.parametrize("overlay", [{}, {"BLOCKING": ""}], ids=["unset", "empty"])
 def test_a_missing_verdict_writes_nothing_at_all(mod: ModuleType, overlay: dict[str, str]) -> None:
-    """Refusing means refusing: no close, and no file/comment either."""
+    """Missing verdicts write no ticket events."""
     runner = _open_advisory_ticket_runner()
     env = {"ADVISORY_IDS": "", "ADVISORY_SUMMARY": "", "RUN_URL": ""} | overlay
     assert mod.main(["advisory-alert"], runner=runner, environ=env, now_epoch=0) == 1
@@ -534,13 +501,10 @@ def test_a_missing_verdict_writes_nothing_at_all(mod: ModuleType, overlay: dict[
 def test_a_crashed_audit_is_distinguishable_from_a_genuine_all_clear(
     mod: ModuleType,
 ) -> None:
-    """The sharpest form of the regression: the two used to be BYTE-IDENTICAL.
+    """Distinguish a crashed audit from an explicit all-clear by transition calls.
 
-    Before the fix both paths emitted the same `rebar transition ... --force=Fixed:
-    dependency advisories cleared at <ts> ...` argv, so nothing downstream — a human
-    reading the ticket included — could tell "the audit crashed" from "the advisory
-    cleared". Comparing the two argv lists is what makes that indistinguishability the
-    thing under test, rather than a return code that could drift apart for other reasons.
+    Missing output emits none; ``BLOCKING=false`` emits one close. The paths must
+    remain distinguishable even if return-code handling changes.
     """
     crashed = _open_advisory_ticket_runner()
     crashed_rc = mod.main(
@@ -561,7 +525,7 @@ def test_a_crashed_audit_is_distinguishable_from_a_genuine_all_clear(
 
 
 def test_a_missing_verdict_is_still_silent_under_dry_run(mod: ModuleType) -> None:
-    """DRY_RUN precedes the verdict guard, so a dry run stays a no-op, not an error."""
+    """Dry-run mode stays silent even when the verdict is absent."""
     runner = FakeRunner()
     env = {"DRY_RUN": "true"}
     assert mod.main(["advisory-alert"], runner=runner, environ=env, now_epoch=0) == 0

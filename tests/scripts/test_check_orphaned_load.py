@@ -1,24 +1,8 @@
-"""Contract for the orphaned-CPU-load detector (bug f3d9-ecd8-df72-4fa1).
+"""Check detection of high-CPU processes orphaned to PID 1.
 
-On 2026-08-22 three agent sessions spawned ``python -c "while True: pass"`` CPU
-saturation workers to reproduce a timing-dependent failure. Nothing reaped them:
-38 orphaned to PID 1 and ran for four days at ~1341% combined CPU. This module
-covers the on-demand detector that would have surfaced them.
-
-**This test never spawns a real CPU burner.** Doing so would reproduce the very
-defect the ticket tracks, so the process-inspection seam is injected and every
-process record here is synthetic. The one exception is a READ-ONLY smoke
-assertion against the real adapter, which covers the live ``ps``-parsing path
-the injected seam bypasses.
-
-API contract (scripts/check_orphaned_load.py):
-  - DEFAULT_MIN_CPU_SECONDS: float                       # 3600
-  - ORPHAN_PPID: int                                     # 1
-  - ProcessRecord(pid, ppid, cpu_seconds, command)
-  - parse_cpu_time(value: str) -> float                  # ps TIME -> seconds
-  - list_processes() -> list[ProcessRecord]              # real adapter (read-only)
-  - find_orphaned_load(records, min_cpu_seconds) -> list[ProcessRecord]
-  - main(argv=None, *, lister=None) -> int               # 0 clean, 1 findings
+Synthetic records cover the 3600-second threshold, parsing, exclusions, and
+exit codes without spawning load. One read-only smoke check exercises the live
+``ps`` adapter when process-table access is available.
 """
 
 from __future__ import annotations
@@ -191,7 +175,7 @@ def test_real_adapter_reads_live_process_table_without_raising(
 
 
 # ---------------------------------------------------------------------------
-# System-owned exclusion (measured: 33 flagged -> 29 launchd daemons -> 4 real)
+# Exclude launchd-owned processes from orphan alerts.
 # ---------------------------------------------------------------------------
 
 

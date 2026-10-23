@@ -1,13 +1,8 @@
-"""The AUTODEPLOY_DISK_PRESSURE marker is published as a metric (task 9d15-d576-e0ca-4596).
+"""Check disk-pressure reclaim markers in the real observability script.
 
-`autodeploy.sh` emits a countable ``AUTODEPLOY_DISK_PRESSURE`` journal marker whenever the
-pressure-triggered reclaim fires (story 28f9), but story 28f9 intentionally scoped the metric
-out, so whether the reclaim gate ran at all was readable ONLY from the host journal. During
-the 2026-08-17 root-disk incident that made a first-order question — "did the reclaim gate
-run?" — unanswerable from CloudWatch. These tests drive the REAL ``observability.sh`` over a
-synthetic unit journal and assert the marker is counted into ``rebar/host:disk_pressure_prunes``
-with a record-anchored pattern and its own delta offset, and that a cold start seeds to 0
-rather than publishing the inherited journal count.
+Record-anchored ``AUTODEPLOY_DISK_PRESSURE`` entries increment their own
+``disk_pressure_prunes`` delta; prose mentions do not count. Cold starts seed
+the cursor and publish 0 rather than inherited history.
 """
 
 from __future__ import annotations
@@ -104,11 +99,8 @@ def _environment(
     offsets.mkdir()
     paths = {name: offsets / name.lower() for name in _OFFSET_VARIABLES}
     if seed_offsets:
-        # `<total> <cursor>` since bug 1205: a cursor of 0 sits before the
-        # journal's first entry, so the counter is already observing and counts everything in
-        # it. A BARE total, like an absent file, is a cold start — it seeds a tail cursor and
-        # publishes 0 (bug e2a6-9ee4-8d5c-4290), which would mask what these tests measure.
-        # REPL_OFFSET_FILE greps a log file rather than journald and keeps the bare form.
+        # Cursor 0 counts the first journal entries; absent or bare state would
+        # cold-start at the tail and publish 0. The replication log keeps a bare total.
         for name, path in paths.items():
             path.write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n")
     env = subprocess_env()
@@ -126,7 +118,7 @@ def _environment(
 
 
 def _state_total(path: Path) -> str:
-    """The cumulative total from a `<total> <cursor>` state file (bug 1205)."""
+    """Read the cumulative total from cursor-backed state."""
     return path.read_text().split()[0]
 
 
@@ -149,12 +141,7 @@ def _run(env: dict[str, str]) -> subprocess.CompletedProcess:
 
 
 def test_disk_pressure_markers_are_counted_into_their_own_metric(tmp_path: Path) -> None:
-    """Marker lines are counted into disk_pressure_prunes; prose naming the marker is not.
-
-    The prose line is the record-anchor regression (bug 8c2f): only journal records that BEGIN
-    with `AUTODEPLOY_DISK_PRESSURE {` may count, so a log sentence that mentions the marker
-    name mid-line never inflates the counter.
-    """
+    """Count anchored pressure records, not prose that mentions the token."""
     lines = [_marker(), "saw an AUTODEPLOY_DISK_PRESSURE marker earlier today", _marker()]
     env, aws_log, paths = _environment(tmp_path, lines)
 
@@ -271,8 +258,7 @@ def test_persistence_second_run_publishes_only_the_new_markers(tmp_path: Path) -
 
 
 def test_no_persistence_markers_publishes_zero(tmp_path: Path) -> None:
-    """NEGATIVE CONTROL at the metric layer: a box whose reclaims all worked publishes 0 here
-    even while ordinary prunes are being counted, so the alarm is silent on a healthy box."""
+    """Publish 0 persistence failures while successful pressure prunes count."""
     env, aws_log, _ = _environment(tmp_path, [_marker(), _marker()])
 
     result = _run(env)
