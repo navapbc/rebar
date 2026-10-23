@@ -1,20 +1,6 @@
-"""Bug b8b1: structurally-impossible inbound links are attempted once, not every pass.
-
-The defect: ``_inbound_update_apply_links`` called ``rebar.link`` for every
-Jira-sourced ADD record, caught the failure, logged a WARNING and forgot it.
-Three of those failures are deterministic verdicts about the LOCAL graph — the
-source is closed, the endpoints are already in an ancestor-descendant
-relationship, the edge would close a cycle — so the next pass re-derived the
-identical record and re-spent the write. Measured on four consecutive live
-Reconcile Bridge passes: 19 doomed writes each, a byte-identical set every time.
-
-The oracle for the headline cells below is **the number of ``rebar.link``
-invocations across two passes**, not the log. That distinction is the whole
-point of the ticket: suppressing the WARNING would satisfy a log-shaped
-assertion while leaving the waste entirely intact. So ``rebar.link`` is wrapped
-in a counter that still calls THROUGH to the real facade against a real store —
-the failures here are genuine ``add_dependency`` verdicts, not simulated ones.
-"""
+"""Structurally impossible inbound links are tried once, recorded durably, and skipped on
+unchanged passes. Changed graph evidence requalifies them; transient failures keep
+retrying, and the record is committed across checkouts."""
 
 from __future__ import annotations
 
@@ -33,12 +19,8 @@ import pytest
 
 @pytest.fixture
 def store(tmp_path: Path, monkeypatch) -> tuple[Path, str, str]:
-    """A real rebar store with two tickets, the source CLOSED.
-
-    Closing the source is what makes ``rebar.link(a, b, ...)`` raise the real
-    "source ticket '<id>' is closed" verdict — the most common of the three
-    shapes in the live logs (5 of 19).
-    """
+    """Use a real store with a closed source so link creation returns the structural
+    closed-source verdict."""
     import rebar
 
     repo = tmp_path / "repo"
@@ -137,12 +119,8 @@ def test_classify_recognises_each_permanent_shape(impossible_links, text, expect
     ],
 )
 def test_classify_refuses_anything_not_provably_structural(impossible_links, text):
-    """An unrecognised failure returns None so the caller keeps retrying it.
-
-    The last case is the trap worth naming: a message containing the words "is
-    closed" but not the "cannot create" verdict marker must NOT be filed as a
-    permanent structural impossibility.
-    """
+    """Classify only exact structural refusals; an unrelated error containing “is closed”
+    must remain retryable."""
     assert impossible_links.classify(text) is None
 
 
@@ -152,11 +130,8 @@ def test_classify_refuses_anything_not_provably_structural(impossible_links, tex
 
 
 def test_impossible_link_is_attempted_once_then_never_again(store, apply_records, monkeypatch):
-    """THE ACCEPTANCE ORACLE — pass 1 attempts the write, pass 2 attempts nothing.
-
-    Counting ``rebar.link`` invocations (not log lines) is what separates a real
-    fix from log suppression: this cell fails if the WARNING is merely silenced.
-    """
+    """Count actual link attempts: an unchanged structural refusal is attempted on pass 1 and
+    skipped on pass 2."""
     repo, a, b = store
     calls = _counting_link(monkeypatch)
 
@@ -180,12 +155,8 @@ def test_impossible_link_is_attempted_once_then_never_again(store, apply_records
 def test_the_skip_is_recorded_durably_and_survives_a_fresh_store(
     store, apply_records, impossible_links, monkeypatch
 ):
-    """The verdict lands in .bridge_state/impossible_links.json and reads back.
-
-    Durability is what makes the skip visible to an operator rather than a
-    silent in-process swallow, and what makes it survive the process boundary
-    between two reconcile passes (each pass is a separate process).
-    """
+    """Persist the structural refusal so a fresh pass sees the skip and an operator can
+    inspect it."""
     repo, a, b = store
     _counting_link(monkeypatch)
 
@@ -206,12 +177,8 @@ def test_the_skip_is_recorded_durably_and_survives_a_fresh_store(
 
 
 def test_reopening_the_source_requalifies_the_link(store, apply_records, monkeypatch):
-    """When the deciding input changes, the record stops matching and we retry.
-
-    This is the self-healing property: the digest keys on the endpoints'
-    status/ancestry/deps, so reopening the closed source re-qualifies the link
-    without anyone clearing the store by hand. And this time the write lands.
-    """
+    """Reopening the source changes the deciding graph evidence, so the link is retried and
+    lands."""
     import rebar
 
     repo, a, b = store
@@ -235,12 +202,8 @@ def test_reopening_the_source_requalifies_the_link(store, apply_records, monkeyp
 
 
 def test_a_comment_on_an_endpoint_does_not_requalify_the_link(store, apply_records, monkeypatch):
-    """Non-structural edits must NOT invalidate the record.
-
-    If the digest keyed on the whole ticket, every comment would send the
-    reconciler back to re-attempting — the churn would return through the back
-    door on an active store.
-    """
+    """An endpoint comment is not structural evidence and must not cause another link
+    attempt."""
     import rebar
 
     repo, a, b = store
@@ -261,12 +224,8 @@ def test_a_comment_on_an_endpoint_does_not_requalify_the_link(store, apply_recor
 def test_a_transient_failure_is_never_recorded_and_is_retried(
     store, apply_records, impossible_links, monkeypatch
 ):
-    """A failure that is not provably structural keeps the old retry behaviour.
-
-    The dangerous failure mode of this change is over-classification: a
-    transient fault filed as permanent would silently stop syncing a legitimate
-    link. Two passes must produce two attempts and an empty store.
-    """
+    """An unclassified transient failure remains absent from the permanent store and is
+    attempted again."""
     import rebar
 
     repo, a, b = store
@@ -290,12 +249,7 @@ def test_a_transient_failure_is_never_recorded_and_is_retried(
 def test_first_impossible_link_warns_and_the_repeat_skip_does_not(
     store, apply_records, monkeypatch, caplog
 ):
-    """A genuinely new impossible link is loud once; the steady state is quiet.
-
-    Both halves matter. Losing the first WARNING would make the skip a silent
-    swallow; keeping it on every pass would leave the permanent error floor the
-    ticket was filed about.
-    """
+    """Warn on the first structural refusal, then skip it quietly on unchanged passes."""
     repo, a, b = store
     _counting_link(monkeypatch)
 
@@ -322,17 +276,8 @@ def test_first_impossible_link_warns_and_the_repeat_skip_does_not(
 def test_a_cycle_record_is_invalidated_by_a_change_to_a_THIRD_ticket(
     tmp_path, apply_records, impossible_links, monkeypatch
 ):
-    """A cycle verdict keys on the whole graph structure, not just the endpoints.
-
-    ``check_would_create_cycle`` walks the TRANSITIVE dependency graph, so the
-    cycle can be broken by unlinking an INTERMEDIATE ticket while both endpoints
-    stay byte-identical. A digest over the two endpoints alone would therefore
-    under-invalidate and suppress a link that has become possible — the failure
-    mode that keying on the global structure exists to prevent.
-
-    Over-invalidating is the safe direction; under-invalidating is not. This
-    cell pins that choice.
-    """
+    """A cycle can disappear when an intermediate ticket changes, so the graph fingerprint
+    must include more than the endpoints."""
     import rebar
 
     repo = tmp_path / "repo"
@@ -421,14 +366,8 @@ def test_a_corrupt_store_degrades_to_empty_and_still_applies(
 def test_a_status_change_on_an_ANCESTOR_invalidates_the_record(
     tmp_path, impossible_links, monkeypatch
 ):
-    """The deciding ticket may be an ANCESTOR, because add_dependency promotes.
-
-    ``add_dependency`` calls ``resolve_hierarchy_link`` before it validates, and
-    that can REDIRECT an endpoint to a type-tier ancestor — so the status the
-    closed-source check actually reads can belong to a parent, not to the id the
-    applier passed. A fingerprint that captured only the passed-in ticket's
-    status would miss a reopened ancestor and suppress the link forever.
-    """
+    """Promotion may redirect a link to an ancestor; reopening that ancestor must invalidate
+    the refusal."""
     import rebar
 
     repo = tmp_path / "repo"
@@ -465,13 +404,8 @@ def test_a_status_change_on_an_ANCESTOR_invalidates_the_record(
 
 
 def test_the_record_file_is_staged_for_commit_back(monkeypatch):
-    """The record must be COMMITTED, or it dies with the CI checkout each pass.
-
-    Every reconcile pass runs in a fresh checkout of the tickets branch. A file
-    written only to the working tree is discarded between passes, so the skip
-    would never take effect in production and the bug would survive the fix
-    while every unit test still passed. This cell pins the commit-back wiring.
-    """
+    """Stage the refusal sidecar for commit-back so the next tickets-branch checkout retains
+    the skip."""
     git_adapter = importlib.import_module("rebar.reconciler.git_adapter")
     # _commit_binding_store_snapshot moved to pass_support.py (ticket
     # piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).

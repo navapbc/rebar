@@ -1,28 +1,6 @@
-"""Epic a4bd / story 83d3: peer confirmation from AUTHORITATIVE fetched snapshots.
-
-S1 records evidence when WE push a link. This is the second, independent source: a
-link the peer demonstrably carries is synchronized even if this clone never pushed
-it (peer-created links, links pushed before the store existed, links pushed by
-another clone).
-
-The load-bearing property under test is COMPLETENESS, and it is a trichotomy, not a
-boolean:
-
-  * ``issuelinks`` key ABSENT  -> UNOBSERVED. Never evidence, in either direction.
-  * ``issuelinks: []``         -> AUTHORITATIVELY EMPTY. The peer carries nothing.
-  * ``issuelinks: [...]``      -> AUTHORITATIVE. Each resolvable entry is evidence.
-
-That distinction is inherited from ``fetcher.merge_issuelinks_map``, which writes the
-key ONLY on a complete read — so a truncated page walk, an HTTP 410, or a backend
-without ``get_issuelinks_map`` leaves the key absent rather than presenting an empty
-list. The trap this suite guards is writing ``entry.get("issuelinks") or []``, which
-silently collapses observed-empty into unobserved.
-
-The other invariant is that confirmation is MONOTONIC: observing confirms, but not
-observing never un-confirms. An un-confirmation path would reintroduce "absence is
-evidence" — the precise failure the epic exists to remove — so its absence is
-asserted, not assumed.
-"""
+"""Confirm links only from authoritative snapshots: absent issuelinks is unobserved, an empty
+list is observed absence, and present links provide evidence. Preserve direction,
+idempotence, fail-open persistence, and no sidecar rewrite on unchanged passes."""
 
 from __future__ import annotations
 
@@ -97,12 +75,7 @@ def test_observed_links_are_confirmed_with_snapshot_provenance(pc, store):
 
 
 def test_unobserved_issue_confirms_nothing(pc, store):
-    """The ``issuelinks`` key is ABSENT — a failed or truncated read.
-
-    This is the case that must never become evidence. The issue is otherwise
-    indistinguishable from one whose links we read successfully, so only the key's
-    presence separates them.
-    """
+    """An absent issuelinks key is an incomplete observation and must confirm nothing."""
     snapshot = {"PROJ-1": {"summary": "no links were read for this issue"}}
     bindings = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
 
@@ -113,13 +86,8 @@ def test_unobserved_issue_confirms_nothing(pc, store):
 
 
 def test_authoritative_empty_confirms_nothing_and_unconfirms_nothing(pc, store):
-    """``issuelinks: []`` is a COMPLETE read proving the peer carries no links.
-
-    It still writes no confirmation (there is nothing to confirm), and — critically —
-    it does not retract an existing one. A future "prune stale confirmations" feature
-    would have to be argued on its own terms; inferring it from an empty list here
-    would resurrect absence-as-evidence.
-    """
+    """An observed empty issuelinks list confirms nothing and does not retract earlier
+    evidence."""
     store.record("src-local", "dst-local", "blocks", link_id="500")
     snapshot = {"PROJ-1": {"issuelinks": []}}
     bindings = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
@@ -131,12 +99,8 @@ def test_authoritative_empty_confirms_nothing_and_unconfirms_nothing(pc, store):
 
 
 def test_get_or_empty_idiom_would_break_the_trichotomy(pc, store):
-    """Pins the distinction itself: absent and empty must NOT be handled alike.
-
-    Both write nothing, so a count-only assertion cannot tell them apart. The
-    difference is observable on the store's dirtiness/persistence, so assert that
-    neither shape persists a file while the observed shape does.
-    """
+    """Keep absent, observed-empty, and observed-present link states distinct; only present
+    links persist evidence."""
     bindings = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
     assert pc.confirm_from_snapshot(store, {"PROJ-1": {}}, bindings) == 0
     assert pc.confirm_from_snapshot(store, {"PROJ-1": {"issuelinks": []}}, bindings) == 0
@@ -149,13 +113,8 @@ def test_get_or_empty_idiom_would_break_the_trichotomy(pc, store):
 
 
 def test_inward_blocks_is_recorded_as_depends_on(pc, store):
-    """Direction is resolved in LOCAL vocabulary via ``link_direction``.
-
-    An inward ``Blocks`` means "X is blocked by Y" — ``depends_on``, not ``blocks``.
-    Recording the un-inverted relation would key the evidence under a relation the
-    local graph does not hold, so the relation-scoped reader would never find it and
-    a legitimate link would look unconfirmed forever.
-    """
+    """An inward Blocks link maps to local depends_on; recording blocks would strand
+    relation-scoped evidence."""
     snapshot = {"PROJ-1": {"issuelinks": [_inward()]}}
     bindings = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
 
@@ -202,10 +161,7 @@ def test_empty_or_missing_snapshot_is_safe(pc, store):
 
 
 def test_reconfirmation_is_idempotent_and_does_not_rewrite(pc, store):
-    """Bug 266c. Re-observing an unchanged link is idempotent AND change-gated: the
-    record set stays at one entry, ``first_confirmed_at`` is preserved from the first
-    observation, and the second observation leaves the store not dirty (no rewrite).
-    """
+    """Reobserving the same link preserves its first confirmation and leaves the store clean."""
     snapshot = {"PROJ-1": {"issuelinks": [_outward()]}}
     bindings = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
 
@@ -245,12 +201,8 @@ def test_persist_seam_writes_and_saves(tmp_path, pc):
 
 
 def test_confirmation_failure_does_not_break_the_pass(tmp_path, monkeypatch, capsys):
-    """AC6 fail-open. A raising confirmation must not abort persistence.
-
-    Driven through the real ``_persist_and_log`` rather than the seam, because the
-    property under test is the caller's try/except — testing the seam alone would
-    pass even if the call site were unguarded.
-    """
+    """A confirmation-store failure is isolated by the real persist caller and cannot abort
+    the pass."""
     reconcile = importlib.import_module("rebar.reconciler.reconcile")
 
     def _boom(_ctx):
@@ -315,15 +267,7 @@ def test_persist_seam_writes_no_file_when_nothing_is_confirmed(tmp_path):
 
 
 def test_two_passes_over_unchanged_snapshot_do_not_rewrite_the_sidecar(pc, tmp_path):
-    """AC1/AC4 (bug 266c). Two COMPLETE persistence passes over an IDENTICAL
-    authoritative snapshot must not produce a second on-disk content change: an
-    unchanged link must not be re-persisted merely because the pass/time advanced.
-
-    This pins epic 0303's churn discipline for the peer-confirmation sidecar —
-    bridge-state records are change-gated, never a per-pass timestamp — the exact
-    property whose absence made ``.bridge_state/peer_confirmations.json`` rewrite
-    the full file every reconcile pass.
-    """
+    """Two complete passes over the same authoritative links leave the sidecar unchanged."""
     (tmp_path / ".tickets-tracker" / ".bridge_state").mkdir(parents=True)
     tracker = str(tmp_path / ".tickets-tracker")
     snapshot = {"PROJ-1": {"issuelinks": [_outward()]}}

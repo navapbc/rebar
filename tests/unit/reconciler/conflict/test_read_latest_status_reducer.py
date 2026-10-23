@@ -1,19 +1,5 @@
-"""applier._read_latest_status must agree with the reducer (ticket vary-ion-fry).
-
-Rec 7a of the 2026-06-09 architecture review (risk R6): the reconciler read the
-"previous status" (used as the optimistic-concurrency `current_status` of the
-STATUS event it pushes) via a raw "last STATUS json wins" scan. That scan ignores
-two things the canonical reducer handles, so it can disagree with reduce_ticket on:
-
-  (a) a COMPACTED ticket — its STATUS events are folded into a SNAPSHOT and the
-      standalone STATUS files are gone, so the scan sees none and returns "open";
-  (b) a STATUS FORK — two STATUS events sharing a parent are resolved by the
-      lexically-lower event UUID, not by file order.
-
-Both build a tracker as a plain directory of event files (reduce_ticket and
-_read_latest_status both read files directly — no git needed) and assert
-_read_latest_status == reduce_ticket(...)["status"].
-"""
+"""The applier reads latest status through reducer semantics: compacted snapshots retain
+status, and fork winners follow event UUID order rather than file order."""
 
 from __future__ import annotations
 
@@ -89,10 +75,7 @@ def test_status_fork_resolution_matches_reducer(applier, reduce_ticket, tmp_path
     create_uuid = "0000-0000-0000-4000"
     parent = "aaaa-aaaa-aaaa-4aaa"
     _write(tdir, 100, create_uuid, "CREATE", {"ticket_type": "task", "title": "Forked"})
-    # Two STATUS events branching from the SAME parent (both current_status="open").
-    # The reducer resolves the fork by lexically-LOWER event UUID; the lower-UUID
-    # event (…-4001, status=closed) wins. But a raw "last STATUS file wins" scan
-    # returns the file-order-last event (…-4fff, status=in_progress) — the divergence.
+    # Forked STATUS events share a parent; the lower event UUID wins, regardless of file order.
     _write(
         tdir,
         200,

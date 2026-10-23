@@ -1,19 +1,6 @@
-"""Unit tests for lossless status mapping via rebar-status: annotation labels.
-
-Ticket: 929a-cc1b-09ee-4e7a
-DIG live workflow = {To Do, In Progress, In Review, Done} only.
-blocked/cancelled must map to In Progress/Done plus a rebar-status: label.
-Inbound must prefer rebar-status: label over raw Jira workflow status.
-rebar-status: labels must be excluded from local tag sync.
-
-Test IDs:
-  (a) outbound blocked → "In Progress" + rebar-status:blocked label intent
-  (b) outbound cancelled → "Done" + rebar-status:cancelled label intent
-  (c) status change blocked→in_progress removes rebar-status:blocked label
-  (d) inbound rebar-status:blocked label → local "blocked" regardless of workflow status
-  (e) inbound "In Review" with no label → "in_progress" (not "open")
-  (f) rebar-status: labels excluded from local tag sync both directions
-"""
+"""Status annotations preserve blocked and cancelled across Jira’s smaller workflow. Outbound
+maps workflow status and manages rebar-status labels; inbound prefers annotations, while
+tag sync excludes them."""
 
 from __future__ import annotations
 
@@ -132,11 +119,7 @@ def _make_jira_fields(
 
 
 def test_outbound_blocked_maps_to_in_progress(outbound_differ: ModuleType) -> None:
-    """(a) outbound transition for blocked must target 'In Progress', not 'Blocked'.
-
-    RED today: _LOCAL_TO_JIRA_STATUS maps blocked→'Blocked' which doesn't
-    exist in the DIG live workflow.
-    """
+    """Blocked maps to Jira In Progress rather than an unavailable Blocked workflow state."""
     ticket = _make_local_ticket(ticket_id="local-1", status="blocked")
     store = StubOutboundBindingStore()  # unbound → create mutation
 
@@ -209,11 +192,7 @@ def test_outbound_blocked_update_maps_to_in_progress(outbound_differ: ModuleType
 
 
 def test_outbound_cancelled_maps_to_done(outbound_differ: ModuleType) -> None:
-    """(b) outbound transition for cancelled must target 'Done', not 'Cancelled'.
-
-    RED today: _LOCAL_TO_JIRA_STATUS maps cancelled→'Cancelled' which doesn't
-    exist in the DIG live workflow.
-    """
+    """Cancelled maps to Jira Done rather than an unavailable Cancelled workflow state."""
     ticket = _make_local_ticket(ticket_id="local-1", status="cancelled")
     store = StubOutboundBindingStore()
 
@@ -264,11 +243,7 @@ def test_outbound_cancelled_emits_rebar_status_cancelled_label(outbound_differ: 
 def test_outbound_blocked_to_in_progress_removes_annotation_label(
     outbound_differ: ModuleType,
 ) -> None:
-    """(c) when local status changes from blocked to in_progress, remove rebar-status:blocked.
-
-    Jira has rebar-status:blocked from a previous pass; now local is in_progress.
-    The differ must emit a REMOVE for rebar-status:blocked.
-    """
+    """Leaving blocked removes its rebar-status:blocked annotation exactly once."""
     ticket = _make_local_ticket(
         ticket_id="local-1",
         status="in_progress",
@@ -340,11 +315,7 @@ def test_outbound_cancelled_to_closed_removes_annotation_label(
 def test_inbound_rebar_status_blocked_label_overrides_jira_status(
     inbound_differ: ModuleType,
 ) -> None:
-    """(d) inbound with rebar-status:blocked label → local 'blocked' regardless of workflow status.
-
-    Jira reports "In Progress" as workflow status, but the rebar-status:blocked
-    label carries the lossless annotation. Local should be "blocked".
-    """
+    """An inbound rebar-status:blocked label overrides Jira’s In Progress workflow status."""
     jira_snapshot = {
         "DIG-100": _make_jira_fields(
             status="In Progress",
@@ -450,11 +421,7 @@ def test_inbound_rebar_status_cancelled_label_sets_local_cancelled(
 
 
 def test_inbound_in_review_maps_to_in_progress(inbound_differ: ModuleType) -> None:
-    """(e) inbound 'In Review' with no rebar-status label → local 'in_progress', not 'open'.
-
-    RED today: _JIRA_TO_LOCAL_STATUS has no entry for 'In Review', so
-    _map_jira_to_local_fields returns 'open' (the dict.get default).
-    """
+    """Jira In Review without an annotation maps to local in_progress."""
     jira_snapshot = {
         "DIG-300": _make_jira_fields(
             status="In Review",
@@ -494,12 +461,8 @@ def test_inbound_in_review_maps_to_in_progress(inbound_differ: ModuleType) -> No
 def test_outbound_rebar_status_labels_excluded_from_tag_sync(
     outbound_differ: ModuleType,
 ) -> None:
-    """(f) rebar-status: labels must not be synced as user tags outbound.
-
-    When local ticket has no rebar-status: tags but Jira has rebar-status:blocked,
-    the outbound differ must NOT emit a REMOVE for that label via normal tag
-    diff (it is managed by status logic only).
-    """
+    """Outbound tag diff ignores reconciler-managed rebar-status labels and must not
+    duplicate status-driven removal."""
     # Local is now in_progress (not blocked), no rebar-status: tag in local tags
     ticket = _make_local_ticket(
         ticket_id="local-1",
@@ -522,10 +485,7 @@ def test_outbound_rebar_status_labels_excluded_from_tag_sync(
         binding_store=store,
     )
 
-    # The rebar-status:blocked label removal should be via status-driven logic
-    # (not via blind tag diff where it would look like "Jira has it, local doesn't")
-    # Specifically: the status-driven REMOVE for rebar-status:blocked should appear,
-    # but a spurious tag-diff REMOVE must NOT appear as a duplicate.
+    # Status logic removes rebar-status:blocked once; generic tag diff must not duplicate it.
     if result:
         m = result[0]
         label_removes = [lb["label"] for lb in m.labels if lb.get("action") == "remove"]
@@ -540,12 +500,8 @@ def test_outbound_rebar_status_labels_excluded_from_tag_sync(
 def test_inbound_rebar_status_labels_excluded_from_local_tag_sync(
     inbound_differ: ModuleType,
 ) -> None:
-    """(f) rebar-status: labels must not leak into local ticket tags via inbound label sync.
-
-    Jira has rebar-status:blocked label. Local ticket has no such tag.
-    The inbound label diff must NOT emit an ADD for rebar-status:blocked as a
-    user tag (it is a reconciler-managed annotation, not a user label).
-    """
+    """Inbound label sync does not add a reconciler-managed rebar-status annotation to user
+    tags."""
     jira_snapshot = {
         "DIG-100": _make_jira_fields(
             status="In Progress",

@@ -1,21 +1,6 @@
-"""Contract test: conflict_resolver never proposes (write, rebar-id) mutation.
-
-Parametrized across the 6-case matrix from draft-9 (story 26de-eb67-29d2-48ae).
-For each case, every resolved Mutation is inspected to assert that no mutation
-has a 'labels' payload containing any value starting with 'rebar-id-' AND an
-action in {create, update}.
-
-This is the dd-3 contract: per-element provenance must skip rebar-id labels;
-the conflict_resolver must not propose writes for the identity marker.
-
-6 case names (per task e2f8-9fa5-9eab-4418 REVISION_CYCLE_1):
-  (a) inbound-comment-create
-  (b) outbound-comment-create
-  (c) comment-edit-bidirectional
-  (d) comment-delete-bidirectional
-  (e) label-create-edit-delete-bidirectional  (excluding rebar-id)
-  (f) link-create-edit-delete-bidirectional
-"""
+"""Draft-9 comment, label, and link cases forbid rebar-id label writes in create or update
+mutations. The differ suppresses identity-label-only drift; the applier guard blocks
+unauthorized writes from direct resolver output."""
 
 from __future__ import annotations
 
@@ -49,13 +34,8 @@ _WRITE_ACTIONS = {"create", "update"}
 
 
 def _assert_no_rebar_id_label_writes(mutations: list[Any], case_id: str) -> None:
-    """Assert no mutation proposes a rebar-id-* label write.
-
-    A forbidden mutation is one where:
-      - action is 'create' or 'update', AND
-      - payload contains a 'labels' key whose value includes any item
-        starting with 'rebar-id-'
-    """
+    """Reject create or update mutations whose labels payload contains a rebar-id identity
+    marker."""
     for mut in mutations:
         action_val = mut.action.value if hasattr(mut.action, "value") else str(mut.action)
         if action_val not in _WRITE_ACTIONS:
@@ -74,21 +54,8 @@ def _assert_no_rebar_id_label_writes(mutations: list[Any], case_id: str) -> None
         )
 
 
-# ---------------------------------------------------------------------------
-# 6-case draft-9 matrix parametrization
-# ---------------------------------------------------------------------------
-#
-# Each case is a (local_state, jira_state) dict pair keyed by the same issue
-# key "PROJ-1".  All cases include a rebar-id-* label in one or both sides to
-# verify it is never proposed as a create/update payload field.
-#
-# The 6 cases follow the draft-9 per-element provenance scenarios:
-#   (a) inbound-comment-create
-#   (b) outbound-comment-create
-#   (c) comment-edit-bidirectional
-#   (d) comment-delete-bidirectional
-#   (e) label-create-edit-delete-bidirectional (excluding rebar-id)
-#   (f) link-create-edit-delete-bidirectional
+# Draft-9 cases vary comments, labels, and links while forbidding rebar-id writes.
+# Identity-label-only drift is filtered before resolver dispatch.
 
 JIRA_KEY = "PROJ-1"
 LOCAL_ID = "local-id-1"
@@ -96,9 +63,7 @@ REBAR_ID_LABEL = "rebar-id-local-id-1"  # typical identity marker format
 
 _DRAFT9_CASES = [
     pytest.param(
-        # (a) inbound-comment-create: Jira has a new comment that local does not.
-        # rebar-id label is identical on both sides — no label diff, so labels
-        # must not appear in any mutation payload at all.
+        # (a) Jira adds a comment; unchanged identity labels produce no label payload.
         {
             JIRA_KEY: {
                 "local_id": LOCAL_ID,
@@ -115,8 +80,7 @@ _DRAFT9_CASES = [
         id="inbound-comment-create",
     ),
     pytest.param(
-        # (b) outbound-comment-create: local has a new comment; Jira does not.
-        # rebar-id label identical on both sides — must not appear in outbound payload.
+        # (b) Local adds a comment; unchanged identity labels stay out of outbound payloads.
         {
             JIRA_KEY: {
                 "local_id": LOCAL_ID,
@@ -133,8 +97,7 @@ _DRAFT9_CASES = [
         id="outbound-comment-create",
     ),
     pytest.param(
-        # (c) comment-edit-bidirectional: both sides have different comment bodies.
-        # rebar-id label identical on both sides — must not appear in update payload.
+        # (c) Both comments differ; unchanged identity labels stay out of updates.
         {
             JIRA_KEY: {
                 "local_id": LOCAL_ID,
@@ -152,11 +115,7 @@ _DRAFT9_CASES = [
         id="comment-edit-bidirectional",
     ),
     pytest.param(
-        # (d) comment-delete-bidirectional: local deleted a comment Jira still has.
-        # rebar-id label identical on both sides; comment diverges but labels do not.
-        # Since labels are identical, no label entry appears in the update payload.
-        # This case verifies that the comment divergence path does not accidentally
-        # inject a rebar-id label write via the labels resolver.
+        # (d) Local deletes a comment; the label resolver must not add an identity-label write.
         {
             JIRA_KEY: {
                 "local_id": LOCAL_ID,
@@ -174,12 +133,7 @@ _DRAFT9_CASES = [
         id="comment-delete-bidirectional",
     ),
     pytest.param(
-        # (e) label-create-edit-delete-bidirectional (excluding rebar-id):
-        # Regular labels diverge (local adds 'sprint-1'; jira adds 'bug').
-        # rebar-id label absent from BOTH sides — the resolved payload labels
-        # {'feature','sprint-1','bug'} must not contain any rebar-id-* item.
-        # This is the primary "excluding rebar-id" contract case: even when
-        # label sets diverge, the resolver must never introduce a rebar-id-* label.
+        # (e) Ordinary labels diverge without an identity label; their union stays identity-free.
         {
             JIRA_KEY: {
                 "local_id": LOCAL_ID,
@@ -195,17 +149,8 @@ _DRAFT9_CASES = [
         id="label-create-edit-delete-bidirectional",
     ),
     pytest.param(
-        # (e2) label-divergent-rebar-id-local-only: local carries REBAR_ID_LABEL;
-        # Jira does NOT. The label sets differ ONLY in the bridge-internal
-        # identity label. Since ticket robe-creek-zealot the differ's
-        # present-in-both branch compares label sets with bridge-internal
-        # prefixes excluded (differ._non_internal_labels), so this drift is
-        # recognised as our own write-back echo and suppressed at the source —
-        # no labels mutation is proposed at all. (Historically this case was a
-        # strict xfail: the differ unioned both sides and only the applier's
-        # _audit_rebar_id_label_writes guard caught the rebar-id write
-        # post-resolution; that guard remains as defense-in-depth, see
-        # test_applier_guard_blocks_resolver_rebar_id_label_writes below.)
+        # (e2) Local-only identity-label drift is an echo suppressed by the differ.
+        # The applier guard still protects direct resolver output.
         {
             JIRA_KEY: {
                 "local_id": LOCAL_ID,
@@ -221,9 +166,7 @@ _DRAFT9_CASES = [
         id="label-divergent-rebar-id-local-only",
     ),
     pytest.param(
-        # (e3) label-divergent-rebar-id-jira-only: Jira carries REBAR_ID_LABEL;
-        # local does NOT. Symmetric inbound counterpart of (e2) — suppressed
-        # at the differ since ticket robe-creek-zealot (see e2 note).
+        # (e3) Jira-only identity-label drift is symmetrically suppressed by the differ.
         {
             JIRA_KEY: {
                 "local_id": LOCAL_ID,
@@ -239,11 +182,7 @@ _DRAFT9_CASES = [
         id="label-divergent-rebar-id-jira-only",
     ),
     pytest.param(
-        # (f) link-create-edit-delete-bidirectional:
-        # Links diverge (jira has an extra 'relates' link); rebar-id label
-        # identical on both sides — no rebar-id label write proposed.
-        # The link elements are plain strings here (not dicts) to avoid
-        # the unhashable-dict issue in resolve_set_valued's dedup pass.
+        # (f) Links diverge while identity labels match; plain string links keep set union valid.
         {
             JIRA_KEY: {
                 "local_id": LOCAL_ID,
@@ -267,16 +206,8 @@ _DRAFT9_CASES = [
 def test_no_rebar_id_label_writes_per_draft9_case(
     differ, local_state: dict, jira_state: dict, request
 ) -> None:
-    """For each draft-9 provenance case, no mutation proposes a rebar-id label write.
-
-    Drives compute_mutations with the 6-case matrix and asserts that for every
-    emitted Mutation with action in {create, update}, the 'labels' payload key
-    (if present) contains no item starting with 'rebar-id-'.
-
-    Contract (dd-3): conflict_resolver per-element provenance MUST skip rebar-id
-    labels; the identity marker remains exclusively under inbound_clean_label /
-    outbound_create jurisdiction.
-    """
+    """Across the draft-9 provenance matrix, no create or update mutation may write a
+    rebar-id identity label."""
     mutations = differ.compute_mutations(local_state, jira_state)
     _assert_no_rebar_id_label_writes(
         mutations,
@@ -284,20 +215,8 @@ def test_no_rebar_id_label_writes_per_draft9_case(
     )
 
 
-# ---------------------------------------------------------------------------
-# Direct resolver + applier-guard tail check
-# ---------------------------------------------------------------------------
-#
-# The xfail cases above (e2, e3) confirm conflict_resolver does NOT itself
-# filter rebar-id-* labels from the union payload — it unconditionally unions
-# both sides. The actual end-to-end contract is enforced by the applier's
-# _audit_rebar_id_label_writes guard, which fires before any unauthorized leaf
-# dispatches a rebar-id-* label write.
-#
-# The test below drives conflict_resolver.resolve_field DIRECTLY with divergent
-# inputs (bypassing the differ's no-diff short-circuit) and then asserts the
-# applier guard raises RebarIdLabelWriteError when an unauthorized leaf attempts
-# to write a Mutation containing the resolver's output.
+# Direct resolver union still includes identity labels; the applier guard blocks
+# unauthorized writes before dispatch. Bypass the differ here to test that boundary.
 
 
 @pytest.fixture(scope="module")
@@ -316,21 +235,15 @@ def applier_mod():
 
 
 def test_resolver_unions_rebar_id_label_on_divergent_sides(conflict_resolver) -> None:
-    """resolve_field('labels', ...) returns the union including rebar-id-* when
-    sides diverge — documents the current (unfiltered) resolver behavior.
-
-    This pins the contract boundary: the resolver does not filter rebar-id-*
-    labels itself; the applier guard catches unauthorized writes downstream.
-    """
+    """The resolver still unions identity labels; the applier guard is the authorized-writer
+    boundary."""
     local_labels = [REBAR_ID_LABEL, "feature"]
     jira_labels = ["feature"]
     resolved = conflict_resolver.resolve_field(
         "labels", local_labels, jira_labels, provenance_record=None
     )
     assert isinstance(resolved, list)
-    # Current behavior: rebar-id-* is unioned in. If the resolver gains an
-    # explicit filter for rebar-id-* labels, this assertion will fail and the
-    # xfail markers on (e2)/(e3) above should be removed.
+    # The resolver currently unions identity labels; the applier enforces write authority.
     assert any(str(lbl).startswith("rebar-id-") for lbl in resolved), (
         "resolve_field('labels', ...) is expected to union all labels including "
         "rebar-id-* (no resolver-level filter). The applier guard "
@@ -341,15 +254,9 @@ def test_resolver_unions_rebar_id_label_on_divergent_sides(conflict_resolver) ->
 def test_applier_guard_blocks_resolver_rebar_id_label_writes(
     conflict_resolver, mutation_mod, applier_mod
 ) -> None:
-    """When the resolver's union output is wrapped in a Mutation routed to an
-    unauthorized leaf (outbound_update), the applier guard raises
-    RebarIdLabelWriteError before any side-effect.
-
-    This is the load-bearing end-to-end contract check: the resolver may
-    union rebar-id-* labels into its output, but the applier _audit_rebar_id_label_writes
-    guard MUST block any unauthorized leaf from acting on that payload.
-    """
-    # 1. Resolver produces a union list that includes a rebar-id-* label.
+    """An unauthorized outbound leaf cannot dispatch a resolver-produced rebar-id label
+    write; the applier guard raises first."""
+    # 1. Resolver output includes the identity label.
     local_labels = [REBAR_ID_LABEL, "feature"]
     jira_labels = ["feature"]
     resolved = conflict_resolver.resolve_field(
@@ -357,9 +264,7 @@ def test_applier_guard_blocks_resolver_rebar_id_label_writes(
     )
     assert any(str(lbl).startswith("rebar-id-") for lbl in resolved)
 
-    # 2. Build a label-target Mutation carrying the offending rebar-id label.
-    #    The applier's _is_rebar_id_label_write_mutation matches mutations where
-    #    target == 'label' AND payload (string) starts with 'rebar-id-'.
+    # 2. Build a label-target mutation with that identity label for the guard.
     offending_label = next(lbl for lbl in resolved if str(lbl).startswith("rebar-id-"))
     mut = mutation_mod.Mutation(
         direction=mutation_mod.MutationDirection.outbound,
@@ -369,13 +274,10 @@ def test_applier_guard_blocks_resolver_rebar_id_label_writes(
         provenance={"source": "test"},
     )
 
-    # 3. Invoke the guard directly with an unauthorized leaf name.
-    #    outbound_update is NOT in _AUTHORIZED_REBAR_ID_LABEL_WRITERS.
-    #    The applier loads its own _errors module under the canonical key
-    #    'reconciler_errors' (see _load_errors_module); use the re-export.
+    # 3. An outbound_update leaf lacks authority to write it; use the exported guard error.
     error_cls = applier_mod.RebarIdLabelWriteError
 
-    # Ensure guard mode is 'raise' regardless of environment.
+    # Force guard rejection.
     import os as _os
 
     prev = _os.environ.get("REBAR_UNSAFE_ID_GUARD_BYPASS")

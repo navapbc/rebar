@@ -1,28 +1,6 @@
-"""Epic a4bd / story 248f: the durable per-link PEER-CONFIRMATION record.
-
-``managed_refs`` proves "we own this ref", never "we pushed it" — it is set the
-instant a link is created LOCALLY and is strictly monotonic. So the inbound
-removal path cannot tell a never-pushed local link from one the peer genuinely
-deleted. This suite pins the evidence store that supplies the missing
-discriminator, and the three properties that make it trustworthy:
-
-1. It is RELATION-SCOPED. The same ordered pair under a different relation is a
-   different key — the outbound ADD dedup key ``(vendor_type, target_key)`` is
-   direction-agnostic and cannot express this, which is exactly why the store
-   does not reuse it.
-2. It records only PROVEN synchronization. A ``set_relationship`` that raises
-   records nothing; an unbound target records nothing rather than writing a
-   vendor key into a local-id field.
-3. It is strictly FAIL-OPEN and side-effect-free with respect to the caller. A
-   corrupt store, an unopenable store, or a callback that raises must leave the
-   outbound path's applied/computed counters byte-identical to the pre-a4bd
-   behaviour — those counters feed the silent-no-op canary, so perturbing them
-   would trade a link-safety bug for a reporting bug.
-
-The counter-parity and raising-callback cases are the load-bearing ones: a naive
-implementation that records inside the dispatch loop without swallowing would
-fail an outbound link that ALREADY LANDED on the vendor.
-"""
+"""Peer-confirmation evidence distinguishes links observed on the peer from locally managed
+refs. Keys include relation and ordered endpoints; the durable sidecar survives compaction
+and confirmation-only commit-back."""
 
 from __future__ import annotations
 
@@ -66,12 +44,8 @@ _DEFAULT = object()
 
 
 class _LinkClient:
-    """A transport implementing the full ``SupportsLinks`` protocol surface.
-
-    Every member is required: ``_capability_present`` uses a ``runtime_checkable``
-    ``isinstance`` (backed by ``hasattr``), so a partial stub would be reported as
-    capability-absent and the dispatch loop would never run at all.
-    """
+    """Implement the complete SupportsLinks protocol so runtime capability checks permit
+    dispatch."""
 
     def __init__(self, result=_DEFAULT, raises: bool = False) -> None:
         self.result = {"id": "10042"} if result is _DEFAULT else result
@@ -118,12 +92,7 @@ def _link_mutation():
 
 
 def test_relation_scoped_key_does_not_confirm_a_sibling_relation(peer_confirmations, tracker):
-    """AC2. Confirming ``blocks`` must NOT confirm ``relates_to`` on the same pair.
-
-    One ordered pair can hold two net-active differently-related deps
-    (``add_dependency`` is idempotent per ``(target, relation)``), so a
-    pair-scoped record would silently license removing the wrong one.
-    """
+    """Confirming blocks for an ordered pair does not confirm relates_to for that same pair."""
     store = peer_confirmations.PeerConfirmationStore(str(tracker))
     store.record("A", "B", "blocks", link_id="1")
 
@@ -164,14 +133,8 @@ def test_records_round_trip_through_the_file(peer_confirmations, tracker):
 
 
 def test_store_survives_snapshot_compaction_of_the_ticket_log(peer_confirmations, tmp_path):
-    """AC7. The record must outlive ticket-log SNAPSHOT compaction.
-
-    It does so STRUCTURALLY: the evidence is a ``.bridge_state`` sidecar, not
-    reducer ``compiled_state``, so compaction cannot reach it. That is the whole
-    reason the sidecar home was chosen over ticket state, and this test is what
-    stops a later refactor from moving it into the event log where compaction
-    would have to be taught about it.
-    """
+    """The confirmation sidecar remains intact when ticket-log events are compacted into a
+    snapshot."""
     import rebar
 
     repo = tmp_path / "repo"
@@ -210,15 +173,7 @@ def test_store_survives_snapshot_compaction_of_the_ticket_log(peer_confirmations
 
 
 def test_commit_only_peer_confirmations_is_staged_and_committed(tmp_path, monkeypatch):
-    """AC9. A confirmation-ONLY change must actually commit.
-
-    ``_commit_binding_store_snapshot`` stages a deliberate file set and gets its
-    bug-1e08 per-file idempotency from the locked store seam's pathspec-scoped
-    status (ticket 11a9-b11b). Missing the sidecar from ``_rel_files`` would make
-    a confirmation-only pass a silent no-op, dropping the evidence on every
-    pass. This test drives a real tracker repo where ONLY the sidecar changed
-    and requires the commit to land.
-    """
+    """A pass changing only peer confirmations stages and commits that sidecar."""
     # _commit_binding_store_snapshot moved to pass_support.py (ticket
     # piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
     helpers = importlib.import_module("rebar.reconciler.pass_support")

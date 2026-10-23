@@ -1,20 +1,6 @@
-"""HELD-OUT oracle (rebar-debug, bug af1b): a scoped `sync --only` LIVE pass MUST dispatch
-a bound issue's outbound scalar UPDATE to the transport write, exactly as the legacy
-`--filter-local-ids` route does.
-
-Confirmed root cause: run_differs builds the outbound update with ``target = jira_key`` and
-hands ``ticket_planner.plan_pass`` a selection whose ``ids`` are the SELECTED LOCAL IDS only;
-``_scope_excluded`` compares the jira-key target against those local ids and classifies the
-in-scope bound-issue update as ``scope_deferred``, so the live coordinator+fuse reroute drops
-the write. The legacy route scopes via ``_build_filter_target_set`` (LOCAL IDS ∪ bound JIRA
-KEYS) and applies correctly.
-
-The reconcile pass is driven by ``_sync_only_dispatch_probe.py`` in a CLEAN subprocess: the
-probe rebinds loader seams on the shared ``rebar.reconciler`` modules and sets process
-environment, which must not leak into pytest's process. A faithful in-memory transport records the
-``update_issue`` calls; the bug is not codec/DC-specific, so an offline transport reproduces
-it (matching the live in-CI probe for bug af1b; context: external, GH Actions run 33129851229).
-"""
+"""A live sync --only selection must dispatch a bound issue’s scalar update, matching legacy
+--filter-local-ids. The planner must recognize both selected local ID and bound Jira key;
+subprocess setup strips inherited sandbox overrides and protects secret values."""
 
 from __future__ import annotations
 
@@ -31,15 +17,9 @@ _EXPECTED = ["update_issue(DIG-1) fields=['description']"]
 
 
 def _run_probe(route: str, base: Path) -> list[str]:
-    # subprocess_env() (not dict(os.environ)): pytest renders call args in its default
-    # traceback, so a raw environment dict would leak inherited secrets on a subprocess
-    # failure — the repr-safe boundary keeps values available to the child while redacting
-    # the representation (enforced by test_subprocess_env_repr_security).
+    # subprocess_env keeps child values while redacting secrets from failure tracebacks.
     env = subprocess_env()
-    # The reconciler unit-test conftests inject REBAR_ROOT / REBAR_CONFIG (empty sandbox
-    # repos) and pinned JIRA_* creds as autouse fixtures. The subprocess would inherit them
-    # and read an EMPTY ticket store; the probe seeds its OWN repo + env, so drop the
-    # inherited overrides and let the probe govern.
+    # Remove inherited fixture sandbox paths so the probe reads its own seeded store.
     for key in ("REBAR_ROOT", "REBAR_CONFIG", "XDG_CONFIG_HOME"):
         env.pop(key, None)
     proc = subprocess.run(

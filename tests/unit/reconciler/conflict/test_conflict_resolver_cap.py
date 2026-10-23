@@ -1,12 +1,5 @@
-"""Unit tests for the 50-element FIFO cap on resolve_set_valued() provenance_record.
-
-Tests cover:
-  - test_cap_at_50_no_growth: when provenance_record has 50 elements and a new merge
-    happens, the result list has exactly 50 elements (no growth beyond cap).
-  - test_cap_fifo_eviction: eviction is FIFO — the oldest element (index 0) is evicted,
-    newest is appended.
-  - test_no_eviction_below_cap: with only 10 elements, no eviction occurs.
-"""
+"""Set-valued conflict provenance keeps the newest 50 entries: below cap it appends, at cap
+it evicts FIFO, and over-capacity input is truncated."""
 
 from __future__ import annotations
 
@@ -82,13 +75,8 @@ def test_no_eviction_below_cap(cr: ModuleType) -> None:
 
 
 def test_cap_truncates_over_capacity_input(cr: ModuleType) -> None:
-    """If provenance_record arrives over capacity (schema migration, alternate
-    writer, etc.), the cap is enforced as bounded *size* — the list is
-    truncated to exactly 50 after the merge, not merely 'do not grow'.
-
-    Regression for the pop(0)+append() bug where length stayed at the original
-    over-capacity value indefinitely.
-    """
+    """An already oversized provenance list is reduced to 50 after a merge, not merely
+    prevented from growing."""
     provenance: list[str] = [f"old_{i}" for i in range(100)]
     cr.resolve_set_valued([], ["fresh_item"], provenance)
 

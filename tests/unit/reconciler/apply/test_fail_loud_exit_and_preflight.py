@@ -1,19 +1,6 @@
-"""beer-datum-bark (e534-5154-2401-40fb), facets 2 and 3.
-
-Facet 2 — FAIL LOUD: after isolating per-mutation failures, a pass that recorded
-any real per-mutation error must exit NON-ZERO (not the current exit 0). The
-benign 400-comment-fallback is NOT a recorded error (persist_phase.persist_and_log counts
-it as applied), so it stays exit 0 — this is fail-loud boundary "Option C".
-
-Facet 3 — PREFLIGHT NO-ABORT: preflight_status_mapping must not raise a
-the former StatusMappingError that aborted the whole pass when a single update mutation carries
-an unmapped status. The offending mutation is recorded as a per-mutation failure
-downstream (applier backstop) instead of aborting its siblings.
-
-RED pre-fix:
-  - the pass exits 0 even when result["mutation_failures"] > 0.
-  - pass_support.preflight_status_mapping raises on the first unmapped status.
-"""
+"""A pass exits nonzero when mutations recorded real failures, but stays zero when clean or a
+benign comment fallback applied. Unmapped status preflight warns without aborting the
+remaining batch."""
 
 from __future__ import annotations
 

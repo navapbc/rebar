@@ -1,27 +1,5 @@
-"""A Jira 404 on ANY outbound action is a per-mutation failure, never pass-fatal
-(bug 449f-f9bf-be90-47fe, mode 3).
-
-`handle_update` soft-fails a 404 (`apply_handlers.py`, bug tan-coin-atone/6614) and
-its comment states the rule in general terms: "A 404 on a single mutation's target
-means the issue is gone: this is a PER-MUTATION failure, never pass-fatal."
-`handle_create` and `handle_delete` never got that treatment — they call
-`create_one` / `delete_one` with no `try` at all. The per-mutation backstop
-(`batch_dispatch._dispatch_with_backstop`, formerly `applier._apply_one`) re-raises
-`urllib.error.HTTPError` ABOVE `record_backstop_failure` precisely because it assumes
-"404 soft-failed in the handler", so a 404 from a create or a delete escapes
-`reconcile_once` and aborts the whole pass.
-
-Observed in production: GHA run 30465914822 (2026-07-29T15:34:55Z) died with
-`ERROR: reconcile_once raised: HTTP Error 404: Not Found` after applying 1 of 30
-planned mutations — 29 valid mutations silently skipped. That directly violates the
-acceptance contract of closed bug e534-5154-2401-40fb ("the reconciler applies every
-other (valid) mutation in the pass ... no valid mutation is silently skipped").
-
-These tests drive the real per-mutation backstop `_dispatch_with_backstop` that both
-batch reroutes dispatch through, not the handler in isolation, because the contract
-under test is "the BATCH continues" — the property e534 pinned and the one the
-production failure broke.
-"""
+"""A Jira 404 on create, update, or delete is a per-mutation failure; later mutations still
+run. Other HTTP failures remain pass-fatal."""
 
 from __future__ import annotations
 
@@ -69,13 +47,8 @@ def test_404_on_create_or_delete_is_isolated_and_batch_continues(
     ctx: apply_handlers.BatchApplyContext,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A 404 from create/delete records a per-mutation failure; the batch goes on.
-
-    `update` already behaves this way; create and delete must match, because
-    the backstop re-raises HTTPError on the assumption that the handler soft-failed
-    it. The second mutation is the load-bearing assertion: e534's contract is that a
-    single bad mutation does not skip the valid ones behind it.
-    """
+    """Create and delete 404s record isolated failures and permit the next mutation to run,
+    matching update."""
 
     def _raise_404(*args: Any, **kwargs: Any) -> Any:
         raise _http_error(404)
@@ -119,12 +92,7 @@ def test_non_404_http_error_still_propagates(
     ctx: apply_handlers.BatchApplyContext,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Contrast case: only 404 is soft-failed; 5xx keeps the fail-fast contract.
-
-    Guards against over-broadening the fix into "swallow every HTTPError", which
-    would hide real outages. `handle_update` draws the line at `exc.code != 404`
-    and the other handlers must draw it in the same place.
-    """
+    """Only 404 is isolated; other HTTP errors propagate so outages remain visible."""
 
     def _raise_500(*args: Any, **kwargs: Any) -> Any:
         raise _http_error(500)

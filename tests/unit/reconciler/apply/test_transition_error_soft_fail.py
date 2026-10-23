@@ -1,26 +1,5 @@
-"""beer-datum-bark (e534-5154-2401-40fb): a bare RuntimeError from a Jira
-transition (acli.transition_issue_by_name — "no transition reaches <status>")
-must SOFT-FAIL per-mutation, not abort the whole reconcile pass.
-
-Root cause: the applier's per-mutation isolation is an enumerated allowlist
-(400-comment-fallback, 404-stale-binding, AssigneeNotFoundError). The
-per-mutation loop in applier._apply_batch only catches HeadDriftError; the bare
-RuntimeError from acli.transition_issue_by_name:514-524 is not a JiraAPIError,
-so it escapes _apply_one -> _apply_batch and aborts the batch mid-loop, silently
-skipping every subsequent mutation.
-
-Intended behavior (design invariant — mirrors the assignee/404/comment soft-fail
-pattern): dispatch every mutation the pass can, record the failing one as a
-per-mutation outcome error, and continue. The recorded error then counts toward
-mutation_failures (reconcile.py:1116-1118), which the pass surfaces as a
-non-zero "fail loud" exit (tested separately at the run_pass seam).
-
-RED test: dispatch [good, bad-transition, good]. Pre-fix, apply() raises the
-RuntimeError and the third mutation never runs. Post-fix, apply() returns, all
-three are attempted, and the manifest records an error only for the bad one.
-
-Mirrors the bootstrap of test_applier_assignee_soft_fail.py.
-"""
+"""A bare RuntimeError from an unreachable Jira transition is isolated per mutation. The
+batch continues and records the precise failure instead of aborting later writes."""
 
 from __future__ import annotations
 
@@ -100,14 +79,8 @@ def test_transition_runtime_error_soft_fails_batch_continues(
     acli_mod: ModuleType,
     tmp_path: Path,
 ) -> None:
-    """[good, bad-transition, good] in one batch.
-
-    Pre-fix: the bare RuntimeError propagates through apply(), killing the pass;
-    the third mutation never runs.
-
-    Post-fix: apply() catches it per-mutation, records an outcome error, and
-    continues. All three mutations are attempted; only the bad one has an error.
-    """
+    """In a good/bad/good batch, record the transition error on the bad mutation and still
+    attempt both good writes."""
     good1 = _update("DIG-1", {"summary": "a"}, local_id="l1")
     bad = _update("DIG-2", {"status": "idea"}, local_id="l2")
     good2 = _update("DIG-3", {"summary": "c"}, local_id="l3")

@@ -1,22 +1,6 @@
-"""Bug e6e9 — the apply layer must report only writes that CONFIRMEDLY landed.
-
-``reconcile_helpers._advance_baselines`` advances the ADR-0026 baseline to what rebar SYNCED, and
-this is the layer that decides what "synced" means. The operator decision on this ticket
-made the granularity a hard requirement: the advance must key off PER-MUTATION success, not
-the pass exit code and not the absence of an exception at pass level. A status transition
-can soft-fail while the pass still exits 0 — ``transition_issue_by_name`` raises a bare
-``RuntimeError`` for an unreachable transition (caught by the applier's per-mutation
-backstop), a 400 illegal-transition is answered with a comment instead of the edit, and a
-404 / unresolved assignee soft-fails the whole mutation.
-
-Advancing the baseline for a write that did not land is strictly WORSE than the bug being
-fixed: today's clobber self-corrects (the baseline advances to Jira's value, local then
-differs, the next pass re-pushes), whereas a falsely-advanced baseline makes rebar believe
-local and Jira agree when they do not, and never self-corrects.
-
-These cells drive the real ``dispatch_one.update_one`` / ``apply_handlers.handle_update``
-against a stub transport, asserting the reported set on each arm.
-"""
+"""Advance scalar baselines only for writes confirmed by the transport. Successful values use
+the vendor payload; soft-failed transitions, comment fallback, stale bindings, parent-only
+edits, and handler failures report no synced fields."""
 
 from __future__ import annotations
 
@@ -80,13 +64,8 @@ def _run(client: _StubClient, mutation: dict[str, Any] | None = None) -> dict[st
 
 
 def test_a_completed_write_reports_every_field_it_sent() -> None:
-    """The happy path: ``update_issue`` returned, so the fields it carried are synced.
-
-    This is the ONLY arm that may report anything. The reported values must be the
-    vendor-shaped ones actually handed to the transport, because that is the shape
-    ``peer_state.set_baseline`` / ``normalize_baseline_value`` consume — a mismatch would
-    make the overlay compare against a value Jira never held.
-    """
+    """A completed update reports every vendor-shaped scalar field sent to Jira for baseline
+    advancement."""
     client = _StubClient()
     synced = _run(client)
 
@@ -103,13 +82,8 @@ def test_a_completed_write_reports_every_field_it_sent() -> None:
 
 
 def test_an_unreachable_transition_reports_nothing() -> None:
-    """The production soft-fail from the ticket: a bare ``RuntimeError``.
-
-    ``acli.transition_issue_by_name`` raises this when no legal transition reaches the
-    target status. It propagates to the applier's per-mutation backstop, which records a
-    failure and lets the pass continue at exit 0 — so the pass-level signal is useless
-    here and only the per-mutation one is honest.
-    """
+    """A bare RuntimeError for an unreachable transition soft-fails the mutation and reports
+    no synced fields."""
     client = _StubClient(raises=RuntimeError("no transition to 'Done' from 'To Do'"))
     synced: dict[str, Any] = {}
 
@@ -123,12 +97,8 @@ def test_an_unreachable_transition_reports_nothing() -> None:
 
 
 def test_a_400_illegal_transition_comment_fallback_reports_nothing() -> None:
-    """The 400 arm posts a COMMENT instead of the edit — nothing was written.
-
-    This is the subtle one: the pass exits 0, ``update_one`` returns normally, and the
-    outcome carries no error. Only the fact that ``fields_synced`` is written on the far
-    side of ``update_issue`` keeps this arm honest.
-    """
+    """A 400 transition fallback posts a comment rather than a field edit, so it reports no
+    synced fields."""
     client = _StubClient(raises=JiraAPIError("illegal transition", status_code=400))
     synced = _run(client)
 
@@ -150,12 +120,8 @@ def test_a_404_on_a_stale_binding_reports_nothing() -> None:
 
 
 def test_a_parent_only_mutation_reports_nothing() -> None:
-    """No scalar write was issued at all, so there is nothing to sync.
-
-    ``update_one`` deliberately skips the otherwise-empty ``update_issue`` call when the
-    only changed field was ``parent``. Reporting here would advance the baseline off a
-    call that never happened.
-    """
+    """A parent-only mutation skips scalar update_issue and therefore reports no synced
+    fields."""
 
     class _ParentClient(_StubClient):
         def set_parent(self, jira_key: str, parent_key: Any) -> None:
@@ -185,13 +151,7 @@ def test_the_handler_records_a_successful_write_under_its_local_id(tmp_path: Pat
 
 
 def test_the_handler_records_nothing_for_a_soft_failed_mutation(tmp_path: Path) -> None:
-    """The end-to-end soft-fail contract at the layer reconcile actually consumes.
-
-    Two independent gates have to hold for this to stay empty: ``fields_synced`` is only
-    written past a completed ``update_issue``, AND the handler's record site sits past
-    every soft-fail return. Either one alone would be enough; asserting here pins the
-    composition, which is what the operator decision required.
-    """
+    """The handler records no local-ID-keyed scalar baseline for a soft-failed mutation."""
     ctx = _ctx(tmp_path, _StubClient(raises=JiraAPIError("illegal transition", status_code=400)))
     handle_update(_mutation(), ctx)
 
