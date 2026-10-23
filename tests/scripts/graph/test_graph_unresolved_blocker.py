@@ -1,15 +1,7 @@
-"""Boundary test: an unresolvable / archived `depends_on` target is treated as a
-CLOSED blocker (tombstone-awareness), so the dependent IS ready.
+"""Treat unresolved depends_on targets as satisfied tombstones.
 
-Story lean-sloth-ham (epic clumsy-jab-yacht) investigated the audit's H-5 claim that
-an unresolvable-alias blocker lets a blocked ticket "wrongly" read as ready. On
-inspection that is the DELIBERATE tombstone invariant: a blocker whose directory is
-absent (archived / deleted / not-yet-synced) must not block its dependents forever
-(see _status._get_ticket_status and test_graph_traversal's archived-blocker test).
-`resolve_ticket_id` returns None for BOTH normal archival and a genuinely-bogus
-alias, indistinguishably, so failing closed on "unresolved" would break archived-
-blocker unblocking. These tests codify the boundary so it is not re-flagged, and the
-controls prove normal blocking still works.
+Alias resolution cannot distinguish archived or deleted targets from a bogus alias.
+Normal resolvable blockers still block until terminal.
 """
 
 from __future__ import annotations
@@ -32,11 +24,7 @@ def _ready_ids(tracker_dir: Path) -> set[str]:
 def test_depends_on_absent_target_is_treated_as_closed_tombstone(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """ticket-x depends_on a target whose dir is absent → x IS ready (tombstone).
-
-    This is the deliberate invariant, NOT a bug: an archived/deleted/not-yet-synced
-    blocker must not block forever. Documented here so future audits don't re-flag it.
-    """
+    """An absent depends_on target cannot block a dependent forever."""
     tracker = tmp_path / "tracker"
     tracker.mkdir()
     _write_ticket(tracker, "ticket-x", status="open")

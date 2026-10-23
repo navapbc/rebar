@@ -1,21 +1,7 @@
-"""Shared RETURN-SHAPE contract for the AcliClient enrichment surface.
+"""Assert the enrichment return shapes shared by FakeAcliClient and AcliClient.
 
-Epic f89d, story C (`59ef-ff3e-5aea-47b1`) — the verified-fake honesty contract.
-These assertions are the SINGLE definition of the shape each enrichment method must
-return; they are run against BOTH implementations so the fake cannot drift from the
-real client undetected (SWE-at-Google "verified fake"):
-
-  * the hermetic ``FakeAcliClient`` — always, in
-    ``tests/integration/reconciler/test_verified_fake_contract.py``;
-  * the real ``AcliClient`` against live Jira — opt-in (``external`` marker +
-    ``REBAR_RUN_EXTERNAL`` + creds), in
-    ``tests/external/test_verified_fake_contract_live.py``.
-
-Each function enumerates the REQUIRED keys + their JSON primitive types and asserts
-STRUCTURE/TYPE only — never specific values (anti-change-detector; see
-docs/adr/0004-reconciler-snapshot-contract.md). Lives at tests/ root so both tiers
-import it via the ``tests/`` sys.path entry (tests/conftest.py), like the sibling
-``_isolation`` / ``_repo_root`` helpers.
+The fake runs hermetically. The client runs in the opt-in external Jira tier. Checks require
+keys and JSON primitive types without pinning values, so the two cannot drift silently.
 """
 
 from __future__ import annotations

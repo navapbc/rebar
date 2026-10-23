@@ -1,16 +1,6 @@
-"""autodeploy re-materializes the host observability probe on a probe-source change
-(ticket dying-verastile-quelea).
+"""Reinstall the host observability probe when its source changes.
 
-The systemd timer runs ``/usr/local/bin/rebar-observability.sh`` — a COPY that only
-``install-observability.sh`` ever writes. ``infra/scripts/`` is in no autodeploy trigger
-path (not BOT_PATHS, not CONFIG_PATHS), so a change to the probe reached the box's
-``/opt/rebar`` copy at best via rsync but NEVER refreshed the installed ``/usr/local/bin``
-copy — the probe silently went stale for 10 days.
-
-This test drives autodeploy.sh under a PATH shim where ``main`` has advanced and ``git
-diff`` reports *only* ``infra/scripts/observability.sh`` changed (so the heavy review-bot
-rebuild block is skipped). It asserts that autodeploy re-runs the idempotent
-``install-observability.sh`` — proved by a marker the stubbed installer writes.
+The systemd timer runs the installed copy, so rsync of the source alone is insufficient.
 """
 
 from __future__ import annotations

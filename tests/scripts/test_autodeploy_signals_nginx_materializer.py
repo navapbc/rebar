@@ -1,31 +1,8 @@
-"""autodeploy signals a pending manual apply when a host-nginx *materializer source*
-changes (bug 5524-e353-2e2d-4dbe).
+"""Signal manual application when host nginx materializer sources change.
 
-The HOST-nginx include materializers and their seed are the source of truth for nginx
-include files that live OUTSIDE the compose build context and are written to
-``/etc/nginx/`` by ``compose-up.sh`` at boot — NOT by the autodeploy loop:
-
-* ``infra/scripts/materialize-opcert-guard.sh`` — writes ``/etc/nginx/opcert-guard.map.conf``
-  (the fail-closed ``/opcert/`` guard map) + reloads nginx;
-* ``infra/scripts/materialize-mcp-upstream.sh`` — installs the committed
-  ``infra/nginx/mcp-upstream.conf`` seed into ``/etc/nginx/mcp-upstream.conf`` + reloads;
-* ``infra/nginx/mcp-upstream.conf`` — the committed seed itself;
-* ``infra/scripts/compose-up.sh`` — the boot orchestrator that invokes both materializers.
-
-Each was absent from EVERY autodeploy path manifest (BOT/SECRETS/MCP/CONFIG/EDGE/OBS/
-CERTBOT), and ``autodeploy.sh`` never invokes ``compose-up.sh``. So a merged change to any
-of these sources rsynced to ``/opt/rebar`` and then silently did nothing — like the nginx
-edge template (bug 1d1b-a719-b675-4a1f) and the gerrit.config precedent
-(bug 1630-0279-85ba-4e15), it failed with NO signal at all.
-
-Scope is detect-and-signal ONLY, the same v1 boundary as ``CONFIG_PATHS``/``EDGE_PATHS``
-(ADR 0079). Full auto-apply (re-run the materializer → ``nginx -t`` → reload → rollback) is
-a separate behaviour decision and is NOT exercised here.
-
-This test drives ``autodeploy.sh`` under a PATH shim where ``main`` has advanced and
-``git diff`` reports *only* one materializer source changed, and asserts autodeploy emits
-``AUTODEPLOY_ERROR`` with ``reason=nginx_materializer_manual`` naming that file, so the
-pending manual re-materialize is visible rather than silent — for each of the four sources.
+Boot-time scripts write installed include files outside the compose build context.
+Autodeploy does not rerun them, so changes to either materializer, the upstream
+seed, or compose-up must emit nginx_materializer_manual naming the source.
 """
 
 from __future__ import annotations

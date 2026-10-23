@@ -1,9 +1,4 @@
-"""Cycle detection: direct/transitive, level-scoped, check_cycle_at_level, hidden-dir skip
-
-Split from the former monolithic tests/scripts/test_ticket_graph.py along
-graph-concern seams. The `graph` fixture + autouse git-isolation fixture live in
-conftest.py; event-writing helpers + the module loader in _helpers.py.
-"""
+"""Test direct and transitive cycles, level scope, and hidden-directory exclusion."""
 
 from __future__ import annotations
 
@@ -29,11 +24,7 @@ from _helpers import (
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_graph_cycle_detection_rejects_direct_cycle(graph: ModuleType, tmp_path: Path) -> None:
-    """add_dependency raises CyclicDependencyError for a direct cycle A→B, B→A.
-
-    Setup: ticket-a blocks ticket-b already exists.
-    Action: add_dependency('ticket-b', 'ticket-a', ...) must raise CyclicDependencyError.
-    """
+    """Reject B-to-A when A already blocks B."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -48,11 +39,7 @@ def test_graph_cycle_detection_rejects_direct_cycle(graph: ModuleType, tmp_path:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_graph_cycle_detection_rejects_transitive_cycle(graph: ModuleType, tmp_path: Path) -> None:
-    """add_dependency raises CyclicDependencyError for a transitive cycle A→B→C→A.
-
-    Setup: ticket-a blocks ticket-b, ticket-b blocks ticket-c.
-    Action: add_dependency('ticket-c', 'ticket-a', ...) must raise CyclicDependencyError.
-    """
+    """Reject C-to-A when A blocks B and B blocks C."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -69,11 +56,7 @@ def test_graph_cycle_detection_rejects_transitive_cycle(graph: ModuleType, tmp_p
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_graph_cycle_detection_allows_dag(graph: ModuleType, tmp_path: Path) -> None:
-    """add_dependency does NOT raise for a valid DAG: A→B, A→C, B→D.
-
-    Setup: ticket-a blocks ticket-b, ticket-a blocks ticket-c, ticket-b blocks ticket-d.
-    Action: These are all valid DAG edges — no CyclicDependencyError should be raised.
-    """
+    """Allow the acyclic edges A-to-B, A-to-C, and B-to-D."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -91,16 +74,7 @@ def test_graph_cycle_detection_allows_dag(graph: ModuleType, tmp_path: Path) -> 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_graph_visited_set_prevents_infinite_loop(graph: ModuleType, tmp_path: Path) -> None:
-    """Diamond graph (A→B, A→C, B→D, C→D) traverses without infinite recursion.
-
-    Setup:
-        - ticket-a blocks ticket-b and ticket-c
-        - ticket-b blocks ticket-d
-        - ticket-c blocks ticket-d
-        - All open
-
-    Expected: build_dep_graph('ticket-d', ...) completes without RecursionError or hang.
-    """
+    """Traverse a diamond A-to-B/C-to-D without revisiting forever."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -126,18 +100,7 @@ def test_graph_visited_set_prevents_infinite_loop(graph: ModuleType, tmp_path: P
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_add_dependency_raises_on_cycle_at_level(graph: ModuleType, tmp_path: Path) -> None:
-    """add_dependency must raise CyclicDependencyError when a level-scoped cycle would be created.
-
-    Setup:
-        - story-a: story, open — blocks story-b
-        - story-b: story, open — blocks story-c
-        - story-c: story, open
-
-    Action: add_dependency(story-c, story-a, ...) should detect a cycle
-    (story-a → story-b → story-c → story-a) at the 'story' level.
-
-    Expected: CyclicDependencyError is raised.
-    """
+    """Reject a story-level edge closing A-to-B-to-C-to-A."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -154,16 +117,7 @@ def test_add_dependency_raises_on_cycle_at_level(graph: ModuleType, tmp_path: Pa
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_add_dependency_raises_on_self_loop_at_level(graph: ModuleType, tmp_path: Path) -> None:
-    """add_dependency must raise CyclicDependencyError for a self-referential dependency.
-
-    Setup:
-        - task-x: task, open
-
-    Action: add_dependency(task-x, task-x, ...) — self-loop.
-
-    Expected: CyclicDependencyError is raised with a message indicating
-    self-referential dependency.
-    """
+    """Reject a task self-loop with a self-reference error."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -178,14 +132,9 @@ def test_add_dependency_raises_on_self_loop_at_level(graph: ModuleType, tmp_path
 def test_add_dependency_skips_cycle_check_when_no_type(
     tmp_path: Path,
 ) -> None:
-    """check_cycle_at_level with empty level returns False without BFS traversal.
+    """Return False for an empty level without reading the tracker.
 
-    This is the fail-open path in add_dependency: when resolved_source_state
-    returns ticket_type as None or empty string, level evaluates to "" and
-    `if level and check_cycle_at_level(...)` short-circuits — no cycle check runs.
-
-    Tests check_cycle_at_level directly with level="" to verify it returns False
-    (fail-open) without accessing the tracker directory.
+    An unresolved source type skips the level-scoped cycle check in add_dependency.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -197,9 +146,7 @@ def test_add_dependency_skips_cycle_check_when_no_type(
     assert result is False, "check_cycle_at_level must return False for empty level (fail-open)"
 
 
-# ---------------------------------------------------------------------------
-# check_cycle_at_level tests (RED — function does not exist yet)
-# ---------------------------------------------------------------------------
+# Direct check_cycle_at_level coverage follows.
 
 
 @pytest.mark.unit
@@ -259,15 +206,9 @@ def test_check_cycle_at_level_no_false_positive(tmp_path: Path) -> None:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_cycle_detection_ignores_suggestions_dir(tmp_path: Path) -> None:
-    """Cycle detection via _get_all_blocked_by must not emit 'skipping corrupt event'
-    warnings when the tracker dir contains a .suggestions/ subdirectory.
+    """Skip hidden .suggestions directories during blocked-by traversal.
 
-    Bug c7a6-96e8: during `ticket link <src> <tgt> depends_on`, the graph
-    traversal iterated all directories in the tracker, including hidden dirs like
-    .suggestions/.  Suggestion JSON files lack 'event_type' and are not ticket
-    events, so the reducer emitted a WARNING for each one.
-
-    After the fix, hidden directories starting with '.' are skipped entirely.
+    Their JSON files are not ticket events and must not produce corruption warnings.
     """
     import io
     import sys
@@ -333,22 +274,10 @@ def test_cycle_detection_ignores_suggestions_dir(tmp_path: Path) -> None:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_get_all_blocked_by_accumulates_targets_without_a_ticket_dir(tmp_path: Path) -> None:
-    """`_get_all_blocked_by` adds every `blocks` target unconditionally, and never
-    the seed.
+    """Return discovered blocks targets, including missing target directories.
 
-    Pins the distinction that the traversal returns an accumulator of discovered
-    edge targets rather than the BFS `visited` set:
-
-    - a `blocks` target with NO backing ticket directory is still in the result
-      (``_graph.py`` adds it before any existence check, so it is accumulated even
-      though it is never reduced);
-    - the seed id is absent unless a real edge points back at it, even though the
-      seed is always in `visited`.
-
-    Without this test a traversal refactor could return `visited` instead — which
-    would silently drop the dangling target AND add the seed, changing
-    ``check_would_create_cycle``'s ``target_id in _get_all_blocked_by(source_id)``
-    membership test.
+    The seed is absent unless an edge points back to it. Returning BFS visited instead
+    would add the seed and lose dangling targets, changing cycle membership checks.
     """
     from rebar.graph._graph import _get_all_blocked_by
 
@@ -380,18 +309,10 @@ def test_get_all_blocked_by_accumulates_targets_without_a_ticket_dir(tmp_path: P
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_check_cycle_at_level_refuses_a_target_at_another_level(tmp_path: Path) -> None:
-    """A dep whose target sits at another level is never traversed into.
+    """Do not traverse an edge whose target has a different ticket level.
 
-    Pins the TARGET-side guard — the single `_is_at_level` call in
-    `_same_level_neighbors` — which is distinct from the inline CURRENT-side
-    `state.get("ticket_type", ...) != level` early-return on the node being expanded.
-    Every other `check_cycle_at_level` test uses one uniform level, so nothing else
-    exercises it.
-
-    The probe must be a DIRECT cross-level edge whose far end IS `source_id`: `bfs`
-    accumulates what `neighbors_fn` yields, so with the guard in place nothing is
-    accumulated from `epic-B` and the verdict is False. Deleting the `_is_at_level`
-    call makes `task-M` be yielded and accumulated, flipping the verdict to True.
+    A direct cross-level edge to the source would falsely report a cycle without the
+    target-side guard.
     """
     check_cycle_at_level = _get_check_cycle_at_level()
     tracker = tmp_path / ".tickets-tracker"
@@ -408,13 +329,7 @@ def test_check_cycle_at_level_refuses_a_target_at_another_level(tmp_path: Path) 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_check_cycle_at_level_does_not_route_through_a_lower_level_hop(tmp_path: Path) -> None:
-    """A lower-level hop cannot reconnect two nodes at the queried level.
-
-    End-to-end companion to the target-side probe above: `epic-B → task-M → epic-A`
-    is a real dependency chain, but at the 'epic' level the walk stops at `task-M`
-    (both guards refuse it), so `epic-A` is unreachable and adding `epic-A → epic-B`
-    is NOT reported as a cycle.
-    """
+    """Stop an epic-level walk at an intervening task-level node."""
     check_cycle_at_level = _get_check_cycle_at_level()
     tracker = tmp_path / ".tickets-tracker"
     _make_ticket(tracker, "epic-A", ticket_type="epic")

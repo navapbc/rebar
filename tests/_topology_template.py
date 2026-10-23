@@ -263,20 +263,10 @@ def _assert_source_paths_absent(topology: Path, rewrites: list[_PathRewrite]) ->
 
 
 def _assert_bare_repositories_pinned(template: Path) -> None:
-    """Refuse to copy a template holding a bare repository still running upkeep.
+    """Reject topology copies containing bare remotes with unpinned Git upkeep.
 
-    At git's defaults a bare repository's ``receive-pack`` spawns
-    ``git maintenance run --auto --quiet --detach`` after every push — a child that
-    OUTLIVES the push. A fixture that pushes into such a remote and then reaches this
-    function races a concurrent repack: ``shutil.copytree`` below and the two full-tree
-    ``rglob("*")`` passes after it walk an object database another process is rewriting,
-    and entries vanish mid-walk (bug b394-6198-6010-42f7).
-
-    This is the only mechanism in ``tests/`` that copies a whole topology, which makes it
-    the one place the whole class can be closed. Refusing here converts a future
-    fixture's latent, load-dependent flake into a deterministic setup failure naming the
-    repository and the keys it is missing — so the exposed set closes by construction,
-    rather than by an enumeration of today's fixtures that decays on the next one added.
+    Detached maintenance can rewrite objects after a push returns, racing copytree and
+    whole-tree scans. Refuse the copy with the remote and missing keys named.
     """
     unpinned = unpinned_bare_repositories(template)
     if unpinned:

@@ -1,18 +1,7 @@
-"""rebar's declared Git version floor, and the primitives that enforce it.
+"""Read and enforce the Git floor required by merge-tree --write-tree tests.
 
-The two-clone convergence regressions merge two independently written tracker histories
-with ``git merge-tree --write-tree`` (bug 8185-2d4b-d2bf-4282 and its sidecar sibling
-55bc-b6bf-7adc-4108). That mode arrived in Git 2.38, so the suite has a hard Git
-prerequisite.
-
-rebar answers it by **declaring and enforcing a floor**, not by skipping the affected
-tests on older clients. A skip guard would mean the regression silently does not run for
-some contributors — coverage in the report, none in fact, which is precisely how the
-guards in 34c2 and 8a5e-b88e-0c3e-4544 rotted (ticket 980d-83ac-a6bb-4edb). So an
-under-floor Git fails the run, loudly, with the required version and the remedy.
-
-The floor value itself lives in ``.github/git-version-floor.txt`` — one source read by
-this module, by the contributor docs, and by the CI gate, so the three cannot drift.
+The value is shared with CI and contributor documentation in .github/git-version-floor.txt.
+An older Git fails the suite instead of silently skipping convergence coverage.
 """
 
 from __future__ import annotations

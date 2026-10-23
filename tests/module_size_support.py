@@ -1,20 +1,7 @@
-"""Single source for the module-size computation the CI gate enforces.
+"""Share the CI module-size computation with contract and metrics tests.
 
-The CI ``Module-size gate`` measures ``find src/rebar -name '*.py' | xargs wc -l`` against
-``.github/module-size-limit.txt``. Two tests need that same computation:
-``tests/unit/test_module_size_contract.py`` mirrors the gate in-process, and
-``tests/unit/metrics/test_scc_module_size_reconciliation_heldout.py`` asserts the scc-backed
-size metric agrees with it (rebar-ticket c5b3-1b8a-08dd-40af). It lives HERE, in one place,
-rather than being duplicated or imported across test directories:
-
-* Duplicating it would give the repository two definitions of the module-size rule, which is
-  precisely the drift the reconciliation test exists to prevent.
-* ``tests/`` is importable by DELIBERATE guarantee -- ``tests/conftest.py`` inserts this
-  directory into ``sys.path`` so tests can share helpers next to it. Every other bare-name
-  test import in this repo is same-directory; reaching across test directories instead relies
-  on pytest's incidental basedir insertion, which silently changes if an ``__init__.py`` is
-  added or removed. Paths here anchor to ``__file__``, never to the working directory, so the
-  helpers resolve identically under ``pytest`` and ``python -m pytest`` from any cwd.
+Paths anchor to this file so editable and installed runs resolve the same source tree.
+The shared helper prevents its two consumers from implementing different limits.
 """
 
 from __future__ import annotations

@@ -1,25 +1,8 @@
-"""One place where the test suite launches a nested pytest.
+"""Launch nested pytest with a test-owned basetemp.
 
-Every nested run built by hand re-decided basetemp, timeout, cache plugin and env, and the
-``--basetemp`` omission that lets a child clean another run's shared numbered temp root arrived
-as three separate bugs before this module existed.  Route every launch through
-:func:`run_nested_pytest` so ``--basetemp`` cannot be forgotten again.
-
-Some launches under ``tests/`` deliberately stay outside this helper, because routing them
-through ``python -m pytest`` would put the repository root on the child's ``sys.path`` and
-destroy the very thing they reproduce: ``tests/unit/test_scripts_import_convention.py``,
-``tests/unit/test_tests_import_convention.py`` and ``tests/unit/test_mechanism_delta.py``
-spawn the BARE ``pytest`` console script.  They are admitted by passing ``--basetemp``
-themselves — the invariant is the child's temp root, not this module's monopoly — and
-``tests/unit/test_nested_pytest_uniqueness.py`` holds them to it.  The
-``pytester.runpytest*`` calls in ``tests/unit/test_caplog_coverage_integrity.py`` and
-``tests/unit/test_repo_isolation_guard.py`` also stay as they are: pytest owns their
-basetemp already.
-
-The guard reads argv STRUCTURALLY and knows three spellings of the same operation, because
-for a while it knew only the first: ``python -m pytest``, ``python -c`` with a payload that
-names pytest, and the bare console script.  A ``python -c`` launch evaded it long enough to
-be measured deleting four other sessions' shared numbered temp roots (bug 16e1-237d).
+Bare pytest and pytester exceptions preserve their import or temp-root contracts and
+supply basetemp themselves. The uniqueness guard checks all launch spellings, including
+python -c payloads, so children cannot clean another run's shared temp root.
 """
 
 from __future__ import annotations
@@ -51,21 +34,11 @@ def run_nested_pytest(
     cwd: Path | None = REPO_ROOT,
     no_cacheprovider: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    """Run ``python -m pytest`` in a child whose basetemp is owned by *tmp_path*.
+    """Run pytest with basetemp under tmp_path and return its unmodified result.
 
-    *env* is REQUIRED and is forwarded to the child verbatim — it is never merged onto
-    ``os.environ``, re-wrapped, or given or denied a key.  Several callers hand the child a
-    deliberately minimal mapping so pytest's bounded mapping repr cannot truncate a sentinel
-    away; widening it would leave those oracles green and vacuous.  A caller that wants the
-    ambient environment asks for it explicitly with ``subprocess_env()``.
-
-    *tmp_path* need not exist yet: pytest's ``--basetemp`` does NOT create missing parent
-    directories and fails every child test with ``FileNotFoundError`` when they are absent, so
-    the directory is created here rather than at each call site.
-
-    *timeout* reaches :func:`subprocess.run` as a keyword and a :class:`subprocess.TimeoutExpired`
-    propagates to the caller, so a caller can convert it into its own diagnostic.  No ``check``
-    is applied and the :class:`subprocess.CompletedProcess` is returned unmodified.
+    The caller supplies env verbatim. Minimal mappings must not gain ambient keys. Create
+    the parent directory because pytest will not. TimeoutExpired propagates and no check
+    is applied to the child exit.
     """
     Path(tmp_path).mkdir(parents=True, exist_ok=True)
     command = [sys.executable, "-m", "pytest"]

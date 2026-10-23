@@ -1,15 +1,6 @@
-"""Same-second LINK/UNLINK ordering.
+"""Test same-second LINK/UNLINK replay order.
 
-Split from the former monolithic tests/scripts/test_ticket_graph.py along
-graph-concern seams. The `graph` fixture + autouse git-isolation fixture live in
-conftest.py; event-writing helpers + the module loader in _helpers.py.
-
-Note: the former ``_write_link_event`` push-retry tests were removed when graph
-link writes were routed through the canonical store path
-(``rebar._store.event_append.write_and_push``) — the hand-rolled flock+git+push-retry
-loop they exercised no longer exists, and push-retry/non-fast-forward behavior is
-now owned and tested at the store layer (``rebar._store.push``). See epic
-``clumsy-jab-yacht`` / story ``scabby-slur-junk``.
+Push retry belongs to the canonical store layer, not these graph tests.
 """
 
 from __future__ import annotations
@@ -23,10 +14,7 @@ from _helpers import (
     _write_ticket,
 )
 
-# ---------------------------------------------------------------------------
-# Same-second LINK/UNLINK timestamp ordering — _is_active_link must not allow
-# UNLINK to replay before LINK when they share the same Unix-second timestamp
-# ---------------------------------------------------------------------------
+# Equal-second LINK/UNLINK replay must keep UNLINK after its LINK.
 
 
 @pytest.mark.unit
@@ -34,17 +22,9 @@ from _helpers import (
 def test_is_active_link_same_second_unlink_sorts_after_link(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """_is_active_link correctly handles LINK+UNLINK events that share the same Unix-second
-    timestamp.
+    """Cancel a LINK even when its equal-second UNLINK filename sorts first.
 
-    When a LINK and its cancelling UNLINK share the same timestamp second but have
-    different random UUIDs, a pure alphabetic filename sort can place the UNLINK before
-    the LINK — making the link appear active when it has been cancelled.
-
-    This test crafts filenames where the UNLINK UUID sorts alphabetically before the LINK UUID
-    at the same timestamp, directly exercising the sort-order bug.
-
-    Expected: _is_active_link returns False (link is net-inactive after the UNLINK).
+    Alphabetic UUID order must not reactivate the link.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -60,9 +40,7 @@ def test_is_active_link_same_second_unlink_sorts_after_link(
     unlink_uuid = "00000000-0000-4000-8000-000000000000"
     same_ts = 1000000000
 
-    # Craft filenames so UNLINK sorts before LINK at the same timestamp
-    #   UNLINK: "1000000000-00000000-...-UNLINK.json"   ← sorts first alphabetically
-    #   LINK:   "1000000000-ffffffff-...-LINK.json"     ← sorts second alphabetically
+    # Equal-second UNLINK UUID sorts before the LINK UUID.
     link_filename = f"{same_ts}-{link_uuid}-LINK.json"
     unlink_filename = f"{same_ts}-{unlink_uuid}-UNLINK.json"
 
@@ -103,9 +81,7 @@ def test_is_active_link_same_second_unlink_sorts_after_link(
     with open(src_dir / unlink_filename, "w") as f:
         json.dump(unlink_event, f)
 
-    # _is_active_link must return False: the UNLINK cancels the LINK, net state = inactive
-    # With the bug: returns True (UNLINK replayed before LINK → LINK appears active again)
-    # With the fix: returns False (LINK always replays before UNLINK at same timestamp)
+    # Net state stays inactive because LINK replays before its UNLINK.
     result = graph._is_active_link("src-ticket", "tgt-ticket", "blocks", str(tracker_dir))
     assert result is False, (
         "_is_active_link returned True but the link was cancelled by an UNLINK event. "

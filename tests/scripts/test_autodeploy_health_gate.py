@@ -1,17 +1,7 @@
-"""autodeploy's health gate must outlast the app's own startup budget, and must record the
-failing container's stderr before it rolls back (bug 2ae9-5aac-1342-4118).
+"""Test deploy readiness timeouts and rollback diagnostics.
 
-On 2026-07-31 the review-bot needed ~62s to become ready because ``run_ensures()`` burns the
-store write-lock budget (``_DEFAULT_TIMEOUT`` x ``_DEFAULT_ATTEMPTS``) before giving up and
-continuing. ``HEALTH_TIMEOUT`` defaulted to 30s — BELOW a budget the application may
-legitimately spend — so the container was killed at +30s and rolled back to ``:prev`` seven
-consecutive times, each rolled-back container then becoming healthy ~30s later.
-
-The second half of the incident was undiagnosability: ``bot-unhealthy`` logged only "ROLLING
-BACK to :prev". The decisive evidence (the missing ``ensure ...`` sweep lines and a 61s gap)
-lived solely in the container's own stderr, and the rollback replaced that container
-immediately — so the deploy journal could not distinguish "the image is broken" from "the
-image is fine, just slow", which have opposite remediations.
+The health deadline must exceed the app's lock-wait startup budget. Capture the
+failing container's stderr before rollback removes it.
 """
 
 from __future__ import annotations
@@ -167,12 +157,7 @@ def test_bot_unhealthy_records_container_log_tail_in_the_deploy_journal(
 def test_captured_container_output_cannot_inflate_the_deploy_errors_alarm(
     deploy_box: dict[str, object], tmp_path: Path
 ) -> None:
-    """The capture must not let container output forge the alarmed marker.
-
-    ``observability.sh`` counts ``AUTODEPLOY_ERROR`` occurrences in THIS unit's journal and
-    publishes the delta as the ``deploy_errors`` CloudWatch metric. Echoing captured container
-    output verbatim would let a bot log line containing that token inflate the alarm.
-    """
+    """Do not let captured container output forge an AUTODEPLOY_ERROR marker."""
     env: dict[str, str] = deploy_box["env"]  # type: ignore[assignment]
     bin_dir = Path(env["PATH"].split(os.pathsep)[0])
     cmd_log: Path = deploy_box["cmd_log"]  # type: ignore[assignment]
@@ -243,15 +228,9 @@ def test_bot_unhealthy_still_rolls_back_to_prev_failsafe(
 
 
 def test_health_timeout_default_outlasts_the_store_lock_budget() -> None:
-    """The deploy's readiness deadline must sit ABOVE the application's own worst-case
-    internal budget, not below it.
+    """Keep the deploy health deadline above run_ensures' lock-wait budget.
 
-    ``run_ensures()`` (``src/rebar/_store/ensures.py``) takes the store write lock on the
-    review-bot's startup path and, when the lock is contended, spends the full
-    ``_DEFAULT_TIMEOUT x _DEFAULT_ATTEMPTS`` budget before logging and continuing — a wait the
-    application is designed to spend. Reading those constants here (rather than restating a
-    literal) keeps the two in lockstep: raising the lock budget fails this test until the
-    deploy deadline follows.
+    Read the budget constants so an increase fails this test until the deadline follows.
     """
     from rebar._store import lock as _lock
 

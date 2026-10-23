@@ -1,12 +1,7 @@
-"""Shared, cached Python-source tree scanning for whole-tree policy oracles.
+"""Cache parsed Python source trees once per worker for policy oracles.
 
-Many regression oracles independently walk a source root (``tests`` or
-``src/rebar``), read every ``*.py`` file, and ``ast.parse`` it. Each walk of the
-tests tree costs ~2.3s and the src tree ~0.8s, and dozens of tests repeat it, so
-the redundant parsing dominates the CPU-bound policy tier (and balloons under
-``--cov``). This module parses each root exactly once per worker process and
-hands back the shared, immutable result, so every oracle that opts in reuses one
-parse instead of re-walking the tree.
+Tests and source roots are scanned on demand, then shared as immutable results so
+whole-tree checks do not repeat the same parse.
 """
 
 from __future__ import annotations

@@ -1,20 +1,8 @@
-"""autodeploy grows an `mcp` blue-green target (panicky-sylphish-foxterrier / ADR 0079).
+"""Test MCP blue-green deployment through the shipped autodeploy script.
 
-The on-box `rebar-mcp` server is a NEVER-IDLE shared endpoint, so the review-bot's
-stop-and-health-drain deploy cannot be reused: a gauge-gated drain bound can never reach zero
-(review-bot bug 7b4a). This target instead models the LOCAL `origin/main` updater — immutable
-release + ATOMIC pointer swap + retire-when-idle:
-
-  build+tag -> memory pre-check -> `docker run -d` a NEW container on a free blue/green port ->
-  health-check its /health -> ATOMICALLY flip the nginx /mcp/ upstream include + reload
-  (the deploy is DONE here, never waiting on an in-flight op) -> RETIRE the old container off
-  the critical path with a GRACEFUL `docker stop` (SIGTERM triggers the container's OWN bounded
-  self-drain), NEVER `docker rm -f` a serving container.
-
-These are real-subprocess integration tests: the box's binaries are stubbed onto PATH and the
-REAL `infra/scripts/autodeploy.sh` runs, so the assertions bind the shipped bash. Every assertion
-is OBSERVABLE only — the docker/nginx call log, exit codes, the materialized upstream include
-bytes, and the countable journal markers — never internal structure.
+Start and health-check a replacement before atomically switching nginx. Retire the
+old backend off the critical path with a graceful drain. Never force-remove one
+still serving requests. Stub box commands and assert observable results.
 """
 
 from __future__ import annotations
@@ -514,18 +502,8 @@ def test_both_ports_busy_does_not_start_a_third_container(mcp_box: dict[str, obj
     assert result.returncode != 0, f"port exhaustion backs off and retries\n{ctx}"
 
 
-# --------------------------------------------------------------------------- #
-# routine backoffs (retire-cap / mem-abort) must NOT inflate deploy_errors    #
-# (bug 6ada-6015-8ac3-44f5)                                                    #
-# --------------------------------------------------------------------------- #
-#
-# observability.sh (mcp blue-green counters) documents the contract these two paths must obey:
-# the AUTODEPLOY_MCP_RETIRE_CAP and AUTODEPLOY_MCP_MEM_ABORT markers are "each kept out of
-# AUTODEPLOY_ERROR so a routine retire-cap / memory abort never inflates deploy_errors" (the
-# sustained case is covered by the dedicated mcp_retire_cap / mcp_mem_abort alarms). deploy_errors
-# counts `^AUTODEPLOY_ERROR {` markers, so emitting one on these routine deferrals false-pages the
-# general rebar-autodeploy-errors alarm during a normal landing burst. These tests assert the
-# observable outcome: each routine path emits ITS OWN marker but NOT AUTODEPLOY_ERROR.
+# Routine MCP retire-cap and memory deferrals have their own markers. They must
+# not emit AUTODEPLOY_ERROR or inflate the general deploy-errors alarm.
 
 
 def _deploy_failed_errors(result: subprocess.CompletedProcess[str]) -> list[dict[str, object]]:
@@ -654,15 +632,7 @@ def test_unhealthy_new_container_leaves_old_upstream_current(mcp_box: dict[str, 
 def test_secrets_fetch_failure_aborts_before_touching_the_live_upstream(
     mcp_box: dict[str, object],
 ) -> None:
-    """An SSM failure must abort the mcp deploy with the OLD container still serving.
-
-    The mcp path re-materializes its SSM-sourced secrets before starting the replacement
-    container (receptive-houndy-nilgai: three PATs were rotated into SSM, nothing regenerated
-    the on-disk tokens file, and every new container failed closed on the stale copy). This
-    pins the ORDERING that makes that safe: if the refresh fails, the deploy stops while the
-    old container is still live, rather than replacing a working container using stale
-    secrets or leaving the endpoint down.
-    """
+    """Stop MCP replacement if SSM refresh fails while the old backend serves."""
     deploy_repo = Path(mcp_box["env"]["DEPLOY_REPO"])  # type: ignore[index]
     upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
     before = upstream.read_bytes()
@@ -696,13 +666,7 @@ def test_secrets_fetch_failure_aborts_before_touching_the_live_upstream(
 def test_storeless_container_is_not_promoted_when_a_store_is_expected(
     mcp_box: dict[str, object],
 ) -> None:
-    """A container that is UP but has no ticket store must not take the upstream.
-
-    A 200 from /health used to mean only "the process is listening", so a container serving
-    NO store passed the readiness gate identically to a healthy one -- which is how a
-    storeless deployment went unobserved for weeks (mobile-groovy-badger). The gate now reads
-    the `store` object /health reports.
-    """
+    """Do not promote a listening MCP container whose health reports no store."""
     upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
     before = upstream.read_bytes()
     # New container comes up healthy, but reports a store it was SUPPOSED to have and lacks.
@@ -1801,15 +1765,10 @@ def test_bot_deferral_is_unaffected_when_only_bot_paths_changed(
 def test_repeated_deferred_ticks_do_not_redeploy_mcp_every_time(
     mcp_box: dict[str, object],
 ) -> None:
-    """A deferred tick that DID deploy mcp must not redeploy it on the next tick.
+    """Record MCP completion separately when the bot deploy is deferred.
 
-    Letting the mcp block run past a bot deferral fixed one bug and exposed another: the
-    deferral exits before the `deployed-sha` advance (correctly — the BOT has not deployed),
-    so the next tick still computes an mcp delta and cuts over again. With a chronically busy
-    bot that is a rebuild + container swap every ~2 minutes, indefinitely.
-
-    One `deployed-sha` cannot represent two components' completion, so the mcp path needs its
-    own state. This asserts the second tick is a no-op for mcp while the bot keeps deferring.
+    The global deployed SHA stays old until the bot completes. A second tick must not
+    rebuild MCP after its first successful cutover.
     """
     _mcp_box_shared_change(mcp_box, in_flight=2)
 
@@ -1819,15 +1778,13 @@ def test_repeated_deferred_ticks_do_not_redeploy_mcp_every_time(
         f"tick 1 must deploy mcp\nrc={first.returncode}\n{first.stdout}\n{first.stderr}"
     )
 
-    # Second tick: bot still busy, nothing new merged.
+    # Bot remains busy on tick 2.
     (mcp_box["cmd_log"]).write_text("")  # type: ignore[operator]
     second = _run(mcp_box)
     second_cmds = _commands(mcp_box)
     ctx = f"rc={second.returncode}\ncmds={second_cmds}\n{second.stdout}\n{second.stderr}"
 
-    # Liveness anchor: tick 2 must actually have RUN and deferred. Without this the two
-    # absence assertions below would be satisfied by a tick that died before the mcp gate,
-    # which is the opposite of what this test claims to prove.
+    # Prove tick 2 ran and deferred before asserting MCP did not redeploy.
     assert "AUTODEPLOY_DEFERRED" in second.stdout + second.stderr, (
         f"tick 2 must still reach the drain gate and defer (bot is still busy)\n{ctx}"
     )
@@ -1841,17 +1798,7 @@ def test_repeated_deferred_ticks_do_not_redeploy_mcp_every_time(
 def test_mcp_failure_on_a_deferred_tick_does_not_backoff_the_bot(
     mcp_box: dict[str, object],
 ) -> None:
-    """An mcp deploy failure must not suppress the REVIEW-BOT's next deploy.
-
-    `record_backoff_failure` writes one shared `deploy-backoff` keyed on the global `$TARGET`,
-    and the top-level gate exits the whole script while it is in effect. Making the mcp block
-    reachable on a deferred tick therefore handed the mcp path a way to throttle the BOT: the
-    bot is already being held back by the drain gate, and an unrelated mcp failure would now
-    also backoff the very component that never ran.
-
-    The two paths deploy independently and already track completion independently
-    (`mcp-deployed-sha`); their failure state must be independent too.
-    """
+    """Keep MCP failure backoff from throttling a pending review-bot deploy."""
     _mcp_box_shared_change(mcp_box, in_flight=2)
     state = Path(mcp_box["env"]["STATE_DIR"])  # type: ignore[index]
     # Make the NEW mcp container fail its readiness probe, so the mcp block takes its
@@ -1879,28 +1826,19 @@ def test_mcp_failure_on_a_deferred_tick_does_not_backoff_the_bot(
 def test_a_failed_mcp_deploy_does_not_redeploy_the_bot_every_tick(
     mcp_box: dict[str, object],
 ) -> None:
-    """A review-bot that already deployed must not be redeployed because MCP failed.
+    """Keep a completed bot deploy recorded when MCP fails later in the tick.
 
-    Completion is recorded ONCE, at the footer, for BOTH components. An mcp failure exits
-    the tick before that footer, so a review-bot that deployed successfully seconds earlier
-    is never recorded as done — and the next tick, diffing from the stale global sha, deploys
-    it again. The bot path stop-and-drains, so each needless redeploy KILLS an in-flight
-    review (bug 34cd, the very thing the drain gate exists to prevent).
-
-    Before the mcp path got its own backoff this was masked: an mcp failure wrote the SHARED
-    backoff, and the top-level gate exited the next tick outright, so the bot never got as
-    far as redeploying. Scoping the backoff to mcp — correctly — removed that accidental
-    cover and exposed the real defect underneath: one completion marker cannot represent two
-    independently-deploying components. The bot needs its own, exactly as mcp now has one.
+    The next tick must not drain and recreate the bot merely because MCP has its own
+    failed deployment.
     """
-    _mcp_box_shared_change(mcp_box, in_flight=0)  # bot is IDLE -> it deploys this tick
-    (mcp_box["dstate"] / "health-8092").write_text("DOWN")  # ...and mcp then FAILS
+    _mcp_box_shared_change(mcp_box, in_flight=0)  # bot deploys
+    (mcp_box["dstate"] / "health-8092").write_text("DOWN")  # MCP fails
 
     first = _run(mcp_box)
     first_cmds = _commands(mcp_box)
     ctx1 = f"rc={first.returncode}\ncmds={first_cmds}\n{first.stdout}\n{first.stderr}"
 
-    # Liveness anchors: BOTH halves of the precondition must really have happened.
+    # Prove bot deploy and MCP failure first.
     assert any("compose-up-" in c for c in first_cmds), (
         f"precondition: the review-bot must have deployed on tick 1\n{ctx1}"
     )
@@ -1908,16 +1846,13 @@ def test_a_failed_mcp_deploy_does_not_redeploy_the_bot_every_tick(
         f"precondition: the mcp deploy must have failed on tick 1\n{ctx1}"
     )
 
-    # Second tick: nothing new merged. The bot is already at the target.
+    # Tick 2 has no new merge. The bot already reached target.
     (mcp_box["cmd_log"]).write_text("")  # type: ignore[operator]
     second = _run(mcp_box)
     second_cmds = _commands(mcp_box)
     ctx2 = f"rc={second.returncode}\ncmds={second_cmds}\n{second.stdout}\n{second.stderr}"
 
-    # Liveness anchor: prove tick 2 actually RAN and got PAST the review-bot gate. The bot
-    # block precedes the mcp block, so the mcp gate reporting its open backoff window is
-    # positive evidence the tick reached and cleared the bot gate — without which the
-    # absence assertion below would be satisfied by a tick that died before ever getting there.
+    # MCP backoff proves tick 2 passed the bot gate before the no-redeploy check.
     assert "mcp backoff active" in second.stdout + second.stderr, (
         f"tick 2 must run through the bot gate and on to the mcp gate\n{ctx2}"
     )
@@ -1931,18 +1866,10 @@ def test_a_failed_mcp_deploy_does_not_redeploy_the_bot_every_tick(
 def test_mcp_backoff_throttles_only_mcp_and_lets_the_bot_deploy(
     mcp_box: dict[str, object],
 ) -> None:
-    """An open mcp backoff window must throttle mcp WITHOUT holding back the review-bot.
+    """Let a pending bot deploy proceed while MCP backoff remains active.
 
-    This is the half the shared backoff could not express: its gate sat at the TOP of the
-    script and exited outright, so "throttle this component" and "stop everything" were the
-    same action. Scoping the backoff to mcp means the bot still gets its turn on the same tick.
-
-    Tick 1 defers the bot (a review is in flight) and fails mcp, which opens the mcp window
-    while leaving the bot's delta undeployed. Tick 2 then runs with the bot IDLE, so the bot
-    has real pending work: it must deploy, while mcp stays skipped. Asserting the BOT
-    deployed is what makes this non-vacuous -- an earlier version ran tick 2 with the bot
-    still busy, so the tick exited at the deferral guard regardless of anything mcp did and
-    the assertions proved nothing about the backoff.
+    Tick 1 defers the busy bot and fails MCP. With the bot idle on tick 2, its deploy
+    must run while MCP remains throttled.
     """
     _mcp_box_shared_change(mcp_box, in_flight=2)  # bot busy -> defers, its delta stays pending
     (mcp_box["dstate"] / "health-8092").write_text("DOWN")  # type: ignore[operator]
@@ -2176,14 +2103,8 @@ def test_a_complete_tick_advances_the_mcp_marker_even_when_mcp_was_a_no_op(
     )
 
 
-# --------------------------------------------------------------------------- #
-# per-release image retirement at reap (bug 9bc0-1200-1451-44bb)               #
-# --------------------------------------------------------------------------- #
-# Blue-green tags every build `compose-mcp:<sha>` and `docker image prune` without `-a` only
-# drops DANGLING images, so these tagged releases accumulated unbounded — 44 images / 11.09GB
-# on 2026-08-28, 10.08GB reclaimable — until the root disk hit 92% and nginx stalled buffering
-# to /var/lib/nginx/tmp/, taking the /mcp endpoint down. The retire path is where that garbage
-# becomes safely removable, because a REAPED container is by construction serving nothing.
+# Retire per-release MCP images when their containers are reaped. Tagged images
+# survive ordinary dangling-image pruning and otherwise accumulate on the root disk.
 
 
 def _image_removals(cmds: list[str]) -> list[str]:
@@ -2323,15 +2244,10 @@ def test_the_bare_build_tag_is_never_retired(mcp_box: dict[str, object]) -> None
 def test_orphaned_per_release_tags_with_no_container_are_reconciled(
     mcp_box: dict[str, object],
 ) -> None:
-    """RED-first (bug e4f3): `mcp_retire_image` only fires at a container's REAP, so a
-    `compose-mcp:<sha>` tag whose container was already reaped on an earlier tick (or never had
-    one on this box) leaks forever — nothing reconciles container-less tags. Left alone they
-    accumulate and fill the 30GiB root once a SECOND blue-green image family (the mcp target,
-    fd4a) lands, re-triggering the disk-pressure alarm that fail-closes LLM-Review. The retire
-    sweep must reconcile these orphans on every tick.
+    """Reconcile orphaned release tags on a no-op tick.
 
-    A no-op tick (deployed==target) reaps nothing, so any image-rm here comes ONLY from the new
-    orphan-reconcile path, not from the at-reap retirement — isolating the behavior under test.
+    With no container reaped, image removal must come from the orphan sweep rather
+    than at-reap retirement.
     """
     (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
     (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
@@ -2512,14 +2428,9 @@ def test_reconcile_ignores_dangling_none_rows(mcp_box: dict[str, object]) -> Non
 
 
 def test_failed_handshake_container_is_not_promoted(mcp_box: dict[str, object]) -> None:
-    """A container that answers /health but reports it could NOT serve an MCP request must not
-    take the upstream.
+    """Reject an MCP backend whose health reports failed initialize readiness.
 
-    /health is registered OUTSIDE the auth middleware and the DNS-rebinding guard, so a 200 said
-    only "the process is listening": a container whose allowlist does not admit the hostname real
-    traffic carries answers 200 while 421-ing every real request, and this gate promoted it
-    (vaccinated-flavorous-solenodon). The server now drives one real `initialize` through its own
-    session manager during lifespan startup and reports the outcome.
+    A listening process can still reject client traffic through host restrictions.
     """
     upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
     state: Path = mcp_box["state"]  # type: ignore[assignment]
@@ -2656,19 +2567,10 @@ def test_entrypoint_source_change_rebuilds_the_mcp_image(mcp_box: dict[str, obje
 
 
 def test_exited_live_backend_is_not_reaped(mcp_box: dict[str, object]) -> None:
-    """RED-first (bug 9ea3): the live backend must be skipped by the retire sweep NO MATTER
-    what state its container is in.
+    """Never reap the nginx-pinned serving backend, even if it has exited.
 
-    `mcp_retire_sweep` skips `$live` only inside its `Running=true` branch, so a container that
-    IS the live backend but is momentarily exited/restarting falls through to the reap branch
-    and is `docker rm`'d — while `$MCP_UPSTREAM_FILE` still names its port. That converts a
-    TRANSIENT crash of the serving container (which `--restart always` would otherwise recover)
-    into a PERMANENT 502: the backend is deleted out from under a still-pointing upstream and
-    nothing recreates it. Exactly the 2026-09-02 state — the include named 8093 while
-    `rebar-mcp-…-8093` was `Exited (137)`.
-
-    The superseded exited container in the same fixture is the ANTI-VACUITY control: a sweep
-    that reaped nothing at all would satisfy the regression assertion for the wrong reason.
+    Removing it while upstream still names its port turns a restartable crash into a
+    lasting outage. An unrelated exited container must still be reaped.
     """
     (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
     (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]

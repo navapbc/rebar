@@ -1,14 +1,6 @@
-"""Held-out edge/contract oracle for the config-ownership gate (RP-04 S7.1, ticket 29a9).
+"""Held-out config-ownership checks for aliases, shims, credentials, and drift.
 
-WITHHELD from the implementation subagent: it sees only the happy-path suite. This file
-pins the shapes that separate a real seam/ownership classifier from one that fakes the
-happy path — the aliased-callee forms, receiver-object aliasing, getattr-env, helper-shim
-resolution + fail-closed, credential ownership, backend-reload, structural exception
-rejection, the registry-completeness drift self-test, and REAL-TREE cleanliness.
-
-Assertions target OBSERVABLE behavior only (error presence/absence, named substrings,
-counts, exit codes) — never internal names or source text — so a behavior-preserving
-refactor of the gate keeps them green.
+Assert observable diagnostics and clean results without pinning implementation text.
 """
 
 from __future__ import annotations
@@ -39,11 +31,6 @@ def _root(tmp_path: Path, body: str, relname: str = "belowseam.py") -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(body, encoding="utf-8")
     return root
-
-
-# --------------------------------------------------------------------------- #
-# Aliased callee forms — an env read routed through a rename must still fire.  #
-# --------------------------------------------------------------------------- #
 
 
 def test_import_aliased_getenv_fires(gate, tmp_path):
@@ -79,11 +66,6 @@ def test_receiver_object_aliasing_of_environ_fires(gate, tmp_path):
     errors = gate.check(_root(tmp_path, body))
     assert len(errors) == 1, errors
     assert "SOME_KNOB" in errors[0]
-
-
-# --------------------------------------------------------------------------- #
-# Helper-shim resolution + fail-closed                                        #
-# --------------------------------------------------------------------------- #
 
 
 def test_known_env_helper_call_resolves_and_fires(gate, tmp_path):
@@ -127,11 +109,6 @@ def test_shim_shaped_helper_with_nonenv_literal_is_quiet(gate, tmp_path):
     assert gate.check(_root(tmp_path, body)) == []
 
 
-# --------------------------------------------------------------------------- #
-# Credential ownership (category 5)                                           #
-# --------------------------------------------------------------------------- #
-
-
 def test_credential_read_below_boundary_fires(gate, tmp_path):
     body = "import os\n\n\ndef f():\n    return os.getenv('JIRA_API_TOKEN')\n"
     errors = gate.check(_root(tmp_path, body))
@@ -145,11 +122,6 @@ def test_credential_read_inside_a_provider_boundary_passes(gate, tmp_path):
     rel = "reconciler/access_check.py"
     body = "import os\n\n\ndef f():\n    return os.getenv('JIRA_API_TOKEN')\n"
     assert gate.check(_root(tmp_path, body, relname=rel)) == []
-
-
-# --------------------------------------------------------------------------- #
-# Backend reload (category 6b) — select_backend only, register is too generic  #
-# --------------------------------------------------------------------------- #
 
 
 def test_select_backend_outside_reconciler_fires(gate, tmp_path):
@@ -174,21 +146,11 @@ def test_bare_register_call_does_not_fire(gate, tmp_path):
     assert gate.check(_root(tmp_path, body)) == []
 
 
-# --------------------------------------------------------------------------- #
-# Configurable default (category 6a)                                          #
-# --------------------------------------------------------------------------- #
-
-
 def test_module_level_configurable_default_fires(gate, tmp_path):
     body = "import os\n\nTIMEOUT = os.getenv('SOME_KNOB')\n"
     errors = gate.check(_root(tmp_path, body))
     assert len(errors) == 1, errors
     assert "SOME_KNOB" in errors[0]
-
-
-# --------------------------------------------------------------------------- #
-# Composition-root seams own categories 1–4                                   #
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -198,11 +160,6 @@ def test_module_level_configurable_default_fires(gate, tmp_path):
 def test_env_read_inside_a_composition_root_passes(gate, tmp_path, seam):
     body = "import os\n\n\ndef f():\n    return os.getenv('SOME_KNOB')\n"
     assert gate.check(_root(tmp_path, body, relname=seam)) == []
-
-
-# --------------------------------------------------------------------------- #
-# LEGACY_EXCEPTIONS — structural validation + suppression                     #
-# --------------------------------------------------------------------------- #
 
 
 def test_legacy_exception_suppresses_the_named_read(gate, tmp_path, monkeypatch):
@@ -241,11 +198,6 @@ def test_empty_rationale_exception_is_rejected(gate, tmp_path, monkeypatch):
     )
     errors = gate.check(_root(tmp_path, "x = 1\n"))
     assert any("rationale" in e.lower() for e in errors), errors
-
-
-# --------------------------------------------------------------------------- #
-# Registry-completeness drift self-test (root-independent)                    #
-# --------------------------------------------------------------------------- #
 
 
 def test_unowned_credential_name_drifts_to_error(gate, tmp_path, monkeypatch):

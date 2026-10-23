@@ -1,14 +1,7 @@
-"""A local fake git remote that either goes silent or dribbles — for stall-abort tests.
+"""Provide stalled and dribbling HTTP remotes for Git fetch abort tests.
 
-Extracted from ``tests/unit/test_snapshot_fetch_stall_abort_12e4.py`` when task ``851e``
-armed the same throughput-keyed abort on the other 300s network fetches, so every site's
-test drives the SAME two remotes rather than growing its own near-copy.
-
-Both modes speak just enough HTTP for git's curl transport to start a body transfer:
-``stall`` sends the response headers and then **zero** body bytes, ``dribble`` sends body
-bytes continuously at a fixed rate. The pair is what makes an assertion throughput-keyed
-rather than wall-clock keyed — an implementation that merely lowers a timeout aborts both,
-and the dribble case fails it.
+A stalled body must abort while a continuously advancing body survives. The pair
+separates throughput enforcement from a simple wall-clock timeout.
 """
 
 from __future__ import annotations

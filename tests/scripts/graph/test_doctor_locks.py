@@ -1,17 +1,7 @@
-"""``doctor`` lock health — held/free, holder liveness, hold age, staleness.
+"""Check lock health without changing locks.
 
-The properties worth pinning are the ones an operator's decision hangs on. A HELD lock
-with a live holder must read as information and must NOT fail the exit code, or every CI
-gate keyed on ``rebar store doctor`` turns red whenever two agents write concurrently. A lock
-with no live owner must read as a finding, or the surface fails at the only job it was
-added for (ticket metaphoric-fleeting-nutcracker). And the whole pass must be read-only:
-a diagnostic that reclaims a lock it merely meant to describe would be a far worse bug
-than the blind spot it replaced.
-
-The staleness verdict is deliberately NOT re-derived here — the tests drive
-``doctor_locks`` and assert the answers ``lock_owner._mkdir_lock_is_stale`` gives, so a
-future change to that decision table shows up here rather than being shadowed by a second
-copy of the rule.
+An active holder is informational. A dead holder is a finding. Staleness decisions come
+from lock_owner, not a second test-side rule.
 """
 
 from __future__ import annotations
@@ -33,12 +23,7 @@ from rebar._store import lock_owner as _owner
 
 @pytest.fixture(autouse=True)
 def _isolated_snapshot_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin the per-host snapshot store under this test's tmp dir.
-
-    The snapshot-GC leg is the census's one HOST-GLOBAL probe
-    (:func:`rebar._snapshot.repo_snapshot.peek_store_root` resolves the same root from
-    every checkout); without this pin, every assertion about an exact leg set or finding
-    count would inherit whatever a real worker left on the machine running the tests."""
+    """Keep the host-global snapshot-store probe under this test's tmp dir."""
     monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "gate-tmp"))
 
 

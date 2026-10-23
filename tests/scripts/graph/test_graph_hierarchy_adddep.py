@@ -1,9 +1,4 @@
-"""add_dependency hierarchy integration, redirect JSON, relation-grammar validation
-
-Split from the former monolithic tests/scripts/test_ticket_graph.py along
-graph-concern seams. The `graph` fixture + autouse git-isolation fixture live in
-conftest.py; event-writing helpers + the module loader in _helpers.py.
-"""
+"""Test hierarchy promotion, canonical relations, and redirect records."""
 
 from __future__ import annotations
 
@@ -26,22 +21,7 @@ from _helpers import (
 def test_add_dependency_cross_story_redirects_to_story_level(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """Cross-TIER task→epic dep: add_dependency promotes the task to its epic.
-
-    Under the new type-tier model a task (tier 0) blocking an epic (tier 2) is
-    promoted up its parent chain to the nearest epic ancestor so the resulting
-    link is epic↔epic.
-
-    Setup:
-        - epic-root: epic (no parent)
-        - story-a: story with parent_id=epic-root
-        - task-a1: task with parent_id=story-a
-        - epic-other: epic (the higher-tier endpoint)
-
-    Expected: add_dependency('task-a1', 'epic-other', ...) writes a LINK event for
-              epic-root -> epic-other (task promoted to its epic ancestor), not
-              task-a1 -> epic-other.
-    """
+    """Promote a task-to-epic edge to its nearest epic ancestor."""
     import glob as _glob
 
     tracker_dir = tmp_path / "tracker"
@@ -85,15 +65,7 @@ def test_add_dependency_cross_story_redirects_to_story_level(
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_add_dependency_redundant_link_exits_nonzero(graph: ModuleType, tmp_path: Path) -> None:
-    """Task-to-direct-parent link is redundant: add_dependency raises ValueError.
-
-    Setup:
-        - story-parent: story (no parent)
-        - task-child: task with parent_id=story-parent
-
-    Expected: add_dependency('story-parent', 'task-child', ...) raises ValueError
-              (is_redundant=True path -- story-parent IS the direct parent of task-child).
-    """
+    """Reject a link from a task's direct parent as redundant."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -109,12 +81,7 @@ def test_add_dependency_redundant_link_exits_nonzero(graph: ModuleType, tmp_path
 def test_add_dependency_cross_story_emits_redirect_json_to_stdout(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """Cross-TIER promotion: add_dependency prints redirect JSON to stdout.
-
-    Setup: a task under a story under an epic, blocking a separate epic.
-    Expected: stdout contains JSON with "redirected": true plus original/resolved
-    IDs reflecting the task being promoted to its epic ancestor.
-    """
+    """Print redirect JSON showing original and resolved IDs after promotion."""
     import contextlib
     import io
 
@@ -158,16 +125,7 @@ def test_add_dependency_cross_story_emits_redirect_json_to_stdout(
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_add_dependency_same_parent_still_works(graph: ModuleType, tmp_path: Path) -> None:
-    """Same-parent tasks: add_dependency writes LINK normally (no redirect).
-
-    Setup:
-        - story-shared: story (no parent)
-        - task-p: task with parent_id=story-shared
-        - task-q: task with parent_id=story-shared
-
-    Expected: add_dependency('task-p', 'task-q', ...) writes LINK in task-p's
-              directory with target_id='task-q' (no redirect -- same parent story).
-    """
+    """Write a same-parent task link without hierarchy redirect."""
     import glob as _glob
 
     tracker_dir = tmp_path / "tracker"
@@ -203,15 +161,9 @@ def test_add_dependency_same_parent_still_works(graph: ModuleType, tmp_path: Pat
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_dep_graph_correctness_after_cross_story_link(graph: ModuleType, tmp_path: Path) -> None:
-    """Cross-tier task→story link is promoted to story level; task-level link NOT written.
+    """Promote a task-to-story dependency to the task's story ancestor.
 
-    Under the type-tier model, a task (tier 0) blocking a story (tier 1) is
-    promoted up to the task's own story ancestor, yielding story↔story.
-
-    Given: epic-a → story-x → task-a, and epic-a → story-y
-    When: add_dependency('task-a', 'story-y', tracker_dir, 'depends_on')
-    Then: story-x has story-y in its deps (task-a promoted to story-x);
-          task-a does NOT have story-y in its deps.
+    Write the story-level edge and leave the task-level edge absent.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -244,17 +196,7 @@ def test_dep_graph_correctness_after_cross_story_link(graph: ModuleType, tmp_pat
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_add_dependency_rejects_non_canonical_relation(graph: ModuleType, tmp_path: Path) -> None:
-    """add_dependency raises ValueError for a non-canonical relation ('blocked_by').
-
-    Bug 61b8-bb44-fb04-402c: the ticket-graph.py --link path (add_dependency in
-    _links.py) performed NO validation of the relation argument against the
-    canonical set {blocks, depends_on, relates_to, duplicates, supersedes}.  It
-    wrote whatever string was passed (e.g. 'blocked_by') verbatim.
-
-    Setup: two open tickets ticket-a and ticket-b.
-    Action: add_dependency('ticket-a', 'ticket-b', tracker_dir, 'blocked_by')
-    Expected: raises ValueError (not CyclicDependencyError); no LINK event written.
-    """
+    """Reject blocked_by as noncanonical without writing a LINK event."""
     import glob
     import subprocess
 
@@ -298,13 +240,7 @@ def test_add_dependency_rejects_non_canonical_relation(graph: ModuleType, tmp_pa
 def test_add_dependency_rejects_all_non_canonical_relations(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """add_dependency raises ValueError for every string outside the canonical set.
-
-    Checks a representative sample of non-canonical relation strings:
-    'blocked_by', 'is_blocked_by', 'related', 'causes', 'parent', 'child', '', 'BLOCKS'.
-
-    For each: no LINK event must be written to disk.
-    """
+    """Reject noncanonical relation spellings without writing events."""
     import glob
     import subprocess
 
@@ -358,11 +294,7 @@ def test_add_dependency_rejects_all_non_canonical_relations(
 def test_add_dependency_accepts_all_canonical_relations(
     graph: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """add_dependency accepts all five canonical relations without raising ValueError.
-
-    Canonical set: blocks, depends_on, relates_to, duplicates, supersedes.
-    Each should succeed (no ValueError raised) when two open tickets exist.
-    """
+    """Accept each canonical relation for two open tickets."""
     import subprocess
 
     canonical = ["blocks", "depends_on", "relates_to", "duplicates", "supersedes"]
@@ -424,10 +356,7 @@ def test_add_dependency_accepts_all_canonical_relations(
             )
 
 
-# ---------------------------------------------------------------------------
-# Structural comparability end-to-end (story affe-2b42-4ee4-4e12): the edge that
-# actually reaches the store, for bugs 1803-df54-18bb-4881 and jira-reb-1582.
-# ---------------------------------------------------------------------------
+# Check the edge recorded after structural resolution, including ancestor refusal.
 
 
 @pytest.mark.unit
@@ -435,12 +364,7 @@ def test_add_dependency_accepts_all_canonical_relations(
 def test_add_dependency_task_to_sibling_story_writes_the_requested_edge(
     graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Bug 1803 repro, end to end: the requested edge is written and the epic is clean.
-
-    The original report had two halves: the epic wrongly gained `depends_on` on its
-    own child, AND the task-to-story edge the caller asked for was silently never
-    recorded. Both are asserted here.
-    """
+    """Record the requested task-to-story edge without adding an epic-to-child edge."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -484,13 +408,7 @@ def test_add_dependency_rejects_grandparent_pair(
 def test_add_dependency_rejects_pair_that_only_resolves_to_an_ancestor(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """The guard sees the RESOLVED pair, catching what the pre-escalation check missed.
-
-    `task-leaf` and `epic-other` are unrelated as given — neither is an ancestor of
-    the other, so a guard reading only the original pair passes them. Escalation
-    resolves the source up to `epic-other`'s own child, producing an
-    ancestor/descendant edge that must still be refused.
-    """
+    """Reject an ancestor edge revealed only after endpoint escalation."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -510,12 +428,7 @@ def test_add_dependency_rejects_pair_that_only_resolves_to_an_ancestor(
 def test_link_dry_run_reports_ancestor_descendant_rejection(
     graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
 ) -> None:
-    """`link --dry-run` must preview the ancestor-descendant refusal, not "Would create".
-
-    The dry-run preview reads the same resolver as the real write, so a pair the
-    real command refuses has to be reported as a rejection here too — otherwise the
-    preview contradicts the command it previews.
-    """
+    """Make dry-run preview the same ancestor refusal as an executable link."""
     from rebar._commands import link_revert as composer
 
     tracker_dir = tmp_path / "tracker"
@@ -543,11 +456,9 @@ def test_link_dry_run_reports_ancestor_descendant_rejection(
 def test_add_dependency_returns_the_redirect_record_when_it_escalates(
     graph: ModuleType, tmp_path: Path
 ) -> None:
-    """The record travels back as a VALUE, not only to stdout.
+    """Return the resolved record for quiet library and MCP callers.
 
-    stdout is unreachable for library and MCP callers — `link_core(quiet=True)`
-    suppresses it so rebar-mcp's stdio JSON-RPC stream stays intact — so a returned
-    record is the only way they can learn a different edge was recorded.
+    They cannot rely on stdout, and MCP stdio must stay valid JSON-RPC.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -588,12 +499,9 @@ def test_add_dependency_returns_none_when_nothing_was_escalated(
 def test_quiet_link_core_returns_the_record_while_writing_nothing_to_stdout(
     graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
 ) -> None:
-    """The suppression must SURVIVE this fix — it is what protects the MCP stream.
+    """Keep quiet mode silent while returning the escalation record.
 
-    rebar-mcp speaks MCP-over-stdio, so a print inside a tool call would inject a bare
-    JSON object into the JSON-RPC stream. The escalation is reported by RETURNING the
-    record, never by relaxing `quiet`. Asserting both halves together is the point: a
-    future "just print it" change would satisfy the return assertion alone.
+    Printing from MCP would corrupt its stdio protocol.
     """
     from rebar._commands import link_revert as composer
 
@@ -622,13 +530,7 @@ def test_quiet_link_core_returns_the_record_while_writing_nothing_to_stdout(
 def test_rebar_link_carries_the_record_through_the_whole_library_chain(
     graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
 ) -> None:
-    """The record must survive EVERY layer of the library facade, not just the graph.
-
-    `rebar.link()` -> `_python_leaf` -> `_link` -> `link_core` -> `add_dependency`.
-    Three of those links previously discarded the value, and a test that stubs
-    `rebar.link` itself cannot see that — it has to run the real chain. This is the
-    test that fails if any one of them stops returning.
-    """
+    """Carry the resolved record through rebar.link and every facade layer."""
     import rebar
     from rebar._commands import link_revert as composer
 

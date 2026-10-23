@@ -19,31 +19,13 @@ _stable_subprocess_time = SimpleNamespace(
     sleep=subprocess.time.sleep,  # type: ignore[attr-defined]
 )
 
-# Volatile REPO_ROOT state dirs a test must never write into, but which exist
-# locally because this checkout dogfoods rebar (so ``.rebar/`` is always present).
-# Watched ONE level deep so a leak INTO them is caught locally — not only on a
-# fresh CI checkout where the same write would instead create a new top-level
-# entry (the false-green/false-red split behind bug hurt-brow-swan). Kept shallow
-# (one extra ``os.listdir`` each) so the per-test guard stays cheap; dirs with
-# legitimate per-test churn (``.git/``, ``.tickets-tracker/``, ``.venv/``) are
-# deliberately NOT watched.
+# Watch volatile repo-root state one level deep to catch test leaks into existing dirs.
+# Git, tracker, and virtualenv dirs have legitimate churn and are excluded.
 LEAK_WATCH_SUBDIRS = (".rebar",)
 GIT_PROBE_TIMEOUT_SECONDS = 5
 
-# A timed-out sample of a READ-ONLY, IDEMPOTENT probe (``rev-parse``/``status``) is not
-# evidence of anything, so it is re-sampled rather than reported. The guard runs once per
-# test — ~19k times in the macOS full-suite sweep, three xdist workers deep — on a runner
-# where ORDINARY fixture setup was measured at 4.562s against this 5s per-attempt bound.
-# One starved sample there is contention, and erroring the innocent test that happened to
-# be running is a false red that turns the whole branch head red (bug 860b-28eb-10c0-4249).
-#
-# Retries carry NO sleep: the elapsed per-attempt timeout is itself the backoff, and
-# sleeping here would re-introduce the patched-``time.sleep`` hazard that
-# ``_stable_subprocess_time`` exists to defend against.
-#
-# The LAST attempt's ``TimeoutExpired`` still propagates, and that is load-bearing: a probe
-# that can never sample must fail LOUDLY rather than silently cease to detect a HEAD move.
-# Retrying absorbs a TRANSIENT stall; it must never absorb a PERSISTENT one.
+# Retry timed-out read-only Git probes without sleep. A starved sample is inconclusive.
+# the last timeout still fails so persistent inability to sample cannot hide a HEAD move.
 GIT_PROBE_ATTEMPTS = 3
 
 
@@ -119,15 +101,9 @@ def porcelain(root) -> set[str] | None:
 
 
 def leak_failure_message(leaked: Iterable[str]) -> str:
-    """The REPO_ROOT leak guard's failure text for *leaked* entries.
+    """Describe a repo-root entry seen during a test without assigning its writer.
 
-    The guard diffs REPO_ROOT around each test, so it cannot tell a leak from a
-    write that landed from outside the suite — the message names both causes
-    rather than asserting the one it cannot know.
-
-    For the same reason the guard does not delete what it reports, so the text
-    says so explicitly: whoever reads this is the only one who can tell the two
-    causes apart, and therefore the only one who can safely clean up.
+    The guard reports the entry without deleting it because another process may own it.
     """
     return (
         f"New entries appeared in REPO_ROOT during this test: {sorted(leaked)}\n"
@@ -142,17 +118,9 @@ def leak_failure_message(leaked: Iterable[str]) -> str:
 
 
 def head_move_failure_message(before: str, after: str) -> str:
-    """The HEAD-move guard's failure text for a move from *before* to *after*.
+    """Describe a HEAD move without attributing it to the test or another process.
 
-    The guard's only evidence is two ``git rev-parse HEAD`` samples taken around
-    the test, and a sha inequality across that window carries no attribution: a
-    commit made by the test and one made by another process sharing this checkout
-    are the same kind of object, by the same user, in the same repo. So the text
-    names both causes instead of asserting the one it cannot know.
-
-    That is also why the recovery command is fenced by a warning placed *before*
-    it: ``git reset --hard`` is right for whoever owns the commit and destructive
-    for everyone else, and a caveat read after the command is read too late.
+    Place the warning before the reset command because a reset can discard another writer's work.
     """
     return (
         f"The repo HEAD moved during this test ({before[:10]} -> {after[:10]}). "
@@ -173,14 +141,9 @@ def head_move_failure_message(before: str, after: str) -> str:
 
 
 def working_tree_failure_message(leaked: Iterable[str]) -> str:
-    """The session working-tree backstop's failure text for *leaked* entries.
+    """Describe a session-wide working-tree change without assigning its writer.
 
-    The backstop diffs two ``git status --porcelain`` snapshots taken around the
-    whole session, and an entry appearing across that window carries no writer
-    identity: a stray test write and a concurrent commit, build, or editor save
-    in the same checkout produce the same porcelain line. So the text names both
-    causes instead of asserting the one it cannot know — the same limit the
-    sibling guards hit (tickets 746c-185a, hot-guessable-ungulate).
+    A test write and a concurrent editor, build, or commit can produce the same status entry.
     """
     entries = sorted(leaked)
     return (

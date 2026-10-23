@@ -1,30 +1,9 @@
-"""Unit-tier subprocess-isolation predicate — collection-time enforcement.
+"""Find subprocesses that escape the unit test sandbox at collection time.
 
-``tests/conftest.py`` provides the isolation root: a session-scoped sandbox repo
-(``_rebar_root_sandbox_repo``) plus an autouse fixture that ``monkeypatch.setenv``s
-``REBAR_ROOT`` at it, per xdist worker. It reaches child processes purely by
-ENVIRONMENT INHERITANCE — so a test that builds its own ``env=`` mapping from
-scratch silently drops ``REBAR_ROOT``, and its child falls back to the git toplevel
-of the cwd: the real checkout. Nothing stopped that before this guard.
-
-Contract (the tests are written against these names):
-
-    scan_source(source, path) -> list[dict]
-        AST-scan one module's source. Each finding carries at least ``kind``
-        ("hazard", which fails collection, or "undecidable", reported only),
-        ``lineno`` (1-based) and ``reason`` (an instructive message naming the fix).
-
-    unharnessed_subprocess_reason(items) -> str | None
-        The collection-hook predicate: None when the selection is clean, else one
-        instructive message. Kept here, not in conftest, so it is testable without
-        spawning pytest — mirroring tests/_live_jira_confinement.py.
-
-Detection is AST, never regex, and the callee is resolved through the module's own
-``import`` / ``from`` bindings: a naive ``run(`` pattern matches 126 ``asyncio.run``
-call sites in the unit tier alone. The classification is deliberately THREE-way — an
-``env=`` bound outside the enclosing function cannot be resolved without a def-site
-trace, so it is ``undecidable`` and NEVER fails collection: reddening dozens of files
-on day one is how a guard gets reverted.
+An inherited REBAR_ROOT keeps children in each worker's sandbox. Hand-built env mappings
+can drop it. Resolve callees through imports and classify unresolved env definitions as
+undecidable rather than failing collection. scan_source and unharnessed_subprocess_reason
+are shared with the collection hook.
 """
 
 from __future__ import annotations

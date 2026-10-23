@@ -1,22 +1,8 @@
-"""autodeploy must not recreate the review-bot container mid-review (bug 34cd).
+"""Defer review-bot recreation while a review is active.
 
-``docker compose up -d`` STOPS the running container. uvicorn's shutdown drain covers only the
-webhook QUEUE (``app.py`` waits on ``queue.join()``); the backfill reconciler's inline review is
-cancelled outright — and the reconciler is the path that RETRIES a killed review. So a deploy
-arriving mid-review kills it, and the retry is killed by the next deploy.
-
-Measured on 2026-08-03: SEVEN recreations in 90 minutes (gaps of 18/7/22/4/15/20 min) against a
-full review that takes ~10 MINUTES. Four of six gaps were shorter than one review, and changes
-1302/1303 sat ``Verified +1`` with ``LLM-Review = 0`` for 20-35 minutes, unsubmittable.
-
-The failure mode was INVISIBLE. A killed review fails nothing — the process was asked to stop —
-so no ``VOTER_ERROR`` is emitted, ``restarts`` stays 0, the deploy logs "redeployed + healthy",
-and all 11 CloudWatch alarms read OK while the gate was live-locked. Hence the marker assertions
-here: the deferral and the interruption must each be COUNTABLE in the unit journal, and a routine
-deferral must NOT carry the ``AUTODEPLOY_ERROR`` token that drives the deploy_errors alarm.
-
-The harness is the one from ``test_autodeploy_health_gate.py``: stub the box's binaries onto PATH
-and run the REAL script, so these assertions bind the shipped bash rather than a reimplementation.
+Compose replacement can cancel an inline review. Deferral and interruption need
+countable markers. Routine deferral must not raise AUTODEPLOY_ERROR. Stub box
+commands and run the shipped script.
 """
 
 from __future__ import annotations
@@ -293,12 +279,7 @@ def test_a_deferred_deploy_is_logged_and_countable(box: dict[str, object]) -> No
 
 
 def test_a_deferral_does_not_inflate_the_deploy_errors_alarm(box: dict[str, object]) -> None:
-    """A deferral is HEALTHY behaviour — expected on every landing burst.
-
-    ``observability.sh`` counts ``AUTODEPLOY_ERROR`` lines in this unit's journal and publishes
-    the delta as rebar/host:deploy_errors, which pages. Folding a routine deferral into that
-    token would page an operator every time main advanced while the bot was working.
-    """
+    """A routine review-bot deferral must not emit the paging error marker."""
     _set_health_body(box, '{"status":"ok","in_flight":1}')
     result = _run(box)
     journal = result.stdout + result.stderr
@@ -343,13 +324,9 @@ def test_the_deferral_is_bounded_and_the_interruption_is_countable(
 
 
 def test_the_bound_is_not_reset_by_a_new_commit_landing(box: dict[str, object]) -> None:
-    """The bound is keyed to the deferral EPISODE, not to the target SHA.
+    """Keep the deferral timer keyed to the episode, not the changing target SHA.
 
-    This is the subtle way the bound can be defeated. ``BACKOFF_FILE`` is deliberately keyed to
-    the target SHA so a new tip retries promptly (fix-forward). If the DEFERRAL timer copied
-    that, it would reset on almost every tick of a landing burst — TARGET advances each time —
-    and a permanently-busy bot would defer forever, which is precisely the unbounded wait the
-    bound exists to prevent.
+    A target-keyed timer would reset through a landing burst and defer forever.
     """
     _set_health_body(box, '{"status":"ok","in_flight":1}')
     env: dict[str, str] = box["env"]  # type: ignore[assignment]
@@ -440,27 +417,10 @@ DEFER_BOUND_REVIEW_CAP_MULTIPLE = 2
 
 
 def test_defer_bound_default_outlasts_the_apps_own_per_review_cap() -> None:
-    """The bound must sit at least 2x above the longest a single review can possibly take.
+    """Set the deploy deferral bound at least twice the app's per-review timeout.
 
-    The review-bot wraps every review in ``asyncio.wait_for(..., REVIEW_TIMEOUT_SECONDS)`` on
-    BOTH paths (the queue worker and the backfill reconciler), so in-flight necessarily returns
-    to 0 within that window of the last review starting. A bound below it would force-deploy
-    through a review that was about to finish — all of the interruption, none of the protection.
-    Reading the constant here rather than restating a literal keeps the two in lockstep: raising
-    the app's per-review cap fails this test until the deploy bound follows.
-
-    WHY 2x AND NOT THE ORIGINAL 1x FLOOR (raised 2026-08-12). Bug 34cd shipped the bound at
-    1800s = 1.5x the cap while this test only pinned >= 1.0x, so the margin that actually mattered
-    lived in a comment where nothing enforced it. That margin turned out to be too thin: on
-    2026-08-12 all four ``bound-exceeded`` review interrupts cleared the bound by a hair —
-    ``deferred_for`` 1810s / 1820s / 1810s / 1930s against ``bound=1800s`` — during a 60+-merge
-    landing burst. Every one was a review that had finished, or was about to, when the budget
-    expired. Pinning 2.0x makes the margin the thing under test rather than the floor below it.
-
-    This does NOT claim to fix a SATURATED episode (bug 7b4a: ``in_flight`` oscillating 2 -> 1 -> 2
-    without ever reaching 0 for 30 minutes, the bound outlasted by pipelining rather than by any
-    one long review). Against saturation a larger bound only defers the same kill, which is why
-    the relationship stays a bounded multiple: an unbounded bound is a deploy that never lands.
+    Read the app constant so its changes update the tested margin. A bounded multiple
+    protects individual reviews without letting a saturated episode defer forever.
     """
     from rebar.review_bot.config import DEFAULT_REVIEW_TIMEOUT_SECONDS
 
@@ -486,18 +446,10 @@ def test_defer_bound_default_outlasts_the_apps_own_per_review_cap() -> None:
 def test_a_landing_burst_ends_with_the_review_surviving_and_one_deploy(
     box: dict[str, object],
 ) -> None:
-    """The measured scenario: commits arriving FASTER than one review completes.
+    """Coalesce a landing burst into one deploy at the newest tip.
 
-    On 2026-08-03 seven recreations landed in 90 minutes — gaps of 18/7/22/4/15/20 minutes —
-    against a ~10-minute review, so four of six gaps were shorter than one review and the same
-    review could be killed again and again. This simulates that burst: six ticks arrive while
-    one review runs (the tip advancing each time, as real commits would), then the review
-    finishes.
-
-    The contract: ZERO recreations while the review is in flight, and then exactly ONE deploy —
-    at the NEWEST tip, not six deploys walking the burst. That second half is the coalescing
-    that falls out of deferring for free: TARGET is recomputed every tick, so a run of deferred
-    ticks collapses to one deploy.
+    Six advancing ticks during one review must not recreate the bot. Deploy once
+    when that review finishes.
     """
     env: dict[str, str] = box["env"]  # type: ignore[assignment]
     env["DEPLOY_DEFER_MAX"] = "3600"  # longer than the burst, so the bound never fires
@@ -634,13 +586,12 @@ def test_a_persistently_unreachable_replacement_rolls_back_without_deferring(
 def test_a_bot_that_is_mid_redeploy_is_deferred_not_recreated_2f46(
     box: dict[str, object],
 ) -> None:
-    """Bug 2f46 (Mechanism 3). A bot whose /health is unreadable ONLY because it is itself
-    being recreated (docker health ``starting``) must NOT be blindly recreated — that would
-    kill the very startup we should wait for and re-enter the blind window. It is DEFERRED
-    (retry next tick) with its own countable ``AUTODEPLOY_DEFERRED bot-redeploying`` marker,
-    NOT failed open with ``signal-unavailable``."""
-    _set_health_body(box, "DOWN")  # /health unreachable -> in_flight == -1
-    _set_bot_state(box, "starting")  # ...but only because the container is mid-(re)start
+    """Defer a bot whose health is unavailable because its container is starting.
+
+    Recreating it would restart the same blind window. Emit the bot-redeploying marker.
+    """
+    _set_health_body(box, "DOWN")  # health unavailable
+    _set_bot_state(box, "starting")  # container is restarting
     result = _run(box)
     state: Path = box["state"]  # type: ignore[assignment]
     commands = _commands(box)
@@ -666,8 +617,7 @@ def test_a_bot_that_is_mid_redeploy_is_deferred_not_recreated_2f46(
 
 
 def test_a_restarting_bot_is_treated_as_mid_redeploy_2f46(box: dict[str, object]) -> None:
-    """The docker STATUS branch of the disposition: a container in ``restarting`` (not merely
-    health ``starting``) is also transient and must be deferred, not recreated blind."""
+    """Defer a restarting container as well as one with starting health."""
     _set_health_body(box, "DOWN")
     _set_bot_state(box, "restarting")
     result = _run(box)
@@ -684,12 +634,9 @@ def test_a_restarting_bot_is_treated_as_mid_redeploy_2f46(box: dict[str, object]
 
 
 def test_a_wedged_bot_still_fails_open_and_is_counted_2f46(box: dict[str, object]) -> None:
-    """Preservation guard: a genuinely WEDGED bot — its container up (``running``) but /health
-    unreadable — must STILL fail open and deploy (that is how a broken bot gets fixed),
-    emitting the countable ``signal-unavailable`` marker. The 2f46 change must not turn this
-    recovery path into a deferral."""
-    _set_health_body(box, "not-json-at-all")  # reachable but unparseable -> -1
-    _set_bot_state(box, "running")  # container up and healthy == not mid-redeploy == wedged
+    """Recover a running bot with unreadable health through a counted fail-open deploy."""
+    _set_health_body(box, "not-json-at-all")  # unparseable health
+    _set_bot_state(box, "running")  # wedged, not redeploying
     result = _run(box)
     commands = _commands(box)
     interrupts = _markers(result, "AUTODEPLOY_REVIEW_INTERRUPT")
@@ -707,9 +654,7 @@ def test_a_wedged_bot_still_fails_open_and_is_counted_2f46(box: dict[str, object
 
 
 def test_a_mid_redeploy_defer_is_bounded_2f46(box: dict[str, object]) -> None:
-    """The mid-redeploy defer is bounded exactly like the busy defer: a bot that never finishes
-    starting cannot freeze the gate forever. Once ``DEPLOY_DEFER_MAX`` is spent it falls through
-    to the fail-open recreate + countable ``signal-unavailable`` — the safety valve is kept."""
+    """Bound mid-redeploy deferral. Afterward fail open with a counted marker."""
     _set_health_body(box, "DOWN_UNTIL_DEPLOY")  # unreachable now; healed once compose-up runs
     _set_bot_state(box, "starting")
     env: dict[str, str] = box["env"]  # type: ignore[assignment]

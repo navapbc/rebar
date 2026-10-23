@@ -1,26 +1,8 @@
-"""autodeploy signals a pending MANUAL apply when a gerrit-side detect-only source changes.
+"""Signal manual Gerrit apply when detect-only sources change.
 
-Two sources in this class, both DETECT-ONLY (``reason=config_manual``) because applying
-either touches the Gerrit container — an operator judgement call on a live review gate that
-this unattended loop deliberately never makes (``BOT_SERVICE`` is documented "NEVER 'gerrit'"):
-
-* ``infra/compose/gerrit.config`` (bug 1630-0279-85ba-4e15) — ``compose-up.sh`` re-seeds it
-  into the Gerrit site etc dir, but only when compose-up runs; Gerrit reads it once at
-  injector-creation time, so applying means restarting Gerrit.
-* ``infra/gerrit/materialize-deploy-key.sh`` (bug 408c-9c78-c523-4d1c) — the SSM->file
-  materializer that installs the replication deploy key into the gerrit user's dir, a direct
-  sibling of ``infra/gerrit/materialize-g2p-config.sh`` which was ALREADY in ``CONFIG_PATHS``.
-  The deploy-key materializer was overlooked, so a merged change to it rsynced to
-  ``/opt/rebar`` and silently did nothing — the same drift class ``CONFIG_PATHS`` detect-only
-  exists to make visible.
-
-Each was (before its fix) absent from EVERY autodeploy path manifest, so a merged change
-reached ``/opt/rebar`` and then silently did nothing, with NO signal at all — the same drift
-class as the observability probe and the certbot timer, one layer over. This test drives the
-REAL ``autodeploy.sh`` under a PATH shim where ``main`` has advanced and ``git diff`` reports
-*only* one such source changed, and asserts autodeploy emits ``AUTODEPLOY_ERROR`` with
-``reason=config_manual`` naming that file, so the pending manual apply is visible rather than
-silent — for each source in the class.
+Gerrit config and deploy-key materializer changes reach the host copy but require
+operator application. The shipped autodeploy script must emit config_manual naming
+the changed source without restarting Gerrit unattended.
 """
 
 from __future__ import annotations
@@ -38,10 +20,7 @@ AUTODEPLOY = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "autode
 _DEPLOYED = "d" * 40
 _TARGET = "e" * 40
 
-# Every gerrit-side detect-only source that must be signalled with reason=config_manual.
-# The second tuple element is a substring the operator-facing `detail` must name, or None
-# when the generic config_manual message names representative artifacts rather than this exact
-# file (the fix is manifest-membership only — it adds no per-file wording).
+# Detect-only Gerrit sources and the detail each manual-apply signal names.
 _CONFIG_MANUAL_SOURCES = [
     ("infra/compose/gerrit.config", "gerrit.config"),
     ("infra/gerrit/materialize-deploy-key.sh", None),

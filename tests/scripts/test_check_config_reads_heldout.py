@@ -107,15 +107,9 @@ def test_store_context_assignment_is_not_a_read(gate, tmp_path):
 
 
 def test_unrelated_same_named_attribute_no_longer_satisfies_the_field(gate, tmp_path):
-    """Bug 2c58: this test previously asserted the OPPOSITE and pinned the defect.
+    """Ignore same-named reads on unrelated objects when attributing a config field.
 
-    It was written as an "accepted fail-quiet trade-off": a read of the same bare name
-    on an unrelated object suppressed the firing. That is precisely the false-negative
-    class this gate exists to prevent — it is why an inert `CodeHealthConfig.enabled`
-    passed for as long as it did, while its uniquely-named sibling `analyzers` tripped
-    the gate. Catching an inert field only when its name happens to be globally unique
-    is luck, not a check. The expectation is therefore INVERTED: an unresolvable /
-    unrelated receiver contributes to no field, so the field still fires.
+    An inert field must still fail even when another object has that attribute name.
     """
     schema, root = _tree(tmp_path, _SCHEMA, "def f(unrelated):\n    return unrelated.ghost_knob\n")
     errors = gate.check(schema, root)
@@ -240,10 +234,7 @@ def test_real_schema_markers_all_carry_pointers(gate):
         assert pointer.strip(), "bare read-via marker committed to the real schema"
 
 
-# ── required negative fixtures: legitimate STRING-keyed reads (bug 2c58) ──────────
-# An owning-dataclass resolver must still tolerate fields consumed through a string
-# key or getattr, where no attribute read exists for any resolver to find. These are
-# LIVE fields; a gate that fires on them would be a false positive that breaks CI.
+# String-keyed and getattr reads lack a resolvable attribute site.
 # They stay green via their `# read-via:` markers, which the sweep must not disturb.
 @pytest.mark.repo_policy
 @pytest.mark.parametrize(
@@ -269,12 +260,9 @@ def test_string_read_fields_keep_their_marker_and_do_not_fire(gate, field_name, 
     assert gate.check(_REAL_SCHEMA, REPO_ROOT / "src" / "rebar") == []
 
 
-# ── ticket-pointer marker reporting (bug 2c58, AC7) ──────────────────────────────
-# A marker that points at a TICKET rather than at a reader is justified only while that
+# Ticket-pointer reports do not query ticket status. The next lines show sample marker text.
 # ticket is open -- `CodeHealthConfig.analyzers` carried `# read-via: inert pending bug
-# dce2-...` and dce2 has since closed. The reporter surfaces those. Its correct output
-# on the real tree is currently EMPTY, which is precisely why it needs a positive test:
-# a reporter that has never emitted anything looks identical to one that cannot.
+# dce2-...`. The fixture checks reporting when the repository schema has none.
 _TICKET_MARKER_SCHEMA = """\
 from dataclasses import dataclass, field
 
@@ -319,17 +307,9 @@ def test_ticket_pointer_reporting_never_changes_the_exit_code(gate, tmp_path, ca
 
 @pytest.mark.repo_policy
 def test_the_real_schema_parks_no_markers_against_a_ticket(gate):
-    """Today's expected state, pinned so a newly-parked marker surfaces in review.
+    """Require zero parked ticket-pointer markers in the current schema.
 
-    The schema used to park exactly two: task f020 deleted the inbound absence-probe port
-    and with it the ONLY reader of ``JiraConfig.resolved_statuses``, then task 549c removed
-    the write-only DC plumbing that had been the last read of
-    ``ReconcilerConfig.resolved_statuses``, leaving both fields inert behind a marker
-    pointing at the hard-removal follow-up f408-64ad-ee41-46b6. That removal has now landed
-    under operator sign-off — the fields and their markers are gone — so the parked set is
-    empty again. Pinned at EXACTLY zero rather than as a bare bound: a loosened assertion
-    would let an unrelated field be parked against a ticket without anyone noticing, which
-    is the whole point of reporting them.
+    A new unresolved marker must surface in review rather than hiding behind a bound.
     """
     reports = gate.ticket_pointer_reports(_REAL_SCHEMA)
     assert reports == [], f"no marker should be parked against a ticket; got {reports!r}"

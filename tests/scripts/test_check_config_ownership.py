@@ -1,21 +1,8 @@
-"""Happy-path contract for the config-ownership gate (RP-04 S7.1, ticket 29a9).
+"""Test approved config-reading boundaries and the ownership gate API.
 
-The gate proves that ONLY approved composition roots / provider boundaries read ambient
-configuration and credentials: every prohibited ambient access (env read, `load_config`
-call, credential read, backend reload, configurable default) BELOW an approved seam is an
-error unless it is a recorded legacy exception or carries a `# read-via:` marker.
-
-Env-read detection REUSES `scripts/gen_env_registry.py` (`scan` / `KNOWN_ENV_HELPERS`);
-the gate layers seam/ownership classification on top.
-
-API contract (scripts/check_config_ownership.py):
-  - check(root: Path) -> list[str]      # error strings, [] == clean
-  - main(argv: list[str] | None) -> int  # 0 clean, 1 failures
-
-Edge shapes (import/local-aliased callees, receiver-object aliasing, getattr-env,
-helper-shim reads, unresolved fail-closed, credential reads, backend reload, structural
-exception rejection, the drift/registry-completeness check, and real-tree cleanliness)
-are held out in test_check_config_ownership_heldout.py.
+Ambient reads below composition or provider seams fail unless an explicit legacy
+exception or read-via marker admits them. Env scanning reuses gen_env_registry.
+held-out tests cover alias and receiver edge cases.
 """
 
 from __future__ import annotations

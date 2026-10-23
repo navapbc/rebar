@@ -1,24 +1,8 @@
-"""autodeploy signals a pending manual apply when ``infra/nginx/rebar.conf.template``
-changes (bug 1d1b-a719-b675-4a1f).
+"""Signal manual nginx edge application after its template changes.
 
-``infra/nginx/rebar.conf.template`` is the source of truth for the nginx edge
-(``/etc/nginx/conf.d/rebar.conf``) — it is the only file in ``infra/`` carrying
-``proxy_redirect``. But it was absent from EVERY component path manifest in
-``autodeploy.sh`` (BOT/SECRETS/MCP/CONFIG/OBS/CERTBOT), so a merged change to the edge
-could never be detected, never applied, and — unlike a Gerrit config change, which is
-DETECT-ONLY but at least emits ``AUTODEPLOY_ERROR reason=config_manual`` — got NO signal
-at all: it failed silently. This is the exact drift class as the observability probe and
-the certbot timer, one layer over, and the same detect-and-signal shape the gerrit.config
-fix used (bug 1630-0279-85ba-4e15).
-
-Scope is Option A (operator-approved): detect-and-signal ONLY. Full auto-apply (render →
-``nginx -t`` → reload → rollback) is deferred to epic sprucing-wise-dikkops
-(6d60-2d0c-6ff7-444b) and is NOT exercised here.
-
-This test drives ``autodeploy.sh`` under a PATH shim where ``main`` has advanced and
-``git diff`` reports *only* ``infra/nginx/rebar.conf.template`` changed, and asserts
-autodeploy emits ``AUTODEPLOY_ERROR`` with ``reason=nginx_edge_manual`` so the pending
-manual render+reload is visible rather than silent.
+The source can reach the host without being rendered into the installed config.
+Autodeploy must emit nginx_edge_manual. Render, validate, reload, and rollback
+remain operator work.
 """
 
 from __future__ import annotations
@@ -59,9 +43,7 @@ def deploy_box(tmp_path: Path) -> dict[str, object]:
     # Seed deployed-sha so this is neither first-run nor up-to-date.
     (state / "deployed-sha").write_text(_DEPLOYED + "\n")
 
-    # git stub: only the rebar.conf.template diff reports a change. The BOT_PATHS/
-    # SECRETS_PATHS/MCP_PATHS/CONFIG_PATHS/OBS_PATHS/CERTBOT_PATHS diffs name other files,
-    # so they return empty and their heavy blocks are skipped.
+    # Only the edge-template diff is nonempty. Skip unrelated deploy paths.
     _stub(
         bin_dir,
         "git",
