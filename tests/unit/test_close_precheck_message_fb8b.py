@@ -1,34 +1,7 @@
-"""The undeclared-paths refusal must name re-attestation as a required step (bug fb8b).
-
-`_check_file_impact_vs_diff` refuses a close when a linked commit touches a path the
-recorded ``file_impact`` does not declare, and advises:
-
-    Declare them with `rebar set-file-impact <ticket> ...` and retry
-
-Following that advice widens ``file_impact``, which changes the material basis hash
-(``rebar.llm.plan_review.material_diff.material_basis`` folds ``file_impact`` into the
-signed basis), so the *next* close is refused again — this time as ``stale-material``.
-The advertised "retry" therefore cannot succeed on its own.
-
-Both refusals are CORRECT and this file does not weaken either. ``file_impact`` defines
-the attestation's scope (``rebar.llm.plan_review.read_set`` builds the read set "from the
-ticket's declared ``file_impact`` ∪ the files the review CITED"), so a widening genuinely
-does invalidate the signature — ``docs/plan-review-gate.md`` states the gate exists so it
-"is not bypassable by editing after signing". The defect is only that the first message
-under-describes the remedy, sending the author into a loop that reads as a contradiction.
-
-This is the same class `db1c` closed for the bounded-recovery message, whose docstring
-records the identical shape: "The advertised remedy for one close gate is a guaranteed
-failure of the other, and the message says nothing about that trade."
-
-What this pins:
-
-* the message names the re-attestation requirement (that widening ``file_impact`` is a
-  material plan change and ``rebar review-plan`` must be re-run);
-* the message still carries the diagnosis it already had — the commit sha, the exact
-  undeclared paths, the ``set-file-impact`` remedy and the ``--force`` override — so a
-  rewrite of the sentence cannot silently cost the operator the information.
-"""
+"""When a commit touches undeclared paths, the close refusal must name those paths, commit,
+file-impact update, and required plan re-attestation. Widening file impact changes signed
+material, so merely retrying cannot satisfy the next close gate. Retain the force override
+information."""
 
 from __future__ import annotations
 

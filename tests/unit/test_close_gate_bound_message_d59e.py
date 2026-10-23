@@ -1,29 +1,5 @@
-"""The close gate must not blame a missing `[agents]` extra for a size bound (bug d59e).
-
-When the completion verifier's bounded-recovery path rejects an oversized ticket,
-``transition_close`` surfaces a single catch-all message telling the operator to
-"install the 'agents' extra and set a model API key". For a
-:class:`CompletionRecoveryError` that remedy is **false** — the extra and key are
-present and working (the same close, retried, returns a real verdict) — and it
-sends the operator to fix a dependency for what is actually "this ticket's text
-is larger than the recovery bound".
-
-The error already carries the numbers that would explain it:
-``diagnostic={"context_chars": …, "context_char_limit": …}``. ``docs/llm-framework.md``
-(§"Bounded completion recovery") names that diagnostic as the actionable surface —
-"Inspect that diagnostic first" — yet the CLI handler interpolates only ``str(exc)``
-and never reads it.
-
-What this pins:
-
-* the bound case reports the MEASURED SIZE and the LIMIT, and does not assert a
-  missing extra/key;
-* the genuine-unavailability case still DOES get the install-the-extra remedy.
-
-That second test is the reason this file exists in this shape: the remedy text is
-correct and useful for the case it was written for, so a fix that simply deletes it
-would trade one wrong message for another. Both must hold.
-"""
+"""A completion-recovery size bound reports measured context and limit, not a missing agents extra.
+Model unavailability still recommends installing the extra or configuring its key."""
 
 from __future__ import annotations
 
@@ -92,14 +68,8 @@ def test_context_bound_failure_reports_the_size_not_a_missing_extra(monkeypatch)
 
 
 def test_genuine_unavailability_still_recommends_installing_the_extra(monkeypatch) -> None:
-    """NEGATIVE CONTROL — the case the remedy text was written for must keep it.
-
-    A missing `[agents]` extra / absent API key surfaces as an ``LLMError`` carrying a
-    classifier ``.outcome``. That operator genuinely does need to install the extra and
-    set a key, so the fix must narrow the remedy to this case rather than delete it.
-    Without this test, "stop saying install-the-extra" could be satisfied by removing
-    useful guidance from every failure.
-    """
+    """Missing LLM support keeps the install-extra and API-key remedy. Recovery-bound
+    errors lose it."""
     exc = LLMError("no model API key configured")
     exc.outcome = LLMOutcome(  # type: ignore[attr-defined]
         resolution_class=ResolutionClass.CHANGE_SETTINGS,
@@ -119,16 +89,8 @@ def test_genuine_unavailability_still_recommends_installing_the_extra(monkeypatc
 
 
 def test_non_bound_recovery_failure_does_not_claim_a_size_breach(monkeypatch) -> None:
-    """The trap in fixing this: don't swap one misattribution for another.
-
-    ``CompletionRecoveryError`` is raised at several recovery stages, and only the
-    bound checks carry ``context_chars``/``context_char_limit``. An exhaustion at, say,
-    criterion 7 carries ``criteria_completed`` instead. A handler that reads those keys
-    unconditionally renders "The ticket's context (None chars) exceeds the ... limit
-    (None chars)" — which is both nonsense AND a false diagnosis, asserting a size
-    breach that did not happen. That is precisely the defect this bug is about, just
-    relocated, so it must be pinned rather than left to the next reader to discover.
-    """
+    """Recovery failures without context-size diagnostics must not be described as size breaches or
+    print None-valued bounds."""
     exc = CompletionRecoveryError(
         "completion recovery exhausted at criterion 7",
         diagnostic={"criteria_completed": 7, "stage": "evidence"},

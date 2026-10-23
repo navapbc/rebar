@@ -1,25 +1,6 @@
-"""Positional-body commands must REJECT option-looking arguments, not store them (bug 00da).
-
-`rebar comment` takes its body positionally and has no `--body`/`--body-file` option.
-Before this guard, invoking one anyway stored the *flag token* as the body: the comment
-became the literal 11-byte string ``--body-file`` (or the 6-byte ``--body``), the intended
-content was silently discarded, and the command **exited 0** — so nothing signalled the
-loss and a ``len(comments)`` check still passed. Two independent sessions lost their entire
-durable record to this (live evidence: ticket b690 comments 5-9 with lengths 11/11/11/11/6,
-and session log 55a9 comment 5).
-
-The mechanism was in :func:`rebar._commands.main`'s arity path: it sliced
-``args[: entry.min_args]`` and silently dropped the surplus, and never inspected a token for
-a leading ``-``. These tests pin the repaired contract:
-
-* an option-looking positional is a **usage error** (non-zero exit, message naming the
-  correct form), never data;
-* surplus positionals are a usage error too — no silent truncation;
-* ``--`` is the escape hatch, so a body that legitimately starts with ``-`` is still
-  writable, and ``--`` itself is consumed rather than stored as the body;
-* the sibling positional-body commands audited by the ticket (``create`` / ``edit`` /
-  ``session-log``) reject the same forms loudly.
-"""
+"""Positional comment bodies must reject option-looking tokens before writing. Tests cover unknown
+flags, end-of-options handling, and legitimate body text so a mistaken --body argument cannot
+become the stored comment."""
 
 from __future__ import annotations
 

@@ -1,20 +1,6 @@
-"""A `--class duplicate` close must be TOLD it needs a replacement link (bug c8fd).
-
-THE DEFECT. `_completion_precheck` exempts a duplicate/not_a_bug/escalated bug that names a live
-replacement from completion verification. When no such replacement was found it fell THROUGH to the
-ordinary completion verifier, which correctly failed — a duplicate's defect is not resolved by the
-duplicate — but printed remediation offering only two impossible paths: finish work that belongs to
-the canonical ticket, or mark the criterion `[operator-attested]`, which would be a false
-attestation that the defect no longer reproduces. The one action that works, `rebar link <id>
-<canonical> duplicates`, was never named. Observed on bug 9b70, where the close failed repeatedly
-and was nearly escalated for a gate change before a single `rebar link 9b70 6a81 duplicates` made
-it pass unchanged.
-
-These tests pin the fix and the three properties that keep it safe: the gate asks only that the
-link EXIST (a duplicate of an already-CLOSED canonical is the common case, so requiring an open
-target would break the majority path); it costs no billable LLM request; and it does not touch
-`not_a_bug` / `escalated` / ordinary close classes, none of which owe a `duplicates` link.
-"""
+"""A duplicate without a replacement link is refused before LLM verification with the exact link
+remedy. A closed canonical can still qualify. Other close classes do not acquire a
+duplicate-link requirement."""
 
 from __future__ import annotations
 
@@ -107,12 +93,7 @@ def _run(store, tmp_path, monkeypatch, *, close_class: str, force: str = ""):
 
 
 def test_a_duplicate_close_with_no_link_names_the_exact_link_command(monkeypatch, tmp_path):
-    """THE BUG. The failure must name the remedy, not leave the operator to guess it.
-
-    Asserted on the literal command text because that is what was missing in the field: the old
-    message was not wrong about the facts, it was wrong about what to DO, and a message that says
-    'no replacement link' without showing the command reproduces the same dead end.
-    """
+    """A missing duplicate link error must print the command that adds the replacement relation."""
     store = _Store({_BUG: _bug_state()})
 
     with pytest.raises(CommandError) as excinfo:
@@ -141,14 +122,7 @@ def test_the_no_link_duplicate_close_never_spends_an_llm_request(monkeypatch, tm
 def test_a_duplicates_link_to_a_closed_canonical_still_takes_the_disposition_path(
     monkeypatch, tmp_path
 ):
-    """THE OPERATOR'S CONFIRMED REFINEMENT, pinned as a regression.
-
-    Closing a duplicate of an ALREADY-CLOSED canonical is the common case — the canonical is
-    usually what got fixed. The gate must key on the link's EXISTENCE only. `_is_live_ticket`
-    happens to permit a closed target today (it rejects only archived/deleted/unresolvable), so
-    this test's job is to make that incidental property load-bearing: a future tightening that
-    demanded an open target would break the majority path silently, and now breaks here instead.
-    """
+    """A duplicate of a closed canonical still qualifies when its replacement link exists."""
     store = _Store(
         {
             _BUG: _bug_state([{"relation": "duplicates", "target_id": _CANONICAL}]),
@@ -233,12 +207,8 @@ def test_ordinary_close_classes_are_unaffected_by_the_missing_link(
 def test_reason_required_dispositions_are_refused_pre_llm_not_routed_to_the_verifier(
     close_class, monkeypatch, tmp_path
 ):
-    """`not_a_bug` asserts there IS no defect and `escalated` may point outside the tracker, so
-    neither owes a `duplicates` link — but since bug d54b neither falls through to the completion
-    verifier either (which would demand proof a nonexistent defect was fixed, an unpassable
-    gate). With no replacement link and no `--reason`, the close is refused pre-LLM naming both
-    doors, and never spends a billable request.
-    """
+    """A not_a_bug or escalated close lacking replacement and required reason is refused before the
+    billable verifier, without demanding a duplicates link."""
     store = _Store({_BUG: _bug_state()})
 
     with pytest.raises(CommandError) as excinfo:

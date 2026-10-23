@@ -1,24 +1,7 @@
-"""Administrative dispositions and the plan-review CLOSE gate (bug 69b9).
-
-THE DEFECT. ``gates.close_plan_review_gate_check`` could not see the close disposition at
-all — it took no ``close_class`` parameter, so a story closed as ``superseded`` against a
-live ``supersedes`` link still had to produce a plan-review attestation. It cannot: a
-genuinely superseded plan describes work that already landed elsewhere, so ``review-plan``
-correctly BLOCKs it, and the more truly superseded the ticket is the more certainly so. The
-only exit was ``--force``, which records no signature — so every superseded ticket degraded
-the audit trail for a disposition that is administrative and evidence-backed.
-
-Its sibling close gate already honours exactly this evidence
-(``close_precheck._has_live_replacement_link``), so the asymmetry was an omission, not a
-policy: one gate reads the live replacement link, the other was never handed it.
-
-THE FIX asserted here. The gate takes keyword-only disposition evidence (defaults keep every
-existing caller unchanged) and exempts a close only when the same deterministic disposition
-producer can mint a completion-disposition attestation: link-backed classes need a live
-replacement, and reason-backed ``obsolete`` / ``wontfix`` need the persisted close reason.
-The exemption reports a DISTINCT ``disposition`` verdict so the audit trail separates it
-from a type ``exempt`` and from an unaudited ``--force`` bypass.
-"""
+"""Administrative closes bypass the plan-review gate only with certifiable evidence.
+Link-backed classes require a readable replacement link to a non-archived, non-deleted ticket.
+Obsolete and wontfix require the persisted reason. The disposition verdict remains separate
+from type exemptions and unsigned force."""
 
 from __future__ import annotations
 

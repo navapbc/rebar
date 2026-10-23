@@ -1,20 +1,6 @@
-"""Bounded auto-resume for the completion-verification close gate (ticket b5f8-d3f9-39d9-4195).
-
-When a close FAILs on pure evidence-search exhaustion — every unmet criterion carries the
-framework-set ``evidence_sufficient: false`` marker, so nothing was positively refuted — the
-correct next action is mechanical: run the verifier again. The cross-run verdict cache
-(ticket 8d74) seeds the credited PASSes, so a re-run concentrates its whole budget on the
-formerly-insufficient criteria. These tests pin the resumption loop that automates that
-re-run at the ONE shared close-gate seam (``close_precheck._completion_precheck`` wrapping
-``llm.verify_completion``), bounded by ``verify.auto_resume_max`` AND by strict progress in
-the cache-credited PASS count.
-
-Everything is asserted through the real seam: ``verify_completion`` is monkeypatched at
-``rebar.llm`` (the module attribute the loop resolves at call time), qualification is the
-framework-owned ``completion_reconcile._insufficiency_only`` predicate REUSED (asserted via a
-counting wrapper — no parallel reimplementation), and the trail is read off the emitted
-sidecar verdict + the refusal message (the close output).
-"""
+"""Completion close auto-resumes only insufficiency-only failures. Cached PASS criteria focus each
+retry, while verify.auto_resume_max and strict credited-PASS progress bound the loop. Tests
+exercise the shared close precheck and inspect sidecar and refusal output."""
 
 from __future__ import annotations
 
@@ -243,12 +229,8 @@ def test_auto_resume_max_zero_disables(monkeypatch):
 
 
 def test_close_gate_insufficiency_only_fail_disposes_as_retryable_exit_11(monkeypatch):
-    """Bug 2dcb — end-to-end at the CLOSE-gate call site (``_completion_precheck``'s generic
-    completion-FAIL raise): an insufficiency-only FAIL that exhausts the resume budget must
-    raise ``CommandError`` with the RETRYABLE ``returncode == 11`` (routed through the shared
-    ``completion_fail_returncode`` helper), NOT the generic hard-block exit 1. Before the fix
-    the close gate flattened this exhausted/truncated verdict into an exit-1 block that only
-    ``--force`` could bypass."""
+    """An insufficiency-only failure after the resume budget returns retryable exit 11 through the
+    shared helper, not hard-block exit 1."""
     _arm(monkeypatch, [_fail_insufficient(credited=1)], max_resumes=0)
 
     with pytest.raises(CommandError) as caught:

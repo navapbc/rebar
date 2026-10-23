@@ -1,28 +1,6 @@
-"""Contract tests for the project's DEFAULT LLM provider being AWS Bedrock (bug d2ce-36f5).
-
-Hermetic: no AWS, no network, no LLM call — these read configuration only.
-
-The decision these pin (ticket d2ce-36f5-fd08-4e40, epic 061c-ecd1): this project's
-authoritative config, `rebar.toml`, names Bedrock for all three model classes, so a clean
-checkout with no LLM environment set resolves to Bedrock rather than direct Anthropic. Before
-this, `rebar.toml` carried no `[llm]` table at all and the built-in class defaults — which are
-unqualified names inferring provider `anthropic` — applied, so every local gate ran on direct
-Anthropic while the production review bot and the CI matrix ran on Bedrock.
-
-Three properties, one per test:
-
-1. CLEAN RESOLUTION — with no `REBAR_LLM_*` variable and no `REBAR_LLM_CONFIG_FILE`, the three
-   classes resolve to `bedrock:` ids. This is the inverse of the measurement that found the gap,
-   and it is what makes the default a default rather than a documented opt-in.
-2. A TWO-SIDED PIN against `.github/llm-providers/bedrock.toml`, which is the authoritative id
-   source shared with the CI provider matrix and the production bot. Exact class-set equality
-   plus byte-equal values, so editing EITHER file alone fails; a one-sided "rebar.toml's id
-   appears in the overlay" check would pass while the two drifted.
-3. THE OPT-OUT — the documented escape hatch (`REBAR_LLM_CONFIG_FILE` at the anthropic overlay)
-   returns resolution to `anthropic:`. Flipping a project default imposes an onboarding cost on
-   a contributor without Bedrock access, so the mitigation must be exercised, not just written
-   down.
-"""
+"""Project defaults resolve LLM model classes and the bare cfg.model through Bedrock. Hermetic
+tests read committed configuration and compare project IDs with the CI Bedrock overlay without
+credentials, network, or model calls."""
 
 from __future__ import annotations
 
@@ -120,19 +98,10 @@ def test_clean_checkout_resolves_every_class_to_bedrock(monkeypatch: pytest.Monk
 def test_clean_checkout_resolves_the_bare_cfg_model_to_bedrock_too(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`cfg.model` is a SECOND resolution path, and it must not leak to Anthropic.
-
-    Ops that resolve `LLMConfig.model` instead of naming a model class bypass the class table
-    entirely and fall back to `DEFAULT_MODEL`, a bare literal that infers provider `anthropic`.
-    That ambient-default leak was MEASURED on a live provider-matrix run and closed for the CI
-    overlays by [rebar:f124-f14a-fd62-4973]; `[llm] model` in `rebar.toml` closes it for local
-    dev, and this asserts it stays closed.
-    """
+    """Bare cfg.model resolution must select Bedrock from project configuration, even when class
+    lookup is bypassed."""
     _clean_llm_env(monkeypatch)
-
-    # `repo_root` is pinned rather than inherited from the cwd: the suite's autouse fixtures
-    # point `REBAR_ROOT` at a sandbox repo, so an unpinned read would never see this project's
-    # `rebar.toml` at all and the test would assert nothing about it.
+    # Pin repo_root to this checkout because autouse fixtures redirect REBAR_ROOT to a sandbox.
     model = LLMConfig.from_env(repo_root=str(_REPO)).model
 
     assert model.split(":", 1)[0] == "bedrock", (
@@ -142,14 +111,8 @@ def test_clean_checkout_resolves_the_bare_cfg_model_to_bedrock_too(
 
 
 def test_project_default_ids_are_byte_equal_to_the_bedrock_overlay() -> None:
-    """`rebar.toml` and `.github/llm-providers/bedrock.toml` name the SAME ids, from one source.
-
-    Two-sided on purpose: the class SETS must match exactly and each value must be byte-equal,
-    so editing either file alone fails. The overlay is the authoritative id source — it is what
-    the CI provider matrix and the production review bot resolve — and only inference-profile
-    ids are invokable, with non-uniform suffixes, so a hand-typed id here would fail only at
-    call time.
-    """
+    """Project and CI overlay model-class sets and IDs must match byte-for-byte. The overlay is the
+    CI source of provider IDs."""
     project = _class_models(_REBAR_TOML)
     overlay = _class_models(_BEDROCK_TOML)
 

@@ -1,41 +1,6 @@
-"""The context-bound remedy must name a lever the operator can actually pull (bug db1c).
-
-`d59e` raised the bounded-recovery context cap from 24,000 to 100,000 characters, which
-removed the *refusal* for every real ticket observed. It did not touch the sentence the
-refusal prints, so the remaining defect is the remedy itself:
-
-    The ticket's context (100,001 chars) exceeds the bounded completion-recovery limit
-    (100,000 chars), so the recovery pass was refused before it ran — shorten the
-    ticket's description/comments.
-
-Both halves of "shorten the ticket's description/comments" are unactionable, for two
-*different* reasons, and each is contradicted by code that is already on `main`:
-
-* **description** — `rebar.llm.plan_review.pass1.material_fingerprint` hashes the
-  description into the plan-review attestation ("a material edit invalidates the
-  signature"). Editing it to satisfy the completion gate therefore breaks the *other*
-  close-gate precondition, `require_plan_review_for_close`, which then demands the
-  attestation be re-earned. The advertised remedy for one close gate is a guaranteed
-  failure of the other, and the message says nothing about that trade.
-* **comments** — comments are excluded from the fingerprint, so editing them would be
-  safe, but the store is append-only: `rebar._lib_writes` exposes `comment()` with no
-  delete or redact counterpart. There is no operation that shortens a comment.
-
-`d59e` shipped a test whose own docstring records this — "the remedy it printed
-('shorten the ticket's description/comments') could not be carried out" (see
-`tests/unit/workflow/test_completion_recovery_oversized_d59e.py`) — while leaving the
-message that prints it unchanged. That contradiction between landed code and landed
-message is what this file closes.
-
-What this pins:
-
-* the message never advises editing the description without naming the attestation cost;
-* the message never offers comment-shortening, which the append-only store cannot do;
-* the message still reports the measured size and the limit, so removing the false
-  remedy does not cost the operator the diagnosis (the guarantee
-  `test_close_gate_bound_message_d59e.py` established, re-asserted here so a rewrite of
-  the sentence cannot silently drop it).
-"""
+"""A context-bound refusal must give an actionable remedy. Description edits invalidate plan-review
+material and require re-attestation. Append-only comments cannot be shortened. The message
+retains measured size and limit and points to usable diagnostics or an operator override."""
 
 from __future__ import annotations
 
@@ -111,13 +76,8 @@ _COMMENT_ADVICE = re.compile(
 
 
 def test_advising_a_description_edit_must_name_the_attestation_cost(monkeypatch) -> None:
-    """THE BUG (half 1): the remedy sends the operator to break the plan-review gate.
-
-    `material_fingerprint` binds the description into the signed attestation, so a
-    description edit invalidates it and `require_plan_review_for_close` then blocks the
-    same close. Advising the edit while silent on that cost is the defect; the message
-    may still mention the description, but only with the consequence attached.
-    """
+    """A suggested description edit must state that it invalidates the signed plan review and
+    requires re-attestation."""
     message = _close_message(monkeypatch, _bound_error())
 
     if _DESCRIPTION_ADVICE.search(message):
@@ -130,12 +90,8 @@ def test_advising_a_description_edit_must_name_the_attestation_cost(monkeypatch)
 
 
 def test_the_remedy_never_offers_comment_shortening(monkeypatch) -> None:
-    """THE BUG (half 2): the store is append-only, so this lever does not exist.
-
-    `rebar._lib_writes` exposes `comment()` with no delete/redact counterpart. Offering
-    it is not merely unhelpful — it is the one instruction an operator cannot carry out
-    at all, which is what made the original bound feel like an inescapable block.
-    """
+    """The append-only tracker has no comment deletion or redaction operation, so a bound remedy
+    cannot advise shortening comments."""
     message = _close_message(monkeypatch, _bound_error())
 
     assert not _COMMENT_ADVICE.search(message), (
@@ -146,13 +102,7 @@ def test_the_remedy_never_offers_comment_shortening(monkeypatch) -> None:
 
 
 def test_the_size_diagnosis_survives_the_new_remedy(monkeypatch) -> None:
-    """NEGATIVE CONTROL — removing a false remedy must not remove the true diagnosis.
-
-    Without this, "stop advising a description edit" could be satisfied by emitting a
-    bare failure. `test_close_gate_bound_message_d59e.py` established that the bound case
-    reports the measured size and the limit; re-asserted here so rewriting the sentence
-    cannot silently regress it.
-    """
+    """Changing remedy text must retain the measured context size and configured limit."""
     message = _close_message(monkeypatch, _bound_error())
 
     limit = _context_ceiling()
@@ -163,13 +113,8 @@ def test_the_size_diagnosis_survives_the_new_remedy(monkeypatch) -> None:
 
 
 def test_the_remedy_points_at_a_lever_the_operator_can_actually_pull(monkeypatch) -> None:
-    """Removing both false levers must leave something actionable behind.
-
-    A message that only says "this is too big" and names no next step trades a wrong
-    remedy for no remedy. The sidecar diagnostic is the surface `docs/llm-framework.md`
-    already directs the operator to, and `--force` is the sanctioned operator
-    judgement call; at least one real next step must be named.
-    """
+    """A bound refusal must direct the operator to the sidecar diagnostic or sanctioned force
+    override instead of reporting size alone."""
     message = _close_message(monkeypatch, _bound_error())
 
     assert re.search(r"gate_error_v1|sidecar|force-close|diagnostic", message, re.IGNORECASE), (
@@ -179,12 +124,7 @@ def test_the_remedy_points_at_a_lever_the_operator_can_actually_pull(monkeypatch
 
 
 def test_a_real_ticket_sized_like_2932_is_no_longer_refused() -> None:
-    """Guards the half of db1c that `d59e` already fixed, so it cannot silently regress.
-
-    db1c was filed because ticket 2932 (41,595 chars) was refused against a 24,000-char
-    cap. That cap is now 100,000. If a future change lowers it back under this size the
-    original defect returns, and the remedy wording above becomes load-bearing again.
-    """
+    """A ticket near 41,595 characters remains below the 100,000-character recovery bound."""
     from rebar.llm.workflow import completion_recovery as _cr  # noqa: F401
 
     ceiling = _context_ceiling()

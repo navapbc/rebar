@@ -1,13 +1,6 @@
-"""Self-tests for the CLI ``--output json`` JS-safe-integer gate (bug e127-a3ad-895a-4a2f).
-
-The gate flags a stdout write built by a RAW ``json.dumps`` on the CLI surface — the construct
-that put rebar's 19-digit nanosecond timestamps on the wire as bare JSON numbers, which float64
-consumers silently round and BigInt consumers cannot re-serialize. These tests pin the
-DISCRIMINATION (the flagged stdout shapes fail; the ``js_safe_dumps`` choke point, a non-stdout
-``json.dumps``, and prose do not), the ``# js-safe-ok: <reason>`` sanction, the reasonless-marker
-diagnostic, the loud handling of an unparseable source, that the real tree is clean, and the
-gate's own wiring into ``make lint``.
-"""
+"""CLI JSON output must quote integers beyond JavaScript's safe range, including nanosecond
+timestamps. This source guard catches raw json.dumps writes that would silently round values in
+float64 clients."""
 
 from __future__ import annotations
 

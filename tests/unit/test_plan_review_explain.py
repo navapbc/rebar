@@ -1,13 +1,5 @@
-"""WS10 (epic cite-stone-sea / glad-gloom-bog): `rebar explain`, the registry-derived criteria
-guide + parity, and coach deep-links.
-
-`explain_criterion` is the ONE shared lookup behind the CLI, the MCP read tool, and the library;
-its error states (unknown-id / malformed-registry) are asserted across the CLI and MCP surfaces.
-Both `explain_criterion` (rendered from the packaged registry) and `explain_guide` (read from the
-packaged `rebar._guides`) are repo-root independent, so an installed rebar serves them from any
-working directory. The guide parity check fails when a criterion's section is removed, and the
-Pass-4 coaching notes carry an additive `guide_url` deep-link anchored to `#<criterion-id>`.
-"""
+"""The CLI, MCP tool, and library share criterion lookup and its error handling. Packaged guides
+and generated criterion sections must link to resources available without a checkout."""
 
 from __future__ import annotations
 
@@ -298,14 +290,8 @@ def test_coach_deeplink_emitted_and_parseable() -> None:
 
 # ── in-command help resolves for a repo-less client (dead-consumer-link guard) ───
 def test_all_in_command_help_links_resolve_for_repoless_client() -> None:
-    """Every markdown link in the prose `rebar explain` serves — the packaged author guides AND
-    the rendered criterion sections — must resolve for a consumer who has the CLI but no rebar
-    checkout. A repo-relative target (`](docs/…)`, `](../…)`, `](foo.md)`) is a dead link there;
-    only an absolute URL, an intra-doc `#anchor`, or `mailto:` is safe. And any `rebar explain
-    <topic>` the prose points at must name a real registered guide/criterion, so the
-    reachable-pointer promise can't rot. Driven by the registries, so new help is covered
-    automatically. (This is the deep-link rot class bug c7e3-dd16-f0a8-43aa fixed for
-    plan-review coaching.)"""
+    """Every served Markdown link must resolve without a checkout. Packaged guides may use absolute
+    web links or packaged-resource links, but repo-relative paths fail for installed CLI users."""
     import re
 
     link = re.compile(r"\]\(([^)]+)\)")

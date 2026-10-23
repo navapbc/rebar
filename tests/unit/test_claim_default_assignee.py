@@ -106,16 +106,8 @@ def test_cli_output_reflects_default(rebar_repo: Path, capsys: pytest.CaptureFix
 def test_default_assignee_resolves_when_the_tracker_lives_outside_the_repo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A RELOCATED store must still resolve `ticket.default_assignee` from the repo.
-
-    `REBAR_TRACKER_DIR` is a supported feature ("the decoupled/relocated store",
-    `_config_sources.tracker_dir_override`), and the deployed MCP server uses it — its store
-    is `/var/gerrit/site/mcp-tickets` while the repo is `/app`. `_config_default_assignee`
-    resolved config from `os.path.dirname(tracker)`, which is the repo root ONLY when the
-    tracker sits inside the checkout. Relocated, that lands in a directory with no
-    `rebar.toml`, the lookup returns "", and the claim silently records NO assignee — the
-    `except Exception: return ""` guard means nothing is logged.
-    """
+    """A relocated tracker still reads ticket.default_assignee from the repository configuration,
+    not the tracker's parent directory."""
     monkeypatch.delenv("REBAR_DEFAULT_ASSIGNEE", raising=False)
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -149,17 +141,8 @@ def test_default_assignee_resolves_when_the_tracker_lives_outside_the_repo(
 def test_plan_review_gate_still_applies_when_the_tracker_lives_outside_the_repo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A relocated store must not silently DISABLE the plan-review start-work gate.
-
-    The same `os.path.dirname(tracker)` root inference fed `plan_review_precheck` /
-    `_plan_review_gate_applies`, which read `verify.require_plan_review_for_claim` from it.
-    With the store relocated, that resolved an empty config — and for a gate flag, an empty
-    config reads as OFF. So the gate stopped applying on exactly the deployment that routes
-    every certified op: claims sailed through with no attestation and nothing said so.
-
-    This is the more consequential half of the root-inference bug: the assignee case loses an
-    owner, this one loses an enforcement boundary.
-    """
+    """Moving the tracker must not disable the repository's plan-review claim gate. Its
+    configuration comes from the repo root."""
     monkeypatch.delenv("REBAR_DEFAULT_ASSIGNEE", raising=False)
     repo = tmp_path / "repo"
     repo.mkdir()

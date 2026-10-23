@@ -1,25 +1,5 @@
-"""RP-05 S3 — the registry-driven core CLI execution oracle.
-
-After S2 the registry named every route and carried lazy parser factories, but
-runtime *execution* still traversed hand-written ``if sub == ...`` ladders in
-``rebar._cli`` with per-arm init policy and per-arm handler call shapes. S3 cuts
-the core + bridge execution over so the selected registry route is the single
-selection authority: each route carries a lazy handler reference, a bounded
-``adapter`` kind (the exact call shape), and an ``init`` policy. The top-level router
-resolves ONLY the
-selected handler and invokes it through the closed adapter set; it never parses
-the command remainder a second time.
-
-These tests assert OBSERVABLE behavior only: the call shape a handler receives
-(via typed fakes), the init policy applied (via a spy), the streams/exit codes of
-``main()``, exception propagation, and — through a parser spy — that the selected
-S2 factory parses exactly once while unrelated factories are never imported.
-
-The happy-path block at the top is the only part handed to the implementer; the
-adversarial adapter/init census, the parser spy, import isolation, exception
-propagation, the ``--`` and malformed-flag controls, and the bridge vocabulary
-are the held-out oracle validated by the orchestrator.
-"""
+"""The CLI executes routes through the registry instead of per-command dispatch ladders. Tests pin
+lazy handler resolution, initialization policy, route arguments, and command results."""
 
 from __future__ import annotations
 

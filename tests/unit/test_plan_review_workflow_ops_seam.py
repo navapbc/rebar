@@ -1,39 +1,7 @@
-"""Seam guards for the plan-review workflow ops (ticket d8ef).
-
-Two guards that did not exist at ANY layer before this file.
-
-WHY THE REGISTRY CHECKS RUN IN A SUBPROCESS — do not "simplify" this away.
-`@register_step` populates `STEP_REGISTRY` (a process-global dict, `workflow/executor.py:166`) as an
-IMPORT SIDE EFFECT, so ANY module that imports a registering module populates it for the whole
-session. The masking path is a SIBLING TEST:
-`tests/unit/test_plan_review_prerequisites_heldout.py:11`
-imports `prerequisite_workflow_ops` DIRECTLY, which registers
-`plan_review_prerequisite_verify_inputs` regardless of whether the production side-effect import
-at `plan_review/workflow_ops.py:45` still exists.
-
-MEASURED, with that `:45` import deleted:
-  * an in-process assertion run ALONE      -> FAILS (it does detect the missing op);
-  * the same assertion run AFTER
-    test_plan_review_prerequisites_heldout -> PASSES, 12 passed — fully MASKED;
-  * this subprocess form, same conditions  -> FAILS, correctly naming the missing op.
-
-So the hazard is not module caching in the abstract — a source deletion is seen by every import in
-a fresh process — it is that a test module's own convenience import silently substitutes for the
-production one. That makes the in-process form's blindness DEPENDENT ON TEST ORDERING, which is
-worse than a consistent failure: it would pass in CI and fail in isolation, or vice versa. A guard
-that can be masked by an unrelated test's import cannot detect the defect it exists for, which is
-worse than no guard because it reads as coverage.
-
-WHAT IS OTHERWISE UNGUARDED. A missed registration import is invisible to every existing layer:
-the v3 schema treats `uses` as a free-form string (`workflow/schema.py:331`); `lint_workflow`
-treats an unknown step as UNKNOWN and SKIPS it by design (`workflow/lint_refs.py:441-447`); and
-`tests/unit/workflow/test_contracts.py:186` looks like a completeness guard but iterates
-`STEP_REGISTRY` itself, so an op that vanished from the registry is invisible to it. Only a
-runtime `WorkflowError` catches it, and only for ops on an executed path.
-`plan_review/workflow_ops.py:45` imports `prerequisite_workflow_ops` purely for its side effect,
-so a routine "remove unused import" cleanup would silently unregister an op that the shipped
-`gates/plan-review.yaml` references at `:136`.
-"""
+"""Guard shipped plan-review workflow op registration in a fresh subprocess. Registering modules
+populate a process-global registry on import, so another test can mask a missing production
+side-effect import. Schema lint permits unknown ops and registry-based completeness checks
+cannot see vanished entries. The subprocess catches the missing prerequisite op."""
 
 from __future__ import annotations
 

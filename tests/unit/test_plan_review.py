@@ -1,11 +1,5 @@
-"""Unit tests for the plan-review gate's deterministic core (epic 5fd2).
-
-These exercise the pure, I/O-free seams — the DET floor (P1-P9) on synthetic
-contexts, the Pass-3 deterministic math, the criteria registry + routing, the
-Pass-4 subject validator, and the attestation/sidecar helpers — with no git store,
-no LLM, no network. The store/CLI/MCP integration is pinned in
-tests/interfaces/test_plan_review_gate.py.
-"""
+"""Deterministic plan-review core tests cover floors, scoring, registry routing, subject
+validation, and attestation sidecars without model or network calls."""
 
 from __future__ import annotations
 
@@ -56,16 +50,8 @@ _GOOD_AC = "## Acceptance Criteria\n- [ ] a thing is observably true\n- [ ] anot
 
 # ── verifier model downgrade (WS2 — gawky-koi-grain) ─────────────────────────
 def test_verifier_cfg_downgrades_to_sonnet_by_default() -> None:
-    """With nothing configured, the Pass-2 verify/coach cfg resolves to the non-frontier verifier
-    model (Sonnet).
-
-    UPDATED by ticket 172e: the assertion was `== VERIFIER_DEFAULT_MODEL`, i.e. the BARE
-    "claude-sonnet-4-6". The verifier now resolves the `standard` model CLASS, and `resolve_class`
-    always returns a PROVIDER-QUALIFIED id, so the value is "anthropic:claude-sonnet-4-6". Same
-    model, and `infer_provider` maps the bare id to the same provider — but the string is
-    observable in usage logs and in the signed verdict's provider_provenance, so this is a real
-    (small) behaviour change rather than a test that drifted. Qualifying is the deliberate
-    direction: an unqualified id in an attestation is ambiguous about which provider served it."""
+    """The default verifier resolves the standard non-frontier model class rather than a bare model
+    ID."""
     cfg = LLMConfig(model=DEFAULT_MODEL)
     resolved = _verifier_cfg(cfg).model
     assert (
@@ -75,17 +61,8 @@ def test_verifier_cfg_downgrades_to_sonnet_by_default() -> None:
 
 
 def test_verifier_cfg_ignores_cfg_model_and_always_resolves_the_standard_class() -> None:
-    """REPLACES `test_verifier_cfg_honors_explicit_operator_override` (ticket 172e).
-
-    That test pinned the rule this ticket DELIBERATELY REMOVES: "an operator who explicitly chose a
-    non-default model keeps it", implemented as `cfg.model != DEFAULT_MODEL`. MEASURED, that rule
-    read ANY non-default string as an explicit choice — so merely provider-qualifying the same model
-    (`anthropic:claude-opus-4-8`) or naming any Bedrock id silently kept Pass-2/Pass-4 on the
-    frontier model, losing the cost downgrade AND greedy decoding. The operator now steers the
-    verifier by configuring the `standard` class, which is unambiguous, rather than by
-    side-effecting `cfg.model`, which was not.
-
-    This is a contract change, recorded as one — not a test relaxed to match new code."""
+    """Verifier selection uses the standard class even when cfg.model differs. The old
+    operator-override path is retired."""
     cfg = LLMConfig(model="claude-opus-4-8-custom")
     assert _verifier_cfg(cfg).model.endswith(VERIFIER_DEFAULT_MODEL)
     # Other config fields are still preserved (only model is tuned).
@@ -1153,18 +1130,12 @@ def test_p9_container_closed_children_do_not_poison() -> None:
     assert r.status == "pass" and r.coverage["poisoning_children"] == 0
 
 
-# NOTE: the bespoke `orchestrator.run_review` path was retired (story B-RETIRE). Its
-# INDETERMINATE-on-outage / per-criterion fail-open / bug-exempt / budget-shed behaviours are
-# now produced + asserted on the workflow gate path:
+# The retired orchestrator path has workflow-gate coverage for outages and exemptions:
 #   - tests/unit/test_gate_engine_cutover.py (outage degradation, coach-failure recovery);
 #   - tests/interfaces/lifecycle/test_plan_review_gate.py (deps/key outage, fail-open,
 #     bug-exempt, cap-hit INDETERMINATE — all via review_plan on the workflow engine);
 #   - tests/unit/workflow/test_plan_review_workflow.py (exempt short-circuit, decide partition).
-# The per-pass LATENCY/COST metrics (db7b AC5: coverage["metrics"] det_ms/llm_ms/total_ms/
-# llm_calls) were bespoke-ONLY (computed inside run_review) and were RETIRED with it — the
-# workflow path does not yet emit them, so `coverage["metrics"]` is absent there. Reinstating
-# passive latency/cost telemetry on the workflow gate is a documented follow-up (tracked
-# separately), NOT covered above.
+# Per-pass latency and cost metrics retired with it. These tests retain fingerprint and sidecars.
 
 
 def test_material_fingerprint_changes_on_material_edit() -> None:
@@ -1312,16 +1283,9 @@ def test_checkpoint_save_resume_and_material_invalidation(tmp_path) -> None:
 def test_concurrent_save_checkpoint_same_digest_loses_no_writer(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two concurrent ``save_checkpoint`` writers for the SAME (ticket, digest) must BOTH
-    persist, per the function's ATOMIC tmp+rename docstring invariant (last-write-wins).
-
-    A shared ``.tmp-<digest>.json`` pathname (keyed by ticket+digest only, not per-writer)
-    makes that false: forced to interleave, both writers write the one shared temp, then the
-    second ``tmp.replace(path)`` finds a temp the first already consumed → ``FileNotFoundError``
-    → the outer ``except Exception: return False`` swallows it and that writer silently returns
-    ``False`` (its checkpoint lost). The barrier fires at the real ``pathlib.Path.replace`` seam,
-    after both writers have already run ``tmp.write_text`` — a deterministic collision. Sibling
-    of bug 7dea (completion_verdict_cache)."""
+    """Concurrent checkpoint writers for one ticket and digest both persist via unique temporary
+    files and atomic replacement. Synchronizing their writes exposes a shared-temp-name
+    collision."""
     import threading
 
     from rebar.llm.review_kernel import (
@@ -1473,11 +1437,8 @@ def test_largest_window_uses_configured_model_window() -> None:
     )
 
 
-# ── bug 48b3: the ladder cannot LOCATE a non-Anthropic-family primary ─────────────────
-# The start rung is found by substring-matching MODEL_LADDER's bare Anthropic family names
-# against the primary. A primary from another family matches nothing and used to fall through
-# to "the whole ladder" / "the ladder maximum" — so escalation DOWNGRADED the window and jumped
-# provider family, and P8's size budget was overstated.
+# An unrecognized primary cannot enter the Anthropic model ladder. Its start rung remains the
+# operator's model.
 
 _UNLOCATED_PRIMARY = "bedrock:us.amazon.nova-pro-v1:0"
 
@@ -1499,16 +1460,15 @@ class _ModelRecordingRunner:
 
 
 def test_unlocated_primary_start_rung_is_the_primary_itself() -> None:
-    # The only proposed rung is the operator's own model: there is no rung to climb onto, and
-    # crucially no SMALLER-window, different-provider rung proposed as an "escalation".
+    # An unrecognized primary offers only the operator's model, never a smaller cross-provider
+    # rung.
     rungs = sizing.models_at_or_above(_UNLOCATED_PRIMARY)
     assert rungs == [_UNLOCATED_PRIMARY]
     assert not any("claude-" in name for name in rungs)
 
 
 def test_unlocated_primary_window_is_the_ladder_minimum() -> None:
-    # Assert the identity of the window (the ladder MINIMUM), not just "not the maximum":
-    # MODEL_LADDER's sonnet and opus rungs share 1_000_000, so a bare inequality is weak.
+    # Check the ladder minimum explicitly. Several rungs share the maximum window.
     assert sizing.largest_window_tokens(_UNLOCATED_PRIMARY) == min(
         w for _, w in sizing.MODEL_LADDER
     )
@@ -1516,9 +1476,8 @@ def test_unlocated_primary_window_is_the_ladder_minimum() -> None:
 
 
 def test_size_ladder_unlocated_primary_never_leaves_the_operator_model() -> None:
-    # Context-limited at every attempt on an unlocatable primary: the run still produces the
-    # existing _too_big failure finding, and every attempt stayed on the operator's model —
-    # the batch call plus exactly one single-criterion retry.
+    # All context-limited attempts stay on the operator's model before the size finding,
+    # including the single-criterion retry.
     runner = _ModelRecordingRunner()
     cfg = replace(_fake_cfg(), model=_UNLOCATED_PRIMARY)
     events: list = []

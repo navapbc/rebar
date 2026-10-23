@@ -1,30 +1,6 @@
-"""One owner for the "this change predates the gate" invariant.
-
-A patchset whose base predates a gate script must not fail ``Verified`` on that gate, so
-every CI step that runs a repo-local gate file guards it with
-``[ -f <path> ] … "change predates the gate" … skip``. That guard is written 24 times across
-``.github/`` and it CANNOT be factored into a shared repo file: any such owner — a composite
-action, a shell helper, a Python module — is itself absent on exactly the pre-gate trees the
-guard serves, so the guard would skip gates whose scripts DO exist (or the job would fail
-resolving a missing local ``uses:``). ``gerrit-verify.yaml`` already carries that exposure for
-``uses: ./.github/actions/docs-gates`` itself.
-
-What CAN be shared is the invariant. Two copies of this guard drifted apart before —
-``anxious-resistant-urson`` (a gate step with no guard) and ``sapphire-vulnerable-fruitfly``
-(a guard added late) — so this module is the single place that pins it:
-
-* **completeness** — every step that runs a repo-local gate file either guards that exact file
-  or carries a ``# predates-gate-ok: <reason>`` marker with a non-empty reason;
-* **behaviour** — every guarded step body, run in an EMPTY directory, exits 0 and says why.
-
-The behaviour half generalises
-``test_ci_workflow_parity.py::test_mutation_selector_skips_pre_gate_trees_without_weakening_current_trees``
-from the one mutation selector to every guarded step. These tests assert the GUARD, never a
-step's shape, so the four sites that carry extra behaviour on the skip path (the mutation
-selector's ``$GITHUB_OUTPUT`` writes, ``_optionality.yml``'s two independently guarded
-generators per bug ``5bc6-5496-4e17-403a``, the inverted ``[ -f ]/else`` forms, and the
-``git-version-floor.txt`` data-file guard) keep their current bodies.
-"""
+"""A gate introduced after a patchset must not fail that patchset. This suite checks that CI runs
+repo-local gate files only when they exist in the patchset tree and that every corresponding
+workflow step uses the same guard."""
 
 from __future__ import annotations
 

@@ -1,16 +1,5 @@
-"""The plan-review type exemption partitions TicketType, from ONE declaration (mirror F3).
-
-Ticket e755-9371-7951-454a (contiguous-industrial-dugong).
-
-Which ticket types the plan-review gate reviews had SIX masters — the start-work gate, the
-create-time file-impact nudge, the drift-refresh candidate path and the close gate each
-carried their own tuple — and nothing asserted they partition ``TicketType``. Three of the
-six claimed to be single-sourced; one of those claims cited a code path that had moved.
-
-The counts happened to work out (4 exempt + 3 reviewed = 7 members), so the defect was
-latent rather than live: an EIGHTH type would land in neither set and be neither gated nor
-exempted, silently deciding whether the claim gate runs at all.
-"""
+"""One TicketType partition defines plan-review exemptions. These tests prevent claim, create,
+drift, and review consumers from maintaining competing type lists."""
 
 from __future__ import annotations
 
@@ -76,17 +65,8 @@ def test_behavior_is_unchanged_for_every_current_type() -> None:
 
 @pytest.mark.parametrize("module_path", CONSUMER_MODULES)
 def test_no_consumer_re_lists_the_ticket_type_literals(module_path: str) -> None:
-    """AC2. A consumer that re-lists the members is a seventh master in waiting.
-
-    Looks for any tuple/set/frozenset literal of string constants that is a PROPER subset
-    of TicketType covering more than one member — the shape of an exemption or complement
-    copy — rather than grepping for the exact old spelling, so reordering cannot evade it.
-
-    A literal listing ALL members is deliberately not flagged here. That is a different
-    mirror (composer's `_TYPES` vs `TicketType`), it is a distinct concept — every valid
-    type to create, not the gate's exemption — and it has its own ticket in this epic,
-    `boiling-gold-pterosaurs` (F7). Folding it in would put this change beyond its plan.
-    """
+    """Reject multi-member literal subsets of TicketType in consumers. They duplicate the shared
+    exemption partition even when their order or exact members differ."""
     members = set(get_args(TicketType))
     tree = ast.parse((REPO_ROOT / module_path).read_text(encoding="utf-8"))
     offenders = []

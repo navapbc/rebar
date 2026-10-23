@@ -1,22 +1,6 @@
-"""PASS-path reuse must REPLAY the last review's stored result (task 167e-e75e-b4e5-468e).
-
-``idempotent_reuse`` (feature b3e5) reused a still-valid attestation but synthesized an
-EMPTY verdict — silently dropping the advisory findings and coaching the last real review
-surfaced. The BLOCK path (``verdict_reuse``, bug 7e77) already replays the stored sidecar;
-these tests close the PASS-path gap:
-
-* stored advisory/coaching/indeterminate + ``coverage.counts`` are replayed when the
-  sidecar's ``material_fingerprint`` matches the current one;
-* fail-open is preserved — an absent/unreadable/mismatched sidecar (or a stored verdict
-  that CONTRADICTS the valid PASS attestation) degrades to the empty-list shape and
-  never blocks the reuse;
-* both reuse paths stamp a recency anchor (``coverage.replayed_review``) and the CLI
-  notation names the output as the LAST review's result replayed against the unchanged
-  plan — not a fresh review — rendering the anchor when present, omitting it gracefully.
-
-Kept apart from ``test_plan_review_reuse.py`` (whose fixtures are tuned to the 7e77 BLOCK
-end-to-end loop), following the ``test_plan_review_reuse_type.py`` precedent.
-"""
+"""PASS reuse replays stored advisory findings, coaching, counts, and recency instead of
+synthesizing an empty verdict. Unreadable sidecars fail open, while BLOCK reuse remains
+separate. Tests pin the replayed result and zero new model calls."""
 
 from __future__ import annotations
 
@@ -115,9 +99,7 @@ def _pass_reuse_ready(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(reuse.sidecar, "latest_review_timestamp", lambda *_a, **_k: _TS_NS)
 
 
-# ---------------------------------------------------------------------------
-# AC1: PASS reuse replays the stored result
-# ---------------------------------------------------------------------------
+# Replay stored PASS evidence.
 
 
 @pytest.mark.unit
@@ -187,9 +169,7 @@ def test_reused_pass_and_block_verdicts_carry_sidecar_review_receipts(
     ] == [("PASS", False, _TS_NS), ("BLOCK", False, _TS_NS)]
 
 
-# ---------------------------------------------------------------------------
-# fail-open: a sidecar problem must never block a valid PASS reuse
-# ---------------------------------------------------------------------------
+# Sidecar errors preserve PASS reuse.
 
 
 @pytest.mark.unit
@@ -238,9 +218,7 @@ def test_pass_reuse_never_replays_a_contradictory_stored_block(
     assert out["advisory"] == [] and out["coaching"] == [] and out["indeterminate"] == []
 
 
-# ---------------------------------------------------------------------------
-# the BLOCK path stamps the same recency anchor
-# ---------------------------------------------------------------------------
+# Replay records the latest review time.
 
 
 @pytest.mark.unit
@@ -266,9 +244,7 @@ def test_verdict_reuse_stamps_replay_recency_anchor(monkeypatch: pytest.MonkeyPa
     assert anchor["reviewed_at"] == _TS_NS
 
 
-# ---------------------------------------------------------------------------
-# CLI notation: name the replay, render the anchor, keep the --force pointer
-# ---------------------------------------------------------------------------
+# CLI output names the replay, recency anchor, and --force pointer.
 
 
 def _render(result: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> str:

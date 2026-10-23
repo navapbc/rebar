@@ -1,26 +1,7 @@
-"""Signing must survive UNRELATED concurrent tracker writes.
-
-Bug (client report §2): PlanReviewGeneration equality compared the whole store —
-ticket_store_revision (the store-wide tracker HEAD) and relation_snapshot.ticket_states_by_id
-(every ticket's state). initial_generation is captured at review START; the sign-time `fresh`
-is collected minutes later. Any commit to ANY ticket in that window (an unrelated agent's
-comment/claim/transition) made fresh != initial_generation, raising PlanReviewGenerationChanged
-and discarding the completed (billed) review — even with before == after within the attempt.
-
-Bug a83f: the d70a fix scoped generation IDENTITY to the subject's material but left
-sign_manifest's within-attempt fence store-wide (`before != after` HEAD samples around
-collect(), and under_lock_check's `locked_head != expected_after`), so signing still demanded
-a globally quiescent tracker it never gets under normal churn — and the regression tests here
-hid it by freezing ``tracker_head_sha`` to a constant. These tests therefore run against a
-REAL temp git tracker and really commit unrelated events inside the window; nothing patches
-``tracker_head_sha``.
-
-Generation identity must be scoped to what the manifest actually binds: the subject's own
-material + its DIRECT related material (child/prerequisite pins) + phase/floor.
-
-Generations are built via ``from_snapshot`` so the tests are agnostic to the dataclass's exact
-field set (they exercise the equality contract, not its representation).
-"""
+"""Plan-review signing ignores unrelated tracker writes. Generation identity covers the subject,
+direct related material, and phase or floor. A temporary Git tracker proves unrelated commits
+cannot invalidate the signed review. Construct generations from snapshots to test equality
+rather than dataclass layout."""
 
 from __future__ import annotations
 
