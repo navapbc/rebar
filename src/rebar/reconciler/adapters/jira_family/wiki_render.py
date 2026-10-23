@@ -1,47 +1,13 @@
-"""Segmenting Markdown-to-wiki renderer for Jira Data Center (story 271c, epic 708d).
+"""Segment Markdown into safe units for Jira Data Center wiki rendering.
 
-Data Center stores rich text as WIKI markup (REST v2) while rebar authors Markdown
-and currently sends it literally, so ``# Heading`` reads as a hash in Jira.
+Whole-body pandoc conversion can rewrite arrows, tables, and inline code, and
+delete the reconciler's HTML echo marker. This renderer locks protected spans,
+splits remaining text into blocks, classifies each unit, then verifies code
+fragments survive byte-for-byte. Unsafe units pass through unchanged.
 
-Converting a whole body in one pandoc call is not an option. Measured on the pinned
-pandoc 3.9 (and originally on 3.6.1), its jira writer escapes a prose ``->`` to
-``\\->``, rewrites a Markdown table delimiter row to ``| \\-\\-\\- |``, escapes
-punctuation inside inline code (`` `->` `` becomes ``{{\\->}}``), and DELETES HTML
-comments outright — a lone ``<!-- rebar:reconciler-echo -->`` renders to the empty
-string, which would drop rebar's own reconciler echo marker.
-
-So this module SEGMENTS: it converts only structurally-safe units and passes
-everything else through byte-for-byte. A unit that cannot convert losslessly is
-never converted, which is what makes the renderer non-corrupting rather than merely
-lossy.
-
-Pipeline:
-
-1. **Lock** complete ``{noformat}`` spans, HTML comments, backtick/tilde fences and
-   four-space-indented blocks — including their internal blank lines — so nothing
-   downstream can split or rewrite them.
-2. **Split** the intervening text into blank-line-separated blocks, preserving
-   separators and order. A list is ONE unit — pandoc needs the whole list to emit a
-   correct wiki list, so it is never split per item.
-3. **Classify** each unit through six ordered rules (see :func:`_classify`) and
-   either pass it exactly, wrap it once in ``{noformat}``, or render it via pandoc.
-4. **Verify** the conversion: every code fragment of the source must reappear
-   byte-identically, in order, or that unit falls back to its original Markdown.
-
-pandoc ships bundled inside the pinned ``pypandoc-binary`` wheel (the ``wiki``
-extra), so the DC path is self-contained with no host install. When pypandoc is
-absent the renderer returns its input unchanged — plain Markdown is trivially
-echo-safe, so the degraded mode loses richness, never content.
-
-**This module is pure and unwired.** ``WikiTextCodec`` stays fully identity and no
-live send path calls it; story 3388 performs that cutover together with the
-echo-safety layer, and story 5c0e adds the subprocess timeout and process-group
-reaping. Nothing observable changes on merge.
-
-Per ``docs/adr/0083-reconciler-vendor-adapter-seam.md`` this package imports nothing
-from ``adapters/jira/``; pandoc is not a Cloud dependency, so the renderer belongs
-here in the shared Jira-family layer. ``docs/adr/0095-dc-segmenting-wiki-renderer.md``
-records the engine decision, the pin provenance and the deferred boundaries.
+The optional ``pypandoc-binary`` wiki extra supplies pandoc; without it, input
+passes through. ``WikiTextCodec`` is identity by default and calls this renderer
+when the Data Center rich-text cutover is enabled. See ADR 0095 for the engine.
 """
 
 from __future__ import annotations

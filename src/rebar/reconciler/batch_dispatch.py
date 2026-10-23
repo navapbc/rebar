@@ -1,19 +1,9 @@
 #!/usr/bin/env python3
-"""Outbound batch-dispatch facade: delete_one + mutation->batch-dict + re-exports.
+"""Expose outbound batch dispatch and legacy mutation conversion.
 
-The bulk of per-mutation dispatch — ``create_one`` / ``update_one`` plus the
-link-probe helpers and the ``_is_illegal_transition_400`` predicate — was extracted
-to the sibling
-``dispatch_one.py`` (module-size split, ticket b043-9490) and is re-exported here
-so this module stays the stable public surface (``rebar.reconciler.batch_dispatch.*``)
-that ``applier`` / ``apply_handlers`` / ``apply_outbound`` / ``apply_inbound`` and
-the reconciler tests import from.
-
-This module still OWNS ``delete_one`` (close = delete the Jira issue, 404
-tolerated) and ``_mutation_to_batch_dict`` (normalise a typed Mutation into the
-legacy batch-dict shape). Imports only downward (``_errors``, ``dispatch_one``);
-never imports ``applier``, so the orchestrator can import these back without a
-cycle.
+Create/update primitives live in ``dispatch_one`` and are re-exported here.
+This module owns delete (including 404 tolerance), typed-to-dict conversion,
+and coordinator routing without importing ``applier``.
 """
 
 from __future__ import annotations
@@ -300,13 +290,10 @@ def coordinate_and_fuse(
     now_ms=None,
     cooldown_ms=None,
 ) -> CutoverReport:
-    """Run the S3 coordinator then fold its terminal outcomes through the pass fuse.
+    """Run the coordinator and fold ordered outcomes through the pass fuse.
 
-    Walks ``report.outcomes`` in the coordinator's dependency/topological order,
-    reclassifying remaining matching work under an already-open scope to ``deferred``
-    (attaching the raising ``FuseDecision``) while independent scopes continue. Returns
-    a :class:`CutoverReport` with the recomputed five-bucket tally, the distinct fuse
-    decisions in first-seen order, and a ``degraded`` flag set when any ticket failed.
+    Defer work under opened scopes while independent scopes continue. Return
+    recomputed buckets, distinct fuse decisions, and degradation state.
     """
     coordinator = importlib.import_module("rebar.reconciler.coordinator")
     fuse_mod = importlib.import_module("rebar.reconciler.pass_fuse")
@@ -634,16 +621,10 @@ def _transient_http_signal(exc, action):
 
 
 def make_coordinator_dispatch(*, ctx, outcomes_sink, dispatch=None, transient_cell=None):
-    """Build the per-attempt ``dispatch_fn(plan, mutation)`` for the coordinator.
+    """Build one-attempt dispatch from typed mutations to coordinator signals.
 
-    Convert the typed mutation to a legacy batch dict, delegate ONE physical attempt to
-    ``dispatch`` (defaulting to the lazily-loaded ``apply_handlers.dispatch_mutation``),
-    append the returned outcome dict to ``outcomes_sink``, and project the terminal
-    ``HandlerResult`` onto an ``AtomicSignal`` — ``permanent``/ticket scope when the
-    outcome carries a truthy ``error``, ``applied`` otherwise. An HTTP 429/5xx becomes a
-    ``transient`` signal (no outcome appended) so the coordinator's retry budget retries
-    it; the error is kept in ``transient_cell[0]`` for ``retry_budget.TransientRetryBudget``.
-    Any other ``HTTPError`` re-raises fail-fast, as before.
+    Append terminal outcomes; map errors to permanent signals. HTTP 429/5xx
+    stays transient for retry, while other HTTP errors propagate.
     """
 
     def dispatch_fn(_plan, mutation):
@@ -747,19 +728,11 @@ def reroute_migrated_plans(
     head_pin_cell,
     outcomes_sink,
 ):
-    """Reroute fully-migrated non-create ticket plans through the cutover surface.
+    """Route fully migrated non-create plans through the coordinator.
 
-    A plan is MIGRATED iff it has mutations and EVERY mutation's action routes to the
-    coordinator (``route_for(...) == COORDINATOR_ROUTE`` — a non-create family). A plan
-    mixing a create with a non-create action is therefore NOT migrated and stays in the
-    remainder, which the applier records as an unrouted failure without dispatching it.
-    When no plan is migrated this is a pure passthrough returning ``(None, mutations)``.
-    Otherwise the migrated plans are executed via
-    :func:`run_migrated_reroute` (appending their outcome dicts to ``outcomes_sink`` and
-    threading ``head_pin_cell``), the migrated mutations' dicts are filtered out of
-    ``mutations`` by ``(action, key)`` (deferred plans dispatch nothing but ARE counted
-    in the returned ``cutover_tally``), and ``(cutover_tally, remaining_mutations)`` is
-    returned.
+    Mixed create/non-create plans remain unrouted. With no migrated plan,
+    return ``(None, mutations)``. Otherwise return the cutover tally and
+    unconsumed mutations; deferred work is counted without dispatch.
     """
     migrated_plans = [
         plan

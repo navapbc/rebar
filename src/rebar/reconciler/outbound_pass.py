@@ -1,29 +1,9 @@
 #!/usr/bin/env python3
-"""outbound_pass.py — the outbound-differ sub-pass of the diff phase, extracted
-from run_differs.py (ticket 7153-e5ad-5e20-4ae9, module-size headroom for the
-typed-payload cutover).
+"""Outbound differ sub-pass: recover bindings, plan changes, and type mutations.
 
-``_run_differs_outbound(ctx, mutations, backend)`` is the self-contained outbound
-sub-pass that ``run_differs.run_differs`` calls to recover pending bindings, compute
-label intent, run the outbound differ, and convert each ``OutboundMutation`` into a
-typed ``Mutation`` appended onto the shared mutation list. Its two fail-open alert
-emitters (``_emit_outbound_field_alerts`` / ``_emit_recovery_failure_alerts``)
-deliberately stayed in ``run_differs.py`` rather than moving alongside it: several
-tests call them directly against a by-file-path-loaded copy of ``run_differs.py`` and
-patch THAT module's own ``_load`` helper to stub the alert store, a patch that can
-only take effect on a function whose ``__globals__`` is that same module's dict.
-``_run_differs_outbound`` below calls them back via a local import (mirroring the
-``refresh_scoped_snapshot`` local-import convention in ``run_differs.py``) so the
-call always resolves against the real package's ``run_differs`` module.
-
-This is a pure relocation: no behavior, call order, or payload shape changed. See
-``run_differs.py`` for the phases that run before/after this one within a pass
-(invariants, the legacy snapshot diff, the inbound differ, the binding walk).
-
-Loader convention: this module imports its own siblings (``mutation.py``) through the
-local ``_load`` helper, a patchable ``importlib.import_module`` seam. Its only back-edge
-to ``run_differs.py`` is the local import inside ``_run_differs_outbound`` described
-above; ``ctx`` is typed loosely to avoid importing ``_PassContext``.
+``run_differs`` retains the alert emitters because by-path-loaded tests patch
+that module's loader; local imports here preserve the patch seam. Sibling
+loading remains patchable, and ``ctx`` avoids a reverse import of pass context.
 """
 
 from __future__ import annotations
@@ -44,26 +24,17 @@ from rebar.reconciler.mutation_payloads import (
 
 
 def _load(_name: str, relpath: str):
-    """Load a sibling module by relative file path, registering it in sys.modules.
-
-    Imports the in-package module ``relpath`` names (``_name`` is kept for call-site
-    stability); a patchable seam over ``importlib.import_module``.
-    """
+    """Import a sibling through the patchable package loader seam."""
     return importlib.import_module(
         "rebar.reconciler." + relpath.removesuffix(".py").replace("/", ".")
     )
 
 
 def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any]:
-    """Outbound differ phase: recover bindings, compute label intent + the outbound
-    differ, and convert each OutboundMutation -> typed Mutation onto ``mutations``.
+    """Append typed outbound mutations and return raw plans, alive fields, and client.
 
-    ``backend`` is the configured :class:`Backend` (ticket 4af8); its ``.transport`` is
-    the live-comment/recovery client and its ``.outbound`` mapper is injected into
-    ``compute_outbound_mutations``.
-
-    Returns ``(outbound_raw, absent_alive_fields, outbound_diff_client)`` for the
-    inbound differ + binding-walk phases that follow.
+    The configured backend supplies transport, outbound mapping, and link
+    handling for subsequent inbound and binding-walk phases.
     """
     # Recovery is a whole-store side effect, so any scoped pass suppresses it.
     # This is separate from the legacy post-differ write filter in reconcile.py.
@@ -80,33 +51,12 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
     sync_logger = ctx.sync_logger
     mut_mod = _load("reconcile_mutation", "mutation.py")
 
-    # -------------------------------------------------------------------
-    # Outbound differ: local → Jira mutations via binding store.
-    #
-    # Recover any pending bindings from prior failed passes, then compute
-    # outbound mutations from local tickets vs. Jira snapshot. Each
-    # OutboundMutation is converted to a typed Mutation so it flows through
-    # the unified applier.apply() dispatch (cap enforcement, direction-aware
-    # routing).
-    # -------------------------------------------------------------------
-    # Build the AcliClient BEFORE recovery (story 9622) so recover_pending_bindings
-    # gets a real client exposing search_issues/add_label/set_entity_property — it
-    # was previously (mis)passed the `applier` MODULE (no search_issues), so every
-    # recovery AttributeError'd into the fail-open swallow below and NEVER ran. The
-    # same client is reused by the outbound differ's live-comment fetch further down.
-    # S4: obtain the outbound-diff transport from the configured backend (routes
-    # through the Backend port instead of constructing an AcliClient inline). The
-    # backend is resolved once by the orchestrator and threaded in (ticket 4af8).
+    # Recovery needs the configured backend transport before the differ uses
+    # that same client for live comments; typed mutations then share applier dispatch.
     outbound_diff_client = backend.transport
 
-    # Filtered passes skip pending-binding recovery to avoid finalizing
-    # bindings for non-test tickets (scope leak). A no-write pass (preview /
-    # legacy --mode dry-run) also skips it: recovery's keyed-pending branch issues
-    # REMOTE add_label / set_entity_property writes, which a documented no-write pass
-    # must not perform (bug 7851). This mirrors the sibling invariant-filing gate
-    # (skip_invariant_filing = (not persist) or bool(scoped_ids)) and the
-    # interrupted-retirement write-boundary gate composed in reconcile.py. The
-    # scoped check is first so a scoped pass never depends on the persist axis.
+    # Scoped and no-write passes skip recovery: it can finalize bindings and
+    # issue remote label/property writes outside their permitted boundary.
     ctx.recovery_failures = 0
     if not scoped_ids and ctx.persist:
         recovery_failures: list[dict[str, Any]] = []
@@ -131,14 +81,8 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
 
             _emit_recovery_failure_alerts(recovery_failures, repo_root, pass_id)
 
-    # Bug a06c: compute per-binding label-intent map BEFORE the differ
-    # runs. The outbound differ uses it to gate REMOVE emission so that
-    # labels Jira added side-band (which local never had) do not produce
-    # spurious REMOVEs — those spurious REMOVEs cancel legitimate
-    # inbound ADDs under the PR #457 local-wins bidir suppression
-    # contract, silently dropping the label on both sides (the T3 IB-ADD
-    # probe failure). Only bound tickets need intent; unbound tickets
-    # emit creates with their full tag set unconditionally.
+    # Compute intent before diffing bound tickets, so peer-only labels do not
+    # become outbound removals that cancel legitimate inbound additions.
     bound_local_ids = [
         t.get("ticket_id", t.get("id", ""))
         for t in local_tickets
@@ -148,20 +92,8 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
         bound_local_ids, tracker_dir
     )
 
-    # Note: `outbound_diff_client` (the AcliClient used here by the outbound
-    # differ's live-comment fetch — Bug 4292) is now built ABOVE, before
-    # pending-binding recovery, so recovery can reuse it (story 9622).
-
-    # Bug 0702-3b6d-c1db-4ed3 (inbound counterpart to 1e08): the outbound differ
-    # RETURNS the bound-but-absent ALIVE direct-GET results (each alive HTTP-200
-    # absent key's raw fields) as the second element of its tuple, so the inbound
-    # differ can mirror Jira-side changes for out-of-window keys WITHOUT a second
-    # GET. We merge them into the inbound snapshot below. 404/transport keys are
-    # intentionally absent from this dict (retirement stays outbound-owned).
-    # Observability sinks (bugs a713/acd0): the differ appends (jira_key, field) for a
-    # both-sides field conflict (local-wins silently overwrites a Jira edit) and for a
-    # mapped-but-allowlist-excluded field that differs (a silent outbound drop). We emit
-    # deduped bridge alerts from them below — behavior is otherwise unchanged.
+    # Share alive absent-key GET fields with inbound diff; omit 404/transport
+    # failures. Collect conflict and excluded-field drops for deduped alerts.
     conflict_sink: list[tuple[str, str]] = []
     dropped_field_sink: list[tuple[str, str]] = []
     # Story d19d: hand the differ the store's projects mapping so the create path
@@ -199,11 +131,7 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
         "outbound_differ_complete",
         count=len(outbound_raw),
     )
-    # Bug b859 (Part 0c): structured per-direction breakdown to stderr so
-    # operators / probes can see per-action counts without parsing the
-    # sync_logger JSON manifest. Format: ``RECON: <kind> <field>=<value>``
-    # with a stable token prefix that's distinct from FILTERED/filter/OK/
-    # ERROR so the probe's grep filter does not need to be updated.
+    # Stable RECON prefix gives probes per-action counts without parsing JSON.
     _ob_creates = sum(1 for m in outbound_raw if m.action == "create")
     _ob_updates = sum(1 for m in outbound_raw if m.action == "update")
     _ob_deletes = sum(1 for m in outbound_raw if m.action == "delete")
@@ -213,10 +141,7 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
         file=sys.stderr,
     )
 
-    # Convert OutboundMutation → typed Mutation for unified dispatch. ADR 0107 "Cut"
-    # step: the payload itself is now one of the ten typed dataclasses
-    # (mutation_payloads.py), constructed directly by this producer — not a raw dict
-    # later disambiguated at dispatch time by ``batch_dispatch._mutation_to_batch_dict``.
+    # Construct typed payloads here so batch dispatch need not infer their shape.
     for om in outbound_raw:
         if om.action == "create":
             typed = mut_mod.Mutation(

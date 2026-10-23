@@ -1,31 +1,10 @@
 #!/usr/bin/env python3
-"""Inbound event-file materialisation: turn a Jira record into local reducer events.
+"""Turn inbound Jira records into local reducer event files.
 
-Extracted from ``apply_inbound_records.py`` (module-size split, ticket
-6f51-f8a4-b4fb-450c): that module sat one line under the 800-LOC hard cap, so any
-edit to it — including adding a comment — failed the CI module-size gate. It was
-split along the seam its own call graph and import graph already drew.
-
-This half owns the phase helpers ``apply_inbound._apply_inbound_create`` and
-``_apply_inbound_update`` call in order. Every one of them terminates in
-``inbound_translate._write_event_file``: they map a Jira issue snapshot onto CREATE /
-STATUS / EDIT / TAG_DELTA / COMMENT event files under the tracker directory. That is
-also why the whole module-level import block below came with them — they were its
-only consumers.
-
-The other half stays in ``apply_inbound_records.py``: the inbound assignee identity
-mint and the inbound link-graph cluster, which write through the ``rebar`` facade
-(``ensure_identity_for`` / ``link`` / ``unlink``) and the impossible-link and
-peer-confirmation sidecar stores, and write no event files at all.
-
-Each helper holds its former body VERBATIM — same computations, same order, same event
-writes. The helpers append to a caller-owned ``written`` list (update) or return the
-values the orchestrator threads onward (create). Imports only downward
-(``inbound_translate`` / ``projects_store``); never imports
-``apply_inbound`` (so the orchestrator can import these helpers back without a cycle),
-and never imports ``apply_inbound_records`` at module level — the two identity-mint
-calls below reach it function-locally, which keeps that direction of the import graph
-open for the back-compat re-export ``apply_inbound_records`` carries.
+Create/update helpers write CREATE, STATUS, EDIT, TAG_DELTA, and COMMENT events.
+Identity and link operations live in ``apply_inbound_records`` and are imported
+only at call time where needed, avoiding a module import cycle. Update helpers
+append paths to the caller's ``written`` list.
 """
 
 from __future__ import annotations
@@ -89,14 +68,8 @@ def _inbound_create_write_create_event(
     ]
     if "imported:reconciler-bootstrap" not in tags:
         tags.append("imported:reconciler-bootstrap")
-    # Parent sync (ticket 8b25): resolve the Jira parent field to a local id.
-    # Three sources, in priority order:
-    #   1. payload["_parent_local_id"] — pre-resolved by reconcile.py for the
-    #      normal inbound-create path (reconcile already has binding_store).
-    #   2. fields["parent"]["key"] derived via _jira_key_to_local_id —
-    #      best-effort local-id derivation for jira-originated parents where the
-    #      local id is deterministic (jira-dig-N convention).
-    #   3. Empty string — safe fallback (hardcoded prior behaviour).
+    # Prefer a pre-resolved local parent ID, then derive it from Jira's key;
+    # use an empty parent when neither is available.
     _raw_parent = fields.get("parent")
     if payload.get("_parent_local_id"):
         resolved_parent_id = payload["_parent_local_id"]
@@ -109,11 +82,7 @@ def _inbound_create_write_create_event(
         "id": local_id,
         "ticket_type": ticket_type,
         "title": fields.get("summary", "") or jira_key,
-        # Live snapshots carry description as a raw ADF dict — normalize to
-        # plain text or the CREATE event stores a dict where the reducer
-        # expects a string (bug 1bb2 class), and the outbound differ then
-        # re-pushes the description on EVERY pass (dict never equals the
-        # ADF-decoded snapshot text). Ticket robe-creek-zealot.
+        # Convert raw ADF to reducer text so later diffs can converge.
         "description": _normalize_adf_body(fields.get("description")),
         "parent_id": resolved_parent_id,
         "tags": tags,
@@ -132,11 +101,7 @@ def _inbound_create_write_create_event(
         from rebar.reconciler.apply_inbound_records import _ensure_inbound_assignee_identity
 
         _ensure_inbound_assignee_identity(fields["assignee"], repo_root)
-    # Creation-channel provenance (story e622): this inbound Jira CREATE is written
-    # DIRECTLY (bypassing composer.create_core), so we stamp the channel here. Validate
-    # first so the direct writer honours the same closed-vocabulary contract create_core
-    # enforces. This is a RECORDED value (not a heuristic inference), so we deliberately
-    # do NOT set creation_channel_inferred.
+    # Validate and record the Jira creation channel on this direct CREATE path.
     from rebar.reducer._version import validate_creation_channel
 
     create_data["creation_channel"] = validate_creation_channel("jira")
@@ -148,28 +113,12 @@ def _inbound_create_write_create_event(
 def _cascade_inbound_status_parents(
     tracker_dir, local_id, current_status: str, target_status: str
 ) -> list[str]:
-    """Parent-first cascade for an inbound STATUS write (ticket bb73-97de-eeea-4899).
+    """Write eligible ancestor STATUS events before the inbound child's event.
 
-    Operator ruling: "rebar should maintain, as an invariant, that no
-    non-terminal-state ticket can be a child of a closed ticket." The inbound-apply
-    surface therefore upholds the same I4a invariant the interactive verbs uphold
-    (docs/concurrency.md §I4a): when the child's ``(current, target)`` STATUS edge is a
-    CASCADING edge, every ancestor sitting in the eligible status is moved along the
-    SAME edge first — topmost eligible ancestor first — before the child's own STATUS
-    event is written. The DECISION is single-sourced on the interactive machinery
-    (``_CASCADING_EDGES`` + ``_resolve_parent_in_status``); only the write primitive
-    differs: parents are written through :func:`_write_event_file` like every other
-    inbound event, NOT through ``transition_compute`` — routing a Jira-originated
-    re-materialisation through the interactive verb would subject it to the start-work
-    plan-review gate and to eager per-event commit/push, breaking the reconciler's
-    deterministic batch orchestration.
-
-    Failure posture mirrors both existing seams: an absent / unreadable / ineligible
-    parent yields no cascade and the child proceeds alone (the exact
-    ``_resolve_parent_in_status`` contract the interactive cascade has), and a
-    ``_write_event_file`` failure propagates out of the leaf exactly as the child's own
-    STATUS write failure already does. The walk is cycle-guarded. Returns the written
-    parent event paths, cascade order (topmost first)."""
+    Reuse the interactive cascade's edge and parent decision, but write event
+    files within the batch. Skip absent/ineligible parents, guard cycles, and
+    propagate write failures. Return paths in topmost-first order.
+    """
     from rebar._commands.transition import _CASCADING_EDGES, _resolve_parent_in_status
 
     eligible = _CASCADING_EDGES.get((current_status, target_status))
@@ -202,20 +151,15 @@ def _cascade_inbound_status_parents(
 
 def _inbound_create_write_status_event(fields, raw_labels, tracker_dir, local_id) -> None:
     """Phase: write a STATUS event when the Jira status reverse-maps to non-default."""
-    # Status: write a STATUS event when the Jira status reverse-maps to
-    # something other than the reducer default ('open'). A rebar-status:
-    # annotation label takes precedence over the raw workflow status —
-    # same precedence as inbound_differ._map_jira_to_local_fields, so the
-    # import lands at the status the bound-ticket differ would compute.
+    # A rebar-status label takes precedence over Jira workflow status;
+    # write only statuses beyond the reducer's open default.
     local_status: str | None = recover_status_label(raw_labels)
     if local_status is None:
         jira_status = _extract_name(fields.get("status"))
         if jira_status:
             local_status = _jira_status_to_local(jira_status)
     if local_status and local_status != "open":
-        # Parent-first cascade (ticket bb73-97de-eeea-4899): a fresh inbound ticket
-        # landing at an active status must not be left under a merely-open parent.
-        # The just-written CREATE event carries parent_id, so the resolver sees it.
+        # Move eligible parents before the new ticket's active STATUS event.
         _cascade_inbound_status_parents(tracker_dir, local_id, "open", local_status)
         _write_event_file(
             tracker_dir,
@@ -226,13 +170,8 @@ def _inbound_create_write_status_event(fields, raw_labels, tracker_dir, local_id
 
 
 def _inbound_create_record_binding(mutation, binding_store, local_id, jira_key) -> None:
-    """Phase: record the local<->jira binding + seed the adopt baseline."""
-    # Record the local<->jira binding NOW — we hold both ids. Without this,
-    # the outbound differ (whose bound/unbound signal is the binding store
-    # ALONE) sees the freshly imported ticket as unbound on the next pass and
-    # re-emits an outbound CREATE for it, converging only via create_one's
-    # dedup-skip JQL search — one wasted create + per-ticket Jira search per
-    # imported ticket (ticket robe-creek-zealot, 1-pass idempotency).
+    """Bind the Jira issue and seed its adopt baseline."""
+    # Bind immediately so the next outbound pass does not re-emit CREATE.
     if binding_store is not None:
         _bind_confirm = getattr(binding_store, "bind_confirm", None)
         if _bind_confirm is not None:
@@ -267,19 +206,9 @@ def _inbound_create_writeback_jira(
         client.add_label(jira_key, f"rebar-id:{local_id}")
         client.set_entity_property(jira_key, "local_id", local_id)
 
-    # Bug 221b: bootstrap pre-existing Jira comments so the local ticket has
-    # a complete comment history immediately after inbound create.
-    #
-    # Strategy (mirrors _diff_comments_inbound in inbound_differ.py):
-    #   1. Fetch the issue's comments via client.get_comments(jira_key).
-    #   2. Skip any comment whose body (ADF-normalized) contains the
-    #      loop-breaker marker — those are our own outbound echoes.
-    #   3. Normalize ADF bodies to plain text (via _normalize_adf_body).
-    #   4. Write one COMMENT event per remaining comment, recording
-    #      jira_comment_id so the next-pass inbound comment diff dedupes.
-    #
-    # On get_comments failure: log a warning and skip comment bootstrap —
-    # the CREATE still succeeds.
+    # Bootstrap Jira comments into local COMMENT events, skipping marked
+    # outbound echoes and recording IDs for later dedup. Fetch errors warn
+    # without failing CREATE.
     if client is not None:
         try:
             raw_comments = client.get_comments(jira_key)
@@ -329,14 +258,8 @@ def _inbound_update_write_edit_event(
     # the local-keyed shape from the differ AND the legacy Jira-keyed
     # ``summary`` for back-compat with any caller that bypasses the differ.
     edit_fields: dict[str, Any] = {}
-    # title needs a fallback (the legacy Jira-keyed ``summary``), so it stays inline;
-    # status (a 2nd STATUS event) and labels (tag read-modify-write) are special-cased
-    # below. The remaining scalar fields are a declarative {field: Jira→local transform}
-    # table — adding a synced scalar field is now a one-line entry. Notes preserved:
-    #   - description: normalize a raw ADF dict → plain text (Bug 1bb2 defense-in-depth;
-    #     the differ should normalize at read time, but a bypassing caller may forward ADF).
-    #   - parent_id: an absent/empty parent maps to "" (clears the parent; ticket 8b25,
-    #     surfaced by the inbound differ as ``fields["parent_id"] = <local_id>``).
+    # Keep the legacy summary fallback inline. Transform other scalar fields;
+    # normalize raw ADF and turn an empty parent into a clear.
     if "title" in fields:
         edit_fields["title"] = fields["title"]
     elif "summary" in fields:
@@ -352,16 +275,10 @@ def _inbound_update_write_edit_event(
         if _fname in fields:
             edit_fields[_fname] = _transform(fields[_fname])
 
-    # 2f13 (additive): mint/reuse a ghost identity for the inbound assignee when it
-    # carries an opaque accountId — best-effort, never fails the update.
-    # Bug 8d68: key on the CANONICAL identity the differ forwards, not on ``fields["assignee"]``
-    # — that is a bare STRING here (the differ's local-keyed shape, see this function's opening
-    # comment), and the mint rejects a non-dict, so this call silently did nothing on every
-    # inbound EDIT. The raw-object fallback keeps a caller that BYPASSES the differ (and so
-    # still passes the Jira user object under ``assignee``) working exactly as before.
+    # Mint a ghost identity from the canonical assignee object when available;
+    # accept the raw Jira object from callers that bypass the differ.
     if "assignee" in fields:
-        # Function-local for the same reason as the create path above: the mint lives in
-        # ``apply_inbound_records`` and this keeps the module-level import one-way.
+        # Import at call time to keep the module dependency one-way.
         from rebar.reconciler.apply_inbound_records import _ensure_inbound_assignee_identity
 
         _ensure_inbound_assignee_identity(
@@ -374,36 +291,22 @@ def _inbound_update_write_edit_event(
 
 
 def _inbound_update_write_status_event(fields, tracker_dir, local_id, written) -> None:
-    """Phase: write a STATUS event when the payload carries a Jira status change."""
+    """Write STATUS when Jira supplies a changed status."""
     if "status" in fields:
         raw_status = fields["status"]
-        # Bug 1bb2 (llm-review finding 2): Trust the differ contract by
-        # SHAPE rather than VALUE. The inbound differ
-        # (_diff_jira_vs_local → _map_jira_to_local_fields) always emits
-        # status as a pre-mapped local string. Legacy callers that bypass
-        # the differ pass the raw Jira shape (a dict like {"name": "..."}).
-        # A value-membership check would mis-route a Jira tenant whose
-        # status is literally named one of the local values (e.g.
-        # 'in_progress') — but only the dict shape needs reverse-mapping,
-        # so the type itself is a reliable discriminator.
+        # The differ supplies local status strings; legacy callers supply
+        # Jira dicts. Use shape to decide whether reverse mapping is needed.
         if isinstance(raw_status, dict):
             local_status = _jira_status_to_local(_extract_name(raw_status))
         else:
             local_status = raw_status
-        # current_status is the PREVIOUS state (matched against state["status"]
-        # by the reducer for fork detection — see
-        # ticket_reducer/_processors.py:process_status).
-        # Read the latest STATUS event from the ticket dir to obtain it.
+        # Read the prior status for the reducer's fork check.
         previous_status = _read_latest_status(tracker_dir, local_id)
         if local_status == previous_status:
-            # No-op suppression (ticket bb73-97de-eeea-4899): the differ only emits a
-            # status that differs from LOCAL at diff time, but a parent-first cascade
-            # earlier in the SAME batch may have already moved this ticket. Skipping
-            # the same-status write keeps the cascade from fighting the ticket's own
-            # inbound mutation and makes re-applying an inbound payload idempotent.
+            # An earlier cascade may have moved this ticket in the same batch.
+            # Avoid a duplicate STATUS write.
             return
-        # Parent-first cascade (ticket bb73-97de-eeea-4899): move eligible ancestors
-        # along the same edge BEFORE the child's STATUS event lands.
+        # Move eligible ancestors before the child's STATUS event.
         written.extend(
             _cascade_inbound_status_parents(tracker_dir, local_id, previous_status, local_status)
         )
@@ -417,36 +320,13 @@ def _inbound_update_write_status_event(fields, tracker_dir, local_id, written) -
 
 
 def _inbound_update_apply_labels(mutation, payload, tracker_dir, local_id, written) -> None:
-    """Phase: apply inbound label add/remove ops as a convergent TAG_DELTA event."""
-    # Bug 57b0: inbound labels — apply payload['labels'] add/remove ops as
-    # an EDIT event on `fields.tags`. The inbound differ surfaces label
-    # mutations under ``payload['labels']`` as
-    # ``[{"action": "add"|"remove", "label": "<name>"}]`` (see
-    # inbound_differ._diff_labels_inbound). Without this block, every
-    # inbound label add/remove was silently dropped — Jira-side label
-    # changes never propagated to local tags.
-    #
-    # The local reducer treats tags as REPLACE-on-EDIT (see
-    # ticket_reducer/_processors.process_edit), so we must read the
-    # current tag list, apply the diff, and write the full resulting list.
+    """Apply inbound label changes through TAG_DELTA."""
+    # Apply inbound add/remove labels as TAG_DELTA. Read current tags to
+    # suppress no-ops; a whole-field EDIT would replace concurrent local tags.
     inbound_labels = payload.get("labels") or []
     if isinstance(inbound_labels, list) and inbound_labels:
-        # Read current tags by reducing the existing ticket directory.
-        #
-        # Bug bc8f-775e-9a34-44d1: the local reducer treats `fields.tags` on
-        # an EDIT event as REPLACE-the-whole-list (see
-        # ticket_reducer/_processors.process_edit). If we cannot reliably
-        # read the current tag list — either because reduce_ticket raises
-        # OR because it returns None (ticket dir doesn't exist yet, e.g.,
-        # race with a concurrent CREATE) — falling back to `current_tags=[]`
-        # and writing `EDIT(fields.tags=[<just the new label>])` would WIPE
-        # every pre-existing local tag. The live probe captured exactly
-        # this: ticket b2e9 with `labelprobe-...` was reduced to `[]` after
-        # T1's bidirectional pass.
-        #
-        # Safe behaviour: when current state cannot be read, SKIP the labels
-        # EDIT for this pass and emit a stderr warning. The next reconciler
-        # pass will retry once the ticket dir / state is readable.
+        # Read current tags before filtering add/remove no-ops. On reducer
+        # failure, warn and retry next pass instead of assuming an empty set.
         reducer_failed = False
         current_state: dict | None = None
         try:
@@ -498,11 +378,8 @@ def _inbound_update_apply_labels(mutation, payload, tracker_dir, local_id, writt
             # the reducer's intra-event contract — never emit a label in both lists.
             removed = [t for t in removed if t not in added]
             if added or removed:
-                # Bug a06c: mark this TAG_DELTA with source=inbound (at data.source)
-                # so local_label_intent skips its added tags when building the
-                # "user-intent" set. Without the marker, a Jira-side ADD applied
-                # locally would look like user intent and a later Jira-side REMOVE
-                # would be cancelled by a spurious outbound ADD (T4 IB-REMOVE).
+                # Mark inbound origin so Jira-added tags are not treated as
+                # local user intent on a later remove.
                 path = _write_event_file(
                     tracker_dir,
                     local_id,
@@ -513,11 +390,8 @@ def _inbound_update_apply_labels(mutation, payload, tracker_dir, local_id, writt
 
 
 def _inbound_update_apply_comments(payload, tracker_dir, local_id, written) -> None:
-    """Phase: write a COMMENT event for each new Jira comment the differ surfaced."""
-    # Bug 85a1 (Gap 1): inbound comments — write a COMMENT event for each
-    # new Jira comment the differ surfaced. The body is stored as plain
-    # text (post-ADF-decode); ``jira_comment_id`` is persisted so the
-    # outbound differ's loop-breaker skips this comment on the next pass.
+    """Write COMMENT events for new Jira comments."""
+    # Store new Jira comments as text with IDs for outbound echo suppression.
     inbound_comments = payload.get("comments") or []
     if isinstance(inbound_comments, list):
         for entry in inbound_comments:

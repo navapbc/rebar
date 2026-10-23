@@ -33,12 +33,8 @@ from rebar.reconciler.adapters.jira_family import (  # noqa: F401
     LOCAL_PRIORITY_TO_JIRA as _LOCAL_TO_JIRA_PRIORITY,
 )
 
-# Kept as a MODULE ATTRIBUTE (read by tests and the state/test_config parity guard, and
-# pinned identical to ``LOCAL_STATUS_TO_JIRA`` by the jira-family boundary test) even
-# though S2 routes the status value through ``resolve_outbound_status`` (map-or-drift)
-# rather than subscripting this map directly. ``resolve_outbound_status`` falls back to
-# the same built-in object when no per-project map is supplied, so the no-config
-# behaviour is unchanged.
+# Preserve the status-map module attribute for parity tests; the outbound
+# resolver uses the same built-in map without a project override.
 from rebar.reconciler.adapters.jira_family import (  # noqa: F401
     LOCAL_STATUS_TO_JIRA as _LOCAL_TO_JIRA_STATUS,
 )
@@ -76,40 +72,13 @@ def _map_local_to_jira_fields(
     priority_map: dict[str, str] | None = None,
     create_defaults: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Map local ticket fields to Jira field names/values.
+    """Map local fields to a Jira create body.
 
-    Use ``.get(key) or default`` (not ``.get(key, default)``) for string
-    fields so an explicit ``None`` value normalises to the empty-string
-    default. ``.get(key, default)`` only falls back when the key is
-    MISSING — if the key exists with value ``None`` (e.g. unassigned
-    tickets where the ticket reducer initialises ``assignee: None``),
-    .get returns None, not the default. None would then become the
-    literal string ``"None"`` after str() conversion at the ACLI boundary,
-    causing ACLI to reject the edit with exit 1.
-
-    Parent resolution (ticket 8b25): when ``binding_store`` is supplied and
-    the ticket carries a ``parent_id``, attempt to resolve it to a Jira key
-    via ``binding_store.get_jira_key(parent_id)``.  An unbound parent is
-    silently omitted from the returned dict (not ``None`` / empty-string) so
-    the diff layer can distinguish "no parent set" from "parent set but
-    unbound this pass" and skip / retry accordingly.
-
-    ``suppressed_out`` (ticket 8390) is how a caller learns that the 8b25
-    hierarchy guard just dropped a parent: the BOUND non-epic case appends the
-    remote key this call WOULD have emitted. It reports the fact and judges
-    nothing — same split ``_resolve_local_parent`` uses on the UPDATE side
-    (ticket 9f26), because only the caller knows whether the suppression cost
-    anything. An UNBOUND parent appends NOTHING: it has not been offered to the
-    tracker yet and converges on a later pass, so alerting on it is churn.
-
-    The returned dict is unchanged by this parameter on every input — nothing
-    rebar sends to Jira depends on it.
-
-    ``priority_map`` (S5) is the effective per-project local->Jira priority map
-    (``config.effective_priority_map``); ``None`` falls back to the built-in map. A local
-    priority with NO target is OMITTED (map-or-drift), never coerced to ``"Medium"``.
-    ``create_defaults`` (S5) is a str-valued map of required-beyond-baseline vendor fields
-    merged UNDER this computed body (baseline computed fields win on collision), CREATE-only.
+    Empty/None strings use empty defaults. Resolve bound parents to Jira keys;
+    omit unbound ones for a later retry. ``suppressed_out`` records a bound
+    non-epic parent omitted by the hierarchy guard without changing the body.
+    Unmapped priorities are omitted. ``create_defaults`` fills only fields the
+    computed body lacks.
     """
     result: dict[str, Any] = {
         "summary": ticket.get("title") or "",
@@ -133,15 +102,8 @@ def _map_local_to_jira_fields(
     if local_parent_id and binding_store is not None:
         import logging as _logging
 
-        # Hierarchy pre-check (ticket 8b25): on this next-gen Jira project only
-        # an Epic may be a parent. A non-epic parent (e.g. Task→Task) is
-        # rejected by Jira with HTTP 400. Suppress the parent diff entirely
-        # when the resolved local parent's ticket_type != "epic" so the differ
-        # never perpetually re-emits a parent mutation Jira will always reject.
-        # This is a sync exclusion mirroring the bug-36af issuetype pattern.
-        # When parent-type info is unavailable (map not supplied / parent
-        # absent from the map), fall through to the existing behaviour rather
-        # than guess — the applier-side 400-skip remains the backstop.
+        # Jira accepts only Epic parents here. Suppress known non-epic parents;
+        # without type data, let the applier's HTTP 400 guard handle rejection.
         if local_ticket_types is not None and local_parent_id in local_ticket_types:
             parent_type = (local_ticket_types.get(local_parent_id) or "").lower()
             if parent_type != "epic":
@@ -153,11 +115,8 @@ def _map_local_to_jira_fields(
                     ticket.get("ticket_id"),
                     parent_type,
                 )
-                # Ticket 8390: report the suppression so the create is not silent.
-                # At CREATE the issue does not exist on the tracker yet, so a
-                # dropped parent is unconditionally a real loss of hierarchy —
-                # but only a BOUND parent has a key we could ever have sent; an
-                # unbound one converges later and is not a drop.
+                # Report a suppressed bound parent; an unbound one can converge
+                # later and has no key to report.
                 if suppressed_out is not None:
                     suppressed_key = binding_store.get_jira_key(local_parent_id)
                     if suppressed_key:

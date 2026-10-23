@@ -1,32 +1,10 @@
-"""The reconciler operation-binding runtime (RP-04 S2, ticket e042).
+"""Capture one immutable backend scope per reconcile operation.
 
-One concern: compose ONE immutable ``ReconcilerRuntime`` per reconcile operation and
-build EXACTLY the *selected* Jira backend from settings CAPTURED at composition time —
-so the backend's read/query scope (``project`` / ``query_project``) and its connection
-essentials are resolved ONCE here, not re-read from ambient ``env``/config on every
-property access.
-
-The composition delegates to the S1 seam
-:func:`rebar._operation_config.compose_operation_snapshot`: that returns the frozen,
-non-secret :class:`~rebar._operation_config.OperationSnapshot` (config values, their
-source provenance, the selected repo root). From its ``values`` we derive a frozen
-:class:`ReconcilerSettings` — the *scope* the built backend answers from — and pair it
-with a provider-specific static-auth carrier that holds the send credential in a
-stdlib-only string field excluded from observable dataclass state.
-
-Secret hygiene (AC5). The static-auth carrier (Cloud ``JIRA_API_TOKEN`` / DC
-``JIRA_PAT``) is stored in a plain string field marked ``repr=False, compare=False``,
-so it can never enter a ``repr`` / ``str`` / equality / hash /
-fingerprint of the runtime or its settings. The secret is revealed ONLY inside the
-selected sending adapter, when it actually authenticates —
-Cloud's ``AcliClient`` construction and DC's lazily-built ``jira.JIRA`` client.
-
-Fail-closed (AC4). :meth:`ReconcilerRuntime.build_backend` (Cloud) and the built
-backend's ``assert_env_ready`` raise a TYPED
-:class:`~rebar.reconciler._backend.BackendEnvError` — never a bare ``AssertionError`` /
-``KeyError`` — BEFORE any transport/network call when the Cloud read scope
-(``jira.project``) is empty or a connection essential is missing/malformed. No
-anonymous / cross-provider fallback.
+Composition selects exactly one provider from the operation snapshot. Its
+read/write project and connection settings stay fixed for the pass. Static
+credentials are excluded from repr, equality, and hashes, and revealed only
+by the selected sending adapter. Missing scope or connection essentials fail
+with ``BackendEnvError`` before transport or network use.
 """
 
 from __future__ import annotations
@@ -52,12 +30,9 @@ _DEFAULT_COMMENT_MAX_CHARS = 32767
 
 @dataclass(frozen=True)
 class StaticAuth:
-    """Base static-auth carrier for an immutable send credential.
+    """Hold a send credential outside repr, equality, and hash state.
 
-    The ``secret`` field is excluded from ``repr``/equality/hash (``repr=False,
-    compare=False``), so the credential never leaks into a diagnostic, cache key, or
-    fingerprint. It is revealed ONLY by the selected sending adapter at authentication
-    time.
+    Only the selected adapter should reveal it when authenticating.
     """
 
     secret: str = field(default="", repr=False, compare=False)
@@ -118,12 +93,10 @@ class ReconcilerRuntime:
     auth: StaticAuth = field(default_factory=StaticAuth, repr=False, compare=False)
 
     def build_backend(self, *, transport: TicketTransport | None = None) -> Any:
-        """Construct EXACTLY the selected provider's backend from captured settings.
+        """Build only the selected backend from captured settings.
 
-        Builds ONLY the selected backend (never the other). ``transport`` is a test
-        seam: when supplied it is used as the backend's transport verbatim (no real
-        transport is constructed and no network is touched); when ``None`` the real
-        provider transport is built from the captured scope + revealed credential.
+        An injected transport is used verbatim without constructing a real
+        client or making a network call.
         """
         import rebar.reconciler.adapters  # noqa: F401  (side-effect: registers factories)
 
@@ -165,18 +138,13 @@ class ReconcilerRuntime:
         from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
         s = self.settings
-        # Symmetry with ``_build_cloud`` (ticket 4698-d85c): assert the NON-SECRET half
-        # of the DC scope (base url + project) at build, before any transport exists.
-        # PAT presence and network validation stay LAZY in ``_LazyDataCenterClient`` /
-        # ``build_client_from_settings``, so composing a DC backend still needs neither
-        # the ``[agents]``/jira extra nor a ``JIRA_PAT``.
+        # Check DC URL and project before transport; PAT and network validation
+        # stay lazy so composition needs neither the optional extra nor a PAT.
         assert_datacenter_nonsecret_scope_ready(s)
         if transport is not None:
             return JiraDataCenterBackend(transport=transport, scope=s)
-        # Build the real ``jira.JIRA`` client LAZILY: composing the runtime (and reading
-        # the captured read scope) must not require the ``[agents]``/jira extra or a live
-        # ``JIRA_PAT`` — those are needed only when a network operation actually runs, at
-        # which point the lazy client fails closed via ``build_client_from_settings``.
+        # Construct the real DC client on first network use, when PAT readiness
+        # is enforced.
         client = _LazyDataCenterClient(self.auth, s)
         transport = JiraDataCenterTransport(client=client, project=s.project)
         assert_transport_conforms(transport, vendor=_DC_BACKEND)
@@ -184,13 +152,7 @@ class ReconcilerRuntime:
 
 
 class _LazyDataCenterClient:
-    """A ``jira.JIRA`` stand-in that builds the real client on first attribute access.
-
-    Lets ``build_backend`` construct the DC backend (and answer its captured read
-    scope) without importing the optional jira extra or requiring ``JIRA_PAT`` up
-    front — the real client, its TLS/auth, and the fail-closed missing-PAT guard in
-    ``build_client_from_settings`` are all deferred to the first real network call.
-    """
+    """Delay optional Jira client import, TLS, and PAT checks until public use."""
 
     def __init__(self, auth: StaticAuth, settings: ReconcilerSettings) -> None:
         self._auth = auth
@@ -219,10 +181,7 @@ class _LazyDataCenterClient:
         return self._real
 
     def __getattr__(self, name: str) -> Any:
-        # Dunder / private probes (repr, pickle, copy, hasattr introspection, pytest's
-        # attribute sniffing) must NOT trigger construction of the real client — that would
-        # both defeat the lazy contract and prematurely raise the fail-closed missing-PAT
-        # error on a mere introspection. Only forward genuine public API access.
+        # Dunder probes must not construct the client or trigger missing-PAT errors.
         if name.startswith("__") and name.endswith("__"):
             raise AttributeError(name)
         return getattr(self._resolve(), name)
@@ -233,14 +192,7 @@ def compose_reconciler_runtime(
     repo_root: str | os.PathLike[str] | None = None,
     cli_overrides: dict | None = None,
 ) -> ReconcilerRuntime:
-    """Compose the ONE immutable :class:`ReconcilerRuntime` for a reconcile operation.
-
-    Delegates config composition to the S1 seam
-    :func:`rebar._operation_config.compose_operation_snapshot` (defaults < user <
-    project < env < cli precedence, repo-root selection, malformed-config fail-fast)
-    and derives the reconciler binding from the resulting snapshot's ``values`` /
-    ``sources`` / ``repo_root``.
-    """
+    """Bind one runtime to the composed operation snapshot and its config precedence."""
     from rebar import _operation_config
 
     snapshot = _operation_config.compose_operation_snapshot(
@@ -250,15 +202,9 @@ def compose_reconciler_runtime(
 
 
 def _normalize_overrides(cli_overrides: dict | None) -> dict | None:
-    """Accept BOTH override spellings and return the nested
-    ``{section: {key: value}}`` shape :func:`compose_operation_snapshot` consumes.
+    """Nest dotted overrides before config coercion so they are not discarded.
 
-    A caller may pass the flat dotted form (``{"reconciler.backend": "jira-datacenter"}``)
-    or the already-nested form (``{"reconciler": {"backend": "jira-datacenter"}}``). The
-    dotted form is the natural spelling at a call site, but the config layer's
-    ``coerce_sparse`` treats a dotted TOP-LEVEL key as an unknown SECTION and silently
-    drops it — so without this normalization a dotted override would be ignored. Nested
-    values are merged through unchanged.
+    Already nested values pass through unchanged.
     """
     if not cli_overrides:
         return cli_overrides
@@ -308,14 +254,9 @@ def _runtime_from_snapshot(snapshot: Any) -> ReconcilerRuntime:
 
 
 def _resolve_provider_scope(backend_name: str, raw_project: str) -> tuple[StaticAuth, str, str]:
-    """Provider-specific scope + static-auth carrier.
+    """Capture provider auth and use the explicit project for reads and writes.
 
-    No provider applies an implicit create-time project default (AC2): the *write* and
-    *read* (query) scope are BOTH the configured project verbatim, so an unset project
-    stays empty and fails closed in :func:`assert_cloud_scope_ready` /
-    :func:`assert_datacenter_scope_ready` before any transport is built. Only an
-    operator who EXPLICITLY configures a project (including the literal ``"DIG"``) gets a
-    non-empty scope.
+    An unset project stays empty for the fail-closed readiness checks.
     """
     if backend_name == _CLOUD_BACKEND:
         auth: StaticAuth = CloudStaticAuth(os.environ.get("JIRA_API_TOKEN", ""))
@@ -341,22 +282,10 @@ def _resolve_tracker_dir(tracker: Any, root: str) -> Path:
 
 
 def assert_cloud_scope_ready(scope: ReconcilerSettings) -> None:
-    """Fail-closed Cloud readiness check on a CAPTURED scope — TYPED, no network.
+    """Reject incomplete captured Cloud scope with ``BackendEnvError`` before I/O.
 
-    Raises :class:`~rebar.reconciler._backend.BackendEnvError` when a Cloud connection
-    essential (``JIRA_URL`` / ``JIRA_USER`` / ``JIRA_API_TOKEN``) is missing, when
-    ``JIRA_USER`` is not an email (Cloud's Basic-auth username IS the account email), or
-    when the read scope (``jira.project``) is empty — before any transport is built.
-
-    INTENDED TIGHTENING, not drift (ticket 4698-d85c). This check is DELIBERATELY
-    stricter than the legacy ambient ``JiraBackend.assert_env_ready`` path, which only
-    requires ``JIRA_URL``/``JIRA_USER``/``JIRA_API_TOKEN`` to be non-empty: the
-    email-format check catches a username that Cloud Basic auth would silently reject
-    (the Basic-auth username IS the Atlassian account email), and the non-empty-project
-    checks catch a scope that would otherwise query EVERY project on the instance. Real
-    Cloud deployments satisfy both, so the captured-scope path is the canonical
-    fail-closed behavior; the weaker ambient check is the compatibility floor for
-    backends built without a captured scope, not a parity target to relax to.
+    Require URL, token, account email, and explicit read/write project. This is
+    stricter than the legacy ambient backend check to prevent broad queries.
     """
     from rebar.reconciler._backend import BackendEnvError
 
@@ -401,17 +330,10 @@ def _assert_cloud_user_is_email(user: str) -> None:
 
 
 def assert_datacenter_nonsecret_scope_ready(scope: ReconcilerSettings) -> None:
-    """Fail-closed check of the NON-SECRET Data Center scope — TYPED, no network.
+    """Check DC URL and read/write project before transport construction.
 
-    The DC build-time analogue of :func:`assert_cloud_scope_ready` (ticket 4698-d85c):
-    raises :class:`~rebar.reconciler._backend.BackendEnvError` when the base ``url``
-    (``[tool.rebar.reconciler].base_url``) or the read/write project scope
-    (``jira.project``) is empty — before any transport or client is built. Deliberately
-    does NOT check ``JIRA_PAT``: the credential (and every network concern) stays lazy
-    in ``_LazyDataCenterClient``, so composing/building a DC backend never requires the
-    secret or the optional jira extra. The PAT is enforced by
-    :func:`assert_datacenter_scope_ready` (the ``assert_env_ready`` path) and by
-    ``build_client_from_settings`` at first real client use.
+    PAT and optional client requirements stay lazy until first real use; a
+    missing non-secret scope raises ``BackendEnvError``.
     """
     from rebar.reconciler._backend import BackendEnvError
 

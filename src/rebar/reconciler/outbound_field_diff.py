@@ -1,30 +1,9 @@
-"""Canonical (local-shape) outbound field diff for bidirectional sync (ticket 625b).
+"""Compare outbound fields in canonical local shape.
 
-The outbound UPDATE path used to compare local ticket state against the RAW Jira
-snapshot shape (``outbound_fields._diff_fields``). This module re-homes that
-comparison into the vendor-neutral core: it diffs the LOCAL ticket against a
-snapshot that has ALREADY been canonicalized to local shape by the injected
-``InboundMapper`` (mirroring the inbound differ), producing a canonical
-``changed`` dict keyed by LOCAL field names. The caller then maps that back to the
-backend's field shapes at the emission boundary via
-``OutboundMapper.map_fields_to_remote``.
-
-Consequences of the seam:
-
-* This module imports NOTHING from ``adapters.jira`` and names no raw Jira
-  snapshot key — vendor shapes cross the core only as opaque payloads produced
-  and consumed at the mapper port calls.
-* Every decision the old vendor-shape differ made is preserved: local-wins,
-  the issuetype/ticket_type update exclusion, inbound-directionality
-  suppression, the assignee identity/resolver fast-path (incl. the
-  ``_assignee_is_account_id`` sentinel), the managed-parent-clear gate, the
-  description parity fit, the reporter one-way diff, and the
-  conflict/dropped-field observability sinks.
-
-The description ADF fit and the assignee account resolution are the two
-vendor-specific operations still needed; both are reached ONLY through the
-injected ``OutboundMapper`` (``map_fields_to_remote`` fits the description;
-``resolve_assignee`` runs the account search), so this module stays pure/neutral.
+The inbound mapper canonicalizes the remote snapshot and baseline; the
+outbound mapper converts changed local fields back to vendor shape. Local-wins,
+inbound directionality, managed parent clears, identity resolution, and
+conflict/drop alerts remain in this neutral core without vendor imports.
 """
 
 from __future__ import annotations
@@ -36,14 +15,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from rebar.reconciler._backend import OutboundMapper
 
-# Fields the INBOUND differ mirrors Jira→local. A Jira-side change to one of
-# these, when local is unchanged since the last sync (matches the baseline),
-# flows inbound rather than being reverted by local-wins. This is the arbitrated
-# set named by ADR 0026 ("the five inbound-mirrored scalar fields") — title
-# included: the pre-625b differ iterated Jira-shaped keys (whose title key is
-# ``summary``) and so never suppressed title, which silently reverted a remote
-# summary edit over an unmodified local title. See
-# ``docs/adr/0026-reconciler-three-way-merge-baseline.md``.
+# These 5 mirrored fields defer to inbound when local still matches baseline;
+# title is included so a remote summary edit is not reverted (ADR 0026).
 _INBOUND_MIRRORED_FIELDS = frozenset({"title", "description", "priority", "status", "assignee"})
 
 
@@ -70,12 +43,7 @@ def _assignee_candidates(scalar: Any, identity: dict[str, Any] | None) -> set[st
 
 
 def _assignee_matches(local_val: str, scalar: Any, identity: dict[str, Any] | None) -> bool:
-    """Shape-tolerant assignee equality against a canonical remote assignee.
-
-    ``local_val`` matches when it equals ANY remote identity form (scalar string or a
-    non-None identity value); both-empty (no candidates, empty local) also matches.
-    Mirrors the pre-625b ``_assignee_matches`` against the raw Jira value (dict OR
-    bare string)."""
+    """Match any canonical remote identity form, including both-empty."""
     candidates = _assignee_candidates(scalar, identity)
     if not candidates:
         return (local_val or "") == ""
@@ -120,36 +88,12 @@ def _resolve_local_parent(
     *,
     suppressed_out: list[str] | None = None,
 ) -> tuple[bool, str | None]:
-    """Resolve the local parent to a remote key for the UPDATE diff (present?, value).
+    """Resolve a parent for update as ``(present, remote_key_or_none)``.
 
-    Mirrors ``_map_local_to_jira_fields``' parent logic exactly (ticket 8b25 +
-    the symmetric parent-detach clear), but is pure binding-store logic — no vendor
-    dependency. Returns ``(present, value)``:
-
-    * a bound, epic (or type-unknown) parent → ``(True, <remote key>)``;
-    * a non-epic parent, or an unbound parent → ``(False, None)`` (omitted, retry);
-    * a locally-DETACHED ticket (no parent_id) → ``(True, None)`` — the clear
-      candidate the diff loop gates on the managed-ref check;
-    * no binding store → ``(False, None)``.
-
-    The two ``(False, None)`` returns are byte-identical but mean OPPOSITE things, and
-    conflating them is what made a suppressed hierarchy edit invisible: an UNBOUND parent
-    self-resolves on a later pass, while a BOUND non-epic parent will NEVER converge — the
-    user's parent edit is dropped for good, yet the pass exits 0 reporting convergence
-    (ticket 9f26; the same class of silence ``pass_io.record_parent_divergence`` was built
-    for).
-
-    ``suppressed_out`` is how the caller learns which of the two happened: the BOUND
-    non-epic case appends the remote key it WOULD have emitted. This reports the fact and
-    stops there deliberately — whether that suppression actually costs the user anything
-    depends on what the tracker already holds, and this function cannot see the remote
-    snapshot. ``diff_canonical_fields`` owns that comparison, because a parent the tracker
-    ALREADY carries was not dropped at all (the common shape: an inbound-mirrored sub-task's
-    parent is a non-epic and is already correct), and alerting there would fire every pass
-    for every such ticket and drain the channel of meaning.
-
-    The suppression itself is unchanged: the parent is still omitted from ``changed``, and
-    the unbound case still appends nothing.
+    Bound epic or unknown type emits its key; local detachment proposes a
+    clear; unbound and non-epic parents are omitted. Only a bound non-epic
+    suppression is reported through ``suppressed_out``. The caller compares it
+    with remote state before alerting, so an already-correct parent stays quiet.
     """
     if binding_store is None:
         return (False, None)
@@ -197,31 +141,11 @@ def _peer_removed_the_parent(
     binding_store: Any,
     local_id: str,
 ) -> bool:
-    """Whether the peer DE-PARENTED this child since our last observation, so the outbound
-    local-wins SET must stand down and let ``diff_inbound_parent`` clear the local parent.
+    """Let inbound clear a parent only when the peer removed an observed one.
 
-    Ticket 339a-57ac-e5f3-4718: a parent cleared on the Jira side was never cleared locally.
-    ``parent`` is not in ``_INBOUND_MIRRORED_FIELDS``, so nothing deferred to inbound for it —
-    outbound resolved the still-bound local epic parent, saw ``remote_parent_id is None``, and
-    emitted a local-wins re-push; the inbound differ then dropped its own freshly computed
-    clear as a same-pass contradiction of that write. The clear's precondition ("Jira has no
-    parent, local does") is IDENTICAL to the re-push's, so the clear could never fire.
-
-    The discriminator is the LAST-OBSERVED PEER PARENT (ticket 88d9's evidence channel, reused
-    here rather than inventing a second one). A bare "remote is falsy" check cannot tell the
-    two symmetric cases apart:
-
-    * ``get_peer_parent(local_id) == local_parent`` — we last saw the peer carrying exactly the
-      parent we still hold locally, and it is gone now. Only the PEER moved: a remote removal,
-      which inbound owns. Suppress the outbound push (return ``True``).
-    * ``get_peer_parent(local_id) != local_parent`` — the local side re-set (or first set) the
-      parent since that observation, so this is genuine LOCAL intent and local-wins must push
-      it. Returning ``True`` here would silently discard a real local re-parent, a worse
-      failure than the one being fixed.
-
-    ``get_peer_parent`` is getattr-guarded exactly as the inbound differ guards it: legacy
-    binding stores and older test doubles predate the method, and their absence must fall
-    through to today's unconditional local-wins push rather than change behaviour blindly.
+    If the last observed parent equals the current local parent and remote is
+    now empty, outbound stands down. A locally new parent still wins. Older
+    stores without peer-parent evidence retain their prior local-wins behavior.
     """
     if not local_parent or remote_parent:
         return False
@@ -249,15 +173,10 @@ def compute_update_fields(
     status_map: dict[str, str] | None = None,
     priority_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Canonicalize the snapshot entry (and arbitration baseline) via the injected
-    ``InboundMapper``, diff in LOCAL shape, and map the changed subset back to the
-    backend's field shapes via the ``OutboundMapper`` — the whole vendor-neutral field
-    path for one bound ticket. Returns the vendor-shaped ``OutboundMutation.fields``.
+    """Canonicalize remote and baseline, diff locally, then map changed fields out.
 
-    Storage stays vendor-shaped: the baseline is mapped at READ time only. The
-    client-backed account resolver is bound to this remote key here and passed DOWN as an
-    argument (ticket 65d7) so ``resolve_assignee`` can consult the live account search —
-    a declared collaborator on the port, not an attribute set on the mapper behind its back.
+    Baseline storage stays vendor-shaped; conversion happens on read. Bind the
+    account resolver to this Jira key as an explicit mapper collaborator.
     """
     canonical_remote = inbound_mapper.map_remote_to_local(jira_fields)
     # Arbitration ancestor (story d6bd): the per-binding baseline when available,
@@ -269,11 +188,8 @@ def compute_update_fields(
     else:
         raw_baseline = (prev_snapshot or {}).get(jira_key)
     canonical_baseline = inbound_mapper.map_remote_to_local(raw_baseline) if raw_baseline else None
-    # Bind the caller's (local_value, jira_key) resolver to THIS remote key and hand it to
-    # the diff as an argument (ticket 65d7). It used to be assigned onto the mapper as
-    # a private attribute ON the mapper, under a bare ``except ...: pass``, so a mapper
-    # that refused the assignment silently lost its live account search and degraded every
-    # resolution to non-authoritative — churn the diff could never converge.
+    # Bind the caller's assignee resolver to this Jira key as a diff argument;
+    # mapper attribute assignment could silently lose live account search.
     bound_resolver = (
         (lambda lv: assignee_resolver(lv, jira_key)) if assignee_resolver is not None else None
     )
@@ -314,15 +230,11 @@ def diff_canonical_fields(
     conflict_sink: list[tuple[str, str]] | None = None,
     dropped_field_sink: list[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """Compare a LOCAL ticket to a canonicalized remote snapshot; return the canonical
-    ``changed`` dict (local field name → local value) plus the ``_assignee_is_account_id``
-    sentinel when the accountId fast-path fires.
+    """Return changed local fields and the account-ID sentinel when needed.
 
-    ``canonical_remote`` / ``canonical_baseline`` are the injected InboundMapper's
-    output for the current snapshot entry and the arbitration baseline (partial-
-    tolerant: an absent field is simply not compared). ``outbound_mapper`` supplies
-    the two vendor operations kept behind the port (description ADF fit via
-    ``map_fields_to_remote``; assignee account resolution via ``resolve_assignee``).
+    Remote and baseline values are canonical mapper output. Missing optional
+    fields remain partial-tolerant; vendor fitting and account resolution stay
+    behind the outbound mapper.
     """
     baseline = canonical_baseline or {}
     changed: dict[str, Any] = {}
@@ -341,11 +253,8 @@ def diff_canonical_fields(
             )
         return _baseline_form_matches(field, local_val, normalized_local, baseline)
 
-    # A live snapshot entry is authoritative for the always-present Jira fields: an
-    # absent key means the remote value is that field's natural empty default (the
-    # pre-625b differ compared against ``_extract_jira_field(...) -> ""``), so a sparse
-    # entry still diffs. ``status``/``parent``/``reporter`` are genuinely optional and
-    # stay partial-tolerant (compared only when their source is present / local drives).
+    # Missing always-present fields use natural empty defaults and still diff;
+    # status, parent, and reporter remain optional.
 
     # --- title (inbound-mirrored per ADR 0026; local==baseline defers to inbound) ---
     local_title = ticket.get("title") or ""
@@ -356,28 +265,14 @@ def diff_canonical_fields(
 
     # --- description (inbound-mirrored; ADF-fit via the outbound port) ---
     local_desc = ticket.get("description") or ""
-    # The local body as it will READ once Jira stores it. Computed BEFORE the
-    # directionality guard so that guard can match on it as well as on the raw text:
-    # under a lossy one-way rich-text codec the baseline holds ``decode(baseline_wire)``
-    # while the local body is raw Markdown, so a raw-only compare reports "local
-    # changed" on every pass and the description re-emits forever. Matching on either
-    # form only ADDS a way to conclude "unchanged" (see ``_local_matches_baseline``), so
-    # the plain-codec behaviour is unchanged.
+    # Compute the landed body before arbitration: a lossy codec can make raw
+    # Markdown differ from an unchanged decoded baseline.
     fitted = outbound_mapper.map_fields_to_remote({"description": local_desc}, ticket=ticket).get(
         "description", local_desc
     )
     if not _suppressed_by_inbound("description", local_desc, normalized_local=fitted):
-        # The port also normalizes soft-wrapped prose (the ADF encoder rejoins a
-        # hard-wrapped paragraph into one), so the body that lands — and that a later
-        # fetch decodes back — is the NORMALIZED form. Route the remote value through
-        # the same idempotent port before comparing, or a hard-wrapped local
-        # description never matches its own landed form and the differ re-emits a
-        # description update on every pass.
-        # The REMOTE value is deliberately compared RAW. A body written by the old
-        # paragraph-per-line encoder decodes back hard-wrapped; routing it through the
-        # port too would make it match the normalized local value, so a stale
-        # description would never be rewritten. Comparing raw re-emits it once, after
-        # which the landed body decodes to the normalized form and converges.
+        # Compare the fitted local body with raw remote text. Normalizing the
+        # remote too would hide legacy hard wraps that need one rewrite.
         if not _text_matches(fitted, canonical_remote.get("description", "")):
             changed["description"] = fitted
 
@@ -431,15 +326,8 @@ def diff_canonical_fields(
     present, local_parent = _resolve_local_parent(
         ticket, binding_store, local_ticket_types, suppressed_out=suppressed_parents
     )
-    # Bug 8b25's guard drops a non-epic parent silently, and before ticket 9f26 that silence
-    # was total: the field never entered `changed`, so `dispatch_one._update_one_apply_parent`
-    # never ran and the whole `record_parent_divergence` / bridge_alerts apparatus was
-    # unreachable — the pass exited 0 reporting convergence while the edit was gone.
-    # Report it on the EXISTING drop channel, but ONLY when it actually costs something: if
-    # the tracker already carries the parent the user asked for, nothing was dropped. That is
-    # the common case (an inbound-mirrored sub-task's parent is a non-epic and already
-    # correct), and alerting on it would fire every pass for every such ticket. Same rule the
-    # sibling `issuetype` drop follows: record when the local value DIFFERS from the remote.
+    # Report a suppressed non-epic parent only when remote differs from the
+    # requested local parent; an already-correct remote parent is no drop.
     if suppressed_parents and dropped_field_sink is not None and jira_key:
         if suppressed_parents[0] != (canonical_remote.get("remote_parent_id") or None):
             dropped_field_sink.append((jira_key, "parent"))
@@ -478,14 +366,10 @@ def diff_canonical_fields(
 def _baseline_form_matches(
     field: str, raw_local: Any, normalized_local: str | None, baseline: dict[str, Any]
 ) -> bool:
-    """Whether ``raw_local`` — or the form it takes once Jira stores it — equals baseline.
+    """Match raw local or its landed form against baseline.
 
-    Under a lossy one-way rich-text codec the baseline holds ``decode(baseline_wire)``
-    while the local body is raw Markdown, so a raw-only compare reports "changed" on
-    every pass. Accepting EITHER form only ADDS a way to conclude "unchanged", so it
-    cannot start missing an edit the raw compare already caught, and it cannot hide a
-    real edit: if the normalized local equals the baseline, the edit makes no difference
-    to what Jira would store.
+    A lossy rich-text codec may change representation without changing what
+    Jira stores; either match prevents needless re-emission.
     """
     if _text_matches(raw_local, baseline.get(field)):
         return True
@@ -500,19 +384,10 @@ def _local_matches_baseline(
     baseline: dict[str, Any],
     normalized_local: str | None = None,
 ) -> bool:
-    """Whether the LOCAL value for a mirrored field equals the canonical baseline.
+    """Compare a mirrored local field with baseline, including its landed form.
 
-    ``normalized_local`` is the local body as it will READ once Jira has stored it
-    (``normalize_outbound(fit_outbound(local))``, from the outbound port). It is an
-    ALTERNATIVE match, never a replacement: under a lossy one-way rich-text codec the
-    baseline holds ``decode(baseline_wire)`` while the local body is raw Markdown, so
-    the two differ in FORM on every pass and the differ would re-emit forever even
-    though nothing changed.
-
-    Matching on EITHER form is deliberately conservative — it can only ADD a way to
-    conclude "unchanged", so no previously-detected edit starts being missed. It also
-    cannot hide a real edit: if the normalized local equals the baseline then the edit
-    makes no difference to what Jira would store, so there is nothing to send.
+    The alternate normalized match prevents lossy rich-text representation
+    from causing repeated updates when the stored value is unchanged.
     """
     if field not in baseline:
         return True

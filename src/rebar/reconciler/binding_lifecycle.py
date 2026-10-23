@@ -1,32 +1,10 @@
-"""Lifecycle policy owner for binding state (RP-02 S2).
+"""Own binding identity and absence transitions over repository state.
 
-``BindingLifecycle`` owns the IDENTITY half of binding lifecycle policy: the
-``pending`` → keyed-``pending`` → ``confirmed`` progression, ``unbind``'s two-index
-teardown, capture of the immutable numeric Jira id (bug 7c26), and the re-key that keeps a
-binding attached to an issue that MOVED project.
-
-It also owns the ABSENCE half (RP-02 S2 T2): consecutive-404 bookkeeping and its
-retirement grace (bug 1e08), the retired-first soft delete and its ``{local_id: jira_key}``
-tombstone index (bug 3b5f), and the append-only comment-identity map
-(emersed-specific-mutt / the DIG-5301 duplicate-comment class). The grace knob's ambient
-env sourcing moved here with it, unchanged.
-
-It is not a store and not a persistence owner. :class:`BindingRepository` owns every byte
-on disk; this class mutates the repository's OWN ``bindings`` / ``reverse`` dictionaries
-IN PLACE. They are reached back through the repository on every access — never copied,
-never cached — because a copy at this boundary would look correct in memory and silently
-discard every transition at save time. Entries are likewise MUTATED, never rebuilt from
-scratch: the file is shared with other writers and carries per-entry state this build does
-not own (baseline/peer_state overlays, fields a newer rebar wrote), so unknown and legacy
-keys must survive every transition.
-
-Deliberately NOT here: GET rotation, which stays with ``BindingStore``, and
-incomplete-operation recovery, which is ``BindingRecovery``'s (RP-02 S3) — it drives the
-transitions below to finish a create or a retirement a crash cut in half. ``BindingStore``
-remains the FACADE and the only public door to binding state — and
-which is also where the ``note_absent_or_rekey`` coordinator lives: it performs the by-id
-client lookup, asks :meth:`rekey` to swap the indexes, and falls through to :meth:`note_absent`
-on a negative answer.
+Lifecycle handles pending/confirmed bindings, numeric Jira IDs, rekeys,
+404 grace, retirement, tombstones, and comment IDs. It mutates the repository's
+live dictionaries in place so unknown fields survive and saves persist the
+changes. ``BindingStore`` remains the public facade; recovery and GET rotation
+live in their respective owners.
 """
 
 from __future__ import annotations
@@ -41,31 +19,17 @@ if TYPE_CHECKING:
 
 __all__ = ["UNKNOWN_COMMENT_ID", "BindingLifecycle"]
 
-# Bug aa7b — sentinel VALUE for the ``comment_ids`` map when the transport that
-# posted the comment cannot report a comment id.
-#
-# The map's job is to record that a local comment HAS been mirrored; the outbound
-# differ's only production reader is ``is_comment_mapped``, which asks about the KEY.
-# The Cloud/ACLI transport's ``add_comment`` returns ACLI's batch-mutation envelope
-# (``{"results": [{"status": "SUCCESS", "id": "<WORK ITEM KEY>"}], ...}``) — it
-# structurally cannot echo a created comment resource, so no comment id exists to
-# store. Recording this sentinel keeps the KEY present (so the PRIMARY id-identity
-# skip fires and the comment is never re-posted) while stating plainly that the VALUE
-# is not a Jira comment id. It is deliberately not id-shaped, and the work item key is
-# never stored in its place.
+# ACLI may report no comment ID. This sentinel records that the local comment
+# was mirrored without mistaking a work-item ID for a comment ID.
 UNKNOWN_COMMENT_ID = "__rebar_unknown_comment_id__"
 
 
 def _now_iso() -> str:
-    # Canonical Z-suffix UTC (twin of rebar.timeutils.utc_now_iso); the local spelling
-    # used across this module's call sites, matching ``binding_store``'s.
+    # Use the shared canonical UTC timestamp spelling.
     return utc_now_iso()
 
 
-# Bug 1e08-1a35-0267-4ca6 — binding lifecycle (GC) default. The consecutive-404 retire
-# grace is read through the owned ``rebar.config.resolve_absent_retire_grace`` accessor
-# (RP-04 S7.3.a); this constant is the shared default it falls back to, aliased by
-# ``binding_store`` — a plain constant, not an ambient read.
+# Shared default for consecutive-404 retirement grace; config resolves overrides.
 _DEFAULT_ABSENT_RETIRE_GRACE = 3
 
 
@@ -191,15 +155,7 @@ class BindingLifecycle:
     # -- immutable numeric id (bug 7c26) -----------------------------------
 
     def get_jira_id(self, local_id: str) -> str | None:
-        """The issue's IMMUTABLE numeric Jira id for a binding, or None.
-
-        A Jira issue's KEY changes when the issue is MOVED between projects; its
-        numeric ``id`` never does. None is VALID and means "not captured yet" — every
-        binding written before bug 7c26 has no id, and gets none until the next create
-        re-records one. The absence path degrades to its pre-7c26 behaviour there (the
-        facade's ``note_absent_or_rekey`` never reaches :meth:`rekey`), so no migration
-        is required.
-        """
+        """Return the issue's immutable numeric ID, or None when not captured."""
         entry = self._bindings.get(local_id)
         if entry is None:
             return None
@@ -207,14 +163,9 @@ class BindingLifecycle:
         return str(jira_id) if jira_id else None
 
     def record_jira_id(self, local_id: str, jira_id: str) -> None:
-        """Capture the immutable numeric id on an EXISTING binding (bug 7c26).
+        """Capture a numeric Jira ID on an existing binding until the next save.
 
-        A separate method rather than a parameter on :meth:`bind_confirm` /
-        :meth:`record_pending_key`: this store is SHARED WITH CLOUD and those methods
-        sit on the live write-ahead path, so keeping their signatures untouched
-        makes the capture purely additive. In-memory until ``save()`` (the
-        caller persists it with the same write that records the key). A no-op for
-        an unbound local id, an empty id, or a re-record of the same value.
+        Missing bindings, empty IDs, and unchanged values are no-ops.
         """
         entry = self._bindings.get(local_id)
         if entry is None or not jira_id:
@@ -225,32 +176,11 @@ class BindingLifecycle:
         entry["updated_at"] = _now_iso()
 
     def rekey(self, jira_key: str, current_key: str) -> bool:
-        """Re-key a MOVED issue: swap both indexes to ``current_key`` and reset absence.
+        """Swap both indexes to a moved issue's new key and clear absence count.
 
-        Step 4 of the ``note_absent_or_rekey`` seam (bug 7c26). The facade keeps the
-        by-id client lookup and the absence fall-through; this owns the mutation, plus
-        the identity comparison that decides whether there is one to make.
-
-        ``current_key`` is the answer to "what key does this issue's immutable numeric id
-        resolve to NOW?". An EMPTY answer means the lookup could not prove anything (no
-        such member on the client, a raise, a genuine-gone 404, a payload with no string
-        key) and an UNCHANGED answer means nothing moved — both are declined here so the
-        caller falls through to the unchanged absence bookkeeping. The recovery can only
-        ADD a save, never skip an absence it did not disprove; that is what makes it safe
-        on the shared Cloud path and on an unmigrated store.
-
-        On a genuinely different key: the forward entry takes the new key, the accrued
-        ``absent_404_count`` is reset (re-keying PROVES the issue is alive, and a move
-        noticed after two 404s must not leave the binding one miss from retirement), and
-        the reverse index is swapped in the SAME operation — otherwise the old key would
-        keep resolving to this local id and re-detach the pair on the next pass. The
-        entry is mutated, so unknown and legacy fields on it survive.
-
-        Persists immediately and emits a deduped ``binding-rekeyed`` alert: an in-memory
-        re-key would be undone by the next pass's load, and a silent one is
-        indistinguishable from a deletion that was never noticed.
-
-        Returns True when the binding was re-keyed, False when nothing was changed.
+        Empty or unchanged lookup results leave absence handling to the caller.
+        A real rekey preserves other entry fields, saves immediately, and emits
+        an alert. Return whether a binding changed.
         """
         local_id = self._reverse.get(jira_key)
         entry = self.entry_for_jira_key(jira_key)
@@ -370,37 +300,19 @@ class BindingLifecycle:
     # -- tombstones: the local-side view of retirement (bug 3b5f) -----------
 
     def retired_key_for_local(self, local_id: str) -> str | None:
-        """The retired ``jira_key`` this local ticket was last bound to, or ``None``.
-
-        The reverse of :meth:`is_retired`, which is keyed by ``jira_key`` and therefore
-        cannot answer the question the unbound-create arm needs to ask: retirement
-        UNBINDS the local ticket (:meth:`retire` pops it from both ``bindings`` and
-        ``reverse``), so by the time the differ sees it there is no live key to look
-        up — only this tombstone distinguishes "was paired with a confirmed-deleted
-        issue" from "never bound at all".
-        """
+        """Return a local ticket's retired Jira key, if its tombstone remains."""
         key = self._retired_locals.get(local_id)
         return key if key is not None and key in self._retired else None
 
     def is_retired_local(self, local_id: str) -> bool:
-        """True when this local ticket's former Jira pairing was retired (3b5f)."""
+        """Whether this local ticket has a retired Jira pairing."""
         return self.retired_key_for_local(local_id) is not None
 
     def unretire(self, jira_key: str) -> bool:
-        """Lift a tombstone: drop ``jira_key`` from the retired set AND file (3b5f).
+        """Remove a Jira tombstone and its local reverse entries.
 
-        The documented route back from a tombstone. After this call the local ticket
-        is ordinary unbound work again, so the next pass's outbound differ creates a
-        fresh Jira issue for it — without this, suppressing the create would be a
-        permanent, undocumented dead end escapable only by hand-editing
-        ``.bridge_state/bindings-retired.json``.
-
-        Both indexes are lifted together: the retired key set and every
-        ``retired_locals`` entry pointing at this key, or the local side would keep
-        reporting a tombstone the file no longer holds.
-
-        Returns True when a tombstone was actually lifted; False (a no-op) when the
-        key was not retired, so the call is idempotent.
+        The local ticket becomes unbound and eligible for a new create.
+        Return whether a tombstone was lifted.
         """
         retired_entries = self._repo.retired_entries()
         entry = retired_entries.pop(jira_key, None)
@@ -445,68 +357,25 @@ class BindingLifecycle:
     # -- rich-text emission state (morose-selfaware-unicorn) ---------------
 
     def note_rich_emit(self, local_id: str, wire: Any) -> int | None:
-        """Record that ``wire`` was CONFIRMEDLY pushed as this binding's description.
+        """Record a confirmed description push on the live binding entry.
 
-        The NAMED mutation seam for rich-emission state. It exists because the only
-        PUBLIC route to a binding record used to be ``all_bindings()`` — a read-shaped
-        query whose outer copy is shallow, so the apply path reached a LIVE entry through
-        it and wrote to it directly, bypassing lifecycle policy entirely. A query that
-        doubles as a write door has no owner and no invariants: anything holding the
-        mapping can annotate any entry, and a later deep copy at that boundary would
-        silently discard those writes instead of failing. This closes that hazard by
-        naming the operation here, where the entry's other transitions already live.
-
-        The state machine itself is NOT reimplemented: ``peer_state.note_rich_emit`` owns
-        ``rich_sha``, the change-gate, and the reset-on-changed-wire rule, and is unit
-        tested there. This resolves the entry and delegates, so the counter progression
-        is the same object's, not a second copy of it.
-
-        Returns how many times in a row the same wire has now been pushed (0 on the
-        first), or ``None`` when the local id is unbound (or its record is not a dict).
-        ``None`` rather than ``0`` because they are not the same answer: ``0`` reads as
-        "first push of this wire" and would send the caller on to do real work — a
-        read-back GET at the observe threshold — for a binding that does not exist. A
-        missing binding is nonfatal, matching today's caller, which simply returns.
-
-        Performs NO save on ANY path, and mutates the repository's OWN entry dict in
-        place. Every confirmed description push calls this, so a per-emit save would be
-        one extra whole-store rewrite and fsync per push — write amplification, not
-        parity. Durability comes from the pass's later unconditional save, exactly as it
-        does for ``set_baseline`` and the rest of the in-memory peer state.
+        Delegate repeat counting to ``peer_state``. Return the consecutive count
+        (0 on first push) or None for an unbound ID. Mutate in memory; the pass's
+        later save provides durability.
         """
         entry = self._bindings.get(local_id)
         if not isinstance(entry, dict):
             return None
         return peer_state.note_rich_emit(entry, wire)
 
-    # -- comment-ID map (append-only comment sync; emersed-specific-mutt) ---
+    # -- comment IDs for mirrored comments ---
 
     def record_comment_id(self, local_comment_key: str, jira_comment_id: str) -> None:
-        """Persist a COMMENT-HLC-key -> comment-ID pairing and persist NOW.
+        """Persist a local comment HLC key and Jira comment ID immediately.
 
-        ``jira_comment_id`` is the transport's comment ID when it reports one, or
-        :data:`UNKNOWN_COMMENT_ID` when it structurally cannot (bug aa7b — the
-        Cloud/ACLI transport). The KEY is what closes the duplicate class; the value is
-        only meaningful to callers that need a real id.
-
-        The map identifies an already-mirrored comment by the COMMENT event's HLC
-        ``timestamp`` (a stable, unique ``local_comment_key``), not by body — so
-        same-text comments never collide and an edited body is not seen as new.
-        Unlike :meth:`record_jira_id`, this saves IMMEDIATELY (write-ahead):
-        it is called on the successful ``add_comment`` return, and the durable
-        entry is what the outbound differ's PRIMARY skip keys on, so a crash after
-        the Jira post cannot re-post (closes the DIG-5301 duplicate class).
-
-        Change-gated and idempotent: an identical re-record is a no-op, with no save
-        churn. The gate is equality-only, so a DIFFERING id for a known key overwrites
-        it and saves. The reviewed base's docstring claimed a key "is never remapped to
-        a different id"; its code did not do that, so the claim is corrected here rather
-        than carried forward — the behaviour is unchanged and pinned by
-        ``test_a_differing_id_for_a_known_key_overwrites_and_saves``.
-
-        The map is created with ``setdefault``, so a legacy store written before comment
-        sync existed is readable without materializing the key — reading never rewrites
-        the file.
+        Use ``UNKNOWN_COMMENT_ID`` when transport reports no ID. Keys prevent
+        duplicate posts even for identical bodies. Equal re-records do nothing;
+        different IDs overwrite and save.
         """
         key = str(local_comment_key)
         comment_ids = self._data.setdefault("comment_ids", {})
@@ -516,14 +385,7 @@ class BindingLifecycle:
         self._repo.save()
 
     def comment_id_for(self, local_comment_key: str) -> str | None:
-        """The recorded value for an HLC key, or ``None`` when unmapped.
-
-        Usually the Jira comment ID, but it is :data:`UNKNOWN_COMMENT_ID` for a comment
-        posted through a transport that cannot report one (bug aa7b) — callers that need
-        a real id must compare against that sentinel. Use :meth:`is_comment_mapped` to
-        ask the question the outbound differ actually asks ("has this local comment been
-        mirrored?"), which is true for both value shapes.
-        """
+        """Return the mapped ID or unknown-ID sentinel, or None if unmapped."""
         recorded: str | None = self._data.get("comment_ids", {}).get(str(local_comment_key))
         return recorded
 

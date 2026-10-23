@@ -323,31 +323,22 @@ def normalize_description(text: str) -> str:
     return adf_to_text(text_to_adf(text))
 
 
-# Jira enforces the description-field length limit on the ADF representation, NOT
-# the plain text. ``text_to_adf`` wraps every line in its own paragraph node, so a
-# multi-line description inflates well past its plain-text length (a 32,767-char
-# description observed serializing to ~50,566 ADF chars — bug 626d follow-up).
-# Target a budget safely under Jira's 32,767-char limit (margin for serialization
-# differences between this measurement and ACLI's wire form).
+# Jira limits serialized ADF length, which can exceed plain-text length.
+# Leave headroom below 32,767 for wire serialization differences.
 _ADF_DESCRIPTION_LIMIT: int = 32000
 _ADF_TRUNCATION_SUFFIX: str = " … [truncated by reconciler]"
 
 
 def _adf_serialized_len(text: str) -> int:
-    """Length of ``text``'s ADF serialization — the size Jira actually limits."""
+    """Return Jira-limited serialized ADF length."""
     return len(json.dumps(text_to_adf(text)))
 
 
 def fit_text_to_adf_limit(text: str, *, limit: int = _ADF_DESCRIPTION_LIMIT) -> str:
-    """Truncate ``text`` so its ADF serialization fits within ``limit`` chars.
+    """Fit text within the serialized ADF limit by binary-searching a prefix.
 
-    A plain-text cap is insufficient because ADF structure inflates the size, so we
-    binary-search the largest text prefix whose ADF (plus a truncation marker)
-    serializes within ``limit``. Idempotent and deterministic: a value already
-    within ``limit`` is returned unchanged, and the function is its own fixed point —
-    so the send path (``acli`` create/update) and the differ's description comparison
-    apply it identically and the diff converges. Send/diff-side only; the local
-    ticket store is never mutated.
+    Keep an already-fitting value unchanged. Send and diff use the same result
+    without changing the local ticket store.
     """
     if not isinstance(text, str) or _adf_serialized_len(text) <= limit:
         return text
@@ -366,21 +357,9 @@ def fit_text_to_adf_limit(text: str, *, limit: int = _ADF_DESCRIPTION_LIMIT) -> 
 # ---------------------------------------------------------------------------
 # Markdown-aware ADF (story e59d, epic 708d)
 #
-# Everything above converts PLAIN text: ``text_to_adf`` emits one paragraph per
-# block, so Markdown syntax (headings, list markers, fences, ``**bold**``) reaches
-# Jira as literal characters and Cloud renders raw source. The functions below add
-# the missing Markdown-aware half, backed by ``marklas`` (MIT) over ``mistune``
-# (BSD-3-Clause).
-#
-# marklas is an OPTIONAL EXTRA, imported LAZILY inside each function. This module
-# ships as reconciler package data under ``rebar/_engine/`` and is contractually
-# stdlib-only, so ``import adf`` must keep working with no extras installed; when
-# marklas is absent each function returns its PLAIN counterpart's result rather
-# than raising. (The vendoring alternative was rejected: marklas needs mistune, and
-# ``src/rebar/_vendor/`` is not importable from the reconciler subprocess.)
-#
-# NOTHING here is wired into ``AdfCodec`` or any live send path — that cutover is
-# story 3388, which also owns tolerating a no-extras install.
+# The functions below add optional Markdown-aware conversion through lazily
+# imported marklas. Without the extra they use plain-text conversion.
+# AdfCodec uses them in configured rich mode; plain mode remains the default.
 # ---------------------------------------------------------------------------
 
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)

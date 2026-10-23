@@ -105,17 +105,9 @@ from rebar.reconciler.apply_inbound import (  # noqa: E402
     inbound_repair_property,
 )
 
-# Subject prefixes considered "benign" for HEAD-drift tolerance — i.e.,
-# external writers that don't conflict with in-flight outbound mutations.
-# Bug f058: parallel Claude sessions running `rebar transition` /
-# `rebar create` / etc. emit `ticket: <VERB>` commits to the tickets
-# branch during a reconciler pass. The suggestion subsystem emits
-# `suggestion: RECORD`. Other reconciler passes emit `acquire lock` /
-# `release lock`. Competing outbound writes emit `pass_record: <pass_id>`
-# — the original concern the drift detector was built for — and remain
-# non-benign.
-# Outbound leaf appliers + HEAD-drift helpers live in apply_outbound.py.
-# Re-exported so _build_leaves (resident) and _apply_batch's drift check resolve.
+# Ticket, suggestion, and lock commits are benign HEAD drift; competing
+# ``pass_record`` writes are not. Re-export outbound leaves and drift helpers
+# so local callers and the batch check resolve their existing names.
 from rebar.reconciler.apply_outbound import (  # noqa: E402, F401
     _apply_outbound_conflict,
     _apply_outbound_create,
@@ -142,11 +134,7 @@ from rebar.reconciler.batch_dispatch import (  # noqa: E402
     update_one,
 )
 
-# Deferred conflict bug filing lives in conflict_bug_filing.py (ticket 4527):
-# dedup tag per (local_id, jira_key) pair, 24h accumulation cap, abort-if-empty,
-# --detected-by provenance. Imported under the historic private name so the
-# monkeypatch seam tests rely on (applier._file_conflict_bug_ticket) survives —
-# the deferred loop below resolves this module-global at call time.
+# Re-export deferred conflict filing under its historic patchable name.
 from rebar.reconciler.conflict_bug_filing import (  # noqa: E402
     file_conflict_bug_ticket as _file_conflict_bug_ticket,
 )
@@ -368,20 +356,10 @@ def apply(
     synced_fields_out=None,
     ticket_plans=None,
 ):
-    """Polymorphic dispatch entry point.
+    """Dispatch one typed mutation or a typed batch, selected by argument shape.
 
-    Two call shapes:
-      1. Typed single-mutation:  apply(mutation, *, client=None) -> ApplyResult
-      2. Batch:                   apply(mutations: Sequence[Mutation], pass_id, ...) -> Path
-    Selection is by argument type at the top of the function. The batch form
-    raises ``TypeError`` when any element is not a typed ``Mutation``.
-
-    ``synced_fields_out`` (bug e6e9) is an optional out-parameter dict the batch path
-    fills with ``local_id -> {vendor_field: value}`` for every outbound write CONFIRMED
-    to have landed, so ``reconcile._advance_baselines`` can advance the ADR-0026 baseline
-    to the last-SYNCED value rather than the pass-start fetch. Left untouched when None
-    (and by the typed / dry-run / no-write paths, which issue no batch writes), so the
-    caller sees an empty map and falls back to today's fetch-only advance.
+    Batch entries must be typed mutations. ``synced_fields_out`` collects confirmed
+    outbound values for baseline advance; dry/no-write paths leave it untouched.
     """
     # REB-3115 S5 T1: typed single-mutation dispatch via explicit declared protocol.
     if isinstance(mutations, MutationShape):
@@ -536,54 +514,24 @@ def _apply_batch(
     *,
     ticket_plans,
 ) -> Path:
-    """Batch dispatch: route dict mutations by ticket plan and write a flat-JSON manifest.
+    """Dispatch planned dict mutations and write a flat-JSON manifest.
 
-    ``ticket_plans`` is required: the create reroute and the coordinator reroute
-    dispatch every planned dict. A dict no plan routes (a plan mixing a create with a
-    non-create action) is recorded failed without a vendor call.
-
-    Performs HEAD-pin drift detection before each mutation: captures the
-    tickets-branch HEAD SHA before the first mutation, then re-checks before
-    each subsequent mutation. If the HEAD changes mid-pass, raises HeadDriftError
-    and aborts without issuing further Jira calls.
-
-    Empty mutations list is a no-op fast path (no HEAD check invoked).
-
-    Args:
-        mutations: List of mutation dicts, each with at least an "action" field
-                   ("create", "update", or "delete").
-        pass_id:   Unique identifier for this reconciliation pass.
-        repo_root: Repository root directory. Defaults to four levels above this file.
-        synced_fields_out: Optional dict filled with ``local_id -> {field: value}`` for
-                   the outbound writes that CONFIRMEDLY landed (bug e6e9). Populated from
-                   the batch context AFTER the dispatch loop, so a HeadDriftError abort
-                   contributes only the mutations that actually completed before it.
-
-    Returns:
-        Path to the written manifest file.
-
-    Raises:
-        HeadDriftError:   When the tickets-branch HEAD changes between mutations,
-                          indicating a concurrent write by another process.
-        RescheduleError:  When the write path signals reschedule. A health event
-                          JSON is emitted to stderr before the raise. No
-                          retry-counter file is written to disk; the next pass
-                          starts fresh.
+    Unroutable plans fail without a vendor call. Check ticket-branch HEAD before
+    each write; drift aborts remaining writes. An empty batch skips that check.
+    ``synced_fields_out`` records only confirmed writes. A reschedule emits a
+    health event before raising; no retry counter is persisted.
     """
     if repo_root is None:
         from rebar.config import reconciler_repo_root as _owned_repo_root
 
         repo_root = _owned_repo_root()
 
-    # S4: _load_acli now returns the configured backend's transport directly. The
-    # transport (an AcliClient) already carries the resolved connection settings
-    # (jira_url/user/api_token and jira_project, defaulting to "DIG" to satisfy ACLI
-    # on every CREATE — bug 4fa9-0846-519e-4c30), so no inline construction is needed.
+    # The configured backend supplies a transport with resolved Jira settings.
     client = _load_acli()
 
     mutations_with_outcomes: list[dict] = []
 
-    # Fast path: empty mutation list — skip HEAD check entirely
+    # Empty batches skip HEAD checks.
     if not mutations:
         manifest = {
             "pass_id": pass_id,
@@ -597,31 +545,21 @@ def _apply_batch(
         manifest_path.write_text(json.dumps(manifest, indent=2))
         return manifest_path
 
-    # Resolve the configured project scope for the cross-project safety guard
-    # (bug 626d) via the Backend port's ``project`` (ticket 97f2/bbf1) — the
-    # DIG-defaulted write scope matches the create client. Read off the backend
-    # (not the transport) so a test fake transport without a jira_project
-    # attribute still works. Resolved HERE (past the empty-mutations fast path)
-    # so a zero-mutation pass builds no extra backend.
+    # Read project scope from the backend after the empty-batch fast path;
+    # fake transports need no ``jira_project`` attribute.
     from rebar.config import compose_config
     from rebar.reconciler import projects_store
     from rebar.reconciler._backend_registry import select_backend
 
     _project = select_backend(compose_config()).project
-    # Story d19d: with a seeded many-to-many mapping, the allowed write scope is the
-    # store's whole project SET, not the single construction-time default. An unseeded
-    # store (no projects.json) yields no keys, so fall back to the single ``_project``
-    # string — preserving the bug-626d single-project guard exactly.
+    # A seeded mapping allows all store projects; otherwise use the default.
     _allowed: str | list[str] = list(projects_store.read_projects(repo_root).keys()) or _project
     _scope_display = (
         ", ".join(repr(p) for p in _allowed) if isinstance(_allowed, list) else repr(_allowed)
     )
 
-    # Cross-project safety guard (bug 626d): refuse — BEFORE issuing any Jira
-    # write — to push outbound updates/deletes at issues outside the allowed
-    # project scope. Stale bindings/labels from a prior sync to another project
-    # would otherwise silently mutate the wrong project's issues. Fail-closed:
-    # abort the whole pass (no partial writes) so a misconfiguration cannot leak.
+    # Reject out-of-scope updates/deletes before any Jira write to avoid
+    # mutating issues from stale bindings in another project.
     offenders = _cross_project_targets(mutations, _allowed)
     if offenders:
         sample = ", ".join(f"{k}(→{p})" for k, p in offenders[:5])
