@@ -1,19 +1,8 @@
-"""The lean discovery row must actually be lean (story 98b8-5f08-1569-45cc).
+"""Lean ``list_tickets`` rows omit bulky authorship and signature material.
 
-``list_tickets``' docstring has always promised a lean default that omits the bulky
-fields, but the lean path dropped only ``description``/``comments``. On the real store
-(2,855 tickets) that left ``authorship_ledger`` (26.2 MB, 59% of the lean payload),
-``attestations`` (10.4 MB, 23%) and ``signature`` (2.6 MB, 6%) in every row -- **88% of a
-"lean" list's bytes were base64 signature material no list caller consumes**. Per row:
-15,548 bytes vs 1,726 bytes.
-
-A list caller is choosing a ticket; the signature record is read per-ticket via ``show`` /
-``verify-signature``, which are untouched on every surface. So the drop set widens, and it
-is spelled ONCE (``rebar._engine_support.reads.lean_projection``) for both read backends.
-
-These tests drive the REGISTERED ``CallToolRequest`` handler a real stdio/HTTP client
-reaches -- not just ``call_tool`` -- so a projection applied only to the post-
-``build_server()`` instance cannot pass them.
+``lean_projection`` serves both read backends. Per-ticket ``show`` and
+``verify-signature`` retain those details. Tests use the registered request handler,
+so a projection applied only to direct ``call_tool`` cannot pass.
 """
 
 from __future__ import annotations
@@ -147,12 +136,9 @@ def test_lean_row_is_an_order_of_magnitude_smaller(rebar_repo: Path, bulky_store
 def test_ready_tickets_is_lean_by_default_with_full_as_the_opt_out(
     rebar_repo: Path, monkeypatch
 ) -> None:
-    """`ready_tickets` is the other whole-shape discovery surface, and it was the FULL one.
+    """``ready_tickets`` drops bulk by default and restores all four fields with ``full=True``.
 
-    It had no ``full`` flag at all, so this narrows a published default. Both directions are
-    asserted here because that is what makes the narrowing a *projection*: the lean call
-    must drop the bulk, and ``full=True`` must still carry every one of the four fields --
-    an opt-out that did not restore them would be a schema removal wearing a flag.
+    Both directions distinguish a lean projection from a removed schema field.
     """
     rows = [_bulky_state(i) for i in range(3)]
     monkeypatch.setattr(rebar, "ready", lambda **_: list(rows))
@@ -210,12 +196,9 @@ def test_ready_default_is_narrower_than_filterable_list_default(
 def test_oversize_list_is_refused_with_a_structured_error_not_a_short_list(
     rebar_repo: Path, bulky_store
 ) -> None:
-    """Over budget -> a structured, actionable error. NEVER a truncated list.
+    """An over-budget registered handler returns a structured error, never a short list.
 
-    A silently-shortened list is the vacuous result this project refuses: the caller
-    cannot tell it from a complete one. Asserted on the REGISTERED handler a real client
-    reaches, so a guard applied only to the instance after ``build_server()`` cannot pass
-    this and still ship broken.
+    A caller cannot distinguish a truncated list from a complete one.
     """
     from rebar.mcp_server import _LIST_TOKEN_BUDGET_BYTES
 
@@ -237,14 +220,8 @@ def test_oversize_list_is_refused_with_a_structured_error_not_a_short_list(
 
 
 def test_oversize_list_travels_the_established_envelope_seam(rebar_repo: Path, bulky_store) -> None:
-    """The refusal must reuse `install_error_guard`, not a bespoke error path.
-
-    On the direct ``call_tool`` surface that means ``ToolError`` raised *from* an
-    ``McpEnvelopeError`` — the same delivery every other rebar MCP failure uses, so a
-    client branches on a code instead of parsing prose. The exception TYPE is what matters:
-    ``_envelope_error`` only envelopes a known rebar exception type, so a plain
-    ``Exception`` carrying ``.error_code`` would be dropped and the caller would get an
-    unstructured failure.
+    """Oversize refusal follows the shared envelope seam. ``McpEnvelopeError`` becomes
+    ``ToolError``. Clients can branch on its code without parsing prose.
     """
     import asyncio
 
@@ -262,13 +239,7 @@ def test_oversize_list_travels_the_established_envelope_seam(rebar_repo: Path, b
 
 
 def test_ready_tickets_is_bounded_too(rebar_repo: Path, monkeypatch) -> None:
-    """`ready_tickets` is the other whole-shape discovery surface; it gets the same bound.
-
-    Its lean shape is covered above; this is the other half. On the real store its 61 ready
-    tickets weighed 693,556 bytes unprojected and 76,878 lean, so the projection is what
-    keeps an ordinary ``ready`` under the budget -- and the bound is what makes an
-    extraordinary one fail loudly instead of killing the transport.
-    """
+    """Lean ``ready_tickets`` also refuses extraordinary payloads over the wire budget."""
     monkeypatch.setattr(rebar, "ready", lambda **_: [_bulky_state(i) for i in range(4000)])
     response = _call("ready_tickets")
     assert response.isError
@@ -313,23 +284,10 @@ def test_a_list_that_fits_is_returned_whole(rebar_repo: Path, bulky_store) -> No
 def test_budget_is_measured_on_the_wire_payload_not_the_raw_reducer_rows(
     rebar_repo: Path, monkeypatch
 ) -> None:
-    """The bound must not UNDER-estimate: measure what the client receives.
+    """Measure the full wire payload so the bound cannot underestimate client bytes.
 
-    Sizing the raw reducer dicts as one JSON object is wrong on two independent axes, and
-    both make the measurement SMALLER than the truth -- which is the dangerous direction,
-    because an under-estimating bound passes a payload that still overruns the client.
-    (A third axis -- pydantic output models re-adding every lean-dropped field as an
-    explicit ``null``/``[]``/``""`` -- disappeared with the mirror, story
-    quilted-nepotic-kitty: the tool now returns the lean rows unchanged.)
-
-    1. ``js_safe_result`` rewrites each JS-unsafe 19-digit nanosecond integer as a QUOTED
-       string, which is longer than the bare int.
-
-    2. ``FastMCP`` emits the result TWICE -- ``structuredContent`` (the whole
-       ``{"result": [...]}`` object) AND one ``content`` text block per row, each
-       ``json.dumps(row, indent=2)``. Together they are ~2.08x the structured object alone,
-       so measuring only ``structuredContent`` would pass roughly twice the budget.
-
+    ``js_safe_result`` quotes unsafe nanosecond integers, and FastMCP sends both
+    ``structuredContent`` and per-row ``content`` text. Raw reducer rows omit both costs.
     """
     from rebar._engine_support.reads import LEAN_OMITTED_FIELDS
     from rebar._mcp_budget import _payload_bytes, _wire_bytes
@@ -366,13 +324,8 @@ def test_budget_is_measured_on_the_wire_payload_not_the_raw_reducer_rows(
 def test_a_list_the_raw_measurement_would_have_passed_is_refused(
     rebar_repo: Path, monkeypatch
 ) -> None:
-    """The regression window: under budget by the raw measurement, over it on the wire.
-
-    250 plain rows (no signature bulk at all -- just the 19-digit `created_at`/`updated_at`
-    every ticket carries) measure 49,652 bytes as raw reducer dicts, comfortably inside the
-    90,000-byte budget, but reach the client as 105,292 bytes. A bound measured on the raw
-    dicts RETURNS this list; a payload 17% over the budget it was supposed to enforce is
-    exactly the "passes something that still overruns" failure the bound exists to prevent.
+    """Reject a list whose raw rows fit but whose duplicated, JS-safe wire form exceeds
+    the 90,000-byte budget.
     """
     import rebar._engine_support.reads as reads_mod
     from rebar._mcp_budget import _LIST_TOKEN_BUDGET_BYTES, _payload_bytes
@@ -417,12 +370,10 @@ def _refusal_message(response) -> str:
 def test_the_refusal_names_a_remedy_the_TOOL_can_actually_execute(
     rebar_repo: Path, bulky_store, monkeypatch
 ) -> None:
-    """A remedy the tool would reject is worse than no remedy: it is a dead end.
+    """Refusal guidance names filters supported by each tool.
 
-    ``ready_tickets`` takes only ``sort`` and ``full`` -- it has NO filter parameters, and
-    ``full`` switches SHAPE, not which tickets come back -- so telling its caller to "narrow
-    the query with status/has_tag" names arguments the tool would reject. ``ready`` is a
-    whole-store question; the scoped tool is ``next_batch``.
+    ``ready_tickets`` has no narrowing filters. ``full`` changes shape only, so its
+    over-budget remedy points to scoped ``next_batch`` instead.
     """
     bulky_store(4000)
     list_message = _refusal_message(_call("list_tickets"))
@@ -445,13 +396,8 @@ def test_the_refusal_names_a_remedy_the_TOOL_can_actually_execute(
 def test_search_is_bounded_too_because_its_docstring_promises_it(
     rebar_repo: Path, monkeypatch
 ) -> None:
-    """`search` is the THIRD discovery list, and its docstring already claimed "bounded".
-
-    It returns `project_search_result` rows, so an ordinary query is far under budget --
-    but an unfiltered one was as unbounded as `list_tickets`, i.e. the same transport-death
-    failure this change exists to fix, sitting behind a docstring that says otherwise.
-    Its remedy names what `search` can actually narrow with (a more specific query, a field
-    predicate, or its status/ticket_type/has_tag arguments), never `ready_tickets`' filters.
+    """Bound unfiltered ``search`` results and name its supported narrowing options:
+    specific text, field predicates, status, ticket type, or tags.
     """
     rows = [
         {

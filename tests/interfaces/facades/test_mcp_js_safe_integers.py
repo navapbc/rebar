@@ -1,23 +1,8 @@
-"""An MCP tool result must not put a JSON-uninteroperable integer on the wire
-(bug unreal-milky-sloth / 6fe7-956f-4901-45cf).
+"""MCP responses encode integers outside JavaScript's exact range as decimal strings.
 
-RFC 8259 section 6 guarantees that implementations "agree exactly on their numeric
-values" only for integers in ``[-(2**53)+1, (2**53)-1]``. rebar's ticket timestamps are
-``time.time_ns()`` values -- 19 digits, far outside that range -- and they reached the MCP
-wire as bare JSON numbers through the (since deleted) permissive pydantic output models,
-which let ``created_at``/``updated_at`` pass through undeclared.
-
-Every supported MCP client parses JSON numbers as IEEE-754 binary64, so this broke both
-ways: a client using plain ``JSON.parse`` SILENTLY truncated the value
-(``1786649271159032001`` -> ``1786649271159032000``), and GitHub Copilot CLI, which parses
-losslessly into a ``BigInt``, threw ``TypeError: Do not know how to serialize a BigInt``
-when it re-stringified the result. rebar had already reached this conclusion for jq and
-banned it from the event path (``src/rebar/_store/canonical.py:15-19``,
-``tests/unit/test_canonical.py:64-72``); the MCP surface never generalized the rule.
-
-These tests drive the real in-process MCP server -- both the direct ``call_tool`` path and
-the REGISTERED request handler an actual stdio client reaches -- against a real store.
-Nothing is mocked.
+Nanosecond ticket timestamps exceed ``2**53 - 1``. JSON numbers can lose digits in
+float64 clients or break lossless ``BigInt`` re-serialization. These tests exercise
+both direct ``call_tool`` and the registered request handler against an initialized store.
 """
 
 from __future__ import annotations
@@ -62,11 +47,9 @@ def _call_direct(tool: str, **args: object) -> tuple[str, Any]:
 
 
 def _call_via_handler(tool: str, **args: object) -> tuple[str, Any]:
-    """Call ``tool`` through the REGISTERED request handler a stdio client reaches.
+    """Call the handler bound at server construction, as a stdio client does.
 
-    ``FastMCP._setup_handlers`` binds the handler at construction time, so a fix applied
-    only to the instance after ``build_server()`` would pass ``_call_direct`` and still
-    ship broken. This path is the one an agent actually takes.
+    Patching only the server instance can pass ``_call_direct`` while this path fails.
     """
     import mcp.types as types
 
@@ -115,12 +98,9 @@ def test_show_ticket_emits_no_uninteroperable_integer(
 
 
 def test_list_tickets_emits_no_uninteroperable_integer(ticket_with_ns_timestamp: str) -> None:
-    """The tool named in the report. ``list_tickets`` returns many ticket records.
+    """Anchor a nonempty ticket response with timestamps before checking integer safety.
 
-    LIVENESS FIRST. ``assert not hits`` alone passes vacuously — on an empty list, on an
-    error envelope, or on a payload carrying no timestamps at all — so a broken tool would
-    read as green. The anchors below prove the payload actually contained the thing under
-    test BEFORE the absence-of-unsafe-integers assertion is allowed to mean anything.
+    An empty or error response would otherwise pass the absence check vacuously.
     """
     _text, structured = _call_via_handler("list_tickets", status="open")
 

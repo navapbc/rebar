@@ -1,13 +1,7 @@
-"""Tier E: the argparse CLI surface — routing coverage, wiring, and stream/exit contracts.
+"""Argparse routes every known CLI command and wires in-process reads and writes.
 
-These prove the in-process argparse CLI (:mod:`rebar._cli`) routes every known subcommand,
-that its in-process read/write arms are wired, and that the help forms and unknown-subcommand
-paths honor their stream/exit contracts. Assertions are on OBSERVABLE BEHAVIOR (return data,
-exit codes, which stream output lands on, help-form equivalence) — not byte-for-byte snapshots
-of help text. (The former ``tests/golden/cli_help`` byte-parity goldens pinned the CLI to the
-retired bash dispatcher during the E1 cutover; post-cutover they only re-asserted "the help
-bytes are what they were last captured", so they were a change-detector — any help edit broke
-them and was "fixed" by re-capturing — and were removed.)
+Help forms and unknown commands are checked through return data, streams, and exit codes,
+without byte-for-byte help snapshots.
 """
 
 from __future__ import annotations

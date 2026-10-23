@@ -1,19 +1,9 @@
-"""Deterministic pre-gates for the four zero-finding AGENT criteria (ticket 4ee2).
+"""Deterministic pre-gates filter T13, T14, removal-rationale, and asserted-capability.
 
-T13 / T14 / removal-rationale / asserted-capability produced ZERO findings over ~7,900
-agentic runs, so each now has a conservative deterministic PRE-FILTER in front of the
-unchanged LLM router (ADR 0034 amendment): a :class:`DetGateRule` that FIRES when
-(all ``text_all`` regexes match the plan text) OR (any ``file_impact_globs`` fnmatch
-matches a declared file_impact path) OR (``file_impact_reason_re`` matches an entry's
-reason or path). A fired plan routes to the LLM exactly as before; a not-fired plan
-skips the criterion with zero LLM routing, recorded in ``gate_log`` (surfaced in the
-sidecar as ``coverage.routing.det_gated``).
-
-These tests pin: the trigger vocabularies fire (audit evasion classes), non-matching
-plans skip with a det_gated record and zero LLM routing, the asserted-capability
-conjunction (both legs required), the file_impact glob/reason arms firing on
-file_impact alone, T5a/T5d/T7/T12 behavior preservation across the DetGateRule
-migration, and the ADR 0034 amendment note.
+A ``DetGateRule`` fires when all ``text_all`` patterns match, or a file-impact glob or
+reason/path pattern matches. Fired criteria retain LLM routing. Skipped criteria record
+``coverage.routing.det_gated`` with no LLM call. The tests also preserve the
+asserted-capability conjunction and T5a/T5d/T7/T12 routing.
 """
 
 from __future__ import annotations

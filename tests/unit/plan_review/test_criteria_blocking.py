@@ -1,23 +1,9 @@
-"""T3 + T10 blocking enablement and the T10 infra DET overlay gate (ticket bfa8).
+"""T3, T10, and T5c block at priority 0.90 through ``default_posture`` and
+``block_threshold``. The code-review ``blocking_enabled`` field does not apply.
 
-T3 (integration feasibility) and T10 (infra/IaC) never blocked in ~2,500 runs each —
-a configuration artifact (default_posture stayed "advisory"), not a quality signal.
-Operator approved enabling blocking for both at a conservative 0.90 pilot threshold.
-Plan-review blocking derives from ``default_posture: "blocking"`` +
-``block_threshold`` (the ``blocking_enabled`` field is the code-review gate's
-convention and does not apply here); a finding blocks when its criterion is
-blocking-postured and its priority crosses the threshold — no per-class mechanism.
-
-These tests pin:
-* the routing posture: T3 and T10 (ticket bfa8) and T5c (ticket c97a) carry
-  default_posture=blocking @ 0.90;
-* Pass-3 behavior: a T3/T10 finding at priority 0.92 BLOCKS, one at 0.85 stays
-  ADVISORY, through the plan-review ``pass3_over_findings`` wrapper;
-* the T10 DET overlay gate (audit: 28% fire rate, 100% strong-finding recall):
-  fires on a terraform-touching plan and a GHA-workflow plan, skips a pure-docs
-  plan with a ``gate_log`` (``coverage.routing.det_gated``) entry and zero T10
-  LLM routing;
-* the T10 rubric carries the MAJOR-class severity-guidance sentence.
+Pass 3 blocks all 3 at 0.92 and advises at 0.85. The T10 deterministic overlay
+routes Terraform and workflow plans, skips pure docs with a ``det_gated`` record,
+and retains the rubric's MAJOR-class severity guidance.
 """
 
 from __future__ import annotations

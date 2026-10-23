@@ -166,19 +166,9 @@ def test_mcp_bridge_tools_return_the_public_library_results(
     assert seen == calls
 
 
-# --------------------------------------------------------------------------- #
-# Absent Jira credentials DEGRADE SOFTLY (bug colourless-hasteless-lamb)       #
-# --------------------------------------------------------------------------- #
-#
-# The deployed MCP server had no Jira credentials at all, so every live bridge operation
-# failed. Wiring them in (ssm.tf -> fetch-secrets.sh -> the container .env) is deliberately
-# a SOFT-degrade path: unlike the static bearer-token store, which is an AUTH boundary and
-# fails CLOSED, an absent OUTBOUND integration credential must never take the endpoint down.
-#
-# These pin the behaviour that makes that posture safe: a missing credential produces a
-# TYPED, per-call error that NAMES what is missing, not a crash and not a silent success. If
-# the probe ever started raising an untyped exception, or worse returning a PASS-shaped
-# verdict without credentials, the soft posture would stop being defensible.
+# Missing outbound Jira credentials leave the MCP server available, unlike missing
+# bearer-token auth. Each bridge call returns a typed error naming the absent input.
+# It must neither crash nor report a false PASS.
 
 
 def _access_check():
@@ -198,11 +188,8 @@ def _access_check():
             },
             "missing_credentials",
         ),
-        # All three CREDENTIALS present but no project: the probe still cannot run. This is the
-        # case that makes JIRA_PROJECT a fourth REQUIRED input rather than an optional extra --
-        # `resolve_jira_probe_scope` reads the ENVIRONMENT ONLY, so rebar.toml's `[jira]
-        # project` never reaches it, and wiring only the credentials would move the failure
-        # here instead of reaching a verdict.
+        # JIRA_PROJECT is required even with all credentials. Scope resolution reads the
+        # environment, not rebar.toml's [jira] project.
         (
             {
                 "JIRA_URL": "https://example.atlassian.net",
@@ -216,11 +203,7 @@ def _access_check():
 def test_incomplete_jira_scope_yields_a_typed_verdict_not_a_crash(
     env: dict[str, str], reason: str
 ) -> None:
-    """Each incomplete scope fails CLOSED with a NAMED reason and exit 2 -- never a traceback.
-
-    No network is reached: the probe short-circuits before constructing a client, which is
-    exactly why an unconfigured box stays serviceable instead of hanging or erroring out.
-    """
+    """Incomplete scope returns a named exit-2 error before constructing a network client."""
     result, lines, returncode = _access_check().run_access_check(env=env)
 
     assert returncode == 2
@@ -232,16 +215,9 @@ def test_incomplete_jira_scope_yields_a_typed_verdict_not_a_crash(
 def test_absent_credentials_surface_as_a_typed_error_naming_the_variables(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The library boundary converts the exit-2 probe into a RebarError that NAMES the inputs.
+    """The library names missing Jira inputs in a RebarError while other tools stay usable.
 
-    This is the whole soft-degrade contract at the tool boundary: ONE tool reports a clear,
-    actionable "these are required" error while the server keeps serving every other tool.
-    An operator reading it learns which SSM slot to populate without opening the source.
-
-    The JIRA_* variables are cleared explicitly rather than assumed absent. A developer machine
-    (and, once this wiring lands, the box itself) HAS them set, so without this the test would
-    make a LIVE authenticated call to Jira -- slow, flaky, credential-dependent, and no longer
-    a test of the unconfigured path at all.
+    Clear JIRA_* explicitly so a configured machine cannot make an outbound Jira call.
     """
     for variable in ("JIRA_URL", "JIRA_USER", "JIRA_PROJECT", "JIRA_API_TOKEN"):
         monkeypatch.delenv(variable, raising=False)

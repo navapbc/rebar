@@ -1,20 +1,8 @@
-"""Held-out validation for bug 2e16 — authored independently of the implementation.
+"""CLI and MCP agree on whether a passed but unsigned plan review is retryable.
 
-The rule "a plan review that PASSED but whose attestation failed to persist is
-RETRYABLE, not success" lived only in the CLI. MCP returned `review_plan(...)` raw, so
-an agent saw `verdict: PASS`, proceeded to `claim`, and the claim gate refused because
-the signature it consumes was never written. The surface most used by autonomous agents
-had the weaker implementation.
-
-The ticket's requirement is "ONE place below CLI and MCP". Structurally asserting where
-the function lives would be a change-detector, so this pins the OBSERVABLE consequence
-instead: for the same input result, the two surfaces must never disagree. If someone
-re-forks the logic, a divergent row here goes red.
-
-The second thing worth guarding is over-triggering. `retryable` gates whether an agent
-retries, so a deliberate no-sign (`reason`, not `error`) must NOT be reported retryable
-— that would send agents into pointless sign_review loops on reviews that were never
-meant to be signed.
+A persistence error is retryable because claim needs the missing signature. A deliberate
+no-sign result carries a reason, not an error, and must not trigger a sign-review retry.
+The tests assert matching observable results across both surfaces.
 """
 
 from __future__ import annotations

@@ -1,20 +1,9 @@
-"""Bug 326f-595a-088b-40a5 — a COMPLETED fsck run is a result, not a tool error.
+"""Completed fsck runs return enumerable findings, even when issues set exit code 1.
 
-``fsck`` is a DIAGNOSTIC: finding problems IS its success condition. The library
-flattened every non-zero exit into ``RebarError("rebar store fsck failed (exit N): <whole
-text report>")`` and the MCP tool relayed that to the client as
-``{"error": "command_failed", "exit_code": 1, "message": "<the report>"}`` — so a
-caller could not ENUMERATE the findings, and could not tell "the store has issues"
-from "the tool broke".
-
-These tests pin the four halves of the contract:
-
-* a completed run (exit 0 or 1) returns a STRUCTURED, enumerable result;
-* a run that could NOT happen (exit >= 2) still raises — the two stay distinguishable;
-* the CLI's non-zero-on-findings exit is untouched (``git fsck``/``fsck(8)`` convention);
-* ``rebar.fsck()``'s legacy ``-> str`` / raise contract is untouched for its callers.
-
-Plus AC4: a self-healed ``STATUS_FORK_RESOLVED`` is REPORTED but does not fail the run.
+Execution failures still raise, including an uninitialized store that can exit 1.
+CLI non-zero-on-findings and the
+legacy ``rebar.fsck() -> str`` contract remain intact. A self-healed
+``STATUS_FORK_RESOLVED`` is reported without failing the run.
 """
 
 from __future__ import annotations
@@ -117,18 +106,9 @@ def test_library_fsck_report_on_clean_store_reports_zero(rebar_repo: Path) -> No
 
 # ── the other half: a run that could NOT happen still raises ──────────────────
 def test_fsck_report_raises_when_fsck_could_not_run(tmp_path: Path) -> None:
-    """A genuine EXECUTION failure stays distinguishable from findings.
+    """An uninitialized store raises instead of returning a false clean report.
 
-    An uninitialised store cannot be scanned at all, so the library must RAISE rather
-    than hand back an empty "clean" report — reporting "your store is fine" for a store
-    that was never read would be worse than the bug this ticket fixes.
-
-    Deliberately NOT asserted on the exit code: this path exits **1**, the same code as
-    "issues found" (``_commands/fsck.py`` ``_missing_tracker_result``, whose JSON branch
-    emits a payload byte-identical to a clean store and puts the real diagnostic on the
-    TEXT path only). The exit code alone therefore cannot carry this distinction, so the
-    test asserts the OBSERVABLE contract — it raised instead of returning a report, and
-    the error says the store could not be scanned — not a guess about the code.
+    Both this failure and findings can exit 1. The error contract distinguishes them.
     """
     bare = tmp_path / "not-a-store"
     bare.mkdir()
@@ -262,11 +242,9 @@ def test_recover_returns_the_narrative_verbatim_not_a_fake_scan_report(
 def test_recover_does_not_scrape_pseudo_issues_out_of_its_prose(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`WARN:` lines in the recover narrative must NOT become `issues[]` entries.
+    """Keep ``WARN:`` lines in recover prose out of ``issues[]``.
 
-    `_transform_json`'s `^([A-Z_]+):` regex matches `WARN:`, so feeding recover output
-    through it manufactured findings that no scan ever reported. Drive a narrative
-    containing exactly that shape and assert none of it leaks into `issues`.
+    The scan parser's label regex would otherwise misread them as findings.
     """
     from rebar._commands import fsck_recover as fr
 
@@ -292,11 +270,9 @@ def test_recover_does_not_scrape_pseudo_issues_out_of_its_prose(
 def test_recover_exit_1_is_a_completed_recovery_not_an_unreadable_store(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`fsck-recover` exit 1 means "attempted, nothing recovered" — a COMPLETED run.
+    """Recover exit 1 means attempted with nothing recovered, not an unreadable store.
 
-    The scan path treats exit 1 with no findings as an unscannable store. Applying that
-    rule to recover would report a legitimately completed recovery as an unreadable
-    tracker, so the two paths must not share the branch.
+    Scan exit 1 with no findings follows a different error path.
     """
     from rebar._commands import fsck_recover as fr
 
