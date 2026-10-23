@@ -1,23 +1,9 @@
-"""A vacuumed journal must not republish already-counted markers (bug 2dc7-31b7-ecbb-4cd2).
+"""Check journal-cursor recovery after a vacuum discards its saved entry.
 
-When journald vacuums (``SystemMaxUse``/``MaxRetentionSec``/``--vacuum-*``) the journal LOSES
-history. Under the original design each counter recomputed a cumulative ``total`` by scanning
-the whole journal and published ``total - prev``; a vacuum made ``total`` drop below the
-persisted offset, the delta went negative, and the guard republished the whole remaining
-``total`` as "new this interval" — a false page on the 1-datapoint ``review_interrupts`` alarm,
-pointing at journal history that had just been deleted.
-
-Since bug 1205 the total is accumulated forward from a persisted journald CURSOR instead of
-recomputed, and a negative delta is no longer REPRESENTABLE: entries that vanish are simply
-absent from the next read. What a vacuum can still do is discard the entry a cursor names, and
-the recovery from that is what these tests now pin:
-
-- the survivors are never re-announced as new, and
-- the suppression is not sticky — the counter reseeds and the next interval publishes normally.
-
-The dangerous recovery, and the one specifically excluded here, is abandoning the cursor and
-re-reading the journal from the beginning: that is the unbounded scan whose removal is the
-point of bug 1205, and it would fire exactly when the journal is largest.
+Surviving markers must not be republished. The counter reseeds, then publishes
+new markers once on the next interval. Recovery must not restart an unbounded
+scan from the journal's beginning. The log-file counter retains its separate
+bare-total behavior.
 """
 
 from __future__ import annotations
@@ -95,9 +81,8 @@ def _environment(tmp_path: Path, seeded_offset: int) -> tuple[dict[str, str], di
     paths: dict[str, Path] = {}
     for _metric, variable in _TARGETS:
         path = offsets / variable.lower()
-        # replication_errors greps a log FILE and keeps the bare-total form; the journal-backed
-        # counters carry `<total> <cursor>`, and the cursor here names an entry the vacuum has
-        # already discarded (base below is far above it).
+        # The log counter keeps a bare total; journal counters carry a total and
+        # a cursor already discarded by the vacuum.
         if variable == "REPL_OFFSET_FILE":
             path.write_text(f"{seeded_offset}\n")
         else:
@@ -105,8 +90,7 @@ def _environment(tmp_path: Path, seeded_offset: int) -> tuple[dict[str, str], di
         paths[variable] = path
     repl_log = tmp_path / "replication.log"
     repl_log.write_text("[ERROR]\n" * _MARKERS_IN_JOURNAL)
-    # journald has discarded the first 500 entries it ever held, so any cursor below that names
-    # an entry it can no longer seek to — which is what a vacuum does to a persisted cursor.
+    # Discard the first 500 entries so the saved cursor cannot be sought.
     base_file = tmp_path / "journal-base"
     base_file.write_text("500\n")
 
@@ -138,35 +122,33 @@ def _values(log: Path, target: str) -> list[int]:
 def test_shrinking_journal_publishes_zero_not_the_remaining_total(
     tmp_path: Path, target: str, offset_variable: str
 ) -> None:
-    """A vacuumed journal must not re-announce its survivors as new markers."""
+    """Do not re-announce surviving markers after a vacuum."""
     env, paths = _environment(tmp_path, seeded_offset=99)
 
     result = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
 
     assert result.returncode == 0
     published = _values(paths["aws_log"], target)
-    # Never the survivors. The log-file counter still publishes its own 0; a journal counter
-    # whose cursor was discarded cannot measure the interval at all and so publishes NOTHING,
-    # which is the probe's contract for an unmeasurable reading — a plausible number here would
-    # be indistinguishable from a healthy one.
+    # The log counter publishes 0; journal counters with lost cursors publish
+    # nothing because that interval cannot be measured. Never count survivors.
     assert published in ([], [0]), published
     assert _MARKERS_IN_JOURNAL not in published
     if offset_variable != "REPL_OFFSET_FILE":
-        # Reseeded, so the discarded cursor is not a permanent stall...
+        # Reseeding prevents a permanent cursor stall.
         total, cursor = paths[offset_variable].read_text().split()
         assert (total, cursor) == ("99", "542")
 
 
 def test_markers_after_a_rotation_still_publish(tmp_path: Path) -> None:
-    """Suppression must not be sticky: markers arriving after the reseed are counted normally."""
+    """Count new markers after reseeding."""
     env, paths = _environment(tmp_path, seeded_offset=99)
 
     first = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
-    # ...and one genuinely new marker lands in the interval after the reseed.
+    # Add one new marker after reseeding.
     journal = Path(env["JOURNAL_FILE"])
     journal.write_text(journal.read_text() + 'AUTODEPLOY_REVIEW_INTERRUPT {"ts": 2}\n')
     second = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
 
     assert (first.returncode, second.returncode) == (0, 0)
-    # The vacuumed interval publishes nothing; the next one publishes the new marker and only it.
+    # The lost-cursor interval is silent; the next counts only the new marker.
     assert _values(paths["aws_log"], "review_interrupts") == [1]

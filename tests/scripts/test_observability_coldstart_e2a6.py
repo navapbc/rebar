@@ -1,18 +1,8 @@
-"""A counter with no offset yet must not republish the journal (bug e2a6-9ee4-8d5c-4290).
+"""Check cold-start journal counters without saved offsets.
 
-Every cumulative marker counter in ``observability.sh`` publishes ``total - prev`` against a
-persisted offset file. When that file does not exist — a NEWLY INTRODUCED counter, a fresh
-``/var/lib/rebar``, a host rebuild, a disk restore — the old fallback read ``prev`` as 0, so the
-first run published every matching marker in the whole retained journal as "new this interval".
-That fabricated 7 bound-exceeded + 1 signal-unavailable markers on 2026-08-12, from history
-reaching back to 2026-08-04, against 1-datapoint threshold>0 alarms.
-
-No offset means the counter has never observed the source, so everything already in the journal
-predates monitoring by it — the cold-start complement of the lost-history clamp in bug
-2dc7-31b7-ecbb-4cd2 (see ``test_observability_rotation_2dc7.py``). These tests drive the real
-script with the offset files ABSENT against a populated stub journal and assert the published
-value is 0 and the offset is seeded, then assert a marker arriving AFTER initialisation still
-publishes normally.
+Existing markers predate monitoring and must publish 0 while the cursor is
+seeded. Markers arriving after initialization then publish normally. The
+log-file counter keeps its separate bare-total state.
 """
 
 from __future__ import annotations
@@ -73,9 +63,7 @@ def _environment(tmp_path: Path) -> tuple[dict[str, str], dict[str, Path]]:
     )
     _stub(bin_dir, "git", f'printf "{_SHA}\\trefs/heads/main\\n"; exit 0')
     _stub(bin_dir, "logger", "exit 0")
-    # The journal is materialised from $MARKERS_FILE and then served by the shared
-    # cursor-aware emulator, so the counters exercise the same bounded read path as production
-    # (bug 1205) while this suite keeps asserting its own cold-start contract.
+    # Serve marker-file records through the cursor emulator's bounded read path.
     _stub(
         bin_dir,
         "journalctl",
@@ -129,7 +117,7 @@ def _values(log: Path, target: str) -> list[int]:
 
 
 def _state(path: Path) -> tuple[int, str]:
-    """`<total> <cursor>` since bug 1205; a bare total (the log-file counter) has no cursor."""
+    """Read journal total and cursor; log-file totals have no cursor."""
     fields = path.read_text().split()
     return int(fields[0]), (fields[1] if len(fields) > 1 else "")
 
@@ -146,10 +134,8 @@ def test_cold_start_publishes_zero_and_seeds_the_offset(
     assert result.returncode == 0
     # 0, NOT the journal's marker count — everything there predates this counter.
     assert _values(paths["aws_log"], target) == [0]
-    # Seeded so the counter measures from the next interval on. Since bug 1205 the seed is a
-    # journald CURSOR at the tail rather than a recomputed total: what makes the inherited
-    # journal un-republishable is that the next read starts after it, not the arithmetic.
-    # replication_errors greps a log file rather than journald and keeps the bare-total form.
+    # Seed a tail cursor so later reads skip inherited journal entries.
+    # The replication-log counter keeps a bare total instead.
     total, cursor = _state(paths[offset_variable])
     if offset_variable == "REPL_OFFSET_FILE":
         assert (total, cursor) == (_MARKERS_IN_JOURNAL, "")

@@ -1,21 +1,8 @@
-"""The mcp blue-green markers are published as their own metrics (panicky-sylphish-foxterrier).
+"""Check separate MCP retire-cap and memory-abort journal metrics.
 
-`autodeploy.sh`'s `mcp` target emits two countable journal markers — ``AUTODEPLOY_MCP_RETIRE_CAP``
-(the blue/green port pool is exhausted / too many releases still draining) and
-``AUTODEPLOY_MCP_MEM_ABORT`` (the 8 GiB box was below the memory floor, so the 2x overlap was
-refused). `observability.sh` counts each into its own ``rebar/host`` metric
-(``mcp_retire_cap`` / ``mcp_mem_abort``) via a record-anchored ERE so the alarms in
-``monitoring_foxterrier.tf`` can page on them.
-
-These tests drive the REAL ``observability.sh`` over a synthetic unit journal and assert:
-- each marker is counted into its OWN metric with the correct delta offset,
-- the two tokens do NOT cross-contaminate each other's counter,
-- the record anchor (`^<TOKEN> {`) means prose merely NAMING a marker mid-line is never counted
-  (the bug-8c2f record-anchor contract), and
-- the counters are deltas (a second run counts only markers that arrived since the first).
-
-This is the coverage the LLM-Review gate flagged as missing on patch set 1 of change 2212.
-"""
+The real script counts record-anchored markers into distinct delta counters,
+ignores prose mentions, and publishes only new markers after the saved cursor.
+Cold starts seed offsets and publish 0."""
 
 from __future__ import annotations
 
@@ -108,11 +95,8 @@ def _environment(
     offsets.mkdir()
     paths = {name: offsets / name.lower() for name in _OFFSET_VARIABLES}
     if seed_offsets:
-        # `<total> <cursor>` since bug 1205. A cursor of 0 sits before the journal's first
-        # entry, so the counter is already observing and counts everything in it. An ABSENT
-        # file is a cold start (seeds a tail cursor and publishes 0 — bug e2a6, asserted
-        # separately below), and so is a BARE total, which is the pre-1205 format.
-        # REPL_OFFSET_FILE greps a log file rather than journald and keeps the bare form.
+        # Cursor 0 counts the first journal entries; absent or bare state would
+        # cold-start at the tail and publish 0. Replication keeps a bare total.
         for name, path in paths.items():
             path.write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n")
     env = subprocess_env()
@@ -193,8 +177,7 @@ def test_cold_start_seeds_offsets_and_publishes_zero(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert _values(aws_log, "mcp_retire_cap") == [0]
     assert _values(aws_log, "mcp_mem_abort") == [0]
-    # Seeded with a tail CURSOR rather than a recomputed total (bug 1205): what makes the
-    # inherited journal un-republishable is that the next read starts after it.
+    # A tail cursor keeps inherited journal markers out of the next interval.
     for variable in ("MCP_RETIRE_CAP_OFFSET_FILE", "MCP_MEM_ABORT_OFFSET_FILE"):
         total, cursor = paths[variable].read_text().split()
         assert total == "0"

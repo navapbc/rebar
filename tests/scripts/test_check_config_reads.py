@@ -1,23 +1,10 @@
-"""Happy-path contract for the config-is-read gate (ticket 6754, corrected by bug 2c58).
+"""Check owner-resolved reads of config dataclass fields.
 
-The gate proves every `_config_schema.py` dataclass field has >=1 attribute-read
-site outside the schema/config plumbing, or carries a `# read-via: <pointer>`
-escape marker.
-
-Detection is OWNER-RESOLVED (bug 2c58-e710-275e-4ff7): a read satisfies a field only
-when the read's RECEIVER resolves to the dataclass that declares it. The gate
-originally matched the bare terminal attribute name against one global set, so a
-field was satisfied by any same-named attribute on any unrelated object -- which is
-why an inert `CodeHealthConfig.enabled` passed while a uniquely-named sibling did
-not. Owner resolution uses the schema's own section map (`Config.mcp: McpConfig`),
-annotations, local alias assignment, function return annotations, and a
-cross-module fixed point binding unannotated parameters from their call sites.
-
-API contract (scripts/check_config_reads.py):
-  - check(schema_path: Path, root: Path) -> list[str]   # error strings, [] == clean
-  - main(argv: list[str] | None) -> int                  # 0 clean, 1 failures
-Edge shapes (receiver-resolution variants, marker placement/validation variants,
-store-context, plumbing exclusion, CI wiring, real-tree cleanliness) are held out.
+Each field needs an external attribute read on its declaring class or a
+``read-via: <pointer>`` marker. Resolution follows sections, annotations,
+aliases, returns, and cross-module calls; same-named fields on unrelated
+classes do not count. ``check`` returns errors or an empty list; ``main``
+returns 1 on failure and 0 when clean.
 """
 
 from __future__ import annotations
@@ -142,16 +129,9 @@ class Config:
 
 
 def test_same_named_field_on_an_unrelated_config_does_not_satisfy_it(gate, tmp_path):
-    """Bug 2c58 (RED-first): the reproduction of the false-negative class.
+    """Credit ``ui.enabled`` only to UiConfig, leaving CodeHealthConfig inert.
 
-    ``CodeHealthConfig.enabled`` has zero read sites; ``UiConfig.enabled`` has one.
-    Under the original global terminal-name matching, the live ``ui.enabled`` read put
-    the bare name ``enabled`` into one global set, which silently satisfied the inert
-    ``CodeHealthConfig.enabled`` too -- so the gate reported clean. That is the exact
-    shape that let the real ``CodeHealthConfig.enabled`` survive until a573.
-
-    Owner resolution must credit the read to ``UiConfig`` alone and fire on
-    ``CodeHealthConfig.enabled``.
+    Matching the bare name would wrongly satisfy both classes.
     """
     schema, root = _tree(
         tmp_path,

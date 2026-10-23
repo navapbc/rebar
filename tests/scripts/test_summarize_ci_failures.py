@@ -1,17 +1,9 @@
-"""Contract for scripts/summarize_ci_failures.py (ticket be9d-2f2d-47ca-45d2).
+"""Check the CI failure summary posted beside Gerrit's Verified vote.
 
-Tier: scripts (imports the module directly; the pure summarize() seam needs no subprocess).
-
-The Gerrit `Verified` vote helper preserves the original gerrit-review-action message shape,
-`"<STATUS>: <run URL>"`. So every -1 reads `CANCELLED: <url>`
-regardless of cause: a job that blew its `timeout-minutes` and a job that failed on stale-base
-version skew are indistinguishable from the vote, though only the second needs a rebase.
-
-This script renders the run's own job list into a triage summary that the vote job posts as a
-comment-only review. The load-bearing distinction is timeout-vs-cancel: GitHub reports a
-TIMED-OUT job as `conclusion: cancelled` and says so only in the check-run annotation text,
-so the annotation is what separates "the gate never finished" from "a newer patchset
-superseded this run".
+The vote message carries only ``<STATUS>: <run URL>``. The summary uses job
+annotations to distinguish a timeout reported as ``cancelled`` from a true
+cancellation, then reports failure and transport faults separately. The pure
+``summarize()`` seam needs no subprocess.
 """
 
 from __future__ import annotations

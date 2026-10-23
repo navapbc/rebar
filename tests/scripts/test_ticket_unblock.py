@@ -1,24 +1,8 @@
-"""RED tests for ticket-unblock.py detect_newly_unblocked function.
+"""Check batch discovery of tickets unblocked by local or sync closure.
 
-These tests are RED — they test functionality that does not yet exist.
-All test functions must FAIL before ticket-unblock.py is implemented.
-
-The function under test:
-    detect_newly_unblocked(
-        closed_ticket_ids: list[str],
-        tracker_dir: str,
-        event_source: str,
-    ) -> list[str]
-
-Contract:
-    - Returns the list of ticket IDs that are now ready_to_work=True after
-      the given tickets are closed.
-    - A ticket is newly unblocked when ALL of its deps are now closed.
-    - Accepts event_source values: 'local-close' and 'sync-resolution'.
-    - Uses a single batch graph traversal (not one query per closed ticket).
-
-Test: python3 -m pytest tests/scripts/test_ticket_unblock.py
-All tests must fail (ERROR/FAILED) until ticket-unblock.py is implemented.
+``detect_newly_unblocked`` returns ready tickets only when every blocker is
+closed, using one graph traversal for the batch. These tests cover dependency
+direction, parent children, hidden directories, and tombstone recovery.
 """
 
 from __future__ import annotations
@@ -30,10 +14,7 @@ from types import ModuleType
 import pytest
 
 # ---------------------------------------------------------------------------
-# Module under test — in-process package (Tier E E7d). The unblock logic lives
-# in rebar.graph._unblock; the bash-era engine shim (_engine/ticket-unblock.py)
-# only re-exported these functions and is being deleted, so we import the
-# package module directly rather than spec-loading the deleted helper.
+# Import the canonical graph module directly; the former engine shim is gone.
 # ---------------------------------------------------------------------------
 import rebar.graph._unblock as ticket_unblock
 
@@ -55,17 +36,11 @@ def _write_ticket(
     status: str = "open",
     deps: list[str] | None = None,
 ) -> Path:
-    """Write a minimal ticket directory with a CREATE event (and optional STATUS/LINK events).
+    """Write a ticket directory and return its path.
 
-    Dependency relationships are recorded as LINK events with relation="blocks" written
-    in the blocker's directory, matching the schema used by ticket-link.sh and
-    ticket-reducer.py.  For each entry in ``deps``, ticket ``dep_id`` blocks
-    ``ticket_id``, so a LINK event is written in ``dep_id``'s directory with
-    ``target_id=ticket_id`` and ``relation="blocks"``.
-
-    Filenames follow the convention: ``{timestamp}-{uuid}-{event_type}.json``
-
-    Returns the ticket directory path.
+    Optional dependencies become ``blocks`` LINK events in each blocker's
+    directory, targeting this ticket. Event filenames follow the timestamp,
+    UUID, and event-type convention.
     """
     ticket_dir = tracker_dir / ticket_id
     ticket_dir.mkdir(parents=True, exist_ok=True)
@@ -131,7 +106,7 @@ def _write_ticket(
 
 
 # ---------------------------------------------------------------------------
-# Test 1: closing A does NOT unblock B when B still depends on C (open)
+# Closing one of 2 blockers leaves the dependent blocked.
 # ---------------------------------------------------------------------------
 
 
@@ -140,15 +115,7 @@ def _write_ticket(
 def test_no_newly_unblocked_when_blocked_by_other_ticket(
     unblock: ModuleType, tmp_path: Path
 ) -> None:
-    """Closing ticket A must NOT unblock B when B also depends on C (still open).
-
-    Setup:
-        - ticket-a: closed (just closed)
-        - ticket-b: open, deps=[ticket-a, ticket-c]
-        - ticket-c: open
-
-    Expected: detect_newly_unblocked(['ticket-a'], ...) == []
-    """
+    """Closing A does not unblock B while its other blocker C remains open."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -168,21 +135,14 @@ def test_no_newly_unblocked_when_blocked_by_other_ticket(
 
 
 # ---------------------------------------------------------------------------
-# Test 2: closing A unblocks B when B's only blocker was A
+# Closing the sole blocker unblocks its dependent.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_single_newly_unblocked_on_close(unblock: ModuleType, tmp_path: Path) -> None:
-    """Closing ticket A must unblock B when B's only dep was A.
-
-    Setup:
-        - ticket-a: closed (just closed)
-        - ticket-b: open, deps=[ticket-a]
-
-    Expected: detect_newly_unblocked(['ticket-a'], ...) == ['ticket-b']
-    """
+    """Closing B's only blocker A returns B as newly unblocked."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -200,22 +160,14 @@ def test_single_newly_unblocked_on_close(unblock: ModuleType, tmp_path: Path) ->
 
 
 # ---------------------------------------------------------------------------
-# Test 3: closing A unblocks B and C simultaneously
+# One close can unblock 2 dependents.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_multiple_newly_unblocked_on_close(unblock: ModuleType, tmp_path: Path) -> None:
-    """Closing ticket A must unblock both B and C when each depended only on A.
-
-    Setup:
-        - ticket-a: closed (just closed)
-        - ticket-b: open, deps=[ticket-a]
-        - ticket-c: open, deps=[ticket-a]
-
-    Expected: detect_newly_unblocked(['ticket-a'], ...) contains 'ticket-b' and 'ticket-c'
-    """
+    """Closing A returns both B and C when each depended only on A."""
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
 
@@ -235,29 +187,17 @@ def test_multiple_newly_unblocked_on_close(unblock: ModuleType, tmp_path: Path) 
 
 
 # ---------------------------------------------------------------------------
-# Test 4: batch graph query — traversal called once, not per-ticket
+# Evaluate multiple closures in one graph traversal.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_batch_graph_query_for_burst(unblock: ModuleType, tmp_path: Path) -> None:
-    """detect_newly_unblocked must accept a list and use batch traversal (not per-ticket loops).
+    """Process A and B as one closure batch and return dependents C, D, and E.
 
-    Validates that the function signature accepts a list of closed_ticket_ids
-    and processes them in a single pass rather than iterating with individual calls.
-    We verify this by passing multiple closed IDs at once and checking correctness —
-    a per-ticket implementation would produce duplicates or miscount.
-
-    Setup:
-        - ticket-a: closed (batch)
-        - ticket-b: closed (batch)
-        - ticket-c: open, deps=[ticket-a, ticket-b]  (both blockers now closed)
-        - ticket-d: open, deps=[ticket-a]
-        - ticket-e: open, deps=[ticket-b]
-
-    Expected: detect_newly_unblocked(['ticket-a', 'ticket-b'], ...) ==
-              ['ticket-c', 'ticket-d', 'ticket-e'] (order-independent)
+    C depends on both closed tickets; D and E each depend on one. The batch
+    traversal should return each ready ticket once, regardless of order.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -357,24 +297,16 @@ def _write_depends_on_link(
 
 
 # ---------------------------------------------------------------------------
-# Test 6: depends_on direction — closing the target (blocker) unblocks the dependent
+# In depends_on, the target blocks the source.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_depends_on_direction_unblocks_dependent(unblock: ModuleType, tmp_path: Path) -> None:
-    """Closing ticket A must unblock B when B depends_on A (A is the blocker).
+    """Closing A unblocks B when B's ``depends_on`` LINK targets A.
 
-    Setup:
-        - ticket-b: open, has LINK event relation='depends_on', target_id='ticket-a'
-          (i.e., ticket-b depends on ticket-a, so ticket-a blocks ticket-b)
-        - ticket-a: just closed
-
-    Expected: detect_newly_unblocked(['ticket-a'], ...) == ['ticket-b']
-
-    This verifies the depends_on direction: the LINK event is in ticket-b's dir,
-    but ticket-a is the blocker (the target of depends_on).
+    The LINK lives in B's directory; its target A is the blocker.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -399,16 +331,9 @@ def test_depends_on_direction_unblocks_dependent(unblock: ModuleType, tmp_path: 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_depends_on_does_not_unblock_the_blocker(unblock: ModuleType, tmp_path: Path) -> None:
-    """Closing ticket B must NOT treat ticket A as unblocked when B depends_on A.
+    """Closing A returns dependent B, not blocker A, as newly unblocked.
 
-    Setup:
-        - ticket-b: open, depends_on ticket-a (ticket-a blocks ticket-b)
-        - ticket-a: open (being "closed" in this test)
-
-    The depends_on LINK is in ticket-b's dir with target_id=ticket-a.
-    Closing ticket-a should unblock ticket-b, NOT cause ticket-a to appear unblocked.
-
-    Expected: detect_newly_unblocked(['ticket-a'], ...) contains 'ticket-b', NOT 'ticket-a'
+    B's ``depends_on`` LINK targets A from B's directory.
     """
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -432,22 +357,14 @@ def test_depends_on_does_not_unblock_the_blocker(unblock: ModuleType, tmp_path: 
 
 
 # ---------------------------------------------------------------------------
-# RED tests: batch_close_operations and --batch-close CLI entry point
+# Batch-close behavior and CLI entry point.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_batch_close_finds_open_children(unblock: ModuleType) -> None:
-    """batch_close_operations with a parent having 2 open children returns both IDs.
-
-    Setup:
-        - parent: open
-        - child-1: open, parent_id=parent
-        - child-2: open, parent_id=parent
-
-    Expected: result['open_children'] contains 'child-1' and 'child-2'
-    """
+    """Return both open child IDs for a parent during batch close."""
     import tempfile
 
     tmp = tempfile.mkdtemp()
@@ -522,14 +439,7 @@ def test_batch_close_finds_open_children(unblock: ModuleType) -> None:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_batch_close_detects_unblocked(unblock: ModuleType) -> None:
-    """batch_close_operations: closing a blocker → dependent appears in unblocked list.
-
-    Setup:
-        - blocker: open (being closed)
-        - dependent: open, blocked by blocker
-
-    Expected: result['newly_unblocked'] contains 'dependent'
-    """
+    """Include a dependent when batch close removes its only blocker."""
     import tempfile
 
     tmp = tempfile.mkdtemp()
@@ -552,15 +462,7 @@ def test_batch_close_detects_unblocked(unblock: ModuleType) -> None:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_batch_close_no_false_unblocks(unblock: ModuleType) -> None:
-    """batch_close_operations: ticket with remaining open blockers NOT in unblocked list.
-
-    Setup:
-        - blocker-a: open (being closed)
-        - blocker-b: open (NOT being closed)
-        - dependent: open, blocked by both blocker-a and blocker-b
-
-    Expected: result['newly_unblocked'] does NOT contain 'dependent'
-    """
+    """Keep a dependent blocked while another blocker remains open."""
     import tempfile
 
     tmp = tempfile.mkdtemp()
@@ -584,15 +486,7 @@ def test_batch_close_no_false_unblocks(unblock: ModuleType) -> None:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_batch_close_excludes_archived(unblock: ModuleType) -> None:
-    """batch_close_operations: archived child ticket not returned in open_children.
-
-    Setup:
-        - parent: open
-        - child-open: open, parent_id=parent
-        - child-archived: open but ARCHIVED, parent_id=parent
-
-    Expected: result['open_children'] contains 'child-open' but NOT 'child-archived'
-    """
+    """Return open children during batch close and exclude archived children."""
     import tempfile
 
     tmp = tempfile.mkdtemp()
@@ -753,8 +647,7 @@ def test_batch_close_single_reduce_call(unblock: ModuleType) -> None:
     _write_ticket(tracker_dir, "ticket-a", status="open")
     _write_ticket(tracker_dir, "ticket-b", status="open")
 
-    # Tier E E3: the unblock logic reaches the canonical graph loader; patch that
-    # owner rather than a removed _unblock compatibility import.
+    # Patch the canonical graph loader used by unblock, not a retired import.
     with unittest.mock.patch.object(
         _pkg_unblock._loader.reducer,
         "reduce_all_tickets",
@@ -771,7 +664,7 @@ def test_batch_close_single_reduce_call(unblock: ModuleType) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Bug c7a6-96e8: detect_newly_unblocked must skip hidden dirs (.suggestions)
+# Skip .suggestions and other hidden dirs.
 # ---------------------------------------------------------------------------
 
 
@@ -780,15 +673,10 @@ def test_batch_close_single_reduce_call(unblock: ModuleType) -> None:
 def test_detect_newly_unblocked_ignores_suggestions_dir(
     unblock: ModuleType, tmp_path: Path
 ) -> None:
-    """detect_newly_unblocked must not emit 'skipping corrupt event' warnings
-    when the tracker directory contains a .suggestions/ subdirectory.
+    """Ignore .suggestions and other hidden dirs without corrupt-event warnings.
 
-    Bug c7a6-96e8: the scanner in ticket-unblock.py iterated all directories
-    via os.scandir() without filtering hidden directories.  When .suggestions/
-    was present, reduce_ticket() was called on it, causing the reducer to emit
-    a WARNING for each suggestion file (which lacks 'event_type').
-
-    After the fix, hidden directories (names starting with '.') are skipped.
+    Suggestion files lack ticket ``event_type`` fields and must never reach the
+    reducer during unblock scans.
     """
     import io
     import sys
@@ -843,14 +731,10 @@ def test_detect_newly_unblocked_ignores_suggestions_dir(
 
 
 # ---------------------------------------------------------------------------
-# Characterization: the three tombstone branches of _load_states_with_tombstones
-#
-# All three are driven through the public detect_newly_unblocked. One shared
-# fixture makes them observable: `tkt-target` carries two depends_on LINK events
-# (so the blocking edges live in the TARGET's dir and survive an unreducible
-# blocker dir), one blocker is closed by the batch and one is tombstoned. With a
-# blocker in the batch, `_was_already_unblocked` cannot short-circuit, so the
-# verdict turns entirely on how the tombstoned blocker's status is loaded.
+# Exercise all tombstone-loading branches through public unblock detection.
+# The target's 2 depends_on links survive an unreadable blocker directory;
+# a batch-closed blocker prevents the already-unblocked shortcut, leaving the
+# tombstone status to decide readiness.
 # ---------------------------------------------------------------------------
 
 
@@ -884,18 +768,10 @@ def _tombstoned_blocker_tracker(tmp_path: Path, tombstone_bytes: str, *, reducib
 def test_unreducible_dir_with_a_tombstone_yields_a_status_only_stub(
     unblock: ModuleType, tmp_path: Path
 ) -> None:
-    """A dir the reducer cannot read is kept as ``{"status": <tombstone status>}``.
+    """Retain an unreadable blocker's tombstone status verbatim in a state stub.
 
-    Pins two things at once: the stub is created at all, and it carries the
-    tombstone's status VERBATIM — ``_read_tombstone_status`` does
-    ``.get("status", "deleted")`` with no validation, so a tombstone recording a
-    non-terminal status produces a non-terminal stub.
-
-    That verbatim propagation is what makes the branch observable: the stub keeps
-    ``blk-tomb`` OPEN, so ``tkt-target`` is not newly unblocked. Drop the branch and
-    ``blk-tomb`` disappears from the state map entirely, at which point
-    ``_is_closed_after_batch``'s "missing dir → tombstoned, treat as closed" fallback
-    takes over and ``tkt-target`` is reported as unblocked.
+    Its non-terminal status keeps the target blocked. Without the stub, the
+    missing-directory fallback treats that blocker as closed and unblocks it.
     """
     tracker_dir = _tombstoned_blocker_tracker(
         tmp_path, json.dumps({"status": "open"}), reducible=False

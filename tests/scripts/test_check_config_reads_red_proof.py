@@ -1,20 +1,9 @@
-"""The standing RED->GREEN proof for bug 2c58-e710-275e-4ff7.
+"""Compare the frozen pre-fix config-read gate with the live owner-aware gate.
 
-Every other test in this directory exercises only the LIVE gate, so each can tell you
-the fixed gate behaves correctly but none can tell you the bug was ever real -- or
-catch a silent regression of the resolver back to bare-name matching.
-
-This module closes that hole differentially. It runs the frozen pre-fix snapshot
-(`tests/scripts/pre_fix_config_read_gate.py`, which still contains the defect) and the
-live gate against the SAME synthetic schema, and asserts they DISAGREE in the specific
-way the fix was supposed to produce:
-
-  old gate  -> silently passes an inert field whose bare name is read elsewhere
-  live gate -> fires on it, naming its owning class
-
-Both are run in-process from the snapshot module. Never `git stash` to produce the old
-behaviour: the stash is shared across every worktree on a checkout, so stashing to
-compare versions corrupts unrelated concurrent work.
+Both inspect one synthetic schema. The old gate accepts an inert field whose
+name is read on another class; the live gate reports its owning class. A
+uniquely named inert field is a control that both gates must report. The
+frozen snapshot supplies the old behavior without changing worktrees.
 """
 
 from __future__ import annotations
@@ -41,8 +30,7 @@ def _load(name: str, path: Path) -> ModuleType:
 
 @pytest.fixture(scope="module")
 def old_gate() -> ModuleType:
-    """The frozen pre-fix gate — loaded by path, exactly like the live one, so the two
-    are compared on equal footing in a single process."""
+    """Load the frozen gate by path for an in-process comparison with live."""
     return _load("pre_fix_config_read_gate", _SNAPSHOT)
 
 
@@ -88,9 +76,7 @@ def colliding_tree(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def test_the_pre_fix_gate_silently_passes_the_inert_field(old_gate, colliding_tree):
-    """RED half: this is the bug, preserved. `CodeHealthConfig.enabled` has zero reads,
-    yet the pre-fix gate reports nothing, because the live `cfg.ui.enabled` read put the
-    bare name `enabled` into its one global set."""
+    """The old gate mistakes ``UiConfig.enabled`` for a read of the inert field."""
     schema, root = colliding_tree
     assert old_gate.check(schema, root) == [], (
         "the frozen snapshot must still exhibit the defect — if this fails, the "
@@ -121,11 +107,7 @@ def test_old_and_new_disagree_exactly_on_the_owner_resolution(old_gate, live_gat
 
 
 def test_a_uniquely_named_inert_field_fired_on_BOTH_versions(old_gate, live_gate, tmp_path):
-    """The control that makes the asymmetry the bug report described legible: when the
-    inert field's name is globally unique, even the pre-fix gate caught it (this is why
-    `CodeHealthConfig.analyzers` needed a marker while its neighbour `enabled` slipped
-    through). Both versions must fire, so the differential above is attributable to
-    owner resolution and not to some unrelated behaviour change."""
+    """Both gates report a uniquely named inert field, isolating owner resolution."""
     schema = tmp_path / "_config_schema.py"
     schema.write_text(
         _COLLIDING_SCHEMA.replace(

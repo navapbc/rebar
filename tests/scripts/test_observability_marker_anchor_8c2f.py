@@ -1,17 +1,7 @@
-"""Marker counters match the emitted RECORD, not the token as prose (bug 8c2f-8377-5044-4650).
+"""Count journal markers only when they start an emitted record.
 
-``observability.sh`` counted markers with a bare substring grep over the review-bot's journal —
-the same stream the bot writes its LLM review output to. On 2026-08-12 a review of
-``observability.sh`` itself enumerated the marker names in prose, and the probe counted that one
-line as both a voter error and a merge-change error, firing two alarms at 23:07Z against a
-review-bot that was voting normally throughout. The merge-change counter had never seen a real
-error in the entire retained journal; its only count in history was that false positive.
-
-Every countable marker is emitted as ``<TOKEN> {json}`` at the start of the journal message
-(``voter.py`` prints ``"VOTER_ERROR " + json.dumps(record)`` to stderr; ``autodeploy.sh``'s
-``marker()`` does ``printf '%s %s\\n' "$TOKEN" "<json>"``). These tests drive the REAL script over
-a synthetic journal and assert prose naming a marker counts 0 while a genuine record counts 1.
-"""
+Review prose can mention marker names without representing errors. The real
+script must count ``<TOKEN> {json}`` records and ignore mid-line mentions."""
 
 from __future__ import annotations
 
@@ -117,11 +107,8 @@ def _environment(
     offsets = tmp_path / "offsets"
     offsets.mkdir()
     paths = {name: offsets / name.lower() for name in _OFFSET_VARIABLES}
-    # `<total> <cursor>` since bug 1205: a cursor of 0 sits before the
-    # journal's first entry, so the counter is already observing and counts everything in
-    # it. A BARE total, like an absent file, is a cold start — it seeds a tail cursor and
-    # publishes 0 (bug e2a6-9ee4-8d5c-4290), which would mask what these tests measure.
-    # REPL_OFFSET_FILE greps a log file rather than journald and keeps the bare form.
+    # Cursor 0 includes the first journal entries; absent or bare state would
+    # cold-start at the tail and hide this anchor check. Replication uses a bare total.
     for name, path in paths.items():
         path.write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n")
     repl_log = tmp_path / "replication.log"
@@ -201,22 +188,12 @@ def test_real_markers_are_counted_alongside_the_prose(tmp_path: Path) -> None:
 
 
 def test_offsets_inflated_by_false_counts_cannot_distort_a_delta(tmp_path: Path) -> None:
-    """The banked false counts need no manual correction on the box.
+    """Ignore inflated legacy totals when computing cursor-based deltas.
 
-    The live counters were inflated by the false positives (voter 222 against 221 real markers,
-    merge-change 1 against 0). Under the original design that inflation MATTERED, because the
-    published delta was `recomputed_total - banked_total`: once the pattern tightened the total
-    dropped below the banked offset and only the lost-history clamp (bug 2dc7-31b7-ecbb-4cd2)
-    kept it from publishing nonsense, re-basing on the way through.
-
-    Since bug 1205 the banked total is never subtracted from anything — the delta is what the
-    journal holds after the counter's cursor — so an inflated count is inert by construction.
-    This pins that: a counter carrying the false-positive inflation publishes 0 while nothing
-    new arrives, and then publishes exactly the one marker that does, not the difference against
-    its banked number.
-    """
+    With no new records publish 0; after one new marker publish 1. The saved
+    false count is never subtracted from the cursor's interval."""
     env, paths = _environment(tmp_path, [_REVIEW_PROSE, _record("VOTER_ERROR")])
-    # Inflated totals, with the cursor at the end of what they have already seen.
+    # Inflated totals retain a cursor after observed entries.
     paths["VOTER_OFFSET_FILE"].write_text("2 2\n")  # counted the prose line as a second error
     paths["MERGE_OFFSET_FILE"].write_text("1 2\n")  # its only count in history was the prose
 

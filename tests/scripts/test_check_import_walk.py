@@ -1,16 +1,8 @@
-"""Oracle suite for scripts/check_import_walk.py — the deterministic import walk (37b9).
+"""Check standalone script and installed-package imports deterministically.
 
-Operator ruling (adjudicated on 5bca-4ca9): the import/packaging-regression class is
-deterministically measurable, so it gets a deterministic check instead of an LLM criterion.
-These tests recreate the historical escaped shapes and pin the walk's contract:
-
-* the scripts leg catches the pre-fix ``alert_dedup`` shape (spinal-grayish-perch) — a
-  scripts/ module bare-importing a sibling WITHOUT the documented ``__file__``-derived
-  ``sys.path`` insert — and is immune to the masking leak that hid it (one script's insert
-  leaking into the next module's import);
-* the installed-package leg reports EVERY broken module (never fail-fast);
-* the expected-optional mechanism records a sanctioned lazy-boundary module as a skip only
-  for its ONE declared missing dep, and as a failure for anything else.
+Each script imports in isolation so a sibling's ``sys.path`` insert cannot
+mask a missing local import. The package walk reports every broken module;
+an expected optional module is skipped only for its declared missing dependency.
 """
 
 from __future__ import annotations
@@ -64,12 +56,10 @@ class TestScriptsLeg:
         assert failures == []
 
     def test_sibling_insert_cannot_mask_the_missing_one(self, broken_scripts_dir: Path) -> None:
-        """A script that DOES insert must not make the next script's bare import resolve.
+        """Do not let an earlier script's path insert mask a later bare import.
 
-        This is the leak that hid the original escape: tests/scripts/conftest.py inserts
-        scripts/ process-wide, so a full session stayed green while a subset run failed.
-        ``aaa_inserter.py`` sorts before ``bridge.py``, so a shared-process walk would
-        import it first and leak both the path entry and the cached ``dedup`` module.
+        ``aaa_inserter.py`` sorts first; process isolation must keep its path and
+        module cache from making ``bridge.py`` pass.
         """
         _write(
             broken_scripts_dir / "aaa_inserter.py",

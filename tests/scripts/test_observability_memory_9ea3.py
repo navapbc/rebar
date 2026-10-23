@@ -1,24 +1,10 @@
-"""Host memory and per-container RSS are measured and published (bug 9ea3-7d07-ea55-4496).
+"""Check host-memory and container-RSS metrics without network or real Docker.
 
-The mcp container was OOM-killed mid-gate on an 8 GiB box that publishes disk and health
-metrics and not one byte of memory. §2c adds the measurement. These tests pin the three
-properties that make it usable:
-
-* the host gauges publish a MEASURED value on the happy path;
-* they publish on the FAILURE path too — a probe that falls silent when ``free`` is
-  missing is indistinguishable from a dead host (the fail-open ticket
-  bff5-9163-cddd-4158 removed), so the pessimistic value is published and
-  ``mem_probe_ok=0`` marks it as synthesised rather than measured;
-* the per-container census publishes one datapoint per container dimensioned on a STABLE
-  SERVICE identity read from a container label — never the container name, which for the
-  blue-green mcp containers embeds the deploy SHA and port and so would mint a fresh
-  CloudWatch dimension value on every deploy;
-* it publishes its own ``container_stats_ok`` heartbeat when ``docker stats`` fails, times
-  out, or ``timeout`` itself is absent, and counts any row it could not parse instead of
-  dropping it behind a flag that says the census went fine.
-
-Every assertion is on the ``aws cloudwatch put-metric-data`` argv the real script emits —
-no network, no AWS, no real ``docker``.
+Host memory publishes measured values when available and pessimistic values with
+``mem_probe_ok=0`` on failure. Container RSS uses stable service-label dimensions,
+including during blue-green deploys. The census publishes ``container_stats_ok``
+even on failure and counts unparseable rows separately. Assertions inspect the
+script's CloudWatch command arguments.
 """
 
 from __future__ import annotations
@@ -148,17 +134,11 @@ def _run(env: dict[str, str]) -> None:
 
 
 def _docker(rows: list[dict[str, str]], *, prelude: str = "") -> str:
-    """A ``docker`` stub answering BOTH calls the census makes, honouring ``--format``.
+    """Stub both bounded ``docker stats`` and ``docker ps`` census calls.
 
-    ``docker stats --format`` cannot emit labels, so the script joins a second bounded
-    ``docker ps`` to learn each container's service identity. A stub that answered only one
-    of the two would let that join pass vacuously, so this one serves both — and the ``ps``
-    branch FAILS unless the script actually asked for both label templates, which is the
-    only thing that makes "the dimension came from a label" a real assertion rather than a
-    restatement of the stub.
-
-    Each row is ``{name, mem, rebar?, compose?}``; an omitted label is the empty string
-    docker prints for a label the container does not carry.
+    The ``ps`` branch requires both service-label templates so dimension checks
+    cannot pass without a real label lookup. Rows carry ``name``, ``mem``, and
+    optional ``rebar``/``compose`` labels; absent labels render empty.
     """
     ps_lines = "\n".join(
         f"PS|{r['name']}|{r.get('rebar', '')}|{r.get('compose', '')}" for r in rows
@@ -234,14 +214,10 @@ def test_available_is_read_not_free_column(tmp_path: Path) -> None:
 def test_a_failed_memory_read_publishes_pessimistically_not_nothing(
     tmp_path: Path, free_body: str, why: str
 ) -> None:
-    """The regression guard: silence is the one thing this section may not emit.
+    """Publish pessimistic values and ``mem_probe_ok=0`` when memory is unreadable.
 
-    ``rebar/host`` alarms treat missing data as breaching on the stated ground that these
-    publishers are heartbeats (ticket bff5-9163-cddd-4158). A memory probe that published
-    only when it could read leaves a future alarm with no datapoint and makes a dead probe
-    look exactly like a healthy box. The pessimistic value is published instead, and
-    ``mem_probe_ok=0`` is what keeps that synthesised reading out of the analysis this
-    measurement campaign exists to produce.
+    Missing data breaches the host alarm, so failed probes must still publish a
+    heartbeat. The flag distinguishes synthetic values from measurements.
     """
     env, aws_log = _environment(tmp_path, free_body=free_body)
 
@@ -279,18 +255,10 @@ def test_container_rss_publishes_one_datapoint_per_container(tmp_path: Path) -> 
 def test_two_deploys_of_the_same_service_collapse_to_one_dimension_value(
     tmp_path: Path,
 ) -> None:
-    """THE CARDINALITY GUARD, and the reason this dimension is not the container name.
+    """Keep 2 blue-green container names under one stable service dimension.
 
-    autodeploy names each blue-green mcp container
-    ``${MCP_CONTAINER_PREFIX}-${TARGET:0:12}-${port}`` — a per-deploy commit SHA and a
-    blue/green port, both of which move — so the name changes on EVERY deploy. The two
-    names below are real ones observed on the box while bug 9ea3-7d07-ea55-4496 was open.
-    Keyed on that name, CloudWatch would mint a new dimension value per
-    commit: custom-metric cardinality growing without bound (billed per unique dimension
-    combination), and, fatally, a per-container series that RESTARTS at every deploy. The
-    campaign this section exists to run asks "what is peak mcp RSS during a gate", which is
-    a comparison across gate runs; a series that resets whenever a commit lands cannot
-    answer it. Two different container names, one dimension value.
+    Deployment names include a changing SHA and port; using them would create a
+    new CloudWatch series per deploy and break cross-run peak-RSS comparisons.
     """
     older, newer = "rebar-mcp-3e04025b684e-8092", "rebar-mcp-8db373933654-8093"
     env, aws_log = _environment(
@@ -369,17 +337,10 @@ def test_rebar_service_wins_over_the_compose_label(tmp_path: Path) -> None:
 
 
 def test_an_unparseable_row_is_counted_not_silently_dropped(tmp_path: Path) -> None:
-    """A row the census cannot parse must not vanish behind a flag that says it went fine.
+    """Count unparseable rows without turning a completed census into failure.
 
-    The first cut of this section dropped an unrecognised ``MemUsage`` with a bare ``next``
-    while ``container_stats_ok`` still went to 1 off any other parseable row: a container
-    present in ``docker stats`` disappeared from the data under a signal claiming health it
-    had not observed — the same defect class the whole ticket is about. The drops are their
-    own published count instead.
-
-    ``container_stats_ok`` deliberately stays 1 here: it answers "did the census run at
-    all", which is what separates a wedged daemon from an idle box, and folding row-level
-    parse quality into it would make one weird row look identical to a dead docker.
+    ``container_stats_unparsed_rows`` exposes dropped readings;
+    ``container_stats_ok=1`` still means the census ran.
     """
     env, aws_log = _environment(
         tmp_path,
@@ -407,13 +368,10 @@ def test_an_unparseable_row_is_counted_not_silently_dropped(tmp_path: Path) -> N
 
 
 def test_docker_stats_is_bounded_by_no_stream_and_timeout(tmp_path: Path) -> None:
-    """The probe must never wedge the 5-minute timer on a loaded box.
+    """Require ``--no-stream`` and ``timeout`` around Docker census calls.
 
-    ``docker stats`` streams by default and can block on the daemon indefinitely — most
-    likely under exactly the memory pressure this metric exists to catch. This stub asserts
-    both bounds are actually applied: it HANGS unless invoked through ``timeout`` and with
-    ``--no-stream``, so a regression shows up as a test that times out rather than one that
-    quietly measures an unbounded call. The ``ps`` join is bounded by ``timeout`` too.
+    The stub hangs when either bound is missing, exposing a timer-wedging
+    regression. The ``ps`` label join is bounded too.
     """
     env, aws_log = _environment(
         tmp_path,
@@ -458,13 +416,10 @@ def test_docker_stats_is_bounded_by_no_stream_and_timeout(tmp_path: Path) -> Non
 def test_a_failed_container_census_publishes_its_heartbeat(
     tmp_path: Path, docker_body: str, with_timeout: bool, why: str
 ) -> None:
-    """Without ``container_stats_ok``, "the census wedged" and "nothing is running" are the
-    same observation — no per-container datapoints at all. The per-container gauge cannot
-    carry a heartbeat itself, because its dimension set is only knowable from a census that
-    succeeded, so the census publishes its own.
+    """Publish census failure even when there are no container datapoints.
 
-    The final case also pins the ``timeout``-is-missing behaviour: the command fails
-    rather than running unbounded, and the probe reports that instead of hanging.
+    A missing ``timeout`` fails the bounded call and reports failure instead of
+    running an unbounded census.
     """
     env, aws_log = _environment(
         tmp_path,

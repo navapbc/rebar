@@ -1,12 +1,7 @@
-"""Tests for the mutation-gate OS sandbox [rebar:e668-b496-e264-4283].
+"""Prove mutation subprocesses obey an OS-enforced write deny.
 
-The sandbox is the only control a mutation cannot delete: the harness
-string-substitutes the artifact under test, so any guard *inside* that artifact is
-mutable, while an OS-enforced write-deny around the subprocess is not.
-
-These tests observe **enforcement**, not construction. Asserting the wrapper argv
-alone would pass against a sandbox that silently denies nothing — which is the exact
-failure mode the fail-closed design exists to prevent.
+Mutations can remove guards inside the artifact under test, so tests check
+actual containment and child liveness rather than wrapper arguments alone.
 """
 
 from __future__ import annotations
@@ -74,11 +69,7 @@ live = pytest.mark.skipif(
 
 
 def test_a_mechanism_is_required_when_the_lane_says_so():
-    """On the enforcement lane, a missing mechanism fails LOUDLY instead of skipping.
-
-    Without this the lane could go green having proven nothing — bubblewrap installed,
-    every enforcement test skipped, the Linux write-deny still unverified.
-    """
+    """Fail the enforcement lane when no working sandbox is available."""
     if not REQUIRE_ENFORCEMENT:
         pytest.skip("REBAR_REQUIRE_SANDBOX_ENFORCEMENT is not set on this lane")
     assert sb.probe() is not None, (
@@ -176,14 +167,10 @@ def test_write_inside_the_allow_list_succeeds(tmp_path):
 
 @live
 def test_the_incident_shape_rm_rf_is_denied(tmp_path):
-    """`rm -rf <protected>/*` — the shape that expanded to `rm -rf /*` on 2026-08-26.
+    """Deny the incident-shaped ``rm -rf`` unlink inside a confined test path.
 
-    The only enforcement test that removes anything, so it carries three independent
-    bounds: Python confirms the target is strictly inside `tmp_path`; the path reaches
-    the shell only as `"${TARGET:?}"`, so an empty value aborts instead of globbing
-    from the filesystem root; and the sandbox denies the unlink. Deletion is tested
-    rather than replaced by a create because unlink is a different syscall class, and
-    a profile could permit it while denying writes.
+    Python checks containment, ``${TARGET:?}`` rejects an empty shell path,
+    and the sandbox must deny deletion as well as creation.
     """
     allowed = tmp_path / "scratch"
     allowed.mkdir()
@@ -337,13 +324,9 @@ def test_bwrap_present_but_unable_to_namespace_is_not_offered(monkeypatch):
 
 
 def test_seatbelt_present_but_not_enforcing_is_not_offered(monkeypatch):
-    """Presence on PATH is not capability — the same rule `bwrap` is held to.
+    """Reject a present ``sandbox-exec`` that fails the enforcement probe.
 
-    `sandbox-exec` is Apple-DEPRECATED. A future macOS shipping it as a non-enforcing
-    stub would satisfy `shutil.which` while denying nothing, so a PATH-only probe would
-    report the sandbox available and every mutation run would proceed effectively
-    UNSANDBOXED — on the platform the 2026-08-26 incident actually happened on, and
-    without the abort the fail-closed design promises.
+    PATH presence alone cannot prove a write deny, just as for ``bwrap``.
     """
     monkeypatch.setattr(
         sb.shutil, "which", lambda n: "/usr/bin/sandbox-exec" if n == "sandbox-exec" else None
@@ -657,10 +640,8 @@ def test_bwrap_uses_minimal_dev_not_a_writable_host_bind(tmp_path, monkeypatch):
 
 
 # --- CI is the disposable environment (LLM-Review 2269) ---------------------------
-# There is exactly ONE way to run unsandboxed, and it must be NAMED. An earlier branch
-# waived the sandbox whenever ambient `CI` was truthy; `CI` is inheritable and trivially
-# set, so a workstation with `CI=1` exported ran mutation tests with no sandbox at all —
-# the configuration the 2026-08-26 `rm -rf /*` landed in (`f11d-f8fd`).
+# Only the named opt-out permits an unsandboxed run; ambient CI is inheritable
+# and must not waive containment.
 
 
 @pytest.mark.parametrize("value", ["true", "1", "yes", "TRUE"])
@@ -721,13 +702,10 @@ def _sandbox_env_target(fn: ast.FunctionDef) -> str:
 
 
 def test_the_sandboxed_subprocesses_receive_the_hardened_env():
-    """The hardened env must actually REACH both children, not merely be computed.
+    """Require both sandboxed child calls to receive the hardened environment.
 
-    Deleting `env = mutation_sandbox.sandbox_env(env)` from execute_shard left the whole
-    suite green (28 sandbox + 42 gate tests), because the only HOME test asserted on the
-    mapping the function returns rather than on any call site. This binds the two
-    sandbox-wrapped `_run` calls to that hardened env, so removing or bypassing it fails
-    here — the same control the wrap-binding tests above provide for `wrap` itself.
+    Computing a safe HOME mapping without passing it to ``_run`` would leave
+    the children on the caller's real HOME.
     """
     name = _sandbox_env_target(_execute_shard_fn())
     wrapped = [c for c in _execute_shard_run_calls() if _is_sandbox_wrapped(c)]
@@ -781,11 +759,8 @@ def test_the_containment_guard_refuses_an_empty_name(tmp_path):
 
 
 # --- module-wide binding: no `mutmut run` may be added unsandboxed --------------------
-# The tests above bind the two call sites inside `execute_shard`. That scoping is what
-# let a THIRD `mutmut run` — `_diagnose_non_killed`, which re-runs surviving mutants —
-# sit unsandboxed on main (`724c-b5fd`): a per-function assertion cannot see a call site
-# in another function. These scan the whole module, so a fourth site fails here rather
-# than silently reopening the hole.
+# Scan the whole module: checking only ``execute_shard`` misses diagnostic
+# ``mutmut run`` calls elsewhere.
 
 
 def _module_tree() -> ast.Module:

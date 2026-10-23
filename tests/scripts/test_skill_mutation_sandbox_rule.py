@@ -1,19 +1,9 @@
-"""Regression gate: both TDD skills require an OS sandbox around mutation runs.
+"""Require OS sandboxing in both mutation-testing skills.
 
-`rebar-debug` and `rebar-implement` instruct agents to perturb code with a
-defect-seeded mutation and then execute the tests.  A seeded defect is arbitrary
-code, so that step *executes hostile code*: on 2026-08-26 an ad-hoc mutation
-script stripped a safety guard from a shell script that performs real deletion
-and the resulting `rm -rf /*` destroyed `/opt/homebrew` and every
-Homebrew-installed app in `/Applications`.
-
-Ticket f321-cb86-6863-44c7 added the sandbox requirement inline to both skills
-(inline, so it does not wait on any wrapper script landing).  This module fails
-if either skill loses any part of it: the complete macOS `sandbox-exec` snippet
-including the heredoc that writes the profile, the complete Linux `bwrap` argv,
-the `bwrap` capability probe plus the statement that presence on PATH is not
-capability, the no-sandbox injected-seam fallback, and the hostile-code framing
-with the 2026-08-26 outcome as its reason.
+Seeded defects execute arbitrary code; a 2026-08-26 guard removal caused
+``rm -rf /*`` to destroy Homebrew files. These tests require complete macOS
+and Linux sandbox examples, a real ``bwrap`` capability probe, refusal to run
+without a sandbox, and the incident's hostile-code rationale in both skills.
 """
 
 from __future__ import annotations
@@ -26,9 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_DIR = REPO_ROOT / "examples" / "agent-skills"
 SKILLS = ("rebar-debug", "rebar-implement")
 
-# The complete macOS invocation: the heredoc writes the profile, so nothing
-# external is referenced.  Every line is load-bearing — a skill that ships only
-# `sandbox-exec -f some-profile.sb` leaves the profile's provenance unstated.
+# Require the complete macOS invocation, including its generated profile.
 MACOS_LITERALS = (
     'SBX="$(mktemp -d)"',
     'cat > "$SBX/p.sb" <<EOF',
@@ -49,10 +37,7 @@ LINUX_LITERALS = (
     "--dev /dev",
     "--proc /proc",
     '--bind "$PWD" "$PWD"',
-    # The scratch bind is not optional: the block's own contract promises writes are
-    # allowed in the worktree AND a scratch dir, and the macOS profile allows $SBX.
-    # Binding only $PWD looks sufficient and fails in ways that read as a broken
-    # sandbox rather than a mis-specified one (LLM-Review, change 2270).
+    # Bind scratch too; the rule permits worktree and scratch writes.
     '--bind "$SBX" "$SBX"',
 )
 
@@ -165,12 +150,10 @@ def test_skill_does_not_weaken_the_mutation_discipline(skill: str) -> None:
 def test_rule_removal_is_detected(
     skill: str, group_name: str, literals: tuple[str, ...], victim: str
 ) -> None:
-    """Every literal group is proven removal-sensitive, in every skill.
+    """Prove each literal group detects removal in each skill.
 
-    Guards the gate itself: a check written against text so generic that a stripped
-    skill still passes would be no gate at all. Proving sensitivity for only the
-    macOS group left the other four unguarded — a later edit could gut them and this
-    module would stay green (LLM-Review, change 2270).
+    A group that still passes after its required text is stripped would leave
+    that part of the sandbox rule unguarded.
     """
     original = _skill_text(skill)
     assert victim in original, f"{group_name}: victim literal absent from {skill}"
