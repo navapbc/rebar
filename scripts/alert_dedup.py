@@ -1,25 +1,11 @@
 #!/usr/bin/env python3
-"""Shared bug-filer dedup primitives for rebar's automated CI alert lanes.
+"""Shared dedup for automated CI alert lanes.
 
-Extracted from ``scripts/canary_bridge.py`` (ticket 63e8-9235-220f-4201) so a SECOND
-scheduled filer — the dependency-advisory lane — reuses the canary's dedup instead of
-growing a parallel one. The canary's helpers were **not reusable as-is**: they were
-module-private and ``_recent_marker_comment`` hard-coded the canary's own
-``BRIDGE_CANARY_ALERT:`` marker, so a second lane sharing them would have collapsed two
-independent alert streams onto one marker. The fix is this extraction with the marker
-lifted to a parameter; ``canary_bridge`` now delegates here and its behaviour is
-unchanged (its own oracle suite still pins it).
-
-The contract both filers share (docs/bug-creation-contract.md, ticket 4527):
-
-* **dedup search first** — one OPEN bug per alert TAG, ever. A lane that stays red for
-  weeks updates that one ticket; it never files a second.
-* **capped accumulation** — at most one marker comment per 24h, so a long-red lane
-  cannot flood the ticket it already filed.
-* **fail-soft finds** — a ``rebar list``/``show`` error reports "no existing alert" /
-  "no recent marker" rather than raising: a duplicate comment is cheaper than a silent
-  gap, and the next cycle re-converges.
-"""
+Both canary and dependency-advisory filers search before filing: each alert tag has
+at most one open bug. A lane adds at most one marker comment per 24 hours; the
+marker is a parameter so lanes stay independent. List/show failures return no
+match rather than raising, allowing the next cycle to converge. See
+docs/bug-creation-contract.md (ticket 4527)."""
 
 from __future__ import annotations
 
@@ -34,12 +20,7 @@ ACCUMULATION_WINDOW_SECS = 24 * 3600
 
 
 def find_alert_ticket(runner: Runner, tag: str) -> str:
-    """Return the id of the single OPEN bug carrying ``tag``, or ``''``.
-
-    This is the dedup key: an alert lane files at most one ticket per tag and finds it
-    again on every subsequent cycle. Fail-soft — any error or unparseable output returns
-    ``''`` ("none found").
-    """
+    """Return the one open bug ID for ``tag``, or '' on no match, list error, or parse error."""
     rc, stdout, _stderr = runner(
         ["rebar", "list", "--type=bug", "--status=open", f"--has-tag={tag}", "--output", "json"]
     )
@@ -59,12 +40,8 @@ def recent_marker_comment(
     now_epoch: int,
     window_secs: int = ACCUMULATION_WINDOW_SECS,
 ) -> bool:
-    """True if ``tid`` already carries a ``marker`` comment younger than ``window_secs``.
-
-    ``marker`` is per-lane (the canary's ``BRIDGE_CANARY_ALERT:`` vs the dependency
-    lane's own), so two lanes commenting on tickets never mute each other. Fail-soft:
-    any show/parse error means "no recent marker" — comment anyway.
-    """
+    """Return whether ``tid`` has this lane's ``marker`` within ``window_secs``; show/parse
+    errors return False."""
     rc, stdout, _stderr = runner(["rebar", "show", tid, "--output", "json"])
     if rc != 0:
         return False
@@ -80,13 +57,9 @@ def recent_marker_comment(
             continue
         ts = comment.get("timestamp")
         if isinstance(ts, str):
-            # Bug e127: `--output json` emits an out-of-JS-safe-range ns timestamp as its
-            # EXACT decimal string, so this consumer must coerce before type-checking.
-            # Without this the isinstance below rejects every comment, this helper always
-            # returns False, and the 24h accumulation cap silently stops working -- both
-            # alert lanes (canary_bridge, dependency_audit) would then append a marker
-            # comment on EVERY cycle, flooding the ticket they already filed. Fail-soft,
-            # so it degrades with no error.
+            # JSON output carries nanosecond timestamps as exact decimal strings (bug e127).
+            # Coerce before type checking or recent markers are missed and both alert
+            # lanes can append a comment on every cycle.
             try:
                 ts = int(ts)
             except ValueError:

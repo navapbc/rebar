@@ -1,35 +1,13 @@
 #!/usr/bin/env python3
-"""Config-is-read DET check (ticket 6754): every _config_schema.py dataclass field
-must have at least one attribute-read site outside the schema/config plumbing, or
-carry a ``# read-via: <pointer>`` escape marker.
+"""Require a real read of each ``_config_schema.py`` dataclass field.
 
-A field counts as read only when some ``ast.Attribute`` load whose terminal name
-equals the field name has a RECEIVER that resolves to the dataclass DECLARING that
-field (bug 2c58): a global set of attribute names satisfied a field from any
-same-named attribute on any unrelated object, so an inert field passed whenever its
-name was not globally unique.
-
-Receiver resolution binds an expression to a set of candidate schema classes via:
-  1. section-attribute names (``Config.mcp: McpConfig`` makes ``*.mcp`` / ``mcp``
-     resolve to ``McpConfig``),
-  2. parameter / ``AnnAssign`` annotations naming a schema class,
-  3. local alias assignments (``m = cfg.mcp``), propagated to a fixed point,
-  4. function return annotations (``load_config() -> Config``) for call expressions,
-  5. ``IfExp`` / ``BoolOp`` branches (union of the branch resolutions),
-  6. cross-module parameter binding — an unannotated parameter inherits the
-     resolution of the arguments passed at its call sites.
-
-An expression that resolves to nothing contributes to no field.
-
-A ``# read-via:`` marker whose pointer names a rebar ticket id is additionally
-REPORTED (never an error): such a marker's justification expires when its ticket
-closes, so it would otherwise become permanent by default.
-
-API contract:
-  - check(schema_path: Path, root: Path) -> list[str]
-  - ticket_pointer_reports(schema_path: Path) -> list[str]
-  - main(argv: list[str] | None = None) -> int
-"""
+An attribute load counts only when its receiver resolves to the declaring
+schema class. Resolve section attributes, annotations, local aliases to a
+fixed point, call return annotations, expression branches, and unannotated
+parameters through callers. Unresolved receivers do not count. A field may
+instead carry ``# read-via: <pointer>``; ticket pointers are reported so closed
+ticket exceptions can be revisited. ``check`` returns errors and
+``ticket_pointer_reports`` returns notices. See tickets 6754 and 2c58."""
 
 from __future__ import annotations
 
@@ -50,12 +28,8 @@ _MARKER_RE = re.compile(r"#\s*read-via:(.*)")
 # Plumbing filenames excluded from the read-site scan.
 _PLUMBING = {"_config_schema.py", "config.py"}
 
-# A rebar ticket id inside a marker pointer: the grouped-hex short (``dce2-b93d``) or
-# full (``dce2-b93d-4112-451c``) form. A marker that points at a TICKET rather than at
-# a reader is a marker whose justification EXPIRES when that ticket closes — e.g.
-# ``# read-via: inert pending bug dce2-b93d-4112-451c``, whose ticket has since closed.
-# Nothing else in the gate notices that, so such markers would become permanent by
-# default; `ticket_pointer_reports` surfaces them (see `main`).
+# Recognize grouped short or full rebar ticket IDs in read-via pointers.
+# Their justification can expire when the ticket closes, so report them.
 _TICKET_ID_RE = re.compile(r"\b[0-9a-f]{4}-[0-9a-f]{4}(?:-[0-9a-f]{4}-[0-9a-f]{4})?\b")
 
 # Safety bound on the binding fixed-point iterations.
@@ -101,12 +75,8 @@ def _collect_fields(schema_path: Path) -> list[tuple[str, str, int]]:
 
 
 def _check_marker(lines: list[str], lineno: int) -> tuple[bool, str]:
-    """Check for a ``# read-via:`` marker on the field's own line or the preceding line.
-
-    Returns ``(found, pointer)`` where ``found`` is True when a marker is present,
-    and ``pointer`` is the text after the colon (stripped). When no marker is found,
-    ``found`` is False and ``pointer`` is ``""``.
-    """
+    """Return (found, stripped pointer) for a # read-via: marker on this or the preceding line;
+    otherwise (False, '')."""
     candidates = [lineno - 1]  # own line (0-indexed)
     if lineno >= 2:
         candidates.append(lineno - 2)  # immediately preceding line (0-indexed)
@@ -444,16 +414,8 @@ def check(schema_path: Path, root: Path) -> list[str]:
 
 
 def ticket_pointer_reports(schema_path: Path) -> list[str]:
-    """Return one report line per ``# read-via:`` marker whose pointer names a rebar
-    ticket id, so a marker parked against a ticket is visible rather than silently
-    permanent. This is a REPORT, not an error: the lines are printed by ``main`` and
-    never contribute to the exit code, because whether such a marker is still justified
-    is a judgement about the ticket's state, not something this gate can decide.
-
-    An empty list means no marker currently points at a ticket — which is the expected
-    state today, and exactly why this reporter needs its own test: a reporter that has
-    never emitted anything is indistinguishable from one that cannot.
-    """
+    """Report, without failing, each # read-via: pointer to a rebar ticket so those exceptions
+    remain visible for review."""
     fields = _collect_fields(schema_path)
     if not fields:
         return []

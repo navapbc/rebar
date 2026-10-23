@@ -1,75 +1,22 @@
 #!/usr/bin/env python3
-"""Shrink-only function-complexity baseline gate (story c9f7).
+"""Shrink-only per-symbol Ruff C901 complexity gate (story c9f7).
 
-This wrapper turns Ruff's ``C901`` (McCabe cyclomatic-complexity) rule into a
-*ratchet*: the current legacy debt is frozen in ``.github/complexity-baseline.json``
-as a per-symbol ceiling, and the gate fails only when NEW debt appears or an existing
-function grows PAST its recorded ceiling. Reductions and removals are always allowed
-(reported as ``stale`` baseline work that ``--update-stale`` can drain).
+``pyproject.toml`` supplies the McCabe threshold (15). Qualified symbol keys
+in ``.github/complexity-baseline.json`` record ceilings for legacy findings.
+Exit-code contract: raw ``ruff check --select C901 --statistics`` exits 1
+for findings; ``--exit-zero --output-format=json`` exits 0 with JSON rows.
+``--check`` prints ``active=``/``new=``/``increased=``/``stale=`` counts,
+failing for new or increased scores and scanner/schema errors. A stale entry
+from reduced or removed complexity passes. Failures add sorted symbol detail.
 
-Why not raw Ruff / per-file ignores
------------------------------------
-Putting ``C901`` in the global Ruff ``select`` list would make ``ruff check`` exit 1 on
-every change while legacy debt exists; per-file or inline ``# noqa`` ignores would let a
-NEW complex function slip into an exempt file. The baseline keys each accepted finding by
-a *stable qualified symbol* (path + class/function ancestry) so unrelated edits do not
-churn the baseline the way line-number keys would.
-
-Threshold source of truth
---------------------------
-The complexity threshold (15) lives ONLY in ``[tool.ruff.lint.mccabe] max-complexity`` in
-``pyproject.toml``; the scanner subprocess relies on that config rather than passing the
-number here.
-
-Exit-code contract
-------------------
-Five distinct commands describe the debt and the gate (``<N>`` = the LIVE census count):
-
-  1. Raw census (human): ``ruff check --select C901 \\
-       --config 'lint.mccabe.max-complexity=15' --statistics src/rebar`` -> exit 1,
-     prints ``<N> C901 complex-structure``.
-  2. Machine census: ``ruff check --select C901 \\
-       --config 'lint.mccabe.max-complexity=15' --exit-zero --output-format=json \\
-       src/rebar`` -> exit 0, JSON length ``<N>``.
-  3. Repository gate: ``python scripts/check_complexity_baseline.py --check`` -> exit 0
-     only when every current finding is at or below its recorded ceiling and no
-     scanner/schema error exists; prints ``active=<A> new=0 increased=0 stale=<S>`` and
-     passes whenever ``new`` and ``increased`` are zero. ``stale=0`` additionally holds
-     only on a FRESHLY DRAINED baseline: a contributor's legitimate complexity reduction
-     makes ``stale`` nonzero (and drops that symbol out of ``active``) and still passes.
-     On FAILURE (``new>0`` or ``increased>0``, exit 1) the compact summary line is kept
-     unchanged and additive per-symbol detail lines are appended after it — one
-     stable-sorted ``  new       <path>::<symbol> score=<n> threshold=15`` line per new
-     symbol, then one ``  increased <path>::<symbol> score=<n> ceiling=<c>`` line per
-     increased symbol. A passing or stale-only check emits no such detail lines.
-  4. Maintenance rewrite: ``python scripts/check_complexity_baseline.py --update-stale``
-     -> lowers still-over-threshold ceilings and removes vanished entries, REFUSING to
-     write (nonzero) if ``new>0``/``increased>0``/scanner/schema error.
-  5. Raw JSON census: ``ruff check --select C901 \\
-       --config 'lint.mccabe.max-complexity=15' --output-format=json src/rebar`` (NO
-     ``--exit-zero``) -> exit 1 because findings exist, JSON length ``<N>``.
-
-Baseline JSON / key / value / counter contract
-----------------------------------------------
-One UTF-8 object with exactly ``schema_version`` (int ``1``) and ``ceilings`` (object).
-Each ``ceilings`` key is ``<repo-relative-posix-python-path>::<qualified-symbol>`` where
-the path starts ``src/rebar/``, ends ``.py``, has no backslash or ``..`` component and is
-not absolute, and the qualified symbol is the dot-joined class/function ancestry (only
-``ast.FunctionDef``/``ast.AsyncFunctionDef`` nodes; lambdas never become keys). Each
-ceiling is a JSON integer greater than 15 (booleans/floats/strings/null/<=15 invalid).
-The loader also rejects unknown/missing top-level fields, duplicate JSON member names,
-duplicate normalized keys, unsorted ``ceilings`` keys, invalid UTF-8, and malformed JSON.
-
-The four per-symbol counters are mutually exclusive:
-
-  * ``active``    — key in current output AND baseline, ``current_score == ceiling``.
-  * ``new``       — key in current output but NOT the baseline.
-  * ``increased`` — key in both, ``current_score > ceiling``.
-  * ``stale``     — key in baseline with no current diagnostic OR ``current_score < ceiling``.
-
-``--check`` exits nonzero iff ``new>0`` or ``increased>0`` or any scanner/schema error;
-``stale>0`` alone is an allowed improvement (exit 0).
-"""
+``--update-stale`` lowers or removes stale ceilings and refuses to write when
+new/increased findings or scanner/schema errors exist. The loader requires
+``schema_version`` 1 and sorted unique ``ceilings`` keys of the form
+``src/rebar/*.py::symbol`` with integer ceilings above 15, plus valid
+UTF-8/JSON. Buckets are exclusive: active equals
+its ceiling; new lacks a key; increased exceeds its ceiling; stale is absent
+or below its ceiling. The CI lock compares against merge-base(main, HEAD)
+and fails closed if the base cannot be read."""
 
 from __future__ import annotations
 
@@ -128,15 +75,8 @@ class SchemaError(BaselineError):
 
 # raw-git-ok: fixed non-shell ruff C901 census argv (RUFF_SCAN_ARGS), not a git/tracker write
 def run_scanner(*, cwd: Path | None = None) -> list[dict]:
-    """Run the C901 scanner subprocess and return the parsed JSON finding list.
-
-    The subprocess is exactly ``ruff check --no-cache --select C901 --exit-zero
-    --output-format=json src/rebar`` (the threshold comes from ``pyproject.toml``).
-    ``--no-cache`` keeps the scan from writing a ``.ruff_cache`` into the working tree.
-    Ruff return codes 0 and 1 both proceed to JSON parsing (1 is normal
-    diagnostic-bearing operation, not a transport failure). A missing executable, a
-    return code >= 2, invalid JSON, or any non-``C901`` diagnostic is a ``ScannerError``.
-    """
+    """Run uncached Ruff C901 JSON census using the configured threshold. Parse exit 0/1;
+    missing Ruff, exit >=2, invalid JSON, or non-C901 output raises ScannerError."""
     try:
         proc = subprocess.run(  # fixed, non-shell argv
             RUFF_SCAN_ARGS,
@@ -174,13 +114,8 @@ def parse_scanner_output(stdout: str) -> list[dict]:
 
 
 def build_symbol_index(source: str) -> dict[int, list[tuple[int, str]]]:
-    """Map ``lineno -> [(name_column_1based, qualified_name), ...]`` for a module.
-
-    Only ``ast.FunctionDef``/``ast.AsyncFunctionDef`` nodes contribute a qualified name
-    (dot-joined class/function ancestry). Lambdas are never indexed, so a diagnostic can
-    never resolve to one. Multiple entries can share a line (rare); the name column
-    disambiguates them.
-    """
+    """Index function/async-function qualified names by line and name column. Lambdas are
+    excluded; columns distinguish same-line definitions."""
     tree = ast.parse(source)
     index: dict[int, list[tuple[int, str]]] = {}
 
@@ -407,15 +342,8 @@ def compare(current: dict[str, int], baseline: dict[str, int]) -> Counters:
 def render_violation_details(
     counters: Counters, current: dict[str, int], baseline: dict[str, int]
 ) -> list[str]:
-    """Return additive per-symbol detail lines for a FAILING check (else empty).
-
-    Emitted only for regression buckets — one line per ``new`` symbol (current score
-    vs. the configured ``threshold``) then one per ``increased`` symbol (current score
-    vs. its recorded ``ceiling``). Each group is stable-sorted by key. A passing or
-    stale-only comparison has no ``new``/``increased`` keys and so returns ``[]``,
-    keeping compact output unchanged. The compact summary line is rendered separately by
-    the caller; these lines are appended after it.
-    """
+    """Return sorted new-score/threshold and increased-score/ceiling lines after a failing
+    summary; stale-only checks add none."""
     lines: list[str] = []
     for key in sorted(counters.new):
         lines.append(f"  new       {key} score={current[key]} threshold={COMPLEXITY_THRESHOLD}")
@@ -486,19 +414,7 @@ def _run_update_stale(argv_cwd: Path) -> int:
 
 
 def lock_against_base(base: dict[str, int], branch: dict[str, int]) -> list[str]:
-    """Return violations between a base (main) and branch ceilings mapping.
-
-    Each element is a human-readable string containing the offending key. An
-    empty list means the lock passes.
-
-    Allowed changes (produce no violations):
-      - an entry REMOVED
-      - an existing ceiling LOWERED
-
-    Rejected changes (produce violations):
-      - an existing ceiling RAISED
-      - a NEW entry ADDED
-    """
+    """Report newly added or raised ceilings against the base. Removed or lowered entries pass."""
     violations: list[str] = []
     for key, branch_ceiling in branch.items():
         if key not in base:
@@ -522,20 +438,9 @@ class LockFetchError(BaselineError):
 
 
 def _base_commit_for_comparison(main_ref: str) -> str:
-    """The commit whose baseline the branch is judged against: ``merge-base(main, HEAD)``.
-
-    Comparing against main's TIP is what bug humble-cinnamoned-mussel was filed for. The lock
-    rejects a ceiling that is HIGHER on the branch than on the base. Against the tip, a branch
-    that never touched the baseline is judged against a main that has moved on — so the moment
-    any change LOWERS a ceiling on main, every un-rebased branch still carrying the old file
-    reads as RAISING it, and the shrink-only ratchet starts punishing the shrinking it exists
-    to reward. Against the merge base, only entries the BRANCH ITSELF changed can violate.
-
-    Falls back to *main_ref* (the previous behaviour) when no merge base can be computed —
-    a shallow checkout with no shared history, say. That direction is deliberate: the tip
-    comparison is STRICTER, so it can only ever over-report. An unavailable merge base can
-    never let a genuine ceiling raise through, preserving the fail-closed posture.
-    """
+    """Use merge-base(main, HEAD) so later main reductions do not penalize an unchanged branch.
+    If unavailable, compare against main's stricter tip and fail closed (bug
+    humble-cinnamoned-mussel)."""
     if (
         subprocess.run(
             ["git", "rev-parse", "--is-shallow-repository"],
@@ -573,19 +478,9 @@ def _base_commit_for_comparison(main_ref: str) -> str:
 
 
 def _fetch_base_ceilings_from_main() -> dict[str, int] | None:
-    """Fetch main's copy of the baseline and return its parsed ceilings.
-
-    Used by the CI lock when no explicit ``--base`` path is given. Fetches ``main`` by
-    EXPLICIT URL from the canonical GitHub repo (``GITHUB_REPOSITORY``) — the same posture
-    the module-size gate uses — so the lock does NOT depend on an ``origin`` remote being
-    configured by the checkout action. The ceilings returned are those at
-    :func:`_base_commit_for_comparison`, i.e. the merge base with main rather than its tip.
-
-    Returns ``None`` when main does not yet carry the baseline file (bootstrap: allow).
-    Raises :class:`LockFetchError` when the base cannot be established for any other reason
-    (missing ``GITHUB_REPOSITORY``, fetch failure, unreadable/invalid base) so the caller
-    can FAIL CLOSED — never a warn-and-continue.
-    """
+    """Fetch canonical GitHub main by explicit URL, then parse the merge-base ceilings. A
+    missing baseline on main returns None; missing repository, fetch, or parse failure
+    raises LockFetchError."""
     repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
     if not repo:
         raise LockFetchError(
@@ -594,9 +489,8 @@ def _fetch_base_ceilings_from_main() -> dict[str, int] | None:
         )
     url = f"https://github.com/{repo}"
     ref = "refs/remotes/gh-main-complexity-lock"
-    # Deep enough to compute a merge base (bug humble-cinnamoned-mussel). A --depth=1 fetch
-    # gives only main's tip, which cannot be used to tell "this branch RAISED a ceiling" from
-    # "main LOWERED it underneath an un-rebased branch" — see _base_commit_for_comparison.
+    # Fetch enough history for merge-base; depth 1 cannot distinguish a branch
+    # ceiling raise from a later reduction on main (bug humble-cinnamoned-mussel).
     fetch = subprocess.run(  # fixed, non-shell argv
         ["git", "fetch", url, f"+refs/heads/main:{ref}"],
         cwd=str(REPO_ROOT),

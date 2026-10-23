@@ -1,30 +1,15 @@
 #!/usr/bin/env python3
-"""Build the vendored Cloud Markdown↔ADF corpus fixture (story e59d, epic 708d).
+"""Build the frozen, sanitized Cloud Markdown↔ADF fixture corpus.
 
-The Markdown↔ADF round-trip's safety claim — that re-encoding a body does not churn
-the Jira wire — is only meaningful against REAL rebar prose. This script freezes a
-sanitized snapshot of that prose into ``tests/fixtures/cloud_adf_corpus/`` so
-``test_adf_markdown.py``'s corpus assertions are hermetic and reproducible without a
-live ticket store.
-
-It follows the doctrine of ``scripts/capture_jira_fixtures.py``: capture from the
-real source, scrub secrets on the way out, commit the result, and let a test
-re-assert the scrub held.
-
-**Why a SAMPLE, not the whole store.** The live body set is ~4,996 unique bodies /
-several MB, while ``.pre-commit-config.yaml`` enforces ``check-added-large-files`` at
-its default 500 KB per file (``.gitignore`` records a deliberate decision NOT to
-raise that cap). The corpus is therefore a deterministic random sample, sharded so
-every file stays under the cap.
-
-Usage (reads the local ticket store; writes only into tests/fixtures/):
+Sample real ticket prose deterministically, normalize vocabulary, scrub secrets,
+and shard under the 500 KB added-file cap. ``test_adf_markdown.py`` checks the
+vendored round-trip corpus without a live store. Read the local store and write
+only ``tests/fixtures/cloud_adf_corpus/`` by default:
 
     python scripts/build_cloud_adf_corpus.py [--store PATH] [--out PATH]
 
-The snapshot is deliberately FROZEN: regenerating it changes the counts the tests
-assert, so re-run it only when the corpus is intentionally refreshed, and update
-those counts in the same change.
-"""
+Regenerate only for an intentional corpus refresh; update asserted counts in
+the same change."""
 
 from __future__ import annotations
 
@@ -52,12 +37,8 @@ _TENANT_HOST_RE = re.compile(r"\b[a-z0-9][a-z0-9-]*\.atlassian\.net\b")
 _ACCOUNTID_RE = re.compile(r"\b[0-9a-f]{24}\b")
 _TOKENISH_RE = re.compile(r"\b[A-Za-z0-9_-]{32,}\b")
 
-# Historical prose carries vocabulary the repo has since retired, and repo-wide
-# guards fail the build when a tracked file contains it (the criteria-vocabulary
-# gate and the held-out bridge-vocabulary contract). The fixture exists to exercise
-# Markdown->ADF conversion, where these tokens are semantically irrelevant, so they
-# are normalized to the canonical spellings on the way out rather than exempting the
-# fixture from the guards.
+# Normalize retired vocabulary in captured prose: it is irrelevant to
+# Markdown/ADF behavior, and tracked fixtures must pass vocabulary guards.
 _VOCABULARY_SUBSTITUTIONS = (
     ("bridge-status", "bridge status"),
     ("bridge-fsck", "bridge fsck"),

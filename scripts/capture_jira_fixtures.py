@@ -1,39 +1,17 @@
 #!/usr/bin/env python3
-"""Capture + scrub real Jira REST payloads into hermetic test fixtures.
+"""Capture scrubbed Jira REST payloads for hermetic snapshot tests.
 
-Story A (fe57-7712-1e3f-45f4) of epic f89d: the escaped Jira-sync bugs all began
-with unit tests feeding the differs hand-built ``jira_snapshot`` dicts in shapes
-the real fetcher never produces (flat ``comments`` instead of nested ``comment``;
-``issuelinks`` the snapshot never carried). Per ``jira-cli``'s pattern, the fix is
-**fixtures captured from real Jira payloads, served through the production
-serialization path** — never hand-massaged. This script is the live-gated capture
-tool that keeps ``tests/fixtures/jira/*.json`` honest.
+With explicit ``REBAR_CAPTURE_JIRA_FIXTURES=1`` and ``JIRA_PROJECT``, read Jira
+through production ``AcliClient`` methods; never write to Jira. Capture the 4
+fetcher inputs: ``search.json``, ``comment_map.json``, ``issuelinks_map.json``,
+and ``parent_map.json``. Layered scrubbing removes tokens, emails, and account
+IDs; ``FakeAcliClient`` replays the saved shapes through the production fetcher,
+and fixture tests check the scrub.
 
-What it captures (the exact four responses ``fetcher._build_snapshot`` consumes,
-through the PRODUCTION ``AcliClient`` methods — no parallel serialization):
+Usage: ``REBAR_CAPTURE_JIRA_FIXTURES=1 JIRA_PROJECT=REB python scripts/capture_jira_fixtures.py``
 
-  * ``search.json``         — ``AcliClient.search_issues`` (the base issue list)
-  * ``comment_map.json``    — ``AcliClient.get_comment_map``    ({key: {"comments": [...]}})
-  * ``issuelinks_map.json`` — ``AcliClient.get_issuelinks_map`` ({key: [issuelink, ...]})
-  * ``parent_map.json``     — ``AcliClient.get_parent_map``     ({key: parent_key | None})
-
-Secret-scrubbing (layered, vcrpy-style redaction) runs on every captured payload so
-the committed fixtures carry NO tokens/emails/accountIds. ``FakeAcliClient``
-(tests/integration/reconciler/jira_contract/_fakes.py) replays these verbatim through the
-production fetcher; ``jira_contract/test_jira_fixtures.py`` independently re-asserts
-the scrub held.
-
-Usage (LIVE — opt-in, reads real Jira, never writes to Jira):
-
-    REBAR_CAPTURE_JIRA_FIXTURES=1 JIRA_PROJECT=REB \\
-        python scripts/capture_jira_fixtures.py
-
-Re-capture cadence: refresh whenever the Jira REST shape the fetcher consumes may
-have changed (a Jira Cloud API change, or a new enrichment field added to
-``_build_snapshot``). The capture is read-only; commit the regenerated fixtures and
-let ``test_snapshot_contract.py`` (story B) + ``test_jira_fixtures.py`` gate
-the refresh. See docs/jira-fixtures.md.
-"""
+Refresh when Jira response shape or fetcher enrichment changes, committing
+fixtures with the snapshot and fixture contract tests. See docs/jira-fixtures.md."""
 
 from __future__ import annotations
 
@@ -44,11 +22,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# The curated capture set: a small, stable neighbourhood of REB issues that
-# jointly exercises every enrichment the fetcher merges — nested comments,
-# issue-links (incl. an authoritative EMPTY list on the epic), parent links
-# (incl. a top-level null parent), and a non-null assignee. Kept small so the
-# committed fixtures stay reviewable; refresh via this script, never by hand.
+# A small stable REB set covers nested comments, links (including empty),
+# parent links (including null), and a non-null assignee. Refresh by capture.
 DEFAULT_KEYS = [
     "REB-407",  # assigned (non-null assignee shape)
     "REB-408",  # comments + 1 link + parent
@@ -62,25 +37,13 @@ DEFAULT_KEYS = [
 
 _FIXTURE_DIR = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "jira"
 
-# Keep fixtures lean: retain at most this many (most-recent) comments per issue.
-# Each retained comment keeps its FULL real shape (ADF body, author dict, ids) —
-# only the COUNT is trimmed, so the producer/consumer contract the differ reads
-# (nested ``comment`` -> ``comments`` list of author/body dicts) is exercised
-# without committing hundreds of KB of verbose real comment bodies.
+# Keep only recent comments to bound fixture size, but preserve each ADF
+# body/author/id and the nested comment shape consumed by the differ.
 _MAX_COMMENTS_PER_ISSUE = 2
 
-# ---------------------------------------------------------------------------
-# Layered secret-scrubbing.
-#
-# Two layers, applied to every captured payload:
-#   (1) key-based value replacement for the structured secret/PII fields, and
-#   (2) a regex sweep over every remaining string for the concrete leakage
-#       vectors (emails, raw + url-encoded Jira accountIds) that hide inside
-#       free-form URL/self/avatar values.
-# Both preserve the JSON SHAPE (keys + value types) so the fixtures stay an
-# honest mirror of the real REST response — only the secret *values* change.
-# ---------------------------------------------------------------------------
-
+# Scrub structured secret fields, then regex-scrub strings for emails and
+# raw or URL-encoded account IDs. Preserve JSON keys and value types so the
+# fixture remains a faithful response shape.
 _REDACTED_EMAIL = "redacted@example.invalid"
 _REDACTED_ACCOUNTID = "redacted:00000000-0000-0000-0000-000000000000"
 _REDACTED_NAME = "Redacted User"
@@ -130,13 +93,8 @@ def scrub(obj: Any, _key: str | None = None) -> Any:
 
 
 def _trim_comments(comment_map: dict[str, Any], cap: int) -> dict[str, Any]:
-    """Retain at most ``cap`` (most-recent) comments per issue; keep shape.
-
-    The Jira ``comment`` field is ``{"comments": [...], "total": N, ...}``. We
-    slice the ``comments`` list to its last ``cap`` entries (most recent) but
-    leave every other key (``total``, ``startAt``, ``maxResults``, ``self``)
-    exactly as Jira reported, so the field stays shape-honest.
-    """
+    """Keep the most recent ``cap`` comments while preserving Jira's other comment-field keys
+    and each retained comment's shape."""
     trimmed: dict[str, Any] = {}
     for key, field in comment_map.items():
         if isinstance(field, dict) and isinstance(field.get("comments"), list):

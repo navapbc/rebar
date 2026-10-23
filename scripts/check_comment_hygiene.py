@@ -1,25 +1,11 @@
 #!/usr/bin/env python3
-"""Comment-hygiene guard: block rot-prone history in comments and docstrings.
+"""Reject rot-prone historical prose in Python comments and docstrings.
 
-Policy [rebar:b047-267f-3c3d-4374]: source comments carry CURRENT STATE and concise
-rationale; the ticket system owns historical detail. Commit SHAs rot (Gerrit's
-rebase-on-submit guarantees the pre-land SHA dies at merge), run/job/thread ids die
-with retention windows, and dated incident narratives go stale silently. This guard
-fails CI when a comment block or docstring narrates history through such tokens
-WITHOUT pointing at the ticket system.
-
-A block that TRIGGERS (bare SHA-like token, run-id-after-keyword, or a dated
-incident narrative) is ACCEPTED when it cites a durable reference: a grouped hex
-ticket id (``3006-e198`` form), a word-triple store alias (``robe-creek-zealot``),
-an ADR id, or the vendor-ref escape hatch ``context: external`` (for upstream
-changelogs / issue SHAs that rebar's ticket system does not own).
-
-ACCEPTED RESIDUAL: only Python comment tokens and docstrings are scanned — string
-literals are runtime data, not policy surface. The guard's own fixture corpus
-(EXCLUDED_FILES below) is structurally excluded: those fixtures MUST contain live
-rot-prone tokens to stay red/green honest, and keeping them in exactly one excluded
-module is what lets the tree scan demand zero suppressions.
-"""
+A SHA-like token, run ID, or dated incident narrative needs a durable ticket
+ID or alias, ADR ID, or ``context: external`` for vendor history. Runtime
+string literals are not scanned. The guard's own fixture corpus is the sole
+structural exclusion because it deliberately contains trigger examples.
+See policy ticket b047-267f-3c3d-4374."""
 
 from __future__ import annotations
 
@@ -85,12 +71,9 @@ _EVIDENCE_VERB = re.compile(
 # Grouped hex ticket id: 2-4 groups of 4 hex chars (3006-e198 / full 4x4 ids).
 _GROUPED_HEX_ID = re.compile(r"\b[0-9a-f]{4}(?:-[0-9a-f]{4}){1,3}\b")
 
-# Word-triple store alias: exactly three hyphen-joined lowercase words, not embedded
-# in a longer hyphen chain, and NOT path/filename context — a hyphenated file name like
-# docs/designs/sync-hardening-proposal.md must not accept a block (it masked a live raw
-# SHA in the b047 close verification). Rejects a preceding path separator and a trailing
-# file extension; a sentence-final alias ("…robe-creek-zealot.") still accepts because
-# the extension shape requires letters after the dot.
+# A store alias is 3 lowercase hyphenated words, outside path/filename
+# context. Reject neighboring separators or a file extension; sentence-final
+# punctuation remains valid (ticket b047).
 _WORD_TRIPLE_ALIAS = re.compile(
     r"(?<![a-z0-9./\\-])[a-z]{3,}-[a-z]{3,}-[a-z]{3,}(?![a-z0-9-])(?!\.[a-z]{1,4}\b)"
 )

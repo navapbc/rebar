@@ -1,68 +1,13 @@
-"""Layer-1 deterministic floor (P1–P11) for the plan-review gate (child 012e).
+"""Layer-1 deterministic plan-review floor, P1 through P11.
 
-The DET floor is the ONLY tier that blocks **by default** in v1 (every LLM-tier
-criterion is advisory unless a project opts it into blocking via its
-``block_threshold``). It is a frozen, deterministic, polyglot floor that **fails
-open** on any unsupported stack: a check that cannot run records an ``abstain``
-(with a reason) and is treated as PASS — the recorded abstain set IS the coverage.
-
-It is a first-class ``exec=DET`` execution tier the orchestrator dispatches via a
-CODE executor (no LLM, no network round-trip beyond the optional grounding-oracle
-lanes), alongside the 1-TURN / 2-STEP / AGENT (LLM) tiers.
-
-The checks
-----------
-* **P1 readiness-shape** — requires an ``## Acceptance Criteria`` checklist (the
-  universal floor ``check_ac``/``clarity_check`` enforce). **BLOCKS** when absent.
-* **P2 file/symbol/import resolution** — probes explicit ``path/like.ext`` and
-  symbol references in the plan against the code-grounding oracle
-  (:func:`rebar.grounding.refute_absence`, universal-ctags T1). Coverage only,
-  **never blocks** (a plan legitimately references files it will *create*). Lives in
-  :mod:`det_advisory` (module-size seam); re-exported here.
-* **P3 package existence** — probes explicit dependency references against the
-  oracle's T0 deps lane. Coverage only, **never blocks**. (:mod:`det_advisory`.)
-* **P4 oversize signals** — a plan-size heuristic (AC count / file-impact count /
-  description length). Description overflow **BLOCKS**; AC count and file-impact
-  remain advisory. (``scc``/``lizard`` code metrics apply to code-review, epic
-  ``9da1`` — a plan has no diff to size.)
-* **P5 task-DAG validity + interference** — for a container, detects dependency
-  **cycles** among children (**BLOCKS** — sound + unambiguous) and file-impact
-  interference between unordered children (advisory).
-* **P6 AC/DD quality** — lexical checks (compound-AND criteria, vague lexicon,
-  verify-command presence) plus the advisory lint hub over the detector siblings.
-  Advisory, **never blocks**. (:mod:`det_advisory`.)
-* **P7 destructive/irreversible sniff** — scans for destructive operations stated
-  without a safeguard (escalates the T4 overlay). Advisory, **never blocks**.
-  (:mod:`det_advisory`.)
-* **P8 reviewability / context-budget** — a token-estimate check: **BLOCKS** when
-  the content (or, for a container, a parent+child pairing) exceeds the largest
-  configured context window even at one-criterion-per-call ("too big to review in
-  full; reduce/decompose it" — the extreme of P4 / G5).
-* **P9 file-impact coverage** — warns (advisory, **never blocks**) when the drift
-  gate (ADR 0002) cannot scope the attestation: a LEAF with empty ``file_impact``, or
-  a CONTAINER whose child-impact inheritance is poisoned (ticket 3e4b). Lives in
-  :mod:`det_lint` (module-size seam); re-exported here.
-* **P10 verification-presence** — a leaf plan must state its verification: a
-  ``## Testing``/``## Verification`` section or >=1 AC item with a code span /
-  verification-vocabulary match. **BLOCKS.** (ticket 49b8; :mod:`det_clarity`.)
-* **P11 AC vagueness** — the boundary-fixed vague lexicon (``clean`` dropped,
-  both word boundaries, code-span aware) over AC item lines only. **BLOCKS.**
-  (ticket 49b8; :mod:`det_clarity`; P6's advisory lexicon shares the matcher.)
-
-The only sound, unambiguous blockers are therefore **P1, P4 (description), P5 (cycle),
-P8, P10, and P11**. Everything else is advisory or coverage-only, consistent with "the
-DET floor blocks only on sound, unambiguous checks and fails open on everything
-else".
-
-That blocking / never-blocking split is also this module's SIZE seam. The four checks
-that can never block (P2, P3, P6, P7) live in :mod:`det_advisory`; they call nothing
-that stays here, while the retained checks are the connected ones (P1 and P4 share
-``_count_ac_items``, P8 uses ``est_tokens``, P5 uses ``det_lint``'s graph helpers).
-This module stays the ENTRY point: it owns :class:`DetResult`, :class:`PlanContext`,
-:data:`DET_CHECKS`, :func:`run_det_floor` and the finding/coverage aggregation, and
-re-exports every check the siblings define — so ``det_floor.<check>`` and
-``from ...det_floor import <check>`` resolve exactly as before.
-"""
+The code tier blocks by default only on sound checks; unsupported stacks
+record an abstain and pass. P1 requires an AC checklist; P4 blocks description
+overflow while other size signals advise; P5 blocks child dependency cycles;
+P8 blocks content beyond the largest review context; P10 requires verification
+evidence; P11 blocks vague AC language. P2/P3 are grounding coverage only,
+P6/P7 advice, and P9 file-impact coverage advice. This module owns results,
+context, registry, dispatch, and aggregation, and re-exports checks split
+into ``det_advisory``, ``det_clarity``, and ``det_lint``."""
 
 from __future__ import annotations
 

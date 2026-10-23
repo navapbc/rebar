@@ -1,42 +1,11 @@
-"""The completion-aware container seam: the Pass-2 completion sub-call + its Pass-3 floor.
+"""Completion-aware container plan-review seam (epic 66ac).
 
-Epic ``66ac`` (children ``94fd`` / ``6533``) made container plan-review completion-aware: a
-SEPARATE Pass-2 sub-call classifies each finding on three atomic axes (attribution / containment
-/ layer), and a deterministic Pass-3 floor drops the findings that merely re-litigate
-already-DELIVERED child work.
-
-Extracted from :mod:`rebar.llm.plan_review.passes` (task 8705) as a pure move along a seam that
-module already carved — its own section banner named this "the completion-aware container seam".
-The cluster is self-contained in the call graph: ``_delivered_manifest_block``,
-``_completion_finding_listing``, ``_coerce_completion_enum`` and ``_coerce_attribution`` each had
-exactly ONE caller anywhere in the tree (``pass2_completion``); ``pass2_completion`` and
-``completion_floor_drop`` were leaves *within* ``passes`` (nothing else in that module called
-them); and ``_pass2_completion_model``'s only caller is ``passes.register_contracts()``. No body
-is rewritten.
-
-``passes`` re-exports every name here, so every existing call site keeps reaching them as
-``passes.<name>`` — ``plan_review/__init__.py``, ``scripts/calibrate_completion_floor.py`` and the
-test suite are untouched, and ``tests/unit/test_completion_floor.py``'s
-``from rebar.llm.plan_review.passes import completion_floor_drop`` still resolves. Following the
-contract ``tests/unit/test_gate_context_seam.py`` pins for the ``config``/``gate_context`` split,
-NO consumer under ``src/`` is repointed at this module: they all keep resolving through
-``passes``.
-
-WHY ``passes`` IS IMPORTED INSIDE THE FUNCTION BODY, NOT AT MODULE LEVEL
-    ``passes`` imports THIS module at module level — ``register_contracts()`` runs at import time
-    and needs ``_pass2_completion_model`` — so a module-level ``from .passes import ...`` here
-    would be a hard import cycle: when ``passes`` reaches its relative-import block,
-    ``PASS_COMPLETION``, ``_max_output_cfg`` and ``_resolve_system`` are not yet defined and the
-    import raises.  A **function-local** import defers the lookup to call time, when ``passes``
-    is fully initialised.
-
-    It also preserves resolution semantics exactly. Before the move these three names resolved
-    through ``passes``'s module globals on EVERY call; a module-level ``from`` binds them once at
-    import, so a ``monkeypatch.setattr(passes, ...)`` of any of them would be silently ignored.
-    That failure mode is not theoretical — task ``c6c9`` demonstrated it on the sibling
-    ``attest``/``remediation_mode`` split, where the naive form turned four tests RED. The
-    function-local import re-reads the attribute per call, so the patch seam survives.
-"""
+A separate Pass-2 sub-call classifies finding attribution, containment, and
+layer; the deterministic Pass-3 floor can then drop low-priority findings
+about delivered child plan semantics. ``passes`` re-exports this module's
+names for existing callers. Import ``passes`` inside functions, after module
+initialization, to avoid its import cycle and preserve call-time monkeypatch
+resolution of ``PASS_COMPLETION`` and helper globals."""
 
 from __future__ import annotations
 
@@ -49,18 +18,13 @@ from rebar.llm.runner import Runner, RunRequest
 logger = logging.getLogger(__name__)
 
 
-# ── Pass-2 COMPLETION sub-call contract (epic 66ac / child 94fd) — completion-aware container
-#    plan-review. Its shape is plan-review-SPECIFIC (about a container's DELIVERED children — not
-#    a generic kernel axis like novelty/verification), so it is defined here as a LOCAL factory
-#    (like `_pass1_model` / `_pass4_model`), NOT aliased from the kernel. The three atomic
-#    sub-answers are a CLOSED vocabulary; following the novelty/verification precedent they are
-#    `str` fields (permissive contract) + these constants, with the closed set ENFORCED by
-#    coercion in `pass2_completion` — so ONE bad value coerces to the fail-safe default rather
-#    than failing the whole structured batch (the per-finding fail-safe the gate mandates). ─────
+# Pass-2's local completion contract classifies delivered-child attribution,
+# containment, and layer. Permissive str fields are coerced per finding to
+# closed enum values; one bad answer takes the fail-safe non-drop default
+# without rejecting the entire structured batch (epic 66ac).
 COMPLETION_ATTRIBUTION_NONE = "none"  # attribution when a finding is about no closed child
-# The two DROP-ELIGIBLE enum values named once, so the sub-call vocabulary (the tuples below) and
-# the Pass-3 completion floor (`completion_floor_drop`) consume the SAME literal — no value drift
-# between the two ends of the contract (story 6533 AC).
+# Share the 2 drop-eligible enum literals between the sub-call vocabulary
+# and Pass-3 completion floor (story 6533).
 COMPLETION_CONTAINMENT_CLOSED = "limited-to-closed"  # containment value the floor drops on
 COMPLETION_LAYER_PLAN = "plan-semantics"  # layer value the floor drops on
 COMPLETION_CONTAINMENT = (COMPLETION_CONTAINMENT_CLOSED, "spans-open-or-system", "n-a")
@@ -252,29 +216,13 @@ def completion_floor_drop(
     preserve: frozenset[str],
     delivered_ids: frozenset[str],
 ) -> bool:
-    """The Pass-3 COMPLETION-floor drop predicate (story 6533), deterministic — no LLM. Mirrors
-    :func:`rebar.llm.review_kernel.decide.rising_floor_drop`, but keyed on the completion
-    sub-answers instead of novelty.
+    """Return whether Pass-3 may drop a completion finding.
 
-    A finding is dropped IFF **all** hold:
-
-    - its ``attribution`` is a child id that is provably **delivered-now** — i.e. in
-      ``delivered_ids`` (the manifest's delivered set). This is stronger than "not ``none``": a
-      structural ``_container_child`` attribution can name a **force-closed** (unverified) child,
-      which must NOT be dropped — "delivery is proven, not assumed" (ADR 0024). A hallucinated /
-      non-delivered id also fails here;
-    - its ``containment`` is exactly :data:`COMPLETION_CONTAINMENT_CLOSED` (limited to closed work);
-    - its ``layer`` is exactly :data:`COMPLETION_LAYER_PLAN` (plan-semantics, not delivered
-      functionality);
-    - its ``priority`` (validity × impact) is ``< floor``;
-    - **none** of its ``criteria`` is in the always-preserve set (e.g. security / contract).
-
-    Every OTHER combination KEEPS the finding — and because every ambiguous/fail-safe sub-answer
-    (``attribution="none"``, ``containment`` anything but limited-to-closed, ``layer`` anything but
-    plan-semantics) is a non-drop value, an unsure classification always fails toward KEEP. The
-    preserve-set veto is checked FIRST, so a security/contract finding is never dropped regardless
-    of the other axes. Pure; the caller supplies the per-finding answers + priority + criteria and
-    the configured floor + preserve set + the delivered-now id set."""
+    Never drop preserve-set criteria. Otherwise require a child attribution in
+    the proven delivered-now ID set, containment limited to closed work, a
+    plan-semantics layer, and priority below the floor. A force-closed or
+    hallucinated child ID, ambiguous sub-answer, delivered functionality, or
+    high-priority finding remains (story 6533)."""
     if any(c in preserve for c in (criteria or [])):
         return False  # preserve-set veto (security/contract) — never dropped
     attribution = completion.get("attribution", COMPLETION_ATTRIBUTION_NONE)

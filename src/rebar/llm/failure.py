@@ -1,21 +1,10 @@
-"""LLM failure classification — the closed resolution-disposition vocabulary, a PURE,
-total classifier, and a diagnostic sanitizer (story civilized-immediate-mamba, epic
-jira-reb-687).
+"""Pure, total LLM failure classification and diagnostic sanitization.
 
-A stable boundary module: the runner attaches an :class:`LLMOutcome` at its generic
-failure seam, and story polite-dutiful-drake imports :func:`classify_llm_failure` /
-:func:`sanitize_diagnostic` from here to route silent-success failures through the SAME
-construction. This module adds classification METADATA only — it changes NO exception
-type raised anywhere in the runner (the ``UsageLimitExceeded`` arm, the structured
-``UnretryableOutputError`` fast-fail, and ``sizing.is_context_limit_error`` are all
-untouched); the per-seam wiring + exit codes belong to story authorial-hated-blackbear.
-
-Failures surface at SEVERAL seams (empirically pinned by tests/unit/test_llm_failure_matrix.py):
-a dedicated ``UsageLimitExceeded`` arm, the structured ``finish_reason`` path, rebar's own
-typed-error passthrough, and the generic ``except Exception``. The classifier therefore
-accepts an exception from ANY seam OR a ``finish_reason`` carried on the context, and is
-TOTAL: an unmatched failure maps to ``NEEDS_INVESTIGATION`` and the classifier never raises.
-"""
+The runner and silent-success path attach classification metadata without
+changing exception types or exit behavior. ``classify_llm_failure`` accepts an
+exception from any runner seam or a context ``finish_reason``; unmatched cases
+become ``NEEDS_INVESTIGATION`` and never raise. See story
+``civilized-immediate-mamba`` and the failure matrix tests."""
 
 from __future__ import annotations
 
@@ -486,35 +475,13 @@ def translate_sampling_parameter_rejection(
     return None
 
 
-# ── Grammar/schema-complexity rejection translation (bug 895c) ──────────────────
-# The exact sibling of `translate_sampling_parameter_rejection` above, for the OTHER way a
-# healthy provider permanently refuses a well-formed rebar request: native/constrained
-# decoding compiles the contract's JSON Schema into a grammar, and rebar's Pass-2
-# verification contracts (22-36 OPTIONAL parameters) blow the documented compilation budget.
-# Bedrock returns HTTP 400 `ValidationException` with "Grammar compilation timed out."
-# (~185s) or "Schema is too complex." (~50-60s).
-#
-# This is emphatically NOT an `LLMUnavailableError`: that type means "provider outage, try
-# later", and here the provider is HEALTHY and the identical request will fail identically
-# forever — a retry ladder built on it burns ~185s per attempt and still fails. It is
-# `UnretryableOutputError`, the existing type for "re-running the SAME call reliably
-# reproduces this", which is also already a `StructuredOutputError`, so every existing
-# `except StructuredOutputError` / `except LLMError` handler keeps catching it.
-#
-# TWO wire shapes, measured, with NO shared vocabulary — which is why the phrase set alone was
-# never sufficient protection and the preflight gate in `structured.output_mode` is the
-# load-bearing half; this translator is the safety net for whatever the gate under-predicts:
-#
-#   Variant A (newer botocore, e.g. 1.43.64) — the request reaches Bedrock and the grammar
-#   fails to compile SERVER-side after ~185s: `status_code: 400 ValidationException` /
-#   "The model returned the following errors: Grammar compilation timed out." (or "Schema is
-#   too complex.").
-#
-#   Variant B (older botocore, e.g. 1.40.61) — boto3 rejects the request CLIENT-side in 0.0s,
-#   before it is ever sent: `Parameter validation failed: Unknown parameter in input:
-#   "outputConfig", must be one of: modelId, messages, system, inferenceConfig, …`. There is
-#   no status code and no `ValidationException` here, so variant B needs its OWN conjunctive
-#   rule — and it is a STACK fact, not a schema fact: it fired on a 722-byte contract.
+# Translate permanent native grammar/schema rejection to UnretryableOutputError
+# (bug 895c), a StructuredOutputError. A healthy provider will reject the same
+# contract again, so the retryable-unavailable path is wrong. Newer botocore
+# reaches Bedrock and may return HTTP 400 ValidationException for grammar
+# timeout or schema complexity; older botocore may reject `outputConfig` before
+# sending, without HTTP status. The `structured.output_mode` preflight is the
+# primary guard; this translation catches rejection it under-predicts.
 _GRAMMAR_REJECTION_PHRASES: tuple[str, ...] = (
     "grammar compilation timed out",
     "schema is too complex",
@@ -623,43 +590,13 @@ def log_degrade(outcome: LLMOutcome | None, *, gate: str, ticket_id: str | None 
 
 
 def recovery_failure_cause(exc: object) -> str | None:
-    """Why a bounded-completion-recovery failure happened, or ``None`` if ``exc`` isn't one.
+    """Explain a ``CompletionRecoveryError`` for callers, or return None.
 
-    Returns a sentence fragment for a caller to embed, the same shape :func:`message_for`
-    returns — the caller owns its own command phrasing; this owns the explanation.
-
-    It belongs beside :func:`message_for` and :func:`outcome_of` because it answers their
-    question ("what should the operator be told about this failure?") for the one failure
-    class they structurally cannot: ``CompletionRecoveryError`` is raised inside the
-    recovery module and never crosses the runner seams that attach an ``.outcome``, so
-    :func:`outcome_of` returns ``None`` and :func:`message_for` has nothing to look up.
-    Without this, such a failure silently inherits whatever default the caller uses for an
-    unavailable runtime.
-
-    The size claim is deliberately CONDITIONAL: recovery raises this error at several
-    stages and only the bound checks carry ``context_chars``/``context_char_limit``.
-    Reading them unconditionally yields "context (None chars) exceeds the limit (None
-    chars)" for, say, an exhaustion at criterion 7 — relocating the misdiagnosis instead
-    of removing it.
-
-    The size branch deliberately does NOT tell the operator to "shorten the ticket's
-    description/comments" — that remedy reads as actionable but neither half is:
-
-    * **description** — the description is *material*: :func:`rebar.llm.plan_review.pass1
-      .material_fingerprint` hashes it into the plan-review attestation, and its docstring
-      records that a material edit invalidates the signature. Shortening it to clear this
-      close gate would therefore trip the other one (``require_plan_review_for_close``),
-      which then demands the attestation be re-earned. The wording keeps the lever but
-      states that trade, rather than sending the operator into it blind.
-    * **comments** — comments are explicitly NON-material (same docstring), so editing
-      them would be attestation-safe, but the event store is append-only: ``comment()``
-      in ``rebar._lib_writes`` (see the public write surface around line 511) has no
-      delete or redact counterpart. There is no operation that shortens or removes a
-      comment, so advising it names a lever that does not exist.
-
-    What is left is the measurement (which is the real diagnosis) plus the pointer to the
-    ``gate_error_v1`` sidecar — a step the operator can actually take.
-    """
+    Recovery errors lack the runner's ``.outcome`` metadata. Report context size
+    only when the exception carries both size and limit; other recovery stages
+    cannot support that diagnosis. Point to the ``gate_error_v1`` sidecar. A
+    description edit changes plan-review material and can require a new review;
+    append-only comments cannot be shortened."""
     from rebar.llm.errors import CompletionRecoveryError
 
     if not isinstance(exc, CompletionRecoveryError):

@@ -1,64 +1,13 @@
-"""Bounded gate concurrency with FAST-FAIL admission (story 09da-343c-1ee9-480c).
+"""Fast-fail shared concurrency admission for plan-review and completion gates.
 
-ADR 0112 decision 5. The snapshot janitor reclaims by high-water mark and relies on POSIX
-delete-on-last-close: it can ``unlink`` an in-flight snapshot, but the blocks are not
-returned until the last reader closes. So at peak concurrency the bytes a running gate
-holds are **LIVE, not garbage**, and a disk cap set below peak concurrent hold cannot be
-honoured by reclamation — the janitor runs, evicts what it may, and the volume still fills.
-Bounding how many holders there can be is therefore a PRECONDITION for the per-accumulator
-caps, not an optimization. The same counter also bounds concurrent gate RSS, which is the
-other budget the review host runs out of (~748 MB peak per plan-review on an 8 GiB box).
-
-WHY THIS SEAM. ``rebar.llm.peak_rss.gate_peak_rss`` already wraps exactly this scope and
-states the reason: wrapping the library entry points ``review_plan`` / ``verify_completion``
-"covers both call paths at one seam, since both reach the gate through these functions".
-Admission is that sibling — entered OUTSIDE the snapshot handle resolution, because it is
-the snapshot materialization (and the review-bot's per-review clone) that spends the bytes.
-One wrapper bounds the in-process MCP daemon path and separate-process CLI runs against ONE
-counter shared by both gates; two counters of N each would admit 2N holders, which is
-precisely the bound that was needed.
-
-WHY THE REFUSAL IS AN ``LLMError``. :class:`~rebar.llm.errors.GateCongestedError` subclasses
-``LLMError`` and carries a retryable ``LLMOutcome``, so the ``except LLMError`` arms the MCP
-tool bodies and the CLI gate handlers ALREADY have route it — a structured
-``retryable: true`` payload over MCP, exit 11 ("transient — retry") on the CLI — with no new
-except clause anywhere. It is never a verdict VALUE, so congestion cannot be read as
-INDETERMINATE, BLOCK or FAIL.
-
-WHY FAST-FAIL AND NOT A QUEUE. A queued gate still holds its thread and its resident memory
-while it waits, so a queue converts disk pressure into memory pressure — and it holds the
-MCP client's request open past its ~60 s deadline, producing the ``-32001`` ambiguity the
-async ``*_start`` + poll surface exists to avoid. A queue is also itself unbounded storage
-of the thing being bounded. A refusal is legible: it lets a client back off.
-
-WHY FLOCK'D SLOT FILES AND NOT A LEASE. ADR 0005 and ``rebar._snapshot.janitor`` record
-that a PID+heartbeat lease was spiked and REJECTED as unsound (N readers per entry, PID
-reuse, crash-stale leases). A ``flock`` needs no heartbeat: the kernel drops it when the
-holder dies or its fd closes, so a crashed gate cannot permanently consume a slot. It also
-serialises correctly between threads of ONE process, because a ``flock`` is held by the open
-file description and each acquisition opens its own. The slots live inside the snapshot
-store's existing ``locks/`` directory, so they inherit ``REBAR_GATE_TMPDIR`` and follow gate
-scratch onto ADR 0112 decision 3's dedicated volume without further plumbing.
-
-DEGRADATION IS SPLIT, and the split is the ADR's, not a preference. A missing ``fcntl`` or a
-single unusable slot file inside an otherwise-healthy ``locks/`` directory ADMITS and emits a
-``GATE_ADMISSION_DISARMED`` marker: bricking every gate on the host over a platform gap is
-worse than the pressure the bound relieves, and the free-space floor still applies — but a
-cap that disarms SILENTLY is how the incident recurs, so it is never silent. An unreachable
-STORE ROOT is the opposite case and fails CLOSED, because ADR 0112 says so in as many words:
-admission must treat a scratch volume that is unmounted "not as an empty cache to repopulate
-onto the root filesystem — otherwise the volume's failure mode is silently reverting to the
-state this ADR exists to prevent". A malformed knob is handled one layer down, in the
-resolver, by falling back to the measured default rather than disarming at all.
-
-WHAT "UNREACHABLE" MEANS ONCE THE VOLUME IS REAL (story aa40-cbda-ee38-481c). An
-``OSError`` from the store root covers the loud failures — a read-only or missing tree — but
-NOT the quiet one this module's whole reason for existing turns on: a mount point whose
-volume is not mounted is an ordinary, writable, EMPTY directory, so ``store_root()`` would
-create the store on the root filesystem and every gate would keep working, on the disk the
-volume exists to protect. :func:`_require_scratch_volume` closes that gap with two marker
-files on two different filesystems, and runs BEFORE the store is touched.
-"""
+ADR 0112 bounds live snapshot bytes and gate RSS before store materialization.
+Both CLI and MCP entry points share flocked slots in the snapshot lock directory;
+kernel release on close/crash avoids stale leases. A full set raises retryable
+``GateCongestedError`` (CLI exit 11), not a verdict, without queueing request
+threads. Missing fcntl or an unusable individual slot admits with a
+``GATE_ADMISSION_DISARMED`` marker. An unreachable or declared-but-unmounted
+scratch volume fails closed before store access; its root directory alone
+cannot prove the volume is mounted."""
 
 from __future__ import annotations
 
@@ -111,16 +60,10 @@ MARKER = "GATE_CONGESTED"
 #: off-switch is NOT a disarm and emits nothing — it is a choice, not a fault.
 DISARMED_MARKER = "GATE_ADMISSION_DISARMED"
 
-#: Concurrent gate executions admitted by default. DERIVED FROM MEASUREMENT, not guessed.
-#: A complete plan-review peaks at ~748 MB resident and a completion-verifier at ~462 MB
-#: (``GATE_PEAK_RSS`` markers; ADR 0112 cites ~739 MB over ~4.7 min, and a degraded run at
-#: 501 MB, so the figure varies materially run to run). The review host is a ``t4g.large``
-#: (8 GiB) shared with Gerrit, and ADR 0112 decision 7 forbids growing it: steady state is
-#: ~2.17 GB and Gerrit reserves ~3 GiB by config (``heapLimit 2g`` + ``packedGitLimit 1g``),
-#: leaving roughly 3 GiB for gate work. 4 x 748 MB = ~2.99 GB fits inside that; a fifth
-#: concurrent run (~3.74 GB) does not. It is also decisively below the operator's observed
-#: ~10 concurrent plan reviews — which is the point, since a cap at or above observed peak
-#: sheds no load and bounds nothing.
+#: Default to 4 concurrent gates: measured plan-review peak ~748 MB and
+#: completion peak ~462 MB; 4 plan reviews use ~2.99 GB of the roughly 3 GB
+#: available on the shared 8 GiB host after steady load and Gerrit reserve.
+#: A fifth would exceed that budget (ADR 0112).
 DEFAULT_MAX_CONCURRENT_GATES = 4
 
 #: The floor, in MiB, of ``MemAvailable`` below which a gate is refused rather
@@ -132,22 +75,11 @@ _MEMINFO = Path("/proc/meminfo")
 
 _SLOT_PREFIX = "gate-slot-"
 
-#: Marker files that make "the dedicated scratch volume is mounted" decidable (ADR 0112
-#: decision 3, story aa40-cbda-ee38-481c). A bare mount point is an ORDINARY DIRECTORY, so
-#: without these an unmounted volume is indistinguishable from an empty one and
-#: ``store_root()``'s ``mkdir(parents=True)`` quietly recreates the store on the root
-#: filesystem — the silent revert the ADR forbids in as many words.
-#:
-#: The pair works because the two files live on DIFFERENT filesystems. The DECLARATION sits
-#: beside the mount point, on root, so it survives an unmount; the PROOF sits inside it, on
-#: the volume, so it vanishes with one. Only ``declaration present AND proof absent`` is the
-#: fault state. Everything else — neither, both, or a proof whose declaration was lost during
-#: a recovery — is today's behaviour, because a host that never declared a dedicated volume
-#: must not start failing gates on an upgrade.
-#:
-#: Deliberately FILES rather than a knob: a new ``REBAR_*`` literal or ``[snapshot]`` key
-#: would be a new mechanism against the shrink-only ratchet, and provisioning is already the
-#: thing that knows whether this host has a dedicated volume.
+#: Declaration lives beside the scratch mount on root; proof lives inside
+#: the volume. Declaration without proof means an unmounted dedicated volume
+#: and must fail closed before mkdir can recreate the store on root. Other
+#: marker combinations retain current behavior for unprovisioned hosts.
+#: Files make provisioning the source of truth (ADR 0112; story aa40).
 _SCRATCH_REQUIRED_MARKER = ".gate-scratch-required"
 _SCRATCH_MOUNTED_MARKER = ".gate-scratch-mounted"
 _CANONICAL_GATE_SCRATCH_MOUNT = Path("/var/lib/rebar/gate-scratch")
@@ -176,34 +108,14 @@ def max_concurrent_gates(repo_root: str | os.PathLike[str] | None = None) -> int
 
 
 def scratch_unavailable_detail() -> str | None:
-    """Why the declared gate-scratch volume is unusable, or ``None`` when there is nothing
-    wrong (ADR 0112 decision 3; story ``aa40``, bug ``1ef8-c849-5801-4eee``).
+    """Return the shared scratch-volume failure detail, or None.
 
-    THE ONE OWNER of the two-marker predicate. It is public — and the only public name in
-    this module that is not about concurrency — because refusal enforcement now spans TWO
-    callers: :func:`_require_scratch_volume` (the gates) and the review-bot's pre-clone
-    admission in ``rebar.review_bot.low_disk``, whose per-review clone is a plain
-    ``tempfile.TemporaryDirectory`` that never passes through :func:`gate_admission`. Those
-    two paths MUST NOT compute mountedness independently: two derivations can disagree, and a
-    guard that half-fires is worse than none, because the loud half creates confidence the
-    protection is in force. ``infra/scripts/observability.sh`` reads the same proof marker for
-    the same reason, so monitoring and enforcement cannot diverge either.
-
-    Uses :func:`~rebar._snapshot.repo_snapshot.peek_store_root`, the SIDE-EFFECT-FREE
-    derivation, so asking the question never materialises a store on the root filesystem —
-    which is the very outcome the answer exists to prevent.
-
-    The markers describe the HOST, not one consumer's temp path: a box that declared a
-    dedicated scratch volume and lost it must not start large writes anywhere, whichever of
-    ``REBAR_GATE_TMPDIR`` / ``TMPDIR`` routed them. That is deliberately conservative, and it
-    is what keeps one predicate honest for both callers.
-
-    ``None`` on a host with no declaration AND no canonical dedicated scratch path, so the
-    guard is opt-in by PROVISIONING rather than by rebar version — no laptop, CI runner or
-    existing box changes behaviour. The canonical path is also a declaration source: compose
-    exports it through ``REBAR_GATE_TMPDIR``, and that host config survives the post-launch
-    EBS attach case where ``user_data.sh`` never ran the marker writes.
-    """
+    The gate and review bot use this side-effect-free two-marker check before
+    writing snapshots or clones; observability reads the same proof. The root-side
+    declaration survives unmount, while the volume-side proof disappears. Guard
+    the declared host regardless of the caller's temp path. With neither a
+    declaration nor canonical dedicated path, ordinary laptops and CI stay
+    unaffected (ADR 0112; story aa40)."""
     from rebar._snapshot.repo_snapshot import peek_store_root
 
     base = peek_store_root().parent

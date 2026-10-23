@@ -1,32 +1,14 @@
 #!/usr/bin/env python3
-"""Build the vendored DC wiki-render corpus fixture (story 271c, epic 708d).
+"""Build the frozen, sanitized DC wiki-render fixture corpus.
 
-The DC renderer's safety claims — that it never rewrites an arrow inside code, and
-never erodes an ASCII table — are only meaningful against REAL rebar prose, which
-is punctuation-dense in exactly the ways pandoc's jira reader mishandles. This
-script freezes a sanitized snapshot of that prose into
-``tests/fixtures/dc_wiki_corpus/`` so ``test_wiki_render_corpus.py`` is hermetic
-and its counts are reproducible without a live store.
-
-It follows the doctrine of ``scripts/capture_jira_fixtures.py``: capture from the
-real source, scrub secrets on the way out, commit the result, and let a test
-re-assert the scrub held.
-
-**Why a SAMPLE, not the whole store.** The full live body set is ~5,209 bodies /
-~5.9 MB, and ``.pre-commit-config.yaml`` enforces ``check-added-large-files`` at
-its default 500 KB per file (``.gitignore`` records a deliberate decision NOT to
-raise that cap). So the corpus is stratified: every body exhibiting a phenomenon
-the renderer must be safe on (code arrows, tables) up to a per-stratum cap, plus a
-random prose sample for the coverage measurement. Each shard stays under the cap.
-
-Usage (reads the local ticket store; writes only into tests/fixtures/):
+Deterministically sample real prose, including capped strata for code arrows
+and ASCII tables, plus random coverage prose. Scrub secrets, normalize text,
+and shard under the 500 KB added-file cap. ``test_wiki_render_corpus.py`` uses
+the vendored fixture without a live store:
 
     python scripts/build_dc_wiki_corpus.py [--store PATH] [--out PATH]
 
-The snapshot is deliberately FROZEN: regenerating it changes the corpus counts the
-tests assert, so re-run it only when the corpus is intentionally refreshed, and
-update the counts in the same change.
-"""
+Regenerate only for an intentional refresh; update asserted counts together."""
 
 from __future__ import annotations
 
@@ -40,11 +22,8 @@ from typing import Any
 # Deterministic sampling so a re-run without a store change reproduces the corpus.
 _SEED = 20260810
 
-# Per-stratum caps keep every shard under the 500 KB pre-commit ceiling.
-# Per-stratum target counts. These are PINNED, not "whatever the store holds today":
-# the committed fixture's cardinality is an acceptance criterion, and the live store
-# grows continuously, so an uncapped stratum would silently change the corpus (and
-# the asserted counts) on every regeneration.
+# Pin stratum counts so a growing store cannot change frozen fixture counts;
+# caps also keep each shard below the 500 KB added-file limit.
 _STRATUM_TARGETS = {"code_arrow": 29, "table": 29, "prose": 120}
 _MAX_BODY_CHARS = 8_000
 
@@ -57,11 +36,8 @@ _URL_RE = re.compile(r"https?://[^\s)>\]]+")
 _ACCOUNTID_RE = re.compile(r"\b[0-9a-f]{24}\b")
 _TOKENISH_RE = re.compile(r"\b[A-Za-z0-9_-]{32,}\b")
 
-# Historical prose carries vocabulary the repo has since retired, and repo-wide
-# guards reject it in ANY tracked file (the bridge-vocabulary contract and the
-# retired --force-close guard). The fixture exists to exercise Markdown-to-wiki
-# conversion, where these tokens are semantically irrelevant, so they are mapped to
-# the canonical spellings on the way out rather than exempting the fixture.
+# Map retired vocabulary to canonical spellings during capture; it is
+# irrelevant to Markdown/wiki conversion and tracked fixtures face guards.
 _VOCABULARY_SUBSTITUTIONS = (
     ("bridge-status", "bridge status"),
     ("bridge-fsck", "bridge fsck"),

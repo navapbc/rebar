@@ -21,13 +21,9 @@ DEFAULT_ALLOWLIST = REPO_ROOT / "scripts" / "criteria-vocabulary-allowlist.txt"
 PHRASE_PATTERN = re.compile(r"\b" + "success" + r"[ _-]criteri(?:a|on)\b", re.IGNORECASE)
 ABBREVIATION_PATTERN = re.compile(r"\bSCs?\b")
 
-# Only the FALLBACK walk (a non-git root) needs a hand-maintained denylist. Inside a git
-# repository the guard asks git for the file list instead, so `.gitignore` — not this set — is
-# the single source of truth for what is out of scope. That distinction is the whole point of
-# bug d5ae: a denylist over an open-ended filesystem drifts, and when it drifted past
-# `.claude/worktrees/` and the reconciler's repo-root scratch directory (now `.rebar/bridge/`)
-# it produced ~47k violations in gitignored paths and permanently reddened the `make lint`
-# commit gate for anyone who had created a worktree.
+# In git roots, use git's tracked/nonignored list. Only the non-git
+# fallback needs exclusions; a duplicate denylist would drift past ignored
+# worktrees or scratch and flood lint (bug d5ae).
 EXCLUDED_DIRECTORY_NAMES = frozenset(
     {
         ".git",
@@ -42,19 +38,15 @@ EXCLUDED_DIRECTORY_NAMES = frozenset(
         "node_modules",
     }
 )
-# ``tests/fixtures/dc_wiki_corpus`` is a FROZEN, scrubbed snapshot of historical ticket
-# prose (scripts/build_dc_wiki_corpus.py) used to prove the Data Center renderer never
-# corrupts real bodies. It is captured data, not authored text, so rewording it to
-# satisfy the criteria vocabulary would falsify the fixture.
+# This frozen, scrubbed ticket-prose fixture tests the DC renderer.
+# Rewording captured data would falsify its contract.
 EXCLUDED_PREFIXES = (
     Path("docs/archive"),
     Path("docs/experiments"),
     Path("tests/fixtures/dc_wiki_corpus"),
 )
-# ``scripts/build_cloud_adf_corpus.py`` NAMES the retired vocabulary because its
-# scrub MAPS it to the canonical spellings when freezing captured ticket prose into
-# a fixture — the same reason ``scripts/gen_cli_reference.py`` is a compatibility
-# file for the bridge-vocabulary contract.
+# The Cloud ADF generator names retired vocabulary because its capture
+# scrub maps those terms to canonical spellings.
 EXCLUDED_FILES = (Path("scripts/build_cloud_adf_corpus.py"),)
 ABBREVIATION_DIRECTORIES = (Path("src/rebar/llm/reviewers"), Path("src/rebar/_guides"))
 ABBREVIATION_FILES = (
@@ -63,21 +55,12 @@ ABBREVIATION_FILES = (
     Path("docs/plan-review-criteria-guide.md"),
 )
 
-# Decode policy. A guard that silently skips whatever it cannot decode is a guard with an
-# opt-out: one stray byte in a source file would hide every occurrence in it. So the suffixes
-# below — the repository's own authored text formats, where an undecodable byte is a defect
-# rather than a legitimate payload — FAIL CLOSED: the file is reported as an error instead of
-# skipped. Every other suffix stays tolerated, because genuine binaries (images, archives,
-# compiled artifacts) are checked in legitimately and must not turn the gate red. The split is
-# deliberately by extension, not by content sniffing: it is reviewable, stable, and cannot be
-# defeated by crafting bytes that a heuristic would call binary.
+# Decode authored text suffixes strictly: an undecodable byte is an error,
+# not a way to hide vocabulary. Tolerate other suffixes, including binaries.
 SOURCE_TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".toml", ".yaml", ".yml"})
 
-# Diagnostic excerpts are attacker-influenced text going straight into a CI log, so they are
-# escaped (no raw control characters, no terminal escape sequences) and capped. The cap applies
-# to the ESCAPED form so the emitted width is bounded no matter how the input expands. A
-# truncated excerpt still identifies the site exactly: path, line, and the matched token are
-# reported separately from the excerpt.
+# Escape and cap attacker-influenced CI excerpts after escaping; path,
+# line, and matched token remain separate when the excerpt is truncated.
 MAX_EXCERPT_CHARS = 200
 TRUNCATION_MARKER = "… [truncated]"
 
@@ -181,12 +164,7 @@ def _abbreviation_is_scoped(path: Path) -> bool:
 
 
 def _git_tracked_relatives(root: Path) -> list[Path] | None:
-    """Return the paths git would consider, or None when *root* is not a usable git repo.
-
-    `--cached --others --exclude-standard` is precisely "tracked, plus untracked files that
-    are not ignored" — so a brand-new file is still scanned the moment it is written, while
-    anything `.gitignore` excludes is out of scope by construction.
-    """
+    """Return tracked and nonignored untracked paths, or None outside a usable git repository."""
 
     if not (root / ".git").exists():
         return None

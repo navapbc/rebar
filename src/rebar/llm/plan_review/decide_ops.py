@@ -1,41 +1,11 @@
-"""Pass-3 of the plan-review gate: the `plan_review_decide` op and its operator-attested pre-step.
+"""Pass-3 plan-review decision and operator-attested AC enrichment.
 
-Extracted from `workflow_ops.py` (ticket b5fe), which stood at 794 LOC against the absolute
-800-line CI cap in `.github/module-size-limit.txt` while holding two of the five
-`orchestrator.finalize_verdict` call sites. `plan_review_decide` alone was 213 of those lines —
-27% of the file and 2.05x the next-largest op — so relieving the file means moving it, not
-trimming around it.
-
-The operator-attested enrichment cluster (`operator_attested_ac_texts`, `_norm`,
-`enrich_operator_attested`) travels with it because `enrich_operator_attested` has exactly ONE
-caller in `src/` — `plan_review_decide` — and runs as a Pass-3 pre-step by construction: it clears
-`ac_unverifiable` BEFORE Pass-3 reads the verifications. `_ticket_id` comes along because `decide`
-is its heaviest caller; `workflow_ops` re-imports it rather than keeping a second copy (a third
-copy already exists at `workflow/steps.py:36`, and more would be drift-prone).
-
-HONEST LIMIT: this RELOCATES the absorber rather than dissolving it. `plan_review_decide` is still
-~213 lines; it now lives in a file with room instead of one at the cap. The follow-up — deliberately
-NOT bundled here because it is behaviour-adjacent and needs its own RED-first test — is the verb cut
-inside the op: lifting the prerequisite-coverage normalisation (the `normalized_coverage` loop, at
-`workflow_ops.py:572-629` before this move) plus the blocking→indeterminate reclassification that
-depends on it (`workflow_ops.py:646-677`) into `prerequisites.py` as a pure function over
-(coverage records, invalid ids, too-large ids).
-
-TWO IMPORT PINS are load-bearing here and are asserted by `tests/unit/test_decide_ops_seam.py`:
-
-  * `_OPERATOR_ATTESTED_AC_RE` is a re-export of `det_operator_attested._OPERATOR_ATTESTED_TAG_RE`
-    by OBJECT IDENTITY — `tests/unit/test_det_floor_operator_attested.py:153` asserts `is`, not
-    equality, so recompiling the pattern here would pass `==` and fail that test.
-  * `orchestrator` is reached by MODULE FORM plus attribute access, never flattened to bare-name
-    imports. `tests/interfaces/lifecycle/test_plan_review_execution_floor_lifecycle.py`
-    monkeypatches `orchestrator.pass3_over_findings` and then calls this op; a flattened import
-    would bind the original function at import time, so the test would pass while exercising
-    unpatched code.
-
-This module is a LEAF: it must not import `workflow_ops` at module scope — `workflow_ops` imports
-it (to populate the `@register_step` process-global registry as an import side effect), so a
-module-scope back-import would close a cycle.
-"""
+Clear ``ac_unverifiable`` for tagged operator-attested criteria before the
+decision reads verification results. Preserve ``_OPERATOR_ATTESTED_AC_RE`` as
+the canonical pattern object, and access ``orchestrator.pass3_over_findings``
+through its module so monkeypatches remain effective. ``workflow_ops`` imports
+this leaf to register the step; a module-level reverse import would cycle.
+See ticket b5fe and ``test_decide_ops_seam.py``."""
 
 from __future__ import annotations
 
@@ -51,17 +21,10 @@ from rebar.llm.workflow.step_contracts import _ticket_id
 logger = logging.getLogger(__name__)
 
 
-# ── a8e5 Component 3: operator-attested AC awareness (pure DET, ADR-0043) ─────────────────────
-# An AC tagged `- [ ] [operator-attested] …` has "done" evidence that inherently lives OUTSIDE
-# the codebase (a deploy, a live drill), so a plan-review finding that flags it as
-# in-session-UNVERIFIABLE (the ac_unverifiable hard-override axis) is a FALSE POSITIVE: the
-# in-session unverifiability is by design. We DET-detect the tag and, for a finding that
-# references such an AC, clear ac_unverifiable BEFORE impact_plan reads it — leaving the kernel
-# impact_plan/pass3 math byte-unchanged (the fact is injected upstream, not taught to the kernel).
-# The tag matcher ``_OPERATOR_ATTESTED_AC_RE`` is a re-export of det_operator_attested's
-# canonical ``_OPERATOR_ATTESTED_TAG_RE`` (single source, ticket b080) so this enrichment path
-# and the plan-time operator-attested lint (det_operator_attested.operator_evidence_ac_gaps)
-# agree on "tagged".
+# Operator-attested ACs have evidence outside the repository. For findings
+# citing a tagged AC, clear `ac_unverifiable` before impact math; the kernel
+# itself stays unchanged. Reuse the canonical tag regex so plan-time lint
+# and Pass-3 enrichment agree (ADR 0043; ticket b080).
 
 
 def operator_attested_ac_texts(description: str) -> list[str]:

@@ -1,49 +1,17 @@
 #!/usr/bin/env python3
-"""CLI ``--output json`` JS-safe-integer gate (bug unhelping-creviced-rhino, e127-a3ad-895a-4a2f).
+"""Guard CLI JSON stdout against raw unsafe integers (ticket e127-a3ad-895a-4a2f).
 
-rebar stamps NANOSECOND timestamps (``created_at`` / ``updated_at`` / ``signed_at`` /
-``timestamp``) as 19-digit ``time.time_ns()`` integers, far outside the RFC 8259 §6
-interoperable range (``|n| > 2**53-1``). Emitted to a CLI ``--output json`` stream as a BARE
-JSON number, every float64 consumer (``jq`` / Node ``JSON.parse`` / Ruby) SILENTLY rounds them
-(``…898642`` -> ``…898600``, a -42 ns drift) and a lossless BigInt consumer (GitHub Copilot
-CLI) dies re-stringifying with ``TypeError: Do not know how to serialize a BigInt``.
+Nanosecond store timestamps exceed JavaScript's exact integer range. CLI store
+data must use ``js_safe_dumps``, which encodes out-of-range integers as exact
+decimal strings. Scan ``_cli``, ``_commands``, ``_engine_support``, and
+``signing.py`` for ``json.dumps`` or ``_json.dumps`` nested anywhere inside
+``print`` or stdout ``write`` expressions. Structured logging and reconciler
+daemon output have separate contracts.
 
-The fix routes CLI store-data serialization through the SINGLE choke point
-:func:`rebar._mcp_errors.js_safe_dumps`, which runs ``js_safe_result`` (out-of-range int ->
-exact decimal STRING) before ``json.dumps``. This gate keeps that choke point intact: it FAILS
-if store data is written to stdout through a RAW ``json.dumps`` on the CLI surface, so a future
-emitter cannot silently reintroduce a bare big-int on the wire.
-
-WHAT IS FLAGGED — only the CONSTRUCT, never prose. A call whose result is written to stdout —
-``print(<X>)``, ``sys.stdout.write(<X>)`` or ``stdout.write(<X>)`` — where ``<X>`` contains
-(directly, or nested through ``+ "\n"`` / an f-string / any expression) a call to
-``json.dumps`` / ``_json.dumps`` (attribute ``dumps`` on a ``json`` / ``_json`` module name).
-The sanctioned choke point ``js_safe_dumps(...)`` is a plain ``Name`` callee and is NOT flagged.
-Docstrings, comments and error text compose no stdout write and are never flagged.
-
-SCAN ROOTS — the user-facing CLI ``--output json`` surface only: ``src/rebar/_cli``,
-``src/rebar/_commands``, ``src/rebar/_engine_support`` and ``src/rebar/signing.py``. This DOES
-cover the CLI LLM/eval verbs that live under ``src/rebar/_cli`` (e.g. ``_llm_eval_commands.py``),
-which share the ``--output json`` wire contract. The structured-logging stream
-(``rebar._logging``) and the reconciler daemon (``src/rebar/reconciler``) are
-DIFFERENT contracts, live outside these roots, and are out of scope.
-
-SANCTION — ``# js-safe-ok: <reason>``, with a MANDATORY reason, honoured on the offending line,
-the line above, or the enclosing statement's first line (mirrors ``# repo-root-ok:`` /
-``# tickets-boundary-ok:``). Use it for a stdout write that provably carries NO store
-timestamps (a fixed diagnostic string, a list of backend names, an f-string of terminal
-output). A bare ``# js-safe-ok`` with no reason is itself reported.
-
-KNOWN LIMITATION — this is a SYNTACTIC gate: it flags a ``json.dumps`` only where it is
-lexically nested inside a stdout-sink call's arguments. A value laundered through a HELPER —
-``s = json.dumps(doc)`` on one statement, ``print(s)`` on another, or ``def f(): return
-json.dumps(doc)`` written to stdout by a distant caller — is NOT caught, because tracking it
-would need whole-program dataflow. The direct ``print(json.dumps(...))`` /
-``sys.stdout.write(json.dumps(...) + "\n")`` shape is what every current CLI emitter uses and
-what regressed here, so the gate pins that shape; the choke point plus the RED regression test
-(``int(wire) == stored`` AND the wire is a JSON string) remain the primary defence, with this
-gate as the belt-and-braces guard against the direct construct.
-"""
+``# js-safe-ok: <reason>`` sanctions a proven safe stdout write on that line,
+the prior line, or the statement's first line; a missing reason is an error.
+This syntactic guard cannot track serialized values through helper calls or
+separate statements. Wire round-trip tests cover the runtime contract."""
 
 from __future__ import annotations
 
@@ -68,10 +36,8 @@ SCAN_ROOTS = (
 #: The stdout sinks a ``--output json`` value flows through.
 _STDOUT_SINKS = {"print", "sys.stdout.write", "stdout.write"}
 
-#: ``file=`` targets that PROVABLY redirect a ``print`` off stdout (a stderr diagnostic the
-#: docstring names as allowed). Only these earn an exemption; an ambiguous ``file=<variable>``
-#: does NOT, so the guard fails CLOSED and the author sanctions with ``# js-safe-ok:`` if it is
-#: genuinely off-stdout.
+#: Only proven stderr file= targets are exempt. Ambiguous targets remain
+#: stdout candidates unless sanctioned with # js-safe-ok: <reason>.
 _NON_STDOUT_FILE_TARGETS = {"sys.stderr", "stderr"}
 
 #: Raw dumps callees the choke point replaces. ``_json`` is the common local alias.
@@ -97,11 +63,8 @@ def _callee_name(func: ast.AST) -> str:
 
 
 def _contains_raw_dumps(node: ast.AST) -> ast.Call | None:
-    """Return the first ``json.dumps``/``_json.dumps`` Call anywhere under ``node``, else None.
-
-    Walks the whole subtree so a dumps nested through ``+ "\n"``, an f-string, or any wrapping
-    expression is still found. ``js_safe_dumps(...)`` (a bare ``Name`` callee) never matches.
-    """
+    """Find raw json.dumps or _json.dumps anywhere in an expression, including nested
+    concatenation and f-strings; exclude js_safe_dumps."""
     for child in ast.walk(node):
         if isinstance(child, ast.Call) and _callee_name(child.func) in _RAW_DUMPS_CALLEES:
             return child
@@ -143,16 +106,8 @@ class _Visitor(ast.NodeVisitor):
 
     @staticmethod
     def _writes_to_stdout(node: ast.Call) -> bool:
-        """A ``print(..., file=X)`` lands on stdout unless ``X`` PROVABLY redirects it off.
-
-        ``print`` defaults to stdout, so a bare ``print(...)`` qualifies. An explicit
-        ``file=sys.stderr`` (or ``stderr``) — the docstring names stderr diagnostics as allowed
-        — is exempt. Every other ``file=`` target, INCLUDING an ambiguous ``file=<variable>``
-        that could alias ``sys.stdout`` at runtime, fails CLOSED (treated as stdout): the guard
-        cannot prove it is off-stdout, so it flags it and the author sanctions with
-        ``# js-safe-ok:`` if warranted. The ``*.write`` sinks are already bound to a concrete
-        stream by their receiver.
-        """
+        """Treat print as stdout unless its file target is provably stderr. Ambiguous targets fail
+        closed; sanctioned exceptions need # js-safe-ok: <reason>."""
         for keyword in node.keywords:
             if keyword.arg == "file":
                 return _callee_name(keyword.value) not in _NON_STDOUT_FILE_TARGETS
@@ -170,13 +125,8 @@ def _statement_lines(tree: ast.AST) -> dict[int, int]:
 
 
 def scan_file(path: Path, root: Path) -> tuple[list[_Finding], list[_Finding]]:
-    """Return (violations, bare_marker_findings) for one source file.
-
-    A file that fails to parse is reported as a violation rather than silently skipped: an
-    unparseable CLI module could otherwise hide a fresh ``print(json.dumps(...))`` from the
-    gate. ``json.dumps`` absent means the file cannot contain the construct, so parsing it at
-    all is unnecessary.
-    """
+    """Return violations and bare sanctions. Unparseable files fail closed; files without raw
+    dumps need no AST scan."""
     source = path.read_text(encoding="utf-8")
     rel = str(path.relative_to(root))
     if "json.dumps" not in source:
