@@ -1,19 +1,5 @@
-"""RP-05 S6 HELD-OUT oracle — adversarial cutover proofs (unit tier).
-
-Withheld from the implementation subagent; restored and validated by the orchestrator after
-the happy-path implementation lands. Covers the cases that separate a real cutover from one
-that only satisfies the happy path:
-
-* every intercept family dispatches through the executor with the bare-remainder adapter
-  shape and NEVER trips the ``handler is None`` RuntimeError (ADV1);
-* the explicit intercept ladder is gone — no second selection authority survives, proven
-  both observably (every intercept spelling reaches ``_execute.execute``) and by a source
-  guard on the router body;
-* the duplicate policy frozensets are retired — the router's live sets are the registry's
-  derived sets, and the dead literal exports no longer exist as ``_cli`` attributes;
-* retired / unknown spellings stay unknown; and
-* ``identity``'s conditional-init contract survives the cutover (full init unless help).
-"""
+"""Held-out CLI registry tests check adversarial route and initialization cases beyond the
+happy-path cutover, including command imports, aliases, and error behavior."""
 
 from __future__ import annotations
 

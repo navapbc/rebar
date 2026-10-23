@@ -1,18 +1,6 @@
-"""A disposition close MINTS an attestation instead of withholding one (bug 738a).
-
-THE DEFECT. The close path exempts a `duplicate` / `not_a_bug` / `escalated` bug that names a live
-replacement from completion verification — correct, since such a bug never claimed to implement its
-own acceptance criteria. But it also returned no sign signal, so the close was unsigned, and
-``child_closure_findings`` counts any unsigned closure as UNCERTIFIED and withholds the parent's
-signature. Two correct rules composing into a state with no honest exit: reopening took the same
-exemption every time, and ``--force`` produced the very uncertified state the ruling forbids.
-
-The exemption keyed on the link that DOCUMENTS the disposition, so certification was reachable only
-for duplicates that hid their replacement. These tests pin the fix and, more
-importantly, the two properties that make it safe: the manifest must not claim a completion PASS
-that never happened, and
-the disposition must still be rejected when the ticket does not actually qualify.
-"""
+"""Evidence-backed administrative dispositions mint a distinct attestation without claiming
+completion PASS. Tests require valid replacement or reason evidence and reject unqualified
+dispositions."""
 
 from __future__ import annotations
 
@@ -34,16 +22,8 @@ def test_the_disposition_classes_match_the_close_gates_own_set():
     ),
 )
 def test_every_replacement_bearing_class_can_produce_a_verdict(close_class, monkeypatch):
-    """All replacement-bearing exempt classes, not just `duplicate`.
-
-    Measured when 738a was filed, only `duplicate` had closes carrying a live replacement link;
-    `not_a_bug` had none and `escalated` had no closed bugs at all. So the other two were LATENT
-    siblings of the same defect — identical code path, gap appearing the moment one is linked.
-    Parametrizing means the fix covers them before that happens rather than after. The
-    REASON-ONLY administrative classes (obsolete/wontfix, ticket fc20) mint from their
-    ``close_reason`` instead — asserted separately below — while `not_a_bug`/`escalated`
-    (reason-required since bug d54b, replacement checked FIRST) must keep this mint unchanged.
-    """
+    """Every replacement-bearing exempt class can mint a disposition verdict. Reason-backed
+    obsolete and wontfix use their persisted close reason instead."""
     monkeypatch.setattr(
         close_disposition, "find_replacement", lambda *a, **k: "dead-beef-cafe-0001"
     )
@@ -76,17 +56,8 @@ def test_every_reason_only_class_can_produce_a_verdict(close_class):
 
 
 def test_a_force_close_is_still_never_signed_even_for_a_linked_duplicate(monkeypatch, tmp_path):
-    """THE GUARANTEE THIS FIX MUST NOT WEAKEN: `--force` still withholds the signature.
-
-    The disposition branch mints an attestation, so the ordering inside `_completion_precheck`
-    becomes load-bearing: `if force_close: return None` runs BEFORE it. If that order were ever
-    reversed, `--force --class duplicate` on a linked bug would start producing a signed
-    closure — turning the operator's escape hatch into a way to certify without verifying, which is
-    exactly the state the reopen ruling exists to prevent.
-
-    Asserted with the disposition path fully primed (gate ON, replacement link present), so the only
-    thing that can produce `None` here is the force-close guard itself.
-    """
+    """Force-close still returns no signature before the disposition branch, even when a duplicate
+    has a valid replacement link."""
     from rebar._commands import gates as _gates
 
     monkeypatch.setattr(_gates, "gate_enabled", lambda *a, **k: True)
@@ -114,15 +85,8 @@ def test_a_force_close_is_still_never_signed_even_for_a_linked_duplicate(monkeyp
 
 
 def test_the_precheck_ACTUALLY_returns_the_disposition_verdict(monkeypatch, tmp_path):
-    """THE WIRING TEST. Everything else here exercises the module in isolation.
-
-    This calls the real `_completion_precheck` on the happy disposition path, so a broken call site
-    fails here rather than silently reverting to the old unsigned behaviour. It exists because the
-    call site MOVED — bug 74a3 split the precheck cluster into `close_precheck`, and the end-to-end
-    verification of this fix had been done against the previous location. A unit suite that only
-    tests the pieces would have stayed green through that move while the gate went back to
-    withholding signatures.
-    """
+    """Call the completion precheck so a disposition verdict reaches the close seam after
+    refactors."""
     from rebar._commands import gates as _gates
 
     monkeypatch.setattr(_gates, "gate_enabled", lambda *a, **k: True)

@@ -1,21 +1,7 @@
-"""Exact review-plan retry (story RP-06 S5 — sullen-famished-incatern).
-
-`rebar review-plan <id> --retry` resumes ONLY the exact latest retained review, and only
-when that review is a retryable INDETERMINATE with a current, versioned discovery journal:
-it reuses the checkpointed findings of the units that already succeeded and issues model
-calls ONLY for the missing units, under a FRESH per-invocation attempt budget. An
-ineligible latest result (PASS/BLOCK, a non-retryable indeterminate, or a
-missing/legacy/corrupt/stale journal) is REFUSED before any model call — an unsigned
-INDETERMINATE, zero calls, no sidecar, the full-review remedy — never a silent fallthrough
-to a full review.
-
-These are library-level oracles (AC1–AC6). They assert OBSERVABLE behavior only: the exact
-called chunk-id sets via a stateful counting fake, the stored discovery journal + retry
-lineage, coverage flags, the surfaced-verdict shape, and zero calls on refusal. The real
-CLI subprocess end-to-end (AC8) + the flag conflicts (AC5) live in
-``test_plan_review_cli_retry.py``; the generated-help drift guard (AC7) in
-``test_gen_cli_reference.py``.
-"""
+"""Retry resumes only the latest retryable INDETERMINATE with a current discovery journal. It
+reuses completed chunks and calls the model only for missing chunks under a fresh budget.
+Ineligible results refuse before model calls or sidecar writes. CLI flag and help checks are in
+separate tests."""
 
 from __future__ import annotations
 

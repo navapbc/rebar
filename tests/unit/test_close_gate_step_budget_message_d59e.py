@@ -1,29 +1,5 @@
-"""A step-budget exhaustion must not blame a missing `[agents]` extra either (bug d59e).
-
-``test_close_gate_bound_message_d59e.py`` fixed this for the bounded-recovery path
-(Gerrit change 1027) by having ``transition_close`` consult
-``_failure.recovery_failure_cause(exc)``. That helper returns ``None`` for anything
-that is not a :class:`CompletionRecoveryError`, so the ``or``-fallback literal remains
-the default for **every other** verifier failure — including one that provably ran the
-model for 804 seconds.
-
-Observed live while closing 9fd4-a94c-156e-4a56 with the extra installed and a working
-API key::
-
-    Error: cannot close 9fd4-...: completion verification could not run (completion
-    verification workflow did not produce a verdict: step 'decide@then/verify' failed:
-    agent exceeded its step budget (max_iterations=480; ~1 model request per tool
-    call). Raise REBAR_LLM_MAX_STEPS or narrow the task.). The completion-verification
-    gate is enabled (verify.require_completion_verification_for_close); install the
-    'agents' extra and set a model API key. ...
-
-The extra was installed and the key was set — the verifier had just spent 13 minutes
-making real model calls. The remedy is false, and it displaces the true one the
-exception already carries.
-
-The sibling file's negative control (a genuine unavailability must KEEP the
-install-the-extra remedy) still applies and is deliberately not duplicated here.
-"""
+"""Step-budget exhaustion comes from a running verifier, so its close error must retain the budget
+remedy rather than claim the agents extra or key is missing."""
 
 from __future__ import annotations
 

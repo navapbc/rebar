@@ -1,19 +1,6 @@
-"""CI parity: every gate that runs against `main` post-merge must also gate pre-merge.
-
-The Gerrit `Verified` vote is cast by ``.github/workflows/gerrit-verify.yaml`` BEFORE a change
-can land; ``.github/workflows/test.yml`` runs the same gates AFTER the fact on the pushed `main`.
-A gate present only in ``test.yml`` can *only* fail post-merge, letting a red change land with a
-green Verified vote (this is exactly how a stale ``docs/env-vars.md`` reached `main`).
-
-The two lanes used to hand-copy the gate+suite step list, and these tests grepped both files to
-catch drift. That copy is now factored into ONE reusable workflow, ``_build-and-test.yml``, which
-BOTH callers invoke (the branch-head lane via ``test.yml``, the patchset/Verified lane via
-``gerrit-verify.yaml``) — so drift is impossible by construction, the same way ``_optionality.yml``
-is shared. These tests therefore assert the new invariant: (1) both callers delegate to the shared
-reusable, (2) every gate/script lives in that reusable so it gates both lanes, and (3) the
-independent safety properties the old file also enforced — the pre-commit SKIP set and the
-optionality wiring — are preserved, now checked against the reusable that owns those steps.
-"""
+"""Pre-merge Gerrit Verified and post-merge main checks share _build-and-test.yml. These tests pin
+both callers, shared gate ownership, pre-commit skips, and optionality wiring so a gate cannot
+first fail after merge."""
 
 from __future__ import annotations
 
@@ -481,42 +468,10 @@ def test_pip_install_of_pytest_is_not_mistaken_for_a_lane() -> None:
 
 
 def test_every_ci_pytest_lane_has_a_per_test_hang_guard() -> None:
-    """A single deadlocked test must name itself in seconds, not eat the whole job.
-
-    ``timeout-minutes`` — where a job even declares it — bounds only the WHOLE job: a test that
-    blocks forever under ``-q`` stays invisible behind the last dot and is killed much later
-    with no traceback and no culprit named, which is exactly the ubuntu/py3.11 incident (ticket
-    ``89d5-61da-b621-47f8``). ``pytest-timeout``'s ``--timeout`` is that instrument.
-
-    ``--timeout-method=thread`` is the load-bearing half: the default ``signal`` method arms
-    ``SIGALRM`` in the main thread and cannot fire while a worker is blocked in a C-level
-    syscall (a stuck ``fcntl.flock``, socket ``recv``, or ``subprocess`` pipe) — precisely the
-    hang shapes these suites are full of, and the ONLY shape the live-service lanes have. The
-    ``thread`` watchdog dumps every thread's stack and aborts the worker, so a recurrence points
-    straight at the offending test.
-
-    This sweeps EVERY workflow rather than just the shared reusable (ticket
-    ``d835-1846-95d1-4d84``): the guard originally shipped only in ``_build-and-test.yml``, and
-    the eight other lanes — the live-LLM matrix, live Jira Cloud, the Langfuse round trip, the
-    Jira DC harness, the structured-output sweep, ``test.yml``'s external tier, and the two
-    offline lanes — each went unguarded because nothing asserted over them. Budgets are
-    per-lane and calibrated from observed runtime (see each step's own comment); this asserts
-    only that a budget EXISTS, so a new lane cannot ship without one.
-
-    EXCEPTION: the ``_build-and-test.yml`` shared-tier lanes satisfy the guard WITHOUT an
-    explicit ``--timeout=`` flag by inheriting the ``[tool.pytest.ini_options]`` budget
-    (ticket ``5a30-d423-b1f5-4e33``): they run pytest from this repo's root, so the ini keys
-    apply, and a CLI flag would OVERRIDE them — which is exactly how a stale tighter flag on
-    trusted ``main`` killed workers on every Verified run and made the raising patchset unable
-    to pass its own gate (bug ``3fa7-94ba-42aa-4623``; the Verified gate executes workflow
-    files from trusted main, not the patchset). The ini fallback is asserted REAL below
-    (budget present and positive, ``thread`` method), and the negative arms in
-    ``test_timeout_budget.py`` prove those keys actually expire a hung test. Every OTHER
-    workflow's lanes must still carry an explicit flag — several run against generated
-    projects or from a clean venv where this repo's ini is not reliably in play, and each
-    carries its own calibrated budget — and a lane that sets a flag must use the ``thread``
-    method.
-    """
+    """Every pytest CI lane needs a per-test hang guard using the thread watchdog, which can expose
+    tests blocked in system calls. Shared build-and-test tiers inherit a positive thread timeout
+    from pytest ini. Other lanes declare calibrated flags because they may run outside that ini.
+    Whole-job timeout alone cannot identify the stuck test."""
     import tomllib
 
     ini = tomllib.loads(_read(_ROOT / "pyproject.toml"))["tool"]["pytest"]["ini_options"]
@@ -549,24 +504,9 @@ def test_every_ci_pytest_lane_has_a_per_test_hang_guard() -> None:
 
 
 def test_the_shared_tier_lanes_are_flag_free_and_governed_by_the_ini() -> None:
-    """`_build-and-test.yml`'s two tiers must carry NO ``--timeout``/``--timeout-method`` flags.
-
-    The budget lives in ``[tool.pytest.ini_options]`` (story ``73b8-2d79-3046-44ce``) so `make
-    test` and a bare local run are guarded too. pytest-timeout precedence is CLI > env > ini,
-    so a command-line ``--timeout=`` OVERRIDES the ini — and because the Gerrit Verified gate
-    executes workflow files from trusted ``main``, not the patchset, any flag here permanently
-    shadows a patchset's ini change: bug ``3fa7-94ba-42aa-4623``'s budget fix could never be
-    exercised by its own Verified run (change 2115 PS1 ran main's stale ``--timeout=20`` and
-    killed its own workers). Single-sourcing makes that drift IMPOSSIBLE rather than
-    checked-for: the lanes carry no flag and the ini — which travels WITH a patchset — is the
-    one authority (ticket ``5a30-d423-b1f5-4e33``).
-
-    Scope is deliberately these two lanes only. The other ``--timeout=`` lanes
-    (``external-integration.yml``, ``_optionality.yml``, ``_eval-discipline.yml``, ``test.yml``,
-    ``structured-output-baseline.yml``) drive live services, clean-venv installs and eval
-    suites whose per-test runtime is legitimately minutes; each carries its own calibrated
-    budget and is asserted only by the hang-guard sweep above.
-    """
+    """The shared tiers take their timeout and thread method only from pytest ini. CLI flags
+    override the patchset's ini while Verified runs trusted-main workflow files. Other
+    specialized lanes keep explicit calibrated flags."""
     import tomllib
 
     ini = tomllib.loads(_read(_ROOT / "pyproject.toml"))["tool"]["pytest"]["ini_options"]
@@ -603,25 +543,9 @@ def test_the_shared_tier_lanes_are_flag_free_and_governed_by_the_ini() -> None:
 
 
 def test_integration_lane_fails_fast_on_worker_crash_and_worksteal_lane_does_not() -> None:
-    """The loadgroup lane must carry ``--max-worker-restart=0``; the worksteal lane must NOT.
-
-    Under ``--dist loadgroup`` (and loadscope) a dead worker's pending workload — INCLUDING
-    the item that crashed it — is re-dispatched to respawned replacement workers, which die on
-    the same item, up to xdist's default restart cap of ``numprocesses * 4`` (16 here). Each
-    cycle re-pays session setup, so a single crashing test burns toward the 60-minute job
-    ceiling instead of failing in seconds (bug ``3fa7``'s RCA; upstream pytest-dev/pytest-xdist
-    #1094/#1189, whose ``docs/crash.rst`` sanctions ``=0``). ``--max-worker-restart=0`` makes
-    the first worker death abort the whole session immediately and cleanly (triggershutdown).
-
-    Exactly ``=0`` rather than a small cap: the deterministic cause of worker deaths (the
-    over-tight 20s budget) was fixed by the budget restore (change 2115, ``--timeout=300``),
-    so any residual worker death is UNEXPECTED and should fail fast and loudly, not be
-    absorbed by a retry allowance that hides it.
-
-    The worksteal (default-suite) lane must NOT get the flag: worksteal never re-dispatches
-    the crashing item, so xdist's default restart allowance there only replaces lost capacity
-    and lets the rest of the suite finish — one crash still fails the run, with more signal.
-    """
+    """The loadgroup lane disables worker restarts so a crashing item fails immediately instead of
+    being redispatched repeatedly. Worksteal retains its restart allowance to finish other tests
+    while still reporting the crash."""
     lanes = {
         ("loadgroup" if "--dist loadgroup" in body else "worksteal"): (step, body)
         for filename, step, body in _all_workflow_pytest_steps()
@@ -724,17 +648,8 @@ def test_optionality_contract_gates_the_verified_path(job: str, reusable: str) -
     )
 
 
-# The optionality suite that used to have its OWN dedicated CI job (`import-linter` in
-# _optionality.yml). That job was deleted as redundant: it installed `-e .[dev]` — byte-identical
-# to the reusable's install — and ran exactly these files, which carry no marker and therefore
-# already run in every `test` matrix cell (3.11/3.12/3.13 + macOS), strictly more coverage than
-# one ubuntu/3.12 run. The deletion is safe ONLY while these files stay in the default selection,
-# and NOTHING else in the repo can see that: the parity checks above read caller-level wiring
-# strings and `scripts/check_verify_gate_parity.py` reads caller job keys — neither looks inside
-# `_optionality.yml`. So the guard below is what replaces the deleted job (ticket
-# `hominoid-awestruck-goshawk`): adding a `@pytest.mark.integration`, moving the files, or
-# marking them from a conftest would otherwise silently drop the optionality contract on a
-# fully GREEN build. Bump this count when a test is legitimately added to either file.
+# The optionality files must remain in the default test selection after their separate job was
+# removed. This guard catches marker or path changes that would silently drop them.
 _OPTIONALITY_SUITE = ("tests/unit/test_core_optionality.py", "tests/unit/test_optional.py")
 _OPTIONALITY_SUITE_ITEM_COUNT = 10
 # The default suite selection, verbatim from the reusable `_build-and-test.yml` test step.
@@ -881,19 +796,9 @@ def _render_default_suite_body(body: str, os_name: str, python_version: str, tem
 def test_macos_default_suite_lane_passes_when_platform_compat_collects_nothing(
     tmp_path: Path,
 ) -> None:
-    """A stale-tree macOS cell (0 platform_compat nodes -> pytest rc 5) must not fail the gate.
-
-    The Verified gate runs THIS workflow from trusted main against the raw patchset tree
-    (reusable-workflow ref binding). A patchset whose tree predates the ``tests/conftest.py``
-    platform_compat auto-marker (story omphacite-desertlike-coney) carries zero nodes with that
-    mark, so the
-    macOS selection ``-m "platform_compat and not external"`` collects nothing and pytest exits
-    5. That is a provenance artifact, not a defect in the change — the ubuntu cells (whole-suite,
-    marker-independent) still fully exercise it — so the macOS lane must treat an empty
-    collection as pass. Every OTHER cell selects the whole suite, where rc 5 is a real
-    empty-suite failure that MUST stay red. This runs the lane's real shell with a stub
-    ``pytest`` that exits 5, per cell.
-    """
+    """An old patchset may have no platform_compat tests for the macOS lane, yielding pytest exit
+    5. Only that marked lane accepts empty collection. Whole-suite cells keep exit 5 as a
+    failure."""
     import yaml
 
     workflow = yaml.safe_load(_read(_BAT_YML))

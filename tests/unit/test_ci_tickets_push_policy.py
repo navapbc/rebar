@@ -1,21 +1,6 @@
-"""NO workflow runs on a push to the ``tickets`` branch (ticket refractive-conceptual-sunbear).
-
-``tickets`` is rebar's own event log, and the store **auto-pushes it on every write** — a
-comment, an edit, a claim, a close. It carries no code. So any workflow that triggers on a
-push to that branch turns each ticket event into a CI run: during a 2026-08-12/13 bug bash
-that starved the org-wide GitHub Actions pool (navapbc is on GitHub Free — 20 concurrent
-jobs, 5 macOS, shared across every repo in the org) and queued a Gerrit ``Verified`` pytest
-matrix roughly two hours behind tickets-push runs.
-
-The operator directive is absolute: *"The tickets branch should never trigger CI."* Anything
-that must read the store runs on a **schedule** instead — reconcile-bridge hourly,
-verify-identity every 6 hours, and so on — so this change removes triggers, never cadence.
-
-The sibling module :mod:`tests.unit.test_ci_main_push_policy` pins the same class of policy
-for ``main``, but against a hard-coded list of workflow NAMES. That shape cannot catch a
-workflow added *later* with a bare ``push:`` key. This module therefore **enumerates the
-workflow directory from disk**, so a new file inherits the invariant automatically.
-"""
+"""No workflow may run on a push to the tickets branch. Every tracker write auto-pushes that
+code-free event log. Store readers use schedules instead. Enumerate all workflow files so newly
+added workflows inherit the ban."""
 
 from __future__ import annotations
 

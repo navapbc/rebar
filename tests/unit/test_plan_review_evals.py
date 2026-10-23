@@ -1,13 +1,7 @@
-"""Standing eval-suite tests for the plan-review prompts (epic 5fd2 / child 7284).
-
-These validate the SHIPPED plan-review eval specs offline (no model, no network): each
-spec parses + passes `validate_eval_spec`, and the labeled datasets carry the three
-case types (recall / false-accept / false-fire) the standing suite requires — including
-the Pass-2 DISCRIMINATION pairs (child acc1) and the ISF recall/justified-descope cases
-(child 681b), seeded from the real observed false-fire taxonomy. The live model run is
-gated behind the `[agents]` extra in the eval CI; the gold subset is human-adjudicated
-(these seed labels stand in pending that adjudication — see eval_specs/README.plan-review.md).
-"""
+"""Offline plan-review eval guards. Each shipped spec parses and includes recall, false-accept, and
+false-fire cases, including Pass-2 discrimination and justified scope exclusions.
+Provider-backed model evaluation runs separately with the agents extra.
+Its seed labels await human adjudication."""
 
 from __future__ import annotations
 
@@ -99,9 +93,7 @@ def test_verifier_has_discrimination_pairs() -> None:
 
 
 def test_verifier_new_subanswers() -> None:
-    # WS1 (epic cite-stone-sea) AC: the two DSO-adopted sub-answers appear in the Pass-2
-    # verification contract. (Deeper kernel-math coverage — the na-default and old-sidecar
-    # validity comparability — lives in tests/unit/test_review_kernel_rules.py.)
+    # The Pass-2 contract includes both adopted sub-answers. Kernel math is tested separately.
     from rebar.llm import review_kernel
 
     model = review_kernel.verification_model()
@@ -115,9 +107,8 @@ def test_verifier_new_subanswers() -> None:
 
 
 def test_verifier_committed_claim_and_altitude_pairs() -> None:
-    # WS1 (epic cite-stone-sea): the two DSO-adopted sub-answers each get a labeled
-    # discrimination pair — a genuinely-unbacked committed claim / an undeclared-at-this-level
-    # finding SURVIVES (high validity); a claim the plan backs / a wrong-altitude finding DROPS.
+    # Pass-2 retains unbacked claims and undeclared-at-this-level findings. It drops backed
+    # claims and wrong-altitude findings.
     ds = E.load_eval_spec("plan-review-verifier").get("dataset", [])
     for pair in ("committed-claim", "altitude"):
         cases = [c for c in ds if c.get("pair") == pair]
@@ -132,8 +123,7 @@ def test_verifier_committed_claim_and_altitude_pairs() -> None:
 
 
 def test_finder_has_scale_calibration_cases() -> None:
-    # WS6 (epic cite-stone-sea): the G-9 scale anchors are finder-side (A1/T5a), proven as
-    # fire/no-fire — evidenced high scale FIRES; scale invented by subject-interpolation does NOT.
+    # Finder cases fire on evidenced scale and reject scale inferred only from the subject.
     ds = E.load_eval_spec("plan-review-finder").get("dataset", [])
     by_id = {c.get("id"): c for c in ds}
     assert by_id.get("R-T5a-scale-evidenced", {}).get("expect") == "finding"
@@ -142,8 +132,7 @@ def test_finder_has_scale_calibration_cases() -> None:
 
 
 def test_e4_scope_exclusion() -> None:
-    # WS2 (epic cite-stone-sea): E4's scope-exclusion sub-check (G-4) discriminates — a false
-    # CODEBASE exclusion FIRES; an external-fact exclusion ABSTAINS-with-coverage (no fire).
+    # E4 fires on false codebase exclusions and abstains with coverage on external facts.
     ds = E.load_eval_spec("plan-review-finder").get("dataset", [])
     e4 = {c.get("id"): c for c in ds if c.get("criterion") == "E4"}
     assert e4.get("R-E4-scope-exclusion-codebase", {}).get("expect") == "finding"
@@ -151,8 +140,7 @@ def test_e4_scope_exclusion() -> None:
 
 
 def test_hedge_finder() -> None:
-    # WS2: the hedge finder is a 1-TURN criterion (NOT exec:DET — ADR 0033) that fires on a
-    # committed element resting on a hedged assumption.
+    # The one-turn hedge finder flags committed claims resting on hedged assumptions.
     import json
     from pathlib import Path
 
@@ -166,8 +154,7 @@ def test_hedge_finder() -> None:
 
 
 def test_hedge_dedup() -> None:
-    # WS2: rubric-level dedup vs E6 — a hedge inside an AC proving-command clause is E6's
-    # no_hedges territory; the hedge criterion marks itself not-applicable (no double-report).
+    # E6 owns hedges in acceptance-criteria proof commands. The hedge finder abstains there.
     from pathlib import Path
 
     from rebar.llm.plan_review import passes
@@ -196,9 +183,8 @@ def _reviewer_prompt(name: str) -> str:
 
 
 def test_g5_prohibition() -> None:
-    # WS3 (epic cite-stone-sea): the prohibition-enumeration overlay (gap-report G-5, id T13).
-    # Recall: a require-tests-before-merge plan yields UNCOVERED `gh pr merge` sites; FP: a plan
-    # that merely describes existing enforcement does not fire. Enums defined in the prompt.
+    # G5 finds prohibited merge commands in test-before-merge plans but ignores descriptions of
+    # existing enforcement.
     prompt = _reviewer_prompt("plan_review_T13.md")
     for token in ("MIGRATED", "EXEMPTED", "UNCOVERED"):
         assert token in prompt, f"T13 prompt missing enum value {token}"
@@ -209,8 +195,7 @@ def test_g5_prohibition() -> None:
 
 
 def test_g10_citrigger() -> None:
-    # WS3: the CI-trigger/release-infra overlay (gap-report G-10, id T14). Recall: a new ref
-    # pattern yields an EXCLUDED workflow; plus a fail-open abstain on unknown CI. Enums in prompt.
+    # G10 detects new refs excluded from CI and abstains when the CI provider is unknown.
     prompt = _reviewer_prompt("plan_review_T14.md")
     for token in ("INCLUDED", "EXCLUDED", "NO_FILTER"):
         assert token in prompt, f"T14 prompt missing enum value {token}"
@@ -227,21 +212,19 @@ def _finder_cases_for(criterion: str) -> dict:
 
 
 def test_removal_rationale_exempt() -> None:
-    # WS11 (epic cite-stone-sea): the gate EXEMPTS dead-code / behavior-preserving refactor.
+    # Dead-code removal and behavior-preserving refactors are exempt.
     c = _finder_cases_for("removal-rationale").get("FP-removal-rationale-dead-code", {})
     assert c.get("expect") == "pass" and c.get("mode") == "dead-code-exempt"
 
 
 def test_removal_rationale_error_path() -> None:
-    # WS11: the gate FIRES on an internals change that alters error/failure handling.
+    # Changed error handling requires removal rationale.
     c = _finder_cases_for("removal-rationale").get("R-removal-rationale-error-path", {})
     assert c.get("expect") == "finding" and c.get("mode") == "error-handling-change"
 
 
 def test_removal_rationale_intent_marker_and_fabricated() -> None:
-    # WS11: FIRES on removal of an intent-marked artifact (no happy-path delta); a fabricated /
-    # ungrounded justification does not satisfy the grounded-scenario bar — the case pins the
-    # expected sub-answer removal_scenario_grounded ∈ {no, insufficient} (low validity).
+    # Intent-marked removals require a grounded scenario. Fabricated rationale does not qualify.
     cases = _finder_cases_for("removal-rationale")
     assert cases.get("R-removal-rationale-intent-marker", {}).get("expect") == "finding"
     fabricated = cases.get("R-removal-rationale-fabricated", {})
@@ -254,8 +237,7 @@ def test_removal_rationale_intent_marker_and_fabricated() -> None:
 
 
 def test_removal_rationale_advisory_and_coaching() -> None:
-    # WS11: advisory posture (does not block a claim) + coaching reuses move 6, and the E5
-    # test-removal overlap is grouped by the coaching pass (a recall case where both fire).
+    # Removal rationale is advisory. Coaching groups its overlap with E5 test removal.
     import json
     from pathlib import Path
 
@@ -271,9 +253,8 @@ def test_removal_rationale_advisory_and_coaching() -> None:
 
 
 def test_verifier_has_blast_radius_ratchet_pair() -> None:
-    # WS6 FP-3(b): the one-way blast_radius ratchet is a Pass-2 (verifier) behavior, so it is
-    # exercised in the verifier eval — a real system-wide defect keeps impact; a trivial finding
-    # is NOT inflated to blocking by a grand subject. (discriminates_impact_levels scores it.)
+    # Pass-2 retains impact for a system-wide defect without inflating a trivial finding from
+    # the subject's scope.
     ds = E.load_eval_spec("plan-review-verifier").get("dataset", [])
     cases = [c for c in ds if c.get("pair") == "blast-radius-ratchet"]
     assert {c.get("kind") for c in cases} == {"true", "false"}

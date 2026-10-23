@@ -1,24 +1,6 @@
-"""The criterion-discovery / prompt-resolution repo-root seam (bug dc05).
-
-Criterion DISCOVERY resolves its root with ``criteria.overlay._resolve_repo_root`` (which
-falls back to the ambient ``config.repo_root()``), while prompt RESOLUTION
-(``prompting.prompts.get_prompt``) has NO fallback — a ``None`` root means "packaged prompts
-only". Both rules are deliberate, so the seam between them must be CHECKED: when the root a
-criterion was discovered from is not the root its rubric is resolved against, that is a wiring
-bug and must fail loudly with an error naming both roots — never a misleading
-``PromptNotFound`` claiming the id is unknown.
-
-These tests pin, per the bug's acceptance criteria:
-
-* the shared agreement check (equal roots pass; different roots — including
-  ``root`` vs ``None`` — raise, naming both);
-* the rewritten not-found message's three cases (no root supplied / root supplied but path
-  absent / genuinely unknown id);
-* ``get_prompt(repo_root=None)`` still meaning "packaged prompts only" (the hard constraint);
-* the seam being enforced in BOTH gates — code-review's batch runner and plan-review's
-  descriptor builder — and a client project's ``.rebar/prompts/<id>.md`` override resolving
-  end to end in each.
-"""
+"""Criterion discovery can infer a repository root, while prompt lookup needs an explicit one.
+These tests pin the resolved root across gate and CLI paths so an external tracker does not send
+prompt lookup to the wrong tree."""
 
 from __future__ import annotations
 

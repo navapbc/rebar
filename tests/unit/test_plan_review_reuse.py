@@ -1,22 +1,6 @@
-"""BLOCK verdict reuse (bug 7e77 — masterful-whimsical-tigermoth).
-
-``_idempotent_reuse`` (feature b3e5) covers only PASS: it requires a certified
-attestation, and a BLOCK never signs. So re-running ``review-plan`` on an UNCHANGED
-blocked plan re-paid the full multi-pass LLM review every time. The fix adds a
-``verdict_reuse`` path beside it: when no attestation applies, the stored BLOCK
-verdict in the latest ``REVIEW_RESULT`` sidecar is reused — zero LLM calls — when
-its ``material_fingerprint`` AND ``verified_at_sha`` both still match the current
-plan/code, and ``--force`` bypasses it. A reused BLOCK exits 1, renders the stored
-findings with a "reused" marker, and emits NO new sidecar.
-
-Offline end-to-end: an LLM-tier BLOCK (the counting fake emits an F1 finding —
-blocking posture, threshold 0.60 — verified full-yes at high severity) with a
-schema-aware counting fake runner, so no model/network. The fixture plan PASSES
-the deterministic floor on purpose: story 228b short-circuits any DET-blocked
-plan BEFORE the LLM tier with zero finder calls, so a DET-floor BLOCK (the old
-fixture) can no longer serve as this file's oracle that the finder re-ran under
-``--force`` / after code drift.
-"""
+"""Unchanged BLOCK verdicts reuse stored findings without a new model run, although BLOCK has no
+attestation. Material or review-code changes invalidate reuse. PASS reuse follows its signed
+path. Tests count calls and retain the blocked result."""
 
 from __future__ import annotations
 
@@ -40,15 +24,8 @@ _BLOCK_CRITERION = "F1"
 
 
 class _CountingGateFake(FakeRunner):
-    """Shape-valid offline runner for the plan-review passes (mirrors the lifecycle gate
-    tests' fake) that COUNTS invocations — the oracle for "reuse ran zero LLM calls".
-
-    Unlike the lifecycle fake it MANUFACTURES a BLOCK from the LLM tier: the finder
-    chunk that carries ``_BLOCK_CRITERION`` returns one finding tagged with it, and the
-    verifier answers every graded binary "yes" at high severity, so Pass-3 decides
-    "block" (priority 1.0 ≥ the 0.60 threshold). The plan itself passes the DET floor
-    — a DET block would short-circuit with zero finder calls (story 228b) and defeat
-    the "the finder re-ran" oracles below."""
+    """Offline plan-review runner that counts calls and returns a BLOCK for the selected finder
+    chunk."""
 
     name = "fake"
 
@@ -154,16 +131,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _make_blocked(repo: Path) -> str:
-    """Create the LLM-blocked fixture ticket with PER-TEST-UNIQUE plan material.
-
-    Pass-1 chunk checkpoints (`.rebar/cache/plan-review/<ticket_id>/`) are keyed by the
-    ticket's MATERIAL fingerprint; today that fingerprint includes the ticket id and the
-    cache dir lives under the per-test repo, but two tests sharing byte-identical fixture
-    material would be one fingerprint-derivation change away from reading each other's
-    cached chunks (and a cached chunk makes ZERO finder calls, silently breaking this
-    file's call-count oracles). A per-ticket nonce paragraph makes the material unique by
-    construction, so no cache — present or future — can serve one test's chunks to
-    another regardless of xdist worker placement."""
+    """Give each blocked fixture unique material so checkpoint reuse cannot cross tests."""
     desc = _BLOCKING_DESC + f"\nMaterial nonce (test isolation): {uuid.uuid4().hex}.\n"
     return rebar.create_ticket("task", "blocked plan", description=desc, repo_root=str(repo))
 

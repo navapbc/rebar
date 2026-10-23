@@ -1,22 +1,5 @@
-"""RP-05 S6 happy-path oracle — the intercept commands complete the registry cutover.
-
-S3 cut the CORE + BRIDGE routes over to registry-driven dispatch
-(:func:`rebar._cli._execute.execute`), but the INTERCEPT commands
-(``reconcile`` / ``review-plan`` / ``config`` / ``verify-*`` / …) still
-dispatched through an explicit ``if argv[0] == …`` ladder in
-:func:`rebar._cli._main_dispatch`, and their registry routes carried NO execution
-metadata (``handler is None``). Because :func:`rebar._cli._execute.execute` RAISES on a
-``None`` handler, deleting the ladder without first giving every intercept route real
-dispatch metadata would break intercept-command dispatch outright.
-
-S6 finishes the cutover: every intercept route names a lazy handler, a bounded adapter
-kind, and an init policy, and the router routes an intercept spelling through
-``_execute.execute`` like every other command — the ladder is retired.
-
-These are the OBSERVABLE happy-path contracts the implementer works against. The
-per-intercept-family end-to-end execution proofs, the ladder-absence / single-authority
-proofs, and the retired-spelling proofs are held out and validated by the orchestrator.
-"""
+"""Intercept routes carry lazy handler strings, bounded adapter kinds, and known init policies
+before _execute dispatch. Tests pin route selection after the core and bridge cutover."""
 
 from __future__ import annotations
 

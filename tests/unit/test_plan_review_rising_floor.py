@@ -1,12 +1,5 @@
-"""The Pass-3 rising-floor drop rule (epic 7d43, child cc5b).
-
-A finding is dropped IFF it is NOVEL (``novelty >= T_novel``) AND LOW-PRIORITY
-(``priority < floor``). These tests pin: the pure drop predicate (all four quadrants), the
-in-place verdict mutation (dropped→`dropped` bucket, narrowed coverage, corrected counts), and
-the gate — the floor is inert unless a remediation re-review is in progress AND per-review
-eligibility holds (the off switch was retired in story 4cdf; the floor is always active). No live
-LLM: the novelty map is injected.
-"""
+"""A novel finding below the rising priority floor is dropped. These tests pin all predicate cases,
+surfaced and dropped buckets, and the coverage effects of floor changes."""
 
 from __future__ import annotations
 
@@ -173,10 +166,7 @@ def test_surfaced_findings_keeps_only_client_returned_decisions() -> None:
 
 
 def test_dropped_prior_findings_never_reach_the_novelty_scorer(monkeypatch) -> None:
-    """REGRESSION (bug old-frilly-plankton): a finding permanently DROPPED for convergence must not
-    re-enter the novelty prior set. ``_maybe_apply_rising_floor`` must feed ``_score_floor_novelty``
-    the SURFACED-only prior findings — else the recurring dropped finding matches its own prior
-    record, scores low-novelty 'carryover', and escapes the floor that dropped it."""
+    """Dropped findings never enter the surfaced prior set used by the novelty scorer."""
     # A prior sidecar holding BOTH a surfaced advisory AND a previously-floored (dropped) finding.
     prior_payload = {
         "findings": [

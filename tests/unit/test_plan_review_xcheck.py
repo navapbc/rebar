@@ -1,16 +1,5 @@
-"""Validation-assessment cross-checks (bug 5e40) — the two intra-verdict / in-store consistency
-drops that converge a non-deterministic re-review:
-
-* CONTRADICTION cross-check (ticket AC): two findings in ONE verdict that mutually contradict —
-  reproduces 5e40 finding A1 (a BLOCKING "no one is tasked with capturing the snapshot" alongside
-  an ADVISORY "the parent explicitly assigns capture to S1"). The contradicted member is dropped.
-* COMMENT-TRAIL consultation (ticket AC): a finding that re-litigates a point the ticket's recorded
-  comment trail already resolved — reproduces 5e40 finding B3 (the ``rebase:chain`` endpoint,
-  conceded in-trail). It is dropped.
-
-Both drops are DETERMINISTIC given the (injected) judgment — the LLM detection seam is exercised
-separately with a ``FakeRunner``. No live LLM.
-"""
+"""Cross-check one verdict for contradictory findings and stored material for inconsistent
+assessment. Both checks drop unsupported findings so repeated review converges."""
 
 from __future__ import annotations
 

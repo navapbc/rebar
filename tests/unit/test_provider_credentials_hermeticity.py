@@ -1,29 +1,6 @@
-"""Hermeticity guard: the unit tier must resolve AWS profile/config from an INJECTED
-isolation dir, never the operator's real ``~/.aws``.
-
-Regression guard for ``unhelpful-quartzitic-cardinal`` (864e-0fe2-820a-41ac). The
-provider-parity tests drive the REAL production Bedrock path
-(``build_bedrock_provider`` -> ``boto3.session.Session(region_name=...)``), whose
-construction eagerly resolves the ambient ``AWS_PROFILE`` through botocore and reads it
-from the operator's real ``~/.aws/config`` (the default ``AWS_CONFIG_FILE``). The
-``_capture`` helper injected dummy ``AWS_ACCESS_KEY_ID``/``AWS_SECRET_ACCESS_KEY`` and a
-region but never isolated the profile/config-FILE read, so under an empty/arbitrary
-``$HOME`` the named profile is absent and Session construction raises
-``botocore.exceptions.ProfileNotFound`` BEFORE ``converse`` -- the outbound payload is
-never captured and six parity tests fail.
-
-The tier fixture ``_isolated_aws_provider_credentials`` (``tests/unit/conftest.py``)
-absorbs exactly that read: it redirects ``AWS_CONFIG_FILE`` and
-``AWS_SHARED_CREDENTIALS_FILE`` into one injected per-session directory and neutralizes
-``AWS_PROFILE``/``AWS_DEFAULT_PROFILE`` -- isolating ONLY the AWS credential/config read,
-leaving ``$HOME`` and ``~/.gitconfig`` git identity untouched (the DIFFERENT seam this
-ticket needs versus the MCP-scanner default-home seam of frousy-ornamental-whale).
-
-This oracle is keyed on the INJECTED fixture dir (the paths the tier fixture exports),
-never on POSIX-only paths and never on an assumption about where pytest's basetemp sits
-relative to the real home -- so it fails deterministically on any machine when the tier
-does not isolate the AWS read, and passes only when it does.
-"""
+"""Unit tests isolate AWS profile and config reads from the operator's home. The Bedrock provider
+path uses injected credential files. This guard catches ambient AWS_PROFILE or ~/.aws leakage
+without calling the network."""
 
 from __future__ import annotations
 
@@ -35,12 +12,8 @@ pytestmark = pytest.mark.unit
 
 
 def test_unit_tier_isolates_aws_credential_resolution_from_real_home() -> None:
-    """boto3/botocore must resolve AWS profile/config from the injected isolation dir.
-
-    Fails RED before the tier fixture exists: ``AWS_CONFIG_FILE`` is unset, so botocore
-    resolves ``~/.aws/config`` and honors the operator's ambient ``AWS_PROFILE`` -- the
-    exact non-hermetic read that raised ``ProfileNotFound`` under an empty ``$HOME``.
-    """
+    """Botocore must read profile and config from the injected isolation directory, never the
+    operator's ~/.aws."""
     import boto3
 
     config_file = os.environ.get("AWS_CONFIG_FILE")

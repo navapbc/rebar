@@ -1,25 +1,5 @@
-"""Deterministic (no-LLM) tests for the project-scoped advisory plan-review criterion
-`project.failure-disposition-contract` (incident 1c0d prevention, ticket
-c789-e1bb-4c7b-496c).
-
-Mirrors the `necessity` built-in's offline pins (tests/unit/test_necessity_criterion.py) and
-the `project.portability` eval-corpus pins (tests/unit/test_project_portability_eval.py), but
-for a PROJECT criterion authored in the `.rebar/` overlay (NOT a packaged built-in):
-
-* registration invariants — activated project criterion, advisory, single-turn (1-TURN),
-  facet project-invariants, scope container+leaf; NOT canonical / agent-tier / codebase-
-  grounded / bug-tier; carries no `suppress_types`;
-* the reviewer rubric's prompt-contract front-matter + the two GATE/REQ checklist sub-answers
-  + the explicit T5b anti-double-flag clause;
-* the hand-authored bounded-sanity eval corpus shape and its calibration arithmetic under an
-  injected perfect solve (the CI-provable proxy: recall 1.0 / false-accept 0.0 over the
-  TP/TN fixtures — the LIVE rubric behaviour is the operator-attested billable run, evidenced
-  by the committed baseline JSON);
-* the escalated-bug-vs-light-bug-tier routing (route_criteria includes it for a non-test
-  file_impact bug and excludes it for a test-only bug — the ticket's "verify this" clause);
-* parity gates stay clean (packaged routing + criteria guide have no orphan);
-* zero-wiring auto-inclusion in the standing effectiveness recorder.
-"""
+"""Offline tests pin the advisory project.failure-disposition-contract criterion. They check its
+prompt, routing, examples, and failure-case discrimination without a model call."""
 
 from __future__ import annotations
 

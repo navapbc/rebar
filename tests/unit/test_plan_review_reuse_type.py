@@ -1,14 +1,5 @@
-"""Retyping a ticket must invalidate a reused plan-review verdict (ticket 6e4f).
-
-Type selects which criteria a review applies at all — `orchestrator.py:364`/`:642`
-and `workflow_ops.py:167`/`:183` all branch on it — so a PASS earned as a `bug`,
-which is exempt from several criteria, must not be replayed for a `task`, which is
-not. Both reuse paths gated only on the material fingerprint, which does not move
-when the type changes.
-
-Kept apart from `test_plan_review_reuse.py`: those fixtures are tuned to the
-DET-floor short-circuit and were red on main within the last day (change 1044).
-"""
+"""Ticket type selects plan-review criteria. Reuse rejects a verdict when both known types differ,
+preventing a bug exemption from carrying into a task. Missing type data fails open."""
 
 from __future__ import annotations
 
@@ -47,9 +38,7 @@ def _block_reuse_ready(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(reuse.sidecar, "review_code_sha", lambda *_a, **_k: "sha-unchanged")
 
 
-# ---------------------------------------------------------------------------
-# the predicate itself
-# ---------------------------------------------------------------------------
+# Types differ.
 
 
 @pytest.mark.unit
@@ -63,9 +52,7 @@ def test_type_changed_only_when_both_sides_are_known() -> None:
     assert reuse._type_changed("bug", _ctx("")) is False
 
 
-# ---------------------------------------------------------------------------
-# verdict_reuse (the BLOCK path)
-# ---------------------------------------------------------------------------
+# BLOCK replays.
 
 
 @pytest.mark.unit
@@ -108,9 +95,7 @@ def test_verdict_reuse_fails_open_on_a_sidecar_without_a_type(
     assert out is not None and out["verdict"] == "BLOCK", out
 
 
-# ---------------------------------------------------------------------------
-# idempotent_reuse (the PASS path)
-# ---------------------------------------------------------------------------
+# PASS replays.
 
 
 @pytest.fixture

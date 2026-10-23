@@ -1,16 +1,5 @@
-"""Happy-path contract for the RP-05 S2a route registry (``rebar._cli._registry``).
-
-These tests pin the *observable* foundation contract the registry must satisfy as the
-SOLE routing authority (RP-05 S6 completed the cutover — the router's duplicate literal
-policy frozensets were retired):
-
-* the immutable route table names every current spelling, and
-* ``derive_policy_sets`` covers exactly the named policy-set census, and
-* the shipped route table validates clean.
-
-Adversarial validation, import-isolation, and parse-error shape live in the
-held-out oracle and are exercised by the orchestrator, not the implementer.
-"""
+"""The route registry is the CLI's sole routing authority. Tests pin immutable route metadata, lazy
+handler references, and lookup behavior without importing optional command stacks."""
 
 from __future__ import annotations
 
@@ -237,18 +226,8 @@ def test_findings_are_deterministic_in_order() -> None:
 
 
 def test_construction_imports_no_command_handlers() -> None:
-    # Building routes + looking one up must pull in no heavy OPTIONAL dependency:
-    # the registry stores handlers as lazy string references, so importing it never
-    # forces the llm/reconciler stacks. Proven in a FRESH child interpreter so the
-    # check can never mutate this process's ``sys.modules`` (popping e.g.
-    # ``pydantic_ai`` here would poison later tests sharing the xdist worker — mirror
-    # of test_audit_serve's subprocess pattern).
-    #
-    # NOTE: after the RP-05 S6 cutover the router imports NO command-handler module at
-    # package-``__init__`` time — the intercept ladder that eagerly imported
-    # ``rebar._cli._llm_commands`` / ``_workflow_commands`` was retired, so those advanced
-    # command modules must stay OUT of ``sys.modules`` when only the registry is imported.
-    # This pins the router's laziness alongside the heavy optional stacks staying out.
+    # Constructing or looking up routes must not import optional LLM or reconciler handlers. A
+    # fresh interpreter proves this independently of test import order.
     forbidden = (
         "rebar._cli._llm_commands",
         "rebar._cli._workflow_commands",
