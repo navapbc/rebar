@@ -1,32 +1,7 @@
-"""Publishing review findings ONTO the Gerrit change (bug lacquer-grotesque-urson).
-
-Before this module the bot published advisory findings as a bare COUNT and nothing else:
-``_summarize``'s PASS branch rendered ``len(verdict["advisory"])`` and never itemised the
-findings, its ``"finding"`` branch itemised blocking findings only, and ``_translate_findings``
-discarded each finding's ``location`` so no anchor ever reached the Gerrit layer. The text was
-retrievable NOWHERE on the change — not in the message, not as an inline comment, and not in the
-patchset-level robot comment either, because this Gerrit answers ``/robotcomments`` with
-"robot comments unsupported". A reviewer could not judge which advisory criteria deserved
-promotion to blocking.
-
-Two surfaces, deliberately overlapping:
-
-* **The message body is the guarantee.** Every finding handed to :func:`post_review` is
-  enumerated in the message when it is not inlined, and ALL of them are enumerated when inline
-  publication fails. The body is the only surface this server is proven to render.
-* **Inline comments are the bonus.** A finding whose ``location`` anchors to a path that really
-  is in the revision also lands as a per-line comment, so it shows up where the reviewer reads
-  the diff. Anchors are validated against the revision's file map first: a comment on a path
-  Gerrit does not know is a 400 that would take the whole vote down with it.
-
-Both failure directions degrade toward "visible", never toward "silent" — an unreadable file map
-means nothing is inlined (body only), and a rejected comment-bearing POST is retried message-only
-with an explicit notice naming the durable ``code_review`` artifact as the full record.
-
-This module also OWNS the enumeration rendering that ``adapter._summarize`` used to inline for
-blocking findings; both adapter branches now call :func:`render_findings_block`, so the wording,
-the truncation and the overflow note are defined once.
-"""
+"""Publish review findings in Gerrit messages and optional inline comments.
+The message enumerates findings even when file anchors are unavailable or
+inline posting fails. Valid revision paths may also receive inline comments.
+The adapter shares this module's rendering for blocking and advisory text."""
 
 from __future__ import annotations
 
@@ -47,9 +22,7 @@ __all__ = [
     "render_findings_block",
 ]
 
-#: Per-finding detail budget in the message body, and the number of findings itemised before the
-#: overflow note takes over. Both are the limits ``adapter._summarize`` applied to blocking
-#: findings before this module existed, promoted to named constants so the two branches share them.
+#: Keep shared message-detail and item-count limits for both finding kinds.
 MAX_DETAIL_CHARS = 240
 MAX_ITEMS = 10
 
@@ -61,17 +34,9 @@ _HEADERS = {
 
 
 def parse_anchor(location: Any) -> tuple[str, int | None] | None:
-    """Split a free-text finding ``location`` into ``(path, line)``, or ``None`` when there is no
-    usable path.
-
-    Peer authority: :func:`rebar.llm.code_review.shim._parse_location`, which reads the SAME
-    field for the local ``review_result`` citation shape. The rule is deliberately identical —
-    ``rpartition(":")``, take the first number of a ``12-20`` / ``12,4`` tail, and fall back to
-    "the whole string is the path" when that tail is not a number — and
-    ``test_parse_anchor_agrees_with_the_review_result_location_parser`` pins them together so they
-    cannot drift. The parsers are not shared outright because this module must stay importable
-    without the heavy ``[agents]`` extra that ``shim`` pulls in.
-    """
+    """Parse a finding location into path and optional line.
+    Use the same rule as the review-result parser without importing its
+    agents dependency."""
     if not isinstance(location, str) or not location.strip():
         return None
     s = location.strip()
@@ -88,13 +53,8 @@ def parse_anchor(location: Any) -> tuple[str, int | None] | None:
 def partition_findings(
     findings: list[dict[str, Any]], revision_paths: set[str]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Split ``findings`` into ``(anchorable, anchorless)``.
-
-    A finding is anchorable only when its location parses to a path that is a REAL key of the
-    revision's file map AND carries a line number. Anything else — no location, a prose location,
-    a hallucinated path, a path with no line — is anchorless and belongs in the message body.
-    Validating against the live file map is what keeps a bad path from turning the vote POST into
-    a 400."""
+    """Separate findings with a numbered path in the revision file map from
+    those that belong in the message body. Invalid paths cannot break a vote."""
     anchorable: list[dict[str, Any]] = []
     anchorless: list[dict[str, Any]] = []
     for f in findings:
@@ -106,10 +66,8 @@ def partition_findings(
     return anchorable, anchorless
 
 
-# Two finding shapes reach this module and BOTH must render. The adapter's message body is built
-# from the RAW kernel verdict (``{finding, criteria, location}``); the voter hands post_review the
-# TRANSLATED shape the receiver logs (``{severity, dimension, detail, location}``). Reading only
-# the raw keys silently produced empty inline comments — the accessors below accept either.
+# Accept raw kernel findings and translated receiver findings when
+# rendering message text or inline comments.
 def _detail_of(finding: dict[str, Any]) -> str:
     raw = finding.get("finding") or finding.get("detail") or ""
     full = str(raw).strip().replace("\n", " ")
@@ -117,10 +75,7 @@ def _detail_of(finding: dict[str, Any]) -> str:
 
 
 def _standing_suffix(finding: dict[str, Any]) -> str:
-    """`` (standing since patchset <k>)`` for a finding carried forward from an earlier patchset
-    (story nitro-zombie-mealworm), or ``""`` for an ordinary one. A reader must be able to tell a
-    finding this run's finders raised from one the gate is re-raising on their behalf — otherwise a
-    carried finding looks brand new on every patchset."""
+    """Mark a finding carried from an earlier patchset, or return empty text."""
     standing = finding.get("standing")
     if not isinstance(standing, dict):
         return ""
@@ -138,13 +93,9 @@ def _criterion_of(finding: dict[str, Any]) -> str:
 
 
 def render_findings_block(findings: list[dict[str, Any]], *, kind: str) -> str:
-    """Enumerate ``findings`` as message-body text: a header, up to :data:`MAX_ITEMS` bullets of
-    ``- (criterion) detail [location]``, and an overflow note for the remainder. Returns ``""``
-    for an empty list so callers can append unconditionally.
-
-    For ``kind="blocking"`` the output is byte-identical to the block ``adapter._summarize``
-    produced before this module existed — that equivalence is pinned by
-    ``test_blocking_enumeration_keeps_its_pre_fix_shape``."""
+    """Render up to MAX_ITEMS findings with criterion, detail, and location.
+    Add an overflow note. Empty input returns an empty string. Blocking
+    format remains compatible with the adapter's prior output."""
     if not findings:
         return ""
     lines = [_HEADERS.get(kind, "{n} finding(s):").format(n=len(findings))]
@@ -159,12 +110,8 @@ def render_findings_block(findings: list[dict[str, Any]], *, kind: str) -> str:
 
 
 def build_inline_comments(findings: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """Gerrit ``CommentInput`` map — ``{path: [{line, message, unresolved}]}`` — for findings
-    already proven anchorable by :func:`partition_findings`.
-
-    ``unresolved`` is always ``False``: submission requires no unresolved comments, so an
-    advisory (by definition non-blocking) must never be able to hold a change back. That is what
-    keeps this additive surface out of the vote's semantics."""
+    """Build resolved Gerrit comments for already validated finding anchors.
+    Advisory comments never leave unresolved threads that block submission."""
     comments: dict[str, list[dict[str, Any]]] = {}
     for f in findings:
         anchor = parse_anchor(f.get("location"))
@@ -202,15 +149,10 @@ def post_review(
     message: str,
     findings: list[dict[str, Any]],
 ) -> int:
-    """Cast the vote with ``findings`` published as inline comments where they anchor, and return
-    the HTTP status.
-
-    ``message`` already enumerates every finding (the adapter's guarantee), so this call adds
-    only the inline layer on top. If the comment-bearing POST is rejected, the vote is retried
-    message-only with that body preserved verbatim plus a notice that inline publication failed
-    and where the full set lives — the vote still lands and no finding text is lost. A ``409``
-    (change closed) is terminal and re-raised untouched so the voter's existing skip path handles
-    it, as is a failure of a POST that carried no comments in the first place."""
+    """Post the vote with optional inline findings and return its HTTP status.
+    If inline posting fails, retry message-only with all findings and a
+    publication notice. A closed-change 409 or failure without inline
+    comments remains terminal."""
     comments: dict[str, list[dict[str, Any]]] = {}
     if findings:
         anchorable, _ = partition_findings(findings, _revision_paths(gc, change_id, revision))

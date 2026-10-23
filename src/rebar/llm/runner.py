@@ -107,17 +107,10 @@ class RunRequest:
     # withdrew a BLOCKING criterion's grounding tool at the Bedrock cutover. Every UNflagged
     # request is still byte-identical (no ``capabilities`` kwarg). DEFAULTED False.
     web: bool = False
-    # Prompt-cache breakpoint control (bug 1dbe). When set, this is the byte-stable LEADING
-    # segment of ``system_prompt`` at whose END the provider cache breakpoint should sit —
-    # rather than at the end of the whole (per-pass-varying) system prompt. The runner seam
-    # (``agent_call.build_agent_kwargs``) realises it by sending ``cache_prefix`` as the static
-    # system block and the REMAINDER as a DYNAMIC instruction, which is where pydantic-ai's
-    # anthropic/bedrock ``*_cache_instructions`` place the breakpoint (the last STATIC block).
-    # The model still receives ``cache_prefix + remainder`` byte-identically — only the cache
-    # boundary moves — so it is behaviour-preserving. Used by the plan-review passes that share
-    # ``prompts.shared_plan_prefix(plan)`` so the finder's WRITE is READ by the Pass-2 verifier
-    # (and a same-ticket re-review inside the TTL). Ignored unless it is a non-empty proper
-    # prefix of ``system_prompt``. DEFAULTED None so every other caller is byte-unchanged.
+    # Place the cache breakpoint after a stable system prefix and send the
+    # changing remainder as instructions without changing model-visible bytes.
+    # Plan-review passes share that prefix across finder and verifier calls.
+    # Ignore an empty or non-prefix value. None preserves other callers.
     cache_prefix: str | None = None
 
     #: The all-``None`` :class:`_structured_run.SingleTurnBounds` — "inherit
@@ -401,19 +394,10 @@ class PydanticAIRunner:
             toolsets = pai_tools.mcp_toolsets(cfg.mcp_servers)
         resolved = _anthropic_model._pai_model(cfg)
         cfg = self._recover_slot_endpoint(cfg, resolved)
-        # Provider resolution is delegated to the per-run ProviderSession seam (story S1 /
-        # one-provider-factory) — the ONE place answering "how is a Provider built for
-        # provider X", incl. "it isn't": a rebar-registered provider (today, only anthropic)
-        # is eagerly built via `infer_model(provider_factory=...)`, owning its client's
-        # lifecycle via the session; a provider pydantic-ai recognizes but rebar does not
-        # build (openai/google/...) stays a lazy model STRING for pydantic-ai's `Agent` to
-        # resolve later, so that OPTIONAL package need not be importable yet; a name NEITHER
-        # side recognizes raises the typed LLMConfigError HERE, so it can never be
-        # misclassified by the broad `except Exception` further down as a provider OUTAGE.
-        # `model_override` (the offline TestModel harness) bypasses all of this.
-        # RP-04 S4: thread the optional native-auth runtime into the per-run session. Passed
-        # only when present so an ambient run stays byte-identical to `ProviderSession(cfg)`
-        # (the two are equivalent — `runtime` defaults to None).
+        # ProviderSession builds registered providers and owns their clients.
+        # Known external providers stay lazy strings to avoid optional imports.
+        # Unknown names raise config errors before the outage classifier.
+        # TestModel overrides bypass resolution. Pass native auth only when set.
         session_kwargs = {} if self._runtime is None else {"runtime": self._runtime}
         with ProviderSession(cfg, **session_kwargs) as provider_session:
             _provider_name = resolved.split(":", 1)[0] if ":" in resolved else resolved
@@ -459,26 +443,11 @@ class PydanticAIRunner:
                     getattr(model, "models", [model]), candidates, strict=True
                 ):
                     _runner_support._check_tool_capability(candidate_model, candidate)
-            # Prompt caching (story 0250; capability-based since story S2). The stable bytes
-            # re-sent across the container fan-out live in `system_prompt`;
-            # `anthropic_cache_instructions` puts a `cache_control` breakpoint on that block
-            # (anthropic.py:1611-1616, the no-instruction-parts branch caches the system prompt
-            # block directly), and `anthropic_cache_tool_definitions` caches the tool surface on
-            # agentic calls (a no-op on single_turn `tools=[]`). `capabilities_for` reads the
-            # resolved model's PROFILE (never a provider-name string, so Bedrock-hosted Claude
-            # still gets its cache keys) and `cache_settings_for` dispatches on the resulting
-            # `prompt_cache_style`; each style's keys are provider-specific and would error on
-            # an unrelated provider, so they are applied at THIS shared seam only — no
-            # RunRequest content-list change, so the structured-output retry path is untouched.
-            # Resolved ONCE, threaded into `_structured_run._pai_structured` below: `model`
-            # (a real object, whose
-            # PROFILE may carry a provider override, S4) for a real run, but `resolved` (the
-            # config STRING) for `model_override` — its profile is irrelevant there, and every
-            # model_override test pins the string behavior; cache_settings stays None then. A
-            # chain resolves capabilities over the whole CANDIDATE SET
-            # (`_runner_support._intersect_capabilities`), never over the wrapper:
-            # `FallbackModel` carries no
-            # profile and its `.provider` is None.
+            # Resolve cache settings from model profiles, intersecting every
+            # fallback candidate rather than reading the profileless wrapper.
+            # Apply provider-specific system and tool cache keys at this seam.
+            # Single-turn tool caching is a no-op. A model override keeps its
+            # string identity and disables cache settings.
             if fallback_targets:
                 caps = _runner_support._intersect_capabilities(
                     [capabilities_for(m) for m in model.models]
@@ -617,16 +586,9 @@ class PydanticAIRunner:
                 # usage looks zeroed (never blocks; test doubles report zero usage, so skip them).
                 if self._model_override is None:
                     _structured_run._warn_if_zeroed_usage(usage)
-                    # Cache-effectiveness telemetry (story S3/2932): caching can fail SILENTLY on
-                    # some Bedrock models (MEASURED: cache_read=0 AND cache_write=0 while billing
-                    # full input tokens, no error) — this is the signal an operator otherwise never
-                    # sees. `cache_settings is not None` is the existing local for "caching was
-                    # requested this call" (set above from `cache_settings_for(caps)`).
-                    # Bug e3cd: measure the MARKED PREFIX against THIS model's documented
-                    # floor. The old call compared total `input_tokens` against a model-blind
-                    # 4096, which both missed real failures on low-floor models (opus-4-8,
-                    # rebar's DEFAULT_MODEL, is 1024) and named the wrong quantity when a big
-                    # payload rode unmarked after the breakpoint.
+                    # Warn when caching was requested but both read and write stay
+                    # zero. Compare the marked prefix with this model's floor,
+                    # not total input or a fixed 4096-token threshold.
                     _structured_run.warn_if_cache_ineffective(
                         usage,
                         caching_requested=cache_settings is not None,

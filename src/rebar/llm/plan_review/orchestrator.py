@@ -1,28 +1,11 @@
-"""The plan-review orchestrator (child ca03) — the engine that runs the gate.
+"""Run plan review while keeping the complete ticket context in every pass.
 
-It owns the generic flow, reusing rebar.llm extension points (the runner, the
-prompt/contract model) and the sibling modules (:mod:`.det_floor`, :mod:`.passes`,
-:mod:`.registry`):
-
-1. **Assemble** the whole ticket context (plan + children) from rebar's own reads
-   — content is ALWAYS whole; never truncated, never content-chunked (the gate-context-
-   never-elided invariant; ADR 0066 records why eliding it is a signed-false-PASS attack).
-2. **DET tier** — run the deterministic floor (P1–P11) via the code executor; its
-   blocking findings (P1/P4-description/P5-cycle/P8/P10/P11) are the gate's default blocks.
-3. **Route** the LLM criteria: ``applies_at`` proportionate scrutiny + overlay
-   triggering; only the code-grounding set greps the codebase.
-4. **Pass 1** — facet-chunked single-turn finders + one agent per code-grounding
-   criterion (the SIZE ladder: batch → one-criterion-per-call → escalate model →
-   P8 too-big failure finding; content never chunked).
-5. **Pass 2** — one aggregate verifier pass.
-6. **Pass 3** — deterministic decision per finding; **mint** the stable per-finding
-   ``id`` (content fingerprint — the orchestrator is its SOLE owner).
-7. **Cap** — surface the top-N advisory findings by priority; overflow → sidecar;
-   blocking findings are EXEMPT from the cap (all returned).
-8. **Pass 4** — affirmative coach over the surviving advisory findings.
-9. **Assemble** the ``plan_review_verdict`` + the coverage record (for the
-   attestation) + the per-criterion sidecar payload.
-"""
+The deterministic floor supplies default blocks. Routing then selects criteria
+and scrutiny by ticket scope. Pass 1 finds issues with size-aware calls without
+truncating ticket content. Pass 2 verifies findings. Pass 3 decides each finding
+and mints its stable content id. An advisory cap sends overflow to the sidecar,
+but never hides a blocking finding. Pass 4 coaches on surviving advisories.
+The final verdict includes coverage and per-criterion sidecar records."""
 
 from __future__ import annotations
 
@@ -168,21 +151,10 @@ def route_criteria(
     triggers = registry.overlay_triggers(plan, file_impact=file_impact)
     leaf_gates = registry.leaf_gate_triggers(plan, file_impact=file_impact)
     single, agent = [], []
-    # BUG REVIEW TIER (epic 6982 / R4): a bug gets a LIGHT ADVISORY tier — the DET floor plus a
-    # restricted, advisory criteria set (registry.BUG_TIER_CRITERIA), never the full suite and
-    # never a blocking criterion. Centralised HERE (the single routing seam) so BOTH the
-    # assemble step and the batch-runner's project-criteria fan-in (both call route_criteria)
-    # inherit it — otherwise an activated project criterion (e.g. a blocking `project.*`) would
-    # be fanned into a bug review and could block it. Bugs did not flow through route_criteria
-    # before (they short-circuited to exempt in plan_review_precheck), so this narrows nothing
-    # that previously ran.
-    #
-    # BLAST-RADIUS ESCALATION (ad0d B1): a bug whose persisted file_impact declares any
-    # NON-TEST path leaves the light tier — it routes the FULL criteria set. Both bug axes
-    # are lifted: the BUG_TIER_CRITERIA restriction here, and the packaged
-    # `suppress_types: ["bug"]` applicability axis (EVERY full-suite criterion carries it,
-    # so lifting only the tier restriction would deliver an empty escalation) via
-    # ticket_type=None in the applies() call below.
+    # Bugs use the deterministic floor and advisory BUG_TIER_CRITERIA here, before
+    # either the assembler or batch runner can add project criteria. A persisted
+    # non-test file impact escalates to the full suite by lifting both the tier
+    # restriction and the packaged bug-type suppression in applies() below.
     escalated_bug = ctx.ticket_type == "bug" and bug_blast_radius_escalates(file_impact)
     bug_tier = ctx.ticket_type == "bug" and not escalated_bug
     # Load the EFFECTIVE criteria (built-ins ∪ activated project criteria from the

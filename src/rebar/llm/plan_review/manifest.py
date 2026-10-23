@@ -287,35 +287,16 @@ def gate_ref_hash_basis(repo_root=None) -> GateRefBasis:
 
 
 def _hash_basis(repo_root=None, *, at_current_gate_ref: bool = False) -> str:
-    """The ONE shared ref-resolution boundary (epic raze-vet-ditch S4b, amended by bug
-    72d9 ``athletic-esthetical-polecat``) that BOTH the plan-review signing-time hashing
-    AND the claim-gate freshness re-check resolve through. The S4b guarantee is that the
-    two sides resolve with the SAME semantics (a committed snapshot under the same gate
-    configuration) — NOT that they resolve to the identical tree: re-hashing at the
-    signature's own pinned ``verified_at_sha`` compared the manifest against the immutable
-    tree it was generated from, which always matched, making scoped drift structurally
-    undetectable in attested mode (bug 72d9).
+    """Resolve the shared code basis for review signing and claim freshness.
 
-    Resolution (single source):
-      * ``at_current_gate_ref`` (the claim-gate freshness re-check) → the materialized
-        snapshot at the CURRENT gate ref (``REBAR_GATE_REF`` / ``[snapshot].ref`` /
-        ``origin/main``), resolved from the LOCAL object DB (no network — drift visibility
-        is as fresh as the last fetch). Signed hashes were produced at the review's pinned
-        SHA, so a signed dependency file that changed between that SHA and the current ref
-        registers as drift, while an unrelated commit still does not (the per-path scoping
-        ADR 0002 exists for). A configured ``source=local`` gate — or a ref/snapshot that
-        cannot be resolved — degrades to the in-place checkout (the pre-S4b behavior; the
-        conservative direction, since the checkout normally contains the drift). This
-        function stays LENIENT — it never raises and always yields a path. Whether the basis
-        was substituted is reported separately by :func:`gate_ref_hash_basis`, which the
-        claim-gate re-check reads so it can fail CLOSED on a degraded attested basis (bug
-        505d-b2c5-734f-47d9) instead of certifying against the working tree.
-      * else the active attested gate snapshot (``current_code_root``, set during an attested
-        ``review_plan``) → the tree the signature is being produced against.
-      * else the in-place checkout (``_config.repo_root``) — the local / back-out basis.
-
-    Legacy tolerance: an attestation with no ``verified_at_sha`` (pre-S4b) still verifies —
-    its signed hashes are simply compared against the same current-gate-ref basis."""
+    At claim, hash the current configured gate ref from local objects so changes
+    since the review's pinned SHA register as scoped drift. Source-local reviews
+    or an unresolved snapshot fall back to the checkout. gate_ref_hash_basis reports
+    that substitution so an attested claim can fail closed. During review, use
+    the active attested snapshot when present. Otherwise use the checkout. This
+    function always yields a path and performs no network fetch. Legacy signatures
+    without a verified SHA compare against the current gate-ref basis.
+    """
     from rebar import config as _config
 
     if at_current_gate_ref:
@@ -460,21 +441,10 @@ def dependency_hashes(
     raw_coverage = verdict.get("coverage")
     coverage: dict[str, Any] = raw_coverage if isinstance(raw_coverage, dict) else {}
     basis = CURRENCY_BASIS_FILE_IMPACT
-    # Scope ONLY the case ADR 0002 leaves unscoped: a set that would otherwise be EMPTY, on a
-    # container that did not poison, for a ticket whose scope is UNDECLARED. All three guards
-    # are load-bearing:
-    #
-    #   * adding the blast radius to an already-scoped set would re-introduce the very false
-    #     positive this ticket removes (an unrelated commit touching e.g. rebar.toml would
-    #     invalidate a container correctly scoped to its child's files);
-    #   * a poisoned container is deliberately fail-CLOSED at whole-HEAD, because any partial
-    #     scope is fail-OPEN for the child's undeclared impact;
-    #   * an AUTHENTICATED no-impact scope (``file-scope: none``) is today fully EXEMPT from
-    #     code drift — ``compute_validity`` skips the head check for it entirely. Scoping it
-    #     would hand it a non-empty dep set, which :func:`classify_file_scope` reclassifies
-    #     ``none`` → ``paths``, so a previously exempt attestation would START invalidating on
-    #     read-set/blast-radius drift. That is strictly MORE invalidation — the opposite of
-    #     this change's purpose — so a declared ``none`` keeps its exemption untouched.
+    # Use read-set scope only when no path scope exists, child impact is not
+    # poisoned, and no authenticated no-impact scope exempts code drift.
+    # Otherwise an unrelated edit invalidates a scoped ticket, a poisoned
+    # child fails open, or explicit `none` is reclassified as `paths`.
     if (
         not paths
         and not impact.poisoned

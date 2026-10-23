@@ -1,29 +1,12 @@
-"""Cross-run PASS-verdict cache for the completion verifier (ticket 8d74-2c9f-c98f-4f0b).
+"""Reuse validated completion PASS evidence across runs when its scope is unchanged.
 
-A re-verify after exhaustion used to re-prove EVERY criterion from scratch. This module
-persists each VALIDATED PASS record at finalize under
-``.rebar/cache/completion_verdicts/<ticket>/<criterion-hash>.json`` and seeds still-valid
-entries into the next run's run-scoped :class:`~.completion_banking.CriterionBank`, stamped
-``seeded: true``. The run-scoped bank itself is unchanged (its run-unique dir is the
-concurrent-close isolation guarantee); this cache is the cross-run layer above it.
-
-Design pins (all review-certified in the ticket plan):
-
-* **PASS-only.** Entries are written only for records the merged, coverage-validated verdict
-  scored ``met=true`` AND that are backed by a bank entry without the
-  ``evidence_sufficient=False`` marker. Insufficiency/FAIL is NEVER cached — the cache can
-  only credit what an earlier validated run actually proved.
-* **Scoped content fingerprint, not the whole-repo tree.** ``BankStamps.material_fingerprint``
-  hashes plan TEXT and ``tree_sha`` rotates on any unrelated commit, so both are unusable as
-  the reuse key. Each entry is keyed by (criterion-text hash, scoped fingerprint) where the
-  fingerprint hashes the git BLOB shas of the ticket's ``file_impact`` paths: an in-scope
-  edit rotates a blob and invalidates; an unrelated commit does not. Absent path → sentinel;
-  git failure → ``None`` (reuse disabled for the run — fail-open to re-verification); empty
-  own impact + children → union of DIRECT-child impact blobs; childless + empty → whole-tree
-  sha fallback.
-* **Atomic writes** (tmp + ``os.replace``), last-write-wins safe across concurrent closes.
-* **Best-effort everywhere**: no cache path may fail a verification run.
-"""
+Only sufficient, coverage-validated PASS records are cached. Each entry binds
+the criterion text to blob hashes for the ticket's file impact, so an in-scope
+edit invalidates reuse while an unrelated commit does not. Empty own impact
+uses direct children, then the tree when there are no children. Missing paths
+have a sentinel and git failure disables reuse. Atomic writes tolerate
+concurrent closes, and cache failures never fail verification. The run-scoped
+CriterionBank still isolates concurrent runs."""
 
 from __future__ import annotations
 

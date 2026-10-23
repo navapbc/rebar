@@ -1,42 +1,13 @@
-"""Prompt + criteria library WRITE + structured-ENUMERATE data model (story B-DM).
+"""Enumerate and author prompts and criteria without changing the packaged index.
 
-It was built as the backend for the visual editor's "select / create criteria & prompts"
-UX (story B-UX; the editor was removed in epic f041-4a84-fcdf-405a) and remains the
-library's authoring surface. It is ADDITIVE over :mod:`rebar.llm.prompting.prompts` (the read/index
-layer) and :mod:`rebar.llm.plan_review.registry` (criteria routing) — it does not
-change their read or index behaviour.
-
-Two surfaces:
-
-* :func:`enumerate_library` — the authorable list for the editor's pickers. For each
-  prompt AND criterion it returns ``{id, kind, title, description, inputs, outputs,
-  is_overlay, source}`` (a superset of the read-only inspector data). Criteria are
-  the prompts whose front-matter ``category == "plan-review-criterion"``; a
-  criterion's overlay flag is sourced from the registry
-  (:func:`rebar.llm.plan_review.registry.is_overlay`). It covers BOTH packaged
-  reviewers and ``.rebar/prompts/<id>.md`` user entries (user wins on id clash,
-  mirroring :func:`rebar.llm.prompting.prompts.get_prompt`'s resolution order).
-
-* :func:`create_prompt` / :func:`update_prompt` — write a VALIDATED prompt-library
-  ``.md`` (front-matter + body) to the writable user-override home
-  ``.rebar/prompts/<id>.md``. The packaged ``reviewers/`` dir is READ-ONLY at runtime
-  (it ships in the wheel and may be on a read-only mount), so authoring never writes
-  there — and therefore never touches the committed ``reviewers/index.json``.
-
-**Why the committed index is NOT regenerated on a user write (the drift-gate
-contract).** ``reviewers/index.json`` is DERIVED from the *packaged* reviewer
-front-matter only (:func:`rebar.llm.prompting.prompts.build_prompt_index` iterates the
-packaged dir), and the CI drift gate diffs it after ``regenerate-index``. A
-user-authored prompt lives outside the packaged dir, so it is correctly absent from
-that committed artifact — the gate stays green precisely BECAUSE an authoring write
-never dirties it. Freshly-authored entries are still immediately visible to the
-editor because :func:`enumerate_library` MERGES the packaged set with a live scan of
-``.rebar/prompts`` rather than reading them out of the committed index. (This is the
-"enumerate merges two sources; user entries are not in the committed index"
-resolution of the index-derivation design question.)
-
-Stdlib-only at import (PyYAML stays lazy inside the prompts helpers).
-"""
+enumerate_library merges packaged entries with project overrides in
+.rebar/prompts, with the project entry winning an id clash. Criterion metadata
+comes from prompt front matter and the plan-review registry. create_prompt and
+update_prompt validate writes to the project override directory because the
+packaged reviewers directory is read-only at runtime. The committed index is
+derived only from packaged reviewers, so project writes do not regenerate it.
+The merged enumeration exposes new project entries immediately. Imports stay
+stdlib-only while YAML loading remains lazy."""
 
 from __future__ import annotations
 

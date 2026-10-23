@@ -1,34 +1,11 @@
-"""The shared four-pass review KERNEL (epic ``vivid-gang-day``).
+"""Share verification, decision, and coaching rules across review gates.
 
-Industry practice and 2025–2026 research converge on a **multi-pass** LLM review: a
-finder surfaces cited EVIDENCE against a locked rubric (no model-emitted
-severity/confidence); a SEPARATE verifier validates each finding via atomic,
-independent binary sub-questions; a DETERMINISTIC policy (not the model) decides
-severity and blocking; and an affirmative COACH maps the surviving advisories to a
-locked move registry. The value-bearing, divergence-dangerous passes are extracted
-HERE so every review surface (the plan-review gate; the code-review gate,
-epic ``b744``) consumes ONE decision core and ONE binary vocabulary — the decision
-math and the verification contract cannot fork.
-
-What the kernel owns (domain-AGNOSTIC):
-
-* **Pass-3** deterministic decision (:mod:`.decide`) — the single ``pass3_decide``
-  (+ the validity/impact/veto math) and ``pass3_over_findings``, with the
-  per-criterion thresholds **parameterized** so a consuming gate sets its own
-  posture without forking the math. This is the framework's single decision core.
-
-What stays per-gate (the consumer SEAM, NOT in the kernel): the criteria + routing,
-the finder prompts, the domain-context assembler (plan text vs diff), the
-verify-prompt preamble, and the move-catalog CONTENT. The plan-review gate is the
-worked reference consumer.
-
-This package owns the three divergence-dangerous passes: Pass-2 (:mod:`.verify`) —
-the finding-verifier + the single registered ``verification`` contract + the verify
-orchestration (chunking, merge-by-global-index, the verifier-model default); Pass-3
-(:mod:`.decide`) — the deterministic decision core; and Pass-4 (:mod:`.coach`) — the
-affirmative-coach mechanism + the pluggable move-registry schema (the applicability
-filter + the subject validator + the deterministic render).
-"""
+Pass 2 verifies cited findings through independent binary questions under one
+registered contract. Pass 3 applies deterministic validity, impact, and veto
+rules with gate-supplied thresholds. Pass 4 maps surviving advisories to an
+affirmative move registry. Gate-specific rubrics, routing, context, verification
+preambles, and move content stay with each consumer. The shared kernel keeps
+plan and code review on one decision and verification vocabulary."""
 
 from __future__ import annotations
 

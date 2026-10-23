@@ -1,38 +1,11 @@
-"""Contributor-triggerable re-review — the ``rerun-llm-review`` comment trigger (ticket bb9b).
-
-WHAT THIS IS. The review-bot's fail-closed design leaves two states a CONTRIBUTOR could
-previously only escape by finding an operator: a coverage-gap ``-1`` whose underlying
-infra failure has since been corrected, and a retries-exhausted escalation (ticket 0347)
-whose bounded automatic recovery has been spent. This module lets the contributor comment
-``rerun-llm-review`` on the Gerrit change to request a FRESH review through the same
-fail-closed pipeline — the human analogue of the reconciler's re-drive, and the
-contributor analogue of the operator's ``/rerun``.
-
-SECURITY MODEL (must hold — tested, not just implemented):
-
-* Eligibility is decided PRIVILEGED-SIDE from durable Gerrit state (the bot's own vote
-  message tag on the CURRENT revision), never from anything the requesting comment says.
-* The ONLY ineligible state is a current-revision findings-BLOCK (a real code veto):
-  the fix for a finding is amend + re-push, not a retry. Everything else — every
-  coverage-gap sub-reason, a retries-exhausted escalation, a PASS, a vote-less change,
-  even an unparseable tag — is eligible, because a re-review is always safe: it can only
-  produce a fresh fail-closed verdict, never mint an unearned PASS.
-* Only AFTER eligibility succeeds may this path call the distinct privileged reset
-  primitive. Its label value is fixed at exactly neutral ``LLM-Review: 0``; contributor
-  text cannot choose a value, mint a PASS, or create a findings-BLOCK. The reset is then
-  verified with the all-accounts vote reader before acceptance.
-* Affirmative/refusal replies still go through :meth:`GerritClient.post_comment`, whose
-  request body has NO ``labels`` key at all. Ineligible, malformed, and failed-eligibility
-  requests perform no label write.
-* The bot's own comments never trigger (loop guard), so the reply cannot re-trigger.
-
-On acceptance the exact revision's vote is reset and verified first, then the bot
-best-effort re-arms the 0347 retry budget (``reset_attempts`` — the row DELETE) before
-the forced re-review is enqueued. A local budget-reset failure is logged but cannot
-reject a request after its authoritative Gerrit marker already exists. The reset's
-Gerrit event is the durable recovery marker if the process-local queue is lost before
-the worker consumes it.
-"""
+"""Handle contributor rerun-llm-review comments through privileged checks.
+Use the bot's current-revision verdict, never comment text, to decide
+eligibility. A findings block normally requires a new patchset, except
+when its sole attestation criterion is now satisfied. An accepted
+request resets the exact vote to neutral, verifies all accounts, resets
+the local retry budget best-effort, and queues the current revision.
+The Gerrit reset event survives a lost process queue. Replies never
+write labels or retrigger the bot."""
 
 from __future__ import annotations
 
@@ -48,35 +21,28 @@ from rebar.review_bot.gerrit_client import GerritClient, GerritError
 
 logger = logging.getLogger("rebar.review_bot.retrigger")
 
-#: The magic comment token. Deliberately shares NO substring with CI's ``recheck`` ChatOps
-#: word (``infra/gerrit/gerrit_to_platform.ini.template``, ``[mapping "comment-added"]``).
-#: That external matcher is substring-based and we do not own it, so a trigger word that
-#: EMBEDS ``recheck`` also re-dispatches the Verified workflow — which is how the retired
-#: word cancelled in-flight CI runs (ticket 0d78-6c15-db26-4cea, changes 1551/1577).
+#: Keep this trigger distinct from CI's substring-matched recheck word
+#: so a review rerun cannot restart Verified.
 TRIGGER_TOKEN = "rerun-llm-review"
 
 #: Word-boundary match where ``-`` and ``_`` also bind: ``rerun-llm-review`` triggers,
 #: ``rerun-llm-reviews`` / ``pre-rerun-llm-review`` / ``rerun-llm-review-x`` do not.
 _TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_-])rerun-llm-review(?![A-Za-z0-9_-])")
 
-#: The RETIRED trigger word, kept ONLY so a contributor who types it gets told the new one.
-#: Hard cutover — matching it never queues a review and never writes a label. This regex and
-#: the docstring above are the sole surviving occurrences of the retired word in the package.
+#: Recognize the retired word only to direct contributors to the
+#: current trigger. It never writes a vote or queues review.
 _RETIRED_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_-])recheck-review(?![A-Za-z0-9_-])")
 
-#: A bot vote-message tag line: ``[LLM-Review: <body>]`` alone on its line. Gerrit
-#: prepends a ``Patch Set N:``/``Patch Set N: LLM-Review-1`` header block to every
-#: change message, so the tag is found by scanning lines, not by position 0.
+#: Scan message lines for the verdict tag because Gerrit prepends
+#: its Patch Set header.
 _TAG_LINE_RE = re.compile(r"^\[LLM-Review: (?P<body>[^\]]*)\]\s*$")
 
 #: The merge-change variant appends this INSIDE the tag brackets (adapter.py) —
 #: e.g. ``[LLM-Review: BLOCK — finding (merge-change, 3 integrated commit(s))]``.
 _MERGE_SUFFIX_RE = re.compile(r"\s*\(merge-change, \d+ integrated commit\(s\)\)$")
 
-#: Coverage-gap stem: covers every ``_TAG_SUFFIXES`` gap member AND the hardcoded
-#: ``merge-review`` literal emitted by ``voter._merge_coverage_gap_decision`` — that tag
-#: is NOT a ``_TAG_SUFFIXES`` member, which is why this parser matches the grammar's
-#: shape rather than enumerating the vocabulary.
+#: Match coverage-gap tag grammar, including the separate
+#: merge-review reason, without enumerating only normal suffixes.
 _GAP_RE = re.compile(r"^BLOCK — coverage-gap \((?P<reason>[a-z][a-z-]*)\)$")
 
 
@@ -88,14 +54,8 @@ def _emit(level: int, event: str, **fields: Any) -> None:
 
 
 def classify_tag(message: str | None) -> str | None:
-    """Classify the ``[LLM-Review: …]`` tag in one bot change message.
-
-    Returns ``"pass"``, ``"finding"``, ``"coverage-gap:<reason>"``, ``"unparseable"``
-    (a bracketed LLM-Review line that matches none of the known stems), or ``None``
-    (no tag line at all). The in-tag merge-change suffix is stripped FIRST, so a merge
-    finding — ``BLOCK — finding (merge-change, N integrated commit(s))`` — classifies
-    as ``finding`` exactly like the bare form (the refusal must not be dodgeable by
-    pushing a merge commit)."""
+    """Classify a bot verdict tag, stripping any merge-change suffix first.
+    Return pass, finding, a coverage-gap reason, unparseable, or None."""
     for raw in (message or "").splitlines():
         m = _TAG_LINE_RE.match(raw.strip())
         if m is None:
@@ -112,16 +72,12 @@ def classify_tag(message: str | None) -> str | None:
     return None
 
 
-#: The criterion whose remedy is a TICKET action, not a code change (ticket 6a81). Its finding is
-#: "this bug has no acceptable plan-review attestation" — fixed by `rebar review-plan <id>`, so
-#: `amend + re-push` is the wrong instruction and a no-code-change patchset only copies the -1
-#: forward under the label's copy condition.
+#: This finding can be resolved by a ticket plan review rather than
+#: a code edit. A copied label would otherwise keep the block.
 ATTESTATION_CRITERION = "bugfix-size-attestation"
 
-#: The finding-summary HEADER, which states the TOTAL blocking count (`adapter.py:129`).
-#: Load-bearing: the adapter renders only the first TEN findings as `- (...)` lines and clips each
-#: detail at 240 chars, so the rendered LIST cannot establish "this was the only finding" — the
-#: header can.
+#: Use the total blocking count in the header. The rendered list is
+#: clipped and cannot prove a finding is sole.
 _HEADER_COUNT_RE = re.compile(r"^rebar code review found (?P<count>\d+) blocking issue\(s\):\s*$")
 
 #: One rendered blocking-finding line: ``- (<criterion-id>) <detail>``.
@@ -131,11 +87,8 @@ _FINDING_LINE_RE = re.compile(r"^- \((?P<crit>[^)]+)\)")
 def latest_bot_message(
     gerrit: GerritClient, change_id: str, current_patchset: int | None
 ) -> str | None:
-    """The TEXT of the bot's latest tagged verdict message on the current revision, or ``None``.
-
-    Same selection rule as :func:`latest_bot_tag_state` (current patchset, bot-authored tag, newest
-    wins) — split out so the attestation arm can read the finding summary without re-implementing
-    the scan and drifting from it."""
+    """Return the newest tagged bot message on the current patchset, or None.
+    Attestation checks share the verdict-selection rule."""
     text: str | None = None
     for msg in gerrit.get_change_messages(change_id):
         if not isinstance(msg, dict):
@@ -150,11 +103,8 @@ def latest_bot_message(
 
 
 def sole_blocking_criterion(message: str | None) -> str | None:
-    """The criterion id of the ONLY blocking finding in ``message``, else ``None``.
-
-    ``None`` whenever soleness cannot be established: no header, an unparseable count, a count that
-    is not exactly 1, or no rendered finding line. FAIL-CLOSED by construction — a parse that cannot
-    prove there was one finding is not evidence that there was."""
+    """Return the only blocking criterion when the message header and
+    rendered finding prove there was exactly 1. Otherwise return None."""
     lines = [raw.strip() for raw in (message or "").splitlines()]
     count: int | None = None
     for raw in lines:
@@ -182,19 +132,10 @@ def attestation_now_acceptable(
     *,
     repo_root: Any = None,
 ) -> tuple[bool, str]:
-    """Whether a ``finding`` block is ONLY the attestation criterion AND the ticket is now attested.
-
-    Both inputs are PRIVILEGED-SIDE, preserving this module's core invariant: the bot's own durable
-    verdict message, and the ticket store. Nothing the requesting comment says is consulted — the
-    criterion id comes from the bot's message and the ticket id from the change's own commit-message
-    trailer, never from the comment or the finding's (clipped) detail text.
-
-    Reuses the gate's OWN classifier and bucketing (``classify_plan_review_attestation`` /
-    ``bucket_for_verdict``) rather than a second notion of "acceptable attestation", which would
-    drift from the gate that produced the finding.
-
-    Returns ``(eligible, reason)``; every failure path is ``False`` (fail-closed).
-    """
+    """Permit a findings rerun only when the bot's sole finding is the
+    attestation criterion and the ticket from the change trailer now has
+    an acceptable signed plan review. Reuse the gate's classifier and
+    bucketing. Return eligibility and reason, failing closed on errors."""
     criterion = sole_blocking_criterion(message)
     if criterion != ATTESTATION_CRITERION:
         return False, f"sole-blocking-criterion={criterion!r}"
@@ -223,14 +164,8 @@ def attestation_now_acceptable(
 def latest_bot_tag_state(
     gerrit: GerritClient, change_id: str, current_patchset: int | None
 ) -> str | None:
-    """The classification of the bot's LATEST vote message on the CURRENT revision.
-
-    Reads ``GET /a/changes/{id}/messages`` (ChangeMessageInfo, oldest first), keeps only
-    messages for ``current_patchset`` (``_revision_number``) that carry the bot's
-    ``autogenerated:rebar`` tag (set by ``post_vote`` — the durable authorship marker,
-    robust where ``AccountInfo`` detail is not), and returns the newest one's
-    classification. ``None`` means the current revision has no bot verdict message —
-    a vote-less change, which is ELIGIBLE (equivalent to a reconciler re-drive)."""
+    """Classify the newest autogenerated bot verdict on the current patchset.
+    No tagged verdict returns None and leaves a vote-less change eligible."""
     state: str | None = None
     for msg in gerrit.get_change_messages(change_id):
         if not isinstance(msg, dict):
@@ -253,9 +188,8 @@ def _refusal_message(state: str, *, detail: str | None = None) -> str:
         "the new revision is reviewed automatically. rerun-llm-review only re-runs "
         "reviews that failed for infrastructure reasons."
     )
-    # Name the attestation verdict when that was the reason (ticket 6a81), so a contributor whose
-    # attestation is stale or unsigned is told WHICH state blocked rather than being sent to amend
-    # code they may not need to touch.
+    # Name the attestation state that blocked rerun so the response
+    # does not wrongly direct a contributor to edit code.
     if detail and detail.startswith("attestation-"):
         base += f" (attestation re-check: {detail})"
     return base
@@ -268,9 +202,8 @@ _ACCEPTED_MESSAGE = (
 )
 
 
-#: Reply to the RETIRED trigger word. It must NOT spell that word: this text is posted as a
-#: Gerrit comment, and the retired word embeds CI's substring-matched ChatOps keyword — a
-#: reply quoting it would re-dispatch the Verified workflow from the bot's own comment.
+#: Do not quote the retired trigger in a reply. It contains CI's
+#: substring-matched command and would restart Verified.
 _RETIRED_TOKEN_MESSAGE = (
     "The LLM re-review trigger word has changed: comment `rerun-llm-review` instead. "
     "The former word was retired because it embedded CI's re-run keyword, so posting it "
@@ -280,10 +213,7 @@ _RETIRED_TOKEN_MESSAGE = (
 
 
 def _actionable_change_key(cfg: ReceiverConfig, event: dict) -> str | None:
-    """The change's key, or ``None`` when the event is not ours to act on.
-
-    Folds the project guard and the key lookup together: an event for another project, or one
-    with no usable change key, yields ``None`` and every caller path silently no-ops."""
+    """Return the change key unless its supplied project conflicts with config."""
     change = event.get("change") or {}
     project = change.get("project")
     if cfg.project and project and project != cfg.project:
@@ -305,12 +235,8 @@ def _trigger_mode(comment: str) -> str | None:
 
 
 def _refuse_retired_word(gc: GerritClient, change_id: str, revision: str, author: str) -> None:
-    """Reply to the RETIRED trigger word (hard cutover, ticket 0d78-6c15-db26-4cea).
-
-    No eligibility read, no label write, exactly one best-effort reply naming the live
-    trigger. Callers invoke this only AFTER the project guard and the change re-anchoring,
-    because ``post_comment`` needs the re-anchored ``change_id``/``revision`` and the bot
-    must never reply on an out-of-project change."""
+    """Reply once with the current trigger after project and change checks.
+    Do not read eligibility, write a label, or queue a review."""
     _emit(
         logging.INFO,
         "RETRIGGER_REFUSED",
@@ -350,15 +276,11 @@ def handle_comment_added(
     gerrit: GerritClient | None = None,
     dedup: DedupStore | None = None,
 ) -> dict[str, Any] | None:
-    """Process one Gerrit ``comment-added`` event; return the forced review event to
-    enqueue on acceptance, else ``None``.
-
-    Order of checks (each earlier check sees strictly less attacker-controlled input):
-    loop guard (bot's own comments) → token word-match (current OR retired) → project
-    guard → change re-anchoring → retired-word refusal → eligibility from the bot's own
-    durable vote-message tag → fixed-neutral reset → all-accounts verification → local
-    budget reset. Replies are best-effort — a failed reply must
-    not lose the accepted re-review or crash the worker."""
+    """Handle a contributor trigger and return a forced current-revision
+    event only after privileged eligibility, fixed-neutral reset, and
+    all-account vote verification. Ignore bot loops and other projects.
+    Retired words receive a refusal without a label write. Replies and
+    local budget reset are best-effort after durable acceptance."""
     if not isinstance(event, dict):
         return None
     cfg = config or ReceiverConfig.from_env()
@@ -423,11 +345,8 @@ def handle_comment_added(
         )
         return None
     if state == "finding":
-        # ONE exception to the findings-block refusal (ticket 6a81): a block that is ONLY the
-        # bugfix-size-attestation criterion, whose remedy is a ticket action rather than a code
-        # change, once the named ticket actually carries an acceptable plan-review attestation.
-        # Refusing that case forces a cosmetic code edit purely to re-trigger the review, because a
-        # no-code-change patchset copies the -1 forward.
+        # Allow one former attestation-only block after the named ticket
+        # receives an acceptable plan-review attestation.
         eligible, why = attestation_now_acceptable(
             gc, change_id, revision, latest_bot_message(gc, change_id, patchset_number)
         )

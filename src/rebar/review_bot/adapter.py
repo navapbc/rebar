@@ -1,40 +1,9 @@
-"""The formal b744 verdict→label seam (epic d251 / S4b; reimplemented by b744 / WS6).
-
-This module holds the ONE function the rest of the receiver depends on for a
-code-review decision:
-
-    code_review_decision(diff_text, repo_root, ref) -> {decision, message, findings, coverage_gap}
-
-**WS6 (this revision):** the contract is now implemented over the FOUR-PASS
-``gate_dispatch.produce_code_review_verdict`` (the typed ``PASS``/``BLOCK``/``INDETERMINATE``
-verdict) — a drop-in swap of the earlier single-pass ``review_code`` implementation, with NO
-caller change (the voter still reads ``decision`` + ``message``). The four-pass gate's own
-deterministic Pass-3 blocker decides PASS vs BLOCK (via ``criteria_routing.json`` thresholds), so
-the adapter no longer applies a severity heuristic — the once-vestigial
-``ReceiverConfig.blocking_severities`` has since been removed entirely.
-
-FORCE-ENABLE. The code-review DISPATCH is OFF by default for callers that leave ``enabled=None``
-(``verify.enable_code_review``), but voter activation is itself the authoritative gate (a project
-is only reviewed once its receiver is deployed + configured), so the adapter passes
-``enabled=True`` — else every change would get the inert disabled verdict. See ADR 0015. (The
-explicit ``review_code`` surface passes ``enabled=True`` for the same intent-is-authoritative
-reason — bug 5b32-37c4-f99a-4315.)
-
-DECISION RULE (fail-closed). PASS only for a genuine ``verdict == PASS`` with full coverage. A
-real BLOCK (blocking findings), an INDETERMINATE (LLM outage), a fail-closed security-scanner
-abstain, an inert-disabled verdict, or ANY exception → BLOCK. A BLOCK caused by a coverage gap
-(infra) is marked ``coverage_gap=True`` and its message carries a DISTINCT tag from a real
-finding, so an operator can tell an infra veto from a code veto.
-
-SOURCE. The receiver has ALREADY cloned the change ref into ``repo_root`` (see
-``gerrit_client.clone_change_ref`` / ``voter``); we review that working tree by passing
-``repo_root`` (the security detectors scan the changed files there) + the fetched ``diff_text``.
-
-TREE↔VOTE BINDING. ``ref`` names what was fetched; ``revision`` is what the vote attaches to.
-They are two independently supplied fields, and the reviewed tree is merely whatever ended up in
-``repo_root``, so the adapter asserts the two agree before reviewing anything and raises
-``ReviewedTreeMismatch`` — the receiver then casts NO vote — when they provably do not.
-"""
+"""Translate four-pass code review verdicts into Gerrit decisions.
+The receiver force-enables dispatch and reviews the cloned tree and diff.
+Only full-coverage PASS maps to PASS. Findings and coverage gaps remain
+distinct. A proven reviewed-tree mismatch raises and prevents a vote.
+The gate owns blocking thresholds and finding-memory by change ID.
+``ReceiverConfig.blocking_severities`` has since been removed entirely."""
 
 from __future__ import annotations
 
@@ -73,14 +42,9 @@ _TAG_SUFFIXES: dict[str, str] = {
     "indeterminate": "BLOCK — coverage-gap (indeterminate)",
 }
 
-#: Coverage-gap sub-reasons that are RETRYABLE (ticket 0347): the review never ran to a usable
-#: conclusion (a broken/missing gate, an LLM outage, a scanner that could not run, a disabled
-#: gate), so the voter defers vote-less — the vote-LESS change stays visible to the backfill
-#: reconciler, which re-drives it — instead of casting a fail-closed ``-1`` that would suppress
-#: that recovery. NOT retryable: ``finding`` (a real code veto) and ``indeterminate`` (the
-#: review RAN TO COMPLETION and concluded coverage could not be established — a result, not an
-#: interruption). The merge-path ``_merge_coverage_gap_decision`` (voter.py) deliberately
-#: carries no ``gap_reason`` and keeps its immediate fail-closed vote.
+#: Retryable interruptions defer without a vote so backfill can retry.
+#: Completed indeterminate reviews and findings are not interruptions.
+#: Merge coverage gaps keep their immediate fail-closed vote.
 RETRYABLE_GAP_REASONS = frozenset(
     {"review-error", "llm-unavailable", "scanner", "gate-disabled", "low-disk"}
 )
@@ -89,10 +53,8 @@ RETRYABLE_GAP_REASONS = frozenset(
 def _message_tag(
     reason: str, *, label: str = "LLM-Review", merge_commits: int | None = None
 ) -> str:
-    """The first-line tag, e.g. ``[LLM-Review: PASS]``. For a merge change (``merge_commits``
-    set) the merge-change variant is appended INSIDE the tag —
-    ``[LLM-Review: PASS (merge-change, 3 integrated commits)]`` — reusing the strict
-    ``_TAG_SUFFIXES[reason]`` lookup so the non-merge tag vocabulary is unchanged."""
+    """Return the first-line verdict tag, including integrated commit count
+    for a merge change."""
     suffix = _TAG_SUFFIXES[reason]
     if merge_commits is not None:
         suffix += f" (merge-change, {merge_commits} integrated commit(s))"
@@ -100,10 +62,8 @@ def _message_tag(
 
 
 def _coverage_gap_reason(coverage: dict[str, Any]) -> str | None:
-    """The coverage-gap sub-reason for a verdict's ``coverage`` block, or None if coverage was
-    fully established. Order: inert **disabled** gate (``enabled is False``), then an **LLM outage**
-    (``llm_unavailable``), then a **fail-closed security scanner abstain**. A scanner MATCH
-    (``reason == 'detector-finding'``) is a real finding, NOT a coverage gap."""
+    """Return disabled, LLM outage, or scanner abstain when coverage failed.
+    A scanner finding is a code finding, not a coverage gap."""
     if coverage.get("low_disk"):
         return "low-disk"
     if coverage.get("enabled") is False:
@@ -119,19 +79,8 @@ def _coverage_gap_reason(coverage: dict[str, Any]) -> str | None:
 
 
 def _translate_findings(verdict: dict[str, Any]) -> list[dict[str, Any]]:
-    """Normalize the verdict's blocking + advisory findings to the receiver's logged shape
-    (``{blocking, dimension, detail, location}``).
-
-    ``blocking`` is True for a finding from ``verdict["blocking"]`` and False for one from
-    ``verdict["advisory"]``, so the receiver can distinguish the two without a severity word.
-
-    ``standing`` is carried through for a finding re-raised from an earlier patchset, so the
-    Gerrit text can say which patchset it has been standing since.
-
-    ``location`` is carried through (bug lacquer-grotesque-urson) so the voter can anchor a
-    finding to a real file/line as an inline Gerrit comment; it was previously dropped here,
-    which is why no anchor ever reached the Gerrit layer. The key is additive — consumers
-    reading ``{blocking, dimension, detail}`` are unaffected."""
+    """Map blocking and advisory findings to receiver records with dimension,
+    detail, location, and any carried-patchset standing marker."""
     out: list[dict[str, Any]] = []
     for is_blocking, findings in (
         (True, verdict.get("blocking") or []),
@@ -145,10 +94,7 @@ def _translate_findings(verdict: dict[str, Any]) -> list[dict[str, Any]]:
                 "detail": str(f.get("finding", "")).strip(),
                 "location": f.get("location") or "",
             }
-            # `standing` rides along when the finding was carried from an earlier patchset
-            # (story nitro-zombie-mealworm) so finding_publish can mark it "since patchset k".
-            # Additive and only ever present on a carried finding — the four keys above are
-            # unchanged.
+            # Carry standing only for findings retained from an earlier patchset.
             standing = f.get("standing")
             if isinstance(standing, dict):
                 item["standing"] = dict(standing)
@@ -218,30 +164,21 @@ def _block(
 
 
 class ReviewedTreeMismatch(RuntimeError):
-    """The working tree the reviewer was handed is provably NOT the revision the vote would
-    attach to. Raised by :func:`code_review_decision` INSTEAD of returning a decision: there is
-    no honest vote to cast about a tree that is not the change, so the receiver refuses to vote
-    and leaves the change unsubmittable (fail-closed)."""
+    """Raised for a proven mismatch between the reviewed checkout and the
+    revision that would receive the vote."""
 
 
 #: Wall-clock bound (seconds) on the single read-only ``rev-parse`` used to identify the tree.
 _REV_PARSE_TIMEOUT = 30
 
-#: A git object name we are willing to COMPARE: 7+ hex digits (git's own minimum useful
-#: abbreviation). Shorter or non-hex input is not a commit name we can compare without inviting
-#: a false verdict, so it is treated as unverifiable rather than as a mismatch.
+#: Compare only commit names with at least 7 hexadecimal digits.
+#: Others are unverifiable, not proven mismatches.
 _SHA_RE = re.compile(r"\A[0-9a-f]{7,64}\Z")
 
 
 def _resolve_reviewed_head(repo_root: str | Path) -> str | None:
-    """The commit actually checked out at ``repo_root``, or ``None`` when the directory carries
-    no resolvable git identity (not a repo, no HEAD, git unavailable).
-
-    ``HEAD`` — deliberately NOT ``FETCH_HEAD``. ``gerrit_client.clone_change_ref`` fetches the
-    change ref, checks it out, and THEN fetches the tickets branch from the mirror; that second
-    fetch REWRITES ``.git/FETCH_HEAD``, so reading FETCH_HEAD after the clone yields the tickets
-    commit and would mismatch on every single review. The detached HEAD left by the checkout is
-    the reviewed tree, and nothing later in the clone moves it."""
+    """Return the checked-out HEAD or None without a resolvable git identity.
+    The later tickets fetch changes FETCH_HEAD, not the reviewed tree."""
     try:
         # raw-git-ok: read-only `rev-parse` against a disposable review clone, not the tracker
         proc = subprocess.run(
@@ -257,20 +194,9 @@ def _resolve_reviewed_head(repo_root: str | Path) -> str | None:
 
 
 def _assert_reviewed_tree(repo_root: str | Path, ref: str, revision: str) -> None:
-    """Bind the tree that is about to be REVIEWED to the revision the vote will ATTACH to.
-
-    ``ref`` (the patch set's ``refs/changes/...``) and ``revision`` arrive as two independently
-    supplied webhook fields, and the reviewed tree is simply whatever ended up in ``repo_root``.
-    A stale or reused clone directory, a partial fetch, or a future refactor of the checkout
-    logic all produce a tree that is not the voted revision, with no signal at all — this is the
-    signal (ticket ``da31-f9d1``).
-
-    Raises :class:`ReviewedTreeMismatch` ONLY on a PROVEN disagreement: two comparable commit
-    names that differ. A false mismatch would veto every review, so the check abstains (returns,
-    logging a warning) whenever the binding cannot be established — no revision supplied (the
-    seam is also called outside Gerrit), no git identity at ``repo_root``, or either name too
-    short/not hex to compare. A clone that never happened already fails closed upstream, where
-    ``clone_change_ref`` raises."""
+    """Raise only when comparable checked-out and voted revisions differ.
+    Missing or invalid commit names cannot establish a mismatch, so warn
+    and return. Clone failure is handled upstream."""
     if not revision:
         return
     resolved = _resolve_reviewed_head(repo_root)
@@ -308,20 +234,12 @@ def code_review_decision(
     change_id: str = "",
     runtime: LLMRuntime | None = None,
 ) -> dict[str, Any]:
-    """Review ``diff_text`` (at the cloned ``repo_root``) via the four-pass gate and return
-    ``{decision, message, findings, coverage_gap}``. PASS only for a genuine full-coverage PASS;
-    a real BLOCK, an INDETERMINATE, a fail-closed scanner abstain, an inert-disabled verdict, or
-    ANY exception → BLOCK (fail-closed). Signature + return shape are stable (the voter is
-    unchanged); the four-pass gate owns the threshold.
-
-    ``change_id`` (the Gerrit change) selects the ``change:<id>`` novelty keyspace for the
-    region-gated floor (epic super-path-bag), so cross-patchset finding-memory is keyed on the
-    CHANGE — spanning its revisions — the Gerrit analogue of the local ``session:<id>`` key.
-
-    ``ref`` + ``revision`` bind the tree to the vote: before any review runs, the commit checked
-    out at ``repo_root`` is asserted to be ``revision``. A proven disagreement raises
-    :class:`ReviewedTreeMismatch` (the caller must then cast NO vote) rather than returning a
-    decision — see :func:`_assert_reviewed_tree`."""
+    """Review the cloned diff through the four-pass gate and return decision,
+    message, findings, and coverage_gap. Only full-coverage PASS passes.
+    Other completed verdicts and ordinary failures block, with coverage
+    gaps distinguished from findings. A proven tree mismatch raises before
+    review so the caller casts no vote. change_id keys finding memory across
+    patchsets."""
     _assert_reviewed_tree(repo_root, ref, revision)
     try:
         # Lazily imported: the [agents] extra (heavy) must not load merely because the receiver
@@ -335,9 +253,8 @@ def code_review_decision(
         logger.warning("adapter: gate import failed: %s", exc)
         return _block("review-error", {}, merge_commits=merge_commits)
 
-    # A composed startup runtime (RP-04 S5) is forwarded provider-native: build the runner WITH
-    # it and inject it on the request, instead of leaving the gate to resolve an ambient runner.
-    # ``runtime is None`` keeps the ambient path unchanged (runner stays None).
+    # Forward a composed runtime into the runner and request.
+    # Without one, retain the ambient runner path.
     runner = None
     if runtime is not None:
         try:
@@ -401,18 +318,14 @@ def code_review_decision(
         return _block(gap, verdict, merge_commits=merge_commits)
     if verdict.get("blocking"):
         return _block("finding", verdict, merge_commits=merge_commits)
-    # Non-PASS (e.g. INDETERMINATE) with NO blocking findings and no detected coverage gap: the
-    # review could not establish coverage — a coverage gap, NOT a code finding. Mapping this to
-    # "finding" rendered the misleading "[LLM-Review: BLOCK — finding] ... 0 blocking issue(s):"
-    # false -1 on a clean change (bug spy-luge-wool, observed on change 223).
+    # A non-PASS without blocking findings or a detected gap still lacks
+    # coverage. Report that gap instead of inventing a code finding.
     return _block("indeterminate", verdict, merge_commits=merge_commits)
 
 
 def append_retries_exhausted_note(decision: dict[str, Any], attempts: int) -> dict[str, Any]:
-    """A copy of a coverage-gap ``decision`` with the retries-exhausted note appended to its
-    message BODY (the first-line ``_TAG_SUFFIXES`` tag is untouched, so the documented tag
-    vocabulary is unchanged). Used by the voter when a retryable gap's attempt budget is spent
-    and the fail-closed ``-1`` is finally cast (ticket 0347)."""
+    """Append the exhausted-budget explanation to a coverage-gap message
+    without changing its first-line verdict tag."""
     out = dict(decision)
     out["message"] = (
         f"{decision.get('message', '')}\n\n"

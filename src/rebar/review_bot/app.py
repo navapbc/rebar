@@ -1,34 +1,8 @@
-"""FastAPI ASGI app — the rebar review-bot webhook receiver (epic d251 / S4b).
-
-WHAT THIS IS (ADR-0007). A thin HTTP service that Gerrit posts review events to.
-It imports the rebar review kernel **as a library** rather than re-exposing the
-stdio MCP server (`rebar-mcp`) over HTTP: Gerrit emits a plain webhook (a JSON
-POST), not MCP JSON-RPC, so an MCP HTTP transport would reject the body. nginx
-routes ``/review/`` to this app (stripping the prefix), so externally the receiver
-lives at ``https://<host>/review/`` and these routes are reached as ``/health`` and
-``/webhook`` after the prefix strip. The production Gerrit webhook path is internal
-(``gerrit`` container → ``review-bot`` container) and authenticated by Gerrit's built-in
-``X-Origin-Url`` header; the public nginx route still requires the explicit review-bot token.
-
-S4b BEHAVIOR (the proven pipe). ``POST /webhook`` (1) authenticates the inbound
-request (ADR-0014 — public callers use the explicit receiver token; Gerrit's internal
-plugin delivery uses its built-in origin header + network ACL), (2) parses the JSON body,
-and (3) **ACKs fast**: it enqueues the event and returns 202 immediately. A background
-worker consumes the queue and runs ``voter.review_and_vote`` (clone → review → cast the
-``LLM-Review`` vote). An LLM review takes 30s–minutes and would blow Gerrit's ~5s webhook
-socket timeout if processed inline (→ timeout + re-delivery). On startup the lifespan
-also launches the ``reconcile_loop`` backfill poller.
-
-IMPORTABILITY CONTRACT. ``fastapi`` is imported at module top here on purpose — it
-is fine that ``import rebar.review_bot.app`` requires the ``reviewbot`` extra. What
-must stay true is that ``import rebar`` (and ``import rebar.review_bot``) does NOT
-pull fastapi; that holds because nothing in the core package imports this module.
-
-RUN. ``uvicorn rebar.review_bot.app:app --host 0.0.0.0 --port 8000`` (the
-docker-compose / Dockerfile entrypoint). The ``REVIEW_BOT_PORT`` env var (default
-8000) is read only by the ``__main__`` convenience runner below; under uvicorn the
-port is passed on the uvicorn command line / by compose.
-"""
+"""FastAPI receiver for Gerrit review webhooks.
+The internal Gerrit route authenticates its origin header and network peer.
+Public callers use a receiver token. POST /webhook acknowledges quickly,
+then a worker clones, reviews, and votes. A backfill reconciler also runs.
+The core rebar package remains importable without FastAPI."""
 
 from __future__ import annotations
 
@@ -67,14 +41,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("rebar.review_bot")
 
-#: HTTP header carrying the public webhook/rerun secret (ticket 66af). The token is read from
-#: THIS header in preference to the legacy ``?token=`` query param because uvicorn's access log
-#: records the request LINE (method + path + query) but NOT headers — so a header-authenticated
-#: request never writes the secret to stderr → journald. Do NOT reintroduce the query-string
-#: form as a convenience: it is exactly what leaked the bot's Gerrit credential into the most-
-#: grepped log on the box. ``config.install_access_log_redaction()`` is the backstop for any
-#: caller still using the query form. Gerrit's deployed ``webhooks`` plugin cannot send this
-#: arbitrary header; its internal compose-network delivery is checked separately.
+#: Public webhook and rerun callers prefer X-Rebar-Token because
+#: uvicorn logs query strings, not headers. Query tokens are redacted.
+#: The deployed Gerrit plugin cannot send this header and uses the
+#: internal origin and network checks.
 TOKEN_HEADER = "X-Rebar-Token"
 _WEBHOOK_AUTH_REJECTIONS_ATTR = "webhook_auth_rejections"
 _WEBHOOK_AUTH_LAST_REJECTED_AT_ATTR = "webhook_auth_last_rejected_at"
@@ -88,48 +58,24 @@ DEFAULT_PORT = 8000
 #: single-box PoC (reviews serialize on the per-(change,rev) lock anyway).
 WORKER_COUNT = 1
 
-#: Grace after the bounded cancel/gather before the lifespan FORCE-EXITS the process (ADR 0067).
-#: ADR 0067's "total shutdown <= drain + cancel" is a PROCESS-level bound, but the asyncio-side
-#: cancel cannot deliver it on its own: every review runs its blocking work through
-#: ``asyncio.to_thread`` on the default (non-daemon) ThreadPoolExecutor. Cancelling a task parked
-#: in such an offload returns the coroutine at once — so the bounded ``gather`` above succeeds —
-#: but the OS thread keeps running the abandoned review, and neither ``asyncio.run``'s
-#: ``shutdown_default_executor`` join nor interpreter finalization can force-cancel it (both
-#: simply JOIN it), so the process — whose listener uvicorn already closed — outlives
-#: ``drain + cancel`` by the whole remaining review, 502ing ``/review/`` while a stale worker
-#: keeps voting (the 2026-08-28 zombie). ``os._exit`` is the only thing that forces the process
-#: down; the lifespan arms a HARD DEADLINE that fires it. The grace lives in ``config`` so its
-#: source-derived sizing (never preempt a legitimate bounded store write mid-lock; still land
-#: below ``stop_grace_period``) can be asserted WITHOUT importing this fastapi-laden module.
-#:
-#: Thread-name prefix for the review-bot's OWN offload pool. The lifespan installs a
-#: ``ThreadPoolExecutor`` with this prefix as the event loop's default executor at startup, so
-#: every ``asyncio.to_thread`` review offload runs on a ``reviewbot-offload_*`` thread. A live,
-#: non-daemon thread with this prefix at shutdown is an offload the process cannot force-cancel —
-#: the arming signal below. A DEDICATED prefix (not CPython's generic ``asyncio_*``) is what
-#: makes the signal precise: unrelated default-executor threads elsewhere in the process — e.g.
-#: another test in the same pytest-xdist worker — never masquerade as our orphan and falsely arm
-#: the deadline (the CI false-positive that a generic ``asyncio_`` scan produced).
+#: A cancelled to_thread coroutine can leave a non-daemon review thread
+#: running. Arm a hard-exit grace sized to let bounded store writes
+#: release locks before the container deadline. Named offload threads
+#: identify this app's work without matching unrelated executor threads.
 _OFFLOAD_THREAD_PREFIX = "reviewbot-offload"
 
 
 def _install_offload_executor() -> None:
-    """Make the running loop's default ``asyncio.to_thread`` executor one whose threads carry
-    :data:`_OFFLOAD_THREAD_PREFIX`, so :func:`_running_offload_threads` can identify the review
-    bot's own offloads precisely. Called once at lifespan startup, before any offload runs, so
-    it replaces the default cleanly; ``asyncio.run``'s ``shutdown_default_executor`` tears it
-    down on exit like the built-in default (no leak)."""
+    """Install a named default executor so shutdown can identify this app's
+    asyncio.to_thread review work. The loop tears it down on exit."""
     asyncio.get_running_loop().set_default_executor(
         concurrent.futures.ThreadPoolExecutor(thread_name_prefix=_OFFLOAD_THREAD_PREFIX)
     )
 
 
 def _running_offload_threads() -> list[threading.Thread]:
-    """Live, non-daemon review-bot offload threads (the un-force-cancellable review work).
-
-    An empty list means no ``asyncio.to_thread`` offload is outstanding, so a clean shutdown will
-    exit on its own and the hard deadline is neither needed nor armed (this is also what makes the
-    clean-teardown contract testable in-process). A non-empty list is the orphaned-thread hazard."""
+    """Return active review-bot offload threads. An empty result needs no
+    hard-exit timer on clean shutdown."""
     return [
         t
         for t in threading.enumerate()
@@ -138,11 +84,8 @@ def _running_offload_threads() -> list[threading.Thread]:
 
 
 def _force_process_exit(code: int = 0) -> None:  # pragma: no cover - exercised via the seam
-    """Terminate the process immediately, bypassing the interpreter finalization that would
-    otherwise JOIN an orphaned non-daemon ``asyncio.to_thread`` worker for the rest of its
-    review. Logs the surviving offload threads FIRST so the force-down is operator-visible in
-    journald (otherwise the zombie/orphaned-thread incident leaves no signal that it tripped).
-    Injected as a module seam so tests can observe the force-down without dying."""
+    """Log surviving offloads, then exit without joining abandoned review
+    threads. Kept as a seam so tests can observe the action."""
     survivors = [t.name for t in _running_offload_threads()]
     logger.critical(
         "review-bot: graceful shutdown exceeded its bound with orphaned offload thread(s) %s "
@@ -155,27 +98,17 @@ def _force_process_exit(code: int = 0) -> None:  # pragma: no cover - exercised 
 
 
 def _arm_hard_shutdown(grace: float) -> threading.Timer:
-    """Arm a DAEMON timer that force-exits the process ``grace`` seconds from now (ADR 0067).
-
-    Daemon so it never itself keeps the process alive: if the shutdown completes cleanly and the
-    interpreter exits first, the pending timer is discarded with the process. It only ever fires
-    when the process is still alive ``grace`` seconds after its bounded shutdown work finished —
-    i.e. when an orphaned OS thread is holding it up — and then hard-exits so the container
-    releases its published port for the replacement instead of lingering as a zombie."""
+    """Arm a daemon timer to force process exit after the grace period.
+    Clean exit discards the timer. A stranded offload cannot hold the
+    listener port indefinitely."""
     timer = threading.Timer(grace, _force_process_exit)
     timer.daemon = True
     timer.start()
     return timer
 
 
-#: The per-review wall-clock timeout now lives in ``config.review_timeout_seconds()`` so the
-#: live worker (below) AND the backfill reconciler (``reconcile.reconcile_once``) bound a single
-#: review with the SAME value — the reconciler previously had NO timeout, so one hung backfill
-#: review could freeze all backfill (incident 2731 / bug 9d7c is the live-worker analogue).
-#:
-#: The shutdown drain window (``config.shutdown_drain_seconds()``) lives there for the same
-#: reason, plus one more: the container's ``stop_grace_period`` is sized against it, and the
-#: test asserting that relationship must read it without importing this fastapi-laden module.
+#: Share review timeout with backfill and shutdown drain settings with
+#: the container budget. Config exposes both without importing FastAPI.
 
 
 def _config() -> ReceiverConfig:
@@ -196,13 +129,10 @@ def _gerrit_auth_health(cfg: ReceiverConfig) -> tuple[bool, str]:
 
 
 def _request_token(request: Request) -> str:
-    """Extract the auth secret, preferring the ``X-Rebar-Token`` header over the legacy
-    ``?token=`` query param.
-
-    The header is preferred because it keeps the secret OUT of the access-logged request line
-    (ticket 66af). The query param is still accepted so a legacy caller (a Gerrit webhook whose
-    ``webhooks.config`` has not yet been re-pushed to send the header) keeps authenticating; its
-    value is protected in the log by ``config.install_access_log_redaction()``."""
+    """Prefer X-Rebar-Token over the query parameter so public callers keep
+    secrets out of access logs. The deployed Gerrit webhook plugin cannot
+    send this custom header and uses separate internal origin authentication.
+    Query-token requests remain accepted and redacted in access logs."""
     header_token = request.headers.get(TOKEN_HEADER, "").strip()
     if header_token:
         return header_token
@@ -297,11 +227,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     reconcile_task = asyncio.create_task(_reconcile.reconcile_loop(config=cfg))
     tasks.append(reconcile_task)
     app.state.tasks = tasks
-    # Snapshot-cache janitor (incident 2731 / bug e7f4): every review clones into the
-    # content-addressed snapshot store on the ROOT disk, and without the janitor that
-    # store grows unboundedly (694M observed) — the reclamation code existed but no
-    # production process ever started it. Daemon thread, off the hot path; must never
-    # block or fail startup (the gate matters more than the janitor).
+    # Start snapshot cleanup off the hot path. Janitor failure must not
+    # block review-bot startup.
     janitor_stop = None
     try:
         from rebar._snapshot import start_background_janitor
@@ -314,18 +241,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         if janitor_stop is not None:
             janitor_stop.set()
-        # Graceful drain (deploy resilience; ADR 0067): let the still-running worker finish the
-        # QUEUED events before we cancel it, so a routine autodeploy restart does not abandon
-        # acknowledged (202 "queued") webhooks (the in-memory queue is otherwise lost on every
-        # restart). Bounded by ``config.shutdown_drain_seconds()``; anything still queued when
-        # the window elapses is left for the backfill reconciler — fail-safe, never fail-lose.
-        #
-        # ONE deadline covers BOTH halves of the drain (ticket 9ec0). The queue drain and the
-        # reconciler drain must not each get a full ``shutdown_drain_seconds()``: the
-        # container's ``stop_grace_period`` is sized as that budget PLUS the store write-lock
-        # budget, so two sequential windows would let a shutdown legitimately overrun the grace
-        # period — and an overrun is SIGKILL mid-store-write (an orphaned mkdir lock dir the
-        # next container cannot reclaim), which is strictly worse than a clean cancel.
+        # Drain acknowledged queue work before cancellation. One deadline
+        # covers the queue and reconciler so shutdown stays below the container
+        # stop budget. Backfill recovers events left queued after that deadline.
         deadline = time.monotonic() + shutdown_drain_seconds()
 
         def _remaining() -> float:
@@ -338,66 +256,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if queue is not None:
             with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
                 await asyncio.wait_for(queue.join(), timeout=_remaining())
-        # Now the OTHER half: the reconciler awaits ``review_and_vote`` INLINE, outside the
-        # queue, so ``queue.join()`` above says nothing about it. Having asked it to stop, wait
-        # for its task to finish the review it already had in flight — the backfill path is the
-        # one that RETRIES a review lost to anything else, so abandoning it here is what let a
-        # landing burst live-lock the gate. Run out of budget and it is abandoned by the cancel
-        # below — the same fail-safe the queue drain already has.
-        #
-        # Gated on a review ACTUALLY being in flight, reusing 34cd's ``in_flight_reviews()``
-        # rather than a second counter: a reconciler merely parked in some other slow step — a
-        # blocking events-log fetch, say — then keeps today's prompt cancel instead of holding
-        # shutdown for the whole budget. The gate cannot go stale in either direction: the stop
-        # is already requested so no new reconciler review can start, and ``queue.join()`` has
-        # already returned, so any remaining count is the reconciler's. (Had the join instead
-        # timed out, a worker review could still be counted — but then the budget is spent, so
-        # the wait below is a no-op.)
-        #
-        # ``asyncio.wait`` rather than ``wait_for``: wait_for's timeout path CANCELS the task and
-        # then awaits it with no bound of its own, which would reintroduce the unbounded-await
-        # hang c2ba closed if the task were slow to honor that cancel. ``wait`` just returns; the
-        # bounded cancel/gather below stays the single place that abandons work.
+        # After queue drain, wait only if the reconciler still has a review
+        # in flight. Share the remaining deadline. asyncio.wait returns on
+        # timeout without cancelling and then waiting indefinitely. Bounded
+        # cancel below handles the remaining task.
         if _voter.in_flight_reviews() and not reconcile_task.done():
             await asyncio.wait({reconcile_task}, timeout=_remaining())
         for task in tasks:
             task.cancel()
-        # Bound the cancel + await (c2ba). A well-behaved task cancels promptly (its coroutine
-        # unwinds at the next await — including the await inside an ``asyncio.to_thread`` offload,
-        # which returns immediately without waiting for the orphaned OS thread). But a task slow
-        # to honor cancellation — a shielded region, a synchronous ``finally`` — would make an
-        # unbounded ``await task`` hang shutdown with no upper bound. Await the join
-        # under ``shutdown_cancel_seconds()`` and ABANDON whatever is still pending (the process
-        # is exiting; any in-flight store write is bounded independently by event_append's
-        # per-git timeout). ``gather(return_exceptions=True)`` collects each task's CancelledError
-        # as a result rather than re-raising, so this never propagates out of the lifespan.
+        # Bound task cancellation and await. Offloaded OS work may continue,
+        # but gather returns coroutine errors without extending shutdown.
         if tasks:
             with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
                 await asyncio.wait_for(
                     asyncio.gather(*tasks, return_exceptions=True),
                     timeout=shutdown_cancel_seconds(),
                 )
-        # The stop flag means "THIS app instance is shutting down", so it must not outlive the
-        # shutdown that set it. It is module state on ``reconcile``, not per-app, so leaving it
-        # set silently neuters every LATER ``reconcile_once`` in the same process: the pass
-        # declines each candidate and returns ``reviewed: 0``. Clearing only at the next
-        # lifespan STARTUP is not enough, because the reconciler is also driven directly —
-        # without a lifespan — by the CLI backfill and by the replacement-process recovery path
-        # that re-drives a rerun the discarded in-memory queue lost. Cleared HERE, after the
-        # bounded cancel, so every task that observes it has already been drained or abandoned.
+        # Clear the module-wide reconciler stop flag after shutdown.
+        # CLI backfill and later app instances can otherwise skip every candidate.
         _reconcile.clear_stop()
-        # Restore ADR 0067's PROCESS-level "shutdown <= drain + cancel" bound. The bounded cancel
-        # above returns the coroutines promptly, but a review whose blocking work is running in an
-        # ``asyncio.to_thread`` offload leaves a non-daemon OS thread alive that neither
-        # ``asyncio.run``'s executor-join nor interpreter finalization can force-cancel — both
-        # merely JOIN it — so without this the process (listener already closed) lingers as the
-        # observed zombie until the whole abandoned review completes. Only ``os._exit`` forces it
-        # down. Arm the hard deadline ONLY when such an offload thread is actually still running
-        # (a clean shutdown with none exits on its own and needs no force): give any abandoned
-        # store write ``shutdown_force_exit_grace_seconds()`` — the lock-acquisition + one-git-call
-        # window — to finish and RELEASE its mkdir lock first, so the force-exit never orphans that
-        # lock, then hard-exit. ``drain + cancel + grace`` stays below the container
-        # ``stop_grace_period``, so this controlled exit fires before Docker's own SIGKILL.
+        # Arm hard exit only for surviving named offload threads.
+        # Give a bounded store write time to release its mkdir lock first.
+        # The total deadline precedes Docker's stop kill.
         if _running_offload_threads():
             _arm_hard_shutdown(shutdown_force_exit_grace_seconds())
 
@@ -410,18 +290,8 @@ def _event_revision(event: Any) -> str | None:
 
 
 def _current_revision(event: dict, cfg: ReceiverConfig) -> str | None:
-    """The change's CURRENT revision sha per Gerrit, or ``None`` when it cannot be determined.
-
-    Bug daa7 (``oozy-darkish-merganser``): the worker is serial and a review takes 15–45
-    minutes, so a queued event is routinely obsolete by the time it is dequeued — the bot
-    would clone, run the multi-pass LLM review, and vote ONE PATCHSET BEHIND (observed live on
-    changes 2226/2231/2232). ``GerritClient.get_change_event`` already asks Gerrit for
-    ``?o=CURRENT_REVISION``; this wraps it for the webhook path, which never asked.
-
-    NEVER RAISES. Any failure — a malformed event, a missing field, a Gerrit blip, an auth
-    error — returns ``None``, which the caller treats as "unknown" and FAILS OPEN (reviews the
-    event anyway). Swallowing a real review because Gerrit hiccupped would be worse than the
-    staleness this guards against."""
+    """Return Gerrit's current revision or None on lookup or shape failure.
+    The queued event still proceeds when currency cannot be checked."""
     try:
         change = event.get("change") if isinstance(event, dict) else None
         change_id = change.get("id") if isinstance(change, dict) else None
@@ -439,11 +309,9 @@ def _current_revision(event: dict, cfg: ReceiverConfig) -> str | None:
 
 
 async def _superseded_by(event: Any, cfg: ReceiverConfig) -> str | None:
-    """The change's current revision when it has SUPERSEDED the queued event's, else ``None``.
-
-    ``None`` means "review it": either the revisions match, the event carries no revision, or
-    the lookup could not answer (fail open — see :func:`_current_revision`). The lookup is a
-    blocking REST call, so it runs off the event loop."""
+    """Return the newer Gerrit revision when a queued event is stale.
+    Unknown or matching revisions proceed. Run the blocking lookup off the
+    event loop."""
     queued = _event_revision(event)
     if queued is None:
         return None
@@ -454,22 +322,15 @@ async def _superseded_by(event: Any, cfg: ReceiverConfig) -> str | None:
 
 
 async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
-    """Drain the review queue, running one review→vote per event under a bounded timeout.
-
-    A per-event FAILURE is logged and a per-event HANG (a review exceeding
-    ``REVIEW_TIMEOUT_SECONDS`` — a blocked clone/subprocess/LLM call) is timed out,
-    abandoned, and recorded as a countable ``VOTER_ERROR`` timeout marker; either way the
-    worker continues to the next event. It must never die AND never stall on one event and
-    starve the queue (bug 9d7c — the single worker silently backing up behind a hung review
-    when the disk filled mid-clone)."""
+    """Drain queued events with one bounded review and vote per event.
+    Log failures and timed-out work as VOTER_ERROR, then continue so one
+    event cannot stall the queue."""
     review_timeout = review_timeout_seconds()
     while True:
         event = await queue.get()
         try:
-            # A contributor `rerun-llm-review` comment (ticket bb9b): decide eligibility
-            # privileged-side and, on acceptance, requeue the change's CURRENT revision
-            # as a forced review event (it then flows through the normal branch below on
-            # its next dequeue). Runs off the event loop — it makes blocking REST calls.
+            # Check contributor rerun eligibility through privileged REST calls,
+            # then queue the current revision for the normal worker path.
             if isinstance(event, dict) and event.get("type") == "comment-added":
                 from rebar.review_bot import retrigger as _retrigger
 
@@ -482,18 +343,9 @@ async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
             # A manual /rerun enqueues the event with a _rebar_force marker so the
             # voter bypasses the dedup + existing-vote short-circuits and re-reviews.
             force = bool(event.pop("_rebar_force", False)) if isinstance(event, dict) else False
-            # Staleness guard (bug daa7). Before any clone/LLM work, ask Gerrit whether the
-            # revision this event describes is still the change's CURRENT one; if the author
-            # has since pushed a new patchset, DISCARD the event rather than spend 15–45
-            # minutes reviewing — and voting on — a superseded patchset. A stale ``-1`` cites
-            # findings the author already fixed, which prompts a re-push that enqueues ANOTHER
-            # review (self-amplifying), and on the single worker that time is stolen from
-            # current work, head-of-line blocking unrelated contributors.
-            #
-            # FORCED and MANUAL-RERUN events bypass the check: both are built FROM the current
-            # revision by construction, so re-asking can only introduce a race that drops a
-            # deliberately requested review. Fail-open otherwise (``_superseded_by`` returns
-            # ``None`` when Gerrit cannot answer) — a blip must never silently swallow a review.
+            # Skip superseded queued revisions before costly review or stale votes.
+            # Forced and manual reruns already use the current revision and bypass this
+            # check. Unknown currency proceeds so a lookup error cannot lose work.
             superseded_by = (
                 None
                 if force or (isinstance(event, dict) and event.get("type") == "manual-rerun")
@@ -509,10 +361,8 @@ async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
         except asyncio.CancelledError:
             raise
         except (asyncio.TimeoutError, TimeoutError):
-            # A hung review — wait_for has already cancelled the inner coroutine. Abandon it
-            # (fail-closed: the change simply goes un-voted this pass and is picked up by the
-            # backfill reconciler) and keep draining. Emit the greppable VOTER_ERROR marker so
-            # the timeout is counted on rebar/host:voter_errors like any other fail-closed event.
+            # Abandon a timed-out review without a vote and emit VOTER_ERROR.
+            # Backfill can retry while the worker continues draining.
             change = event.get("change") if isinstance(event, dict) else None
             change_id = change.get("id") if isinstance(change, dict) else None
             _voter._voter_error(
@@ -535,11 +385,7 @@ async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
 
 
 def _discard_superseded(event: Any, current_revision: str) -> None:
-    """Record the discard of a superseded event as a countable ``VOTER_ERROR`` marker.
-
-    Observability parity with the timeout-abandon path: a silent skip is indistinguishable
-    from a lost event when a change sits at ``LLM-Review = --``, so the discard is emitted on
-    the same greppable marker that feeds ``rebar/host:voter_errors``."""
+    """Emit a VOTER_ERROR marker for a stale event discarded before review."""
     change = event.get("change") if isinstance(event, dict) else None
     change_id = change.get("id") if isinstance(change, dict) else None
     queued_revision = _event_revision(event)
@@ -561,17 +407,12 @@ def _discard_superseded(event: Any, current_revision: str) -> None:
     )
 
 
-# Configure rebar's structured logging (the _emit() INFO events) so they reach stdout→journald.
-# uvicorn configures only its own uvicorn.* loggers; without this the rebar.* loggers have no
-# handler and every INFO line is silently dropped (the observability outage this fixes). Called
-# at import, before the app is built, so startup logs are captured too.
+# Install structured rebar logging before app startup so INFO events
+# reach stdout beside uvicorn logs.
 configure_logging()
 
-# Install the access-log token-redaction backstop (ticket 66af option c). Even though the
-# secret now travels in the ``X-Rebar-Token`` header (out of the access-logged request line),
-# any request line that still carries ``?token=`` — a legacy caller or a future regression — is
-# scrubbed before it reaches stderr → journald. Idempotent; called at import for the same reason
-# as configure_logging.
+# Redact query tokens from uvicorn access logs at import time.
+# The deployed Gerrit webhook plugin still uses query-token delivery.
 install_access_log_redaction()
 
 app = FastAPI(
@@ -718,9 +559,8 @@ async def rerun(request: Request) -> JSONResponse:
     change_id = str(event["change"]["id"])
     revision = str(event["patchSet"]["revision"])
 
-    # Establish the durable marker before changing any local state or acknowledging.
-    # The reset primitive fixes the only permissible value at neutral 0; this follow-up
-    # all-accounts read fails closed if an admin/concurrent nonzero vote survives.
+    # Write the durable rerun marker before acknowledgement. Reset the
+    # vote to neutral and fail closed if a nonzero vote survives.
     try:
         await asyncio.to_thread(gc.reset_llm_review_vote, change_id, revision)
     except GerritError as exc:

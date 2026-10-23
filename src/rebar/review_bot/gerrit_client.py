@@ -1,25 +1,8 @@
-"""A small Gerrit REST + git client for the review-bot (epic d251 / S4b).
-
-STDLIB ONLY (``urllib``/``subprocess``) — deliberately NO new ``httpx`` dependency.
-The receiver makes only a handful of authenticated calls per patchset, so the
-synchronous stdlib HTTP client is sufficient; the async voter runs these blocking
-calls off the event loop via ``asyncio.to_thread`` (see ``voter.py``). The
-``reviewbot`` extra therefore stays ``fastapi`` + ``uvicorn`` only.
-
-All authenticated REST calls hit the ``/a/`` (authenticated) namespace with HTTP
-basic auth (``BOT_USER:GERRIT_BOT_TOKEN``). Gerrit prefixes every JSON response with
-the XSSI guard ``)]}'`` which we strip before parsing.
-
-Endpoints used:
-- ``GET  /a/changes/{id}/revisions/{rev}/patch`` — base64 git format-patch → diff text.
-- ``GET  /a/changes/{id}/revisions/{rev}/review`` — current votes (existing LLM-Review?).
-- ``POST /a/changes/{id}/revisions/{rev}/review`` — cast the LLM-Review label + robot comment.
-- ``POST /a/changes/{id}/revisions/{rev}/review`` — reset LLM-Review to neutral for a rerun.
-- ``POST /a/changes/{id}/hashtags`` — stamp the driving session visibly.
-- ``POST /a/changes/{id}/revisions/{rev}/submit`` — submit-if-current safety.
-- ``GET  /a/plugins/events-log/events/`` — backfill source (reconciler).
-plus a git clone/fetch of the change ref into a working tree for the reviewer.
-"""
+"""Stdlib Gerrit REST and git client for review-bot operations.
+Authenticated /a/ calls use basic auth and strip Gerrit's XSSI prefix.
+The client reads patches, revision files, votes, messages, and events,
+posts reviews or comments, tags and submits changes, and fetches a
+review checkout. The async voter offloads its blocking calls."""
 
 from __future__ import annotations
 
@@ -41,21 +24,8 @@ _XSSI = ")]}'"
 _LABEL = "LLM-Review"
 _ROBOT_ID = "rebar-review-bot"
 
-#: Wall-clock bound (seconds) on every git subprocess in :meth:`GerritClient.clone_change_ref`.
-#: An unbounded git call blocks the caller forever on a stuck remote or a hung credential
-#: helper (bug 747f measured a ~2.1-hour hang on such a path). 300s rather than the 30s used
-#: by ``src/rebar/_store/push.py`` / ``src/rebar/_store/sync.py``: those bound an INCREMENTAL
-#: ref-sized op against an already-warm clone, whereas this method runs ``git init`` on a
-#: freshly created dest and does a COLD fetch of the change ref — 747f's "legitimately minutes
-#: on a cold clone" profile, for which it adopted the same 300s bound.
-#:
-#: That bound is ELAPSED TIME, which is the wrong axis for a *stalled* transfer: a remote that
-#: opens the socket and then moves no bytes is indistinguishable from a slow cold clone, so it
-#: parks the child here for the full five minutes (task 851e). The two network fetches below
-#: therefore also arm the throughput-keyed abort from
-#: :func:`rebar._snapshot.git_fetch.stall_abort_args` — the same seam bug 12e4 built for the
-#: snapshot path, not a copy of it — which ends a dead-air transfer in ~10s while leaving a
-#: slow-but-progressing one alone.
+#: Bound every git call to 300 seconds for cold clones. Network fetches
+#: also abort when throughput stalls, without interrupting slow progress.
 _GIT_TIMEOUT = 300
 
 
@@ -68,11 +38,8 @@ def _strip_xssi(text: str) -> str:
 
 
 def _git_op(cmd: Any) -> str:
-    """Best-effort name of the git subcommand in ``cmd`` (e.g. ``fetch``, ``checkout``).
-
-    ``cmd`` is whatever ``subprocess.TimeoutExpired.cmd`` carried, so it may be a list or a
-    string. Skips the ``git`` argv[0] and any leading global option (``-C <dir>``) to reach the
-    subcommand; falls back to ``"git"`` if nothing recognisable is found."""
+    """Return the git subcommand from list or string timeout arguments.
+    Skip global -C options and fall back to git."""
     parts = list(cmd) if isinstance(cmd, (list, tuple)) else str(cmd).split()
     i = 1 if parts and str(parts[0]).endswith("git") else 0
     while i < len(parts):
@@ -142,13 +109,8 @@ class GerritClient:
 
     # ── operations ────────────────────────────────────────────────────────────
     def get_patch(self, change_id: str, revision: str = "current") -> str:
-        """Return the change's diff (the unified git ``format-patch`` text).
-
-        The ``/patch`` endpoint's body shape depends on the request ``Accept``:
-        with ``Accept: application/json`` (what this client sends), Gerrit returns
-        the patch as an XSSI-guarded JSON *string* of the raw format-patch text
-        (NOT base64 — that is only the default text/plain form). So we strip the
-        XSSI prefix and JSON-decode to the diff text directly."""
+        """Return format-patch text from XSSI-prefixed JSON, decoding base64 if present.
+        Also accept a base64 text/plain body."""
         status, text = self._request(
             "GET", f"/a/changes/{self._q(change_id)}/revisions/{revision}/patch"
         )
@@ -172,15 +134,9 @@ class GerritClient:
         except (ValueError, base64.binascii.Error):  # type: ignore[attr-defined]
             return decoded if isinstance(decoded, str) else str(decoded)
 
-    # ── merge-change review path (epic 88ab / S2) ─────────────────────────────
-    # A merge commit (>= 2 parents) fails a bare ``/patch`` with HTTP 409 ("Revision has
-    # more than 1 parent"), and ``/patch?parent=1`` would diff the ENTIRE feature (violates
-    # R1). The bot instead reviews ONLY the auto-merge delta (the conflict resolutions):
-    # ``files`` / per-file ``diff`` with NO ``base``/``parent`` param return the diff against
-    # the auto-merge base (Gerrit REST, rest-api-changes.html#list-files: "If the revision is
-    # a merge commit and neither base nor parent is set, the list of files is computed
-    # against the auto-merge"). Live-captured fixtures: tests/fixtures/review_bot_merge/.
-    #: Gerrit's synthetic pseudo-paths in a revision file map — NOT real conflict files.
+    # Review merge conflict resolutions through the auto-merge file delta.
+    # Bare /patch returns 409 and first-parent diff includes the full feature.
+    # Synthetic paths are not conflict files.
     MAGIC_PATHS = frozenset({"/COMMIT_MSG", "/MERGE_LIST"})
 
     def get_commit(self, change_id: str, revision: str = "current") -> dict:
@@ -190,21 +146,15 @@ class GerritClient:
         return self._get_json(f"/a/changes/{self._q(change_id)}/revisions/{revision}/commit")
 
     def get_merge_files(self, change_id: str, revision: str = "current") -> dict[str, dict]:
-        """Return the auto-merge-base file map for a MERGE revision — ``GET .../files`` with
-        NO ``base``/``parent`` param. For a merge commit this is the diff against the
-        auto-merge base (the conflict resolutions); a CLEAN merge yields only the magic
-        ``/COMMIT_MSG`` + ``/MERGE_LIST`` pseudo-paths (:attr:`MAGIC_PATHS`), i.e. an empty
-        real delta. NEVER call the bare ``/patch`` on a merge (it 409s)."""
+        """Return a merge revision's delta against Gerrit's auto-merge base.
+        A clean merge contains only pseudo-paths. Bare /patch returns 409
+        for merge revisions."""
         return self.get_revision_files(change_id, revision)
 
     def get_revision_files(self, change_id: str, revision: str = "current") -> dict[str, dict]:
-        """The revision's file map — the plain ``GET .../files``, valid for ANY revision.
-
-        :meth:`get_merge_files` is the merge-specific reading of the same endpoint (for a merge
-        revision, omitting ``base``/``parent`` yields the auto-merge delta) and delegates here so
-        the call exists once. Used to validate that a finding's location names a path Gerrit
-        actually knows before it is posted as an inline comment — a comment on an unknown path is
-        a 400 that would take the whole vote down with it."""
+        """Return the revision file map used to validate inline finding paths.
+        For merges, the same endpoint without base or parent yields the
+        auto-merge delta."""
         d = self._get_json(f"/a/changes/{self._q(change_id)}/revisions/{revision}/files")
         return d if isinstance(d, dict) else {}
 
@@ -223,12 +173,8 @@ class GerritClient:
         return d if isinstance(d, list) else []
 
     def has_llm_review_vote(self, change_id: str, revision: str = "current") -> bool:
-        """True if the given revision already carries a NON-ZERO ``LLM-Review`` vote.
-
-        Reads ``/revisions/{rev}/review`` and inspects the ``labels.LLM-Review.all``
-        per-account votes — any non-zero value means the patchset has already been
-        voted (by the bot or an admin), so we skip. Authoritative Gerrit-side guard
-        that complements the local dedup store."""
+        """Return whether any account has a nonzero LLM-Review vote on this
+        revision. Gerrit-side state complements local deduplication."""
         detail = self._get_json(f"/a/changes/{self._q(change_id)}/revisions/{revision}/review")
         labels = (detail or {}).get("labels") or {}
         entry = labels.get(_LABEL) or {}
@@ -241,13 +187,9 @@ class GerritClient:
         return False
 
     def reset_llm_review_vote(self, change_id: str, revision: str) -> int:
-        """Reset this bot's ``LLM-Review`` vote on the exact revision to neutral ``0``.
-
-        This is the durable marker for an accepted rerun: Gerrit's label write emits a
-        fresh patchset-bearing ``comment-added`` event, so reconciliation can recover the
-        review after process loss. The label value and message are deliberately fixed here;
-        callers cannot pass contributor-controlled text or choose a verdict value.
-        """
+        """Reset this bot's vote to neutral on the exact revision.
+        The fixed message and value create a durable rerun event without
+        accepting contributor-controlled vote text."""
         body = {
             "tag": "autogenerated:rebar-rerun",
             "notify": "NONE",
@@ -264,13 +206,8 @@ class GerritClient:
         return status
 
     def get_change_event(self, change_id: str) -> dict | None:
-        """Build a webhook-shaped event for ``change_id`` from its CURRENT revision.
-
-        Used by the manual ``/rerun`` path (which has only a change id, not a live
-        webhook payload). Queries ``/a/changes/{id}?o=CURRENT_REVISION`` and shapes the
-        result like a ``patchset-created`` event so it flows through the SAME
-        ``voter.review_and_vote`` path. Returns ``None`` if the change has no current
-        revision."""
+        """Build a webhook-shaped manual-rerun event for the current revision.
+        Return None when Gerrit reports no current revision."""
         d = self._get_json(f"/a/changes/{self._q(change_id)}?o=CURRENT_REVISION")
         cur = (d or {}).get("current_revision")
         if not cur:
@@ -301,20 +238,10 @@ class GerritClient:
         robot_comments: dict | None = None,
         comments: dict | None = None,
     ) -> int:
-        """Cast the ``LLM-Review`` label on ``revision`` and return the HTTP status.
-
-        Posts ``tag=autogenerated:rebar``, ``notify=NONE``, ``labels={LLM-Review: value}``
-        and (default) a single patchset-level robot comment under the magic path
-        ``/PATCHSET_LEVEL`` — a robot comment with NO path is a 400, so we always anchor
-        it there. Raises ``GerritError`` on a non-2xx response (the voter treats that as
-        a fail-closed BLOCK; no dedup row is written).
-
-        ``comments`` is an optional ordinary ``CommentInput`` map (``{path: [...]}``) carrying
-        the review's findings inline on the diff; it is included only when non-empty, so a
-        review with nothing to anchor posts exactly the body it always did. Ordinary comments
-        are used rather than robot comments because a Gerrit with robot comments disabled
-        answers ``/robotcomments`` with "robot comments unsupported", which is what left
-        advisory findings unreadable (bug lacquer-grotesque-urson)."""
+        """Post LLM-Review with the autogenerated tag, no notification, and a
+        patchset-level robot comment. Add ordinary inline comments only when
+        provided. Raise GerritError on non-2xx so failed publication writes no
+        dedup row."""
         if robot_comments is None:
             robot_comments = {
                 "/PATCHSET_LEVEL": [
@@ -346,23 +273,14 @@ class GerritClient:
         return status
 
     def get_change_messages(self, change_id: str) -> list[dict]:
-        """Return the change's ``ChangeMessageInfo`` list (``GET /a/changes/{id}/messages``,
-        oldest first). Each entry carries ``_revision_number`` (the patchset it belongs
-        to), ``tag`` (``autogenerated:rebar`` on the bot's own vote messages — set by
-        :meth:`post_vote`), and ``message`` — which Gerrit PREFIXES with a
-        ``Patch Set N:`` header block, so consumers must scan for the ``[LLM-Review: …]``
-        tag line rather than reading line 0 (see ``retrigger.classify_tag``)."""
+        """Return change messages in Gerrit order. Scan their lines for verdict
+        tags because Gerrit prepends a Patch Set header."""
         d = self._get_json(f"/a/changes/{self._q(change_id)}/messages")
         return d if isinstance(d, list) else []
 
     def post_comment(self, change_id: str, revision: str, message: str) -> int:
-        """Post a change message WITHOUT touching any label (the retrigger reply path).
-
-        The request body contains ONLY ``message`` — deliberately NO ``labels`` key at
-        all. A ``labels: {LLM-Review: 0}`` form is NOT equivalent: a value-0 vote is
-        still a label write (it records/copies label state on the revision), and the
-        retrigger security property requires this path to be provably vote-free. A test
-        asserts the serialized body has no ``labels`` member."""
+        """Post a change message with no labels member, so a retrigger reply
+        cannot alter or copy vote state."""
         body = {"message": message}
         status, _ = self._request(
             "POST",
@@ -408,17 +326,8 @@ class GerritClient:
         return status
 
     def list_events(self, since: str | None = None) -> list[dict]:
-        """Fetch the events-log plugin's events (reconciler source).
-
-        The endpoint is ``/a/plugins/events-log/events/`` — the TRAILING SLASH is
-        required (without it Gerrit 404s). The body is newline-delimited JSON events
-        (one per line), NOT a JSON array, so parse line-by-line.
-
-        ``since`` (optional) restricts the window to events at/after a ``t1`` time
-        (the events-log REST ``?t1=`` query param, ``yyyy-MM-dd HH:mm:ss`` UTC). The
-        reconciler passes its persisted cursor so each poll fetches only the new tail
-        rather than rescanning the whole log. A blank/None ``since`` fetches all
-        retained events (first run / no cursor)."""
+        """Read newline-delimited events from the slash-terminated events-log
+        endpoint. Optional since maps to Gerrit's inclusive t1 window."""
         path = "/a/plugins/events-log/events/"
         if since:
             path += "?t1=" + urllib.parse.quote(str(since), safe="")
@@ -436,12 +345,10 @@ class GerritClient:
 
     # raw-git-ok: disposable sandbox repo, not the tracker
     def clone_change_ref(self, change_number: int, revision_ref: str, dest: str) -> str:
-        """Clone the project at the change's ref into ``dest`` (a working tree for the
-        reviewer) and return ``dest``.
-
-        Fetches over HTTPS using the bot token in the URL (``user:token@host``). The
-        ``revision_ref`` is the patch set's ref, e.g. ``refs/changes/NN/CHANGE/REV``,
-        carried in the webhook ``patchSet.ref``. Raises ``GerritError`` on failure."""
+        """Fetch the patchset ref into a disposable checkout and return its path.
+        Use HTTPS bot credentials, bounded git calls, and a stall abort on
+        network fetches. Fetch the tickets branch from its mirror for attested
+        review. Redact credentials from failures."""
         parsed = urllib.parse.urlsplit(self._base)
         userinfo = (
             f"{urllib.parse.quote(self._cfg.bot_user, safe='')}:"
@@ -486,14 +393,9 @@ class GerritClient:
                 text=True,
                 timeout=_GIT_TIMEOUT,
             )
-            # Fetch the current tickets-branch HEAD from the shared mirror ALONGSIDE the Gerrit
-            # code clone: the rebar ticket store lives on the orphan `tickets` branch, which is NOT
-            # on Gerrit (only `main` + change refs are) — it is on the public GitHub mirror. The
-            # code-review gate runs ATTESTED (like plan review) and its materialize_tickets pins the
-            # store from `origin/tickets`; without this the agent has no ticket access and the gate
-            # fail-closes on a missing `.tickets-tracker`. Add it as `origin` (materialize_tickets
-            # prefers `origin/tickets`, the shared store) and fetch depth-1 (the gate materializes
-            # only the tree at the tickets HEAD — no history needed). Public repo → no auth.
+            # Fetch the orphan tickets branch from the GitHub mirror as origin/tickets.
+            # The attested gate needs its current tree. Gerrit hosts only code refs.
+            # Depth 1 is enough for materialization.
             subprocess.run(
                 ["git", "-C", dest, "remote", "add", "origin", self._cfg.tickets_remote],
                 check=True,
@@ -520,9 +422,8 @@ class GerritClient:
                 timeout=_GIT_TIMEOUT,
             )
         except subprocess.TimeoutExpired as exc:
-            # A TimeoutExpired is neither an OSError nor a CalledProcessError, so it would
-            # otherwise escape the redacting handler below — and its ``cmd`` carries the
-            # ``user:token@host`` fetch URL. Convert it here, through the SAME redaction.
+            # Convert git timeouts through the same credential redaction as other
+            # fetch failures. Timeout arguments can contain the tokenized URL.
             raise GerritError(
                 f"clone_change_ref(change={change_number}, ref={revision_ref}) failed: "
                 f"git {_git_op(exc.cmd)} timed out after {_GIT_TIMEOUT} seconds: "
@@ -530,9 +431,7 @@ class GerritClient:
             ) from exc
         except (OSError, subprocess.CalledProcessError) as exc:
             stderr = getattr(exc, "stderr", "") or ""
-            # Never let the token leak into a log line via the URL — redact BOTH the
-            # raw token AND its percent-encoded form (the token is URL-quoted into the
-            # fetch URL, so git's error output would echo the encoded form).
+            # Redact both raw and percent-encoded tokens from git failures.
             redacted = self._redact(stderr)
             raise GerritError(
                 f"clone_change_ref(change={change_number}, ref={revision_ref}) failed: "
@@ -541,9 +440,7 @@ class GerritClient:
         return dest
 
     def _redact(self, text: Any) -> str:
-        """Redact the bot token from ``text`` — BOTH the raw token AND its percent-encoded
-        form (the token is URL-quoted into the fetch URL, so git's error output and a
-        ``TimeoutExpired.cmd`` would echo the encoded form)."""
+        """Remove raw and URL-encoded bot tokens from git error text."""
         tok = self._cfg.gerrit_bot_token
         out = str(text)
         if not tok:

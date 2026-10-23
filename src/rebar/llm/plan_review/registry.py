@@ -1,49 +1,13 @@
-"""Criteria registry + routing for the plan-review gate (child ca03).
+"""Merge plan-review rubrics from the prompt library with derived routing metadata.
 
-The PRODUCTION criteria live in the workflow-engine **prompt library**, NOT in an
-inline constant or the experiment ``criteria_v8.json`` (design reference only). Each
-criterion's RUBRIC is a contract-bearing prompt file
-(``src/rebar/llm/reviewers/plan_review_<id>.md``, ``category:
-plan-review-criterion``) resolved through the da27 prompt machinery
-(:func:`rebar.llm.prompting.prompts.get_prompt` → front-matter contract + ``.rebar/prompts/``
-project overrides). Its ROUTING (``exec`` / ``applies_at`` / ``block_threshold`` /
-``default_posture`` / ``checklist``) lives in the derived ``criteria_routing.json``
-index — the analog of the reviewers' ``index.json``, which likewise separates prompt
-TEXT (library) from selection/routing metadata. :func:`load_criteria` MERGES the two
-into a descriptor (e.g. the Layer-2 judgment F/E/G/A, the T1–T15 overlays, COH, ISF,
-and the advisory ac-text-quality / scope criteria).
-
-This registry provides the generic routing the orchestrator needs:
-
-* :func:`load_criteria` — merge each criterion's library prompt + routing entry (cached).
-* :func:`applies` — proportionate-scrutiny filter (``applies_at``: container/leaf
-  ``scope`` / suppress-by-type / suppress-when-test-or-mechanical).
-* :func:`chunk_by_facet` — pack same-``facet`` single-turn criteria into
-  ``ceil(total/n)`` near-equal balanced chunks (``n = base_chunk(model) ×
-  size_factor(ticket)``, floored at 2), never a wasteful singleton for ``total >= 2``
-  (the RUBRIC is the lever that fits a context window — the ticket content is NEVER
-  chunked).
-* :func:`overlay_triggers` / :func:`leaf_gate_triggers` — deterministic criterion
-  pre-gates (T5a/T5d/T7/T12 + the ticket-4ee2 T13/T14 and leaf-criterion pre-filters,
-  tables in :mod:`.det_gate_rules`); the rest are LLM-routed at Pass-1.
-* :func:`check_registry_coverage` — the completeness guard (every criterion in the
-  canonical v4 §5 registry must have a loadable library prompt + routing entry).
-
-The merged descriptor (per criterion)::
-
-    {
-      "id": str, "exec": "1-TURN"|"2-STEP"|"AGENT", "facet": str,
-      "name": str, "scenario": str (the rubric body, from the library prompt),
-      "applies_at": {"scope": ["container"|"leaf", ...] (absent ⇒ both),
-                     "suppress_types": [..], "suppress_when": [..]},
-      "checklist": [{"key": str, "check": str}, ...],
-      "default_posture": "advisory"|"blocking", "block_threshold": float
-    }
-
-The DET floor (P1–P11) is NOT in this file — it is the ``exec=DET`` tier in
-:mod:`.det_floor`. This registry owns the LLM tiers (1-TURN / 2-STEP / AGENT). See
-``docs/reuse-surface.md`` §3 for the prompt-library contract this builds on.
-"""
+The rubric lives in each packaged or project-overridden criterion prompt.
+Routing records execution mode, applicability, posture, threshold, and checks.
+This module loads their descriptors, filters by ticket scope, and balances same-facet
+single-turn criteria into calls. T1–T15 triggered overlays use configured routing.
+Some use deterministic pre-gates, while others require LLM or agent review.
+Ticket content stays whole while rubric work is chunked. The coverage check
+requires every canonical criterion to have a prompt and routing entry. The
+P1-P11 deterministic floor belongs to det_floor, outside this registry."""
 
 from __future__ import annotations
 
@@ -212,18 +176,10 @@ CANONICAL_LLM = frozenset(
         # Advisory sanity check for explicit no-file-impact declarations. A plan that
         # requires source/tests/config/docs contradicts `none`; external-only work does not.
         "no-file-impact",
-        # AC process-gate redundancy probe (task sombre-corrective-cob) — an advisory, single-turn
-        # (1-TURN) `ac-text-quality` criterion (container+leaf) that flags an acceptance criterion
-        # whose ENTIRE completion predicate is a GENERIC development-process / tooling gate CI or
-        # rebar already enforces mechanically for every ticket (children-closed, tests/CI/lint
-        # pass, plan-review passes, merged, commit-trailer) — so the completion verifier can only
-        # focus on ACs that meaningfully represent THIS ticket's delivered work. Accepts an AC
-        # naming the ticket's specific deliverable even when tests/CI/plan-review are its subject
-        # (e.g. "E2E tests written covering feature X", "plan-review criteria updated to rubric Y").
-        # Distinct from evidence-kind (WHERE proof lives) / E1 (coverage) / E2 (ambiguity) /
-        # ac-satisfiability (joint satisfiability). Ships advisory; promotion to blocking is a
-        # future dogfood-gated criteria_routing.json change (see the promotion gate in
-        # docs/plan-review-gate.md).
+        # Advisory single-turn check for ACs whose whole predicate repeats a
+        # generic process gate. An AC naming this ticket's deliverable remains
+        # valid even when tests or plan review provide its evidence. This differs
+        # from evidence-kind, coverage, ambiguity, and satisfiability checks.
         "ac-process-gate",
         # Cross-cutting
         "COH",
@@ -250,16 +206,10 @@ BUG_TIER_CRITERIA = ("necessity",)
 _PROMPT_ID_PREFIX = "plan-review-"
 _ROUTING_RESOURCE = "criteria_routing.json"
 
-# ── project-supplied criteria overlay (epic 3156, story ef7e; unified in 5065) ──────
-# A project may add its OWN plan-review criteria + re-tune/disable a built-in via a
-# `.rebar/criteria_routing.json` overlay that REUSES the packaged routing schema, keyed
-# by gate:  {"plan_review": {"<id>": {…routing…}}, "code_review": {…},
-#            "activate": {"project.<id>": ["plan_review", "code_review"]}}.
-# The overlay MERGE / activation / cache-isolation machinery lives in the SHARED
-# `rebar.llm.criteria` layer (story 5065); this registry registers the plan-review gate
-# with it (its packaged index + canonical set) and its public `effective_*` /
-# `disabled_builtins` functions DELEGATE there with `gate_key="plan_review"`. Behaviour is
-# byte-identical to ef7e. See docs/adr/0015 + 0017 + docs/plan-review-gate.md.
+# Project criteria and built-in routing changes share the packaged schema in
+# `.rebar/criteria_routing.json`. The shared criteria layer handles merging,
+# activation, and cache isolation. This registry delegates effective routing
+# and disabled-built-in reads with `gate_key="plan_review"`.
 _GATE_KEY = "plan_review"
 # The project-criterion id namespace (a net-new project criterion is `project.<name>`). The
 # overlay MERGE uses the shared core's copy; this stays exported for `production_batch_runner`
