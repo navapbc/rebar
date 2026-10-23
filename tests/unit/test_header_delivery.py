@@ -163,14 +163,10 @@ def test_value_unsafe_only_after_substitution_is_rejected(ctrl: str) -> None:
 
 
 def test_configured_mapping_is_not_mutated_by_a_model_call() -> None:
-    """AC8: the pinned pydantic-ai Chat path mutates the caller's dict.
+    """Pass fresh headers to pydantic-ai Chat for each model call.
 
-    models/openai.py:1001 reads `extra_headers` with NO copy, then :1002 setdefaults
-    User-Agent into it — unlike the Responses path (:2300) and anthropic.py:772, which copy.
-    Upstream issue 6866, fixed by PR 6868 AFTER this pin. Without a fresh dict per call the
-    config's own mapping is polluted and a pydantic-ai version string leaks into the recorded
-    header-name set, making a signed verdict's provenance non-deterministic.
-    """
+    The pinned client may setdefault User-Agent on the supplied dict. Sharing
+    the config mapping would pollute signed header-name provenance."""
     import asyncio
 
     import httpx

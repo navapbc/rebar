@@ -1,19 +1,9 @@
-"""Gate parity between the packaged prose guides and the criteria registry (ticket 2f3c).
+"""Pin cited plan-review criteria against packaged prose guides (2f3c).
 
-Bug 828a: `writing-a-passing-plan.md` told authors to name a rejected alternative while the
-authoritative G6 criterion explicitly says NOT to require one. The drift shipped for a month.
-`validate_criteria_guide()` covers only the GENERATED `docs/plan-review-criteria-guide.md`;
-the packaged prose guides cite criterion ids inline as if authoritative with nothing coupling
-them to the registry. The 828a fix added hand-written G6-specific assertions — good for that
-one claim, but 14 other cited ids in the plan guide (and every citation added tomorrow) still
-have no coupling.
-
-A gate cannot judge whether prose faithfully paraphrases a rubric. What it CAN do is refuse to
-let a cited criterion change SILENTLY: pin a digest of every cited criterion's registry text,
-and fail when the criterion moves out from under the prose. These tests pin that contract —
-the pure `compute_pins`/`diff_pins` core (so a criterion mutation needs no monkeypatching) and
-the packaged gate wired into `validate-routing`.
-"""
+Generated guide validation does not cover hand-written criterion citations.
+Digest every cited registry text and wire the pin check into validate-routing,
+so a rubric change cannot silently leave prose stale. Pure compute/diff tests
+cover the comparison without judging a paraphrase's meaning."""
 
 from __future__ import annotations
 
@@ -227,12 +217,10 @@ def test_validate_routing_surfaces_a_pin_problem(monkeypatch, capsys) -> None:
 
 
 def test_validate_routing_passes_when_the_pin_gate_is_clean(monkeypatch) -> None:
-    """Composition, isolated from its siblings. A bare ``_main(["validate-routing"])`` cannot
-    be asserted green here: ``validate_criteria_guide`` resolves ``docs/`` against the AMBIENT
-    ``config.repo_root()``, which the unit-test sandbox redirects to a tmp dir, so it reports
-    a missing generated guide on a PRISTINE tree too (verified with this module absent). That
-    is pre-existing and unrelated to the pin gate — so stub the siblings and assert that a
-    clean pin gate leaves the composition green."""
+    """Isolate the pin-gate composition from ambient guide-root behavior.
+
+    The unit sandbox points config.repo_root at a temp directory, so stub the
+    unrelated guide checks and assert a clean pin check leaves routing green."""
     monkeypatch.setattr(plan_registry, "validate_packaged_routing", lambda *a, **k: [])
     monkeypatch.setattr(plan_registry, "validate_criteria_guide", lambda *a, **k: [])
 

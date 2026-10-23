@@ -411,20 +411,10 @@ def test_confirmations_go_to_stdout_and_logs_to_stderr(repo: Path) -> None:
     assert "no file_impact" in proc.stderr
 
 
-# ── the SHARED seam, structurally (ticket 0c00-0649-32da-41a5) ────────────────
-# The exact-line tests above are per-verb and observable-behaviour only: they stay
-# green if a verb stops using the shared confirmation channel and goes back to
-# printing its own line. These tests pin the STRUCTURE instead — every
-# confirmation is routed through `_confirm.emit`/`emit_text` exactly once, and
-# stdout carries nothing the shared seam was not asked to print.
-#
-# The seam is spied rather than the event reducer: `rebar.reducer.reduce_ticket`
-# is re-exported by binding the function object at import time
-# (`rebar.reducer.__init__`, `rebar._native`, `rebar.__init__`), so patching the
-# defining module's attribute is invisible to most callers and a call-count on it
-# would silently under-report. `test_confirmation_formatters_need_no_store` covers
-# the other half of the contract — the line is built from args plus the seam's
-# outcome, never a follow-up store read — by formatting with no store to read.
+# Spy on the shared _confirm.emit/emit_text seam. Every verb must route once,
+# and stdout must contain only requested lines. Patching reducer misses its
+# import-time re-exports. The no-store formatter test separately guards against
+# a follow-up read when building confirmation text.
 @pytest.fixture
 def seam_spy(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Record every line routed through the shared confirmation seam."""
@@ -519,10 +509,8 @@ def test_confirmation_formatters_need_no_store(
     ]
 
 
-# ── the verb inventory + confirmation-line migration record ───────────────────
-# Both tables are curated ONCE in the CLI-reference generator and rendered into
-# docs/cli-reference.md (a generated artifact behind a CI drift gate), the same
-# shape as its INTERCEPT_COMMANDS ladder parity check.
+# The CLI-reference generator owns both tables. Generated docs and CI drift
+# checks consume them, as with INTERCEPT_COMMANDS ladder parity.
 def _gen():
     import importlib.util
 

@@ -1,17 +1,8 @@
-"""Layering guard: ``rebar.reducer`` must not depend *up* on ``rebar._engine_support``
-at module scope.
+"""Keep reducer below _engine_support in the module import graph.
 
-``reducer`` is the low-level event-replay layer; ``_engine_support`` is the higher
-read-tooling layer that legitimately imports ``reducer`` at module scope (downward is
-fine). The reverse — a module-scope ``reducer → _engine_support`` import — closes the
-``reducer ↔ _engine_support`` package cycle at load time. The one intrinsic upward
-touch (``reducer._processors`` needs ``resolve_ticket_id`` at replay) is kept
-*function-local* on purpose; this test fails if any reducer module promotes such an
-import to module scope (the regression that the ``rebar._alias`` extraction removed,
-having previously been worked around with a fragile lazy-import pair).
-
-Companion to ``test_core_optionality.py`` (same module-scope AST-walker shape).
-"""
+The support layer imports reducer. A reducer module import back into support
+closes a load-time cycle. The one replay-time resolve_ticket_id call remains a
+function-local import. This AST guard rejects a module-scope promotion."""
 
 from __future__ import annotations
 

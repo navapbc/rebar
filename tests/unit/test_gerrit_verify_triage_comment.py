@@ -1,14 +1,7 @@
-"""The Verified gate's triage comment must stay observability-only (ticket be9d-2f2d-47ca-45d2).
+"""Keep Verified failure triage comments observability-only (be9d).
 
-A `Verified -1` used to read exactly `CANCELLED: <run URL>`, so a job that exceeded its
-`timeout-minutes` and a job that failed on stale-base version skew were indistinguishable from
-the vote — though only the second needs a rebase. The vote job now posts a companion comment
-naming the jobs and their outcomes.
-
-The danger in that change is scope creep: anything that shifts WHEN the gate votes, or that
-lets the new steps influence the gate's outcome, would turn an observability fix into a
-correctness change. These tests pin the boundary.
-"""
+A companion comment names failed jobs so timeout and stale-base skew can be
+distinguished. Its steps must not delay the vote or alter the gate outcome."""
 
 from __future__ import annotations
 

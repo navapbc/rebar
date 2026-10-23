@@ -1,22 +1,9 @@
-"""Contract tests for task 7761 — the Pass-1 ladder expressed in MODEL CLASSES.
+"""Keep the Pass-1 model ladder provider-neutral (7761).
 
-The ladder in ``workflow/gates/plan-review.yaml`` held BARE Anthropic ids, and three separate
-consumers copy ``model_ladder[0]`` onto the model a run actually uses. So a run configured for
-another provider still sent Pass-1 — 41 of 42 calls on a real review — to DIRECT ANTHROPIC.
-
-THE OBSERVABLE in every test here is the model id a ladder consumer ACTUALLY USES, never the
-resolver in isolation (``resolve_model_string`` is f844's and is already tested at
-``test_model_classes.py:329``):
-
-* :class:`ProductionBatchRunner` — the ``cfg.model`` handed to ``run_pass1``;
-* :class:`DefaultBatchRunner` and code review's ``CodeReviewBatchRunner`` — the ``model`` key of
-  the agent step they dispatch;
-* ``sizing.models_at_or_above`` — the escalation targets returned for a primary model.
-
-Two controls stop a "resolve everything, always" implementation from passing vacuously: the
-escalation ORDER must be unchanged, and with NO classes configured every consumer must produce
-today's byte-for-byte value.
-"""
+Assert the models actually dispatched by production/default/code-review batch
+runners and returned by sizing escalation. Preserve rung order. With no class
+table, retain unconfigured bare IDs byte-for-byte. A configured provider must not
+silently route Pass-1 to direct Anthropic."""
 
 from __future__ import annotations
 
@@ -228,11 +215,8 @@ def test_plan_review_yaml_ladder_carries_no_literal_model_id() -> None:
     ladders = _collect_ladders(doc)
     assert ladders, "no model_ladder found in plan-review.yaml — the AC would pass vacuously"
     for ladder in ladders:
-        # This checks THIS test's stated AC — every entry names a model CLASS, so no literal
-        # vendor id can pin the gate to one provider. It deliberately does NOT pin the exact
-        # list: the entry rung is a separate, ticketed decision (77ed moved it to `frontier`,
-        # restoring the opus finder), and only rung 0 is ever read. Asserting the exact triple
-        # made an unrelated policy change look like a regression in the class-vocabulary AC.
+        # Require model classes without pinning the rung list. The entry rung
+        # is separate policy, and only rung 0 drives the run's model.
         assert ladder, ladder
         assert all(e in CLASS_NAMES for e in ladder), ladder
         assert not [e for e in ladder if "claude-" in e]
@@ -258,14 +242,10 @@ def _collect_ladders(node: Any) -> list[list[str]]:
 def test_models_at_or_above_returns_todays_bare_ids_with_no_classes_configured(
     no_classes,
 ) -> None:
-    """THE BACK-COMPAT CONTROL. With no classes configured the return value must be today's BARE
-    ids byte-for-byte — not `anthropic:claude-sonnet-4-6`.
+    """With no class table, return unconfigured bare model IDs byte-for-byte.
 
-    This is what stops a "resolve always" implementation: `resolve_class` runs every name through
-    `_resolve_target`, which PREFIXES the inferred provider, so the naive wiring silently changes
-    every existing caller's strings. `sizing.models_at_or_above` is asserted against
-    literal bare ids at test_plan_review.py:1145, and `prerequisites.py:257` logs these.
-    """
+    A resolve-always path adds a provider prefix and changes existing callers'
+    values."""
     assert sizing.models_at_or_above(_TODAY_TRIVIAL) == _TODAY_LADDER
     assert sizing.models_at_or_above(_TODAY_STANDARD) == [_TODAY_STANDARD, _TODAY_FRONTIER]
     assert sizing.models_at_or_above(_TODAY_FRONTIER) == [_TODAY_FRONTIER]
@@ -401,10 +381,8 @@ def test_resolve_model_leaves_a_literal_step_model_untouched(no_classes) -> None
 
 # ══ Escalation targets must stay on the provider the RUN is on (bug 7de4) ═════════════
 #
-# The rungs above are about the class VOCABULARY. These are about the run's own model: with
-# no class table configured, `_rung_target` compared the rung against itself, so the model the
-# run is actually on was never an input and every escalation target degraded to MODEL_LADDER's
-# bare Anthropic name — relocating a Bedrock run onto direct Anthropic.
+# With no class table, escalation must retain the run's provider. Comparing a
+# rung with itself would route a Bedrock run to a bare Anthropic ladder name.
 
 _BEDROCK_PINNED_FRONTIER = "bedrock:us.anthropic.claude-opus-4-8-v1:0"
 _BEDROCK_PINNED_TRIVIAL = "bedrock:us.anthropic.claude-haiku-4-5-v1:0"

@@ -19,16 +19,9 @@ CRITERION = "project.measurement-provenance"
 ROUTING = REPO / ".rebar" / "criteria_routing.json"
 PROMPT = REPO / ".rebar" / "prompts" / "plan-review-project-measurement-provenance.md"
 
-# The sites that carry the [operator-attested] evidence contract, pinned by a DIGEST of their
-# contract-bearing lines rather than by a git diff. A `git diff origin/main` guard looks right
-# locally and silently breaks in CI, where `origin/main` is not a resolvable ref: git exits 128
-# and the assertion reports "was modified" when nothing was. A digest tests the actual invariant
-# — that THIS STORY leaves the shipped contract wording alone — in every environment.
-#
-# `docs/plan-review-criteria-guide.md` is GENERATED and legitimately changes whenever any
-# criterion is added. Only its contract SENTENCES are pinned, never the whole file; ticket deeb
-# deliberately updated this digest when the built-in evidence-kind validator extended the
-# cross-client contract.
+# Pin [operator-attested] contract sentences by digest. Origin/main may be absent
+# in CI, and the generated criteria guide changes outside these sentences. A
+# deliberate evidence-kind contract change updates its digest in the same patch.
 CONTRACT_DIGESTS: dict[str, tuple[str, int]] = {
     "src/rebar/llm/reviewers/plan_review_F1.md": ("c9ae05352df0062f", 1),
     "src/rebar/llm/reviewers/plan_review_E2.md": ("5ff7cfbe9435dc36", 1),

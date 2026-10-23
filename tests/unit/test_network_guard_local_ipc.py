@@ -1,17 +1,7 @@
-"""The unit/scripts network guard must block real network, not local IPC.
+"""Block network sockets while allowing local IPC in unit/scripts tests (0b31).
 
-Regression for bug ``0b31-aeb5-e734-41c9``. The autouse guard in ``tests/conftest.py``
-patches ``socket.socket.connect`` so unit/scripts tests cannot reach the network. It was
-patching *every* address family, so an ``AF_UNIX`` connection — pure local IPC with no
-network involved — was rejected too. Python 3.14 changed the default ``multiprocessing``
-start method on Linux from ``fork`` to ``forkserver``, and ``forkserver`` reaches its
-server process over an ``AF_UNIX`` socket, so every guarded test that starts a
-``multiprocessing.Process`` began failing with ``RuntimeError: Network access is
-forbidden`` on 3.14+ (green on ``fork``/``spawn``).
-
-The contract: the guard blocks ``AF_INET``/``AF_INET6`` (real network) and leaves
-``AF_UNIX`` (local IPC) alone.
-"""
+The autouse guard rejects AF_INET and AF_INET6. It must leave AF_UNIX alone so
+multiprocessing forkserver on Python 3.14+ can reach its local socket."""
 
 from __future__ import annotations
 

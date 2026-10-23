@@ -1,19 +1,9 @@
-"""Oracle for the registry-derived CLI-reference generator (RP-05 S5, ticket 6755).
+"""Check the registry-derived CLI reference generator (6755).
 
-S5 rebuilds ``scripts/gen_cli_reference.py`` so that EVERY command syntax/options section
-in ``docs/cli-reference.md`` is DERIVED from the immutable route registry
-(:mod:`rebar._cli._registry`) plus the committed package-help bytes (proven byte-current by
-``scripts/gen_cli_help.py --check``). The hand-maintained intercept command census is gone:
-no ``INTERCEPT_COMMANDS`` curated one-liner table and no ``ladder_intercepts()`` source-regex.
-Editorial rationale is kept structurally separate and is registry-linted; parser artifacts
-remain the only usage/option authority.
-
-Assertions here are OBSERVABLE: the generator's rendered bytes, ``--check`` exit codes, the
-registry-vs-doc parity, and the editorial lint's findings — never private helper names.
-(The verb confirmation-line record ``MUTATION_VERBS`` is a distinct behavioral record, drift-
-gated against the registry's ``_CONFIRM_SCOPE``, and is exercised by
-``tests/unit/test_mutation_confirmations.py`` — out of scope here.)
-"""
+Command syntax and options come from the route registry and byte-current
+package help. Editorial rationale stays separate and linted. Assert rendered
+bytes, --check behavior, and registry/doc parity without pinning private
+helpers. Confirmation-line records have their own tests."""
 
 from __future__ import annotations
 

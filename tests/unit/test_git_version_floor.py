@@ -1,24 +1,8 @@
-"""The declared Git version floor is real, single-sourced, and unskippable.
+"""Enforce the single-sourced Git floor needed by merge-tree regressions (980d).
 
-rebar's two-clone convergence regressions (added for bug 8185-2d4b-d2bf-4282 and its
-sidecar sibling 55bc-b6bf-7adc-4108) merge two independently written tracker histories
-with ``git merge-tree --write-tree`` — a mode Git gained in 2.38. The project answers
-that dependency by DECLARING and ENFORCING a floor, never by skipping the affected
-tests on older clients: a regression that quietly does not run reads as coverage while
-providing none, which is exactly how the guards in 34c2 and 8a5e-b88e-0c3e-4544 went
-vacuous. Ticket 980d-83ac-a6bb-4edb.
-
-These tests pin three things:
-
-1. the floor is single-sourced in ``.github/git-version-floor.txt`` and every consumer
-   (contributor docs, CI, the suite's own preflight) agrees with it;
-2. the preflight FAILS — with a diagnostic naming the required version and the fix —
-   rather than skipping, and the running Git really does satisfy it;
-3. no merge-tree regression anywhere under ``tests/`` is guarded by skip machinery.
-   Check (3) is deliberately fail-closed: it locates the regressions by searching for
-   the capability they use rather than by a pinned file path, so a module split or a
-   rename makes it fail loudly instead of silently scanning nothing.
-"""
+Docs, CI, and preflight read .github/git-version-floor.txt. Old Git fails with
+an upgrade diagnostic instead of skipping tests. Discover merge-tree tests by
+capability so path moves cannot make the skip guard vacuous."""
 
 from __future__ import annotations
 

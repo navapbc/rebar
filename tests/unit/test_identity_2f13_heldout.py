@@ -1,10 +1,8 @@
-"""HELD-OUT oracle for 2f13 — the implementation MUST NOT see this file.
+"""Held-out placeholder identity edges (2f13).
 
-Validates the parts the happy path cannot: the in-place upgrade of a placeholder
-(one identity, not two, even with a changed display name), the provider-neutral
-stable-id keying (same external_id → one; different → two), and that an EXISTING
-real identity mapping that accountId is reused rather than shadowed by a ghost.
-"""
+An existing placeholder upgrades in place even when display changes. The same
+provider/external ID reuses one identity, distinct IDs stay distinct, and a
+existing mapping is reused rather than shadowed by a ghost."""
 
 from __future__ import annotations
 

@@ -119,16 +119,11 @@ def test_terraform_invoke_policy_is_the_sole_grantee() -> None:
 
 
 def test_terraform_opcert_admin_role_ignores_assume_role_policy_drift() -> None:
-    """Regression (bug 7c91-0488): the rebar-opcert-admin role's trust principals are
-    operator-supplied at DEPLOY (`var.opcert_admin_principal_arns`, default []). The
-    terraform-drift check runs `terraform plan` with NO -var, so it renders an empty
-    principal and reports a permanent phantom `1 to change` against the live account-root
-    principal — reddening the daily sweep forever and masking real drift. The role must carry
-    `lifecycle { ignore_changes = [assume_role_policy] }` (an operator-owned attribute terraform
-    should not fight, the same rationale the key param once used ignore_changes for before it
-    moved to write-only value_wo) so plan/apply never diff on the operator-owned trust
-    list. The key-param guard is now asserted as write-only value_wo in
-    test_terraform_both_securestring_params_present."""
+    """Keep operator-owned op-cert admin trust out of Terraform drift.
+
+    A no-var plan otherwise compares empty principal input with deployed trust and
+    reports a phantom change. ignore_changes on assume_role_policy preserves the
+    operator-owned list. The key parameter is checked separately as write-only."""
     tf = _TF.read_text()
     role = _resource_block(tf, "aws_iam_role", "opcert_admin")
     assert role is not None, "missing aws_iam_role.opcert_admin"
@@ -358,10 +353,9 @@ def _resource_block(tf: str, kind: str, label: str, *, data: bool = False) -> st
 
 
 def test_dockerfile_opcert_uses_ssh_dash_v_for_version_check() -> None:
-    """Regression (bug accc): the OpenSSH >= 8.9 build assertion must read the version from
-    `ssh -V` (which prints `OpenSSH_X.Y...` to stderr), NOT `ssh-keygen -V` (a validity-interval
-    flag that errors without an argument, yielding an empty version so the check ALWAYS fails and
-    the image never builds)."""
+    """Check OpenSSH >=8.9 with ssh -V, which prints its version to stderr.
+
+    ssh-keygen -V expects a validity interval and cannot supply the version."""
     dockerfile = (_REPO / "infra" / "compose" / "Dockerfile.opcert").read_text(encoding="utf-8")
     assert "ssh -V 2>&1" in dockerfile, "OpenSSH version must be read from `ssh -V`"
     assert "ssh-keygen -V 2>&1" not in dockerfile, "must not use `ssh-keygen -V` (wrong flag)"
@@ -382,10 +376,10 @@ def test_nginx_template_raises_map_hash_bucket_size_for_guard() -> None:
 
 
 def test_opcert_compose_service_is_aws_free() -> None:
-    """AC5 (story 6f14, supersedes bug accc): the op-cert APPLICATION runtime no longer does a
-    boto3 SSM key fetch, so the compose service must carry NO AWS region / SSM key parameter —
-    the key is materialized to a file OUTSIDE the app before start and bound via
-    ``REBAR_OPCERT_KEY_PATH``."""
+    """Keep AWS key retrieval outside the op-cert application container.
+
+    The service binds a pre-materialized file through REBAR_OPCERT_KEY_PATH and
+    needs no AWS region or SSM parameter."""
     import yaml as _yaml
 
     compose = _yaml.safe_load(

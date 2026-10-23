@@ -1,21 +1,8 @@
-"""Bug 84aa: the Gerrit commit-msg hook install must be worktree-safe.
+"""Install Gerrit's commit-msg hook without clobbering shared worktree hooks (84aa).
 
-The command AGENTS.md and CONTRIBUTING.md used to document —
-
-    curl -sLo "$(git rev-parse --git-path hooks/commit-msg)" <url>
-
-— resolves, from inside a LINKED WORKTREE, to the MAIN checkout's shared
-``.git/hooks/commit-msg``. That is the slot pre-commit's wrapper occupies, so the curl
-silently clobbers the wrapper for EVERY worktree on the host, dropping either the
-pre-commit ``commit-msg`` gate or (after the next ``pre-commit install``) the Change-Id
-stamp. The damage is invisible until a Gerrit push is rejected, possibly in a different
-worktree than the one that ran the command. Two independent agents hit this in one
-session.
-
-These tests pin both halves: that the shared slot really is what the old path targets
-(the defect), and that ``scripts/install-gerrit-hook.sh`` leaves BOTH hooks working when
-run from inside a worktree (the fix).
-"""
+A linked worktree's git-path hook slot is the common pre-commit wrapper. Pin
+that hazard and verify scripts/install-gerrit-hook.sh preserves both the
+message gate and Change-Id stamping from a linked worktree."""
 
 from __future__ import annotations
 
@@ -90,12 +77,10 @@ def checkout_with_worktree(tmp_path: Path) -> tuple[Path, Path, Path]:
 def test_the_old_documented_path_targets_the_shared_precommit_slot(
     checkout_with_worktree: tuple[Path, Path, Path],
 ) -> None:
-    """The defect itself, pinned so nobody reintroduces the bare curl.
+    """The linked worktree's git-path commit-msg slot is shared.
 
-    ``git rev-parse --git-path hooks/commit-msg`` run from a LINKED worktree points at the
-    MAIN checkout's shared hook file — the very file pre-commit's wrapper occupies. Any
-    ``curl -o`` at that path is therefore a host-wide clobber, not a per-worktree install.
-    """
+    Downloading a hook there would replace pre-commit's wrapper for every
+    worktree, so the old bare curl instruction must stay retired."""
     _main, worktree, hooks = checkout_with_worktree
 
     resolved = Path(_git("rev-parse", "--git-path", "hooks/commit-msg", cwd=worktree).strip())

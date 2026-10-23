@@ -1,27 +1,8 @@
-"""983f: the two network-capable git subprocess calls in the ``_commands`` layer must
-carry an explicit wall-clock timeout, matching the established ``_store`` /
-``_snapshot`` precedents.
+"""Bound init's cold tickets fetch and fsck repair's warm push (983f).
 
-Two sites were previously unbounded (they routed through a bare ``run_git`` /
-``run_git_write`` with no ``timeout=``), so a stuck remote or a hung credential helper
-could block indefinitely:
-
-* ``_commands/init.py`` — the cold first ``fetch <remote> <branch>`` of the tickets
-  branch into a freshly-initialised store. A cold materialize can legitimately take
-  minutes (a large event-sourced branch over a proxy), so it takes the shared
-  ``_snapshot/git_fetch`` cold precedent — the generous, tunable ``fetch_timeout()``
-  backstop (bug curly-open-swan), no longer a FIXED 300s cap that failed an honest large
-  transfer closed.
-* ``_commands/fsck_repair.py`` — the a3-remediation ``push origin HEAD:tickets`` of a
-  batch of ticket events against an already-warm clone. Incremental, so it takes the
-  ``_store/push`` precedent (``_GIT_TIMEOUT = 30``).
-
-Each now funnels through a module-local bounded helper mirroring ``_store/push.py._git``:
-it passes ``timeout=`` and folds a :class:`subprocess.TimeoutExpired` into a synthetic
-failed ``CompletedProcess`` (returncode 124) whose stderr names the git op and the bound
-it exceeded — so the existing returncode-inspecting callers fail cleanly instead of
-raising a bare ``TimeoutExpired`` or hanging.
-"""
+The cold fetch uses the tunable fetch_timeout backstop. Incremental repair
+uses the store's shorter write bound. Helpers pass timeout and convert
+TimeoutExpired to a failed CompletedProcess with operation and bound in stderr."""
 
 from __future__ import annotations
 

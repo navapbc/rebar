@@ -1,12 +1,8 @@
-"""Guard for the mypy strictness ratchet (story d2fa / dullish-computable-buck).
+"""Keep mypy's disallow_untyped_defs coverage monotonic (d2fa).
 
-`[[tool.mypy.overrides]]` enables `disallow_untyped_defs` for a set of already-clean
-packages. That set is SHRINK-ONLY for the exempt list — i.e. the strict set may only
-GROW; a package may never be removed from it. This test pins the committed baseline as a
-subset of the currently-enabled set, so dropping a package (regressing strictness) turns
-the build red. To promote a package, annotate its defs until `mypy src/rebar/<pkg>
---disallow-untyped-defs` is clean, then add it to the override module list.
-"""
+The committed baseline must remain a subset of strict override modules. A
+package can enter after its definitions are annotated, but removing one from
+the strict set fails the guard."""
 
 from __future__ import annotations
 

@@ -1,18 +1,8 @@
-"""Bug 2a6f — a completion FAIL that names no criterion is a VERIFIER FAULT, not a judgement.
+"""Distinguish an unitemized verifier fault from a criterion failure (2a6f).
 
-``reconcile_verdict`` coerces anything that is not exactly ``PASS`` to ``FAIL``. When the
-verifier's structured turn came back garbled/truncated (or without a ``verdict`` at all) the
-result was a FAIL with an empty ``findings``, and the reconciler INVENTED a placeholder
-criterion ``(unspecified)`` for it. In the field that produced:
-
-    Error: completion verification FAILED for cb91-… — 1 unmet criteria; not closing.
-      - (unspecified): verifier returned FAIL without itemizing the failing criterion.
-
-— a block with no remediation path, indistinguishable from a genuine one-criterion failure.
-These tests pin the replacement: recover real criteria from the positive manifest when it
-names any, else mark ``verdict_obtainable=False`` so callers can tell a fault from a verdict.
-The ``{PASS, FAIL}`` vocabulary is unchanged and the verdict still blocks fail-closed.
-"""
+A malformed completion result must not invent an (unspecified) criterion.
+Recover named criteria from a positive manifest when present. Otherwise mark
+verdict_obtainable=False. Keep PASS/FAIL vocabulary and fail-closed blocking."""
 
 from __future__ import annotations
 

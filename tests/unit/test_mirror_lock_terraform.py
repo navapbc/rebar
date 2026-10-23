@@ -1,19 +1,9 @@
-"""Contractual invariants for the GitHub mirror-lock IaC (ticket 8ccf, epic b744).
+"""Pin the GitHub mirror-lock Terraform contract (8ccf).
 
-Pins the ``infra/terraform-github`` module to the WS7 cutover decisions so a future edit
-cannot SILENTLY:
-
-- reintroduce a tag lock (tags MUST stay human-pushable so ``.github/workflows/release.yml``
-  can publish to PyPI on a ``v*`` tag push),
-- downgrade the fail-closed deploy-key existence gate back to a ``check`` block (which only
-  WARNs and lets ``apply`` proceed) instead of a resource ``precondition`` (which ABORTS), or
-- weaken the ``main`` lock's rules / bypass actor (the lock rejects direct pushes AND PR merges
-  and its sole bypass is the replication deploy key).
-
-This is a text-contract test on the committed IaC — offline and fast. The live reconcile
-(``terraform validate`` + ``terraform plan`` == "No changes" against the imported live ruleset)
-is verified out-of-band at cutover, not here.
-"""
+Release tags stay human-pushable. Missing deploy keys must fail apply through
+a resource precondition. The main lock blocks direct pushes and PR merges, with
+only the replication deploy key bypassing it. These offline text checks guard
+committed IaC. Deployed Terraform drift is checked separately."""
 
 from __future__ import annotations
 

@@ -1,26 +1,8 @@
-"""The CI Git-floor gate survives the definition-vs-tree skew, without going toothless.
+"""Keep the CI Git-version floor effective across workflow/tree skew (7e90).
 
-Gerrit's ``Verified`` lane takes the workflow DEFINITION from the target branch but checks
-out the CHANGE'S tree. A gate step that reads a repo file therefore runs against changes
-whose base predates that file. ``.github/workflows/_build-and-test.yml`` states the house
-rule for this in its "Definition-vs-tree skew guard (ticket ee2a)" note: a new gate step
-that reads a repo artifact must skip — with a log line — when the artifact is absent from
-the checked-out tree, and re-enforce on rebase and on every post-merge change. The
-``Git version floor gate`` (ticket 980d-83ac-a6bb-4edb) did not copy that guard and
-hard-failed every in-flight change (bug 7e90-233b-3ee9-4f14).
-
-These tests EXECUTE the real step. They lift the gate's ``run:`` script straight out of the
-workflow YAML and run it under ``bash`` against purpose-built trees, so they assert the
-gate's behavior rather than its wording:
-
-* a tree WITHOUT the floor file must pass, and must say why it skipped;
-* a tree WITH the floor file must still enforce — an adequate Git passes, and an
-  under-floor Git fails with the required version, the installed version and the upgrade
-  path (980d's enforcement, preserved not weakened).
-
-Both tree shapes are covered deliberately: the workflow-from-main / tree-from-patchset split
-makes them genuinely different cases, and a fix verified on only one of them is unverified.
-"""
+Verified uses the main-branch workflow against a patchset tree that may lack
+the floor file. Execute the workflow step. A missing file skips with a reason.
+A present file accepts adequate Git and rejects old Git with an upgrade path."""
 
 from __future__ import annotations
 
@@ -33,11 +15,8 @@ import pytest
 import yaml
 from _subprocess_env import subprocess_env
 
-# `_child_diag` lives in `tests/`, which the ROOT `tests/conftest.py` normally puts on
-# `sys.path`. That is not enough here: this module is loaded as a `pytest_plugins` entry by a
-# NESTED pytest run rooted OUTSIDE `tests/` (tests/unit/test_fixture_env_repr_security.py),
-# where the root conftest never loads and a bare import raises ImportError at collection.
-# Same explicit bootstrap the sibling oracle uses (tests/unit/test_live_dc_pass_health.py).
+# Nested pytest can load this plugin outside tests/, without root conftest's
+# sys.path setup. Add tests/ explicitly so _child_diag imports at collection.
 _TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
