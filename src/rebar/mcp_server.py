@@ -53,17 +53,8 @@ class McpStartupError(RuntimeError):
 
 
 # ── Canonical MCP environment-variable contract ──────────────────────────────
-# The SINGLE SOURCE OF TRUTH for the env vars the MCP server honors. The published
-# manifest (server.json) MUST advertise exactly this set — a CI drift-guard
-# (scripts/check_server_manifest.py, wired into .github/workflows/test.yml) diffs
-# server.json against this list and fails the build on divergence, so the manifest
-# can never silently drift from the real gates again. The ``--help`` text below is
-# also derived from this list, so the three stay in lockstep.
-#
-# Each entry: name and a one-line description.
-# The active gates are read in mcp_server.build_server / _mcp_reads / _mcp_llm /
-# _mcp_writes / config.py. (The REBAR_MCP_ALLOW_RECONCILE_LIVE alias of
-# REBAR_MCP_ALLOW_JIRA_SYNC was removed pre-1.0 — DE7.)
+# Keep MCP env names here for server.json drift checks and derived --help text.
+# Each entry names one gate and gives its short description.
 MCP_ENV_VARS: tuple[dict, ...] = (
     {
         "name": "REBAR_ROOT",
@@ -320,22 +311,15 @@ MCP_ENV_VARS: tuple[dict, ...] = (
 
 
 def _mcp_gate(attr: str) -> bool:
-    """Resolve a typed ``mcp.<attr>`` boolean gate through the single-source config
-    (env ``REBAR_MCP_<ATTR>`` wins over a ``[tool.rebar.mcp]`` config file; the
-    ``_as_bool`` coercion accepts 1/true/yes/on, any case, whitespace-tolerant). On a
-    MALFORMED config the resolver raises ``ConfigError`` (operator ruling 39f8-ae7c) —
-    the structured-error guard delivers it to the client as a ``config_unreadable``
-    envelope, so the value reported by ``rebar config`` is exactly what's enforced
-    here and a fault never reads as a policy choice."""
+    """Resolve typed MCP booleans with env precedence and explicit config errors.
+
+    The structured-error guard reports unreadable config, not a policy value.
+    """
     return rebar.config.mcp_gate(attr)
 
 
 def _readonly() -> bool:
-    # ERRORS on a malformed config (operator ruling 39f8-ae7c) — consistent with the
-    # verify gates; a broken config surfaces the fault instead of silently locking
-    # read-only. Routed through the ONE shared resolver in rebar.config so the LLM
-    # runner's read-only gate (runner._readonly_gate) resolves identically and the two
-    # can't drift. (_mcp_gate stays for the allow_llm / allow_jira_sync gates below.)
+    # Share the typed read-only resolver with LLM tools; malformed config errors.
     return rebar.config.mcp_readonly()
 
 
@@ -355,16 +339,10 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
 
 def _resolve_http_runtime(mcp_cfg, *, auth_enabled: bool):
-    """Resolve the Streamable-HTTP runtime (host, port, path, TransportSecuritySettings)
-    from config, applying the two fail-closed startup gates and the loopback-bind
-    defaults. Raises :class:`McpStartupError` when a gate refuses the boot.
+    """Resolve HTTP bind and security settings with fail-closed startup gates.
 
-    Gates:
-      * Unauthenticated-HTTP gate — refuse an auth-off HTTP boot unless the operator
-        sets ``REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP``.
-      * Non-loopback bind — a non-loopback host must supply BOTH allowlists AND
-        acknowledge TLS-at-edge; a loopback host fills any empty allowlist with the
-        explicit loopback defaults for the configured port.
+    Unauthenticated HTTP needs explicit acknowledgement. Non-loopback binds need
+    both allowlists and TLS-at-edge acknowledgement; loopback fills defaults.
     """
     from mcp.server.transport_security import TransportSecuritySettings
 
@@ -440,11 +418,8 @@ def build_server(cfg=None):
         cfg = rebar.config.compose_config()
     mcp_cfg = cfg.mcp
 
-    # Auth seam (S2): OFF by default. When enabled, build the composite token verifier
-    # (the SINGLE audience/fail-closed choke point) and the Resource-Server AuthSettings,
-    # and pass BOTH to FastMCP so the SDK serves RFC 9728 PRM + the 401 challenge and
-    # enforces required_scopes. A misconfigured composite raises AuthConfigError, which
-    # propagates out of build_server (fail-closed startup).
+    # When enabled, pass one composite verifier and resource-server settings to
+    # FastMCP; invalid auth config fails startup.
     auth_enabled = bool(mcp_cfg.auth_enabled)
     token_verifier = None
     auth_settings = None
@@ -474,21 +449,8 @@ def build_server(cfg=None):
             transport_security=ts,
             token_verifier=token_verifier,
             auth=auth_settings,
-            # STATELESS, deliberately. The SDK's default session manager keeps session
-            # state IN MEMORY in this process, so an `Mcp-Session-Id` is only ever valid
-            # on the container that minted it. The box's blue-green deploy swaps the nginx
-            # /mcp upstream the moment the new container is healthy, which orphans every
-            # live client session: the next request lands on a container that never heard
-            # of that id and 404s "Session expired", surfacing to agents as an opaque
-            # `rmcp::transport::worker` transport error mid-task. Retiring the old
-            # container gracefully cannot help -- the upstream has already moved, so
-            # nothing reaches it. Holding no per-container session state makes the failure
-            # structurally impossible rather than merely rarer.
-            #
-            # Safe because the tool surface is pure request/response: no tool takes the
-            # SDK's `Context`, which is the only handle for server-initiated messages, and
-            # `run_workflow` is poll-based (`get_workflow_status`), needing no session
-            # continuity. See ticket nemophilic-prettyish-cockroach.
+            # Stateless HTTP survives blue-green upstream swaps without orphaning
+            # container-local session IDs. Tools are request/response; workflows poll.
             stateless_http=True,
         )
     else:
@@ -496,13 +458,8 @@ def build_server(cfg=None):
         # fails closed at startup) but the SDK only enforces auth over HTTP.
         mcp = FastMCP("rebar", token_verifier=token_verifier, auth=auth_settings)
 
-    # Trusted-proxy header-guard (S5): when the `proxy` strategy is active, the forwarded
-    # identity lives on HTTP headers the token-only verify_token seam never sees, so wrap
-    # the Streamable-HTTP ASGI app with ProxyAuthMiddleware — it validates the shared
-    # secret (constant-time), strips the X-Forwarded-* family / secret / identity headers
-    # to defeat spoofing, and on a valid secret records the identity in a request-scoped
-    # ContextVar that ProxyTokenVerifier (already in the composite) reads. The factory
-    # already validated the secret env var is non-empty, so `secret` here is non-empty.
+    # Proxy auth validates the shared secret, strips spoofable forwarding headers,
+    # and binds verified identity to this request before token verification.
     if auth_enabled and "proxy" in mcp_cfg.auth_strategies:
         from rebar._mcp_auth import ProxyAuthMiddleware
 
@@ -540,19 +497,9 @@ def build_server(cfg=None):
     install_js_safe_guard(mcp)
     install_canonical_output_schemas(mcp)
 
-    # Registration order matches the original in-line definition order (reads, then
-    # the always-registered LLM tools, then the READONLY-gated writes). The read and
-    # write surfaces carry the cross-session advisory as a response field, so register
-    # them through a proxy that runs each tool under suppress_cross_session_warning():
-    # a scoped guard makes the field the single advisory without a process-global
-    # warnings filter (which would silence CrossSessionWarning for other import-rebar
-    # callers sharing this process). All three clusters are ALSO registered through a
-    # second proxy that composes-and-binds ONE authoritative OperationSnapshot per tool
-    # call (RP-04 S2, ticket 3a08) — the LLM registrar now gets this too (ticket ec44
-    # closed the "pending ec44" gap: its 5 tools now delegate to the SAME
-    # rebar.llm.* functions the CLI/library use, and those functions bind their own
-    # authoritative LLMConfig via compose_and_bind_llm_config; this general snapshot
-    # binding covers the non-LLM (store/ticket) config those tool bodies also touch).
+    # Register reads, LLM tools, then gated writes. Scoped advisory suppression
+    # avoids duplicate warning channels; each tool binds one operation snapshot.
+    # LLM calls also bind their own LLMConfig in the delegated library seam.
     from rebar._lib_warn import suppress_library_double_advisory
     from rebar._operation_config import bind_operation_snapshot_for_tools
 
@@ -573,24 +520,12 @@ def build_server(cfg=None):
 
 
 def compose_startup_opcert_binding(cfg):
-    """Compose the ONE startup op-cert signer this server signs its certified-op certs under, or
-    ``None`` when op-cert signing is not provisioned (the developer-local / stdio default).
+    """Bind the pinned environment's startup signer when both inputs exist.
 
-    The on-box deployment materializes the box environment's Ed25519 key OUTSIDE the app and wires
-    the mcp compose service with ``REBAR_OPCERT_ENV_ID`` (the pinned env_id) +
-    ``REBAR_IDENTITY_SIGNING_KEY`` (the bind-mounted key path). When BOTH are set this composes an
-    immutable :class:`~rebar.opcert_service.keyprov.OpcertSigner` from them — the SAME startup
-    composition the trusted op-cert gate service uses (validate + 0600 process-owned copy) — so
-    every cert the certified-op tools mint carries that env_id and verifies against the pinned
-    public key (:mod:`rebar.attest.trusted_env`). The binding is threaded context-locally around
-    serving (see :func:`rebar._mcp_health.run_mcp`); WITHOUT it the certified tools would sign the
-    principal from ``REBAR_OPCERT_ENV_ID`` but under the wrong (genesis) key, so the cert would
-    fail the required-environment verify.
-
-    Fail-closed: when both inputs are present but the key is invalid (missing / not 0600 /
-    encrypted / non-Ed25519), :func:`compose_signer` raises and startup aborts rather than serving
-    with an unusable signer. When EITHER input is absent the binding is skipped and signing keeps
-    its exact env/genesis behavior (regression-safe for the developer-local CLI / stdio path)."""
+    Compose a process-owned Ed25519 key copy so certified tools sign under the
+    claimed principal. Invalid provisioned keys fail startup; missing inputs
+    retain the developer-local env/genesis path.
+    """
     import os
 
     raw_env_id = os.environ.get("REBAR_OPCERT_ENV_ID")  # read-via: identity-deployment-override
@@ -605,10 +540,7 @@ def compose_startup_opcert_binding(cfg):
 
 
 def main() -> None:
-    # ``rebar-mcp`` takes no options — it speaks MCP-over-stdio. Respond to
-    # ``--help`` / ``-h`` with a short usage and exit 0 instead of starting the
-    # stdio server (so a curious `rebar-mcp --help` does not hang waiting on stdin,
-    # and a CI boot check can confirm the entry point resolves).
+    # Handle --help before starting stdio so it cannot wait for MCP input.
     if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
         # Env list is DERIVED from MCP_ENV_VARS so --help can't drift from the
         # manifest (server.json) or the real gates.
@@ -637,9 +569,8 @@ def main() -> None:
     server = build_server(cfg)
     from rebar._mcp_health import run_mcp
 
-    # Compose the box's op-cert signer (fail-closed on a bad key) and hand it to run_mcp, which
-    # binds it context-locally INSIDE the serving thread so the certified-op tools mint certs
-    # under the box environment. None ⇒ unprovisioned (dev / stdio) ⇒ unchanged env/genesis path.
+    # Bind a valid box signer inside the serving thread; unprovisioned runs
+    # retain env/genesis signing.
     binding = compose_startup_opcert_binding(cfg)
     try:
         run_mcp(server, cfg.mcp, opcert_binding=binding)

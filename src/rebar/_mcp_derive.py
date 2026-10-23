@@ -125,10 +125,7 @@ def readonly_pin() -> PerCall:
 
 # ── cross-session advisory and delivery status ──────────────────────────────────────────
 def cross_session_warning(ticket_id: str) -> str | None:
-    """The cross-session holder-naming advisory, or ``None`` if silent/uncomputable.
-
-    Best-effort (story 734d): any exception silences the advisory rather than failing the
-    operation the client asked for."""
+    """Name another session's claim, or return ``None`` without failing the call."""
     from rebar._commands.cross_session import cross_session_warning_for
 
     try:
@@ -138,10 +135,10 @@ def cross_session_warning(ticket_id: str) -> str | None:
 
 
 def push_status() -> dict[str, Any]:
-    """The store's push-delivery status (bug vapoury-attack-lamb), or ``unknown``.
+    """Read durable delivery state after the write; return ``unknown`` on failure.
 
-    A plain file read taken AFTER the write; the marker is durable, so a detached push
-    failure that lands later is reported by the next write."""
+    A detached push may fail later, so its marker appears on the next write.
+    """
     try:
         return dict(rebar.push_status())
     except Exception:  # noqa: BLE001 — a status read must never fail a completed write
@@ -158,8 +155,7 @@ def warn_before(param: str) -> PreHook:
 
 
 def ack(_ctx: Any, call: Call, _result: Any) -> dict[str, Any]:
-    """The shared ``write_ack``: ``{"result": "ok"}`` plus delivery status; each advisory key
-    is ABSENT when there is nothing to say."""
+    """Return write acknowledgement and delivery state, omitting silent advisories."""
     out: dict[str, Any] = {"result": call.state.get("ack_text", "ok"), "push_status": push_status()}
     for key in ("description_warning", "cross_session_warning"):
         value = call.state.get(key)
@@ -190,7 +186,7 @@ def with_push(_ctx: Any, _call: Call, result: Any) -> dict[str, Any]:
 
 
 def attach_warning(_ctx: Any, call: Call, result: Any) -> Any:
-    """Add the pre-computed advisory to a dict result, only when non-``None``."""
+    """Attach a precomputed advisory only when present."""
     warning = call.state.get("cross_session_warning")
     if warning is not None:
         result["cross_session_warning"] = warning

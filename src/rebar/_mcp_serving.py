@@ -1,20 +1,8 @@
-"""Serving runtime and bounded graceful shutdown for the rebar MCP HTTP transport.
+"""Serve MCP HTTP with a bounded certified-op drain before uvicorn shutdown.
 
-This is the serving/shutdown call-graph seam of :mod:`rebar._mcp_health`: the four
-functions here form one cluster that already called each other
-(``run_mcp`` -> ``run_http_with_grace`` -> ``make_sigterm_handler`` ->
-``drain_then_exit``) and depend on the gauge/handshake primitives that stay in
-``_mcp_health``. They were extracted so ``_mcp_health`` stays under the 800-LOC module
-cap after the bug-2f46 fast-drain fix; ``_mcp_health`` re-exports every public name here
-so ``from rebar._mcp_health import run_mcp`` (and the monkeypatch paths the tests use)
-keep working unchanged.
-
-Bug 2f46: on SIGTERM a retiring container now (1) CLOSES new certified intake via
-:meth:`rebar._mcp_health.InFlightGauge.begin_draining`, (2) waits (bounded by the
-certified-op ``grace_seconds``) for the in-flight op to finish, and only THEN tells
-uvicorn to stop. uvicorn's own ``timeout_graceful_shutdown`` is bound to the SHORT
-:data:`rebar._mcp_health.DEFAULT_UVICORN_BACKSTOP_SECONDS`, decoupled from the op grace,
-so a 0-in-flight container fast-drains instead of pinning a blue-green port for ~20 min.
+On SIGTERM, close new certified intake, wait for active operations, then stop
+uvicorn with a separate short idle-stream backstop. ``_mcp_health`` re-exports
+this call cluster and retains its gauge and handshake primitives.
 """
 
 from __future__ import annotations
@@ -64,23 +52,11 @@ def make_sigterm_handler(
     grace_seconds: float,
     poll_interval: float,
 ) -> Callable[[int, Any], None]:
-    """Build the SIGTERM handler used by :func:`run_http_with_grace`.
+    """Close certified intake, drain active ops, then request uvicorn shutdown.
 
-    On SIGTERM it (1) CLOSES new certified intake immediately
-    (:meth:`InFlightGauge.begin_draining` — a new certified call is then refused with
-    :class:`MCPRetiringError` so it retries the live container and cannot re-inflate the
-    gauge), (2) waits (bounded by ``grace_seconds``) for the in-flight certified op to
-    finish, and only THEN (3) tells uvicorn to stop serving (``should_exit`` — uvicorn runs
-    its own graceful shutdown, bounded by the SHORT ``timeout_graceful_shutdown`` backstop).
-
-    Draining the gauge BEFORE setting ``should_exit`` is the bug-2f46 fix: a real in-flight
-    op's streaming response completes normally while uvicorn keeps serving, and uvicorn's
-    (now short) graceful-shutdown backstop only ever sweeps IDLE held-open streams once the
-    gauge is already 0 — it never truncates a real op, and a retiring container no longer
-    burns the full 1200s op grace pinning a blue-green port. Intake is closed via the gauge
-    (not via ``should_exit`` first) precisely so the short backstop cannot force-close a
-    still-in-flight op. Extracted as a seam so the handler BODY is directly testable without
-    delivering a real signal."""
+    This order preserves active streaming responses while the short uvicorn
+    backstop handles only idle streams. The handler is testable without a signal.
+    """
 
     def _on_sigterm(_signum: int, _frame: Any) -> None:
         gauge.begin_draining()
@@ -103,26 +79,12 @@ def run_http_with_grace(
     poll_interval: float = 0.5,
     opcert_binding: Any = None,
 ) -> None:
-    """Serve the Streamable-HTTP app with an owned, bounded SIGTERM grace.
+    """Run HTTP in a serving thread while the main thread handles SIGTERM.
 
-    uvicorn only installs its own signal handlers on the main thread, so we run the
-    server on a background thread (it therefore installs none) and own the SIGTERM
-    handler on the main thread (see :func:`make_sigterm_handler`).
-    ``timeout_graceful_shutdown`` is uvicorn's OWN backstop and is bounded by the SHORT
-    ``uvicorn_backstop_seconds`` (default :data:`DEFAULT_UVICORN_BACKSTOP_SECONDS`),
-    DELIBERATELY DECOUPLED from ``grace_seconds`` (the certified-op drain budget) — bug
-    2f46: binding the two made a retiring container wait the full op grace for idle
-    held-open client streams and pin a blue-green port ~20 min. The certified-op drain is
-    enforced by the gauge poll in the SIGTERM handler (which runs before ``should_exit``),
-    so this short backstop only sweeps idle streams and never truncates a real op. The main
-    thread joins with a timeout so it stays responsive to the signal (a bare ``join()``
-    would defer handler delivery).
-
-    ``opcert_binding`` (the box's startup op-cert signer, or ``None``) is bound
-    context-locally INSIDE the serving thread's target, not in the caller's thread:
-    a :class:`contextvars.ContextVar` set on the main thread is NOT inherited by the
-    background thread, so the binding must be entered where the request-handling event
-    loop actually runs. ``None`` is a transparent no-op (the unprovisioned path)."""
+    Gauge drain precedes ``should_exit``; uvicorn's short idle-stream backstop is
+    separate from certified-op grace. Timed joins keep signals responsive.
+    Bind the optional signer inside the serving thread, where requests run.
+    """
 
     import signal
 
@@ -165,16 +127,12 @@ def run_http_with_grace(
 
 
 def run_mcp(server: Any, mcp_cfg: Any, *, opcert_binding: Any = None) -> None:
-    """Run ``server`` for the configured transport. HTTP uses the bounded-grace runner
-    above; stdio delegates to FastMCP's own run loop (no HTTP surface to drain).
+    """Run HTTP with bounded drain or stdio through FastMCP.
 
-    ``opcert_binding`` (or ``None``) is the box's startup op-cert signer; it is threaded to
-    the serving thread so the certified-op tools mint certs under the box environment. HTTP
-    binds it inside the uvicorn thread target (:func:`run_http_with_grace`); stdio binds it
-    around ``server.run`` here (same thread). ``None`` is a transparent no-op."""
+    Bind the optional op-cert signer where each transport executes requests.
+    """
 
-    # Bug 879b serve-degraded surface: stash the pinned-key match status for /health and log a
-    # boot warning if the bound signer is not the pinned trusted-environment key. Never aborts.
+    # Expose pinned-key match status through /health and warn without aborting.
     setattr(server, _OPCERT_STATUS_ATTR, opcert_signing_status(opcert_binding))
     run_startup_opcert_check(opcert_binding)
 

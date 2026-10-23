@@ -1,34 +1,8 @@
-"""Atomic publication of a NEW ticket directory: stage out of sight, then one rename.
+"""Publish a new ticket directory and its first event with one atomic rename.
 
-The problem this closes
------------------------
-The write path used to ``os.makedirs`` the ticket directory and only land its first event
-much later, at the under-lock ``os.replace`` — with the temp write, the write-lock
-acquisition and the rebase guard in between. Process death anywhere in that window (host
-sleep, session kill, shell timeout) left an empty, plausible-looking ticket directory in
-the tracker worktree, which ``fsck`` reports TWICE: ``MISSING_CREATE`` (the reducer finds
-no CREATE event) and ``FOREIGN_STORE_PATH`` (the directory holds no event file). Eight such
-directories were swept by hand under ticket illsuited-erect-ibis before this fix existed.
-
-Here the directory and its first event are built together in a staging path and published
-by a single :func:`os.rename`, which is atomic on one filesystem. An interruption can
-therefore only ever strand the staging path — never a bare ticket directory.
-
-The naming convention (this is the load-bearing part)
------------------------------------------------------
-A staging path is ``<tracker>/.tmp-newticket-<pid>-<uuid4hex>``:
-
-* The **leading dot** makes it invisible to every store scanner, by a rule that already
-  existed rather than one added for this module — ``fsck._ticket_dirs`` and
-  ``fsck.foreign_store_path_list`` both skip top-level entries starting with ``.``, as do
-  fsck's JSON check and the plan reducer's ``relation_snapshot``. Ticket ids never start
-  with a dot, so the two namespaces cannot collide. This is the same convention the
-  pre-existing ``.tmp-event-*`` event staging files rely on.
-* The **pid and uuid4** make the name unique per writer and per call, so concurrent creates
-  of different tickets cannot collide on a staging path (and a retry never reuses one).
-
-Anything stranded here is the writer's own scratch, not store data — which is what lets the
-sweep below reclaim it without contradicting bug 043f.
+Build both in a hidden ``.tmp-newticket-<pid>-<uuid>`` directory. The dot hides
+staging from store scanners; pid and UUID prevent writer collisions. An interrupted
+write strands only reclaimable staging, never an empty visible ticket directory.
 """
 
 from __future__ import annotations
@@ -46,20 +20,14 @@ from rebar._store import lock_owner as _owner
 # The staging-path prefix. Dot-prefixed on purpose — see the module docstring.
 STAGING_PREFIX = ".tmp-newticket-"
 
-# Ownership stamp INSIDE a staging directory, reusing the write lock's v2 stamp format
-# (host + pid namespace + process start time). Start time is what makes the probe safe
-# against pid recycling. Removed just before publication so it is never renamed into the
-# published ticket directory.
+# Stamp staging ownership with host, pid namespace, and process start time;
+# remove it before publication so pid reuse cannot fool the sweep.
 _OWNER_FILE = ".rebar-staging-owner"
 
-# Fallback age ceiling for a staging path whose owner cannot be probed (no stamp, a torn
-# stamp, a foreign host, another pid namespace). Deliberately generous: an unprobeable
-# path is only reclaimed once no plausible writer could still be working on it.
+# Reclaim an unprobeable owner only after this generous age ceiling.
 _UNPROBEABLE_STALE_S = 6 * 60 * 60
 
-# Sweep bounds. The sweep is best-effort housekeeping on the write path, never a scan the
-# store depends on, so it looks at a fixed slice of the directory and removes a fixed
-# number of paths at most.
+# Bound best-effort write-path cleanup by scanned and removed entries.
 _SWEEP_SCAN_LIMIT = 512
 _SWEEP_REMOVE_LIMIT = 32
 
@@ -102,11 +70,7 @@ def _age_s(path: str) -> float | None:
 
 
 def _is_abandoned(staging_dir: str) -> bool:
-    """Whether *staging_dir*'s owner is provably gone.
-
-    Fail-closed at every step: a live pid, an unreadable age, or any uncertainty keeps the
-    path. Only a positive "that process is not running" verdict — or an age no live writer
-    could plausibly still be inside — licenses removal."""
+    """Keep uncertain or live owners; reclaim only a dead or sufficiently old one."""
     stamp = _read_owner_stamp(staging_dir)
     if stamp:
         fields = _owner._parse_v2_stamp(stamp)
@@ -122,19 +86,11 @@ def _is_abandoned(staging_dir: str) -> bool:
 
 
 def sweep_stale_staging(tracker: str) -> int:
-    """Reclaim abandoned staging paths in *tracker*. Returns how many were removed.
+    """Best-effort, bounded cleanup of abandoned hidden staging; return removals.
 
-    Bounded and best-effort — it never raises, and a failure to remove one path is simply
-    left for the next writer.
-
-    **This does not contradict bug 043f ("tolerate, never tidy").** That ruling forbids the
-    writer from deleting STORE DATA — an event-less ticket directory — because doing so
-    races another session's in-flight write in a tracker many sessions share, and because
-    the reader-side tolerance also repairs clones that already carry one. Nothing here
-    touches a ticket directory: this only removes ``.tmp-newticket-*`` paths, which are
-    this writer's own staging area, are invisible to every reader, and are removed only
-    when their owning process is provably gone. Event-less ticket directories are still
-    tolerated and never tidied."""
+    Only hidden staging with dead owners or unprobeable paths past the age
+    ceiling is swept. Visible ticket directories, including event-less ones, stay.
+    """
     removed = 0
     try:
         names = os.listdir(tracker)
@@ -156,16 +112,9 @@ def sweep_stale_staging(tracker: str) -> int:
 
 @dataclass
 class StagedEvent:
-    """One event staged for publication, and how to publish or abandon it.
+    """Publish a new ticket by directory rename, or an existing ticket by file replace.
 
-    Two shapes, chosen by whether the ticket directory already exists:
-
-    * **new ticket** — ``staging_dir`` is set and holds the event; :meth:`promote` renames
-      the whole directory into place, so the directory and its first event become visible
-      in ONE atomic step;
-    * **existing ticket** — ``staging_dir`` is ``None`` and ``staging`` is a
-      ``.tmp-event-*`` file beside the tracker; :meth:`promote` is the historical single
-      ``os.replace``, unchanged.
+    ``staging_dir`` distinguishes the new-ticket path from a staged ``.tmp-event-*``.
     """
 
     staging: str
@@ -176,11 +125,7 @@ class StagedEvent:
     published_dir: bool = False
 
     def promote(self) -> None:
-        """Publish the event. MUST be called with the store write lock held.
-
-        Keeping the rename under the lock is what preserves the existing discipline: an
-        event file never becomes visible before the caller's under-lock checks (the rebase
-        guard, and optimistic-concurrency ``under_lock_check``) have passed."""
+        """Publish under the write lock, after rebase and concurrency checks pass."""
         if self.staging_dir is None:
             os.replace(self.staging, self.final_path)
             return
@@ -199,13 +144,10 @@ class StagedEvent:
         self.published_dir = True
 
     def unpublish(self) -> None:
-        """Undo :meth:`promote`'s directory publication when the transaction rolls back.
+        """Remove only this transaction's empty published directory under the lock.
 
-        Only ever removes a directory THIS transaction created, only while its own event
-        file has already been rolled back, and only while the write lock is still held —
-        so it cannot race another session, and cannot remove a directory that holds
-        anything. That keeps a failed commit from re-creating the very debris this module
-        exists to prevent."""
+        The event must already be rolled back, so another writer's content survives.
+        """
         if not self.published_dir:
             return
         try:
@@ -230,11 +172,11 @@ def stage_event(
     *,
     sweep_stale: bool = True,
 ) -> StagedEvent:
-    """Stage *payload* as *filename* for *ticket_id*, ready for an atomic publish.
+    """Stage an event out of sight for atomic publication under the later lock.
 
-    No lock is held here and nothing under ``<tracker>/<ticket_id>`` is touched: for a new
-    ticket the directory is built out of sight and only appears at :meth:`StagedEvent
-    .promote`. Raises :class:`OSError` on a staging failure, leaving no partial state."""
+    New tickets do not touch their visible directory; staging failures raise
+    ``OSError`` without publishing partial state.
+    """
     ticket_dir = os.path.join(tracker, ticket_id)
     final_path = os.path.join(ticket_dir, filename)
     relative_path = os.path.relpath(final_path, tracker)
@@ -251,16 +193,12 @@ def stage_event(
             raise
         return StagedEvent(staging, final_path, relative_path, ticket_dir)
 
-    # Creating a ticket is the only moment a staging path can appear, so it is also the
-    # cheapest place to reclaim ones abandoned earlier — bounded, best-effort, and never
-    # touching store data (see sweep_stale_staging).
+    # New-ticket writes create staging paths, so sweep abandoned ones here.
     if sweep_stale:
         sweep_stale_staging(tracker)
 
-    # The TRACKER root may not exist yet on the reconciler paths, which reached here via
-    # ``mkdir(parents=True)``. Creating it is not the window this module closes — the debris
-    # signature is an empty TICKET directory, and the tracker root holding no ticket yet is
-    # both normal and invisible to the ticket scanners.
+    # Reconciler writes may need the tracker root; only an empty ticket directory
+    # would be visible debris.
     os.makedirs(tracker, exist_ok=True)
     staging_dir = _new_staging_path(tracker)
     os.mkdir(staging_dir)

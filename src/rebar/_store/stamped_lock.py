@@ -1,17 +1,8 @@
-"""One stamped-file advisory lock for the background workers (story 1cf6-f902-5bfa-438f).
+"""Share a best-effort advisory file lock among background workers.
 
-The compaction sweep and the snapshot-GC worker (and, until ADR 0086's worker was removed, a
-third background worker) each need the same cheap "only one of me at a time" file lock, and
-each carried its OWN copy of the loop — which is how
-the unresolved-path defect spread (bug ``da68-fc7c-068c-4c53``), how the three dialects drifted
-apart (bug ``aadc-9af6-0e67-4e2a``), and how the release delta :func:`release_stamped_lock` now
-settles survived in one of them. Deliberately narrow: staleness stays in
-:mod:`rebar._store.lock_owner` (this module ASKS
-:func:`~rebar._store.lock_owner.stamped_file_is_stale`, inheriting its pid-recycle
-qualification, refuse-without-proof branches and single wall-clock ceiling for all three), and
-directory creation stays with the three callers, who each do it differently — so this takes an
-already-resolved path. These are NOT store write locks: they only stop two PROCESSES doing
-redundant work, so every leg is best-effort and none may fail its caller.
+Callers supply resolved paths and create their own directories. Shared lock-owner
+logic decides staleness, including pid reuse and its age ceiling. These locks limit
+duplicate worker processes; store write locks still protect correctness.
 """
 
 from __future__ import annotations
@@ -34,17 +25,11 @@ def stamped_file_lock(
     lock_noun: str = "worker lock",
     describe_holder: Callable[[str], str] | None = None,
 ) -> int | None:
-    """Take the advisory lock at *path*: an open fd, or ``None`` if a live worker holds it (or
-    the filesystem refused us — a background concern never fails its caller).
+    """Acquire a stamped advisory fd, or return ``None`` without failing the caller.
 
-    The file carries the SAME v2 ownership stamp the store's mkdir write lock writes, and a
-    collision is adjudicated by the SAME shared decision table; without that, a worker that died
-    between acquire and release leaked it forever and every later trigger silently skipped (bug
-    ``knavish-stimulated-bluebottle``). An orphan is reclaimed LOUDLY and the create retried
-    EXACTLY ONCE; a holder the table will not condemn is respected. *label* and *lock_noun* name
-    the caller and the lock in the log lines; *describe_holder*, when given, renders the holder
-    into the reclaim WARNING so a wedge is attributable without ``rebar store doctor``. Exclusion is
-    DEFEASIBLE ACROSS THE RECLAIM — see below."""
+    Respect a live or uncertain holder. Log and reclaim a proven orphan with one
+    retry; caller labels and optional holder details identify that reclaim.
+    """
     from rebar._store import lock_owner as _owner
 
     target = os.fspath(path)
@@ -56,28 +41,10 @@ def stamped_file_lock(
                 return None
             held = "" if describe_holder is None else f" held by {describe_holder(target)}"
             logger.warning("%s: reclaiming stale %s %s%s", label, lock_noun, target, held)
-            # ACCEPTED RACE (task deathful-lettered-maltesedog, operator decision
-            # 2026-08-16). Nothing excludes another worker between the
-            # `stamped_file_is_stale` verdict above and this unlink: both can condemn the
-            # same orphan, the winner can recreate and stamp a FRESH lock, and this unlink
-            # then removes that live lock — so two workers can run at once. (The mkdir leg
-            # has the same shape but is safe, because `_acquire_mkdir`'s precondition is
-            # that its caller already holds the exclusive fcntl leg; a single FILE lock has
-            # no such kernel leg to inherit.) The window is left open deliberately:
-            #   * Harm is bounded to REDUNDANT WORK, never to a wrong outcome. This lock is
-            #     advisory and exists only to stop two worker PROCESSES duplicating effort;
-            #     the correctness boundary is the store lock each pass takes for its actual
-            #     work (the GC pass's non-blocking store lock; the sweep stands aside while a
-            #     writer holds the store write lock), which a second worker cannot bypass.
-            #   * Closing it means changing the MECHANISM — a kernel leg (`flock`) or an
-            #     atomic create-and-rename — which is a larger change than the bug it would
-            #     prevent, on a path that is already strictly better than the permanent
-            #     wedge it replaced (bug knavish-stimulated-bluebottle).
-            #   * It is also self-limiting: the retry above is capped at ONE, so a contended
-            #     reclaim converges rather than spinning.
-            # Revisit only if drain work stops being idempotent, or if the queue claim
-            # ceases to be the correctness boundary — either would turn "redundant" into
-            # "wrong" and make the kernel leg worth its cost.
+            # Accepted stale-unlink race: another worker may replace the orphan
+            # before this unlink, allowing 2 workers. Their actual work still takes
+            # the store lock; the one retry bounds duplicate effort. Revisit if that
+            # work stops being idempotent or the store lock stops guarding correctness.
             try:
                 os.unlink(target)
             except OSError:
@@ -96,10 +63,10 @@ def stamped_file_lock(
 
 
 def release_stamped_lock(path: str | os.PathLike[str], fd: int) -> None:
-    """Drop the advisory lock: close the fd, unlink the file. Best-effort in BOTH legs, and
-    they are INDEPENDENT on purpose — a failing ``os.close`` must not skip the unlink, or the
-    lock outlives its holder and every later trigger skips until the shared ceiling reclaims it
-    an hour later. A failing unlink leaves a stamped file that table will reclaim."""
+    """Independently close and unlink, so either failure cannot skip the other leg.
+
+    A leftover stamped file remains reclaimable under the shared age ceiling.
+    """
     try:
         os.close(fd)
     except OSError:
@@ -111,13 +78,10 @@ def release_stamped_lock(path: str | os.PathLike[str], fd: int) -> None:
 
 
 def _offending_source(text: str) -> str | None:
-    """Why *text* re-implements the acquire above, or ``None`` if it does not.
+    """Flag another stamped-lock acquire, requiring both create and stale checks.
 
-    The anchor is the CONJUNCTION of ``os.O_CREAT`` and ``stamped_file_is_stale``: a bare
-    ``O_EXCL`` scan over-matches seven legitimate lines, and ``O_EXCL`` conjoined with the table
-    still flags ``_commands/doctor_locks.py`` — the diagnostic READER, which adjudicates
-    staleness but deliberately opens WITHOUT ``O_CREAT``. The rule lives HERE, not in the guard
-    test, so the guard is not itself a second copy of the construct it keeps singular."""
+    The conjunction excludes diagnostic readers and legitimate ``O_EXCL`` uses.
+    """
     if "os.O_CREAT" not in text or "stamped_file_is_stale" not in text:
         return None
     marker = _MARKER_RE.search(text)
