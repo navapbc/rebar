@@ -1,36 +1,10 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# materialize-deploy-key.sh — materialise the GitHub replication deploy key into
-# the gerrit user's ~/.ssh BEFORE Gerrit starts. Story S5.
-#
-# Runs on the HOST as root (it has the instance role, so it can read the
-# SecureString from SSM). It writes into the host directory that is bind-mounted
-# to the container's /var/gerrit/.ssh (the gerrit user's HOME is /var/gerrit, so
-# its SSH dir is /var/gerrit/.ssh). The mount is:
-#     host  $DOTSSH (/var/gerrit/site/dotssh)  ->  container /var/gerrit/.ssh
-# (see infra/compose/docker-compose.yml). The in-container gerrit user is uid/gid
-# 1000, so everything is chowned 1000:1000.
-#
-# FAIL-CLOSED: this script exits non-zero on ANY failure (empty/None/missing
-# param, write/chown failure). It is meant to run BEFORE `docker compose up` so
-# that Gerrit NEVER starts without a usable deploy key — a missing key must abort
-# the boot, not silently disable replication.
-#
-# Env:
-#   DOTSSH                host .ssh dir bind-mounted to /var/gerrit/.ssh
-#                         (default /var/gerrit/site/dotssh)
-#   AWS_REGION            (default us-east-1)
-#   SSM_DEPLOY_KEY_PARAM  SSM param holding the ed25519 PRIVATE key
-#                         (default /rebar/prod/github-replication-deploy-key)
-#
-# NOTE on the param name: an earlier ticket draft referred to
-# `/rebar/prod/github-deploy-key`; the ACTUAL provisioned parameter is
-# `/rebar/prod/github-replication-deploy-key` (the more specific name). This
-# script defaults to the provisioned name. If you bootstrapped under the old
-# name, either rename the SSM param or override SSM_DEPLOY_KEY_PARAM.
-#
-# The private key is NEVER echoed to stdout/stderr.
-# ---------------------------------------------------------------------------
+# Run as root before Gerrit boots. The instance role reads the replication
+# private key from SSM_DEPLOY_KEY_PARAM (default
+# /rebar/prod/github-replication-deploy-key). An empty or missing value fails boot.
+# DOTSSH (default /var/gerrit/site/dotssh) is the host mount for container
+# /var/gerrit/.ssh. Files belong to uid/gid 1000 with restrictive modes.
+# AWS_REGION defaults to us-east-1. Never log the private key.
 set -euo pipefail
 
 DOTSSH="${DOTSSH:-/var/gerrit/site/dotssh}"

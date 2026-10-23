@@ -1,58 +1,16 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# setup-replication.sh — apply the Gerrit -> GitHub replication config on the box.
-# Story S5.
-#
-# Run by the OPERATOR, on (or against) the box. Orchestrates:
-#   1. materialize-deploy-key.sh  — put the deploy key into the gerrit user's
-#      ~/.ssh (fail-closed; aborts if the key is missing).
-#   2. Copy replication.config into the Gerrit site etc dir
-#      (/var/gerrit/site/etc/replication.config), chowned to the gerrit uid.
-#   3. Reload the `replication` plugin IF remote plugin admin is enabled; else
-#      tell the operator a Gerrit RESTART is required to load the config.
-#
-# REMOTE PLUGIN ADMIN IS DISABLED on this instance, so step 3 falls through to
-# the restart path: replication.config is loaded at Gerrit startup. `autoReload`
-# in replication.config re-reads the file on CHANGE once the plugin is loaded,
-# but the FIRST load of a brand-new replication.config still needs a restart
-# (the plugin must be (re)initialised). Expect to restart Gerrit after first run.
-#
-# Env:
-#   GERRIT_SITE          Gerrit site root on the host (default /var/gerrit/site)
-#   COMPOSE_FILE         compose file for the restart hint
-#                        (default infra/compose/docker-compose.yml)
-#   GERRIT_HOST/USER/PORT/ADMIN_SSH_KEY  — only used IF you opt into a remote
-#                        `plugin reload` (disabled by default; see ALLOW_REMOTE_RELOAD)
-#   ALLOW_REMOTE_RELOAD  set to 1 to attempt `gerrit plugin reload replication`
-#                        over admin SSH (only works if remote plugin admin is
-#                        enabled on the server; default 0 -> restart path)
-#   DRY_RUN              set to 1 to print actions without applying
-#
-# Also passes DOTSSH / AWS_REGION / SSM_DEPLOY_KEY_PARAM through to
-# materialize-deploy-key.sh (same defaults).
-#
-# -- KILL-SWITCH ------------------------------------------------------------
-# To STOP replication immediately: remove (or rename) the site
-# replication.config and restart Gerrit, e.g.
-#     mv /var/gerrit/site/etc/replication.config /var/gerrit/site/etc/replication.config.disabled
-#     docker compose -f infra/compose/docker-compose.yml restart gerrit
-# With no replication.config the plugin loads but configures no remotes, so no
-# pushes happen. Restore by moving the file back and restarting.
-#
-# -- DEPLOY-KEY ROTATION LIFECYCLE ------------------------------------------
-# 1. Generate a NEW ed25519 keypair.
-# 2. Add the new PUBLIC key as a deploy key (write access) on navapbc/rebar
-#    (operator, via infra/gerrit/register-deploy-key.sh or the GitHub UI).
-# 3. Overwrite SSM /rebar/prod/github-replication-deploy-key with the new PRIVATE
-#    key (aws ssm put-parameter --overwrite --type SecureString).
-# 4. Re-run THIS script to re-materialise the key and install replication.config.
-# 5. Restart Gerrit (or reload the replication plugin on an instance where remote
-#    plugin admin is enabled). JGit caches SSH sessions/keys, so a mounted key file
-#    update alone does not prove the running replication plugin will use the new key.
-# 6. Verify replication by triggering `replication start --all --remote github
-#    --now --wait` and confirming the replication_log no longer tries the old key.
-# 7. REMOVE the OLD deploy key from navapbc/rebar only after that verification.
-# ---------------------------------------------------------------------------
+# Apply Gerrit-to-GitHub replication on the box. Materialize the SSM deploy key
+# first (fail closed), then copy replication.config with Gerrit uid/gid ownership.
+# DRY_RUN=1 prints actions. ALLOW_REMOTE_RELOAD=1 opts into plugin reload.
+# The default requires a Gerrit restart for first load. autoReload handles later
+# config changes after the plugin starts. GERRIT_SITE, COMPOSE_FILE, admin SSH
+# settings, and deploy-key settings may be overridden.
+# To stop replication, remove the site replication.config and restart Gerrit.
+# -- DEPLOY-KEY ROTATION LIFECYCLE --
+# Register the new write-enabled public deploy key, update SSM, and rerun this
+# script to rematerialize the private key.
+# Restart Gerrit after rematerialization. JGit caches SSH sessions/keys.
+# Verify replication uses the new key before you REMOVE the OLD deploy key.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

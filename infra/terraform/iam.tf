@@ -1,13 +1,5 @@
-# ---------------------------------------------------------------------------
-# IAM — instance role + DLM service role
-# ---------------------------------------------------------------------------
-# SINGLE-OWNER CONTRACT: this story (S1) OWNS the EC2 instance role
-# `rebar-gerrit-instance-role`, its instance profile, and the DLM lifecycle
-# role `rebar-dlm-lifecycle-role`. Downstream stories (S2, S4a) must NOT create
-# another role — they ATTACH their own *separately-named, scoped* inline
-# policies to this same role. Keeping one role with one owner avoids the
-# "two configs fight over the same resource" drift class.
-# ---------------------------------------------------------------------------
+# S1 owns the Gerrit EC2 instance role, instance profile, and DLM role.
+# Later stories attach separately named scoped policies to this one role.
 
 data "aws_caller_identity" "current" {}
 
@@ -127,20 +119,10 @@ resource "aws_iam_role_policy_attachment" "dlm_managed" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole"
 }
 
-# --- GitHub Actions OIDC role: terraform-plan drift detection (ticket c7d4) --
-# SINGLE-OWNER: this ticket (c7d4) owns the drift-detection CI role. Assumed by
-# .github/workflows/terraform-drift.yml via GitHub's OIDC provider to run READ-ONLY
-# `terraform plan` on infra/terraform/**, so committed HCL that sits un-applied surfaces
-# as a failing check (the root cause behind dc3f: manual applies drift silently).
-#
-# The OIDC provider (token.actions.githubusercontent.com) is owned by rebar (oidc.tf) —
-# adopted from the decommissioned snap project (epic gaugeable-combatable-skylark) so rebar
-# controls its own dependency rather than trusting a dead stack's ARN.
-# Trust is scoped to THIS repo. Permissions = AWS-managed ReadOnlyAccess (covers S3 state
-# read + ssm:GetParameter + every data-source read a plan performs) PLUS one inline
-# statement for kms:Decrypt-via-SSM, which ReadOnlyAccess deliberately omits and the
-# alert-endpoint SecureString data source (aws_ssm_parameter.alert_endpoint) needs. The CI
-# runs `terraform plan -lock=false`, so NO state writes (and no S3 PutObject) are required.
+# GitHub's repo-scoped OIDC role runs read-only terraform-drift plans against
+# committed HCL. oidc.tf owns the provider. ReadOnlyAccess covers state and
+# data-source reads. An inline KMS-via-SSM grant decrypts the alert endpoint.
+# `terraform plan -lock=false` needs no state write permission.
 data "aws_iam_policy_document" "gha_terraform_plan_assume" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]

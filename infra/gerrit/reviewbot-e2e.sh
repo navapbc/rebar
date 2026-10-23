@@ -1,70 +1,15 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# reviewbot-e2e.sh — the committed LIVE end-to-end verification artifact for the
-# S4b "proven pipe" (epic d251). This is the artifact the AC asks for: it PROVES
-# the live pipe against the RUNNING Gerrit + the deployed receiver — not FakeRunner
-# / offline unit tests — by pushing a real change and observing the bot's vote,
-# its INTEGER value, and (on PASS) the merged change APPEARING on the GitHub mirror.
-#
-# Apply-prove-rollback safe: the full chain runs on a DELETABLE TEST BRANCH
-# ($TEST_BRANCH, default gerrit-e2e-test) — NEVER on `main`. Submitting on the
-# test branch never advances real `main`, and cleanup deletes the GitHub test
-# branch + the temp clone on exit. (The Gerrit test branch is left in place; it is
-# harmless and reused by subsequent runs.)
-#
-# THREE DISTINCT TERMINAL STATES (a caller can tell them apart by exit code):
-#   - exit 0  PASS          — bot voted == MAX, submit requirement SATISFIED, the
-#                             change SUBMITTED → MERGED, AND the merged commit
-#                             REPLICATED to the navapbc/rebar GitHub mirror.
-#   - exit 2  HARNESS-FAILURE — no bot vote within the timeout, or a clone/push/
-#                             Gerrit/SSM/replication error. The pipe could NOT be
-#                             exercised; this is an infra/test problem, NOT a verdict.
-#   - exit 3  GATE-BLOCKED  — the bot cast a NON-MAX value (e.g. -1). The gate is
-#                             WORKING and correctly declined the change; it is a
-#                             valid review outcome (not a harness bug) and the change
-#                             is correctly non-submittable. Surfaced distinctly and
-#                             non-zero so a caller can distinguish it from PASS.
-#
-# Fail-closed throughout. The bot token is read from SSM and NEVER echoed.
-#
-# DO NOT run this in CI by default — it makes LIVE calls to the running Gerrit and
-# the deployed receiver, pushes a real (throwaway) change, and (on PASS) submits it
-# on the test branch. Run it by hand from an operator box after a deploy.
-#
-# ---------------------------------------------------------------------------
-# PREREQUISITE — replication of the test branch to GitHub
-# ---------------------------------------------------------------------------
-# The PASS path asserts the merged commit appears on the GitHub mirror's
-# $TEST_BRANCH. That requires the Gerrit replication plugin to push that ref. The
-# production replication.config typically only replicates `refs/heads/main` (+ the
-# mirror-lock refs), so BEFORE running this e2e the operator must TEMPORARILY add a
-# refspec covering the test branch to the site replication.config, e.g.:
-#
-#     [remote "github"]
-#       push = +refs/heads/${TEST_BRANCH}:refs/heads/${TEST_BRANCH}
-#
-# Gerrit's replication plugin autoReload picks the change up (no restart needed).
-# Remove the temporary refspec after the test. If the refspec is NOT present, the
-# GitHub-appearance poll TIMES OUT into a clear
-#   [HARNESS-FAILURE] test-branch not replicated — add the refspec (see header)
-# rather than reporting a false negative.
-#
-# ---------------------------------------------------------------------------
-# Env (all have defaults except the admin SSH key):
-#   GERRIT_HOST          default rebar.solutions.navateam.com
-#   GERRIT_SSH_USER      default admin
-#   GERRIT_ADMIN_SSH_KEY (required) path to the admin SSH private key
-#   BOT_USER             default rebar-review-bot
-#   SSM_TOKEN_PARAM      default /rebar/prod/gerrit-bot-token
-#   AWS_REGION           default us-east-1
-#   PROJECT              default rebar
-#   GERRIT_SSH_PORT      default 29418
-#   TEST_BRANCH          default gerrit-e2e-test
-#   LLM_REVIEW_MAX       default 1  (the MAX LLM-Review value that gates submit)
-#   GITHUB_REPO          default navapbc/rebar
-#   POLL_TIMEOUT_SECONDS default 240
-#   POLL_INTERVAL_SECONDS default 6
-# ---------------------------------------------------------------------------
+# Manual test of the deployed review bot on a reusable Gerrit test branch, never main.
+# It checks the integer LLM-Review vote, a test-branch submit, and GitHub mirror
+# arrival. It does not prove the current full two-vote main pipeline.
+# Exit 0 = pass, 2 = harness/transport failure, 3 = non-max vote gate block.
+# Read the bot token from SSM without logging it. Cleanup removes the temporary
+# clone and GitHub test branch. The Gerrit branch is reused. An opportunistic
+# mirror-lock probe is separate from this review-bot assertion.
+# Temporarily add a test-branch refspec to replication.config before running.
+# remove it afterward. Without that ref, the GitHub appearance poll times out.
+# Run manually after deploy. The required admin SSH key and other overrides
+# are read from environment variables below.
 set -euo pipefail
 
 GERRIT_HOST="${GERRIT_HOST:-rebar.solutions.navateam.com}"

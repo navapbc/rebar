@@ -1,39 +1,9 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# register-deploy-key.sh — register the GitHub deploy key on navapbc/rebar.
-# Story S5. Run by the OPERATOR from a workstation (NOT on the box).
-#
-# This is the GitHub side of the replication identity: it adds the PUBLIC half of
-# the ed25519 deploy key (whose PRIVATE half lives in SSM
-# /rebar/prod/github-replication-deploy-key and is materialised on the box by
-# materialize-deploy-key.sh) as a WRITE-ENABLED deploy key on github.com/navapbc/
-# rebar, so Gerrit can push to it.
-#
-# We do this with `gh` rather than the Terraform github provider deliberately:
-# the github provider would require a GitHub token/credential wired into the
-# terraform run + state, pulling a second provider and a long-lived PAT into the
-# AWS-only state. A one-shot, idempotent `gh` script keeps the GitHub mutation
-# out of terraform state and uses the operator's own already-authenticated gh.
-# (If you DO prefer terraform, you would add the `integrations/github` provider
-# and a `github_repository_deploy_key` resource, and supply GITHUB_TOKEN — note
-# that requirement explicitly; this script is the simpler, stateless path.)
-#
-# Idempotent: if a deploy key with the same TITLE already exists it is left as-is
-# (a deploy key's public key is immutable; to ROTATE, delete the old one — see
-# the rotation lifecycle in setup-replication.sh).
-#
-# Env:
-#   REPO          GitHub repo (default navapbc/rebar)
-#   KEY_TITLE     deploy key title (default rebar-gerrit-replication)
-#   PUBKEY_FILE   path to the PUBLIC key file (e.g. id_ed25519.pub). Required
-#                 UNLESS PUBKEY is set.
-#   PUBKEY        the public key string itself (alternative to PUBKEY_FILE)
-#   DRY_RUN       set to 1 to print the action without calling the GitHub API
-#
-# AUTHORING NOTE: this script makes a LIVE GitHub mutation when actually run; it
-# is checked in for the operator to run, and is NOT executed during S5 file
-# authoring/validation.
-# ---------------------------------------------------------------------------
+# Operator-only GitHub change: add the public half of Gerrit's replication key
+# as a write-enabled deploy key on REPO (default navapbc/rebar). The private half
+# stays in SSM. Supply PUBKEY_FILE or PUBKEY. KEY_TITLE identifies an existing
+# key and leaves it untouched. DRY_RUN=1 prints the action without an API call.
+# Rotation removes the old key separately. Use the operator's gh credentials.
 set -euo pipefail
 
 REPO="${REPO:-navapbc/rebar}"

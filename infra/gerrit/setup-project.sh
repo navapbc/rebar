@@ -1,25 +1,10 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# setup-project.sh — provision the `rebar` Gerrit project + its managed groups + push
-# its refs/meta/config (labels LLM-Review + Verified, submit requirements, submit-type
-# pin, the feature-branch ACLs, and the Contributors Submit gate). Originally story S3;
-# extended by epic 88ab / S1 (bored-tag-sale) to create/converge the
-# `feature-branch-drivers` group and its ACLs, and later to add the `Contributors` group
-# + the Submit ACL that restricts landing to authorized contributors + Administrators.
-#
-# Declarative + idempotent: creates the project + managed groups if absent, then pushes a
-# fully declarative project.config to refs/meta/config (overwriting prior config). The
-# SERVER-LEVEL change.submitWholeTopic (a global key, not project-scoped) is set
-# out-of-band in the site gerrit.config (infra/compose/gerrit.config [change]) — it
-# is NOT managed by this script.
-#
-# Auth (fail-fast): needs Gerrit ADMIN ssh access on 29418. Provide the admin key via
-#   GERRIT_ADMIN_SSH_KEY  (path to the private key; default ~/.ssh/gerrit_admin)
-#   GERRIT_SSH_USER       (default admin)
-#   GERRIT_HOST           (default rebar.solutions.navateam.com)
-#   GERRIT_SSH_PORT       (default 29418)
-# Dry-run: set DRY_RUN=1 to print the diff of project.config vs live without pushing.
-# ---------------------------------------------------------------------------
+# Provision Gerrit project and managed groups, then replace project.config in
+# refs/meta/config declaratively. Create missing groups before resolving their
+# current UUIDs, including Registered Users. Converge memberships additively and
+# remove members only when explicitly requested. DRY_RUN=1 prints the diff.
+# Admin SSH credentials use GERRIT_ADMIN_SSH_KEY, GERRIT_SSH_USER/PORT/HOST.
+# Server-wide change.submitWholeTopic is configured in gerrit.config, not here.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,19 +29,10 @@ else
   $GERRIT_SSH gerrit create-project "$PROJECT" --empty-commit
 fi
 
-# --- 1b. Ensure managed groups exist (idempotent) --------------------------
-# `feature-branch-drivers` (epic 88ab / S1 — bored-tag-sale; ADR 0025) holds the
-# Create/Delete Reference (refs/heads/feature/*) + Push Merge Commit
-# (refs/for/refs/heads/{main,feature/*}) ACLs in project.config. The `want`-dict step
-# below only RESOLVES the UUIDs of groups that ALREADY exist (via `ls-groups`), so a
-# group referenced by project.config but absent on the server would make Gerrit REJECT
-# the refs/meta/config push with an "unknown group" error. So create it here if absent,
-# and converge its membership on every run (both idempotent).
-#
-# Membership policy (ADR 0025): initial members = Administrators (included as a subgroup)
-# + the named operating agents listed in FEATURE_BRANCH_DRIVER_MEMBERS (space-separated
-# usernames; default empty = admins only). Membership changes flow through THIS script
-# (an admin-approved edit), not ad-hoc UI grants.
+# Create managed groups before resolving their UUIDs for project.config.
+# Otherwise Gerrit rejects unknown groups. The feature-branch-drivers group grants
+# feature ref create/delete and merge-change pushes. Administrators are a
+# subgroup. FEATURE_BRANCH_DRIVER_MEMBERS adds named operators.
 FB_GROUP="feature-branch-drivers"
 if $GERRIT_SSH gerrit ls-groups | grep -qxF -- "$FB_GROUP"; then
   echo "setup-project: group '$FB_GROUP' already exists" >&2
@@ -73,21 +49,10 @@ for _m in ${FEATURE_BRANCH_DRIVER_MEMBERS:-}; do
   $GERRIT_SSH gerrit set-members "$FB_GROUP" --add "$_m" >/dev/null 2>&1 || true
 done
 
-# `Contributors` (landing-authorization gate; see the Submit ACL in project.config
-# [access "refs/heads/*"]): its members + Administrators are the ONLY accounts allowed to
-# Submit (land) a change — everyone else can still push to refs/for/* to PROPOSE. Created
-# + converged here so the group referenced by project.config exists BEFORE the
-# refs/meta/config push (an absent group makes Gerrit reject the push, same as the
-# feature-branch-drivers group above).
-#
-# Membership policy (mirrors feature-branch-drivers): initial members = Administrators
-# (included as a subgroup) + the named accounts in CONTRIBUTOR_MEMBERS (space-separated
-# usernames; DEFAULT = "RebarBotNava", the landing bot). Set CONTRIBUTOR_MEMBERS to
-# override the default list. Membership changes flow through THIS script (an
-# admin-approved edit), not ad-hoc UI grants. NOTE: convergence is additive — to REMOVE
-# a contributor, drop them from CONTRIBUTOR_MEMBERS AND run
-# `gerrit set-members Contributors --remove <user>` as an admin; a re-run alone will not
-# offboard.
+# Contributors and Administrators may Submit. Other users may only propose.
+# CONTRIBUTOR_MEMBERS defaults to RebarBotNava. Membership convergence adds
+# accounts only. To offboard an operator, remove it from the variable and run
+# `gerrit set-members Contributors --remove <user>` to offboard them.
 CONTRIB_GROUP="Contributors"
 CONTRIBUTOR_MEMBERS="${CONTRIBUTOR_MEMBERS:-RebarBotNava}"
 if $GERRIT_SSH gerrit ls-groups | grep -qxF -- "$CONTRIB_GROUP"; then

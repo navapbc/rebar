@@ -1,27 +1,10 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# install-plugins.sh — install the non-bundled Gerrit plugins into the site.
-#
-# Two plugins are fetched here (both NOT in the gerritcodereview/gerrit:3.14.1
-# image); `webhooks` is bundled+enabled already, so nothing to do for it.
-#
-#   events-log            — story S4a (review-bot event plumbing).
-#   gerrit-oauth-provider — b744/WS8 (GitHub OAuth backend; only meaningful once
-#                           auth.type = OAUTH — see the hardening runbook). Installed
-#                           as plugins/oauth.jar; Gerrit registers it under its
-#                           MANIFEST Gerrit-PluginName (`gerrit-oauth-provider`), so
-#                           the gerrit.config `[plugin "gerrit-oauth-provider-github-oauth"]`
-#                           section binds regardless of the on-disk filename.
-#
-# For each: download the pinned jar (URL + sha256 recorded in plugins/README.md),
-# verify the sha256 (FAIL on mismatch), then place it in the site plugins dir with
-# an atomic move. Gerrit must be reloaded/restarted to load a newly-dropped plugin.
-#
-# Env:
-#   GERRIT_SITE                    Gerrit site root (default /var/gerrit/site).
-#   EVENTS_LOG_URL / _SHA256       override the events-log pin.
-#   OAUTH_URL / OAUTH_SHA256       override the gerrit-oauth-provider pin.
-# ---------------------------------------------------------------------------
+# Install checksum-pinned events-log and gerrit-oauth-provider jars absent from
+# the Gerrit image. The webhooks plugin is bundled. Pins are in plugins/README.md and may be
+# overridden by EVENTS_LOG_URL/_SHA256 or OAUTH_URL/_SHA256.
+# OAuth lives on disk as oauth.jar but Gerrit identifies its manifest plugin name.
+# It is useful with auth.type=OAUTH. Verify hashes before atomic move and restart
+# or reload Gerrit to activate new jars. GERRIT_SITE overrides /var/gerrit/site.
 set -euo pipefail
 
 # --- Pinned provenance (keep in sync with infra/gerrit/plugins/README.md) ---
