@@ -163,11 +163,7 @@ def derive_pass_tally(nowrite_plan, apply_tally, manifest_path, mutation_count: 
         tally["applied"] = 0
         return tally
     if apply_tally is not None:
-        # Bug c903: LIVE deletes its manifest, so the counts arrive out-of-band from
-        # _emit_mode_manifest (read immediately before the unlink). Without this the tally
-        # fell through to the (mutation_count, 0) default, which made mutation_failures
-        # structurally 0 in the only mode production runs — leaving __main__'s
-        # `if failures > 0` unreachable and printing "applied N of N" while it failed.
+        # LIVE removes its manifest; use counts captured before unlink.
         tally["applied"] = int(apply_tally.get("applied_count", 0))
         tally["failed"] = int(apply_tally.get("failed_count", 0))
         tally["deferred"] = int(apply_tally.get("deferred_count", 0))
@@ -177,10 +173,7 @@ def derive_pass_tally(nowrite_plan, apply_tally, manifest_path, mutation_count: 
     if manifest_path is not None:
         try:
             manifest_data = json.loads(Path(manifest_path).read_text())
-            # Two manifest shapes coexist (bug 85a1 follow-up): the legacy/LIVE flat
-            # ``mutations`` list (each outcome with no ``error`` key is applied), and the
-            # asymmetric/BOOTSTRAP shape carrying an explicit ``applied_count`` — prefer
-            # the latter when present (it is the authoritative tally).
+            # Prefer explicit counts over deriving them from legacy outcomes.
             if "applied_count" in manifest_data:
                 tally["applied"] = int(manifest_data["applied_count"])
                 tally["failed"] = int(manifest_data.get("failed_count", 0))
@@ -315,10 +308,8 @@ def _emit_mode_manifest(
         for m in deferred_for_manifest
     ]
 
-    # Additive shadow layer (RP-03 S2 T3): when the pure ticket plans are threaded
-    # through, expose their versioned lifecycle-intents section. This is the ONLY key
-    # added — every existing key/byte (including ``plan``) stays identical, so a None
-    # ``ticket_plans`` yields byte-for-byte today's manifest.
+    # Add lifecycle intents only when ticket plans are supplied; otherwise
+    # preserve the existing manifest shape.
     if ticket_plans is not None:
         rendered_with_meta["lifecycle_intents"] = renderer_mod.render_lifecycle_intents(
             ticket_plans

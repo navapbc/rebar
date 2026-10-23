@@ -280,21 +280,10 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         self.api_token = api_token
         self.jira_project = jira_project
         self._acli_cmd = acli_cmd
-        #: Per-call subprocess bound (seconds), captured at construction (ticket
-        #: 2048-d289 — the operation-scoped ``reconciler.jira_cli_timeout``).
-        #: ``0``/non-positive = unset: every dispatch falls back to the ambient
-        #: ``_acli_call_timeout()`` resolve, the legacy behaviour.
+        #: Per-call timeout in seconds; non-positive uses the ambient default.
         self._call_timeout: float | None = call_timeout if call_timeout > 0 else None
-        # Per-JQL search memo (see search_issues). Lifetime: an AcliClient
-        # lives at most ONE reconcile pass — reconcile_helpers.
-        # bind_operation_runtime composes "the ONE operation runtime for this
-        # pass" per pass, _backend_registry.select_backend constructs a fresh
-        # backend on every call, and the production entrypoint runs one
-        # reconcile_once per process — so this memo can never leak staleness
-        # ACROSS passes (which is also why binding_recovery's cross-pass
-        # search_miss_count corroboration counts genuinely fresh queries).
-        # WITHIN a pass, a caller that re-asks the same JQL for freshness
-        # must call invalidate_search_cache first (bug d30c).
+        # Cache JQL searches for this client's pass. Call
+        # invalidate_search_cache before a same-pass freshness check.
         self._search_cache: dict[str, _SearchResult] = {}
 
     def invalidate_search_cache(self, jql: str | None = None) -> None:
@@ -365,27 +354,16 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         if ticket_data.get("priority") is not None:
             optional_fields["priority"] = ticket_data["priority"]
         if ticket_data.get("assignee"):
-            # Bug 544e: resolve the assignee through the SAME validator the UPDATE
-            # path uses (validate_assignee_exists), so an ambiguous/unmappable handle
-            # is left UNASSIGNED — matching the update outcome — instead of being
-            # passed raw to ACLI/Jira, which fuzzy-matches or applies a project
-            # default and silently MIS-assigns. CREATE has no issue key yet, so
-            # resolution uses PROJECT scope. A definitively-unmappable assignee
-            # (AssigneeNotFoundError) is omitted (unassigned); transient resolution
-            # errors propagate so the create is retried rather than mis-assigned.
+            # Resolve in project scope before create. Omit unassignable names;
+            # let transient failures propagate for retry.
             try:
                 optional_fields["assignee"] = self.validate_assignee_exists(
                     str(ticket_data["assignee"]), project_key=project
                 )
             except AssigneeNotFoundError:
                 pass  # unmappable → omit (leave unassigned), like the UPDATE path
-        # Parent sync (ticket 8b25): outbound_differ emits the resolved Jira
-        # parent key into the create payload. The differ writes a BARE string
-        # (``_map_local_to_jira_fields`` sets ``result["parent"] = jira_key``),
-        # but accept the Jira REST nested shape ``{"key": K}`` too so a future
-        # differ change does not silently drop the parent. create_issue then
-        # attaches the parent at create time (--parent) or via set_parent
-        # fallback (--from-json path). Previously dropped silently — bug 8b25.
+        # Accept either a bare parent key or REST ``{"key": K}`` shape;
+        # attach during create or through the from-JSON fallback.
         parent_key = _extract_parent_key(ticket_data.get("parent"))
         if parent_key:
             optional_fields["parent"] = parent_key
@@ -402,30 +380,11 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
     def update_issue(
         self, remote_id: str, *, assignee_is_account_id: bool = False, **kwargs: Any
     ) -> dict[str, Any]:
-        """Update a Jira issue via ACLI.
+        """Update through ACLI, resolving or clearing the assignee first.
 
-        264f: ``assignee_is_account_id`` (a bool — the ONLY new coupling into acli;
-        NO rebar-core import) marks that ``kwargs["assignee"]`` is an ALREADY-RESOLVED
-        Jira accountId (from the flow layer's identity mapping). When True a non-empty
-        assignee is submitted DIRECTLY, skipping ``validate_assignee_exists`` (no
-        assignable search). It is captured as an explicit keyword (never forwarded to
-        the module-level ``update_issue``), so it can't leak to the ACLI subprocess as a
-        bogus ``--assignee_is_account_id`` flag.
-
-        Bug 85a1 (Fix D7): assignee=None/empty is routed through
-        ``unassign_issue`` (REST PUT /assignee with ``{"accountId": null}``)
-        rather than passed to ACLI as ``--assignee ""``, which ACLI silently
-        no-ops (the probe Phase 2 verify-assignee-unassigned regression).
-
-        Bug 06a5 (Gap 5 follow-up): non-empty assignee values are pre-validated
-        against ``/rest/api/3/user/assignable/search`` and normalised to the
-        matched ``accountId`` before the ACLI dispatch. Bogus assignees raise
-        ``AssigneeNotFoundError`` here rather than silently no-op via ACLI's
-        exit-0-on-failure contract.
-
-        unassign_issue failures are caught and logged so a transient REST
-        error does not abort the entire batch — the rest of the update_one
-        body (label/comment dispatch, field edits) must still run.
+        ``assignee_is_account_id`` skips assignable-user lookup for a resolved
+        ID. Empty values use REST unassign; its errors are logged so remaining
+        fields still update. Other names are validated before dispatch.
         """
         if "assignee" in kwargs:
             if kwargs["assignee"] in (None, ""):
@@ -504,13 +463,7 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         return {"timeZone": "UTC", "serverTitle": "Jira Cloud"}
 
     def get_comments(self, jira_key: str) -> list[dict[str, Any]]:
-        """Get ALL comments on a Jira issue.
-
-        ``--paginate`` is REQUIRED (bug 1f3d): without it ACLI returns only the first
-        page (50, oldest), so the outbound dedup re-posts everything past page 1 and
-        inflates high-traffic issues to Jira's 5000-comment cap. ``--paginate`` streams
-        one JSON object per page — parse via ``_parse_paginated_comments``.
-        """
+        """Get all comment pages and decode ACLI's concatenated JSON objects."""
         cmd = [
             "jira",
             "workitem",
@@ -540,10 +493,7 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
             PermissionError: When ACLI exits with a 403 permission error.
             subprocess.CalledProcessError: On other ACLI failures (single attempt — no retry).
         """
-        # `--yes` skips ACLI's interactive confirmation prompt. Without it,
-        # `acli jira workitem delete` waits on stdin for confirmation and
-        # exits non-zero in non-TTY contexts (bug 3256-f960-4ae6-4943
-        # surfaced by the live cfd6 capability probe run).
+        # Skip ACLI's interactive confirmation in non-TTY runs.
         cmd = [
             "jira",
             "workitem",
@@ -551,16 +501,12 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
             "--key",
             jira_key,
             "--yes",
-            # Bug 44de: --json so structured-failure detection runs on the
-            # exit=0-on-failure path that ACLI exposes for delete too.
+            # Detect structured failures even when ACLI exits 0.
             "--json",
         ]
         try:
-            # Bug d843: route the delete through the _run_acli chokepoint so it
-            # inherits the timeout/process-group reaping (and errors='replace').
-            # WRITE — retry_on_timeout=False (delete is non-idempotent on a
-            # timeout; callers below treat 404 as idempotent success).
-            # _run_acli already runs _check_mutation_failure on the completed run.
+            # Use bounded process-group cleanup. Do not retry an ambiguous
+            # timed-out write; _run_acli checks structured failures.
             acli_subprocess._run_acli(
                 cmd,
                 acli_cmd=self._acli_cmd,

@@ -1,27 +1,9 @@
 #!/usr/bin/env python3
-"""Inbound rebar-facade mutation: the assignee identity mint and the link graph.
+"""Apply inbound assignee identity and link-graph changes through rebar facades.
 
-Once the home of every inbound create/update phase helper (extracted from
-``apply_inbound.py``, ticket 090a). Those helpers moved on to
-``apply_inbound_events.py`` when this module reached one line of headroom under the
-800-LOC hard cap (ticket 6f51-f8a4-b4fb-450c); the split followed the seam the call
-graph already drew, so what remains here is one concern rather than a remainder.
-
-What stays: the two clusters that mutate rebar's SHARED stores through the public
-``rebar`` facade rather than writing ticket event files —
-
-* the inbound assignee identity mint (``rebar.ensure_identity_for``), and
-* the inbound link graph (``rebar.link`` / ``rebar.unlink``) with the durable
-  impossible-link and peer-confirmation sidecar stores that decide which records are
-  worth attempting and which removals are safe to honour.
-
-Both are best-effort and fail-open: every failure is logged through this module's
-``logger`` and the inbound apply continues. Their only shared module-level dependency
-with the event writers was ``inbound_translate._extract_name`` (the identity mint's
-display-name read), which is why it is still imported below; every other dependency
-here is a function-local import, as it already was.
-
-The event writer cluster now has exactly one owner: ``apply_inbound_events``.
+Identity minting and link/unlink operations use shared stores, including
+impossible-link and peer-confirmation records. Failures log and leave inbound
+apply running. Ticket event-file writes live in ``apply_inbound_events``.
 """
 
 from __future__ import annotations
@@ -34,32 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 def _identity_provider_for(backend) -> str:
-    """The store-facing identity provider / creation channel for a backend (bug 5f48).
+    """Return the backend's validated store-facing identity family.
 
-    The Backend port's ``vendor`` is per-DEPLOYMENT (Cloud and Data Center carry
-    different vendor strings — see ``adapters/jira*/backend.py``), but the store's
-    identity provider and its ``CREATION_CHANNELS`` vocabulary
-    (``rebar.reducer._version``) are per-FAMILY: only the family name is a member.
-    Using the raw vendor as the creation channel made every DC mint raise
-    ``ValueError`` inside the best-effort ``except`` below — a silently swallowed
-    no-op. Widening ``CREATION_CHANNELS`` was rejected deliberately: it would fork the
-    store vocabulary per deployment and force a migration, and Cloud/DC identities must
-    share ONE provider namespace so a human assigned on one deployment still resolves
-    on the other.
-
-    The family is DECLARED BY THE BACKEND (``identity_family``), not derived here. Two
-    alternatives were rejected. A string transform (family = everything before the
-    first ``-``) keeps this module vendor-neutral but fails OPEN: a future backend
-    registered as ``import-foo`` would silently collapse onto ``import`` — a real
-    member of ``CREATION_CHANNELS`` — and mis-stamp the provenance of every identity it
-    minted, with nothing raising. A literal lookup table here fails closed but puts
-    vendor names back into a CORE module, which is exactly what
-    ``test_backend_neutrality.py`` forbids. Asking the backend keeps this module free of
-    vendor literals AND makes each backend state its own family explicitly.
-
-    Falls back to ``vendor`` when a backend declares no family, so an unrecognized
-    backend is rejected by :func:`validate_creation_channel` rather than quietly
-    mis-attributed — the same fail-closed posture as before.
+    The backend declares its family across Cloud/DC deployments. Fall back to
+    ``vendor`` only when absent so unknown values fail validation rather than
+    silently acquiring another provider's identity namespace.
     """
     from rebar.reducer._version import validate_creation_channel
 
@@ -67,34 +28,16 @@ def _identity_provider_for(backend) -> str:
 
 
 def _ensure_inbound_assignee_identity(assignee, repo_root) -> None:
-    """Best-effort: mint/reuse a placeholder identity for an inbound Jira assignee
-    (2f13). When the assignee field carries an external id, resolve it through
-    :func:`rebar.ensure_identity_for` (provider = the backend vendor's Jira-family
-    name, keyed on that external id) so an unmapped inbound user gets a ghost
-    identity that a later outbound pass can key on.
+    """Best-effort mint or reuse an identity for a Jira assignee.
 
-    The external id is deployment-shaped (story b4e3's ``UserIdentityModel``, see
-    ``adapters/jira_family/identity_model.py``): Jira Cloud identifies users by the
-    opaque ``accountId`` (username/userkey were removed for GDPR), while Data Center
-    has NO accountId at all and identifies users by ``name``. This function is
-    handed the RAW Jira user object, so it accepts either — ``accountId`` FIRST so
-    Cloud's behavior is byte-for-byte unchanged, falling back to DC's ``name``
-    (bug 5f48: the accountId-only guard meant DC never minted an identity).
-
-    ADDITIVE + best-effort: this NEVER changes the human-readable name extraction and
-    NEVER fails the inbound apply — an assignee carrying neither key returns early
-    without minting, and any mint failure is swallowed so the apply continues with
-    the name-only behavior."""
+    Prefer Cloud ``accountId``, then Data Center ``name`` or canonical
+    ``account_id``. Missing IDs or mint failures leave inbound apply running.
+    """
     if not isinstance(assignee, dict):
         return
     external_id = ""
-    # Cloud's key first, then DC's, then ``account_id`` — the CANONICAL
-    # ``assignee_identity`` shape the inbound differ forwards on an UPDATE (bug 8d68).
-    # ``_identity_of:154-179`` already resolved accountId-or-DC-username into that one key,
-    # with accountId winning, so reading it here inherits 5f48's precedence rather than
-    # restating it. The dict guard above is deliberately NOT relaxed to accept a bare string:
-    # on DC the scalar assignee happens to be the username, but on Cloud it is the DISPLAY
-    # NAME, and minting on it would register every Cloud user under the wrong external id.
+    # Prefer Cloud ID, then DC name, then canonical differ ID. A bare string
+    # could be a Cloud display name, so it cannot establish external identity.
     for key in ("accountId", "name", "account_id"):
         candidate = assignee.get(key)
         if isinstance(candidate, str) and candidate.strip():
@@ -108,10 +51,7 @@ def _ensure_inbound_assignee_identity(assignee, repo_root) -> None:
         from rebar.config import compose_config
         from rebar.reconciler._backend_registry import select_backend
 
-        # S4: provider identity + creation channel come from the configured backend
-        # (routes through the Backend port), not a hard-coded provider literal — asked
-        # for its FAMILY, since the store vocabulary is per-family, not per-deployment
-        # (see _identity_provider_for, bug 5f48).
+        # Use the configured backend's family for provider and creation channel.
         provider = _identity_provider_for(select_backend(compose_config()))
 
         rebar.ensure_identity_for(
@@ -128,34 +68,17 @@ def _ensure_inbound_assignee_identity(assignee, repo_root) -> None:
 
 
 def _inbound_unlink_one(local_id, target_local_id, relation, repo_root, confirm_store=None) -> bool:
-    """Mirror a peer link DELETION locally via a RELATION-SCOPED ``rebar.unlink``.
+    """Mirror a peer deletion with relation-scoped ``rebar.unlink``.
 
-    **G5, relation-scoped (tickets 2b16 → e39f).** Links are written keyed on
-    ``(target_id, relation)`` (``graph/_links.add_dependency``), so a pair can hold more than
-    one active relation. The original G5 guard could only DECLINE when the pair's most-recent
-    net-active relation was not the one whose peer link vanished — ``rebar.unlink`` was
-    pair-scoped, so unlinking would have removed a link the peer still carries. That decline
-    was permanent: the removal re-emitted and re-declined every pass, so a double-related
-    pair never converged (bug e39f). ``rebar.unlink`` now accepts the relation, so we remove
-    exactly the mirrored ``(target, relation)`` link and the pair converges. The G5 safety
-    invariant is unchanged and now structural: a removal can never touch a relation the
-    record did not name, and when the named relation has NO net-active local link the
-    removal is a logged no-op. We still ask ``_get_link_info`` (the very function
-    ``unlink_core`` will consult, with the same relation narrowing) before writing, so the
-    no-op case is detected without an exception and the prediction and the subsequent write
-    can never disagree.
-
-    Returns True only when an UNLINK was actually written, so the caller's count feeds the
-    silent-no-op canary (``apply_handlers.py``) truthfully. Every skip is LOGGED: this defect
-    class has been silent every time, so a skip that reports nothing is not acceptable.
+    Only the named active relation is removed; absent ones log a no-op. Check
+    through the same relation-aware lookup used by unlink. Return True only
+    when an UNLINK was written, for accurate applied counts.
     """
     import rebar
     from rebar._commands._seam import tracker_dir
     from rebar._commands.unlink import _get_link_info
 
-    # G3 DISCRIMINATOR (epic a4bd): "managed" proves ownership, NOT that the peer ever saw the
-    # link, and G4 misses the outbound-ADD-deduped case. Require positive evidence instead, so
-    # absence is never read as deletion (full rationale in ``peer_confirmations``).
+    # Require peer confirmation before treating a missing managed link as deleted.
     if confirm_store is not None and not confirm_store.is_confirmed(
         local_id, target_local_id, relation
     ):
@@ -282,29 +205,14 @@ def _note_impossible_link(skip_store, local_id, target_local_id, relation, exc) 
 
 def _inbound_update_apply_links(payload, local_id, repo_root) -> int:
     """Phase: write each Jira-sourced relation change into rebar via the rebar facades."""
-    # Cycle 3: inbound links — write each Jira-sourced relation into rebar via
-    # the rebar.link library facade. rebar.link owns relation validation,
-    # hierarchy promotion, cycle/redundant-link guards, and the LINK event
-    # write — so we do NOT hand-write LINK events here. The redundant-link
-    # guard inside add_dependency makes re-apply idempotent. Failures are
-    # non-fatal and logged.
-    #
-    # Ticket 2b16: REMOVE records are now honoured too. This loop previously read
-    # ``if entry.get("action") != "add": continue``, so a removal emitted by
-    # ``inbound_differ._diff_link_removals_inbound`` was SILENTLY DISCARDED — the pass
-    # reported OK, the dep stayed put, and nothing raised. An unrecognised action is still
-    # skipped, but loudly, so the next new record type cannot fail the same way.
+    # Apply Jira link adds/removals through rebar facades, which own graph
+    # validation and events. Log failures and unknown actions.
     inbound_links = payload.get("links") or []
     links_applied: int = 0
     if isinstance(inbound_links, list):
         import rebar
 
-        # Bug b8b1: three of the failures below are deterministic verdicts about the
-        # LOCAL graph (closed source / redundant with the hierarchy / cycle-forming),
-        # not faults. Without memory the differ re-emits the identical record every
-        # pass and we re-spend the write — measured at 19 doomed writes per live pass,
-        # a byte-identical set each time. Consult the durable record first, and record
-        # a permanent verdict after the fact so the next pass can skip it.
+        # Cache deterministic local-graph rejections so later passes skip them.
         skip_store = _open_impossible_link_store(repo_root)
         skipped: int = 0
         # Epic a4bd: opened ONCE per pass (never per record) beside the skip store, and

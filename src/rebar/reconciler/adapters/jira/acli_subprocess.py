@@ -40,22 +40,8 @@ _MAX_ATTEMPTS: int = 3  # initial + 2 retries
 _AUTH_FAILURE_CODE: int = 401
 
 # --- Auth-failure detection (bug sole-curbable-stinkpot) -------------------
-# ACLI is a SUBPROCESS: a rejected credential exits **1** with the marker on
-# stderr, never with an HTTP status as the exit code. The historical
-# ``returncode == _AUTH_FAILURE_CODE`` fast-abort below therefore never fired —
-# an expired token burned the full 3-attempt retry budget (pointless: a rejected
-# credential is deterministic, not transient) and then surfaced as a generic
-# ``returned non-zero exit status 1``, indistinguishable from a data failure.
-# Six scheduled Reconcile Bridge runs over 2026-08-07 -> 2026-08-11 died exactly
-# this way, each on the FIRST ACLI call of the pass:
-#
-#     ✗ Error: unauthorized: use `acli [product] auth login` to authenticate
-#
-# So detect it from stderr. Markers are matched case-insensitively against the
-# whole stderr. Kept deliberately TIGHT — only credential-rejection wording, not
-# authorization/permission wording ("forbidden", "cannot be assigned"), which
-# signals a data/config problem the caller handles separately and must not be
-# reported to an operator as an expired credential.
+# ACLI reports rejected credentials on stderr with exit 1, not an HTTP status
+# exit code. Match only credential wording; permission failures remain separate.
 _AUTH_FAILURE_MARKERS: tuple[str, ...] = (
     "unauthorized",
     "auth login",
@@ -64,13 +50,8 @@ _AUTH_FAILURE_MARKERS: tuple[str, ...] = (
 )
 
 # --- Subprocess timeout / process-group reaping (bug d843) -----------------
-# A hung ``acli`` child (interactive prompt, stuck socket, JVM/network-helper
-# grandchild holding the capture pipe) must never freeze a reconcile pass.
-# ``subprocess.run(timeout=)`` only reaps the DIRECT child — a grandchild on
-# the pipe defeats it (CPython bpo-30154). So we Popen(start_new_session=True),
-# communicate(timeout=), and on TimeoutExpired reap the whole process GROUP
-# (SIGTERM -> grace -> SIGKILL), bounding the post-kill drain so a D-state
-# child can't block forever. Worst-case per call = call_timeout + GRACE + DRAIN.
+# Run ACLI in its own session so timeouts reap pipe-holding descendants as
+# well as the direct child. Bound the grace and drain after SIGKILL.
 _DEFAULT_ACLI_TIMEOUT: int = 120  # seconds; acli does OAuth + network
 _ACLI_GRACE_SECONDS: int = 3  # SIGTERM grace before SIGKILL (JVM flush headroom)
 _ACLI_DRAIN_SECONDS: int = 2  # bounded post-SIGKILL reap/drain (D-state safe)
@@ -240,23 +221,10 @@ def _is_auth_failure(stderr: str | None) -> bool:
 
 
 class AcliAuthError(RuntimeError):
-    """ACLI rejected the credential — the session is not authenticated.
+    """Signal a rejected ACLI credential on the first attempt.
 
-    Terminal and raised on the FIRST attempt: a rejected credential is
-    deterministic, so retrying only delays the failure by the backoff schedule.
-
-    Distinct from a bare :class:`subprocess.CalledProcessError` so callers can
-    ``except`` this specifically and report a CREDENTIAL problem rather than a
-    data problem — the reconciler's pass classifier does exactly that, turning
-    what used to be a generic ``reconcile_once raised: ... exit status 1`` into
-    an operator-actionable message naming the token.
-
-    Subclasses ``RuntimeError`` so existing ``except RuntimeError`` sites in the
-    acli path (which already catch ``RetryExhaustedError``) keep working.
-
-    Note this reports that the credential was REJECTED; it does not and cannot
-    renew one. Recovery is rotating the ``JIRA_API_TOKEN`` secret — an operator
-    action, deliberately not automated here.
+    Callers can report an authentication failure instead of a data error.
+    Credential rotation is an operator action.
     """
 
     def __init__(self, cmd: list[str], stderr: str | None = None) -> None:
@@ -323,17 +291,9 @@ class AcliMutationError(RuntimeError):
 
 
 def _backoff_sleep(seconds: float) -> None:
-    """Sleep *seconds* between ACLI retry attempts (the single retry-backoff seam).
+    """Sleep between retries through a patchable backoff seam.
 
-    Deliberately a distinct, patchable indirection over ``time.sleep`` rather than
-    a bare ``time.sleep`` call. Tests that assert the retry-backoff schedule can
-    patch THIS function to observe only the retry delays. Patching the module-global
-    ``time.sleep`` instead would also capture the sub-second poll sleeps
-    CPython's ``subprocess.Popen._wait`` busy-wait emits from inside
-    ``communicate()`` (an exponential 0.0005→0.05s series whose iteration count
-    depends on how quickly the OS reaps the child) — an unrelated, load-dependent
-    signal that made the 429-backoff assertion flaky under load. Same behavior as
-    ``time.sleep``; the split exists purely to isolate the observable seam.
+    Tests can observe retry delays without capturing subprocess poll sleeps.
     """
     time.sleep(seconds)
 
@@ -444,23 +404,11 @@ def _mutation_result_shape(stdout: str | None) -> str | None:
 
 
 def decode_acli_triple(returncode: int, stdout: str | None, stderr: str | None) -> AcliOutcome:
-    """Decode a sanitized historical ACLI ``(exit, stdout, stderr)`` triple into a
-    known :class:`AcliOutcome`, or FAIL LOUD (REB-3115 S1 T2, AC5).
+    """Classify an ACLI exit/stdout/stderr triple without I/O.
 
-    Deterministic and pure — no subprocess, no clock, no network. The mapping:
-
-    * exit 0 + a mutation-result ``FAILURE`` / ``successCount==0`` → ``mutation_failure``;
-    * exit 0 + a benign shape (a success mutation result, a created-issue dict, a
-      search list, or empty stdout) → ``applied``;
-    * exit 0 + non-empty, non-JSON stdout → :class:`UnknownAcliOutcomeError`;
-    * nonzero + credential-rejection stderr → ``auth_failure`` (the real exit-1
-      unauthorized shape lands here);
-    * nonzero + rate-limit stderr → ``rate_limited``;
-    * nonzero + deterministic assignee-error stderr → ``assignee_error``;
-    * nonzero with no recognizable marker → :class:`UnknownAcliOutcomeError`.
-
-    An unknown shape RAISES rather than defaulting to a retry class, so a novel
-    error surface can never be silently re-driven.
+    Successful exits distinguish applied from structured mutation failure.
+    Failed exits classify auth, rate limit, or assignee errors from stderr.
+    Unknown shapes raise ``UnknownAcliOutcomeError`` instead of being retried.
     """
     if returncode == 0:
         shape = _mutation_result_shape(stdout)
@@ -508,20 +456,7 @@ def _decode_partial(data: Any) -> str | None:
 
 
 def _reap_process_group(p: subprocess.Popen[str]) -> None:
-    """Reap a timed-out ACLI child + its process group via the shared reaper (bug d843).
-
-    Thin wrapper over :func:`rebar._proc.reap_process_group` — the single source of
-    truth for the SIGTERM → grace → SIGKILL → bounded-drain, ESRCH/EPERM-guarded,
-    D-state-safe group reap (formerly duplicated byte-for-byte in the grounding
-    harness). This caller pins its OWN timing constants and log identity
-    (``label="acli"``, this module's ``logger``); update the shared helper — not a
-    private copy — for any behavior change.
-
-    Imported function-locally, mirroring this module's other ``rebar.*`` imports
-    (``rebar.config``): the reconciler subprocess always has ``rebar`` importable
-    (``rebar.reconciler.__main__`` imports it at startup and puts the package parent
-    on ``sys.path`` as a fallback), and ``rebar._proc`` is a stdlib-only leaf.
-    """
+    """Reap a timed-out ACLI process group using shared bounded cleanup."""
     from rebar._proc import reap_process_group
 
     reap_process_group(
@@ -541,35 +476,12 @@ def _run_acli(
     retry_on_timeout: bool = False,
     call_timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run an ACLI command with retry, exponential backoff, and a bounded timeout.
+    """Run ACLI with up to 3 attempts, backoff, and per-call timeout.
 
-    Retries up to 2 times (3 total attempts) on CalledProcessError,
-    with backoff delays of 2s and 4s. Auth failures (exit code 401)
-    and deterministic assignee errors ("cannot be assigned" or "User not
-    found for email:") abort immediately without retrying.
-
-    Each invocation is bounded by an explicit positive ``call_timeout`` (the
-    operation-scoped ``reconciler.jira_cli_timeout`` capture, ticket 2048-d289)
-    or, when unset, by the ambient ``REBAR_JIRA_CLI_TIMEOUT`` resolve
-    (default 120s) and run
-    in its own process session, so a hung ``acli`` child (or a pipe-holding
-    grandchild) is reaped rather than freezing the pass (bug d843). On timeout:
-
-    - ``retry_on_timeout=True`` (READS only — they are idempotent) retries the
-      timed-out call within the existing attempt loop with backoff.
-    - ``retry_on_timeout=False`` (the default; WRITES) raises
-      :class:`AcliTimeoutError` immediately — a timed-out Jira write is
-      ambiguous (may have committed server-side) and Jira create/link is
-      non-idempotent, so a blind retry would duplicate. The terminal error is
-      deliberately not a builtin ``TimeoutError`` so no caller that retries on
-      ``TimeoutError`` re-retries it.
-
-    Raises:
-        CalledProcessError: if all CalledProcessError attempts are exhausted.
-        AcliTimeoutError: on a non-retryable (write) timeout, or read timeout
-            with all attempts exhausted. Terminal — raised BEFORE
-            ``_check_mutation_failure`` so a killed child never fabricates a
-            success.
+    Auth and deterministic assignee failures stop immediately. Timed-out reads
+    can retry when ``retry_on_timeout`` is set; writes raise ``AcliTimeoutError``
+    because a server-side write may already have landed. Each child runs in a
+    separate process session so timeout cleanup can reap its group.
     """
     base = acli_cmd if acli_cmd is not None else _DEFAULT_ACLI_CMD
     full_cmd = base + cmd

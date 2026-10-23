@@ -1,31 +1,9 @@
-"""Incomplete-operation recovery for binding state (RP-02 S3).
+"""Recover pending creates and interrupted retirements in binding state.
 
-``BindingRecovery`` owns the repair half of binding lifecycle: what to do when a pass
-died PART WAY THROUGH a multi-write operation. Two such operations exist, and they leave
-very different residue:
-
-* **An interrupted CREATE** leaves a ``pending`` binding. The write-ahead protocol
-  (story 9622) makes that state deterministic to resolve — a keyed-pending entry proves
-  the create landed, a keyless one does not — and ``recover_pending_bindings`` is that
-  resolution, lifted here UNCHANGED from the facade so the policy sits beside the other
-  recovery it is a sibling of.
-* **An interrupted RETIREMENT** leaves one identity both live and tombstoned.
-  ``BindingLifecycle.retire`` writes the tombstone FIRST and drops the live
-  forward/reverse pair second (ADR 0099 §5), so the only crash window it can leave is
-  that ordered overlap — recoverable precisely because the identity matches on both
-  sides. ``complete_interrupted_retirements`` finishes those, and REFUSES to touch
-  anything that is not an exact match.
-
-Like every owner behind the facade, this is not a store and not a persistence owner:
-:class:`BindingRepository` owns every byte on disk and ``BindingLifecycle`` owns the
-identity transitions. This class mutates the repository's OWN dictionaries in place and
-reaches transitions through the lifecycle owner, so a repair is indistinguishable from
-the ordinary operation it completes.
-
-The asymmetry that governs the whole retirement half: **a tombstone is authoritative
-retirement INTENT, and only ``unretire`` revokes it.** So completion deletes live
-residue and NEVER a tombstone. Getting that backwards would turn a soft delete into a
-hard one — exactly the incident the retired-first write order exists to prevent.
+Keyed pending creates can be confirmed; keyless ones require search corroboration.
+Retirement repair removes only an exact-match live pair left after its durable
+tombstone. The repository owns persistence, lifecycle owns transitions, and only
+``unretire`` removes retirement intent.
 """
 
 from __future__ import annotations
@@ -49,10 +27,7 @@ __all__ = [
     "classify_interrupted_retirements",
 ]
 
-#: How long a keyless-pending binding is treated as "the create may have landed but is not
-#: indexed yet" (bug 21fc). Jira DC's Lucene index is eventually consistent and
-#: JRASERVER-70423 documents a 2,991s lag, so this is deliberately LARGER: the cost of
-#: waiting is a delayed create, of not waiting a duplicate — only one is reversible.
+#: Grace longer than the documented Jira DC index lag before keyless unbind.
 _INDEX_LAG_GRACE_SECONDS = 3600.0
 
 #: Consecutive negative searches required before absence is treated as corroborated (a
@@ -78,13 +53,7 @@ def _now_iso() -> str:
 
 
 def _age_seconds(created_at: Any) -> float:
-    """Seconds since an ISO-8601 ``created_at``; ``inf`` when it is absent or unparseable.
-
-    ``inf`` is the SAFE default here and the direction matters: an entry whose age cannot
-    be established is treated as OLD, so it becomes eligible for the ordinary
-    corroborated-unbind path rather than being suppressed forever. A store written before
-    this field existed must not strand its tickets.
-    """
+    """Return age in seconds; missing or invalid timestamps count as old (inf)."""
     if not isinstance(created_at, str) or not created_at:
         return float("inf")
     from datetime import datetime, timezone
@@ -299,27 +268,12 @@ class BindingRecovery:
     def recover_pending_bindings(
         self, client: TicketTransport, *, failure_sink: list[dict[str, Any]] | None = None
     ) -> int:
-        """Scan for pending bindings and attempt to recover (story 9622).
+        """Recover keyed and keyless pending bindings; return resolved count.
 
-        For each pending binding:
-
-        - **Keyed-pending** (entry carries a ``jira_key`` — the write-ahead
-          recorded it the instant ``create_issue`` returned, before the label was
-          attached): the create landed, so retro-attach the rebar-id label +
-          ``local_id`` entity property (idempotent) and confirm. NO Jira search —
-          deterministic, so a crash in the create->label window yields NO duplicate.
-        - **Keyless-pending** (no ``jira_key`` — crash before/during create): search
-          Jira for the ``rebar-id:{local_id}`` label (colon form, legacy hyphen
-          fallback). Confirm if found; unbind if not (the create never reached Jira).
-
-        Any per-entry error is appended to ``failure_sink`` as ``{local_id, reason}``
-        and skipped (loud but non-fatal; the entry stays pending). Returns the count
-        of RESOLVED bindings (confirmed or unbound). ``client`` must expose
-        ``search_issues`` / ``add_label`` / ``set_entity_property``.
-
-        Takes no persistence or scope parameter, and gains none by living here: whether
-        recovery runs at all is the CALLER's decision (``run_differs`` skips it for a
-        scoped pass), and durability comes from the pass's later unconditional ``save()``.
+        Keyed entries reattach markers and confirm without search. Keyless entries
+        search for current or legacy labels, then confirm or corroborate absence
+        before unbinding. Record per-entry errors in ``failure_sink`` and continue;
+        the pass saves later.
         """
         bindings = self._repo.bindings
         pending = [lid for lid, entry in bindings.items() if entry.get("state") == "pending"]
@@ -348,12 +302,8 @@ class BindingRecovery:
                     self._lifecycle.bind_confirm(local_id, results[0]["key"])
                     recovered += 1
                     continue
-                # A NEGATIVE SEARCH IS NOT PROOF OF ABSENCE ON DC (bug 21fc): the keyless
-                # state is entered on a crash during create_issue — exactly when the issue
-                # may exist but not yet be indexed (Jira DC's Lucene index is eventually
-                # consistent, JRASERVER-70423: 2,991s lag). Unbinding here makes the next
-                # pass create a duplicate, so absence must be CORROBORATED: repeated misses
-                # AND an entry too old for the documented lag to explain. Else stay pending.
+                # A DC search miss can be index lag. Require repeated misses and
+                # age beyond the grace before unbinding.
                 misses = int(entry.get("search_miss_count") or 0) + 1
                 entry["search_miss_count"] = misses
                 entry["updated_at"] = _now_iso()
@@ -369,27 +319,9 @@ class BindingRecovery:
         return recovered
 
     def repair_at_write_boundary(self, *, persist: bool, scoped: bool) -> RetirementRepairOutcome:
-        """The ONLY door a reconcile pass may use to complete interrupted retirements.
+        """Repair interrupted retirements only in write-bearing, unscoped passes.
 
-        Two conditions have to hold, and the guard lives HERE rather than at the call site
-        so the spine carries one unconditional line and cannot drift from the policy:
-
-        * ``persist`` — cap-0 dry-run mode is documented read-only, and
-          completing a retirement is a write. The overlap simply survives to the next
-          write-bearing pass, which is the correct outcome: a read-only command that
-          silently mutated the store would be the more surprising bug.
-        * ``not scoped`` — a filtered pass reasons about a hand-picked subset of tickets, so
-          finishing retirements for identities outside that scope is a scope leak. The
-          repair is store-wide by nature (it walks every tombstone) and cannot be narrowed
-          honestly, so a scoped pass declines the whole operation rather than half of it.
-
-        Refusing is FREE: no classification runs, nothing is read from the repository, and
-        nothing is reported. That matters because this is reached on every read-only pass,
-        and a guard that classified first and discarded the answer would make the read-only
-        path pay for a repair it is forbidden to perform.
-
-        Returns an EMPTY :class:`RetirementRepairOutcome` when refused — the same type the
-        admitted path returns, so a caller never has to branch on "was I allowed?".
+        Refused calls return an empty outcome without reading the repository.
         """
         if not persist or scoped:
             return RetirementRepairOutcome()
@@ -398,29 +330,10 @@ class BindingRecovery:
         return outcome
 
     def complete_interrupted_retirements(self) -> RetirementRepairOutcome:
-        """Finish retirements the retired-first order left half-done (ADR 0099 §5).
+        """Remove exact-match live residue while retaining durable tombstones.
 
-        The tombstone is durable; only the live forward/reverse pair is still there. So
-        the repair is to delete that residue and leave the tombstone completely alone —
-        consuming it would make the soft delete unrecoverable, which is the one outcome
-        the write order was chosen to rule out. ``save_retired`` is therefore never
-        called from here at all; ``unretire`` remains the only route back.
-
-        NOTHING is written when there is no exact-match candidate, even when there ARE
-        refusals. Every pass would otherwise rewrite (and re-commit to the tickets
-        branch) the whole live store just to report that it changed nothing, and a store
-        holding one permanently-refused tombstone would churn forever.
-
-        One ``save()`` covers the whole batch: the removals are independent, and a
-        per-candidate save would leave a crash mid-batch in the same partial state this
-        method exists to clean up.
-
-        A failed save is ROLLED BACK in memory. The live file still holds every pair, so
-        leaving them popped would hand the rest of the pass a view that disagrees with
-        disk — and the next ``save()`` from any other owner would then commit a deletion
-        this method already declined to report as done. The failure is returned as
-        ``ABORT_REPLACE_FAILED`` per attempted candidate rather than raised, because a
-        binding repair must never be the thing that aborts a sync pass.
+        Save once only when repairs exist. A failed save restores in-memory pairs
+        and returns ``ABORT_REPLACE_FAILED`` per candidate without aborting sync.
         """
         repo = self._repo
         outcome = classify_interrupted_retirements(

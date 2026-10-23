@@ -15,11 +15,7 @@ from typing import Any
 
 
 def _load(_name: str, relpath: str):
-    """Load a sibling module by relative file path, registering it in sys.modules.
-
-    Imports the in-package module ``relpath`` names (``_name`` is kept for call-site
-    stability); a patchable seam over ``importlib.import_module``.
-    """
+    """Import a sibling through the patchable package loader seam."""
     return importlib.import_module(
         "rebar.reconciler." + relpath.removesuffix(".py").replace("/", ".")
     )
@@ -33,14 +29,8 @@ def _tracker_dir(repo_root: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Canonical leaf-helper modules.
-#
-# ADR 0111 forbids preserving old private compatibility bindings after a
-# move. Keep the sibling modules loaded once for the spine, but route every
-# moved collaborator through its canonical owner at call time instead of
-# rebinding it as ``reconcile.<name>``. The remaining names defined in this
-# module (``_load``, ``_load_snapshots``, ``_persist_and_log``) are phase seams
-# owned by this spine, not compatibility re-exports.
+# Load canonical helper owners once. Moved collaborators resolve there at call
+# time; this spine retains only its own phase seams (ADR 0111).
 # ---------------------------------------------------------------------------
 _helpers = _load("rebar.reconciler.reconcile_helpers", "reconcile_helpers.py")
 _pass_support = _load("rebar.reconciler.pass_support", "pass_support.py")
@@ -49,14 +39,7 @@ _runtime = _load("rebar.reconciler.runtime", "runtime.py")
 
 @dataclass
 class _PassContext:
-    """Mutable per-pass state threaded through reconcile_once's phase helpers.
-
-    reconcile_once is a thin sequencer over _load_snapshots -> run_differs ->
-    _apply_mutations -> _persist_and_log; each phase reads the fields it needs
-    and writes back the ones it produces. Carrying the ~30 threaded values on one
-    object (rather than as positional params) keeps each phase independently
-    callable + unit-testable while preserving the single-pass idempotent contract.
-    """
+    """Mutable pass state shared by independently callable lifecycle phases."""
 
     # inputs (set at construction)
     pass_id: str
@@ -106,11 +89,8 @@ class _PassContext:
     # (bug e6e9), so _advance_baselines records the last-SYNCED value, not the pass-start
     # fetch. Empty degrades that advance to its pre-e6e9 fetch-only behaviour exactly.
     synced_fields: dict[str, dict] = field(default_factory=dict)
-    # RP-04 S3 (AC1): the composed operation runtime's already-built backend and its
-    # captured transport, threaded into _apply_mutations so the apply phase forwards the
-    # transport as applier.apply(client=...) instead of re-resolving config ambiently via
-    # _load_acli. None when composition was skipped for a no-write pass whose scope is
-    # absent.
+    # Apply receives the captured backend and transport, avoiding ambient config
+    # resolution. A no-write pass without scope may skip composition.
     runtime_backend: Any = None
     runtime_transport: Any = None
 
@@ -126,38 +106,13 @@ def reconcile_once(
     route: str | None = None,
     abort_check=None,
 ) -> dict:
-    """Run one reconciler pass: fetch → diff → apply.
+    """Fetch, diff both directions, apply, and persist one reconciler pass.
 
-    Reads the previous snapshot (written at the end of the prior pass) from
-    ``<tracker>/.bridge_state/prev_snapshot.json``, fetches the current
-    remote state, computes mutations, applies them, then advances the prev
-    snapshot file so the next call is idempotent against an unchanged remote.
-    Per-pass scratch (snapshots, manifests, sync logs, alerts) lands under
-    ``<repo_root>/.rebar/bridge/`` with bounded retention.
-
-    The pass now includes bidirectional sync:
-      1. Legacy inbound path (snapshot diff → typed Mutations)
-      2. Outbound path (local→Jira via outbound_differ + binding_store)
-      3. New inbound path (Jira→local via inbound_differ for bound tickets)
-      4. Sync logger for structured audit trail
-      5. Binding store persistence at pass end
-
-    Args:
-        pass_id:       Unique identifier for this reconciliation pass.
-        repo_root:     Repository root directory.  Defaults to four levels
-                       above this file (reconciler/ → _engine/ → rebar/ →
-                       src/ → repo root).
-        filter_local_ids:
-                       When set, restricts which mutations reach the applier.
-                       All three differs run on their full, unfiltered inputs
-                       (same code paths as production).  Only mutations whose
-                       target or provenance matches a local ID in this set
-                       (or its bound Jira key) are dispatched.  ``None``
-                       (default) means no filtering — full reconciliation.
-
-    Returns:
-        ``{"pass_id": pass_id, "mutation_count": N, "manifest_path": str}``
-        where N is the number of mutations dispatched in this pass.
+    The previous snapshot under ``<tracker>/.bridge_state`` advances after
+    apply, making an unchanged remote idempotent. Scratch lives under
+    ``<repo_root>/.rebar/bridge``. ``filter_local_ids`` limits dispatch only;
+    the differs still see full inputs. Return pass ID, dispatched mutation
+    count, and manifest path.
     """
     if repo_root is None:
         from rebar.config import reconciler_repo_root as _owned_repo_root
@@ -187,19 +142,9 @@ def reconcile_once(
 
 
 # ---------------------------------------------------------------------------
-# Phase-function seams. reconcile_once's three write-bearing phases (load,
-# apply, persist) moved to sibling modules load_phase.py / apply_phase.py /
-# persist_phase.py (ticket piscine-bullish-cowbird: reconcile.py was at the
-# locked 800-line cap). reconcile_once itself is untouched above — it remains
-# the single lifecycle facade calling these four names, exactly as before.
-#
-# _apply_mutations and _confirm_peer_links remain direct phase seams owned by this
-# spine: external guard tests call them to exercise the extracted phase functions.
-#
-# _load_snapshots, _save_and_commit_bindings, and _persist_and_log are thin
-# wrappers around the sibling phase implementations. Their moved helper/runtime
-# collaborators are resolved from canonical owner modules at call time rather than
-# through old ``reconcile.<name>`` compatibility bindings.
+# Load, apply, and persist implementations live in sibling modules. This spine
+# retains the lifecycle facade and phase entry points used by guard tests;
+# collaborators resolve through their canonical owners.
 # ---------------------------------------------------------------------------
 _load_phase = _load("rebar.reconciler.load_phase", "load_phase.py")
 _apply_phase = _load("rebar.reconciler.apply_phase", "apply_phase.py")
@@ -231,24 +176,15 @@ def _load_snapshots(ctx: _PassContext) -> None:
 def _handle_corrupt_snapshot(
     pass_id: str, repo_root: Path, prev_path: Path, _exc: Exception
 ) -> None:
-    """Abort the pass on a corrupt / conflict-marked ``prev_snapshot.json``.
-
-    Lifted out of the ``reconcile_once`` spine (the corrupt-snapshot abort): emit
-    a loud operator ERROR, best-effort record a critical alert, then raise
-    ``RuntimeError``. The pass must NEVER proceed with an unknown Jira state, so
-    this always raises.
-    """
+    """Report corrupt previous state and abort rather than reconcile from it."""
     return _load_phase.handle_corrupt_snapshot(pass_id, repo_root, prev_path, _exc)
 
 
 def _save_and_commit_bindings(ctx: _PassContext) -> None:
-    """Post-apply persistence for a writing pass (extracted from ``_persist_and_log``).
+    """Persist proven baselines, peer links, and snapshots for a writing pass.
 
-    Advances the per-binding baselines and peer-link evidence from THIS pass's proven
-    snapshot, saves + commits the binding store to the tickets branch, runs the
-    comment-id recording invariant, and advances the prev-snapshot key set. Every step is
-    fail-open — a store-write hiccup must never break a pass that otherwise succeeded — and
-    the whole block runs ONLY under the persistence gate (skipped in no-write mode).
+    The store commit and comment-ID invariant remain fail-open; no-write
+    passes skip this phase.
     """
     _persist_phase.save_and_commit_bindings(
         ctx,

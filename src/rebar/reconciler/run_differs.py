@@ -1,36 +1,10 @@
 #!/usr/bin/env python3
-"""run_differs.py — the diff phase of a reconcile pass, extracted from reconcile.py.
+"""Run the invariant, snapshot, outbound, inbound, and binding-walk diff phases.
 
-``run_differs(ctx)`` is the single ``reconcile_once`` phase that was previously the
-in-file ``_run_differs`` helper. It runs the structural invariants, the legacy
-snapshot diff, the outbound differ (with OutboundMutation -> typed Mutation
-conversion), and the binding-aware inbound differ (with InboundMutation -> typed
-Mutation conversion), accumulating the typed-Mutation list onto the shared
-``_PassContext`` (``ctx.mutations``).
-
-Bug 3b5f removed the inbound-probe dispatch phase: its only producer
-(``differ._compute_mutations_emit_absent_partner_probes``) could never fire from this
-call site, which passes a FETCHED Jira snapshot as ``local_state``. Deletion-vs-aged-out
-discrimination lives on the outbound side instead (``outbound_differ._safe_get_issue``
-and ``binding_walk``), which ADR 0028 L16 makes the owner of retirement.
-
-Loader convention: run_differs imports its own siblings (``mutation.py``) through the
-local ``_load`` helper, a patchable ``importlib.import_module`` seam. It holds NO back-edge
-to reconcile.py: ``ctx`` is typed loosely to avoid importing ``_PassContext``.
-
-Ticket 7153: the self-contained outbound sub-pass driver (``_run_differs_outbound``)
-was extracted to the sibling ``outbound_pass.py`` module to create module-size
-headroom ahead of the typed-payload cutover (earthborn-statuelike-boutu).
-``run_differs`` still invokes it as the outbound phase of the pass — see
-``outbound_pass.py`` for the moved implementation. Its two fail-open alert emitters
-(``_emit_outbound_field_alerts`` / ``_emit_recovery_failure_alerts``) stayed HERE
-rather than moving alongside it: several tests exercise them directly against a
-by-file-path-loaded copy of this module and patch this module's own ``_load`` helper
-(e.g. ``patch.object(run_differs_mod, "_load", ...)``) to stub the alert store —
-a patch that only affects a function whose ``__globals__`` is THIS module's dict.
-``_run_differs_outbound`` calls them back via a local import (mirroring the
-``refresh_scoped_snapshot`` local-import convention below) so it always resolves
-the copy living in the package's real ``run_differs`` module.
+The phases append typed mutations to ``ctx.mutations``. ``_load`` provides a
+patchable sibling-import seam, and loose context typing avoids a back-edge to
+``reconcile.py``. The outbound phase lives in ``outbound_pass.py``; alert emitters
+stay here for by-path tests that patch this module's loader.
 """
 
 from __future__ import annotations
@@ -43,23 +17,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-# Ticket 7153: the self-contained outbound sub-pass driver (``_run_differs_outbound``)
-# was extracted to the sibling ``outbound_pass`` module for module-size headroom.
-# Re-exported here (mirroring the outbound_differ.py / applier.py split convention) so
-# ``run_differs._run_differs_outbound`` keeps resolving for existing callers and tests,
-# and so a ``monkeypatch.setattr(run_differs, "_run_differs_outbound", ...)`` stub still
-# intercepts this module's own call below (the bare-name lookup resolves against THIS
-# module's globals at call time). Its two alert emitters stayed in THIS module (see the
-# module docstring) and are called back by ``_run_differs_outbound`` via a local import.
+# Re-export the outbound phase so callers and tests can patch this module's name.
+# Its alert callbacks remain here for by-path tests that patch ``_load``.
 from rebar.reconciler.outbound_pass import _run_differs_outbound
 
 
 def _load(_name: str, relpath: str):
-    """Load a sibling module by relative file path, registering it in sys.modules.
-
-    Imports the in-package module ``relpath`` names (``_name`` is kept for call-site
-    stability); a patchable seam over ``importlib.import_module``.
-    """
+    """Import a sibling named by ``relpath``; retain ``_name`` for callers."""
     return importlib.import_module(
         "rebar.reconciler." + relpath.removesuffix(".py").replace("/", ".")
     )
@@ -71,12 +35,7 @@ def _emit_outbound_field_alerts(
     repo_root: Path,
     pass_id: str,
 ) -> None:
-    """Emit deduped bridge alerts for outbound both-sides conflicts (a713) and
-    allowlist-dropped fields (acd0), mirroring fetcher._flag_unmapped_statuses.
-
-    Deduped per (kind, ticket, field) over the alert_store 24h window so a persistent
-    condition does not re-file every pass. Fully fail-open — any error is swallowed so
-    observability can never break a reconcile pass."""
+    """Emit 24-hour-deduped conflict and dropped-field alerts without failing the pass."""
     if not conflict_sink and not dropped_field_sink:
         return
     try:
@@ -111,12 +70,7 @@ def _emit_recovery_failure_alerts(
     repo_root: Path,
     pass_id: str,
 ) -> None:
-    """Emit a deduped bridge alert per pending-binding recovery failure (story 9622).
-
-    Recovery was previously silently swallowed; a failure (a failed Jira search or
-    retro-label attach) now files an ``outbound-recovery-failure`` alert, deduped per
-    local_id over the alert_store 24h window. Fully fail-open — any error is swallowed
-    so observability can never break a reconcile pass."""
+    """Emit 24-hour-deduped recovery-failure alerts without failing the pass."""
     if not failures:
         return
     try:
@@ -144,15 +98,7 @@ def _emit_recovery_failure_alerts(
 
 
 def _load_reconcile_backend():
-    """Return the configured ``Backend`` for the diff phase (S4 + ticket 4af8).
-
-    The orchestrator obtains the backend once and threads its role Protocols down:
-    ``.transport`` for the outbound-diff live-comment fetch + pending-binding recovery,
-    ``.outbound`` / ``.inbound`` as the injected field mappers for the outbound / inbound
-    differs (routing the core differs off the vendor mappers via dependency injection).
-    Lazily imports ``load_config``/``select_backend`` to avoid import cycles and to keep
-    standalone by-path loading working.
-    """
+    """Load the configured backend for transport and injected field mappers."""
     from rebar.config import compose_config
     from rebar.reconciler._backend_registry import select_backend
 
@@ -160,15 +106,9 @@ def _load_reconcile_backend():
 
 
 def _read_local_ticket_full(repo_root: Path, local_id: str, *, no_sync: bool) -> dict | None:
-    """Targeted read of ONE local ticket (including archived) via ``rebar show``.
+    """Read a local ticket, including archived ones; return ``None`` on failure.
 
-    The binding-store acting walk (epic 3006-e198) reconciles bound pairs whose
-    local ticket has left the ACTIVE snapshot (archived/deleted — ``rebar list``
-    omits them), so it must read those tickets individually. ``rebar show`` reads
-    any ticket regardless of archive state. Returns the ticket dict, or ``None``
-    when the ticket no longer exists (hard-deleted) or the read fails (fail-open:
-    the walk treats ``None`` as ``LocalState.ABSENT``). ``no_sync=True`` suppresses
-    the tickets-branch fetch so a no-write pass stays no-write on the git tree.
+    ``no_sync`` suppresses the tickets-branch fetch for a no-write pass.
     """
     import os as _os
     import subprocess as _sp
@@ -209,32 +149,15 @@ def _read_local_ticket_full(repo_root: Path, local_id: str, *, no_sync: bool) ->
 
 
 def run_differs(ctx: Any) -> None:
-    """Diff phase: invariants + the legacy snapshot diff +
-    the outbound differ (with OM->Mutation conversion) + the binding-aware inbound
-    differ (with IM->Mutation conversion). Accumulates the typed-Mutation list.
+    """Run diff phases and collect typed mutations on ``ctx``.
 
-    THE SNAPSHOT DIFF IS LEGACY-SHAPED, AND THAT IS LOAD-BEARING (bugs 727f / d103).
-    ``differ.compute_mutations``'s contract is ``(local_state, jira_state)`` and its
-    module docstring says that contract REPLACED the legacy
-    ``(prev_snapshot, next_snapshot)`` one — but this call site, its only production
-    caller, was never migrated and still passes the legacy pair. Both halves are remote
-    Jira fetches (``reconcile.py`` reads ``prev_snapshot`` from the persisted earlier
-    fetch and ``curr_snapshot`` from a fresh one), so the differ's local-state-dependent
-    arms cannot be trusted here and are dropped immediately below. Its useful output at
-    this call site is the ``jira_new`` inbound create for a key that appeared since the
-    last pass. If this caller is ever migrated to pass real local state, remove that
-    suppression in the same change.
-
-    ``ctx`` is the shared ``reconcile._PassContext`` (typed loosely as ``Any`` so
-    this module holds no import edge back to reconcile.py).
-
-    A thin orchestrator over the named ``_run_differs_*`` phase helpers, each of
-    which captures one cohesive stage of the former inline body VERBATIM.
+    The snapshot differ receives two Jira snapshots here despite its
+    local/remote contract. Drop its local-state-dependent output; retain new
+    Jira issue creates. If real local state replaces the first snapshot, revisit
+    that suppression. Loose context typing avoids importing ``reconcile.py``.
     """
-    # Bug f449: for a SCOPED pass, refresh the scoped bound keys from the primary store
-    # (lag-free GET) and overlay ``ctx.curr_snapshot`` in place BEFORE any differ or the
-    # later baseline advance reads it, so a stale post-write JQL-search snapshot cannot make
-    # the level-triggered inbound differ clobber a just-synced field.
+    # Refresh scoped bound keys before diffing or baseline advance so search lag
+    # cannot overwrite a just-synced field.
     from rebar.reconciler.snapshot_lagfree_refresh import refresh_scoped_snapshot
 
     refresh_scoped_snapshot(ctx)
@@ -273,28 +196,15 @@ def run_differs(ctx: Any) -> None:
 
     ctx.mutations = mutations
 
-    # Shadow layer (RP-03 S2 T1): attach a deterministic, PURE ticket plan derived
-    # solely from the finalized ``ctx.mutations`` and the pass inputs — without
-    # disturbing ``ctx.mutations`` (still authoritative). ``ctx.observation`` /
-    # ``ctx.ticket_plans`` are not declared on _PassContext; the plain dataclass
-    # accepts the attribute assignment. Every ctx field is read via getattr with a
-    # default so a partial SimpleNamespace test ctx is tolerated, and no I/O is
-    # performed (no binding_store method calls).
+    # Derive a pure ticket plan from finalized mutations and pass inputs. Keep
+    # mutations authoritative; getattr defaults support partial test contexts.
     ticket_planner = _load("rebar.reconciler.ticket_planner", "ticket_planner.py")
     prev_snapshot = getattr(ctx, "prev_snapshot", {}) or {}
-    # ``ctx.target_mode`` is a ``Mode(str, Enum)`` member in production; ``str(Mode.LIVE)``
-    # renders ``'Mode.LIVE'`` on 3.11+, so extract the canonical ``.value`` (mirroring
-    # reconcile.py's ``target_mode.value if target_mode else "live"``). Duck-typed so a
-    # plain-string test ctx (no ``.value``) still passes through unchanged.
+    # Use an enum's value; accept plain-string modes in test contexts.
     _target_mode = getattr(ctx, "target_mode", None)
     mode = str(getattr(_target_mode, "value", _target_mode) or "")
-    # ``ctx.mutations`` may mix typed ``Mutation`` instances with legacy plain-dict
-    # mutations (documented dual shape — see ``_run_differs_report_schema_drift``). The
-    # typed planner groups by ``Mutation.target``, so restrict it to the typed items
-    # (duck-typed on the ``.target`` attribute, mirroring the ``getattr(_m, "action")``
-    # discriminator used above; ``isinstance`` is unreliable across by-path module
-    # loads). Legacy dicts carry no ``.target`` attribute and are not part of the typed
-    # planning surface.
+    # The planner accepts typed mutations with ``target``; legacy dicts lack it.
+    # Duck typing also tolerates by-path module loads.
     typed_mutations = [m for m in ctx.mutations if getattr(m, "target", None) is not None]
     ctx.observation, ctx.ticket_plans = ticket_planner.plan_pass(
         pass_id=getattr(ctx, "pass_id", ""),
@@ -334,17 +244,8 @@ def _run_differs_invariants(ctx: Any) -> tuple[bool, set[str], list]:
     prev_snapshot = ctx.prev_snapshot
     curr_snapshot = ctx.curr_snapshot
 
-    # Check structural invariants on the post-fetch snapshot, before diffing.
-    # check_at_most_one_local_id returns only the filed violations (capped
-    # at 5 per pass — see invariants._CAP_PER_PASS), so the prior log line's
-    # "violations" and "filed" numbers were identical by construction. F11: log
-    # filed count with the cap for clarity.
-    #
-    # Filtered passes skip invariant bug-filing to avoid side effects on
-    # pre-existing violations outside the test scope.
-    # Compose the bug-filing gate: invariant checks FILE local bug tickets
-    # (CREATE events), so they must be skipped both for filtered passes (scope
-    # leak) and for cap-0 no-write passes (ticket yaw-plait-doe).
+    # File at most 5 structural violations from the post-fetch snapshot.
+    # Skip filing in filtered or no-write passes to avoid out-of-scope writes.
     skip_invariant_filing = (not persist) or bool(scoped_ids)
     if skip_invariant_filing:
         _reason = "no-write mode" if not persist else "filtered pass"
@@ -358,13 +259,8 @@ def _run_differs_invariants(ctx: Any) -> tuple[bool, set[str], list]:
         filed = invariants_mod.check_at_most_one_local_id(curr_snapshot, repo_root=repo_root)
         print(f"invariants: scanned={len(curr_snapshot)} filed={len(filed)} (cap=5)")  # noqa: T201
 
-    # Invariant phase: verify dual-identity round-trip on the post-fetch
-    # snapshot before diffing. Quarantine one-sided keys (skipped by the
-    # differ) and seed repair_property mutations for one-sided local_id
-    # rows so the differ emits the repair in this same pass.
-    #
-    # Filtered passes skip this to avoid seeding repair mutations for
-    # non-test tickets that would leak outside the filter scope.
+    # Quarantine one-sided keys and seed same-pass identity repairs. Filtered
+    # passes skip this to avoid mutations outside their scope.
     if skip_invariant_filing:
         quarantine_keys: set[str] = set()
         seed_repair_property_mutations: list = []
@@ -377,25 +273,9 @@ def _run_differs_invariants(ctx: Any) -> tuple[bool, set[str], list]:
 
 def _run_differs_report_schema_drift(mutations, skip_invariant_filing, invariants_mod) -> None:
     """Post-emit phase: file dedup'd bug tickets for repair_property schema-drift follow-ons."""
-    # Post-emit filter: scan mutations for repair_property follow-ons that carry a
-    # schema-drift kind. report_schema_drift surfaces each drift (files a dedup'd bug
-    # ticket + writes an alert record) so the signal is not swallowed.
-    #
-    # CONTRACT NOTE (aligned under meta-bug 5f2a-9a9f-2b4a-4aab): this loop matches the
-    # ACTUAL kind that apply_inbound.inbound_repair_property emits on a repair failure —
-    # "schema_drift_signal" (see apply_inbound.py, inbound_repair_property). It PREVIOUSLY
-    # matched "schema_drift", a string no producer in src/ ever emits, so the in-pass
-    # repair_property repair-failure follow-ons were silently dropped here. The issue key
-    # is read from the emitter's "issue_key" field, with a "target" fallback for the
-    # observed/expected-shaped follow-ons.
-    #
-    # Mutations may be plain dicts (legacy schema) or Mutation dataclass
-    # instances (canonical contract from epic 4047 / cde1). Normalise on
-    # access — mirrors the same dual-shape pattern in
-    # preflight_status_mapping below. Pre-fix this loop used
-    # `_m.get("action")` which crashed with "'Mutation' object has no
-    # attribute 'get'" once the reconciler reached this code path in
-    # production with typed Mutations.
+    # File deduplicated bugs and alerts for repair_property follow-ons whose
+    # kind is ``schema_drift_signal``. Accept typed mutations and legacy dicts;
+    # prefer ``issue_key`` and fall back to ``target``.
     mut_mod_for_action = _load("reconcile_mutation", "mutation.py")
     for _m in mutations:
         action_attr = getattr(_m, "action", None)
@@ -444,18 +324,9 @@ def _run_differs_inbound(ctx: Any, mutations, outbound_raw, absent_alive_fields,
     # path handles field-level updates for already-bound tickets.
     # -------------------------------------------------------------------
     local_by_id = {t.get("ticket_id", t.get("id", "")): t for t in local_tickets}
-    # Bug 3bf8: pass outbound mutations so the inbound differ can suppress
-    # emissions that would contradict (and clobber) a just-emitted outbound
-    # change for the same target in the same bidirectional pass.
-    # Bug 3bf8: ``compute_inbound_mutations`` returns
-    # ``(mutations, suppression_count)`` — the count of inbound field/label
-    # items dropped by bidirectional outbound-context filtering. Single-pass
-    # to avoid O(2n) differ cost on every reconcile pass.
-    # Bug 0702: merge the outbound differ's alive bound-but-absent GET results
-    # into the snapshot the inbound differ sees, so out-of-window Jira issues
-    # are mirrored Jira→local with the GET shared across both directions (no
-    # double-GET). curr_snapshot is left unmutated (shallow copy) so downstream
-    # snapshot persistence is unaffected.
+    # Share outbound mutations to suppress contradictory inbound updates. Add
+    # alive absent-issue GET fields to a copy so both differs see them without
+    # changing the persisted snapshot.
     inbound_snapshot = curr_snapshot
     if absent_alive_fields:
         inbound_snapshot = dict(curr_snapshot)
@@ -494,16 +365,8 @@ def _run_differs_inbound(ctx: Any, mutations, outbound_raw, absent_alive_fields,
             target=im.jira_key,
             payload={
                 "local_id": im.local_id,
-                # Bug b859 (Part 1a, H3 fix): _apply_inbound_update reads
-                # ``fields = payload.get("fields") or payload`` at
-                # applier.py:625. Writing the inbound mutation's fields
-                # under "changed_fields" (mirroring the outbound convention)
-                # caused the .get("fields") lookup to miss → fallback to
-                # the wrapper dict whose keys never matched the
-                # summary/status/etc. branches → every inbound EDIT/STATUS
-                # event was silently dropped → Phase 6 idempotency churn.
-                # Use "fields" so the existing applier consumer finds the
-                # dict on the first lookup.
+                # The inbound applier reads ``fields``; ``changed_fields`` would
+                # hide edits and status changes inside the wrapper payload.
                 "fields": im.fields,
                 "labels": im.labels,
                 # Bug 85a1 (Gap 1): propagate inbound comments so each new
@@ -536,13 +399,8 @@ def _run_differs_binding_walk(ctx: Any, mutations, outbound_diff_client) -> None
     sync_logger = ctx.sync_logger
     mut_mod = _load("reconcile_mutation", "mutation.py")
 
-    # ── binding-store-driven acting walk (drift classes A + C; epic 3006-e198) ──
-    # The differ above iterates the ACTIVE local snapshot, so a bound pair whose
-    # local ticket has been archived/deleted (dropped from ``rebar list``) is
-    # invisible to it. The level-triggered walk closes that blind spot: it iterates
-    # the BINDING STORE, targeted-reads each off-snapshot local ticket, and drives
-    # class A (terminal-transition → Done) + class C (probe → grace → GC) from one
-    # shared iteration — breaker-gated before any mutation (13eb / 444d).
+    # Walk bindings to process archived/deleted local tickets absent from the
+    # active snapshot. The breaker gates terminal and probe/retirement actions.
     binding_walk_mod = _load("reconcile_binding_walk", "binding_walk.py")
     classify_mod = _load("reconcile_classify", "classify.py")
     from rebar.config import ConfigError, compose_config
@@ -585,12 +443,7 @@ def _run_differs_binding_walk(ctx: Any, mutations, outbound_diff_client) -> None
         breaker_allowed=bool(walk.breaker.allowed) if walk.breaker else True,
         refused=walk.refused,
     )
-    # Story a118 census expand-contract: `walk.census` IS a `classify.census()`
-    # record (binding_walk.py:239), so it is emitted under the canonical
-    # `decision_census` event name (classify.py:351) — the documented-but-never-
-    # emitted census now goes live. No consumer read the old `binding_walk_census`
-    # key (grep-verified), so this is a direct rename. ROLLBACK (one line): revert
-    # this event name to "binding_walk_census".
+    # Emit the classify census under its canonical ``decision_census`` name.
     sync_logger.log("decision_census", **walk.census)
     if walk.refused:
         sync_logger.log(

@@ -1,35 +1,9 @@
-"""Shared Jira comment-length truncation helper (bug 6afc-20ee-84e5-4dd5).
+"""Share Jira comment truncation between send and diff paths.
 
-The Jira Cloud comment body has a documented hard limit of 32,767 characters.
-``acli jira workitem comment create`` exits 0 even when the underlying Jira
-operation fails on an over-length body, so ``_check_mutation_failure`` raises
-``AcliMutationError`` — the comment never lands. Because the outbound differ
-decides a comment needs adding when the local body is *not present* in Jira,
-the never-landed comment is re-emitted on every reconciler pass (the outbound
-comment-sync loop).
-
-The fix has a convergence requirement that forces a SINGLE shared truncation
-function used by BOTH paths:
-
-  - the send path (``acli.add_comment``) truncates the body before
-    handing it to ACLI, so the comment actually lands; and
-  - the differ comparison path (``outbound_differ._diff_comments``) applies the
-    SAME truncation to the expected local body BEFORE the membership test, so a
-    previously-truncated-then-landed Jira body matches and the diff stops
-    re-emitting.
-
-If the two paths used different truncation logic they could never agree on the
-landed body, and the loop would persist. They MUST therefore share this one
-helper so they cannot drift.
-
-CONSTRAINT (hard): truncation applies ONLY to the in-memory body sent to Jira
-and the differ's in-memory comparison key. The truncated body is NEVER written
-back to the local ticket store — local comment content is the source of truth
-and stays untouched.
-
-This module is stdlib-only and pure so both the package-imported caller
-(``reconciler/acli.py``) and the importlib-by-path caller
-(``outbound_differ.py``, in tests) can load it without side effects.
+Jira Cloud limits comment bodies to 32,767 characters. Both paths must compare
+the same fitted body so a landed truncated comment is not re-emitted. Fitting
+changes only in-memory send and comparison values, never the local ticket.
+This helper is stdlib-only for package and by-path imports.
 """
 
 from __future__ import annotations

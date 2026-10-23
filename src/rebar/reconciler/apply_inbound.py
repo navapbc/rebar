@@ -1,20 +1,9 @@
 #!/usr/bin/env python3
-"""Inbound leaf appliers: materialise Jira issues into the local ticket store.
+"""Apply inbound Jira mutations to local ticket events.
 
-The (inbound, *) leaf handlers dispatched from the typed registry, plus
-inbound_repair_property (the local_id property write _apply_inbound_repair_property
-delegates to). Each leaf reads its Jira-side payload, translates it via
-inbound_translate, and writes local ticket events; rebar-id/property write-backs
-to Jira are single transport calls (no handler-level retry, ADR 0103 S3).
-
-Imports downward only (apply_base, apply_inbound_events, inbound_translate — none
-import back); never imports applier.
-
-Bug 3b5f removed the ``delete`` and ``probe`` inbound leaves: their producer chain had
-no live emitter, and ``_apply_inbound_delete``'s ``create_after_hard_delete`` follow-on
-WAS the resurrection of a deliberately-deleted Jira issue that the operator ruling
-forbids. A confirmed hard-delete now tombstones the pairing in ``outbound_differ``
-instead — see ADR 0028's Consequences.
+Typed leaves handle create, update, conflict, and property repair. Jira marker
+writes are single transport calls. Imports flow downward without an applier
+back-edge. Confirmed remote deletion is handled by outbound tombstoning.
 """
 
 from __future__ import annotations
@@ -32,10 +21,7 @@ from rebar.reconciler.apply_base import (
     _load_mutation_module,
 )
 from rebar.reconciler.apply_inbound_events import (
-    # Loop-breaker marker re-exported so ``apply_inbound._RECONCILER_MARKER_APPLIER``
-    # still resolves (its sole use — the create comment-bootstrap — moved with the
-    # phase helpers, ticket 090a, and moved again with them to apply_inbound_events.py
-    # when apply_inbound_records.py was split, ticket 6f51-f8a4-b4fb-450c).
+    # Preserve the marker's historic import path for callers.
     _RECONCILER_MARKER_APPLIER,  # noqa: F401
     _inbound_create_record_binding,
     _inbound_create_write_create_event,
@@ -64,19 +50,12 @@ logger = logging.getLogger(__name__)
 def _apply_inbound_create(
     mutation, *, client: TicketTransport | None = None, repo_root=None, binding_store=None
 ) -> ApplyResult:
-    """Materialise a remote Jira issue as a local jira-* ticket.
-
-    Writes a CREATE event (title, ticket_type, priority, description, tags
-    including ``imported:reconciler-bootstrap``) and, when the payload carries
-    a non-default status, a follow-up STATUS event reverse-mapped via
-    config.local_to_jira_status.
-    """
+    """Create a local ticket from Jira fields, then write non-default status."""
     mut_mod = _load_mutation_module()
     _direction_guard(mutation, mut_mod.MutationDirection.inbound)
 
     payload = dict(mutation.payload or {})
-    # Accept both shapes: payload with nested "fields" key (batch-dict shape)
-    # and payload with top-level field keys (differ Mutation shape).
+    # Accept nested batch fields or top-level differ fields.
     fields = payload.get("fields") or payload
     jira_key = mutation.target
     local_id = _jira_key_to_local_id(jira_key)
@@ -89,14 +68,8 @@ def _apply_inbound_create(
             detail = {"jira_key": jira_key, "skipped_retired": True}
             return ApplyResult(mutation.direction, mutation.action, detail)
 
-    # Defense-in-depth inbound dedup (ticket 1577). The snapshot differ normally
-    # stands down for an already-bound issue by recognising its rebar-id:<local_id>
-    # label in the fetched fields (bug 4354) — that is the primary production
-    # dedup. This guard covers the narrow transient where the snapshot predates
-    # the label write-back yet the binding already exists in bindings.json: the
-    # differ then mis-emits an inbound CREATE which would materialise a duplicate
-    # local ticket. If the target Jira key is already bound, record the mapping
-    # and skip materialisation. Cheap (local reverse-index lookup, no Jira GET).
+    # If a binding exists before its label appears in the snapshot, record the
+    # mapping and skip a duplicate local CREATE.
     if binding_store is not None:
         bound_local_id = binding_store.get_local_id(jira_key)
         if bound_local_id:
@@ -136,12 +109,9 @@ def _apply_inbound_create(
 
 
 def _apply_inbound_update(mutation, *, repo_root=None, **_kwargs) -> ApplyResult:
-    """Apply a remote-side update to an existing local jira-* ticket.
+    """Write local EDIT and optional STATUS events for a Jira update.
 
-    Writes one EDIT event with the changed fields, plus an additional STATUS
-    event when the payload includes a Jira status change. Unknown ticket
-    directories are tolerated (the EDIT is still written; the reducer will
-    surface fsck on the next read).
+    Unknown ticket directories are tolerated; the reducer checks them later.
     """
     mut_mod = _load_mutation_module()
     _direction_guard(mutation, mut_mod.MutationDirection.inbound)
@@ -151,11 +121,7 @@ def _apply_inbound_update(mutation, *, repo_root=None, **_kwargs) -> ApplyResult
     # and payload with top-level field keys (differ Mutation shape).
     fields = payload.get("fields") or payload
     target = mutation.target
-    # Bug 1bb2: prefer payload['local_id'] (set by reconcile.py for bound
-    # tickets) over Jira-key-derived local_id. Without this, EDIT events
-    # for a bound UUID ticket are written under a new jira-dig-NNN/
-    # directory — creating a duplicate ticket and silently dropping the
-    # update on the bound UUID ticket.
+    # Prefer the bound local ID over a Jira-derived ID to avoid a duplicate.
     local_id = payload.get("local_id") or (
         target if target.startswith("jira-") else _jira_key_to_local_id(target)
     )
@@ -223,20 +189,10 @@ def _apply_inbound_repair_property(
 
 
 def _apply_inbound_conflict(mutation, **_kwargs) -> ApplyResult:
-    """Emit a ``suppress_pair`` follow-on and a ``pending_bug_ticket`` directive
-    for an unresolved (local, Jira) conflict.
+    """Return pair suppression and a deferred conflict bug directive.
 
-    Bug filing is DEFERRED out of the apply loop because the
-    ``rebar create bug`` CLI commits to the ``tickets``
-    orphan branch, which would advance HEAD inside ``_apply_batch``'s
-    drift-guarded loop and raise a spurious ``HeadDriftError`` (bug d822).
-    The caller (``apply``) collects pending_bug_ticket directives during the
-    inbound dispatch loop and files them after ``_apply_batch`` returns —
-    outside the drift guard's scope.
-
-    The follow_on still emits during the leaf so reconcile_once can drop
-    subsequent mutations for the same pair in the same pass; suppression
-    semantics are unchanged.
+    The caller files the bug after the HEAD-guarded batch to avoid drift;
+    same-pass suppression still applies immediately.
     """
     mut_mod = _load_mutation_module()
     _direction_guard(mutation, mut_mod.MutationDirection.inbound)
@@ -281,33 +237,11 @@ def _apply_inbound_conflict(mutation, **_kwargs) -> ApplyResult:
 
 
 def inbound_repair_property(mutation, client: TicketTransport) -> dict:
-    """Repair a missing entity property on a Jira issue.
+    """Write the missing Jira ``local_id`` property and return its outcome.
 
-    Happy path: invokes ``client.set_issue_property(target, 'local_id', local_id)``
-    and returns ``{'status': 'ok', 'key': target}``.
-
-    Failure path: when ``set_issue_property`` raises, attempts a follow-on cleanup
-    via ``client.remove_label(target, 'rebar-id-<local_id>')`` (best-effort — a
-    ``remove_label`` exception is captured, NOT raised), and returns an outcome
-    dict with ``status='repair_property_failed'`` plus a top-level ``follow_on``
-    payload whose ``kind`` is ``'schema_drift_signal'``. The follow-on is the
-    signalling seam consumed by reconcile.py; this function MUST NOT import
-    invariants directly — preserving the invariants-as-upstream-phase contract
-    (see ticket 44e6-4916 AC: "applier.py does NOT import invariants").
-
-    The follow_on field sits at the TOP LEVEL of the outcome dict (not nested
-    under 'result'); manifest canonical-form serialization is expected to
-    EXCLUDE follow_on fields when computing the content-addressable hash
-    (per AC amendment G2 on ticket 44e6-4916).
-
-    Args:
-        mutation: Object exposing ``.target`` (Jira issue key) and ``.payload``
-                  (mapping with at least a ``'local_id'`` entry).
-        client:   AcliClient (or compatible test double) exposing
-                  ``set_issue_property`` and ``remove_label``.
-
-    Returns:
-        Outcome dict — see status taxonomy above.
+    On failure, attempt label cleanup and return ``repair_property_failed``
+    with a top-level ``schema_drift_signal`` follow-on. Cleanup errors are
+    recorded in-band. The manifest excludes follow-ons from its content hash.
     """
     target = mutation.target
     payload = mutation.payload or {}

@@ -1,34 +1,11 @@
 #!/usr/bin/env python3
-"""Per-action mutation handlers for the legacy outbound batch path.
+"""Handle each legacy outbound batch action using injected transport.
 
-``applier._apply_batch`` is the *sequencer*: HEAD-drift recheck loop → dispatch →
-record → manifest-write tail. This module owns the *per-action orchestration*
-that wraps the ``batch_dispatch`` Jira-call primitives, one handler per
-``MutationAction``:
-
-    - ``handle_create`` — REST-budget counting + swallowed-comment surfacing
-      around ``create_one``.
-    - ``handle_update`` — the assignee-unresolved per-mutation soft-fail, the
-      sub-op (labels/comments/links) telemetry, the bug-3f04 silent-no-op
-      canary, and set-valued-field provenance, around ``update_one``.
-    - ``handle_delete`` — ``delete_one`` (already-gone tolerance lives in the
-      primitive).
-    - ``handle_unknown`` — the legacy unrecognised-action error outcome.
-
-All three dispatching handlers share ONE stale-binding-404 soft-fail
-(``_soft_fail_stale_binding_404``, bug 449f-f9bf-be90-47fe): a Jira ``404`` on any
-outbound mutation is per-mutation, never pass-fatal; every other ``HTTPError``
-still propagates fail-fast through ``batch_dispatch._dispatch_with_backstop``.
-
-Each handler takes the per-pass :class:`BatchApplyContext` plus a single mutation
-dict and returns a :class:`HandlerResult` the sequencer appends to the manifest.
-
-Transport is *injected*: the sequencer resolves the AcliClient transport through
-``applier._load_acli`` (the seam the tests patch, now returning the configured
-backend's transport directly — S4) and hands it to the handlers on the context;
-the handlers never resolve transport themselves. This
-module imports only *downward* (batch_dispatch / pass_io); it never imports
-``applier``, so the sequencer can import the handlers back without a cycle.
+The applier sequences HEAD checks, dispatch, and manifest writes. These handlers
+wrap create/update/delete primitives, record per-mutation outcomes, and share a
+stale-binding-404 soft-fail; other HTTP errors propagate. Each takes a
+``BatchApplyContext`` and returns a ``HandlerResult``. Downward imports avoid an
+applier import cycle.
 """
 
 from __future__ import annotations
@@ -253,24 +230,10 @@ def handle_create(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
 
 
 def _rich_cutover_active() -> bool:
-    """Whether ANY client is cut over to the rich-text wire (story 3388).
+    """Read rich-text cutover at call time; fail closed on absent config.
 
-    Reads ``reconciler.rich_text_cutover`` at CALL time, never at import, so
-    flipping the flag needs no redeploy. Fails CLOSED — an unreadable or absent
-    config, or a ``rebar`` package that is not importable at all (the engine ships
-    as stdlib-only subprocess package data), all answer False — so a config fault
-    can never silently switch this on.
-
-    This deliberately does NOT call ``adapters.jira_family.rich_text.
-    cutover_clients``, which answers the same question for the codecs. Core must
-    not import the vendor package: the dependency direction is one-way (concrete
-    backends import ``jira_family``; it never imports core back), and
-    ``config.local_to_jira_status`` documents the same choice for the status map —
-    a second independent read, kept honest by a PARITY TEST rather than by an
-    import that would invert the layering.
-
-    With the flag off (the default) every caller below is skipped, so the
-    plain-wire behaviour is byte-identical to before the cutover shipped.
+    Core reads its own config to avoid importing the vendor codec package.
+    A parity test keeps the 2 reads aligned. The default remains plain wire.
     """
     try:
         from rebar.config import ConfigError, compose_config
@@ -279,50 +242,19 @@ def _rich_cutover_active() -> bool:
     try:
         return compose_config().reconciler.rich_text_cutover in ("cloud", "dc", "both")
     except (ConfigError, AttributeError):
-        # AttributeError is in the set deliberately: the engine is loaded as package
-        # data and can run against a rebar whose config predates this key, and callers
-        # substitute partial config objects. Failing closed over a missing field beats
-        # taking the apply path down over one we can default.
+        # Older or partial configs can lack this field; keep plain wire.
         return False
 
 
 def _observe_rich_reemit(
     ctx: BatchApplyContext, local_id: str, jira_key: Any, fields_synced: dict
 ) -> None:
-    """Bound a non-converging rich-text body with ONE post-push GET.
+    """Observe repeated rich-text wire output with one post-push GET.
 
-    The DC codec is one-way and lossy, so a body is not guaranteed to reach a
-    codec fixed point: the differ can decide the local body still differs from the
-    baseline, push an identical wire, and decide the same thing again next pass.
-    Nothing in the plain-wire design detects that, because under a lossless codec
-    it cannot happen.
-
-    So each CONFIRMED description push is recorded against the binding
-    (``peer_state.note_rich_emit``), and when the same wire has gone out
-    ``RICH_REEMIT_OBSERVE_AT`` times in a row this reads the body back ONCE and
-    overlays what Jira actually stored onto the fields this mutation synced. That
-    overlay reaches the baseline the way every other confirmed write does — as a
-    ``synced_fields`` entry consumed by ``reconcile._advance_baselines``, which
-    calls ``binding_store.merge_baseline``. **This function never writes a
-    baseline itself**; ``_advance_baselines`` remains the sole baseline writer, and
-    that invariant is why the observation is expressed as an overlay rather than a
-    direct ``set_baseline`` here.
-
-    Fail-open throughout: a missing binding, a store predating the fields, or a
-    failed GET leaves the pushed value in place, which is exactly today's
-    behaviour. The cost is bounded to one extra REST call per divergence episode
-    (the threshold is an equality, so the episode does not re-charge every pass).
-
-    The record goes through ``binding_store.note_rich_emit`` — the store's NAMED door
-    onto this state (RP-02 S2 T3 ``morose-selfaware-unicorn``) — and not through
-    ``all_bindings()``. That query is READ-shaped: it hands back a fresh outer mapping
-    whose inner entries are still the live ones, so reaching an entry through it in
-    order to write was an unowned write seam, a mutation the store never saw and could
-    therefore enforce no invariant on. The operation returns the consecutive-push count,
-    or ``None`` when the local id is unbound — deliberately distinct from ``0`` ("first
-    push"), so the single equality below handles the missing binding and the
-    below-threshold case in one expression without letting ``None`` through. It saves
-    nothing of its own; durability comes from the pass's later unconditional store save.
+    A lossy codec can keep emitting the same wire. Count confirmed pushes through
+    ``note_rich_emit``; at the threshold, overlay Jira's stored description onto
+    ``synced_fields`` for the later baseline advance. Missing bindings or failed
+    GETs leave the pushed value. This function never writes the baseline.
     """
     wire = fields_synced.get("description")
     if wire is None or ctx.binding_store is None or not _rich_cutover_active():
@@ -399,23 +331,13 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     soft-fail, sub-op telemetry, silent-no-op canary, and provenance contracts.
     """
     outcome = dict(mutation)
-    # Bug 17b5-dda4-6662-4616: AssigneeNotFoundError (raised by
-    # client.update_issue's Phase A pre-validation when the local assignee
-    # doesn't map to a real Jira account, e.g. 'Worktree' git-config default)
-    # was killing the entire batch because the surrounding try-block only
-    # handles HeadDriftError. Soft-fail this mutation: record an alert, mark
-    # outcome error, and continue with the rest. Mirrors the existing
-    # 400-illegal-transition fallback in update_one and the BRIDGE_ALERT pattern
-    # in create_one.
+    # Soft-fail an unresolvable assignee with an alert and continue the batch.
     # Bug 6afc-20ee-84e5-4dd5: collect any add_comment failures so a swallowed
     # comment sub-mutation surfaces in the batch outcome rather than reporting a
     # clean error=None.
     _comment_errors: list[str] = []
     _subop: dict[str, int] = {}
-    # Bug e6e9: filled by update_one ONLY if the scalar write completed. Every arm below
-    # that soft-fails the mutation returns before the record at the bottom, and the
-    # record_backstop_failure path never reaches this function's tail at all, so a
-    # mutation that did not land contributes nothing to the baseline advance.
+    # Only a completed scalar write supplies fields for baseline advance.
     _fields_synced: dict[str, Any] = {}
     _link_confirm = _make_link_confirm(mutation, ctx)
     try:
@@ -467,10 +389,7 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
         outcome["error"] = f"assignee-unresolved: {exc!s}"
         return HandlerResult(outcome, soft_failed=True)
     outcome["result"] = result
-    # Bug e6e9: record what this mutation actually SYNCED, for the ADR-0026 baseline
-    # advance. Reached only past every soft-fail return above, and _fields_synced is
-    # itself empty unless client.update_issue completed — two independent gates, so
-    # "the pass ran" can never be mistaken for "the write landed".
+    # Record confirmed fields for baseline advance after soft-fail exits.
     _local_id = mutation.get("local_id")
     if _local_id and _fields_synced:
         ctx.synced_fields.setdefault(str(_local_id), {}).update(_fields_synced)
@@ -486,20 +405,12 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
         # the silent-no-op canary below ALSO fires, it augments (does not silently
         # replace) this reason.
         outcome["error"] = f"comment-errors: {'; '.join(_comment_errors)}"
-    # Story E (2359): sub-op telemetry — surface per-kind APPLIED counts on the
-    # structured outcome (parity with apply_inbound's links_applied), so a
-    # link/comment/label that silently no-ops is queryable, not only logged.
+    # Expose applied label/comment/link counts in the structured outcome.
     outcome["labels_applied"] = _subop.get("labels_applied", 0)
     outcome["comments_applied"] = _subop.get("comments_applied", 0)
     outcome["links_applied"] = _subop.get("links_applied", 0)
-    # Silent-no-op canary: a kind with sub-ops COMPUTED (post-dedup) but ZERO
-    # applied is exactly the bug-3f04 link-drop failure mode — it would otherwise
-    # pass green with error=None. computed is counted post-dedup, so an
-    # idempotent re-sync (everything deduped) is computed==0 and does NOT fire.
-    # NOTE: this is a TOTAL-no-op detector (applied==0) per the AC's
-    # `computed > 0 && applied == 0` invariant — a PARTIAL drop (e.g. 2 links
-    # computed, 1 applied) does not fire; a finer per-sub-op threshold is
-    # deliberately out of scope (YAGNI).
+    # Flag a kind with computed post-dedup work but zero applied actions.
+    # Fully deduplicated work and partial drops do not trigger this canary.
     _silent = [
         kind
         for kind in ("labels", "comments", "links")
@@ -581,19 +492,10 @@ def dispatch_mutation(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
 def record_backstop_failure(
     mutation: dict, exc: Exception, action: str, ctx: BatchApplyContext
 ) -> HandlerResult:
-    """Per-mutation failure backstop, shared with the applier's dispatch loop.
+    """Record an unhandled per-mutation error and alert without aborting the pass.
 
-    Generalizes the enumerated soft-fails above (400-comment / 404 / assignee /
-    gone-delete): a mutation whose dispatch raised an *unhandled* exception — e.g.
-    ``acli.transition_issue_by_name`` raising a bare ``RuntimeError`` for an
-    unreachable Jira transition — is recorded as a per-mutation failure (a
-    ``bridge_alerts`` entry + an outcome carrying an ``"error"`` key, which counts as
-    a ``mutation_failure`` in reconcile's manifest tally) instead of propagating and
-    aborting the whole pass. The caller re-raises the control-flow / fail-fast
-    contracts (HeadDriftError / RescheduleError / HTTPError) before reaching here, so
-    only genuine per-mutation failures land in this backstop. Since bug
-    449f-f9bf-be90-47fe every handler soft-fails a 404 itself, so the HTTPError that
-    reaches the caller's re-raise arm is always a non-404 one.
+    The caller re-raises control-flow and HTTP errors before this backstop.
+    Handlers already soft-fail target 404s.
     """
     key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
     _load_alert_store().append(

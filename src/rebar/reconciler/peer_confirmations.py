@@ -1,47 +1,12 @@
-"""Durable per-link PEER-CONFIRMATION records (epic a4bd, story 248f).
+"""Durable evidence that a peer has seen each relation-scoped link.
 
-WHY THIS EXISTS. ``managed_refs`` (``rebar.reducer._managed_refs``) marks a ref
-managed the instant it is created LOCALLY, and is strictly monotonic. So the
-inbound removal path's managed check (G3) proves "we own this ref", NOT "we ever
-pushed it to the peer" — a brand-new never-pushed local link and a link the peer
-genuinely deleted are state-indistinguishable. G4 (the same-pass outbound-ADD
-suppression) covers that blind spot only when the outbound differ emits the
-re-ADD, and ``outbound_links._diff_links`` dedups ADDs direction-agnostically on
-``(vendor_type, target_key)`` — "intentionally NOT deduped on relation" — so a
-local link whose vendor type collides with a remote link in the OTHER direction
-is never pushed AND never G4-protected.
-
-This store is the missing discriminator: it records, per link, the EVIDENCE that
-the peer has actually seen it. The rule the epic fixes is that absence may delete
-only something previously proven synchronized; an unqualified missing link is
-never deletion evidence.
-
-WHY A FULL RECORD, NOT A BOOLEAN. A boolean cannot say which side created the
-link, which vendor link id it carries, or which read confirmed it — and the
-completeness tracking the snapshot path needs (a partial read is NON-evidence) is
-impossible without that provenance. Jira exposes deletion as an explicit event
-keyed by a stable link id, so retaining the id keeps the evidence strong enough
-for bidirectional reconciliation.
-
-WHY A ``.bridge_state`` SIDECAR AND NOT REDUCER STATE. The record carries the
-VENDOR link id and is peer-derived, whereas ``_managed_refs`` is deliberately
-provider-agnostic (LOCAL ids only, so the primitive is reusable for Linear or
-GitHub). Putting vendor ids into ticket ``compiled_state`` would break that and
-would emit a ticket event — auto-committed and auto-pushed to the ``tickets``
-branch — on every outbound link push. Every other peer-derived fact (binding
-baselines, ``peer_parent``) already lives in ``.bridge_state``. Ticket-log
-SNAPSHOT compaction cannot touch a sidecar, so the record survives it trivially.
-
-KEYED ON LOCAL IDS, RELATION-SCOPED. ``(source_local_id, target_local_id,
-relation)`` matches the reader — ``apply_inbound_records._inbound_unlink_one``,
-relation-scoped since e39f — and ``impossible_links.record_key``. The outbound
-ADD dedup key ``(vendor_type, target_key)`` is deliberately NOT used: it is
-direction-agnostic and not relation-keyed, so it cannot express the granularity
-the removal decision needs.
-
-FAIL-OPEN, NEVER FAIL-CLOSED. A corrupt or absent store degrades to "nothing
-confirmed" rather than raising, matching ``bindings-retired.json`` and NOT
-``bindings.json``. Losing the evidence must never break a sync pass.
+``managed_refs`` proves local ownership, not peer delivery. Removal requires
+a prior push, authoritative snapshot, or marked upgrade backfill; absence alone
+is not deletion evidence. Records retain source, vendor link ID, and provenance,
+keyed by ordered local IDs and relation. Peer-derived data lives in
+``.bridge_state`` so reducer state stays provider-agnostic and ticket events do
+not churn. Missing or corrupt evidence degrades to unconfirmed without stopping
+the sync pass.
 """
 
 from __future__ import annotations
@@ -83,12 +48,10 @@ def record_key(source_id: str, target_id: str, relation: str) -> str:
 
 
 class PeerConfirmationStore:
-    """Read/modify/write access to the durable peer-confirmation records.
+    """Load peer evidence eagerly and write only changed records.
 
-    Loads eagerly and writes only when something actually changed, so a
-    converged pass touches the file zero times. A corrupt or unreadable store
-    degrades to empty rather than raising (see the module docstring): the
-    evidence is a safety optimisation, never a precondition for running a pass.
+    Corrupt or unreadable evidence degrades to an empty store, keeping the
+    sync pass available.
     """
 
     def __init__(self, tracker_dir: str) -> None:
@@ -152,22 +115,11 @@ class PeerConfirmationStore:
         direction: str = DIRECTION_OUTBOUND,
         source_kind: str = SOURCE_PUSH,
     ) -> None:
-        """Record that the peer carries this link, with the evidence that proves it.
+        """Record material confirmation evidence without per-pass churn.
 
-        ``link_id`` is the vendor's stable link id when the transport supplies
-        one. Backends may legitimately return none; a missing id is stored as
-        ``None`` and is NOT a failure — the record still proves synchronization.
-
-        CHANGE-GATED, NEVER A PER-PASS TIMESTAMP (bug 266c, epic 0303 churn
-        discipline — see ``peer_state.note_rich_emit``). The record carries only
-        MATERIAL evidence: the identity/decision fields plus ``first_confirmed_at``
-        (set once, then preserved). Re-recording byte-identical evidence — which
-        snapshot reconfirmation does for every observed link on every pass — leaves
-        the record untouched and does NOT set ``_dirty``, so a converged pass
-        rewrites the full sidecar zero times. Deliberately dropped: the former
-        ``confirmed_pass`` / ``confirmed_at`` per-pass fields, which had no
-        production reader (only tests asserted them) and refreshed every pass,
-        rewriting the whole file over unchanged link evidence.
+        A backend may omit its stable ``link_id`` without invalidating the
+        confirmation. ``first_confirmed_at`` is preserved; identical evidence
+        does not dirty or rewrite the sidecar.
         """
         key = record_key(source_id, target_id, relation)
         previous = self._records.get(key) or {}
@@ -207,30 +159,12 @@ def confirm_from_snapshot(
     curr_snapshot: Any,
     binding_store: Any,
 ) -> int:
-    """Confirm links OBSERVED in an authoritative fetched snapshot. Returns the count.
+    """Confirm observed links from authoritative snapshots; return their count.
 
-    The second, independent evidence source: a link present on the peer is proven
-    synchronized even if this clone never pushed it (peer-created links, links
-    pushed before this store existed, links pushed by another clone).
-
-    COMPLETENESS IS THE WHOLE CONTRACT. A partial, paginated, failed or stale read
-    is NON-EVIDENCE — it can neither confirm nor deny. We do not invent a signal for
-    that: ``fetcher.merge_issuelinks_map`` already writes the per-issue
-    ``issuelinks`` key ONLY on an authoritative read, so an ABSENT key means
-    unobserved (truncated page walk, HTTP 410, failed enrichment, a backend with no
-    ``get_issuelinks_map``) and ``[]`` means authoritatively-empty. Hence the
-    ``"issuelinks" in entry`` membership test below — ``entry.get("issuelinks") or
-    []`` would collapse observed-empty into unobserved, the exact trap
-    ``inbound_differ``'s G1 docstring warns against. A stalled pager never reaches
-    here at all: ``BackendPaginationStallError`` re-raises rather than degrading.
-
-    MONOTONIC AND ADDITIVE. Observing a link confirms it; NOT observing one never
-    un-confirms. There is deliberately no un-confirmation path — reintroducing
-    "absence is evidence" is precisely the failure this epic exists to remove.
-
-    ``resolve_inbound_link`` is used per raw entry rather than ``observed_peer_deps``
-    because the latter returns only ``(relation, target)`` and DISCARDS the vendor
-    link id this record must persist.
+    Only an entry with an ``issuelinks`` key is observed; an absent key marks an
+    incomplete read, while ``[]`` is authoritatively empty. Confirmation is
+    additive and never revoked by absence. Resolve raw links to retain vendor
+    IDs that ``observed_peer_deps`` discards.
     """
     from rebar.reconciler.link_direction import resolve_inbound_link
 
@@ -270,29 +204,12 @@ def backfill_from_managed_refs(
     local_tickets: Any,
     binding_store: Any,
 ) -> int:
-    """Grandfather pre-upgrade managed links as confirmed. Returns the count written.
+    """Grandfather managed links once when the sidecar file is absent.
 
-    WHY THIS IS REQUIRED, not a nicety. The removal path declines any link with no
-    confirmation record. On the FIRST run after this feature ships the store is
-    empty, so without a backfill every legitimate peer deletion would be declined —
-    a worse regression than the blind spot the epic set out to close. Grandfathering
-    trades a one-time assumption for that.
-
-    THE ASSUMPTION IS MARKED, not hidden. Records carry ``source="backfill"`` and
-    ``direction="backfill"`` so an operator can always separate assumed evidence from
-    proven evidence. It is deliberately NOT distinguished at the decision point —
-    treating backfill as weaker there would re-open the blind spot for every
-    pre-upgrade link, which is precisely what grandfathering exists to prevent.
-
-    ONE-SHOT ON FILE ABSENCE, not on emptiness (``store.was_absent``): an operator who
-    deliberately emptied the store must not have it silently repopulated next pass.
-
-    NEVER DOWNGRADES. ``record()`` overwrites its key unconditionally, so this must
-    read before writing and skip any key that already holds a record. An existing
-    ``push`` or ``snapshot`` entry is strictly stronger evidence than a grandfather
-    assumption, and clobbering it would lose the vendor link id and the confirming
-    pass. The reverse direction needs no code: a later real confirmation overwrites a
-    backfilled entry by that same unconditional behaviour, so provenance upgrades.
+    Mark assumptions as ``backfill`` so they remain distinguishable from push
+    or snapshot evidence. An empty existing file does not trigger backfill, and
+    existing stronger records are never overwritten. Later real confirmation
+    may replace an assumed record.
     """
     from rebar.reducer._managed_refs import managed_ref_set
 
@@ -324,16 +241,9 @@ def backfill_from_managed_refs(
 
 
 def open_store_or_none(repo_root: Any) -> PeerConfirmationStore | None:
-    """The store, or ``None`` when it cannot be opened.
+    """Open the store, or return ``None`` to retain pre-confirmation removal behavior.
 
-    Mirrors ``apply_inbound_records._open_impossible_link_store``. ``None`` disables
-    the removal-decline check for the whole pass and restores exactly the pre-a4bd
-    behaviour: the evidence is an optimisation of SAFETY, never a precondition for
-    applying a removal. Failing closed here would be worse than the blind spot — an
-    unreadable sidecar would freeze inbound removal convergence entirely.
-
-    It lives here rather than in ``apply_inbound_records`` because that module is
-    within 50 lines of the 800-line cap.
+    Unreadable sidecar evidence must not halt inbound convergence.
     """
     try:
         return open_store(repo_root)

@@ -1,41 +1,10 @@
-"""Byte-preserving persistence owner for binding state (RP-02 S1).
+"""Persist live, retired, rotation, and alert files for Jira bindings.
 
-``BindingRepository`` is the SOLE owner of the four files the Jira binding subsystem
-keeps on disk:
-
-* live      ``<tracker_dir>/.bridge_state/bindings.json``
-* retired   ``<tracker_dir>/.bridge_state/bindings-retired.json``
-* rotation  ``<tracker_dir>/.bridge_state/get_rotation.json`` (the GET-rotation sidecar)
-* alerts    ``<repo_root>/.rebar/bridge/bridge_alerts/*.jsonl`` (best-effort lifecycle log)
-
-It owns *persistence only*. Lifecycle policy — bind/confirm/retire/tombstone/comment
-bookkeeping — stays with its current owner, which mutates the dictionaries this class
-hands out and then calls :meth:`save`. That is why the views below are OPEN views over
-the ORIGINAL dictionaries rather than copies: a defensive copy here would silently
-discard every in-place write those owners make.
-
-Three deliberate asymmetries, each load-bearing:
-
-* **The live store fails CLOSED.** An unparseable ``bindings.json`` (typically git
-  conflict markers from a tickets-branch merge) raises rather than degrading to an
-  empty store. An empty store would report every ticket as unbound, so the very next
-  outbound pass would re-create every issue in Jira — an irreversible mass-duplicate
-  write. Aborting the pass is reversible; duplicating Jira issues is not.
-* **The retired store fails OPEN.** A retired binding wrongly treated as live costs one
-  wasted GET (it re-404s and re-retires), never a duplicate write, so a corrupt retired
-  file degrades to an empty set plus a deduped alert.
-* **The rotation sidecar fails OPEN.** Rotation is an optimization; losing its history
-  costs a bounded extra GET. A failed sidecar write must not abort the save, and the
-  legacy inline ``last_get_pass`` floor is then RETAINED — it is only scrubbed from the
-  live entries once the sidecar durably holds the stamp.
-
-Alerting is best-effort by the same logic: any failure inside :meth:`alert` is swallowed
-so observability can never break a sync pass.
-
-Deliberately NOT claimed: multi-file atomicity, a journal or write-ahead log, format
-migration, an eager rewrite on load, deep-copied views, tickets-branch publication, or
-write elision. :meth:`save` is UNCONDITIONAL — it always attempts rotation persistence
-before replacing live state, even when nothing changed in memory.
+Lifecycle owners mutate this repository's live dictionaries in place, then save.
+Corrupt live state raises to prevent mass duplicate creates; retired and rotation
+state degrade with alerts or retained legacy stamps. Alerts are best effort.
+``save`` attempts rotation persistence before replacing live state, even when
+memory has not changed.
 """
 
 from __future__ import annotations
@@ -120,20 +89,10 @@ class BindingRepository:
     """Sole owner of the live, retired, rotation, and alert binding-state files."""
 
     def __init__(self, tracker_dir: Path) -> None:
-        """Load binding state from ``tracker_dir``. READS ONLY — never writes.
+        """Read binding state without creating files or rewriting unknown fields.
 
-        Construction must not materialize or rewrite anything: an eager rewrite would
-        churn the tickets branch on every pass and, worse, would re-serialize a store
-        that a newer rebar may have written with fields this build does not understand,
-        before a single thing has changed. ``.bridge_state`` is therefore not created
-        here either; the first :meth:`save` creates it.
-
-        Load order matters. The rotation sidecar is read and then merged with the legacy
-        inline stamps found in the live store, so a store written before the sidecar
-        existed still contributes its rotation floor. The retired-locals reverse index
-        ({local_id: jira_key}) is derived once here so the outbound differ can ask "was
-        THIS local ticket confirmed-deleted?" without re-reading the retired file per
-        unbound ticket.
+        Merge sidecar and legacy rotation stamps, then derive the retired local
+        reverse index once for later lookups. The first save creates the directory.
         """
         self._path = tracker_dir / ".bridge_state" / "bindings.json"
         self._retired_path = self._path.with_name("bindings-retired.json")
@@ -218,12 +177,7 @@ class BindingRepository:
         return self._retired
 
     def retired_locals(self) -> dict[str, str]:
-        """The retired file's ``{local_id: jira_key}`` reverse index, as read at load.
-
-        Retirement UNBINDS the local ticket, so by the time the outbound differ sees it
-        there is no live key to look up; this index is the only thing that distinguishes
-        "was paired with a confirmed-deleted issue" from "never bound at all".
-        """
+        """Return the loaded local-to-retired-Jira-key index."""
         return self._retired_locals
 
     def retired_entries(self) -> dict[str, Any]:
@@ -301,13 +255,7 @@ class BindingRepository:
     # -- loading -----------------------------------------------------------
 
     def _load(self) -> dict[str, Any]:
-        """Load the live store. FAILS CLOSED on corruption.
-
-        An absent file is a legitimate first-ever pass and yields a fresh empty store
-        (deep-copied from the template). An UNPARSEABLE file is not: degrading it to an
-        empty store would report every ticket as unbound and mass-duplicate them in
-        Jira, so this raises ``ValueError`` naming the file and the recovery route.
-        """
+        """Load live state, or a fresh empty store if absent; raise on corruption."""
         if self._path.exists():
             try:
                 with open(self._path, encoding="utf-8") as handle:

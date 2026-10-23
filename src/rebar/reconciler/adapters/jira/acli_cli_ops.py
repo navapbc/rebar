@@ -44,21 +44,10 @@ def _verify_created_issue(
     client: Any = None,
     call_timeout: float | None = None,
 ) -> dict[str, Any]:
-    """Parse ACLI create output, verify the issue exists, and return it.
+    """Parse ACLI create output and verify the issue exists.
 
-    Uses direct REST GET (immediately consistent) instead of JQL search,
-    which is subject to Jira Cloud's eventual-consistency index lag.
-
-    Credentials for the REST GET come ONLY from the explicit *client*
-    (AcliClient), never from ``os.environ`` (bug 7689). Reading ambient env
-    here made create-path test behaviour depend on whatever JIRA_* variables
-    happened to be set in the developer/CI process — tests that mocked only
-    ``subprocess.run`` silently switched to the urllib REST path. With the
-    credential source pinned to the caller's client, behaviour is determined
-    solely by what the caller passes: a client carrying creds → REST GET
-    (production: ``AcliClient.create_issue`` forwards ``client=self``, whose
-    creds are read from the environment at construction); no client / no creds
-    → the deterministic subprocess ``get_issue`` path.
+    An explicit client with credentials enables immediate REST GET verification;
+    otherwise use the ACLI search path. Ambient credentials are never read here.
     """
     created = json.loads(stdout)
     jira_key = created.get("key", "")
@@ -120,28 +109,10 @@ def _extract_parent_key(raw: Any) -> str | None:
 
 
 def _attach_parent_guarded(client: Any, child_key: str, parent_key: str) -> None:
-    """Attach *child_key* under *parent_key* via ``client.set_parent``, guarded.
+    """Attach a parent, logging and recording HTTP 400 hierarchy rejection.
 
-    Hierarchy guard (ticket 8b25): on this next-gen project only an Epic may be
-    a parent — a Task→Task reparent is rejected by Jira with HTTP 400 (and a
-    misleading "same project" message). Any HTTP 400 from the parent op is
-    treated as a hierarchy rejection: log a WARNING and continue the pass
-    (generic 400-skip — also covers Epic-as-child and other unmet hierarchy
-    constraints without bespoke probing). Non-400 errors propagate.
-
-    The 400 arm ALSO records a ``bridge_alerts`` entry (ticket 8390), the same
-    ``outbound-parent-rejected`` record ``dispatch_one`` writes for the identical
-    shape. This is the only path where Jira ACTIVELY REJECTED the parent and rebar
-    still reports the create as successful, so warn-and-continue alone left the
-    divergence with no durable, operator-visible trace. ``local_id`` is ``None``
-    because the transport boundary does not carry it. ``record_parent_divergence``
-    is fail-open by construction, so this cannot cost a create that would otherwise
-    land, and the 400 is still swallowed exactly as before.
-
-    The import is ABSOLUTE and function-scope: this module is also loaded by file
-    path (the ``_load`` / ``_load_sibling`` convention used across the reconciler),
-    where a relative import raises ``ImportError`` — which would escape here and
-    abort a create that had already succeeded on the tracker.
+    Other errors propagate. The alert omits ``local_id`` because this transport
+    has none. Use an absolute local import for by-path module loading.
     """
     import logging as _logging
 
@@ -343,33 +314,13 @@ def _create_issue_from_json(
     call_timeout: float | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """Create a Jira issue using ``--from-json`` to set priority.
+    """Create via ``--from-json`` so ACLI can set priority.
 
-    ACLI's ``workitem create`` does not have a ``--priority`` flag, but
-    the ``--from-json`` path accepts ``additionalAttributes`` which maps
-    directly to Jira REST API fields. Priority requires
-    ``{"name": "<Jira priority name>"}`` in the ACLI payload.
-
-    Accepted ``priority`` input shapes (all normalized to a name string before
-    payload assembly):
-      - ``int`` (0-4): mapped through ``_LOCAL_PRIORITY_TO_JIRA`` (e.g., 1 -> "High").
-      - ``dict``: Jira REST-shape priority object (the reconciler's differ
-        propagates this verbatim from fetcher snapshots). ``.get("name")`` is
-        preferred; if absent, falls back to ``.get("id")`` mapped through the
-        reverse of ``_LOCAL_PRIORITY_TO_JIRA``; if both absent, defaults to
-        ``"Medium"``. See bug 5010-1c6a-9387-4b5b.
-      - ``str``: passed through verbatim (caller-supplied Jira priority name).
+    Integer priorities use the local map; dict priorities prefer ``name`` then
+    reverse-map ``id``. Unmapped integers and dicts without a truthy name or
+    mapped ID use Medium; strings pass through unchanged.
     """
-    # Convert priority to a Jira priority name.
-    # - Integer (0-4): map through _LOCAL_PRIORITY_TO_JIRA.
-    # - Jira REST-shape dict ({"name": ..., "id": ..., "iconUrl": ..., "self": ...}):
-    #   extract .name, falling back to a reverse-id lookup. The reconciler's
-    #   differ propagates Jira's snapshot priority dict verbatim (fetcher.py
-    #   → differ.py → applier.py → client.create_issue), so this branch is
-    #   load-bearing — without it, str(<dict>) produces a Python-repr that
-    #   ACLI rejects with "The priority selected is invalid"
-    #   (bug 5010-1c6a-9387-4b5b).
-    # - String: use as-is.
+    # Normalize integer or REST-dict priorities to Jira names; keep strings.
     if isinstance(priority, int):
         jira_priority_name = _LOCAL_PRIORITY_TO_JIRA.get(priority, "Medium")
     elif isinstance(priority, dict):
@@ -425,26 +376,10 @@ def _create_issue_from_json(
 
 
 def update_priority(jira_key: str, priority_name: str) -> None:
-    """Update priority on a Jira issue via REST PUT.
+    """PUT priority through REST; log and skip when credentials are incomplete.
 
-    ACLI does not support priority edit — uses direct REST API:
-    PUT /rest/api/3/issue/{key} with {"fields":{"priority":{"name":"..."}}}
-    Probe-validated: returns 204 on success.
-
-    **Credential resolution differs from the ACLI-based siblings in this module.**
-    They spawn ``acli``, which authenticates from its own config file
-    (``acli auth login``) and takes an optional caller-supplied argv prefix
-    (``acli_cmd``). This function spawns nothing, so no argv prefix applies to it —
-    it takes NO ``acli_cmd`` (bug c9c6). It resolves the Jira target itself via
-    :func:`acli_subprocess.resolve_jira_settings`: the non-secret ``url``/``user``
-    come from the typed config (``JIRA_URL``/``JIRA_USER`` env override the
-    ``[tool.rebar.jira]`` file) and the secret ``api_token`` from the environment
-    only. Callers holding their own credentials (an ``AcliClient``) should use the
-    ``AcliClient.update_priority`` method instead, which PUTs with ``self``'s
-    ``jira_url``/``user``/``api_token``.
-
-    Missing any of url/user/token is a logged skip, not a raise — a partially
-    configured environment must not abort the reconcile pass.
+    Unlike ACLI functions, this uses resolved Jira settings. A client with its
+    own credentials uses ``AcliClient.update_priority`` instead.
     """
     _s = acli_subprocess.resolve_jira_settings()
     jira_url, user, api_token = _s.url, _s.user, _s.api_token
@@ -513,34 +448,11 @@ def add_comment(
     acli_cmd: list[str] | None = None,
     call_timeout: float | None = None,
 ) -> dict[str, Any]:
-    """Add a comment to a Jira issue via ACLI.
+    """Add an ACLI comment after fitting text and encoding its wire body.
 
-    emersed-specific-mutt: the Cloud comment path now ADF-encodes the body the
-    same way the description path does, routed through the ``RichTextCodec``
-    contract. Order is load-bearing and mirrors ``AdfCodec.fit_outbound``:
-    FIT THE TEXT FIRST (``fit_outbound`` measures the serialized ADF against
-    Jira's limit), THEN ``json.dumps(to_wire(fitted))``. No plaintext
-    character-cap guard is run on the serialized ADF — its byte
-    length is far longer than the text it measures, so it would slice the JSON
-    mid-structure into a payload ACLI rejects. ``--body`` accepts ADF (confirmed
-    by ``acli jira workitem comment create --help``: "plain text or Atlassian
-    Document Format (ADF)"). The codec is built exactly as
-    ``adapters/jira/backend.py`` builds it, so ``reconciler.rich_text_cutover``
-    (story 3388, ships ``off``) governs rendering.
-
-    Bug 5931-78a3-95d2-44cd: the fit goes through
-    ``outbound_comments.fit_preserving_marker`` rather than ``codec.fit_outbound``
-    directly. The body arriving here is ALREADY decorated with
-    ``RECONCILER_MARKER`` (the loop-breaker the inbound differ looks for), and that
-    marker is the body's LAST characters while every fitter truncates from the
-    RIGHT — so a bare ``fit_outbound`` cut the marker off first and the comment
-    landed unmarked, which made the next inbound pass treat our own echo as a NEW
-    Jira comment and re-mirror it (836 unmarked duplicates accumulated live). The
-    helper truncates the CONTENT and re-appends the decoration instead. It lives in
-    the backend-neutral core beside that decoration and takes the fitter as an
-    injected callable, so it stays vendor-agnostic; passing ``codec.fit_outbound``
-    keeps the size contract, the rich/plain cutover, and the undecorated-value path
-    exactly as they are today.
+    Fit before JSON encoding so size limits apply to the rendered body. The
+    marker-preserving fitter truncates content while retaining the reconciler
+    echo marker at the end; the codec follows the rich-text cutover.
     """
     from rebar.reconciler.adapters.jira.rich_text_codec import AdfCodec
     from rebar.reconciler.adapters.jira_family.rich_text import cutover_clients
@@ -569,25 +481,11 @@ def add_comment(
 
 
 def _parse_comment_created(stdout: str) -> dict[str, Any]:
-    """Normalise ACLI ``comment create --json`` stdout to a COMMENT RESOURCE.
+    """Normalize comment-create output to a comment resource.
 
-    Ticket 3235-8aaf-e288-48f2: ``add_comment`` was the only ``--json`` consumer in
-    this module returning raw ``json.loads`` straight to its caller, handing it
-    ACLI's batch mutation envelope (``{"results": [...], "totalCount": N,
-    "successCount": N}``) while the declared contract and every consumer treat the
-    return as a created comment resource — the gap that shipped bug
-    aa7b-5e47-6d3d-4615 (dedup map never populated; ~205 re-posts/hour).
-
-    - A dict WITHOUT the envelope markers (``results``/``successCount``) is a
-      comment resource (the DC/REST-shaped ``{"id": ...}``) — returned verbatim.
-    - The batch envelope becomes ``{"id": None, "acli_envelope": <parsed>}``: an
-      explicit no-comment-id (ACLI echoes none for the ``comment`` verb), with the
-      envelope preserved under a clearly-named key so ``results[].id`` — the WORK
-      ITEM key, not a comment id — can never be mistaken for one. FAILURE
-      envelopes never reach here: ``_run_acli`` raises ``AcliMutationError`` via
-      ``_check_mutation_failure`` first (bug 44de).
-    - Any other shape raises, mirroring ``_verify_created_issue``'s loud failure,
-      rather than returning a silently-unusable payload.
+    Return a plain resource unchanged. Preserve an ACLI batch envelope under
+    ``acli_envelope`` with ``id=None`` because its result IDs name work items,
+    not comments. Reject other shapes.
     """
     parsed = json.loads(stdout)
     if isinstance(parsed, dict):
@@ -599,14 +497,7 @@ def _parse_comment_created(stdout: str) -> dict[str, Any]:
 
 
 def _parse_acli_comments(parsed: Any) -> list[dict[str, Any]]:
-    """Normalise an ACLI comments response to a flat list of comment dicts.
-
-    ACLI may return a bare list, a wrapped dict with a 'comments' key, or an
-    unrecognised shape (error dict, scalar, None).  All unrecognised shapes
-    intentionally produce [] — callers must not interpret unknown payloads as
-    comment data, and surfacing raw error dicts as comment lists would silently
-    corrupt downstream processing.
-    """
+    """Flatten list or wrapped comments; ignore unknown shapes and non-dicts."""
     if isinstance(parsed, list):
         return [item for item in parsed if isinstance(item, dict)]
     if isinstance(parsed, dict):
@@ -620,20 +511,10 @@ def _parse_acli_comments(parsed: Any) -> list[dict[str, Any]]:
 
 
 def _parse_paginated_comments(stdout: str) -> list[dict[str, Any]]:
-    """Flatten ACLI ``comment list --paginate --json`` output to ALL comment dicts.
+    """Decode concatenated ACLI page objects and flatten their comments.
 
-    With ``--paginate`` ACLI emits ONE JSON object PER PAGE, concatenated (NOT a
-    single document) — verified live: a 5000-comment issue yields ~101 back-to-back
-    ``{"comments": [...], "isLast": …, "startAt": …}`` objects. A single
-    ``json.loads`` raises ``JSONDecodeError('Extra data')`` on the second page and
-    would silently drop every comment past page 1 — the bug that let 13 issues
-    re-post to the 5000-comment cap (bug 1f3d).
-
-    Decode each object in sequence (``raw_decode``) and concatenate its comments via
-    :func:`_parse_acli_comments` (which normalises the per-page wrapped-dict / bare-list
-    shapes and drops non-dict noise). A single-object or bare-list payload (the
-    non-paginated shape) is handled as a one-iteration case, so this is a safe
-    superset of ``_parse_acli_comments(json.loads(stdout))``.
+    A single object or list uses the same path; ``raw_decode`` prevents later
+    pages from being dropped as extra JSON data.
     """
     decoder = json.JSONDecoder()
     comments: list[dict[str, Any]] = []

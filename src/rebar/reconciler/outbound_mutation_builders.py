@@ -1,18 +1,8 @@
-"""Outbound CREATE/UPDATE mutation builders extracted from outbound_differ.py.
+"""Build outbound create and update mutations for the differ.
 
-Holds the two per-ticket mutation builders (``_compute_outbound_create_mutation``
-and ``_compute_outbound_update_mutation``) that ``compute_outbound_mutations``
-orchestrates. Split out of ``outbound_differ.py`` purely for module size; the
-behaviour is unchanged.
-
-Ticket 6452: both builders now read their pass-scoped inputs from the EXISTING
-``OutboundDiffConfig`` (extended, not replaced — ADR 0107 explicitly rejects a
-*new* generic context/options object for this seam: "it would just rename the
-same N names as attributes of one bag") instead of a loose 24/11-value parameter
-bundle each. The four Backend-port collaborators (``binding_store``, the
-optional ``client`` read off ``config``, ``outbound_mapper``, ``inbound_mapper``,
-the assignee resolver) stay separate, explicit, narrow parameters per that same
-ADR's disposition — see ``OutboundDiffConfig``'s docstring in outbound_differ.py.
+Pass-wide inputs live in the existing ``OutboundDiffConfig``; backend ports
+remain explicit parameters. The split preserves the differ's behavior and
+avoids a second generic context object (ADR 0107).
 """
 
 from __future__ import annotations
@@ -46,13 +36,7 @@ from rebar.reconciler.outbound_links import _diff_links
 
 
 def _create_prerequisites(ticket, binding_store) -> tuple[str, ...]:
-    """Return the local-id prerequisites an outbound CREATE depends on.
-
-    A child create depends on its parent's CREATE only when the local ticket declares
-    ``parent_id`` and that parent is not yet bound in Jira. The prerequisite identity
-    stays in the local-id namespace the planner and create scheduler already share;
-    this path never invents a Jira key for an unbound parent.
-    """
+    """Depend on an unbound parent's create by local ID, without inventing a Jira key."""
     parent_id = ticket.get("parent_id")
     if not isinstance(parent_id, str) or not parent_id:
         return ()
@@ -70,39 +54,12 @@ def _compute_outbound_create_mutation(
     binding_store,
     outbound_mapper,
 ) -> None:
-    """Phase: append the outbound CREATE mutation for an unbound local ticket.
+    """Append a create for an unbound ticket unless a retired binding forbids it.
 
-    ``config`` carries this pass's fixed, pass-scoped inputs (ticket 6452:
-    converges what used to be 4 loose values — ``local_ticket_types``,
-    ``mapping``, ``repo_root``, ``effective_cache`` — plus the
-    ``dropped_field_sink`` observability sink into reads off this one existing
-    per-pass config object; see ``OutboundDiffConfig``). ``binding_store`` and
-    ``outbound_mapper`` stay explicit Backend-port collaborator parameters per
-    ADR 0107's disposition. The CREATE path owns no per-ticket update-only state
-    (no jira snapshot, no client, etc), so it reads only the subset of
-    ``config`` it needs.
-
-    ``outbound_mapper`` is the injected Backend-port ``OutboundMapper`` (ticket
-    4af8); its ``map_local_to_remote`` replaces the former direct vendor-mapper
-    import.
-
-    DROPPED-PARENT REPORTING (ticket 8390): bug 8b25's hierarchy guard omits a non-epic
-    parent from the mapped fields, and on this path that omission was totally silent —
-    a ticket created under a non-epic parent lost its hierarchy at birth with no durable
-    trace. Report it on the EXISTING drop channel (``run_differs._emit_outbound_field_alerts``
-    turns the pair into a deduped ``outbound-field-dropped`` bridge alert), keyed by the
-    LOCAL id because a create has no Jira key yet by construction.
-
-    Unlike the sibling UPDATE path there is no convergence gate here, and there must not
-    be one: at CREATE the issue does not exist on the tracker, so there is no remote
-    parent it could already match — the drop is unconditionally a real loss.
-
-    TOMBSTONE GUARD (bug 3b5f): a local ticket with NO live binding but WITH a retired
-    one was paired with a Jira issue a bounded direct GET confirmed 404 — deleted.
-    Retirement unbinds the local ticket, so without this check the ordinary
-    unbound->create arm resurrected the deliberately-deleted issue ~3 passes later.
-    A NEVER-bound ticket has no tombstone and still creates; that distinction is the
-    whole point. Fail-open via ``_best_effort``, and reversible by ``unretire``.
+    A confirmed tombstone must not resurrect as a new issue; never-bound
+    tickets still create. The injected mapper records a suppressed non-epic
+    parent in the existing dropped-field sink, keyed by local ID because no
+    Jira key exists yet. A create cannot use update's remote convergence gate.
     """
     local_ticket_types = config.local_ticket_types
     mapping = config.projects_mapping
@@ -152,31 +109,17 @@ def _compute_outbound_create_mutation(
     )
     if suppressed_parents and dropped_field_sink is not None:
         dropped_field_sink.append((local_id, "parent"))
-    # Story d19d: resolve the target project per ticket and stamp it, so BOTH
-    # transports write to the ticket's project rather than one construction-time
-    # default. Gated on a non-empty mapping so an unseeded (single-project) store
-    # keeps its legacy behaviour (create, no stamp — the transport's own project
-    # applies). A ticket that resolves to "not synced" (None), or names a project
-    # NOT in the mapping (a stale/typo binding), emits NO create: creates are
-    # exempt from the applier's cross-project guard, so this is the only gate that
-    # can stop a create against an unsynced project.
+    # With a project mapping, stamp each create's resolved target. Reject
+    # unmapped projects here because creates bypass the applier's project guard;
+    # an unseeded single-project store retains the transport default.
     if mapping is not None and getattr(mapping, "projects", None):
         from rebar.reconciler import projects_store
 
         target = projects_store.resolve_project(ticket, mapping)
         if not target:
             return
-        # Bug 7b9a finding 1: match CASE-INSENSITIVELY so this create-path check
-        # agrees with the applier's cross-project guard, which uppercases both
-        # sides (applier._cross_project_targets). Stamp the CANONICAL mapping key
-        # (not the ticket's raw case) so the transport routes to the real project.
-        # A key with no case-folded match (stale/typo binding) still emits no
-        # create — creates are guard-exempt, so this is the only gate that stops
-        # a create against an unsynced project.
-        # Finding 4 (accepted): the mapping is also read by the applier guard
-        # (read_projects) later in the same pass. That two-read window is left as
-        # is — projects.json is a rare operator CLI write and a pass is a short
-        # single window, so a mid-pass divergence is not worth threading one read.
+        # Match the applier's case-insensitive guard but stamp the canonical
+        # mapping key. A stale key suppresses the create.
         canonical = next((k for k in mapping.projects if k.upper() == target.upper()), None)
         if canonical is None:
             return
@@ -215,21 +158,11 @@ def _compute_outbound_update_mutation(
     inbound_mapper,
     assignee_resolver,
 ) -> None:
-    """Phase: for a bound ticket, resolve jira_fields (including the bounded
-    bound-but-absent direct GET) and append an outbound UPDATE mutation when anything
-    diverged. A bare ``return`` skips the ticket (emit nothing).
+    """Append an update for a bound ticket only when a resolved field diverges.
 
-    ``config`` carries this pass's fixed, pass-scoped inputs (ticket 6452:
-    converges what used to be 13 loose values into reads off this one existing
-    per-pass config object — see ``OutboundDiffConfig`` in outbound_differ.py,
-    extended for exactly this purpose per ADR 0107's disposition). The four
-    Backend-port collaborators (``binding_store``, ``outbound_mapper``,
-    ``inbound_mapper``, ``assignee_resolver``) stay separate, explicit, narrow
-    parameters — the ADR calls these "already single, named, narrow
-    collaborators... not loose values," so folding them into ``config`` too
-    would not reduce coupling, only relabel it. Every value read from ``config``
-    below is identical across every ticket this pass visits; only
-    ``ticket``/``status``/``local_id``/``jira_key`` vary per call.
+    Bound keys absent from search use a bounded direct GET; unresolved keys
+    emit nothing. ``config`` holds pass-wide values while backend collaborators
+    stay explicit.
     """
     jira_snapshot = config.jira_snapshot
     # Both are populated by compute_outbound_mutations before the per-ticket loop.
@@ -251,14 +184,8 @@ def _compute_outbound_update_mutation(
     conflict_sink = config.conflict_sink
     dropped_field_sink = config.dropped_field_sink
 
-    # Bound -> compare fields, emit update if different.
-    #
-    # Bug 1e08-1a35-0267-4ca6: discriminate on MEMBERSHIP, not value.
-    # A bound key ABSENT from this pass's search snapshot must NOT diff
-    # against ``{}`` (that re-emits every field every pass). Two absence
-    # sub-classes: (a) deleted → direct GET 404; (b) status=Done beyond
-    # _DONE_RECENT_CAP → alive (HTTP 200) but absent from the search
-    # snapshot. We resolve the real fields via a bounded direct GET.
+    # Search absence is not an empty issue: GET to distinguish deleted from
+    # alive out-of-window keys before computing a field diff.
     if jira_key in jira_snapshot:
         # EXISTING path — key present in the search snapshot.
         jira_fields = jira_snapshot[jira_key]
@@ -281,10 +208,8 @@ def _compute_outbound_update_mutation(
         _best_effort(binding_store, "set_last_get", jira_key, pass_id)
 
         if fields is _DELETED:
-            # HTTPError 404 — gone, OR MOVED to another project and re-keyed
-            # (bug 7c26). The store re-asks by immutable numeric id and re-keys
-            # on a hit; only an unproven absence bumps the consecutive-404
-            # counter (may retire at GRACE). Emit nothing either way.
+            # A 404 may mean deletion or a project move. Recheck by immutable
+            # ID; only unresolved absence advances retirement grace.
             _best_effort(binding_store, "note_absent_or_rekey", jira_key, client)
             return
         if fields is _TRANSPORT_ERROR:
@@ -304,11 +229,8 @@ def _compute_outbound_update_mutation(
         jira_fields = fields
         comment_snapshot = dict(jira_snapshot)
         comment_snapshot[jira_key] = fields
-        # Bug 0702: share this alive GET result with the inbound differ
-        # so the out-of-window key is mirrored Jira→local without a
-        # second GET. Only the alive (200) case is recorded — 404 and
-        # transport errors are intentionally left out so a gone issue is
-        # never inbound-mirrored (retirement stays outbound-owned).
+        # Share only alive fields with inbound diffing; deleted and failed GETs
+        # stay outbound-owned and are never mirrored back.
         absent_alive_fields[jira_key] = fields
 
     # Ticket 625b: the whole vendor-neutral field path (canonicalize snapshot +
@@ -332,11 +254,8 @@ def _compute_outbound_update_mutation(
         status_map=_status_map,
         priority_map=_priority_map,
     )
-    # Comments use the resolved snapshot (the bounded-GET overlay) — NO second call (C3).
-    # emersed-specific-mutt: thread the binding_store so _diff_comments' PRIMARY skip can
-    # consult the persistent comment_ids map, and the backend's comment codec so the LOCAL
-    # dedup key is normalized through the SAME RichTextCodec the send path renders with
-    # (injected via the Backend port — the shared layer never imports a concrete codec).
+    # Comments reuse the resolved snapshot and persistent comment IDs. The
+    # backend codec normalizes local dedup keys like the send path.
     comment_mutations = _diff_comments(
         ticket,
         jira_key,
@@ -385,11 +304,8 @@ def _compute_outbound_update_mutation(
     )
 
     if fields or comment_mutations or label_mutations or link_mutations:
-        # Sync-hardening P5 / bug 57d1: emit a one-line CHANGED-FIELD BREADCRUMB
-        # (field NAMES only, never values — descriptions/assignees may be large or
-        # sensitive) whenever a bound key gets an outbound UPDATE carrying field diffs,
-        # so a re-emitting (non-converging) field is visible in CI logs. Comment-/label-
-        # only updates carry no field diff, so the breadcrumb is skipped.
+        # Log changed field names, never values, to expose non-converging
+        # updates without leaking content. Non-field updates skip the list.
         print(  # noqa: T201
             f"RECON: outbound_update key={jira_key} "
             f"changed=[{','.join(sorted(fields))}] "

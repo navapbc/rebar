@@ -1,18 +1,8 @@
 #!/usr/bin/env python3
-"""pass_support.py — per-pass leaf helpers extracted from reconcile_helpers.py.
+"""Per-pass status checks, binding commits, ticket reads, and selection helpers.
 
-Moved out (ticket piscine-bullish-cowbird, module-size headroom) to keep
-reconcile_helpers.py under the 800-line cap: the status-preflight scan and its
-``StatusMappingError`` marker, the binding-store commit-back, the ticket-CLI
-reader, the selection-resolution cluster, and the filter-scope set builders.
-Every name here carries no back-edge to the ``reconcile_once`` spine — same
-contract reconcile_helpers.py documents — and reconcile.py re-binds these at
-module level exactly as it did when they lived in reconcile_helpers.py.
-
-Loader convention: like every sibling in this package, this module loads its own
-siblings (``config.py``, ``alert_store.py``, ``binding_store.py``) by file path via
-the local ``_load`` helper, so it resolves both under the real package and when
-loaded standalone in tests. It imports NOTHING from reconcile.py/reconcile_helpers.py.
+These leaf helpers have no import back-edge to the reconcile spine. Sibling
+loading remains patchable for standalone tests.
 """
 
 from __future__ import annotations
@@ -26,37 +16,25 @@ from typing import Any
 
 
 def _load(_name: str, relpath: str):
-    """Load a sibling module by relative file path, registering it in sys.modules.
-
-    Imports the in-package module ``relpath`` names (``_name`` is kept for call-site
-    stability); a patchable seam over ``importlib.import_module``.
-    """
+    """Import a sibling through the patchable package loader seam."""
     return importlib.import_module(
         "rebar.reconciler." + relpath.removesuffix(".py").replace("/", ".")
     )
 
 
 class StatusMappingError(Exception):
-    """Names a mutation referencing a status that ``config.local_to_jira_status``
-    maps in NEITHER direction — i.e. the value is neither a local-status key nor a
-    Jira workflow status value. (Outbound mutations may carry either shape, so a Jira
-    status added without a corresponding reconciler mapping trips this — the offending
-    value is not necessarily a local status.) The preflight scan NO LONGER raises this
-    (reconciler-abort-isolation): it now warns non-fatally and lets the applier record
-    the offending mutation as a per-mutation failure instead of aborting the pass. The
-    class stays defined for references (e.g. tests) that still name it."""
+    """Legacy marker for a status absent from both local and Jira vocabularies.
+
+    Preflight now warns and leaves per-mutation failure handling to the applier.
+    """
 
 
 def _status_preflight_tolerated(mapping: Mapping[str, str], repo_root: Path | None) -> set[str]:
-    """The status names the preflight tolerates: the built-in ``local_to_jira_status``
-    keys (local names) UNION its values (built-in Jira names) UNION every Jira status
-    NAME the mapping config for ``repo_root`` declares.
+    """Accept built-in local/Jira status names plus configured Jira names.
 
-    The config-declared widening (ticket 438a) is what keeps a per-project REMAP from
-    tripping a spurious warning: the mapper emits a config-only Jira name that is absent
-    from the built-in keys AND values, so without this union the post-mapper preflight
-    would false-alarm on exactly the config it is meant to support. Best-effort: a
-    config-load failure falls back to the built-in set and never breaks the pass."""
+    Per-project remaps may use names absent from built-ins. Config-load failure
+    falls back to the built-in set without aborting the pass.
+    """
     tolerated = set(mapping) | set(mapping.values())
     try:
         from rebar.reconciler import mapping_config as _mc
@@ -68,22 +46,11 @@ def _status_preflight_tolerated(mapping: Mapping[str, str], repo_root: Path | No
 
 
 def preflight_status_mapping(mutations, repo_root: Path | None = None) -> None:
-    """Scan update mutations for statuses absent from the EFFECTIVE status vocabulary
-    (built-in ``config.local_to_jira_status`` keys/values UNION the config-declared Jira
-    names for ``repo_root``) and WARN (non-fatally) on each.
+    """Warn on unmapped outbound update statuses without aborting the pass.
 
-    Facet 3 (reconciler-abort-isolation): this scan used to RAISE
-    :class:`StatusMappingError` on the first unmapped status, aborting the whole
-    pass before any mutation was applied. It now logs a warning to stderr for
-    each offending mutation and returns normally, so the mutation flows to the
-    applier and is recorded there as a per-mutation failure (fail-loud) instead
-    of taking down the entire pass. :class:`StatusMappingError` remains defined
-    for other references.
-
-    An empty built-in mapping disables the scan (kill-switch). Non-update mutations,
-    inbound mutations, and mutations whose ``fields`` payload does not include a
-    ``status`` key are ignored. ``repo_root`` scopes the config-declared widening so a
-    per-project status remap is tolerated rather than flagged (ticket 438a).
+    Local keys, Jira values, and configured names are tolerated. Empty built-in
+    mapping disables the scan; inbound and non-update mutations are skipped.
+    The applier records each offending mutation as a failure.
     """
     cfg = _load("reconcile_config", "config.py")
     mapping = getattr(cfg, "local_to_jira_status", {}) or {}
@@ -112,54 +79,22 @@ def preflight_status_mapping(mutations, repo_root: Path | None = None) -> None:
             direction = m.get("direction")
         if action != "update":
             continue
-        # Bug 85a1: preflight validates *local* status names against the
-        # local→jira mapping. Inbound mutations carry Jira's status (either
-        # the raw REST dict or — post-normalisation — the Jira-side name),
-        # which is the VALUE side of the mapping, not the KEY side.
-        # Iterating inbound mutations through this check produces spurious
-        # ``local status 'To Do' not in local_to_jira_status mapping`` errors
-        # that abort the entire pass. Skip inbound entries; only outbound
-        # mutations populate ``fields.status`` with a local-status key.
+        # Inbound statuses use Jira shape; this outbound preflight skips them.
         if direction == "inbound":
             continue
         if not isinstance(fields, dict):
             continue
         raw_status = fields.get("status")
-        # Bug 85a1: inbound and outbound paths both feed mutations through
-        # this preflight. Outbound payloads carry the local status STRING
-        # ("open", "in_progress", ...); inbound payloads carry Jira's
-        # raw REST status DICT ({"name": "To Do", "id": ..., ...}). The
-        # original ``status not in mapping`` check failed closed for dict
-        # values with TypeError: unhashable type: 'dict'. Normalise dicts to
-        # the ``.name`` field before lookup so the preflight is shape-tolerant.
+        # Normalize REST dicts to their name before membership lookup.
         if isinstance(raw_status, dict):
             status = raw_status.get("name") or ""
         else:
             status = raw_status
-        # Bug 85a1: outbound mutations may carry either:
-        #   - a LOCAL status string ("open", "in_progress") — when the
-        #     mutation originates from a path that hasn't translated yet;
-        #   - or a JIRA status string ("To Do", "In Progress") — when the
-        #     differ already mapped local→jira via _LOCAL_TO_JIRA_STATUS
-        #     (outbound_differ._map_local_to_jira_fields:107).
-        # Accept either by checking presence in the effective tolerated set
-        # (built-in local keys ∪ built-in Jira values ∪ config-declared Jira
-        # names). The preflight purpose is to catch *unmapped* statuses before
-        # the applier dispatch; a per-project remap onto a config-declared name
-        # is legitimately-mapped (ticket 438a).
+        # Outbound values may still be local names or already mapped Jira
+        # names; the tolerated set includes both and configured remaps.
         if status and status not in tolerated:
-            # Facet 3 (reconciler-abort-isolation): this preflight used to RAISE
-            # StatusMappingError here, which aborted the ENTIRE pass on the FIRST
-            # unmapped status — before ANY mutation was applied. That turned one
-            # misconfigured mutation into a whole-pass outage. Downgrade to
-            # NON-FATAL: log a warning to stderr naming the offending status +
-            # target and RETURN NORMALLY, letting the mutation flow to the applier
-            # where the per-mutation backstop (record_backstop_failure) records it as a
-            # per-mutation failure (so it still counts toward fail-loud / a
-            # non-zero exit). The StatusMappingError class stays defined for other
-            # references; the empty-mapping kill-switch and the inbound-skip above
-            # are preserved. (Message framing per c672-5111-8201-4fa7: the value may
-            # originate on the Jira side, so it is not necessarily a local status.)
+            # Warn on this unmapped value and let the applier record a
+            # per-mutation failure; one bad status does not abort the pass.
             print(  # noqa: T201
                 f"reconcile: preflight — status {status!r} is not mapped in "
                 f"local_to_jira_status (neither a local-status key nor a Jira "
@@ -169,43 +104,19 @@ def preflight_status_mapping(mutations, repo_root: Path | None = None) -> None:
             )
 
 
-# The selective 5-file staging goes through the shared locked store seam:
-# push.commit_tickets_branch takes a pathspec (ticket 11a9-b11b-e93d-4832), so the
-# `add -A` sweep that broke reconcile idempotency in ticket 6454-d06e-7361-4e3d
-# (staging .bridge_state/last-pass.json advanced the tickets HEAD every pass) no
-# longer forces a raw git_adapter.add+commit composition here.
+# Commit only 5 binding-state files through the locked store pathspec;
+# broad staging would advance tickets HEAD on every pass.
 def _commit_binding_store_snapshot(
     _binding_store: Any,
     repo_root: Path,
     pass_id: str,
 ) -> bool:
-    """Commit the binding-store snapshot to the tickets orphan branch.
+    """Commit only binding-state files through the locked tickets-branch seam.
 
-    Bug: binding_store.save() only writes bindings.json to the working-tree
-    filesystem.  When the ticket-CLI's _push_tickets_branch() runs between
-    reconciler passes and merges origin/tickets, the un-committed local copy
-    of bindings.json is silently overwritten by the version committed by a
-    concurrent GHA run — causing the NEXT reconciler pass to see previously-
-    bound tickets as unbound, generating outbound CREATE mutations instead of
-    UPDATE mutations and producing a no-op dedup-skip rather than field updates.
-
-    Fix: after every successful binding_store.save(), commit the file set to the
-    tickets orphan branch inside the .tickets-tracker worktree, through the store's
-    locked commit seam (``rebar._store.push.commit_tickets_branch``) with a pathspec
-    scoped to exactly the binding-state files — never ``git add -A``, which would
-    sweep in ``.bridge_state/last-pass.json`` and advance the tickets HEAD on every
-    idempotent pass (ticket 6454-d06e). No push: local probe runs that don't go
-    through GHA still get durable bindings, and delivery stays with the GHA
-    commit-back / the store's own push paths.
-
-    Returns:
-        True  — commit succeeded (or nothing to commit — bindings already current).
-        False — a subprocess error occurred; bindings persisted to filesystem only.
-
-    Degrades gracefully: any subprocess error (git not available, tickets branch not
-    checked out, no bindings path, etc.) is caught and logged to stderr; the reconciler
-    pass continues and the next GHA commit-back will persist the bindings as normal. The
-    caller must NOT abort on False — commit failure must never break the sync pass.
+    This protects saved bindings from a later tickets-branch merge without
+    staging unrelated pass artifacts or advancing HEAD on an idempotent pass.
+    Return ``False`` and report failure when the filesystem copy could not be
+    committed; the reconciliation pass continues.
     """
     from rebar.config import tracker_dir as _resolve_store
 
@@ -234,15 +145,9 @@ def _commit_binding_store_snapshot(
         return True  # Nothing to commit — not a failure
 
     try:
-        # Commit through the shared write-locked seam, staging ONLY our state files
-        # (never git add -A: avoid staging unrelated working-tree changes in the
-        # tickets worktree). The pathspec-scoped status inside the seam gives the
-        # PER-FILE idempotency of bug 1e08: a change in ANY of the five files —
-        # including a retirement-only bindings-retired.json change — commits, and no
-        # change in any of them leaves HEAD unmoved. strict=True turns every seam
-        # failure (stage, commit, lock timeout, rebase guard) into a raised
-        # PushDeliveryError, which the fail-open handler below converts to the
-        # existing False + stderr + bridge_alerts contract.
+        # Scoped staging commits any changed binding-state file, including a
+        # retirement-only update, and leaves HEAD still when none changed.
+        # Strict seam errors become the fail-open False/alert result below.
         from rebar._store.push import commit_tickets_branch
 
         commit_tickets_branch(
@@ -291,20 +196,10 @@ def _commit_binding_store_snapshot(
 
 
 def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]:
-    """Read local tickets from the ticket CLI, falling back to empty list.
+    """Read full ticket bodies through the CLI, or warn and return empty.
 
-    In production the ticket CLI is the ``rebar`` dispatcher (``rebar list``),
-    self-resolved via :func:`in_process_cli`. If the CLI is unavailable (unit
-    tests, minimal environments), return an empty list with a warning on stderr.
-
-    Passes ``--full`` because ``rebar list`` is lean by default (it omits the
-    ``description``/``comments`` bodies) and the outbound differ compares those
-    bodies against Jira — a lean read would compute spurious mutations.
-
-    ``no_sync=True`` sets REBAR_SYNC_PULL=off for the subprocess so the read does not
-    trigger the tickets-branch fetch/reconverge (a git working-tree mutation).
-    Cap-0 dry-run/preview passes set this so a no-write
-    pass stays literally no-write on the local git tree (review M3).
+    ``no_sync`` disables the tickets-branch pull for a no-write pass; ordinary
+    reads explicitly clear that override so they still synchronize.
     """
     import os as _os  # local import to avoid top-level dep
     import subprocess as _sp  # local import to avoid top-level dep
@@ -419,12 +314,7 @@ def _build_filter_target_set(
     filter_local_ids: set[str],
     binding_store: Any,
 ) -> set[str]:
-    """Build the full set of targets that match *filter_local_ids*.
-
-    Returns the union of the local IDs themselves and their bound Jira keys
-    (if any).  A mutation matches the filter when its ``target``,
-    ``provenance.local_id``, or ``provenance.jira_key`` intersects this set.
-    """
+    """Include selected local IDs and bound Jira keys for mutation filtering."""
     targets = set(filter_local_ids)
     for lid in filter_local_ids:
         jira_key = binding_store.get_jira_key(lid)

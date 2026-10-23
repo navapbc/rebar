@@ -1,20 +1,8 @@
 #!/usr/bin/env python3
-"""reconcile_helpers.py — pass-support utilities extracted from reconcile.py.
+"""Pass helpers for no-write plans, differ filtering, runtime binding, and baselines.
 
-These are the leaf helpers that a reconcile pass leans on but which carry no
-back-edge to the ``reconcile_once`` spine: the no-write plan renderer, the
-``_NoOpSyncLogger`` cap-0 stand-in, the snapshot-differ local-state emission
-filter, the RP-04 S3 runtime-binding cluster, and the ADR-0026 baseline
-advance. The status-preflight scan, the binding-store commit-back, the
-ticket-CLI reader, and the selection/filter-scope cluster moved out to the
-sibling ``pass_support.py`` (ticket piscine-bullish-cowbird, module-size
-headroom). ``reconcile.py`` calls these canonical owners directly instead of
-re-exporting their private names.
-
-Loader convention: this module imports its own siblings (``config.py``,
-``alert_store.py``) through the local ``_load`` helper, a patchable
-``importlib.import_module`` seam. It imports NOTHING from reconcile.py; callers use this
-module as the canonical owner for these private helpers.
+The reconciliation spine calls these canonical owners directly; this module
+has no reverse import of ``reconcile``. Sibling loading stays patchable.
 """
 
 from __future__ import annotations
@@ -29,11 +17,7 @@ from typing import Any
 
 
 def _load(_name: str, relpath: str):
-    """Load a sibling module by relative file path, registering it in sys.modules.
-
-    Imports the in-package module ``relpath`` names (``_name`` is kept for call-site
-    stability); a patchable seam over ``importlib.import_module``.
-    """
+    """Import a sibling through the patchable package loader seam."""
     return importlib.import_module(
         "rebar.reconciler." + relpath.removesuffix(".py").replace("/", ".")
     )
@@ -87,10 +71,8 @@ class _NoOpSyncLogger:
         return None
 
 
-# The differ emissions that are only sound when ``local_state`` really is local state:
-# ``(outbound, update)``/``field_drift`` (bug 727f) and ``(outbound, create)``/
-# ``unbound_local`` (bug d103-c3f8-2fbc-4c97). Keyed on BOTH ``source`` and ``reason`` so
-# an invariant SEED mutation that happens to reuse a reason string is never swept up.
+# These emissions require real local state. Match source and reason together
+# so invariant seed mutations sharing a reason remain intact.
 _SNAPSHOT_DIFFER_LOCAL_STATE_EMISSIONS: frozenset[tuple[str, str, str]] = frozenset(
     {
         ("outbound", "update", "field_drift"),
@@ -100,61 +82,14 @@ _SNAPSHOT_DIFFER_LOCAL_STATE_EMISSIONS: frozenset[tuple[str, str, str]] = frozen
 
 
 def drop_snapshot_differ_local_state_emissions(mutations: list[Any]) -> list[Any]:
-    """Discard the differ emissions that presume a real ``local_state`` argument.
+    """Drop 2 outbound emissions invalid when both differ inputs are remote snapshots.
 
-    Bugs 727f-b351-59ba-4b3b and d103-c3f8-2fbc-4c97 — one cause, two symptoms.
-
-    ``differ.compute_mutations`` documents its arguments as ``(local_state, jira_state)``
-    — the LOCAL source of truth against the Jira working set — and says so precisely
-    because that contract REPLACED the legacy ``(prev_snapshot, next_snapshot)`` one.
-    ``run_differs`` was never migrated: it still passes the legacy pair, both halves of
-    which are REMOTE Jira state (``prev_snapshot`` is a persisted earlier fetch,
-    ``curr_snapshot`` a fresh one). At that one call site ``local_state`` is therefore not
-    local state at all, and the differ's two local-state-dependent arms misfire:
-
-    * **``field_drift``** (key in both) — ``_compute_mutations_emit_both`` reads every
-      prev->curr REMOTE field change as local-wins drift and emits an
-      ``(outbound, update)`` carrying the STALE prev value. It never converges:
-      ``reconcile.py`` advances the prev snapshot from the PRE-APPLY fetch, so an outbound
-      write applied during pass N is invisible to ``prev`` at pass N+1 — a fully converged
-      pair is re-planned as outbound work, and a read-only pass (which never advances
-      ``prev``) re-plans the same phantom forever. The snapshot route drops this
-      phantom before apply; the differ's canonical outbound/update payload shape
-      is still ADR 0107's wrapped ``{"changed_fields": ...}`` contract.
-    * **``unbound_local``** (key in ``local_state`` only) —
-      ``_compute_mutations_emit_local_only`` emits an ``(outbound, create)`` for a key
-      that is really just "present in the previous fetch, absent from this one". That is
-      indistinguishable from a key that merely aged out of the working-set query, and the
-      create RESURRECTS the issue from stale prev fields. It also violates ADR 0028
-      (``docs/adr/0028-reconciler-bound-but-absent-not-deleted.md``, Decision para 1): no
-      destructive or terminal action may be driven by a key's absence from the fetched
-      snapshot.
-
-    The differ's third arm — key in ``jira_state`` only, ``(inbound, create)`` with reason
-    ``jira_new`` — IS correct here: at this call site it means a genuinely new remote
-    issue, which is the snapshot diff's one real job. It is preserved, as is every other
-    differ emission (inbound conflict/probe, ``dangling_jira_local_id``,
-    ``duplicate_local_id``, ``ambiguous_local_binding``, ``repair_property`` follow-ons,
-    the absent-partner probes). Nothing is lost by the two suppressions: field sync and
-    creation for these keys are already owned in BOTH directions by the binding-aware
-    outbound and inbound differ phases that run immediately afterwards.
-
-    Scoped by ``(direction, action, provenance["source"], provenance["reason"])`` — the
-    ``source`` check matters: invariant SEED mutations are prepended by
-    ``compute_mutations``'s ``seed_mutations`` argument and carry
-    ``provenance["source"] == "invariants"``, and a seed may legitimately reuse one of
-    these reason strings. Keying on ``reason`` alone would drop it. Mutations that are
-    plain dicts (legacy shape) have no ``provenance`` attribute and pass through untouched.
-    Pure: returns a NEW list, never mutates in place.
-
-    ``differ.compute_mutations`` itself is deliberately NOT modified — its documented
-    local-vs-jira contract stays intact for callers that honour it, and the suppression
-    lives at the one call site that does not.
-
-    REMOVAL NOTE: if ``run_differs`` is ever migrated to pass REAL local state, this
-    suppression must be DELETED in the same change — at that point both emissions become
-    correct and dropping them would silently disable outbound create and outbound field
-    sync.
+    ``run_differs`` passes previous/current Jira fetches to a differ expecting
+    local/Jira state. Its ``field_drift`` would replay stale fields and
+    ``unbound_local`` could resurrect an issue merely absent from search.
+    Preserve inbound ``jira_new``, invariant seeds, and all other emissions by
+    matching source as well as reason. Legacy dicts pass through; return a new
+    list. Remove this suppression if the caller starts passing real local state.
     """
     kept: list[Any] = []
     for mutation in mutations:
@@ -205,13 +140,10 @@ def drop_snapshot_differ_property_bound_emissions(
 
 
 def _accepts_synced_fields_out(fn: Any) -> bool:
-    """Whether ``fn`` will accept the ``synced_fields_out`` kwarg (bug e6e9).
+    """Pass ``synced_fields_out`` only to signatures that accept it.
 
-    True for the real ``applier.apply`` and any stub declaring ``**kwargs``; False for a
-    stub with a fixed narrower signature, which keeps its pre-e6e9 call shape. An
-    un-introspectable signature counts as NOT accepting it: a false positive raises
-    TypeError and takes down the pass, a false negative only leaves the baseline
-    advancing from the fetch as it does today.
+    Unknown signatures use the fetch-only baseline fallback instead of risking
+    a pass-breaking ``TypeError``.
     """
     try:
         params = inspect.signature(fn).parameters
@@ -223,14 +155,9 @@ def _accepts_synced_fields_out(fn: Any) -> bool:
 
 
 def _accepts_client(fn: Any) -> bool:
-    """Whether ``fn`` accepts the ``client`` kwarg (RP-04 S3, AC1).
+    """Forward captured transport only when the apply signature accepts ``client``.
 
-    True for the real ``applier.apply`` and any stub declaring ``**kwargs``; False for a
-    stub with a fixed narrower signature, so the composed runtime's transport is
-    forwarded only where it is accepted — mirroring the ``synced_fields_out`` tolerance
-    so a narrow test stub is never handed an unexpected kwarg. An un-introspectable
-    signature counts as NOT accepting it, leaving the applier's ambient ``_load_acli``
-    fallback exactly as today.
+    Unknown or narrow signatures retain the applier's ambient fallback.
     """
     try:
         params = inspect.signature(fn).parameters
@@ -251,11 +178,10 @@ def _accepts_ticket_plans(fn: Any) -> bool:
 
 
 def _resolve_pass_transport(ctx: Any):
-    """Resolve the transport to hand the composed backend, honoring the applier's
-    ``_load_acli`` seam so a test that patches it (or a stubbed transport) still drives
-    the apply path. Returns ``None`` when the applier exposes no such seam (the composed
-    runtime then builds the real provider transport from captured scope). A resolution
-    failure re-raises for a persisting pass and degrades to ``None`` for a no-write pass.
+    """Honor the applier's patchable transport seam.
+
+    Missing seams return ``None``; load failures raise for writes and fall back
+    for no-write passes.
     """
     loader = getattr(ctx.applier, "_load_acli", None)
     if not callable(loader):
@@ -269,22 +195,10 @@ def _resolve_pass_transport(ctx: Any):
 
 
 def bind_operation_runtime(ctx: Any, compose: Any) -> None:
-    """Compose the ONE operation runtime for this pass and capture its backend + transport.
+    """Capture one backend and transport for the pass's apply phase.
 
-    The composed backend CAPTURES scope at compose time; threading its transport into the
-    apply phase (as ``applier.apply(client=...)``) resolves the transport ONCE per pass
-    rather than letting each apply re-resolve config ambiently via ``_load_acli``. The
-    ``compose`` callable is passed in by the ``reconcile_once`` spine from the canonical
-    runtime module, keeping this helper free of a back-edge to reconcile.py. The
-    transport handed to ``build_backend`` comes from the applier's ``_load_acli`` seam.
-    Existing tests that patch that seam keep controlling the client; when it is absent,
-    the composed runtime builds the real
-    provider transport from captured scope.
-
-    Composition must not crash a read-only pass whose Jira scope is absent: on a
-    compose/build failure we re-raise for a persisting (write) pass (fail closed) but fall
-    back to the ambient path (``client=None``) for a no-write pass, so dry-run /
-    preview passes keep working.
+    The applier's loader remains patchable for tests. Composition failures
+    raise for writing passes but leave no-write passes on their ambient path.
     """
     try:
         transport = _resolve_pass_transport(ctx)
@@ -303,22 +217,12 @@ def _advance_baselines(
     curr_snapshot: Mapping[str, Any],
     synced_fields: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> int:
-    """Advance every CONFIRMED binding's per-binding baseline to the LAST-SYNCED Jira state
-    (story d6bd — the always-on successor to the retired dual-write shadow). Only
-    confirmed bindings whose Jira key is in the current fetch window are advanced (an
-    out-of-window key has no fresh value this pass); ``set_baseline`` filters to the
-    mirrored fields. In-memory until the caller's ``save()`` persists them (ADR 0026).
+    """Advance confirmed bindings from fetched and then confirmed written fields.
 
-    Two sources with different freshness (bug e6e9), applied in order: ``curr_snapshot``
-    is the pass-START fetch, taken BEFORE the outbound apply, and is correct for every
-    field rebar did not write; ``synced_fields`` is what rebar's own writes CONFIRMEDLY
-    landed later in the SAME pass, so it is strictly fresher for those fields and is
-    overlaid on top. Advancing from the fetch alone is the defect ``peer_state.
-    merge_baseline`` documents, and ``synced_fields`` MUST carry only per-mutation
-    confirmed writes — never "the pass ran".
-
-    The overlay runs for a confirmed binding even when its key is OUT of the fetch window:
-    our own write is direct evidence about the peer and, unlike a fetch, cannot be missing.
+    The pass-start snapshot predates outbound apply. Overlay only landed
+    per-mutation writes, including out-of-window keys, so the baseline records
+    last-synced rather than stale fetched values. Unconfirmed bindings and
+    absent fetch values do not advance from the snapshot.
     """
     advanced = 0
     synced = synced_fields or {}
@@ -352,17 +256,10 @@ def _advance_baselines(
 
 
 def _advance_peer_parent(binding_store: Any, local_id: str, entry: Mapping[str, Any]) -> None:
-    """Record the peer parent OBSERVED for one binding — and ONLY if it was observed.
+    """Record a peer parent only when the snapshot carries the parent key.
 
-    The evidence an inbound parent CLEAR requires (ticket 88d9). The observation test is
-    ``"parent" in entry``: key PRESENT means the parent map answered for this issue, and an
-    explicit ``None`` is then an authoritative "no parent". Key ABSENT is the whole unsafe set —
-    ``get_parent_map`` degraded to ``{}`` on a REST failure, a truncated page walk, a
-    cross-project issue — and MUST leave the prior observation untouched. Overwriting a good
-    history with a failed read is what would let the orphaning incident recur by a longer route,
-    so this is the load-bearing line, not a defensive nicety.
-
-    getattr-guarded so a store predating the field is a no-op rather than an AttributeError.
+    Explicit ``None`` means observed empty; an absent key leaves earlier
+    evidence intact. Older stores without the setter remain a no-op.
     """
     if "parent" not in entry:
         return

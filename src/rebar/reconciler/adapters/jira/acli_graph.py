@@ -28,25 +28,10 @@ if TYPE_CHECKING:
 
 
 class RunawayPaginationError(BackendPaginationStallError):
-    """A ``nextPageToken`` cursor walk saw the same non-null token twice in a row.
+    """Signal a repeated non-null page token instead of silently truncating a read.
 
-    The server has stopped advancing the cursor ([rebar:cabc-7a98-d173-4d7c]):
-    every further request would return the same page forever, so the walk stops
-    at the second sighting. Readers re-raise this PAST their fail-open handlers
-    deliberately — a stalled cursor is a truncated whole-project read (the
-    silent-loss class this adapter has shipped three times), not a transient
-    fault to degrade around.
-
-    Base class (bug 9a46): this is Cloud's *instance* of the vendor-neutral
-    ``BackendPaginationStallError`` stall class, so it derives from it rather
-    than from ``RuntimeError`` directly. Core's ``fetcher.fetch_snapshot``
-    re-raises only ``BackendPaginationStallError`` past its per-enrichment
-    fail-open ``except Exception``; while this error sat outside that hierarchy
-    the re-raise clauses missed it and a Cloud cursor stall was swallowed into a
-    silently degraded snapshot. ``BackendPaginationStallError`` itself subclasses
-    ``RuntimeError``, so ``RuntimeError`` stays in this MRO and pre-existing
-    ``except RuntimeError`` sites keep catching it; the name and identity are
-    unchanged, so ``except RunawayPaginationError`` sites are unaffected.
+    The vendor-neutral base lets snapshot fetches re-raise cursor stalls past
+    their per-enrichment fail-open handlers.
     """
 
 
@@ -55,25 +40,11 @@ def _iter_cursor_pages(
     path: str,
     base_body: dict[str, Any],
 ) -> Iterator[dict[str, Any]]:
-    """Yield each page of an opaque-cursor ``POST <path>`` search.
+    """Yield cursor pages until ``isLast`` or a missing token.
 
-    THE one cursor loop: three hand-rolled copies of this walk have shipped
-    three silent-truncation bugs (see test_acli_graph_pagination_heldout.py's
-    module docstring), so exactly one copy exists and the readers all route
-    through it. Contract (ticket 8b25, live-proven): the first request body is
-    ``base_body`` verbatim; each subsequent request adds ``nextPageToken``; the
-    walk ends on ``isLast: true`` or a null/absent token. A non-dict response
-    ends the walk quietly — callers treat pages already yielded as the partial
-    result.
-
-    Transport exceptions propagate unhandled: degradation policy (410-loud,
-    warn-and-degrade, partial map) belongs to each reader, not the shared walk.
-
-    Raises:
-        RunawayPaginationError: the same non-null token arrived twice
-            consecutively. Without this the spin would run until the transport
-            itself failed, and the readers' fail-open handlers would convert
-            THAT into a silent partial map.
+    Start with ``base_body`` unchanged, then add ``nextPageToken``. A non-dict
+    response ends the walk; transport errors reach the caller. Repeated non-null
+    tokens raise ``RunawayPaginationError`` to prevent silent truncation.
     """
     next_page_token: str | None = None
     while True:
@@ -170,31 +141,10 @@ class AcliGraphMixin:
         return self._add_label_impl(jira_key, label)
 
     def _add_label_impl(self, jira_key: str, label: str) -> None:
-        """Additively add a label to a Jira issue via ACLI workitem edit.
+        """Add a label without replacing existing labels.
 
-        Uses ``acli jira workitem edit --from-json <file> --yes`` with payload
-        ``{"issues": ["<KEY>"], "labelsToAdd": ["<label>"]}``. The ``labelsToAdd``
-        operation is ADDITIVE — existing labels are preserved (verified live
-        against DIG-3802 2026-05-24 per bug c916-74a1-ed06-40e4).
-
-        Per ACLI v1.3.18:
-          - The singular ``--label`` flag DOES NOT EXIST and is rejected with
-            'unknown flag: --label'.
-          - The plural ``--labels`` flag is a SET-REPLACE — passing
-            ``--labels foo`` clobbers all existing labels, leaving only ``foo``.
-            That semantic is incompatible with the reconciler's conflict policy
-            ('additive content merged inbound: labels added') because it would
-            destroy Jira-only labels on every rebar-id stamp.
-          - The ``--from-json`` payload schema (exposed via
-            ``acli jira workitem edit --generate-json``) includes
-            ``labelsToAdd`` and ``labelsToRemove`` as the documented additive
-            operations. This is the correct surface.
-          - ``--from-json`` writes require ``--yes`` to skip the interactive
-            'You're about to edit N work item(s). (y/N)' prompt.
-
-        The ``--from-json`` path is single-call (no read-then-write race) and
-        idempotent at the ACLI layer — calling with a label that already
-        exists on the issue succeeds silently.
+        Use ACLI ``--from-json`` with ``labelsToAdd`` and ``--yes``. The
+        ``--labels`` flag replaces the whole set; repeated additive calls succeed.
         """
         payload = {"issues": [jira_key], "labelsToAdd": [label]}
         fd, json_path = tempfile.mkstemp(suffix=".json", prefix="acli-edit-")
@@ -271,33 +221,11 @@ class AcliGraphMixin:
         project: str,
         jql: str | None = None,
     ) -> dict[str, str | None]:
-        """Return a {jira_key → parent_key | None} map via REST search.
+        """Return Jira keys mapped to parents through paged REST search.
 
-        Issues one paged REST search (POST ``/rest/api/3/search/jql``) with
-        ``fields=["parent"]`` so we get parent data without hitting ACLI's
-        field-selector restriction (ACLI rejects ``-f parent``).
-
-        Endpoint contract (ticket 8b25, live-proven): the legacy
-        ``POST /rest/api/3/search`` endpoint is RETIRED (HTTP 410). The
-        replacement ``/rest/api/3/search/jql`` paginates via an opaque
-        ``nextPageToken`` cursor — there is NO ``total`` field and sending
-        ``startAt`` is rejected with HTTP 400. The first request body carries
-        ``{jql, fields, maxResults}``; each subsequent request adds
-        ``{nextPageToken: <token>}``. The loop terminates when the response
-        reports ``isLast: true`` or yields a null/absent ``nextPageToken``.
-
-        Paginates until the cursor is exhausted (via the module's single
-        shared ``_iter_cursor_pages`` walk).  Returns an empty dict and
-        logs on any REST failure (fetcher degrades gracefully — ticket 8b25).
-        An HTTP 410 (endpoint retirement) is logged at ERROR (loud — API
-        retirements must be noticed); transient faults stay at WARNING.  One
-        deliberate exception to fail-open: a stalled cursor (the same token
-        twice in a row) raises ``RunawayPaginationError`` instead of
-        degrading, because a partial whole-project map is silent data loss.
-
-        Args:
-            project: Jira project key (e.g. "DIG").
-            jql: Optional JQL override.  Defaults to ``project = <project>``.
+        Search ``fields=["parent"]`` because ACLI rejects that field selector.
+        ``jql`` overrides the project query. REST failures log and return any
+        pages collected so far (HTTP 410 at ERROR); a stalled cursor raises.
         """
         import logging as _logging
 
@@ -363,30 +291,11 @@ class AcliGraphMixin:
         project: str,
         jql: str | None = None,
     ) -> dict[str, Any]:
-        """Return a {jira_key → comment-field dict} map via ONE paged REST search.
+        """Return raw Jira comment fields from one paged REST search.
 
-        Comment-state enrichment (Action viability): the live comment fetch
-        previously issued one ``acli comment list`` call per commented ticket
-        every pass (~1-2s each, fleet-wide — measured multi-hour passes). This
-        method amortises that into a SINGLE paged ``POST /rest/api/3/search/jql``
-        with ``fields=["comment"]`` so the differ can dedup comments without a
-        per-ticket round-trip.
-
-        Returns ``{jira_key: <comment field dict>}`` where the value is the raw
-        Jira ``comment`` field (``{"comments": [...], "total": N, ...}``) — the
-        exact shape ``outbound_differ._diff_comments`` reads from a snapshot
-        entry's ``comment`` key. Keys whose ``comment`` field is absent are
-        omitted so the caller can fall back to the per-ticket ``get_comments``
-        path for them (the never-emit-blind invariant stays intact).
-
-        Pagination + degradation contract mirror ``get_parent_map``: opaque
-        ``nextPageToken`` cursor (no ``startAt`` / ``total``); HTTP 410 →
-        ERROR (endpoint retirement is loud); other faults → WARNING; an empty
-        dict is returned on failure so the fetcher degrades gracefully.
-
-        Args:
-            project: Jira project key (e.g. "DIG").
-            jql: Optional JQL override.  Defaults to ``project = <project>``.
+        Omit issues without a comment field so callers can fetch them directly.
+        ``jql`` overrides the project query. REST failures log and return any
+        pages collected so far (HTTP 410 at ERROR); a stalled cursor raises.
         """
         import logging as _logging
 
@@ -489,22 +398,10 @@ class AcliGraphMixin:
         project: str,
         jql: str | None = None,
     ) -> dict[str, Any]:
-        """Return a ``{jira_key → issuelinks list}`` map via ONE paged REST search.
+        """Return REST-shaped issue-link lists from one paged search.
 
-        Bug 3f04: the snapshot previously carried NO ``issuelinks`` — the fetcher
-        enriched ``parent`` and ``comment`` but not links — so BOTH the inbound
-        link differ (``inbound_differ._diff_links_inbound``) and the outbound
-        differ's dedup (``outbound_differ._existing_jira_links``) read
-        ``jira_fields.get("issuelinks")`` and always saw nothing. Inbound link
-        sync was structurally dead and outbound re-emitted every link each pass.
-
-        Amortises what would otherwise be a per-ticket ``get_issue_links`` REST
-        round-trip into a SINGLE paged ``POST /rest/api/3/search/jql`` with
-        ``fields=["issuelinks"]``. Returns ``{jira_key: [<issuelink>, ...]}`` in
-        the exact REST-nested shape the differs read (``type.name`` +
-        ``inwardIssue``/``outwardIssue`` keys). Mirrors ``get_comment_map``'s
-        pagination + fail-open degradation contract (410 → ERROR, other faults →
-        WARNING, empty dict on failure so the pass still completes).
+        The map supplies link data to both differs. REST failures log and return
+        any pages collected so far (HTTP 410 at ERROR); a stalled cursor raises.
         """
         import logging as _logging
 
@@ -631,28 +528,8 @@ class AcliGraphMixin:
 
         Raises subprocess.CalledProcessError on ACLI failure.
         """
-        # Bug 3b86: ACLI's ``--out``/``--in`` are INVERTED relative to the naive reading.
-        # Empirically (live-validated, see bug 3b86): ``link create --out X --in Y --type Blocks``
-        # creates "Y blocks X" — the ``--in`` issue is the BLOCKER (outward), the ``--out``
-        # issue is the BLOCKED (inward). So to make ``from_key blocks to_key`` we must pass
-        # ``--out to_key --in from_key``. (The earlier ``--out from_key --in to_key`` reversed
-        # every written link; it looked correct only because rebar reads links direction-
-        # agnostically and most links were adopted from Jira rather than written by us.)
-        #
-        # Story 25ae: the installed ACLI rejects an unconditional ``--json`` on
-        # ``link create`` ("unknown flag"). Run WITHOUT ``--json``; only retry
-        # with it for forward-version tolerance (older builds that DO accept it
-        # behave identically either way — we never read the structured output
-        # here, the return is synthesized).
-        #
-        # Ticket 5528: ``--yes`` skips ACLI's interactive confirmation. Without it this
-        # subcommand prompts, and _run_acli spawns with stdin=subprocess.DEVNULL, so the
-        # prompt reads EOF and ACLI aborts with "✗ Error: command cancelled" — deterministic,
-        # so it recurred on every pass. Same failure mode bug 3256 fixed for
-        # ``workitem delete`` (see acli.py). Verified on the flag ITSELF rather than assumed
-        # from that sibling (story 25ae's lesson: ``--json`` IS rejected here):
-        #     $ acli jira workitem link create --help   # acli 1.3.19-stable, the fleet's
-        #           --yes    Confirm link creation without prompting
+        # ACLI uses ``--in`` for the blocker and ``--out`` for the blocked
+        # issue. ``--json`` is rejected here; ``--yes`` prevents an EOF prompt.
         cmd = [
             "jira",
             "workitem",
@@ -702,17 +579,8 @@ class AcliGraphMixin:
             "delete",
             "--id",
             link_id,
-            # Story 25ae: the installed ACLI rejects ``--json`` on link delete
-            # ("unknown flag"); ``_run`` raises on a nonzero exit, so the
-            # synthesized return below stands in for structured-failure detection.
-            #
-            # Ticket 5528: ``--yes`` skips the interactive confirmation. Without it every
-            # delete prompted, read EOF from stdin=subprocess.DEVNULL, and aborted with
-            # "✗ Error: command cancelled" — which dispatch_one then counted as an APPLIED
-            # link, so passes reported removing links they had not removed. Note ``--json``
-            # and ``--yes`` had to be checked separately; this one IS accepted:
-            #     $ acli jira workitem link delete --help   # acli 1.3.19-stable
-            #           --yes    Confirm link deletion without prompting
+            # ACLI rejects ``--json`` for link delete; ``--yes`` avoids an EOF
+            # prompt. ``_run`` raises on failure, so the return is synthesized.
             "--yes",
         ]
         self._run(cmd)

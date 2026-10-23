@@ -1,34 +1,11 @@
-"""Typed ``Mutation.payload`` contracts — one dataclass per live ``(direction,
-action)`` pair (ADR 0107).
+"""Frozen, mapping-compatible payloads for the 10 live mutation kinds (ADR 0107).
 
-``rebar.reconciler.mutation.Mutation`` already types its ``direction``/``action``
-fields and constrains valid combinations via ``_VALID_COMBINATIONS``; what remains
-untyped is ``Mutation.payload: Mapping[str, Any]``. This module closes that gap
-with ten frozen, ``Mapping``-compatible payload dataclasses, one per pair in
-``_VALID_COMBINATIONS`` (the same 10 pairs ``typed_dispatch._LEAVES`` registers).
-``(inbound, delete)`` and ``(inbound, probe)`` are not valid pairs: ``Mutation``
-rejects them, and feeding either to :func:`build_typed_payload` raises
-:class:`UnknownMutationKindError`.
-
-Each payload type is:
-
-* a ``Mapping[str, Any]`` (via the ``_PayloadMapping`` mixin, keyed by
-  ``as_legacy_dict()``) — so a typed payload is a drop-in replacement for the
-  ``dict`` payload ``Mutation.__post_init__`` already accepts; no change to
-  ``Mutation`` itself is required (the ADR's "Expand" migration step).
-* validated in ``__post_init__``/``from_legacy`` — missing required fields,
-  wrong-action fields, or unrecognized ("extra critical") fields raise
-  ``ValueError``/``TypeError`` before any effect runs (AC1).
-* round-trippable through ``as_legacy_dict()`` back to the exact historical
-  dict shape for every already-shipped ``(direction, action, target)`` triple,
-  so ``serialize_manifest``'s sha256 (an external compatibility surface) is
-  unchanged when a typed payload is substituted for its legacy dict twin.
-
-``outbound_pass.py`` constructs the outbound payload types directly, and
-``batch_dispatch._mutation_to_batch_dict`` reads them. The other producers
-(``binding_walk.py``, ``differ.py``, ``invariants.py``, ``run_differs.py``) still
-build plain-dict payloads. ``build_typed_payload`` lifts a legacy dict payload to
-its typed twin; only tests call it.
+``Mutation`` still accepts legacy dict payloads. Each typed payload validates
+required, wrong-action, and extra fields before effects, then projects to the
+historical dict shape so manifest hashes stay stable. ``build_typed_payload``
+lifts legacy payloads for tests; unsupported inbound delete/probe pairs raise
+``UnknownMutationKindError``. Outbound producers construct typed payloads in
+``outbound_pass``; other producers may still use dicts.
 """
 
 from __future__ import annotations
@@ -379,15 +356,11 @@ class InboundRepairPropertyPayload(_PayloadMapping):
 
 @dataclass(frozen=True)
 class InboundConflictPayload(_PayloadMapping):
-    """``(inbound, conflict)`` — a human-readable reason plus the Jira key it
-    concerns, per the ADR 0107 decision table.
+    """ADR 0107's inbound-conflict payload contract: reason and Jira key.
 
-    NOTE (named delta — see ``docs/adr/0107-...md`` Decision §1): today's live
-    ``differ.py`` inbound-conflict producers put ``reason`` in
-    ``Mutation.provenance`` (not ``payload``) and often ship an empty payload (or
-    one carrying ``jira_field_snapshot``). This type intentionally encodes the
-    ADR's DECIDED contract (not today's producer shape); reconciling producers to
-    it is deferred to the ADR's "Cut" step.
+    Live ``differ`` producers still place the reason in provenance and may
+    emit an empty or snapshot-only payload. Producer alignment remains deferred
+    to the ADR's Cut step.
     """
 
     reason: str
@@ -422,13 +395,8 @@ class InboundConflictPayload(_PayloadMapping):
 # Registry / factory
 # ---------------------------------------------------------------------------
 
-# Exactly the 10 LIVE (direction, action) combinations — deliberately excludes
-# (inbound, delete) and (inbound, probe), which typed_dispatch._LEAVES never
-# registers (dead by design, ADR 0028 / bug 3b5f). Keyed by
-# (direction.value, action.value) string pairs so this module has no import-time
-# dependency on mutation.py's enum classes (which are dynamically loaded under a
-# canonical sys.modules key elsewhere in this package — see ADR 0083) — avoiding
-# any cross-module enum-identity concern for this purely-additive contract layer.
+# String keys avoid importing dynamically loaded enum classes at module load.
+# Inbound delete/probe are absent from the live dispatch registry (ADR 0028).
 _PAYLOAD_TYPES: dict[tuple[str, str], type[_PayloadMapping]] = {
     ("outbound", "create"): OutboundCreatePayload,
     ("outbound", "update"): OutboundUpdatePayload,
@@ -459,28 +427,13 @@ def payload_type_for(direction: str, action: str) -> type[_PayloadMapping]:
 
 
 def build_typed_payload(direction: str, action: str, payload: Mapping[str, Any]) -> _PayloadMapping:
-    """Construct the named payload type for ``(direction, action)`` from a
-    legacy dict-shaped ``payload``.
-
-    Raises before any effect: :class:`UnknownMutationKindError` for an
-    unregistered pair, ``ValueError``/``TypeError`` for missing required
-    fields, wrong-action fields, or unrecognized ("extra critical") fields —
-    this is AC1's "construction rejects ... before effects".
-    """
+    """Lift a legacy payload; reject unknown kinds or invalid fields before effects."""
     payload_cls = payload_type_for(direction, action)
     return payload_cls.from_legacy(payload)
 
 
 def as_legacy_dict(payload: Any) -> dict[str, Any]:
-    """Project any ``Mutation.payload`` value back to its legacy dict shape.
-
-    Typed payloads (``_PayloadMapping`` subclasses) delegate to their own
-    ``as_legacy_dict()``; a plain ``Mapping`` (the pre-existing untyped-dict
-    shape) is copied via ``dict(...)`` unchanged. This is the ONE new
-    responsibility ``serialize_manifest`` gains (ADR 0107 Decision §2) so the
-    emitted JSON bytes for an already-shipped triple are unaffected by whether
-    its payload happens to be typed or a raw dict.
-    """
+    """Project typed payloads or copy mappings to the legacy manifest shape."""
     projector = getattr(payload, "as_legacy_dict", None)
     if callable(projector):
         return projector()
