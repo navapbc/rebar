@@ -1,50 +1,17 @@
-"""Selector + JSONL manifest writer for plan-review regression fixtures (ticket 549b).
+"""Pure selector and stable JSONL writer for plan-review fixtures (ticket 549b).
 
-Reads a plan-review corpus (``plan_replay/corpus.py`` rows enriched with their slimmed
-sidecar findings) and emits a LABELED CANDIDATE MANIFEST: per criterion, each candidate
-with its direction, tier, signals and rank, plus a zero-candidate row (with a reason) for
-every criterion that produced none. The manifest is JSONL — one JSON object per line, keys
-sorted — a byte-stable contract consumed by the diff acceptance test and the downstream
-emitter. No YAML, no model call: selection is a pure function of the corpus + git metadata.
+From corpus reviews and git rubric history, emit candidate rows per criterion
+with direction, tier, rank, signals, margin, finding ID, and review UUID. Emit a
+``zero_candidate`` row for each criterion without a candidate, explaining
+missing committed rubric history, an open unreliable ticket, or rejection of
+all eligible candidates. Write one sorted-key JSON object per line for the diff
+test and downstream emitter; no model call or YAML output.
 
-Public surface (stable import path ``rebar.llm.evals.fixture_selection``):
-
-- :data:`MIN_MARGIN` — the blocking-tier margin floor.
-- :func:`rubric_path` — the rubric file the vintage gate git-logs for a criterion
-  (``.rebar/prompts/<pid>.md`` override-wins, else the packaged reviewer ``fallback_file``).
-- :func:`last_rubric_commit_ts` — the timestamp of the last commit touching that file on the
-  gate's base ref, or ``None`` when there is no committed history / the base ref is absent /
-  git errs (the vintage gate then fails closed).
-- :func:`select_candidates` — the selector: synthetic-or-real reviews in, manifest rows out.
-- :func:`write_manifest` — the byte-stable JSONL writer.
-
-INPUT REVIEW SHAPE (each element of ``reviews``), a dict:
-    ``ticket_id``            : str
-    ``review_event_ts``      : int   (used for vintage eligibility + consecutive ordering)
-    ``review_event_uuid``    : str   (deterministic tie-break)
-    ``verdict``              : str
-    ``material_fingerprint`` : str   (equal-fingerprint reviews are reproduction pairs)
-    ``findings``             : list[slimmed-finding]  (sidecar ``_slim`` shape: ``norm_id``,
-                               ``criteria`` list, ``cohort`` list|None, ``decision_margin``
-                               float|None, ``decision``, ...)
-    ``ticket_state``         : dict  (fed to ``labels.escaped_defect``: ``close_class``,
-                               ``inbound_deps``) — OPTIONAL when ``escaped_defect`` is given
-    ``escaped_defect``       : bool  (OPTIONAL precomputed answer; wins over
-                               ``ticket_state`` so a batched index can replace the
-                               per-ticket state compile)
-
-MANIFEST ROW SHAPES (JSON objects, keys sorted on write):
-    candidate  : {"kind":"candidate","criterion":str,"direction":"fire"|"no_fire",
-                  "norm_id":str|None,"tier":"blocking"|"advisory","rank":int,
-                  "signals":[sorted signal names],"escaped_defect":bool,
-                  "abs_margin":float|None,"review_event_uuid":str}
-    zero       : {"kind":"zero_candidate","criterion":str,"reason":str}
-
-Reasons for a zero-candidate row:
-    "no-committed-prompt-history"   — no committed rubric history / absent base ref / git err
-    "unreliable-criterion:<id>"     — an open unreliable-criterion ticket skips the criterion
-    "no-admitted-candidate"         — eligible, non-skipped, but every candidate was rejected
-"""
+``MIN_MARGIN`` is the blocking floor. ``rubric_path`` prefers a local prompt
+override; ``last_rubric_commit_ts`` returns None on missing history/base or git
+failure, closing vintage eligibility. Reviews carry ticket ID, timestamp/UUID,
+verdict, material fingerprint, slimmed findings, and ticket state or a
+precomputed ``escaped_defect`` value, which takes precedence."""
 
 from __future__ import annotations
 

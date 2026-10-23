@@ -1,37 +1,10 @@
-"""Peak-RSS measurement for a gate run (bug 9ea3-7d07-ea55-4496).
+"""Measure, without limiting, process peak RSS across a gate run.
 
-MEASUREMENT ONLY. On 2026-09-02 the mcp container was OOM-killed roughly three minutes
-into a plan-review gate run on an 8 GiB box it shares with Gerrit, the review-bot and
-opcert. Gate work runs IN-PROCESS on a daemon thread inside the MCP server
-(:func:`rebar._mcp_llm._spawn_gate_daemon`), so gate memory *is* server memory — and
-nobody has ever measured what one gate run actually costs. Every candidate remedy
-(a container ``mem_limit``, a larger instance, a narrower LLM fan-out) needs that number
-first, so this module produces it and stops there. It sets no limit and enforces nothing.
-
-WHY A LOG MARKER AND NOT A METRIC. The host probe (``infra/scripts/observability.sh``)
-is the only thing on the box with AWS credentials: the containers deliberately do not get
-them, because the IMDS hop limit constrains in-container metadata access — the same reason
-``VOTER_ERROR`` / ``MERGE_CHANGE_ERROR`` are journald markers that the host probe greps
-and republishes. A marker therefore needs no new credential path, no boto3 dependency in
-the gate hot path, and no CI provider; it works identically under the CLI on a laptop,
-where CloudWatch does not exist at all. The convention is copied exactly from
-:func:`rebar.review_bot.voter_merge.merge_change_error`: ONE line-start
-``GATE_PEAK_RSS {json}`` print to stderr (the single emission a ``^GATE_PEAK_RSS \\{``
-anchor would count), plus a logger copy of the JSON body WITHOUT the token, so configured
-application logging can never double a future count (bug f829-152a-b415-44a4).
-
-``ru_maxrss`` UNITS DIFFER BY PLATFORM and the difference is a factor of 1024, which is
-exactly large enough to look like a plausible reading either way: Linux (and the box)
-reports KiB, while macOS/BSD reports BYTES. :func:`ru_maxrss_to_bytes` is the whole of
-that decision, kept as a pure function so both branches are directly testable without a
-platform to run them on.
-
-The measurement is HIGH-WATER, PROCESS-WIDE and MONOTONIC: ``RUSAGE_SELF`` reports the
-peak for the whole process since it started, not for this gate alone. In the CLI that is
-effectively the run's own cost; in the long-lived MCP server it is "the largest this
-server has ever been", so ``peak_delta_bytes`` (the rise across the gate) is reported
-alongside it and is the number that attributes cost to THIS run.
-"""
+Emit one line-start ``GATE_PEAK_RSS {json}`` stderr marker for host monitoring,
+plus a logger copy without that token. ``ru_maxrss`` is KiB on Linux and bytes
+on macOS/BSD; ``ru_maxrss_to_bytes`` converts it. ``RUSAGE_SELF`` is a
+process-wide high-water mark, so the MCP daemon's absolute peak includes older
+work; ``peak_delta_bytes`` reports the rise during this gate. See bug 9ea3."""
 
 from __future__ import annotations
 

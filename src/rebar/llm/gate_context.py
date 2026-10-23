@@ -1,50 +1,12 @@
-"""Gate read-root + snapshot-session context for the LLM agent-operations framework.
+"""Gate execution context for pinned code and ticket read roots.
 
-The ContextVars a running gate binds — the attested code read-root, the pinned
-ticket-store read-root or lazy view, and the "am I inside a gate session" flag — plus
-their readers, their ``with``-scoped binders, and the ``assert_gated`` fail-closed guard.
-This is the
-gate EXECUTION context, a different concern from ``LLMConfig`` (which merely *consumes*
-it: ``from_env`` calls :func:`current_code_root` / :func:`current_tickets_root` to resolve
-``repo_path`` / ``tickets_path`` (``llm/config.py``)). Its natural consumer seam already
-existed at ``llm/gate_source.py:35``, which imports the binders and nothing else.
-
-WHY THIS FILE EXISTS — and what it does NOT fix (ticket b300). ``llm/config.py`` sat at
-793 LOC against the absolute 800-line cap in ``.github/module-size-limit.txt`` and is the
-most-imported near-cap module in the repo (fan-in 93), which made ticket d23e's
-``REBAR_LLM_MODEL`` deprecation alias (measured at 10-16 lines) unlandable against the 7
-lines available (that alias has since been removed, but the headroom problem
-stands). This extraction RELOCATES INERT MASS: the code below has not grown since
-2026-07-09, so moving it buys headroom without touching the actual absorber. That absorber
-is ``LLMConfig.from_env``, which grows ~10-13 lines per new knob (a field, a resolution
-line, a docstring row) and is untouched here — so this is roughly 15 knobs of runway, NOT
-permanence. ``config.py`` will approach the cap again.
-
-The durable follow-ups, either of which removes the growth term rather than deferring it:
-
-  (a) teach ``scripts/gen_env_registry.py`` to consume an exported spec list, and ONLY
-      THEN table-ify ``from_env``; or
-  (b) domain-split the knobs per feature cluster, so each cluster's growth lands in its
-      own module.
-
-Do NOT attempt a declarative field table before (a). ``gen_env_registry.py`` records an
-env read only when the variable name is a STRING LITERAL at the read site, so collapsing
-the knobs into spec rows silently drops 19 rows from ``docs/env-vars.md`` and fails the
-registry drift gate. That constraint is why the relieving cut here is a different-concern
-extraction rather than the field table ADR 0056 speculated about.
-
-RE-EXPORT CONTRACT: every name below is re-exported from ``rebar.llm.config`` and NO
-consumer under ``src/`` imports it from here except ``gate_source.py`` (which always did).
-Thirteen ``monkeypatch.setattr`` targets in the suite name ``rebar.llm.config.<name>``, and
-they keep working only because consumers resolve the name at call time out of ``config``'s
-module globals (a function-level ``from rebar.llm.config import ...``, e.g.
-``plan_review/attest.py:123``). Repointing a consumer here would leave those patches
-applying to a module the consumer no longer reads — the tests would pass while asserting
-nothing. Import from ``rebar.llm.config``, not from this module.
-
-Dependency direction is one-way: ``config`` imports ``gate_context``; this module must
-never import ``rebar.llm.config`` (that is a cycle, and an import-time failure).
-"""
+ContextVars, scoped binders, readers, and ``assert_gated`` live here;
+``LLMConfig`` consumes them through ``rebar.llm.config``. That module re-exports
+these names, and consumers should keep importing there so existing monkeypatch
+targets remain effective. ``config`` imports this module; a reverse import
+would create a cycle. Literal environment reads in ``LLMConfig.from_env`` must
+remain visible to the env-registry scanner; a field table would hide them.
+See ticket b300."""
 
 from __future__ import annotations
 
@@ -86,36 +48,14 @@ def resolve_code_root(
     allow_checkout_fallback: bool = True,
     require: bool = False,
 ) -> str | None:
-    """The single authoritative code read-root resolver for the LLM gates.
+    """Resolve the authoritative code read root for an LLM gate.
 
-    Cascade (first truthy wins):
-
-      1. an explicit ``repo_root`` (a caller override),
-      2. ``cfg_repo_path`` (a pinned snapshot already resolved onto an explicit ``LLMConfig``),
-      3. the ACTIVE attested-gate snapshot (:func:`current_code_root`) — a gate pins this to
-         ``[snapshot].ref`` (``origin/main`` HEAD by default), so an in-gate caller that
-         threads nothing still grounds against the pinned snapshot,
-      4. the live checkout root (:func:`rebar.config.repo_root`, which itself falls back to
-         the cwd and so never returns ``None``) — UNLESS ``allow_checkout_fallback`` is False.
-
-    Centralizing this is what kills the *class* of bug where a gate consumer handed
-    ``repo_root=None`` (because the value was dropped on one of the threading hops) silently
-    degrades — e.g. the det-floor P2 'resolution' check abstaining ``no_repo_root``, or an
-    agentic verifier reading the server's mutable checkout instead of the pinned snapshot.
-
-    The default (``allow_checkout_fallback=True``) NEVER returns ``None`` and is for the gate
-    BOUNDARY (a workflow run needs a concrete root; in non-attested local mode the checkout IS
-    the correct root). Lightweight context builders that must NOT force a checkout default
-    (where ``None`` legitimately means "no code to ground against", and a forced checkout root
-    would induce writes) pass ``allow_checkout_fallback=False`` to get snapshot-or-``None``.
-
-    ``require=True`` makes the read-root contract ENFORCEABLE for a stage that genuinely cannot
-    run blind: if the cascade would yield ``None`` (only reachable with
-    ``allow_checkout_fallback=False``), it raises :class:`~rebar.llm.errors.LLMConfigError`
-    (fail-closed) instead of returning ``None`` — so a stage that requires a root never silently
-    degrades against one (the #71 class of bug). It is opt-in (default ``False`` preserves the
-    snapshot-or-``None`` behavior) and composes with the cascade: a resolved snapshot/checkout
-    satisfies it without raising. See docs/adr/0006-llm-stage-seam-contracts.md."""
+    Choose the first available root: explicit ``repo_root``, configured
+    ``cfg_repo_path``, active pinned snapshot, then live checkout. With
+    ``allow_checkout_fallback=False``, return None instead of choosing checkout;
+    ``require=True`` raises ``LLMConfigError`` when no root remains. The default
+    always yields a root. This keeps callers that omit a threaded root on the
+    attested snapshot rather than silently reading mutable code (ADR 0006)."""
     if repo_root:
         return str(repo_root)
     if cfg_repo_path:

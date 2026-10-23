@@ -1,42 +1,10 @@
-"""The NEVER-BLOCKING half of the plan-review DET floor: P2, P3, P6, P7.
+"""Never-blocking plan-review DET checks P2, P3, P6, and P7.
 
-Extracted from :mod:`.det_floor` (which owns :class:`.det_floor.DetResult`,
-:class:`.det_floor.PlanContext`, the ``DET_CHECKS`` registry, ``run_det_floor`` and the
-finding/coverage aggregation) along the boundary that module's own docstring already
-draws: "the only sound, unambiguous blockers are P1, P4 (description), P5 (cycle), P8,
-P10 and P11 — everything else is advisory or coverage-only". This module is that
-everything else.
-
-The boundary is a real seam in the call graph, not a line-count carve. None of the four
-checks here calls — or is called by — anything that stayed in ``det_floor``:
-
-* **P2 resolution** and **P3 package existence** are COVERAGE-ONLY oracle probes. Each
-  extracts references with its own private pattern (:data:`_FILE_REF_RE` /
-  :data:`_PKG_REF_RE`) and probes them through
-  :func:`rebar.grounding.refute_absence`, lazily imported so this module carries no
-  import-time dependency on the grounding stack. Neither ever blocks: a plan may
-  legitimately reference a file it will create or a dependency it will add, so a
-  non-resolving reference is recorded as coverage, never as a defect. Fail-open — any
-  oracle or extraction error becomes an ``abstain``.
-* **P6 AC/DD quality** is the ADVISORY aggregation hub over the lint detectors already
-  extracted into siblings: :func:`.det_operator_attested.ac_item_lines` and
-  ``operator_evidence_issues``, :func:`.det_clarity.vague_hits_in_line`,
-  :func:`.det_lint._verify_command_strings` / ``_lint_verify_command``,
-  :func:`.det_measurement_provenance.provenance_issues` and
-  :func:`.det_citation.unbacked_citations`. Moving it puts the hub beside its spokes.
-* **P7 destructive sniff** owns :data:`_DESTRUCTIVE_RE` / :data:`_SAFEGUARD_RE` and calls
-  nothing at all.
-
-The retained half is, by contrast, connected: P1 and P4 share ``_count_ac_items``, P1
-adds ``_clarity_score``, P4 adds ``_description_limit``, P8 uses ``est_tokens``, and P5
-uses ``det_lint``'s graph helpers. Cutting between the two sets severs no call edge.
-
-Cycle-freedom follows the contract :mod:`.det_lint` and :mod:`.det_clarity` established:
-``from __future__ import annotations`` plus ``TYPE_CHECKING`` for the ``DetResult`` /
-``PlanContext`` annotations, and a lazy ``from .det_floor import DetResult`` inside each
-body — so ``det_floor``'s module-level import of these checks (which it re-exports, to
-keep every existing import point and attribute access unchanged) never closes a loop.
-"""
+P2/P3 probe file and dependency references for coverage, abstaining on oracle
+errors; plans may name future files or packages. P6 aggregates AC/DD lints
+and detector advice. P7 sniffs destructive work without a safeguard. These
+checks are re-exported by ``det_floor``. Type-only annotations and lazy
+``DetResult`` imports avoid a cycle with that module."""
 
 from __future__ import annotations
 

@@ -51,38 +51,14 @@ __all__ = [
 
 
 def _verifier_cfg(cfg: LLMConfig) -> LLMConfig:
-    """The cfg the Pass-2 verify (and Pass-4 coach) steps run under: the STANDARD model class,
-    whatever ``cfg.model`` is (ticket 172e).
+    """Select the standard model class for Pass-2 verify and Pass-4 coach.
 
-    The rule this REPLACES kept the frontier model whenever ``cfg.model != DEFAULT_MODEL``, reading
-    any non-default string as "the operator chose this". MEASURED consequence: provider-qualifying
-    the SAME model (``anthropic:claude-opus-4-8``) — or naming any Bedrock id — silently kept
-    Pass-2/Pass-4 on the frontier model, losing the cost downgrade AND, on a model that rejects
-    sampling parameters, the greedy decoding the verification depends on.
-
-    With no class configured, ``standard`` resolves to ``VERIFIER_DEFAULT_MODEL`` — the SAME
-    MODEL today's rule picks. It is NOT byte-identical: the returned string is now PROVIDER-
-    QUALIFIED (``anthropic:claude-sonnet-4-6`` where today it is the bare ``claude-
-    sonnet-4-6``), because :func:`resolve_class` always qualifies. Functionally equivalent —
-    ``infer_provider`` maps the bare ``claude-*`` id to the same provider — but the string is
-    OBSERVABLE in usage logs and in the signed verdict's ``provider_provenance``, so it is a
-    real, if small, behaviour change. Qualifying is the desirable direction: an unqualified id
-    in an attestation is ambiguous about which provider served it, which is the misattribution
-    this epic exists to remove.
-
-    The class config is now the steering wheel: an operator changes the verifier by configuring the
-    ``standard`` class, not by side-effecting ``cfg.model``.
-
-    Still applied on cfg rather than as a static per-step ``model:`` in ``gates/plan-review.yaml``,
-    because ``resolve_model`` precedence is ``step > workflow > cfg`` — a literal step model would
-    always beat the operator's configuration.
-
-    "THE PASS-1 FINDER IS UNAFFECTED" IS AN INVARIANT, NOT AN OBSERVATION — this result becomes the
-    WHOLE RUN's cfg at the ``produce_plan_review_verdict`` boundary, so the runner is built from it
-    and Pass-1 will inherit this downgrade unless two things hold: ``RunRequest.config`` takes
-    precedence over the runner's own (b690), and the Pass-1 ladder's entry rung names ``frontier``
-    (77ed). Both are pinned by ``tests/unit/test_pass1_finder_model.py``, which asserts the model
-    REACHING THE RUNNER — the YAML declaration alone is not evidence. See 77ed for the history."""
+    The configured class, not ``cfg.model``, controls these steps. With no class
+    override, the default model is functionally unchanged but returned with a
+    provider-qualified ID visible in usage and signed provenance. Keep selection
+    in config: a literal step model would outrank it. Pass-1 still selects its
+    frontier rung through ``RunRequest.config`` precedence; the runner-reached
+    model is pinned by ``test_pass1_finder_model.py`` (ticket 172e)."""
     from dataclasses import replace
 
     from rebar.llm.model_classes import STANDARD_CLASS, resolve_model_string

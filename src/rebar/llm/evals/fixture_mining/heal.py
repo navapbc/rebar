@@ -1,69 +1,18 @@
-"""Public contract for the scheduled fixture-mining heal loop (ticket 1cef).
+"""Scheduled per-criterion fixture-mining heal loop (ticket 1cef).
 
-This module owns the per-criterion loop, the quarantine breaker, the due-stamp, and the
-ledger reserve/finalize orchestration. The model work (emit + score for one criterion) is
-delegated to an injectable ``attempter`` seam so the loop is deterministic under test.
+Inject ``attempter`` for deterministic tests. A due sweep (default interval 30
+days) selects uncovered criteria, skips exact-title open unreliable tickets,
+and drops counters outside the remaining attempt list. It writes ``last_run``
+and counters on completion; an early not-due return writes nothing.
 
-DESIGN CONTRACT (the orchestrator authored this; the implementation must match it exactly):
-
-``heal_fixtures(repo_root, *, attempter, gap_source=None, now=None, interval_days=None,
-                cap_usd=25.0, threshold=3, state_path=None, ledger_path=None,
-                gate_key="plan_review") -> HealReport``
-
-Behaviour:
-
-* Due-stamp. Load ``state_path`` JSON ``{"last_run": float|None, "counters": {id: int}}``.
-  If ``last_run`` is set and ``now - last_run < interval_days * 86400`` seconds, return
-  ``HealReport(ran=False)`` and write nothing. Otherwise run, and on completion persist
-  ``last_run = now`` and the updated counters. ``now`` defaults to ``time.time()``;
-  ``interval_days`` defaults to the configured interval (30).
-
-* Gap + skip. ``gap = list(gap_source())`` (default: the criteria the plan-review gate routes
-  with no eval spec, i.e. ``fixture_selection._default_criteria``). Build the unreliable map
-  from OPEN tickets titled exactly ``UNRELIABLE_TITLE_PREFIX + criterion_id`` (lowest ticket
-  id wins on a duplicate), via ``rebar.list_tickets(status="open", repo_root=...)``. A
-  criterion in that map is skipped (reported in ``skipped_unreliable``); the rest form the
-  attempt list (sorted). Counters for criteria no longer in the attempt list are dropped
-  (so a covered or quarantined — or reopened — criterion starts fresh).
-
-* The budget ledger is RESET at the start of each real (due, non-dry-run) sweep. ``cap_usd``
-  bounds a single sweep, not all-time spend, so a prior sweep's recorded spend never counts
-  against a later sweep's budget (otherwise the persistent ledger would accumulate until every
-  future sweep tripped the cap and self-stopped — a permanent fail-closed).
-
-* Per-criterion loop, in attempt order:
-    - ``tier, sample_n = attempter.plan(criterion_id)``.
-    - ``ledger.reserve(ledger.estimate(tier, sample_n), ledger_path=..., cap_usd=cap_usd,
-      reserve_usd=0.0)``. ``cap_usd`` is the whole heal budget, so the pre-check reserves no
-      extra headroom (``reserve_usd=0.0``) — the effective ceiling is exactly ``cap_usd`` for
-      every cap, matching the admission run's own reservation against the same ledger.
-      On ``BudgetExceeded``: set ``stopped_for_budget=True`` and STOP (criteria already
-      completed stay admitted).
-    - ``result = attempter.run(criterion_id)``.
-    - Record spend for the attempt (``_record_spend``): if ``result.usage_rows`` carry a
-      priceable model, ``ledger.finalize(...)`` records actual cost; otherwise (no rows, or an
-      unpriceable model) ``ledger.charge_estimate(...)`` records the pre-flight
-      ``ledger.estimate(tier, sample_n)``. An entry is written for EVERY attempt, so the next
-      ``ledger.reserve`` sees accumulated spend and the cap fails CLOSED — never open on a run
-      that recorded nothing.
-    - Fold the outcome:
-        * ``ADMITTED`` — reset the criterion's failure counter to 0; add to ``admitted``.
-        * ``FAILED_REPRODUCE`` or ``SKIPPED_UNBALANCED`` — increment the counter; when it
-          reaches ``threshold`` (default 3), file the unreliable ticket (idempotent) and add
-          to ``quarantined``.
-        * ``UNMINABLE`` — file the unreliable ticket on FIRST encounter (no threshold) and
-          add to ``quarantined``.
-        * ``INCOMPLETE`` — a transient outage (the admission run exhausted its retries, e.g.
-          an LLM/infra outage). Leave the counter UNCHANGED and neither admit nor quarantine,
-          so a passing outage does not accrue toward a spurious quarantine; the criterion is
-          retried on the next sweep.
-
-* Filing a ticket is idempotent: only ``rebar.create_ticket`` when no OPEN ticket of that
-  exact title already exists.
-
-Assert OBSERVABLE behaviour against this contract (the returned ``HealReport``, tickets in
-the store, and the ledger total) — never private structure.
-"""
+Each real sweep resets the budget ledger. In sorted attempt order, reserve the
+estimated cost against the sweep's ``cap_usd`` with zero extra headroom; stop on
+``BudgetExceeded``. Charge every attempt with actual priceable usage or its
+estimate, so later reserves see accumulated spend. ``ADMITTED`` resets the
+failure counter. ``FAILED_REPRODUCE`` and ``SKIPPED_UNBALANCED`` increment it
+and file an idempotent unreliable ticket at the threshold (default 3);
+``UNMINABLE`` files on first encounter. ``INCOMPLETE`` leaves it unchanged.
+Observe the report, tickets, and ledger rather than private structure."""
 
 from __future__ import annotations
 

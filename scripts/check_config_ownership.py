@@ -1,21 +1,12 @@
 #!/usr/bin/env python3
-"""Config-ownership gate (RP-04 S7.1, ticket 29a9).
+"""Offline AST gate for ambient configuration and credential ownership.
 
-A deterministic, offline AST gate proving that ONLY approved composition roots and
-provider boundaries read ambient configuration and credentials. Every prohibited ambient
-access (env read, ``load_config`` call, credential read, backend reload, configurable
-default) BELOW an approved seam is an error unless it is a recorded legacy exception or
-carries a ``# read-via:`` marker.
-
-Env-read detection REUSES ``scripts/gen_env_registry.py`` (``KNOWN_ENV_HELPERS``
-/ ``_is_os_environ`` / ``_str_literal``) by direct import — there is NO parallel env-read
-parser here. On top of those primitives this gate layers seam/ownership classification,
-the getattr/backend/configurable-default categories, and receiver-object aliasing.
-
-API contract:
-  - check(root: Path) -> list[str]          # sorted error strings, [] == clean
-  - main(argv: list[str] | None) -> int      # 0 clean, 1 failures
-"""
+Only approved composition roots and provider boundaries may read environment,
+load config, read credentials, reload backends, or use configurable defaults.
+Reuse ``gen_env_registry.py`` env-read primitives, then classify seam ownership,
+receiver aliases, and approved legacy/``# read-via:`` exceptions.
+``check(root)`` returns sorted errors; ``main(argv)`` exits 0 clean or 1 on errors.
+See ticket 29a9."""
 
 from __future__ import annotations
 
@@ -36,20 +27,14 @@ from gen_env_registry import (  # noqa: E402
     _str_literal,
 )
 
-# --------------------------------------------------------------------------- #
-# Approved seams — a finding fires only BELOW the relevant seam.
-# --------------------------------------------------------------------------- #
-
-# Composition roots own the ambient-config categories (env read, helper-shim env read,
-# load_config call, getattr-env) — classified by module BASENAME.
+# Approved composition-root basenames own ambient env/config reads;
+# findings fire only below the relevant seam.
 COMPOSITION_ROOT_BASENAMES: frozenset[str] = frozenset(
     {
         "config.py",
         "_config_sources.py",
-        # The below-seam RP-04 resolvers split out of _config_sources.py (story 1a33).
-        # Same composition root, two files: the raw-input half and the owned-resolver
-        # half. Classification is by BASENAME, so the split half must be listed here or
-        # every read it OWNS would fire as a below-seam violation.
+        # The raw-input and owned-resolver halves share a composition root, so
+        # both basenames must be approved after the split (story 1a33).
         "_config_resolvers.py",
         "_config_schema.py",
         "_child_env.py",

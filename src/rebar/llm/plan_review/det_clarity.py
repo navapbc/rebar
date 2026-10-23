@@ -1,39 +1,11 @@
-"""Blocking clarity-floor DET checks P10 + P11 (ticket 49b8).
+"""Blocking DET clarity checks P10 and P11 (ticket 49b8).
 
-Backtests over the 7-day population (153 tickets; 104 passed-plan FP set, 55
-blocked-plan hit set) and a 200-ticket extended set supported two deterministic
-floor additions, operator-approved for BLOCKING. ``p6_ac_quality`` is monolithic
-and stays advisory, so both rules are SEPARATE DET checks with their own coverage
-entries rather than promotions inside P6:
-
-* **P10 verification-presence** — a leaf plan passes if it has a ``## Testing``
-  or ``## Verification`` H2 section, OR >=1 ``- [ ]``/``- [x]`` AC checklist item
-  that contains an inline code span (backtick-fenced token) or matches the
-  verification-vocabulary regex (:data:`_VERIFICATION_VOCAB_RE`). That vocabulary
-  is EXHAUSTIVE for the check — nothing else qualifies. A container is a natural
-  pass (its children carry the verification detail). **BLOCKS.**
-* **P11 AC vagueness** — the boundary-FIXED vague lexicon
-  (:data:`_VAGUE_LEXICON_FIXED`: both word boundaries; ``clean`` dropped —
-  the old prefix matching fired on "cleanly"/"lint clean" and measured FPs,
-  while the fixed rule measured 0 FPs across 304 passed plans; ``etc.`` kept)
-  scanned over AC item lines only (:func:`.det_operator_attested.ac_item_lines`).
-  **BLOCKS.**
-
-Code-span handling (:func:`vague_hits_in_line`): inline code-span positions are
-recorded on the ORIGINAL line before the spans are blanked for matching; a
-lexicon hit inside a recorded span never fires, and an ``etc.`` occurrence whose
-start lies within :data:`ETC_SPAN_PROXIMITY_CHARS` characters after a recorded
-span's end is exempt — a non-exhaustive enumeration of already-concrete examples
-("run ``git grep …``, etc.") is not vague.
-
-Extracted alongside :mod:`.det_lint` / :mod:`.det_operator_attested` (the same
-module-size seam) so the size-ceilinged :mod:`.det_floor` does not grow past the
-800-LOC cap; ``det_floor`` imports the two checks into ``DET_CHECKS`` and shares
-:func:`vague_hits_in_line` for P6's advisory lexicon so the two surfaces agree.
-No runtime import back into ``det_floor`` at module level (``DetResult`` is
-imported lazily, the :func:`.det_lint.p9_file_impact_coverage` precedent), so
-the import is cycle-free.
-"""
+P10 requires a leaf Testing/Verification H2 or an AC checklist item with an
+inline code span or verification-vocabulary match; containers pass. P11 scans
+AC item lines for the fixed vague lexicon with word boundaries. Code spans
+are excluded, and ``etc.`` immediately after concrete code examples is
+exempt; ``clean`` is absent from the lexicon. P6 reuses the same matcher for
+advice. Lazy ``DetResult`` imports avoid a cycle with ``det_floor``."""
 
 from __future__ import annotations
 

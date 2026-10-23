@@ -1,85 +1,17 @@
-"""Pydantic AI bounded-operation seams for the PROMPTED structured-output path (RP-01 S2).
+"""Pydantic AI hooks for one bounded prompted structured-output run.
 
-The manual attempt scheduler in :func:`rebar.llm.structured_run._pai_structured` (a
-``for _ in range(output_retries + 1)`` loop issuing a fresh ``run_sync`` per attempt) is
-replaced by ONE bounded Pydantic AI ``Agent`` run. That single run composes the S1
-output-policy adapter (:mod:`rebar.llm.pai_output`, as ``output_type=TextOutput(fn)``) with
-the two seams this module supplies. Neither seam selects a provider, projects usage for
-telemetry, or persists anything — they only express two EXISTING deterministic authorities
-(:mod:`rebar.llm.structured` and :func:`rebar.llm.model_classes.own_window_tokens`) through
-documented Pydantic AI hooks.
+``wire_history_processor`` projects a copy for the provider: retain a failed
+text response only when billed input/output plus output reserve fits every
+candidate's context window. Missing usage omits it; an oversized authoritative
+request raises ``ContextWindowExceededError`` before a provider call. Stored
+history remains complete. ``concision_guard`` turns prompted truncation from
+either finish-reason layer into in-run ``ModelRetry``; otherwise it delegates
+to ``structured.check_response``. Native output keeps its terminal guard.
 
-Seam 1 — wire-context projection (:func:`wire_history_processor`)
-================================================================
-A ``ProcessHistory`` capability whose ``before_model_request`` runs a
-``Callable[[list[ModelMessage]], list[ModelMessage]]`` and returns a wire COPY. It never
-mutates stored state, so ``result.all_messages()`` keeps the full history regardless of what
-the wire omits. Rule, applied to each FAILED output ``ModelResponse`` (a response carrying
-text but no tool call — a tool-calling turn is part of the agentic loop and is always kept):
-
-* Carry it on the retry wire ONLY when, for every viable candidate model,
-  ``response.usage.input_tokens + response.usage.output_tokens + effective_max_tokens``
-  fits ``model_classes.own_window_tokens(candidate)`` — evaluated against the SMALLEST
-  candidate window so a carried response fits every candidate the fallback chain may route to.
-* Otherwise OMIT the response WHOLE (never partially). Missing / zero usage → omit (its size
-  cannot be proven, so it never rides the wire).
-* If the authoritative input ALONE plus the output reserve overflows
-  (``input_tokens + effective_max_tokens > window``, i.e. nothing can be added and it still
-  does not fit), raise :class:`rebar.llm.errors.ContextWindowExceededError` — rebar fails
-  closed rather than SHORTENING authoritative system / user / tool content.
-* The REQUEST side of the same rule (story f79d): every wire's ``ModelRequest`` content
-  (instructions + part content) is estimated locally at :data:`CHARS_PER_TOKEN` chars/token,
-  and ``estimate + effective_max_tokens > window`` raises the same
-  :class:`ContextWindowExceededError` BEFORE the provider call. This is what covers the
-  FIRST request — a history of ``[ModelRequest]`` carries no billed usage for the response
-  rule to read, and previously went to the provider unmeasured (a 400 surfaced as
-  ``LLMUnavailableError``). Per-op input bounds (spec-scan, plan-review sizing,
-  completion ceilings) remain the first line; this seam is the shared backstop.
-
-Seam 2 — truncation reclassification (:func:`concision_guard`)
-==============================================================
-An ``after_model_request`` capability attached IN PLACE OF
-:func:`rebar.llm.pai_output.guard_capability` on the PROMPTED branch only (the NativeOutput
-branch keeps the terminal ``guard_capability`` — a fixed decoding grammar, not verbosity,
-drives a native turn's size, so a truncated native turn stays TERMINAL). Because the shared
-:mod:`rebar.llm.structured` classifiers only RAISE (never return a reason), the guard does its
-own read-only two-layer read for the truncation subset ONLY — ``finish_reason`` in
-{``length``, ``max_tokens``} OR the raw ``provider_details['finish_reason']`` in that subset
-(mirroring :func:`rebar.llm.structured.check_response`'s two layers so a provider_details-only
-truncation, pydantic-ai #5221, is caught):
-
-* on a truncation signal it raises, before parsing,
-  ``pydantic_ai.ModelRetry`` carrying the exact concision instruction (bounded, in-run);
-* otherwise it delegates to the SAME S1 logic — :func:`rebar.llm.structured.check_response`:
-  a terminal :class:`rebar.llm.errors.UnretryableOutputError` (refusal / content_filter)
-  propagates, a retryable :class:`rebar.llm.errors.StructuredOutputError` (transient
-  ``error``) is translated into ``ModelRetry``.
-
-The shared ``structured.py`` tables are READ, never mutated.
-
-Combined-allowance derivation (one value seeds two budgets)
-===========================================================
-The output-retry allowance ``N`` is ``structured.OUTPUT_RETRIES`` (2 by default), lowered by
-``req.structured_retry_limit`` when the caller sets it (see
-:func:`rebar.llm.structured_run.output_retry_allowance`). That ONE value seeds BOTH:
-
-* the Agent's ``retries={"output": N}`` — the bound on the shared per-run output-retry counter
-  that BOTH a capability-hook ``ModelRetry`` (the concision guard, seam 2) AND a
-  ``TextOutput``-validator ``ModelRetry`` (the parse/validation failure) decrement; and
-* the ADDEND on the constructed ``UsageLimits.request_limit`` in
-  :func:`rebar.llm.structured_run.build_usage_limits` (base ``ceil(eff_max_iter/2)`` PLUS
-  ``N``, while the RETURNED ``req_limit`` stays the bare base for telemetry and the
-  ``completion_banking`` ``2*B`` inverse).
-
-Seeding both from ONE value guarantees the shared request budget can NEVER trip before the
-output-retry counter, so an invalid-then-valid recovery always spends its retries on OUTPUT
-correction rather than aborting on a request-budget stop. On exhaustion pydantic-ai raises
-``UnexpectedModelBehavior("Exceeded maximum output retries (N)")``, which the operation
-translates to a rebar-typed :class:`rebar.llm.errors.UnretryableOutputError`.
-
-Pydantic AI symbols are imported lazily inside functions so top-level ``import rebar.llm``
-stays stdlib-only (the ``structured_run`` / ``pai_output`` convention).
-"""
+One output retry allowance seeds both Agent output retries and the request
+limit addend, so the request budget cannot end before output correction.
+Exhaustion becomes ``UnretryableOutputError``. Pydantic AI imports stay lazy
+so importing ``rebar.llm`` remains stdlib-only."""
 
 from __future__ import annotations
 

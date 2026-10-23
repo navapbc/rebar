@@ -1,44 +1,12 @@
 #!/usr/bin/env python3
-"""POSIX-only-import collection guard (bug ``infamous-protected-baboon``, 0b31-aeb5-e734-41c9).
+"""Guard module-scope ``fcntl`` imports so modules collect off POSIX.
 
-``fcntl`` is a POSIX-only stdlib module: it has no Windows build. An *unconditional*
-module-level ``import fcntl`` therefore makes the whole module unimportable off POSIX, and
-because ``import rebar`` transitively reaches such a module (``rebar._commands.doctor_locks``),
-a single unguarded import turned the entire package unimportable on Windows — every test
-module failed to *collect* with ``ModuleNotFoundError: No module named 'fcntl'`` (the
-non-blocking "Test Suite (mirror)" Windows sweep tier went fully red).
-
-The collectability contract is: a POSIX-only import that runs at module import time MUST be
-guarded, so the module still imports where the dependency is absent::
-
-    try:  # POSIX advisory locking; absent on some platforms (e.g. plain Windows)
-        import fcntl
-    except ImportError:  # pragma: no cover - platform-dependent
-        fcntl = None  # type: ignore[assignment]
-
-(actually *using* ``fcntl`` off POSIX is out of scope — Windows is not a declared support
-target — only that import/collection succeeds.)
-
-This gate is a deterministic AST check, not an LLM criterion: the property is exactly
-"a module-scope ``import fcntl`` that is not lexically inside a ``try``". It is stdlib-only
-and needs no CI provider (project.portability) — it runs the same locally and in any CI::
-
-    python scripts/check_fcntl_import_guard.py
-    make lint                                   # wired in
-
-What is FLAGGED — an *unconditional* module-scope ``import fcntl`` / ``from fcntl import ...``
-(one not made conditional by a ``try`` or an ``if``). What is NOT flagged:
-
-* an import inside a **function/method body** — that is lazy and only runs when called, so it
-  never breaks *collection* (e.g. ``rebar._store.hlc`` imports fcntl lazily);
-* an import inside a **``try``** block — the ``try: import fcntl / except ImportError``
-  idiom this gate exists to require;
-* an import inside an **``if``/``else``** branch — a platform guard such as
-  ``if sys.platform != "win32": import fcntl / else: fcntl = None`` is equally
-  collection-safe (see ``rebar.reconciler.alert_store``);
-* a line carrying the sanction marker ``# fcntl-guard-ok: <reason>`` (reason MANDATORY) — for
-  a genuinely collection-safe module-scope import the AST cannot otherwise prove safe.
-"""
+Flag unconditional ``import fcntl`` and ``from fcntl import`` at module
+scope. Lazy function imports, imports inside ``try`` or conditional branches,
+and a line sanctioned with ``# fcntl-guard-ok: <reason>`` are accepted. A
+module-scope import can use ``try: import fcntl`` / ``except ImportError:
+fcntl = None``; using fcntl off POSIX is outside this collection gate. Run
+directly or through ``make lint``. See ticket 0b31-aeb5-e734-41c9."""
 
 from __future__ import annotations
 
@@ -81,14 +49,8 @@ def _targets_posix_only(node: ast.stmt) -> str | None:
 def _scan(
     body: list[ast.stmt], *, guarded: bool, lines: list[str], findings: list[_Finding], path: Path
 ) -> None:
-    """Walk *body* recursively, flagging unconditional module-scope POSIX-only imports.
-
-    ``guarded`` is True inside a construct that makes the import *conditional* — a ``try``
-    block (``try: import fcntl / except ImportError: fcntl = None``) or an ``if``/``else``
-    branch (``if sys.platform != "win32": import fcntl / else: fcntl = None``). Both are
-    established, collection-safe idioms in this codebase. Function/async-function bodies are
-    skipped entirely: an import there is lazy and never runs at collection time.
-    """
+    """Flag unconditional module-scope POSIX imports. Imports inside try/if are guarded;
+    imports inside functions are lazy and skipped."""
     for node in body:
         module = _targets_posix_only(node)
         if module is not None:

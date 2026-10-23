@@ -1,22 +1,10 @@
-"""One-time backfill of retroactive ``caused_by`` links over CLOSED bugs (ticket 2f8e).
+"""Backfill ``caused_by`` links on closed bugs (ticket 2f8e).
 
-For every closed bug we reuse the ticket-555e conservative single-culprit blame resolver
-(:func:`rebar.metrics.blame.derive_caused_by`) to find the change that most likely
-introduced the bug, then draw a ``caused_by`` link from the bug to that culprit ticket —
-the links the bug-close hook would have drawn had the resolver existed at close time.
-
-The blame resolver is best-effort and conservative: it only yields a culprit when a
-strict majority (> 50%) of the pre-fix blamed lines belong to ONE commit that resolves
-to a ticket, returning ``None`` on any ambiguity. We do NOT reimplement blame here.
-
-Because a closed bug is a closed link *source*, :func:`graph._links.add_dependency` would
-reject the edge; we write via the lower-level ``_write_link_event`` (bypassing the
-closed-source guard), exactly as ticket 555e does at close time. The pass is idempotent:
-a bug that already carries an active ``caused_by`` edge to its culprit is skipped.
-
-``--dry-run`` is the DEFAULT — the script previews proposals and writes nothing unless
-``--write`` is passed.
-"""
+Reuse ``derive_caused_by``: it yields one culprit only when a strict majority of
+pre-fix blamed lines belong to one commit resolving to a ticket. Write the link
+through ``_write_link_event`` because the source bug is closed; skip an existing
+active edge to the same culprit. Default ``--dry-run`` previews only; ``--write``
+persists links."""
 
 from __future__ import annotations
 
@@ -29,13 +17,8 @@ from rebar.metrics.blame import derive_caused_by
 
 
 def propose_caused_by(repo_root: str) -> list[dict]:
-    """Proposed ``caused_by`` edges for closed bugs with a resolved single culprit.
-
-    Iterates CLOSED bugs, runs the 555e blame resolver for each, and returns
-    ``[{"bug_id": ..., "culprit_id": ...}, ...]`` for the bugs that resolve to exactly
-    one culprit ticket. Idempotency (skipping an edge that already exists) is enforced at
-    write time in :func:`backfill`, so a re-run never writes a duplicate ``caused_by`` event.
-    """
+    """Return closed-bug/single-culprit pairs from the blame resolver. ``backfill`` skips
+    existing edges at write time."""
     tracker_dir = str(config.tracker_dir(repo_root))
     proposals: list[dict] = []
     for bug in rebar.list_tickets(status="closed", ticket_type="bug", repo_root=repo_root):
@@ -48,12 +31,8 @@ def propose_caused_by(repo_root: str) -> list[dict]:
 
 
 def backfill(repo_root: str, write: bool = False) -> int:
-    """Draw the proposed ``caused_by`` links; return the count of NEW links written.
-
-    In the default dry-run (``write=False``) nothing is written and ``0`` is returned.
-    With ``write=True`` each proposed edge is written via the closed-source-bypassing
-    ``_write_link_event`` and the number of newly written links is returned.
-    """
+    """Write proposed closed-source links and count new edges; default dry-run writes none and
+    returns 0."""
     proposals = propose_caused_by(repo_root)
     if not write:
         return 0

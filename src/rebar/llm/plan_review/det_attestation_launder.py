@@ -1,39 +1,12 @@
-"""Deterministic attestation-laundering detector (bug 2f56-313f-6175-41b1; ADR-0043 x ADR-0016).
+"""Detect operator-attested ACs that cite repository-resident proof.
 
-THE ANTI-PATTERN. ``[operator-attested]`` (ADR-0043) exempts an acceptance criterion from
-repository verification because its done-evidence legitimately lives OUTSIDE the snapshot —
-a deploy, a vote, console output. The completion verifier classifies SOLELY from the author
-tag (by design; see ``completion_verifier.md``), so tagging a criterion whose proof is
-repo-resident LAUNDERS it past verification: the verifier accepts a ticket comment where an
-exact path/symbol check was possible. The live instance this module answers is epic
-``fb8a-7363-e406-4e36`` AC-19: retagged after a verifier step-budget failure although its
-proof was ``tests/unit/test_scan_scoping.py`` — the review-side evidence-kind criterion (an
-LLM judgment) missed it, and the provenance lint surfaced only as ADVISORY P6 coaching.
-
-THE DETECTOR. A tagged AC item fires when its own text — the checkbox line plus its indented
-continuation lines, up to the next checkbox item or the end of the AC section — cites exact
-repository path/symbol evidence AS EVIDENCE. Matching is precision-first, because a false
-positive here would block ADR-0043's legitimate escape hatch:
-
-* test artifacts always fire (``tests/…`` paths, ``test_*`` path segments and symbols,
-  pytest ``::node`` ids) — a test is inherently completion proof, never orientation;
-* other repo citations (repo-root-anchored paths ``src/…``/``docs/…``/``scripts/…``, slash
-  paths with a code-shaped extension) fire only when an evidence-introducing word (proxy,
-  proof, evidence, verified, covered, documented, …) precedes them on their line — a path
-  in plain prose is ORIENTATION ("the fix shipped in src/… is deployed") and a
-  legitimately-external AC may mention one freely (7f69/5796 false-positive class).
-
-URLs are scrubbed first (a link is external evidence; its path segments must not read as
-repo paths). Bare commit hashes and Gerrit change numbers deliberately do NOT fire: they are
-the attestation-EVENT provenance ADR-0043's contract itself demands. Dotted config keys
-(``compact.trigger``) carry no slash and do not fire.
-
-Consumed by the deterministic pre-LLM close guard
-(:func:`rebar._commands.txn.ensure_attested_items_valid`). Pure stdlib (``re`` only) — no
-network, no shell, mirroring its siblings ``det_operator_attested`` (the opposite-direction
-lint: external evidence left UNtagged) and ``det_measurement_provenance`` (the
-``provenance:`` continuation-line shape).
-"""
+An ``[operator-attested]`` tag is for evidence outside the snapshot. Inspect
+the AC item's checkbox and continuations: tests paths, test symbols, and
+pytest node IDs always count as repository proof. Other repo paths count only
+when an evidence-introducing word precedes them on that line, leaving
+orientation references alone. Scrub URLs first; commit hashes and Gerrit
+change IDs are valid event provenance. The pre-LLM close guard consumes this
+pure detector (bug 2f56; ADRs 0043 and 0016)."""
 
 from __future__ import annotations
 

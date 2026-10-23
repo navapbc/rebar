@@ -1,30 +1,11 @@
 #!/usr/bin/env python3
-"""Commit-message body wrap checker — the 50/72 rule, enforced at commit time.
+"""Enforce the 50-column subject and 72-column body commit-message convention.
 
-Gerrit renders a change description as preformatted text and preserves the author's
-newlines verbatim, so the wrapping you commit is the wrapping reviewers read (and what
-``git log`` shows in an 80-column terminal). Gerrit's bundled
-``commit-message-length-validator`` only *warns* on a long subject or body line, which
-is easy to ignore — this hook makes the same rule a local commit gate.
+Gerrit preserves authored newlines. Do not wrap trailers, fenced or indented
+code, long unbreakable tokens, table rows, or stripped ``#`` comment lines.
+The pre-commit hook passes the message file; direct use is:
 
-The convention matches every major Gerrit-based project: Go ("wrapped at around 72
-columns"), Chromium ("wrapped to 72 columns for easier log message viewing in
-terminals"), ChromiumOS ("wrap the body text to 72 characters so that ``git log``
-looks nice") and Android ("hard-wraps at 72 characters maximum").
-
-Deliberate carve-outs — things that must NOT be wrapped, because wrapping them breaks
-machine parsing or makes them unusable:
-
-* **trailers** (``rebar-ticket:``, ``Change-Id:``, ``Signed-off-by:``, ``Fixes:`` …)
-* **fenced code blocks** (``` ``` ```) and indented blocks, which are verbatim
-* **long unbreakable tokens** — a URL, path, or hash that simply cannot be split
-* **table-ish / comment lines** (``|`` rows, and everything git strips: ``#`` lines)
-
-Usage (pre-commit passes the message file; CLI use is for testing):
-
-    check_commit_message_wrap.py .git/COMMIT_EDITMSG
-    check_commit_message_wrap.py --subject-limit 50 --body-limit 72 <file>
-"""
+    check_commit_message_wrap.py [--subject-limit 50] [--body-limit 72] <file>"""
 
 from __future__ import annotations
 
@@ -46,28 +27,19 @@ _TAG_RE = re.compile(r"^[A-Z][A-Z0-9_]*=")
 
 _FENCE_RE = re.compile(r"^\s*```")
 
-# An "atomic" token has structure that implies it is a single unsplittable thing —
-# a scheme (https://), a path separator, or a long run of dotted/underscored/hyphenated
-# identifier segments. Plain repeated letters do not qualify: that is unwrapped prose.
-# (A bare hex run is deliberately NOT listed: a git sha is at most 64 chars, so it can
-# never by itself exceed a 72-column limit, and treating long hex-ish runs as atomic
-# would silently excuse unwrapped prose made of a/b/c/d/e/f characters.)
+# Atomic tokens contain a scheme, path separator, or long structured
+# identifier segments; plain character runs are wrappable prose.
 _ATOMIC_TOKEN_RE = re.compile(r"://|[/\\]|\w[._-]\w")
 
 
-# A line is unwrappable only when a SINGLE token already exceeds the limit *and* the
-# line is essentially just that token (plus short lead-in) — a URL, module path, or git
-# sha the author physically cannot split. A long line made of many short words IS
-# wrappable, and so is one long token followed by lots of prose that should have been
-# moved to the next line, so neither is exempt.
+# Exempt a line only when one unsplittable token exceeds the limit and
+# its short lead-in fits. Extra prose can move to another line.
 def _has_unbreakable_token(line: str, limit: int) -> bool:
     over = [t for t in line.split() if len(t) > limit]
     if not over:
         return False
-    # Only ATOMIC tokens earn the exemption: a URL, a filesystem/module path, a git
-    # sha, a long dotted/underscored identifier — things with no natural break point.
-    # A same-length run of ordinary characters is just unwrapped prose, so it is still
-    # reported. And whatever precedes the atomic token must itself fit on a line.
+    # URLs, paths, and structured identifiers can be atomic; bare hex runs
+    # are not. The text before an atomic token must fit separately.
     if not all(_ATOMIC_TOKEN_RE.search(t) for t in over):
         return False
     remainder = len(line.strip()) - max(len(t) for t in over)

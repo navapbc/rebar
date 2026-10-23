@@ -1,20 +1,9 @@
-# Standing eval spec for the plan-review Pass-2 NOVELTY sub-call (epic 7d43 / child 150b).
-# The DISCRIMINATION proving check for the SEPARATE novelty sub-call: a labeled set of
-# {carryover, novel} findings paired against a prior-review finding. The sub-call must score a
-# reworded CARRYOVER finding as low-novelty (< 0.5 — it matches a prior finding) and a genuinely
-# NEW finding as high-novelty (>= 0.5). This is the evidence gate the Pass-3 rising-floor (cc5b)
-# rests on: a novelty signal that cannot separate new from reworded-prior would make the floor
-# drop real new findings. Distinct from the verifier spec — the novelty sub-call uses its OWN
-# prompt + contract, so its cases live here, not in plan-review-verifier.eval.yaml.
-# Validate offline: `rebar prompt eval plan-review-novelty`.
-#
-# The SAME novelty sub-call also backs the Pass-3 DRIFT floor (bug 5e40 — the plan-UNCHANGED +
-# code-DRIFTED re-review axis): the drift floor drops a finding iff it is NOVEL here AND its
-# citations do not intersect the drifted file set (that drift-intersection predicate is pure and
-# unit-tested in tests/unit/test_plan_review_drift_floor.py). So this discrimination is ALSO the
-# evidence gate the drift floor's novelty half rests on; the N4 pair below adds a code-drift-themed
-# case so the corpus exercises that regime. NOTE: a full run needs the paid model above — this
-# change only EXTENDS the fixture corpus (it does not weaken or remove any existing case).
+# Pass-2 novelty eval (epic 7d43): pair prior findings with reworded carryover
+# (<0.5 novelty) and genuinely new findings (>=0.5). Its separate prompt and
+# contract make this the Pass-3 rising-floor and drift-floor discrimination check.
+# The drift floor drops novel findings only when citations miss drifted files;
+# N4 exercises a drifted-code case. Run `rebar prompt eval plan-review-novelty`;
+# a full eval needs the configured paid model.
 prompt: plan-review-novelty
 model: anthropic:claude-opus-4-8
 epochs: 3
@@ -81,12 +70,9 @@ dataset:
     finding: "The plan adds a new public config key but specifies no default and no back-out path if it is set wrong."
     note: "Novel: a different defect (config key with no default/back-out) — matches no prior finding."
 
-  # N4 — the code-DRIFT re-review regime (bug 5e40). The plan is byte-identical to the signed PASS;
-  # only HEAD drifted. The carryover restates the prior concern (must match → low novelty); the
-  # novel case is a genuinely new concern about the DRIFTED code (must NOT match → high novelty).
-  # This is the exact discrimination the Pass-3 drift floor needs: it drops novel findings only when
-  # they do not cite drifted code, so a novelty signal that mislabels a real drift finding as
-  # carryover (or vice-versa) would break the drift floor's convergence/safety.
+  # N4: with an unchanged plan and drifted code, reworded carryover scores low
+  # and a new concern about the drifted code scores high. The Pass-3 drift floor
+  # retains novel findings that cite the drifted file set (bug 5e40).
   - id: N4-carryover
     pair: drift-access-snapshot
     kind: carryover

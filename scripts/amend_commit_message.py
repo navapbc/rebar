@@ -1,45 +1,12 @@
 #!/usr/bin/env python3
-"""Amend HEAD's commit message from a file WITHOUT dropping its ``Change-Id``.
+"""Amend HEAD's message from a file while retaining its Gerrit Change-Id.
 
-Run it as ``make amend-msg FILE=<path>``.
-
-WHY THIS EXISTS
----------------
-``git commit --amend -F <file>`` (and ``-m``) REPLACES the whole commit message, so the
-``Change-Id`` trailer goes with it. Gerrit's ``commit-msg`` hook only ever ADDS a
-``Change-Id`` when none is present, so it then stamps a FRESH one — and the next
-``git push gerrit HEAD:refs/for/main`` opens a SECOND Gerrit change instead of adding a
-patchset to the existing one. The original is orphaned and has to be abandoned by hand.
-It happened three times in a single session (Gerrit 1921, 1926, 1931).
-
-Nothing downstream can catch it. ``git commit --amend -F <file>`` hands
-``prepare-commit-msg`` ``source='message'`` with an EMPTY sha — byte-identical to what a
-fresh ``-F`` commit produces — so a hook cannot tell "amending, keep the Change-Id" from
-"new commit, stamp one" (measured, not assumed). Neither can the server: a commit
-carrying a fresh Change-Id is indistinguishable from a legitimate new change.
-
-So this follows the Gerrit ecosystem's actual remedy — Go's ``git codereview change``,
-OpenStack's ``git-review``, Android's ``repo upload``, Chromium's ``git cl upload`` —
-which make the failure UNREACHABLE by wrapping the workflow rather than DETECTABLE by
-adding a guard. Read HEAD's ``Change-Id``, put it into the new message, amend.
-
-BEHAVIOUR
----------
-* HEAD carries no ``Change-Id`` -> refuse, loudly and non-zero. A missing trailer means
-  the Gerrit ``commit-msg`` hook is not installed, which is its own problem (``make
-  hooks``); amending anyway would just hand the freshly-stamped-id failure right back.
-* FILE carries its own ``Change-Id`` -> dropped, and HEAD's carried forward instead.
-  Gerrit rejects a commit with two ``Change-Id`` lines, and the one that matters is the
-  one already published on the change.
-* HEAD carries ``Signed-off-by`` trailer(s) and FILE omits them -> carried forward, all
-  of them, in order. ``--file`` replaces the message wholesale, so without this the DCO
-  attestation would be lost as silently as the Change-Id — the very failure this wrapper
-  exists to prevent. A FILE that supplies its own sign-off is authoritative: nothing is
-  carried and nothing duplicated. A HEAD without one gets none invented.
-* Everything else is plain ``git commit --amend``: hooks are NOT bypassed (no
-  ``--no-verify``, so the commit-message gates still fire), and anything staged is
-  folded into the amended commit exactly as ``git commit --amend --no-edit`` would.
-"""
+Run ``make amend-msg FILE=<path>``. Plain ``git commit --amend -F`` replaces the
+message and can stamp a new Change-Id, opening a separate Gerrit change. This
+wrapper refuses HEAD without a Change-Id (install hooks with ``make hooks``),
+replaces any file-supplied Change-Id with HEAD's, and carries HEAD's ordered
+sign-offs only when the file supplies none. Hooks still run, and staged changes
+are included in the amended commit."""
 
 from __future__ import annotations
 
@@ -56,9 +23,8 @@ _SHARED_SCRATCH_ROOTS = {
     root for path in (Path("/tmp"), Path("/var/tmp")) for root in (path, path.resolve(strict=False))
 }
 
-# Gerrit's own hook matches ``^Change-Id: I[0-9a-f]{40}$``. This is deliberately looser
-# (any token, any case) so a hand-written or malformed trailer is still recognised as
-# one rather than being silently duplicated by the composition below.
+# Recognize even malformed or mixed-case Change-Id trailers so composition
+# replaces them instead of duplicating them; Gerrit's hook is stricter.
 _CHANGE_ID_LINE = re.compile(r"^Change-Id:\s*(\S+)\s*$", re.IGNORECASE)
 
 # Deliberately loose for the same reason as ``_CHANGE_ID_LINE``: a hand-written or
@@ -95,12 +61,7 @@ def _is_direct_shared_scratch_file(path: Path) -> bool:
 
 
 def extract_change_id(message: str) -> str | None:
-    """Return the last ``Change-Id`` value in *message*, or ``None`` if it carries none.
-
-    The last one wins for the same reason Gerrit reads it that way: when a message has
-    somehow accumulated more than one, the trailing trailer block is the authoritative
-    footer.
-    """
+    """Return the last Change-Id trailer, the authoritative footer value, or None."""
     found = [m.group(1) for line in message.splitlines() if (m := _CHANGE_ID_LINE.match(line))]
     return found[-1] if found else None
 
@@ -111,9 +72,8 @@ def strip_change_id_lines(message: str) -> str:
     return "\n".join(kept) + "\n"
 
 
-# The subcommand is a caller-supplied parameter, so the raw-git-write lint resolves this
-# argv as opaque and fires fail-closed. Every caller in this module passes a READ (`log`,
-# `interpret-trailers`), and the target is the code checkout, never the ticket store.
+# This parameter is opaque to the raw-git lint, but callers use read-only
+# git log/interpret-trailers on the code checkout.
 # raw-git-ok: read-only git helper (git log / interpret-trailers) on the code checkout
 def _git_stdout(*args: str, stdin: str | None = None) -> str:
     """Run a READ-ONLY git command and return its stdout, or exit loudly on failure."""
@@ -131,26 +91,14 @@ def _git_stdout(*args: str, stdin: str | None = None) -> str:
 
 
 def extract_sign_offs(message: str) -> list[str]:
-    """Return every ``Signed-off-by`` value in *message*, in order, possibly empty.
-
-    Unlike ``Change-Id`` — where only the last one is authoritative — multiple sign-offs
-    are legitimate (each is a distinct DCO attestation), so all of them are kept.
-    """
+    """Return all Signed-off-by trailer values in order; multiple DCO attestations are valid."""
     return [m.group(1) for line in message.splitlines() if (m := _SIGN_OFF_LINE.match(line))]
 
 
 def compose_message(new_message: str, change_id: str, sign_offs: Sequence[str] = ()) -> str:
-    """Return *new_message* carrying *change_id* and, when it omits one, *sign_offs*.
-
-    ``Change-Id`` handling is unchanged: any in *new_message* is stripped and HEAD's
-    re-attached as the sole trailer. *sign_offs* (HEAD's, in order) are appended only
-    when *new_message* itself carries no ``Signed-off-by`` — a file that supplies its
-    own is authoritative, so nothing is carried and nothing duplicated.
-
-    Placement is delegated to ``git interpret-trailers`` rather than reimplemented: it
-    already knows whether the final paragraph is a trailer block (append into it, next to
-    ``Signed-off-by``) or prose (open a new one).
-    """
+    """Replace file-supplied Change-Ids with HEAD's ``change_id``. Preserve ordered HEAD
+    sign-offs only when the new message supplies none. Let ``git interpret-trailers`` place
+    the trailers."""
     stripped = strip_change_id_lines(new_message)
     trailers: list[str] = []
     if not extract_sign_offs(stripped):
@@ -162,9 +110,8 @@ def compose_message(new_message: str, change_id: str, sign_offs: Sequence[str] =
     return _git_stdout("interpret-trailers", *args, stdin=stripped)
 
 
-# This IS the sanctioned amend path: the whole point of the wrapper is that a raw
-# `git commit --amend -F` drops the Change-Id, so the remedy has to OWN the amend rather
-# than forbid it. Ticket-store writes are unaffected -- they stay on the rebar seams.
+# This wrapper owns the code-checkout amend so it retains Change-Id;
+# ticket-store writes still use rebar's supported seams.
 # raw-git-ok: amends the CODE checkout's own HEAD commit message, never the ticket store
 def amend_head(message: str) -> int:
     """Amend HEAD with *message*. Returns git's exit status."""

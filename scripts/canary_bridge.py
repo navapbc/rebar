@@ -1,14 +1,10 @@
-"""canary_bridge.py — extracted alert-classification logic from reconcile-bridge-canary.yml.
+"""Classify bridge canary alerts outside the workflow YAML.
 
-This module is Tier 3 of the shell→Python strangler-fig migration (ticket e602-1354-6778-4c0f).
-It absorbs the four YAML run-block decision trees. Tickets-branch commit and delivery now live
-in ``rebar._store.push``; the workflows retain only strict process-boundary adapters.
-
-The two alert subcommands are automated bug filers and follow the bug-creation
-contract — dedup search first, ≤1 accumulation comment per 24h, abort-if-empty,
-consecutive-red threshold (heartbeat only; drift is persistent state), and
---detected-by provenance.  See docs/bug-creation-contract.md (ticket 4527).
-"""
+The workflows retain process adapters; tickets-branch delivery lives in
+``rebar._store.push``. Alert commands deduplicate by tag, cap marker comments
+at one per 24 hours, abort on empty evidence, and record ``--detected-by``.
+Heartbeat alerts require consecutive red runs; persistent drift does not.
+See docs/bug-creation-contract.md (ticket 4527)."""
 
 from __future__ import annotations
 
@@ -24,14 +20,9 @@ import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-# `alert_dedup` is a SIBLING module in this directory, not an installed package. Under
-# `python scripts/canary_bridge.py` it resolves because the script's directory leads
-# sys.path, but a test that loads this file via `importlib.util.spec_from_file_location`
-# gets no such entry — so the bare import raised ModuleNotFoundError whenever the loading
-# test ran without something else having inserted `scripts/` first, which is exactly what a
-# subset run does (bug 291e-7b48-3f24-41c6). Derive the directory from `__file__` so
-# resolution is invocation-independent; the membership check keeps it idempotent and never
-# reorders an entry that is already present.
+# Resolve sibling alert_dedup from this file's directory for both direct
+# execution and importlib-loaded tests; avoid reordering an existing sys.path
+# entry (bug 291e-7b48-3f24-41c6).
 _SCRIPTS_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
@@ -70,9 +61,8 @@ def _append_outputs(path: str, **kv: str) -> None:
             f.write(f"{k}={v}\n")
 
 
-# Dedup (find-the-open-alert + cap accumulation at 1 comment/24h) is SHARED with the
-# dependency-advisory filer and lives in scripts/alert_dedup.py (ticket 63e8). These two
-# names stay as this module's spelling of it — the marker is what differs per lane.
+# Share open-alert dedup and the 24-hour marker cap with the advisory filer;
+# each lane supplies its own marker.
 _find_alert_ticket = alert_dedup.find_alert_ticket
 
 _ALERT_MARKER = "BRIDGE_CANARY_ALERT:"
@@ -90,14 +80,8 @@ def _previous_canary_red(
     runner: Runner,
     environ: Mapping[str, str],
 ) -> tuple[bool, str]:
-    """(previous completed canary run was red, its updated_at ISO timestamp).
-
-    Consecutive-red threshold for the heartbeat filer: a ticket is only filed
-    when the *previous* completed canary run also failed, so a single flake
-    (API blip, runner hiccup) never opens a bug. Fails toward NOT filing —
-    a query error logs loudly and reports "not red" (the next canary cycle
-    retries; a missed cycle only delays the alert by one cron period).
-    """
+    """Return whether the prior completed canary was red and its timestamp. Query errors log
+    and return not-red, delaying heartbeat alert filing until another cycle."""
     repo = environ.get("GITHUB_REPOSITORY", "")
     workflow = environ.get("CANARY_WORKFLOW_FILE", "")
     current_run = environ.get("GITHUB_RUN_ID", "")
@@ -506,9 +490,8 @@ def cmd_check_binding_drift(
 
     rc, stdout, stderr = runner(["rebar", "bridge", "fsck", "--output", "json"])
 
-    # Exit 1 is the expected findings signal and still carries the JSON report.
-    # Exit 2 is an operational scan failure; never reinterpret it as an empty
-    # report, which could incorrectly close an existing alert ticket.
+    # Exit 1 carries expected findings and a JSON report. Exit 2 means the scan
+    # failed; treating it as empty could close a live alert.
     if rc not in {0, 1}:
         print(f"::error::bridge fsck failed operationally (exit {rc}): {stderr or 'no diagnostic'}")
         return 1
@@ -608,9 +591,8 @@ def cmd_binding_drift_alert(
 
     tid = _find_alert_ticket(runner, _DRIFT_TAG)
 
-    # No consecutive-red threshold here (unlike heartbeat-alert): binding drift is
-    # persistent store state that cannot self-heal between runs, and the fsck
-    # oracle never fails the canary run, so run conclusions carry no drift signal.
+    # Binding drift persists, so unlike heartbeat alerts it needs no
+    # consecutive-red threshold; canary run status carries no drift signal.
     if drift_found == "true" and not tid:
         title = f"[binding-drift] bridge fsck found {drift_total} audit finding(s)"
         desc = _drift_description(drift_total, drift_summary, ts, run_url)

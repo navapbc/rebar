@@ -1,53 +1,23 @@
 #!/usr/bin/env python3
-"""One-shot backtest for the Gerrit bugfix-size attestation criterion (ticket ad0d B2).
+"""Offline backtest for the shipped Gerrit bugfix-size gate (ticket ad0d B2).
 
-Re-derives the historical bug-fix corpus from git history and applies the SHARED size floor
-(`BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES`) + non-test classification rule from
-`rebar.llm.code_review.bugfix_size_gate` — the exact code the review bot runs — so the
-backtest cannot drift from the gate. Emits a JSON artifact:
+Import the production non-test-line counter, path predicate, threshold, and
+repeat-fix predicate. The pinned planning corpus has 113 commit SHAs and 13
+adjudicated substantive flagged members; ``--check-planning-corpus`` requires
+both measured sets to match. SHA membership avoids drift from live ticket
+classification; artifact ticket labels remain best-effort. Default mode covers
+all resolvable bug fixes, including trailer references.
 
-    {"threshold": 150, "total_bugfix_commits": N, "flagged_count": M,
-     "commits": [{"commit", "ticket", "non_test_lines", "flagged"}, ...]}
+``--repeat-fix`` adds that predicate beside size; ``--labels-from-caused-by``
+reports recall and escalation rates from store links. ``--all-work`` covers every
+commit in a window and reports change-shape distributions and correlations with
+offline rework signals. No mode calls CI or the network; Gerrit Verified-1 figures
+in the report are not reproduced.
 
-Adjudication basis (planning corpus, recorded on ticket ad0d-6338-bc8c-43b6): 13 of 113
-bug-fix commits exceeded the floor; ALL 13 were adjudicated substantive (two shipped ADRs).
-A mechanical false positive means exactly: a flagged commit outside that adjudicated-13 set.
-
-The planning corpus is pinned by IDENTITY: PLANNING_CORPUS_COMMITS lists the exact 113
-commit SHAs the planning analysis measured — the ancestors of PLANNING_CORPUS_BOUNDARY
-whose SUBJECT line carried a `<ticket-id>:` prefix resolving to a bug ticket AS OF the
-tracker state when ticket ad0d-6338-bc8c-43b6 was filed (tickets branch c5b7d41419e8).
-Deriving membership from LIVE ticket state instead is what this check originally did, and
-it drifts: reclassifying any historical ticket to/from `bug`, or adding a ticket that
-changes short-prefix resolution, moves the count (bug 648b-7882-497f-45fc). The SHA pin is
-immune to tracker churn. (The default mode resolves trailers too, matching the shipped
-gate; over the same range that wider rule sees 245 bug-fix commits, whose extra flagged
-members are outside the hand-adjudicated corpus.)
-`--check-planning-corpus` measures the pinned commits and exits non-zero unless the
-measured set equals the pin and the flagged set equals ADJUDICATED_SUBSTANTIVE exactly —
-the executable form of the acceptance criterion. Per-row ticket labels are best-effort
-against live state, for the artifact only; they no longer gate.
-
-`--repeat-fix` additionally evaluates the SHIPPED repeat-fix predicate (ticket 1dd5) per
-commit — again by importing it, so the backtest cannot drift from the gate — as a field
-BESIDE `flagged`; `--labels-from-caused-by` labels each fix from the store's own `caused_by`
-links ("this fix's ticket was later named as the cause of another bug") and prints labelled
-recall + escalation rate per predicate, which is how the two signals are compared.
-
-`--all-work` switches to a WIDER corpus: every commit in a window, not just bug fixes. It
-emits the commit- and ticket-level change-shape distributions and their rank correlation
-with the offline rework signals (`caused_by` fan-in, plan-review and completion-gate rounds),
-plus the above/below split at the shipped threshold. It is the reproducible form of
-`reports/stability/change-shape-backtest.md` read (a), and — like every other mode here — it
-imports `count_non_test_diff_lines` / `is_test_path` / the threshold constant rather than
-re-deriving them. It stays OFFLINE (git + the local store only, no CI provider, no network);
-the report's Gerrit `Verified-1` figures need credentials and are not reproduced by it.
-
-Usage:  python scripts/backtest_bugfix_size.py [--rev-range origin/main] [--out artifact.json]
-        python scripts/backtest_bugfix_size.py --check-planning-corpus [--out artifact.json]
-        python scripts/backtest_bugfix_size.py --repeat-fix --labels-from-caused-by
-        python scripts/backtest_bugfix_size.py --all-work --since 2026-07-01 --until 2026-09-02
-"""
+Usage: ``python scripts/backtest_bugfix_size.py [--rev-range origin/main] [--out artifact.json]``
+       ``python scripts/backtest_bugfix_size.py --check-planning-corpus``
+       ``python scripts/backtest_bugfix_size.py --repeat-fix --labels-from-caused-by``
+       ``python scripts/backtest_bugfix_size.py --all-work --since DATE --until DATE``"""
 
 from __future__ import annotations
 
@@ -81,10 +51,8 @@ from rebar.llm.code_review.repeat_fix import (  # noqa: E402
 # Newest commit of the 113-commit planning corpus (subject-prefix bug-fix commits).
 PLANNING_CORPUS_BOUNDARY = "25fa6107f36f69b4b3731a4aaa9f5622aaec2988"
 
-# The 113 planning-corpus commits, pinned by SHA. Recovered by re-running the
-# subject-prefix derivation against the tracker state at ticket ad0d-6338-bc8c-43b6's
-# creation (tickets branch c5b7d41419e877f47e6aa326ac5cac7aaff1d48c, via
-# REBAR_TRACKER_DIR): corpus=113, flagged set == ADJUDICATED_SUBSTANTIVE exactly.
+# Pin the 113 planning-corpus SHAs from ticket ad0d's original tracker state;
+# their flagged set must equal ADJUDICATED_SUBSTANTIVE exactly.
 PLANNING_CORPUS_COMMITS = frozenset(
     {
         "25fa6107f36f69b4b3731a4aaa9f5622aaec2988",
@@ -271,12 +239,8 @@ def _measure(sha: str, ticket: str, *, repeat_fix: bool = False) -> dict:
         "flagged": non_test > BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES,
     }
     if repeat_fix:
-        # Call the GATE, not the predicate underneath it. Re-deriving the escalation here
-        # would make the backtest measure a second implementation of the rule and report the
-        # number as if it were the gate's — and the two silently disagreed: the gate left the
-        # window anchored at wall-clock `now` while this asked for the commit's own time, so
-        # a replay of a year-old commit scored it against today's history. `escalation_for_diff`
-        # now takes the anchor, so replay and review run the same code on the same window.
+        # Replay through the shipped gate, anchored at the commit's time. A separate
+        # predicate or today's wall clock would score a different history window.
         _, reason, priors = escalation_for_diff(
             diff,
             repo_root=str(REPO_ROOT),
@@ -340,9 +304,8 @@ def _print_recall(summary: dict) -> None:
 
 
 def _corpus_label(sha: str, subject: str, tracker: str) -> str:
-    """Best-effort ticket label for a pinned planning-corpus row. Artifact metadata only —
-    corpus membership is the SHA pin, so an unresolvable or reclassified ticket never
-    changes the corpus; it just degrades this row's label to the raw subject prefix."""
+    """Return a best-effort artifact label; SHA pins, not live ticket labels, determine corpus
+    membership."""
     match = _SUBJECT_TICKET_PREFIX.match(subject)
     prefix = match.group(1) if match else ""
     message = _git("log", "-1", "--format=%B", sha)
@@ -355,12 +318,8 @@ def _corpus_label(sha: str, subject: str, tracker: str) -> str:
 
 
 def _run_all_work(args: argparse.Namespace, tracker: str) -> int:
-    """The all-work mode: the reproducible form of the change-shape backtest report.
-
-    Everything it measures is OFFLINE — git history plus the local ticket store — so it runs
-    with no CI provider and no network. The report's Gerrit `Verified-1` figures are
-    deliberately not reproduced here; they need authenticated Gerrit access.
-    """
+    """Report all-work change shape using git and the local store. Gerrit Verified-1 counts
+    need credentials and are not reproduced."""
     report = all_work.build_report(
         repo_root=REPO_ROOT,
         tracker_dir=Path(tracker),

@@ -1,32 +1,11 @@
 #!/usr/bin/env python3
-"""Destructive test-exec lint [rebar:6818-615f-555e-4bb9].
+"""Reject tests that execute shell deletion with an unguarded variable target.
 
-A test may not ``subprocess``-exec a shell script whose deletion target is an
-unguarded variable interpolation. On 2026-08-26 a test did exactly that: it ran a
-real script containing ``rm -rf "${dir}"/*`` with ``dir`` set to ``""``, the glob
-expanded to ``rm -rf /*``, and the run destroyed ``/opt/homebrew`` and every
-Homebrew-installed app in ``/Applications`` before a 60-second timeout stopped it.
-
-The deeper defect is the test design, not the script: a test asserting *"the guard
-rejects an unsafe path"* should never be able to delete anything. Asserting on **what
-would have been deleted** — via an injectable seam — is a strictly better oracle than
-observing a wiped directory, and it removes the hazard instead of containing it.
-
-Two shapes clear this gate:
-
-* a **seam** — the script deletes through ``"${RM_CMD:-rm}"``, so a test can point
-  ``RM_CMD`` at a stub that records argv;
-* a **shell-level guard** — ``: "${dir:?...}"`` for the same variable the deletion
-  targets, which aborts on unset AND on set-but-empty.
-
-Note that ``set -euo pipefail`` does NOT clear this gate, and deliberately so: ``set
--u`` fires on *unset*, not set-but-empty, and the incident's variable was ``""``.
-
-This is static analysis over the reviewable surface. It cannot stop a mutation at
-runtime — a mutation harness can delete any guard expressed in the artifact it
-mutates — so it is defence in depth behind the OS sandbox tracked by
-``e668-b496-e264-4283``, never a substitute for it.
-"""
+An injectable deletion command (such as ``${RM_CMD:-rm}``) lets tests record
+argv without deleting. A preceding ``: "${dir:?...}"`` guard also accepts a
+targeted variable by rejecting unset and empty values; ``set -u`` alone does
+not protect an empty value. This static check covers reviewable shell calls;
+the OS sandbox remains the runtime boundary. See ticket 6818-615f-555e-4bb9."""
 
 from __future__ import annotations
 
@@ -43,10 +22,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _EXEC_FUNCS = frozenset({"run", "Popen", "call", "check_call", "check_output"})
 
-#: ``rm`` plus its flag cluster and deletion target. The flags are checked
-#: separately rather than enumerated in one alternation: an alternation has to spell
-#: out every ordering and case (``-rf``/``-fr``/``-Rf``/``-fR``/``-r -f``/…), and a
-#: missed spelling is a silent hole. Reducing the cluster to a letter set cannot miss.
+#: Match rm flags as a set, covering every ordering and case of recursive
+#: force without an incomplete alternation.
 _RM_RE = re.compile(r"\brm\b((?:\s+-[A-Za-z]+)+)\s+([^\n;&|]*)")
 
 
@@ -125,15 +102,8 @@ def _script_literals(call: ast.Call) -> list[str]:
 
 
 def _is_exec_call(node: ast.AST) -> TypeGuard[ast.Call]:
-    """Any call that hands a shell-script path to something.
-
-    Deliberately NOT keyed to `subprocess.run(...)`. Matching only that spelling is
-    evadable three ways that all still execute the script: ``from subprocess import
-    run``, ``import subprocess as sp``, and a thin in-repo wrapper helper. Static
-    analysis cannot resolve an arbitrary wrapper, so this fails CLOSED on the thing
-    that actually carries the risk — a test naming a script path — rather than on a
-    mechanism spelling it can always be tricked about.
-    """
+    """Detect a test call naming a shell script even through subprocess aliases or wrappers;
+    static analysis cannot resolve arbitrary wrapper behavior."""
     return isinstance(node, ast.Call) and bool(_script_literals(node))
 
 

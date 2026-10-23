@@ -360,43 +360,15 @@ def resolve_model_string(value: str, repo_root: str | None = None) -> str:
 
 
 def should_fall_back(exc: Exception) -> bool:
-    """The ``fallback_on`` predicate: should ``exc`` move the chain to its next candidate?
+    """Decide whether a failure advances the model fallback chain.
 
-    Two rules, one for each LEG position:
-
-    **A NON-PRIMARY (fallback) leg's failure is ALWAYS retained.** When a fallback leg is the
-    one raising, returning ``True`` here makes pydantic-ai COLLECT the exception and, at
-    chain exhaustion, bundle every leg into a ``FallbackExceptionGroup`` — instead of
-    BARE-RERAISING this leg alone and DISCARDING the primary's retained cause. That discard
-    is bug 1c0d: a keyless fallback's non-retryable auth ``TypeError`` masked a retryable
-    primary throttle (429), turning an ``exit 11`` (wait-and-retry the primary) into a hard
-    INDETERMINATE fleet-wide. The retained group is then classified by its MOST-RECOVERABLE
-    leg (see :func:`rebar.llm.failure._classify_fallback_group`). The leg is recognised via
-    :func:`rebar.llm.tracing.is_fallback_leg_failure`, which reads the marker that the
-    EXISTING per-candidate wrapper (:class:`~rebar.llm.tracing._TracedCandidateModel`, already
-    applied to every leg by :func:`build_fallback_model` and already carrying
-    ``_candidate_order``) stamps in its ``request()`` catch when ``_candidate_order > 0`` — so
-    this rule never fires for the primary (order 0, unstamped).
-
-    **The PRIMARY leg keeps the deliberately NARROW guard.** pydantic-ai's own docs warn that
-    provider SDK retry logic can delay failover substantially — a 429 may be retried inside
-    the SDK (and, for rebar's Anthropic path, inside the ``AsyncTenacityTransport``) for up to
-    ~60s before the fallback is ever reached — so switching providers is only worth that
-    latency for the AVAILABILITY classes. Everything else must fail LOUDLY: a credential error
-    (``CHANGE_SETTINGS``) must not be masked by shopping for a provider whose key happens to
-    work; an oversized request (``CHANGE_INPUT``) is the size ladder's problem and another
-    provider will not fix it; and a quota/payment failure (``INCREASE_PROVIDER_LIMITS`` — which
-    is where a 429 carrying ``insufficient_quota`` lands, unlike a plain rate-limit 429) is a
-    SPEND problem, where silently relocating spend is worse than stopping. This decides whether
-    a fallback is TRIED AT ALL; the retain-the-group rule above governs only what happens once
-    a fallback leg has itself failed.
-
-    Derived from :mod:`rebar.llm.failure`'s taxonomy at CALL time — the existing ``_RETRYABLE``
-    frozenset (``WAIT_AND_RETRY`` + ``RETRY_NOW``, the latter covering the down-local-endpoint
-    ``httpx.ConnectError`` this feature exists for) plus ``CHANGE_PROVIDER_OR_MODEL`` — rather
-    than a hand-maintained tuple of exception types. That is what keeps the two from drifting:
-    a future taxonomy change reaches failover without editing this function.
-    """
+    Always retain a non-primary leg's failure so exhaustion exposes the full
+    ``FallbackExceptionGroup`` and classification can use its most recoverable
+    cause. For the primary, attempt fallback only for taxonomy dispositions
+    ``WAIT_AND_RETRY``, ``RETRY_NOW``, or ``CHANGE_PROVIDER_OR_MODEL``; credential,
+    input-size, and quota failures must surface. Read that taxonomy at call time
+    to avoid a second exception list. The traced candidate marker distinguishes
+    fallback legs from the primary (bug 1c0d)."""
     from rebar.llm.tracing import is_fallback_leg_failure
 
     if is_fallback_leg_failure(exc):
