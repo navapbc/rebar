@@ -1,11 +1,7 @@
-"""Happy-path oracle for 2f13 (epic gnu-whale-ichor): inbound ghost/placeholder
-identity with idempotent auto-upgrade.
+"""Pin idempotent inbound placeholder minting (2f13).
 
-The ONLY 2f13 test the implementation sees. Pins the resolve-or-mint contract on the
-happy path: an unmapped inbound user mints a placeholder identity, and re-running for
-the SAME (provider, external_id) returns the SAME identity (one, not two). The
-in-place upgrade and provider-neutral-key edges are validated separately (held out).
-"""
+An unmapped user creates one placeholder. Repeating the same provider and
+external ID returns it. Held-out tests cover upgrade and keying edges."""
 
 from __future__ import annotations
 

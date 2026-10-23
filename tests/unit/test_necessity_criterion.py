@@ -1,13 +1,8 @@
-"""Deterministic (no-LLM) tests for the R4 `necessity` no-op/over-action probe (epic 6982).
+"""Pin deterministic wiring for the advisory necessity criterion (R4).
 
-Pin the criterion's NON-LLM logic — registration invariants (canonical, single-turn, NOT
-code-grounded / NOT agent-tier, non-orphan routing), routing/finding shape (advisory posture,
-applies to bugs, criterion-local checklist sub-answers), prompt-contract front-matter, the
-bounded-sanity eval-fixture shape, the criteria-guide section, and zero-wiring auto-inclusion
-into the standing effectiveness recorder. The live over-action/necessity behavior is exercised
-out-of-band by the committed `criteria eval` sanity artifact (the ticket's proving command),
-mirroring the R1/R3 family's posture.
-"""
+Check registration, bug routing, finding shape, prompt contract, eval fixture,
+criteria guide, and automatic effectiveness-recording inclusion. Current
+necessity behavior belongs to the committed criteria eval artifact."""
 
 from __future__ import annotations
 

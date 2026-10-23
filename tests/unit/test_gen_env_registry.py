@@ -31,10 +31,8 @@ def test_positive_capture_direct_helper_and_llm():
     reads, _dynamic = gen.scan(gen.DEFAULT_SCAN_ROOT)
     # a direct os.environ read
     assert "GERRIT_BOT_TOKEN" in reads
-    # a reconciler read. Historically this came through the _rebar_env("SUFFIX") shim and
-    # its REBAR_ prefix row; the RP-04 config-ownership cutover (cultish-shadowy-hapuku)
-    # drained that shim out of the tree, so it is now a plain inline literal read
-    # (_pass_lock_lifecycle.py) and bug 84c7-486f removed the row it left behind.
+    # The former _rebar_env prefix shim is gone. _pass_lock_lifecycle now reads
+    # this reconciler key literally, and the stale helper row was removed.
     assert "REBAR_RECONCILER_LOCK_STEAL" in reads
     # a _llm_int(table, cli, "REBAR_LLM_TIMEOUT", ...) read
     assert "REBAR_LLM_TIMEOUT" in reads
@@ -156,23 +154,16 @@ def test_committed_registry_still_documents_the_popped_opcert_key():
 
 
 def test_dunder_getitem_call_registers_its_key(tmp_path: Path):
-    # ``os.environ.__getitem__("X")`` is an explicit CALL, not a Subscript node, so the
-    # subscript branch never sees it. It takes the variable name as its first argument and
-    # returns that variable's value, which makes it key-bearing: classifying it as a bulk
-    # whole-mapping access would reopen the exact silent-skip hole this bug is about.
+    # __getitem__("X") is a key-bearing call, not a Subscript or bulk mapping
+    # access. Its first argument must enter the registry.
     reads, _dynamic = _scan_source(tmp_path, 'X = os.environ.__getitem__("REBAR_FAKE_DUNDER")\n')
     assert "REBAR_FAKE_DUNDER" in reads
 
 
 # --- bug ff2e: KNOWN_ENV_HELPERS was fail-OPEN --------------------------------------
-# The os.environ half fails closed (above), but helper recognition did not. A function
-# whose os.environ key comes from its own PARAMETER is an env-read helper by construction:
-# the literal key lives at its CALL SITES, one level up, and is only resolved when the
-# callee name is in KNOWN_ENV_HELPERS. A helper absent from that table was walked past
-# silently -- its internal read landed in the "dynamic" list, indistinguishable from a
-# registered helper's, so the artifact could not show that keys had been lost. MEASURED:
-# `_gate_str_pref` cost REBAR_GATE_REF and REBAR_GATE_SOURCE (scan 120 -> 122 on adding
-# the row, --check exit 0 throughout).
+# An unregistered parameterized env helper hides literal keys at its call
+# sites in the dynamic list. Reject it rather than silently losing keys such
+# as REBAR_GATE_REF and REBAR_GATE_SOURCE (_gate_str_pref, ff2e).
 
 
 def test_unregistered_parameterised_env_helper_aborts_the_scan(tmp_path: Path):
@@ -223,31 +214,18 @@ def test_registered_helper_does_not_abort_the_scan(tmp_path: Path):
 
 
 def test_real_tree_scans_clean_and_documents_the_gate_vars():
-    # The measured instance. `_gate_str_pref` in src/rebar/_config_resolvers.py reads
-    # os.environ.get(env_name); its two literals were invisible. The seam comment directly
-    # above it (_config_resolvers.py:288-289) asserts these literals "stay visible to
-    # gen_env_registry here" -- this is that claim, enforced.
+    # _gate_str_pref reads through env_name. Both call-site literals must still
+    # appear in the generated registry.
     reads, _dynamic = gen.scan(gen.DEFAULT_SCAN_ROOT)
     missing = [v for v in ("REBAR_GATE_REF", "REBAR_GATE_SOURCE") if v not in reads]
     assert missing == [], f"read under src/rebar but invisible to the generator: {missing}"
 
 
 # --- bug 84c7: KNOWN_ENV_HELPERS was fail-OPEN in the OPPOSITE direction --------------
-# ff2e (above) closed "helper with no row": a function that reads the environment under a
-# key from its own parameter must be registered or the scan aborts. Nothing closed the
-# mirror, "row with no helper". A row is matched by NAME (_scan_call, _helper_access), and
-# the name outlives the function, so deleting a helper's `def` produced no signal from the
-# generator, the drift gate, or the ownership gate -- the row was UNFALSIFIABLE. The table
-# claims the invariant it never enforced: "Signatures verified against the current tree".
-#
-# MEASURED cost of the silence, all four cited in the RCA on bug 84c7-486f: the derived
-# artifact published four helper names that name nothing under src/rebar; `_int_pref`'s row
-# TOTALLY exempted `_int_pref('SOME_KNOB')` from check_config_ownership (control
-# `_mystery_pref('SOME_KNOB')` fires) because membership short-circuits `_shim_access`
-# before its shape test; `_rebar_env`'s row applied a stale `REBAR_` prefix to an unrelated
-# callee; and `_str_pref` went live -> ghost in the SAME change that dropped REBAR_GATE_REF
-# and REBAR_GATE_SOURCE from the registry (cookable-governing-cockatoo), where they stayed
-# missing until defiable-distortive-pinniped while `--check` stayed green throughout.
+# Also reject the reverse drift in a KNOWN_ENV_HELPERS row whose definition is
+# gone. Name-only matching once let four ghost rows survive, exempted stale
+# _int_pref calls from ownership checks, applied an obsolete _rebar_env prefix,
+# and hid missing REBAR_GATE_REF/REBAR_GATE_SOURCE while --check stayed green.
 
 
 def _defined_function_names(root: Path) -> set[str]:
@@ -270,17 +248,10 @@ def _defined_function_names(root: Path) -> set[str]:
 
 
 def test_every_known_env_helper_row_has_a_live_definition():
-    """THE CENSUS, and the durable mirror of test_env_registry_helper_coverage.py's guard.
+    """Require every registered env-helper row to name an existing definition.
 
-    That guard asserts tree -> table (every env-read helper has a row). This asserts
-    table -> tree (every row has a helper). Four rows -- `_rebar_env`, `_env_int`,
-    `_str_pref`, `_int_pref` -- named nothing under src/rebar: four RP-04 cutover stories
-    (cookable-governing-cockatoo, complex-leftist-drafthorse, toadyish-magic-arrowana,
-    cultish-shadowy-hapuku) drained their helpers out of the tree and no gate noticed,
-    because a row is matched by NAME and nothing ever checked that name against a
-    definition. Duration is not the point -- nothing here would EVER have surfaced them;
-    they were found by hand.
-    """
+    The companion guard covers tree-to-table. This covers table-to-tree so a
+    removed helper cannot leave a stale registry row."""
     stale = sorted(set(gen.KNOWN_ENV_HELPERS) - _defined_function_names(gen.DEFAULT_SCAN_ROOT))
     assert stale == [], (
         f"{stale} are KNOWN_ENV_HELPERS rows with no definition under "
@@ -291,14 +262,10 @@ def test_every_known_env_helper_row_has_a_live_definition():
 
 
 def test_stale_known_env_helper_row_aborts_the_scan():
-    """THE GATE ORACLE for this bug, and the behaviour the census above cannot show.
+    """An orphaned helper row must abort generation and name that row.
 
-    The census pins that today's rows are live; it cannot show what the GENERATOR does when
-    a row goes stale tomorrow -- which is the whole defect, since that is the moment the
-    diagnostic has to fire. Re-enacts a rename-that-orphans-a-row on the real tree: register
-    a helper that provably does not exist and scan. The generator must refuse, naming the
-    row, rather than emitting a registry whose header advertises a helper that is not there.
-    """
+    The current-tree census alone cannot show the generator's future failure
+    path, so this test seeds a nonexistent registered helper."""
     ghost = "_rebar_ghost_helper_84c7"
     assert ghost not in _defined_function_names(gen.DEFAULT_SCAN_ROOT), "pick a freer name"
     gen.KNOWN_ENV_HELPERS[ghost] = 0
@@ -311,15 +278,9 @@ def test_stale_known_env_helper_row_aborts_the_scan():
 
 
 def test_a_partial_scan_root_does_not_flag_every_row_as_stale(tmp_path: Path):
-    """THE FALSE-POSITIVE CONTROL, and the reason the check is root-INDEPENDENT.
+    """Judge known helpers against shipped src/rebar, not a caller's partial scan root.
 
-    `scan()` takes an arbitrary root and the module explicitly plans for a test temp dir.
-    Measured: against a one-module synthetic tree, 13 of 13 rows have no definition -- so a
-    staleness check scoped to the CALLER's root would abort every synthetic-tree test in
-    this file with a 13-row false-positive storm that has nothing to do with what they
-    assert. The table describes the shipped src/rebar surface, so that is what it must be
-    judged against, exactly as check_config_ownership's _check_registry_completeness and
-    _validate_exceptions resolve independently of their caller's root.
-    """
+    Synthetic one-module trees legitimately omit registry definitions. Checking
+    them would reject unrelated fixture scans."""
     reads, _dynamic = _scan_source(tmp_path, "X = os.environ.get('REBAR_FAKE_PARTIAL')\n")
     assert "REBAR_FAKE_PARTIAL" in reads, "a partial root still scans normally"

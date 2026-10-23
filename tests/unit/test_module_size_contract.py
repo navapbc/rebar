@@ -1,20 +1,8 @@
-"""Structural contract for the module-size hard cap (epic 716f, Phase 2).
+"""Enforce the absolute module-size cap without an allowlist (716f).
 
-The module-size policy (docs/architecture.md) used to be a *growth ratchet* with a
-grandfathering escape hatch — a bare-path allowlist plus a per-file ceilings file. Epic 716f
-split every over-cap module and drained that allowlist to zero, then removed the escape hatch
-entirely: the cap is now ABSOLUTE. No ``src/rebar`` module may exceed the limit, and there is
-no allowlist to exempt one.
-
-The limit itself is single-sourced in ``.github/module-size-limit.txt`` — the SAME file the CI
-``Module-size gate`` reads — so the gate and this test can never disagree on the number. That
-file is LOCKED by the CI gate: changing the value requires an administrator to override the
-gate (force-submit); a normal contributor change to it fails ``Verified``.
-
-This test mirrors the gate in-process: it reads the limit from the single source and asserts
-no ``src/rebar`` ``*.py`` file exceeds it. Line counting uses ``text.count("\\n")`` to match the
-gate's ``wc -l`` semantics exactly (``wc -l`` counts newlines).
-"""
+Read the limit from .github/module-size-limit.txt, the same source CI uses,
+and count newlines like wc -l. Every src/rebar Python file must stay under it.
+Normal contributions cannot change the locked limit."""
 
 from __future__ import annotations
 
@@ -60,10 +48,10 @@ def test_compute_over_cap_is_deterministic() -> None:
 
 
 def test_allowlist_mechanism_removed() -> None:
-    """The grandfathering escape hatch is gone for good (epic 716f): neither the bare-path
-    allowlist nor the per-file ceilings file exists any more. The cap is absolute; a re-added
-    allowlist would be dead (the CI gate no longer reads it), so this guards against quietly
-    resurrecting the escape hatch."""
+    """The former bare-path allowlist and per-file ceiling file stay absent.
+
+    The hard cap has no grandfathering escape hatch. Reintroducing those files
+    would misrepresent CI behavior."""
     allowlist = REPO_ROOT / ".github" / "module-size-allowlist.txt"
     ceilings = REPO_ROOT / ".github" / "module-size-ceilings.txt"
     assert not allowlist.exists(), (

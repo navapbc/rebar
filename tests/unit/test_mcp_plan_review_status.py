@@ -1,15 +1,8 @@
-"""The MCP server must expose the plan-review attestation currency check (ticket 86c8).
+"""Expose current plan-review attestation status through the MCP READ tools (86c8).
 
-`rebar review-plan <id> --status` is a read-only, no-LLM, no-network query answering
-"is my attestation current — should I re-gate before I implement?". It was reachable
-from the library and the CLI but had NO MCP tool, so an MCP-only agent could only
-discover staleness by provoking a `claim` / `transition ... closed` refusal.
-
-These tests pin the tool onto the READ registrar (so it survives
-`REBAR_MCP_READONLY`), pin the two ends of its verdict range, and pin that it
-DELEGATES to `rebar.llm.plan_review_status` rather than reimplementing the check —
-a second implementation is exactly how the MCP and CLI answers would drift apart.
-"""
+The query must be read-only, use no LLM or network, survive READONLY mode, and
+delegate to rebar.llm.plan_review_status. Pin current and stale results so MCP
+cannot drift from the CLI/library answer."""
 
 from __future__ import annotations
 

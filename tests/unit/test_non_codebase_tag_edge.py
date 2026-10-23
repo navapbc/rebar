@@ -1,10 +1,7 @@
-"""HELD-OUT edge oracle for the `[non-codebase]` tag (story 3726, ADR 0101).
+"""Held-out edges for the [non-codebase] tag (3726).
 
-Withheld from the implementation subagent so a passing run means the implementation
-generalized rather than fitted the happy path. Covers the near-miss fail-safe, the findall
-arity trap, the single-source identity seam, and the two plan-time surfaces the parent AC
-claims parity for.
-"""
+Cover near-miss fail safety, regex findall arity, single-source identity, and
+parity across the two plan-time surfaces."""
 
 from __future__ import annotations
 

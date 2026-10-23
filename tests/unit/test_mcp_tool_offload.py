@@ -1,28 +1,9 @@
-"""A synchronous MCP tool body must not occupy the event loop.
+"""Keep synchronous MCP tool bodies off the shared HTTP event loop.
 
-WHY THIS TEST EXISTS. Every rebar MCP tool is a plain ``def``, and the SDK calls a sync tool
-body DIRECTLY inside the ASGI request coroutine (``mcp/server/fastmcp/utilities/
-func_metadata.py``: ``if fn_is_async: await fn(...) else: fn(...)``). On the stdio transport
-that was harmless -- one client, one process. Behind the SHARED HTTP transport it is not: the
-call occupies the uvicorn event loop for its whole duration and the server answers nothing
-else meanwhile, including the unauthenticated ``/health`` route.
-
-MEASURED on the deployed box (bug dewy-rotatable-tarsier): a ``CallToolRequest`` began at
-21:03:00.590 and the process logged NOTHING for 3m56s; at 21:06:56.275 six ``/health``
-responses and five 401s completed within 5 MILLISECONDS of each other -- a backlog draining
-the instant the loop was released. From outside that window is `http=000` after 70s and 401s
-taking 12s/28s/50s/63s against a 0.25s steady state, which is why the bug was reported as a
-slow first `initialize` after a redeploy: a redeploy makes every agent reconnect at once, so
-the first one to arrive is the one most likely to queue behind another client's long tool
-call. The handshake itself measures 30 ms cold.
-
-WHAT THE FIRST TEST PINS, and why it is shaped this way. The assertion is NOT a wall-clock
-threshold -- those are flaky and say nothing about the mechanism. Instead the tool body waits
-on a ``threading.Event`` that ONLY a concurrently-scheduled coroutine can set. If the loop is
-free the coroutine runs and the body observes ``released``; if the loop is blocked the
-coroutine cannot be scheduled at all and the body observes its own timeout. The verdict is a
-value, not a duration, so the test is deterministic in what it proves.
-"""
+A blocked tool once delayed health responses and other clients. The test body
+waits on a threading.Event released only by a concurrently scheduled coroutine.
+A free loop releases it. An occupied loop cannot. Assert the observed value
+without a timing threshold."""
 
 from __future__ import annotations
 

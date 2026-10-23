@@ -1,16 +1,8 @@
-"""Oracle for the mechanism-delta ratchet.
+"""Guard the shrink-only mechanism-delta ratchet (9ca8).
 
-Ticket 9ca8-675e-4dfb-427d (unblacked-loveless-toad).
-
-56% of sampled fixes add a new mechanism against 30% pure logic fixes, so the surface
-that produces future defect classes grows every cycle. This is the counter-pressure: a
-shrink-only ratchet over a committed per-``(kind, name)`` baseline, modelled on
-``scripts/check_complexity_baseline.py`` — whose four-bucket ``compare()`` and
-``has_regression`` are ported unchanged because they are proven.
-
-Census counts are derived LIVE from the tree here, never hardcoded, following the
-discipline ``tests/unit/test_complexity_baseline.py`` states for itself.
-"""
+Census the repository tree by (kind, name), compare it with the committed baseline,
+and reject unexplained new mechanisms. Derive counts from source rather than
+hardcoding them. Reuse the complexity ratchet's comparison buckets."""
 
 from __future__ import annotations
 
@@ -204,15 +196,9 @@ def test_a_marker_admits_only_the_mechanism_it_names():
     assert any("undeclared.lock" in m for m in messages), messages
 
 
-# ---------------------------------------------------------------------------
-# the two marker placements that are NOT anchored to a Python def line
-#
-# The tests above drive `evaluate()` with synthetic keys, which proves the
-# admission RULE but never exercises marker HARVESTING off a real tree. These
-# two seed an actual repo root so the detector, the placement rule, and the
-# admission all run end to end — the only way to cover the filename-glob and
-# YAML-step shapes, whose markers do not sit on a definition line.
-# ---------------------------------------------------------------------------
+# Seed source files to test marker harvesting for filename globs and YAML steps,
+# which have no definition-line anchor. Synthetic evaluate() cases cover only
+# admission. These cases also exercise detection and placement end to end.
 
 
 def test_a_marker_in_a_new_gate_scripts_head_admits_it(tmp_path):

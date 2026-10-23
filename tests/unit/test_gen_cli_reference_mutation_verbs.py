@@ -1,13 +1,8 @@
-"""Both PROSE copies of the confirmable-verb list are gated against ``_CONFIRM_SCOPE``.
+"""Keep both prose confirmable-verb lists aligned with canonical _CONFIRM_SCOPE.
 
-The 17 confirmable mutation verbs appear three times: the derived ``_CONFIRM_SCOPE`` (canonical),
-the ``EDITORIAL_PREAMBLE`` emitted into ``docs/cli-reference.md``, and a hand-authored sentence in
-``docs/user-guide.md``. Only the curated ``MUTATION_VERBS`` dict was gated, so adding a
-``confirmable=True`` route left both prose copies stale — in exactly the documents that tell an
-agent which commands ask for confirmation (mirror F14).
-
-All three agree at 17/17 today, so the gate is preventive; these tests are what give it teeth.
-"""
+The generated CLI reference preamble and user guide must name the same
+mutation verbs as the route registry. A newly confirmable route cannot leave
+agent-facing guidance stale."""
 
 from __future__ import annotations
 
@@ -67,12 +62,7 @@ def test_a_dropped_prose_verb_is_reported(label: str) -> None:
 
 
 def test_a_rewritten_sentence_fails_loudly_rather_than_silently() -> None:
-    """A passage the regex can no longer find must not read as agreement.
-
-    This is the failure mode a set comparison alone would invert: no match would yield an
-    empty verb set, which differs from canonical and so happens to fail — but reports all 17
-    as missing, pointing at the verbs instead of at the parser that stopped working.
-    """
+    """Report a missing prose pattern as parser drift, not missing canonical verbs."""
     assert gen.prose_mutation_verbs("The verbs that confirm are: `create`, `claim`.") is None
     drift = gen.prose_verb_drift("somewhere", "no such sentence", _CANONICAL)
     assert drift is not None

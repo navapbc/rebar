@@ -1,19 +1,8 @@
-"""The shared store git seam retries the WRITE-side runner-FS transient, not just the READ
-side (bug unheedful-custodial-bluebottle).
+"""Retry recognized transient git object-write failures at the shared seam.
 
-git's loose-object temp create under ``.git/objects/`` intermittently fails on CI runners
-while writing a blob, tree or commit — ENOENT on Linux ("unable to create temporary file: No
-such file or directory"), EINVAL on macOS ("… Invalid argument") — and the identical op
-succeeds on retry. That signature used to be recognised only by ``event_append``'s private
-``git add`` loop, so every OTHER caller of ``gitutil.run_git_write`` (the s3 doctor,
-compaction, the claim/transition writers) hard-failed on the same blip. These tests pin the
-symmetric behaviour: the shared seam retries the write-side signatures with the SAME bounded
-budget the read-side faults get, real damage is still surfaced on the first attempt, and a
-fault that outlives the budget still fails loudly.
-
-Attempts are counted through a scripted ``run_git`` seam; no test here asserts on elapsed
-time, and the retry backoff is stubbed out.
-"""
+run_git_write gives ENOENT/EINVAL temp-create signatures the bounded read-side
+retry budget. Non-transient damage fails immediately and exhausted transients fail
+loudly. Scripted calls count attempts without timing assumptions."""
 
 from __future__ import annotations
 

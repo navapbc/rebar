@@ -195,17 +195,9 @@ def test_hand_authored_docs_name_current_overlay_range() -> None:
 
 
 # --- Ticket 828a: the author guide must not contradict G6's anti-priming rule ---------------
-#
-# G6 clause (4) is the authoritative contract for what a plan's approach section must contain:
-# a POSITIVE rationale for the chosen approach, and explicitly *not* a rejected-alternatives
-# section, "that primes implementers with rejected behavior". Clause (3) reinforces it — the
-# reviewer generates alternatives, discards them, and "never write[s] them into the plan", so
-# "the implementer's plan still contains only ONE approach".
-#
-# The guide (served by `rebar explain plan`) and the criterion (served by `rebar explain G6`)
-# are two independently-canonical artifacts with no generator linking them, so these tests
-# assert parity across the same two public seams the CLI uses. They are keyed to the criterion
-# text, so they self-invalidate rather than silently ossify if the contract ever changes.
+# G6 asks for a positive rationale and forbids a rejected-alternatives section
+# that primes implementation. The author guide and criterion are independent
+# public surfaces. Pin their parity to the current criterion text (828a).
 
 ANTI_PRIMING_CLAUSE = "do NOT require a rejected-alternatives section"
 

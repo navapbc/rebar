@@ -1,28 +1,9 @@
-"""Oracle for the config-reference generator (ticket 3199, RP-04 S7.4).
+"""Guard generated config and security references (3199).
 
-The generator (scripts/gen_config_reference.py) emits TWO new, fully-generated docs:
-
-  * docs/config-reference.md — the machine-current configuration precedence / source /
-    lifecycle reference, whose per-key rows are derived from the typed config schema
-    (rebar._config_schema) with a LIFECYCLE column derived from the cfg-kind entries of
-    rebar._deprecations.REGISTRY + rebar._deprecations.tombstones().
-  * docs/security.md — the indexed security reference, whose secret-name inventory is
-    derived from rebar._child_env._ADAPTER_SECRET_NAMES.
-
-Narrative topics that are not registry-derivable are emitted verbatim from a curated
-template constant in the generator. The existing hand-authored docs/config.md is left
-ENTIRELY untouched.
-
-The happy-path subset (schema-key coverage, banners, a clean --check against the
-committed tree, and a bare regenerate) was the only part shown to the implementer during
-development; the edge/E2E oracle (config.md preservation, the lifecycle column, secret
-inventory, topic coverage, CRLF newline-safety, drift-trips) was withheld and is
-consolidated below. Tests that need to WRITE generated output redirect the generator's
-output paths to a tmp dir via the ``redirect_outputs`` fixture, so no test mutates the
-committed working tree; the one exception is
-``test_check_mode_clean_against_committed_tree``, which is read-only and asserts the
-committed docs are current.
-"""
+Config rows derive from typed schema and deprecation lifecycle. Secret names
+come from the child-env registry. Curated narrative stays in templates and
+hand-authored config.md stays untouched. Redirect write tests to tmp output,
+while read-only --check compares the committed files. Cover CRLF and drift."""
 
 from __future__ import annotations
 

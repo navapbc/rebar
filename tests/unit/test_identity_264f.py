@@ -1,12 +1,8 @@
-"""Happy-path oracle for 264f (epic gnu-whale-ichor): the provider-neutral
-resolution seam.
+"""Pin provider-neutral identity resolution's pure library seam (264f).
 
-The ONLY 264f test the implementation sees. Pins the pure-library provider seam —
-`resolve_mapping`, `jira_account_id`, `identity_email` — that the reconciler's
-outbound assignee/reporter resolution is built on. The reconciler-integration
-behaviour (accountId fast-path, sentinel, reporter REST sub-call, degradation) is
-validated separately (held out).
-"""
+resolve_mapping, jira_account_id, and identity_email support outbound
+assignee/reporter mapping. Held-out integration covers sentinel, reporter REST,
+and degradation behavior."""
 
 from __future__ import annotations
 

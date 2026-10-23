@@ -1,18 +1,8 @@
-"""Contract phase: remove the legacy HMAC scheme for the op-cert kinds (story 8f1d).
+"""Require asymmetric certificates for plan review and completion (8f1d).
 
-Pins the acceptance criteria:
-
-  * AC1 (dependency gate): the asymmetric op-cert producer path is present — an import check
-    plus an end-to-end op-cert sign/verify smoke test.
-  * no code path SIGNS an HMAC op-cert: ``plan-review`` / ``completion-verifier`` no longer
-    resolve the HMAC-SHA256 scheme in ``registry.POLICY``, and ``sign_manifest`` emits an
-    envelope (no HMAC ``signature``) for those kinds. Since the 2026-09 retirement no HMAC
-    helper remains for any kind.
-  * no code path ACCEPTS an HMAC op-cert: a pre-existing HMAC-signed op-cert record reads
-    NOT-certified (``unsigned`` with the retired-scheme reason), and re-running the gate
-    re-issues an asymmetric op-cert that then certifies.
-  * the migration artifact exists, is non-empty, and carries the documented sections.
-"""
+Check the producer, signed envelope, and verification path. Retired HMAC
+records read unsigned until a gate reissues them. No HMAC helper remains after
+the 2026-09 retirement, and the migration guide stays present."""
 
 from __future__ import annotations
 

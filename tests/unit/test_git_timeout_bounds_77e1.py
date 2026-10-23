@@ -1,29 +1,8 @@
-"""Task 77e1: every network-capable git call site is bounded by an explicit timeout.
+"""Bound network-capable git calls in review-bot and op-cert workspace (77e1).
 
-Bug 747f proved this class is not theoretical — an unbounded git call on the snapshot
-materialize path produced 40 sequential per-object fetch RPCs and a measured ~2.1-hour
-hang — and fixed it by bounding ``src/rebar/_snapshot/repo_snapshot.py`` with
-``_GIT_TIMEOUT = 300``, joining the older ``_store/push.py`` / ``_store/sync.py``
-precedent. 77e1 closes the rest of the class in the two modules that were still
-unbounded:
-
-* ``rebar.review_bot.gerrit_client.GerritClient.clone_change_ref`` — five
-  ``subprocess.run`` calls (``init``, ``fetch --depth 2``, ``checkout``,
-  ``remote add``, ``fetch --depth 1``), none of which passed a timeout.
-* ``rebar.opcert_service.workspace._git`` — the module's single git seam, which every
-  call (including two unshallow network ``fetch``es) funnels through.
-
-A timeout is only half the fix: an unbounded hang that becomes a bare
-``subprocess.TimeoutExpired`` merely moves the mystery. ``TimeoutExpired`` is neither an
-``OSError`` nor a ``CalledProcessError``, so it fell OUTSIDE both modules' existing
-``except`` tuples — in ``gerrit_client`` that also bypassed the token-redaction handler,
-and ``TimeoutExpired.cmd`` carries the ``user:token@host`` fetch URL. So these tests
-assert the failure path too: the module's own descriptive error type, naming the git
-operation and the bound, with the bot token redacted.
-
-Everything here is offline — the git call is monkeypatched to raise ``TimeoutExpired``
-without ever spawning a process.
-"""
+Every clone/fetch seam needs a timeout. TimeoutExpired must become each
+module's descriptive error naming operation and bound, with credential URLs
+redacted. Scripted subprocess failures keep the test offline."""
 
 from __future__ import annotations
 

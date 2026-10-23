@@ -1,21 +1,8 @@
-"""Certification environment is NOT a gate (bug c21f-6f29-5d2d-4a5a).
+"""Accept valid op-certs across signing environments by default (c21f).
 
-Operator policy, recorded verbatim on the bug:
-
-    "Certification environment should not currently be a gate. Any certification is as good
-    as any other certification right now. Limited to a trusted set of environments is a
-    future feature, but not currently in use."
-
-So a cryptographically valid op-cert certifies here no matter which environment minted it —
-the local CLI can consume a cert the on-box MCP server signed, and vice versa. What is NOT
-loosened: the signature itself. A forged/altered envelope is still ``mismatch``, and the
-opt-in ``verify.require_environment`` seam still restricts the signer when an operator sets
-it.
-
-Every cross-environment case below is built for REAL — a distinct Ed25519 key under a
-distinct principal — never by mocking the principal comparison away, and each asserts the
-principal genuinely differs from the verifying environment's before asserting acceptance.
-"""
+Distinct Ed25519 principals prove a cert remains valid outside its
+originating environment. Forged envelopes still mismatch, and an explicitly
+set verify.require_environment still restricts signers."""
 
 from __future__ import annotations
 

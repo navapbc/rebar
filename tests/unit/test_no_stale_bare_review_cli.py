@@ -1,14 +1,8 @@
-"""No stale bare-`review` CLI guidance in canonical operational docs (ticket
-2dbf-07bf-452d-4543).
+"""Keep canonical docs free of the removed bare review CLI verb (2dbf).
 
-`src/rebar/_cli/_registry.py` registers `review-code`, `review-plan`, and
-`sign-review` -- there is no bare `review` command. `AGENTS.md` and
-`docs/repo-snapshot-gates.md` previously claimed otherwise (a "deprecated,
-forwards to review-plan" verb and a "retained alias" respectively). This
-pins the corrected state while leaving the accurate historical records
-(the ADR mapping and the release-notes/output-schemas removed-surface
-entries) untouched.
-"""
+The registry exposes review-code, review-plan, and sign-review. Preserve
+accurate historical records while rejecting current guidance that claims review
+still forwards to review-plan."""
 
 from __future__ import annotations
 

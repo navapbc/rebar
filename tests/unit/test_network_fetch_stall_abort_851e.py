@@ -1,20 +1,8 @@
-"""Task ``851e``: the remaining 300s network fetches abort on THROUGHPUT, not the clock.
+"""Abort stalled network fetches by throughput, not only elapsed time (851e).
 
-Bug ``12e4`` armed ``http.lowSpeedLimit``/``http.lowSpeedTime`` on the snapshot fetch path
-after a stalled transfer burned the full 300s ``_GIT_TIMEOUT``. Three other network fetches
-carried the identical exposure — a socket that opens and then moves no bytes looks exactly
-like a legitimately slow cold clone, so only the wall-clock ceiling ends it:
-
-* ``rebar.review_bot.gerrit_client.GerritClient.clone_change_ref`` (two fetches),
-* ``rebar.opcert_service.workspace._git`` (the ``review`` and ``tickets`` fetches),
-* ``rebar._commands.init._git_fetch`` (the ticket-branch fetch), armed at the seam it
-  shares with the remote probe, ``_init_probe.run_bounded_git``.
-
-Each site now splices ``git_fetch.stall_abort_args()`` before the subcommand — the same
-seam, not a copy of it. Wrapper coverage proves that wiring and each wrapper's zero-byte
-stall behavior. The shared snapshot boundary in 12e4 owns the single real Git/libcurl
-above-floor integration that discriminates throughput aborts from elapsed-time aborts.
-"""
+Review-bot, op-cert workspace, and init ticket-branch fetches share
+git_fetch.stall_abort_args rather than copying settings. Wrapper tests cover
+zero-byte stalls. The snapshot boundary owns the Git/libcurl control."""
 
 from __future__ import annotations
 
