@@ -1,18 +1,5 @@
-"""Tests for the invariant phase wired into reconcile_once().
-
-Covers task 52f3-f71a-dfaa-4d03:
-  - reconcile_once() runs invariants.check_dual_identity_complete() and
-    passes its outputs to differ.compute_mutations() as quarantine_set= and
-    seed_mutations= kwargs.
-  - reconcile_once() runs a post-emit filter that invokes
-    invariants.report_schema_drift() for every repair_property mutation
-    whose payload carries follow_on={'kind':'schema_drift_signal', ...}
-    (the kind apply_inbound.inbound_repair_property actually emits).
-  - The same-pass follow-on signal is preserved end-to-end (returned in
-    the same pass, not deferred).
-
-All collaborators (fetcher, differ, applier, health, invariants) are served
-by a patched ``reconcile._load``.
+"""The invariant phase passes quarantine sets and seed repairs to the differ, then
+surfaces schema-drift follow-ons in the same pass.
 """
 
 from __future__ import annotations
@@ -113,11 +100,8 @@ def _install_stubs(*, fetcher, differ, applier, health, invariants):
 
 
 def test_invariant_phase_passes_quarantine_set_to_differ(tmp_path):
-    """compute_mutations must be called with quarantine_set kwarg.
-
-    Behavior under test: the invariant phase computes a quarantine set of
-    one-sided keys; that set must reach the differ so the differ can skip
-    those keys instead of emitting create/delete mutations against them.
+    """Pass one-sided identity keys to the differ's quarantine_set so it skips unsafe
+    mutations.
     """
     pass_id = "inv-phase-quarantine"
     snapshot = {"JIRA-1": {"summary": "x"}}
@@ -146,11 +130,8 @@ def test_invariant_phase_passes_quarantine_set_to_differ(tmp_path):
 
 
 def test_invariant_phase_passes_seed_mutations_to_differ(tmp_path):
-    """compute_mutations must be called with seed_mutations kwarg.
-
-    Behavior under test: the invariant phase produces seed repair_property
-    mutations for one-sided local_id rows; those seeds must reach the
-    differ so they land in the same pass (no deferral).
+    """Pass one-sided identity repair_property seeds to the differ for same-pass
+    planning.
     """
     pass_id = "inv-phase-seeds"
     snapshot = {"JIRA-1": {"summary": "x"}}
@@ -186,14 +167,7 @@ def test_invariant_phase_passes_seed_mutations_to_differ(tmp_path):
 
 
 def test_schema_drift_post_emit_filter_invokes_report(tmp_path):
-    """report_schema_drift must be invoked for repair_property follow-ons.
-
-    Behavior under test: when the differ returns a repair_property mutation
-    whose payload carries follow_on={'kind':'schema_drift_signal', ...}, the
-    post-emit filter in reconcile_once must call report_schema_drift with
-    the issue_key/observed/expected fields from the follow-on payload (here
-    the issue key falls back to the "target" field).
-    """
+    """Report a repair_property schema-drift follow-on after the differ emits it."""
     pass_id = "inv-phase-drift"
     snapshot = {"JIRA-1": {"summary": "x"}}
     mutations = [
@@ -237,14 +211,7 @@ def test_schema_drift_post_emit_filter_invokes_report(tmp_path):
 
 
 def test_same_pass_follow_on_emitted(tmp_path):
-    """schema_drift follow-on must surface in the same pass, not be deferred.
-
-    Behavior under test: a repair_property mutation that carries a
-    schema_drift follow-on triggers report_schema_drift WITHIN the same
-    reconcile_once() call that produced the mutation — not on a subsequent
-    pass. Verified by asserting drift_spy fires before reconcile_once
-    returns.
-    """
+    """Surface schema-drift follow-ons before the current reconciliation pass ends."""
     pass_id = "inv-phase-same-pass"
     snapshot = {"JIRA-1": {"summary": "x"}}
     mutations = [
@@ -288,16 +255,8 @@ def test_same_pass_follow_on_emitted(tmp_path):
 
 
 def test_real_repair_failure_follow_on_is_surfaced(tmp_path):
-    """The REAL repair-failure follow-on (kind='schema_drift_signal') is now surfaced.
-
-    Regression for meta-bug 5f2a-9a9f-2b4a-4aab (item 16b-2): the applier
-    ``apply_inbound.inbound_repair_property`` emits a follow-on with
-    kind='schema_drift_signal' on a repair failure, but the reconcile_once post-emit
-    filter USED TO match the never-emitted kind 'schema_drift', so those in-pass
-    repair-failure signals were silently dropped. This drives the ACTUAL emitter to
-    produce the follow-on, feeds it through the filter, and asserts report_schema_drift
-    now fires — reading the issue key from the emitter's own 'issue_key' field (the
-    production path that was broken; before the fix this asserted 0 calls).
+    """An actual failed repair_property emits a schema-drift follow-on that the pass
+    reports.
     """
     from rebar.reconciler.apply_inbound import inbound_repair_property
 

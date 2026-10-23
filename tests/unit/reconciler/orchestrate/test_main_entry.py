@@ -1,15 +1,5 @@
-"""Behavioral tests for rebar.reconciler.__main__ entry module.
-
-Tests cover the canonical pass API: ``guarded_pass.run_pass_result`` delegates a single
-steady-state pass to reconcile.reconcile_once(pass_id, repo_root=...) and classifies it,
-and ``__main__._render_pass`` collapses that classification to a process exit:
-
-  - test_run_pass_returns_0_when_reconcile_succeeds: run_pass_result() classifies a
-    normal reconcile.reconcile_once result dict as converged (exit 0).
-  - test_run_pass_returns_1_when_reconcile_raises: the rendered pass exits 1 and does
-    not propagate the exception when reconcile.reconcile_once raises.
-  - test_main_returns_0_when_reconcile_succeeds: main() with --repo-root threads
-    through run_guarded_pass() and returns 0.
+"""Check entrypoint pass delegation, repo-root threading, and success/reschedule exit
+codes. Advisory locking is tested separately.
 """
 
 from __future__ import annotations
@@ -121,13 +111,8 @@ def test_run_pass_returns_1_when_reconcile_raises(main_mod, guarded_mod, tmp_pat
 
 
 def test_run_pass_returns_75_on_reschedule_error(guarded_mod, tmp_path):
-    """F6 regression: RescheduleError must surface as EXIT_RESCHEDULE (75), not 1.
-
-    Before F6, run_pass swallowed RescheduleError under the broad
-    ``except Exception`` and returned 1, hiding the reschedule signal from
-    any scheduler that distinguishes 75 from 1. The fix loads the applier
-    module, special-cases its RescheduleError, and returns
-    applier.EXIT_RESCHEDULE (75).
+    """Propagate RescheduleError as exit 75 so the scheduler retries instead of
+    treating it as a generic failure.
     """
     # Use the real applier so we use the real RescheduleError and EXIT_RESCHEDULE
     applier_mod = importlib.import_module("rebar.reconciler.applier")
@@ -217,12 +202,7 @@ def test_missing_pipeline_module_raises_instead_of_converging(guarded_mod, tmp_p
 
 
 def test_main_returns_0_when_reconcile_succeeds(main_mod, guarded_mod, tmp_path):
-    """main() threads --repo-root through run_guarded_pass and returns its exit code.
-
-    Advisory-lock guard calls are mocked out so this test remains a pure
-    unit test of the pass delegation path; lock integration is covered
-    by test_reconcile_main.py.
-    """
+    """Thread --repo-root through the guarded pass and return its successful exit code."""
     stub = _make_stub_reconcile()
 
     # Mock _load_sibling_keyed so main() gets a stub advisory module that

@@ -1,21 +1,6 @@
-"""Verified-fake Jira client that replays captured fixtures through production.
-
-Story A (fe57-7712-1e3f-45f4) of epic f89d. ``FakeAcliClient`` serves the
-scrubbed real Jira payloads under ``tests/fixtures/jira/`` from the SAME method
-signatures the production ``AcliClient`` exposes (``search_issues``,
-``get_comment_map``, ``get_issuelinks_map``, ``get_parent_map``) — returning them
-**verbatim, with NO shape massaging**. This is the foundation the snapshot
-contract test (story B), the verified-fake honesty harness (story C), and the
-hermetic round-trip probe (story F) build on.
-
-The fake is installed by the established codebase seam: patch
-``fetcher._load_acli`` to return the fake transport DIRECTLY (S4: ``_load_acli``
-now returns a ``TicketTransport``, not a module — see :func:`install`). The
-fixtures are then consumed
-ONLY by driving ``fetcher.fetch_snapshot`` / ``fetcher.compute_snapshot``, which
-routes them through the production parent/comment/issuelinks enrichment merge —
-exactly where bugs 0ee6 (nested ``comment`` vs flat ``comments``) and 3f04
-(absent ``issuelinks``) lived. No test reads the fixtures and hand-reshapes them.
+"""Replay scrubbed Jira fixtures through production fetch and enrichment. The fake
+exposes the real client signatures, returns captured shapes without reshaping, and
+isolates callers with deep copies.
 """
 
 from __future__ import annotations
@@ -30,13 +15,8 @@ FIXTURE_DIR = Path(__file__).resolve().parents[3] / "fixtures" / "jira"
 
 
 class FakeAcliClient:
-    """Replays captured Jira fixtures via the production method signatures.
-
-    Constructed exactly like the real ``AcliClient`` (``jira_url`` / ``user`` /
-    ``api_token`` kwargs, all ignored) so it is a drop-in ``TicketTransport`` the
-    ``_load_acli`` seam can return directly. Every method returns a deep copy of the fixture
-    so a consumer that mutates the merged snapshot cannot bleed into the next
-    test — the SHAPE returned is the fixture's, untouched.
+    """Match the real client constructor and method signatures. Return deep copies of
+    captured payloads so one test cannot mutate another test's fixture state.
     """
 
     def __init__(self, fixture_dir: Path | None = None, **_kwargs: Any) -> None:
@@ -65,12 +45,8 @@ class FakeAcliClient:
 
 
 def install(monkeypatch: Any, fetcher_mod: Any, fixture_dir: Path | None = None) -> None:
-    """Route ``fetcher_mod`` through the fake by patching ``_load_acli``.
-
-    This is the production seam: after this call, ``fetcher.fetch_snapshot`` /
-    ``fetcher.compute_snapshot`` use the injected :class:`FakeAcliClient` transport
-    directly (S4: ``_load_acli`` returns a ``TicketTransport``, not a module) and
-    merge its fixtures via the real parent/comment/issuelinks enrichment path — no
-    parallel serialization, no hand-reshaping.
+    """Inject the fake transport through fetcher's production _load_acli seam.
+    Production snapshot enrichment then merges the captured parent, comment, and
+    link shapes without a parallel serialization path.
     """
     monkeypatch.setattr(fetcher_mod, "_load_acli", lambda: FakeAcliClient(fixture_dir))

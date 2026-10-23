@@ -1,41 +1,6 @@
-"""Held-out behavioral oracle for RP-03 S2 T1 — immutable observations + pure ticket plans.
-
-This oracle pins the DETERMINISTIC VALUE-CONSTRUCTION contract of the new shadow
-planning layer (lifecycle intents, inter-ticket dependencies, caps ordering, and
-preview rendering are OUT OF SCOPE for T1 and owned by later S2 tasks). Three modules
-and one refactor are under test (the ticket's file impact):
-
-``rebar.reconciler.observation``
-    ``ObservationVersion(pass_id: str, fingerprint: str)`` — a frozen, hashable identity.
-    ``Observation`` — a frozen, provider-neutral snapshot of one reconcile pass's inputs
-    (version, local_snapshot, remote_snapshot, binding_view, mode, selection, limits,
-    payload); every Mapping field is deep-frozen and equality is structural.
-    ``build_observation(*, pass_id, local_snapshot, remote_snapshot, binding_view, mode,
-    selection, limits, payload=None) -> Observation`` — pure; the version ``fingerprint``
-    is ``content_hash`` over the SUBSTANTIVE inputs (everything except ``pass_id``), so
-    two passes over identical data share a fingerprint while ``pass_id`` still
-    distinguishes their version identity.
-
-``rebar.reconciler.ticket_plan``
-    ``PlanDisposition(str, Enum)`` — ``mutate`` / ``defer`` / ``noop``. T1 only ever emits
-    ``mutate``; ``defer`` and ``noop`` are the reserved forward-compat surface later S2
-    tasks (lifecycle/scope deferral) extend.
-    ``TicketPlan`` — a frozen per-ticket plan (identity, mutations, diagnostics,
-    disposition, observation_version, payload). ``__eq__`` covers every field; ``__hash__``
-    covers the hashable subset (identity, mutations, diagnostics, disposition,
-    observation_version).
-
-``rebar.reconciler.ticket_planner``
-    ``plan_pass(*, pass_id, local_snapshot, remote_snapshot, binding_view, mode, selection,
-    limits, mutations, diagnostics_by_target=None, plan_payload_by_target=None,
-    observation_payload=None) -> tuple[Observation, tuple[TicketPlan, ...]]`` — a PURE
-    function that groups the already-computed ``Mutation`` values by ``Mutation.target``
-    into per-ticket plans, performing ZERO I/O.
-
-``rebar.reconciler.run_differs``
-    After it accumulates ``ctx.mutations`` (legacy, still authoritative), it attaches a
-    deterministic shadow ``ctx.observation`` and ``ctx.ticket_plans`` derived purely from
-    those mutations and the pass inputs — without disturbing ``ctx.mutations``.
+"""Pin deterministic, pure shadow planning from immutable observations. Selection,
+dependencies, mode caps, and skipped data decide plans before effects; additive
+lifecycle previews preserve canonical mutation bytes and redact raw payloads.
 """
 
 from __future__ import annotations
@@ -180,10 +145,9 @@ def test_plan_pass_is_deterministic(planner_mod, mutation_mod):
 
 
 def test_plan_pass_emits_deterministic_sorted_order(planner_mod, mutation_mod):
-    """The EMISSION order is explicitly sorted, not merely convergent (AC1): targets are
-    emitted in sorted order and, within a target, mutations follow the total canonical
-    ``_mutation_sort_key`` — regardless of the differ's (deliberately unsorted) input
-    order. A convergence-twin comparison of two identical runs cannot see this."""
+    """Emit targets in sorted order and each target's mutations by the canonical total
+    sort key, regardless of input order.
+    """
     _observation, plans = _plan_pass(planner_mod, mutation_mod)
 
     # Targets emitted in sorted order (uppercase 'REB-*' before lowercase 'local-*').
@@ -198,9 +162,9 @@ def test_plan_pass_emits_deterministic_sorted_order(planner_mod, mutation_mod):
 
 
 def test_within_plan_tiebreak_is_payload_stable(planner_mod, mutation_mod):
-    """Two mutations on ONE target sharing ``(direction, action)`` — distinguished only by
-    ``payload`` (excluded from Mutation identity) — are ordered by the canonical tie-break,
-    deterministically and independent of input order (AC1)."""
+    """For equal direction/action keys, payload provides a stable canonical tie-break
+    independent of input order.
+    """
     d = mutation_mod.MutationDirection
     a = mutation_mod.MutationAction
 
@@ -249,9 +213,9 @@ def test_existing_mutation_serialization_is_byte_identical(planner_mod, mutation
 
 
 def test_observation_version_fingerprint_tracks_data_identity(planner_mod, mutation_mod):
-    """The version fingerprint is a pure function of the SUBSTANTIVE inputs: identical
-    data → identical fingerprint even under a different pass_id; any changed datum →
-    a different fingerprint (AC1, observation/version identity)."""
+    """Observation versions depend on substantive data, not pass_id; changed data
+    changes the fingerprint.
+    """
     obs_1, _ = _plan_pass(planner_mod, mutation_mod, pass_id="pass-alpha")
     obs_2, _ = _plan_pass(planner_mod, mutation_mod, pass_id="pass-beta")
 
@@ -347,13 +311,9 @@ def test_provider_payload_extension_stays_open(planner_mod, mutation_mod, ticket
 
 
 def test_planner_performs_zero_io(planner_mod, mutation_mod):
-    """Plan construction performs no repository saves, ticket writes, Jira calls,
-    subprocess launches, or ambient clock reads (AC4). Poison every such seam for the
-    DURATION of the plan_pass call and assert it still produces its deterministic result.
-
-    The poison is scoped with a context manager so it wraps only the code under test —
-    poisoning ``time``/``Path``/``subprocess`` globally for the whole test would also
-    trip pytest's own capture/teardown machinery, not the planner."""
+    """Plan construction reads no repository, provider, subprocess, or clock seam, even
+    when those seams are poisoned.
+    """
     import subprocess
     import time
     from unittest import mock
@@ -387,12 +347,8 @@ _STUBBED_PHASES = (
 
 
 def _drive_run_differs(run_differs_mod, monkeypatch, *, seed_mutations):
-    """Run the real run_differs with every mutation-producing phase stubbed to yield a
-    known set, so the assertions see exactly the shadow plan the planner attached.
-
-    ``ctx.mutations`` is finalized from ``ctx.differ.compute_mutations(...)`` after the
-    legacy local-state suppression, so we seed there and neutralize the suppression
-    pass; the named phase helpers then run as no-ops, leaving the seed intact.
+    """Run the real differ coordinator with mutation phases stubbed to a known set,
+    exposing the attached shadow plan without changing authoritative mutations.
     """
     seed = list(seed_mutations)
     mode_mod = importlib.import_module("rebar.reconciler.mode")
@@ -444,11 +400,9 @@ def test_run_differs_attaches_deterministic_shadow_plan(monkeypatch, mutation_mo
 
     assert sorted(map(key, ctx1.mutations)) == sorted(map(key, seed))
 
-    # A shadow plan is attached and groups the same mutations by target. run_differs
-    # loads ``observation``/``ticket_plan`` by path through its own loader, so the
-    # attached objects' classes are distinct object identities from any test-side
-    # re-load — assert the type by name/module (isolation-safe) and lean on the
-    # version-linkage + determinism assertions below for the real contract.
+    # The by-path loader gives attached plans distinct class identities from
+    # test-side imports. Check type by name/module, then assert version linkage
+    # and deterministic grouping by target.
     assert type(ctx1.observation).__name__ == "Observation"
     assert type(ctx1.observation).__module__.endswith("observation")
     # ``target_mode`` was a real ``Mode(str, Enum)`` member: the observation records the
@@ -467,10 +421,9 @@ def test_run_differs_attaches_deterministic_shadow_plan(monkeypatch, mutation_mo
 
 
 def test_run_differs_shadow_plan_tolerates_legacy_dict_mutations(monkeypatch, mutation_mod):
-    """``ctx.mutations`` may MIX typed ``Mutation`` instances with legacy plain-dict
-    mutations (documented dual shape — see ``_run_differs_report_schema_drift``). The
-    shadow attach must not raise on the dicts, must leave ``ctx.mutations`` (dict
-    included) authoritative and unchanged, and must plan only the typed items."""
+    """Attach a shadow plan from mixed typed and dict mutations without rewriting
+    authoritative ctx.mutations.
+    """
     run_differs_mod = importlib.import_module("rebar.reconciler.run_differs")
     legacy = {
         "action": "repair_property",
@@ -654,9 +607,9 @@ def test_intent_version_equals_observation_version_exactly(planner_mod, mutation
 
 
 def test_blocked_create_before_link_defers_with_no_mutation(planner_mod, mutation_mod):
-    """A create-before-link prerequisite that is NOT satisfiable this pass blocks the
-    dependent plan: disposition ``defer``, reason ``dependency_deferred``, the dependency
-    edge is still recorded, and NO out-of-order mutation is emitted (mutations empty)."""
+    """An unavailable create prerequisite records its dependency and defers the
+    dependent with no out-of-order mutation.
+    """
     muts = [
         _mk(
             mutation_mod,
@@ -739,9 +692,9 @@ def test_mode_cap_excludes_outbound_with_safety_aborted(planner_mod, mutation_mo
 
 
 def test_write_enabled_modes_are_not_mode_capped(planner_mod, mutation_mod):
-    """The write-enabled warm-up modes ``bootstrap-strict`` and ``bootstrap-throttle`` (and
-    ``live``) permit outbound writes, so an outbound plan under them is NOT mode-capped — it
-    stays a ``mutate`` plan. (Regression: they must not be treated like the no-write modes.)"""
+    """Bootstrap and live write modes leave eligible outbound plans mutable; only
+    no-write modes abort them before effect.
+    """
     muts = [_mk(mutation_mod, "outbound", "update", "REB-out")]
     for write_mode in ("bootstrap-strict", "bootstrap-throttle", "live"):
         _obs, plans = _plan_pass(planner_mod, mutation_mod, mutations=muts, mode=write_mode)
@@ -819,9 +772,9 @@ def test_excluded_plans_carry_no_lifecycle_intents(planner_mod, mutation_mod):
 
 
 def test_run_differs_shadow_plan_applies_scope_exclusion(monkeypatch, mutation_mod):
-    """E2E through the real ``run_differs``: an ``only`` selection narrows the shadow plan so
-    out-of-scope targets are deferred with ``scope_deferred`` while the in-scope target is a
-    mutate plan — driven at ``Mode.LIVE`` with the pre-effect exclusion still applied."""
+    """An only-selection defers out-of-scope targets while retaining in-scope mutations
+    in the shadow plan.
+    """
     run_differs_mod = importlib.import_module("rebar.reconciler.run_differs")
     seed = _mutations(mutation_mod)
 
@@ -842,9 +795,9 @@ def test_run_differs_shadow_plan_applies_scope_exclusion(monkeypatch, mutation_m
 
 
 def test_excluded_create_target_does_not_satisfy_dependent(planner_mod, mutation_mod):
-    """A create target that is itself excluded before the dependency stage (here limit-capped)
-    will NOT actually be created, so it must not satisfy a dependent's ``requires_create``: the
-    dependent is dependency-deferred, not mutated."""
+    """An excluded create cannot provide an identity; its dependent plan stays
+    dependency-deferred.
+    """
     muts = [
         # Two independent creates + one dependent; max_changes caps the *third* eligible
         # target (sorted). Use ids so the dependent's provider "REB-new" is the capped one.
@@ -904,9 +857,9 @@ def test_unrecognized_skip_value_still_classifies_skipped(planner_mod, mutation_
 
 
 def test_invalid_lifecycle_override_falls_back_to_action_mapping(planner_mod, mutation_mod):
-    """An explicit ``payload['lifecycle']`` that is a string but NOT one of the six IntentKind
-    values is ignored (not adopted, not error): the intent kind falls back to the action
-    mapping — here ``create → bind``, not the bogus override."""
+    """An unknown lifecycle override falls back to the action mapping instead of
+    becoming an intent kind.
+    """
     muts = [
         _mk(mutation_mod, "outbound", "create", "REB-c", payload={"lifecycle": "not_a_kind"}),
     ]
@@ -916,13 +869,9 @@ def test_invalid_lifecycle_override_falls_back_to_action_mapping(planner_mod, mu
 
 
 def test_transitive_create_provider_cascade_blocks_dependent(planner_mod, mutation_mod):
-    """The effective-create-provider fixpoint cascades: a create target that is itself
-    dependency-blocked by a MISSING prerequisite cannot provide its identity, so a dependent
-    relying on it is transitively dependency-deferred too — not mutated.
-
-    Chain: REB-leaf requires_create REB-mid; REB-mid (a create) requires_create REB-absent
-    which exists nowhere. REB-mid is blocked, so it is not a real provider, so REB-leaf is
-    also blocked."""
+    """A dependency-blocked create cannot serve as a provider; deferral cascades to
+    downstream plans.
+    """
     muts = [
         _mk(
             mutation_mod,
@@ -986,9 +935,9 @@ def mode_mod_t3():
 
 
 def _deferred_plans(planner_mod, mutation_mod, *, extra_payload=None):
-    """A one-target corpus whose sole mutation depends on a create that never happens, so the
-    plan is dependency-deferred (disposition=defer, mutations emptied). Returns (legacy, plans)
-    where ``legacy`` is the raw mutation list the legacy differ would have emitted."""
+    """Build a one-target dependency-deferred plan beside its legacy mutation for
+    parity and rendering checks.
+    """
     payload = {"requires_create": ["REB-missing"]}
     if extra_payload:
         payload.update(extra_payload)
@@ -1031,9 +980,9 @@ def _emit(apply_planning_mod, mode_mod, mutations, *, ticket_plans=None, route="
 def test_render_lifecycle_intents_is_versioned_section(
     planner_mod, mutation_mod, manifest_renderer_mod
 ):
-    """The renderer emits ONE versioned lifecycle-intents section keyed off the shadow plans:
-    a schema version, the observation version identity, and one entry per plan carrying its
-    identity/disposition/dependencies and derived intent kinds."""
+    """Render one versioned lifecycle section with observation identity and each plan's
+    disposition, dependencies, and intent kinds.
+    """
     _obs, plans = _plan_pass(planner_mod, mutation_mod, binding_view={})
     section = manifest_renderer_mod.render_lifecycle_intents(plans)
 
@@ -1131,16 +1080,14 @@ def test_emit_manifest_section_is_purely_additive(
 def test_serialize_manifest_hash_unperturbed_by_shadow_section(
     planner_mod, mutation_mod, apply_planning_mod, mode_mod_t3
 ):
-    """The canonical ``serialize_manifest`` bytes + sha256 over the corpus mutations are a
-    golden invariant the additive preview section does not perturb: rendering the manifest
-    WITH shadow plans leaves the same mutations serializing to the same hash."""
+    """Adding the preview section leaves canonical mutation bytes and SHA-256
+    unchanged.
+    """
     legacy = _mutations(mutation_mod)
     golden_text, golden_hash = mutation_mod.serialize_manifest(legacy)
 
-    # A LITERAL golden pin over the corpus: any change to the canonical manifest bytes/hash
-    # (whether from perturbing serialize_manifest itself or from the additive section leaking
-    # into it) breaks this constant — a runtime recompare alone would silently accept a
-    # deterministic perturbation.
+    # The fixed hash catches canonical-byte drift that a runtime recompare of
+    # two equally changed serializations would miss.
     GOLDEN_HASH = "e8d2bfad77db0336b2ee67af1b344ea6c7f5266a92205f0a583b294cf6ab61c9"
     assert golden_hash == GOLDEN_HASH
 
@@ -1221,9 +1168,9 @@ def test_run_differs_attaches_matching_parity_report(monkeypatch, mutation_mod):
 
 
 def test_run_differs_parity_flags_deferred_divergence(monkeypatch, mutation_mod):
-    """E2E: when a seeded mutation depends on a create that never happens, the shadow plan
-    defers it (empties its mutation), so parity flags an unexpected delta naming that ticket
-    and the pass observation version — without disturbing the authoritative ctx.mutations."""
+    """A missing create defers the shadow mutation, so parity reports the unexpected
+    ticket and observation version delta.
+    """
     run_differs_mod = importlib.import_module("rebar.reconciler.run_differs")
     seed = [
         _mk(

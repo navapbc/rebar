@@ -1,15 +1,6 @@
-"""Tests for reconciler/reconcile.py reconcile_once().
-
-Covers:
-- Idempotency: two consecutive reconcile_once() calls with unchanged remote
-  both produce mutation_count=0 (second call sees prev==curr snapshot).
-- EXCLUDED_FIELDS filter: a change only in an excluded field produces
-  mutation_count=0 (excluded fields do not drive mutations).
-- Remote field convergence: a Jira-side field change is detected without being
-  planned as an outbound REVERT of itself, while a never-before-seen key is still
-  planned (the regression guard against over-filtering).
-- Snapshot absence: a key that leaves the fetch window is never resurrected by an
-  outbound create (ADR 0028, ticket d103).
+"""Check pass convergence, excluded fields, remote changes, dry-run writes, and
+absent-key suppression. Mutable Jira and JQL stubs preserve the production search
+partitions and write-back behavior.
 """
 
 from __future__ import annotations
@@ -58,16 +49,8 @@ def applier_mod():
 
 
 def _make_acli_module(issues: list[dict]) -> object:
-    """Return a FAITHFUL stub acli_integration module over a mutable Jira state.
-
-    Ticket robe-creek-zealot: the previous stub returned the same static issue
-    list for every search and dropped every write on the floor. Real Jira
-    REFLECTS writes on subsequent reads — in particular the ``rebar-id:``
-    label / ``local_id`` entity-property write-back performed by
-    ``_apply_inbound_create`` is visible in the NEXT pass's search snapshot.
-    A stub that never reflects those writes silently under-tests idempotency
-    (the differ's own-write-back echo path is never exercised). All client
-    instances created from this module share one mutable state dict.
+    """Serve mutable Jira state through the production client shape: writes affect
+    later searches, so two-pass convergence cannot pass against a static fixture.
     """
     import copy as _copy
     import json as _json
@@ -210,15 +193,8 @@ def _patch_acli_and_snapshot_head(fetcher_mod, applier_mod, issues: list[dict]):
 def test_idempotency_two_passes_with_unchanged_remote(
     tmp_path, reconcile_mod, fetcher_mod, applier_mod
 ):
-    """Two consecutive reconcile_once() calls with unchanged remote both have mutation_count=0.
-
-    The first pass initialises prev snapshot from empty ({}) so all issues appear
-    as "create" mutations.  The second pass reads the prev snapshot written by the
-    first pass and compares it against an identical current snapshot — producing
-    zero mutations, proving idempotency.
-
-    This test uses pass_id="idempotency-pass" for both calls so the prev file
-    written by pass 1 is the one read by pass 2.
+    """Two passes over unchanged Jira state converge: the second produces no mutations
+    or writes.
     """
     issues = _make_stable_issues()
     pass_id = "idempotency-pass"
@@ -254,12 +230,7 @@ def test_live_pass_persists_prev_snapshot_as_a_bare_key_set(
 def test_excluded_fields_change_does_not_drive_mutations(
     tmp_path, reconcile_mod, fetcher_mod, applier_mod
 ):
-    """A change only in an EXCLUDED_FIELDS field produces mutation_count=0.
-
-    Pass 1: snapshot has issues with 'summary' field (real) and no excluded fields.
-    Pass 2: same issues but with an 'local_id' field added (in EXCLUDED_FIELDS).
-    The differ must ignore that change and emit zero mutations.
-    """
+    """Changing only an excluded field does not generate a mutation."""
     pass_id = "excluded-fields-pass"
     base_issues = [
         {
@@ -319,35 +290,8 @@ def test_excluded_fields_change_does_not_drive_mutations(
 def test_real_field_change_converges_after_one_pass(
     tmp_path, reconcile_mod, fetcher_mod, applier_mod
 ):
-    """A remote field change is detected without planning an outbound REVERT of it.
-
-    WHAT THIS CELL USED TO ASSERT, AND WHY IT WAS WRONG (bugs 727f / d103). It required
-    ``mutation_count == 1`` on the detecting pass, calling that "a genuine field change".
-    Instrumenting the diff phase in this exact harness showed the one mutation it counted
-    was::
-
-        outbound update DIG-20 payload={'summary': 'Original summary'}
-                        provenance={'source':'differ','reason':'field_drift',...}
-
-    i.e. the STALE PREVIOUS value pushed BACK to Jira — a revert of the very edit the
-    fixture makes, not a sync of it. There is no local side here at all (stderr reports
-    ``local_tickets=[]``, ``outbound_differ total=0``, ``inbound_differ total=0``), so the
-    "field change" is purely Jira-side, and the count came entirely from the snapshot
-    differ reading a remote-vs-remote delta as local-wins drift. The cell was pinning the
-    defect's mechanism, not the behaviour its docstring described.
-
-    WHAT IT ASSERTS NOW, PRESERVING BOTH HALVES OF THE ORIGINAL INTENT.
-
-    * "detect a genuine change" -> pass 1 must still plan the inbound create for a key it
-      has never seen. That is the snapshot differ's real job on this fixture.
-    * "a regression guard against over-filtering" -> that pass-1 assertion is the guard: a
-      suppression broad enough to swallow real work fails it.
-    * added, and the actual contract: pass 2 must NOT plan an outbound revert of the
-      Jira-side edit. Correct handling of a Jira-side field edit is inbound mirroring by
-      the binding-aware differ (ADR 0026's arbitrated inbound-mirrored scalar set; ticket
-      b9b8 and ``diffing/test_inbound_field_sync_directionality.py``), which needs a
-      binding this snapshot-only harness never creates — so zero planned work here is the
-      correct outcome, not lost work.
+    """An unseen Jira key plans work on pass 1; a Jira-only field edit on pass 2
+    plans no outbound revert of its current value.
     """
     pass_id = "real-change-pass"
     issues_v1 = [
@@ -428,14 +372,8 @@ def mode_mod():
 
 
 def _make_jql_partitioned_acli(issues: list[dict]) -> object:
-    """Faithful acli stub that partitions by the active/Done JQL split.
-
-    The production fetcher issues TWO queries (active ``status != Done`` then
-    Done-recent). A real Jira partitions the set by status, so no key appears
-    in both. The simple ``_make_acli_module`` returns the same list for every
-    query, which spuriously triggers the cross-query dedup observability alert.
-    This stub returns an issue only for the query whose status-band matches,
-    mirroring production so the snapshot build emits no dedup alert.
+    """Partition active and Done-recent searches as Jira does, keeping each key in its
+    proper query window.
     """
     base = _make_acli_module(issues)
     Base = type(base)  # S4: _make_acli_module now returns a transport instance
@@ -445,11 +383,8 @@ def _make_jql_partitioned_acli(issues: list[dict]) -> object:
             # Dedup JQL (labels = "rebar-id:...") keeps the base behaviour.
             if jql.strip().startswith('labels = "rebar-id:'):
                 return super().search_issues(jql, **kwargs)
-            # Active query carries ``statusCategory != "Done"``; Done-recent
-            # carries ``statusCategory = "Done"``. Distinguish on the ``!=`` operator so the
-            # active substring (which also contains ``= "Done"``) isn't
-            # mis-classified as the Done query. Partition over the LIVE
-            # state (base returns reflected writes), not the seed list.
+            # Distinguish != Done from = Done, which is a substring of the
+            # active query; partition current reflected state, not seed data.
             done = '= "Done"' in jql and '!= "Done"' not in jql
             out = []
             for issue in super().search_issues(jql, **kwargs):
@@ -493,12 +428,8 @@ def _snapshot_tree(root: Path) -> set[str]:
 def test_dry_run_reconcile_once_writes_nothing(
     tmp_path, reconcile_mod, fetcher_mod, applier_mod, mode_mod
 ):
-    """A DRY_RUN reconcile_once produces ZERO local writes.
-
-    The full differ runs (mutation_count reflects the computed plan), but NO
-    file may appear under .rebar/bridge/ or .tickets-tracker/.bridge_state/ —
-    no snapshot, manifest, health record, sync-log, bindings, or prev_snapshot.
-    Encodes the fix for ticket yaw-plait-doe (cap-0 modes were persisting).
+    """Dry-run computes the mutation plan without writing snapshots, bindings, or Jira
+    state.
     """
     issues = _make_stable_issues()
     pass_id = "dry-run-no-write"
@@ -565,30 +496,8 @@ def test_live_mode_reconcile_once_still_persists(
 def test_a_key_absent_from_the_current_snapshot_never_reaches_create_issue(
     tmp_path, reconcile_mod, fetcher_mod, applier_mod
 ):
-    """The live-path oracle for d103: absence must not drive a create.
-
-    Pass 1 primes prev_snapshot with DIG-9; pass 2 presents an EMPTY working set, so
-    DIG-9 is present in prev and absent from curr. That happens for a deleted issue AND
-    for one that merely ages out of the working-set query (``status = Done`` beyond the
-    recent cap), so the reconciler cannot tell the two apart from absence alone.
-
-    ADR 0028 Decision para 1: "No destructive or terminal action ... may be driven by a
-    key's absence from the fetched snapshot"; deletion is proven only by a bounded direct
-    GET returning 404 (para 2). A create targeted at the issue's own Jira key, built from
-    the stale prev fields, is exactly such a terminal action.
-
-    Neither downstream guard catches it, which is why the assertion is at the transport:
-    ``applier._cross_project_targets`` skips ``action == "create"`` outright, and
-    ``create_one``'s JQL dedup degenerates to ``labels = "rebar-id:"`` because
-    EXCLUDED_FIELDS strips ``local_id`` from the payload.
-
-    Since bug 2392-9389-39f9-4ca6, pass 1 no longer leaves DIG-9 label-marked but
-    unbound: the marker IS the lost-adopt residue signature (deterministic id, no
-    binding, no local ticket), so the walk replays the adopt and pass 2 sees a
-    genuinely BOUND key leaving the window. That routes the pass-2 walk to the
-    bounded direct GET (ADR 0028 §2 — probe, never create), which this offline test
-    answers deterministically with a 404 sentinel: the oracle stays "absence drives
-    no create" while the probe leg no longer reaches a real transport.
+    """A key present only in the previous snapshot cannot trigger Jira creation.
+    Partitioned JQL and window searches make the absence path observable.
     """
     from unittest.mock import patch
 
@@ -626,12 +535,9 @@ def test_a_key_absent_from_the_current_snapshot_never_reaches_create_issue(
         finally:
             applier_mod.snapshot_head = _bak
 
-    # Pass 1 healed the marked-but-unstored key (bug 2392-9389-39f9-4ca6), so the
-    # pass-2 walk now probes the BOUND off-window key with a bounded direct GET.
-    # Answer it with the confirmed-404 sentinel via the walk's own probe seam
-    # (``outbound_differ._safe_get_issue`` on the reconcile-loaded module) so this
-    # offline test never reaches a real transport; a single 404 is below the
-    # retire grace, so the walk defers — no mutation, exactly the d103 oracle.
+    # The bound off-window key gets one direct probe. Return the confirmed-404
+    # sentinel through the loaded probe seam; one 404 remains below retire grace
+    # and must not create a mutation or reach live transport.
     ob_mod = importlib.import_module("rebar.reconciler.outbound_differ")
 
     def _probe_404(_client, _key):

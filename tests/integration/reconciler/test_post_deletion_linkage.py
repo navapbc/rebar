@@ -1,13 +1,6 @@
-"""Post-deletion registry-LINKAGE guard (task 76e6 / story 2da6).
-
-Renamed from the former ``test_post_deletion_smoke.py``, which was mis-named: it
-looked like an invocability proof but actually only asserted stale-import/linkage
-survival. This file is scoped to that LINKAGE concern ONLY — that the applier's
-typed-dispatch registry (``_LEAVES``) still imports cleanly and exposes exactly the
-expected leaves after the legacy bridge deletion (task 6cbb) and the bridge-cutover
-one-shot removal (WS4). It is NOT an invocability proof — that lives in the sibling
-``test_leaves_invocable.py``, which actually invokes a leaf and asserts an observable
-outcome.
+"""Check post-deletion typed-dispatch registry linkage: expected leaves still import
+and appear in _LEAVES. Actual leaf invocation is covered by
+test_leaves_invocable.py.
 """
 
 import importlib
@@ -26,13 +19,8 @@ EXPECTED_LEAF_PAIRS = frozenset(
         ("inbound", "clean_label"),
         ("inbound", "conflict"),
         ("inbound", "create"),
-        # ("inbound", "delete") and ("inbound", "probe") were REMOVED by bug 3b5f: the
-        # (inbound, probe) producer could never fire from the real call site, and the
-        # (inbound, delete) leaf's create_after_hard_delete follow-on IS the resurrection
-        # the operator ruled against ("once deleted in Jira, it shouldn't be resurrected").
-        # Dropped from this pinned set deliberately — the guard still pins the exact
-        # remaining pairs, so a leaf dropped by ACCIDENT still fails here.
-        # ("outbound", "probe") STAYS: the outbound bounded-GET absence probe is live.
+        # Inbound probe is unreachable, and inbound delete would resurrect a Jira
+        # deletion. Outbound probe remains live for bounded absence checks.
         ("inbound", "repair_property"),
         ("inbound", "update"),
         ("outbound", "conflict"),
@@ -50,14 +38,8 @@ def applier():
 
 
 def test_leaves_registry_linkage_intact(applier):
-    """Registry-linkage guard: the typed-dispatch table survived the legacy bridge
-    deletion (task 6cbb) with the expected leaves still wired and callable.
-
-    This is a LINKAGE check, not an invocability proof — it asserts the observable
-    shape of the public ``_LEAVES`` registry: the exact (direction, action) pairs
-    are present (so no leaf was silently added or dropped) and every registered
-    value is callable. A missing import behind any leaf would already have raised
-    ``ModuleNotFoundError`` at module load (the fixture), failing this test.
+    """The registry contains exactly the expected direction/action pairs and callable
+    leaves; import failure breaks module load. Invocation is checked separately.
     """
     registered = {(d.value, a.value) for (d, a) in applier._LEAVES}
     assert registered == set(EXPECTED_LEAF_PAIRS), (

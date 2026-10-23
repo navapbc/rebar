@@ -137,24 +137,8 @@ def _fake_snapshot_head(_repo_root) -> str:
 
 
 def test_pre_existing_rebar_id_produces_zero_creates(tmp_path, differ, applier):
-    """A Jira issue already carrying a rebar-id:<local_id> label → zero creates (end-to-end).
-
-    Production semantics since commit 1f0032df24 / bug 4354: the fetcher
-    snapshot stores Jira ``fields`` only (never the ``local_id`` entity
-    property), so the snapshot differ recognises an already-bound issue by its
-    ``rebar-id:<local_id>`` / ``rebar-id-<local_id>`` label and STANDS DOWN — the
-    issue is owned by the binding-aware inbound/outbound differs. No inbound
-    CREATE is emitted, so apply() never materialises a phantom ``jira-dig-NNNN``
-    local ticket and never writes a ghost ``rebar-id:`` label back to Jira.
-
-    This replaces an obsolete pre-4354 contract that asserted an applier-level
-    dedup guard (mapping.json + a ``dedup-create-skipped`` manifest event). That
-    guard never existed on the inbound-create path, and is unnecessary: dedup of
-    already-bound issues is the differ's job, exercised here end-to-end
-    (differ → applier). The earlier failing assertion (``mapping.json must be
-    written by the dedup guard``) wired an *inbound* create yet asserted
-    *outbound* dedup artifacts; the ``get_comments`` AttributeError it cited was
-    a caught symptom, not the cause. Regression history: bugs a666/b38a/38fd/4cc1.
+    """A pre-existing Jira issue bearing the local rebar-id label suppresses creation
+    through the full differ-to-applier pass, unlike an unbound local ticket.
     """
     fake_client = FakeAcliClient()
 
