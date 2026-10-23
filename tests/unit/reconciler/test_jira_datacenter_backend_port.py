@@ -1,27 +1,8 @@
-"""HELD-OUT port-conformance tests for ``JiraDataCenterBackend`` (story J7, epic e369).
+"""Pin all nine JiraDataCenterBackend Protocol members (J7).
 
-Held out from the implementation subagent: the subagent is given only the happy-path
-case, so these edge assertions cannot be satisfied by over-fitting to a shown example.
-
-WHAT THIS PINS, and why it is not test bookkeeping. On merged ``main`` the DC backend
-satisfied SEVEN of the ``Backend`` Protocol's nine members — ``query_project`` and
-``assert_env_ready`` were absent, so ``isinstance(backend, Backend)`` was ``False`` and
-the contract suite's ``test_isinstance_backend_facade`` went red the moment the DC
-backend entered its fixture params. Both absences are real defects:
-
-* ``query_project`` is the READ/query scope the inbound fetcher scopes its search to.
-  It must NOT substitute a create-time default: an empty value has to stay empty so the
-  fetcher FAILS CLOSED rather than querying every project (bug 626d). A "helpful"
-  default here silently widens an inbound scan across the whole instance.
-* ``assert_env_ready`` is the fail-fast that raises the neutral ``BackendEnvError``
-  naming the missing connection essential BEFORE the transport is used in
-  bootstrap-band execution, instead of a cryptic downstream failure (ticket 97f2).
-
-Patching note (a trap this repo has hit before): the backend resolves settings through
-a FUNCTION-LOCAL import, which binds at CALL time — patching a local alias silently
-no-ops and the test passes for the wrong reason. These tests patch the attribute on its
-DEFINING module, ``…jira_datacenter.settings.resolve_jira_datacenter_settings``.
-"""
+query_project must preserve an empty query scope so inbound fetch fails closed.
+assert_env_ready must name missing essentials with neutral BackendEnvError.
+Patch the function-local settings resolver on its defining module."""
 
 from __future__ import annotations
 

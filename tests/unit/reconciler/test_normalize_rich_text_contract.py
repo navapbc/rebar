@@ -1,27 +1,8 @@
-"""Cross-repo contract test for ``normalize_rich_text`` (story 3289, epic 708d).
+"""Pin the public normalize_rich_text seam used by a sibling repo (3289).
 
-The sibling repo ``agentic-dev-platform`` imports the ``normalize_rich_text`` seam
-from this package — as the free function
-``rebar.reconciler.inbound_fields.normalize_rich_text`` AND through the Backend port's
-``InboundMapper.normalize_rich_text`` (``adapters/jira/backend.py:_JiraInbound`` and the
-Data Center twin). Its behavior is therefore a PUBLIC contract, not an internal detail:
-a change to the accepted input types, the return type, or the decode behavior would
-break that importer silently at their call site.
-
-This test pins that shape so a breaking change fails HERE first, in this repo's own
-default suite, instead of surfacing downstream. It is a characterization of the
-CURRENT public behavior (ticket 21ca), not a new requirement:
-
-  * ``None`` -> ``""`` (empty string, never ``None``).
-  * a plain ``str`` passes through UNCHANGED (identity), so decode is idempotent on
-    already-decoded text.
-  * a non-``None`` non-``dict`` is coerced with ``str(...)``.
-  * an ADF ``dict`` decodes to plain/markdown text via ``adf_to_text``.
-  * the return type is ALWAYS ``str``.
-  * the callable signature is a single positional ``body`` returning ``str``.
-  * the ``InboundMapper`` Protocol declares the method, and both Jira-family backend
-    ports delegate to the SAME free function (no divergent per-vendor decode).
-"""
+None returns an empty string, str passes through, other scalar values stringify,
+and ADF dicts decode through adf_to_text. The one-body signature always returns
+str. Both Jira-family InboundMapper ports delegate to the shared free function."""
 
 from __future__ import annotations
 

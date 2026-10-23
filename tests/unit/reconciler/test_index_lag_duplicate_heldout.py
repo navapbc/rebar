@@ -1,27 +1,9 @@
-"""HELD-OUT: DC index lag must not turn a crashed create into a DUPLICATE issue (bug 21fc).
+"""A crashed create must not duplicate a Jira issue during DC index lag (21fc).
 
-THE DEFECT, and why it is the worst one in this epic: every other DC gap causes rebar to READ
-incomplete data or fail loudly. This one makes rebar WRITE a second Jira issue for the same
-local ticket — the exact outcome the write-ahead binding protocol exists to prevent.
-
-Jira DC's Lucene index is eventually consistent (JRASERVER-70423 documents a real-world lag of
-2,991 seconds). A JQL search cannot see an unindexed issue. The keyless-pending state is
-entered PRECISELY when rebar crashed during `create_issue` — i.e. exactly when the issue may
-already exist but not yet be indexed.
-
-THERE ARE TWO INDEX-DEPENDENT SITES, and an earlier draft of this ticket named only the first:
-
-  1. `recover_pending_bindings`, keyless branch — searches, and on a miss UNBINDS.
-  2. `dispatch_one.create_one`'s dedup — searches, and on a miss CREATES.
-
-Site 2 writes the duplicate; site 1 only removes the record that might have prevented reaching
-it. **Fixing site 1 alone does NOT help**: `outbound_differ` gates the create on
-`binding_store.get_jira_key(local_id) is None`, and a keyless-pending entry HAS
-`jira_key: None` — so the create is emitted anyway and the dedup misses for the same lag
-reason. That is why the headline test below drives the WHOLE path and asserts exactly one
-issue is created; a test asserting only "recover_pending did not unbind" passes against the
-broken code.
-"""
+A keyless pending binding can coexist with an unindexed issue. Both recovery's
+keyless search and create_one's dedup search can miss it. Asserting only that
+recovery retains the record misses the second write. Drive crash, recovery,
+differ, and create, and require exactly one issue."""
 
 from __future__ import annotations
 

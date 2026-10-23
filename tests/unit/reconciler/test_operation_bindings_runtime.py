@@ -1,28 +1,8 @@
-"""S2 (e042) happy-path oracle — reconciler operation-bindings runtime.
+"""Compose one immutable reconciler runtime from an operation snapshot (e042).
 
-Contract under test (the NEW public seam this story adds):
-
-    rebar.reconciler.runtime.compose_reconciler_runtime(
-        *, repo_root=None, cli_overrides=None) -> ReconcilerRuntime
-
-composes ONE immutable settings/runtime projection from the S1 operation
-snapshot (``rebar._operation_config.compose_operation_snapshot``) and builds
-exactly the *selected* Jira Cloud or Data Center backend. The composed
-settings are CAPTURED at composition time: ``backend.project`` /
-``backend.query_project`` return the composed scope and do NOT re-resolve
-ambient env/config on each access.
-
-Only the happy path lives here (this is the file the implementer sees). The
-poisoned-ambient stability, only-selected-construction, fail-closed, secret
-canary, and cloud/DC interface behaviors are the held-out oracle
-(``tests/interfaces/store/test_reconciler_operation_bindings.py`` and the
-edge cases there), run by the orchestrator against code the implementer never
-saw.
-
-The package conftest puts the engine dir on ``sys.path`` and autouse-poisons
-``JIRA_URL/JIRA_USER/JIRA_PROJECT/JIRA_API_TOKEN`` + ``REBAR_ROOT`` so a
-default compose selects the Cloud backend with project ``DIG``.
-"""
+Construct only the selected Cloud or DC backend and capture project/query scope
+at composition rather than rereading ambient config. The held-out interface
+suite covers poisoned ambient state, secret safety, and fail-closed edges."""
 
 from __future__ import annotations
 

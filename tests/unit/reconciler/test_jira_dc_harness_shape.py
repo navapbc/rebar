@@ -1,28 +1,9 @@
-"""Per-commit structural enforcement for the Jira DC harness (story J5, epic e369).
+"""Guard the Data Center harness shape in the default unit tier (J5).
 
-The harness itself only runs on a native-amd64 runner from a weekly/dispatched
-workflow. Its *file shape*, though, encodes several decisions that are expensive
-to rediscover and easy to "tidy" away — so those are pinned HERE, in the default
-unit tier that CI runs on every commit, rather than under ``tests/external/``
-where the opt-in guard would leave them unchecked except on a cron.
-
-The two that matter most, both learned by watching the harness fail:
-
-* **``-Dproduct.start.timeout``** — without it, Cargo's default 600000 ms deploy
-  ceiling kills the container roughly 25 minutes in with
-  ``Deployable [...] failed to finish deploying within the timeout period
-  [600000]``. That reads like a network fault, so a maintainer is likely to
-  delete the "unnecessary" flag and reintroduce a slow, silent death.
-  (``-DstartupTimeout`` and ``-Dcargo.timeout`` were both verified to have NO
-  effect — this is the only property that works.)
-* **``-DskipAllPrompts=true``** — Atlassian retired the Marketplace v1 REST
-  endpoint that AMPS hardcodes for its SDK update check, so without this flag
-  every cold start dies on a ``FileNotFoundException``.
-
-Plus the security and reproducibility invariants: the base image is pinned by
-DIGEST (not a floating tag), and the port is bound to loopback only, because the
-instance ships well-known ``admin``/``admin`` credentials.
-"""
+Keep AMPS product.start.timeout and skipAllPrompts. startupTimeout and
+cargo.timeout do not substitute, and cold starts need the prompt skip. Pin the
+image digest, vendored license, and loopback-only port for the instance with
+well-known admin credentials."""
 
 from __future__ import annotations
 

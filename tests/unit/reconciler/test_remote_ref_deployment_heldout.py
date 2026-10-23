@@ -154,19 +154,11 @@ def test_vendor_already_separates_cloud_from_data_center() -> None:
 
 
 def test_instance_does_NOT_prevent_local_id_collision_between_deployments() -> None:
-    """A REGRESSION GUARD ON A LIMITATION, not on a feature — read the docstring before "fixing".
+    """Pin the cross-deployment local-id collision limit.
 
-    `RemoteRef`'s docstring used to claim `instance` exists "so two instances of the same vendor
-    never collide". For the value itself that is true. For the LOCAL TICKET ID — the thing that
-    actually collides in the store — it is FALSE, and this test pins the false half so a future
-    reader cannot assume 6a91 solved it.
-
-    `_jira_key_to_local_id` is `"jira-" + jira_key.lower()` and consults nothing else, so two DC
-    deployments that each own a project `DIG` both mint `jira-dig-123` no matter what their
-    `RemoteRef.instance` says. Making the id instance-aware would change the id scheme for every
-    existing Jira-sourced ticket — a breaking, store-wide migration that is deliberately out of
-    scope here. If that migration is ever done, THIS test is the one that should go red.
-    """
+    RemoteRef.instance distinguishes refs, but _jira_key_to_local_id uses only
+    the lowercased Jira key. Two deployments with DIG-123 therefore share one
+    local id. Instance-aware ids require a store-wide migration."""
     from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 
     one = _jira_key_to_local_id("DIG-123")

@@ -1,35 +1,9 @@
-"""The inbound UPDATE path never mints an identity, because it hands the mint a STRING.
+"""Forward canonical identity through inbound UPDATE so it can mint (5200).
 
-Found by J11's inbound-assignee cell (ticket 5200-e04e-246e-4aae) once its setup
-was fixed and it reached its real assertion for the first time. This module localises the
-mechanism harness-free, one variable at a time.
-
-THE CHAIN, read end to end:
-
-  1. ``inbound_fields._map_jira_to_local_fields:223-225`` maps the Jira user object to TWO
-     canonical keys: the scalar ``assignee`` (a bare STRING via ``_extract_jira_field_value``,
-     i.e. ``name`` or ``displayName``) and the fixed-shape ``assignee_identity``
-     (``{display, email, account_id}``, where ``account_id`` already carries DC's username —
-     ``_identity_of:154-179``).
-  2. ``inbound_differ._diff_jira_vs_local:185-188`` emits ONLY the scalar:
-     ``changed["assignee"] = jira_mapped.get("assignee")``. ``assignee_identity`` is not in
-     ``field_map``, so it never reaches the mutation.
-  3. ``apply_inbound_events._inbound_update_write_edit_event`` documents that these
-     fields ARE the differ's local-keyed shape, and line 369 passes ``fields["assignee"]`` —
-     that string — to ``_ensure_inbound_assignee_identity``.
-  4. ``_ensure_inbound_assignee_identity:100-101`` opens with ``if not isinstance(assignee,
-     dict): return``. A string returns immediately. NO MINT, and the caller cannot tell:
-     the function is best-effort and silent by contract.
-
-The CREATE path is unaffected and that is what has masked this: ``:200-203`` passes the RAW
-Jira user object from the snapshot, which IS a dict, so an inbound CREATE mints correctly.
-Every identity the harness has ever observed came from that path.
-
-NOT A REGRESSION OF 5f48. That bug fixed the KEY SELECTION inside the mint (``accountId``
-first, then DC's ``name``) so DC users would resolve. This defect is upstream of that guard:
-on the update path the function returns before any key is read, so 5f48's fix is never
-reached. It is a case 5f48 never covered.
-"""
+The mapper supplies scalar assignee and assignee_identity, but dropping the
+latter leaves the applier a string that the mint guard ignores. Preserve the
+identity object through differ and apply. CREATE already receives the raw Jira
+user. Cloud accountId and DC username share the canonical account_id key."""
 
 from __future__ import annotations
 
@@ -212,13 +186,10 @@ def _differ_fields(raw_assignee: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_the_differ_forwards_the_canonical_identity_with_the_assignee() -> None:
-    """BOUNDARY 1. The mutation must carry `assignee_identity`, not only the scalar.
+    """Carry assignee_identity beside the scalar assignee in the mutation.
 
-    The mapper already computes it (`_map_jira_to_local_fields:223-225`); before the fix the
-    differ dropped it on the floor, which is why the applier had nothing but a string to mint
-    from. Keyed on `account_id`, which holds the accountId on Cloud and the username on DC
-    (`_identity_of:154-179`).
-    """
+    Its account_id holds Cloud accountId or DC username. The applier needs that
+    object rather than a string to mint."""
     changed = _differ_fields(_RAW_DC_ASSIGNEE)
 
     assert "assignee_identity" in changed, (

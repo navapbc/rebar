@@ -1,22 +1,9 @@
-"""Ticket ``65d7``: the assignee resolver travels by CONTRACT, not by attribute injection.
+"""Pin the declared, keyword-only assignee_resolver contract (65d7).
 
-The outbound mapper used to receive its live account-search resolver as an attribute set on
-it from outside (``outbound_mapper._assignee_resolver = ...``, under a bare
-``except (AttributeError, TypeError): pass``), which each backend then rediscovered with
-``getattr(self, "_assignee_resolver", None)``. Three costs, all load-bearing:
-
-* it fails SILENTLY — an injection that does not happen degrades every resolution to
-  ``authoritative=False``, and a permanently non-authoritative assignee re-emits an outbound
-  change it can never converge (the churn class epic ``ace2`` exists to fix);
-* it hid a real bug in review — PR #120's Data Center adapter copied the ``getattr`` into a
-  class where nothing set the attribute, so its whole authoritative branch was dead code;
-* it is invisible to mypy, so each wiring site needed ``# type: ignore[attr-defined]``.
-
-These tests pin the replacement: a declared, keyword-only ``assignee_resolver`` parameter on
-the neutral ``OutboundMapper.resolve_assignee`` contract and on both implementers, threaded
-from the core diff. The structural test at the bottom is what makes the defect class
-UNWRITABLE rather than merely fixed once.
-"""
+Core diff threads the resolver through OutboundMapper.resolve_assignee and both
+backends. Attribute injection and getattr discovery can silently make resolution
+non-authoritative, leaving assignee updates unable to converge. The structural
+guard forbids that wiring."""
 
 from __future__ import annotations
 

@@ -1,28 +1,9 @@
-"""HELD-OUT: the inbound snapshot pager (bug deac, epic e369).
+"""Reject silent partial inbound snapshots when Jira clamps a page (deac).
 
-THE DEFECT. ``_iter_pages`` terminated on a SHORT page and advanced by the REQUESTED
-page size:
-
-    if len(page) < page_size:
-        return
-    start_at += page_size
-
-Jira Data Center silently truncates ``maxResults`` above ``jira.search.views.default.max``
-— a common hardening, and the same server behaviour that produced the identical defect in
-``get_parent_map`` (fixed in change 1105). A truncated FIRST page therefore reads as "that
-is all there is".
-
-WHY THIS ONE IS THE WORST OF THE THREE SIBLINGS. ``collect()`` feeds ``_build_snapshot``,
-so a truncated read here is not a missing attribute on a present issue — it is an issue the
-pass never sees at all. Every unseen bound issue becomes a candidate for the absence/deletion
-path, and a run in that state reports success: nothing raises, and "converged" is true of
-the fraction it looked at. Measured before the fix: **20 of 250 issues, 92% lost.**
-
-WHY THE CLOUD ASSERTIONS BELOW ARE NOT PADDING. This is CORE code on the path the live Cloud
-bridge also uses, so "DC is fixed" is not sufficient evidence. The ``cap``, ACLI-ceiling and
-same-token-twice behaviours are pinned here so a regression in any of them fails loudly
-rather than surfacing as a mis-sized Cloud snapshot.
-"""
+Advance by returned length rather than requested size, and do not treat a short
+page as completion. Pin stall detection, Cloud cap and ACLI ceiling, and repeated
+tokens too. Collection feeds the deletion-sensitive snapshot, so unseen issues must
+never appear to be a complete, converged read."""
 
 from __future__ import annotations
 

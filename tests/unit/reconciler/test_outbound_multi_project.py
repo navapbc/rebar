@@ -1,28 +1,9 @@
-"""Outbound multi-project create routing + guard relaxation (story d19d, epic 0e68).
+"""Route outbound creates to each ticket's resolved project (d19d).
 
-Outbound sync historically wrote every created issue to ONE construction-time
-project and its pre-flight guard aborted the pass on any key outside that one
-project. This module pins the many-to-many behaviour:
-
-* the create mutation is stamped with the ticket's RESOLVED project
-  (``resolve_project`` against the store mapping) under the reserved payload key
-  ``_bridge_target_project`` — resolved once in the differ, above both transports;
-* a ticket whose resolved project is NOT in the mapping (a stale/typo binding), or
-  which resolves to "not synced", emits NO create mutation (creates are guard-exempt,
-  so this is the only place that gap is closed);
-* BOTH transports honour the stamped project — Cloud ``AcliClient`` and the Data
-  Center ``_IssuesMixin`` — falling back to their construction-time project when the
-  key is absent, so single-project stores are unchanged;
-* the Data Center transport DROPS the reserved key before splatting the translated
-  field dict into ``jira.JIRA.create_issue(**fields)`` — otherwise it is sent as a
-  bogus Jira field id and the create 400s;
-* the guard ``_cross_project_targets`` accepts the mapping's project SET (still a
-  bare string for the single-project case) and only flags keys outside it.
-
-The transports are exercised at their real seams (``AcliClient.create_issue`` and
-``JiraDataCenterTransport.create_issue``) with the vendor call recorded, because the
-destination project carried on that call is the contract under test.
-"""
+The differ stamps _bridge_target_project. Unsynced or stale targets emit no
+create. Cloud and DC transports honor it, retain construction-project fallback,
+and remove the reserved key before Jira receives fields. The preflight guard
+accepts the mapped project set while retaining single-project behavior."""
 
 from __future__ import annotations
 

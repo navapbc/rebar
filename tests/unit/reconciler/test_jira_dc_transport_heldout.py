@@ -1,26 +1,9 @@
-"""HELD-OUT oracle for the Data Center transport (story J6, epic e369).
+"""Pin Data Center transport security, registration, and retry (J6).
 
-This file is HELD OUT from the implementation subagent. It pins the properties a
-shape-and-happy-path spec cannot: the security posture, the retry semantics, and
-the registration wiring — each of which fails silently or at an operator's first
-run rather than in an obvious way.
-
-Three are worth stating explicitly, because each has a specific way of being
-"tested" without being tested at all:
-
-* **TLS.** ``pycontribs/jira`` reads TLS config from its OPTIONS DICT — ``verify``
-  is a key of ``JIRA.DEFAULT_OPTIONS`` (default ``True``), consumed as
-  ``self._options["verify"]``. So an assertion phrased as "no ``verify=False``
-  kwarg" is VACUOUS: no such kwarg exists, and it would pass unchanged with
-  verification disabled through the options dict.
-* **Registration.** A missing self-registration import makes
-  ``select_backend("jira-datacenter")`` fail at RUNTIME with
-  ``BackendRegistryError`` (not ``KeyError``) while every file is individually
-  correct and every transport unit test passes.
-* **Retry.** "It retries" is easy to assert and easy to get backwards: an HTTP
-  error retried is a duplicate mutation, and a timeout NOT retried is a flaky
-  reconcile. The direction is the contract, so both halves are pinned.
-"""
+TLS verification belongs in JIRA's options dict. A keyword-only assertion is
+vacuous. Selecting jira-datacenter must import its registration and report its
+own error. Retry timeouts without retrying HTTP mutation failures, and keep
+construction secret-safe."""
 
 from __future__ import annotations
 

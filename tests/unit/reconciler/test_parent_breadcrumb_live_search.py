@@ -1,28 +1,8 @@
-"""Bug 9ebb-3114-4d0e-4528: parent-drift breadcrumb in the LIVE-SEARCH path.
+"""Emit parent-drift breadcrumbs even with zero local comments (9ebb).
 
-S7 (2c66-205d-92e1-4419) emits the echo-safe parent-drift breadcrumb from
-``outbound_comments._diff_comments`` after the resolved Jira dedup set is
-built. In the live-search path (the snapshot lacks the ``comment`` field)
-the function early-returned ``[]`` when the child had zero local comments —
-BEFORE the breadcrumb builder ran — so exactly the under-defined-leaf case
-the breadcrumb targets got no breadcrumb in that fallback path.
-
-Contracts pinned (ticket ACs):
-  * emitted — a drift-affected bound child with ZERO local comments and an
-    available transport client receives exactly one breadcrumb in the
-    live-search path, deduped (append-once) against the live-fetched set;
-  * client-None safety — no client ⇒ comment state unknown ⇒ no breadcrumb
-    (bug-4292 unknown-state safety preserved);
-  * fetch-failure safety — a failing live fetch ⇒ no breadcrumb (bug 4292);
-  * append-once — an already-landed tagged breadcrumb in the LIVE-FETCHED
-    set suppresses a second one;
-  * no wasted call — zero local comments and no drift condition ⇒ the client
-    is never consulted (the existing no-unnecessary-API-call behaviour).
-
-Everything asserted here is an observable output of ``_diff_comments`` (plus
-the fake client's call log), so a behaviour-preserving refactor cannot turn
-these red.
-"""
+When Jira search supplies comments, a bound under-defined child gets one
+append-once breadcrumb. Unknown state from no client or failed fetch suppresses
+it. No drift makes no needless fetch. Dedup against the fetched set."""
 
 from __future__ import annotations
 

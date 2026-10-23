@@ -1,17 +1,8 @@
-"""HELD-OUT: the Jira-key → local-id derivation the live oracle depends on (bug 23ed).
+"""Pin lowercase Jira-key to local-id derivation (23ed).
 
-WHY THIS EXISTS AS A UNIT TEST. The live provenance test asserts that a DC-created issue
-produces a local ticket whose id is ``_jira_key_to_local_id(remote_key)``. That assertion is
-only as good as the derivation it calls, and the live test runs only in the DC harness job —
-so if the derivation changed, the live test would go red in a 20-minute CI job with a
-confusing message, on a machine most contributors cannot reproduce.
-
-More importantly: the ORIGINAL live assertion was ``remote_key in json.dumps(ticket)``, which
-could never pass, because this function lowercases and the inbound CREATE payload carries no
-raw Jira key. That defect survived the entire epic. Pinning the derivation here means the
-*premise* of the live assertion is checked on every change, cheaply, rather than only when a
-harness happens to be available.
-"""
+The DC provenance oracle compares against _jira_key_to_local_id. This
+unit test makes that premise non-vacuous. The inbound CREATE payload need not
+contain the raw Jira key, so searching the ticket JSON for it is invalid."""
 
 from __future__ import annotations
 
