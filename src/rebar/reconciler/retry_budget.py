@@ -14,6 +14,8 @@ so the sibling value module is imported as ``rebar.reconciler.operation_outcome`
 
 from __future__ import annotations
 
+import random
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
@@ -28,6 +30,17 @@ class _Clock(Protocol):
     def now(self) -> int: ...
 
     def sleep_ms(self, ms: int) -> None: ...
+
+
+class WallClock:
+    """Real time for a production :class:`RetryBudget`: epoch milliseconds and a blocking
+    sleep. Tests inject a recording clock instead, so they never sleep."""
+
+    def now(self) -> int:
+        return int(time.time() * 1000)
+
+    def sleep_ms(self, ms: int) -> None:
+        time.sleep(ms / 1000)
 
 
 @dataclass(frozen=True)
@@ -127,6 +140,39 @@ class RetryBudget:
             self.request_count = plan.request_count
             self.cumulative_sleep_ms = plan.cumulative_sleep_ms
         return plan
+
+
+class TransientRetryBudget:
+    """A :class:`RetryBudget` that fails the pass when its invocations run out.
+
+    The budget alone decides. ``retry`` and ``defer`` pass through: a ``defer`` (the next
+    delay, e.g. a long ``Retry-After``, would pass the sleep cap) becomes the
+    coordinator's ``retryable_deferred``, so that op is held for the next pass while the
+    rest of the pass continues. ``exhausted`` (all 3 invocations used) re-raises the last
+    transient error the dispatch recorded in ``transient_cell[0]``, so the pass aborts
+    exactly as the fail-fast re-raise did before.
+    """
+
+    def __init__(self, budget: RetryBudget, transient_cell: list) -> None:
+        self._budget = budget
+        self._transient_cell = transient_cell
+
+    def attempt_retry(self, *, provider_delay_ms: int | None = None) -> RetryPlan:
+        plan = self._budget.attempt_retry(provider_delay_ms=provider_delay_ms)
+        if plan.action == "exhausted" and self._transient_cell[0] is not None:
+            raise self._transient_cell[0]
+        return plan
+
+
+def transient_budget_factory(transient_cell: list, clock_factory):
+    """A coordinator ``budget_factory``: a fresh :class:`TransientRetryBudget` per atomic
+    op, on ``clock_factory()`` with uniform ``[0, 1)`` s jitter."""
+
+    def factory() -> TransientRetryBudget:
+        budget = RetryBudget(clock=clock_factory(), jitter=random.random)
+        return TransientRetryBudget(budget, transient_cell)
+
+    return factory
 
 
 def decide_replay(*, observation: str, budget_remaining: bool) -> tuple[Disposition, bool]:

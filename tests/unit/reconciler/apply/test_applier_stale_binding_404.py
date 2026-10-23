@@ -199,11 +199,13 @@ def test_non_404_http_error_still_propagates(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Only 404 is softened. A 500 (or any non-404 HTTPError) must keep the
-    current behavior and propagate — we do not blanket-catch HTTP errors.
+    """Only 404 is softened. A 500 (or any non-404 HTTPError) is never swallowed into a
+    per-mutation soft-fail — we do not blanket-catch HTTP errors.
 
-    ADR 0103 S3: the handler makes ONE attempt, so the raw 500 propagates from the
-    first call with no backoff in between (no handler retry, no coordinator replay).
+    Story inept-unanarchic-foal: the handler still makes one attempt per call, but the
+    coordinator's ADR 0103 retry budget retries a 5xx within the pass. A 500 on every
+    call is retried up to the budget's 3 invocations, with the budget's own backoff
+    (2-3 s, then 4-5 s) before each retry, and then the raw 500 propagates.
     """
     pass_id = f"test-pass-500-{int(time.time())}"
     mutation = _update("DIG-9999", {"status": "in_progress"}, local_id="five-hundred-id")
@@ -217,21 +219,24 @@ def test_non_404_http_error_still_propagates(
     )
     fake_acli_mod = _make_fake_acli(acli_mod, fake_client)
 
-    # RECORD any backoff instead of sleeping it: a handler-level retry would show up
-    # here as a sleep before the second attempt.
+    # RECORD the coordinator budget's backoff instead of sleeping it
+    # (``retry_budget.WallClock`` sleeps through ``time.sleep``).
     delays: list[float] = []
     monkeypatch.setattr(time, "sleep", delays.append)
 
     with patch.object(applier_mod, "_load_acli", return_value=fake_acli_mod):
-        with pytest.raises(urllib.error.HTTPError):
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
             applier_mod.apply(
                 [mutation], pass_id, repo_root=tmp_path, ticket_plans=_plans([mutation])
             )
 
-    assert fake_client.update_issue.call_count == 1, (
-        f"a 500 must reach the transport once; got {fake_client.update_issue.call_count}"
+    assert excinfo.value is fake_client.update_issue.side_effect
+    assert fake_client.update_issue.call_count == 3, (
+        f"a 500 must be retried to the budget's 3 invocations; got "
+        f"{fake_client.update_issue.call_count}"
     )
-    assert delays == [], f"no backoff may precede a retry that no longer exists; got {delays}"
+    assert len(delays) == 2, f"one budget backoff before each retry; got {delays}"
+    assert 2.0 <= delays[0] < 3.0 and 4.0 <= delays[1] < 5.0, delays
 
 
 # ── RP-03 S3 T1: the coordinator's provider-neutral isolation of this same 404 ───────
