@@ -1,25 +1,9 @@
-"""RP-01 S4 — candidate-tracing HELD-OUT ORACLE (edge/E2E; withheld from the implementer).
+"""Held-out candidate tracing contracts beyond the shared happy path.
 
-The happy path and shared harness live in ``test_candidate_tracing.py``; this module imports
-that harness and adds the cases that separate a real implementation from one that only fakes
-the happy path:
-
-* AC-5  all candidates fail -> one ``raised`` span each; the ``FallbackExceptionGroup`` /
-        resolution is UNCHANGED by instrumentation.
-* AC-6  bug-895c native->prompted downgrade is legible as a native ``raised`` then a prompted
-        ``returned`` span, with NO ``_pai_structured`` change (a real native 400 + downgrade).
-* AC-7  a ``raised`` span reason is sanitized through ``sanitize_diagnostic`` (no key/email/
-        endpoint/prompt/response body).
-* AC-8  a span-emission failure while tracing is ENABLED is swallowed — result, usage, and the
-        propagated exception are identical to tracing-off.
-* AC-9  ``_usage`` (and thus pricing/JSONL inputs) is identical tracing on vs off and carries no
-        candidate counter.
-* AC-10 the base install (no tracing extra) imports ``rebar.llm.tracing`` and runs the
-        candidate seam as a no-op with no span dependency error (subprocess).
-* AC-1/AC-2 real OTel nesting: each candidate span parents to the single Agent model-request
-        span, ordered — proven with an in-memory exporter under ``importorskip`` (skips in the
-        default/CI env that lacks the ``[tracing]`` SDK; validated locally).
-"""
+Failures emit raised spans without changing fallback exceptions. A native
+rejection and prompted downgrade produce distinct spans. Diagnostics are
+sanitized. Tracing errors leave results, usage, and exceptions unchanged.
+Base installs need no tracing extra. Optional SDK tests check parent nesting."""
 
 from __future__ import annotations
 
@@ -101,16 +85,9 @@ def _grammar_400_body() -> dict:
 
 
 def _install_native_downgrade(monkeypatch) -> list[int]:
-    """Drive the REAL bug-895c native->prompted downgrade in ``_pai_structured`` unchanged.
-
-    ``structured.output_mode`` is forced to ``NativeOutput`` so the operation takes the native
-    (constrained-decoding) branch — standing in for a native-capable provider without altering
-    ``_pai_structured``. The FIRST model request (the native attempt) 400s with the documented
-    grammar-compilation rejection that ``translate_schema_complexity_rejection`` recognizes;
-    every later request (the prompted downgrade) returns a valid verdict. Returns the call log.
-
-    ``REBAR_GATE_ALLOW_UNGATED`` is the documented escape hatch for the completion-verdict op's
-    file-tool wiring — orthogonal to candidate tracing, and no file is actually read here."""
+    """Drive the native-to-prompted downgrade without changing _pai_structured.
+    The first request rejects constrained output. Later requests return a
+    verdict. Return the call log for span assertions."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-dummy")
     monkeypatch.setenv("REBAR_GATE_ALLOW_UNGATED", "1")
     monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
@@ -298,9 +275,5 @@ def test_base_install_imports_tracing_and_runs_candidate_seam_without_sdk():
     assert "OK" in proc.stdout
 
 
-# AC-1 / AC-2's real-OTel ambient-context NESTING proof (candidate spans parent to the single
-# Agent model-request span) requires the real ``[tracing]`` SDK, which the lean unit Verified
-# lane deliberately does not install (real-SDK tracing lives in the external tier, like
-# ``tests/external/test_llm_trace.py``). That proof lives in
-# ``tests/external/test_candidate_tracing_live.py``. The env-independent ``RecordingTracer``
-# tests above cover the AC-1/AC-2 span-emission / zero-based-order / attribute contract in CI.
+# OpenTelemetry parent nesting requires the optional tracing SDK and lives in
+# the external test. RecordingTracer covers span order and attributes in CI.

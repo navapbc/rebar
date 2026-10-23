@@ -1,21 +1,8 @@
-"""First-class Bedrock provider: capabilities, cache observability, and error translation (S3).
+"""Bedrock capability, cache, and error contracts.
 
-Every fact asserted here was MEASURED against real AWS (us-east-2) before it was written, not
-inferred from documentation. The measurements are recorded on ticket 2932; the load-bearing
-ones:
-
-- ``us.anthropic.claude-sonnet-4-6`` caches (cache_write=4017 then cache_read=4017).
-- ``us.`` AND ``global.`` opus-4-5 report cache_read=0 AND cache_write=0 while billing the full
-  4029 input tokens — caching fails SILENTLY and is model-dependent, not prefix-dependent.
-- ``us.anthropic.claude-opus-4-7`` + ``temperature=0`` returns 400 "temperature is deprecated
-  for this model"; the identical call without it succeeds. pydantic-ai's
-  ``_drop_unsupported_sampling_settings`` exists only in its Anthropic adapter, NOT its Bedrock
-  one, so the direct path degrades with a warning and Bedrock hard-fails.
-
-Most of these tests need NO ``boto3``: capability derivation, the cache-zero warning and the
-error translation all work off profile stubs and plain exceptions. Only construction needs the
-optional extra, and those are marked.
-"""
+Measured provider cases cover Sonnet cache writes and reads, Opus zero-cache
+usage, and an Opus temperature rejection. Profile stubs cover most tests
+without boto3. Provider construction requires the optional extra."""
 
 from __future__ import annotations
 
@@ -98,17 +85,8 @@ def test_supports_temperature_is_withdrawn_only_for_the_measured_model():
 
 
 def test_supports_temperature_defaults_true_for_everything_else():
-    """The denylist must not leak: an unlisted model keeps temperature. Chosen over an
-    allowlist deliberately — an unknown-but-affected model then fails LOUDLY rather than
-    silently resampling verdicts.
-
-    EXEMPLAR UPDATED (ticket 1903): this used `anthropic:claude-opus-4-8` as its "unlisted
-    model" example. That model is now LISTED, because it does not accept temperature on the
-    direct-Anthropic path either — OBSERVED in production, where pydantic-ai's Anthropic adapter
-    logs "Sampling parameters ['temperature'] are not supported by 'claude-opus-4-8'" on
-    essentially every call. So the old exemplar encoded a disproven fact. The assertion's INTENT
-    and strength are unchanged; only the example moved to models that are genuinely unlisted and
-    MEASURED to accept temperature."""
+    """The temperature denylist leaves unlisted models enabled. This example accepts
+    temperature, while Opus 4.8 is now listed on both provider paths."""
     from rebar.llm.capabilities import capabilities_for
 
     assert capabilities_for("anthropic:claude-sonnet-4-6").supports_temperature is True
@@ -210,16 +188,8 @@ def test_exact_id_override_beats_the_profile_shaped_one():
 
 
 def test_warns_when_caching_was_requested_but_both_counters_are_zero(caplog):
-    """Decision B — the silent-failure guard.
-
-    MEASURED: opus-4-5 bills the full input on every call with cache_read=0 AND cache_write=0
-    and no error. The existing ``_warn_if_zeroed_usage`` CANNOT catch this: it fires on
-    input_tokens==0, and here input_tokens is a healthy 40290. Without a distinct predicate an
-    operator pays full price forever with no signal.
-
-    ``input_tokens`` clears ``CACHE_MIN_PREFIX_TOKENS`` (bug 7a79): the warning now asserts that
-    a CACHEABLE prompt silently failed to cache, so the fixture has to be a cacheable size. The
-    sub-floor half of that contract lives in ``tests/unit/test_cache_floor_warning.py``."""
+    """A cacheable prompt with zero read and write counters warns even when billed
+    input is nonzero. Sub-floor prompts have a separate guard."""
     from rebar.llm.structured_run import warn_if_cache_ineffective
 
     usage = {
@@ -332,16 +302,8 @@ def test_failure_module_has_no_provider_name_branch():
 
 
 def test_bedrock_builder_sets_exactly_the_two_parity_cache_keys():
-    """PARITY, not maximalism: the direct-Anthropic path sets instructions + tool_definitions
-    and leaves ``*_cache_messages`` unset, so Bedrock does the same. Enabling a third key would
-    make Bedrock cache MORE than Anthropic — a different behaviour with its own cost profile,
-    and story 0d76 measures the parity bar against exactly these two.
-
-    Scoped to SINGLE_TURN, which is what this parity claim was always about: bug dd27 added a
-    message-tail breakpoint to the multi-turn arm on BOTH providers (Anthropic
-    ``anthropic_cache``, Bedrock ``bedrock_cache_messages``), so parity there is preserved by
-    each arm using its OWN key — see ``test_agentic_message_cache.py``. The single-turn arm has
-    no history to cache and is byte-unchanged, so the two-key bar still holds here exactly."""
+    """Single-turn Bedrock sets the instruction and tool-definition cache keys,
+    matching direct Anthropic. Multi-turn message-tail caching has its own keys."""
     pytest.importorskip("boto3")
     from rebar.llm.capabilities import cache_settings_for, capabilities_for
 
@@ -479,13 +441,8 @@ def test_unrelated_provider_failure_still_surfaces_as_llm_unavailable_at_the_run
 
 # ── 281f: the inert REBAR_LLM_BEDROCK_MODEL_ID knob is REMOVED ────────────────────────────
 def test_bedrock_model_id_config_field_is_gone(monkeypatch) -> None:
-    """281f (happy path): `REBAR_LLM_BEDROCK_MODEL_ID` was parsed onto `LLMConfig` but read by
-    NOTHING, so an operator who set it got silence — no model change, no warning, no error.
-
-    The knob is deleted rather than wired: `cfg.model` ALREADY carries the Bedrock id as the
-    provider-prefixed `bedrock:<inference-profile-id>` string (the path S3's tests exercise), so
-    wiring a second source would require precedence rules for two ways to say one value. This
-    asserts the ATTRIBUTE is gone, so a future reintroduction of an unread field fails here."""
+    """The unused Bedrock model-id field stays absent. The provider-prefixed model
+    value already carries the inference profile, avoiding a second source."""
     from rebar.llm.config import LLMConfig
 
     monkeypatch.setenv("REBAR_LLM_BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-8")
@@ -510,11 +467,8 @@ def test_bedrock_provider_prefixed_model_still_resolves(monkeypatch) -> None:
 
 
 def test_bedrock_region_knob_is_untouched(monkeypatch) -> None:
-    """281f collateral invariant (HELD OUT): `REBAR_LLM_BEDROCK_REGION` is a SIBLING setting that
-    IS genuinely read (`build_bedrock_provider` threads `cfg.bedrock_region_name` into
-    `BedrockProvider`). Deleting the inert model-id knob must not delete its live neighbour —
-    an easy over-deletion given the adjacent lines. This matters more since a574: a missing
-    region raises NoRegionError at client construction."""
+    """Removing the unused model-id setting leaves the configured region setting intact.
+    The builder passes the configured region to BedrockProvider."""
     from rebar.llm.config import LLMConfig
 
     monkeypatch.setenv("REBAR_LLM_BEDROCK_REGION", "us-east-1")
@@ -541,15 +495,8 @@ def test_env_registry_no_longer_documents_the_removed_knob() -> None:
 
 # ── 1903: the supports_temperature override table covers the whole affected family ─────────
 def test_default_model_opus_4_8_withdraws_temperature() -> None:
-    """1903 (happy path): `us.anthropic.claude-opus-4-8` REJECTS an explicit temperature, and it
-    is rebar's DEFAULT_MODEL — so it is the most likely Bedrock Pass-1 model and the one the
-    override table most needs to cover. MEASURED (account 896586841071, us-east-1):
-    converse(temperature=0.0) -> ValidationException "`temperature` is deprecated for this
-    model"; the identical call with no temperature succeeds.
-
-    NOTE the PROVIDER-QUALIFIED form: `_model_id_of` returns None for a bare id with no colon,
-    so a bare-string assertion would pass vacuously against the conservative record rather than
-    exercising the override table. Production always passes `provider:model` or a model object."""
+    """The default Opus 4.8 Bedrock model rejects explicit temperature. Check its
+    provider-qualified ID so the override table is actually exercised."""
     from rebar.llm.capabilities import capabilities_for
 
     assert capabilities_for("bedrock:us.anthropic.claude-opus-4-8").supports_temperature is False
@@ -575,10 +522,8 @@ def test_both_opus_4_7_prefixes_withdraw_temperature() -> None:
 
 
 def test_sonnet_retains_temperature_support() -> None:
-    """HELD OUT — the over-application guard, and the most important test here. Sonnet ACCEPTS
-    temperature (MEASURED: us. and global. claude-sonnet-4-6 both succeed at temperature=0.0 and
-    0.5). A blanket family-level withdrawal would silently strip Pass-2's greedy determinism from
-    the model that actually supports it, which is a worse defect than the one being fixed."""
+    """Sonnet accepts explicit temperature. Its support must survive the Opus
+    withdrawal so Pass 2 can still request greedy decoding."""
     from rebar.llm.capabilities import capabilities_for
 
     for mid in (
@@ -589,18 +534,8 @@ def test_sonnet_retains_temperature_support() -> None:
 
 
 def test_direct_anthropic_opus_also_withdraws_temperature() -> None:
-    """1903 (extension): the SAME model rejects temperature on the DIRECT-ANTHROPIC path too.
-
-    OBSERVED IN PRODUCTION on the code-review bot: pydantic-ai's Anthropic adapter logs
-    "Sampling parameters ['temperature'] are not supported by 'claude-opus-4-8'. These settings
-    will be ignored." on essentially every call. Its Bedrock adapter has no equivalent drop, so
-    the same model 400s there and only warns here — one defect, two symptoms.
-
-    Withdrawing the parameter is wire-identical to having it dropped downstream, but it removes
-    the per-call warning AND the false belief that a pass pinning temperature=0 is decoding
-    greedily. That matters: code review pins temperature=0 on Pass-2 verify so re-running a
-    finding cannot resample its verdict, and code review has no verifier downgrade, so every one
-    of its passes runs on this model."""
+    """Direct Anthropic Opus 4.8 also rejects temperature. Withdrawing it avoids
+    the adapter's warning and removes a false claim of greedy decoding."""
     from rebar.llm.capabilities import capabilities_for
 
     for mid in ("anthropic:claude-opus-4-8", "anthropic:claude-opus-4-7"):
@@ -609,11 +544,8 @@ def test_direct_anthropic_opus_also_withdraws_temperature() -> None:
     assert capabilities_for("anthropic:claude-sonnet-4-6").supports_temperature is True
 
 
-# ── a574: a missing region must fail as a TYPED, actionable rebar error ────────────────────
-# MEASURED in compose-review-bot-1 (896586841071): no AWS_REGION, no AWS_DEFAULT_REGION, and
-# boto3.session.Session().region_name is None, so BedrockProvider raised a bare boto3
-# NoRegionError from deep inside construction. Every earlier probe in this epic passed
-# region_name="us-east-1" EXPLICITLY, which is why ambient resolution was never exercised.
+# An absent region must raise a typed configuration error. Earlier probes
+# supplied region_name explicitly and never exercised ambient resolution.
 def _stub_bedrock_provider(monkeypatch):
     """Replace BedrockProvider with a recorder so these tests never build a real AWS client."""
     import pydantic_ai.providers.bedrock as bedrock_mod
@@ -704,19 +636,9 @@ def test_an_ambient_boto3_region_is_still_honoured(monkeypatch) -> None:
 def test_botocore_still_ignores_aws_region_but_rebar_now_closes_the_trap(
     monkeypatch, tmp_path
 ) -> None:
-    """8274 (rewrites the 4e71 oracle, which pinned the old raise). Two claims in one test:
-
-    1. The MEASURED botocore quirk still holds — with AWS_DEFAULT_REGION genuinely absent
-       (deleted, not set empty) and AWS_REGION set, the REAL boto3 resolution chain resolves
-       nothing. If a future botocore starts honouring AWS_REGION this arm goes RED, the signal
-       to re-measure and simplify rebar's own chain.
-    2. rebar no longer inherits that quirk: `build_bedrock_provider` resolves AWS_REGION in
-       its OWN chain and passes it explicitly as `region_name=`, so the build now SUCCEEDS
-       where it used to raise a typed LLMConfigError (the 4e71-era behaviour).
-
-    Profile config files are pointed at nonexistent paths so an ambient ~/.aws/config on a
-    developer machine cannot supply a region and mask either claim.
-    """
+    """With AWS_DEFAULT_REGION absent, botocore ignores AWS_REGION. Rebar resolves
+    AWS_REGION itself and passes region_name to the provider. Empty profile paths
+    prevent ambient AWS configuration from masking either assertion."""
     import boto3
 
     from rebar.llm.bedrock_model import build_bedrock_provider
@@ -781,11 +703,8 @@ def test_empty_string_env_regions_are_treated_as_unset(monkeypatch) -> None:
     assert resolve_bedrock_region("") == (None, None)
 
 
-# ── cda8: truthful region_source — the configured knob's ORIGIN labels the record ───────────
-# The knob arm used to label EVERY configured value "REBAR_LLM_BEDROCK_REGION", so a
-# rebar.toml pin was mislabeled as the env var in signed provenance. The label now rides the
-# SAME resolution pass that produced the value (LLMConfig.from_env -> bedrock_region_source),
-# threaded here as `configured_source` — never re-derived, so record and runtime agree.
+# Preserve the configured region's source label from the same resolution
+# pass that produced its value.
 
 
 @contextlib.contextmanager
@@ -927,13 +846,8 @@ def test_no_region_error_names_the_full_chain_and_drops_the_stale_warning(monkey
     assert "IMDS" in text
 
 
-# ── 61d8: llm_retry_max_attempts / timeout_s must reach the botocore client Config ──────────
-# The inert-config defect: both knobs were documented but had NO read site on the Bedrock
-# path — `build_bedrock_provider` ended at `BedrockProvider(region_name=region)` and the
-# client ran on botocore's stock defaults. These oracles are BEHAVIOURAL: a spy boto3
-# session records what client was constructed and with which botocore Config, so a revert
-# to the bare `BedrockProvider(region_name=region)` (which never builds a client through
-# the session) turns them RED. They are NOT satisfiable by the Anthropic path.
+# Spy on the boto3 client Config to check that retry and timeout settings
+# reach Bedrock rather than stopping at the provider constructor.
 
 
 def _spy_boto_session(monkeypatch, *, ambient_region=None):
@@ -1020,12 +934,8 @@ def test_retry_attempts_below_one_clamp_to_a_single_attempt(monkeypatch) -> None
     assert session_seen["client_kwargs"]["config"].retries["max_attempts"] == 1
 
 
-# ── adb6: the repo-config rung — [llm] bedrock_region_name reaches region resolution ────────
-# The fresh-shell failure (bug adb6-4762-90f6-4e30): rebar.toml pins region-scoped `us.*`
-# inference profiles but not the region they are served from, so a shell exporting only
-# AWS_PROFILE (whose profile carries no region) fails every gated LLM op with the a574
-# LLMConfigError. The fix pins `bedrock_region_name` in the project [llm] table; these pin
-# (a) the table rung actually resolving, and (b) env keeping precedence over it.
+# Project bedrock_region_name supplies the region when ambient AWS settings
+# do not. The environment override still takes precedence.
 
 
 def _region_pinned_project(tmp_path):
@@ -1092,11 +1002,8 @@ def test_env_region_keeps_precedence_over_the_table_value(monkeypatch, tmp_path)
 
 
 def test_this_checkout_pins_the_region_beside_its_region_scoped_model_pins() -> None:
-    """adb6 AC1 (the fix itself, held as a guard). This repo's rebar.toml pins region-scoped
-    `us.*` Bedrock inference profiles; the region they are measured in (us-east-1, account
-    896586841071 — .github/llm-providers/bedrock.toml, external-integration.yml defaults)
-    must be pinned beside them, or fresh shells rediscover the region via ambient env and
-    fail closed (operator ruling on adb6-4762-90f6-4e30: use the project's measured region)."""
+    """The project pins bedrock_region_name beside its region-scoped inference
+    profiles, so a fresh shell need not infer the region from ambient settings."""
     from pathlib import Path
 
     import tomllib

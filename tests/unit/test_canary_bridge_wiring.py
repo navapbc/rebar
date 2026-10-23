@@ -1,16 +1,8 @@
-"""Anti-rot gate: the canary keeps policy in Python and delegates delivery to core.
+"""Keep canary classification in Python and delivery in core.
 
-Ticket e602 (shell-to-Python Tier 3) migrated the reconcile-bridge-canary
-workflow's classification + alert-lifecycle logic out of YAML run-blocks into
-``scripts/canary_bridge.py``. This guard pins that wiring so it cannot rot:
-
-* each of the four subcommands is invoked by exactly one canary step;
-* no logic-bearing rebar/gh invocations reappear in YAML run-blocks (the
-  allowlisted exceptions are ``rebar init`` plumbing and the private core push
-  process boundary);
-* the flush step remains a thin, strict, synchronous push-only adapter while
-  retry and merge policy stays in ``rebar._store.push``.
-"""
+Each of 4 subcommands has 1 workflow step. YAML contains no returned
+classification or alert logic. The flush step only performs a strict
+synchronous push. Retry and merge policy stay in store push."""
 
 from __future__ import annotations
 

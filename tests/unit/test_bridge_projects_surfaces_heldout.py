@@ -1,10 +1,7 @@
-"""Held-out surface-parity oracle for ``bridge projects`` (story c927).
+"""The bridge projects record agrees across library, CLI, and MCP reads.
 
-The five-slot census the happy-path implementer does not see proven: one record read
-identically through the library, the CLI, and MCP; the MCP read tool annotated
-READ_ONLY while set/remove are registered as write tools; and the pinned group help +
-argparse metavar both naming the new verb.
-"""
+The MCP read is marked read-only, set/remove remain writes, and help text
+and argparse expose the verb."""
 
 from __future__ import annotations
 
@@ -158,15 +155,8 @@ def test_invalid_key_is_rebarerror_through_lib_and_mcp(repo: Path) -> None:
 
 
 def test_bridge_projects_set_commits_and_leaves_a_clean_tree(repo: Path) -> None:
-    """``bridge_projects_set`` commits the mapping itself and leaves NOTHING staged or
-    dirty in the tracker (ticket b783).
-
-    Regression for the live-DC rehearsal defect: since the write routes through
-    ``commit_and_push_tickets_branch`` (commit under the write lock, independent of push
-    policy — ticket fea4), a follow-up manual ``git add``/``git commit`` finds "nothing to
-    commit" and fails. This asserts the invariant that made that manual commit stale: after
-    the call the blob is in the committed tree AND the working tree is clean.
-    """
+    """bridge_projects_set commits the mapping and leaves the tracker clean. A
+    follow-up manual commit has nothing left to commit."""
     rebar.bridge_projects_set("REB", ["rebar"], repo_root=str(repo))
     tracker = repo / ".tickets-tracker"
 

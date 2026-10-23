@@ -1,25 +1,10 @@
-"""S6 / AC1 — the fail-open CONFORMANCE MATRIX.
+"""Conformance matrix for fail-open grounding across six backend boundaries.
 
-The IRONCLAD invariant of epic 8f6c, asserted UNIFORMLY across every backend × every
-failure mode: an unsupported-lang / missing-tool / parse-error / crash / timeout /
-version-skew / invalid-detector NEVER raises, NEVER manufactures a false ``absent`` /
-false-refute — it becomes ``abstain(<closed reason>)`` carrying a coverage record (the
-visible skip IS the coverage; never a silent no-op).
-
-Backends covered (the five fail-open boundaries of the oracle):
-
-* ``ctags``  — the T1 resolve lane (Engine A, out-of-process).
-* ``registry`` — the T0 deps lane (Engine B's sibling; ``_http_get`` is the seam).
-* ``opengrep`` — Engine B's primary structural matcher (out-of-process).
-* ``ast-grep`` — Engine B's secondary structural matcher (out-of-process).
-* ``metric``  — Engine B's scc/lizard size matcher (out-of-process; absent here).
-* ``worker``  — the IN-PROCESS binding boundary (run_in_worker): a hung/segfaulting
-  tree-sitter parse must be reaped, never crash the host.
-
-Each cell asserts: ``outcome == abstain``, ``reason`` is the expected CLOSED reason,
-a coverage record is present (``status == skipped``), and ``ev.validate`` passes. The
-matrix is parametrized so coverage is legible and a regression points at one cell.
-"""
+ctags, registry, opengrep, ast-grep, metric, and the isolated worker each face
+unsupported input, missing tools, parse errors, crashes, timeouts, version skew,
+or invalid detectors. Each applicable failure must abstain with a closed reason
+and a visible skipped coverage record. No cell may raise or falsely refute an
+absence. Every emitted record passes ev.validate."""
 
 from __future__ import annotations
 
@@ -38,9 +23,8 @@ from . import _worker_payloads as wp
 
 pytestmark = pytest.mark.unit
 
-# Validate tool IDENTITY, not just PATH presence (CI runners ship impostors):
-#  * macOS preinstalls BSD `ctags` (answers `which ctags`) — not Universal Ctags, whose
-#    JSON index the resolve lane needs; gate on the version probe that matches "Universal".
+# Require Universal Ctags through its version probe. macOS BSD ctags lacks the
+# JSON index needed by the resolver.
 _HAVE_CTAGS = r.ctags_version() is not None
 _HAVE_SEMGREP = bool(shutil.which("opengrep") or shutil.which("semgrep"))
 
@@ -85,14 +69,8 @@ def repo(tmp_path: Path) -> str:
     return str(tmp_path)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BACKEND × FAILURE-MODE matrix — out-of-process lanes via the harness boundary
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-# Each entry: (backend_label, failure_mode, factory(repo) -> RunResult, expected_reason).
-# The factory drives the *harness* directly so the cell is deterministic on any host
-# (it does not depend on a real tool being installed unless noted).
+# Backend and failure-mode cells exercise the harness directly. Factories keep
+# the matrix deterministic without installed tools.
 
 
 def _harness_no_tool() -> harness.RunResult:
@@ -124,12 +102,8 @@ def _harness_version_skew() -> harness.RunResult:
 )
 @pytest.mark.parametrize("job", [ev.JOB_REFUTE, ev.JOB_SMELL])
 def test_harness_boundary_failure_modes(failure_mode, factory, expected_reason, job) -> None:
-    """The out-of-process harness boundary maps every failure mode to a closed abstain.
-
-    This is the single chokepoint EVERY out-of-process backend (ctags/opengrep/
-    ast-grep/metric) runs through, so proving it here proves the floor for all of them;
-    the per-backend tests below confirm each lane actually routes through it.
-    """
+    """Map out-of-process backend failures to closed abstentions at the shared harness
+    boundary. Backend-specific cases confirm each lane uses that boundary."""
     res = factory()
     assert res.abstained, f"{failure_mode}: harness should fail open, not complete"
     rec = res.as_abstain(job=job, provenance_tier=ev.TIER_T1)
@@ -371,11 +345,8 @@ def test_metric_unsupported_lang_when_no_matching_files(tmp_path, monkeypatch) -
 def test_worker_boundary_failure_modes(
     failure_mode, payload, args, kwargs, expected_reason
 ) -> None:
-    """The in-process binding boundary maps every failure mode to a closed abstain.
-
-    A tree-sitter binding can hang or segfault a C-extension; run_in_worker isolates it
-    so a hung/segfaulting parse is reaped to an abstain — never a host crash, never a raise.
-    """
+    """Map in-process binding failures to closed abstentions. The isolated worker
+    reaps a hung or signal-killed parser without crashing the host."""
     extra = dict(kwargs or {})
     timeout = 0.5 if expected_reason == "timeout" else None
     res = harness.run_in_worker(payload, *args, backend="tree-sitter", timeout=timeout, **extra)
@@ -411,8 +382,7 @@ def test_matrix_dimensions_are_complete() -> None:
         "version-skew",
         "invalid-detector",
     }
-    # Every backend is exercised by at least one cell above; every failure mode is
-    # exercised by at least one backend. (The harness-boundary test proves the shared
-    # floor; per-backend tests prove each lane routes through it.)
+    # Cover every backend and failure mode. The shared harness test checks the
+    # boundary while backend cases check routing into it.
     assert len(backends) == 6
     assert len(modes) == 7

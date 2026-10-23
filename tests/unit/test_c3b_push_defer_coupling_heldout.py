@@ -1,24 +1,8 @@
-"""Held-out coupling regression for RP-04 C3b (store/snapshot/io cutover).
+"""Ticket pushes read sync policy on each call.
 
-The dangerous cut in this slice is ``push.py``'s ``load_config().sync.push`` read. It is
-resolved **live per push**, and ``_io/import_ndjson.py`` mutates ``REBAR_SYNC_PUSH`` in the
-process env mid-import (``=off`` while interior events are written, restored for one final
-push) precisely so those live reads defer per-event delivery during a bulk import.
-
-If the cutover routes ``push.py`` through a value composed ONCE at the seam (cached /
-threaded), it stops observing that mid-flight mutation and the import's push-deferral
-silently breaks -- every interior write would push. This test pins the observable contract:
-a ``REBAR_SYNC_PUSH`` change made BETWEEN two ``push_tickets_branch`` calls MUST be observed
-by the second call.
-
-Observed SERVER-SIDE (a real bare origin with a pre-receive hook that logs every push
-attempt), not via a call-count spy on an internal function -- so a behaviour-preserving
-rename/extraction of the resolver cannot fool it, and only a real change in delivery
-behaviour turns it red.
-
-RED if ``push.py`` is cut to a compose-once value: the second push (under
-``REBAR_SYNC_PUSH=off``) would still hit the remote, so the hook would log two attempts.
-"""
+Bulk import turns REBAR_SYNC_PUSH off while writing interior events, then
+restores it for the final push. A bare origin records push attempts
+across an environment change between calls, guarding against a cached policy."""
 
 from __future__ import annotations
 

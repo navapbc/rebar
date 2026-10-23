@@ -1,24 +1,10 @@
-"""S6 / AC3 — the polyglot fixture corpus covering the false-refute HAZARD class.
+"""Polyglot fixtures guard against false refutation.
 
-A multi-language fixture corpus that exercises the design's scoped-out hazards — the
-places a NAIVE resolver would false-refute — and asserts the resolver ABSTAINS at each:
-
-* **common-name COLLISION** (a name defined > 1 time) → ``abstain(ambiguous)`` (spike E2
-  guard), NOT refuted.
-* **MEMBER / dotted reference** (``recv.attr``) → ``abstain`` (member binding is T2),
-  NOT refuted.
-* **unsupported-language** file → ``abstain(unsupported_lang)``.
-* **language-extension slot** — a ``.rebar/grounding.toml`` ctags optlib / a
-  ``.rebar/sgconfig.yml`` ast-grep ``customLanguages`` — is read and widens routing.
-* **monorepo/workspace + import-vs-distribution-name** for the DEPS lane (``_http_get``
-  mocked): a workspace member and a ``bs4 → beautifulsoup4`` style mismatch → ``abstain``,
-  never a false absence.
-
-Plus a DEPS-lane eval (real → refute, hallucinated/stdlib/slop → abstain), mocking the
-network seam (the unit tier is network-guarded; the live probe lives in tests/external/).
-
-Every emitted evidence record validates against the S1 contract.
-"""
+Common names, dotted members, unsupported languages, workspace members, and
+distribution-name mismatches abstain rather than invent a target. Language
+extension files widen routing. A mocked registry checks present, missing, and
+standard-library dependency cases without network access. Every evidence
+record validates against the grounding contract."""
 
 from __future__ import annotations
 
@@ -117,11 +103,8 @@ def test_member_dotted_reference_abstains(corpus, index) -> None:
     # a bare 'symbol' whose NAME is dotted is caught by the same dotted gate.
     rec2 = _refute("recv.normalize", corpus, index, kind="symbol")
     assert rec2["outcome"] == ev.OUTCOME_ABSTAIN
-    # Guard-the-guard: the abstain must be produced BY the member gate, not by an
-    # incidental 0-def not-found. The decisive case is a dotted name whose LAST
-    # segment ('normalize') IS a unique bare symbol in the corpus — without the
-    # member gate this would fall through and could false-refute on that segment;
-    # the gate must abstain via the member path (reason 'ambiguous', member detail).
+    # A dotted member has a unique bare final segment. Its member gate must
+    # abstain before a bare-name lookup could falsely refute.
     rec3 = _refute("recv.normalize", corpus, index, kind="member")
     assert rec3["outcome"] == ev.OUTCOME_ABSTAIN
     assert rec3["reason"] == "ambiguous"
@@ -206,8 +189,7 @@ def _dep(name: str, eco: str = "pypi") -> dict:
 
 
 def test_workspace_member_abstains_never_absent(monkeypatch) -> None:
-    # A monorepo workspace member must abstain even if the registry would 200 — the
-    # internal guard wins, never a false absence.
+    # A workspace member abstains even when the registry responds successfully.
     monkeypatch.setattr(
         deps, "_http_get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no probe"))
     )
@@ -233,8 +215,7 @@ def test_import_vs_distribution_name_mismatch_abstains(monkeypatch) -> None:
 
 
 def test_enumerated_workspace_feeds_refutation_guard(tmp_path, monkeypatch) -> None:
-    # End-to-end monorepo: enumerate a Cargo workspace, then a member abstains even
-    # though the registry 200s; a real public dep refutes.
+    # Enumerated Cargo members abstain. A public dependency can refute.
     (tmp_path / "Cargo.toml").write_text(
         '[package]\nname = "rootcrate"\n[workspace]\nmembers = ["crates/foo"]\n'
         '[dependencies]\nserde = "1"\n'
@@ -255,10 +236,8 @@ def test_enumerated_workspace_feeds_refutation_guard(tmp_path, monkeypatch) -> N
 
 
 def test_stdlib_short_circuit_guards_the_guard(monkeypatch) -> None:
-    # Guard-the-guard for the stdlib gate: with the registry returning 200 for
-    # EVERYTHING, a stdlib name can only abstain via the short-circuit that runs
-    # BEFORE the probe. If that guard were removed, os/fmt would refute (200); the
-    # stdlib reason+detail prove the abstain came from the gate, not a 404.
+    # A permissive registry exposes the standard-library short circuit.
+    # Standard-library names still abstain before a dependency probe.
     monkeypatch.setattr(deps, "_http_get", lambda url, timeout=10.0: 200)
     for name, eco in (("os", "pypi"), ("fmt", "golang")):
         rec = deps.refute_package(_dep(name, eco))

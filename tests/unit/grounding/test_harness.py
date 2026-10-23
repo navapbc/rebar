@@ -140,11 +140,8 @@ def test_worker_entry_ships_regular_exception_as_evidence() -> None:
 
 @pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
 def test_worker_entry_propagates_interrupts(interrupt: type[BaseException]) -> None:
-    """Narrowing regression (epic ring-gun-jot): the worker boundary was narrowed from
-    `except BaseException` (an inert `# noqa: BLE0001` typo) to `except Exception`, so a
-    KeyboardInterrupt / SystemExit now PROPAGATES (the parent maps signal-death to a
-    fail-open abstain) instead of being swallowed and shipped as 'err'. The pipe is still
-    closed by the `finally`."""
+    """KeyboardInterrupt and SystemExit escape the worker's Exception handler.
+    The parent maps signal death to abstention, and the finally block closes the pipe."""
 
     def raise_interrupt() -> None:
         raise interrupt()
@@ -299,18 +296,8 @@ def test_as_abstain_on_non_abstained_raises() -> None:
 
 
 def test_signal_death_not_misclassified_as_timeout_under_reap_lag() -> None:
-    """Bug 85c3: a signal-killed worker whose exit hasn't been reaped yet must map to
-    parse_error, NOT timeout — even if ``proc.is_alive()`` transiently returns True.
-
-    Deterministically reproduces the crash-vs-timeout race by forcing the proc's
-    ``is_alive()`` to report True exactly once (simulating reap lag right after the
-    signal death). The classifier must key on whether the poll() timeout actually
-    elapsed — a crash closes the pipe immediately (poll → True), so it can never be a
-    timeout — not on the racy is_alive() probe.
-
-    RED (pre-fix, is_alive()-gated classifier): returns abstain_reason=="timeout".
-    GREEN (poll-gated classifier): returns abstain_reason=="parse_error".
-    """
+    """A signal-killed worker is parse_error even when is_alive briefly reports True.
+    The pipe closes before the poll deadline, distinguishing death from timeout."""
     real_ctx = multiprocessing.get_context("spawn")
 
     class _ReapLagProcess:

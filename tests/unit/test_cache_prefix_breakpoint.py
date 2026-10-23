@@ -1,21 +1,9 @@
-"""The shared-prefix cache breakpoint + the write-every-call-never-read diagnostic (bug 1dbe).
+"""Guard shared-prefix caching and write-without-read telemetry offline.
 
-Two remedies, both pinned OFFLINE (no live model):
-
-* **Remedy 1 (telemetry)** — :func:`cache_write_never_read` /
-  :func:`warn_if_cache_write_never_read` flag the run shape the ticket measured: every caching
-  call WROTE the cache and NONE ever READ it, which the per-call ``warn_if_cache_ineffective``
-  (write==0 AND read==0) could never see. This is the ticket's AC 4.
-
-* **Remedy 2 (breakpoint relocation)** — a ``RunRequest.cache_prefix`` runner-seam knob moves
-  the provider cache breakpoint to the END of the byte-identical ``shared_plan_prefix`` so the
-  Pass-1 finder's WRITE is READ by the Pass-2 verifier within one run. The breakpoint boundary
-  is verified against REAL pydantic-ai ``_map_message`` for BOTH the anthropic and bedrock
-  cache styles — so if a pydantic-ai upgrade ever moved the mark off the prefix, this goes RED
-  (the loud regression the ticket asks for). This replaces the unsatisfiable "byte-identical
-  across TICKETS" AC (the marked prefix embeds the plan by design — see the ticket's Phase-1
-  investigation (b).2/(c).3).
-"""
+The diagnostic catches runs that write every cacheable call but never read.
+RunRequest.cache_prefix moves the breakpoint to the end of the identical
+shared plan prefix so Pass 2 can read Pass 1's write. Provider mapping tests
+check that placement for Anthropic and Bedrock cache styles."""
 
 from __future__ import annotations
 
@@ -281,9 +269,8 @@ def _req(cache_prefix, *, system=_PREFIX + _SUFFIX):
 
 
 def test_effective_cache_prefix_is_the_single_validity_predicate() -> None:
-    # The one shared guard (bug 1dbe): agent_call, the marked-prefix estimate, and the
-    # workflow request builder all defer to this method, so it must accept exactly a
-    # non-empty PROPER prefix and reject every no-op shape.
+    # The shared predicate accepts a nonempty proper prefix and rejects
+    # no-op prefix shapes for all 3 callers.
     assert _req(_PREFIX).effective_cache_prefix() == _PREFIX  # proper prefix -> relocate
     assert _req(None).effective_cache_prefix() is None  # unset
     assert _req("").effective_cache_prefix() is None  # empty

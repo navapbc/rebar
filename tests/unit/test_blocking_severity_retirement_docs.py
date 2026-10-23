@@ -1,14 +1,7 @@
-"""No live blocking-severity guidance after its severity-retirement epic
-(ticket 22ec-e638-c896-4b54).
+"""Current guidance omits the retired blocking-severity setting.
 
-Closed epic `pink-complex-xenurine` / child `byzantine-spinelike-penguin` removed
-`ReceiverConfig.blocking_severities` in commit 8db373933654c7c21fa214565426f562ca55cd80.
-`docs/gerrit-aws-setup.md` and `src/rebar/review_bot/config.py` kept describing it
-as a live, configurable knob. These tests pin the corrected state: the current
-PASS/BLOCK decision is the four-pass gate's deterministic Pass-3 blocker
-(criteria_routing.json thresholds), not a severity threshold, while historical ADRs
-(0009, 0108) keep their accurate record of the removed knob untouched.
-"""
+The four-pass gate's Pass 3 blocker now determines PASS or BLOCK. Historical
+ADRs retain the removed setting as history."""
 
 from __future__ import annotations
 

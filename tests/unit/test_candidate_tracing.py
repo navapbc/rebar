@@ -1,22 +1,8 @@
-"""RP-01 S4 — fallback/downgrade candidate tracing: HAPPY PATH + shared harness.
+"""Shared harness and happy-path candidate tracing contracts.
 
-This module holds the shared, env-independent test harness for candidate tracing and the
-happy-path contract the implementer builds against. The FULL oracle (edge cases, secret
-sanitization, best-effort swallow, usage non-interference, real-OTel nesting) lives in the
-held-out ``test_candidate_tracing_oracle.py``.
-
-Design constraint (load-bearing): the OpenTelemetry *SDK* is only in the optional ``[tracing]``
-extra and is ABSENT from the default test env / CI (`uv sync --extra dev`). So the core
-behavioral contract is asserted through a rebar-owned RECORDING TRACER injected at
-``rebar.llm.tracing._candidate_tracer`` — env-independent, runs in CI. Real OTel span emission
-and parent nesting are proven separately, under ``importorskip('opentelemetry.sdk')``, in the
-held-out oracle.
-
-The recording tracer mimics only the sliver of the OTel API the candidate seam uses:
-``start_as_current_span(name)`` as a context manager yielding a span with ``set_attribute``.
-Assertions land on the recorded span attributes (an emitted contract), never on private
-structure.
-"""
+A recording tracer implements the small span interface used by the seam,
+so core assertions run without the optional OpenTelemetry SDK. The held-out
+oracle covers failures, sanitization, usage, and optional SDK nesting."""
 
 from __future__ import annotations
 

@@ -290,9 +290,8 @@ def test_subprocess_contract_strips_environment_and_copies_readonly_snapshot(
     result, capture, _ = _corroborate(repo, monkeypatch)
     assert result.evidence["outcome"] == ev.OUTCOME_MATCH
     assert Path(capture["argv"][0]).name == "terraform-config-inspect"
-    # The directory argument is "." — the child's cwd IS the snapshot, so this names the same
-    # directory while keeping the snapshot path out of argv and keeping the tool's pos.filename
-    # relative (bug f95d-19f6-7e58-4a8e).
+    # The child runs in the snapshot, so "." keeps the snapshot path out of argv
+    # and the tool's reported filename relative.
     assert capture["argv"][1:] == ["--json", "."]
     assert Path(capture["cwd"]).name.startswith(".rebar-tfci-")
     assert capture["stdin"] == ""
@@ -307,8 +306,8 @@ def test_subprocess_contract_strips_environment_and_copies_readonly_snapshot(
     assert "main.tf" in copied
     assert "escape.tf" not in copied
     assert copied["main.tf"]["mode"] & stat.S_IWUSR == 0
-    # The receipt records only the tool BASENAME, never the resolved absolute path (which
-    # would leak the operator's home directory / username) — the digest-only redaction posture.
+    # Record the executable basename, never an absolute path that reveals a home
+    # directory or username.
     exe_abs = str(repo.parent / "bin" / "terraform-config-inspect")
     assert result.receipt["executable"]["path"] == "terraform-config-inspect"
     assert exe_abs not in json.dumps(result.receipt, sort_keys=True)
@@ -323,8 +322,7 @@ def test_match_receipt_requires_executable_and_invocation_provenance(
     validator = schemas.validator(schemas.TERRAFORM_GROUNDING_RECEIPT)
     # Baseline: a real match receipt carries executable + invocation provenance and validates.
     assert validator.is_valid(receipt)
-    # A `match` receipt stripped of either provenance block is REJECTED (positive corroboration
-    # must be reproducible: which audited binary ran, and under exactly what invocation).
+    # Positive matches require both executable and invocation provenance.
     for missing in ("executable", "invocation"):
         stripped = {k: v for k, v in receipt.items() if k != missing}
         assert not validator.is_valid(stripped)
@@ -344,13 +342,9 @@ def test_faults_abstain_redact_cleanup_and_retry(
 ) -> None:
     from rebar.grounding import terraform_corroborator as tc
 
-    # ONLY `hang` needs a shortened deadline — that fixture sleeps 10s on purpose. The other
-    # three faults are CONTENT faults, produced by a child that must RUN TO COMPLETION, and the
-    # fixture "binary" is a full CPython process. The old blanket 0.2s budget raced its ~40ms
-    # median spawn: on a contended 4-vCPU CI runner the tail crossed 200ms, `_run` timed the
-    # child out, and the assertion saw `worker_timeout` instead of the fault under test — or,
-    # when the SIGTERM landed inside the capture write, a JSONDecodeError from an empty capture
-    # (bug 5310-b51f-bba6-4e61). 1.0s is ~25x the measured median and far under the 10s sleep.
+    # Only the hanging child needs a short deadline. Content-fault children must
+    # finish so their faults remain distinguishable from worker_timeout. The 1.0s
+    # budget accommodates interpreter startup while staying below the 10s hang.
     if mode == "hang":
         monkeypatch.setattr(tc, "DEADLINE_SECONDS", 1.0)
     result, _capture, _ = _corroborate(repo, monkeypatch, mode=mode)

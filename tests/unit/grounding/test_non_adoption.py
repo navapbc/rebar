@@ -1,20 +1,9 @@
-"""S6 / AC4 — the NON-ADOPTION test: a non-adopting client pays nothing.
+"""Grounding stays optional for callers without its extra or external tools.
 
-The second IRONCLAD invariant of the epic: with the optional ``[grounding]`` extra ABSENT
-(tree-sitter not installed — the current state of this checkout), a client that merely
-``import rebar`` / ``import rebar.grounding`` must:
-
-(a) **import clean** — pull NO heavy stack into ``sys.modules`` (no tree-sitter, no
-    langchain/anthropic/etc.). Checked in a clean SUBPROCESS so the parent's already-warm
-    modules can't mask a leak (the pattern from tests/unit/test_core_optionality.py).
-
-(b) **fail open with zero footprint** — an oracle query with the external tools absent
-    (binaries pointed at bogus names / offline) returns an ``abstain``/no-op, NEVER a
-    raise, NEVER an ImportError, NEVER a manufactured absence.
-
-The grounding contract + harness are stdlib-only by design; tree-sitter lives behind the
-worker boundary and is imported lazily, so this is provable, not aspirational.
-"""
+Fresh-process imports of rebar and rebar.grounding load no heavy provider or
+tree-sitter stack. With tools absent or references malformed, oracle queries
+abstain without raising or asserting absence. The contract and harness remain
+importable with the core dependencies."""
 
 from __future__ import annotations
 
@@ -45,9 +34,7 @@ _HEAVY = (
 
 
 def test_grounding_extra_is_actually_absent() -> None:
-    # The premise of this whole file: tree-sitter is NOT installed (the non-adoption
-    # state). If a host DID install it, the import-clean guarantee still holds (lazy
-    # import), so we don't fail — but we record the state for the report.
+    # Record whether tree-sitter is installed. Lazy import must hold either way.
     import importlib.util
 
     have = importlib.util.find_spec("tree_sitter") is not None
@@ -56,8 +43,7 @@ def test_grounding_extra_is_actually_absent() -> None:
 
 
 def test_import_rebar_grounding_pulls_no_heavy_stack() -> None:
-    # Clean subprocess: import the core + the grounding package and assert none of the
-    # heavy modules landed in sys.modules.
+    # A fresh subprocess exposes heavy modules hidden by warm parent imports.
     code = (
         "import sys;"
         "import rebar;"
@@ -80,8 +66,7 @@ def test_import_rebar_grounding_pulls_no_heavy_stack() -> None:
 
 
 def test_oracle_contract_is_import_clean_and_callable() -> None:
-    # The static contract is a stdlib-only probe (no repo scan); it must return a
-    # well-formed dict with the closed vocabularies, never raising even with no tools.
+    # The stdlib-only contract returns closed vocabularies without external tools.
     contract = oracle.contract()
     assert set(contract["abstain_reasons"]) == set(ev.ABSTAIN_REASONS)
     assert set(contract["outcomes"]) == set(ev.OUTCOMES)
@@ -97,7 +82,7 @@ def test_oracle_contract_is_import_clean_and_callable() -> None:
 
 
 def test_refute_query_with_ctags_absent_fails_open(tmp_path, monkeypatch) -> None:
-    # Point the resolver at a bogus ctags binary -> abstain(no_tool), never a raise.
+    # Missing ctags must abstain(no_tool) without raising.
     (tmp_path / "x.py").write_text("def f(): pass\n")
     monkeypatch.setattr(r, "_CTAGS_BIN", "definitely-not-a-real-ctags-xyz")
     r._CACHED_CTAGS_LANGS = None
@@ -119,8 +104,7 @@ def test_scan_query_with_engines_absent_fails_open(tmp_path, monkeypatch) -> Non
     assert records, "the scan must still produce coverage records (no silent no-op)"
     for rec in records:
         ev.validate(rec)
-        # With every engine absent, every record is a fail-open abstain — never a match,
-        # never a raise. (Skipped-by-routing records are also abstains.)
+        # Missing engines emit skipped abstentions, never matches or exceptions.
         assert rec["outcome"] == ev.OUTCOME_ABSTAIN
         assert rec["coverage"]["status"] == ev.STATUS_SKIPPED
 
@@ -142,8 +126,7 @@ def test_deps_query_offline_fails_open(monkeypatch) -> None:
 
 
 def test_oracle_query_never_raises_on_malformed_reference() -> None:
-    # A malformed reference at the untrusted boundary is absorbed into an abstain,
-    # never a raise (the facade is uniformly fail-open).
+    # Reject an untrusted malformed reference through abstention, not an exception.
     rec = oracle.refute_absence({"kind": "bogus-kind", "name": "x"}, repo_root="/tmp")
     ev.validate(rec)
     assert rec["outcome"] == ev.OUTCOME_ABSTAIN

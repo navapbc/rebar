@@ -1,20 +1,8 @@
-"""S6 / AC5 — COVERAGE reconstruction over a mixed-language run.
+"""Reconstruct grounding coverage from one mixed Python, JavaScript, and Go run.
 
-The evidence model's "no silent no-op" guarantee: a skipped backend is a VISIBLE
-coverage record (``status=skipped`` + ``reason``), not an absence. So from the records
-of one scan/query over a mixed-language repo you can fully RECONSTRUCT what ran vs what
-was skipped and WHY — every backend that participated is accounted for.
-
-We scan a Python+JS+Go repo and assert:
-
-* every record carries a ``coverage`` block (``backend`` + ``status`` (+ ``reason`` when
-  skipped)) and validates against the S1 contract;
-* the per-backend account is reconstructable — each backend appears as ran OR skipped
-  (with a closed reason), and the skipped set explains itself (e.g. scc/lizard absent →
-  ``no_tool``);
-* there are NO silent no-ops: the count of (ran ∪ skipped) records equals the count of
-  emitted records (no record lacks coverage).
-"""
+Every emitted record validates and identifies its backend as ran or skipped.
+Skipped records carry closed reasons, including missing metric tools. The
+backend account distinguishes a visible skip from a silent no-op."""
 
 from __future__ import annotations
 
@@ -96,8 +84,7 @@ def test_metric_backend_skip_is_reconstructable(
 def test_full_backend_account_is_present(
     mixed_repo, capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Reconstruct the WHOLE per-backend account and assert every Engine B backend that
-    # had an applicable detector is represented (ran or skipped) — never missing.
+    # Account for each applicable Engine B backend as ran or skipped.
     monkeypatch.setattr(engine_b, "_METRIC_CANDIDATES", ("missing-metric-tool",))
     result = engine_b.scan(mixed_repo)
     table = _coverage_table(result.records)
@@ -131,8 +118,7 @@ def test_oracle_scan_records_reconstruct_coverage(mixed_repo) -> None:
 
 @pytest.mark.skipif(not _HAVE_SEMGREP, reason="opengrep/semgrep not installed")
 def test_ran_and_skipped_coexist_in_one_run(mixed_repo) -> None:
-    # The defining property: a SINGLE run yields both ran records (engines present) and
-    # skipped records (scc/lizard absent) — the account distinguishes them, no silent gap.
+    # One run contains both ran and skipped coverage statuses.
     result = engine_b.scan(mixed_repo)
     statuses = {r["coverage"]["status"] for r in result.records}
     assert ev.STATUS_RAN in statuses, "an engine that ran must be recorded as ran"
