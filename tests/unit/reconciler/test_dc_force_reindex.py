@@ -2,8 +2,8 @@
 
 After a successful numeric-id read, ``force_issue_reindex`` must POST that id to
 ``/rest/api/2/reindex/issue`` so search observes a preceding write without widening an
-unbounded Lucene wait. A failed id read must issue no reindex request and must not raise;
-the caller then falls back to its existing wait. The helper uses the supplied authenticated
+unbounded Lucene wait. A failed id read must issue no reindex request and must not raise.
+The caller then falls back to its existing wait. The helper uses the supplied authenticated
 request seam and never owns or exposes credentials.
 """
 

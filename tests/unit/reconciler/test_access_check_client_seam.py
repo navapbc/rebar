@@ -1,17 +1,8 @@
-"""The access-check client seam must resolve ``AcliClient`` at CALL time (bug 2c4b).
+"""Access checks must resolve AcliClient when called (bug 2c4b).
 
-``access_check`` binds ``AcliClient`` into its own globals at import and froze that
-binding into ``run_access_check``'s ``client_cls`` default — a default expression is
-evaluated ONCE, at import. Tests patch the seam on the DEFINING module
-(``monkeypatch.setattr(acli, "AcliClient", Fake)``), so the patch reached the probe only
-when ``access_check`` happened not to be imported yet. Once any earlier test in the
-process had imported it, the real client was used and the probe made a LIVE network call.
-
-These tests pin the seam by forcing the hostile order explicitly: ``access_check`` is
-imported BEFORE the patch, so they are deterministic in isolation and do not depend on
-what else ran first. Same invariant the ``_retry_sleep`` indirection already establishes
-for ``sleep_fn`` (ticket 5ea3-76e5-480a-4464).
-"""
+Import access_check before patching AcliClient on its defining module. This
+pins the late-bound seam and prevents import order from selecting the client
+or making a network call. The retry-sleep seam follows the same rule."""
 
 from __future__ import annotations
 

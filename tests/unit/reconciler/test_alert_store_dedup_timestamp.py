@@ -1,20 +1,8 @@
-"""Bug 8384: alert-store dedup must actually fire — ``append`` stamps ``timestamp_ns``.
+"""Alert-store append must stamp timestamp_ns for unresolved-key dedup.
 
-``alert_store.is_deduped`` suppresses a same-key unresolved alert written within a 24h
-window by comparing ``now - rec["timestamp_ns"]``. The record's ``timestamp_ns`` was owned
-by nobody: ``append`` wrote the caller's dict verbatim and several callers (notably
-``BindingRepository.alert`` and a couple of fetcher paths) never stamped it, so
-``rec.get("timestamp_ns", 0)`` defaulted to 0, ``now - 0`` always exceeded the window, and
-dedup never fired.
-
-Fix: ``append`` stamps ``timestamp_ns`` centrally when the caller did not, so EVERY dedup
-path works. A caller-supplied ``timestamp_ns`` is preserved (so the dozen callers that
-already stamp are unchanged, and a test can inject an out-of-window timestamp).
-
-These are seam-level oracles over ``alert_store`` directly, complementing the
-through-the-real-path oracle in
-``tests/unit/reconciler/state/test_binding_repository.py``.
-"""
+Callers that omit the timestamp must still deduplicate within 24 hours.
+Preserve a caller-supplied timestamp so an old alert can fall outside the
+window. These direct seam checks complement the binding-repository path."""
 
 from __future__ import annotations
 

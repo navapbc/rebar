@@ -1,52 +1,27 @@
-# ---------------------------------------------------------------------------
-# rebar Gerrit + review-bot compose stack (epic d251 / story S2).
-#
-# Runs four containers on the AL2023 arm64 box: `gerrit` (the code-review server),
-# `review-bot` (the FastAPI webhook receiver), `opcert` (the FastAPI trusted
-# operation-certificate signing gate) and `mcp` (the remote MCP server that serves
-# certified tracker ops). nginx is NOT in this
-# stack — it runs as a HOST package (dnf nginx + host certbot) and proxies to the
-# published container ports (see infra/nginx/rebar.conf.template and
-# infra/scripts/install-certbot-timer.sh, and ADR-0007).
-#
-# Secrets come from infra/compose/.env, regenerated each boot from SSM by
-# infra/scripts/fetch-secrets.sh (ADR-0008). Compose auto-loads a sibling `.env`.
-#
-# PERSISTENCE MODEL (important): the official `gerritcodereview/gerrit` image runs
-# the server from the baked site at `/var/gerrit` (`-d /var/gerrit`) and IGNORES a
-# GERRIT_SITE override. Mounting one volume over the whole `/var/gerrit` would hide
-# the baked binaries (bin/, lib/, gerrit.war). So we persist only the STATEFUL
-# SUBDIRECTORIES by bind-mounting them from the EBS-backed host path
-# `/var/gerrit/site/*` into the container's `/var/gerrit/*`. Bind mounts onto the
-# persistent EBS mount are inherently safe from `docker compose down -v` (which only
-# removes named volumes), satisfying the "data survives down -v" requirement, and
-# they ride the EBS data volume's DLM daily snapshots (S7). compose-up.sh seeds
-# `site/etc/gerrit.config` (and copies the baked plugins) before first boot.
-# ---------------------------------------------------------------------------
+# Four services run on the AL2023 arm64 host: Gerrit, review-bot, opcert,
+# and MCP. Host nginx terminates TLS and proxies to their published ports.
+# fetch-secrets.sh rebuilds the sibling .env from SSM on each boot.
+# Persist only Gerrit's stateful site directories on EBS. Mounting all of
+# /var/gerrit would hide the image binaries. compose-up.sh seeds config and
+# plugins before boot. External volumes survive docker compose down -v.
 
 services:
   # --- Gerrit code-review server -------------------------------------------
   gerrit:
-    # Extends gerritcodereview/gerrit:3.14.1 with Python + gerrit-to-platform so the
-    # `hooks` plugin can exec the g2p CI hooks in-container (epic 1fa8 / ADR-0022).
-    # The base image still publishes arm64; the added apt/pip layers are arch-neutral.
+    # Add Python and g2p hooks to the Gerrit image for container-side CI.
     build:
       context: ../..
       dockerfile: infra/compose/Dockerfile.gerrit
     restart: unless-stopped
     mem_limit: 3072m
     ports:
-      # 8080: Gerrit HTTP — published to host loopback so the HOST nginx (TLS
-      # terminator) proxies to 127.0.0.1:8080; NOT directly internet-exposed.
+      # HTTP stays on host loopback behind nginx.
       - "127.0.0.1:8080:8080"
-      # 29418: Gerrit SSH (git-over-SSH) — exposed directly (SG opens 29418).
+      # SSH is exposed directly on 29418.
       - "29418:29418"
     volumes:
-      # Persist the stateful site subdirs via EXTERNAL named volumes (declared
-      # external: true below; created out-of-band by compose-up.sh as local `bind`
-      # volumes onto the EBS-backed host path /var/gerrit/site/*). external:true means
-      # `docker compose down -v` will NOT destroy them. Only the STATEFUL subdirs are
-      # mounted, so the image's baked binaries (bin, lib, gerrit.war) are NOT shadowed.
+      # External EBS-backed site volumes survive docker compose down -v.
+      # Mount only stateful directories so image binaries remain visible.
       - gerrit_git:/var/gerrit/git
       - gerrit_index:/var/gerrit/index
       - gerrit_cache:/var/gerrit/cache
@@ -54,282 +29,107 @@ services:
       - gerrit_etc:/var/gerrit/etc
       - gerrit_logs:/var/gerrit/logs
       - gerrit_plugins:/var/gerrit/plugins
-      # S5 replication: the GitHub deploy key + known_hosts + ssh config live in
-      # the gerrit user's ~/.ssh (HOME=/var/gerrit -> /var/gerrit/.ssh). A DIRECT
-      # host bind mount (not an external named volume) onto /var/gerrit/site/dotssh,
-      # which infra/gerrit/materialize-deploy-key.sh populates (as uid 1000) from
-      # SSM BEFORE Gerrit starts. The replication plugin's `git push` reads this
-      # dir to authenticate to github.com:navapbc/rebar.
+      # Mount the SSM-materialized GitHub deploy key and SSH settings directly.
+      # The replication plugin reads them as the Gerrit user's ~/.ssh.
       - /var/gerrit/site/dotssh:/var/gerrit/.ssh
-      # epic 1fa8 (S3): gerrit-to-platform config + GitHub PAT, materialised from SSM
-      # by infra/gerrit/materialize-g2p-config.sh BEFORE boot (like the deploy key
-      # above). g2p (in-container) reads gerrit_to_platform.ini + replication.config here.
+      # g2p reads its SSM-materialized config and GitHub PAT here.
       - /var/gerrit/site/g2p-config:/var/gerrit/.config/gerrit_to_platform
     environment:
-      # Public HTTPS origin (nginx-terminated). The entrypoint writes this into
-      # etc/gerrit.config; it mirrors the canonicalWebUrl we pre-seed there.
+      # Match the nginx public origin and seeded canonicalWebUrl.
       CANONICAL_WEB_URL: https://rebar.solutions.navateam.com/
-    # Ship container stdout/stderr to the host journal (journald), per the S2
-    # observability AC; `journalctl CONTAINER_NAME=compose-gerrit-1` then works.
+    # Send container output to the host journal.
     logging:
       driver: journald
 
   # --- rebar review-bot webhook receiver -----------------------------------
   review-bot:
     build:
-      # Build context is the REPO ROOT so `pip install .` sees the whole package.
+      # Build from the repository root for the package install.
       context: ../..
       dockerfile: infra/compose/Dockerfile.reviewbot
     restart: unless-stopped
     mem_limit: 2048m
-    # Give the graceful shutdown (app.py lifespan) time to finish before Docker escalates
-    # SIGTERM → SIGKILL on a redeploy/restart, so acknowledged (202) webhooks are not abandoned
-    # AND — the reason this must be generous — an in-flight store write is never killed midway.
-    # The drain waits for the running review to finish, and that review ends in
-    # emit_code_review_artifact → event_append.stage_and_commit, which holds the store's MKDIR
-    # write lock. The fcntl leg is kernel-released on death; the mkdir dir is NOT, and a lock
-    # stamped by one container cannot be reclaimed by the next — so a SIGKILL landing inside
-    # that region orphans it and the successor container burns its whole lock budget at boot
-    # (the 2026-07-31 rebar-autodeploy-errors incident).
-    #
-    # Sized from the app's own budgets, not from the drain window alone. Since c2ba every term
-    # is now a BOUNDED budget, so this is a provable worst case rather than a risk reduction:
-    #   1200s  SHUTDOWN_DRAIN_SECONDS  (config.py DEFAULT_SHUTDOWN_DRAIN_SECONDS — sized to the
-    #          per-review timeout so an IN-FLIGHT review finishes before the deploy proceeds;
-    #          ticket 0347. An empty queue drains instantly, so a no-review deploy pays nothing.)
-    #   + 60s  store write-lock acquisition (_store/lock.py _DEFAULT_TIMEOUT 30 x _ATTEMPTS 2)
-    #   + 45s  the push reconcile's re-taken lock (push.py _PUSH_MERGE_LOCK_TIMEOUT 15
-    #          x _MAX_RETRIES 3)
-    #   = 1305s, rounded up to a whole 22 minutes (1320s) for margin.
-    # The lock-held git work done under those acquisitions is itself bounded by event_append's
-    # _GIT_TIMEOUT (30s/call, matching push.py), and the lifespan's post-drain cancel/await is
-    # bounded by SHUTDOWN_CANCEL_SECONDS (10s) — both well inside the total above. Docker's own
-    # default would be 10s. Anything not drained in the window still falls to the backfill
-    # reconciler.
-    #
-    # c2ba (melting-resting-serpent) closed the two residues that previously made this constant
-    # unprovable — event_append's lock-held git calls now carry _GIT_TIMEOUT, and voter.py runs
-    # emit_code_review_artifact OFF the event loop (asyncio.to_thread) so the drain bound can
-    # actually fire — so the critical section now has an upper bound by construction.
-    # tests/unit/test_review_bot.py::test_reviewbot_stop_grace_period_covers_an_in_flight_store_write
-    # asserts the relationship, so raising either budget fails CI until this follows.
+    # Allow an in-flight review and its store write to finish on SIGTERM.
+    # The 1320s grace covers the 1200s review drain, 60s lock acquisition,
+    # and 45s push reconcile lock, with 15s margin. Lock-held git calls and
+    # cancellation have their own bounds. A SIGKILL inside the mkdir lock
+    # would leave the next container unable to reclaim it. The review-bot
+    # stop-grace test checks this budget relationship.
     stop_grace_period: 1320s
     env_file:
       - .env
     environment:
-      # Data capture (story limestone-unethical-zebrafinch): auto-push every code_review artifact
-      # ticket event to origin/tickets as it is written. The push credential is a URL-scoped git
-      # credential helper materialized by the entrypoint from REVIEWBOT_TICKETS_PAT (see .env /
-      # fetch-secrets.sh); the persistent tickets worktree below is its store.
-      # Trust nginx's X-Forwarded-Proto (bug a61d — the same scheme downgrade 79b2 fixed
-      # for the mcp service, reproduced here: `GET /review/health/` answered 307 with
-      # `location: http://<host>/health`). uvicorn reads FORWARDED_ALLOW_IPS natively,
-      # defaults it to "127.0.0.1", and wraps the app in ProxyHeadersMiddleware with it.
-      # This app runs INSIDE this container with its port published on host loopback, so
-      # nginx's connection arrives from the docker bridge GATEWAY, not 127.0.0.1: the peer
-      # was untrusted, `X-Forwarded-Proto: https` was DROPPED, and Starlette's
-      # trailing-slash 307 built its absolute Location as `http://` — a scheme downgrade
-      # that can put a client's credential on the wire in plaintext.
-      #
-      # "*" (trust any peer), NOT a pinned bridge-gateway IP: this service declares no
-      # `networks:` block, so that address is IMPLICIT and can drift on a compose/docker
-      # change — a stale pin would silently re-open the downgrade with no failure signal.
-      # Trust-all is BOUNDED here: the port is published on host LOOPBACK with nginx the
-      # sole reachable client, and nginx sets X-Forwarded-Proto as a LITERAL
-      # (`proxy_set_header X-Forwarded-Proto https`), which OVERWRITES whatever a client
-      # sent — so no client can forge the value.
+      # Push each code_review artifact through the persistent tickets clone.
+      # The entrypoint obtains its URL-scoped credential from the PAT.
+      # Trust the bridge gateway's forwarded scheme for nginx redirects.
+      # The port is host-loopback only and nginx overwrites X-Forwarded-Proto,
+      # so a client cannot supply the trusted scheme.
       FORWARDED_ALLOW_IPS: "*"
-      # Gerrit's webhooks plugin sends this public canonical URL in its built-in
-      # X-Origin-Url header; the receiver accepts that header only from the resolved
-      # compose-network Gerrit service peer.
+      # Accept Gerrit's canonical X-Origin-Url only from its compose peer.
       # mechanism-ok: env_var GERRIT_CANONICAL_WEB_URL — 073f-b86f-42c6-456f: pins
       # the non-secret origin value the Gerrit webhooks plugin emits for internal deliveries.
       GERRIT_CANONICAL_WEB_URL: "https://rebar.solutions.navateam.com/"
       REBAR_SYNC_PUSH: "always"
-      # Authorship signing key, CONTAINER-side path (bug beb1). fetch-secrets.sh materializes
-      # the key on the HOST and exports that HOST path via env_file; that path does not exist
-      # in this container's namespace, so rebar silently wrote every event unsigned. Override
-      # with the mount target below; keep the two in sync.
+      # Use the mounted container path for the SSM-materialized signing key.
+      # The host path in .env is not visible inside this container.
       REBAR_IDENTITY_SIGNING_KEY: "/run/secrets/rebar-bot-signing-key"
-      # Point rebar's ambient tickets store (config.tracker_dir, read by the reviewbot's
-      # create_ticket/link/emit calls that pass repo_root=None) at the PERSISTENT tickets worktree,
-      # NOT the container's /app cwd — so artifact writes land in the pushable clone.
+      # Write ticket events to the persistent pushable clone.
       REBAR_TRACKER_DIR: "/var/gerrit/site/reviewbot-tickets"
-      # Trust the persistent tickets volume for git. The container runs as root (no USER in
-      # Dockerfile.reviewbot) but that named volume is owned uid 1000 (a legacy population that
-      # survives rebuilds), so git's dubious-ownership guard (>=2.35.2) refused EVERY op on it —
-      # the ensure-tickets convergence AND rebar's runtime `git commit` in emit_code_review_artifact
-      # — making 100% of code_review artifact emissions fail (ARTIFACT_EMIT_ERROR). safe.directory
-      # is only honored from command-line/system/global config (never repo-local), so inject it via
-      # GIT_CONFIG_* — equivalent to `git -c safe.directory=...` (confirmed to resolve the guard on
-      # the box), HOME-independent (HOME is unset here), applied to every git process from startup.
-      # Keep the path in sync with REBAR_TRACKER_DIR above.
+      # Trust this uid-1000 volume in root-run Git processes. Git ignores
+      # repository-local safe.directory, so inject it into every invocation.
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: "safe.directory"
       GIT_CONFIG_VALUE_0: "/var/gerrit/site/reviewbot-tickets"
-      # AWS region for the Bedrock provider (ticket a574). MEASURED in this container: no
-      # AWS_REGION, no AWS_DEFAULT_REGION, no profile — boto3.session.Session().region_name is
-      # None and bedrock-runtime construction raises NoRegionError. Story eb6e's cutover ships
-      # with NO cross-provider fallback, so an unset region takes the LLM-Review gate down for
-      # every landing rather than degrading it.
-      #
-      # This is rebar's OWN knob rather than a bare AWS_REGION so the value is visible to rebar's
-      # config layer and is recorded in the signed verdict's provider_provenance (ticket 343b);
-      # an AWS_REGION set here would authenticate fine but leave no trace of which region
-      # produced the verdict.
-      #
-      # NOTE this is independent of IMDS. IMDS is reachable from this container and the instance
-      # role resolves (ticket 9249), yet region_name is still None — credential discovery and
-      # region discovery fail, and are fixed, separately.
+      # Rebar's region setting selects Bedrock and records provider provenance.
+      # Instance credentials resolve through IMDS, but region discovery does not.
       REBAR_LLM_BEDROCK_REGION: "us-east-1"
-      # ALSO the ambient boto3 var, and the two are NOT interchangeable. MEASURED: with only
-      # REBAR_LLM_BEDROCK_REGION set, rebar's own Bedrock path works (it threads the value
-      # into BedrockProvider) but a bare boto3 client STILL raises NoRegionError, because
-      # boto3 has never heard of rebar's knob. AWS_DEFAULT_REGION is botocore's canonical
-      # region var and covers every other caller in the image.
+      # Botocore callers also need their own ambient region setting.
       AWS_DEFAULT_REGION: "us-east-1"
-      # THE BEDROCK CUTOVER (story eb6e): fill the three MODEL-CLASS slots with Bedrock
-      # inference-profile ids. This is the whole flip — purely ADDITIVE, and the kill switch is
-      # purely SUBTRACTIVE (delete these three lines, recreate the container). MEASURED in this
-      # container: with the slots absent, rebar resolves the classes to the built-in defaults
-      # anthropic:claude-opus-4-8 / -sonnet-4-6 / -haiku-4-5, so removing them restores the
-      # direct-Anthropic path by construction, with no other edit and no rebuild.
-      #
-      # WHY CLASSES AND NOT `REBAR_LLM_MODEL`: the gates name model CLASSES, not model ids
-      # (code-review.yaml's base is `frontier` and its verify/coach are `standard`;
-      # plan-review.yaml's Pass-1 ladder is `[frontier]`). Filling the slots therefore re-points
-      # every pass in one act while PRESERVING that split. `REBAR_LLM_MODEL` would have
-      # destroyed it: it fanned ONE value out to ALL THREE classes — sonnet-everywhere silently
-      # downgrades the Pass-1 finder, opus-everywhere loses the Pass-2 cost downgrade AND renders
-      # code-review.yaml's `temperature: 0` greedy pin inoperative, because Bedrock opus accepts
-      # only the default temperature. Both are wrong, in opposite directions. The variable has
-      # since been REMOVED and tombstoned: setting it now fails loud, so it must not be added.
-      #
-      # ONLY INFERENCE-PROFILE ids are invokable: a bare on-demand `anthropic.claude-*` id
-      # returns `ValidationException: … on-demand throughput isn't supported`. The suffixes are
-      # NOT uniform (sonnet and haiku differ), so take any new id VERBATIM from
-      # `aws bedrock list-inference-profiles`. These three values are pinned byte-for-byte to
-      # `.github/llm-providers/bedrock.toml` by
-      # tests/unit/test_reviewbot_bedrock_cutover.py, so editing either side alone fails CI —
-      # that test is what keeps this block and the CI provider matrix single-sourced.
-      #
-      # If these ids change, infra/terraform/monitoring_eb6e.tf must change too: its
-      # client-error alarm is dimensioned by ModelId and would otherwise watch ids that no
-      # longer receive traffic and report healthy forever.
+      # Set all 3 model-class slots to Bedrock inference profiles. Removing
+      # these settings restores the built-in direct Anthropic defaults.
+      # Model classes preserve frontier versus standard gate routing.
+      # REBAR_LLM_MODEL is removed and must not be used. Use profile IDs from
+      # aws bedrock list-inference-profiles, including their distinct suffixes.
+      # The cutover test pins these IDs to the CI provider matrix. Update the
+      # ModelId alarm in monitoring_eb6e.tf if any ID changes.
       REBAR_LLM_FRONTIER_MODEL: "bedrock:us.anthropic.claude-opus-4-8"
       REBAR_LLM_STANDARD_MODEL: "bedrock:us.anthropic.claude-sonnet-4-6"
       REBAR_LLM_TRIVIAL_MODEL: "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0"
-      # Per-call token/provider sink (src/rebar/llm/usage_log.py). Recording is OPT-IN — with
-      # this var unset, `record()` is a no-op, which is why this container has produced no
-      # usage evidence until now. It is set HERE because it is the only oracle that proves the
-      # property this cutover actually cares about: that every call went to a Bedrock
-      # inference profile and ZERO went to direct Anthropic. The verdict's provider_provenance
-      # names the provider for the RUN; this names it PER CALL, so a single stray
-      # direct-Anthropic call cannot hide inside an otherwise-Bedrock review. ANTHROPIC_API_KEY
-      # stays in the container by design (the kill switch needs a working credential), so
-      # "unused" is a claim that has to be MEASURED rather than inferred from the key's
-      # absence — this is what measures it.
-      #
-      # ON THE PERSISTENT VOLUME on purpose. Auto-deploy recreates this container on every
-      # deploy, so a path inside the container image would lose the evidence at exactly the
-      # moment it is wanted; /var/gerrit/site/reviewbot is the bind-backed volume that already
-      # carries voted.db and reconcile_cursor across recreation.
-      #
-      # GROWTH, stated rather than waved at: the sink is append-only JSONL with NO rotation and
-      # no cap — it was built for ephemeral CI jobs, not a long-lived service. The RATE is what
-      # makes it acceptable here, not the design: a few hundred bytes per LLM call and tens of
-      # calls per review put it on the order of 100-200 MB/year at a busy review rate. MEASURED
-      # headroom: /var/gerrit is 50G with 44G free and the whole reviewbot volume is under 300K,
-      # and rebar-gerrit-data-disk-high already alarms on that filesystem. If the review rate
-      # ever grows by orders of magnitude, add rotation rather than removing the sink.
+      # Record each LLM call's provider and tokens on the persistent review-bot
+      # volume. This detects stray direct Anthropic calls while retaining its
+      # credential for rollback. The JSONL sink has no rotation. Disk-pressure
+      # monitoring covers its growth. Add rotation if review volume rises.
       REBAR_USAGE_LOG: "/var/gerrit/site/reviewbot/usage.jsonl"
-      # Volume-RELATIVE headroom for the snapshot-cache janitor (bug 3a52). The janitor is the
-      # ONLY thing that bounds this store (app.py's lifespan starts it), and its stock trigger is
-      # an ABSOLUTE 2 GiB free — disk-size-blind. The snapshot store lives on the container's
-      # WRITABLE LAYER on the box's 30-GiB ROOT volume: no volume mount above covers /tmp and
-      # REBAR_GATE_TMPDIR is unset, so /tmp/rebar-gate-snapshots is root-disk storage. On 30 GiB,
-      # 2 GiB free is 93.3% used — ABOVE the 85% at which infra/terraform/monitoring_autodeploy.tf's
-      # rebar-root-disk-pressure alarm pages, so the janitor could only ever engage after the alarm
-      # had already breached, inverting the ordering infra/runbooks/review-bot-ops.md documents
-      # (janitor reclaims; alarm is the backstop). 20% headroom trips reclaim at 80% used, below
-      # the alarm floor, and matches infra/scripts/autodeploy.sh's DISK_PRESSURE_PCT=80 — chosen
-      # there for the same reason, so the two reclaimers share one pressure threshold. The janitor
-      # then runs on to 25% free (its fixed internal RECLAIM_TARGET_MARGIN_PCT) rather than
-      # stopping on the trigger, so a pass does not re-fire every interval.
+      # Trigger snapshot-cache reclaim at 20% free on the gate-scratch
+      # volume. The janitor reclaims to 25% free. The prior absolute 2 GiB
+      # trigger was too late when snapshots lived on the 30 GiB root disk.
       REBAR_GATE_FREE_WATERMARK_PCT: "20"
-      # --- Review-gate scratch lives on its OWN EBS volume (ADR 0112 decision 3, story
-      # aa40-cbda-ee38-481c). The comment above describes the world before this: the store
-      # sat on the container's writable layer on the ROOT volume because REBAR_GATE_TMPDIR
-      # was unset. It is set now, and the watermark above still applies — relative to the
-      # scratch volume rather than to root, which is what it always wanted to measure.
-      #
-      # TWO variables, because the two consumers read two different names and setting only
-      # one leaves half the bytes on root:
-      #   REBAR_GATE_TMPDIR — the content-addressed snapshot store's base directory
-      #     (rebar._snapshot.repo_snapshot.peek_store_root), so rebar-gate-snapshots/ and
-      #     the admission slot files under locks/ both land on the volume.
-      #   TMPDIR — the system temp dir, which is what
-      #     tempfile.TemporaryDirectory(prefix="reviewbot-") in review_bot/voter.py follows.
-      #     That clone is PER REVIEW, so its bytes scale linearly with concurrency; it is
-      #     the larger of the two under load, and it is invisible to REBAR_GATE_TMPDIR.
-      #
-      # Both must equal terraform's `gate_scratch_mount` and observability.sh's
-      # GATE_SCRATCH_MOUNT; tests/unit/test_gate_scratch_volume_aa40.py pins the agreement.
+      # Put both snapshot storage and per-review temporary clones on the
+      # gate-scratch EBS volume. The snapshot store reads REBAR_GATE_TMPDIR.
+      # tempfile reads TMPDIR. Keep both aligned with Terraform and the
+      # gate-scratch volume test.
       REBAR_GATE_TMPDIR: "/var/lib/rebar/gate-scratch"
       TMPDIR: "/var/lib/rebar/gate-scratch"
     ports:
-      # Publish on host loopback for the HOST nginx /review/ proxy. Host port is
-      # single-sourced from .env (REVIEW_BOT_PORT, default 8000); container port
-      # is fixed at 8000 (uvicorn --port in the Dockerfile).
+      # Publish host loopback for nginx. Uvicorn listens on container 8000.
       - "127.0.0.1:${REVIEW_BOT_PORT:-8000}:8000"
     volumes:
-      # Persist the dedup ledger + reconcile cursor across container recreation. Auto-deploy
-      # rebuilds this container on every deploy; without a volume the reconcile cursor resets
-      # to empty each time, forcing a full events-log re-scan on every deploy (the bug c943
-      # amplifier). Bind onto the EBS host path like the gerrit_* site volumes; the external
-      # volume is created by compose-up.sh (and pre-provisioned on the host). The review-bot
-      # image runs as root, so the root-owned host dir is writable.
-      # The authorship signing key materialized by fetch-secrets.sh next to this compose file
-      # (bug beb1). Read-only; the path MUST match REBAR_IDENTITY_SIGNING_KEY above.
-      # fetch-secrets.sh always creates this file (empty when the SSM slot is blank) because a
-      # missing bind-mount source would make docker create a DIRECTORY here and break start-up.
+      # Persist the dedup ledger and reconcile cursor across redeploys.
+      # Mount the signing key read-only at the path named above. The secrets
+      # fetch creates an empty file for a blank slot to avoid a directory mount.
       - ./rebar-bot-signing-key:/run/secrets/rebar-bot-signing-key:ro
       - gerrit_reviewbot:/var/gerrit/site/reviewbot
-      # Persistent tickets worktree (story limestone-unethical-zebrafinch): a durable clone of the
-      # `tickets` branch that survives container recreation, so the reviewbot's code_review artifact
-      # writes accumulate + auto-push (REBAR_SYNC_PUSH=always) instead of living in an ephemeral
-      # /tmp dir. Materialized once by the entrypoint (see Dockerfile.reviewbot).
+      # Persist the tickets clone so artifact writes can auto-push.
       - gerrit_reviewbot_tickets:/var/gerrit/site/reviewbot-tickets
-      # The gate-scratch EBS volume, bound at its PARENT rather than at the mount point.
-      # That is load-bearing, not tidiness: rebar's gate admission decides "is the volume
-      # mounted" from a declaration marker that lives on the ROOT filesystem BESIDE the
-      # mount point (so it survives an unmount) and a proof marker INSIDE it (so it does
-      # not). Binding only the mount point would show the container an empty directory in
-      # both states, and the guard could never fire — the exact silent fallback to root
-      # that ADR 0112 forbids.
-      #
-      # A plain host bind, deliberately NOT an `external:` named volume: those are
-      # provisioned from compose-up.sh's SITE_SUBDIRS list under /var/gerrit/site and
-      # paired by config-check.sh check 5. Scratch is on a different volume entirely and
-      # does not belong in that list.
+      # Bind the gate-scratch volume's parent. The root-side declaration
+      # marker and in-volume proof marker must both remain visible so the
+      # admission guard detects an unmounted scratch volume. It is separate
+      # from the Gerrit site volumes created by compose-up.sh.
       - /var/lib/rebar:/var/lib/rebar
-    # REBAR_MCP_ALLOW_LLM deliberately NOT set (gates only the stdio MCP server;
-    # the receiver calls the rebar.llm library directly — S4b).
-    #
-    # Liveness signal that distinguishes "listener closed, process alive" from healthy
-    # (the 2026-08-28 zombie: uvicorn closed its :8000 listener at the start of a graceful
-    # shutdown but the process never exited, so `docker compose ps` still reported the
-    # container `Up` while every request RST'd — a SILENT 502). This probe hits the process's
-    # OWN listener over container loopback, so in that state the connection is refused, the
-    # probe exits non-zero, and after `retries` the container flips to `unhealthy` — an
-    # observable signal monitoring can alarm on, instead of a container that reads green while
-    # serving nothing. It is REPORTING only: nothing here acts on health (autodeploy.sh runs
-    # `docker compose up -d` WITHOUT `--wait` and gates on its own curl /health probe;
-    # `restart: unless-stopped` does not react to health status), so declaring it does not
-    # change the recreate contract — it only surfaces the state. The merged force-exit deadline
-    # (app.py `_arm_hard_shutdown`) bounds how long that unhealthy-zombie state can persist;
-    # this healthcheck is what makes it VISIBLE while it does. Mirrors the `mcp` service's
-    # healthcheck; port is the container-fixed 8000 (see the `ports:` note above).
+    # The receiver calls rebar.llm directly, so REBAR_MCP_ALLOW_LLM is unused.
+    # Probe the container listener to expose a process that remains up after
+    # closing port 8000. Health is reporting only. Autodeploy uses its own
+    # /health check and Docker restart does not react to unhealthy status.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status==200 else 1)"]
       interval: 30s
@@ -339,249 +139,137 @@ services:
     logging:
       driver: journald
 
-  # --- trusted op-cert gate service (story 76d2) ---------------------------
-  # The FastAPI gate service (infra/compose/Dockerfile.opcert / rebar.opcert_service.app).
-  # Reached ONLY through the SigV4-authenticated API Gateway -> HOST nginx /opcert/ (which
-  # enforces the X-Opcert-Guard origin guard) -> this container's loopback-published port.
-  # It fetches authoritative state itself and NEVER pushes (REBAR_SYNC_PUSH=off), so a gate's
-  # SIGNATURE append lands only in the discarded per-job workspace.
+  # The trusted gate sits behind SigV4 API Gateway and nginx's origin guard.
+  # It fetches authoritative state and never pushes gate workspace writes.
   opcert:
     build:
-      # Build context is the REPO ROOT so `pip install .` sees the whole package.
+      # Build from the repository root for the package install.
       context: ../..
       dockerfile: infra/compose/Dockerfile.opcert
     restart: unless-stopped
     mem_limit: 256m
-    # ANTHROPIC_API_KEY (the gate's LLM ops) + REBAR_OPCERT_GUARD (appended by
-    # infra/scripts/materialize-opcert-guard.sh, the SSM-materialized origin guard) come
-    # from the regenerated .env.
+    # Load the gate credentials and origin guard from the regenerated .env.
     env_file:
       - .env
     environment:
-      # The environment's identity (the DSSE principal / SSHSIG key id). MUST equal the
-      # env_id pinned in .rebar/trusted_environments.yaml. Operator overrides at deploy.
+      # Match the trusted-environment env_id. Deploy may override it.
       REBAR_OPCERT_ENV_ID: "${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}"
-      # The op-cert Ed25519 PRIVATE key, materialized OUTSIDE the app before start (story 6f14):
-      # fetch-secrets.sh writes the SSM value to a 0600 FILE next to .env and this service
-      # bind-mounts it read-only at the fixed container target below. compose_signer validates it
-      # at startup and copies it into a process-owned 0700 dir — the app never touches SSM/boto3.
+      # Mount the SSM-materialized opcert key read-only. The signer copies
+      # it to a process-owned directory and does not fetch AWS secrets.
       REBAR_OPCERT_KEY_PATH: "/run/secrets/opcert-ed25519-key"
-      # Authoritative-state sources the worker fetches ITSELF (never trusts the client): the
-      # review remote's `main` tip becomes the signed merged_log_commit; the tickets branch is
-      # mounted read-only as a rebar tracker worktree.
+      # Fetch the review main tip and read-only tickets state independently.
       REBAR_OPCERT_REVIEW_REMOTE_URL: "${REBAR_OPCERT_REVIEW_REMOTE_URL:-https://github.com/navapbc/rebar.git}"
       REBAR_OPCERT_TICKETS_REMOTE_URL: "${REBAR_OPCERT_TICKETS_REMOTE_URL:-https://github.com/navapbc/rebar.git}"
       REBAR_OPCERT_REVIEW_BRANCH: "main"
-      # STORE-READ-ONLY: never push a gate write to the shared tickets branch.
-      # Trust nginx's X-Forwarded-Proto (bug a61d — the same scheme downgrade 79b2 fixed
-      # for the mcp service, reproduced here: `GET /review/health/` answered 307 with
-      # `location: http://<host>/health`). uvicorn reads FORWARDED_ALLOW_IPS natively,
-      # defaults it to "127.0.0.1", and wraps the app in ProxyHeadersMiddleware with it.
-      # This app runs INSIDE this container with its port published on host loopback, so
-      # nginx's connection arrives from the docker bridge GATEWAY, not 127.0.0.1: the peer
-      # was untrusted, `X-Forwarded-Proto: https` was DROPPED, and Starlette's
-      # trailing-slash 307 built its absolute Location as `http://` — a scheme downgrade
-      # that can put a client's credential on the wire in plaintext.
-      #
-      # "*" (trust any peer), NOT a pinned bridge-gateway IP: this service declares no
-      # `networks:` block, so that address is IMPLICIT and can drift on a compose/docker
-      # change — a stale pin would silently re-open the downgrade with no failure signal.
-      # Trust-all is BOUNDED here: the port is published on host LOOPBACK with nginx the
-      # sole reachable client, and nginx sets X-Forwarded-Proto as a LITERAL
-      # (`proxy_set_header X-Forwarded-Proto https`), which OVERWRITES whatever a client
-      # sent — so no client can forge the value.
+      # Never push gate workspace writes. Trust the bridge gateway's
+      # forwarded scheme for nginx redirects. The port is host-loopback only
+      # and nginx overwrites X-Forwarded-Proto, preventing client forgery.
       FORWARDED_ALLOW_IPS: "*"
       REBAR_SYNC_PUSH: "off"
     ports:
-      # Publish on host loopback for the HOST nginx /opcert/ proxy. Host port 8090 (Gerrit
-      # owns 8080, review-bot owns REVIEW_BOT_PORT); container port is fixed 8080 (uvicorn).
+      # Publish host loopback for nginx on 8090. Container port is 8080.
       - "127.0.0.1:8090:8080"
     volumes:
-      # The op-cert Ed25519 signing key materialized by fetch-secrets.sh next to this compose
-      # file (story 6f14; the rebar-bot-signing-key precedent). Read-only; the path MUST match
-      # REBAR_OPCERT_KEY_PATH above. fetch-secrets.sh ALWAYS creates this file (empty when the
-      # SSM slot is blank, bug beb1) because a missing bind-mount source would make docker create
-      # a DIRECTORY here and break start-up.
+      # Mount the SSM-materialized key read-only at REBAR_OPCERT_KEY_PATH.
+      # The secrets fetch creates an empty file for a blank slot.
       - ./opcert-ed25519-key:/run/secrets/opcert-ed25519-key:ro
     logging:
       driver: journald
 
-  # --- rebar MCP HTTP transport service (ADR deft-evolutive-mosasaur / story esok) ---
-  # The FastMCP Streamable-HTTP server (infra/compose/Dockerfile.mcp / rebar-mcp). Reached
-  # ONLY through the HOST nginx /mcp location (TLS-terminated edge; ADR 0104) -> this
-  # container's loopback-published port. TLS terminates at nginx, so the app speaks plain
-  # HTTP behind it (REBAR_MCP_HTTP_TLS_AT_EDGE=true acknowledges that). Fail-closed posture:
-  # a non-loopback bind (0.0.0.0) REQUIRES both the allowlists AND the TLS ack, or
-  # build_server raises McpStartupError (ADR-0050 gates).
-  #
-  # MCP_PATHS (autodeploy change-detector, consumed by panicky-sylphish-foxterrier — NOT by
-  # compose): the paths whose change should trigger an mcp blue-green redeploy.
+  # MCP serves authenticated Streamable HTTP behind host nginx.
+  # Non-loopback container bind requires allowlists and TLS-at-edge acknowledgment.
+  # MCP_PATHS is consumed by autodeploy for MCP blue-green redeploys.
   #   MCP_PATHS="src/rebar infra/compose/Dockerfile.mcp infra/scripts/mcp-entrypoint.sh infra/scripts/autodeploy.sh infra/compose/docker-compose.yml uv.lock pyproject.toml"
   mcp:
     build:
-      # Build context is the REPO ROOT so the locked install sees the whole package.
+      # Build from the repository root for the locked install.
       context: ../..
       dockerfile: infra/compose/Dockerfile.mcp
     restart: always
     mem_limit: 3712m
-    # Cover the app's bounded SIGTERM grace (_mcp_health.DEFAULT_SHUTDOWN_GRACE_SECONDS =
-    # 1200s: a retiring container waits for an in-flight certified op to finish) plus margin
-    # so Docker never escalates SIGTERM->SIGKILL mid-op. MUST stay >= that constant;
-    # tests/interfaces/facades/test_mcp_http_transport.py asserts the relationship.
+    # Cover the 1200s certified-op SIGTERM grace with 60s margin.
+    # The HTTP transport test checks this relationship.
     stop_grace_period: 1260s
-    # ANTHROPIC_API_KEY / the LLM provider creds (the certified tools) come from .env.
+    # Load LLM credentials from the regenerated .env.
     env_file:
       - .env
     environment:
-      # HTTP transport posture (ADR 0104). Bind non-loopback inside the container so the
-      # loopback-published host port reaches it; nginx is the only client.
+      # Bind container-wide HTTP behind host-loopback nginx.
       REBAR_MCP_TRANSPORT: "http"
       REBAR_MCP_HTTP_HOST: "0.0.0.0"
       REBAR_MCP_HTTP_PORT: "8091"
-      # TLS terminates at the nginx edge; acknowledge it so the non-loopback gate passes.
+      # Acknowledge TLS termination at nginx.
       REBAR_MCP_HTTP_TLS_AT_EDGE: "true"
-      # Trust nginx's X-Forwarded-Proto (bug 79b2 — HTTPS->HTTP downgrade of the bearer
-      # PAT). uvicorn reads FORWARDED_ALLOW_IPS natively and defaults it to "127.0.0.1",
-      # then wraps the app in ProxyHeadersMiddleware(trusted_hosts=<that>). But the app runs
-      # INSIDE this container: nginx's connection arrives from the docker bridge GATEWAY,
-      # not 127.0.0.1, so the peer was untrusted, `X-Forwarded-Proto: https` was DROPPED,
-      # and every scheme-derived absolute URL (notably Starlette's trailing-slash 307
-      # Location) was built as `http://` — a scheme downgrade that can put a client's
-      # bearer PAT on the wire in plaintext.
-      #
-      # "*" (trust any peer), NOT a pinned bridge-gateway IP: this service declares no
-      # `networks:` block, so that address is IMPLICIT and can drift on a compose/docker
-      # change — a stale pin would silently re-open the downgrade with no failure signal.
-      # Trust-all is BOUNDED here: the port is published on host LOOPBACK
-      # (127.0.0.1:8091:8091) with nginx the sole reachable client, and nginx sets
-      # X-Forwarded-Proto as a LITERAL (`proxy_set_header X-Forwarded-Proto https`), which
-      # OVERWRITES whatever a client sent — so no client can forge the value.
+      # Trust the bridge gateway's forwarded scheme for nginx redirects.
+      # The port is host-loopback only and nginx overwrites X-Forwarded-Proto,
+      # preventing clients from forging the trusted scheme.
       FORWARDED_ALLOW_IPS: "*"
-      # The DNS-rebinding guard checks the forwarded Host/Origin: name the public edge.
+      # Restrict forwarded Host and Origin to the public edge.
       REBAR_MCP_HTTP_ALLOWED_HOSTS: "${REBAR_MCP_HTTP_ALLOWED_HOSTS:-rebar.solutions.navateam.com}"
       REBAR_MCP_HTTP_ALLOWED_ORIGINS: "${REBAR_MCP_HTTP_ALLOWED_ORIGINS:-https://rebar.solutions.navateam.com}"
-      # Auth ON at /mcp (static bearer). /health stays unauthenticated (custom route).
+      # Require static bearer auth on /mcp. /health stays unauthenticated.
       REBAR_MCP_AUTH_ENABLED: "1"
       REBAR_MCP_AUTH_STRATEGIES: "static"
       REBAR_MCP_AUTH_RESOURCE_SERVER_URL: "${REBAR_MCP_AUTH_RESOURCE_SERVER_URL:-https://rebar.solutions.navateam.com/mcp}"
-      # OAuth issuer URL advertised in RFC 9728 metadata; AuthSettings rejects an empty
-      # value, so this must be set (no fallback to RESOURCE_SERVER_URL) or the container
-      # crash-loops on a fresh deploy — see haughty-leisured-puffer.
+      # Supply the OAuth issuer required by AuthSettings to avoid startup failure.
       REBAR_MCP_AUTH_ISSUER_URL: "${REBAR_MCP_AUTH_ISSUER_URL:-https://rebar.solutions.navateam.com/mcp}"
-      # The static bearer digests file, materialized OUTSIDE the app (avians' fetch-secrets
-      # slice) and bind-mounted read-only below.
+      # Mount the static bearer digests file read-only.
       REBAR_MCP_AUTH_STATIC_TOKENS_FILE: "/run/secrets/mcp-static-tokens.json"
-      # Let the certified LLM tools run (the box drives review_plan/verify_completion/… ).
+      # Enable the certified LLM gate tools.
       REBAR_MCP_ALLOW_LLM: "1"
-      # MCP runs the same certified gates as review-bot, so ADR 0112's scratch-volume
-      # routing applies here too: both tmpdir variables are required, and the bind below
-      # is the parent so the root-side declaration marker remains visible.
+      # Route both gate temp directories to the parent-bound scratch volume.
       # mechanism-ok: env_var REBAR_GATE_FREE_WATERMARK_PCT — ce66-59ef-d6d7-4c7a
       REBAR_GATE_FREE_WATERMARK_PCT: "20"
       # mechanism-ok: env_var REBAR_GATE_TMPDIR — ce66-59ef-d6d7-4c7a
       REBAR_GATE_TMPDIR: "/var/lib/rebar/gate-scratch"
       # mechanism-ok: env_var TMPDIR — ce66-59ef-d6d7-4c7a
       TMPDIR: "/var/lib/rebar/gate-scratch"
-      # Op-cert signing identity (mirrors opcert): the env id + Ed25519 key the certified
-      # tools sign under, materialized outside the app and bind-mounted below.
+      # Sign certified operations with the mounted key and environment ID.
       REBAR_OPCERT_ENV_ID: "${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}"
       REBAR_IDENTITY_SIGNING_KEY: "/run/secrets/opcert-ed25519-key"
-      # The rebar ticket store the MCP tools read AND WRITE. Nothing bakes a store into the
-      # image (.dockerignore excludes .tickets-tracker and .git), so without this the path
-      # resolved to the WORKDIR and every tool failed "/app/.tickets-tracker not found".
-      # The entrypoint (Dockerfile.mcp) clones the `tickets` branch here on first boot and
-      # converges it into a writable store; the named volume below makes it persistent.
+      # Persist the writable tickets clone created by the entrypoint.
       REBAR_TRACKER_DIR: "/var/gerrit/site/mcp-tickets"
-      # The CODE checkout the attested LLM gates resolve refs against, and the repo root
-      # rebar reads it through. `.dockerignore` excludes `.git` and the image is `COPY . /app`,
-      # so /app is a SOURCE COPY with no object database: with REBAR_ROOT unset the root
-      # resolved to the WORKDIR and every `source=attested` gate died at "cannot resolve ref
-      # 'origin/main' to a commit in '.'" — no plan-review or completion-verifier attestation
-      # could be earned through this server. The entrypoint clones `main` here (blobless,
-      # single-branch) in the background; the named volume below makes it persistent. MUST stay
-      # at parity with mcp_run_new in infra/scripts/autodeploy.sh (blue-green `docker run`).
+      # Resolve attested refs in the entrypoint's persistent blobless main
+      # clone. Keep these paths aligned with autodeploy's mcp_run_new.
       MCP_CODE_DIR: "/var/gerrit/site/mcp-code"
       REBAR_ROOT: "/var/gerrit/site/mcp-code"
-      # Explicit rather than inherited from the implicit default, because this service is
-      # a WRITER and both siblings state their posture (reviewbot "always", opcert "off").
-      # A second independent remote writer on origin/tickets is the DESIGNED model, not an
-      # oversight: the store is event-sourced with union merges and shares every write
-      # immediately (docs/concurrency.md). The review-bot appends code_review artifacts,
-      # this appends the ticket events its tools write, and neither rewrites the other's.
+      # Push ticket events alongside review-bot artifact writes. The
+      # event-sourced store merges concurrent writers.
       REBAR_SYNC_PUSH: "always"
-      # AWS region for the Bedrock provider. rebar.toml pins the configured model to
-      # `bedrock:us.anthropic.claude-*`, so this service makes real Bedrock calls; credentials
-      # come from the EC2 instance role (rebar-gerrit-instance-role carries an inline
-      # bedrock:InvokeModel policy) and reach the container over IMDS. REGION DOES NOT: MEASURED
-      # for the sibling review-bot service (ticket dressy-abbatial-antbear), an otherwise
-      # identical container has `boto3.session.Session().region_name is None` and
-      # bedrock-runtime construction raises NoRegionError — independently of IMDS, which
-      # resolves fine (ticket hallowed-usable-squeaker). Credential discovery and region
-      # discovery fail, and are fixed, separately.
-      #
-      # BOTH vars, and they are NOT interchangeable. REBAR_LLM_BEDROCK_REGION is rebar's own knob:
-      # it threads into BedrockProvider and is visible to the config layer, so the region is
-      # recorded in the signed verdict's provider_provenance (ticket ecstatic-joyless-furseal).
-      # AWS_DEFAULT_REGION is botocore's canonical var and is what every other caller in the
-      # image reads. Keep in sync with mcp_run_new in infra/scripts/autodeploy.sh, which is the
-      # path a real deploy takes.
+      # Rebar's Bedrock region appears in signed provider provenance.
+      # Botocore also needs AWS_DEFAULT_REGION. Credentials come from the
+      # instance role. Keep both settings aligned with mcp_run_new.
       REBAR_LLM_BEDROCK_REGION: "us-east-1"
       AWS_DEFAULT_REGION: "us-east-1"
-      # Fine-grained GitHub PAT (contents:write on the tickets repo) the entrypoint feeds to a
-      # URL-scoped git credential helper for the clone + auto-push. Materialized from SSM into
-      # the .env by fetch-secrets.sh; BLANK IS FINE — the clone is simply deferred and the
-      # container still boots (soft failure posture).
+      # Pass the SSM-materialized tickets PAT to the URL-scoped Git helper.
+      # A blank PAT defers cloning without blocking container startup.
       MCP_TICKETS_PAT: "${MCP_TICKETS_PAT:-}"
-      # Jira bridge configuration (bug colourless-hasteless-lamb). Like MCP_TICKETS_PAT above
-      # these are SSM-materialized into the .env by fetch-secrets.sh and are ALREADY delivered
-      # by `env_file: .env`; they are spelled out here so the mcp service documents every input
-      # it depends on rather than leaving them implicit in a generated file. They are therefore
-      # `_ENV_FILE_ONLY` in the compose/mcp_run_new parity oracle: `docker run` does NOT
-      # interpolate the project .env, so re-spelling them as `-e JIRA_URL=${JIRA_URL:-}` in
-      # autodeploy's mcp_run_new would resolve EMPTY in the deploy shell and CLOBBER the real
-      # value. --env-file is the carrier for these; see mcp_run_new.
-      #
-      # BLANK IS FINE and is the SOFT-DEGRADE posture: the container boots, /mcp keeps serving,
-      # and only the bridge tools report unavailable (bridge_check_access already raises a typed
-      # exit-2 error naming the missing variables). Contrast mcp-static-tokens.json below, which
-      # fails CLOSED because it is an AUTH boundary -- a missing outbound integration credential
-      # is a soft degrade, a missing bearer store is not.
+      # Load Jira bridge settings from the generated .env. docker run does
+      # not interpolate Compose's project .env, so mcp_run_new must pass the
+      # env file without empty command-line overrides. Missing Jira credentials
+      # make bridge calls return typed missing-input errors while /mcp stays up.
+      # Missing bearer digests instead fail closed at startup.
       JIRA_URL: "${JIRA_URL:-}"
       JIRA_USER: "${JIRA_USER:-}"
-      # A FOURTH required input for a live verdict, not an optional extra: the probe scope
-      # resolver reads the environment only, so rebar.toml's `[jira] project` never reaches it.
+      # Probe scope reads JIRA_PROJECT from the environment.
       JIRA_PROJECT: "${JIRA_PROJECT:-}"
       JIRA_API_TOKEN: "${JIRA_API_TOKEN:-}"
     ports:
-      # Publish on host loopback for the HOST nginx /mcp proxy. Host port 8091 (Gerrit owns
-      # 8080, review-bot REVIEW_BOT_PORT, opcert 8090); container port is fixed 8091.
+      # Publish host loopback for nginx on 8091.
       - "127.0.0.1:8091:8091"
     volumes:
-      # Secrets bind-mounted read-only; paths MUST match the env above. These files are
-      # NOT materialized by anything in THIS change — provisioning them (the static bearer
-      # digests + the op-cert key) is avians' fetch-secrets slice, which, like the existing
-      # opcert-ed25519-key precedent (bug beb1), must ALWAYS create each file (empty when
-      # the slot is blank) so a missing bind-mount source can't make docker create a
-      # DIRECTORY here. Until that slice lands the source files are absent; a deploy that
-      # brings this service up before then is expected to FAIL CLOSED (an empty/missing
-      # mcp-static-tokens.json → AuthConfigError at startup, and with restart: always the
-      # container crash-loops rather than serving /mcp unauthenticated — the intended
-      # posture: no bearer store, no MCP endpoint).
+      # Mount bearer digests and the opcert key read-only. The secrets
+      # fetch must create files even for blank slots. Missing bearer digests
+      # fail closed rather than serving unauthenticated MCP.
       - ./mcp-static-tokens.json:/run/secrets/mcp-static-tokens.json:ro
       - ./opcert-ed25519-key:/run/secrets/opcert-ed25519-key:ro
-      # The persistent ticket store (REBAR_TRACKER_DIR above) — an external named volume so a
-      # `docker compose down -v` does not destroy accumulated ticket events. Created by
-      # compose-up.sh from its SITE_SUBDIRS list, alongside the other gerrit_* volumes.
+      # Persist ticket events in an external site volume.
       - gerrit_mcp_tickets:/var/gerrit/site/mcp-tickets
-      # The persistent code checkout (MCP_CODE_DIR / REBAR_ROOT above) — external for the same
-      # reason: a `docker compose down -v` must not throw away a multi-GB blobless clone and
-      # force every gate to fail again until it re-converges.
+      # Persist the blobless main clone in an external site volume.
       - gerrit_mcp_code:/var/gerrit/site/mcp-code
-      # ADR 0112 gate scratch: parent bind, not mount-point bind, so the declaration marker
-      # beside gate-scratch and the proof marker inside it are both visible to the container.
+      # Bind the scratch parent so both mount markers remain visible.
       - /var/lib/rebar:/var/lib/rebar
-    # Liveness: the container HEALTHCHECK in Dockerfile.mcp hits loopback /health; declare
-    # it here too so `docker compose ps` reflects health and a redeploy waits on it.
+    # Probe loopback /health so docker compose ps reports listener health.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=4).status==200 else 1)"]
       interval: 30s
@@ -591,11 +279,8 @@ services:
     logging:
       driver: journald
 
-# External named volumes for the stateful Gerrit site subdirs. Declared external:true
-# so `docker compose down -v` does NOT destroy them. compose-up.sh creates each one
-# (idempotently) as a local `bind` volume onto /var/gerrit/site/<subdir> on the EBS
-# data volume BEFORE `docker compose up`. (Per-subdir, not one volume over the whole
-# /var/gerrit, so the image's baked binaries are not shadowed.)
+# compose-up.sh creates external EBS-backed site volumes before startup.
+# They survive docker compose down -v without shadowing image binaries.
 volumes:
   gerrit_git:
     external: true
@@ -611,19 +296,15 @@ volumes:
     external: true
   gerrit_plugins:
     external: true
-  # rebar review-bot state (dedup ledger + reconcile cursor) — bind onto
-  # /var/gerrit/site/reviewbot; created by compose-up.sh alongside the gerrit_* volumes.
+  # Persist review-bot state on the Gerrit site volume.
   gerrit_reviewbot:
     external: true
-  # /var/gerrit/site/reviewbot-tickets — the persistent tickets worktree for code_review artifacts
-  # (story limestone-unethical-zebrafinch); created by compose-up.sh alongside the others.
+  # Persist the review-bot tickets clone.
   gerrit_reviewbot_tickets:
     external: true
-  # /var/gerrit/site/mcp-tickets — the persistent rebar ticket store the MCP tools read and
-  # write; created by compose-up.sh alongside the others.
+  # Persist the MCP tickets store.
   gerrit_mcp_tickets:
     external: true
-  # /var/gerrit/site/mcp-code — the persistent blobless `main` checkout the attested LLM gates
-  # resolve refs against (REBAR_ROOT); created by compose-up.sh alongside the others.
+  # Persist the MCP blobless main clone for attested refs.
   gerrit_mcp_code:
     external: true

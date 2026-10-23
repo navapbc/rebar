@@ -25,19 +25,19 @@ from .backend_support import FakeTransport
 # Mutation ledger (cedc-58d1-f6d1-428e, AC8). Each perturbation failed by
 # assertion in the named value/boundary pins:
 # - priority ``High`` -> ``Higher`` and status ``In Progress`` -> ``In progress``:
-#   create-path, exhaustive-map, and reverse-map tests;
-# - summary 254 -> 253 and label 255 -> 254: inclusive-limit/token tests;
-# - story ``Story`` -> ``Storey``: create and exhaustive issue-type tests;
-# - assignee ``get(...) or ""`` -> ``get(..., "")``: explicit-None coercion;
-# - description fit -> passthrough: WikiText fitting and Cloud-divergence tests;
-# - wiki limit 32767 -> 32766: literal constants plus all inclusive-limit pins;
-# - suffix ``… [truncated by reconciler]`` -> plural: exact truncation pins;
-# - both non-string guards removed: non-string description preservation;
-# - status default ``To Do`` -> ``Todo``: status/default mapping;
-# - identity prefix ``rebar-id:`` -> ``rebar-id=``: canonical label format;
+#   create-path, exhaustive-map, and reverse-map tests.
+# - summary 254 -> 253 and label 255 -> 254: inclusive-limit/token tests.
+# - story ``Story`` -> ``Storey``: create and exhaustive issue-type tests.
+# - assignee ``get(...) or ""`` -> ``get(..., "")``: explicit-None coercion.
+# - description fit -> passthrough: WikiText fitting and Cloud-divergence tests.
+# - wiki limit 32767 -> 32766: literal constants plus all inclusive-limit pins.
+# - suffix ``… [truncated by reconciler]`` -> plural: exact truncation pins.
+# - both non-string guards removed: non-string description preservation.
+# - status default ``To Do`` -> ``Todo``: status/default mapping.
+# - identity prefix ``rebar-id:`` -> ``rebar-id=``: canonical label format.
 # - resolved ``Cancelled`` -> ``Canceled``: the now-retired default-status pin.
 # The wiki-limit mutation initially survived because tests imported the production
-# boundary; module-local ``WIKI_LIMIT`` now kills it. Either non-string guard alone is
+# boundary. Module-local ``WIKI_LIMIT`` now kills it. Either non-string guard alone is
 # redundant, so their observable mutation deliberately removes both.
 
 #: DC's plain-character rich-text cap and the exact marker ``WikiTextCodec``
@@ -301,8 +301,8 @@ def test_dc_fit_comment_is_the_send_path_fit():
 
 
 # AC3 drives the shared mapper through ``WikiTextCodec`` and asserts exact fitting.
-# It deliberately does not assert call order: normalization is identity on DC, so
-# swapping normalization and fitting is unobservable; ``AdfCodec`` owns that pin.
+# It deliberately does not assert call order. Normalization is identity on DC, so
+# swapping normalization and fitting is unobservable. ``AdfCodec`` owns that pin.
 
 
 def test_dc_map_fields_to_remote_fits_description_to_the_wiki_value():

@@ -1,34 +1,8 @@
-"""Cloud config-validation coverage — story 2127, item 2 (2a ENFORCED by bdb8; 2b by ad85).
+"""Cloud configuration enforces TLS URLs and credentials at construction.
 
-Two Cloud config-validation behaviours the DC transport HAS, BOTH now at parity: item 2a
-(non-https URL) is ENFORCED (bug bdb8) and item 2b (missing credential) is ENFORCED (bug
-ad85) — ``_build_jira_backend`` fails loudly at construction. Each has an inverse
-mutation-check recorded RED/GREEN in its change description.
-
-  behaviour                 | DC (has it)                              | Cloud
-  --------------------------+------------------------------------------+-----------------------
-  non-https base URL        | ReconcilerConfig.__post_init__ calls     | JiraConfig.__post_init__
-  rejected                  | _validate_reconciler_tls → ConfigError   | now rejects too, via the
-                            | (_config_schema.py)                      | shared _validate_https_url
-                            |                                          | — ENFORCED (bug bdb8)
-  missing/invalid credential| (DC PAT is required by its transport)    | _build_jira_backend
-  fails loudly              |                                          | raises BackendEnvError
-                            |                                          | at construction —
-                            |                                          | ENFORCED (bug ad85)
-
-Item 2a was originally absence-documenting; bug bdb8-0646-9e13-4bfb closed the gap, so the
-tests below now PIN the ENFORCEMENT (JiraConfig rejects a non-https url, with a
-``jira.allow_insecure`` override) — the mutation-check is the inverse: removing
-``JiraConfig.__post_init__`` flips these RED.
-
-Item 2b is now ENFORCED (bug ad85): the tests below PIN the loud failure (``_build_jira_backend``
-raises ``BackendEnvError`` on a missing/blank/non-email credential); its inverse mutation-check
-(remove the credential guard → the enforcement assertions flip RED) is recorded in ad85's change.
-
-Follow-up bugs (filed + linked ``discovered_from`` 2127):
-  * Cloud non-https URL not rejected  → bug bdb8-0646-9e13-4bfb  (RESOLVED — enforced above)
-  * Cloud missing-credential silent   → bug ad85-e5e3-be8d-4be5  (RESOLVED — enforced below)
-"""
+JiraConfig rejects non-HTTPS URLs unless allow_insecure is set.
+_build_jira_backend raises BackendEnvError for missing or invalid credentials.
+The tests pin both enforcement paths and their inverse mutation checks."""
 
 from __future__ import annotations
 

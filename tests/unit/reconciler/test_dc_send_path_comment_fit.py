@@ -1,7 +1,7 @@
-"""Pin comment fitting on the real Data Center send path (bug b9b4).
+"""Pin comment fitting on the Data Center send path (bug b9b4).
 
 With only the Jira client stubbed, tests capture the wire body. Over-limit text must
-fit the deployment ceiling while preserving ``RECONCILER_MARKER``; the differ's
+fit the deployment ceiling while preserving ``RECONCILER_MARKER``. The differ's
 ``fit_comment`` key must equal the marker-stripped body that landed so the next pass
 converges. In-limit and unlimited bodies remain byte-identical. The ceiling is injected
 through ``_DCSanitizer`` rather than process configuration.

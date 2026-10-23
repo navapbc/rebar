@@ -1,8 +1,8 @@
 """Pin transition lookup by destination status, not transition name (bug 7f93).
 
 Callers pass workflow states such as ``In Progress``, which may be reached by a
-transition named ``Start Progress``. Exact transition-name matches still take precedence;
-ambiguous destinations are rejected and unavailable destinations may soften. Tests include
+transition named ``Start Progress``. Exact transition-name matches still take precedence.
+Ambiguous destinations are rejected and unavailable destinations may soften. Tests include
 the misleading ``Done`` case, where transition and status names coincide, plus the distinct
 name that exposed the defect.
 """

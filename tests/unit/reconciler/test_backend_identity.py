@@ -1,13 +1,7 @@
-"""HELD-OUT edge tests for JiraIdentityConvention (S2, epic bbf1).
+"""Held-out JiraIdentityConvention edge checks (S2).
 
-The identity convention has no pre-existing single delegate — S2 introduces it as a
-pure object that must reproduce the inlined ``rebar-id:`` convention EXACTLY (the
-write form ``rebar-id:<local_id>`` and the read scan at ``binding_walk`` that accepts
-both the canonical ``rebar-id:`` colon form and the legacy ``rebar-id-`` hyphen form,
-treating an empty-after-prefix marker as NOT a binding).
-
-Held out from the implementation subagent.
-"""
+Write rebar-id:<local_id>. Read both the canonical colon marker and legacy
+hyphen marker. An empty marker suffix does not establish a binding."""
 
 from __future__ import annotations
 

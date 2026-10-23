@@ -1,13 +1,7 @@
-"""Shared test doubles for the reconciler backend-port contract suite (S2, epic bbf1).
+"""Shared doubles for the reconciler backend-port contract tests (S2).
 
-Importable (non-test) helpers so the backend-agnostic contract tests can run against
-BOTH the real ``JiraBackend`` (with an injected fake transport) and an in-memory
-``FakeBackend``. Neither double encodes the Jira characterization oracle — that lives
-in the held-out characterization tests.
-
-The engine dir is placed on ``sys.path`` by the package conftest, so the reconciler
-modules import flat (``from rebar.reconciler import ...``).
-"""
+The same contracts use JiraBackend with fake transport and FakeBackend.
+Jira-specific output pins remain in held-out characterization tests."""
 
 from __future__ import annotations
 

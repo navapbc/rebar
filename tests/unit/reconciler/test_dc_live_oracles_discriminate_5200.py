@@ -1,11 +1,12 @@
-"""Keep repaired J11 live oracles discriminating without the DC harness.
+"""Keep repaired J11 DC oracles discriminating without the DC harness.
 
-The live image cannot run on this host, so tests import each oracle's actual
-``_dc_support`` logic rather than paraphrasing it. They guard three vacuity failures:
-the inbound assignment cell reused an already-assigned value and asserted only truthiness;
-outbound creation never asserted either ``rebar-id:`` provenance marker; and pagination
+Tests import each oracle's ``_dc_support`` logic by path and suppress its
+network harness probe during import. They guard assignment,
+provenance, and pagination vacuity. The inbound assignment cell reused an
+already-assigned value and asserted only truthiness. Outbound creation never
+asserted either ``rebar-id:`` provenance marker. Pagination
 measured its precondition through the pager under test, misclassifying truncation as index
-lag. Harness-free RED/GREEN checks ensure those exact live oracles expose each defect.
+lag. Harness-free RED/GREEN checks ensure those DC oracles expose each defect.
 """
 
 from __future__ import annotations
@@ -172,7 +173,7 @@ def test_the_writer_emits_the_COLON_label_form_and_nothing_emits_the_hyphen(supp
 
     ``create_route.py`` (the coordinated outbound create, the only create core since the
     legacy core in ``dispatch_one.py`` was deleted), ``apply_inbound_events.py``, and
-    ``binding_recovery.py`` must emit ``rebar-id:<local_id>``; the hyphen form is
+    ``binding_recovery.py`` must emit ``rebar-id:<local_id>``. The hyphen form is
     read-only legacy. File-based source checks catch string literals that semantic
     references cannot and must be retargeted if a writer moves. The recording-client
     recovery test is the behavioral authority if it ever disagrees with this
@@ -308,7 +309,7 @@ class _ClampingSearch:
 
 
 def _truncating_paged_search(server: _ClampingSearch) -> list[dict[str, Any]]:
-    """Model the old pager: advance by requested size and stop on a capped short page."""
+    """Model the old pager. Advance by requested size and stop on a capped short page."""
     status, body = server("/rest/api/2/search?jql=project%3DRBJ&startAt=0&maxResults=100")
     assert status == 200
     issues = body["issues"]
@@ -340,7 +341,7 @@ def test_the_raw_count_sees_every_issue_a_clamped_search_withholds(support: Any)
 def test_the_old_precondition_fails_on_the_very_defect_it_disclaimed(support: Any) -> None:
     """Prove the old precondition hides the pagination defect it disclaims.
 
-    The broken pager reports 50 of 201 and blames index lag; raw REST reports all 201 so
+    The broken pager reports 50 of 201 and blames index lag. Raw REST reports all 201 so
     the cell reaches the assertion that identifies truncation.
     """
     server = _ClampingSearch(total=201, clamp=50)
@@ -380,7 +381,7 @@ def test_the_raw_count_surfaces_a_failed_request_instead_of_counting_zero(suppor
     assert "HTTP 503" in str(excinfo.value)
 
 
-# Row 12 outbound needs its own write oracle: the neighboring clear-parent test only
+# Row 12 outbound needs its own write oracle. The neighboring clear-parent test only
 # observes a parent supplied during issue creation. The harness-free fake drives the DC
 # transport so both parent-write paths remain executable contracts.
 
@@ -467,8 +468,8 @@ def test_dc_set_parent_WRITES_fields_parent_for_a_subtask() -> None:
 def test_dc_set_parent_USES_A_DIFFERENT_PATH_for_the_non_subtask_case() -> None:
     """Keep epic and sub-task parent writes on distinct DC paths.
 
-    A non-sub-task uses the instance-discovered Epic Link custom field; the GreenHopper
-    route is refuted by DC 8.17.1's 404. The fake exposes ``fields()`` so discovery is real
+    A non-sub-task uses the instance-discovered Epic Link custom field. The GreenHopper
+    route is refuted by DC 8.17.1's 404. The fake exposes ``fields()`` so discovery runs
     rather than a vacuous decline. No non-sub-task may receive ``fields.parent``, which DC
     silently ignores.
     """

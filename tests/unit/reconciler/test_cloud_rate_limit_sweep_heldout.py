@@ -1,7 +1,7 @@
 """Held-out per-member census of Cloud (ACLI) 429 behavior.
 
 Cloud mutations cross three boundaries: pooled REST and bare ``urlopen`` make one
-attempt; the ACLI subprocess performs bounded ``Retry-After`` retries; reporter and
+attempt. The ACLI subprocess performs bounded ``Retry-After`` retries. Reporter and
 comment apply phases explicitly remain single-attempt. ADR 0103 S3 retired the
 handler-level retry wrapper, so no dispatch-level retry sits above the transport. The
 tables below assign every mutation its transport seam, dispatch level, attempt policy,
@@ -9,10 +9,10 @@ and duplicate-write disposition, while ``_NON_MUTATING``
 accounts for every read, helper, and constructor so new members cannot inherit a
 policy silently.
 
-Deliberately retried operations are idempotent or deduplicated: creates use the
+Deliberately retried operations are idempotent or deduplicated. Creates use the
 ``rebar-id`` lookup, edits target stable fields or ids, label operations are set-like,
 and deletes tolerate absence. Relationship creation can duplicate transiently but the
-differ reconverges; comment creation has no idempotency key and therefore stays
+differ reconverges. Comment creation has no idempotency key and therefore stays
 single-attempt. The boundary tests and enumeration check reject missing members,
 unbounded retries, ignored ``Retry-After``, and accidental retries on non-retrying
 paths.

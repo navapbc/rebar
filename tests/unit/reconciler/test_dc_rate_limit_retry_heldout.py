@@ -3,7 +3,7 @@
 Retry eligibility follows the header, not assumed Jira versions or limiter defaults.
 Because ``_with_connection_retry`` also serves non-idempotent writes, blanket 429 replay
 could duplicate issues or comments. Retries therefore default off and are enabled only by
-callers whose operation is safe; tests cover the default, bounded delay, and header-driven
+callers whose operation is safe. Tests cover the default, bounded delay, and header-driven
 read retry.
 """
 

@@ -1,18 +1,9 @@
-"""Binding-store-driven acting walk — drift classes A + C (epic 3006-e198).
+"""Binding-store walk handles terminal, absent, and unbound Jira issues.
 
-RED-first cells for the ONE shared walk that heals:
-
-* **class A (444d)** — a locally archived/deleted ticket drives its live Jira issue
-  to Done in one pass (``TERMINAL_TRANSITION``); an already-Done issue is a no-op.
-* **class C (13eb)** — a confirmed binding whose Jira issue is a confirmed 404
-  retires after GRACE consecutive misses (reversible soft-delete), even though the
-  local ticket is archived (invisible to the active-snapshot differ). Regression
-  guards: an out-of-window ALIVE key never retires; a transport error defers
-  WITHOUT advancing grace; the circuit breaker refuses a mass-retire/transition
-  pass BEFORE any mutation.
-
-Follows the reconciler test-tree loader convention (spec_from_file_location).
-"""
+An archived local ticket transitions Jira to Done. A confirmed 404 retires
+only after grace, while an alive key or transport error does not. An unbound
+present issue adopts unless identity or retired state forbids it. The breaker
+rejects mass action before mutation, and dry run leaves the store unchanged."""
 
 from __future__ import annotations
 
@@ -429,17 +420,11 @@ def test_class_b_empty_rebar_id_marker_is_adopted(tmp_path: Path) -> None:
 
 
 def test_class_b_marked_but_unstored_key_is_readopted(tmp_path: Path) -> None:
-    """Bug 2392-9389-39f9-4ca6: the lost-final-push runner residue MUST replay.
+    """Replay a lost final push for a deterministic inbound marker.
 
-    Runner 1 adopted a Jira-native issue — CREATE event + binding written, the
-    ``rebar-id:jira-reb-3510`` label stamped on Jira — then its final tickets push
-    was rejected (non-fast-forward) and the EPHEMERAL runner was destroyed: the
-    label persisted while the local CREATE + binding were lost. The next pass sees
-    a present, UNBOUND key whose ONLY marker is exactly the DETERMINISTIC inbound
-    id, with no binding-store entry for that id and no local ticket. That is proof
-    of a lost adopt, not of a live binding — the walk must fall through to the
-    ADOPT arm (idempotent replay: same deterministic local id) instead of standing
-    down on the L10 guard forever (permanent unbound_jira drift; REB-3510)."""
+    The Jira label survives, but the local create and binding did not. With no
+    local ticket or binding-store entry, adopt the key using the same local id.
+    Do not treat that marker as proof of a surviving binding."""
     bs = _empty_store(tmp_path)  # the binding died with runner 1
     fields = {
         "summary": "adopted, then the runner died before the push",

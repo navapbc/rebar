@@ -1,39 +1,9 @@
-"""HELD-OUT: Cloud's three whole-project readers must page to exhaustion (bug 0fad).
+"""Cloud whole-project graph readers must follow cursor pages to exhaustion.
 
-WHY THIS MODULE EXISTS. ``adapters/jira/acli_graph.py``'s ``get_parent_map``,
-``get_comment_map`` and ``get_issuelinks_map`` each walk an ENTIRE project through the
-opaque ``nextPageToken`` cursor of ``POST /rest/api/3/search/jql``. Until this module,
-NO test drove any of them past a single page: the only coverage
-(``mutate/test_acli_cross_mixin_binding.py``) feeds one payload carrying ``isLast: True``.
-
-That gap sits on top of a defect class this codebase has shipped THREE times, always as
-a silent truncation of a whole-project read — never as an error:
-  * change 1105 — DC ``get_parent_map`` advanced by the REQUESTED page size and stopped on
-    a short page; measured 20 of 250 parents recovered (92% silently lost);
-  * [rebar:9263-b404-cb6c-463f] — the same bug in DC ``get_issuelinks_map`` /
-    ``get_comment_map``;
-  * [rebar:deac-4f5a-856a-49bd] — the same bug in ``fetcher._iter_pages``, which lost the
-    ISSUES themselves and so made every unseen bound issue a deletion candidate.
-DC now has ``test_dc_transport_pagination_heldout.py`` pinning all of this. Cloud had
-nothing, which is backwards relative to risk: Cloud is the deployment in production use.
-
-WHAT THE INVESTIGATION FOUND. Cloud's readers page CORRECTLY today — they are cursor-driven
-(echo the server's opaque token back) rather than offset-driven, so the advance-by-requested-
-size arithmetic that broke DC does not exist here to get wrong. This module is therefore a
-REGRESSION NET, not a bug reproduction: every oracle below has been mutation-checked to go
-red when the loop is broken after the first page or made to stop on a short page.
-
-The runaway-cursor hole this module originally pinned as a strict-xfail —
-[rebar:cabc-7a98-d173-4d7c], a server repeating the same cursor token spun the loop until
-the transport failed and the fail-open handler swallowed THAT into a silent partial map —
-is now CLOSED [rebar:ab7f-f0cc-7384-43a7]: all three readers route through the module's
-single shared ``_iter_cursor_pages`` walk, which raises ``RunawayPaginationError`` on a
-same-token-twice stall, and the readers re-raise it PAST their fail-open handlers.
-
-DELIBERATE LITERALS. ``_EXPECTED_PAGE_SIZE`` below is a module-local literal spelling what
-the reader is expected to request, NOT an import of the reader's own ``page_size``. Deriving
-it from the code under test makes the assertion move with the bug and it can never fail.
-"""
+Parent, comment, and issue-link readers must survive short pages and reject a
+repeated cursor with RunawayPaginationError, even across fail-open handlers.
+Keep the expected page size as a test literal so it cannot drift with the
+reader. These held-out checks prevent silent partial maps."""
 
 from __future__ import annotations
 

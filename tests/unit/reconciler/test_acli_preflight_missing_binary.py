@@ -1,24 +1,8 @@
-"""Ticket 3581-9cf1 — `acli` is an undeclared runtime prerequisite of the Jira Cloud path.
+"""Cloud ACLI preflight reports a missing binary as AcliNotInstalledError.
 
-A non-container `pip install` succeeds without the `acli` (Atlassian CLI) binary, and then
-every Jira **Cloud** mutation used to die with a bare
-``FileNotFoundError([Errno 2] No such file or directory: 'acli')`` — an errno that names a
-file, not a missing dependency, with no install pointer.
-
-These held-out oracles pin the DECLARATION/preflight contract this ticket owns (distinct from
-the transport-internals verdict mapping in ``access_check.py``, ticket ac93):
-
-- A missing `acli` produces a **typed, actionable** ``AcliNotInstalledError`` naming the binary,
-  the Jira Cloud requirement, and the install-doc remedy — not a bare ``[Errno 2]``.
-- The typed error subclasses ``FileNotFoundError`` so existing/future handlers keep catching it.
-- Three states are DISTINGUISHED, not merely three failures: missing-binary (typed error raised)
-  vs missing-credentials (empty settings, no error) vs present (available + populated).
-- A positive control with a stub `acli` on PATH proves the preflight is not unconditionally
-  failing.
-
-The absence is driven by REAL ``PATH`` manipulation (a temp dir with no `acli`), never by
-monkeypatching the check away.
-"""
+The FileNotFoundError subtype names the binary and install remedy. Missing
+credentials remain a separate state, while an ACLI stub on PATH proves the
+positive case. Drive absence through PATH instead of bypassing the check."""
 
 from __future__ import annotations
 

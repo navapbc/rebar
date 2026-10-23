@@ -1,15 +1,8 @@
-"""HELD-OUT characterization of JiraBackend delegation (S2, epic bbf1).
+"""Held-out JiraBackend delegation checks (S2).
 
-Byte-for-byte pins on the CURRENT outputs of the pure Jira mappers/sanitizers,
-asserting that ``JiraBackend``'s role Protocols delegate to them with ZERO behaviour
-change. The expected values were captured from the pre-story ``main`` functions
-(``outbound_fields._map_local_to_jira_fields``, ``inbound_fields._map_jira_to_local_fields``,
-``adapters/jira/jira_fields`` sanitizers). A delegation that drops or rewires a map
-fails here.
-
-This file is HELD OUT from the implementation subagent — it is the oracle that proves
-the delegation is faithful, not a spec the implementer codes against.
-"""
+Pin mapper and sanitizer output literals from the pre-story functions. A
+backend delegate must preserve those values without dropping or rewiring a
+mapping."""
 
 from __future__ import annotations
 

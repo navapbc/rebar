@@ -1,7 +1,7 @@
 """Pin Jira Cloud's positive empty-assignee unassign contract (bug 6a74).
 
-The differ sends ``assignee=""``; forwarding that as ``--assignee ""`` silently
-does nothing. The transport must instead issue the real Cloud unassign request,
+The differ sends ``assignee=""``. Forwarding that as ``--assignee ""`` silently
+does nothing. The transport must instead issue the Cloud REST unassign request,
 ``PUT /assignee`` with ``{"accountId": null}``, and must never place an empty
 ``--assignee`` flag in ACLI argv. Assertions inspect the resulting REST body and argv,
 not merely calls or exceptions, because silent success is the guarded failure mode.

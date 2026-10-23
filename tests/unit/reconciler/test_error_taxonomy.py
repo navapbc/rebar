@@ -2,7 +2,7 @@
 
 Both public surfaces must expose the same ``RetryExhaustedError`` from ``_errors`` with
 the required ``RuntimeError`` and ``ReconcilerError`` ancestry. ADR 0103 S3 retired the
-batch path's handler-level retry loop, so its cause-chain pin went with it; the type stays
+batch path's handler-level retry loop, so its cause-chain pin went with it. The type stays
 public for transports that raise it. Oracles use identity and MRO rather than source-text
 heuristics.
 """
