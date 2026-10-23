@@ -1,21 +1,8 @@
-"""Public-import contract for the config WRITE path after its extraction into
-``rebar._config_writer`` (rebar-ticket a66c-9329-e9c9-4aec).
+"""Keep config writer names available through the public facade.
 
-``rebar.config`` is PUBLIC SURFACE: consumers do ``from rebar.config import X``, and the
-CLI onboarding wizard reaches the writer as a module attribute
-(``_config.write_jira_config`` in ``rebar._cli._jira_onboard``). The private
-``_emit_toml`` is likewise reached as ``cfg._emit_toml`` by ``tests/unit/test_jira_onboard.py``.
-
-Splitting a module MOVES symbols, so this pins the two things a split must not break:
-
-  1. both names still resolve through ``rebar.config`` — by ``from``-import AND by module
-     attribute (the form the CLI and the existing tests actually use);
-  2. each resolves to the SAME object the new home defines, i.e. the facade re-exports the
-     one implementation rather than keeping a divergent copy behind.
-
-Point 2 is what makes this a contract rather than a smoke test: a copy-instead-of-move
-would satisfy point 1 while silently forking the writer.
-"""
+``write_jira_config`` and ``_emit_toml`` must resolve through imports and
+module attributes on ``rebar.config`` and be the same objects defined in
+``rebar._config_writer``. Copies would fork the implementation."""
 
 from __future__ import annotations
 

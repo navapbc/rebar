@@ -1,16 +1,8 @@
-"""The container pass's sibling roster (bug creamy-cocksure-elkhound).
+"""Give container criteria each sibling's acceptance criteria.
 
-``G3`` asks whether the union of children covers each parent acceptance criterion, and the
-container prompt tells it to flag an absence "only if NO sibling in the roster covers it".
-The roster it was handed carried ids and TITLES ONLY, which cannot discharge that burden — so
-the anti-false-positive rule correctly silenced the finding every time and G3 could never fire
-on an uncovered parent criterion.
-
-These tests pin the repair: the roster carries each child's acceptance criteria, ONE shared
-builder serves every caller (so the eval harnesses cannot drift from production), the roster
-rides the cached prefix instead of being re-sent per pairing, and its tokens are counted in
-the prefix estimate that packs container bins.
-"""
+The shared roster builder must expose child criteria to G3, send the roster
+in the cached prefix rather than each pairing, and count its tokens when
+packing container bins."""
 
 from __future__ import annotations
 
@@ -101,12 +93,7 @@ def test_roster_tolerates_absent_description() -> None:
 
 # ── single sourcing ───────────────────────────────────────────────────────────
 def test_roster_builder_single_sourced() -> None:
-    """Every non-test caller of ``pass1_container`` builds its roster with the ONE shared
-    helper. Three independent copies of the expression existed; the two eval paths would have
-    kept sending title-only rosters while production sent AC-bearing ones — and those
-    harnesses are what generate the dogfooding evidence for G3's deferred posture decision,
-    so the divergence would have corrupted the data it rests on.
-    """
+    """Production and eval callers must share the AC-bearing roster builder."""
     for module in (pass1, fidelity_spot_eval, eval_solver):
         src = inspect.getsource(module)
         assert "build_sibling_roster" in src, f"{module.__name__} does not use the shared builder"
@@ -126,10 +113,7 @@ def test_eval_fixture_roster_override_wins() -> None:
 
 # ── where the roster is sent ──────────────────────────────────────────────────
 def test_roster_rides_prefix_not_instructions() -> None:
-    """The roster is byte-identical across a review's pairings, so it belongs in the cached
-    prefix. Left in ``instructions`` (after the per-pairing children block) it would be
-    re-sent once per pairing — cost growing with the SQUARE of the child count now that it
-    carries every child's criteria."""
+    """Cache the shared roster in the prefix instead of resending it per pairing."""
     cap = _Capturing()
     passes.pass1_container(
         cap,

@@ -1,24 +1,8 @@
-"""Bug b0e0-7603: the ``checkout-index`` call in ``_apply_delta`` must be bounded.
+"""Bound ``_apply_delta``'s ``checkout-index`` by the sibling git timeout.
 
-``_apply_delta`` runs two git subprocesses back to back against the same temp index. The
-``read-tree`` goes through :func:`rebar._snapshot.git_fetch.git_run`, bounded by
-``_GIT_TIMEOUT`` (300s) — but the ``checkout-index`` (the expensive call: it writes the
-actual blob content, ~620 MiB / 70k blobs for a full ticket tree) bypassed that wrapper via
-``run_git`` with no ``timeout=``, so a stall on a slow or wedged volume had no upper bound
-and no diagnostic.
-
-The contract (ticket b0e0-7603): bound ``checkout-index`` by the SAME timeout its sibling
-uses; a timeout is a structured failure — ``_apply_delta`` returns ``False`` so callers fall
-back to full materialization (fail-closed, like every other doubt in this module) — and it
-is surfaced in a diagnostic naming the operation, so a stall is distinguishable from slow
-progress. ``_GIT_TIMEOUT`` itself is explicitly out of scope and pinned unchanged.
-
-The stall test drives the REAL ``_apply_delta`` against a fake ``git`` on ``PATH`` that
-sleeps on ``checkout-index`` (the 093a pattern), with the bound shrunk via monkeypatch so
-the test is quick; nothing here asserts a tight elapsed time — the ceiling asserted is far
-under the fake's sleep, so it can only pass because the call was cut off.
-
-Everything here is offline: no network, no LLM.
+On timeout it must report the operation and return ``False`` for full
+materialization fallback. A sleeping fake git command tests the wrapper call
+with a shortened bound. ``_GIT_TIMEOUT`` itself remains unchanged.
 """
 
 from __future__ import annotations

@@ -1,19 +1,9 @@
-"""Unit tests for the blocking clarity-floor DET checks (ticket 49b8).
+"""Pin separate blocking clarity checks while P6 stays advisory.
 
-Two SEPARATE blocking DET checks (P6 stays advisory and monolithic):
-
-* **P10 verification-presence** — a leaf plan must carry a ``## Testing`` /
-  ``## Verification`` H2 section OR >=1 AC checklist item with an inline code
-  span or a verification-vocabulary match (the exhaustive regex in
-  ``det_clarity``).
-* **P11 AC vagueness** — the boundary-fixed vague lexicon (both word
-  boundaries; ``clean`` dropped; ``etc.`` kept with the code-span-proximity
-  exemption measured on ORIGINAL-line span positions) scanned over AC item
-  lines only.
-
-The ten false-positive fixture lines are transcribed from the 304-passed-plan
-backtest (each measured 0 FPs under the fixed rule) and MUST NOT fire; the
-three positive cases MUST fire.
+P10 requires a Testing/Verification heading or an AC item with a code span or
+verification term. P11 scans only AC items for bounded vague words (including
+``etc.`` but not ``clean``), honoring the code-span exemption at original line
+positions. Negative and positive fixtures protect both boundaries.
 """
 
 from __future__ import annotations

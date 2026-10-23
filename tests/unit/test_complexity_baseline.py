@@ -847,12 +847,8 @@ def test_complexity_lock_runs_once_in_the_non_matrix_lint_job() -> None:
     assert "-f scripts/check_complexity_baseline.py" in step["run"]
 
 
-# ── the lock's base of comparison (bug humble-cinnamoned-mussel) ───────────────────────────
-# The lock rejects a ceiling HIGHER on the branch than on its base. Judged against main's TIP,
-# a branch that never touched the baseline is measured against a main that moved on — so the
-# moment any change LOWERS a ceiling on main, every un-rebased branch still carrying the old
-# file reads as RAISING it, and the shrink-only ratchet punishes the shrinking it exists to
-# reward. It is judged against the MERGE BASE, so only entries the branch itself changed count.
+# Compare against the merge base. A ceiling lowered on main must not make an
+# untouched older branch appear to raise its baseline.
 
 _KEY = "src/rebar/_commands/transition_close.py::close_ticket"
 
@@ -1015,13 +1011,7 @@ def test_no_merge_base_falls_back_to_the_tip_and_says_so(tmp_path: Path, monkeyp
 def test_tree_assertions_agree_with_gate_on_a_reduction(
     tmp_path, monkeypatch, capsys, current, expect_rc, expect_token
 ):
-    """A genuine complexity REDUCTION must get the SAME verdict locally and in CI.
-
-    ``make lint`` runs ``--check``, which allows ``stale>0`` as an improvement
-    (script docstring, "Exit-code contract"). The tree-scoped assertions CI runs
-    must not be stricter, or a contributor who improves a baselined function gets a
-    green ``make lint`` and a red ``Verified`` -- which is what Gerrit 1928 hit.
-    """
+    """A lowered complexity ceiling must pass both local ``--check`` and CI tree assertions."""
     baseline_file = tmp_path / "baseline.json"
     _write_committed_style_baseline(
         baseline_file, {"src/rebar/a.py::a": 20, "src/rebar/b.py::b": 25}

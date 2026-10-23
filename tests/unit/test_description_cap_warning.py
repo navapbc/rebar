@@ -1,17 +1,9 @@
-"""Save-time warning for a description the plan-review gate will refuse to admit.
+"""Warn at save time when a description exceeds the review admission cap.
 
-The admission cap (``verify.max_ticket_description_chars``, default 8,000) blocks
-``review-plan`` and the completion verifier — but only when one of those runs, which is
-long after the description was written. Four sessions in one night discovered the limit
-at review time (8,001 / 8,001 / 8,180 chars, and an epic with three children at 11k-22k),
-so the cost was paid as rework rather than as a keystroke.
-
-These tests pin the earlier feedback loop: a ``create``/``edit`` that puts the description
-over the SAME configured cap warns immediately, on each surface's own channel — CLI stderr,
-the library logger, and an MCP result field (the ``push_status`` precedent: an MCP client
-reads only the tool result). And they pin what it must NOT do — it never fires when the
-plan-review start-work gate is off or the type is exempt, never fires within the cap, and
-never blocks, alters, or fails the write it is warning about.
+``create`` and ``edit`` warn before review or completion verification through CLI stderr, the
+library logger, or the MCP result. The warning is absent for exempt types, a
+disabled start-work gate, and descriptions within the cap. It never changes
+or blocks the write.
 """
 
 from __future__ import annotations

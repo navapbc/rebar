@@ -1,20 +1,8 @@
-"""Completion-verifier diagnosability + determinism scoping (bug e458).
+"""Pin deterministic inputs and diagnostics for completion verification.
 
-Root cause (proven by instrumented trace): the verifier's test-existence judgment depends on the
-agent's variable, fallible free-form search (it silently no-matches on regex/semantic queries
-against the literal-substring `search_files` tool), so it non-deterministically reports a test
-absent when the tool provably retrieves it. Two of the three scoped fixes are deterministic code
-changes pinned here:
-
-* the COMPLETION_VERDICT sidecar records `verified_at_sha` (+ `trace_id`) so any residual drift is
-  provably on identical input (closes the diagnosability gap: today the record can't distinguish
-  non-determinism from input drift).
-* the completion verifier pins sampling temperature to 0 by default (variance mitigation), unless
-  an operator explicitly set one.
-
-(The third fix — the prompt guidance to search by ticket-id/exact-symbols, not regex/semantic
-phrases — is an LLM-surface prompt change, validated behaviorally, not by a unit test.)
-"""
+PASS and FAIL sidecars carry ``verified_at_sha`` and ``trace_id`` to expose
+input drift. The verifier defaults to temperature zero unless an operator
+sets another value. Prompt-search guidance is checked separately."""
 
 from __future__ import annotations
 

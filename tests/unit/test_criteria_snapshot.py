@@ -1,16 +1,9 @@
-"""RP-06 S1 — the immutable effective review-policy snapshot (``CriteriaSnapshot``).
+"""Pin the effective review-policy snapshot across overlay and routing consumers.
 
-These are real producer→consumer contract tests: they feed a real project
-``.rebar/criteria_routing.json`` overlay through the loader and the snapshot compiler,
-then assert the exact selected policy, its source provenance, the deterministic digest,
-and gate-specific applicability. One tier lower is insufficient because the defects this
-snapshot removes occur BETWEEN the overlay producer and the packaged-routing consumers.
-
-Applicability contract (the edge RP-06's plan-review flagged): for a ``code_review``
-``project.``-prefixed LLM criterion, ``applies_to: ["**"]`` selects the criterion
-UNCONDITIONALLY — including for a review whose ``changed_files`` set is empty — exactly
-reproducing the prior ungated ``applies_to: []`` short-circuit, so migrating
-``project.review-phase-boundaries`` from ``[]`` to ``["**"]`` never regresses at that edge.
+An on-disk ``.rebar/criteria_routing.json`` overlay passes through the loader and
+snapshot compiler. Tests check selected policy, provenance, digest, and gate
+applicability. For a code-review project LLM criterion, ``["**"]`` selects even
+with no changed files, preserving the prior ungated ``[]`` behavior.
 """
 
 from __future__ import annotations
@@ -135,14 +128,9 @@ def test_repository_wide_glob_selects_changed_files(tmp_path):
     assert decision.reason == "repository-wide"
 
 
-# ══════════════════════════════════════════════════════════════════════════════════
-# HELD-OUT: edge / negative-control / contract oracle (validated by the orchestrator).
-# ══════════════════════════════════════════════════════════════════════════════════
+# Repository-wide selection must include the empty changed-file case.
 def test_repository_wide_selects_on_empty_changed_files(tmp_path):
-    """THE DIVERGING EDGE (RP-06 blocking finding T8): ``["**"]`` selects UNCONDITIONALLY
-    even when ``changed_files`` is empty — reproducing the prior ungated ``[]`` short-circuit
-    (``if not globs: return True``), which ``any(glob_match … over [] )`` would have flipped
-    to False."""
+    """``["**"]`` selects with no changed files, as the old ungated ``[]`` did."""
     root = _make_repo(tmp_path, _overlay(cr_globs=["**"]))
     snap = compile_snapshot(repo_root=root)
     decision = snap.code_review_project_applies("project.house-style", [])
@@ -201,11 +189,7 @@ def test_plan_review_project_criteria_do_not_adopt_code_review_glob_rule(tmp_pat
 
 @pytest.mark.parametrize("det_applies_to", [[], None], ids=["empty-list", "missing"])
 def test_code_review_project_det_is_exempt_from_nonempty_glob_rule(tmp_path, det_applies_to):
-    """NEGATIVE CONTROL (AC2 scoping): the stricter NON-EMPTY-glob rule guards code-review
-    project ``exec != DET`` (LLM) criteria ONLY — a ``code_review`` ``project.`` DET detector
-    with an EMPTY or MISSING ``applies_to`` still COMPILES (deterministic detectors incur no
-    model cost, so they are not gated on a non-empty applies_to), whereas the identical shapes
-    are REJECTED for an LLM criterion (see the sibling LLM-rejection test)."""
+    """DET project criteria accept empty or missing globs. Code-review LLM criteria do not."""
     overlay = _overlay(cr_globs=["**"])
     if det_applies_to is None:
         del overlay["code_review"]["project.secret-shape"]["applies_to"]

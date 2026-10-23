@@ -1,12 +1,7 @@
-"""Held-out red-proofs for the config-gate wiring parity (RP-04 S7.2, ticket 735b).
+"""Pin config-gate wiring with held-out negative controls.
 
-WITHHELD from the implementation subagent. These prove the parity assertions in
-test_ci_workflow_parity.py have TEETH: fed synthetic edited copies of the Makefile / the
-reusable workflow, the same invariant must FLIP (detect the removal / the double-run),
-so a silently dropped gate invocation cannot pass unnoticed.
-
-Assertions target observable text-invariants of the shipped config files only.
-"""
+Synthetic Makefile and workflow edits must make the shipped parity assertions
+fail when an invocation is removed or duplicated."""
 
 from __future__ import annotations
 

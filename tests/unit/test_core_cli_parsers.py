@@ -1,23 +1,10 @@
-"""Happy-path oracle for RP-05 S2b core-command parser factories.
+"""Pin core command routes to parser factories.
 
-This pins the *shape* of the migration the implementer builds to; the byte-exact
-behavioral/parity surface (per-family unknown-token semantics, help text,
-diagnostics, exit codes) lives in the held-out interface oracle, not here.
-
-The contract:
-
-* Every registered **core** command Route (everything that is not an advanced
-  ``intercept`` family and not the already-migrated ``metrics``) carries a
-  ``parser_factory`` reference after S2b — no core Route is left with the
-  imperative-only grammar RP-05 exists to remove.
-* Each referenced factory is a lean ``callable(*, prog=...)`` that constructs a
-  :class:`RebarArgumentParser` bound to ``prog`` (the S2a contract).
-* A representative valid argv parses without error through the built parser.
-* Constructing the core parser package imports no heavy optional runtime.
-* **The command's runtime handler actually parses argv THROUGH its factory** —
-  the factory is not dead declaration: a real invocation of the command routes
-  through it (the metrics/audit precedent, AC1 de-duplication + AC4 isolation).
-"""
+Each core route (excluding advanced intercept families and ``metrics``) has a lean
+``prog``-bound ``RebarArgumentParser`` factory that
+accepts representative argv, loads without heavy optional dependencies, and
+is used by its runtime handler. Detailed help and error parity lives in the
+held-out interface oracle."""
 
 from __future__ import annotations
 
@@ -218,14 +205,8 @@ print('OK', built)
     assert result.stdout.startswith("OK "), result.stdout
 
 
-# --- AC1/AC4: the handler actually parses THROUGH its factory --------------
-#
-# The whole point of the migration is that each core command's runtime parses
-# via its S2a factory (the metrics/audit precedent: the handler does
-# ``build(prog=...).parse_args(argv)``). A factory that merely exists as a
-# ``Route.parser_factory`` declaration while the handler keeps parsing argv
-# imperatively is EXACTLY the duplicate grammar RP-05 exists to remove. These
-# spy on the declared factory and prove a real command invocation calls it.
+# A declared factory must also parse a command invocation. Otherwise
+# the handler could retain a separate imperative grammar.
 
 
 @pytest.fixture
@@ -311,14 +292,8 @@ def test_summary_runtime_parses_through_its_factory(
     assert seen == ["rebar summary"], "rebar summary did not parse through its core factory"
 
 
-# --- AC1 governance: the factory GOVERNS, it is not called-and-discarded -----
-#
-# A handler that runs its factory purely to satisfy the isolation spy but then
-# parses argv imperatively (discarding the factory's namespace) leaves the exact
-# parallel imperative grammar RP-05 removes. To prove the factory is the parser
-# of record, replace it with one that REJECTS the command's otherwise-valid argv
-# and assert the invocation now fails: if the factory governs, the rejection
-# propagates; if it is discarded, the command still succeeds (RED = theater).
+# Replacing the factory with a rejecting parser must reject otherwise-valid
+# argv. That proves the handler uses its result, not a parallel grammar.
 
 
 def _rejecting_parser(prog: str) -> RebarArgumentParser:

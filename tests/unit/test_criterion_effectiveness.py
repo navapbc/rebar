@@ -1,12 +1,9 @@
-"""Golden tests for the standing per-criterion effectiveness recorder (epic 6982, extends R7).
+"""Pin reproducible per-criterion effectiveness metrics.
 
-The recorder lives under ``docs/experiments/plan-review-gate/harnesses/`` (not a package), so — as
-with ``test_gate_eval_classifier.py`` — we load it by path. This pins the CI-verifiable core: the
-pure ``firings_from_review`` extraction, the ``compute_effectiveness`` detection/de-escalation/
-window/zero-denominator logic (on synthetic fixtures with known round sequences), criterion
-auto-inclusion, and a regression that the committed metrics artifact is exactly reproducible from
-the committed firing ledger and is non-trivial over the real corpus. The live-store ``--record``
-path is exercised out-of-band (the AC proving commands), mirroring R7's ``--verify-repro`` posture.
+The harness is loaded by path because it is outside the package. Synthetic
+rounds cover firing extraction, detection, de-escalation, windows, zero
+denominators, and criterion inclusion. The committed metrics must reproduce
+from the firing ledger. Store-backed ``--record`` runs separately.
 """
 
 from __future__ import annotations

@@ -19,15 +19,10 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture(autouse=True)
 def _clean_config_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Strip ambient config so each test sees only what it sets up. Clears the
-    CANONICAL env name for every key (which for jira.*/some reconciler.* keys is an
-    ergonomic name like JIRA_URL, not the auto-derived REBAR_<SECTION>_<KEY>) plus
-    every deprecated alias — otherwise an exported JIRA_URL etc. leaks into the
-    'sources' provenance.
+    """Clear canonical and legacy environment keys and use an empty XDG directory.
 
-    Point XDG_CONFIG_HOME at an EMPTY per-test dir (not delenv). Deleting it would
-    make ``user_config_path()`` fall back to ``~/.config/rebar/config.toml`` — the
-    developer's real config — defeating conftest's hermetic isolation (d716)."""
+    Unsetting XDG would expose the developer's user config and corrupt
+    provenance assertions."""
     monkeypatch.delenv("REBAR_CONFIG", raising=False)
     xdg_empty = tmp_path / "xdg-empty"
     xdg_empty.mkdir(exist_ok=True)
@@ -50,15 +45,7 @@ def _proj(tmp: Path) -> Path:
 def test_module_fixtures_do_not_leak_real_user_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Guards the d716 defect: the module-local ``_clean_config_env`` autouse fixture
-    must NOT undo conftest's hermetic user-config isolation. It previously did a
-    ``monkeypatch.delenv("XDG_CONFIG_HOME")`` which, once XDG was gone, made
-    ``user_config_path()`` fall back to ``~/.config/rebar/config.toml`` — the real
-    developer config — leaking a host-dependent layer into resolution.
-
-    We simulate that host config by planting a NON-default user config under a fake
-    ``$HOME`` (``os.path.expanduser("~")`` honors ``$HOME`` on POSIX). Under correct
-    isolation ``load_config`` must never read it; the planted value must not appear."""
+    """A planted home config must stay outside this module's isolated resolution."""
     fake_home = tmp_path / "home"
     user_cfg_dir = fake_home / ".config" / "rebar"
     user_cfg_dir.mkdir(parents=True)

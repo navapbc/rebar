@@ -1,18 +1,8 @@
-"""The container stage's warm-call abort-vs-degrade ruling (ticket shaggy-crass-bull).
+"""Pin abort versus degrade after a warm container call fails.
 
-``container_stage._run_container`` runs the container criteria (G3/G4) warm-then-fan-out:
-one pairing runs serially first to write the shared cache prefix, then the rest fan out.
-A SYSTEMIC failure on that warm call (``LLMUnavailableError``, or — bug 43d4 —
-``LLMInputRejectedError``, which rejects identically for every remaining pairing) must
-ABORT the whole stage rather than fan out N-1 doomed calls; any other warm failure must
-DEGRADE to a direct fan-out of ALL pairings (never hang, never abort). The module had zero
-referencing tests, so both halves of that ruling were unpinned — reverting the
-``isinstance`` arm to its pre-43d4 form left the suite green.
-
-These tests drive the REAL ``_run_container`` with ``passes.pass1_container`` (the
-model-call boundary ``_timed_pairing`` invokes) monkeypatched, over a fixture sized so the
-warm gate (``parent_tokens >= CACHE_MIN_PREFIX_TOKENS and len(pairings) >= 2``) is met.
-"""
+Systemic ``LLMUnavailableError`` or ``LLMInputRejectedError`` aborts the stage.
+Other warm failures fan out all pairings. Tests drive the container stage
+with the model-call seam patched and enough tokens to enter the warm path."""
 
 from __future__ import annotations
 

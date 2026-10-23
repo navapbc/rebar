@@ -1,12 +1,8 @@
-"""The cross-session warn set is derived from ``ROUTES``, not a hardcoded spelling list.
+"""Pin the cross-session warning policy to current CLI routes.
 
-``_execute.py`` carried 14 hardcoded command SPELLINGS and checked them with
-``if name not in _CROSS_SESSION_WARN_COMMANDS``. A route rename therefore dropped the warning
-silently: the stale spelling simply never matched again and nothing failed (mirror F11).
-
-WHICH verbs warn is a policy judgement and is NOT what this change touches. The mirror is only
-that the spellings must BE route names, which nothing enforced — so the fix flags the routes and
-derives the set, and these tests pin that the derivation did not move the policy.
+``ROUTES`` supplies warning membership, so a route rename cannot silently
+drop a warning. The recorded verb set checks that deriving it did not change
+which commands warn.
 """
 
 from __future__ import annotations
@@ -17,11 +13,9 @@ from rebar._cli import _execute, _registry
 
 pytestmark = pytest.mark.unit
 
-#: The spellings that warn, kept as a deliberate record so a refactor is provably
-#: policy-preserving. This is not a mirror of the route table: it is expected to need a
-#: deliberate edit whenever the policy is intentionally changed. The CLI-verb consolidation
-#: (epic toadyish-sulfurous-ovenbird) was one: ``tag``/``untag`` were removed (``edit``
-#: already warns) and ``check-ac``/``clarity-check`` merged into ``check``, 14 -> 11.
+#: Independent expected warning verbs. Change this list deliberately when policy
+#: changes. ``tag``/``untag`` now use ``edit`` and ``check-ac``/``clarity-check``
+#: now use ``check``.
 _LITERAL_BEFORE = frozenset(
     {
         "show",
