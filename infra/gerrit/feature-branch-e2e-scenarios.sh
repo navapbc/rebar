@@ -1,19 +1,9 @@
 # shellcheck shell=bash
-# ---------------------------------------------------------------------------
-# feature-branch-e2e-scenarios.sh — the seven scenario bodies for
-# feature-branch-e2e.sh (story leafy-vogue-ingot / epic 88ab S5). Sourced by the
-# driver, which provides: log/pass/harness/blocked, api_get/api_post/api_put/api_del,
-# push_for_review, poll_both_votes, account_vote, sr_status, change_status,
-# current_ps, change_kind, submit_change, CREATED_CHANGES, FB, GIT_HTTPS_URL,
-# GITHUB_REPO, LLM_REVIEW_MAX, VERIFIED_MAX, and the $tmp/repo clone (cwd).
-#
-# Each scenario emits `EVIDENCE: scenario=<n> <key>=<value> …` lines on stdout so
-# the operator can transcribe live change URLs + votes onto the epic ticket and the
-# committed evidence doc. Scenarios operate on the throwaway ${FB}; only scenario 3
-# lands a small, legitimate evidence-marker doc on main via the reviewed merge
-# change (it passes the two-vote gate like any change — that IS the assertion).
-# ---------------------------------------------------------------------------
-
+# Sourced scenario bodies for feature-branch-e2e.sh. The driver supplies Gerrit
+# API/push/vote helpers, branch settings, change tracking, and a throwaway clone.
+# Each scenario emits EVIDENCE: scenario=<n> fields for the operator. Scenario 3
+# alone submits a reviewed evidence marker to main. Scenario 4 records but does
+# not assert a Verified rerun. Scenario 7 cites concurrency/backfill evidence.
 _evi() { echo "EVIDENCE: scenario=$1 $2"; }
 
 # helper: build a commit off a given base ref adding one file, return nothing.

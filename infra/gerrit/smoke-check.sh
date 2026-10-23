@@ -1,28 +1,9 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# smoke-check.sh — verify the S4a review-bot plumbing end-to-end. Story S4a.
-#
-# Asserts (and DOCUMENTS, as runnable checks) the two properties S4b depends on:
-#
-#   1. DUAL-SCOPE BOT TOKEN — the bot's single HTTP token (SSM
-#      /rebar/prod/gerrit-bot-token) authenticates BOTH:
-#        (a) the Gerrit REST API at /a/  (GET /a/accounts/self), AND
-#        (b) git-over-HTTPS clone of the rebar repo (the receiver's read path —
-#            S4b clones the change ref into repo_root using this same credential).
-#      So no separate read key is provisioned (the S5 deploy key is GitHub-write-only).
-#
-#   2. EVENTS-LOG BACKFILL ENDPOINT — `GET /a/plugins/events-log/events/` returns
-#      recent events. NOTE: the TRAILING SLASH is REQUIRED — `/events` (no slash)
-#      404s; `/events/` (with slash) is the correct path. S4b's reconciler MUST use
-#      the trailing-slash form.
-#
-# Exits non-zero on any failed check (so CI / an operator can gate on it). The bot
-# token is read from SSM with the operator/instance AWS creds and never echoed.
-#
-# Env: GERRIT_HOST (default rebar.solutions.navateam.com), BOT_USER
-#      (default rebar-review-bot), SSM_TOKEN_PARAM (default
-#      /rebar/prod/gerrit-bot-token), AWS_REGION (default us-east-1), PROJECT (rebar).
-# ---------------------------------------------------------------------------
+# Check one SSM bot token against Gerrit REST /a/ and git-over-HTTPS clone,
+# then check the events-log backfill endpoint /a/plugins/events-log/events/.
+# The trailing slash is required. Accumulate failures and remove the temporary
+# clone on exit. Never print the token. GERRIT_HOST, BOT_USER, SSM_TOKEN_PARAM,
+# AWS_REGION, and PROJECT may be overridden.
 set -euo pipefail
 
 GERRIT_HOST="${GERRIT_HOST:-rebar.solutions.navateam.com}"

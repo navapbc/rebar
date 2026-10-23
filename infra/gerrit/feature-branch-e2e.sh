@@ -1,70 +1,14 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# feature-branch-e2e.sh — the committed LIVE 7-scenario verification artifact for
-# the epic-88ab "server-side feature branch + reviewed merge change" pattern
-# (story leafy-vogue-ingot / S5). Sibling to reviewbot-e2e.sh; where that script
-# proves the SINGLE-change happy path, this one proves the FEATURE-BRANCH flow —
-# stories reviewed INTO refs/heads/feature/<name>, then landed via one --no-ff
-# merge change to main — under the seven scenarios the story enumerates.
-#
-# It PROVES the flow against the RUNNING Gerrit (rebar.solutions.navateam.com) +
-# the deployed review bot + CI on the navapbc/rebar GitHub Actions mirror — not
-# offline unit tests. Every scenario records the live change number(s) and the two
-# votes it observed (LLM-Review from the review bot, Verified from the CI bot).
-#
-# DRIVE MODEL — HTTPS/REST (not the admin SSH key). All Gerrit ops go over HTTPS as
-# an operator who is BOTH an Administrator AND a feature-branch-drivers member:
-#   - push story change:  git push https://<user>@host/a/rebar HEAD:refs/for/feature/<fb>
-#   - push merge change:   git push … HEAD:refs/for/main   (the --no-ff merge commit)
-#   - read votes:          GET  /a/changes/<n>/detail?o=DETAILED_LABELS
-#   - submit requirements: GET  /a/changes/<n>?o=SUBMIT_REQUIREMENTS
-#   - submit:              POST /a/changes/<n>/submit
-#   - abandon (cleanup):   POST /a/changes/<n>/abandon
-#   - create/delete fb:    PUT/DELETE /a/projects/rebar/branches/<url-encoded>
-# The operator credential is read via `git credential fill` (osxkeychain / helper);
-# it is NEVER echoed. This mirrors reviewbot-e2e.sh's conventions (XSSI-stripping
-# api_get, the log/pass/harness/blocked terminal-state helpers, the vote/submit-
-# requirement parsers, and the GitHub-replication poll) but generalizes the vote
-# reader to BOTH labels and adds merge-change + branch-lifecycle + abandon steps.
-#
-# TERMINAL STATES (exit codes, caller-distinguishable — same convention as the
-# sibling script):
-#   - exit 0  PASS           — the scenario's assertions all held live.
-#   - exit 2  HARNESS-FAILURE — the pipe could not be exercised (auth/push/REST/
-#                              replication/timeout error). An infra problem, not a
-#                              verdict.
-#   - exit 3  GATE-BLOCKED   — a gate correctly declined (e.g. scenario 6: Verified=-1
-#                              blocks submit on an empty auto-merge diff). For the
-#                              scenarios whose EXPECTED outcome IS a block, this is
-#                              the PASS condition and the scenario function returns 0
-#                              after asserting the block; exit 3 is reserved for an
-#                              UNEXPECTED block.
-#
-# Fail-closed throughout. Cleanup (trap) abandons every throwaway change this run
-# created and deletes the e2e feature branch on both Gerrit and the GitHub mirror.
-#
-# DO NOT run in CI by default — it makes LIVE calls, pushes real (throwaway) changes,
-# and submits merge changes to main on a THROWAWAY feature branch's content only
-# (the merge changes are abandoned in cleanup unless a scenario explicitly submits
-# one as part of its assertion, in which case it lands throwaway content that is
-# immediately reverted — see per-scenario notes). Run by hand from an operator box.
-#
-# ---------------------------------------------------------------------------
-# Env (all defaulted except none — the operator credential comes from the helper):
-#   GERRIT_HOST           default rebar.solutions.navateam.com
-#   GERRIT_USER           default JoeOakhartNava   (admin + feature-branch-drivers)
-#   PROJECT               default rebar
-#   REVIEW_BOT_NAME       default "rebar review bot"   (casts LLM-Review)
-#   CI_BOT_NAME           default "rebar CI bot"        (casts Verified)
-#   LLM_REVIEW_MAX        default 1
-#   VERIFIED_MAX          default 1
-#   GITHUB_REPO           default navapbc/rebar
-#   FB                    default feature/e2e-<UTC-date>   (the throwaway branch)
-#   POLL_TIMEOUT_SECONDS  default 480   (CI on Actions can take minutes)
-#   POLL_INTERVAL_SECONDS default 8
-#   SCENARIOS             default "1 2 3 4 5 6 7"   (space list; run a subset)
-#   KEEP_FB               default ""    (set to 1 to skip feature-branch deletion)
-# ---------------------------------------------------------------------------
+# Manual scenarios on configured Gerrit. Use credential-helper HTTPS auth.
+# Never place passwords in URLs. Story changes target a temporary feature
+# branch. A reviewed merge change lands selected content on main. Wait for the
+# branch ref on GitHub before dispatching CI. Each scenario records current votes
+# and Gerrit change IDs. Commits carry DCO and ticket trailers.
+# Exit 0 means asserted scenarios passed, 2 means the harness could not exercise
+# the pipe, and 3 means an unexpected gate block. Cleanup abandons throwaway
+# changes and deletes test branches. It cannot undo content already merged.
+# This mutates configured Gerrit and GitHub and is run manually with admin plus feature
+# driver rights, not as a default CI job. Environment overrides are set below.
 set -euo pipefail
 
 GERRIT_HOST="${GERRIT_HOST:-rebar.solutions.navateam.com}"

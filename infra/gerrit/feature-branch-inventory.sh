@@ -1,33 +1,10 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# feature-branch-inventory.sh — the stale-`feature/*`-branch inventory for the
-# epic-88ab feature-branch flow (story norm-dam-swab / S6). The pattern's known
-# failure mode is branch rot: OpenDev warns feature branches are "not for sustained
-# long-term development" and Qt abandoned routine long-lived-branch merges. Gerrit
-# does not auto-prune a merged-back or abandoned `feature/*` branch, so this scripted
-# check flags branches inactive beyond the lifetime cap — whether MERGED-BACK (already
-# folded into main), MERGED-REBASED (same bytes landed under a rewritten SHA), or
-# NOT-IN-MAIN — for owner-confirmed deletion, and is the tooling half of the S6
-# lifetime/cadence policy (the prose lives in CONTRIBUTING §4 and
-# infra/runbooks/review-bot-ops.md).
-#
-# READ-ONLY by default (prints the inventory). Deletion is age/owner-confirmed; the
-# state column is advisory context for that confirmation, not an automatic deletion
-# gate. The script prints the exact `curl -X DELETE` per stale branch for an OWNER to
-# confirm and run, because a feature branch may be paused rather than dead (the policy
-# is owner-confirmed, not a cron that reaps). Pass --delete to delete AFTER you have
-# confirmed ownership (still one branch at a time, each logged).
-#
-# Drives over HTTPS/REST as an operator (feature-branch-drivers / admin), same auth model
-# as feature-branch-e2e.sh: the credential comes from `git credential fill`, never echoed.
-#
-# Env (all defaulted):
-#   GERRIT_HOST   default rebar.solutions.navateam.com
-#   GERRIT_USER   default JoeOakhartNava
-#   PROJECT       default rebar
-#   CAP_DAYS      default 14   (the branch-lifetime cap; older + inactive => flagged)
-#   DELETE        default ""   (set / pass --delete to actually delete flagged branches)
-# ---------------------------------------------------------------------------
+# Inventory feature branches older than CAP_DAYS (default 14) and inactive.
+# Classify each as ancestor-of-main, content-equivalent after rebase, or absent
+# from main. The state is advisory. Owners confirm each deletion. Read-only by
+# default. --delete/DELETE performs confirmed Gerrit and GitHub removal.
+# HTTPS auth comes from git credential fill and is never printed. GERRIT_HOST,
+# GERRIT_USER, PROJECT, CAP_DAYS, and DELETE may be overridden.
 set -euo pipefail
 
 GERRIT_HOST="${GERRIT_HOST:-rebar.solutions.navateam.com}"

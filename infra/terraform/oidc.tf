@@ -1,15 +1,7 @@
-# ---------------------------------------------------------------------------
-# oidc.tf — GitHub Actions OIDC identity provider (re-homed from snap)
-# ---------------------------------------------------------------------------
-# The account-wide OIDC provider for GitHub Actions token federation. rebar's
-# drift-detection role (rebar-terraform-plan, iam.tf) federates THIS provider to
-# run read-only `terraform plan` without long-lived keys. There is exactly ONE
-# such provider per account (a singleton keyed on the URL), so it is shared
-# account infrastructure — historically created and owned by the now-decommissioned
-# `snap` project's terraform. rebar has adopted ownership (epic gaugeable-combatable-
-# skylark): the resource was `terraform import`ed from the live provider and released
-# from snap's shared state, so rebar no longer depends on a dead project's stack for
-# a resource it functionally requires.
+# Account-singleton GitHub Actions OIDC provider shared by the read-only
+# Terraform drift role and bridge telemetry role. Terraform owns the
+# provider. No long-lived GitHub key is needed for federation.
+
 resource "aws_iam_openid_connect_provider" "github" {
   url            = "https://token.actions.githubusercontent.com"
   client_id_list = ["sts.amazonaws.com"]

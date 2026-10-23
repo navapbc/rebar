@@ -1,33 +1,9 @@
-# ---------------------------------------------------------------------------
-# monitoring.tf — S7 monitoring IaC: SNS alerting + gate-down / host-down alarms.
-# Epic d251, story S7.
-# ---------------------------------------------------------------------------
-# SCOPE / SINGLE-OWNER CONTRACT: S7 only ADDS monitoring + ASSERTS invariants.
-# It does NOT re-declare anything S1 owns:
-#   - the EC2 instance + data volume + their prevent_destroy (main.tf)
-#   - the DLM lifecycle policy retain=7 + its execution role (backup.tf / iam.tf)
-# S7 reads those by DATA SOURCE and watches the resulting metrics/snapshots.
-# A second declaration of any of them would put two configs in conflict over one
-# resource (the exact drift class S1's single-owner comments warn against).
-#
-# Reuses var.aws_region and data.aws_caller_identity.current (declared in iam.tf),
-# matching monitoring_s5.tf / monitoring_s4b.tf.
-#
-# COVERAGE MODEL — two complementary signals catch the two distinct failure modes:
-#   1. gerrit_gate_down  (Rebar/Gate:GerritReachable < 1) — Gerrit is DOWN but the
-#      host is up and the probe still runs: GerritReachable is published as 0.
-#   2. ec2_system_check / ec2_instance_check (AWS/EC2 status checks) — the HOST
-#      itself is down/unreachable: the probe stops publishing, AND AWS's own status
-#      checks fail. The status-check alarms are the host-down BACKSTOP.
-#   Together they distinguish "Gerrit crashed on a healthy box" from "box is gone".
-#   The gate-down alarm ALSO has treat_missing_data=breaching, so a probe that stops
-#   publishing (host wedged but not status-check-failing) still trips gerrit_gate_down.
-# ---------------------------------------------------------------------------
+# S7 owns alerting, not S1's instance, volume, or backup lifecycle.
+# The shared SNS endpoint comes from SSM and requires out-of-band confirmation.
+# GerritReachable distinguishes a failed service on a healthy host. EC2 system
+# and instance checks backstop host failure. Missing gate-probe data breaches.
+# Distinct capacity and debris alarms below retain their own signals.
 
-# --- Alert sink: SSM-sourced email -> SNS topic + subscription -------------
-# The alert email lives in SSM SecureString /rebar/prod/alert-endpoint (the slot
-# is created by ssm.tf; an operator populates the real address out-of-band). Read
-# it here with decryption so the subscription endpoint is not hardcoded in HCL.
 data "aws_ssm_parameter" "alert_endpoint" {
   name            = "/rebar/prod/alert-endpoint"
   with_decryption = true
@@ -77,37 +53,10 @@ resource "aws_cloudwatch_metric_alarm" "gerrit_gate_down" {
   metric_name = "GerritReachable"
   statistic   = "Minimum"
 
-  # PROFILE A (dead-man), 6-of-6 over 30 minutes — infra/runbooks/alarm-window-tuning.md.
-  #
-  # This was 2 consecutive periods (evaluation_periods = 2, datapoints_to_alarm defaulted to 2).
-  # With breaching missing data that meant TWO EMPTY BUCKETS paged on their own, and ticket
-  # a9d1-c7f3-cfd9-44ff measured 10.0-minute publisher inter-arrivals TWICE inside two hours —
-  # enough to empty two adjacent 5-minute buckets. The publisher's contractual interval is
-  # 5-9 minutes, not 5 (install-observability.sh: OnUnitActiveSec=5min is measured from the last
-  # COMPLETED run, and TimeoutStartSec=240 bounds the run), so this was one straggler from a
-  # false page.
-  #
-  # 6-of-6 requires 30 minutes with NO published 1, and datapoints_to_alarm ==
-  # evaluation_periods means any single healthy datapoint clears it.
-  #
-  # THIS WAS 3-of-3 (15 min) UNTIL A FALSE FIRING AT 20:47Z ON 2026-09-05 FALSIFIED THE PREMISE
-  # BEHIND IT. That sizing assumed §1 held the publisher's 5-9 minute cadence contract, which
-  # the 8-hour sweep supported: 93% bucket presence, 10.0-minute worst gap. Then this alarm
-  # entered ALARM on "no datapoints were received for 2 periods and 2 missing datapoints were
-  # treated as [Breaching]" while Gerrit answered HTTPS 200 in 0.266s — and the head-of-script
-  # gap was re-measured at 25.0 MINUTES, which defeats any 15-minute window. The head of the
-  # script is no longer exempt from the truncation this ticket documents, so it no longer gets
-  # a tighter window than the rest of Profile A.
-  #
-  # COST, stated plainly: detection of a genuinely unreachable Gerrit goes from 10 to 30
-  # minutes. That is a real regression and it is accepted for two reasons. First, the 10-minute
-  # detector demonstrably pages on healthy operation, so it was not buying 10-minute detection,
-  # it was buying noise. Second, host death is still caught in ~2 minutes by the EC2
-  # status-check alarms below, which are AWS-published and do not depend on this publisher at
-  # all; what widens to 30 minutes is only the "host up, Gerrit not serving" case. Once
-  # ignitable-fuchsia-kawala (9313-1fac-9f32-4b07) restores the publisher's cadence, this
-  # should go back to 3-of-3 — see the revert conditions in
-  # infra/runbooks/alarm-window-tuning.md.
+  # PROFILE A: 6-of-6 over 30 minutes. One healthy 1 clears the alarm.
+  # Head-of-script probe gaps reached 25 minutes, so shorter breaching-missing
+  # windows falsely paged. EC2 status alarms still detect host death quickly.
+  # This window covers a host that serves no Gerrit. See alarm-window-tuning.md.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 6
@@ -266,23 +215,9 @@ locals {
   monitoring_account_id = data.aws_caller_identity.current.account_id
 }
 
-# --- Alarm 4: Gerrit DATA-volume disk pressure (ticket c7d4) ----------------
-# The /var/gerrit data volume filling is a top outage risk — git repos, All-Projects,
-# and the review DB live there. observability.sh publishes rebar/host:disk_used_percent
-# with a `mount` dimension per filesystem; this alarm watches mount=/var/gerrit.
-#
-# ADOPTS a pre-existing, UNMANAGED live alarm (rebar-gerrit-data-disk-high) that was
-# created out-of-band with an EMPTY alarm_actions list (so it never notified). Bringing
-# it under IaC also WIRES it to the SNS topic, closing the silent-alarm gap. Companion
-# to rebar-root-disk-pressure (monitoring_autodeploy.tf), which watches the ROOT disk
-# (root_disk_used_percent); this one watches the DATA volume (disk_used_percent).
-#
-# POST-MERGE ADOPTION: the live alarm already exists, so after this merges an operator
-# imports it before apply so state matches reality (see ticket c7d4):
-#   terraform import aws_cloudwatch_metric_alarm.gerrit_data_disk_high rebar-gerrit-data-disk-high
-#   terraform apply   # sets alarm_actions/ok_actions on the adopted alarm
-# (CloudWatch PutMetricAlarm is an idempotent upsert, so an un-imported apply would also
-# adopt-by-overwrite; import is preferred so the first plan shows only the actions diff.)
+# The /var/gerrit data-volume alarm watches git and review DB capacity, distinct
+# from root pressure. observability.sh publishes mount=/var/gerrit. SNS actions
+# make this managed alarm notify on both edges.
 resource "aws_cloudwatch_metric_alarm" "gerrit_data_disk_high" {
   alarm_name        = "rebar-gerrit-data-disk-high"
   alarm_description = "Gerrit data volume (/var/gerrit) disk usage >= 85%. observability.sh publishes rebar/host:disk_used_percent per mount; exhaustion of this volume takes Gerrit down (git repos + review DB live here)."
@@ -296,39 +231,17 @@ resource "aws_cloudwatch_metric_alarm" "gerrit_data_disk_high" {
     mount      = "/var/gerrit"
   }
 
-  # PROFILE A (dead-man), 6-of-6 over 30 minutes — infra/runbooks/alarm-window-tuning.md.
-  #
-  # This alarm keeps "breaching" while the other level gauges move off it, because silence
-  # here carries information nothing else carries: §2 publishes NOTHING when it cannot read a
-  # percentage for /var/gerrit, i.e. when the data volume is gone or unmountable (see the
-  # treat_missing_data comment below). That is a real condition and it must keep paging.
-  #
-  # What changes is the evidence rule. The 2-of-3 shape counted TWO EMPTY BUCKETS as sufficient
-  # on their own, and ticket a9d1-c7f3-cfd9-44ff measured empty buckets to be guaranteed rather
-  # than unlucky: the publisher's contractual inter-arrival is 5-9 minutes against 5-minute
-  # buckets, and 6 of 47 buckets over four hours were empty (87% present, not the ~92% the
-  # comment this replaces asserted). datapoints_to_alarm == evaluation_periods means a page now
-  # needs 30 minutes with no readable percentage at all, and ANY single reading — over or under
-  # 85 — decides the alarm on real evidence instead of on absence.
-  #
-  # Detection is unchanged in kind and slower in time: a volume genuinely at or above 85% reads
-  # so on every run, so all 6 periods breach and it pages within 30 minutes.
+  # PROFILE A: six high or missing readings page within 30 minutes. Missing
+  # data can mean an unmountable volume. One healthy value clears an ordinary
+  # probe gap. The old 2-of-3 window paged on empty buckets alone.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 6
   threshold           = 85
   comparison_operator = "GreaterThanOrEqualToThreshold"
 
-  # Pre-dates ticket bff5-9163-cddd-4158; that ticket only widened the window above. Missing
-  # data has two causes here and BOTH warrant a page: the host-published probe stopped, or
-  # observability.sh §2 read no percentage for $DATA_MOUNT (`df --output=pcent /var/gerrit`
-  # produced no digits) and skipped the publish. Unlike the rebar/host counters, §2 is NOT
-  # unconditional and deliberately stays that way — its metric is a reading, not a delta, so
-  # there is no honest placeholder: publishing 0 would assert an empty volume and 100 would
-  # fabricate a full one. A df that cannot report on the Gerrit data volume means that volume
-  # is gone or unmountable, which is a worse fault than the one this alarm names, so silence
-  # is allowed to page. The 6-of-6 window above absorbs an ordinary scheduling gap and a one-off
-  # read failure alike, because either leaves the other five periods free to clear the alarm.
+  # A stopped probe or unreadable /var/gerrit mount both suppress the percentage.
+  # Neither has a truthful 0/100 placeholder, so sustained silence pages.
   treat_missing_data = "breaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
@@ -340,24 +253,9 @@ resource "aws_cloudwatch_metric_alarm" "gerrit_data_disk_high" {
   }
 }
 
-# --- Alarm 5: non-`site/` debris on the Gerrit DATA volume (task 3e92) ------
-# Companion to Alarm 4 above, and deliberately a DIFFERENT question. Alarm 4 watches
-# disk_used_percent — "how full is /var/gerrit" — which cannot distinguish the git repos
-# and review DB the volume exists for from one-off investigation output dumped beside
-# them. The 2026-08-26 fill was 65% the latter: two ~5.2G epoch-probe dumps under
-# /var/gerrit/rebar-quiet-window-evidence/, invisible to every metric until a human ran
-# `du` mid-incident.
-#
-# observability.sh §2c publishes rebar/host:data_disk_debris_bytes — the summed size of
-# every top-level entry under /var/gerrit that is not `site` or `lost+found` — with the
-# same InstanceId+mount dimensions as disk_used_percent. A healthy volume publishes 0, so
-# this alarm fires on the PRESENCE of debris well before it becomes capacity pressure,
-# which is the whole point: at 85% used the volume is already an incident.
-#
-# 1 GiB, not 0 bytes. A byte-exact threshold would page on a stray dotfile or an
-# operator's half-second `ls > /var/gerrit/x`, and an alarm that pages on noise gets
-# muted — which is how the condition went unwatched in the first place. 1 GiB is well
-# under the ~11G that produced the incident and far above anything incidental.
+# This alarm sees non-site/ data-volume debris before the disk-pressure alarm.
+# observability.sh 2c sums top-level entries outside site/ and lost+found with
+# the same mount dimensions. The 1 GiB threshold ignores incidental files.
 resource "aws_cloudwatch_metric_alarm" "gerrit_data_disk_debris" {
   alarm_name        = "rebar-gerrit-data-disk-debris"
   alarm_description = "Non-site/ content on the Gerrit data volume (/var/gerrit) exceeds 1 GiB. observability.sh publishes rebar/host:data_disk_debris_bytes; investigation/probe evidence belongs on the operator workstation, not here — see infra/runbooks/gerrit-data-volume-reclaim.md."

@@ -1,28 +1,7 @@
-# ---------------------------------------------------------------------------
-# monitoring_autodeploy.tf — CloudWatch alarm for continuous-auto-deploy failures.
-# Epic 88ab / story 8903.
-# ---------------------------------------------------------------------------
-# METRIC SOURCE: the on-box systemd oneshot rebar-autodeploy.service (autodeploy.sh) writes
-# a structured `AUTODEPLOY_ERROR` marker to stderr -> journald on any deploy-step failure
-# (git fetch, config-check, materialise, review-bot build/health-check-then-rollback). The
-# HOST observability probe (infra/scripts/observability.sh §4d) greps the unit journal for
-# those markers and publishes a per-period count to rebar/host:deploy_errors — the same
-# host-grep pattern §4/§4c use for voter_errors / merge-change errors. This alarm watches it.
-#
-# WHY IT MATTERS: a persistent signal means the box is NOT tracking `main` (config/code
-# drift) and/or a deploy keeps failing and backing off. The auto-deploy is fail-safe (the
-# last-known-good review-bot + config stay live, so the gate is NOT frozen), but sustained
-# failure means fixes to `main` are not reaching production — investigate the deploy loop
-# (journalctl -u rebar-autodeploy) and the target `main` tip.
-#
-# Custom metric contract (what the host probe must PutMetricData):
-#   Namespace  = rebar/host
-#   MetricName = deploy_errors
-#   Dimensions = NONE — dimensionless on BOTH sides (see monitoring_s4b.tf rationale).
-#   Unit       = Count   (per-period count of new AUTODEPLOY_ERROR journal lines)
-#
-# ACTION: wires the shared SNS alerts topic (not a silent alarm), like WS7 / 1fa8 / §4c.
-# ---------------------------------------------------------------------------
+# The host probe counts AUTODEPLOY_ERROR journal markers as dimensionless
+# rebar/host:deploy_errors and alerts via shared SNS. Sustained failures mean
+# the box is not tracking main. The last healthy review-bot remains serving.
+# Metric namespace/name/dimensions must match the probe exactly.
 
 resource "aws_cloudwatch_metric_alarm" "deploy_errors" {
   alarm_name        = "rebar-autodeploy-errors"
@@ -52,21 +31,10 @@ resource "aws_cloudwatch_metric_alarm" "deploy_errors" {
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  # PROFILE B, ticket a9d1-c7f3-cfd9-44ff: absence of a delta report is not evidence of errors.
+  # PROFILE B: observed errors page. Missing data alone does not.
   # rebar:allow-missing-data-notbreaching: liveness is carried by the dead-man alarms, which keep
-  # treat_missing_data = "breaching" with datapoints_to_alarm == evaluation_periods and span
-  # observability.sh from §1 (GerritReachable) and §1b (mcp_healthy) through §2e/§2g/§2h/§2i (the
-  # mount / journal-cap / var-tmp-cleanup / container-reaper heartbeats) to §5 (mirror_out_of_sync).
-  # A stopped probe, and a run truncated by the unit's 240s TimeoutStartSec, therefore still page —
-  # ONCE, with an accurate message, instead of once per counter with a false one.
-  #
-  # bff5's premise (this counter publishes 0 unconditionally, so silence means a dead publisher)
-  # is still true; what bff5 got wrong was making EVERY counter say so. At 900s periods that made
-  # 30 MINUTES OF SILENCE a page with the counter reading 0 throughout — reachable whenever the
-  # probe run is cut short before §4d/§4e, which is exactly the publisher fault filed as
-  # ignitable-fuchsia-kawala. The window above is unchanged: datapoints_to_alarm must stay below
-  # evaluation_periods so an INTERMITTENT stream, which an N-of-N streak would reset on, is still
-  # caught, and 2 real datapoints inside 4x900s is reachable at any plausible publish cadence.
+  # treat_missing_data = "breaching". The configured window catches observed
+  # intermittent errors without false pages when the probe misses a zero.
   treat_missing_data = "notBreaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
@@ -79,54 +47,16 @@ resource "aws_cloudwatch_metric_alarm" "deploy_errors" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Reviews KILLED by a deploy (bug 34cd).
-#
-# `docker compose up -d` stops the review-bot container, and uvicorn's shutdown drain covers
-# only the webhook QUEUE — the backfill reconciler's inline review is cancelled outright, and
-# that is the path that RETRIES a killed review. On 2026-08-03 seven recreations in 90 minutes
-# (gaps of 18/7/22/4/15/20 min) repeatedly killed a ~10-minute review and changes 1302/1303 sat
-# `Verified +1` with `LLM-Review = 0` for 20-35 minutes, unsubmittable.
-#
-# WHY THIS ALARM EXISTS AT ALL: that outage was INVISIBLE to every other alarm. A killed review
-# fails nothing — the process was asked to stop — so the fail-closed voter path never runs, no
-# VOTER_ERROR is emitted, `restarts` stays 0, and the deploy itself logs "redeployed + healthy".
-# All 11 alarms read OK while the gate was live-locked. `rebar-gerrit-voter-errors`
-# (monitoring_s4b.tf) provably CANNOT observe this failure mode, which matters because the
-# Bedrock cutover (eb6e) names that alarm as its safety net. autodeploy.sh now defers a deploy
-# that would interrupt a review; the alarms below watch the cases where it recreated anyway — the
-# DEPLOY_DEFER_MAX bound was exhausted (a chronically busy bot), or the /health in_flight signal
-# was unreadable so the deploy ran blind. Routine, healthy deferrals are a SEPARATE metric
-# (deploy_deferrals) and deliberately do not page.
-#
-# SPLIT BY REASON (bug 613a). One alarm on a rolled-up counter could not say WHICH of those two
-# causes fired, and they want opposite responses. A CloudWatch-only sweep therefore had to hedge:
-# [rebar:7b4a-0f39-1a45-4ce9] was filed unable to distinguish "the bot is busy" from "34cd has
-# regressed and every deploy is blind", and closing it needed SSM shell access to read the
-# journal. There is now ONE ALARM PER REASON, each carrying only its own remediation, so the
-# alarm itself answers the question. Split via distinct METRIC NAMES rather than a CloudWatch
-# dimension — every metric here stays dimensionless on both sides (monitoring_s4b.tf: a dimension
-# present on only one side silently unmatches and the alarm goes permanently INSUFFICIENT_DATA).
-#
-# Custom metric contract (what the host probe must PutMetricData):
-#   Namespace  = rebar/host
-#   MetricName = review_interrupts_bound_exceeded     — alarmed below
-#                review_interrupts_signal_unavailable — alarmed below
-#                review_interrupts                    — rolled-up total, published but NOT
-#                                                       alarmed: it keeps pre-split history
-#                                                       readable and catches any future reason,
-#                                                       while leaving each firing to page once.
-#   Dimensions = NONE — dimensionless on BOTH sides (see monitoring_s4b.tf rationale).
-#   Unit       = Count  (per-period count of new AUTODEPLOY_REVIEW_INTERRUPT journal lines
-#                        matching that reason)
-#
-# Both alarms kept the pre-split 900s / 1-datapoint / Sum > 0 cadence, so the split itself did
-# not change aggregate sensitivity. Ticket bff5-9163-cddd-4158 then moved both to 2-of-4 with
-# treat_missing_data = "breaching": these counters publish 0 on the healthy path, so silence is a
-# dead probe rather than calm, and a 1-datapoint latch on "breaching" would page on one absent
-# period. Making `bound-exceeded` less trigger-happy on the SIGNAL side is still deliberately NOT
-# bundled in here — that is a call to make with the DEPLOY_DEFER_MAX disposition.
-# ---------------------------------------------------------------------------
+# A deploy can cancel an in-flight review without a voter error or bot restart.
+# The change then stalls at Verified +1 and LLM-Review 0. Defer deploys while
+# reviews run. If a deploy proceeds anyway, distinguish an exhausted
+# DEPLOY_DEFER_MAX bound from unreadable /health in_flight. They need different
+# responses. Healthy deploy_deferrals do not page.
+# The host probe publishes dimensionless rebar/host Count metrics named
+# review_interrupts_bound_exceeded and review_interrupts_signal_unavailable.
+# The rolled-up review_interrupts total remains published but has no alarm.
+# Both alarms use 900s, 2-of-4, Sum > 0. Healthy zero and missing-data policy
+# are explained at each alarm. Keep dimensions absent on both publisher and alarm.
 
 resource "aws_cloudwatch_metric_alarm" "review_interrupts_bound_exceeded" {
   alarm_name        = "rebar-autodeploy-review-interrupts-bound-exceeded"
@@ -160,21 +90,10 @@ resource "aws_cloudwatch_metric_alarm" "review_interrupts_bound_exceeded" {
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  # PROFILE B, ticket a9d1-c7f3-cfd9-44ff: absence of a delta report is not evidence of errors.
+  # PROFILE B: observed errors page. Missing data alone does not.
   # rebar:allow-missing-data-notbreaching: liveness is carried by the dead-man alarms, which keep
-  # treat_missing_data = "breaching" with datapoints_to_alarm == evaluation_periods and span
-  # observability.sh from §1 (GerritReachable) and §1b (mcp_healthy) through §2e/§2g/§2h/§2i (the
-  # mount / journal-cap / var-tmp-cleanup / container-reaper heartbeats) to §5 (mirror_out_of_sync).
-  # A stopped probe, and a run truncated by the unit's 240s TimeoutStartSec, therefore still page —
-  # ONCE, with an accurate message, instead of once per counter with a false one.
-  #
-  # bff5's premise (this counter publishes 0 unconditionally, so silence means a dead publisher)
-  # is still true; what bff5 got wrong was making EVERY counter say so. At 900s periods that made
-  # 30 MINUTES OF SILENCE a page with the counter reading 0 throughout — reachable whenever the
-  # probe run is cut short before §4d/§4e, which is exactly the publisher fault filed as
-  # ignitable-fuchsia-kawala. The window above is unchanged: datapoints_to_alarm must stay below
-  # evaluation_periods so an INTERMITTENT stream, which an N-of-N streak would reset on, is still
-  # caught, and 2 real datapoints inside 4x900s is reachable at any plausible publish cadence.
+  # treat_missing_data = "breaching". The configured window catches observed
+  # intermittent errors without false pages when the probe misses a zero.
   treat_missing_data = "notBreaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
@@ -216,21 +135,10 @@ resource "aws_cloudwatch_metric_alarm" "review_interrupts_signal_unavailable" {
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  # PROFILE B, ticket a9d1-c7f3-cfd9-44ff: absence of a delta report is not evidence of errors.
+  # PROFILE B: observed errors page. Missing data alone does not.
   # rebar:allow-missing-data-notbreaching: liveness is carried by the dead-man alarms, which keep
-  # treat_missing_data = "breaching" with datapoints_to_alarm == evaluation_periods and span
-  # observability.sh from §1 (GerritReachable) and §1b (mcp_healthy) through §2e/§2g/§2h/§2i (the
-  # mount / journal-cap / var-tmp-cleanup / container-reaper heartbeats) to §5 (mirror_out_of_sync).
-  # A stopped probe, and a run truncated by the unit's 240s TimeoutStartSec, therefore still page —
-  # ONCE, with an accurate message, instead of once per counter with a false one.
-  #
-  # bff5's premise (this counter publishes 0 unconditionally, so silence means a dead publisher)
-  # is still true; what bff5 got wrong was making EVERY counter say so. At 900s periods that made
-  # 30 MINUTES OF SILENCE a page with the counter reading 0 throughout — reachable whenever the
-  # probe run is cut short before §4d/§4e, which is exactly the publisher fault filed as
-  # ignitable-fuchsia-kawala. The window above is unchanged: datapoints_to_alarm must stay below
-  # evaluation_periods so an INTERMITTENT stream, which an N-of-N streak would reset on, is still
-  # caught, and 2 real datapoints inside 4x900s is reachable at any plausible publish cadence.
+  # treat_missing_data = "breaching". The configured window catches observed
+  # intermittent errors without false pages when the probe misses a zero.
   treat_missing_data = "notBreaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
@@ -283,22 +191,9 @@ resource "aws_cloudwatch_metric_alarm" "reviewbot_webhook_auth_rejections" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Root-filesystem disk pressure (incident 2731). The box's 60G ROOT disk holds
-# docker's image/build-cache storage and the review-bot's working tmp; when it
-# filled, every LLM-Review fail-closed (clone/pip ENOSPC) — yet the only disk
-# metric published was the /var/gerrit EBS data volume, and NO alarm watched
-# even that. The host probe (observability.sh §2) now also publishes the root
-# filesystem as rebar/host:root_disk_used_percent — DIMENSIONLESS on both sides
-# (the monitoring.tf / GerritReachable convention: CloudWatch keys a metric by
-# namespace+name+dimensions, so a dimension on only one side silently unmatches).
-#
-# Custom metric contract (what the host probe must PutMetricData):
-#   Namespace  = rebar/host
-#   MetricName = root_disk_used_percent
-#   Dimensions = NONE
-#   Unit       = Percent  (df used% of /)
-# ---------------------------------------------------------------------------
+# observability.sh 2 publishes dimensionless rebar/host:root_disk_used_percent
+# from `df` on /. Root exhaustion breaks review-bot clone/build work. This is
+# separate from the /var/gerrit data-volume alarm.
 
 resource "aws_cloudwatch_metric_alarm" "root_disk_pressure" {
   alarm_name        = "rebar-root-disk-pressure"
@@ -316,36 +211,11 @@ resource "aws_cloudwatch_metric_alarm" "root_disk_pressure" {
   metric_name = "root_disk_used_percent"
   statistic   = "Maximum"
 
-  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes. This is the house shape the other
-  # rebar/host gauges and heartbeats in this file point at; the full derivation, the measured
-  # publish cadence behind it, and the per-alarm table are in
-  # infra/runbooks/alarm-window-tuning.md (ticket a9d1-c7f3-cfd9-44ff).
-  #
-  # WHAT WAS WRONG WITH 300/3/2. treat_missing_data is "breaching" here (correctly — see below),
-  # which makes an EMPTY period a breaching datapoint. datapoints_to_alarm = 2 of
-  # evaluation_periods = 3 therefore paged on TWO EMPTY BUCKETS ALONE, with no reading of any
-  # kind. On 2026-09-05 that put 19 alarms in ALARM, about 17 of them false — root_disk_used_percent
-  # was publishing 73 throughout. The comment this replaces called the gaps "ordinary timer
-  # jitter that makes ~2 of 24 periods absent"; the measured figure is 6 of 47 (13%), and the
-  # gaps are STRUCTURAL, not jitter: install-observability.sh sets OnUnitActiveSec=5min measured
-  # from the last COMPLETED run with TimeoutStartSec=240, so the publish interval is 5-9 minutes
-  # against 5-minute buckets and empty buckets are guaranteed.
-  #
-  # The same shape had a second, worse failure: when the publisher is slower than the window,
-  # EVERY evaluation holds two empty buckets, so the alarm re-arms itself forever and no value
-  # the metric can publish clears it. rebar-docker-buildkit-cache-high sat in ALARM for 10.5
-  # hours that way while its cache went from 9% over budget to 0, noticing neither.
-  #
-  # WHY 6-of-6 FIXES BOTH. datapoints_to_alarm == evaluation_periods means missing buckets can
-  # never OUT-VOTE a real reading: a page requires the ENTIRE 30-minute window to be breaching
-  # or empty, so one scheduling gap is harmless, and ONE healthy datapoint returns the alarm to
-  # OK however slow the publisher is. The unclearable state is unreachable by construction.
-  #
-  # WHY NOT LOWER datapoints_to_alarm INSTEAD. Because that is the pair that broke. M < N is
-  # kept only where an INTERMITTENT breach is the real condition (the error counters above,
-  # which moved to notBreaching for exactly that reason). Disk fullness is not intermittent: a
-  # volume at or above 85% reads so on every run, so 6-of-6 detects it and pages within 30
-  # minutes. Detection is slower than the nominal 15 minutes and loses nothing.
+  # PROFILE A: six 5-minute breaching or empty periods page. The probe's 5-9 minute
+  # cadence leaves empty buckets. A 2-of-3 breaching window falsely paged and could
+  # stay in ALARM despite healthy readings. With 6-of-6, one healthy reading clears
+  # the alarm. Sustained disk pressure remains visible within 30 minutes. See
+  # infra/runbooks/alarm-window-tuning.md.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 6
@@ -365,18 +235,9 @@ resource "aws_cloudwatch_metric_alarm" "root_disk_pressure" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Review-gate scratch volume (ADR 0112 decisions 2+3, story aa40-cbda-ee38-481c)
-# ---------------------------------------------------------------------------
-# The scratch volume takes gate snapshots and reviewbot-* clones OFF the root
-# filesystem, which is what stops a review burst wedging the OS disk. But it also
-# adds a mount that can fail independently of root — ADR 0112 says so directly —
-# so it gets its own pair of alarms rather than riding the root alarm above.
-#
-# TWO alarms, because they answer two different questions and the 3e92 precedent is
-# explicit that the second one is not implied by the first: "how full is it" cannot
-# say "is it even there". A volume that silently failed to mount reads as 0% used —
-# perfectly healthy — while every gate on the box refuses.
+# Gate snapshots and reviewbot clones use a separate scratch volume. Alarm on
+# both capacity and mount presence. An unmounted volume can read as 0% used
+# while all gate runs refuse.
 
 resource "aws_cloudwatch_metric_alarm" "gate_scratch_disk_high" {
   alarm_name        = "rebar-gate-scratch-disk-high"
@@ -399,18 +260,8 @@ resource "aws_cloudwatch_metric_alarm" "gate_scratch_disk_high" {
     mount      = var.gate_scratch_mount
   }
 
-  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
-  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
-  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
-  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
-  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
-  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
-  # or empty, and one healthy datapoint always clears it.
-  #
-  # This alarm's condition — the gate scratch volume at or above 85% — reads breaching on every
-  # run while it holds, so 6-of-6 detects it within 30 minutes. Its co-located heartbeat is
-  # gate_scratch_unmounted below, published by the same §2e block, which is what pages if §2e is
-  # never reached at all.
+  # Six breaching or empty five-minute periods page. One healthy reading
+  # clears ordinary probe gaps. A missing mount has its own heartbeat below.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 6
@@ -446,18 +297,8 @@ resource "aws_cloudwatch_metric_alarm" "gate_scratch_unmounted" {
   metric_name = "gate_scratch_mounted"
   statistic   = "Minimum"
 
-  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
-  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
-  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
-  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
-  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
-  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
-  # or empty, and one healthy datapoint always clears it.
-  #
-  # This is a HEARTBEAT: §2e publishes gate_scratch_mounted on every run, 1 mounted / 0 not, so a
-  # healthy period is a published 1 and silence means §2e was never reached. Keeping "breaching"
-  # is the point of the alarm; 6-of-6 is what stops an ordinary gap from being mistaken for it.
-  # A genuinely unmounted volume publishes 0 on every run and still pages within 30 minutes.
+  # Section 2e publishes 1 mounted or 0 unmounted on every tick. Six
+  # unhealthy or absent periods page. One published 1 clears a probe gap.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 6
@@ -522,39 +363,12 @@ resource "aws_cloudwatch_metric_alarm" "gate_scratch_volume_not_in_service" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Docker storage generators (ADR 0112 decisions 1+2, story 9183-aaae-667d-45e6)
-# ---------------------------------------------------------------------------
-# rebar-root-disk-pressure above says "root disk high" and nothing more. On 2026-09-02 that
-# cost five hours: /var/lib/docker was 17G of a 28G working set, overlay2 alone 16G across 67
-# layer directories, and naming the generator took a `du` under time pressure.
-#
-# THREE alarms, because each answers a question the other two structurally cannot, which is the
-# rebar-gerrit-data-disk-debris (task 3e92) argument generalised from the data volume to root:
-#
-#   1. storage-cap-high      — is the whole /var/lib/docker budget saturating?
-#   2. buildkit-cache-high   — is the BUILDKIT GENERATOR at ITS OWN cap? BuildKit sitting at
-#                              100% of its 5 GiB share is invisible inside a 20 GiB budget
-#                              reading 60%; conversely a runaway image set saturates the
-#                              budget while BuildKit sits at 10%. Neither implies the other.
-#   3. unaccounted-bytes     — how much of the Docker root does DOCKER ITSELF NOT KNOW ABOUT?
-#                              This is the one the incident turned on. `docker system df`
-#                              reported ~9.5 GB with ZERO dangling images against 16G of real
-#                              overlay2, so ~6.5 GB was unreachable by any prune — four rounds
-#                              recovered ~1.06 GB against a 29 GB problem. Alarms 1 and 2 say
-#                              "how full"; only this one says "full of what prune cannot
-#                              touch", and it is what changes the remediation from "prune
-#                              harder" (which is measured to fail) to a daemon-level reclaim.
-#                              It is deliberately NOT scoped to overlay2: which subdirectory
-#                              holds layer bytes is an engine detail that moves (graphdriver
-#                              vs containerd snapshotter), and an alarm scoped to the wrong
-#                              one reads healthy forever.
-#
-# Published dimensionless by observability.sh 2f on the 5-minute cadence, following
-# root_disk_used_percent: CloudWatch keys a metric by namespace+name+dimensions, so a
-# dimension on only one side silently never matches. The caps behind the two percent metrics
-# come from infra/scripts/docker-storage-cap.sh, the same file that renders the daemon's own
-# builder.gc policy, so "percent of cap" can never mean a different cap than the one enforced.
+# Docker alarms distinguish total budget, BuildKit's internal share, and bytes
+# omitted by `docker system df`. Unaccounted bytes need daemon-level diagnosis.
+# Pruning cannot reclaim storage Docker does not track. Measure the whole Docker
+# root, not a specific engine layer path. observability.sh 2f publishes these
+# dimensionless metrics. docker-storage-cap.sh owns both percent denominators
+# and the daemon's BuildKit policy.
 
 resource "aws_cloudwatch_metric_alarm" "docker_storage_cap_high" {
   alarm_name        = "rebar-docker-storage-cap-high"
@@ -573,17 +387,8 @@ resource "aws_cloudwatch_metric_alarm" "docker_storage_cap_high" {
   metric_name = "docker_storage_used_percent"
   statistic   = "Maximum"
 
-  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
-  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
-  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
-  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
-  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
-  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
-  # or empty, and one healthy datapoint always clears it.
-  #
-  # §2f publishes this ONLY on a successful root-du measurement. Bug 5993 established that a
-  # bounded `du` timing out under load is an accepted degradation, not storage pressure; the
-  # dedicated docker_du_not_ok heartbeat below pages on that state.
+  # Three measured high readings within six periods identify capacity pressure. Missing
+  # measurements are not capacity evidence. docker_du_not_ok pages on failed du.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 3
@@ -656,21 +461,8 @@ resource "aws_cloudwatch_metric_alarm" "docker_buildkit_cache_high" {
   metric_name = "docker_buildkit_cache_used_percent"
   statistic   = "Maximum"
 
-  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
-  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
-  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
-  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
-  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
-  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
-  # or empty, and one healthy datapoint always clears it.
-  #
-  # THIS IS THE ALARM THAT COULD NOT CLEAR. It sat in ALARM from 2026-09-04T17:51:49 for 10.5
-  # hours on "no datapoints were received for 3 periods and 3 missing datapoints were treated as
-  # [Breaching]", while the BuildKit cache went from 5.877 GB against a 5.00 GiB budget to 0 and
-  # published 0 — and it noticed neither, because two missing buckets re-satisfied
-  # datapoints_to_alarm = 2 on every evaluation. Under 6-of-6 that single published 0 clears it.
-  # §2f publishes only on a successful measurement, so "breaching" still carries the real
-  # "the probe can no longer see the cache" condition.
+  # Six high or absent five-minute periods page. A healthy cache reading
+  # clears ordinary probe gaps. Section 2f publishes after a successful measure.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 6
@@ -711,17 +503,8 @@ resource "aws_cloudwatch_metric_alarm" "docker_unaccounted_bytes" {
   metric_name = "docker_unaccounted_bytes"
   statistic   = "Maximum"
 
-  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
-  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
-  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
-  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
-  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
-  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
-  # or empty, and one healthy datapoint always clears it.
-  #
-  # §2f publishes this ONLY when both the Docker-root filesystem walk and Docker ledger
-  # succeeded. Bounded walk misses are accepted degradation and page through docker_du_not_ok
-  # instead of this residue alarm pretending the unseen residue crossed the threshold.
+  # Three measured high readings within six periods identify unaccounted bytes. Missing
+  # measurements are not residue evidence. docker_du_not_ok pages on failed du.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 3
@@ -745,36 +528,11 @@ resource "aws_cloudwatch_metric_alarm" "docker_unaccounted_bytes" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# journald, the /var/log generator (ADR 0112 decisions 1+2, story e956-b1c3-45b9-4016)
-# ---------------------------------------------------------------------------
-# The other accumulator the 2026-09-02 measurement found: /var/log was 1.8G of the 28G root
-# working set and 1.7G of that was the JOURNAL, because every compose service logs to the host
-# journal. rebar-root-disk-pressure could only say "root disk high".
-#
-# TWO alarms, because neither implies the other — the rebar-gerrit-data-disk-debris (task 3e92)
-# argument again:
-#
-#   1. journal-usage-high        — is the journal approaching the ceiling it is measured against?
-#   2. journal-cap-not-in-effect — is that ceiling the one the RUNNING journald actually read?
-#                                  journald reads its configuration at startup and
-#                                  systemd-journald.service implements no ExecReload, so a
-#                                  ceiling can sit installed on disk while the live daemon
-#                                  enforces the one it read at boot. In that state alarm 1 is
-#                                  computed against a denominator that is NOT in force and
-#                                  reads perfectly healthy, which is exactly the gap story 9183
-#                                  left open for its BuildKit share.
-#
-# HONEST STRENGTH, so an operator reading these during an incident is not misled: SystemMaxUse
-# is a real cap that journald enforces as it extends a journal file, but only ARCHIVED files are
-# vacuumed, so usage can exceed the ceiling by up to one active file (SystemMaxFileSize, default
-# 1/8 of the ceiling). And it bounds /var/log/journal ONLY — the rest of /var/log is covered
-# only by rebar-root-disk-pressure.
-#
-# Published dimensionless by observability.sh 2g on the 5-minute cadence, following
-# root_disk_used_percent: CloudWatch keys a metric by namespace+name+dimensions, so a dimension
-# on only one side silently never matches. The ceiling behind the percent comes from
-# infra/scripts/journald-cap.sh, the same file that renders the drop-in journald reads.
+# Journal usage and cap-in-effect are separate alarms. A config file can name a
+# ceiling that the running journald has not read. SystemMaxUse only covers
+# /var/log/journal and can exceed its ceiling by one active file. Root pressure
+# covers the rest of /var/log. observability.sh 2g publishes dimensionless
+# metrics. journald-cap.sh owns the cap and rendered configuration.
 
 resource "aws_cloudwatch_metric_alarm" "journal_usage_high" {
   alarm_name        = "rebar-journal-usage-high"
@@ -796,17 +554,8 @@ resource "aws_cloudwatch_metric_alarm" "journal_usage_high" {
   metric_name = "journal_used_percent"
   statistic   = "Maximum"
 
-  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
-  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
-  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
-  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
-  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
-  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
-  # or empty, and one healthy datapoint always clears it.
-  #
-  # §2g publishes journal_used_percent only on a successful measurement, so "breaching" carries
-  # the real "the probe can no longer size the journal" condition and stays. 6-of-6 separates
-  # that from a scheduling gap; a journal genuinely at or above 85% reads so on every run.
+  # Six high or absent five-minute periods page. One healthy reading
+  # clears a gap. Section 2g publishes after a successful journal measure.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 6
@@ -846,18 +595,8 @@ resource "aws_cloudwatch_metric_alarm" "journal_cap_not_in_effect" {
   metric_name = "journal_cap_in_effect"
   statistic   = "Minimum"
 
-  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
-  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
-  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
-  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
-  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
-  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
-  # or empty, and one healthy datapoint always clears it.
-  #
-  # This is a HEARTBEAT: §2g publishes journal_cap_in_effect on EVERY tick including its 0 path,
-  # so its absence can only mean the probe, the timer or the host is dead. That is why it keeps
-  # "breaching" while the counters do not, and why 6-of-6 rather than a lower datapoint count is
-  # the right way to stop a gap from imitating it.
+  # Section 2g publishes this 1/0 cap heartbeat each tick. Six missing
+  # or 0 readings page. One healthy 1 clears ordinary scheduling gaps.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 6
@@ -878,16 +617,9 @@ resource "aws_cloudwatch_metric_alarm" "journal_cap_not_in_effect" {
   }
 }
 
-# --- /var/tmp, the fourth root generator (ADR 0112 / story 2ba3-bf77-1303-4b2d) --------
-# Published dimensionless by observability.sh 2h on the 5-minute cadence, following
-# root_disk_used_percent. The budget behind the percent comes from infra/scripts/vartmp-cap.sh,
-# the same file that renders the tmpfiles drop-in and the reaper units.
-#
-# TWO alarms, not three. `var_tmp_hard_quota_in_effect` is published beside these and is
-# deliberately NOT alarmed: the XFS project quota it reports needs `rootflags=pquota` and a host
-# reboot, so its honest value is 0 until that reboot is scheduled, and an alarm that pages
-# continuously is muted within a day. It is a capacity fact to read when interpreting
-# rebar-var-tmp-usage-high, not an incident.
+# observability.sh 2h publishes dimensionless /var/tmp usage and cleanup
+# metrics. vartmp-cap.sh owns the budget and reaper. Publish but do not alarm
+# on var_tmp_hard_quota_in_effect until rootflags=pquota is enabled by reboot.
 
 resource "aws_cloudwatch_metric_alarm" "var_tmp_usage_high" {
   alarm_name        = "rebar-var-tmp-usage-high"
@@ -910,17 +642,8 @@ resource "aws_cloudwatch_metric_alarm" "var_tmp_usage_high" {
   metric_name = "var_tmp_used_percent"
   statistic   = "Maximum"
 
-  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
-  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
-  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
-  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
-  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
-  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
-  # or empty, and one healthy datapoint always clears it.
-  #
-  # /var/tmp has no writer-enforced cap absent an XFS project quota, so this READING is the whole
-  # control and §2h publishes it only on a successful measurement: "breaching" stays. 6-of-6
-  # separates a failed measurement from a scheduling gap.
+  # Six high or absent five-minute periods page. Section 2h publishes
+  # only after sizing /var/tmp, whose cleanup has no writer-enforced quota.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 6
@@ -960,18 +683,8 @@ resource "aws_cloudwatch_metric_alarm" "var_tmp_cleanup_not_active" {
   metric_name = "var_tmp_cleanup_active"
   statistic   = "Minimum"
 
-  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
-  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
-  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
-  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
-  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
-  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
-  # or empty, and one healthy datapoint always clears it.
-  #
-  # This is a HEARTBEAT: §2h publishes var_tmp_cleanup_active on EVERY tick including its 0 path,
-  # so its absence can only mean the probe, the timer or the host is dead. It is currently 0 for
-  # a real reason (the pending rootflags=pquota reboot), and 6-of-6 keeps it firing on that: a
-  # genuine 0 breaches on every run, so the whole window breaches.
+  # Section 2h publishes this 1/0 cleanup heartbeat each tick. Six
+  # missing or 0 readings page. One healthy 1 clears a scheduling gap.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 6
@@ -992,18 +705,10 @@ resource "aws_cloudwatch_metric_alarm" "var_tmp_cleanup_not_active" {
   }
 }
 
-# --- writable CONTAINER layers, the last root generator (ADR 0112 / story 910b-2d43-4482-4c64) ---
-# Published dimensionless by observability.sh 2i on the 5-minute cadence, following
-# root_disk_used_percent. The share behind the percent comes from infra/scripts/container-cap.sh,
-# which reads it from docker-storage-cap.sh — ONE Docker budget with an internal split, never a
-# second cap over the same overlay2 bytes.
-#
-# TWO alarms, not three. `container_quota_enforceable` is published beside these and is
-# deliberately NOT alarmed: overlay2's per-container `--storage-opt size=` needs XFS with the
-# pquota mount option on the filesystem backing /var/lib/docker, which on this root filesystem
-# needs rootflags=pquota and a host reboot — so its honest value is 0 until that reboot is
-# scheduled, and an alarm that pages continuously is muted within a day. It is a capacity fact to
-# read when interpreting rebar-container-writable-usage-high, not an incident.
+# observability.sh 2i publishes dimensionless writable-layer usage and reaper
+# status. container-cap.sh draws one internal share from docker-storage-cap.sh's
+# Docker budget. Publish but do not alarm on container_quota_enforceable until
+# XFS pquota is enabled by reboot.
 
 resource "aws_cloudwatch_metric_alarm" "container_writable_usage_high" {
   alarm_name        = "rebar-container-writable-usage-high"
@@ -1026,18 +731,8 @@ resource "aws_cloudwatch_metric_alarm" "container_writable_usage_high" {
   metric_name = "container_writable_used_percent"
   statistic   = "Maximum"
 
-  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
-  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
-  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
-  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
-  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
-  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
-  # or empty, and one healthy datapoint always clears it.
-  #
-  # The reaper behind this metric can only remove EXITED containers, so when the bytes belong to
-  # a RUNNING service nothing bounds them and the READING is the entire control; §2i publishes it
-  # only on a successful measurement, so "breaching" stays. 6-of-6 separates a failed measurement
-  # from a scheduling gap.
+  # Six high or absent five-minute periods page. Section 2i publishes
+  # only after measuring container writable layers. Missing data stays breaching.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 6
@@ -1078,18 +773,8 @@ resource "aws_cloudwatch_metric_alarm" "container_reaper_not_active" {
   metric_name = "container_reaper_active"
   statistic   = "Minimum"
 
-  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
-  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
-  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
-  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
-  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
-  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
-  # or empty, and one healthy datapoint always clears it.
-  #
-  # This is a HEARTBEAT: §2i publishes container_reaper_active on EVERY tick including its 0
-  # path, so its absence can only mean the probe, the timer or the host is dead. §2i is the LAST
-  # of the four mid-script heartbeats, which makes it the sentinel for a run truncated anywhere
-  # between §2e and §2i by the unit's 240s TimeoutStartSec.
+  # Section 2i publishes this 1/0 reaper heartbeat each tick. Six
+  # missing or 0 readings page. This tail heartbeat also detects a truncated probe.
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 6

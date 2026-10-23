@@ -1,10 +1,6 @@
-# ---------------------------------------------------------------------------
-# acm.tf — wildcard TLS certificate for *.solutions.navateam.com (re-homed from snap)
-# ---------------------------------------------------------------------------
-# Domain-wide wildcard cert used by the auth_host SSO CloudFront distribution
-# (auth_host.tf) and available to any other *.solutions.navateam.com surface.
-# Adopted from snap's shared state (epic gaugeable-combatable-skylark). DNS-validated
-# into the same Route53 public zone rebar already uses (var.dns_zone_id).
+# Own the DNS-validated wildcard certificate for *.solutions.navateam.com.
+# auth_host.tf consumes it. Lifecycle protection prevents accidental replacement.
+
 resource "aws_acm_certificate" "wildcard" {
   domain_name       = "*.${local.sso_domain}"
   validation_method = "DNS"
