@@ -1,12 +1,9 @@
-"""Project-supplied criteria overlay — the MVP-root vocabulary + cache-isolation seam
-(epic 3156, story ef7e).
+"""Pin project criteria overlays and repository-scoped routing caches.
 
-These tests exercise the `.rebar/criteria_routing.json` OVERLAY that opens plan-review's
-closed criterion vocabulary: `effective_criteria(repo_root)` (built-ins ∪ activated
-project ids), `effective_routing(repo_root)` (packaged routing merged with the overlay,
-repo-keyed so the long-lived MCP server never leaks one repo's routing into another), and
-the load-time collision/rebind/namespace validation (each a LOCATED error, never a silent
-skip).
+``effective_criteria`` includes activated project ids alongside built-ins.
+``effective_routing`` merges packaged and project routing without leaking values
+between repositories in a long-lived MCP server. Invalid collisions, rebindings,
+and namespaces fail at load time with located errors.
 """
 
 from __future__ import annotations
@@ -373,11 +370,8 @@ def test_editing_overlay_invalidates_memo_by_content(tmp_path):
     assert "project.p" in registry.effective_criteria(root)
 
 
-# ── `applies_to` SHAPE validation (bug d343-47c6) ─────────────────────────────────
-# `applies_to` gates WHEN a criterion runs. Every consumer of it narrows a malformed value
-# to `[]` (`[g for g in globs if isinstance(g, str)]`, `entry.get("applies_to") or []`), and
-# an empty glob list means "ungated" for a project criterion — so a typo used to silently
-# turn the gate OFF and run the criterion on every review. It must fail at LOAD instead.
+# Malformed `applies_to` must fail at load. Consumers narrow it to `[]`, which
+# would otherwise turn a project criterion's path gate off.
 @pytest.mark.parametrize(
     "bad_applies_to",
     [
@@ -405,14 +399,9 @@ def test_wellformed_applies_to_accepted_at_overlay_load(tmp_path, ok_applies_to)
     assert registry.effective_routing(root)["project.x"]["applies_to"] == ok_applies_to
 
 
-# ── RP-06 S1: the [] → ["**"] migration of project.review-phase-boundaries ──────────
-#
-# The committed repo overlay migrates the code-review project criterion
-# `project.review-phase-boundaries` from the ungated `applies_to: []` spelling to the
-# explicit repository-wide `["**"]`. These contract tests prove (a) the committed file
-# declares the explicit spelling and (b) the consumer selection is behavior-preserving —
-# including the diverging empty-`changed_files` edge, where the old `[]` short-circuit
-# selected but `any(glob_match … over [])` would not.
+# The `project.review-phase-boundaries` overlay uses `["**"]` for repository-wide
+# selection. These tests also cover empty `changed_files`, where the old `[]`
+# short-circuit selected but a naive glob loop would not.
 _REPO_ROOT = str(Path(__file__).resolve().parents[2])
 
 

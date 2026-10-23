@@ -1,18 +1,9 @@
-"""Repo-tier oracles for the DC store-copy fixture's git diagnostics (``ancient-domestic-orca``).
+"""Pin useful git errors from the Data Center store-copy fixture.
 
-WHY THIS LIVES IN THE UNIT TIER. The defect it pins was found in a Live External Integration
-run: ``dc_store_copy_repo`` aborted at setup with ``CalledProcessError: Command '['git',
-'fetch','origin','tickets']' returned non-zero exit status 128`` and nothing else. The call was
-``subprocess.run(..., capture_output=True, check=True)``, so git's stderr — the one line naming
-the actual cause — went into a captured buffer that ``CalledProcessError``'s string form never
-reports. A fix for "the log does not say why" is only verifiable by showing the message DOES
-say why, and a demonstration that needs a booted amd64 harness image and 41 minutes of live
-spend is a demonstration nobody repeats. The two helpers carrying the repair are plain
-module-level functions, so they are driven here with a stubbed ``subprocess.run`` on every
-commit.
-
-The live lane is not a gate for this ticket: it reads the improved message on its next
-scheduled run.
+``capture_output=True`` with ``check=True`` hides git stderr in
+``CalledProcessError``'s message. Stubbed subprocess calls check that both
+fixture helpers report the command, exit status, and stderr without an external
+Data Center harness.
 """
 
 from __future__ import annotations
@@ -78,13 +69,7 @@ class TestRunGitSurfacesStderr:
         assert "128" in message
 
     def test_old_shape_is_the_negative_control(self, tmp_path: Path) -> None:
-        """RED-proof: the discarded-stderr shape this ticket replaced fails the assertion above.
-
-        Without this control the cell above is a change-detector — it would pass against any
-        error type that happened to mention the branch name. ``CalledProcessError`` is
-        constructed exactly as ``check=True`` constructs it, stderr and all, and its string
-        form still does not contain that stderr.
-        """
+        """A ``check=True`` error contains stderr but omits it from ``str(error)``."""
         error = subprocess.CalledProcessError(
             128, ["git", "fetch", "origin", "tickets"], output=b"", stderr=GIT_STDERR.encode()
         )
@@ -145,13 +130,7 @@ class TestFetchTicketsRetries:
 
 
 def test_store_copy_fixture_leaves_no_swallowed_diagnostic(dc_fixtures: ModuleType) -> None:
-    """No ``subprocess.run`` in the fixture module pairs ``capture_output`` with ``check``.
-
-    Pinned structurally, on the parsed call sites rather than the text, because the defect is
-    a call SHAPE: a future edit that reintroduces the pair would restore the undiagnosable
-    failure without breaking any behavioural assertion here. Parsing (not grepping) keeps the
-    prose in this module's own docstrings — which necessarily quote the bad shape — out of it.
-    """
+    """Parsed fixture calls must not pair ``capture_output`` with ``check``."""
     tree = ast.parse(_FIXTURES.read_text())
     offenders = [
         node.lineno
@@ -208,14 +187,7 @@ class TestBridgeStateScrub:
     def test_seed_unit_resurrects_the_cache_and_recommit_scrub_removes_it(
         self, dc_fixtures: ModuleType, tmp_path: Path
     ) -> None:
-        """Regression origin + fix in one cell.
-
-        The `projects-seed` ensure unit (ticket 462d / epic 0303) re-creates and COMMITS
-        `.bridge_state/projects.json` after the first scrub deleted the blob its tree-check
-        looks for — that resurrection is why the store copy carried `.bridge_state`. The
-        second, committing scrub is the fix; asserting the seed FIRST is the negative control
-        that keeps this from passing vacuously.
-        """
+        """Seed the bridge cache first, then prove the committing scrub removes it."""
         from rebar._store.project_ensures import seed_projects_mapping_unit
 
         tracker = tmp_path / "store"

@@ -1,16 +1,8 @@
-"""Regression for the completion-banking observation stub's kwarg forwarding (bug 9c7c).
+"""Keep the banking observer stub aligned with ``CriterionBank.upsert``.
 
-The live bedrock arm of ``tests/external/test_completion_banking_behavior_0707.py`` failed
-with ``observed_upsert() got an unexpected keyword argument 'evidence_sufficient'`` because
-the monkeypatch stub for ``CriterionBank.upsert`` had drifted from the real signature: the
-real ``upsert`` grew keyword-only ``evidence_sufficient`` / ``seeded`` markers that production
-passes on the bounded-fallback and cache-seed paths, but the stub only accepted ``source``.
-
-These tests drive a real :class:`CriterionBank` through the shared stub factory
-(:func:`tests._bank_observer.make_observed_upsert`) on exactly the paths that pass those
-kwargs, so a stub that fails to forward them raises the same ``TypeError`` here — no live
-provider required.
-"""
+Bank calls through the shared stub must forward keyword-only
+``evidence_sufficient`` and ``seeded`` on fallback and cache-seed paths,
+without an external provider."""
 
 from __future__ import annotations
 

@@ -1,10 +1,8 @@
-"""Unit tests for delivered_now — the plan-review completion-awareness predicate (story 457a).
+"""Pin delivered_now to verified delivery, including a concurrent in-container superseder.
 
-``delivered_now(child, siblings)`` keys on VERIFIED delivery (a valid ``completion-verifier``
-attestation on read), never bare ``closed`` status. These exercise both branches directly with
-constructed ticket-state dicts, monkeypatching the same two seams ``test_compute_validity``
-does (``rebar.verify_signature`` — the per-child attestation read reused from
-``completion.child_closure_findings`` — and ``attest.current_material_fingerprint``)."""
+Bare closed status does not count. Constructed tickets and patched signature
+and material reads cover delivered and undelivered branches without a shared store.
+"""
 
 from __future__ import annotations
 

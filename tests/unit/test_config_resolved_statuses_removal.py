@@ -1,18 +1,8 @@
-"""The `resolved_statuses` config keys are REMOVED but still load, warning (task f408).
+"""Removed ``resolved_statuses`` keys remain loadable with warnings.
 
-Task f020 deleted the inbound absence-probe port, orphaning the operator-facing
-`jira.resolved_statuses` / `reconciler.resolved_statuses` keys. Task 549c decided
-DEPRECATE-not-remove and executed the deprecation half; the removal half was held for
-operator sign-off, which was given on 2026-08-12, and this module replaces the
-deprecation module that pinned the interim state.
-
-Resolved/unresolved discrimination is outbound-owned (ADR 0028), so there is no
-replacement key — an operator simply deletes the line. The tombstones are therefore
-`warn`, not `error`: the keys are INERT (nothing read them, and the behaviour they
-configured no longer exists), so an existing `pyproject.toml` carrying one must keep
-loading. Both halves of THAT are silently reversible, which is what these tests pin:
-the key must not hard-fail, and the warning must actually fire.
-"""
+Outbound logic owns resolved-state discrimination, so the old Jira and
+reconciler keys are inert warn-class tombstones with no replacement. Tests
+require both continued loading and an emitted warning."""
 
 from __future__ import annotations
 

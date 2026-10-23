@@ -1,27 +1,9 @@
-"""Regression for the banking eval's response-denominated measurement and oracle (bug 9507).
+"""Measure completion banking by evidence responses, not repository calls.
 
-Commit ``e1352535ace`` (ticket ``dd41-239d-6e09-4a86``) deliberately lets a batched model
-response execute ALL of its governed repository reads, so the completion evidence policy's
-finite boundary is denominated in evidence RESPONSES (distinct ``run_step`` values), never in
-executed calls. The live eval in ``tests/external/test_completion_banking_behavior_0707.py``
-must measure and bound the same unit: its previous executed-call oracle rejected the intended
-batched behavior deterministically (``calls_at_bank=[11,11,11,11,11]``, 0/3 trials on the
-bedrock arm — bug ``9507-4676-27af-4344``).
-
-These tests replay batching transcripts through the REAL
-``wrap_completion_evidence_policy`` wrapped by the shared response counter
-(:func:`tests._bank_observer.make_response_counting_wrap`), then judge the trial with the
-shared oracle (:func:`tests._bank_observer.bounded_bank_gaps`) — no live provider required.
-They prove the re-denominated oracle ACCEPTS the dd41-intended batched shape and still
-REJECTS the original 0707 defect shapes (zero banks at exhaustion; a first bank only after
-the bounded evidence search should have fail-closed).
-
-The measured contract is SYSTEM-level boundedness (operator ruling, ticket
-``6543-24a7-d2fb-4ff9``): a criterion counts as banked at its first durable bank write by ANY
-actor — the model's genuine record or the policy's silent bounded-fallback insufficiency
-snapshot. The rig's bookkeeping mirrors :func:`tests._bank_observer.make_observed_upsert`,
-which is actor-agnostic for the same reason.
-"""
+The evidence policy and shared response counter replay batched transcripts.
+The oracle accepts governed reads within one response, but rejects exhaustion
+without a bank or a first bank after the bounded search. A criterion is banked
+at its first durable write, whether by the model or bounded fallback."""
 
 from __future__ import annotations
 
@@ -129,12 +111,7 @@ class _Rig:
 
 
 def test_intended_batched_shape_is_accepted() -> None:
-    """The dd41 shape that the stale executed-call oracle rejected 0/3 must now pass.
-
-    Eleven governed reads batched into two responses, then five end-of-run records — the
-    exact live signature ``calls_at_bank=[11,11,11,11,11]`` — collapses to two evidence
-    responses, within the policy's three-response bound for every first bank.
-    """
+    """Eleven reads in two responses stay within the three-response first-bank bound."""
     rig = _Rig()
 
     async def scenario() -> None:
@@ -204,13 +181,7 @@ def test_steered_calls_do_not_count_as_evidence_responses() -> None:
 
 
 def test_fallback_only_transcript_is_bounded_and_green() -> None:
-    """A model that never volunteers a record still yields a bounded, GREEN trial.
-
-    The REAL policy fail-closes each current criterion at its third evidence-claimed
-    response; the observer snapshots read one response low (the documented fallback-ordering
-    caveat), so five criteria land at [2, 5, 8, 11, 14] — every gap exactly 3. That is the
-    ruled system-level contract: boundedness however achieved, actor irrelevant.
-    """
+    """Silent fallback banks five criteria within three-response gaps."""
     rig = _Rig()
 
     async def scenario() -> None:
@@ -225,12 +196,7 @@ def test_fallback_only_transcript_is_bounded_and_green() -> None:
 
 
 def test_live_run_32575679530_shape_is_green_under_system_scope() -> None:
-    """The live trace that failed 0/3 under the model-genuine scope passes the ruled scope.
-
-    Live signature: silent fallbacks held the bound (snapshots 2 and 5) while the model's
-    genuine records began only at evidence response 6. Counting durable banks regardless of
-    actor, first writes are [2, 5, 6, 7, 8] — bounded throughout.
-    """
+    """The observed first writes [2, 5, 6, 7, 8] are bounded regardless of actor."""
     rig = _Rig()
 
     async def scenario() -> None:

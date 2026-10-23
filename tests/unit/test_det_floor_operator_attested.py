@@ -1,12 +1,8 @@
-"""Unit tests for the operator-attested evidence-kind advisory DET lint (ticket b080,
-epic 6982; ADR-0043 x ADR-0016).
+"""Pin advisory operator-attested lint for external completion evidence.
 
-The lint extends :func:`p6_ac_quality` — it is ADVISORY (never blocks) and prompt-less
-(a lexicon over AC text). It flags AC checklist items whose "done" evidence lives OUTSIDE
-the codebase (deploy / prod / live-run / IaC / cloud-state / merge-gate / human action /
-drill / store-surgery / recorded attestation) but which are NOT tagged
-``[operator-attested]``. Self-gated by the deterministic lexicon eval under
-``docs/experiments/plan-review-gate/`` (>=70% precision, <=5% flag rate, both known cases).
+The promptless P6 extension flags untagged AC items requiring deployment,
+runtime or cloud state, merge gates, human action, or recorded attestation. It
+never blocks. The lexicon eval bounds precision and flag rate.
 """
 
 from __future__ import annotations
@@ -31,10 +27,8 @@ def _gaps(text: str) -> list[tuple[str, list[str]]]:
     return operator_evidence_ac_gaps(ac_item_lines(text))
 
 
-# (label, ac_line, should_fire). The 115b/8c4f rows are the historical (tag-stripped) AC
-# text of the two tickets that motivated this lint — they MUST fire. The negatives exercise
-# the codebase-verifiable SUPPRESSION (proving command / doc / "— landed on main" trailer)
-# and the NEGATION guard ("no live") — a marker word alone must not flag them.
+# Historical tag-stripped ACs must fire. Codebase-verifiable and negated
+# examples must not fire on a marker word alone.
 _FIXTURES = [
     (
         "115b-retire",
@@ -149,13 +143,12 @@ def test_canonical_det_matches_floor_and_no_routing_orphan() -> None:
 
 
 def test_tag_regex_single_source() -> None:
-    """det_operator_attested OWNS the [operator-attested] matcher; workflow_ops re-exports it."""
+    """One tag matcher serves planning and completion."""
     assert decide_ops._OPERATOR_ATTESTED_AC_RE is _OPERATOR_ATTESTED_TAG_RE
 
 
 def test_agreement_with_workflow_ops() -> None:
-    """A line workflow_ops recognizes as tagged is never flagged by the plan-time lint — the
-    lint and the completion-verifier enrichment agree on 'tagged' by construction."""
+    """Planner lint and completion enrichment agree on tagged AC items."""
     for line in (
         "- [ ] [operator-attested] the fix is deployed to prod",
         "- [ ] [OPERATOR-ATTESTED] the change is merged to main via Gerrit",

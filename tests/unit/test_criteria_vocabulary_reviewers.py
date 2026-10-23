@@ -1,18 +1,8 @@
-"""One criteria vocabulary in the reviewer prompts and routing index (ticket 2aa6).
+"""Pin one acceptance-criteria term in reviewer prompts and routing.
 
-The plan-review prompts and `criteria_routing.json` pooled "acceptance/success
-criterion" as one concept while spelling it two ways. This pins the collapsed
-vocabulary as a property of the shipped prompt corpus.
-
-Deliberately NOT collapsed, and asserted here so a broad find-and-replace cannot
-quietly swallow them:
-
-* `plan_review_T2.md` — "a pilot with metrics, or stated success criteria for a
-  trial" is generic English about whether an EXPERIMENT succeeded, not the ticket
-  heading. Renaming it would change T2's meaning.
-* `plan_review_verifier.md` / `plan_review_verifier_agentic.md` — the
-  `dod_uncertifiable` "definition-of-done / success criterion" wording is a
-  separate concept, out of scope for this story and its epic.
+The T2 pilot's generic success criteria and the verifier's
+``dod_uncertifiable`` success criterion name different concepts.
+Both must survive the vocabulary check unchanged.
 """
 
 from __future__ import annotations

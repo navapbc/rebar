@@ -1,19 +1,8 @@
-"""The dependency-advisory lanes are WIRED, not just implemented (bug 63e8).
+"""Pin dependency-advisory wiring in workflow YAML.
 
-``scripts/dependency_audit.py`` can be perfectly correct and still fix nothing if a
-workflow never calls it, calls it with the wrong lane, or calls it from a job the
-publishing jobs do not descend from. Workflow YAML is not reachable from a unit test by
-execution, so these tests parse it: they are the only thing standing between a correct
-module and a gate that silently does not run — the failure mode a sibling investigation
-(ticket 599e) found in a different test surface.
-
-Claims pinned here:
-
-* the per-change lane resolves ``gerrit`` on the Verified lane and ``branch`` otherwise;
-* the release gate runs the ``release`` lane in ``authorize``, which every publishing job
-  reaches through ``needs:``, so a blocking advisory stops the release before any build;
-* the scheduled canary exists, is scheduled, and escalates through ``advisory-alert``;
-* the old unconditional shell gate is gone (a leftover copy would re-break the lane split).
+Per-change verification selects ``gerrit`` or ``branch``. Release ``authorize``
+runs the ``release`` lane before publishing jobs. The scheduled canary escalates
+through ``advisory-alert``, and the former unconditional shell gate stays gone.
 """
 
 from __future__ import annotations

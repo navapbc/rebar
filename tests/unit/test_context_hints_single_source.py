@@ -1,20 +1,8 @@
-"""Guard: the provider context-length phrasing list has exactly ONE definition.
+"""Keep provider context-overflow phrases in one owner module.
 
-Story fcb7-e6e2-7244-42d2. The eight-phrase tuple that decides "does this provider error
-look like a context-window overflow?" used to be copied byte-for-byte into
-``rebar.llm.plan_review.sizing``. Two copies means a fix to one silently leaves the other
-stale, and the two classifiers then disagree about the same wire error.
-
-The guard matches the CONJUNCTION of all eight phrases as *distinct string literals* in one
-module — never a single common token such as ``"context"``, which appears innocently all over
-the tree. Prose that merely quotes the phrases inside one docstring (``run_failure.py``)
-is one literal, not eight, so it is left alone; so is
-``workflow.completion_failures``, whose token-exhaustion classifier is a deliberately
-DIFFERENT list.
-
-A module that genuinely needs its own copy opts out with a line comment
-``# context-hints-ok: <reason>`` — the reason is mandatory.
-"""
+The guard matches all eight distinct literals, not a common token or one
+docstring that quotes them. The completion token classifier is separate.
+A legitimate copy requires ``# context-hints-ok: <reason>``."""
 
 from __future__ import annotations
 
@@ -140,8 +128,7 @@ def test_sizing_predicate_follows_the_owner_module(monkeypatch: pytest.MonkeyPat
 
 
 def test_sizing_still_exposes_a_patchable_predicate():
-    """``orchestrator`` binds this by value at import time and a prerequisites test
-    monkeypatches it by name, so it must stay a real attribute of ``sizing``."""
+    """Keep sizing.is_context_limit_error a stable callable module attribute."""
 
     assert callable(sizing.is_context_limit_error)
     assert sizing.is_context_limit_error is sizing.is_context_limit_error

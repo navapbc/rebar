@@ -1,18 +1,9 @@
-"""Regression for bug bb3a-c931-47ba-4808: the delivered-children manifest must not pay
-a full-store scan per child.
+"""Keep delivered-child manifest scans constant as child count grows.
 
-``orchestrator.delivered_children_manifest`` loops a container's children through
-``attest.delivered_now`` → ``_attested_delivered`` →
-``compute_validity(sig, child, "completion-verifier")`` per closed child; the completion
-branch recomputes ``current_material_fingerprint`` (one full-store reduction via
-``relation_snapshot.live_material_children`` → ``_reads.list_tickets(parent=…)`` →
-``reduce_all_tickets``), a stale fingerprint retries three legacy generations, and the
-stale-material explanation enumerates children once more — so one Pass-2 completion
-sub-call manifest assembly over N children cost O(5·N) full-store scans. Sibling of bugs
-3d57-602f-0b75-48ee (pin health) and a3f5-5c19-faad-417b (completion child gate); the
-same shared ``material_child_index`` snapshot collapses them. The contract pinned here:
-full-store reductions during manifest assembly are a small constant, independent of
-child count."""
+Completion validity checks can revisit each child's material fingerprint and
+legacy generations. A shared ``material_child_index`` snapshot must prevent
+those checks from causing a full-store reduction per child.
+"""
 
 from __future__ import annotations
 
@@ -93,11 +84,7 @@ def _scans_for_child_count(monkeypatch, repo: str, count: int) -> int:
 
 
 def test_delivered_manifest_scan_count_constant_in_child_count(monkeypatch, repo) -> None:
-    """Full-store scans must NOT grow with the number of children (bug bb3a-c931).
-
-    Before the fix each closed child cost 5 scans (1 current fingerprint + 3 legacy
-    generations + 1 stale-material explanation), so 4 children cost ~4x what 1 child
-    did; the fix answers every child enumeration in the loop from one shared snapshot."""
+    """Four children must use the same full-store scan count as one child."""
     scans_one = _scans_for_child_count(monkeypatch, repo, 1)
     scans_four = _scans_for_child_count(monkeypatch, repo, 4)
     assert scans_four == scans_one, (

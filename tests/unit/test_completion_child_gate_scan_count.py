@@ -1,16 +1,8 @@
-"""Regression for bug a3f5-5c19-faad-417b: the completion child-closure gate must not
-pay a full-store scan per child.
+"""Keep completion child-closure scans constant as child count grows.
 
-``child_closure_findings`` loops a parent's direct children and runs
-``compute_validity(sig, child, "completion-verifier")`` per closed child; the completion
-branch recomputes ``current_material_fingerprint`` (one full-store reduction via
-``relation_snapshot.live_material_children`` → ``_reads.list_tickets(parent=…)`` →
-``reduce_all_tickets``), a stale fingerprint retries three legacy generations, and the
-stale-material explanation enumerates children once more — so a container close with N
-children cost O(5·N) full-store scans. Sibling of bug 3d57-602f-0b75-48ee (per-pin scans
-in pin health); the same shared ``material_child_index`` snapshot collapses them. The
-contract pinned here: full-store reductions during the child-closure check are a small
-constant, independent of child count."""
+Per-child validity can recompute material fingerprints and legacy variants.
+The shared ``material_child_index`` snapshot must prevent full-store
+reductions from scaling with the number of closed children."""
 
 from __future__ import annotations
 
@@ -90,11 +82,7 @@ def _scans_for_child_count(monkeypatch, repo: str, count: int) -> int:
 
 
 def test_child_gate_scan_count_constant_in_child_count(monkeypatch, repo) -> None:
-    """Full-store scans must NOT grow with the number of children (bug a3f5-5c19).
-
-    Before the fix each closed child cost 5 scans (1 current fingerprint + 3 legacy
-    generations + 1 stale-material explanation), so 4 children cost ~4x what 1 child
-    did; the fix answers every child enumeration in the loop from one shared snapshot."""
+    """Four children must use the same full-store scan count as one child."""
     scans_one = _scans_for_child_count(monkeypatch, repo, 1)
     scans_four = _scans_for_child_count(monkeypatch, repo, 4)
     assert scans_four == scans_one, (

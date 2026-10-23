@@ -1,13 +1,9 @@
-"""Deterministic (no-LLM) tests for the R3 `decomp-shape` container criterion (epic 6982).
+"""Pin deterministic contracts for the ``decomp-shape`` container criterion.
 
-These pin the criterion's NON-LLM logic — registration invariants (canonical / agent-tier /
-NOT code-grounded / container-fan-out membership, non-orphan routing), the routing/finding shape
-(advisory posture, container facet+scope, criterion-local checklist sub-answers), the
-prompt-contract front-matter, the eval_solver container arm (a fake runner threads through
-`pass1_container`), the bounded-sanity eval fixture shape, the criteria-guide section, and the
-zero-wiring auto-inclusion into the standing effectiveness recorder. The live decomposition-shape
-behavior is exercised out-of-band by the committed `criteria eval` sanity artifact (the ticket's
-proving command), mirroring the family's posture.
+Tests cover canonical agent-tier, non-code-grounded registration, container routing and advisory
+findings, checklist answers, prompt metadata, fake-runner evaluation, guide
+content, and automatic effectiveness recording. Criterion behavior is checked by
+the separate committed criteria-eval artifact.
 """
 
 from __future__ import annotations

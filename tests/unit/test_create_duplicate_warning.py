@@ -1,15 +1,10 @@
-"""Create-time advisory same-title duplicate warning (ticket eac3-ed70-764a-4f9e).
+"""Pin the advisory duplicate hint at ticket creation.
 
-Duplicate tickets were only detected after an agent was mid-implementation: the heavy
-overlap detector (ADR 0086) runs at review time, so a same-title twin filed seconds after
-its original passed creation unflagged — and every same-title true duplicate in the store
-was created within 171 seconds of its twin. These tests pin the cheap create-time
-complement: with ``verify.suggest_duplicate_tickets`` on, a create whose normalized title
-matches another create inside the recency window is SURFACED — with the candidate's id and
-status — on each surface's own channel (library dict, ``create``/``idea`` CLI stderr, MCP
-result field). And they pin what it must NOT do: never block or fail the create, never fire
-for distinct titles or stale entries, never fire (or write the journal) when the flag is
-off, and never let a corrupt journal disturb the write.
+With ``verify.suggest_duplicate_tickets`` enabled, a recent normalized-title match
+appears with its id and status in the library result, CLI stderr, or MCP result.
+The hint never blocks creation. Distinct or stale titles, a disabled flag, and a
+corrupt recency journal must leave the write unaffected. A disabled flag must not
+write the journal.
 """
 
 from __future__ import annotations

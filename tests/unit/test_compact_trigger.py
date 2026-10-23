@@ -1,26 +1,9 @@
-"""The operation-linked compaction trigger — the floor for stores with no CI and no cron
-(story gaudy-gangrenous-basilisk).
+"""Pin the operation-linked compaction trigger for stores without a scheduler.
 
-THE GAP THIS CLOSES. Compaction left the close path because it held the store write lock for
-minutes (bug choosy-arthrodic-barbet), and a scheduled GitHub Actions sweep replaced it. But a
-schedule needs CI or cron, and an adopter running rebar as a library or CLI has neither — for
-them a CI-only trigger is no trigger at all, and their event logs would grow forever. So the
-close TRIGGERS compaction again without PERFORMING it: two O(1) checks on the tail of the
-close, and any real folding handed to a detached worker.
-
-What is asserted here, in the order it matters:
-
-* the trigger fires on the two conditions that make it a real floor — the just-closed ticket
-  needs folding, OR the last sweep is stale — and stays quiet otherwise;
-* the staleness arm is not decorative: it is what covers a store whose closed tickets happen
-  never to be foldable;
-* it does not storm — a held advisory lock suppresses the spawn, and a provably-orphaned lock
-  is reclaimed rather than disabling the trigger forever;
-* the close itself holds NO store lock across any of it, which is the whole reason compaction
-  was moved in the first place.
-
-The spawn is asserted through a stubbed `_spawn_detached_sweep`: a real detached child would
-outlive the assertion, and what this module owns is the DECISION to spawn, not the child.
+Close checks whether its ticket needs folding or the sweep is stale, then
+delegates folding to a detached worker without holding the store lock.
+A held advisory lock suppresses duplicate spawns. An orphaned one is
+reclaimed. Tests stub the spawn decision rather than launch a lasting child.
 """
 
 from __future__ import annotations
@@ -87,15 +70,9 @@ def _age_events(tdir: Path, by_ns: int) -> None:
 
 @pytest.fixture(autouse=True)
 def _trigger_async_here(monkeypatch: pytest.MonkeyPatch) -> None:
-    """This module is where the trigger is exercised, so opt back IN to the production default.
+    """Restore production ``async`` after the suite disables detached sweeps.
 
-    The suite-wide conftest fixture forces `REBAR_COMPACT_TRIGGER=off` so no other test spawns
-    a detached worker that would race the next test's store. These tests need the real default
-    (`async`), and set `off`/`always` explicitly where that is the thing under test.
-
-    Set UNCONDITIONALLY: the conftest fixture has already put `off` in the environment by the
-    time this runs, so a "only if unset" guard would never fire. A test that wants a different
-    mode calls `monkeypatch.setenv` in its own body, which runs after every fixture and wins."""
+    Set it unconditionally. Individual tests may override the mode afterward."""
     monkeypatch.setenv("REBAR_COMPACT_TRIGGER", "async")
 
 
@@ -287,19 +264,10 @@ def test_always_folds_inline(store: Path, monkeypatch: pytest.MonkeyPatch) -> No
 def test_the_close_neither_folds_nor_holds_the_lock(
     store: Path, monkeypatch: pytest.MonkeyPatch, spawns: list[str]
 ) -> None:
-    """The whole point of moving compaction: a close must hand the work off, not do it.
+    """In production ``async`` mode, close delegates folding without holding its lock.
 
-    Exercised in `async`, the PRODUCTION mode — and that distinction is the correction to an
-    earlier version of this test, which used `always` and asserted the lock was never held
-    during a fold. That assertion was false by construction: `always` exists precisely to run
-    the fold INLINE so the suite can observe it, so of course the folding process holds the
-    store lock. Testing the production claim against the test-only mode proved nothing and
-    failed as soon as the trigger actually started firing.
-
-    Two observations, both structural rather than timed: across a real close the closing
-    process writes no fold artifact at all, and the lock dir is never seen while one exists.
-    The spawn is stubbed because a real detached child would outlive the assertion — what this
-    asserts is that the close DELEGATED, which is exactly the property under test."""
+    The stubbed spawn and structural artifact/lock observations avoid a lasting
+    child. Test-only ``always`` mode would fold inline and invalidate this claim."""
     from rebar._commands import gates as _gates
     from rebar._commands import transition as _transition
 
@@ -430,19 +398,9 @@ def test_a_stand_aside_does_not_reset_the_sweep_clock(
     assert compact_trigger._sweep_is_stale(tracker, 3600) is True
 
 
-# ── one store, one set of sidecars (bug intangible-ladyish-vicuna 93a9-66cf-e681-4f49) ───────
-#
-# `make worktree` provisions a worktree whose `.tickets-tracker` is a SYMLINK to the canonical
-# store while its `.rebar` is a real, per-worktree directory. The trigger derived all three of
-# its sidecars from `os.path.dirname(tracker)` without resolving that symlink, so each worktree
-# keyed its own worker lock, its own sweep stamp and its own log while triggering sweeps of the
-# ONE shared store. Observed on this host: 33 worktree-local stamps and logs, no shared lock.
-#
-# The store's own contract is explicit — `_store.lock.canonical_tracker` exists "so symlinked
-# and real-path callers contend on the SAME lock file", and the neighbouring `.rebar/hlc.lock`
-# already resolves internally. These tests pin the trigger to that contract, artifact by
-# artifact, because the three fail differently: the lock loses exclusion, the stamp makes every
-# fresh worktree re-fire a sweep the store just had, and the log is deleted with the worktree.
+# Worktrees symlink the shared tracker but own separate `.rebar` directories.
+# Resolve the canonical tracker before choosing the worker lock, sweep stamp,
+# and log so every worktree uses the same sidecars.
 
 
 def _canonical_store(tmp_path: Path) -> str:

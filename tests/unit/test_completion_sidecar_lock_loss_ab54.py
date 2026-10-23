@@ -1,25 +1,9 @@
-"""ab54: a PASS/FAIL COMPLETION_VERDICT sidecar must not be SILENTLY lost on write-lock
-contention.
+"""A completion verdict sidecar must not disappear silently on lock loss.
 
-THE DEFECT. ``completion_sidecar.emit`` calls ``append_event``, which can raise
-``LockTimeout`` (a TRANSIENT, retryable write-lock contention — 60s budget). ``emit`` caught
-ALL exceptions, logged a swallowed ``logger.warning`` and returned ``False``; the caller
-``close_precheck`` discarded that bool. Net effect: under contention the durable record
-vanished with exit 0, clean stdout, no stderr — a transient failure handled identically to a
-permanent one, and invisibly.
-
-THE FIX (asserted here):
-- a ``LockTimeout`` on the sidecar write is RETRIED at least once, so a transient contention
-  that clears LANDS the record (both at the raw seam boundary and at the real lock boundary,
-  where ``append_event`` wraps ``LockTimeout`` into a ``CommandError``);
-- when the sidecar is ULTIMATELY dropped, the close writes an EXPLICIT ``Warning: ... WITHOUT
-  ...`` stderr line naming the ticket, and the close still SUCCEEDS + stays certified
-  (best-effort policy preserved);
-- ``close_precheck`` inspects ``emit``'s bool at BOTH the PASS and FAIL sites.
-
-Assertions are on OBSERVABLE behaviour (the landed sidecar record, the captured stderr, the
-returned sign signal), never on a private name.
-"""
+Retry transient ``LockTimeout`` at the raw and wrapped write seams. If the
+sidecar still cannot land, close remains successful and certified but warns
+on stderr with the ticket id. ``close_precheck`` handles ``emit`` failure on
+both PASS and FAIL paths."""
 
 from __future__ import annotations
 

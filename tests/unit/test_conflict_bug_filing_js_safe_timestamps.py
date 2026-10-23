@@ -1,21 +1,8 @@
-"""The reconciler's conflict filer must read the JS-safe CLI timestamp wire form
-(bug unhelping-creviced-rhino / e127-a3ad-895a-4a2f).
+"""Keep conflict-marker deduplication across JSON-safe timestamp forms.
 
-``conflict_bug_filing._recent_marker_comment`` shells out to ``rebar show --output json``
-and inspects each comment's ``timestamp`` to enforce a 24h duplicate-suppression window.
-It type-checked that value with ``isinstance(ts, (int, float))``.
-
-Bug e127 made ``--output json`` emit an out-of-JS-safe-range nanosecond timestamp as its
-EXACT decimal string. A string fails that ``isinstance`` check, so the loop ``continue``s
-past every marker comment, ``_recent_marker_comment`` always returns ``False``, and the
-window silently stops matching -- appending a fresh accumulation comment on every
-reconciler pass. The function is deliberately fail-soft ("a duplicate accumulation comment
-is cheaper than a silent gap"), so the regression produces NO error: it degrades quietly,
-which is the precise failure mode e127 exists to eliminate.
-
-These tests drive the real function with an injected runner -- the module's own testing
-idiom -- so no subprocess or store is involved.
-"""
+``rebar show --output json`` emits large nanosecond instants as exact decimal
+strings. The reconciler must parse those strings so its 24-hour suppression
+window does not append another accumulation comment on each pass."""
 
 from __future__ import annotations
 

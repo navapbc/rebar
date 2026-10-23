@@ -1,24 +1,8 @@
-"""Semantic shrink-only LOCK for ``.github/complexity-baseline.json`` (task 47e9).
+"""Lock the complexity baseline against new or raised ceilings.
 
-The existing baseline gate (``--check``) freezes per-symbol C901 ceilings but does NOT
-stop a contributor from ADDING a new high-complexity entry or RAISING an existing ceiling
-in the same change — the baseline is a freely-growable file with no CI lock, unlike
-``.github/module-size-limit.txt`` which is byte-locked against ``main``.
-
-This task adds a SEMANTIC lock that parses both the ``main`` baseline (base) and the
-branch copy and compares the ``ceilings`` mappings entry by entry:
-
-  * an entry REMOVED           -> allowed (the ratchet working)
-  * an existing ceiling LOWERED -> allowed
-  * an existing ceiling RAISED  -> REJECTED (administrator override required)
-  * a NEW entry ADDED           -> REJECTED (the hole today)
-
-The lock must FAIL CLOSED when the base copy cannot be established, and the module-size
-lock in ``_build-and-test.yml`` must be fixed to fail closed for the same reason.
-
-These are behavioral/contract assertions against the script's public functions and its
-CLI, plus a config-contract assertion on the workflow's fail path.
-"""
+Removing entries or lowering ceilings is allowed. The semantic comparison
+with main rejects additions and increases, and fails closed when the base
+cannot be read. Workflow tests also pin the module-size lock's fail path."""
 
 from __future__ import annotations
 
