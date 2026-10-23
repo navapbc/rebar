@@ -1,11 +1,6 @@
-"""HELD-OUT oracle for bde5 — the implementation MUST NOT see this file.
-
-Validates the security-critical behaviour the happy path cannot: an envelope
-signed by identity A does NOT verify against identity B's keys, a tampered payload
-fails, an unknown / keyless identity is non-verified (never raises even if the
-lookup itself throws), and the trust root is built only from the identity's in-band
-keys. Observable behaviour only (Verdict.verified).
-"""
+"""Held-out authorship checks: reject cross-identity and tampered signatures;
+unknown or keyless identities remain non-verified without raising. Trust roots
+come only from the subject identity's in-band keys."""
 
 from __future__ import annotations
 

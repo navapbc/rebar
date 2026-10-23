@@ -1,11 +1,6 @@
-"""Happy-path oracle for AC7 (bff8, epic gnu-whale-ichor): the `rebar verify-identity`
-enforcement merge-gate.
-
-The ONLY AC7 test the implementation sees: `rebar verify-identity --all` runs the gate, and
-`--require-authenticated` forces enforcement (non-zero exit on an unsigned event) even when
-config leaves it off. The alias, `--since` grandfathering, `--format json` report, and the
-CI workflow file are held out.
-"""
+"""Happy-path verify-identity gate: --all runs the check and
+--require-authenticated enforces unsigned-event failure even with config off.
+Alias, --since, JSON, and CI cases are held out."""
 
 from __future__ import annotations
 

@@ -1,40 +1,12 @@
-"""Engine A — the T1 **refutation resolver** (epic 8f6c / story 1532).
+"""Confirm-only T1 resolver for asserted-absent references.
 
-Job 1 of the code-grounding oracle: **refute an asserted absence**. When a
-reviewer (plan or code) claims an import/symbol is hallucinated, this lane tries
-to DISPROVE the claim by resolving the reference against the repo. It is
-*confirm-only*: it emits ``refuted`` (we found the thing the reviewer said was
-absent) or ``abstain`` (with a closed reason) — it **never** asserts an absence.
-So the lane only ever *reduces* false positives; it never manufactures one.
-
-The deterministic T1 floor is a **universal-ctags** repo-wide tags index (164
-languages, no server, no build) plus plain file-path existence — both always
-available, both fast. (LSP/SCIP semantic resolution is T2, deferred to epic
-``850f``; member/attribute binding is T2 territory and abstains here.)
-
-The ``refuted`` verdict is SCOPED by an ambiguity+member guard the spike proved
-necessary (``docs/experiments/code-grounding-spike/`` E2: naive bare
-name-existence false-refutes a common-name collision; the guard restores
-0 false-refute). The resolution rule:
-
-* a **dotted / member** reference (``recv.attr``) → ``abstain`` — a member can't
-  be bound at T1 (T2 territory);
-* a name with **>1 definition** in the index (a collision / common name) →
-  ``abstain(ambiguous)`` — we can't pick the reviewer's intended one;
-* a **unique, bare, non-member** symbol/import name, OR an existing **file** path
-  → ``refuted`` (with the def-site / file location when known);
-* ``kind=dependency`` → ``abstain`` — dependencies route to the **T0 deps lane**
-  (story ``S3``), not resolved here;
-* a name simply **not found** → ``abstain`` (NOT ``refuted``, NOT "absent"): the
-  lane confirms presence, it never asserts absence.
-
-Everything fails open through S1's harness: no ctags binary / parse error /
-timeout / unsupported language → ``abstain``, never a raise.
-
-This module is stdlib-only in its core (ctags is an external CLI invoked through
-:func:`rebar.grounding.harness.run_tool`); it builds plain dicts to the S1
-contract and is import-clean for non-adopting clients.
-"""
+Existing files and unique bare symbols/imports may be refuted. Dotted members
+abstain unless an installed module attribute resolves in the environment;
+colliding names, dependencies, and missing names abstain. Dependencies belong
+to T0; unresolved member binding belongs to T2. Universal-ctags builds a repo
+index while missing tools, unsupported languages, parse errors, and timeouts
+fail open.
+The core stays import-clean and emits normalized evidence."""
 
 from __future__ import annotations
 
@@ -63,11 +35,8 @@ _CTAGS_BIN = os.environ.get("REBAR_CTAGS_BIN", "ctags")
 
 # ── Reference-in schema (the closed `kind` contract) ─────────────────────────
 
-#: The CLOSED set of reference kinds Engine A understands. This is the
-#: integration contract S5 EXPOSES; the JSON Schema's ``reference.kind`` enum
-#: matches this 5-value set. ``symbol``/``import``/``file`` are refute-eligible by
-#: name/path existence, ``dependency`` routes to the T0 deps lane, and ``member``
-#: (a dotted ``recv.attr``) is T1-abstain (T2 territory).
+#: Closed reference kinds: symbol/import/file can refute; dependency routes to
+#: T0; member abstains at T1 pending semantic resolution.
 REFERENCE_KINDS: frozenset[str] = frozenset({"symbol", "import", "dependency", "file", "member"})
 
 #: A bare (single-segment) identifier — no dots, no path separators.
@@ -83,18 +52,10 @@ class ReferenceError(ValueError):
 
 
 def validate_reference(ref: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate + normalize a reference-in dict against the closed ``kind`` set.
+    """Validate and trim a reference-in dict with a closed kind and nonempty name.
 
-    The reference-in contract is ``{kind, name, in_file?, container?, language?,
-    ecosystem?}`` where ``kind ∈`` :data:`REFERENCE_KINDS` (closed) and ``name``
-    is a non-empty string. Returns a shallow-copied, trimmed dict; raises
-    :class:`ReferenceError` on a malformed reference.
-
-    This is rebar's OWN 5-value validator (independent of the JSON Schema, whose
-    ``reference.kind`` enum is the 3-value subset until the integration patch
-    lands). Resolution callers run this at the boundary so a bad reference is a
-    loud programmer error, distinct from a fail-open ``abstain``.
-    """
+    Optional fields are in_file, container, language, and ecosystem. Return a
+    shallow copy or raise ReferenceError for malformed programmer input."""
     if not isinstance(ref, Mapping):
         raise ReferenceError(f"reference must be a mapping, got {type(ref).__name__}")
     kind = ref.get("kind")
@@ -127,13 +88,10 @@ def is_member_name(name: str) -> bool:
 
 @dataclass
 class CtagsIndex:
-    """A repo-wide universal-ctags tags index keyed by bare symbol name.
+    """Repo-wide definitions keyed by bare name.
 
-    ``defs[name]`` is the list of definition sites for that name across the repo;
-    a name with len 0 is unknown, len 1 is unique (refute-eligible), len >1 is a
-    collision (ambiguous → abstain). ``languages`` records the per-language def
-    count so coverage can report what was actually indexed.
-    """
+    Zero definitions are unknown, one is refute-eligible, and multiple are
+    ambiguous. Language counts report index coverage."""
 
     defs: dict[str, list[Definition]] = field(default_factory=dict)
     languages: dict[str, int] = field(default_factory=dict)
@@ -240,12 +198,7 @@ def ctags_languages(timeout: float | None = 10) -> frozenset[str]:
 def _language_supported(
     language: str, config: GroundingConfig, *, timeout: float | None = None
 ) -> bool:
-    """True iff ``language`` is parseable by ctags OR declared in project config.
-
-    The project extensibility slot wins: a language listed in
-    ``supported_languages`` (backed by a configured optlib/grammar) is treated as
-    supported even if the stock ctags build doesn't know it.
-    """
+    """Return whether stock ctags or configured project optlibs support language."""
     norm = language.strip().lower()
     if norm in {s.lower() for s in config.supported_languages}:
         return True
@@ -260,14 +213,9 @@ def _language_supported(
 def _ctags_cmd(
     repo_root: str, *, optlib_dirs: Sequence[str] = (), options: Sequence[str] = ()
 ) -> list[str]:
-    """Assemble the universal-ctags repo-wide JSON-index command.
+    """Build the repo-wide ctags JSON command with language and long-kind fields.
 
-    ``--fields=+lK`` adds the language (``l``) and long kind (``K``) fields so the
-    index can report per-language coverage and distinguish kinds. Project
-    extensibility (``optlib_dirs`` / ``options``) is threaded through ``--optlib-dir``
-    / ``--options`` so a project-supplied ctags optlib (a custom ``--langdef``)
-    indexes an otherwise-unsupported language with no recompile.
-    """
+    Pass project optlib directories and options through for custom grammars."""
     cmd = [_CTAGS_BIN, "-R", "--output-format=json", "--fields=+lK"]
     for d in optlib_dirs:
         cmd.append(f"--optlib-dir={d}")
@@ -284,15 +232,11 @@ def build_index(
     optlib_dirs: Sequence[str] = (),
     options: Sequence[str] = (),
 ) -> tuple[CtagsIndex | None, harness.RunResult]:
-    """Build a repo-wide ctags index, fail-open.
+    """Build a ctags index and return (index, run_result).
 
-    Returns ``(index, run_result)``. On any fail-open condition (no ctags binary,
-    timeout, spawn error) the index is ``None`` and ``run_result.abstained`` is
-    True with the closed reason — the caller turns that into an ``abstain``. A
-    non-zero ctags exit with usable stdout is still parsed (ctags often warns on
-    one file yet indexes the rest); only an empty/garbage parse with a non-zero
-    exit is treated as ``parse_error``.
-    """
+    Missing tools, timeout, or spawn failures return None with closed abstention.
+    Parse usable stdout despite a nonzero exit; empty or invalid output with a
+    nonzero exit is a parse error."""
     cmd = _ctags_cmd(repo_root, optlib_dirs=optlib_dirs, options=options)
     version = ctags_version()
     result = harness.run_tool(cmd, backend=BACKEND_CTAGS, timeout=timeout, version=version)
@@ -318,32 +262,15 @@ CONFIG_REL_PATH = os.path.join(".rebar", "grounding.toml")
 
 @dataclass(frozen=True)
 class GroundingConfig:
-    """Project grounding config read from ``.rebar/grounding.toml``.
-
-    Convention (minimal, real):
-
-    .. code-block:: toml
-
-        [grounding]
-        # extra universal-ctags optlib dirs (custom --langdef regex grammars)
-        ctags_optlib_dirs = ["tools/ctags-optlibs"]
-        # explicit ctags --options files (an optlib .ctags file)
-        ctags_options = ["tools/cobol.ctags"]
-        # languages the project declares it can resolve via the optlibs above
-        # (used to decide unsupported_lang vs a real abstain for exotic langs)
-        supported_languages = ["COBOL"]
-
-    Paths are resolved relative to ``repo_root``. An absent / unreadable / invalid
-    config yields the empty default (no extensibility) — never a raise.
-    """
+    """Optional .rebar/grounding.toml settings for ctags optlib dirs, options,
+    and supported languages. Paths are relative to repo_root; missing or invalid
+    config yields empty defaults without raising."""
 
     ctags_optlib_dirs: tuple[str, ...] = ()
     ctags_options: tuple[str, ...] = ()
     supported_languages: frozenset[str] = frozenset()
 
-    # T2 semantic-resolution seam (epic 850f). All default-off: with ``t2_enabled``
-    # false the oracle is byte-identical to the T0+T1 floor. Malformed values fail
-    # open to these defaults (never a raise), like every key above.
+    # T2 defaults off; invalid config fails open without changing the T0+T1 floor.
     t2_enabled: bool = False
     t2_backend: str | None = None
     t2_timeout_seconds: float = 30.0
@@ -429,25 +356,11 @@ def refute_absence(
     config: GroundingConfig | None = None,
     timeout: float | None = None,
 ) -> dict[str, Any]:
-    """Try to DISPROVE an asserted-absent reference; emit one evidence record.
+    """Return one normalized refuted or closed-reason abstain record.
 
-    The single public entry point of Engine A. ``reference`` is a reference-in
-    dict (see :func:`validate_reference`). Returns ONE evidence record (always
-    valid against the S1 contract): ``refuted`` (the reference exists — claim
-    disproved) or ``abstain`` (a closed reason). NEVER asserts an absence; NEVER
-    raises on a resolution failure (fail-open through the harness).
-
-    ``index`` lets a caller resolving many references against one repo build the
-    ctags index once and pass it in; omitted, it's built per call (fail-open).
-
-    The guard (spike E2, the 0-false-refute property):
-
-    * ``kind=dependency`` → ``abstain`` routed to the T0 deps lane (story S3);
-    * ``kind=member`` or a dotted ``name`` → ``abstain(ambiguous)`` (member is T2);
-    * ``kind=file`` → ``refuted`` iff the path exists under ``repo_root``;
-    * a bare symbol/import name: ``refuted`` iff exactly ONE def in the index,
-      ``abstain(ambiguous)`` if >1, ``abstain`` (not found) if 0.
-    """
+    Dependencies route to T0; members and dotted names abstain at T1; existing
+    files and unique bare symbols/imports refute absence. Collisions and missing
+    names abstain. Reuse a supplied ctags index or build one fail-open."""
     ref = validate_reference(reference)
     kind = ref["kind"]
     name = ref["name"]
@@ -463,16 +376,11 @@ def refute_absence(
             detail="kind=dependency routes to the T0 deps lane (story S3); not resolved by the T1 ctags lane",  # noqa: E501
         )
 
-    # `file` → plain path existence (a path is a path, not a member ref — so this
-    # MUST precede the dotted-name gate, which would otherwise see the `.` in an
-    # extension / the `/` in a path and mis-route it to the member abstain).
+    # Check files before dotted-name routing; extensions contain dots.
     if kind == "file":
         return _refute_file(name, ref, repo_root=repo_root)
 
-    # `member` / dotted name → T2 territory for the ctags lane; never refute a
-    # member at T1 by name-collision. But an installed third-party `module.attr`
-    # (bug 406f) IS deterministically resolvable by importing it, so consult the
-    # environment first — a real library member is CONFIRMED, not left unresolved.
+    # Members need T2, except installed module attributes confirmed by environment lookup.
     if kind == "member" or is_member_name(name):
         env = _refute_via_environment(ref)
         if env is not None:
@@ -530,21 +438,13 @@ def _refute_symbol(
     config: GroundingConfig | None,
     timeout: float | None,
 ) -> dict[str, Any]:
-    """Refute a bare ``symbol``/``import`` name via the ctags repo-wide index,
-    falling back to the installed environment whenever the repo lane cannot SEE it.
+    """Resolve a bare symbol/import through ctags, then the installed environment.
 
-    The environment fallback (bug 406f) must run on EVERY ctags-blind path — an
-    unsupported language (which is how an absent ctags binary presents: it can parse
-    nothing), a build failure (no tool / timeout / parse error), OR zero repo defs —
-    not only the zero-defs case; otherwise a host without universal-ctags (e.g. the
-    default CI suite) would abstain on a real third-party symbol before ever
-    consulting importlib. The repo-collision ``ambiguous`` case is left as-is (the
-    symbol demonstrably exists in-repo, so it is not a 'does-not-exist' claim)."""
+    Unsupported languages, index failures, and zero repo definitions all reach
+    the environment fallback. Repo collisions remain ambiguous."""
     cfg = config if config is not None else load_config(repo_root)
 
-    # An unsupported declared language means the ctags lane is blind (commonly:
-    # the ctags binary is absent, so it lists no languages). Skip the index and go
-    # straight to the environment fallback rather than abstaining sight-unseen.
+    # A ctags-blind language goes directly to the installed-environment fallback.
     lang = ref.get("language")
     lang_unsupported = bool(
         isinstance(lang, str) and lang and not _language_supported(lang, cfg, timeout=timeout)
@@ -591,11 +491,8 @@ def _refute_symbol(
                 )
             # Zero defs in the repo index → fall through to the environment fallback.
 
-    # The ctags lane could not CONFIRM the name (unsupported language, absent ctags
-    # binary / timeout / parse error, or zero repo defs). Consult the INSTALLED
-    # environment: a symbol/import importable from a third-party dependency
-    # (site-packages) or the stdlib DOES exist — the repo-scoped index simply cannot
-    # see it. This is precise (an actual import), so it never false-refutes.
+    # Ctags misses, failures, or unsupported languages can still resolve through an
+    # actual installed dependency or stdlib import without false refutation.
     env = _refute_via_environment(ref)
     if env is not None:
         return env
@@ -629,12 +526,8 @@ def _refute_symbol(
     )
 
 
-# ── Environment-aware resolution (installed site-packages / stdlib) ───────────
-# The environment lane (bug 406f) lives in `.environment` to keep this module under
-# the size cap. `refute_via_environment` upgrades a not-found abstain to a `refuted`
-# when a symbol/import resolves from an installed dependency the repo index can't see;
-# `resolve_in_environment` + `BACKEND_ENV` are re-exported here so callers and tests
-# keep importing them from `.resolve` unchanged.
+# Installed-environment fallback lives in .environment; re-export its public
+# symbols here for existing callers. It can refute ctags-blind references.
 
 
 # ── schema-safe reference attachment ─────────────────────────────────────────
@@ -643,16 +536,10 @@ _CACHED_SCHEMA_KINDS: frozenset[str] | None = None
 
 
 def _schema_reference_kinds() -> frozenset[str]:
-    """The ``reference.kind`` enum the *current* JSON Schema actually accepts.
+    """Read accepted reference kinds from the live grounding schema.
 
-    Read once from ``grounding.schema.json``. The live schema enum is the full
-    5-value set ``{import,symbol,dependency,file,member}``, so a ``file``/``member``
-    reference attaches to emitted records today. This indirection is retained as a
-    safety net: we attach the ``reference`` field only when its kind is
-    schema-accepted (see :func:`_schema_safe_reference`), so the resolver can never
-    emit a record that fails ``ev.validate`` even if the schema and this module ever
-    drift. Fails open to the 3-value subset if the schema can't be read.
-    """
+    The full set includes import, symbol, dependency, file, and member. Fall back
+    to the three-kind subset if unreadable so emitted records stay valid."""
     global _CACHED_SCHEMA_KINDS
     if _CACHED_SCHEMA_KINDS is not None:
         return _CACHED_SCHEMA_KINDS
@@ -675,14 +562,10 @@ def _schema_reference_kinds() -> frozenset[str]:
 
 
 def _schema_safe_reference(ref: Mapping[str, Any]) -> dict[str, Any] | None:
-    """Return ``ref`` only if its kind is accepted by the current schema, else None.
+    """Attach a reference only when its kind passes the live schema.
 
-    Keeps every emitted record valid against the live ``ev.validate`` (the
-    3-value enum) today, and AUTO-ATTACHES all 5 kinds the moment the integration
-    patch widens the schema enum — no code change here. When the kind is not yet
-    schema-accepted, the reference identity is still carried in the record's
-    ``detail`` (set by every caller), so no information is lost.
-    """
+    Other references remain represented in record detail, preserving identity
+    without emitting invalid evidence."""
     kind = ref.get("kind")
     if kind in _schema_reference_kinds():
         return dict(ref)
@@ -702,15 +585,10 @@ _DIFF_ADDED_RE = re.compile(r"^\+(?!\+\+)(.*)$", re.MULTILINE)
 def extract_references(
     text: str, *, language: str = "python", in_file: str | None = None
 ) -> list[dict[str, Any]]:
-    """Deterministically extract ``import`` references from source ``text``.
+    """Extract Python import names deterministically from source lines.
 
-    Returns reference-in dicts (``kind=import``) for the imported NAMES of Python
-    ``import`` / ``from … import …`` statements — the bare names a reviewer would
-    flag as hallucinated. Deterministic and AST-free (a regex over import lines);
-    **prose extraction is out of scope** (the oracle verifies references, it does
-    not mine them from natural language). Only ``language='python'`` is wired
-    today; an unknown language yields ``[]`` (no extraction, never a raise).
-    """
+    Return reference-in dicts; unknown languages return []. Prose extraction is
+    outside the oracle's scope."""
     if language != "python":
         return []
     refs: list[dict[str, Any]] = []
@@ -745,12 +623,9 @@ def extract_references(
 def extract_references_from_diff(
     diff: str, *, language: str = "python", in_file: str | None = None
 ) -> list[dict[str, Any]]:
-    """Extract ``import`` references from the ADDED lines of a unified diff.
+    """Extract imports from added non-header diff lines only.
 
-    Collects the ``+``-prefixed (added, non-header) lines and runs
-    :func:`extract_references` over them — so a review extracts the imports a diff
-    *introduces*. Removed/context lines are ignored. Prose is out of scope.
-    """
+    Ignore removed/context lines and prose."""
     added = "\n".join(m.group(1) for m in _DIFF_ADDED_RE.finditer(diff))
     return extract_references(added, language=language, in_file=in_file)
 

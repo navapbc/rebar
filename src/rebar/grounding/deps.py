@@ -1,41 +1,9 @@
-"""T0 dependency / package-existence — manifest enumeration + registry refutation
-+ the abstain gauntlet (epic 8f6c / story 2554).
+"""Confirm package existence through manifests and deps.dev without asserting absence.
 
-The dependency half of the resolution lane: refute the hallucination class
-"package X doesn't exist / was made up" (slopsquatting is a real, high-base-rate
-failure mode). This lane is **confirm-only** — it emits ``refuted`` (the package
-DOES exist, so an asserted absence is disproved) or ``abstain`` (with a CLOSED
-reason), and **NEVER** an asserted absence. There is no "absent" outcome by
-construction: a name we cannot resolve is an *abstain*, never an accusation.
-
-The load-bearing risk is FALSE positives — an internal/workspace package, a
-stdlib module, or an import-vs-distribution name mismatch must NEVER be called
-absent. So the registry probe is wrapped in an **abstain gauntlet** that runs
-BEFORE and AROUND the network probe:
-
-* **Name normalization** per ecosystem (PEP 503 for pypi, crates ``-``≡``_``, Go
-  ``!``-escaping, npm scopes) so a real package isn't missed on a spelling that
-  the registry stores canonically.
-* **Workspace / monorepo membership** — a local workspace member (Cargo
-  ``[workspace]``, pnpm-workspace, Go ``replace``, Maven reactor) is internal, not
-  absent → abstain(``private_or_internal_suspected``).
-* **Stdlib / builtin** — a Python stdlib module / Go std / Node builtin is not a
-  distribution at all → abstain(``other``, detail=``stdlib``).
-* **Import-name-vs-distribution-name** mismatch (``bs4``→``beautifulsoup4``,
-  ``cv2``→``opencv-python``) — undecidable at T0 → abstain(``ambiguous``).
-* **Transient / offline** — 429/5xx/timeout/network error → abstain(
-  ``rate_limited``/``network_error``/``timeout``), never a false absence.
-* **Unknown ecosystem** → abstain(``unsupported_lang``).
-
-Registry oracle: `deps.dev <https://deps.dev>`_'s v3 existence endpoint
-(``/v3/systems/{system}/packages/{name}``) — a polyglot oracle reachable without
-per-registry auth. ``syft`` (SBOM enumeration) is OPTIONAL and fail-open if absent;
-manifest parsing here is stdlib-only (``tomllib``/``json``/line parsing).
-
-stdlib-only and import-clean (a non-adopting client pays nothing); the HTTP layer
-is a single private wrapper (:func:`_http_get`) so unit tests monkeypatch ONE seam
-and never touch the live network.
-"""
+The T0 lane returns refuted only for a confirmed registry hit; internal, stdlib,
+ambiguous, unknown, missing, and transient cases abstain with closed reasons.
+Names follow each ecosystem's registry rules. Enumeration uses stdlib parsers;
+optional syft is not required. _http_get is the sole network seam."""
 
 from __future__ import annotations
 
@@ -181,23 +149,13 @@ _IMPORT_DIST_MISMATCH: dict[str, str] = {
 
 
 def normalize_name(ecosystem: str, name: str) -> str:
-    """Canonicalize a package name to its registry-stored form.
-
-    * **pypi** — PEP 503: lowercase, runs of ``[-_.]`` collapse to a single ``-``.
-    * **cargo** — crates.io treats ``-`` and ``_`` as equivalent; the canonical
-      crate name on the registry keeps the author's spelling, but for the *probe*
-      we lower-case (crate names are case-insensitive on lookup).
-    * **go** — module paths are CASE-SENSITIVE, so we do NOT lowercase; instead an
-      uppercase letter ``X`` is escaped ``!x`` (the deps.dev/Go proxy convention).
-    * **npm** — lowercased; scopes (``@scope/name``) preserved verbatim.
-    * others — returned trimmed, unchanged.
-    """
+    """Return a registry-normalized name: PEP 503 for PyPI, case-insensitive
+    Cargo and npm (preserving npm scopes), Go uppercase !-escaping, or a trimmed
+    unchanged name for other ecosystems."""
     n = name.strip()
     eco = ecosystem.lower()
     if eco == "pypi":
-        # PEP 503: collapse runs of [-_.] to a single '-' and lowercase. strip('-')
-        # so a name with leading/trailing separators normalizes to the canonical
-        # form the registry indexes (else a real package 404s -> a missed refute).
+        # PEP 503: lowercase and collapse [-_.] runs; trim edge separators to match registry names.
         return re.sub(r"[-_.]+", "-", n).strip("-").lower()
     if eco == "cargo":
         return n.lower()
@@ -231,10 +189,7 @@ def _stdlib_abstain(eco: str, name: str) -> dict[str, Any] | None:
     base = name.split("/")[-1] if eco == "npm" and name.startswith("@") else name
     is_std = False
     if eco == "pypi":
-        # Conservative, deliberately over-abstaining: a few stdlib top-level names
-        # (email/json/typing/…) ALSO exist as real PyPI distributions, so this
-        # abstains on them rather than refute — a known, accepted yield gap that
-        # keeps the lane confirm-only (never a false absence) by erring toward skip.
+        # Some stdlib names also exist on PyPI; abstain rather than infer a distribution.
         is_std = base.split(".")[0] in sys.stdlib_module_names
     elif eco == "npm":
         is_std = base in _NODE_BUILTINS
@@ -301,13 +256,10 @@ def _dep_reference(name: str, ecosystem: str) -> dict[str, Any]:
 
 
 def _http_get(url: str, *, timeout: float = _HTTP_TIMEOUT) -> int:
-    """GET ``url`` and return its HTTP status code — the SOLE network seam.
+    """Return the HTTP status for url, including error statuses.
 
-    Unit tests monkeypatch THIS function (no live network). It never raises for an
-    HTTP error status (returns the code); it re-raises only transport-level
-    exceptions (``urllib.error.URLError``, ``TimeoutError``, ``OSError``) so the
-    caller's fail-open mapping can classify them. Returns the status int.
-    """
+    This is the sole network seam. Transport errors propagate for the caller's
+    fail-open classification."""
     req = urllib.request.Request(url, method="GET", headers={"User-Agent": _USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -317,15 +269,10 @@ def _http_get(url: str, *, timeout: float = _HTTP_TIMEOUT) -> int:
 
 
 def _probe_registry(eco: str, name: str) -> dict[str, Any]:
-    """Probe deps.dev for ``name`` and map the result onto an evidence record.
+    """Probe deps.dev and return evidence without raising.
 
-    200 → ``refuted`` (the package exists; an asserted absence is disproved).
-    404/410 → abstain(``private_or_internal_suspected``) — CANNOT prove absence
-    (could be private/internal/brand-new); NEVER an asserted absence.
-    429 → abstain(``rate_limited``); 5xx → abstain(``network_error``);
-    timeout → abstain(``timeout``); any other transport error → abstain(
-    ``network_error``). Every path returns a record; nothing raises.
-    """
+    200 refutes absence; 404/410 abstain as possibly private or internal. 429,
+    5xx, timeout, and other transport errors abstain with closed reasons."""
     system = _DEPSDEV_SYSTEM[eco]
     quoted = urllib.parse.quote(name, safe="")
     url = f"{_DEPSDEV_BASE}/{system}/packages/{quoted}"
@@ -427,21 +374,11 @@ def refute_package(
     *,
     workspace_members: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Try to refute an asserted-absent package — the gauntlet then the probe.
+    """Refute an absent-dependency claim only when registry existence is confirmed.
 
-    ``reference`` is a structured dependency reference: ``{"kind": "dependency",
-    "name": <name>, "ecosystem": <purl-eco>}`` (``ecosystem`` is one of
-    npm/pypi/cargo/golang/go/maven/nuget/gem). Returns ONE evidence record:
-
-    * ``refuted`` iff the package demonstrably EXISTS on the registry (the
-      hallucination claim is a false positive),
-    * otherwise ``abstain`` with a CLOSED reason — INCLUDING every not-found,
-      transient, internal, stdlib, mismatch, and unknown-ecosystem case. This
-      function STRUCTURALLY CANNOT emit a false absence: not-found is an abstain.
-
-    ``workspace_members`` (optional) lets a monorepo enumeration mark local
-    members internal. Every returned record validates against the canonical schema.
-    """
+    The structured reference names an ecosystem and package. Workspace members,
+    stdlib names, import aliases, unknown ecosystems, not-found results, and probe
+    failures abstain; every record follows the evidence schema."""
     name = str(reference.get("name", "")).strip()
     eco = str(reference.get("ecosystem", "")).strip().lower()
 
@@ -511,20 +448,11 @@ _REQ_LINE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:[<>=!~;@\[].*)?$"
 
 
 def enumerate_dependencies(root: str | Path) -> dict[str, Any]:
-    """Enumerate declared deps + workspace members from manifests under ``root``.
+    """Enumerate and deduplicate manifest dependencies by ecosystem and name.
 
-    Stdlib-only parsing across the purl ecosystems: ``pyproject.toml`` /
-    ``requirements*.txt`` (pypi), ``package.json`` (npm), ``Cargo.toml`` (cargo),
-    ``go.mod`` (golang), ``pom.xml`` (maven), ``Gemfile`` (gem). Returns::
-
-        {"references": [<dependency reference>, ...],
-         "workspace_members": {<normalized local member names>},
-         "errors": [{"file": ..., "reason": ...}, ...]}
-
-    Fail-open: an unreadable/unparseable manifest is recorded in ``errors`` and
-    skipped — enumeration NEVER raises. ``references`` are de-duplicated by
-    (ecosystem, name). ``syft`` is not invoked here (optional; fail-open if absent).
-    """
+    Returns references, normalized workspace members, and per-file errors across
+    Python, npm, Cargo, Go, Maven, and Gem manifests. Unreadable or invalid files
+    are skipped with errors; optional syft is not invoked."""
     base = Path(root)
     refs: dict[tuple[str, str], dict[str, Any]] = {}
     members: set[str] = set()

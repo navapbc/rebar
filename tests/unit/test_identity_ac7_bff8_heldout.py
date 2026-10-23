@@ -1,10 +1,5 @@
-"""HELD-OUT oracle for AC7 (bff8) — the implementation MUST NOT see this file.
-
-The enforcement-gate behaviour the happy path can't cover: removed alias rejection,
-`--since` grandfathering (pre-cutover events don't fail; post-cutover do), the
-`--format json` report shape validated against verify_identity_report.schema.json, and the
-CI merge-gate workflow file.
-"""
+"""Held-out verify-identity checks: removed alias rejection, --since
+grandfathering, JSON schema, and CI workflow wiring."""
 
 from __future__ import annotations
 

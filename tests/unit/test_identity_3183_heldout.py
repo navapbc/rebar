@@ -1,11 +1,6 @@
-"""HELD-OUT oracle for 3183 — the implementation MUST NOT see this file.
-
-Validates the parts the happy path cannot: replay NEVER rejects a bad-signature event
-(it still folds, and the reduced state records signed/unsigned PRESENCE counts), the
-UX-only write-gate fails fast when a required-authenticated write cannot be signed, and
-a signed event compacted into a SNAPSHOT still verifies from the snapshot's authorship
-ledger. Observable behaviour only.
-"""
+"""Held-out authenticated-authorship checks: replay folds bad signatures while
+counting signed/unsigned events; required unsigned writes fail fast; signed
+snapshot ledger entries still verify."""
 
 from __future__ import annotations
 

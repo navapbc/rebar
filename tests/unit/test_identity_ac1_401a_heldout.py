@@ -1,9 +1,5 @@
-"""HELD-OUT oracle for AC1 (401a) — the implementation MUST NOT see this file.
-
-The guard the happy path can't cover: the KEY_ADD path is guarded too, the full
-private-key header family is rejected (case-insensitively), and a rejected KEY_ADD
-appends no event.
-"""
+"""Held-out private-key checks: KEY_ADD rejects the case-insensitive header
+family and writes no event."""
 
 from __future__ import annotations
 

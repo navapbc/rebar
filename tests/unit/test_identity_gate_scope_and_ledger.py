@@ -1,24 +1,8 @@
-"""Regression tests for two authenticated-authorship gate false-rejections
-(branch ``fix/identity-gate-false-rejections``).
+"""Gate scope and ledger regression checks.
 
-Bug A — reducer-IGNORED observability sidecars (``COMPLETION_VERDICT`` et al.) are
-        NOT in ``rebar.reducer.KNOWN_EVENT_TYPES``, are non-state-bearing, and may be
-        emitted unsigned. They must be OUT of the authorship gate's scope so they do
-        not false-fail enforcement — while KNOWN state-bearing events with no
-        ``author_sig`` are STILL classified ``unsigned`` (the exemption is scoped to
-        non-KNOWN types only, not a blanket pass).
-
-Bug B — a compacted SNAPSHOT ``authorship_ledger`` entry can carry a null
-        ``commit_sha`` (compaction's ``resolve_event_commit`` returned ``None`` at
-        fold time). The gate must RE-RESOLVE that null from the recorded ``position``
-        (which resolves to the real, era-valid introducing commit) so a validly-signed
-        event is classified ``verified`` — not ``key_not_valid_at_era``. Compaction
-        itself must also fall back to the global position resolver so it persists the
-        real commit rather than a null.
-
-All assertions are on OBSERVABLE outcomes (JSON-report verdicts, exit codes, persisted
-ledger values), never internal classifier names.
-"""
+Reducer-ignored unsigned sidecars stay outside enforcement; known state events
+remain in scope. Re-resolve null snapshot ledger commits by position so valid
+signatures verify, and persist resolved commits during compaction."""
 
 from __future__ import annotations
 

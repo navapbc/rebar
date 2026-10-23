@@ -1,24 +1,9 @@
-# rebar built-in PUBLIC-EXPOSURE detectors (task 830a / bane-tuber-marsh) — deterministic,
-# tfsec/Checkov-ALIGNED signals for a network service exposed to untrusted networks. The code-level
-# counterpart to the plan-review T10 `endpoint_access_contract` (a278): plan-review reasons over prose
-# and cannot do reachability analysis; these fire on the ACTUAL `*.tf` / docker-compose diff.
-#
-# Native opengrep rules (opengrep is a semgrep-compatible fork; the `semgrep` fallback binary runs
-# them). There is NO tfsec/Checkov integration seam in the grounding layer, so these are authored
-# rules that CITE the equivalent tfsec / Checkov check id — not a tool bridge.
-#
-# The `rebar.builtin.iac.public-exposure.` id-prefix (NOT the fail-closed `rebar.builtin.security.`
-# prefix) routes these to the ADVISORY `public-exposure-without-auth` code-review criterion
-# (blocking_enabled: false / fail_mode: open): a match is a coach-not-block coverage finding, so
-# boundary controls that may live OUTSIDE the diff (an authenticating gateway / service-mesh mTLS /
-# network policy) remain the reviewer's judgement.
-#
-# DENY-BY-DEFAULT: each message names the exposure AND the obligation to verify an authenticating
-# front — the auth-absence CUE, not a deterministic auth-correlation a single rule cannot prove.
-#
-# FP GUARDS are pattern exclusions: only unambiguous public-exposure literals match. Private CIDRs
-# (10/8, 172.16/12, 192.168/16), loopback (127.0.0.1 / ::1), unix sockets, and `internal = true`
-# load balancers do NOT match, so they are never flagged.
+# Public-exposure detectors inspect actual Terraform/Compose code, with
+# tfsec/Checkov-equivalent citations; no external tool bridge is used.
+# The dedicated ID prefix routes matches to advisory review because auth may
+# sit outside the diff. Messages require an authenticating-front check.
+# Only public literals match: private CIDRs, loopback, sockets, and internal
+# load balancers are excluded.
 rules:
   - id: rebar.builtin.iac.public-exposure.tf-ingress-open-ipv4
     languages: [terraform]

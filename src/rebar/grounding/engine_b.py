@@ -1,33 +1,10 @@
-"""Engine B — the detector evaluator (story 48d7 / epic 8f6c).
+"""Evaluate declarative detectors and normalize matches and abstentions.
 
-Three backends run declarative detectors over a repo and normalize every match (or
-fail-open skip) to S1's evidence model:
-
-* **OpenGrep** (``opengrep``/``semgrep``) — the PRIMARY matcher and first vertical
-  slice. Pre-validated engine-faithfully (``--validate``, spike E1), then run with
-  ``scan --sarif``; the SARIF is parsed by the shared :mod:`rebar.grounding.sarif`.
-* **ast-grep** — a lighter structural secondary; validated by its own per-rule
-  check, run with ``scan --json``, normalized in-module. A project tree-sitter
-  custom grammar (ast-grep ``customLanguages`` style) declared in the ``.rebar/``
-  slot (``.rebar/sgconfig.yml``, or a path in ``.rebar/grounding.toml``) is honored
-  for structural detectors via ``--config``; an unconfigured language fails open
-  (skipped + coverage).
-* **metric** (``scc``/``lizard``) — a size/complexity matcher with configurable
-  thresholds. The tools are not installed here, so the path is real but fails open
-  to ``abstain(no_tool)``.
-
-Every backend runs inside the fail-open :mod:`rebar.grounding.harness` boundary:
-a missing binary / timeout / version-skew / crash / invalid-detector becomes a
-recorded ``abstain``, never a raise. Applicability is *self-declared* on the
-detector (languages / file globs); a detector whose language or files are absent
-is **skipped with a coverage record** (not run). Output is normalized to the
-evidence model and validated by the caller via :func:`rebar.grounding.evidence.validate`.
-
-The per-backend runners themselves live in :mod:`rebar.grounding.engine_b_backends`
-(split out for the module-size cap) and are re-exported here — this module owns the
-shared helpers (binary resolution, version pinning, applicability routing) and the
-public :func:`scan` entrypoint the runners are dispatched from.
-"""
+OpenGrep/Semgrep validates then scans SARIF; ast-grep handles structural rules
+and optional custom grammars; metric tools cover size and complexity. Every
+backend runs through the fail-open harness. Self-declared language and path
+applicability produce visible skipped coverage. Backend runners live in
+engine_b_backends and are re-exported here."""
 
 from __future__ import annotations
 
@@ -72,9 +49,7 @@ _LANG_EXTENSIONS: dict[str, tuple[str, ...]] = {
     "java": (".java",),
     "rust": (".rs",),
     "json": (".json",),
-    # IaC: terraform/hcl (`.tf`/`.tfvars`) and yaml (compose / k8s manifests) — added for the
-    # public-exposure detectors (task 830a). Without these a `languages: [terraform]` rule is
-    # skipped as `unsupported_lang` and never runs.
+    # Terraform/HCL and YAML extensions keep IaC detectors applicable.
     "terraform": (".tf", ".tfvars"),
     "hcl": (".tf", ".tfvars"),
     "yaml": (".yaml", ".yml"),
@@ -90,11 +65,10 @@ def _resolve_binary(candidates: Iterable[str]) -> str | None:
 
 
 def astgrep_binary() -> str | None:
-    """Path to a GENUINE ast-grep binary on PATH, or None. Validates each candidate's
-    identity via ``--version`` so the unrelated shadow-utils ``sg`` (the Linux
-    run-as-different-group command, also answered by ``which sg``) is NOT mistaken for
-    ast-grep — which would otherwise run the wrong tool and yield no matches instead of
-    cleanly abstaining (no_tool). Used by the scan path AND the tests' availability gate."""
+    """Return a verified ast-grep binary, or None.
+
+    Check --version so the unrelated shadow-utils sg cannot be mistaken for
+    ast-grep; scan and availability tests use this same resolution."""
     for name in _ASTGREP_CANDIDATES:
         path = shutil.which(name)
         if path:
@@ -106,12 +80,8 @@ def astgrep_binary() -> str | None:
 
 @dataclass(frozen=True)
 class ScanResult:
-    """The outcome of one Engine B scan: every emitted evidence record.
-
-    ``records`` holds matches AND fail-open abstains (a skipped detector is a
-    visible coverage record, never a silent no-op), so the list is the complete,
-    self-describing account of what ran and what did not.
-    """
+    """Complete evidence from one scan, including matches and skipped or failed
+    detectors as visible abstention records."""
 
     records: tuple[dict[str, Any], ...]
 
@@ -139,26 +109,17 @@ def _repo_extensions(repo_root: Path) -> set[str]:
     return exts
 
 
-#: Where a project declares an ast-grep custom-language (tree-sitter) config, in
-#: the `.rebar/` slot. ast-grep's native project config file is `sgconfig.yml`; we
-#: read it from `.rebar/sgconfig.yml` (or a path declared in `.rebar/grounding.toml`
-#: under `[grounding] astgrep_sgconfig`). Its `customLanguages` entries register a
-#: tree-sitter grammar (ast-grep `customLanguages` style) so structural detectors in
-#: an otherwise-unsupported language are honored; an unconfigured language fails open.
+#: Project ast-grep config in .rebar/sgconfig.yml or the configured path loads
+#: customLanguages grammars; unconfigured languages fail open.
 _PROJECT_SGCONFIG_REL = ".rebar/sgconfig.yml"
 _GROUNDING_TOML_REL = ".rebar/grounding.toml"
 
 
 def _resolve_astgrep_sgconfig(repo_root: Path) -> tuple[str | None, dict[str, set[str]]]:
-    """Resolve a project ast-grep ``sgconfig.yml`` (custom tree-sitter grammars).
+    """Resolve project sgconfig and its custom-language extension map.
 
-    Returns ``(sgconfig_path | None, {custom_language: {".ext", …}})``. The path is
-    passed to ast-grep via ``--config`` so its ``customLanguages`` grammars load; the
-    extension map lets a custom-language detector route as applicable (its files are
-    present) instead of being skipped as ``unsupported_lang``. Fails open to
-    ``(None, {})`` on any read/parse error — a missing or malformed slot simply means
-    no custom grammars, never a raise.
-    """
+    Pass the path through --config for custom grammars and use extensions for
+    applicability. Missing or malformed config fails open to (None, {})."""
     candidate = repo_root / _PROJECT_SGCONFIG_REL
     declared = _sgconfig_from_toml(repo_root)
     path = declared if declared is not None else (candidate if candidate.is_file() else None)
@@ -205,18 +166,11 @@ def _is_applicable(
     repo_root: Path,
     custom_exts: dict[str, set[str]] | None = None,
 ) -> tuple[bool, str | None]:
-    """Decide whether ``det`` applies to this repo.
+    """Return applicability and a skip reason from declared languages and paths.
 
-    Returns ``(applicable, reason_if_not)``. A detector whose declared languages
-    have no matching file extension in the repo is NOT applicable
-    (``unsupported_lang``); declared ``paths`` globs that match nothing are also a
-    skip. A detector that declares neither always applies (e.g. metric detectors).
-    """
+    Missing matching files skip; a detector with neither restriction applies."""
     langs = det.languages
-    # `generic` is opengrep/semgrep's language-agnostic mode: the rule scans EVERY file regardless
-    # of extension (used by polyglot detectors like the conflict-marker rule, story da25). It has no
-    # extension set to gate on, so a `generic` detector is ALWAYS applicable — the file-presence
-    # check below would otherwise skip it as `unsupported_lang` and it would never run.
+    # Generic rules scan every file, so extension-based applicability cannot skip them.
     if langs and "generic" in langs:
         return True, None
     if langs:
@@ -279,11 +233,8 @@ def _binary_version(binary: str) -> str | None:
 
 # ── Scan entrypoint ──────────────────────────────────────────────────────────
 
-# The per-backend runners live in engine_b_backends (module-size split). They are
-# re-exported here so ``engine_b._run_opengrep`` / ``engine_b._match_declared`` /
-# … keep resolving (external callers + tests reference them on this module, and
-# monkeypatch the shared helpers above on this module — which the runners read at
-# call time via the ``engine_b.`` prefix, so the patches steer them).
+# Re-export backend runners here; callers import and monkeypatch helpers on engine_b,
+# which runners consult at call time.
 from .engine_b_backends import (  # noqa: E402 — after the shared helpers the runners read
     _match_declared,  # noqa: F401 — re-exported for external callers/tests (engine_b._match_declared)
     _run_astgrep,
@@ -305,15 +256,10 @@ def scan(
     *,
     registry: Registry | None = None,
 ) -> ScanResult:
-    """Run every applicable detector over ``repo_root`` and return normalized evidence.
+    """Run applicable registry detectors and return normalized evidence.
 
-    Loads (or accepts) the detector :class:`Registry`, routes each detector by
-    self-declared applicability (absent language/files -> skipped + coverage), then
-    dispatches the applicable ones per backend. The OpenGrep backend pre-validates
-    + quarantines (spike E1); every backend runs fail-open via the harness. Returns
-    a :class:`ScanResult` whose ``records`` are the complete account (matches AND
-    abstains), each one a valid evidence record per S1's schema.
-    """
+    Language/path misses produce skipped coverage; backend validation and execution
+    fail open. ScanResult.records includes matches and abstentions."""
     root = Path(repo_root)
     reg = registry if registry is not None else load_registry(root)
     repo_exts = _repo_extensions(root)

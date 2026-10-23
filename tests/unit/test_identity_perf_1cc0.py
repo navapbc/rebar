@@ -1,17 +1,7 @@
-"""Perf refactor (bug 1cc0): the verify-identity gate must resolve every event's
-introducing commit in ONE `git log` pass, not one subprocess per event.
+"""Verify-identity resolves introducing commits in one Git history pass.
 
-The old path called ``resolve_event_commit`` once per non-verified event, each a full-history
-``git log`` — O(events × history), ~1.8h at real store scale. The batched
-``build_introducing_commit_map`` walks history once (O(events + history)). These tests pin
-BOTH invariants that matter:
-
-* correctness — the batch map returns the SAME introducing commit as the per-event resolver
-  for every active event (parity against the ground-truth function);
-* efficiency — running the full-store gate does not fall back to the per-event resolver when
-  the batch map covers every event (mirrors the build_dep_graph single-batch-scan precedent
-  in tests/scripts/graph/test_graph_perf.py).
-"""
+Check batch-map parity with the per-event resolver and prevent the gate from
+falling back to one subprocess per event."""
 
 from __future__ import annotations
 
@@ -111,12 +101,8 @@ def test_batch_map_commit_actually_added_the_file(repo: Path) -> None:
 
 # ── efficiency invariant (mirrors build_dep_graph single-batch-scan) ───────────
 def test_gate_does_not_call_per_event_resolver(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A full-store scan resolves commits from the batch map, NOT one git-log per event.
-
-    With every active event covered by build_introducing_commit_map, the per-event
-    resolve_event_commit must not be invoked at all — the O(events × history) behaviour is
-    gone. Kept RED until verify_authorship builds the map once and looks up per event.
-    """
+    """With the batch map covering active events, the gate never invokes the
+    per-event resolver."""
     _seed_multi_commit_store(repo)
 
     calls: list[tuple[str, str]] = []

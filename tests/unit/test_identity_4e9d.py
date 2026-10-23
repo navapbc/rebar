@@ -1,10 +1,5 @@
-"""Happy-path oracle for 4e9d (epic gnu-whale-ichor): event author attribution.
-
-The ONLY 4e9d test the implementation sees. Pins the public contract on
-well-formed input: every locally-written event's envelope carries a denormalized
-`author_email`, and an optional `author_id` when a current identity resolves.
-Edge/all-composer/back-compat/cache behaviour is validated separately (held out).
-"""
+"""Happy-path event-attribution checks: local envelopes carry author_email and
+optional resolved author_id. Composer, compatibility, and cache cases are held out."""
 
 from __future__ import annotations
 

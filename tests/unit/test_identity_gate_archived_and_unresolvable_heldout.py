@@ -1,24 +1,6 @@
-"""Regression tests for two verify-identity gate defects (ticket f482-309a-7d61-4d78).
-
-Defect 1 (archived scope) — an ARCHIVED ticket's events must be OUT of the authorship
-        gate's scope: archived tickets are retired work, and their (possibly unsigned or
-        unresolvable) events must not fail enforcement. A non-archived ticket's unsigned
-        KNOWN event is STILL flagged (the exemption is scoped to archived, not a blanket
-        pass).
-
-Defect 2 (unresolvable null-commit ledger) — the whole-store CI failure. A SNAPSHOT
-        ``authorship_ledger`` entry can carry a null ``commit_sha`` (a pre-fix snapshot),
-        and at gate time its ``position`` may fail to resolve to an introducing commit
-        (topology/environment-dependent — this is what happened in CI, producing 206
-        ``key_not_valid_at_era``). A validly-SIGNED entry whose commit cannot be resolved
-        must NOT be force-failed: the gate must not fail-close it to an ENFORCED
-        ``key_not_valid_at_era``. It is authentic (its signature verifies against a real
-        key the identity holds), so it must be treated as verified/grandfathered, and the
-        run must exit 0.
-
-All assertions are on OBSERVABLE outcomes (JSON-report verdicts, exit codes), never on
-internal classifier names. This file is held out from the fix implementer.
-"""
+"""Held-out gate checks: archived tickets leave enforcement scope while
+active unsigned events remain flagged. Signed snapshot ledger entries with
+unresolvable null commit SHAs must verify without era failure."""
 
 from __future__ import annotations
 
@@ -116,14 +98,9 @@ def test_archived_ticket_out_of_scope(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_unresolvable_null_commit_ledger_does_not_fail_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A signed SNAPSHOT ledger entry whose ``commit_sha`` is null AND whose ``position``
-    does NOT resolve to any introducing commit (the CI condition) must NOT be force-failed
-    to an ENFORCED ``key_not_valid_at_era``. It is authentic, so the gate must exit 0.
-
-    The signature binds the event's uuid + content_hash (not its position), so we corrupt
-    ONLY the position (to an id that no committed file matches) — resolution then returns
-    None while the signature still verifies against the identity's real key.
-    """
+    """A signed ledger entry with a null commit and unresolvable position remains
+    verified and exits 0. Corrupt only the position, which is outside the
+    signature's UUID and content-hash binding."""
     repo = _init(tmp_path, monkeypatch, "unresolvable")
     priv, pub = _keypair(tmp_path, "author")
     ident = rebar.create_identity("Ada", "ada@example.com", keys=[pub], repo_root=str(repo))

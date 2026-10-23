@@ -1,10 +1,5 @@
-"""Happy-path oracle for AC1 (401a, epic gnu-whale-ichor): reject private-key material
-at the identity write-gate.
-
-The ONLY AC1 test the implementation sees: a normal authorized-keys public line is
-accepted, and a CREATE carrying an OpenSSH PRIVATE key is refused with no event written.
-The KEY_ADD path and the full private-key-header family are held out.
-"""
+"""Happy-path identity write-gate checks: accept public authorized keys;
+reject a private key at CREATE without writing an event. KEY_ADD is held out."""
 
 from __future__ import annotations
 

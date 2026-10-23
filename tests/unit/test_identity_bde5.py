@@ -1,10 +1,5 @@
-"""Happy-path oracle for bde5 (epic gnu-whale-ichor): the authorship attest kind.
-
-The ONLY bde5 test the implementation sees. Pins the public contract on the happy
-path: the `rebar.authorship.v1` policy is registered at import, and an event payload
-signed with an identity's private key verifies against that identity's in-band
-public keys. Cross-identity / tamper / unknown-identity rejection is held out.
-"""
+"""Happy-path authorship attestation checks: the policy registers at import
+and verifies an event against its author's in-band public keys."""
 
 from __future__ import annotations
 

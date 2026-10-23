@@ -1,13 +1,6 @@
-"""HELD-OUT oracle for TS1 (c96d) — the implementation MUST NOT see this file.
-
-Validates the security-critical + contract behaviour the happy path cannot:
-- cross-identity rejection, tampered body (content_hash mismatch), tampered signature;
-- a malformed / non-Statement payload is non-verified (never raises);
-- an unknown / keyless identity is non-verified;
-- ``authorship_content_hash`` excludes ``author_sig`` and is sensitive to every other field;
-- the low-level ``sign_authorship``/``verify_authorship`` primitive is PRESERVED (KEY-op path).
-Observable behaviour only.
-"""
+"""Held-out in-toto authorship checks: reject cross-identity, tampered,
+malformed, unknown, and keyless cases. Content hash excludes author_sig while
+covering other fields; low-level signing primitives remain available."""
 
 from __future__ import annotations
 

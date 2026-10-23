@@ -1,11 +1,5 @@
-"""HELD-OUT oracle for 4e9d — the implementation MUST NOT see this file.
-
-Validates the parts that separate a real implementation from one that fakes the
-happy path: attribution at ALL FOUR local envelope composers (append_event / txn /
-delete / compact), replay back-compat (pre-change events reduce identically),
-the author_email failure branch, the per-repo memoization cardinality, per-entry
-reduced-output surfacing, and top-level reduced-state surfacing. Observable only.
-"""
+"""Held-out attribution checks for all four local composers, legacy replay,
+email failure, per-repo cache, and reduced-state author surfacing."""
 
 from __future__ import annotations
 

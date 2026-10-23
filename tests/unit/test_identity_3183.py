@@ -1,11 +1,7 @@
-"""Happy-path oracle for 3183 (epic gnu-whale-ichor): opt-in authenticated-authorship
-enforcement.
+"""Happy-path authenticated-authorship gate tests.
 
-The ONLY 3183 test the implementation sees. Pins the merge-gate on the happy path:
-with `identity.require_authenticated` ON, `rebar verify-identity` FLAGS an unsigned
-event and exits non-zero (the real control); with the config OFF it is advisory
-(exit 0). The write-gate, replay-never-rejects, and snapshot round-trip are held out.
-"""
+With enforcement on, verify-identity flags unsigned events; with it off,
+the gate is advisory. Write-gate, replay, and snapshot cases are held out."""
 
 from __future__ import annotations
 

@@ -1,10 +1,5 @@
-"""HELD-OUT oracle for ddbe — the implementation MUST NOT see this file.
-
-Validates the parts that separate a real implementation from one that fakes the
-happy path: the seven-site type exemption (graph/list/gates/Jira-sync), every
-resolver fallback degrading to ``None``, generated-types registration, and the
-end-to-end CLI create path. Asserts observable behaviour only.
-"""
+"""Held-out identity checks: seven-site type exemptions, resolver fallbacks
+to None, generated-type registration, and CLI creation."""
 
 from __future__ import annotations
 

@@ -1,40 +1,9 @@
-"""The public oracle API — three query surfaces over the three engines (S5).
+"""Public evidence-only facade over dependency, ctags, and detector lanes.
 
-This is the **thin facade** the epic's two consumers build against (``5fd2`` the
-DET floor, ``9da1`` the Pass-2 reviewers): one stable surface, three query
-methods, one normalized evidence model out of every one. It UNIFIES the lanes the
-earlier stories built — it adds no detection logic of its own, it only routes and
-filters, keeping the package **pure-evidence** (NO block/advisory policy lives
-here; that is the consumer's call).
-
-The three surfaces (job 1 / job 2 / job 3 of the oracle):
-
-* :func:`refute_absence` — *job 1, refutation.* Route a reference-in dict by its
-  ``kind``: ``dependency`` → the T0 deps lane (:func:`deps.refute_package`),
-  everything else (``symbol``/``import``/``file``/``member``) → the T1 ctags lane
-  (:func:`resolve.refute_absence`). THIS is the unification: the resolve lane
-  abstains-and-routes for ``dependency`` today; the facade makes the dependency
-  call actually happen, so a consumer hits ONE entry point for every kind.
-* :func:`applies` — *job 2, applicability.* Run the applicability detectors that
-  declare a given ``dimension`` over the repo and return ONE evidence record: a
-  ``match`` if any applicability detector fires, else an ``abstain`` (no-match,
-  with coverage). ``dimension`` is validated against the **closed dimension-ID
-  vocabulary owned here** (:data:`DIMENSIONS`); an unknown dimension abstains.
-* :func:`scan` — *job 3, smell/metric scan.* Wrap :func:`engine_b.scan` and filter
-  the records by ``detectors`` / ``dimensions`` / ``path_globs`` (``None`` = all
-  applicable). Returns the list of evidence records (matches AND fail-open skips).
-
-The **closed dimension-ID vocabulary** (:data:`DIMENSIONS`, versioned by
-:data:`DIMENSIONS_VERSION`) is OWNED here — :mod:`.detectors.registry` imports it,
-so this module is the single source of truth a consumer or a project detector
-draws a dimension from. The **reference-in schema** is DEFINED + validated in S2
-(:func:`resolve.validate_reference`); the oracle only EXPOSES it (re-exporting
-:data:`REFERENCE_KINDS`), it never redefines it.
-
-stdlib-only and import-clean: importing the facade pulls only the contract + the
-already-import-clean lanes; the heavy tree-sitter binding stays behind the worker
-boundary the harness owns.
-"""
+refute_absence routes dependencies to T0 and other references to T1; applies
+queries the closed dimension vocabulary; scan filters normalized detector
+records. DIMENSIONS is the registry's source of truth. Policy belongs to
+consumers, and optional tools stay behind fail-open boundaries."""
 
 from __future__ import annotations
 
@@ -54,23 +23,9 @@ from .detectors import Registry, load_registry
 #: add/remove so a consumer pinning a dimension set can detect a vocabulary shift.
 DIMENSIONS_VERSION = 1
 
-#: The CANONICAL closed set of applicability/overlay dimension IDs. A consumer
-#: passes one of these to :func:`applies`; a detector declares one in its
-#: ``rebar_envelope.dimension``. This is the integration contract S5 owns —
-#: :mod:`.detectors.registry` imports it (replacing its provisional placeholder),
-#: so there is ONE source of truth and a project detector outside this set is
-#: flagged (``Detector.unknown_dimension``) rather than silently accepted.
-#:
-#: Members:
-#:
-#: * ``web_frontend`` — the repo exposes a JS/TS web-frontend surface.
-#: * ``has_iac`` — infrastructure-as-code (Terraform/CloudFormation/Pulumi/…)
-#:   is present.
-#: * ``touches_auth`` — authentication / authorization surface is present.
-#: * ``has_migrations`` — database schema migrations are present.
-#: * ``has_tests`` — an automated test surface is present.
-#: * ``smell_generic`` — the catch-all dimension for job-3 smell/metric detectors
-#:   that are not scoped to a specific applicability overlay.
+#: Canonical closed dimension IDs shared with the detector registry. Unknown IDs
+#: are flagged, not accepted: web_frontend, has_iac, touches_auth,
+#: has_migrations, has_tests, and catch-all smell_generic.
 DIMENSIONS: frozenset[str] = frozenset(
     {
         "web_frontend",
@@ -104,28 +59,13 @@ def refute_absence(
     repo_root: str,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """Refute an asserted-absent ``reference`` — the unified entry for ALL kinds.
+    """Refute an absent reference through the T0 or T1 lane.
 
-    Routes by the reference's ``kind`` (validated against the S2 closed set):
-
-    * ``kind=dependency`` → the **T0 deps lane** (:func:`deps.refute_package`): a
-      registry-existence probe wrapped in the abstain gauntlet (stdlib/workspace/
-      mismatch/transient guards). This is the unification — the standalone T1
-      resolver abstains-and-routes for ``dependency``; the facade makes the deps
-      call actually happen so a consumer needs ONE entry point.
-    * any other kind (``symbol``/``import``/``file``/``member``) → the **T1 ctags
-      lane** (:func:`resolve.refute_absence`).
-
-    Returns ONE normalized evidence record (``refuted`` or ``abstain`` with a
-    CLOSED reason). NEVER asserts an absence; NEVER raises on a resolution failure
-    (fail-open through the lanes). ``**kwargs`` forwards lane-specific options
-    (``index``/``config``/``timeout`` for the ctags lane;
-    ``workspace_members`` for the deps lane).
-    """
-    # Fail-open at the boundary: a malformed/unknown reference (bad kind, missing
-    # name, non-mapping) is the untrusted-input case the oracle exists to absorb, so
-    # it becomes an abstain — never a raise. Mirrors how `applies` absorbs an
-    # out-of-vocab dimension, keeping the facade uniformly fail-open.
+    Dependencies use the registry gauntlet; symbol, import, file, and member kinds
+    use the T1 resolver, which checks paths, ctags symbols, and installed
+    references as applicable. Forward lane-specific kwargs. Return one normalized
+    refuted or closed-reason abstain record, never an absence claim or raise."""
+    # Malformed or unknown references abstain at this fail-open API boundary.
     try:
         ref = resolve.validate_reference(reference)
     except resolve.ReferenceError as exc:
@@ -155,16 +95,10 @@ def refute_absence(
 def _maybe_escalate_t2(
     ref: Mapping[str, Any], rec: dict[str, Any], *, repo_root: str, **kwargs: Any
 ) -> dict[str, Any]:
-    """Escalate a T1 ``abstain`` on a T2-territory reference to the semantic seam.
+    """Escalate eligible T1 abstentions to confirm-only semantic resolution.
 
-    The T2 tier (epic 850f) is confirm-only: it can only UPGRADE a T1 abstain to a
-    trustworthy ``refuted`` at ``TIER_T2``; it never downgrades a resolved record and
-    never asserts an absence. So we escalate ONLY when the T1 lane abstained on a
-    member/dotted or not-found bare symbol/import reference, and we keep the T1 record
-    unless T2 returns a ``refuted``. With T2 disabled (the default) ``refute_semantic``
-    returns ``None`` and this is a no-op — the returned record is byte-identical to the
-    T0+T1 floor.
-    """
+    Only member, dotted, or not-found bare references qualify. Keep the T1 result
+    unless T2 refutes it; disabled T2 leaves the T0+T1 result unchanged."""
     if rec.get("outcome") != ev.OUTCOME_ABSTAIN or not semantic.is_t2_territory(ref):
         return rec
     config = kwargs.get("config") or resolve.load_config(repo_root)
@@ -191,21 +125,10 @@ def applies(
     *,
     registry: Registry | None = None,
 ) -> dict[str, Any]:
-    """Decide whether an applicability ``dimension`` applies to ``repo_root``.
+    """Return the first applicability match or a covered abstention.
 
-    Runs the **job-2 applicability detectors** declaring ``dimension`` over the
-    repo and returns ONE evidence record:
-
-    * a ``match`` (the FIRST firing applicability detector's match) iff any such
-      detector fires — the dimension APPLIES;
-    * else an ``abstain`` (no applicability detector matched) carrying a coverage
-      record, so a no-match is a visible, self-describing skip, never a silent
-      no-op.
-
-    ``dimension`` MUST be in the closed vocabulary :data:`DIMENSIONS`; an unknown
-    dimension returns ``abstain(invalid_detector)`` (it is a malformed request, not
-    a repo fact). Fail-open throughout (a missing engine binary → abstain).
-    """
+    Only detectors declaring a known dimension qualify. Unknown dimensions and
+    missing engines abstain rather than raising."""
     if dimension not in DIMENSIONS:
         return ev.normalize_evidence(
             ev.abstain(
@@ -219,9 +142,7 @@ def applies(
         )
 
     result = engine_b.scan(repo_root, registry=registry)
-    # An applicability record is a job=applies record that declares this dimension.
-    # Engine B carries the declared dimension on the detector, not the record, so we
-    # resolve it back through the registry (the same snapshot the scan used).
+    # Resolve detector-declared dimensions from the scan's registry snapshot.
     reg = registry if registry is not None else load_registry(repo_root)
     dim_detectors = {d.id for d in reg if d.dimension == dimension and _is_applies(d)}
 
@@ -269,23 +190,11 @@ def scan(
     path_globs: Sequence[str] | None = None,
     registry: Registry | None = None,
 ) -> list[dict[str, Any]]:
-    """Run the job-3 smell/metric scan and return the filtered evidence records.
+    """Filter Engine B evidence by detector, dimension, and file globs.
 
-    Wraps :func:`engine_b.scan` (every applicable detector over the repo) and
-    narrows the result by any of:
-
-    * ``detectors`` — keep only records whose ``detector_id`` is in this set;
-    * ``dimensions`` — keep only records from detectors declaring one of these
-      dimensions (each validated against :data:`DIMENSIONS`; an unknown one matches
-      nothing). Resolved through the registry the scan used;
-    * ``path_globs`` — keep only records whose ``location.file`` matches one of
-      these globs (records with no location — e.g. coverage-only skips — are kept,
-      since a skip is not file-scoped).
-
-    ``None`` for a filter means "no restriction" (all applicable). Returns the
-    list of normalized evidence records (matches AND fail-open skips); the list is
-    the complete, self-describing account of what ran and what did not.
-    """
+    None means no restriction. Unknown dimensions match nothing. Location-free
+    coverage records survive file filtering; matches and fail-open skips remain
+    normalized evidence."""
     result = engine_b.scan(repo_root, registry=registry)
     records = list(result.records)
 
@@ -320,14 +229,10 @@ def _location_matches(record: Mapping[str, Any], globs: Sequence[str]) -> bool:
 
 
 def contract() -> dict[str, Any]:
-    """Return the STATIC, repo-independent integration contract the oracle exposes.
+    """Return the static oracle integration contract without scanning a repo.
 
-    A fast, deterministic snapshot a consumer (``5fd2``/``9da1``) uses to discover
-    the vocabulary it must draw from — the closed reason enum, the dimension
-    vocabulary + its version, the reference kinds, and the backends with their
-    DETECTED availability/version. No repo is scanned; only tool-version probes
-    run (each fail-open). This is the shape the ``grounding-info`` read tool emits.
-    """
+    Includes closed reasons, versioned dimensions, reference kinds, and detected
+    backend availability/version; tool probes fail open."""
     return {
         "dimensions_version": DIMENSIONS_VERSION,
         "dimensions": sorted(DIMENSIONS),
@@ -341,12 +246,9 @@ def contract() -> dict[str, Any]:
 
 
 def _backend_availability() -> list[dict[str, Any]]:
-    """One ``{name, available, version}`` entry per oracle backend, fail-open.
+    """Return each backend's name, availability, and version.
 
-    Each probe is a best-effort version/PATH check; an absent tool reports
-    ``available=False`` with a null version (never a raise), which is exactly the
-    fail-open posture the oracle takes at run time.
-    """
+    Missing or failed version probes report unavailable with a null version."""
     out: list[dict[str, Any]] = []
 
     # T1 ctags lane (Engine A).

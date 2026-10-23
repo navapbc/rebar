@@ -1,18 +1,8 @@
-"""Happy-path oracle for ddbe (epic gnu-whale-ichor): the ``identity`` entity.
+"""Happy-path identity entity checks.
 
-This is the ONLY identity test the implementation sees. It pins the public
-contract of the create path and the self-identity resolver on well-formed input.
-Edge/exemption/E2E behaviour is validated separately (held out).
-
-Contract under test:
-- ``rebar.create_identity(name, email, mappings=None, keys=None, repo_root=...)``
-  mints an ``identity``-type ticket in one CREATE and returns its id.
-- ``rebar.show_ticket(id)`` surfaces ticket_type=="identity", title==name, and
-  the ``email`` / ``mappings`` / ``keys`` payload.
-- ``rebar.use_identity(id)`` writes the ``.rebar/current_identity`` pointer and
-  ``rebar.resolve_current_identity()`` reads it back; absent a pointer, it
-  defaults to a case-insensitive ``git config user.email`` match.
-"""
+create_identity writes one identity CREATE with email, mappings, and keys;
+show_ticket exposes it. use_identity stores the pointer; resolution reads it
+or falls back to a case-insensitive Git email match."""
 
 from __future__ import annotations
 

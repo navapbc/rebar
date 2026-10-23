@@ -1,12 +1,6 @@
-"""Happy-path oracle for TS1 (c96d, epic gnu-whale-ichor transition): authorship
-payload becomes an in-toto Statement.
-
-The ONLY TS1 test the implementation sees. Pins the approved-design happy path:
-``sign_event_authorship`` wraps an event in an in-toto Statement (subject binds
-{event_uuid, content_hash}) inside a DSSE envelope, and ``verify_event_authorship``
-verifies that against the author identity's in-band keys. Cross-identity / tamper /
-malformed-Statement / primitive-preservation are held out.
-"""
+"""Happy-path in-toto authorship: sign_event_authorship binds event UUID and
+content hash in a DSSE Statement; verify_event_authorship checks the author's
+in-band keys. Failure and primitive cases are held out."""
 
 from __future__ import annotations
 

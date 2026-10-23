@@ -1,11 +1,8 @@
-"""Optional terraform-config-inspect corroboration for Terraform diagnostics.
+"""Positive-only Terraform diagnostic corroboration through config-inspect.
 
-This backend is positive-only: a schema-valid ``terraform-config-inspect --json``
-entry can corroborate a structural diagnostic at T1, while every missing,
-malformed, unequal, dynamic, or execution-fault case abstains with a closed
-reason. Child streams, environment values, and Terraform literals are never
-returned.
-"""
+Only schema-valid structural matches corroborate at T1. Missing, malformed,
+unequal, dynamic, or execution-fault cases abstain with closed reasons;
+child streams, environment values, and Terraform literals remain private."""
 
 from __future__ import annotations
 
@@ -283,12 +280,9 @@ def _run(exe: Path, snapshot: Path) -> _Execution:
     home = Path(tempfile.mkdtemp(prefix=".rebar-tfci-home-"))
     try:
         proc = subprocess.Popen(
-            # "." not str(snapshot): upstream stamps pos.filename as
-            # filepath.Join(dir, name) (tfconfig/load.go dirFiles), so an ABSOLUTE dir
-            # argument comes back as an absolute filename that _validate_positions then
-            # rejects as path_outside_snapshot. cwd is already the snapshot, so "." names
-            # the same directory and keeps filenames relative — and keeps the snapshot
-            # path out of argv entirely (bug f95d-19f6-7e58-4a8e).
+            # Use '.' from snapshot cwd: upstream prefixes pos.filename with its dir
+            # argument. An absolute dir would fail position validation and expose the
+            # snapshot path in argv; '.' keeps filenames relative.
             [str(exe), "--json", "."],
             cwd=str(snapshot),
             stdin=subprocess.DEVNULL,

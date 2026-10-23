@@ -1,20 +1,7 @@
-"""Regression test for `enforce_since` grandfathering (story 8d91 / dedicated-married-ptarmigan).
+"""Check enforce_since via environment config on a mixed store.
 
-Complements the held-out oracle (``test_identity_ac7_bff8_heldout.py``, which drives the
-boundary through the ``--since`` FLAG) by covering three gaps that motivated the
-authenticated-identity rollout (epic pristine-horrible-whapuku):
-
-1. The boundary is driven through the ``identity.enforce_since`` config key via its
-   ``REBAR_IDENTITY_ENFORCE_SINCE`` env override, AND enforcement is turned on through the
-   ``REBAR_IDENTITY_REQUIRE_AUTHENTICATED`` env override — i.e. the config/env path the
-   real merge-gate uses, not the ``--since`` / ``--require-authenticated`` flags.
-2. A single MIXED store: one pre-boundary unsigned event is grandfathered AND one
-   post-boundary unsigned event is enforced in the SAME run, asserting the per-event
-   ``grandfathered`` flag in the ``--format json`` report while the run still exits non-zero.
-3. The STRICT-ancestor boundary semantics: an in-scope event whose introducing commit *is*
-   the boundary commit is ENFORCED (``git merge-base --is-ancestor X X`` exits 0, so a commit
-   is its own ancestor) — only STRICT ancestors of the boundary are grandfathered.
-"""
+Pre-boundary unsigned events are grandfathered in JSON; later events fail
+enforcement. A boundary commit itself is enforced, not grandfathered."""
 
 from __future__ import annotations
 
