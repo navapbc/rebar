@@ -1,16 +1,9 @@
-"""Story 9622 (D1): deterministic write-ahead + pending-binding recovery.
+"""Pending bindings make create recovery deterministic.
 
-Write-ahead: a durable pending record is persisted BEFORE create_issue; the Jira
-key is recorded on the still-pending entry (and persisted) BEFORE the rebar-id
-label. Recovery is then deterministic:
-
-- keyed-pending (key already recorded)  -> confirm + retro-attach the label, NO Jira
-  search  -> a crash between create and label yields NO duplicate.
-- keyless-pending                        -> search the rebar-id label; confirm if
-  found, else unbind (the create never reached Jira).
-- bind_pending persist failure           -> BindingPersistError, create_issue is
-  NOT called (item-scoped skip; recorded failed upstream).
-"""
+Persist a pending record before create and its Jira key before labeling.
+Keyed recovery confirms without search. Keyless recovery searches for the
+identity label and unbinds only after corroborated absence. A failed pending
+persist prevents create."""
 
 from __future__ import annotations
 
@@ -79,21 +72,7 @@ def test_keyless_pending_found_via_search(binding_store_mod, tmp_path):
 
 
 def test_keyless_pending_miss_unbinds(binding_store_mod, tmp_path):
-    """A keyless-pending record whose label search misses is unbound — but only once
-    absence is CORROBORATED.
-
-    This test previously asserted the unbind after a SINGLE negative search. That
-    assertion encoded bug 21fc: the keyless-pending state is entered exactly when we
-    crashed during create_issue, and Jira DC's Lucene index is eventually consistent
-    (JRASERVER-70423: a 2,991s lag observed), so one empty search is precisely what a
-    LIVE issue looks like — and unbinding on it made the next pass write a DUPLICATE.
-
-    The intent is unchanged and still asserted: a truly-absent issue must not strand its
-    ticket pending forever. What changed is that absence must now be corroborated by
-    repeated misses AND an entry older than the index-lag grace window. This is the
-    sibling of ``test_recover_pending_not_found_in_jira`` in
-    ``state/test_binding_store.py``, which pinned the same defect.
-    """
+    """A missing keyless pending label unbinds only after the configured absence checks agree."""
     store = _new_store(binding_store_mod, tmp_path)
     store.bind_pending("local-C")
 
@@ -109,9 +88,8 @@ def test_keyless_pending_miss_unbinds(binding_store_mod, tmp_path):
     store._data["bindings"]["local-C"]["created_at"] = "2000-01-01T00:00:00Z"
     counts = [store.recover_pending_bindings(client) for _ in range(3)]
 
-    # The unbind lands on the THIRD miss overall (one above + the loop's), then there is
-    # nothing left to resolve — so assert exactly one resolution across the sequence
-    # rather than pinning which call it fell on.
+    # Unbind after the third corroborated miss. Assert one resolution across the
+    # sequence without depending on which call completes it.
     assert sum(counts) == 1, f"the corroborated unbind never resolved: {counts}"
     assert store.get_jira_key("local-C") is None
     assert "local-C" not in store.pending_bindings()
@@ -150,9 +128,8 @@ def test_write_ahead_orders_pending_before_create_and_key_before_label(dispatch,
     client.add_label.side_effect = lambda *a, **k: order.append("add_label")
 
     store = MagicMock()
-    # A bare MagicMock answers EVERY member with a truthy Mock, including the
-    # keyless-pending grace gate create_one consults (21fc) — which would defer this
-    # create and leave `order` empty. A real store returns False here.
+    # MagicMock would make the keyless grace gate truthy and skip create. Make its
+    # response false to model a store without pending grace.
     store.is_keyless_pending_within_grace.return_value = False
     store.bind_pending.side_effect = lambda *a, **k: order.append("bind_pending")
     store.record_pending_key.side_effect = lambda *a, **k: order.append("record_key")
@@ -265,9 +242,7 @@ def test_coordinated_path_preserves_write_ahead_order(route_mod, binding_store_m
 def test_coordinated_abort_leaves_keyed_pending_recovered_without_search(
     route_mod, binding_store_mod, tmp_path
 ):
-    """AC2: when the coordinated route aborts AFTER recording the key (label write
-    fails), it leaves a KEYED-pending binding and NEVER deletes; the subsequent
-    recovery confirms it with ZERO Jira search."""
+    """A label-write abort leaves keyed pending for search-free recovery."""
     store = binding_store_mod.BindingStore(tmp_path)
 
     class _LabelFails:

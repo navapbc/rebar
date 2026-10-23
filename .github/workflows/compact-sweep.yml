@@ -1,27 +1,8 @@
-# rebar — out-of-band compaction sweep
-#
-# Folds every ticket whose foldable event count exceeds `compact.threshold` into a
-# SNAPSHOT, then pushes once. This is the store's ONLY standing compaction trigger:
-# compaction used to run inline on every close, where it held the ONE store write
-# lock for the whole fold — measured at 13m53s on one close, starving every
-# concurrent writer — so bug choosy-arthrodic-barbet took it off the close path.
-#
-# Running it HERE is the point. The runner is a disposable, separate checkout on a
-# separate machine — a fresh clone per run with the store mounted as a `tickets`
-# worktree of it — so the sweep shares no index.lock, no rebar-git-op.lock and no
-# store write lock with anything an interactive session is doing. Its result reaches everyone through the ordinary
-# push/merge path, which is safe by invariant I9 (docs/concurrency.md): a fold adds
-# a SNAPSHOT and renames sources to *.retired, while concurrent sessions only add
-# new event files, so the two merge as a union.
-#
-# There is no long-lived clone to keep fresh: every run re-derives the store from
-# origin/tickets, and a failed push leaves only local commits on a workspace that is
-# discarded. Nothing accumulates, so there is no stale-clone cleanup to get wrong.
-#
-# Cadence is 6-hourly — compaction is optional housekeeping whose only cost when
-# deferred is disk, so this trades a little store size for a trigger that is cheap
-# and never urgent. Single-flight (cancel-in-progress: false) so a long sweep
-# finishes before the next one starts.
+# Optional out-of-band ticket compaction on a disposable runner.
+# Fold tickets above compact.threshold into snapshots and push once. A fresh
+# full-history clone avoids local writer locks. Concurrent new events merge with
+# retired-source snapshots as a union. Failed local commits are discarded with
+# the runner. Six-hour scheduling and single flight bound housekeeping load.
 
 name: Compaction Sweep
 
@@ -52,11 +33,8 @@ jobs:
   sweep:
     name: Fold over-threshold tickets
     runs-on: ubuntu-latest
-    # Bound the job like every other scheduled workflow here (reconcile-bridge.yml and
-    # _build-and-test.yml both use 60). Without it the job inherits GitHub's 6-hour default,
-    # so a sweep that stalls — or fans out over a large backlog of over-threshold tickets —
-    # would burn six hours of runner time before anyone noticed. A truncated sweep is
-    # harmless: compaction is optional and the next run re-folds whatever is still pending.
+    # Stop the optional sweep after 60 minutes instead of GitHub's six-hour
+    # default. A truncated sweep is harmless because the next run resumes work.
     timeout-minutes: 60
     permissions:
       contents: write # push the folded SNAPSHOTs back to the tickets orphan branch
@@ -66,11 +44,8 @@ jobs:
         with:
           persist-credentials: true # the mounted worktree reuses these creds to push
           filter: blob:none
-          # Full history (NOT shallow). A shallow graft defeats git's merge-base
-          # computation, so reconciling a compaction — which retires source event files —
-          # against the remote resurrects them, i.e. SNAPSHOT_INCONSISTENT corruption
-          # (bug saggy-pupil-plant / f193). The tickets store MUST be reconciled with full
-          # history + merge, never shallow + rebase. Same reason reconcile-bridge.yml does it.
+          # Fetch full ticket history. Shallow grafts break merge-base and can resurrect
+          # retired events during compaction. Reconcile by merge, never rebase.
           fetch-depth: 0
 
       - name: Set up Python
@@ -85,10 +60,8 @@ jobs:
           pip install -e .
 
       - name: Mount tickets branch as a worktree
-        # The store lives on the `tickets` orphan branch at the repo root. Mount it as
-        # .tickets-tracker on the ACTUAL `tickets` branch (not detached) so tracker.branch
-        # matches and `rebar store fsck` does not WARN on a mismatch. Same recipe as
-        # reconcile-bridge.yml — the proven way to give a CI job a writable store.
+        # Mount the writable store on the tickets branch so tracker.branch matches
+        # and store fsck does not report a detached or mismatched checkout.
         run: |
           set -euo pipefail
           git fetch origin '+tickets:refs/remotes/origin/tickets'
@@ -101,10 +74,8 @@ jobs:
         run: git config merge.ours.driver true
 
       - name: Configure git identity for the sweep bot
-        # --global so the checkout and the mounted .tickets-tracker worktree both inherit it.
-        # Without an identity, `git commit` fails exit 128 ("empty ident name") on CI runners.
-        # The email defaults to the Rebar Bot authorship identity so the inline signing seam's
-        # git-email fallback resolves swept SNAPSHOTs to that identity.
+        # Set Git identity for both the checkout and mounted ticket worktree.
+        # The bot email also resolves the optional snapshot signing identity.
         env:
           SWEEP_BOT_NAME: ${{ vars.BRIDGE_BOT_NAME || 'rebar-bridge[bot]' }}
           SWEEP_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'joeoakhart+bot@navapbc.com' }}
@@ -114,12 +85,8 @@ jobs:
           git config --global user.email "${SWEEP_BOT_EMAIL}"
 
       - name: Materialize the Rebar Bot signing key
-        # The inline signing seam signs only when identity.signing_key resolves. Materialize
-        # the key to a 0600 file under $RUNNER_TEMP (discarded at job end) and export its
-        # path. Unset => SNAPSHOTs are written unsigned, the same advisory posture as
-        # reconciler writes. The store's own env id needs no bootstrap: it is read from
-        # <tracker>/.env-id, which is content of the tickets branch, so the mounted worktree
-        # carries it automatically.
+        # Materialize an optional signing key in a 0600 runner-temp file. Without it,
+        # snapshots remain unsigned. The mounted store carries its own .env-id.
         env:
           REBAR_BOT_SIGNING_KEY: ${{ secrets.REBAR_BOT_SIGNING_KEY }}
         run: |
@@ -144,12 +111,8 @@ jobs:
           ARGS=()
           if [ "${DRY_RUN}" = "true" ]; then ARGS+=(--dry-run); fi
           if [ "${LIMIT}" != "0" ]; then ARGS+=("--limit=${LIMIT}"); fi
-          # Exit 2 means some tickets errored while others folded; the sweep is best-effort
-          # housekeeping, so surface it without failing the run. A real invocation error
-          # (exit 1) still fails.
-          # Redirect rather than pipe: under `set -o pipefail` a `tee` failure (unwritable
-          # RUNNER_TEMP, full disk) becomes the pipeline's exit status and would masquerade as
-          # rebar's, defeating the exit-2-vs-1 branching immediately below.
+          # Exit 2 reports partial sweep errors as a warning. Exit 1 fails the job.
+          # Capture output without a pipe so a tee failure cannot hide rebar's exit code.
           rebar store compact --all "${ARGS[@]}" >"${RUNNER_TEMP}/sweep.out" 2>&1 || rc=$?
           cat "${RUNNER_TEMP}/sweep.out"
           if [ "${rc:-0}" = "2" ]; then
@@ -159,10 +122,7 @@ jobs:
           fi
 
       - name: Report what the sweep did
-        # Telemetry, not decoration: compaction is invisible when it works and equally
-        # invisible when it silently stops, and a store whose sweep has quietly folded nothing
-        # for weeks looks exactly like a healthy one. Publishing the counts on every run makes
-        # "the sweep is doing nothing" a thing someone can SEE without reading logs.
+        # Publish fold counts every run so stalled or empty sweeps are visible.
         if: always()
         run: |
           set -euo pipefail

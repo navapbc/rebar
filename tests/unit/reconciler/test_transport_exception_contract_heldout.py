@@ -1,26 +1,9 @@
-"""HELD-OUT: the Backend port's transport EXCEPTION contract (story J10, epic e369).
+"""BackendHTTPError must subclass urllib HTTPError for adapter-neutral handling.
 
-Held out from the implementation subagent, which is given only the happy path.
-
-WHY THIS EXISTS. The DC transport is built on pycontribs/jira and raises
-``jira.exceptions.JIRAError``. Two CORE reconciler modules catch only
-``urllib.error.HTTPError`` — the type Cloud's urllib transport raises:
-
-* ``outbound_differ._safe_get_issue`` maps ``HTTPError.code == 404`` to ``_DELETED``
-  and everything else transport-ish to ``_TRANSPORT_ERROR``. A ``JIRAError`` matches
-  NEITHER clause, so a remotely-deleted DC issue is not classified as deleted AND the
-  exception escapes. Deletion detection silently breaks.
-* ``dispatch_apply_phases._update_one_apply_reporter`` wraps ``client.set_reporter`` in
-  ``except urllib.error.HTTPError`` specifically to DEGRADE SOFTLY on a 4xx, which its
-  own comment calls "the common case". A ``JIRAError`` escapes and fails the update.
-
-THE CHOSEN FIX, and why the tests below are shaped this way: ``BackendHTTPError``
-SUBCLASSES ``urllib.error.HTTPError``. That is load-bearing — it is what lets both core
-sites keep working with NO edit, and keeps the live-validated Cloud path untouched
-(brainstorm decision 7). So the decisive assertions drive the REAL core functions rather
-than re-implementing their logic: a test that only checked ``isinstance`` would pass even
-if the classification it exists to protect had broken.
-"""
+The Data Center adapter wraps vendor failures so the core classifies 404 as
+deleted and other read failures as transport errors. Reporter 4xx failures
+still degrade softly, while Cloud classification remains unchanged. Drive
+those core paths, not only an isinstance check."""
 
 from __future__ import annotations
 
@@ -72,9 +55,7 @@ def test_backend_http_error_is_declared_on_the_port() -> None:
 
 
 def test_backend_http_error_subclasses_urllib_http_error() -> None:
-    """HELD-OUT edge, and the keystone of the whole design. If this is not a subclass,
-    the two core ``except urllib.error.HTTPError`` clauses stop matching and every other
-    assertion here becomes false — while an isinstance-only test would still pass."""
+    """BackendHTTPError remains a urllib HTTPError subtype so existing core catches still apply."""
     from rebar.reconciler._backend import BackendHTTPError
 
     assert issubclass(BackendHTTPError, urllib.error.HTTPError)
@@ -91,24 +72,20 @@ def test_backend_http_error_carries_the_status_code() -> None:
 
 
 def test_a_dc_404_is_classified_as_DELETED_by_the_real_differ() -> None:
-    """The headline behaviour. Today a DC ``JIRAError`` matches no handler here, so the
-    issue is not classified as deleted and the exception escapes."""
+    """The outbound differ classifies a Data Center 404 as deleted."""
     result = outbound_differ._safe_get_issue(_RaisingClient(_dc_error(404)), "DC-1")
     assert result is outbound_differ._DELETED
 
 
 def test_a_dc_non_404_is_a_TRANSPORT_ERROR_not_a_DELETE() -> None:
-    """HELD-OUT edge. Mapping every DC failure to _DELETED would be far worse than the
-    bug: the reconciler would treat a transient 500 as 'the issue is gone'."""
+    """A Data Center non-404 read failure is a transport error, never deletion."""
     for status in (403, 500, 503):
         result = outbound_differ._safe_get_issue(_RaisingClient(_dc_error(status)), "DC-1")
         assert result is outbound_differ._TRANSPORT_ERROR, f"status {status} misclassified"
 
 
 def test_cloud_classification_is_unchanged() -> None:
-    """NEGATIVE CONTROL. Cloud must keep raising plain urllib.error.HTTPError and keep
-    classifying identically — brainstorm decision 7 forbids altering the live-validated
-    Cloud path, so this proves the fix did not reach it."""
+    """Cloud 404 and other HTTP failures retain their pre-adapter classifications."""
     cloud_404 = urllib.error.HTTPError("http://x", 404, "gone", None, None)  # type: ignore[arg-type]
     cloud_500 = urllib.error.HTTPError("http://x", 500, "boom", None, None)  # type: ignore[arg-type]
     assert outbound_differ._safe_get_issue(_RaisingClient(cloud_404), "DIG-1") is (
@@ -125,9 +102,7 @@ def test_cloud_classification_is_unchanged() -> None:
 
 
 def test_a_dc_reporter_4xx_degrades_softly_instead_of_escaping(monkeypatch) -> None:
-    """HELD-OUT edge. The handler exists so a missing Modify-Reporter permission — which
-    its own comment calls 'the common case' — does not fail the whole update. A DC
-    JIRAError escapes it today."""
+    """A Data Center reporter 4xx degrades through the core handler instead of escaping."""
     recorded: list[str] = []
     monkeypatch.setattr(
         dispatch_apply_phases,
@@ -175,9 +150,7 @@ def test_reporter_handler_still_degrades_for_cloud(monkeypatch) -> None:
     "module", ["outbound_differ.py", "dispatch_apply_phases.py", "outbound_field_diff.py"]
 )
 def test_no_core_module_names_a_vendor_exception(module: str) -> None:
-    """HELD-OUT edge. The fix must NOT be 'teach the core a second vendor's exception'.
-    If ``JIRAError`` appears in a core module, the adapter-boundary translation was
-    abandoned and the seam leaked a second time."""
+    """Core reconciler modules use neutral transport exceptions rather than Jira vendor types."""
     import pathlib
 
     root = pathlib.Path(__file__).resolve().parents[3] / "src/rebar/reconciler"

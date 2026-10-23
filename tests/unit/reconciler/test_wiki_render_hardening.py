@@ -1,24 +1,9 @@
-"""Story 5c0e — the DC renderer's subprocess must be bounded, reaped, and inert.
+"""The Data Center Pandoc subprocess is bounded and reaped as a process group.
 
-The Data Center path shells out to pandoc once per structurally-safe unit. Two
-hazards from the DC experiment motivate this file:
-
-* **Pathological input.** One corpus body span pandoc's jira reader for 13.5
-  minutes at 95.8% CPU. pypandoc's high-level API sets no timeout and hands back
-  no process handle, so a single field could stall a reconcile indefinitely.
-* **Orphaned grandchildren.** ``subprocess.run(timeout=...)`` reaps only the
-  DIRECT child. A pipe-holding grandchild survives it and keeps burning CPU (bug
-  d843, bpo-30154), so the timeout alone would not actually stop the spin.
-
-The third property is the one that makes the other two safe to ship: this story
-changes ROBUSTNESS only. Rendered output must be byte-identical to the landed
-renderer, so a hardening change can never quietly alter what lands in Jira.
-
-**Cost discipline.** The whole historical corpus remains byte-compared in Verify,
-but its production-side conversion is now supplied by committed real-Pandoc replay
-outputs. Version/fingerprint and representative product-path tests retain the live
-boundary. The weekly/manual external job performs every required real conversion.
-"""
+Timeouts cannot leave pipe-holding grandchildren. Input reaches the renderer
+on stdin, and output remains byte-identical to the landed renderer. Committed
+replay covers the corpus while representative tests retain the installed
+Pandoc boundary."""
 
 from __future__ import annotations
 
@@ -169,11 +154,7 @@ def test_each_render_pass_resolves_the_timeout_once(
 def test_a_non_positive_timeout_falls_back_rather_than_disabling_rendering(
     bad: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Zero would mean 'kill pandoc immediately' — every unit degrading to Markdown.
-
-    Fail-SAFE, not fail-open: a config fault must not silently switch rendering
-    off across the whole project.
-    """
+    """A non-positive timeout uses the configured fallback rather than canceling every render."""
     (tmp_path / ".git").mkdir(parents=True)
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
     monkeypatch.setenv("REBAR_RECONCILER_DC_PANDOC_TIMEOUT_S", bad)
@@ -195,12 +176,7 @@ def test_an_unreadable_config_falls_back_to_the_builtin_default(
 def test_a_config_object_without_the_key_falls_back_rather_than_raising(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The engine ships as package data and can meet a config predating this key.
-
-    Callers also substitute partial config objects — one such stand-in in the
-    cutover suite carries only ``rich_text_cutover``. Raising over a field we can
-    trivially default would take the whole pass down.
-    """
+    """A config predating the timeout key uses its fallback without raising."""
     import rebar.config
 
     partial = type("Cfg", (), {"reconciler": type("R", (), {})()})()
@@ -211,19 +187,9 @@ def test_a_config_object_without_the_key_falls_back_rather_than_raising(
 # --- 2. a hung process AND its group are killed --------------------------------
 
 
-# A REAL executable standing in for pandoc, rather than a patched
-# ``subprocess.Popen``. Patching the module attribute would also hijack every
-# OTHER subprocess spawned while it is in place — including the autouse
-# conftest fixture that shells out to git during teardown, which then blocks on
-# this stand-in's pipes and reports as an infrastructure hang. Handing
-# ``_convert`` a path to run keeps the spawn entirely real: real argv, real
-# pipes, real timeout, real reap.
-#
-# It forks a grandchild that inherits the pipes and spins at full CPU, which is
-# the shape a plain ``subprocess.run(timeout=...)`` fails to clean up (bug d843).
-# The grandchild's pid comes back through a FILE: a reader waiting on stderr for
-# EOF would block until the grandchild dies, turning a reap regression into a
-# deadlock instead of a failure.
+# Run an executable stand-in through _convert instead of patching Popen, which
+# would also intercept fixture subprocesses. Its grandchild holds pipes and
+# spins. A pid file lets the test check group reaping without waiting on EOF.
 _FAKE_PANDOC = """#!{python}
 import os, pathlib, time
 pid = os.fork()
@@ -260,13 +226,7 @@ def _alive(pid: int) -> bool:
 def test_a_timeout_reaps_the_whole_process_group_not_just_the_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The load-bearing one: a spinning GRANDCHILD must not survive the timeout.
-
-    A plain ``subprocess.run(timeout=...)`` passes a test that only inspects the
-    direct child, which is exactly how bug d843 stayed invisible. So the stand-in
-    forks a grandchild spinning at full CPU, the timeout is allowed to fire, and
-    the assertion is about the GRANDCHILD.
-    """
+    """A timeout reaps the renderer and pipe-holding grandchildren in its process group."""
     (tmp_path / ".git").mkdir(parents=True)
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
     monkeypatch.setenv("REBAR_RECONCILER_DC_PANDOC_TIMEOUT_S", "1")
@@ -281,8 +241,7 @@ def test_a_timeout_reaps_the_whole_process_group_not_just_the_child(
     assert _convert("anything", fake) is None
     elapsed = time.monotonic() - started
 
-    # Separates "the 1s timeout fired" from "we waited out the stand-in's 300s sleep" —
-    # the only two ways _convert can return here.
+    # Distinguish the 1-second timeout from the stand-in's 300-second sleep.
     # timing: hang-guard — 60x the timeout, 5x under the sleep; contention cannot cross it
     assert elapsed < 60
 
@@ -303,12 +262,7 @@ def test_a_timeout_reaps_the_whole_process_group_not_just_the_child(
 def test_the_child_leads_its_own_process_group(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``start_new_session=True`` is what gives the reaper a group to kill.
-
-    Without it the child shares the RECONCILER's group, so the reaper's killpg
-    would target rebar's own processes — the reap and the session flag are one
-    mechanism, not two independent settings.
-    """
+    """The renderer starts a new process group so timeout cleanup can signal the group."""
     (tmp_path / ".git").mkdir(parents=True)
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
     monkeypatch.setenv("REBAR_RECONCILER_DC_PANDOC_TIMEOUT_S", "1")
@@ -376,13 +330,7 @@ def test_an_unspawnable_pandoc_degrades_without_raising(monkeypatch: pytest.Monk
 
 @_NEEDS_PANDOC
 def test_the_unit_is_delivered_on_stdin_with_the_landed_argv() -> None:
-    """The one place this deliberately diverges from the ACLI pattern it mirrors.
-
-    acli reads nothing from stdin and is spawned ``stdin=DEVNULL``; pandoc reads
-    the unit FROM stdin. Copying that kwarg would feed pandoc an empty document
-    and degrade every unit while looking perfectly healthy, so the pipe and the
-    argv are both pinned.
-    """
+    """The renderer receives the unit on stdin with the committed argument vector."""
     seen: dict[str, object] = {}
     real_popen = subprocess.Popen
 
@@ -406,11 +354,7 @@ def test_the_unit_is_delivered_on_stdin_with_the_landed_argv() -> None:
 
 @_NEEDS_PANDOC
 def test_an_empty_stdin_would_have_been_detectable() -> None:
-    """Guards the guard: prove the stdin bug this file protects against is visible.
-
-    If feeding pandoc nothing produced the same answer as feeding it the unit,
-    the test above would pass under the broken implementation too.
-    """
+    """The stdin assertion detects an empty-input regression instead of false green."""
     assert _convert("hello **world**", str(_PANDOC)) != _convert("", str(_PANDOC))
 
 
@@ -484,18 +428,7 @@ def test_the_installed_pandoc_matches_the_legacy_fixture_provenance() -> None:
 
 
 def test_static_replay_output_is_byte_identical_to_the_landed_renderer() -> None:
-    """Committed product output vs immutable pre-hardening bytes for all 1101 units.
-
-    This is what licenses the change: swapping ``subprocess.run`` for a ``Popen``
-    + caller-side timeout + group reap must change WHEN pandoc is given up on,
-    never WHAT it produces. Compared at ``_convert`` level so the comparison
-    isolates the changed function rather than the segmentation around it, which
-    this story does not touch.
-
-    The independent legacy fixture cannot follow mutable production constants. The
-    new replay files were captured from the product converter and complete external
-    replay revalidates them against both supported binaries every week.
-    """
+    """Committed replay output matches pre-hardening renderer bytes for all 1,101 units."""
     converter = _GENERATOR.StaticReplayConverter(_REPLAY_FIXTURES)
     for position, prepared in enumerate(_renderable_units()):
         expected = _expected_output(_LEGACY_ENTRIES[position])

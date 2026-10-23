@@ -1,24 +1,8 @@
-"""The ``RichTextCodec`` contract (story J3, epic e369).
+"""Cloud stores ADF documents, while Data Center stores wiki text.
 
-Rich-text encoding is one of the three real Cloud/Data-Center differences: Jira
-Cloud's REST v3 requires Atlassian Document Format (a nested JSON document;
-sending a plain string returns 400), while Data Center's REST v2 carries
-descriptions as plain text / wiki markup.
-
-The contract has FOUR operations, because Cloud's existing behaviour needs all
-four kept distinct:
-
-* ``fit_outbound(text)``      — fit to the deployment's limit (Cloud measures the
-                                ADF SERIALIZATION, not the plain text)
-* ``normalize_outbound(text)``— render the value as it will read after a round
-                                trip (Cloud rejoins soft wraps; DC is identity)
-* ``to_wire(text)``           — the wire shape (Cloud: an ADF dict; DC: the str)
-* ``decode_inbound(body)``    — wire shape back to plain text
-
-``fit_outbound`` and ``normalize_outbound`` are separate on purpose: the Cloud
-send path composes BOTH, while the description sanitizer applies only the fit.
-Collapsing them would silently change one of those two callers.
-"""
+RichTextCodec separates fitting, round-trip normalization, wire encoding, and
+inbound decoding. Cloud fitting measures serialized ADF. The Cloud send path
+uses fitting and normalization, while the description sanitizer fits only."""
 
 from __future__ import annotations
 
@@ -65,23 +49,14 @@ def test_text_within_the_limit_is_returned_unchanged_and_unmarked(factory: Any) 
     assert "truncated" not in codec.fit_outbound(text)
 
 
-# Both codecs append the SAME visible marker, so a Jira reader sees one
-# consistent string regardless of deployment (adf._ADF_TRUNCATION_SUFFIX and
-# rich_text._WIKI_TRUNCATION_SUFFIX are defined independently but identically —
-# the shared layer must not import the Cloud module).
+# Both codecs use the same visible truncation marker. Keep the wiki and ADF
+# constants equal without importing Cloud code into the shared layer.
 _TRUNCATION_MARKER = " … [truncated by reconciler]"
 
 
 @pytest.mark.parametrize("factory", _CODECS)
 def test_over_limit_text_is_fitted_and_marked(factory: Any) -> None:
-    """An over-length value is truncated and the marker lands at the very END.
-
-    ``endswith`` is the assertion that matters, not a substring check: the
-    contract is that the marker terminates the fitted value, so a Jira reader
-    sees the truncation notice at the point the content stops. A mere
-    ``"truncated" in fitted`` would also pass if the marker were stranded
-    mid-string, which would mean content after the notice.
-    """
+    """Fitting an over-limit value keeps a terminal marker within the cap."""
     codec = factory()
     fitted = codec.fit_outbound("x" * 200_000)
 
@@ -93,13 +68,7 @@ def test_over_limit_text_is_fitted_and_marked(factory: Any) -> None:
 
 
 def test_wiki_over_limit_value_ends_with_the_marker_and_fits_the_cap() -> None:
-    """AC6, stated as one assertion pair: the fitted value ends with the marker
-    AND does not exceed ``WIKI_DESCRIPTION_LIMIT``.
-
-    The marker is counted against the cap rather than appended past it, so
-    marking the truncation can never itself push the value over the limit — the
-    same rule ``comment_limits.truncate_comment_body`` follows.
-    """
+    """Wiki fitting keeps the terminal marker within WIKI_DESCRIPTION_LIMIT."""
     fitted = WikiTextCodec().fit_outbound("w" * (WIKI_DESCRIPTION_LIMIT + 10_000))
 
     assert fitted.endswith(_TRUNCATION_MARKER)
@@ -107,9 +76,7 @@ def test_wiki_over_limit_value_ends_with_the_marker_and_fits_the_cap() -> None:
 
 
 def test_adf_over_limit_value_ends_with_the_marker_within_the_serialized_cap() -> None:
-    """The Cloud half of AC6. Cloud's cap is on the SERIALIZED document, so the
-    length assertion is made against the ADF, not the plain text — while the
-    marker requirement is identical."""
+    """ADF fitting keeps the terminal marker inside the serialized-document cap."""
     import json
 
     from rebar.reconciler.adapters.jira import adf
@@ -130,23 +97,9 @@ def test_fit_is_idempotent(factory: Any) -> None:
     assert codec.fit_outbound(once) == once
 
 
-# ---------------------------------------------------------------------------
-# The codec law (ticket a32a, AC #4): normalize_outbound(t) == decode_inbound(to_wire(t))
-#
-# This is the invariant the outbound comment differ's dedup key now RELIES on
-# (outbound_comments._resolve_codec / the `codec` parameter of `_diff_comments`):
-# the Jira-side comparison key is always `decode_inbound(<what Jira stores>)`,
-# and the local-side key is `normalize_outbound(<the fitted local value>)`. The
-# two only converge if this law holds — a codec whose `to_wire` encoding, once
-# decoded, does NOT equal its own `normalize_outbound` would make the comment
-# differ re-emit an already-mirrored comment forever, or (if the mismatch runs
-# the other way) silently swallow the human's Jira-native formatting. Today's
-# ``WikiTextCodec`` satisfies this trivially (every operation is the identity
-# on `str`); a pandoc-backed converter that got this wrong would pass every
-# OTHER test in this file while breaking comment-diff convergence in
-# production. Pinned here directly, over a small corpus of realistic bodies,
-# not just the interchangeability example above.
-# ---------------------------------------------------------------------------
+# The comment differ compares decoded Jira wire output with normalized local
+# text. Their equality prevents duplicate comments and lost Jira formatting.
+# normalize_outbound(t) == decode_inbound(to_wire(t)).
 
 _CODEC_LAW_BODIES = [
     pytest.param("a single short line", id="short-line"),
@@ -161,14 +114,7 @@ _CODEC_LAW_BODIES = [
 @pytest.mark.parametrize("factory", _CODECS)
 @pytest.mark.parametrize("text", _CODEC_LAW_BODIES)
 def test_normalize_outbound_equals_decode_of_to_wire(factory: Any, text: str) -> None:
-    """The codec law every ``RichTextCodec`` implementation must satisfy:
-    ``normalize_outbound(t) == decode_inbound(to_wire(t))``.
-
-    This is what makes ``normalize_outbound`` a truthful preview of "what a
-    reader will see after Jira round-trips this value" — the property the
-    outbound comment differ's dedup key (ticket a32a) depends on to compare
-    the local value against what Jira will actually store.
-    """
+    """Every codec preserves the law normalize_outbound(t) == decode_inbound(to_wire(t))."""
     codec = factory()
 
     assert codec.normalize_outbound(text) == codec.decode_inbound(codec.to_wire(text))

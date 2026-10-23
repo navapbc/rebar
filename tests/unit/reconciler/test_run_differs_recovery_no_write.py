@@ -1,23 +1,8 @@
-"""Bug 7851: preview / dry-run passes must issue ZERO remote Jira writes during
-pending-binding recovery.
+"""Preview and dry-run differ passes must perform no remote recovery writes.
 
-``run_differs._run_differs_outbound`` gated pending-binding recovery on
-``if not scoped_ids`` alone — no persist/no-write axis — so a ``preview`` route
-pass and a legacy ``--mode dry-run`` pass (both ``persist=False``, both documented
-and reported as no-write) still ran ``recover_pending_bindings``, whose keyed-pending
-branch issues real ``client.add_label`` / ``client.set_entity_property`` mutations of
-the remote issue. The sibling invariant-filing gate in the same function already
-composes both axes (``skip_invariant_filing = (not persist) or bool(scoped_ids)``),
-so the recovery gate was asymmetric with the code beside it.
-
-Fix: gate recovery on ``ctx.persist and not scoped_ids``. A no-write pass then
-performs zero remote identity writes; a live pass's recovery is unchanged.
-
-Scope note (AC#3): the create-recovery machinery's own invariants — the keyed-pending
-no-search rule and the three-miss + 3600s keyless conjunction — are pinned unchanged
-by ``tests/unit/reconciler/state/test_binding_recovery.py``. This test only adds
-the persist-axis gate coverage on the ``_run_differs_outbound`` seam.
-"""
+Pending-binding recovery runs only for an unscoped pass with persist enabled.
+Keyed-pending recovery still writes identity on a normal pass. BindingRecovery
+tests separately guard keyed no-search and keyless absence thresholds."""
 
 from __future__ import annotations
 
@@ -50,13 +35,7 @@ class _SpyTransport:
 
 
 def _seed_keyed_pending(tracker: Path, local_id: str = "loc-A", jira_key: str = "DIG-A") -> None:
-    """Write a live store carrying a single KEYED-PENDING binding.
-
-    Keyed-pending = ``state == "pending"`` with a ``jira_key`` already recorded (the
-    write-ahead captured it the instant ``create_issue`` returned, before the label
-    landed). Recovery's keyed branch retro-attaches the rebar-id label + local_id
-    entity property — the remote writes this test guards.
-    """
+    """Seed a keyed-pending binding in the store for recovery checks."""
     bridge = tracker / ".bridge_state"
     bridge.mkdir(parents=True, exist_ok=True)
     doc = {
@@ -121,9 +100,7 @@ def test_no_write_pass_performs_zero_remote_recovery_writes(tmp_path):
 
 
 def test_live_pass_still_performs_recovery_writes(tmp_path):
-    """A live (persist=True) unscoped pass with a keyed-pending binding still
-    recovers — the remote identity writes are issued (contrast oracle: proves the
-    no-write assertion above is about the persist axis, not a dead recovery path)."""
+    """An unscoped persisted pass writes identity during keyed recovery."""
     ctx, spy = _make_ctx(tmp_path, persist=True)
     backend = types.SimpleNamespace(transport=spy, outbound=None, inbound=None)
 

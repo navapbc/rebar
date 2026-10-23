@@ -1,27 +1,15 @@
 name: CodeQL SAST
 
-# Static analysis (SAST) on the GitHub mirror. CodeQL is free for public repos and
-# runs fine on this read-only mirror: it only needs push/schedule triggers and writes
-# results to the Security tab (it does not push to the tree). This complements the
-# gitleaks secret scan + pip-audit on the Gerrit review path with an independent
-# code-analysis layer. Actions are pinned by major version tag to match the repo
-# convention (see test.yml / gerrit-verify.yaml), not by commit SHA.
+# Scheduled and manual static analysis on the read-only GitHub mirror.
+# CodeQL writes Security findings without changing the tree. This complements
+# the Gerrit secret and dependency scans. Actions use the repository's major tags.
 
-# `main` CI on this mirror is SCHEDULED, not push-triggered (ticket 03ef-6fb5-158b-4abd):
-# push-on-`main` runs cancelled each other and rendered a healthy `main` as red X's. CodeQL
-# follows that policy by dropping its push trigger, and joins the shared 6-hourly branch-health
-# tick that replaced it (ticket 34b5-ad7d-b983-47f9). Scanning every push to `main` was this
-# workflow's original posture, so the tick preserves it rather than raising it: leaving the old
-# weekly cron as the only automatic pass would have stretched worst-case exposure for a
-# newly-introduced finding to seven days. Frequency is not a billing question here —
-# `navapbc/rebar` is a PUBLIC repository, where CodeQL and Actions minutes are free — so the
-# only real cost is queue time. `workflow_dispatch` below still scans on demand when a change
-# warrants it immediately.
+# Scan main on the shared six-hour branch-health schedule. Push-triggered
+# runs canceled each other, while manual dispatch remains available for an
+# immediate scan.
 on:
   schedule:
-    # Every 6 hours at :35 — off the hour, and staggered against the sibling branch-health
-    # lanes (test.yml :41, optionality.yml :47, verify-identity.yml :53) so they do not all
-    # queue at once.
+    # Stagger at minute 35 from sibling health workflows to reduce queueing.
     - cron: "35 */6 * * *"
   workflow_dispatch: {}
 

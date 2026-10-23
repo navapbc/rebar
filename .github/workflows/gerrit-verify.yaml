@@ -1,24 +1,10 @@
 name: Gerrit Verified Gate
 
-# CI second gate vote (`Verified`) for Gerrit changes — epic 1fa8 (ADR-0020).
-#
-# Dispatched by gerrit-to-platform (the Gerrit `hooks` plugin, running IN the Gerrit
-# container — story S3) on `patchset-created` and on a `recheck` comment, with the
-# nine GERRIT_* inputs below. It runs the SAME checks as test.yml against the EXACT
-# patchset, then casts the Gerrit `Verified` label on the change over SSH.
-#
-# 3-job production shape (ONAP/O-RAN-SC pattern): clear-vote -> build-and-test -> vote.
-#   - clear-vote  resets Verified->0 at run start (GerriScary-safe; CVE-2025-1568).
-#   - build-and-test checks out the change (checkout-gerrit-change-action) + runs the
-#     gates/suite (same commands as test.yml).
-#   - vote  aggregates the run conclusion and casts Verified +1/-1, run URL in message.
-#
-# OPERATOR SETUP (story S4) — required for this workflow to vote:
-#   repo variables: GERRIT_SERVER, GERRIT_SSH_USER, GERRIT_KNOWN_HOSTS, GERRIT_URL
-#   repo secret:    GERRIT_SSH_PRIVKEY  (the CI service account's private key)
-# Until they are set the vote steps fail (fail-closed: no +1 -> no submit).
-#
-# All third-party actions are SHA-pinned (tag in trailing comment).
+# Gerrit Verified vote for an exact patchset, dispatched on patchset creation or
+# recheck. Clear the old vote, run the shared gates, then cast +1 or -1 with the
+# run URL. Trusted default-branch vote code and the SSH key stay outside patchset
+# execution. Missing required repository variables or key fails closed.
+# Third-party actions retain their pinned revisions below.
 
 # RUN IDENTITY (ticket 2a21-112a-538f-46fb). This workflow is dispatched from `main`, so
 # GitHub stamps every run's `head_sha` with the sha of THIS FILE — then the job checks out a
@@ -320,15 +306,10 @@ jobs:
           run-contract-tests: "true"
 
   build-and-test:
-    # The gate+suite (lint + pip-audit + the os×py test matrix) now lives in the reusable
-    # _build-and-test.yml, shared verbatim with test.yml (post-merge branch CI) so the two
-    # lanes cannot drift (the pattern _optionality.yml already uses). Passing the Gerrit
-    # coordinates makes the reusable check out the EXACT patchset (checkout-gerrit-change-action);
-    # it inherits NO secrets — the Verified vote key stays in this file. Gated behind
-    # clear-vote + require-ticket as before; `vote` still lists build-and-test in `needs`, and
-    # im-open/workflow-conclusion folds the reusable's job conclusions into the Verified vote
-    # (the same mechanism already used for `optionality`). Splitting the former inline
-    # lint/mypy/config-check/pre-commit out of the 4× matrix means they now run once, not per cell.
+    # Run the shared lint, audit, and matrix suite on the exact Gerrit patchset.
+    # Its reusable workflow receives no vote key. Clear-vote and ticket checks
+    # precede it, and the vote job includes its terminal result. Shared setup
+    # checks run once instead of once per matrix cell.
     name: build-and-test (gate + suite on the patchset)
     needs: [clear-vote, require-ticket, classify]
     if: ${{ !cancelled() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
@@ -351,13 +332,9 @@ jobs:
       gerrit-url: https://${{ vars.GERRIT_SERVER }}
 
   optionality:
-    # Run the clean-core-wheel + optional-extras (per-extra venvs + union) contract ON THE PATCHSET,
-    # so a no-extras import leak or packaging regression BLOCKS Verified pre-merge (build-and-test
-    # installs .[dev], so the heavy stack is present there and never exercises the clean wheel).
-    # Reuses the SAME jobs the push/PR lane runs (no drift). Passes the Gerrit coordinates as
-    # non-secret inputs → the reusable workflow checks out the exact patchset via
-    # checkout-gerrit-change-action; it inherits NO secrets (the vote key stays in this file).
-    # On a full route it runs in parallel with the other full jobs after classification.
+    # Run the shared clean-wheel, isolated-extra, and union checks on the exact
+    # patchset. They catch optional import and packaging defects before Verified
+    # votes. The reusable workflow receives only nonsecret checkout inputs.
     name: optionality (lean-runtime + packaging on the patchset)
     needs: [clear-vote, require-ticket, classify]
     if: ${{ !cancelled() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
@@ -497,14 +474,9 @@ jobs:
           python scripts/probe_rebar.py </dev/null
 
   verify-identity:
-    # PRE-MERGE whole-store authenticated-authorship gate. Mitigates the gap that let the
-    # require_authenticated flip (change 759) merge green and only fail post-merge: the
-    # standalone verify-identity.yaml runs on GitHub push/pull_request, i.e. only AFTER a
-    # Gerrit change lands on the mirror — it never gated the Gerrit change itself. Running it
-    # here folds it into the Verified vote, so the whole-store enforcement check runs BEFORE
-    # merge. Enforcement posture is CONFIG-driven (identity.require_authenticated in THIS
-    # change's rebar.toml): advisory (exit 0, report-only) while off, blocking once flipped on
-    # — so a future re-flip's own Verified vote is the proof that the whole store verifies.
+    # Verify ticket-store authorship before merge. The patchset configuration
+    # selects advisory or blocking mode, so a future enforcement change must
+    # pass its own Verified gate.
     name: verify-identity (whole-store authorship gate)
     needs: [clear-vote, require-ticket, classify]
     if: ${{ !cancelled() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
@@ -588,17 +560,10 @@ jobs:
             exit 1
           fi
           git worktree add -B tickets .tickets-tracker refs/remotes/gh-tickets
-      # NOTE: there is deliberately NO pack-size gate here. A hard cap on the tickets
-      # pack (formerly `REBAR_TICKETS_PACK_LIMIT_KIB`, "Fail closed if the filtered tickets
-      # pack exceeds its limit") was removed on purpose: the `tickets` branch is an
-      # APPEND-ONLY event log whose full history is mounted here on purpose (commit-ancestry
-      # era scoping, ADR 0051), so its pack only ever grows — a fixed KiB ceiling is
-      # guaranteed to be crossed eventually and, once crossed, casts Verified -1 on EVERY
-      # Gerrit change repo-wide until someone bumps the number. Since the feature landed it
-      # has repeatedly blocked the normal review workflow for reasons unrelated to the change
-      # under review, so the gate cost far more than it protected. Tracked by a092
-      # (bardic-continuous-asianlion). If tickets-pack growth ever needs bounding, do it with
-      # a real mechanism (server-side gc / history compaction), not a fail-closed CI ceiling.
+      # Do not impose a fixed pack-size gate on the append-only tickets branch.
+      # Full history is required here, so a fixed ceiling would eventually fail
+      # every Gerrit change regardless of its diff. Bound growth through store
+      # maintenance instead of casting Verified -1 across unrelated changes.
       - name: verify-identity (config-driven posture; reads rebar.toml from this change)
         shell: bash
         run: |
@@ -725,15 +690,9 @@ jobs:
           # cannot make it absent.
           python3 scripts/cast_gerrit_verified_vote.py
 
-      # ---- Observability only (ticket be9d-2f2d-47ca-45d2) ----------------------------
-      # A `Verified -1` reads exactly `CANCELLED: <run URL>` whatever went wrong, so a job
-      # that blew its `timeout-minutes` and a job that failed on stale-base version skew look
-      # identical — though only the second needs a rebase. These two steps add a comment
-      # naming the jobs and saying which of those it was.
-      #
-      # They run AFTER the cast so the vote is already on the change before any of this
-      # executes, and both are `continue-on-error` so a hiccup here can never change the gate
-      # outcome. Nothing below casts a label.
+      # After casting the vote, comment with failed job names and whether a
+      # timeout or stale-base skew caused cancellation. These best-effort steps
+      # never cast a label or change the gate result.
       - name: Summarize the jobs that did not succeed
         id: summary
         if: ${{ steps.normalize.outputs.vote-type != 'success' }}

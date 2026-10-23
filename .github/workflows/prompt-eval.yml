@@ -1,19 +1,10 @@
 name: Prompt Eval
 
-# Prompt evaluation gating (epic a88f / WS-G; live tier wired by epic 6f2d / WS-EVAL).
-# Two tiers, the community-standard split:
-#   * OFFLINE (every PR/push) — the eval DISCIPLINE is enforced with NO model/credentials:
-#     spec validity (incl. STRICT: registered scorers + balanced dataset + gold_set for
-#     specs that ship a dataset), grader discipline (pinned cross-family judge, temp 0,
-#     seed, snapshot), at_least(k) over explicit epochs, coverage, kappa/JUnit, the
-#     scorer registry, and the eval solver/run_eval aggregation — all via the unit tests.
-#     This is the only REQUIRED check and costs nothing.
-#   * LIVE (gated; needs the [agents] extra + credentials) — actually runs each
-#     dataset-bearing spec through run_eval (the reviewer's real op via the eval solver),
-#     emits JUnit, and reports pass/coverage. Deliberately OFF the PR critical path
-#     (manual dispatch + a weekly schedule), NON-BLOCKING (continue-on-error), and
-#     fork-safe (same-repo only) so PRs/forks/Dependabot never spend tokens. Provider
-#     spend caps belong at the Anthropic/OpenAI dashboard (CI has no native $ cap).
+# Offline evaluation discipline runs on branch and pull-request changes.
+# It checks specs, graders, epoch thresholds, coverage, scorer registration,
+# and solver output without credentials. Same-repository advisory changes and
+# weekly or manual model runs use bounded sequential cases and provider caps.
+# Model runs report evidence without blocking the ordinary pull-request gate.
 
 on:
   push:
@@ -41,13 +32,9 @@ concurrency:
 
 jobs:
   eval-discipline:
-    # The job body now lives in the reusable _eval-discipline.yml (workflow_call), shared
-    # verbatim with gerrit-verify.yaml (the Verified gate) so the eval-discipline gate runs
-    # on BOTH lanes and cannot drift (jira-reb-1163 — it previously ran on THIS mirror lane
-    # only, so a breaking change earned Verified +1 yet reddened main). No inputs => the
-    # reusable checks out the branch head; gerrit-verify passes the Gerrit patchset refspec.
-    # Skip the redundant push run for PR branches (pull_request already covers them);
-    # schedule has nothing to add to the offline tier.
+    # Share offline evaluation checks with Gerrit Verified. Branch runs check
+    # HEAD, while Gerrit supplies its patchset refspec. Pull requests already
+    # cover their branch push, and the offline tier needs no schedule.
     if: ${{ github.event_name != 'schedule' }}
     uses: ./.github/workflows/_eval-discipline.yml
 
@@ -129,11 +116,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           REBAR_EVAL_MAX_CASES: "12"
-          # Durable token-usage record for this billable job (rebar.llm.usage_log). The
-          # runner appends one JSONL line per LLM call; the next step summarizes it into
-          # the job summary and uploads the raw file. Step-level so ${{ runner.temp }} is
-          # in scope — a JOB-level env entry using runner.* is a parse-time startup
-          # failure (Bug 8002; see tests/unit/test_ci_actionlint_scope.py).
+          # Record each model call as JSONL, summarize it, and upload the file.
+          # Set runner.temp at step scope because it is unavailable in job-level env.
           REBAR_USAGE_LOG: ${{ runner.temp }}/usage.jsonl
         run: |
           python - <<'PY'

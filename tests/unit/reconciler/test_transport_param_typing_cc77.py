@@ -1,28 +1,8 @@
-"""cc77: the core reconciler's transport parameters must be typed AS THE PORT.
+"""Core transport parameters must name the resolvable TicketTransport port.
 
-Two spellings are equivalent to no annotation at all under ``mypy src/rebar``,
-and this module fails on each of them:
-
-1. a bare ``client`` / ``transport`` parameter — mypy infers nothing;
-2. ``client: Any`` — satisfies ``disallow_untyped_defs`` (so the strictness
-   ratchet would ACCEPT it) while staying completely blind.
-
-The reconciler is the ordinary ``rebar.reconciler`` package, so the port resolves
-for mypy through either spelling of its import — absolute
-(``from rebar.reconciler._backend import TicketTransport``) or relative
-(``from ._backend import TicketTransport``) — and an annotation naming it is
-checked. (This file once also rejected the absolute spelling: before the package
-move ``rebar_reconciler`` was a top-level name injected onto ``sys.path`` at
-runtime, which mypy could not resolve and widened to ``Any``. That name no
-longer exists.)
-
-The defect class behind [rebar:a357-b747-ece9-4cf5] — a writing reconcile pass
-crashing on ``set_entity_property``, a method the core calls from three sites
-and the port never declared — is what an unchecked port annotation lets through.
-
-This is a STATIC-side guard. It does not replace the runtime conformance guard
-(``assert_transport_conforms``) or the AST audit; all three catch different things.
-"""
+Bare parameters and Any hide missing members from mypy. The port can be
+imported from core modules without a cycle. Static typing complements the
+runtime conformance check and AST audit."""
 
 from __future__ import annotations
 
@@ -36,11 +16,8 @@ CORE = pathlib.Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconcil
 #: Parameter names that carry the transport port through the core.
 PORT_PARAMS = ("client", "transport")
 
-#: The ONE deliberate ``Any``. ``assert_transport_conforms`` is the runtime guard
-#: itself: its whole job is to inspect an object that may NOT conform and say so.
-#: Annotating its parameter as the port would assert precisely the property it
-#: exists to check. Keyed by (module, function) so it cannot silently widen to
-#: cover a second site.
+#: The runtime conformance guard accepts Any because it must inspect objects
+#: that may not implement TicketTransport. Keep its exemption keyed to one site.
 DELIBERATE_ANY = {("_backend.py", "assert_transport_conforms")}
 
 
@@ -108,12 +85,7 @@ def test_port_params_are_annotated_as_the_port(module: pathlib.Path) -> None:
 
 
 def test_the_only_deliberate_any_is_the_runtime_guard_itself() -> None:
-    """Pin the exemption set so it cannot quietly become an allowlist.
-
-    Every entry must name a function that still exists and still takes an
-    ``Any``-annotated port parameter — otherwise the exemption is stale and the
-    next author would inherit a hole nobody is checking.
-    """
+    """Only the runtime conformance guard may keep a deliberate Any transport parameter."""
     assert DELIBERATE_ANY == {("_backend.py", "assert_transport_conforms")}
 
     tree = ast.parse((CORE / "_backend.py").read_text())
@@ -126,13 +98,7 @@ def test_the_only_deliberate_any_is_the_runtime_guard_itself() -> None:
 
 
 def test_the_port_is_importable_from_any_core_module_without_a_cycle() -> None:
-    """The remedy the other test prescribes must actually be available.
-
-    ``_backend`` imports nothing inside the package, so importing the port from
-    any core module is cycle-free by construction. If that ever stopped being
-    true the prescribed fix would become impossible and this test says so before
-    the other one starts producing unfixable failures.
-    """
+    """Every core module can import TicketTransport without a cycle or unresolved type."""
     tree = ast.parse((CORE / "_backend.py").read_text())
     intra = {
         node.module

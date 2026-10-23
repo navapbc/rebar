@@ -1,24 +1,10 @@
 name: Optional-Dependency Isolation (reusable)
 
-# Reusable (workflow_call) form of the optionality contract — the clean-core-wheel,
-# per-extra, and union checks. (The lean-runtime/AST half — tests/unit/test_core_optionality.py
-# and tests/unit/test_optional.py — had a dedicated `import-linter` job here; it was deleted as
-# redundant because those unmarked tests already run in every `test` matrix cell off the same
-# `.[dev]` install. `test_optionality_suite_still_runs_in_the_default_selection` in
-# tests/unit/test_ci_workflow_parity.py guards that they stay in the default selection.)
-# Invoked from TWO callers:
-#   * optionality.yml       — push / pull_request (branch-head checkout).
-#   * gerrit-verify.yaml     — the Verified gate (checks out the EXACT Gerrit patchset),
-#     so a clean-wheel / packaging regression BLOCKS the Verified vote pre-merge instead
-#     of only reddening main post-merge (the module-scope-import class that escaped once).
-#
-# Checkout is parameterized by `gerrit-refspec`: empty => actions/checkout (branch head);
-# set => checkout-gerrit-change-action (the patchset). A LOCAL composite action cannot do
-# this — a `./.github/actions/...` reference needs the repo already checked out — so the
-# conditional checkout is inlined per job. This workflow takes NO secrets: the Gerrit
-# values are non-secret inputs (checkout-gerrit-change-action is mirror-first), and the
-# Verified vote key stays confined to gerrit-verify.yaml (never inherited here — the push
-# caller's pull_request trigger includes fork PRs).
+# Shared clean-wheel, per-extra, and union-install checks for branch CI and
+# exact Gerrit patchsets. Default test selection already covers lean-runtime and
+# import guards. An optional Gerrit refspec changes checkout. Conditional checkout
+# lives in each job because a local action needs a prior checkout. This workflow
+# accepts no secrets. The Verified vote key remains with its caller.
 
 on:
   workflow_call:
@@ -128,16 +114,9 @@ jobs:
       - name: a core CLI command runs on the clean wheel
         run: |
           /tmp/clean/bin/rebar --help >/dev/null
-      # RP-05 S5 (ticket 6755): the CLI reference + package help DERIVE from the route
-      # registry and the committed help bytes. Prove they are byte-current when rendered by
-      # the LEAN no-extras interpreter — a doc/help section that silently needed an optional
-      # import to render would fail here rather than only reddening main post-merge.
-      # If-present guard per ticket ee2a (bug 1909-c1a7-9f20-440f): the Verified lane takes this
-      # workflow DEFINITION from the target branch but checks out the CHANGE'S tree, so a step
-      # added on main runs against every open change whose base predates it. The two generators
-      # landed at DIFFERENT times, so each is guarded on ITS OWN presence rather than jointly —
-      # a joint guard would silence the older check on every tree that has it
-      # (bug 5bc6-5496-4e17-403a).
+      # Render CLI reference and package help in the lean interpreter and compare
+      # committed bytes. Guard each generator independently because they landed at
+      # different times and older patchsets may contain only one.
       - name: parser-derived docs are byte-current on the lean wheel
         run: |
           if [ -f scripts/gen_cli_help.py ]; then
@@ -152,17 +131,9 @@ jobs:
             echo "scripts/gen_cli_reference.py not in checked-out tree (change predates the gate) — skipping;" \
                  "the gate re-enforces on rebase and on every post-merge change"
           fi
-      # The clean-wheel distribution contract (AC4/AC7): the SAME repository-local pytest that
-      # runs locally builds a no-extras wheel, renders every approved help form in a fresh
-      # directory with exact committed bytes, asserts no operation/config/store/handler/heavy
-      # import, and smoke-tests the `rebar-mcp` entry point (a concrete `--help` observable).
-      # 600s: it builds a wheel + a nested clean venv; --timeout-method=thread because that
-      # work blocks in C-level subprocess/venv calls the default `signal` method cannot fire in.
-      # If-present guard per ticket ee2a (bug 1909-c1a7-9f20-440f): this test file landed with the
-      # step, so on a tree whose base predates it pytest collects nothing and exits 4 — a
-      # Verified -1 caused by the gate rather than by the change under review
-      # (bug 5bc6-5496-4e17-403a). The guard precedes the pip install so an
-      # old-base tree does no work at all.
+      # Build the no-extras wheel in a fresh directory, compare rendered help,
+      # reject heavy imports, and smoke-test rebar-mcp. A 600-second thread timeout
+      # covers nested venv work. Skip before installs on a patchset lacking this test.
       - name: clean-wheel distribution + every-help-form byte contract (portable pytest)
         run: |
           if [ ! -f tests/interfaces/contracts/test_cli_registry_distribution.py ]; then
@@ -174,13 +145,8 @@ jobs:
           /tmp/clean/bin/pip install pytest pytest-timeout build 'mcp>=1.28.1,<2'
           /tmp/clean/bin/python -m pytest --timeout=600 --timeout-method=thread \
             tests/interfaces/contracts/test_cli_registry_distribution.py -rs
-      # The LLM-optionality *degradation* tests (skipif the agents extra is
-      # installed) verify every interface fails loudly+cleanly when the stack is
-      # ABSENT. The main test.yml lane installs [dev] -> [agents], so they always
-      # skip there; this no-extras clean venv is the one place they can run. Install
-      # only the light test deps (pytest + jsonschema + mcp/FastMCP) — NOT the agents
-      # stack — so agents_extra_installed() stays False and the skipif tests execute.
-      # Story alive-ogre-tiger (epic clumsy-jab-yacht).
+      # Run missing-agent degradation tests in a lean venv. The default dev suite
+      # installs agents and skips them. Install only light test dependencies here.
       - name: degradation-path tests run with NO agents extra
         run: |
           # If-present guards per ticket ee2a (bug 1909-c1a7-9f20-440f), fixed as bug
@@ -214,26 +180,16 @@ jobs:
           # assertion immediately below still requires agents_extra_installed() to be False.
           /tmp/clean/bin/pip install pytest pytest-timeout jsonschema 'mcp>=1.28.1,<2'
           /tmp/clean/bin/python -c "from rebar.llm import agents_extra_installed; assert not agents_extra_installed(), 'agents extra must be ABSENT in the clean lane (else the degradation tests skip)'"
-          # F2: drive the completion close-gate fail-closed path with the [agents] extra
-          # genuinely ABSENT (not just a monkeypatched error) — the lean lane is the one
-          # place it runs for real. The test monkeypatches the verifier, so it needs no
-          # extra; running it HERE proves the fail-closed close survives a real lean install.
-          # Per-test hang guard (ticket d835-1846-95d1-4d84). 300s: offline unit tests, the
-          # same budget the shared suite uses in _build-and-test.yml. --timeout-method=thread
-          # for the usual reason (the default `signal` method cannot interrupt a C-level call).
+          # Check fail-closed completion when the agents extra is absent in this lean
+          # venv. Offline tests use the shared 300-second thread timeout.
           /tmp/clean/bin/python -m pytest --timeout=300 --timeout-method=thread \
             "${targets[@]}" \
             -m "not external" -rs
 
   optional-extras:
-    # ONE job replaces what used to be a 5-cell `per-extra` matrix PLUS a separate `union`
-    # job (6 concurrent slots -> 1). The org-wide 20-concurrent-job ceiling is what queued
-    # Verified runs behind each other; each of those cells did <1m of real work while
-    # holding a slot for a full checkout + setup-python. The isolation guarantee that made
-    # the matrix worth having is preserved by giving every iteration its OWN fresh venv —
-    # a sequential `pip install .[a]` then `.[b]` into ONE interpreter would contaminate the
-    # env, so a missing dependency declaration in a later extra would PASS silently, which
-    # is the exact bug class this workflow exists to catch.
+    # Test each extra in its own fresh venv, then test the union. Sequential
+    # iterations save CI slots without allowing one extra's dependencies to
+    # satisfy another's missing declaration.
     name: optional extras isolate (per-extra venvs + union)
     runs-on: ubuntu-latest
     steps:
@@ -330,21 +286,10 @@ jobs:
             target="${spec#*:}"
             v="$RUNNER_TEMP/venv-$label"
             echo "::group::$label -> pip install .[$target]"
-            # Two rules, each guarding a SILENT pass:
-            #  * NEVER `source "$v"/bin/...` an env script — those STACK across iterations,
-            #    so PATH would decide which interpreter runs and every later iteration could
-            #    re-test the FIRST extra while reporting its own name.
-            #  * ALWAYS invoke by absolute "$v/bin/..." path — a bare `python`/`rebar-mcp`
-            #    runs the AMBIENT interpreter and can pass while testing nothing.
-            # `python -m venv` from the setup-python interpreter is already clean (user
-            # site-packages disabled, include-system-site-packages=false, no PYTHONPATH/PIP_*
-            # set here), so no --copies/--without-pip games; ensurepip ships an old pip, hence
-            # the per-venv upgrade.
-            # Error isolation: Actions runs `run:` under `bash -e`, but errexit is SUPPRESSED
-            # for a command tested by `if` — so the iteration is explicitly &&-chained to
-            # short-circuit, and its failure is aggregated into `rc` + `continue` instead of
-            # aborting the loop. That is what `fail-fast: false` bought on the old matrix;
-            # `exit $rc` at the end is what stops it being a no-op that can never fail.
+            # Run every extra through its own absolute venv interpreter. Sourcing env
+            # scripts or calling ambient python can silently retest the first extra.
+            # Each iteration chains commands because bash disables errexit inside if.
+            # Record each failure, continue checking, and return the aggregate status.
             if ! {
               python -m venv "$v" &&
                 "$v/bin/python" -m pip install --upgrade pip &&
@@ -430,15 +375,9 @@ jobs:
         env:
           REBAR_TERRAFORM_CONFIG_INSPECT_CANARY: "1"
         run: |
-          # If-present guard per bug d3d3-63b0-3f5d-4f93 (same class as 1909-c1a7-9f20-440f /
-          # 5bc6-5496-4e17-403a). The Verified lane takes this workflow DEFINITION from `main`
-          # but checks out the PATCHSET tree (gerrit-verify.yaml lines 23-27), so a change
-          # branched before this test file landed does not carry it, pytest exits 4, and the
-          # change takes a Verified -1 caused by the gate rather than by the change under
-          # review. The step previously asserted "job and test file are introduced together,
-          # so the lane never runs against an older base", which is true only when the
-          # definition and the tree come from the same commit — on this lane they do not. The
-          # guard precedes the pip installs so a pre-gate tree pays for neither.
+          # Verified loads this workflow from main but tests the patchset tree. A patchset
+          # predating the corroborator test must skip before installs, or pytest exits 4
+          # and casts a false Verified -1. The canary returns when the tree includes it.
           if [ ! -f tests/unit/grounding/test_terraform_corroborator.py ]; then
             echo "tests/unit/grounding/test_terraform_corroborator.py not in checked-out tree" \
                  "(change predates the gate) — skipping;" \

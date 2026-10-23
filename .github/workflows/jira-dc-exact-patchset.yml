@@ -1,32 +1,10 @@
 name: Jira DC Exact-Patchset Parity
 
-# Exact-Gerrit-patchset Jira DC differential/convergence lane (AC1/AC2 of ticket
-# `3f27-cb3c-8023-4f57` / `single-vast-roan`, epic `eb64` "Prove Jira DC parity, cut
-# over the reconciler, and delete legacy dispatch").
-#
-# The existing `jira-dc-harness` job (external-integration.yml) and the capability-map
-# job (jira-dc-capability-map.yml) both run against whatever ref GitHub Actions'
-# `actions/checkout` resolves for the *current event* — a `workflow_dispatch` run of
-# either always exercises the tip of whatever branch/ref triggered it, never an
-# explicit, verified Gerrit patchset SHA. Neither takes a patchset SHA as an input,
-# verifies the checkout landed on it, or fails a wrong-ref/all-skipped run. This
-# workflow closes that gap: it is dispatched the SAME way `gerrit-verify.yaml` is (by
-# gerrit-to-platform on `patchset-created`/`recheck`, or manually with the same nine
-# GERRIT_* inputs), fetches the exact Gerrit refspec, proves it resolves to
-# `GERRIT_PATCHSET_REVISION` before checkout, then checks out and records that exact
-# SHA byte-for-byte (fail on any mismatch — a stale mirror, a race with a newer
-# patchset, or a wrong ref resolves to a hard CI failure, never a silent no-op)
-# before running the live Jira DC harness.
-#
-# This is ADDITIVE evidence (ticket AC5: "Portable/default CI remains authoritative
-# when Docker/DC is unavailable; the live lane is additive evidence") — it does not
-# gate `Verified` and is not invoked by gerrit-verify.yaml's `build-and-test` job. A
-# human (or a future automation) dispatches it deliberately for a patchset under
-# review, same as jira-dc-capability-map.yml today.
-#
-# Native amd64 is a hard requirement for the harness itself (see
-# tests/external/live_jira_dc/README.md's measured arm64 findings) — ubuntu-latest is
-# native x86_64, mirroring every other Docker-backed Jira DC job in this repo.
+# Additive Jira Data Center evidence for an explicit Gerrit patchset.
+# Fetch the supplied ref, verify its SHA against GERRIT_PATCHSET_REVISION, then
+# run the isolated DC suite. A wrong ref or skipped suite fails. This manual
+# lane does not cast Verified. The portable default gate remains authoritative.
+# Native amd64 runs the pinned harness.
 on:
   workflow_dispatch:
     inputs:
@@ -53,18 +31,9 @@ jobs:
     name: jira DC exact-patchset parity (real Jira Data Center, ephemeral)
     runs-on: ubuntu-latest
     steps:
-      # AC1: "CI checks out and records the exact Gerrit patchset SHA used for the
-      # ephemeral DC run; an all-skipped or wrong-ref run fails." We do not use a
-      # third-party refspec-first checkout action here: such an action resolves
-      # GERRIT_REFSPEC and unconditionally checks out FETCH_HEAD *before* any
-      # verification runs, so a stale/mismatched refspec (a dispatch race with a
-      # newer patchset, or inconsistent GERRIT_REFSPEC/GERRIT_PATCHSET_REVISION
-      # inputs) can silently become the working-tree HEAD ahead of the guard meant to
-      # catch it (see run 33455923923). Instead: fetch the refspec ourselves (mirror
-      # first, Gerrit fallback), compare the fetched commit against the input's own
-      # claimed revision BEFORE checking anything out, and only check out the
-      # expected SHA once both agree. Any fetch failure or SHA mismatch fails hard,
-      # never a silent no-op, and no live DC setup runs before this check passes.
+      # Fetch the ref from the mirror or Gerrit, compare its commit with the
+      # supplied revision, then check out that exact SHA. A mismatch fails before
+      # Data Center setup. This prevents a refspec race from testing another tree.
       - name: Checkout the exact Gerrit patchset SHA
         shell: bash
         env:
@@ -127,10 +96,8 @@ jobs:
         with:
           enable-cache: true
 
-      # `[jira-datacenter]` supplies pycontribs/jira (the DC transport dependency) —
-      # without it the transport tests skip while the smoke tests still execute, which
-      # is exactly the "silently-all-skipped run reads as green" failure this lane
-      # exists to prevent. Mirrors external-integration.yml's jira-dc-harness job.
+      # Install jira-datacenter so transport tests cannot skip for a missing
+      # dependency while smoke tests pass.
       - name: Install rebar (test-only; this harness needs no LLM API key)
         run: |
           uv sync --locked --extra dev --extra jira-datacenter
@@ -155,19 +122,9 @@ jobs:
             exit 1
           fi
 
-      # Isolation guarantees (AC2): both the outer git repo and the ticket-store repo
-      # have no remotes, REBAR_SYNC_PUSH=off, and every Jira target is the disposable
-      # harness project — all enforced by the existing fixtures in
-      # tests/external/live_jira_dc/_dc_fixtures.py / _dc_support.py / conftest.py,
-      # reused unmodified here (never weakened or bypassed).
-      #
-      # -m external selects the whole live_jira_dc external-tier suite, which includes
-      # the isolated legacy-vs-typed differential (test_dc_mutations.py's 14-by-2
-      # mutation table), the store-copy isolation assertions
-      # (test_store_copy_isolation.py), and the multi-project rehearsal
-      # (test_multi_project_rehearsal.py) — the comparison this AC requires. The
-      # all-skip canary in tests/external/conftest.py fails the session if every test
-      # in this tier skipped (an all-skipped run cannot go green).
+      # Fixtures remove remotes from both repositories, disable sync push, and
+      # target only the disposable harness. The external tier includes differential,
+      # store-isolation, and multi-project tests. An all-skipped suite fails.
       - name: Run the exact-patchset Jira DC differential + convergence suite
         env:
           REBAR_RUN_EXTERNAL: "1"

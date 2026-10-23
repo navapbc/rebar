@@ -1,28 +1,8 @@
-# rebar — Dependency-Advisory Canary
-#
-# Bug 63e8. A committed `uv.lock` freezes every transitive dependency, so the moment an
-# advisory is published against a pinned version the world has changed under `main` with
-# nobody having pushed anything. The scheduled lane — not whoever happens to have a
-# change in flight — is the right owner of that.
-#
-# This workflow is that owner. Daily it audits `main`'s committed closure and, when a
-# CRITICAL/HIGH advisory is outstanding, files ONE rebar bug and keeps it updated;
-# when the advisory clears, it closes it. A red run that nobody is paged for reproduces
-# the original problem in a quieter form, which is why escalation is a ticket.
-#
-# DEDUP is the load-bearing property: a daily lane against an advisory that stays open
-# for weeks must file ONE ticket, not thirty. It reuses the heartbeat canary's dedup —
-# `scripts/alert_dedup.py`, extracted from `scripts/canary_bridge.py` for exactly this
-# reason (the canary's copy hard-coded its own marker, so it was not reusable as-is):
-# find-the-open-bug-by-tag before filing, and cap accumulation at one comment per 24h.
-#
-# What a red run here BLOCKS: releases only (release.yml's authorize job runs the same
-# gate). It does not block merges and it does not block Gerrit submit — changes that
-# leave the dependency map alone flow past advisories entirely (that split is the fix).
-#
-# Classification/lifecycle logic lives in scripts/dependency_audit.py, unit-tested by
-# tests/scripts/test_dependency_audit.py. The steps here are thin invocations plus the
-# same ticket-store plumbing reconcile-bridge-canary.yml uses.
+# Daily advisory check for the committed uv.lock dependency closure.
+# Critical or high findings keep one tagged bug current, with at most one
+# comment per 24 hours. Clearing findings closes it. Release authorization
+# blocks on advisory findings, while ordinary Gerrit changes remain reviewable.
+# scripts/dependency_audit.py owns classification and ticket lifecycle.
 
 name: Dependency Advisory Canary
 
@@ -128,16 +108,9 @@ jobs:
 
       - name: Audit the committed closure
         id: audit
-        # `continue-on-error` so a blocking verdict does NOT skip the escalation step —
-        # the ticket is the point of this lane. The run is still reddened by the final
-        # step below.
-        #
-        # A step that fails also sets NO outputs, so on a CRASH `steps.audit.outputs.blocking`
-        # is "" — which means the final "Fail the run" step below (`== 'true'`) does not fire
-        # either, and the run would conclude SUCCESS. That is why `advisory-alert` refuses an
-        # absent/empty BLOCKING with exit 1 (bug 7147-6ea7-90b4-44b1): the escalation step is
-        # NOT continue-on-error, so a crashed audit reddens this run there. Do not add
-        # `continue-on-error` to that step without replacing that signal.
+        # Keep audit continue-on-error so the alert step still runs on findings.
+        # A crashed audit leaves blocking output empty. The alert step rejects that
+        # state and fails the run. Do not allow the alert step to continue on error.
         continue-on-error: true
         run: |
           set -uo pipefail

@@ -1,33 +1,9 @@
-"""HELD-OUT test oracle for S6: Transition replay fallback (invalid direct Jira hop).
+"""Transition replay follows recorded status events when a direct Jira hop fails.
 
-A Jira workflow may forbid the DIRECT end-state transition rebar wants (e.g. ``open ->
-done`` when only ``open -> in_progress -> done`` is allowed). Today the outbound sync
-runs ONE hop, gives up, and ``_update_one_scalar_update`` turns the failure into
-comment-fallback + drift. S6 adds a *grounded* replay: mirror rebar's own recorded
-status hops (the append-only ``*-STATUS.json`` events) to reach the end state via the
-allowed intermediate hops, aborting to the existing comment-fallback the moment any hop
-is rejected. Self-healing (inventing hops rebar never took) is OUT of scope.
-
-These tests pin OBSERVABLE behaviour only:
-
-* fake Cloud / DC transports that RECORD their ``transition_issue_by_name`` calls (and
-  raise the real per-backend rejection types: ``RuntimeError`` for Cloud acli,
-  ``ValueError`` / ``IllegalTransitionError`` for Data Center);
-* an on-disk ``<tracker>/<local_id>/<ts>-STATUS.json`` event store, exactly the shape
-  ``rebar._commands.txn`` writes (``{"data": {"status": <local>, "current_status":
-  <from>}}``);
-* the store located through the SAME config seam the module self-resolves
-  (``config.tracker_dir(config.reconciler_repo_root())``), pointed at the on-disk store
-  via the ``REBAR_TRACKER_DIR`` / ``REBAR_ROOT`` env overrides that seam honours.
-
-No private structure is asserted: only the recorded transition-call sequence, the
-``replay_transition`` boolean contract, the forward-mapped hop list, and ``update_one``'s
-``result is None`` drift signal.
-
-Target module (does NOT yet exist — its absence is the correct RED state):
-``rebar.reconciler.transition_replay`` with ``recorded_status_hops(local_id, tracker)``
-and ``replay_transition(client, remote_id, local_id, target_status)``.
-"""
+Use chronological STATUS events and forward-mapped Jira names to resume from
+the current state. Never invent an unrecorded hop. A rejected hop falls back to
+drift, while transient transport failures propagate. Tests observe transition
+calls and the update result through the configured tracker-store seam."""
 
 from __future__ import annotations
 
@@ -45,12 +21,8 @@ from rebar.reconciler.dispatch_one import update_one
 pytestmark = pytest.mark.unit
 
 
-# ── Lazy imports of the module under test ─────────────────────────────────────
-# Imported INSIDE each test (not at module top) so that, before S6 lands, each
-# replay/hops test fails INDEPENDENTLY with ``ModuleNotFoundError`` at its own call
-# site — the correct RED signal — rather than collapsing the whole file into a single
-# collection error. Once ``transition_replay`` exists, the conftest ``rebar.reconciler``
-# namespace bridge resolves these the same way it resolves every other engine submodule.
+# Import replay helpers inside tests so a missing helper fails at its call site
+# without stopping collection of the other replay oracles.
 def _replay_transition():
     from rebar.reconciler.transition_replay import replay_transition
 
@@ -71,15 +43,7 @@ def _replay_should_drift():
 
 # ── On-disk STATUS-event store, byte-shaped like rebar._commands.txn writes ───
 def _write_status_event(ticket_dir: Path, ts: int, target: str, current: str) -> None:
-    """Append one ``{ts}-{uuid}-STATUS.json`` event whose ``data.status`` is *target*.
-
-    ``target`` / ``current`` are LOCAL status strings (``open``/``in_progress``/...), which
-    is exactly what ``txn`` records in ``data`` (``txn.py`` ~L333) and what
-    ``recorded_status_hops`` forward-maps to Jira names. The timestamp is zero-padded to a
-    fixed width so the filename's lexicographic order and its integer-prefix order AGREE —
-    the helper is neutral about which sort the implementation chooses, while still letting
-    the ordering test discriminate a filename sort from insertion/mtime order.
-    """
+    """Append a timestamped STATUS event with the target local status and recorded prior status."""
     uuid_str = f"uuid{ts:020d}"
     fname = f"{ts:020d}-{uuid_str}-STATUS.json"
     event = {
@@ -106,11 +70,7 @@ def _make_tracker(
     start_ts: int = 100,
     step: int = 100,
 ) -> Path:
-    """Materialise ``<tracker>/<local_id>/*-STATUS.json`` for *local_hops* in order.
-
-    Returns the tracker root (the dir that HOLDS ``<local_id>/``). ``local_hops`` is the
-    ordered sequence of ``data.status`` targets, e.g. ``["open", "in_progress", "closed"]``.
-    """
+    """Write local status hops in order under the ticket tracker directory."""
     tracker = root / "tracker"
     ticket_dir = tracker / local_id
     ticket_dir.mkdir(parents=True, exist_ok=True)
@@ -123,35 +83,14 @@ def _make_tracker(
 
 
 def _point_config_at(monkeypatch: pytest.MonkeyPatch, tracker: Path) -> None:
-    """Route ``config.tracker_dir(config.reconciler_repo_root())`` at *tracker*.
-
-    ``REBAR_TRACKER_DIR`` is the verbatim store override honoured by
-    ``config.tracker_dir`` (via ``tracker_dir_override``); ``REBAR_ROOT`` makes
-    ``reconciler_repo_root`` deterministic. Using the real env seam — not a
-    monkeypatched function object — makes the wiring robust to HOW the implementation
-    imports ``config``.
-    """
+    """Point the reconciler tracker-directory resolver at the test store."""
     monkeypatch.setenv("REBAR_TRACKER_DIR", str(tracker))
     monkeypatch.setenv("REBAR_ROOT", str(tracker.parent))
 
 
 # ── Fake transports (record calls; raise the real per-backend rejection types) ─
 class _FakeTransport:
-    """Minimal transport recording ``transition_issue_by_name`` calls.
-
-    * ``get_issue`` returns the canonical Jira issue JSON so the implementation reads
-      ``fields.status.name`` (``["fields"]["status"]["name"]``).
-    * ``transition_issue_by_name`` records ``(remote_id, target_status)`` and, when
-      ``hop_error`` is set for that Jira-name target, raises the configured backend
-      rejection (mid-chain abort).
-    * ``update_issue`` simulates the DIRECT end-state hop that fails first: when a
-      ``status`` field is present and ``update_error`` is set, it raises — the trigger
-      that must route into replay.
-    * ``get_issue_error`` (when set) makes ``get_issue`` RAISE instead of returning a
-      snapshot (e.g. a 404 stale binding); ``snapshot_override`` (when set) makes it
-      return that raw dict verbatim (used to feed a malformed/absent-field snapshot).
-    * ``add_comment`` records the drift comment-fallback (capability-gated in dispatch).
-    """
+    """Record transition calls and expose configured Jira status and hop failures."""
 
     def __init__(
         self,
@@ -213,12 +152,7 @@ def test_replay_walks_recorded_intermediate_hops(
 def test_replay_resume_point_matches_in_jira_name_space(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``get_issue`` reports ``In Progress``; replay resumes by matching that Jira NAME
-    directly against the forward-mapped hop list and sends ONLY ``Done``.
-
-    ``LOCAL_STATUS_TO_JIRA`` is non-injective, so the resume point must be found WITHOUT
-    inverting it: comparison happens entirely in Jira-name space.
-    """
+    """Resume on forward-mapped Jira status and send only the remaining Done hop."""
     tracker = _make_tracker(tmp_path, "tkt-resume", ["open", "in_progress", "closed"])
     _point_config_at(monkeypatch, tracker)
     client = _FakeTransport(current_status="In Progress")
@@ -233,12 +167,7 @@ def test_replay_resume_point_matches_in_jira_name_space(
 def test_replay_duplicate_jira_name_anchors_on_last_occurrence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``blocked`` and ``in_progress`` both forward-map to ``In Progress``, so the hop
-    list ``open, in_progress, blocked, closed`` -> ``To Do, In Progress, In Progress,
-    Done`` has ``In Progress`` at TWO positions. A current status of ``In Progress`` must
-    anchor on the LAST match (index 2) and replay only ``Done`` — anchoring on the first
-    (index 1) would wrongly re-send ``In Progress``.
-    """
+    """When two local hops map to In Progress, resume after its last recorded occurrence."""
     tracker = _make_tracker(tmp_path, "tkt-dup", ["open", "in_progress", "blocked", "closed"])
     _point_config_at(monkeypatch, tracker)
     client = _FakeTransport(current_status="In Progress")
@@ -253,11 +182,7 @@ def test_replay_duplicate_jira_name_anchors_on_last_occurrence(
 def test_replay_never_invents_unrecorded_hops(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Recorded hops are ``open -> closed`` only (Jira ``To Do, Done``). Even though a
-    real workflow might require an intermediate ``In Progress``, replay is GROUNDED: it
-    replays only recorded hops, so it sends ``Done`` and NEVER the un-recorded
-    ``In Progress`` (self-healing is out of scope).
-    """
+    """A direct open-to-closed trail cannot invent an intermediate In Progress hop."""
     tracker = _make_tracker(tmp_path, "tkt-noinvent", ["open", "closed"])
     _point_config_at(monkeypatch, tracker)
     client = _FakeTransport(current_status="To Do")
@@ -300,16 +225,7 @@ def test_replay_aborts_and_drifts_on_illegal_hop(
     hop_exc: BaseException,
     update_exc: BaseException,
 ) -> None:
-    """A mid-chain hop rejection (Cloud ``RuntimeError``; DC ``ValueError`` /
-    ``IllegalTransitionError``) aborts replay and falls through to the existing
-    comment-fallback: ``update_one`` returns ``None`` (drift), and no hop AFTER the
-    rejected one is attempted.
-
-    Driven end-to-end through ``update_one`` so the observable is the real drift signal:
-    the direct end-state hop (``update_issue`` with ``status``) fails first, routing into
-    replay; replay resumes at ``To Do`` and its FIRST remaining hop (``In Progress``) is
-    rejected, so ``Done`` must never be sent.
-    """
+    """A rejected intermediate hop aborts replay and leaves update_one in drift."""
     tracker = _make_tracker(tmp_path, "tkt-abort", ["open", "in_progress", "closed"])
     _point_config_at(monkeypatch, tracker)
     client = _FakeTransport(
@@ -334,15 +250,7 @@ def test_replay_aborts_and_drifts_on_illegal_hop(
 
 # ── 6. recorded_status_hops orders by filename, forward-mapped ────────────────
 def test_recorded_status_hops_orders_by_filename(tmp_path: Path) -> None:
-    """``recorded_status_hops(local_id, tracker)`` returns the ``data.status`` targets in
-    FILENAME (chronological) order, forward-mapped local -> Jira via
-    ``LOCAL_STATUS_TO_JIRA``.
-
-    The events are written in an order DIFFERENT from their timestamp prefixes (closed
-    first, then open, then in_progress), so an implementation that returned
-    insertion/mtime order would fail while a filename sort yields
-    ``["To Do", "In Progress", "Done"]``.
-    """
+    """Read STATUS targets in filename order and forward-map each local status to Jira."""
     tracker = tmp_path / "tracker"
     ticket_dir = tracker / "tkt-order"
     ticket_dir.mkdir(parents=True, exist_ok=True)
@@ -360,10 +268,7 @@ def test_recorded_status_hops_orders_by_filename(tmp_path: Path) -> None:
 def test_replay_aborts_when_current_status_not_in_sequence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """If ``get_issue`` reports a Jira status name absent from the recorded hop list
-    (here ``In Review``, which no recorded hop maps to), replay cannot ground a resume
-    point: it aborts (returns ``False``) and sends NO hops, leaving the ticket to drift.
-    """
+    """Abort replay when the current Jira status matches no recorded forward-mapped hop."""
     tracker = _make_tracker(tmp_path, "tkt-missing", ["open", "in_progress", "closed"])
     _point_config_at(monkeypatch, tracker)
     client = _FakeTransport(current_status="In Review")
@@ -378,10 +283,7 @@ def test_replay_aborts_when_current_status_not_in_sequence(
 def test_replay_skipped_when_local_id_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A mutation with no ``local_id`` has no recorded-hop provenance to replay, so replay
-    is SKIPPED and the widened failure path behaves as today: comment-fallback + drift
-    (``result is None``), with ``transition_issue_by_name`` never called.
-    """
+    """Without a local id, skip replay and retain the comment-fallback drift result."""
     # A populated tracker exists, but with NO local_id on the mutation it must not be used.
     tracker = _make_tracker(tmp_path, "tkt-unused", ["open", "in_progress", "closed"])
     _point_config_at(monkeypatch, tracker)
@@ -406,15 +308,7 @@ def test_replay_skipped_when_local_id_absent(
 def test_update_one_reports_landed_when_replay_reaches_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """End-to-end through ``update_one``: the DIRECT end-state hop fails (routing into
-    replay), replay walks the recorded ``To Do -> In Progress -> Done`` trail to the
-    target, and the observable outcome is a LANDED update — ``update_one`` returns the
-    success result ``{"key": issue_key}``, ``fields_synced`` records the applied fields,
-    the replayed transitions were actually performed, and NO drift comment is posted.
-
-    The pre-remediation suite exercised only ``replay_transition``'s boolean return; this
-    pins the full ``update_one`` success path (result dict + applied fields).
-    """
+    """A failed direct hop lands only if recorded replay reaches its target."""
     tracker = _make_tracker(tmp_path, "tkt-e2e", ["open", "in_progress", "closed"])
     _point_config_at(monkeypatch, tracker)
     client = _FakeTransport(
@@ -441,10 +335,7 @@ def test_update_one_reports_landed_when_replay_reaches_target(
 def test_replay_not_landed_when_remaining_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The current status is the LAST recorded hop, so ``remaining`` is empty and ZERO
-    transitions would be performed. Replay must NOT report the failed direct update as
-    landed (that would mask a stuck ticket): it returns ``False`` and sends no hop.
-    """
+    """An empty remaining trail performs no transition and cannot report a landed replay."""
     tracker = _make_tracker(tmp_path, "tkt-last", ["open", "in_progress", "closed"])
     _point_config_at(monkeypatch, tracker)
     client = _FakeTransport(current_status="Done")
@@ -458,10 +349,7 @@ def test_replay_not_landed_when_remaining_empty(
 def test_update_one_drifts_when_replay_performs_zero_transitions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """End-to-end companion of the zero-transition case: the direct update fails, replay
-    performs nothing (current is already the last recorded hop), so ``update_one`` must
-    DRIFT (``result is None``) rather than falsely report the update landed.
-    """
+    """A failed direct update with zero replay transitions remains drift, not success."""
     tracker = _make_tracker(tmp_path, "tkt-last-e2e", ["open", "in_progress", "closed"])
     _point_config_at(monkeypatch, tracker)
     client = _FakeTransport(
@@ -485,10 +373,7 @@ def test_update_one_drifts_when_replay_performs_zero_transitions(
 def test_replay_not_landed_when_final_hop_is_not_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The recorded trail ends at ``In Progress`` but the desired ``target_status`` is
-    ``Done``. Walking the trail would never reach ``Done``, so replay must NOT report
-    success just because its (shorter) recorded hops succeeded.
-    """
+    """Replay cannot report landed if its last recorded hop differs from the desired status."""
     tracker = _make_tracker(tmp_path, "tkt-shorttrail", ["open", "in_progress"])
     _point_config_at(monkeypatch, tracker)
     client = _FakeTransport(current_status="To Do")
@@ -504,10 +389,7 @@ def test_replay_not_landed_when_final_hop_is_not_target(
 def test_recorded_status_hops_surfaces_corrupt_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A corrupt/truncated ``*-STATUS.json`` invisibly shortens the recorded hop trail,
-    which can change the resume index and the drift decision. ``recorded_status_hops``
-    must SURFACE the unreadable file (naming it on stderr) rather than silently skip it.
-    """
+    """A corrupt STATUS event raises instead of silently shortening the replay trail."""
     tracker = _make_tracker(tmp_path, "tkt-corrupt", ["open", "in_progress"])
     ticket_dir = tracker / "tkt-corrupt"
     bad = ticket_dir / f"{999:020d}-uuidcorrupt-STATUS.json"
@@ -525,11 +407,7 @@ def test_recorded_status_hops_surfaces_corrupt_file(
 
 # ── 13. replay_should_drift honours a threaded (pre-parsed) hop trail ──────────
 def test_replay_should_drift_uses_threaded_hops() -> None:
-    """``replay_should_drift`` accepts the already-parsed hop trail so the caller does not
-    re-glob/re-parse the store a second time in the same ``except`` arm. The drift
-    decision is unchanged: a present trail drifts, an empty trail propagates, and a falsy
-    ``local_id`` always drifts.
-    """
+    """Reuse parsed recorded hops for the drift decision without reading the store again."""
     should_drift = _replay_should_drift()
 
     assert should_drift("tkt-any", hops=["To Do", "Done"]) is True
@@ -541,11 +419,7 @@ def test_replay_should_drift_uses_threaded_hops() -> None:
 def test_update_one_propagates_original_error_without_recorded_trail(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``local_id`` is present but NO ``*-STATUS.json`` trail exists, and the failure is a
-    bare transition ``RuntimeError`` (not an illegal-transition 400). Replay is not
-    applicable and drift does not apply, so ``update_one`` must RE-RAISE the ORIGINAL
-    transition error (identity preserved) to the pre-S6 soft-fail backstop.
-    """
+    """Without a recorded trail, a bare transition error propagates from update_one."""
     tracker = tmp_path / "tracker"
     (tracker / "tkt-notrail").mkdir(parents=True, exist_ok=True)  # ticket dir, no STATUS events
     _point_config_at(monkeypatch, tracker)
@@ -587,12 +461,7 @@ def test_non_transition_http_error_propagates(
     key: str,
     update_exc: JiraAPIError,
 ) -> None:
-    """A non-illegal 400 (missing required field) and a 404 stale binding are NOT workflow
-    rejections: raised by ``update_issue`` they must PROPAGATE out of ``update_one``
-    unchanged (``_is_non_transition_http_error`` branch), never swallowed into
-    replay/comment/drift. A recorded trail exists to prove drift was *available* and yet
-    NOT taken.
-    """
+    """Field 400 and stale-binding 404 failures propagate without replay drift."""
     tracker = _make_tracker(tmp_path, "tkt-15", ["open", "in_progress", "closed"])
     _point_config_at(monkeypatch, tracker)
     client = _FakeTransport(current_status="To Do", update_error=update_exc)
@@ -614,12 +483,7 @@ def test_non_transition_http_error_propagates(
 def test_5xx_http_error_propagates_not_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A raw ``HTTPError`` 500 from ``update_issue`` is retried and, on exhaustion, the
-    ORIGINAL raw ``HTTPError`` is re-raised by ``_call_with_retry`` (story 9622). It must
-    then PROPAGATE out of ``update_one`` (a 5xx is transient/server-side, not a workflow
-    rejection), never route into replay/drift. Retry backoff is neutralised so the test
-    is fast.
-    """
+    """An exhausted HTTP 500 retry re-raises the original HTTPError instead of recording drift."""
     import rebar.reconciler.dispatch_apply_phases as dap
 
     monkeypatch.setattr(dap.time, "sleep", lambda *_a, **_k: None)
@@ -645,12 +509,7 @@ def test_5xx_http_error_propagates_not_drift(
 def test_retry_exhausted_error_from_update_propagates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``_call_with_retry`` raises ``RetryExhaustedError`` when a genuinely transient
-    5xx/429/timeout exhausts its retries. Although it is a ``RuntimeError`` subclass by
-    MRO, it is NOT a workflow transition rejection: ``update_one`` must RE-RAISE it (to the
-    pass soft-fail backstop) rather than misroute it into replay/comment/drift. A recorded
-    trail and a resume-able current status make drift *available* to prove it is not taken.
-    """
+    """A transient update exhausted by retry raises RetryExhaustedError, not replay drift."""
     tracker = _make_tracker(tmp_path, "tkt-retry", ["open", "in_progress", "closed"])
     _point_config_at(monkeypatch, tracker)
     exhausted = RetryExhaustedError("all retries exhausted", attempts=4)
@@ -673,11 +532,7 @@ def test_retry_exhausted_error_from_update_propagates(
 def test_replay_reraises_retry_exhausted_error_from_hop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A ``RetryExhaustedError`` raised by ``transition_issue_by_name`` DURING replay is a
-    transient exhaustion, not a hop rejection: ``replay_transition`` must RE-RAISE it (so
-    the pass surfaces it) rather than swallow it via ``_HOP_REJECTIONS`` and return
-    ``False`` (which would silently drift).
-    """
+    """Retry exhaustion in a replay hop propagates rather than becoming drift."""
     tracker = _make_tracker(tmp_path, "tkt-hopretry", ["open", "in_progress", "closed"])
     _point_config_at(monkeypatch, tracker)
     exhausted = RetryExhaustedError("hop retries exhausted", attempts=4)
@@ -695,10 +550,7 @@ def test_replay_reraises_retry_exhausted_error_from_hop(
 def test_replay_drifts_on_malformed_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A snapshot missing ``fields``/``status``/``name`` must NOT crash replay with a
-    ``KeyError``/``TypeError``: ``replay_transition`` treats it as "cannot determine
-    current status" and safely returns ``False`` (abort to drift), sending no hop.
-    """
+    """A snapshot without a usable status aborts replay to drift without a parsing exception."""
     tracker = _make_tracker(tmp_path, "tkt-malformed", ["open", "in_progress", "closed"])
     _point_config_at(monkeypatch, tracker)
     client = _FakeTransport(
@@ -714,10 +566,7 @@ def test_replay_drifts_on_malformed_snapshot(
 def test_replay_drifts_when_get_issue_raises_404(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A ``get_issue`` that fails with a non-hop-rejection error (a 404 stale binding) must
-    NOT crash replay: it is treated as "cannot determine current status" -> ``False``
-    (abort to drift), sending no hop.
-    """
+    """A status read returning 404 aborts replay to drift without inventing a hop."""
     tracker = _make_tracker(tmp_path, "tkt-getfail", ["open", "in_progress", "closed"])
     _point_config_at(monkeypatch, tracker)
     client = _FakeTransport(
@@ -735,11 +584,7 @@ def test_replay_drifts_when_get_issue_raises_404(
 def test_illegal_transition_400_drifts_without_recorded_trail(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An illegal-transition 400 with a present ``local_id`` but NO recorded ``*-STATUS``
-    trail must still DRIFT (``result is None``): dispatch's
-    ``_is_illegal_transition_400(exc) or replay_should_drift(...)`` short-circuits on the
-    illegal-400 even though ``replay_should_drift`` would be ``False`` (empty trail).
-    """
+    """An illegal-transition 400 with no STATUS trail remains drift."""
     tracker = tmp_path / "tracker"
     (tracker / "tkt-notrail-400").mkdir(parents=True, exist_ok=True)  # dir exists, no STATUS events
     _point_config_at(monkeypatch, tracker)
@@ -762,10 +607,7 @@ def test_illegal_transition_400_drifts_without_recorded_trail(
 def test_recorded_hops_for_reads_self_resolved_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``recorded_hops_for`` (an in-scope extension threading the parsed trail to both
-    replay helpers) reads the self-resolved store for a truthy ``local_id`` and returns
-    ``[]`` for a falsy one (nothing to replay against).
-    """
+    """Read hops from the configured store for a local id and return an empty trail without one."""
     from rebar.reconciler.transition_replay import recorded_hops_for
 
     tracker = _make_tracker(tmp_path, "tkt-hopsfor", ["open", "in_progress", "closed"])
