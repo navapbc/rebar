@@ -56,12 +56,9 @@ def test_every_relation_is_either_synced_or_deliberately_unsynced():
 
 
 def test_the_unsynced_set_is_exactly_the_four_measured_relations():
-    """Names the four explicitly, because the prose named the wrong three — twice.
-
-    The pre-fix code comment listed duplicates/supersedes/discovered_from (omitting `caused_by`);
-    the bug report listed supersedes/discovered_from/caused_by (omitting `duplicates`). Both were
-    wrong in different directions, which is why the set is now data.
-    """
+    """Pin the exact unsynced set: duplicates, supersedes, discovered_from,
+    and caused_by. Earlier prose omitted one relation in different places.
+    The executable set is the source of truth."""
     assert set(_value_maps().UNSYNCED_RELATIONS) == {
         "duplicates",
         "supersedes",

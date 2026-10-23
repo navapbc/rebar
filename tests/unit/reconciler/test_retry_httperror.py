@@ -1,12 +1,8 @@
-"""The REST floor's raw ``HTTPError`` contract after ADR 0103 S3.
+"""Keep the REST floor's raw HTTPError boundary after ADR 0103 S3.
 
-Story 9622 taught the handler-level retry wrapper to retry raw
-``urllib.error.HTTPError`` 429/5xx from the REST floor (``acli_rest``). ADR 0103 S3
-retired that wrapper: handlers now make a single transport attempt, so an HTTP
-429/5xx on a Cloud REST leg is not retried by the handler. What remains is the
-floor's own contract, pinned here: ``acli_rest`` re-raises the RAW ``HTTPError``
-(no boundary translation), which the raw-HTTPError catchers downstream rely on.
-"""
+For a nonretryable 404, acli_rest re-raises the original HTTPError. Downstream
+catchers rely on that identity. The retired handler wrapper must not add a
+second retry layer around the floor."""
 
 from __future__ import annotations
 

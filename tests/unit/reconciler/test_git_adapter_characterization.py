@@ -1,16 +1,8 @@
-"""Characterization test pinning ``rebar.reconciler.git_adapter``'s behaviour.
+"""Pin the reconciler's single git_adapter seam.
 
-The reconciler routes *every* ``git`` subprocess through :mod:`git_adapter` (the
-single git seam). This test documents "this is the git behaviour the adapter
-produces" — the exact ``git`` argv each op constructs and the exact values of the
-named ref/path constants — so any future drift in the adapter's git invocations,
-or in the tickets-tracker / bridge-state paths lifted out of the reconciler's
-commit-back path, is caught by a failing test rather than shipping silently.
-
-It is a *characterization* (golden) test: it asserts the observable contract of a
-migration that previously had no such pin — the byte-for-byte argv the inline
-``subprocess.run(["git", …])`` calls used before they were centralised here.
-"""
+Assert exact git argv and named ref/path constants, including ticket-tracker
+and bridge-state paths, so moving subprocess calls cannot alter observable
+git behavior."""
 
 from __future__ import annotations
 

@@ -1,38 +1,9 @@
-"""Property tests for the reconciler field-symmetry contract (story e931).
+"""Exercise the reconciler's field-symmetry mechanisms (e931).
 
-The registry under test is ``reconciler/_field_contract.py`` — the
-declarative per-field symmetry contract.  These tests enforce, against the REAL
-code paths (never re-implementations):
-
-  1. COVERAGE GUARD (import-time, fails collection): every field handled by
-     ``conflict_resolver.FIELD_CLASSES`` and every outbound name canonicalized by
-     ``inbound_differ._OUTBOUND_TO_INBOUND_FIELD`` must have a FIELD_CONTRACT
-     entry.  Deleting a registry entry (or adding a handled field without
-     declaring it) breaks collection, not a late test.
-  2. Conflict-class parity: the registry's ``conflict_class`` mirrors
-     conflict_resolver.FIELD_CLASSES exactly (the two axes must not drift).
-  3. Per-class properties through the owning mechanism:
-       bidirectional(status) — round-trip identity on the canonical preimages of
-         the REAL config maps, and the computed non-injective residue equals the
-         DECLARED lossy set (both directions: no over- or under-declaration);
-       links direction codec — INVERSE_RELATION is an involution and
-         resolve_inbound_link resolves inward/outward through the real function;
-       add_wins(labels) — the reducer's intra-event TAG_DELTA contract
-         (process_tag_delta): add wins over remove, idempotent on replay;
-       one_way_gated(links/parent) — should_propagate_removal through the real
-         gate: managed → True, unmanaged/absent/malformed → False (fail-open).
-     Path-level integration of the gate stays where it already lives
-     (tests/unit/reconciler/diffing/test_link_removal_sync.py and the
-     outbound_fields/outbound_field_diff parent tests) — not duplicated here.
-
-MUTATION CHECKS (how this suite kills the bug class):
-  * flip a declared class (e.g. status → add_wins) → test_core_field_classes_pinned
-    fails by name;
-  * delete a FIELD_CONTRACT entry → the import-time coverage guard raises and
-    the module fails collection;
-  * change local_to_jira_status so a new value stops round-tripping without
-    declaring it lossy → test_status_lossy_residue_exactly_declared fails.
-"""
+Collection requires every handled field in FIELD_CONTRACT. Conflict classes
+must match the resolver. Check status round trips and exact declared lossy
+residue, inverse link directions, add-wins replay, and managed-only removal
+gates. These properties catch registry omissions and contract drift."""
 
 from __future__ import annotations
 

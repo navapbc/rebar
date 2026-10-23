@@ -1,25 +1,9 @@
-"""Config-driven link-relation mapping — the S4 outbound seam, skip-not-approximate
-preserved (epic ravenous-dirt-widgeon / 1515-bebc-0d91-476b).
+"""Use one effective link map for outbound ADD and REMOVE (S4).
 
-One effective ``link_map`` governs BOTH halves of link emission — the ADD pass
-(``outbound_links._diff_links``) and the managed-ref-gated REMOVE pass
-(``outbound_links._diff_link_removals``) — through a single ``_resolve_link`` seam:
-
-  * an override replaces the built-in Jira link TYPE while preserving the built-in
-    direction ``swap``;
-  * a ``skip`` override (and the built-in unsynced relations) suppress BOTH ADD and
-    REMOVE — never added, never removed, never approximated;
-  * REMOVE attribution is config-aware: a remote link carrying an OVERRIDDEN vendor
-    type — which the built-in reverse map (``link_direction.JIRA_LINK_TO_RELATION``)
-    does not know, so ``map_remote_links`` hands back ``relation=None`` — is recovered
-    via the inverted ``link_map`` rather than silently dropped;
-  * ``config.effective_link_map`` fails closed (``MappingConfigError``) on a link_map
-    value outside a declared ``link_types`` vocabulary.
-
-Assertions target OBSERVABLE behaviour only — the resolved map, and the vendor-shaped
-ADD/REMOVE mutation dicts the diff funcs emit — never private structure. Built-in
-behaviour (no ``[mapping]`` block) must stay bit-for-bit what it is today.
-"""
+Overrides replace Jira link type without changing direction. Skip and built-in
+unsynced relations suppress both passes. Invert configured types for removal
+attribution, guard collisions, and reject values outside declared link_types.
+Without mapping config, preserve built-in behavior."""
 
 from __future__ import annotations
 

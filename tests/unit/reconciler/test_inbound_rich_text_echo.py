@@ -1,20 +1,8 @@
-"""Inbound echo-safety for the lossy rich-text wire (story 3289, epic 708d).
+"""Suppress inbound echoes of lossy outbound rich text (3289).
 
-This is the INBOUND mirror of ``test_rich_text_echo_suppression.py`` (which only covered
-the OUTBOUND differ). The gap it guards was live-observed: under the DC rich-text cutover
-the local body is Markdown while Jira echoes the RENDERED wiki, so the inbound differ,
-which normalized descriptions through the Cloud ADF codec only, saw Jira's echo of our OWN
-push as a fresh Jira-side change and emitted an inbound description update on every pass —
-pulling the wiki wire form back over the user's local Markdown and breaking the AC2
-once-only-upgrade-then-converge guarantee.
-
-The fix injects the outbound port into the inbound differ and treats Jira's value as
-unchanged when it equals the local body's LANDED wire form
-(``map_fields_to_remote(local)``) — the inbound analogue of the outbound
-``_baseline_form_matches``. A deterministic lossy fake codec is used here (no pandoc
-dependency) so the convergence contract is exercised on every CI run, not only where the
-real renderer is installed.
-"""
+Compare Jira's value with the local body's landed wire form from
+map_fields_to_remote. A deterministic lossy fake codec proves the echo does
+not overwrite local Markdown or repeat after the first upgrade."""
 
 from __future__ import annotations
 

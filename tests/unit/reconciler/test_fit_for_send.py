@@ -1,22 +1,8 @@
-"""Story 4cee — the outbound comment dedup key is the READBACK of the bytes sent.
+"""Derive outbound comment wire text and dedup readback once (4cee).
 
-Before this story the differ's dedup key was a *prediction*: it composed
-decorate → ``sanitizer.fit_comment`` → ``codec.to_wire`` → decode, while the
-mutation it queued carried the UNFITTED decorated body and each adapter
-re-derived the wire independently at send time.  The key was therefore correct
-only while three separately-maintained compositions stayed in lockstep, and
-every historical divergence re-posted an over-length comment on every pass.
-
-``fit_for_send`` computes the wire text ONCE.  The differ keys on the decoded
-readback of that text and queues the text itself, so both enactment consumers
-hand the transport exactly the bytes the key was taken from.
-
-The convergence property is asserted end-to-end rather than by restating the
-composition: post a comment, feed the wire the transport received back in as
-Jira's stored comment, and the next diff must emit NOTHING.  Under the old
-shape that second pass re-emits, because the stored body is the FITTED text
-while the key predicted a differently-fitted one.
-"""
+The differ keys on decoded readback of fit_for_send's wire text and queues that
+same text for both adapters. Feed the sent wire back as Jira's stored comment.
+The second diff must emit nothing, even after fitting a long body."""
 
 from __future__ import annotations
 
@@ -357,14 +343,10 @@ def _fit_then_wire_offenders() -> list[str]:
 
 
 def test_the_fit_then_wire_derivation_has_exactly_one_body() -> None:
-    """The durability half of story 4cee. Consolidating the fit/dedup-key derivation is worth
-    nothing if a sixth copy can merge next week — and the comment key/send fit was among the
-    worst offenders in the defect review behind this epic, arriving as repeated instalments
-    precisely because a fix landed in one copy while its twins stayed broken.
+    """Pin one fit/dedup-key composition so a second copy cannot drift.
 
-    This asserts how MANY compositions exist, never how the one composition works, so a
-    behaviour-preserving refactor inside `outbound_comments` cannot fail it.
-    """
+    Count derivations without constraining behavior-preserving refactors inside
+    outbound_comments."""
     assert _fit_then_wire_offenders() == [], (
         "the fit-then-wire derivation was re-implemented outside "
         f"{_OWNER}; call fit_for_send instead, or mark the line "

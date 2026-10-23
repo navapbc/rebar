@@ -1,18 +1,9 @@
-"""HELD-OUT pin on the reconciler's ``Retry-After: 0`` zero-guard (bug 3604-891f-e301-4aff).
+"""Treat Retry-After: 0 as absent on reconciler retry surfaces (3604).
 
-A ``Retry-After: 0`` is a VALID directive meaning "retry immediately", but the reconciler's
-ADR-0036 backoff exists to *desynchronize* concurrent reconcilers hitting one Jira instance. If a
-zero directive is honored literally it collapses the backoff to ``time.sleep(0.0)`` — a
-synchronized immediate replay, the same thundering-herd class-B vector ticket 254e guarded for the
-Anthropic transport (``a zero/negative Retry-After is treated as absent``). So a ``0`` must be
-treated like an ABSENT header — routed to the already-jittered fallback — and MUST be
-distinguished from a present positive value, which is still honored (and capped).
-
-This test is held out from the fix: it exercises the 429 backoff surfaces plus the shared
-parser, and it is designed to be RED before the guard exists (each surface produces a ``0.0``
-immediate replay) and GREEN after. ADR 0103 S3 retired the handler-level retry wrapper that was
-surface 2, so the DC and ACLI surfaces remain.
-"""
+A literal zero synchronizes immediate retries. The jittered fallback must
+handle zero while a positive header remains honored and capped. Exercise the
+shared parser plus current DC and ACLI backoff surfaces. The retired handler
+wrapper is outside this contract."""
 
 from __future__ import annotations
 

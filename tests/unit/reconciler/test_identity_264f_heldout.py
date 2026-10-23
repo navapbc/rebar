@@ -1,15 +1,8 @@
-"""HELD-OUT oracle for 264f — the implementation MUST NOT see this file.
+"""Pin account-id identity propagation across the reconciler (264f).
 
-Placed under tests/unit/reconciler/ so the package conftest puts the engine on
-sys.path and seeds the flat ``rebar.reconciler`` namespace (the engine package is
-shadowed by ``rebar._engine``), letting these modules import directly.
-
-Validates the reconciler integration the happy-path seam cannot: the outbound differ
-writes the ``_assignee_is_account_id`` sentinel on an identity-mapping hit;
-``AcliClient.update_issue`` skips the fuzzy assignable-search when told the assignee
-is already an accountId (and does not leak the flag to the ACLI subprocess); and
-``set_reporter`` issues the reporter REST PUT unwrapped via ``_direct_rest_put_raw``.
-"""
+A mapping hit sets the assignee-is-account-id sentinel. AcliClient skips fuzzy
+assignable search without leaking the flag to ACLI. Reporter updates use an
+unwrapped raw REST PUT."""
 
 from __future__ import annotations
 

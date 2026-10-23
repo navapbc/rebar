@@ -1,35 +1,9 @@
-"""HELD-OUT: inbound ghost-identity minting under the Data Center backend (story J7,
-epic e369; folded-in bug 5f48).
+"""Pin both Data Center inbound identity defects together (5f48).
 
-TWO defects that COMPOUND, which is why they are pinned together in one file:
-
-(a) ``_ensure_inbound_assignee_identity`` returns early unless the assignee object
-    carries a non-empty ``accountId``. ``adapters/jira_family/identity_model.py`` is
-    explicit that **DC has no accountId at all** — DC users carry ``name``/``key``
-    (REST v2) — and the function is called with the RAW Jira user object. So on a DC
-    deployment it exits at the guard and Cloud mints ghost identities while DC
-    silently mints none. NOTHING RAISES; the mint is simply never attempted.
-
-(b) The backend vendor is ALSO used as the creation channel
-    (``ensure_identity_for(vendor, …, creation_channel=vendor)``), and
-    ``"jira-datacenter"`` is not in ``CREATION_CHANNELS``. That rejection is real but
-    unreachable while (a) short-circuits first — it fires the moment anyone teaches
-    the guard DC's ``name``. Because the call sits inside
-    ``except Exception:  # best-effort ghost mint``, logged at DEBUG, fixing (a) ALONE
-    converts a silent no-op into a SWALLOWED EXCEPTION, which is strictly harder to
-    diagnose. Convergence is unaffected either way — epic AC6's premise.
-
-So ``test_fixing_only_the_guard_would_swallow_a_channel_rejection`` is the load-bearing
-test here: it is what stops a future contributor from landing half the fix.
-
-The store vocabulary must NOT grow a per-deployment channel: that would fork
-``CREATION_CHANNELS``, contradict the epic's shared-identity decision, fragment one
-human's identity across deployments, and drag in a migration the epic avoids.
-
-Patching note: the reconciler resolves the backend through a FUNCTION-LOCAL import,
-which binds at CALL time, so these tests patch ``select_backend`` on its DEFINING
-module (``rebar.reconciler._backend_registry``), never a local alias.
-"""
+DC users have name/key but no accountId, so a Cloud-only guard skips minting.
+After that guard changes, using jira-datacenter as creation_channel would be
+rejected inside best-effort handling. Assert both fixes and reuse the shared
+identity vocabulary. Patch select_backend on its defining module."""
 
 from __future__ import annotations
 

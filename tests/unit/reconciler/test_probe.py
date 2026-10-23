@@ -1,49 +1,9 @@
-"""Held-out oracle for S8 — ``rebar bridge suggest-mapping`` (the live-Jira mapping probe).
+"""Exercise the offline, read-only suggest-mapping probe port (S8).
 
-This file is the TEST-FIRST contract for S8. It pins the OBSERVABLE behaviour of a new,
-read-only ``rebar bridge suggest-mapping <PROJECT> [--write]`` verb that observes a Jira
-project through a probe PORT and emits a suggested ``[mapping.*]`` config block seeded with
-the project's real vocabulary and identity-seed axis maps. Everything here is FULLY OFFLINE
-— a FAKE probe port supplies canned issue-type / priority / link-type / status / createmeta /
-search+transitions data, so no live Jira and no CI credential are required (the portability
-rule). The tests drive the REAL CLI entry point (``rebar._cli.main(["bridge",
-"suggest-mapping", ...])``) wherever possible.
-
-Contract the implementer must satisfy (the injection seam these tests target)
------------------------------------------------------------------------------
-NEW module ``rebar.reconciler.mapping_probe`` (source at
-``src/rebar/reconciler/mapping_probe.py``) exposes:
-
-* ``build_probe(...)`` — a module-level factory that returns a probe PORT constructed from
-  resolved DC settings (via ``adapters/jira_datacenter/transport.build_client_from_settings``).
-  These tests monkeypatch it to return a FAKE port, so the real builder runs OFFLINE. The
-  ``suggest-mapping`` handler (``_cli.__init__._bridge_suggest_mapping``) MUST obtain its port
-  through this factory as a MODULE ATTRIBUTE (``mapping_probe.build_probe(...)``), so a
-  monkeypatch on the module takes effect.
-* ``build_mapping_layer(port, project_key)`` — the pure layer builder that calls the port's
-  per-axis read methods and returns ``{"projects": {project_key: {<layer>}}}``.
-
-The probe PORT exposes exactly these read-only methods, each returning PLAIN data (the port
-normalizes the raw ``jira.JIRA`` resources so the builder — and these fakes — stay simple):
-
-* ``issue_types()``           -> list[dict] with keys ``name``, ``id``, optional ``hierarchyLevel``
-* ``priorities()``            -> list[str] (priority names)
-* ``issue_link_types()``      -> list[str] (link-type names)
-* ``statuses()``              -> list[str] (status names)
-* ``createmeta_issuetypes(key)``            -> list[dict] with ``id``, ``name``
-* ``createmeta_fieldtypes(key, id)``  -> list[dict] with ``fieldId``, ``name``, ``required``
-* ``search_issues(jql)``      -> list[dict] with ``key``, ``issue_type``, ``status``
-* ``transitions(issue_key)``  -> list[dict] with ``name`` and ``to`` (destination status name)
-
-The port has NO create / transition / delete method — that read-only surface is the whole
-point (``test_probe_is_read_only``), distinct from ``check-access`` which creates+deletes a
-throwaway issue.
-
-``mapping_probe.build_probe`` is resolvable in this test tree because
-``tests/unit/reconciler/conftest.py`` already puts the engine dir on ``sys.path`` and
-extends ``rebar.reconciler.__path__`` to the engine package, so ``import
-rebar.reconciler.mapping_probe`` binds the SAME module object the CLI handler imports.
-"""
+The CLI obtains an injectable factory, reads plain-data issue types,
+priorities, links, statuses, createmeta, search, and transitions, then builds a
+project mapping layer. The port has no mutation methods. The --write flag is a separate
+CLI choice. Fake data keeps the default suite independent of Jira credentials."""
 
 from __future__ import annotations
 

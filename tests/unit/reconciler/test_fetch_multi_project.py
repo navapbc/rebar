@@ -1,23 +1,9 @@
-"""Story 1734: inbound fetch fans out over the multi-project mapping.
+"""Fetch every mapped project independently (1734).
 
-The fetcher must ingest EVERY project in the store's ``projects.json`` mapping,
-not just the single configured ``jira.project``:
-
-  * **Base queries** — one active + done JQL pair PER mapped project (the query
-    loop already dedups cross-query via ``seen_keys``).
-  * **Enrichment** — one parent/comment/issuelink pass PER mapped project, each
-    failing open independently.
-  * **Per-project ceiling** — the ``_ACLI_CEILING`` is a PER-QUERY (hence
-    per-project) bound, never a shared cumulative budget across projects.
-  * **Single-project fallback** — an unseeded store reproduces the exact
-    single-project queries + enrichment (regression parity).
-
-Inbound-created tickets are stamped with ``bridge_project`` (derived from the
-Jira key prefix) and ``repos`` (from the mapping), so cef7's tri-state project
-routing fields are populated at creation.
-
-Held-out RED oracle for 1734 — kept out of the fix subagent's tree.
-"""
+Each project gets active/done base queries, parent/comment/link enrichment, and
+its own query ceiling. Dedup spans queries. An unseeded store retains single-
+project behavior. Stamp inbound tickets with bridge_project from the Jira key
+and repos from the mapping."""
 
 from __future__ import annotations
 

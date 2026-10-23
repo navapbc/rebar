@@ -1,35 +1,9 @@
-"""MUTATION CHECK for J11's rewritten inbound-assignee oracle (ticket 5200).
+"""Prove the inbound-assignee oracle can detect a missing mint (5200).
 
-The live cell ``test_the_inbound_assignee_mints_a_jira_family_identity`` used to compare
-``rebar.ensure_identity_for(...)``'s return value against itself. ``ensure_identity_for`` is
-create-or-reuse, so that oracle MINTED the thing it was checking for and could not fail. It has
-been rewritten to observe the identity REGISTRY across the pass, through the read-only
-``rebar.resolve_mapping``.
-
-An oracle rewritten for discriminating power has to be shown to HAVE it, and the live cell cannot
-demonstrate that — a green live run is consistent with a tautology. So the halves are pinned
-HERE, harness-free:
-
-  * ``resolve_mapping`` returns None on a store nothing has minted into, so the rewritten
-    oracle's ``minted is not None`` assertion genuinely FIRES when the pass mints nothing;
-  * driving the PRODUCTION mint (``apply_inbound_records._ensure_inbound_assignee_identity``,
-    the function the inbound apply actually calls) makes it resolve — so the oracle can also
-    legitimately pass, and passes for the mint rather than for its own side effect;
-  * the cell's SETUP step — ``_dc_support.forget_identity_mapping`` — really does re-establish
-    the absence the oracle asserts, even on a store where the mapping was already minted. That
-    is the shape the J11 harness (ticket 5200-e04e-246e-4aae) forced: the mapping is not
-    left by the scrub (every
-    identity on the real ``tickets`` branch carries ``mappings: []``) but minted DURING the test
-    by ``bound_dc_issue``'s binding pass importing the seeded issue's default assignee. Without
-    a working removal the cell can only ever fail at setup;
-  * and the MUTATION: with the mint neutered, the oracle goes RED naming the missing identity.
-
-The oracle's registry half is imported from ``_dc_support`` and run VERBATIM here rather than
-paraphrased — a paraphrase can stay red while the live cell has quietly gone vacuous.
-
-Deliberately in ``tests/unit/``: a module under ``tests/external/live_jira_dc/`` without a
-harness skipif does not run harness-free — the autouse fixture burns the budget and then errors.
-"""
+Read the registry through resolve_mapping without minting in the assertion.
+Verify setup removes an existing mapping, production inbound apply can mint it,
+and a disabled mint turns the verbatim oracle red. Run without the external
+harness or its budget fixture."""
 
 from __future__ import annotations
 

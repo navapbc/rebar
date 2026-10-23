@@ -1,21 +1,8 @@
-"""Bug 3b5f: a confirmed-deleted Jira pairing is TOMBSTONED, never resurrected.
+"""Do not recreate a Jira issue after its pairing is confirmed deleted (3b5f).
 
-Operator ruling (recorded on the ticket): once an issue is deleted in Jira it must
-not be re-created. Before this change rebar resurrected it on a delay — three
-consecutive confirmed-404 ``note_absent`` calls retire the binding, ``_retire``
-pops the entry from BOTH ``bindings`` and ``reverse`` so ``get_jira_key`` returns
-``None``, and the unbound-create arm in ``outbound_differ`` then emits an outbound
-CREATE for the now-unbound local ticket. A fresh Jira issue replaced the
-deliberately-deleted one about three passes later.
-
-The guard SUPPRESSES work, so its failure mode is silently not creating issues —
-which no green suite would surface. Hence both halves are asserted here in one
-module: the retired pairing must NOT create, and a NEVER-BOUND local ticket MUST
-still create. The tombstone is also reversible by a documented call
-(``BindingStore.unretire``), and the suppression is observable in bridge_alerts.
-
-Follows the importlib loader convention established across this test tree.
-"""
+A tombstone suppresses outbound create after retirement. A never-bound ticket
+must still create. BindingStore.unretire restores the pairing, and the
+suppression remains observable in bridge_alerts."""
 
 from __future__ import annotations
 

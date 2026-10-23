@@ -1,27 +1,8 @@
-"""HELD-OUT structural oracle for the Jira-family sub-seam (story J2, epic e369).
+"""Enforce the Jira-family import boundary in the default suite (J2).
 
-This file is HELD OUT from the implementation subagent. It is the machine-checked
-import contract the epic requires (§6): the drift this seam exists to prevent
-recurs the moment a contributor adds Cloud-specific logic to the shared layer, so
-the boundary ships enforced rather than conventional.
-
-It is implemented as an AST walk inside the ordinary ``make test`` run that CI's
-``Verified`` gate already executes — no new CI job and no new dev dependency —
-matching how this repo already enforces structural rules (``test_backend_neutrality.py``).
-
-What it pins:
-
-1. the permitted import graph under ``adapters/`` (acyclic, one direction);
-2. that ``jira_family/`` imports NONE of the Cloud-pinned vendor modules — its
-   ADF/comment-limit dependencies arrive as injected contracts;
-3. that no re-export shim was left at any pre-move path;
-4. that exactly one dict literal defines each value map WITHIN ``adapters/``;
-5. that no location-pinned module changed path (ADR 0035 §(a));
-6. that the new imports are absolute, never relative.
-
-The checker itself is given teeth by ``test_checker_flags_a_synthetic_violation``:
-a tautological graph checker that never fires would pass every assertion here.
-"""
+The acyclic adapter graph injects shared ADF and comment limits, forbids old
+path shims, duplicate value maps, and relative imports, and preserves pinned
+module locations. A synthetic violation proves the AST checker can fail."""
 
 from __future__ import annotations
 

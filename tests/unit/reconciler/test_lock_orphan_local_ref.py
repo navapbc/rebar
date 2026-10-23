@@ -1,25 +1,8 @@
-"""Bug: a stranded LOCAL refs/reconciler/lock wedges every local pass forever.
+"""Keep remote-authoritative reconciler locks reclaimable.
 
-The pass lock is remote-authoritative — ADR 0031 §"Distributed operation": "The lock
-must be authoritative across CI runners, manual invocations, and clones", and with
-``remote="origin"`` "the remote is the truth". Two gaps broke that invariant:
-
-1. ``_fetch_ref`` (``+<ref>:<ref>``) plants a LOCAL copy of whatever the remote holder
-   held at read time, and git cannot delete a local ref through a refspec whose source
-   is absent — so once the remote holder releases, the local copy is STRANDED. Every
-   later ``read`` then reports HELD while the authoritative remote is free.
-2. ``release`` in remote mode deletes only the REMOTE ref, never the local one.
-
-The observed consequence: ``steal()`` cannot break the orphan either (a
-``--force-with-lease`` push against an absent remote ref is rejected as ``stale info``,
-which the CAS classifier reads as "lost to another contender"), so the checkout is
-wedged permanently and manual ``git update-ref -d`` is the only escape — contradicting
-ADR 0031's "C2's relative-duration lease makes this rarely necessary ... steal-able
-after one lease interval automatically."
-
-These tests drive REAL git repositories (a bare "remote" plus a working clone) through
-the real ``_ref_lock`` primitives; no mocking of the CAS.
-"""
+Fetching a remote lock can leave a local ref after remote release. Read and
+release must clear that orphan, or a free remote still appears held and steal's
+lease push cannot recover it. Exercise git CAS in a bare remote and clone."""
 
 from __future__ import annotations
 

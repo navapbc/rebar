@@ -1,36 +1,10 @@
-"""S7 (2c66-205d-92e1-4419): parent-drift breadcrumb comment — held-out oracle.
+"""Pin the echo-safe parent-drift breadcrumb (S7).
 
-When a local parent cannot be represented in Jira (the parent is a non-epic and
-this project permits only Epic parents, so the outbound differ suppresses the
-parent field), the child lands as an under-defined leaf. This oracle pins the
-echo-safe breadcrumb comment that the OUTBOUND comment differ
-(``outbound_comments._diff_comments``) emits to point the Jira user at the
-nearest ancestor that *is* represented in Jira.
-
-Everything asserted here is an OBSERVABLE output — the returned mutation list
-from ``_diff_comments`` and the returned mutation list from
-``inbound_collection_diffs._diff_comments_inbound``. Nothing reads a private
-symbol name or greps source, so a behaviour-preserving refactor (renaming the
-internal ``_build_parent_breadcrumb`` helper, restructuring the walk) cannot turn
-these red. The breadcrumb is identified among mutations solely by the stable
-identity tag it must carry.
-
-Contracts pinned (ticket ACs):
-  * emitted — a bound child with a type-collapsed, bound parent gets exactly one
-    breadcrumb naming the nearest represented ancestor's Jira key, carrying both
-    the ``<!-- rebar:parent-breadcrumb -->`` identity tag and RECONCILER_MARKER;
-  * default no-op — with the ancestor maps absent, every existing caller is
-    unchanged (no breadcrumb);
-  * append-once — an already-present breadcrumb (found by the stable tag, even
-    when it names a DIFFERENT ancestor) suppresses a second one;
-  * intervening — an unbound intervening ancestor is skipped to reach a bound
-    one, and the body says so;
-  * omitted — no ancestor with a bound Jira key ⇒ no breadcrumb;
-  * drift-gated — a child whose direct parent IS an epic (the parent field is
-    NOT suppressed) or whose parent type is absent gets NO breadcrumb;
-  * echo-safe — the emitted body is suppressed by the inbound comment differ
-    (it carries RECONCILER_MARKER), never re-ingested as local content.
-"""
+For a bound child whose direct parent is unrepresentable, name the nearest
+bound represented ancestor with the stable tag and RECONCILER_MARKER. Skip an
+unbound intermediate ancestor. Omit when none exists or the direct epic parent
+is representable. Default maps are no-op, existing tags suppress repeats, and
+inbound comments ignore the marker."""
 
 from __future__ import annotations
 

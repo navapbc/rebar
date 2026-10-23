@@ -1,32 +1,8 @@
-"""HELD-OUT: a failed identity write must NOT delete the created issue (bug 387d).
+"""Keep a created Jira issue after an identity-write failure (387d).
 
-THE DEFECT. `create_one` writes identity markers straight after `create_issue` succeeds, and
-on ANY failure in that block it DELETED the freshly created issue and re-raised. Destroying a
-successfully-created issue to recover from a failure to LABEL it inverts the cost: a
-created-but-unlabelled issue is recoverable, a deleted one is not.
-
-The trigger is ordinary, not exotic. Jira rejects a field write with "Field 'x' cannot be set.
-It is not on the appropriate screen, or unknown" in at least three distinct situations, and the
-message is misleading in roughly half of them: the field genuinely is not on the project's
-Create/Edit screen; the workflow property `jira.permission.createclone.denied` is set (nothing
-to do with screens); or the value is MALFORMED on a field that IS on the screen. A self-hosted
-DC instance with a customised Create screen hits this on the first write.
-
-A SECOND DEFECT IN THE SAME BLOCK, found while tracing the first. The write-ahead records the
-key BEFORE the identity writes (`record_pending_key` + `save`, deliberately inside the try).
-The rollback then deleted the issue but NEVER UNBOUND, so a KEYED-pending binding survived
-pointing at a DELETED Jira key. On every later pass `recover_pending_bindings`' keyed branch
-calls `add_label` on that dead key, raises, is caught into the failure sink, and the entry
-stays pending — permanently. So the old behaviour did not merely lose an issue; it also
-stranded the local ticket forever. Both symptoms have one cause and one fix.
-
-WHY NOT-DELETING IS SAFE. The recovery path this needs already exists and is already correct:
-the KEYED branch retro-attaches the rebar-id label and the local_id property and confirms, with
-NO Jira search — deterministic, and documented as such precisely so a crash in the
-create->label window yields no duplicate. A failed identity write leaves exactly the state that
-branch is built for. The rollback was solving a problem the write-ahead protocol had already
-solved, and destroying data to do it.
-"""
+The keyed pending record must survive for deterministic label/property recovery.
+Deleting the issue loses data and strands a pending binding against its dead key.
+Recovery must retain the key and avoid a search-driven duplicate."""
 
 from __future__ import annotations
 

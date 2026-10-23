@@ -1,10 +1,8 @@
-"""Story 9622: pending-binding recovery failures are LOUD, not silently swallowed.
+"""Surface pending-binding recovery failures in the pass result (9622).
 
-The old code passed the applier MODULE (no search_issues) to recover_pending_bindings
-so recovery AttributeError'd into a fail-open swallow. The fix passes the real
-AcliClient + a failure_sink; each failure emits a deduped alert_store bridge alert
-AND surfaces a nonzero recovery_failures tally on the pass result + sync_pass_end log.
-"""
+Pass AcliClient and failure sink. Each failure gets a deduped bridge
+alert and nonzero recovery_failures tally in both pass result and sync_pass_end
+log. A swallowed AttributeError from the wrong module must not appear green."""
 
 from __future__ import annotations
 

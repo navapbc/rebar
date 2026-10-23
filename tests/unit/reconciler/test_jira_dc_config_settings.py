@@ -1,21 +1,9 @@
-"""The DC connection settings AC(11)-(13) name, which had no tests (story J6, epic e369).
+"""Pin Data Center TLS, config, and status settings (J6).
 
-A completion-verification run on ticket 9fd4 refused the close over four criteria. One was a
-truncation artifact — ``options["verify"]`` is never False IS covered, by
-``test_jira_dc_transport_heldout.py``. The other three were real:
-
-* ``_config_schema._validate_reconciler_tls`` had **zero** test references anywhere in the
-  tree, despite being the security control that stops a Jira PAT crossing the wire in
-  cleartext;
-* ``resolve_jira_datacenter_settings``'s fail-loud property is an ABSENCE — there is no
-  ``except ConfigError`` — and an absence is exactly what regresses silently when someone
-  later "helpfully" adds a fallback;
-* ``resolved_statuses`` appeared in the suite only as a fixture VALUE, never as an assertion
-  about its default or a custom workflow's names.
-
-That pattern — a criterion naming a behaviour nothing asserts — is the same one that let
-``add_label`` ship calling a method that does not exist on ``jira.JIRA``. These tests close it.
-"""
+Reject insecure PAT transport unless allow_insecure explicitly opts in, while
+warning on that override. Propagate ConfigError without fallback. Assert
+resolved-status defaults and custom workflow names. Transport tests separately
+pin options-dict TLS verification."""
 
 from __future__ import annotations
 
@@ -144,14 +132,9 @@ def test_settings_no_longer_expose_resolved_statuses() -> None:
     assert "resolved_statuses" not in JiraDataCenterSettings._fields
 
 
-# --- AC(13) sub-requirements the earlier tests did NOT cover -------------------------------
-#
-# `test_jira_dc_transport_heldout.py` asserts options["verify"] is never False and that a
-# ca_bundle lands as a path. A completion-verification run pointed out that the criterion asks
-# for two MORE things, and it was right: nothing simulated a verification FAILURE, and nothing
-# exercised the `allow_insecure=True` path to show it does not relax certificate verification.
-# (I had classified this criterion as already covered — checking that plausibly-named tests
-# existed rather than checking them against the criterion's full text.)
+# AC(13): the transport guard covers options["verify"] and ca_bundle paths. These
+# tests also require a named verification failure and keep allow_insecure=True
+# from silently disabling certificate verification.
 
 
 def test_a_tls_verification_failure_names_ca_bundle_and_is_not_retried(monkeypatch) -> None:

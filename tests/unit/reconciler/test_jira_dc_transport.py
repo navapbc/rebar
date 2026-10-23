@@ -1,23 +1,8 @@
-"""The Data Center transport's public contract (story J6, epic e369).
+"""Pin the Data Center transport's unwrapped payload contract (J6).
 
-The DC transport wraps ``pycontribs/jira`` behind the opt-in ``[jira-datacenter]``
-extra. Its defining property is that the library's object model is **unwrapped at
-this boundary**: every method returns the raw payload shapes rebar's existing
-mappers already consume, so nothing downstream ever learns about ``jira.Issue``.
-
-That property is asserted through ``tests/_jira_shape_contract.py`` — the repo's
-existing verified-fake honesty contract, already holding the hermetic
-``FakeAcliClient`` and the real ``AcliClient`` to ONE definition of these shapes.
-Reusing it here tests the actual claim (DC returns the SAME shapes) and makes
-drift impossible to hide: a DC-specific copy of these assertions could quietly
-diverge from the Cloud ones while both suites stayed green — which is precisely
-the two-implementations-diverging failure this epic exists to prevent.
-
-The transport takes its underlying client as a CONSTRUCTOR PARAMETER so these
-tests can inject a fake: no network, and the opt-in extra need not be installed
-to run them. The same shapes are re-asserted against a real Jira 8.17.1 in
-``tests/external/live_jira_dc/test_transport.py``.
-"""
+Reuse the shared verified-fake shape contract for Cloud and DC so mapper inputs
+cannot diverge. Inject the client for offline tests without the optional extra.
+The external Jira test covers vendor behavior. Keep issue-resource method ownership."""
 
 from __future__ import annotations
 
@@ -41,17 +26,10 @@ class _LibIssue:
         self.raw = {"key": key, "fields": dict(fields)}
 
     def add_field_value(self, field: str, value: str) -> None:
-        """Mirrors ``jira.resources.Issue.add_field_value(field, value)``.
+        """Mirror jira.resources.Issue.add_field_value(field, value).
 
-        Deliberately modelled on the ISSUE resource with its real TWO-argument
-        signature: ``jira.JIRA`` has no ``add_field_value`` at all (verified
-        against jira 3.10.5). The transport previously called it on the CLIENT
-        with three arguments, so ``add_label`` raised AttributeError on every
-        invocation — a bug that survived because the method had no test at any
-        tier and this fake exposed no such attribute to contradict it. Keeping
-        the fake's surface faithful to the real object is what makes it a
-        verified fake rather than a rubber stamp.
-        """
+        The method belongs to an Issue, not the JIRA client, and takes two
+        arguments. A fake with the wrong surface hid a failing add_label call."""
         current = list(self.raw["fields"].get(field) or [])
         current.append(value)
         self.raw["fields"][field] = current

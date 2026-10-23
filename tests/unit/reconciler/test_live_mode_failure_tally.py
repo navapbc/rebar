@@ -1,32 +1,8 @@
-"""LIVE mode must still count per-mutation failures (bug c903-42b9-0f17-45cc).
+"""Count per-mutation failures in LIVE mode (c903).
 
-`_apply_batch` writes a manifest carrying every mutation outcome, including
-`outcome["error"]` for soft-failed ones. `apply_planning._emit_mode_manifest`'s LIVE
-branch then UNLINKS that manifest and returns `("RETURN", None)` — "LIVE: no manifest
-file per contract" — so `applier.apply()` returns None. `reconcile._persist_and_log`
-tallies with:
-
-    mutations_applied = len(mutations)
-    mutation_failures = 0
-    ...
-    elif manifest_path is not None:   # never true in LIVE
-        ... mutation_failures = sum(1 for o in outcomes if o.get("error"))
-
-so in LIVE the tally block never runs: failures stay 0 and every computed mutation is
-counted as applied. The pass classifier's `if failures > 0: return 1` is therefore dead
-code in the only mode production runs.
-
-Three contracts are defeated by this, all in LIVE only:
-  * e534-5154-2401-40fb — "isolate + fail loud at the END exits non-zero"
-  * 48c8-5375-f883-462d — a silent sub-op no-op or a swallowed comment failure (always
-    a per-mutation error) must "count toward mutation_failures and drive a non-zero
-    pass exit"
-  * 85a1 — the truthful tally; `applied N of N` is printed while mutations failed
-
-Every existing fail-loud/truthful-tally test stubs `reconcile_once` to RETURN a
-`mutation_failures` value, so none of them exercise this path. These tests drive the
-REAL functions.
-"""
+LIVE removes the manifest file, but the result must still carry truthful
+applied/failure counts and a nonzero pass exit. Exercise production apply and
+reconcile paths rather than stubbing a precomputed mutation_failures value."""
 
 from __future__ import annotations
 
@@ -89,15 +65,11 @@ def test_live_emit_returns_tally_and_still_removes_the_manifest(tmp_path: Path) 
 def test_live_emit_merges_cutover_tally_deferred_skipped_recovered_degraded(
     tmp_path: Path,
 ) -> None:
-    """LIVE must fold the coordinator route's cutover buckets into the returned tally.
+    """Merge coordinator cutover buckets into LIVE's returned tally.
 
-    RP-03 S3 T3: when ``_apply_batch`` reroutes migrated non-create families through the
-    coordinator+fuse surface, it stamps a ``cutover_tally`` block into the manifest
-    carrying the fuse-held ``deferred`` / data ``skipped`` / ``recovered`` buckets and the
-    degraded-pass exit signal — dispositions the legacy applied/failed pair cannot express.
-    The LIVE branch must merge them so ``derive_pass_tally`` fires the degraded exit; without
-    the merge a fuse-deferred pass with no hard failures would still report degraded=False.
-    """
+    Deferred, skipped, and recovered dispositions plus the degraded signal
+    cannot be represented by the legacy applied/failed pair. A fuse-held pass
+    with no hard failure must still report degraded."""
     outcomes = [
         {"action": "update", "key": "OK-1"},
         {"action": "delete", "key": "BAD-1", "error": "permanent: HTTP Error 400"},
@@ -588,18 +560,10 @@ def test_legacy_apply_tally_without_degraded_key_stays_converged(
     assert rc == 0
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-# ── S3T3-REROUTE-E2E-HELDOUT-START ── live cutover reroute, withheld from impl ──
-#
-# These drive the REAL ``applier.apply`` non-create dispatch with a fake transport and
-# an explicit ``ticket_plans`` shadow set, pinning the OBSERVABLE cutover contract:
-#   * a migrated family (update) physically dispatches through the S3 coordinator route
-#     (``coordinate_and_fuse``) — NOT the legacy ``applier._apply_one`` batch loop
-#     (AC1/AC5: legacy per-mutation nesting unreachable for migrated families);
-#   * the ``rebar-id:<local_id>`` audit label is still stamped (G6 guard preserved);
-#   * the per-mutation lost-lease ``abort_check`` still gates each physical op (G6);
-#   * the cross-project (bug 626d) guard still fails the pass closed before any write.
-# ════════════════════════════════════════════════════════════════════════════════
+# S3T3-REROUTE-E2E-HELDOUT-START: real non-create apply must route migrated
+# updates through coordinate_and_fuse, not the legacy _apply_one loop. The
+# rebar-id:<local_id> audit label, per-operation lost-lease abort_check, and
+# cross-project fail-closed guard must still hold before writes.
 
 from unittest.mock import MagicMock, patch  # noqa: E402
 
@@ -928,16 +892,12 @@ def _persist_tally(tmp_path: Path, monkeypatch, apply_tally: dict) -> dict:
 def test_mixed_pass_tally_is_exact_including_recovered(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """AC5: a mixed cutover pass surfaces EXACT, DISJOINT applied / recovered / deferred /
-    failed / skipped counts that sum to ``mutation_count``.
+    """Report disjoint applied, recovered, deferred, failed, and skipped counts.
 
-    The production tally (``batch_dispatch.build_pass_tally``) FOLDS recovered into
-    ``applied_count`` (``applied_count = applied + recovered`` — a legacy-consumer
-    contract pinned by ``test_build_pass_tally_folds_recovered_into_applied``), so the
-    apply_tally reconcile receives already carries recovered inside ``applied_count``.
-    ``reconcile`` must subtract it back out so ``recovered`` is surfaced explicitly and
-    NOT double-counted in ``mutations_applied``. Here 4 pure-applied + 5 recovered arrive
-    as ``applied_count`` 9; the exact reported applied count is 4."""
+    The production apply tally folds recovered into applied_count for legacy
+    consumers. Reconcile subtracts recovered before reporting pure applied.
+    Four pure applied plus five recovered must report four and five, not nine
+    and five."""
     result = _persist_tally(
         tmp_path,
         monkeypatch,
