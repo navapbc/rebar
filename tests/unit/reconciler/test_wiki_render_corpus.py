@@ -1,18 +1,8 @@
-"""Corpus safety tests for the DC wiki renderer (story 271c, epic 708d).
+"""The committed Data Center wiki corpus checks rendering safety and convergence.
 
-These run the renderer over the vendored ``tests/fixtures/dc_wiki_corpus/`` snapshot
-of real rebar prose — the punctuation-dense material pandoc's jira writer mishandles.
-The corpus is committed (see ``scripts/build_dc_wiki_corpus.py``) so the counts below
-are hermetic and reproducible without a live ticket store.
-
-The claims are SAFETY claims, not fidelity claims: the DC path is one-way, so what
-must hold is that nothing is corrupted and that rendering settles.
-
-**Cost discipline.** Broad routine assertions drive the production segmenter through
-committed exact Pandoc outputs. A missing prepared input fails rather than falling
-back. Three representative bodies still traverse the installed real Pandoc in every
-Verify run; complete real-binary replay belongs to External Integration Tests.
-"""
+Protected code excerpts remain in place, later passes settle, and richness
+floors prevent trivial output. Routine tests compare committed Pandoc replay
+bytes. Representative product-path tests still use the installed binary."""
 
 from __future__ import annotations
 
@@ -91,13 +81,8 @@ def test_corpus_cardinality_is_pinned() -> None:
     assert len(_all_bodies()) == 178
 
 
-# NOTE: there is deliberately NO test here asserting the corpus is free of the repo's
-# RETIRED vocabulary (the old bridge command spellings, the old force-close flag). The
-# generator's scrub maps them, and two repo-wide guards already scan EVERY tracked file
-# — including this fixture — for exactly those spellings
-# (`test_bridge_vocabulary_stale_heldout` and `test_transition_force_flag_24f7`). A local
-# copy would be weaker than those, and it could only be written by spelling the retired
-# tokens out, which makes THIS file an offender the guards then flag.
+# Repository-wide guards already check this fixture for retired vocabulary.
+# Repeating those tokens here would itself violate those guards.
 def test_corpus_carries_no_unscrubbed_secrets() -> None:
     """Re-assert the generator's scrub held, per the capture-fixture doctrine."""
     blob = "\n".join(_all_bodies())
@@ -110,11 +95,7 @@ def test_corpus_carries_no_unscrubbed_secrets() -> None:
 def test_dc_corpus_protected_excerpts_are_retained(
     corpus_pass1: tuple[tuple[str, str], ...],
 ) -> None:
-    """The headline safety claim: code is content and never moves.
-
-    Covers pandoc's escaping of punctuation inside code spans (``{{\\->}}``), which
-    the renderer rejects via its post-conversion preservation check.
-    """
+    """Code excerpts remain content and keep their position in rendered corpus bodies."""
     offenders = [
         body[:120]
         for body, out in corpus_pass1
@@ -161,21 +142,7 @@ def test_dc_corpus_passes_two_to_five_are_byte_identical(
     stratum: str,
     corpus_pass1: tuple[tuple[str, str], ...],
 ) -> None:
-    """Rendering settles: no ratchet, no drift, across the whole corpus.
-
-    Proven with TWO renders rather than five. The renderer is a pure deterministic
-    function R (pinned by ``test_render_is_deterministic``), so once a body reaches a
-    fixed point the rest of the sequence is forced: if ``R(p1) == p1`` then
-    ``p3 = R(p2) = R(p1) = p2``, and likewise for p4 and p5. Where a body is NOT an
-    immediate fixed point, one further render settles it and the same argument
-    applies from there — so checking p2, and p3 only when needed, is equivalent to
-    checking all five passes, at a fraction of the subprocess cost.
-
-    Split per stratum so no single test carries the whole corpus past CI's per-test
-    timeout. Pass 1 comes from the shared ``corpus_pass1`` artifact — it is the same
-    ``render_markdown_to_wiki(body)`` value this test used to recompute — so only the
-    passes this test actually adds are paid for here.
-    """
+    """Corpus render passes two through five remain byte-identical without drift."""
     pass1 = dict(corpus_pass1)
     for body in _load(stratum):
         first = pass1[body]
@@ -187,11 +154,7 @@ def test_dc_corpus_passes_two_to_five_are_byte_identical(
 
 
 def test_dc_corpus_coverage_ratios(corpus_pass1: tuple[tuple[str, str], ...]) -> None:
-    """Richness floors, measured over the committed fixture.
-
-    Floors, not equalities: the renderer may only get richer. A drop below either bar
-    means eligible units silently started falling back.
-    """
+    """The committed corpus retains required structure and content coverage floors."""
     pairs = corpus_pass1
     changed = [body for body, out in pairs if out != body]
 

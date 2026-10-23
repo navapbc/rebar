@@ -1,33 +1,8 @@
-# rebar — Reconciler Heartbeat Canary
-#
-# Monitors reconcile-bridge.yml for staleness and alerts via a rebar bug ticket
-# when no successful run has occurred within the alert window. Self-healing:
-# closes the alert ticket when the reconciler recovers.
-#
-# Also runs the offline bridge audit: each cycle `rebar bridge fsck` checks the
-# binding-drift parity oracle and forward/reverse binding-store integrity, then
-# opens/updates/closes a `binding-drift-alert` bug for actionable findings.
-#
-# This is a TEMPLATE: client projects copy it verbatim (see docs/jira-sync-setup.md).
-#
-# Classification + alert-lifecycle LOGIC lives in scripts/canary_bridge.py
-# (ticket e602 — shell-to-Python Tier 3); the steps here are thin invocations
-# plus plumbing. Unit tests: tests/scripts/test_canary_bridge.py. The final
-# "flush unpushed" step is a strict, synchronous process-boundary adapter;
-# rebar._store.push owns its CAS recovery, and an executable workflow smoke
-# test protects the formerly verbatim YAML contract.
-#
-# rebar divergences from DSO's canary:
-#   * ticket ops use the `rebar` CLI (rebar list/create/comment/transition), which
-#     AUTO-COMMITS and AUTO-PUSHES to origin/tickets — so a manual commit-back is
-#     usually unnecessary. We still run a final "flush unpushed" guard because
-#     auto-push is best-effort (a failed push leaves the commit local, lost when the
-#     runner is torn down).
-#   * bug-close requires `--reason` prefixed "Fixed:" or "Escalated to user:".
-#
-# Staleness window: default 4h (workflow_dispatch override `alert_window_hours`).
-# The reconcile cadence is hourly, so the theoretical floor is 3h (3x cadence); the
-# 4h window still clears it, tolerating a late/contended run without false alarms.
+# Monitor reconcile cadence and binding-store integrity.
+# A stale successful run opens or updates a bug and recovery closes it. Each
+# cycle also audits binding drift and forward/reverse bindings. The client
+# template uses rebar ticket writes, then flushes any pending push before exit.
+# The default four-hour alert window tolerates a late hourly run.
 
 name: Reconciler Heartbeat Canary
 
@@ -77,12 +52,8 @@ jobs:
       DRY_RUN: ${{ inputs.dry_run || 'false' }}
       ALERT_TAG: heartbeat-alert
       REBAR_CANARY_HEARTBEAT_SOURCE: ${{ inputs.status_source || 'status' }}
-      # NOTE: REBAR_IDENTITY_SIGNING_KEY is exported by the "Materialize the Rebar Bot signing
-      # key" step (via $GITHUB_ENV) and is deliberately NOT set here. Job-level `env:` cannot
-      # reference ${{ runner.temp }} — the `runner` context is unavailable outside steps, so a
-      # job-level entry using it is a parse-time startup failure that produces ZERO jobs (the
-      # canary never runs). Every rebar-write step runs after Materialize, so they all see
-      # identity.signing_key without a job-level entry.
+      # The signing-key step exports REBAR_IDENTITY_SIGNING_KEY through GITHUB_ENV.
+      # runner.temp is unavailable in job-level env, so the path is set at step scope.
 
     steps:
       - name: Checkout repository
@@ -130,12 +101,8 @@ jobs:
           git config --global user.email "${BRIDGE_BOT_EMAIL}"
 
       - name: Materialize the Rebar Bot signing key
-        # Story 1787: the canary writes NON-EXEMPT tickets via the rebar CLI, which signs
-        # automatically through the seam once identity.signing_key + a resolvable identity
-        # are present. A multi-line OpenSSH PEM key cannot live in an env var used as a
-        # key_path, so materialize it to a 0600 file under $RUNNER_TEMP (discarded at job
-        # end) and export its path. If the secret is unset the canary still runs, writing
-        # unsigned (verify-identity is advisory).
+        # Put the optional multiline signing key in a 0600 runner-temp file and
+        # export its path. Without the secret, the canary writes unsigned tickets.
         env:
           REBAR_BOT_SIGNING_KEY: ${{ secrets.REBAR_BOT_SIGNING_KEY }}
         run: |
@@ -152,12 +119,8 @@ jobs:
           echo "Materialized bot signing key to ${KEYFILE} (0600)"
 
       - name: Initialize the ticket store (seed .env-id for CLI writes)
-        # A bare `git worktree add` of the tickets branch does NOT create
-        # `.tickets-tracker/.env-id` (it is git-ignored and never committed to the
-        # branch), and the write seam refuses every rebar write without it. `rebar init`
-        # is the documented headless-CI provisioning path (docs/architecture.md): it
-        # attaches to the existing origin/tickets non-interactively and seeds `.env-id`.
-        # Idempotent — prints "already initialized" on subsequent runs.
+        # The tickets worktree has no committed .env-id. Headless rebar init seeds
+        # it before writes and is safe to repeat.
         run: |
           set -euo pipefail
           rebar init
@@ -191,11 +154,9 @@ jobs:
           set -euo pipefail
           python scripts/canary_bridge.py heartbeat-alert
 
-      # ── Binding-drift parity oracle (epic 3006-e198, child 8de5) ─────────────
-      # bridge fsck reads bindings.json + prev_snapshot.json READ-ONLY. It runs the
-      # convergence classifier and validates both binding-index directions. Surface
-      # actionable binding_drift or store_integrity findings as a bridge_alert bug;
-      # an operational scan failure fails this step instead of looking clean.
+      # bridge fsck reads binding indexes and the previous snapshot without
+      # writing. Actionable drift or integrity findings open a bridge alert.
+      # Scan failure fails this step instead of reporting a clean store.
       - name: Check bridge binding-drift
         id: drift
         run: |

@@ -1,20 +1,10 @@
 name: Artifact Provenance Probe (reusable)
 
-# Reusable (workflow_call) form of the artifact-provenance probe (story 6168) — the single
-# source of truth for the job that BOTH CI lanes run:
-#   * test.yml           — push / pull_request (branch-head checkout), post-merge branch CI.
-#   * gerrit-verify.yaml — the Verified gate (checks out the EXACT Gerrit patchset), so a
-#     packaging regression BLOCKS the Verified vote pre-merge instead of only reddening main
-#     (jira-reb-1163 — artifact-probe previously ran on the mirror lane ONLY).
-#
-# Builds the wheel + sdist the way `python -m build` does (sdist first, then wheel FROM the
-# extracted sdist — a tree with no .git), runs the same import/CLI/schema probes the release
-# wheel-test/sdist-test jobs run, and asserts `_build_info.COMMIT` exactly matches the final
-# checked-out HEAD. This catches missing or stale provenance in ordinary CI, not only in release.
-#
-# Checkout is parameterized by `gerrit-refspec`: empty => actions/checkout (branch head);
-# set => checkout-gerrit-change-action (the patchset). Takes NO secrets (Gerrit inputs are
-# non-secret; the Verified vote key stays confined to gerrit-verify.yaml).
+# Shared artifact probe for branch CI and exact Gerrit patchsets.
+# Build an sdist, then build the wheel from its extracted tree without .git.
+# Check release import, CLI, and schema contracts and require the baked commit to
+# equal checkout HEAD. The optional Gerrit refspec changes checkout only. This
+# workflow accepts no secrets. The Verified vote key stays with its caller.
 
 on:
   workflow_call:
@@ -100,9 +90,7 @@ jobs:
           python -m pip install --upgrade pip build
           REBAR_BUILD_COMMIT="$REBAR_EXPECTED_COMMIT" python -m build
       - name: Validate package metadata (twine check)
-        # Catches malformed/unrenderable package metadata (long_description, classifiers,
-        # missing fields) BEFORE it can reach a release — mainstream Python packaging hygiene.
-        # --strict fails on warnings so a metadata regression reddens the gate, not just PyPI.
+        # Strict metadata validation rejects missing fields and warnings before release.
         run: |
           python -m pip install --upgrade twine
           twine check --strict dist/*
@@ -117,9 +105,8 @@ jobs:
           rebar-mcp --help
           python -c "import importlib.resources as r, json, rebar; fs=[f for f in r.files('rebar').rglob('*.json')]; assert fs; [json.loads(f.read_text()) for f in fs]"
           python -c "import os; from rebar import _build_info; assert _build_info.COMMIT == os.environ['REBAR_EXPECTED_COMMIT'], 'wheel baked the wrong COMMIT'"
-          # Deterministic import walk (ticket 37b9): import EVERY rebar.* module from the
-          # installed wheel + each top-level scripts/*.py standalone. Logic (and the
-          # documented skip tables) live in the script, which is equally runnable locally.
+          # Import every installed rebar module and each standalone script from the
+          # built archive. The reusable script owns the documented skip list.
           python scripts/check_import_walk.py
       - name: Probe install-from-sdist (REBAR_BUILD_COMMIT unset, preserve-existing)
         run: |

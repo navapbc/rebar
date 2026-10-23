@@ -1,23 +1,8 @@
-"""Config-driven type mapping + type-granular skip — the S3 outbound FORWARD seam,
-load-time fail-closed, and reverse-map-free ``rebar-type:`` round-trip
-(epic ravenous-dirt-widgeon / a8ea-be28-2394-4f0c).
+"""Project type mapping drives outbound create, SKIP decisions, and inbound recovery.
 
-Assertions target OBSERVABLE behaviour and contracts only — resolved mapping values,
-the effective excluded set, the vendor-shaped ``issuetype`` the outbound CREATE mapper
-emits, the annotation-label mutations, the local type inbound recovery yields, and the
-fail-closed exception raised at the mutation entry point — never private structure.
-Every test drives a REAL entry point:
-
-  * ``config.effective_type_map`` (the forward resolution)
-  * ``config.effective_excluded_sync_types`` / ``config.assert_type_decisions_complete``
-  * ``JiraBackend.map_local_to_remote`` (the shared CREATE mapper, all three impls)
-  * ``outbound_labels._diff_type_annotation_labels`` (the stamp rule)
-  * ``inbound_fields.recover_type_label`` / ``_map_jira_to_local_fields`` (recovery)
-  * ``outbound_differ.compute_outbound_mutations`` (the up-front fail-closed gate)
-
-built-in behaviour (no ``[mapping]`` present) must stay bit-for-bit what it is today:
-``LOCAL_TYPE_TO_JIRA`` = {bug: Bug, story: Story, task: Task, epic: Epic}.
-"""
+No mapping preserves the built-in bug, story, task, and epic targets. An
+undecided syncable type fails before mutation. Lossy mappings stamp a
+rebar-type label so inbound recovery needs no project reverse map."""
 
 from __future__ import annotations
 
@@ -92,10 +77,7 @@ def _issuetype(out: dict[str, Any]) -> Any:
 
 
 def test_effective_type_map_default_equals_builtin(tmp_path: Path) -> None:
-    """With NO ``[mapping]`` block the effective type map equals the built-in
-    ``LOCAL_TYPE_TO_JIRA`` verbatim, and a per-project ``type_map`` overlay remaps a
-    type while leaving every un-overlaid type at its built-in target — the config seam
-    is inert until configured. (Happy path: the no-config invariant + one remap.)"""
+    """The built-in map applies by default. An overlay changes selected types."""
     base = _proj(tmp_path, "", name="base")
     eff = cfg_mod.effective_type_map("REB", root=base)
     assert eff == dict(LOCAL_TYPE_TO_JIRA)
@@ -111,10 +93,7 @@ def test_effective_type_map_default_equals_builtin(tmp_path: Path) -> None:
 
 
 def test_type_map_threaded_through_all_three_mappers(tmp_path: Path) -> None:
-    """The effective type map reaches the REAL CREATE mapper: ``map_local_to_remote``
-    accepts a ``type_map=`` kwarg (beside ``status_map``) and emits the remapped
-    ``issuetype``. Passing ``type_map=None`` falls back to today's built-in behaviour.
-    (Happy path drives the Cloud backend; the parity census covers all three impls.)"""
+    """The effective type map reaches the create mapper and changes its Jira issuetype."""
     proj = _proj(tmp_path, '[mapping.projects.REB.type_map]\nbug = "Defect"\n')
     eff = cfg_mod.effective_type_map("REB", root=proj)
 
@@ -131,10 +110,7 @@ def test_type_map_threaded_through_all_three_mappers(tmp_path: Path) -> None:
 
 
 def test_skip_is_a_valid_type_decision(tmp_path: Path) -> None:
-    """A type mapped to ``SKIP`` is a DECIDED type: it passes the completeness gate, is
-    a member of ``effective_excluded_sync_types``, and is ABSENT from the effective
-    forward map (no Jira target). SKIP is the type-granular skip signal — S1's sentinel
-    reused, not a separate axis."""
+    """SKIP satisfies completeness, joins the excluded set, and has no Jira target."""
     proj = _proj(tmp_path, '[mapping.projects.REB.type_map]\nbug = "skip"\n')
 
     eff = cfg_mod.effective_type_map("REB", root=proj)
@@ -148,9 +124,7 @@ def test_skip_is_a_valid_type_decision(tmp_path: Path) -> None:
 
 
 def test_effective_excluded_union_builtin_and_skip(tmp_path: Path) -> None:
-    """``effective_excluded_sync_types`` == the built-in ``EXCLUDED_SYNC_TYPES`` UNION
-    every local type mapped to ``SKIP`` for the project. With no overlay it is exactly
-    the built-in set; a SKIP adds ON TOP of it, never replacing it."""
+    """Effective exclusions unite built-in excluded types with project SKIP mappings."""
     base = _proj(tmp_path, "", name="base")
     assert cfg_mod.effective_excluded_sync_types("REB", root=base) == set(
         cfg_mod.EXCLUDED_SYNC_TYPES
@@ -164,10 +138,7 @@ def test_effective_excluded_union_builtin_and_skip(tmp_path: Path) -> None:
 def test_fail_closed_fires_before_mutation_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An UNDECIDED syncable type (neither a Jira target nor SKIP) raises
-    ``MappingConfigError`` from ``compute_outbound_mutations`` UP-FRONT — before any
-    per-ticket mutation is built. Simulated by removing a built-in target so the type
-    becomes undecided; the gate fires over the distinct project keys before the loop."""
+    """An undecided syncable type raises MappingConfigError before any ticket mutation is built."""
     from rebar.reconciler import mapping_config, outbound_differ
 
     proj = _proj(tmp_path, "")
@@ -197,10 +168,7 @@ def test_fail_closed_fires_before_mutation_loop(
 
 
 def test_type_skip_excludes_ticket_both_consumers(tmp_path: Path) -> None:
-    """A local type mapped to ``SKIP`` is excluded from outbound sync at BOTH
-    consumers of the effective excluded set — the per-ticket mutation loop AND the
-    absent-gets selector — so a SKIP-typed ticket produces no create/update mutation
-    and is not selected as an absent GET. Observable: no mutation references it."""
+    """SKIP excludes a ticket from the mutation loop and absent-gets selector."""
     from rebar.reconciler import outbound_differ
     from rebar.reconciler.projects_store import Mapping
 
@@ -216,10 +184,7 @@ def test_type_skip_excludes_ticket_both_consumers(tmp_path: Path) -> None:
 
 
 def test_rebar_type_label_stamped_when_lossy(tmp_path: Path) -> None:
-    """A LOSSY (collapsing) type map stamps a ``rebar-type:<local>`` annotation label so
-    the round-trip is recoverable: two locals collapsing to one Jira type each carry a
-    distinguishing label, added via ``config.jira_to_local_type`` (the reverse check).
-    A non-lossy built-in type that reverses to itself is NOT stamped."""
+    """A collapsing type map stamps rebar-type:<local> so each local type can round-trip."""
     proj = _proj(
         tmp_path,
         '[mapping.projects.REB.type_map]\nstory = "Task"\ntask = "Task"\n',
@@ -239,10 +204,7 @@ def test_rebar_type_label_stamped_when_lossy(tmp_path: Path) -> None:
 
 
 def test_rebar_type_label_recovered_reverse_map_free(tmp_path: Path) -> None:
-    """Inbound recovers the local type from the ``rebar-type:<local>`` label WITHOUT any
-    per-project reverse map or project key — even when the raw Jira issuetype ("Task")
-    reverse-maps to a DIFFERENT built-in local ("task"). The label wins over the raw
-    type. ``recover_type_label`` is the shared recovery helper."""
+    """Inbound recovers the local type from its rebar-type label without a project reverse map."""
     recovered = inbound_fields.recover_type_label(["rebar-type:story"])
     assert recovered == "story"
 
@@ -256,9 +218,7 @@ def test_rebar_type_label_recovered_reverse_map_free(tmp_path: Path) -> None:
 
 
 def test_rebar_type_prefix_excluded_all_four_tuples() -> None:
-    """The ``rebar-type:`` prefix is a bridge-internal annotation and MUST be filtered by
-    all four independent prefix tuples, so a stamped label never leaks into a user-facing
-    label set on either the outbound or inbound path."""
+    """All four prefix filters hide bridge-internal rebar-type labels from user-facing labels."""
     from rebar.reconciler import (
         differ,
         inbound_collection_diffs,
@@ -275,16 +235,12 @@ def test_rebar_type_prefix_excluded_all_four_tuples() -> None:
 
 
 def test_jira_to_local_type_parity() -> None:
-    """``config.jira_to_local_type`` (the reverse map the stamp rule consults) must stay
-    in lock-step with ``inbound_fields._JIRA_TO_LOCAL_TYPE`` — the parity that keeps the
-    two independent literals honest, exactly as ``jira_to_local_status`` does."""
+    """The reverse type map stays aligned with the inbound field mapper literal."""
     assert cfg_mod.jira_to_local_type == inbound_fields._JIRA_TO_LOCAL_TYPE
 
 
 def test_local_type_vocab_derived_from_ticket_type() -> None:
-    """The inbound recovery vocabulary is DERIVED from ``get_args(TicketType)`` — never a
-    divergent hand-maintained literal — so every local type the outbound stamp rule can
-    emit round-trips, and no legitimately-stamped ``rebar-type:<local>`` is dropped."""
+    """Inbound recovery derives valid local types from TicketType so stamped types round-trip."""
     assert set(inbound_fields._LOCAL_TYPE_VOCAB) == set(get_args(TicketType))
     for local in get_args(TicketType):
         assert inbound_fields.recover_type_label([f"rebar-type:{local}"]) == local

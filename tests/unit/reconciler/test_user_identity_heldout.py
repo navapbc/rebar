@@ -1,26 +1,8 @@
-"""HELD-OUT oracle for the ``UserIdentityModel`` contract (story J4, epic e369).
+"""UserIdentityModel must keep Data Center assignment authoritative when resolvable.
 
-This file is HELD OUT from the implementation subagent.
-
-Three things it proves that the happy-path spec deliberately does not:
-
-1. **The anti-churn regression oracle.** GitHub PR #120's proposed Data Center
-   adapter resolved its assignee through ``getattr(self, "_assignee_resolver", None)``
-   on a class where nothing ever set that attribute, so its entire authoritative
-   branch was dead code and DC returned ``authoritative=False`` for EVERY assignee.
-   That is not cosmetic: a permanently non-authoritative assignee makes the outbound
-   diff re-emit a change it can never converge — the churn class epic ``ace2`` exists
-   to fix. These tests fail against any ``getattr``-discovered-collaborator design.
-
-2. **Cloud behavioural parity, state for state.** ``AccountIdIdentity`` must
-   reproduce the pre-story ``JiraBackend.resolve_assignee`` decision table exactly
-   (its docstring enumerates the states). The parity is asserted against the LIVE
-   ``JiraBackend`` rather than against copied literals, so the two cannot drift.
-
-3. **The structural guarantee**: no ``getattr``-discovered collaborator exists inside
-   the identity models — the property that makes defect (1) unwritable rather than
-   merely absent.
-"""
+Constructor-injected resolution prevents a missing collaborator from making
+every assignee non-authoritative and causing repeated outbound changes.
+AccountIdIdentity matches Cloud backend decisions state for state."""
 
 from __future__ import annotations
 
@@ -55,12 +37,7 @@ def _resolver(mapping: dict[str, tuple[Any, bool, bool]]):
 
 
 def test_data_center_is_authoritative_for_a_resolvable_assignee() -> None:
-    """THE oracle for this story.
-
-    A DC implementation that discovers its resolver via ``getattr`` on an attribute
-    nobody sets returns ``authoritative=False`` here and fails. Only a real, injected
-    lookup passes.
-    """
+    """A resolvable Data Center assignee yields an authoritative identity decision."""
     model = NameIdentity(resolver=_resolver({"me@example.com": ("jsmith", True, False)}))
 
     _, authoritative, _ = model.resolve("me@example.com", {"name": "someone-else"})
@@ -74,9 +51,7 @@ def test_data_center_is_authoritative_for_a_resolvable_assignee() -> None:
 
 
 def test_data_center_converges_on_the_second_pass() -> None:
-    """The end-to-end consequence of being authoritative, asserted as behaviour:
-    once the resolved identity matches the remote, the model signals CONVERGED
-    (``value is None``) so the caller emits nothing and the churn loop terminates."""
+    """A resolved Data Center identity converges on pass two without reassignment."""
     model = NameIdentity(resolver=_resolver({"me@example.com": ("jsmith", True, False)}))
 
     # pass 1 — remote holds someone else, so a change is emitted
@@ -142,11 +117,8 @@ def test_account_id_identity_matches_the_live_cloud_backend_state_for_state(
     Both sides are evaluated live, so this cannot drift the way copied expected
     literals would: if either implementation changes, the equality breaks.
     """
-    # assignee resolution is the OUTBOUND role's job; the backend facade merely holds it.
-    # The resolver reaches it as a DECLARED parameter (ticket 65d7); it used to be set on
-    # the mapper as ``backend.outbound._assignee_resolver`` and rediscovered by ``getattr``,
-    # the side-channel this oracle's own structural test now forbids. Same six states, same
-    # live-vs-live comparison — only how the collaborator arrives has changed.
+    # The backend holds the outbound resolver, which receives it as a constructor
+    # parameter. The identity model must not discover it through getattr.
     backend = JiraBackend(transport=FakeTransport())
     expected = backend.outbound.resolve_assignee(
         local_value,
@@ -176,13 +148,7 @@ def test_cloud_with_no_resolver_keeps_the_permissive_fallback() -> None:
 
 
 def test_identity_models_discover_no_collaborator_by_getattr() -> None:
-    """The resolver arrives as a declared constructor parameter.
-
-    A ``getattr(self, "_assignee_resolver", None)`` lookup is what let PR #120 ship a
-    permanently-dead authoritative branch: the attribute was simply never set and
-    nothing failed loudly. Forbidding the pattern here makes that class of bug
-    impossible rather than merely fixed once.
-    """
+    """Identity models receive collaborators in constructors, never through getattr."""
     path = _REC / "adapters" / "jira_family" / "identity_model.py"
     assert path.is_file(), "adapters/jira_family/identity_model.py does not exist"
 

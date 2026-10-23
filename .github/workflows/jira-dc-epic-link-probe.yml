@@ -1,27 +1,9 @@
 name: Jira DC Epic-Link Clear Probe
 
-# A TARGETED, DETERMINISTIC probe against the pinned Jira DC harness (bug 1019, epic e369).
-#
-# THIS IS NOT THE CAPABILITY MAP AND DOES NOT RE-RUN IT. `jira-dc-capability-map.yml` is an
-# agentic Opus pass over a broad checklist whose answers are already committed in
-# docs/jira-dc-capability-map.md; re-running it to settle two narrow questions would be slow,
-# billable, and would risk churning answers that are already reviewed and landed. This job runs
-# `scripts/jira_dc_epic_link_clear_probe.py` — plain deterministic urllib, no LLM, no agent, four
-# predetermined REST calls — so it answers ONLY the two open questions and touches nothing else.
-#
-# It exists in CI rather than on a workstation because the harness image is linux/amd64-only and
-# does not boot locally (tests/external/live_jira_dc/README.md). It boots the SAME vendored,
-# digest-pinned Dockerfile the capability map and the live suite build, so its answer is about
-# the environment the suite actually runs against.
-#
-# The two questions:
-#   Q1  does clearing the Epic Link custom field take effect? (writing it is measured; clearing
-#       is not, and `set_parent`'s non-sub-task branch has no read-back, so a silent no-op there
-#       is invisible today)
-#   Q2  is `parent` present in the field inventory at all — i.e. could it ever be screened?
-#
-# `workflow_dispatch` ONLY — never push, PR, or schedule. It boots a real container and must
-# stay an explicit, on-demand authoring tool.
+# Manual four-call Jira Data Center probe with no agent or LLM.
+# The disposable pinned harness tests whether clearing Epic Link takes effect
+# and whether the parent field appears in inventory. It uploads evidence and
+# leaves the repository untouched.
 on:
   workflow_dispatch: {}
 

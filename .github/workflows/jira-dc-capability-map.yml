@@ -1,23 +1,9 @@
 name: Jira DC Capability Map
 
-# On-demand mapping run for the pinned Jira Data Center harness (ticket 259b-b7da-a346-4785).
-#
-# THIS IS AN AUTHORING TOOL, NOT A TEST-PATH COMPONENT. It boots the SAME digest-pinned,
-# ephemeral Jira DC image the `jira-dc-harness` job in external-integration.yml uses (built
-# from the vendored tests/external/live_jira_dc/Dockerfile, whose FROM line pins
-# addono/jira-software-standalone by digest — see that file and its README for the exact
-# pin), runs an Opus agent (rebar.llm's own agentic runtime — scripts/jira_dc_capability_map.py)
-# against it to answer a fixed checklist (issue types, workflows/statuses, priorities, link
-# types + direction, and Jira's hardcoded length limits), and uploads the answers PLUS the raw
-# REST request/response evidence behind every one of them as a build artifact.
-#
-# It produces a CANDIDATE environment contract for a human to review and land as committed
-# data (docs/jira-dc-capability-map.md documents the re-run/review process) — it does not
-# commit anything itself, and the agent is instructed to REPORT what it finds, never to fix
-# the harness, the repository, or rebar's own configuration.
-#
-# `workflow_dispatch` ONLY — never push, PR, or schedule (tests/unit/
-# test_jira_dc_capability_map_workflow.py asserts this, not just this comment).
+# Manual authoring run against the pinned Jira Data Center harness.
+# A bounded agent surveys issue types, workflows, priorities, links, and length
+# limits. Upload candidate answers with raw REST evidence for human review.
+# The workflow does not change repository data or configuration.
 on:
   workflow_dispatch: {}
 
@@ -49,14 +35,8 @@ jobs:
             exit 1
           fi
 
-      # `[dev]` self-references `nava-rebar[agents,metrics]` (pyproject.toml), so this ONE
-      # sync already pulls the LLM runtime rebar.llm.runner needs (pydantic-ai-slim[anthropic]
-      # + json-repair + pydantic) — mirroring the external-integration.yml jobs' own install
-      # step. This job runs no pytest suite at all — scripts/jira_dc_capability_map.py is a
-      # standalone script, not a test — so it deliberately does NOT install
-      # `[jira-datacenter]` (that extra supplies pycontribs/jira for the reconciler's OWN
-      # transport, which this job never calls: every REST round trip here is raw urllib,
-      # "no rebar transport in the path").
+      # The dev extra supplies the agent runtime. This standalone raw-urllib script
+      # does not use rebar's Jira transport, so it does not need jira-datacenter.
       - name: Install rebar + the agentic LLM runtime
         run: |
           uv sync --locked --extra dev
@@ -68,10 +48,7 @@ jobs:
           git config --global user.name "rebar CI"
           git config --global init.defaultBranch main
 
-      # Builds the vendored ./Dockerfile — the SAME one the jira-dc-harness job in
-      # external-integration.yml builds — so the digest pin on its base image
-      # (addono/jira-software-standalone@sha256:...) applies here too, by construction
-      # rather than by a second literal that could drift from the first.
+      # Build the same vendored, digest-pinned Data Center image as the integration suite.
       - name: Build and start the Jira DC harness
         working-directory: tests/external/live_jira_dc
         run: docker compose up -d --build
@@ -91,10 +68,7 @@ jobs:
             exit 1
           fi
 
-      # ONE boot, ONE batched agent run over the whole checklist (inventory, workflows/
-      # statuses, priorities, link types + direction, length limits, the 37e7/1a9f
-      # falsifiers) — the harness took minutes to become ready, so every question is
-      # answered in this single pass rather than iterating boots per question.
+      # Answer the complete checklist in one harness boot and bounded agent run.
       - name: Run the capability-mapping agent
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

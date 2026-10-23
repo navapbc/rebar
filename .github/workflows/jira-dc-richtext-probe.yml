@@ -1,24 +1,10 @@
 name: Jira DC Rich-Text Probe
 
-# On-demand agentic ROOT-CAUSE run for the live Jira DC rich-text reconcile defect
-# (epic REB-3115 / bug reckless-diabolic-kob). It is the debug analog of the Jira DC
-# Capability Map workflow.
-#
-# THIS IS AN AUTHORING / DIAGNOSTIC TOOL, NOT A TEST-PATH COMPONENT. It boots the SAME
-# digest-pinned, ephemeral Jira DC image the `jira-dc-harness` job in external-integration.yml
-# uses, then runs an Opus agent (rebar.llm's own agentic runtime, driven by the pytest module
-# tests/external/live_jira_dc/test_dc_richtext_agentic_probe.py) against a store already BOUND
-# to a live DC issue. The agent computes wire with WikiTextCodec, diffs with
-# compute_update_fields, runs real scoped reconcile passes, writes directly through the
-# transport, and reads the raw + rendered description back — MANY experiments in ONE boot,
-# instead of one blind print-and-push observation per ~2h CI cycle.
-#
-# It produces a CANDIDATE root-cause finding + full experiment evidence for a human to review
-# (uploaded as a build artifact and printed to the job log). The agent is instructed to REPORT
-# the mechanism, never to fix the harness, the repository, or rebar's configuration, and
-# REBAR_MCP_READONLY=1 keeps rebar's own ticket store read-only for the run.
-#
-# `workflow_dispatch` ONLY — never push, PR, or schedule.
+# Manual Jira Data Center rich-text investigation on the pinned harness.
+# A bounded agent tests wire conversion, outbound diff, reconcile, and direct
+# transport writes against a bound issue. Logs and artifacts carry candidate
+# findings and raw responses. REBAR_MCP_READONLY keeps the ticket store read-only.
+# The run does not repair the repository or harness.
 on:
   workflow_dispatch: {}
 
@@ -50,10 +36,8 @@ jobs:
             exit 1
           fi
 
-      # BOTH extras: `[dev]` self-references `nava-rebar[agents,metrics]` (the LLM runtime the
-      # agent runs on), and `[jira-datacenter]` supplies pycontribs/jira (the DC transport the
-      # bound-issue fixture and the agent's experiments drive). `[dev]` does NOT imply
-      # `[jira-datacenter]`, so both are named explicitly — mirroring the jira-dc-harness job.
+      # Install dev for the agent and jira-datacenter for its transport. The dev
+      # extra alone does not include the Data Center transport dependency.
       - name: Install rebar + the agentic LLM runtime + the DC transport
         run: |
           uv sync --locked --extra dev --extra jira-datacenter
@@ -90,13 +74,8 @@ jobs:
       - name: Run the agentic rich-text root-cause probe
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # PIN the agent to a direct-Anthropic model. Without this overlay the run resolves
-          # the SHIPPED default model, which is now `bedrock:us.anthropic.claude-opus-4-8`
-          # (needs an AWS credential chain this workflow does not configure) and the agentic
-          # runtime fails with "Unable to locate credentials". The overlay is the same
-          # per-provider selection mechanism the external suite's anthropic arm uses; it sets
-          # `[llm] model = anthropic:claude-opus-4-8` + the anthropic model_classes, so the
-          # only credential needed is the ANTHROPIC_API_KEY secret above.
+          # Select the direct Anthropic model through the provider overlay. The shipped
+          # Bedrock default needs AWS credentials this workflow does not configure.
           REBAR_LLM_CONFIG_FILE: ${{ github.workspace }}/.github/llm-providers/anthropic.toml
           REBAR_RUN_EXTERNAL: "1"
           REBAR_DC_RICHTEXT_PROBE: "1"

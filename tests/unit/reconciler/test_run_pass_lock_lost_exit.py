@@ -1,25 +1,8 @@
-"""Losing the pass lock mid-pass is benign contention, not an unrecoverable error
-(bug 449f-f9bf-be90-47fe, mode 1).
+"""A mid-pass lease loss aborts reconciliation and exits for rescheduling.
 
-The reconciler already treats "another pass holds the lock" as benign when it is
-detected BEFORE the pass starts: `main` returns 3, and the workflow prints
-"Another reconcile pass is in flight (exit 3) — benign, skipping".
-
-Mid-pass the same event is classified as fatal. The heartbeat sets `lock_lost`, the
-`abort_check` closure raises `ReconcileLockLost` — which is a bare `RuntimeError`
-subclass, NOT `applier.RescheduleError` — so the pass body's `except Exception` falls
-past the reschedule arm to `return 1`. `.github/workflows/reconcile-bridge.yml`
-whitelists only 0/75/3, so exit 1 hits the `*)` arm and the run goes red.
-
-Aborting the pass is correct and deliberate (ADR 0031; ticket 2711: "heartbeat loses
-lease mid-pass -> pass aborts, no double-run"). What was never specified is the exit
-code, and ADR 0031 states the property that decides it: "the pass aborts, the finally
-release no-ops, **a re-run is idempotent**" — which is precisely the meaning of
-EXIT_RESCHEDULE (75), documented in the workflow as "next scheduled run will retry".
-
-Observed in production: runs 30576272914 (2026-07-30T19:52Z) and 30579382013
-(20:38Z), both `##[error]Reconcile failed (exit 1)` after a lost lease.
-"""
+ReconcileLockLost maps to exit 75, which the bridge workflow treats as a
+retryable pass. An unrelated failure still exits 1. The lock-loss abort keeps
+the no-overlap invariant while allowing the next scheduled run to retry."""
 
 from __future__ import annotations
 
@@ -34,19 +17,7 @@ from rebar.reconciler import guarded_pass
 
 
 def _lock_lost_cls() -> type[Exception]:
-    """Resolve ReconcileLockLost exactly as production does.
-
-    Both the raise site (`run_guarded_pass`) and the classification site (`run_pass_result`)
-    go through
-    `_load_sibling_keyed(_ADVISORY_LOCK_KEY, ...)`, which deliberately returns a
-    test-pre-seeded `sys.modules` entry when one exists. Importing
-    `rebar.reconciler._advisory_lock` directly instead can therefore hand back a
-    DIFFERENT class object once another test in the session has seeded a stub under
-    that key — `isinstance` then fails and this test goes red for a reason that has
-    nothing to do with the behaviour under test (the order-dependent class-identity
-    hazard tracked by bug 9f0b). Resolving through the same loader keeps the test
-    faithful to the production path and immune to that ordering.
-    """
+    """Resolve the production ReconcileLockLost class so the test raises its exact exception."""
     advisory = guarded_pass._load_sibling_keyed(
         guarded_pass._ADVISORY_LOCK_KEY, "_advisory_lock.py"
     )
@@ -75,12 +46,7 @@ def _install_steps(monkeypatch: pytest.MonkeyPatch, reconcile_once_exc: BaseExce
 def test_lock_lost_mid_pass_exits_reschedule_not_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A lost lease returns the benign reschedule code, and says so on stderr.
-
-    Exit 1 is what turns a benign lock handover into a red CI run. 75 is already
-    wired as "next scheduled run will retry", which is exactly ADR 0031's
-    "a re-run is idempotent".
-    """
+    """A lost mid-pass lease reports rescheduling and exits 75 rather than 1."""
     _install_steps(
         monkeypatch,
         _lock_lost_cls()(
@@ -105,11 +71,7 @@ def test_lock_lost_mid_pass_exits_reschedule_not_error(
 
 
 def test_generic_failure_still_exits_one(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Contrast case: only the lock-lost signal is reclassified.
-
-    Guards against the fix degenerating into "treat every reconcile_once failure as
-    benign", which would hide real faults (the mode-3 404 among them).
-    """
+    """Only lock loss is reclassified. An unrelated pass failure still exits 1."""
     _install_steps(monkeypatch, RuntimeError("genuine unrecoverable failure"))
 
     rc = reconciler_main._render_pass(

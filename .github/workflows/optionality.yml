@@ -1,22 +1,15 @@
 name: Optional-Dependency Isolation (mirror)
 
-# Enforce that rebar's runtime stays LEAN (epic a88f / WS-J3). Extras can only ADD
-# dependencies, so without CI the base silently grows heavy. The checks themselves live
-# in the reusable ._optionality.yml (workflow_call) so the SAME job definitions run here
-# (push / pull_request) AND in the Verified gate (gerrit-verify.yaml, on the patchset) —
-# no drift. This lane checks out the branch head (no gerrit-refspec) and casts no vote;
-# gerrit-verify is the sole Verified source (see fern-belief-gap).
+# Branch and pull-request entrypoint for shared optionality checks.
+# The reusable workflow verifies lean runtime and optional installs on branch
+# HEAD. Gerrit calls the same checks on its exact patchset and alone casts
+# Verified. This mirror lane stays read-only.
 
 on:
   push:
-    # every branch EXCEPT `main` and the S3-replicated feature/** (redundant mirror CI).
-    # `main` branch-health moved to the shared 6-hourly schedule below so post-merge CI
-    # reports "is main healthy NOW" instead of a per-commit verdict that cancellation
-    # rendered as red X's (ticket 03ef-6fb5-158b-4abd). Pre-merge gating is unchanged: the
-    # SAME reusable runs against the patchset in the Verified lane.
-    # `tickets` is rebar's event log: every ticket write auto-pushes it, so a trigger here
-    # multiplies each comment into a CI run and starves the runner pool. It carries no code
-    # — never CI it (ticket refractive-conceptual-sunbear).
+    # Ignore main and replicated feature branches on push. Scheduled health
+    # checks cover main, while Gerrit gates patchsets before merge. Ignore the
+    # tickets event-log branch because ticket writes contain no code.
     branches-ignore: ["feature/**", "main", "tickets"]
   pull_request: {}
   workflow_dispatch: {}

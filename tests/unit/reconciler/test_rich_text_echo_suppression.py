@@ -1,20 +1,8 @@
-"""State-based echo suppression for the lossy rich-text wire (story 3388, epic 708d).
+"""Lossy rich-text output needs state-based echo suppression.
 
-The DC codec is ONE-WAY and lossy, so loop prevention cannot rest on
-``decode(encode(x)) == x``. Echo is suppressed by STATE instead: the local body is
-compared against the last-synced baseline (ADR 0026).
-
-The failure this guards against is subtle and permanent. The baseline holds
-``decode(baseline_wire)`` — for DC, the RENDERED wiki — while the local body is raw
-Markdown. Comparing only the raw forms, they differ on every pass, so the differ
-reports "local changed" forever and re-emits an identical update each reconcile.
-
-The fix is to let the baseline compare match on EITHER the raw local body or the local
-body as it will READ once Jira stores it (``normalize_outbound(fit_outbound(local))``,
-from the outbound port). That can only ADD a way to conclude "unchanged", so the
-plain-codec behaviour is untouched — which is why the whole existing differ suite
-passes unmodified.
-"""
+Compare local text with the last-synced baseline in raw form or after outbound
+normalization. That prevents repeated writes of unchanged rendered wiki text,
+allows a changed body through, and preserves plain-codec behavior."""
 
 from __future__ import annotations
 
@@ -76,11 +64,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_lossy_baseline_compare_local_normalized() -> None:
-    """A converged body must NOT re-emit, even though raw local != baseline.
-
-    This is the whole point: the baseline carries rendered wiki, the local body carries
-    Markdown. Without matching on the landed form the differ re-emits forever.
-    """
+    """A normalized local body matching the baseline does not re-emit."""
     wire = _rendered(_MD)
 
     changed = _diff(_MD, wire, wire, rich=True)
@@ -108,12 +92,7 @@ def test_a_genuine_local_edit_still_emits() -> None:
 
 
 def test_legacy_body_upgrades_once() -> None:
-    """A pre-cutover body upgrades exactly once, then converges.
-
-    "Legacy" here means the remote still holds the un-rendered body and the baseline
-    does NOT already record it as synced. The first pass emits the rendered form; once
-    that has landed and become the baseline, the body is quiet forever.
-    """
+    """A body synced before rich-text cutover upgrades once and then converges."""
     first = _diff(_MD, _MD, None, rich=True)
     assert "description" in first
     upgraded = first["description"]
@@ -124,14 +103,7 @@ def test_legacy_body_upgrades_once() -> None:
 
 
 def test_cutover_does_not_mass_rewrite_already_synced_bodies() -> None:
-    """Flipping the flag must not re-emit every previously-synced description.
-
-    When the baseline already records the body as synced (local == baseline), the
-    ADR-0026 directionality guard defers to inbound and nothing is emitted. That keeps
-    the cutover cheap and non-destructive: bodies migrate to the rich wire as they are
-    genuinely edited, rather than the whole project being rewritten the moment the flag
-    is turned on.
-    """
+    """Enabling rich mode does not rewrite descriptions already synchronized under the baseline."""
     assert "description" not in _diff(_MD, _MD, _MD, rich=True)
 
 

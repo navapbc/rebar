@@ -1,24 +1,8 @@
-"""Rich-text cutover flag + codec repointing (story 3388, epic 708d).
+"""The rich-text cutover defaults off and restores plain wire output when disabled.
 
-Stories ``e59d`` and ``271c`` landed the Markdown-aware Cloud ADF functions and the DC
-segmenting wiki renderer as PURE capability, wired to nothing. This story makes them
-reachable on the live send paths — behind ``reconciler.rich_text_cutover``, which ships
-``off``.
-
-What these tests pin:
-
-* **Default OFF.** With no configuration, every codec op is byte-identical to the
-  historical plain/identity wire. The existing ``test_rich_text_codec.py`` suite passes
-  UNMODIFIED for the same reason.
-* **Rollback is the flag.** Setting the flag back to ``off`` restores the plain wire —
-  no capability revert, no redeploy.
-* **The codec law survives the cutover.** In rich mode
-  ``normalize_outbound(t) == decode_inbound(to_wire(t))`` holds BY CONSTRUCTION, because
-  ``normalize_outbound`` is derived from ``to_wire`` rather than written twice.
-* **Both DC send paths render.** The update path (via ``OutboundFieldMapper``) and the
-  CREATE path (``_issues.py``) must agree; a create that fits without rendering would
-  post raw Markdown and then rendered wiki on the next update.
-"""
+Rich mode preserves normalize_outbound(t) == decode_inbound(to_wire(t)). Both
+Data Center update and create paths render wiki text, while Cloud sends ADF.
+The flag controls both paths without reverting the codec capability."""
 
 from __future__ import annotations
 
@@ -152,12 +136,7 @@ def test_cutover_rollback_restores_plain() -> None:
     ],
 )
 def test_codec_law_holds_in_both_modes(rich: bool, body: str) -> None:
-    """``normalize_outbound(t) == decode_inbound(to_wire(t))`` — ticket a32a.
-
-    The law is what the outbound comment differ's dedup key depends on, and the whole
-    point of deriving ``normalize_outbound`` from ``to_wire`` in rich mode is that the
-    two cannot drift apart.
-    """
+    """Plain and rich modes preserve normalize_outbound(t) == decode_inbound(to_wire(t))."""
     for codec in (WikiTextCodec(rich=rich), AdfCodec(rich=rich)):
         assert codec.normalize_outbound(body) == codec.decode_inbound(codec.to_wire(body))
 
@@ -172,12 +151,7 @@ def test_non_string_values_pass_through_in_rich_mode() -> None:
 
 
 def test_dc_create_path_renders_like_the_update_path(set_flag: Any) -> None:
-    """BOTH DC send sites must render, or create posts raw Markdown.
-
-    ``_issues.py`` previously fitted the description WITHOUT ``to_wire``, so after a
-    cutover a created issue would carry raw Markdown while every later update carried
-    rendered wiki.
-    """
+    """Data Center create and update both render wiki text, so create never posts raw Markdown."""
     from rebar.reconciler.adapters.jira_datacenter import _issues
 
     set_flag("dc")
@@ -189,17 +163,7 @@ def test_dc_create_path_renders_like_the_update_path(set_flag: Any) -> None:
 
 
 def test_dc_backend_create_path_renders_like_the_update_path(set_flag: Any) -> None:
-    """The SECOND DC create path, which the test above does not reach.
-
-    ``_map_local_to_dc_fields`` is ``map_ticket_to_remote``'s implementation — a create
-    path entirely separate from ``_issues._translate_create_fields``. It built a rich
-    codec and then applied only ``fit_outbound``, so with the DC cutover ON a created
-    issue carried raw Markdown while every later update carried rendered wiki: the
-    formatting looked broken until somebody edited the issue.
-
-    Having two independent DC create paths is exactly why this is asserted twice. The
-    sibling test passing said nothing about this one.
-    """
+    """Backend create renders wiki text through its own route, like update."""
     from rebar.reconciler.adapters.jira_datacenter import backend
 
     set_flag("dc")
@@ -230,11 +194,7 @@ def test_dc_create_path_is_unchanged_when_flag_is_off(set_flag: Any) -> None:
 
 
 def test_cloud_functions_degrade_without_marklas(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AC from e59d, inherited here: a no-extras install must still cut over safely.
-
-    With the ``adf`` extra absent the Markdown-aware functions return their plain
-    results, so the cutover path emits the plain-text ADF wire and raises nothing.
-    """
+    """Cloud cutover remains usable when the optional marklas package is absent."""
     from rebar.reconciler.adapters.jira import adf
 
     monkeypatch.setattr(adf, "_marklas", lambda: None)
@@ -253,12 +213,7 @@ def test_dc_degrades_without_pandoc(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_resolver_lives_in_the_shared_layer_without_cloud_imports() -> None:
-    """ADR 0083: ``jira_family`` must not import ``adapters/jira/``.
-
-    Checked over the parsed IMPORT statements, not the file text — the module discusses
-    ``adapters.jira.comment_limits`` in a comment (deliberately, to explain why the DC
-    limit matches Cloud's), and a substring search would flag that prose as a violation.
-    """
+    """The shared jira_family resolver remains importable without importing Cloud adapters."""
     import ast
 
     source = (rich_text.__file__ or "").replace(".pyc", ".py")

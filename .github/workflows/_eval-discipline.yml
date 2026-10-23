@@ -1,18 +1,9 @@
 name: Prompt-Eval Discipline (reusable)
 
-# Reusable (workflow_call) form of the OFFLINE eval-discipline gate (epic a88f / WS-G) — the
-# single source of truth for the job that BOTH CI lanes run:
-#   * prompt-eval.yml    — push / pull_request (branch-head checkout), post-merge branch CI.
-#   * gerrit-verify.yaml — the Verified gate (checks out the EXACT Gerrit patchset), so an
-#     eval-discipline regression BLOCKS the Verified vote pre-merge instead of only reddening
-#     main (jira-reb-1163 — eval-discipline previously ran on the mirror lane ONLY).
-#
-# Enforces the eval discipline with NO model/credentials: spec validity (strict per-spec
-# validation), grader discipline, at_least(k) over epochs, coverage, kappa/JUnit, the scorer
-# registry, and the eval solver aggregation — all via the unit tests. Costs nothing.
-#
-# Checkout is parameterized by `gerrit-refspec`: empty => actions/checkout (branch head);
-# set => checkout-gerrit-change-action (the patchset). Takes NO secrets.
+# Shared offline evaluation gate for branch CI and exact Gerrit patchsets.
+# Unit tests enforce spec and grader validity, epoch thresholds, coverage,
+# kappa/JUnit, scorer registration, and solver aggregation without a model key.
+# An optional Gerrit refspec changes checkout only. This workflow takes no secrets.
 
 on:
   workflow_call:
@@ -97,14 +88,9 @@ jobs:
           uv sync --locked --extra dev
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Enforce eval discipline (offline)
-        # The strict per-spec validation also lives in the default suite (via
-        # _build-and-test.yml), so it already blocks Verified; this job runs the eval
-        # test subset directly so the discipline is a named gate on BOTH lanes.
-        # Per-test hang guard (ticket d835-1846-95d1-4d84). 300s: these are OFFLINE unit
-        # tests, the same ones the shared suite runs under the identical 300s budget in
-        # _build-and-test.yml, so this lane inherits that calibration rather than inventing a
-        # second number for the same tests. --timeout-method=thread for the usual reason: the
-        # default `signal` method cannot fire while blocked in a C-level flock/subprocess call.
+        # The default suite also checks strict spec validity. This named offline gate
+        # keeps the same checks visible in both lanes. Its 300-second thread timeout
+        # matches the shared suite and catches blocked subprocess or flock calls.
         run: |
           python -m pytest -q --timeout=300 --timeout-method=thread \
             tests/unit/test_eval.py \
