@@ -1,16 +1,6 @@
-"""Unit tests for reconciler/conflict_resolver.py.
-
-Tests cover:
-  - test_resolve_state_returns_local: local_val always wins.
-  - test_resolve_additive_list_union: list union preserves order, no dupes.
-  - test_resolve_additive_string_concat: string fields concatenated with separator.
-  - test_resolve_additive_one_none: only one non-None value is returned.
-  - test_resolve_set_valued_union: returns union of both sets.
-  - test_resolve_field_status_dispatches_state: 'status' → resolve_state.
-  - test_resolve_field_description_dispatches_additive: 'description' → resolve_additive.
-  - test_resolve_field_labels_dispatches_set_valued: 'labels' → resolve_set_valued.
-  - test_resolve_field_unknown_defaults_to_state: unknown field → resolve_state (local wins).
-"""
+"""Conflict resolution uses local-wins state, additive content merges, and set union; field
+classes select the policy, with unknown fields defaulting to local-wins. Individual tests
+below pin each case."""
 
 from __future__ import annotations
 

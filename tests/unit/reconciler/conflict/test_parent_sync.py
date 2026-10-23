@@ -1,16 +1,6 @@
-"""RED tests for bidirectional parent/child hierarchy sync (ticket 8b25-ae7a-efc3-47f6).
-
-Covers all seams:
-  - outbound create with bound parent → payload carries parent key
-  - outbound create unbound parent → no parent + debug skip
-  - outbound reparent (bound ticket parent change) → set_parent called
-  - inbound create with parent → local parent_id populated (bound) or empty (unbound)
-  - inbound update parent change → EDIT with parent_id
-  - reducer applies parent_id from EDIT (already works via process_edit)
-  - fetcher enrichment failure degrades gracefully
-
-All tests use mock clients; no live Jira calls.
-"""
+"""Parent sync covers outbound create and reparent, inbound parent mapping, applier parent
+events, and fetch enrichment. Unbound parents are omitted and enrichment failure leaves
+the snapshot usable."""
 
 from __future__ import annotations
 

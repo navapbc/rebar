@@ -1,18 +1,5 @@
-"""Hardened conflict bug filing (ticket 4527-0cfa-d31a-4a08).
-
-The reconciler's deferred conflict filer historically created one bug per
-conflict occurrence per pass with no dedup, no accumulation cap, no
-abort-if-empty guard, and no provenance. These tests pin the hardened
-contract of the extracted ``conflict_bug_filing`` module:
-
-- **dedup**: a stable per-pair tag; an open bug carrying that tag absorbs
-  repeat filings for the same (local_id, jira_key) pair.
-- **accumulation**: an absorbed repeat posts at most one marker comment
-  per 24h window.
-- **abort-if-empty**: hollow payloads (no identifiers, or empty
-  title/description) are refused loudly instead of filed.
-- **provenance**: creates carry ``--detected-by reconciler-conflict``.
-"""
+"""Conflict bugs use a stable pair tag to absorb repeats, add at most one marker comment per
+24 hours, reject empty payloads, and record reconciler-conflict provenance."""
 
 from __future__ import annotations
 

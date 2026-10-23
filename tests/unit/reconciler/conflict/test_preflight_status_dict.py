@@ -1,19 +1,5 @@
-"""RED tests for preflight_status_mapping dict-status normalization.
-
-Historical bug (bug 85a1-f581-2252-4a21): the outbound apply pipeline runs
-``preflight_status_mapping`` over all mutations. Outbound mutations carry
-the local status STRING ("open", "in_progress", ...); inbound (and any
-mutation whose ``fields`` were taken verbatim from a Jira snapshot) carry
-Jira's raw REST status DICT (``{"name": "To Do", "id": ..., ...}``).
-
-Before the fix, ``status not in mapping`` raised ``TypeError: unhashable
-type: 'dict'`` on the dict-shaped status — the probe Phase 3+ reconciler
-crashed with ``cannot use 'dict' as a dict key`` and the full inbound +
-outbound pipeline aborted.
-
-The fix normalizes ``raw_status`` to a string via ``.get("name")`` when it
-is a dict, so the preflight lookup is shape-tolerant.
-"""
+"""Status preflight normalizes Jira dict values, skips inbound mutations, accepts both local
+mapping keys and Jira-side values, and warns nonfatally for genuinely unmapped statuses."""
 
 from __future__ import annotations
 
@@ -100,12 +86,8 @@ def test_preflight_skips_dict_without_name(pass_support, monkeypatch):
 
 
 def test_preflight_skips_inbound_mutations(pass_support, monkeypatch):
-    """Inbound mutations carry Jira status names — preflight is for outbound only.
-
-    The probe Phase 3 fed inbound mutations through preflight and produced
-    spurious ``local status 'To Do' not in local_to_jira_status mapping``
-    errors (Jira names are mapping VALUES, not keys). Inbound must skip.
-    """
+    """Inbound mutations carry Jira-side status names and must bypass outbound mapping
+    preflight."""
     _patch_mapping(pass_support, monkeypatch, {"open": "To Do", "in_progress": "In Progress"})
     mutations = [
         {
@@ -134,13 +116,8 @@ def test_preflight_skips_inbound_with_dict_status(pass_support, monkeypatch):
 
 
 def test_preflight_accepts_outbound_jira_side_status_name(pass_support, monkeypatch):
-    """Outbound differ pre-maps local→Jira; the resulting Jira name must pass.
-
-    ``outbound_differ._map_local_to_jira_fields`` translates local status
-    (e.g. "in_progress") to the Jira name ("In Progress") BEFORE emitting
-    the mutation. The preflight then sees the VALUE side of the mapping,
-    not the KEY side — both shapes must be accepted.
-    """
+    """An outbound differ may already map local status to a Jira-side value; preflight
+    accepts that value."""
     _patch_mapping(pass_support, monkeypatch, {"open": "To Do", "in_progress": "In Progress"})
     mutations = [
         {
@@ -154,9 +131,8 @@ def test_preflight_accepts_outbound_jira_side_status_name(pass_support, monkeypa
 
 
 def test_preflight_warns_on_truly_unmapped_status(pass_support, monkeypatch, capsys):
-    """A status that is neither a key nor a value in the mapping is unmapped — it
-    is WARNED (naming the target), not raised (Facet 3: preflight is non-fatal so
-    the mutation flows to the applier and is recorded as a per-mutation failure)."""
+    """A status in neither mapping keys nor values warns with its target but does not abort
+    the batch."""
     _patch_mapping(pass_support, monkeypatch, {"open": "To Do", "in_progress": "In Progress"})
     mutations = [
         {

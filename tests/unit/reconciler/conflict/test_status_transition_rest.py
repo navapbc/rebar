@@ -1,21 +1,6 @@
-"""RED tests for Gap 8: status outbound via REST POST /transitions.
-
-Historical bug (bug 85a1 / Gap 8): the outbound status push was gated behind
-``REBAR_RECONCILER_STATUS_GATING=1`` AND routed through
-``_route_status_via_draft5`` which was a literal no-op stub (both since removed —
-epic f89d story D deleted that dead typed-leaf code). Even with the
-gate set, nothing was pushed. The legacy ``transition_issue`` used ACLI,
-which silently returns exit 0 on bogus transitions (Gap 5).
-
-This test fixture replaces ``transition_issue`` to use direct REST:
-  - GET  /rest/api/3/issue/{key}/transitions   (list available)
-  - match local status name (case-insensitive) against transition names
-    or transition.to.name
-  - POST /rest/api/3/issue/{key}/transitions   {"transition": {"id": "<id>"}}
-  - HTTP 204 → success; non-2xx → raise
-
-There is no longer a BY_DESIGN drop for status — every field syncs.
-"""
+"""Outbound status transition uses REST to list reachable transitions and post the matched
+ID. Matching ignores case and accepts destination-state names; unreachable targets raise
+actionable errors."""
 
 from __future__ import annotations
 
@@ -92,12 +77,8 @@ def test_transition_case_insensitive_name_match(acli):
 
 
 def test_transition_matches_via_to_state_name(acli):
-    """Workflow with 'Move to Review' transition name and to.name='In Review'.
-
-    When the local target is 'In Review' but the transition is named
-    'Move to Review' (and its target state is 'In Review'), we should
-    still find it via the ``to.name`` field.
-    """
+    """A transition named Move to Review matches a requested In Review destination through
+    to.name."""
     client = _make_client_with_transitions(
         acli,
         [

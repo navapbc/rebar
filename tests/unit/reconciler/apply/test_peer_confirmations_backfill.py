@@ -1,22 +1,6 @@
-"""Epic a4bd / story f6e9: grandfather pre-upgrade managed links as confirmed.
-
-S3 declines any inbound link removal whose link carries no peer-confirmation record.
-On the FIRST run after this feature ships the store is empty, so without a backfill
-EVERY legitimate peer deletion would be declined — a worse regression than the blind
-spot the epic set out to close. This suite pins the grandfathering that buys that
-first pass, and the three properties that keep it from becoming a liability:
-
-1. ONE-SHOT ON FILE ABSENCE, not on emptiness. An operator who deliberately empties
-   the store must not have it silently repopulated on the next pass.
-2. NEVER DOWNGRADES. ``record()`` overwrites unconditionally, so backfill must read
-   before writing. An existing ``push``/``snapshot`` record is strictly stronger than
-   an assumption, and clobbering it would discard the vendor link id and the
-   confirming pass.
-3. ONE STORE INSTANCE. Backfill and snapshot confirmation share an instance. Two
-   would each load a pre-write copy, so the same-pass upgrade could not happen and —
-   worse — whichever saved last would silently discard the other's records. The
-   lost-update test below is what stops that regression from being reintroduced.
-"""
+"""On first upgrade, backfill managed links only when the evidence file is absent. Never
+overwrite proven evidence; snapshot observations upgrade assumptions, and one shared store
+preserves both writes."""
 
 from __future__ import annotations
 
@@ -131,12 +115,8 @@ def test_non_managed_kinds_and_malformed_tickets_are_ignored(pc, tracker):
 
 @pytest.mark.parametrize("existing", ["push", "snapshot"])
 def test_backfill_never_overwrites_proven_evidence(pc, tracker, existing):
-    """AC5, no-downgrade half.
-
-    ``record()`` overwrites unconditionally, so this property lives entirely in
-    backfill's read-before-write skip. Without it the vendor link id and confirming
-    pass of a real confirmation would be replaced by an assumption.
-    """
+    """Backfill skips existing confirmations so vendor link IDs and original confirming
+    passes are retained."""
     store = pc.open_store(tracker)
     store.record(
         "src-local",
@@ -219,12 +199,8 @@ def test_ordering_backfill_runs_before_snapshot_confirmation(tracker, pc):
 
 
 def test_lost_update_backfill_and_snapshot_records_both_survive(tracker, pc):
-    """The regression the single instance exists to prevent.
-
-    Backfill writes ref A; snapshot confirms a DIFFERENT link B. With two store
-    instances each loading a pre-write copy, whichever saved last would drop the
-    other's record. Both must be on disk after the single save.
-    """
+    """Backfill and snapshot confirmation share one store; both different links survive its
+    single save."""
     reconcile = importlib.import_module("rebar.reconciler.reconcile")
 
     ctx = reconcile._PassContext(repo_root=tracker, pass_id="pass-5")

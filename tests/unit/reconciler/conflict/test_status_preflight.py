@@ -1,16 +1,5 @@
-"""Tests for pass_support.preflight_status_mapping.
-
-Verifies the preflight status-mapping scan WARNS (non-fatally) for any update
-mutation whose status field is absent from ``config.local_to_jira_status``,
-without aborting the pass (Facet 3, reconciler-abort-isolation: the scan used
-to raise ``StatusMappingError`` and abort every later mutation; it now logs to
-stderr and returns so the offending mutation flows to the applier and is
-recorded there as a per-mutation failure). An empty mapping acts as a
-kill-switch.
-
-Follows the module-loading convention documented in
-``tests/unit/reconciler/conftest.py``.
-"""
+"""Status preflight warns without aborting on unmapped update status, names it without
+assuming its side, and skips the scan when mapping is disabled or action is not update."""
 
 from __future__ import annotations
 
@@ -31,10 +20,8 @@ def pass_support_mod():
 
 
 def test_missing_status_warns_but_does_not_abort(pass_support_mod, capsys):
-    """An update mutation with an unmapped status WARNS to stderr but does NOT
-    raise (Facet 3): the preflight no longer aborts the pass, so the offending
-    mutation can flow to the applier and be recorded as a per-mutation failure.
-    The warning must still name the offending status value and target key."""
+    """An unmapped update status warns with value and target, then remains available for
+    per-mutation handling."""
     mutations = [
         {
             "action": "update",
@@ -58,20 +45,7 @@ def test_missing_status_warns_but_does_not_abort(pass_support_mod, capsys):
 
 
 def test_unmapped_jira_status_not_mislabeled_as_local(pass_support_mod, capsys):
-    """An unmapped JIRA workflow status (e.g. ``Selected for Development`` added
-    Jira-side) must not be reported as a "local status" (bug c672). The preflight
-    accepts both local-status keys and Jira-status values and fails only when the value
-    is in neither, so the message must describe an unmapped status of indeterminate side
-    and acknowledge the Jira-status possibility — otherwise it misdirects debugging
-    toward a non-existent local ticket.
-
-    (Uses ``Selected for Development`` rather than the once-used ``IDEA``: ``IDEA`` is
-    now a MAPPED status — local ``idea`` ↔ Jira ``IDEA`` — so it no longer exercises the
-    unmapped-status path.)
-
-    Facet 3 (reconciler-abort-isolation): the preflight now WARNS non-fatally instead
-    of raising, so the message is asserted against stderr rather than an exception. The
-    bug-c672 intent (do not mislabel a Jira status as local) is unchanged."""
+    """An unmapped Jira workflow value warns without falsely calling it a local status."""
     unmapped = "Selected for Development"
     mutations = [
         {"action": "update", "key": "REB-716", "fields": {"status": unmapped}},

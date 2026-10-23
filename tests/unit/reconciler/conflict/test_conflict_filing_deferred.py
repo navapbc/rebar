@@ -1,31 +1,6 @@
-"""Regression test for Bug d822: HEAD drift caused by in-loop bug-filing.
-
-Bug summary:
-  The reconciler's _apply_batch loop pins HEAD and re-checks it on every
-  iteration to detect concurrent writers. But `_apply_inbound_conflict`
-  (called from the inbound dispatch loop in `apply()`) directly invokes
-  `_file_conflict_bug_ticket`, which shells out to `rebar create bug`.
-  That CLI commits to the `tickets` orphan branch, advancing HEAD. While
-  the inbound dispatch happens BEFORE the batch loop's pin in the current
-  flow, ANY future caller that reaches the batch loop with an in-flight
-  conflict — or any concurrent reconciler producing inbound conflicts —
-  trips the drift detector spuriously.
-
-  More fundamentally: the apply path should be commit-free. Bug filing is
-  an out-of-band side effect that belongs AFTER the mutation loop, not
-  during.
-
-Fix (Option C from investigation d822):
-  - `_apply_inbound_conflict` records a `pending_bug_ticket` directive
-    in its ApplyResult payload INSTEAD of calling _file_conflict_bug_ticket.
-  - `apply()` collects all pending_bug_ticket directives during the loop.
-  - After `_apply_batch` returns, `apply()` files the pending tickets
-    in a deferred step — outside the drift-guarded loop.
-
-This regression test asserts the structural property: _apply_inbound_conflict
-must NOT call _file_conflict_bug_ticket directly; it must return a
-pending_bug_ticket directive in its result payload.
-"""
+"""Conflict filing runs after the apply batch so its ticket commit cannot trip HEAD-drift
+checks. Pending directives survive the finally path, preserve pair suppression, and
+re-raise batch errors."""
 
 from __future__ import annotations
 
@@ -107,15 +82,8 @@ def _make_mutation(mut_mod, *, direction, action, target, payload=None):
 def test_inbound_conflict_leaf_does_not_invoke_subprocess(
     applier, mut_mod, fixture_repo, monkeypatch
 ):
-    """_apply_inbound_conflict must NOT spawn the ticket-CLI subprocess
-    during its leaf dispatch. It must return a pending_bug_ticket directive
-    in the result payload instead.
-
-    Rationale: the apply loop's HEAD-drift detector treats the `tickets`
-    orphan branch as quiescent. Any subprocess that commits to that branch
-    during apply trips the detector. Bug-filing is an out-of-band effect
-    that must be deferred until after the loop.
-    """
+    """The inbound conflict leaf returns a pending bug directive without spawning a
+    ticket-writing subprocess inside the apply loop."""
     call_log: list[str] = []
 
     def _trap_filing(*_args, **_kwargs):
@@ -134,9 +102,7 @@ def test_inbound_conflict_leaf_does_not_invoke_subprocess(
 
     result = applier._apply_inbound_conflict(mutation, repo_root=fixture_repo)
 
-    # Structural assertion: the leaf must NOT call the bug-filing subprocess
-    # directly. The current (buggy) implementation calls it; this assertion
-    # FAILS before the fix and PASSES after.
+    # The conflict leaf must return a directive without running the ticket CLI.
     assert call_log == [], (
         f"_apply_inbound_conflict invoked _file_conflict_bug_ticket "
         f"{len(call_log)} time(s) during the leaf dispatch. After the fix, "
@@ -178,14 +144,8 @@ def _make_fake_acli_mod():
 def test_apply_files_pending_bug_tickets_after_apply_batch_returns(
     applier, mut_mod, fixture_repo, monkeypatch
 ):
-    """Positive postcondition: when apply() processes an inbound conflict
-    mutation, it MUST call _file_conflict_bug_ticket for the resulting
-    pending_bug_ticket directive AFTER _apply_batch returns.
-
-    Complements `test_inbound_conflict_leaf_does_not_invoke_subprocess`
-    which verifies the leaf does NOT call directly. Without this positive
-    test, the deferred-filing block at applier.py:apply() could be silently
-    deleted and the negative test would still pass."""
+    """Apply files pending conflict bugs after the batch returns, rather than dropping the
+    deferred directive."""
     call_log: list[dict] = []
 
     def _capture_filing(cli_path, pending):
@@ -225,19 +185,8 @@ def test_apply_files_pending_bug_tickets_after_apply_batch_returns(
 def test_apply_files_pending_bug_tickets_when_apply_batch_raises(
     applier, mut_mod, fixture_repo, monkeypatch
 ):
-    """Critical correctness postcondition: if _apply_batch raises (e.g.
-    HeadDriftError, RescheduleError), the deferred bug-filing block MUST
-    still execute. Otherwise the conflict audit ticket is silently dropped
-    — the conflict was already suppressed by the leaf's follow_on, but the
-    operator loses visibility.
-
-    Regression guard for the important finding in deep review of PR #425:
-    "Deferred bug-filing is not guaranteed to execute when _apply_batch
-    raises ... All collected pending_bug_ticket directives are silently
-    dropped."
-
-    The fix wraps _apply_batch in try/finally so the deferred-filing block
-    runs unconditionally before the exception propagates."""
+    """Apply files pending conflict bugs in finally even if the batch raises, then propagates
+    the exception."""
     call_log: list[dict] = []
 
     def _capture_filing(cli_path, pending):

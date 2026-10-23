@@ -1,33 +1,5 @@
-"""Observability (48c8-5375-f883-462d) — fail-loud on swallowed comment failures
-and same-kind silent-no-op coverage for comments/labels (not just links).
-
-Two gaps let a reconcile pass report ``OK: applied N of N`` / exit 0 while a sub-op
-silently failed:
-
-  * ``comment_errors`` (a swallowed PARTIAL add_comment failure — apply_handlers
-    create + update paths) were recorded NON-fatally and never counted toward
-    ``mutation_failures``. The pre-existing silent-no-op canary only catches a
-    TOTAL no-op (computed > 0, applied == 0); a PARTIAL drop (e.g. 2 comments
-    computed, 1 applied, 1 dropped) leaves ``applied > 0`` so the canary never
-    fires — yet a comment was silently lost and the pass still exits 0. This is
-    the exact gap the ticket names ("a partial comment drop yields exit 0").
-  * the silent-no-op canary's *test* coverage was links-only, even though the code
-    iterates ``("labels", "comments", "links")``.
-
-This pins:
-
-  * **Fail-loud, PARTIAL drop** — with no environment set, a
-    ``comment_errors``-carrying outcome whose canary did NOT fire (applied > 0) still
-    gets an ``outcome["error"]`` starting ``comment-errors:`` (so reconcile.py counts
-    it toward ``mutation_failures`` → non-zero exit). Both paths (create + update) are
-    asserted — RED before the apply_handlers change (comment_errors → error=None on a
-    partial drop).
-  * **Same-kind canary coverage** — a TOTAL no-op (computed > 0, applied == 0) on
-    COMMENTS and on LABELS trips ``silent_noop`` and hard-fails the mutation, matching
-    the links coverage already in test_silent_noop_canary.py.
-
-Asserts the outcome flags/error, not specific log strings.
-"""
+"""Comment failures become per-mutation errors even when other comments land.
+Total comment or label no-ops also trigger the same-kind canary."""
 
 from __future__ import annotations
 
@@ -178,10 +150,8 @@ def test_partial_comment_drop_promotes_to_error(applier_mod, acli_mod, tmp_path)
 
 
 def test_create_path_comment_drop_promotes_to_error(applier_mod, acli_mod, tmp_path) -> None:
-    """CREATE path: a swallowed comment failure during outbound CREATE also promotes to
-    outcome["error"] (parity with the update path). The create path has no silent-no-op
-    canary, so even a single failed comment is a clean discriminator (RED:
-    comment_errors → error=None on unmodified code)."""
+    """An outbound create records a swallowed comment failure as an outcome error;
+    create has no total-no-op canary."""
     pass_id = f"cr-on-{time.time_ns()}"
     mutation = _create(
         "create-flagged-comment-fail",
