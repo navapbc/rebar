@@ -1,12 +1,9 @@
-"""Happy-path oracle for the plan-review fixture selector (ticket 549b).
+"""Fixture-selector happy-path contract (549b).
 
-These tests pin the CORE observable contract of ``rebar.llm.evals.fixture_selection``:
-a fully-corroborated fire candidate is admitted as a ``blocking`` manifest row carrying its
-three tier signals, and :func:`write_manifest` emits byte-stable sorted-keys JSONL. Edge
-cases (vintage exclusion, zero-candidate rows, tier downgrades, no-fire admission,
-escaped-defect priority, ranking) and the real-corpus determinism test live in the held-out
-suites and are validated by the orchestrator.
-"""
+A corroborated fire becomes a blocking manifest row with three tier signals.
+The write_manifest helper emits sorted-key, byte-stable JSONL. Held-out suites cover
+vintage, empty rows, tiers, no-fire, escaped priority, ranking, and recorded-corpus
+determinism."""
 
 from __future__ import annotations
 

@@ -1,12 +1,7 @@
-"""`make lint` must reach the two test-hygiene gates, not defer them to CI.
+"""Keep raw-git and wall-clock hygiene checks in local ``make lint``.
 
-Story ``73b8-2d79-3046-44ce``. ``scripts/check_raw_git_writes.py`` and
-``scripts/check_wall_clock_asserts.py`` ran only as dedicated CI steps of
-``_build-and-test.yml``, so the local fast gate returned a clean verdict over a tree CI
-rejects — the reachability gap task ``2d9a-78c5-5f87-4a22`` closed for the comment-hygiene
-gate. Without this guard the wiring is one silent Makefile edit away from regressing, and the
-regression only shows up as a red CI run on someone else's change.
-"""
+Both scripts also run in CI. The Makefile wiring prevents a local green gate
+from missing either check."""
 
 from __future__ import annotations
 

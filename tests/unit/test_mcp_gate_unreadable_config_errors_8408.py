@@ -1,13 +1,8 @@
-"""An unreadable config ERRORS the MCP gate resolvers — never a silent default (8408).
+"""MCP gate resolvers raise ConfigError for unreadable config (8408).
 
-Operator ruling 39f8-ae7c ("Unreadable config should result in an error"), extended to
-the MCP surface: ``config.mcp_readonly()`` and ``config.mcp_gate()`` must raise a typed
-:class:`~rebar.config.ConfigError` (chained from the parse fault, naming the gate and
-the ruling) instead of collapsing the fault into the configured/default value — even a
-SAFE default, because a fault that reads as a policy choice never gets fixed. The MCP
-error envelope classifies the fault as ``config_unreadable`` so a driving agent can
-branch on it (change 2045 PS4 surface-parity advisory).
-"""
+Ruling 39f8-ae7c requires mcp_readonly and mcp_gate to name the gate and
+chain the parse fault, even when a safe default exists. The MCP envelope marks
+config_unreadable so callers can handle it (change 2045 PS4)."""
 
 from __future__ import annotations
 

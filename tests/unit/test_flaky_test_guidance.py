@@ -1,16 +1,8 @@
-"""A flaky test is a bug to root-cause, not a retry (ticket 9b79-56ba-0d16-4c49).
+"""Root-cause flaky tests instead of retrying until green (9b79).
 
-The order-dependent leaked-logger flake cost four `Verified -1`s across changes
-1715/1716/1717/1720 and several recheck cycles before one root-cause pass fixed it
-class-wide in change 1721. Root-causing it once was cheaper than every recheck combined.
-
-Two halves are pinned here, and the second is the one a plain "the text exists" test would
-miss: the rule must be PRESENT, and the old retry-until-green licence must be GONE. Before
-this ticket both files told a reader to `recheck` a failure that merely "looks
-transient/flaky", which reads as permission to retry a nondeterministic test until it
-passes — so adding the rule without narrowing them would have left the repo contradicting
-itself.
-"""
+A leaked-logger flake caused four Verified -1 votes and repeated rechecks
+before a class-wide fix. Both guidance files must state the rule and remove
+the old license to recheck failures merely looking transient."""
 
 from pathlib import Path
 
@@ -69,12 +61,8 @@ def test_agents_carves_out_only_provably_environmental_faults() -> None:
     [("AGENTS.md", _agents), ("CONTRIBUTING.md", _contributing)],
 )
 def test_no_unqualified_recheck_for_a_merely_flaky_looking_failure(name: str, reader) -> None:
-    """Neither file may offer `recheck` for a failure that only *looks* transient.
-
-    This is the regression half. `AGENTS.md` used to read "comment `recheck` if it is a
-    flake" and `CONTRIBUTING.md` "the failure looks transient/flaky … comment `recheck`";
-    both are exactly the licence the rule withdraws.
-    """
+    """Neither guidance file may allow recheck for a failure that merely looks
+    transient. The old wording licensed retrying an unfixed flaky test."""
     body = reader()
     assert "comment `recheck` if it is a flake" not in body, (
         f"{name} still licenses a bare recheck on a suspected flake"

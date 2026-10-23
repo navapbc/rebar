@@ -1,15 +1,8 @@
-"""A ``LockTimeout`` must NAME the holder (bug 7084 / remediation R5).
+"""Report the existing lock-owner stamp on timeout.
 
-Field evidence on 7084: a 48s ``compact-on-close`` starved six concurrent writers, and
-none of them could say what had blocked them — the holder was identified afterwards by
-inferring from the tracker's commit timeline, because ``flock: could not acquire lock
-after Ns`` threw away the ownership stamp the mkdir leg had already written.
-
-R5 surfaces that EXISTING stamp; it adds no fields and no machinery. These tests pin the
-reported identity, the degraded cases (absent / unrecognised / incomplete stamp — stated
-plainly, never guessed), the liveness verdict that separates "a live process holds it"
-from "a stale stamp", and the end-to-end behaviour under real contention.
-"""
+Diagnostics include holder identity and corroborated liveness, or name an
+absent, unrecognized, or incomplete stamp without guessing. Contended lock acquisition
+exercises the same path."""
 
 from __future__ import annotations
 

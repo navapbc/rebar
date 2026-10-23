@@ -1,12 +1,8 @@
-"""Tool-level proof that the MCP gate tools de-duplicate concurrent in-flight calls (bug d80d).
+"""Check that MCP gate tools use the in-flight registry (d80d).
 
-``test_mcp_inflight`` pins the singleflight registry in isolation; this pins the WIRING —
-that ``review_plan`` / ``verify_completion``, as registered on the FastMCP server and run on
-the server's worker threads (``offload_sync_tools``), actually route through the registry so
-two concurrent same-ticket calls invoke the underlying billable ``rebar.llm`` gate EXACTLY
-ONCE (AC #2). The gate is monkeypatched with a fake that blocks on a ``threading.Event`` and
-counts calls, so the verdict is a call count — deterministic, zero tokens.
-"""
+The registry has separate tests. These exercise FastMCP review_plan and
+verify_completion on worker threads. An event-blocked fake counts underlying
+billable gate calls. Concurrent calls for one ticket must invoke it once."""
 
 from __future__ import annotations
 
@@ -64,13 +60,10 @@ def test_two_concurrent_calls_invoke_the_gate_exactly_once(tool_name, monkeypatc
     # real store — it proves ONLY the singleflight wiring, deterministically + token-free.
     mcp = _server_with_llm_tools(readonly=True)
 
-    # Release the leader only once a *real* follower has attached to its in-flight entry.
-    # Spying on ``_await_follower`` (the follower-only branch of ``run_singleflight``) makes
-    # the proof deterministic rather than reliant on a fixed sleep: the first CallTool pays a
-    # cold pydantic/thread-pool warm-up that blocks the loop, so a fixed window is racy. If
-    # de-dup were broken the follower would become a SECOND leader, ``_await_follower`` would
-    # never run, and the bounded fallback below still releases so the test fails (calls == 2)
-    # instead of hanging — the teeth stay intact.
+    # Release the leader after a waiting follower reaches _await_follower. A fixed
+    # sleep races the first CallTool's cold setup. If de-dup breaks, the second
+    # call becomes a leader. The bounded fallback releases both and calls == 2
+    # fails instead of hanging.
     follower_attached = threading.Event()
     orig_await_follower = inflight._await_follower
 

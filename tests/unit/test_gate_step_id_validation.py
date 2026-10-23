@@ -1,22 +1,8 @@
-"""Every gate validates its own step ids, not just plan-review (mirror F13).
+"""Validate every gate's YAML step IDs against its own code constants (0d3c).
 
-Ticket 0d3c-ff25-5317-4d73 (misandrous-defaceable-zenaida).
-
-``_validate_gate_step_ids`` existed with ONE call site — plan-review — while the
-code-review and completion-verification gates loaded their YAML and checked nothing,
-despite each having python that looks its step ids up BY NAME. The failure a rename
-produces is silent in both:
-
-* code-review — ``code_review/finalize.py``'s lookups return ``None`` and the
-  finalization cluster degrades a recoverable run.
-* completion-verification — the row falls through ``completion_metrics``' mapping into
-  the "unclassified" timing bucket, so NOTHING errors and the metric is merely wrong.
-
-The point of these tests is not that a call exists; it is that each gate's required set
-is DERIVED from the constants its own code references. A set re-typed as string literals
-would satisfy a "does it validate?" test while drifting from the thing it guards — which
-is the very defect class this epic removes.
-"""
+Only plan review once checked. A renamed code-review ID degraded finalize.
+A completion ID entered an unclassified timing bucket. Derive each
+required set from code references so a copied literal list cannot drift."""
 
 from __future__ import annotations
 
@@ -112,14 +98,9 @@ def test_completion_required_set_tracks_code_references_not_yaml_contents():
 
 
 def test_every_gate_doc_load_is_followed_by_a_step_id_validation():
-    """The tests above prove the VALIDATOR works; this proves each dispatch CALLS it.
-
-    Deliberately structural. The behavioral route — drive a real dispatch with a doctored
-    doc — needs a git worktree and a diff context before the guard is even reached, and it
-    would pin only the gates that exist today. The regression this ticket fixes was a gate
-    added WITHOUT a guard, so the invariant worth pinning is the general one: in
-    gate_dispatch, every `_gate_doc(...)` result is validated inside the same function.
-    """
+    """Every gate dispatch validates each loaded document in the same function.
+    This structural check covers future gates. A behavioral test of current
+    dispatches would miss an added unguarded gate."""
     import ast
     import inspect
 

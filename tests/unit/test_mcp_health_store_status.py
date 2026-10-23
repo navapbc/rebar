@@ -1,20 +1,11 @@
-"""`/health` must distinguish "serving with a store" from "serving with no store at all".
+"""Health reports whether the ticket store is present and expected.
 
-WHY THIS TEST EXISTS. The MCP `/health` route reported only `{"in_flight": N}`. It is BOTH the
-container HEALTHCHECK (`infra/compose/Dockerfile.mcp`) and the blue-green readiness gate
-(`infra/scripts/autodeploy.sh`), so a container with NO ticket store passed every check in the
-pipeline. Combined with a boot sweep that skipped silently on a missing store, that is how a
-deployed server answered every tracker query as though the store were merely empty, for weeks,
-with nothing able to report it (bugs kilted-nuclear-bronco / mobile-groovy-badger).
-
-THE DESIGN THIS PINS, and it is deliberately not the obvious one. `/health` REPORTS rather than
-FAILS, and the discriminator is `expected`, not `present`. A missing store is a fault only for a
-deployment that declared it has one; for a deployment that never configured a tracker dir it is
-simply a fact. Keying the readiness gate on `present AND expected` is what lets this ship to a
-box that currently has NO store without marking a working container unhealthy — and makes the
-gate strict automatically once a tracker dir is configured. A test that asserted "no store => 503"
-would look stricter and would have caused the outage it was meant to prevent.
-"""
+The route once reported only in_flight, so both the container healthcheck and
+blue-green readiness gate accepted a server with no store. Boot sweep was also
+silent (kilted-nuclear-bronco / mobile-groovy-badger). Health reports rather
+than fails. A missing store is a fault when a tracker directory was configured.
+Otherwise expected is false. Readiness uses these fields so deploying before
+store provisioning does not mark a serving container unhealthy."""
 
 from __future__ import annotations
 
@@ -93,17 +84,10 @@ def test_probe_never_raises_even_when_resolution_fails(monkeypatch: pytest.Monke
 
 
 def test_autodeploy_gate_names_the_storeless_refusal() -> None:
-    """The gate must have a NAMED refusal reason, so a blocked promotion is greppable.
+    """Require a greppable refusal marker.
 
-    Deliberately narrow: this asserts only that the marker name exists. An earlier version
-    grepped the script for the verbatim predicate `st.get("expected") and not st.get("present")`,
-    which pinned an implementation detail — any equivalent rewrite would have failed it while
-    the behaviour was unchanged. The BEHAVIOUR is covered where it should be, by tests that
-    drive the real script through the harness with a stubbed /health body:
-    `test_storeless_container_is_not_promoted_when_a_store_is_expected`,
-    `test_storeless_container_IS_promoted_when_no_store_is_expected`, and
-    `test_health_without_a_store_field_still_promotes` in
-    tests/scripts/test_autodeploy_mcp_bluegreen.py.
+    The script harness tests promotion with a missing expected store, no expected
+    store, and a legacy health body. This avoids pinning the shell predicate's spelling.
     """
     autodeploy = (
         Path(__file__).resolve().parents[2] / "infra" / "scripts" / "autodeploy.sh"
@@ -117,14 +101,9 @@ def test_autodeploy_gate_names_the_storeless_refusal() -> None:
 def test_boot_sweep_warns_naming_the_path_when_the_store_is_absent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A missing store at boot must SAY SO, naming the path.
-
-    The sweep is deliberately log-and-continue — a missing store must not abort boot — but
-    before this it emitted nothing at all on that branch. Combined with a /health probe that
-    could not see the store, that silence is why a storeless deployment ran unobserved: there
-    was no line to grep for and no signal to alarm on. The path is in the message because
-    "no store" is not actionable without knowing WHICH path was checked.
-    """
+    """Boot continues when the store is missing, but warns with the checked path.
+    Silence alongside the old health response hid a storeless deployment. The
+    path makes the warning actionable."""
     from rebar._mcp_health import run_startup_store_sweep
 
     missing = tmp_path / "absent-store"
@@ -174,19 +153,11 @@ def test_boot_sweep_is_quiet_and_does_not_raise_when_the_store_exists(
 def test_a_removed_load_bearing_input_fails_hard_instead_of_being_reported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`RemovedInputError` must PROPAGATE out of the probe, not be reported as degraded.
-
-    The probe's whole contract is "never raise for an ordinary resolution fault" — a health
-    check that can fail is worse than one reporting a degraded field. `RemovedInputError` is
-    the ONE deliberate exception: a retired but still-set load-bearing input (a stale
-    `TICKETS_TRACKER_DIR`) means the server is reading a store the operator does not think it
-    is reading. Reporting that as `present: False` would launder a misconfiguration into a
-    routine "no store yet", which the readiness gate then treats as an ordinary absent store.
-
-    It subclasses BaseException so it sails through broad `except Exception` handlers, which
-    makes the explicit re-raise redundant TODAY — this test is what stops a future widening of
-    that handler from silently swallowing it.
-    """
+    """RemovedInputError escapes the health probe. Ordinary resolution faults are
+    reported as degraded to avoid healthcheck crash loops. A retired but set
+    TICKETS_TRACKER_DIR instead means the server may read an unexpected store.
+    Reporting it as absent would hide that misconfiguration. The explicit
+    propagation also guards against a future broader exception handler."""
     from rebar._deprecations import RemovedInputError
 
     def _boom() -> str:

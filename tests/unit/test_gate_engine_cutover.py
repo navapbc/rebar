@@ -41,12 +41,9 @@ def _passing_verdict() -> dict:
 
 
 def test_manifest_is_deterministic_and_path_independent(monkeypatch) -> None:
-    # The signed manifest is a pure function of the verdict STATE (no timestamps, no
-    # path/engine identity) — so the bespoke and workflow paths, producing the same verdict
-    # state, sign a byte-identical manifest. Building it twice must be byte-identical.
-    # The provenance stamp is pinned because gate_code_version samples live `git status`
-    # per call, and a concurrent xdist worker touching the checkout flips its `-dirty`
-    # suffix between builds (bug b44c-2a74).
+    # The manifest depends on verdict state, not time, path, or engine. Equal
+    # verdicts must sign identically. Pin provenance because gate_code_version
+    # reads working-tree git status, which an xdist worker can mark dirty between calls.
     monkeypatch.setattr("rebar.signing.gate_code_version", lambda: "test-version")
     v = _passing_verdict()
     m1 = attest.build_manifest(v, material="fp-abc", deps={"src/x.py": "h1"}, regver="rv1")
@@ -165,17 +162,12 @@ def test_plan_review_coach_recovery_returns_none_when_decide_absent() -> None:
 
 # ── code-read-root vs ticket-store-root (epic 5ca8 / joe-debug: the no_repo_root class) ─
 def test_precheck_grounds_code_root_without_hijacking_ticket_root(monkeypatch, tmp_path) -> None:
-    """The det-floor op must keep the two read-roots DISTINCT:
+    """Keep distinct code and ticket roots in the deterministic floor op.
 
-      * the CODE read-root (the active attested snapshot — origin/main HEAD by default) drives
-        `PlanContext.repo_root`, so DET check P2 ('resolution') can ground against real code;
-      * the TICKET-store read-root drives `assemble_context`'s `rebar.show_ticket(repo_root=…)`
-        and stays whatever the workflow threads (the ticket snapshot / live store).
-
-    Before the fix `PlanContext.repo_root` was None and P2 abstained `no_repo_root`. A naive
-    fix that threaded the CODE snapshot as the op's `repo_root` then broke ticket reads
-    ('Ticket not found'), because the ticket store is NOT under the .git-less code snapshot.
-    Both must hold at once."""
+    The attested code snapshot grounds PlanContext and P2 resolution. The
+    workflow's ticket store still supplies assemble_context/show_ticket. A missing
+    code root made P2 abstain. Using the code snapshot for ticket reads made
+    show_ticket fail because it contains no ticket store."""
     from rebar.llm import gate_context
     from rebar.llm.plan_review import workflow_ops
     from rebar.llm.workflow.executor import StepContext

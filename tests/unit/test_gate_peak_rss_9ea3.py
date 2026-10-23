@@ -1,22 +1,10 @@
-"""A gate run reports its peak RSS when it completes (bug 9ea3-7d07-ea55-4496).
+"""Report gate peak RSS at completion (9ea3).
 
-MEASUREMENT ONLY. The mcp container was OOM-killed roughly three minutes into a
-plan-review run, on a box where gate work executes IN-PROCESS on an MCP daemon thread —
-so gate memory is server memory, and nobody had measured what one run costs. Every
-candidate remedy needs that number, so :mod:`rebar.llm.peak_rss` produces it and does
-nothing else.
-
-These tests pin the three things that make the number trustworthy:
-
-* ``ru_maxrss`` UNITS DIFFER BY PLATFORM — bytes on macOS/BSD, kibibytes on Linux (the
-  box). The error is a silent factor of 1024 in either direction and either way lands on
-  a plausible-looking figure, so both branches are pinned;
-* the marker is emitted AT COMPLETION, including when the gate RAISES — which is the
-  OOM-adjacent case this exists for;
-* it is emitted in the established journald convention (ONE line-start ``GATE_PEAK_RSS
-  {json}`` on stderr, a logger copy of the body WITHOUT the token) and never raises into
-  the run it measures.
-"""
+An MCP server was OOM-killed during in-process review, with no per-run
+memory measure. Normalize ru_maxrss, which reports bytes on macOS/BSD and KiB on Linux.
+Emit even when the gate raises, using one line-start GATE_PEAK_RSS JSON marker
+on stderr and a logger copy without the token. Measurement must not raise
+into the gate."""
 
 from __future__ import annotations
 
@@ -95,11 +83,8 @@ def test_completion_emits_one_line_start_marker(capsys: pytest.CaptureFixture[st
 def test_the_logger_copy_carries_no_line_start_token(
     caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Bug f829-152a-b415-44a4: the logger copy logs the JSON body only.
-
-    If it emitted the token too, configured application logging (whose stdout also lands
-    in journald) would DOUBLE any future ``^GATE_PEAK_RSS \\{`` count — the same defect
-    the voter markers were fixed for."""
+    """The logger copy carries only JSON, not the marker token (f829).
+    Otherwise journald sees two line-start GATE_PEAK_RSS records per run."""
     with caplog.at_level("INFO", logger="rebar.llm.peak_rss"):
         with peak_rss.gate_peak_rss("verify_completion", "9ea3-7d07-ea55-4496"):
             pass
@@ -200,21 +185,11 @@ def test_both_gate_entry_points_emit_the_marker(
     entry_point: str,
     gate: str,
 ) -> None:
-    """CALLING each entry point must actually produce a ``GATE_PEAK_RSS`` marker.
+    """Call both library gate entry points and observe a peak-RSS marker.
 
-    The seam is the LIBRARY entry points, not the MCP daemon and the CLI separately:
-    ``_mcp_llm._spawn_gate_daemon`` and the CLI verbs both reach the gate through
-    ``rebar.llm.review_plan`` / ``rebar.llm.verify_completion``, so wrapping those two
-    covers both call paths once, and a refactor that drops the instrumentation out of one
-    path must fail here.
-
-    This asserts the OBSERVABLE property rather than the presence of a call in the source.
-    An earlier version of this test grepped ``inspect.getsource`` for ``gate_peak_rss("…"``,
-    which passes on a call that is present but broken (wrapping nothing, swallowed by a
-    context manager that never yields, emitting under the wrong gate name) and fails on a
-    harmless rename or reindent. Reading the source proves the code was written; calling it
-    proves the marker comes out.
-    """
+    MCP and CLI reach review_plan and verify_completion through these functions.
+    A source grep could pass for dead or mislabeled instrumentation. Execution
+    checks the emitted marker on both paths."""
     import rebar.llm as llm
 
     verdict = getattr(llm, entry_point)("9ea3-7d07-ea55-4496")

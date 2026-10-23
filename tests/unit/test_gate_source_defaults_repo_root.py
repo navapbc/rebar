@@ -29,17 +29,12 @@ def _capture_acquire(monkeypatch: pytest.MonkeyPatch) -> dict:
 def test_a_none_repo_root_is_resolved_from_config_before_the_snapshot_layer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """THE DEPLOYED FAILURE. Every attested tool — review_plan, scan_spec, verify_completion,
-    review_code — calls through WITHOUT a repo_root (`_mcp_llm.py:116, 146, 196`). If this
-    function passes that None straight down, the snapshot layer falls back to the bare cwd,
-    which on the MCP container is `/app`: a source copy whose `.git` is excluded by
-    `.dockerignore`. Every one of them then failed with
-    `cannot resolve ref 'origin/main' to a commit in '.'` while REBAR_ROOT named a healthy
-    checkout that resolved the very SHA being requested.
+    """Resolve an omitted repo_root from config before snapshotting.
 
-    This function already applies the configured defaults for `ref` and `source`; the root is
-    the third one it owes.
-    """
+    Deployed MCP tools omit it. Falling back to container /app fails to resolve
+    origin/main because .dockerignore excludes .git, even while REBAR_ROOT names
+    a healthy checkout. Ref and source already use configured defaults. Root
+    must too."""
     real = tmp_path / "checkout"
     real.mkdir()
     not_a_repo = tmp_path / "elsewhere"

@@ -1,16 +1,8 @@
-"""A write whose lock acquire times out must be RETRIED, not permanently lost.
+"""Retry a timed-out lock acquisition before the write body runs.
 
-Bug ``royal-weariless-zebrafish``. Before this, ``acquire()`` folded ``timeout × attempts``
-into ONE deadline and raised :class:`LockTimeout` when it expired — the write was discarded
-with no retry and no spool. Measured against a clone of the live store: a 70s holder plus 3
-``rebar comment``s produced 3/3 failures and **0 of 3 markers present afterwards**, and a
-``claim`` behind a 45s holder died at exactly 30.30s because it passes ``attempts=1``.
-
-The remedy is bounded retry-with-backoff rather than fair queueing: when one holder outlives
-the whole budget, EVERY waiter fails regardless of service order, so FIFO buys nothing against
-the failure that actually occurs. Retry is safe — and cannot duplicate a write — precisely
-because it lives inside ``acquire()``, before the caller's write body has run.
-"""
+Bounded backoff covers a holder that outlives one acquire budget without
+duplicating a write. The retry belongs inside ``acquire()``, ahead of the
+caller's mutation."""
 
 from __future__ import annotations
 

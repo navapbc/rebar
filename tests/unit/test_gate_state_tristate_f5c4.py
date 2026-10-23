@@ -1,17 +1,9 @@
-"""`gate_enabled` must not collapse a FAULT into a POLICY CHOICE (bug f5c4 -> ruling 39f8).
+"""Unreadable gate config raises. Readable config resolves enabled/disabled (f5c4, 39f8).
 
-History in two steps. Bug f5c4 made the two falsey states distinguishable at the source
-(`GateState.UNREADABLE` vs `DISABLED`) while deliberately KEEPING the fail-OPEN posture,
-which was a separate, contested policy question. Ticket 39f8-ae7c then carried that
-question to an operator, whose ruling — "Unreadable config should result in an error" —
-settled it: an unreadable config is no longer a state a gate can resolve TO at all; it
-raises a `ConfigError` naming the gate, the ticket, and the parse fault.
-
-These tests pin the post-ruling contract: a readable config resolves ENABLED/DISABLED
-(bool-compatible, so the ~15 test modules monkeypatching `gate_enabled` with a plain bool
-keep working), and an unreadable config raises — never a silent skip, never a fake
-`disabled` verdict.
-"""
+The earlier unreadable state preserved fail-open policy until the operator
+ruled for ConfigError naming gate and parse fault. Keep bool-compatible
+readable states for callers that patch gate_enabled. Never turn a parse fault
+into a disabled or skipped verdict."""
 
 from __future__ import annotations
 
@@ -90,12 +82,9 @@ def test_gate_state_has_no_unreadable_member() -> None:
 def test_the_close_gate_propagates_the_config_fault_instead_of_a_skip_verdict(
     cfg_root,
 ) -> None:
-    """RE-ANCHORED twice (f5c4 deferral -> 2091 verdict split -> 39f8 ruling).
-
-    The close gate must not launder a config FAULT into anything — neither a
-    `disabled` verdict (f5c4's bug) nor its own `unreadable` skip verdict (the 2091
-    interim): it errors, and the disabled POLICY CHOICE keeps its honest skip payload.
-    """
+    """Propagate a config fault through close. Neither a disabled verdict nor
+    the former unreadable skip may hide it. An explicitly disabled policy retains its
+    skip payload."""
     state = {"ticket_id": "1111-2222-3333-4444", "ticket_type": "story", "status": "in_progress"}
 
     off = gates.close_plan_review_gate_check(state["ticket_id"], state, repo_root=cfg_root(_OFF))

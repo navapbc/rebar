@@ -1,35 +1,14 @@
-"""Oracle for the dedicated gate-scratch volume (story aa40-cbda-ee38-481c).
+"""Oracle for the dedicated gate-scratch EBS volume (aa40, ADR 0112).
 
-ADR 0112 decision 3 moves the gate snapshot store and the review-bot's per-review clones off
-the root filesystem onto their own EBS volume. Most of that is configuration —
-``REBAR_GATE_TMPDIR`` already parameterises the store's base directory and
-``tempfile.TemporaryDirectory`` already honours ``TMPDIR`` — so the tests here fall into two
-groups.
-
-**The refusal** is the one part that needed code, and it is the part the ADR is emphatic
-about: a scratch volume that is not mounted must be a REFUSAL, "not an empty cache to
-repopulate onto the root filesystem — otherwise the volume's failure mode is silently
-reverting to the state this ADR exists to prevent". A bare mount point is an ordinary
-directory, so without this guard ``store_root()``'s ``mkdir(parents=True)`` recreates the
-store on root and everything keeps working, quietly, on the disk the epic exists to protect.
-
-Two marker files make the two states distinguishable with NO new mechanism — no env var, no
-config key, so ``check_mechanism_delta.py --check`` stays at ``new=0``:
-
-* ``<base>/../.gate-scratch-required`` — the DECLARATION. Written on the ROOT filesystem
-  beside the mount point, so it SURVIVES an unmount.
-* ``<base>/.gate-scratch-mounted`` — the PROOF. Written ON the volume, so it DISAPPEARS with
-  it.
-
-Only ``declaration present AND proof absent`` refuses. Every other combination — including the
-declaration-absent/proof-present quadrant that arises if the root-side write failed or an
-operator removed it during recovery — resolves to today's behaviour, because a host that never
-declared a dedicated volume must not start failing gates.
-
-**The wiring** group asserts the committed Terraform / compose / observability text, following
-``tests/unit/test_alarm_actions_terraform.py``: offline text contracts on the IaC, since a live
-``terraform plan`` needs credentials and an apply is an operator action.
-"""
+REBAR_GATE_TMPDIR and TMPDIR direct snapshots and review-bot clones off root.
+If a declared volume unmounts, a bare mount directory must refuse work
+rather than let store_root recreate data on root. A root-side
+.gate-scratch-required declaration survives unmount. The volume-side
+.gate-scratch-mounted proof disappears. A declaration without proof refuses.
+The configured dedicated path also refuses when both markers are absent.
+Other marker quadrants on unconfigured paths retain current behavior. No new
+env or config key is needed. Offline Terraform, compose, and observability checks
+cover wiring. Terraform apply remains an operator action."""
 
 from __future__ import annotations
 
@@ -167,12 +146,8 @@ def test_configured_dedicated_scratch_path_refuses_without_markers(
 
 
 def test_proof_without_declaration_also_admits(scratch_host) -> None:
-    """The fourth quadrant, stated rather than left to fall out of the implementation.
-
-    Proof-present/declaration-absent arises when the root-side write failed or an operator
-    removed it during a recovery. It resolves to today's behaviour: the declaration is the
-    only thing that turns the assertion on, so a missing declaration can never REFUSE.
-    """
+    """On this unconfigured path, proof without declaration admits even after
+    a failed root-side write or removal during recovery."""
     host = scratch_host
     host.mount()
     ran = []

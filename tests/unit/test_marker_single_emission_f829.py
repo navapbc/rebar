@@ -1,19 +1,8 @@
-"""One real error -> exactly ONE probe-countable marker line (bug f829-152a-b415-44a4).
+"""Count one anchored observability marker per error.
 
-The host observability probe counts markers with an anchored grep over the container's
-journald stream (``infra/scripts/observability.sh``: ``grep -cE '^<TOKEN> \\{'``), and
-journald ingests BOTH the container's stdout and stderr as line-start messages. Each
-marker emitter used to write the token-prefixed line on TWO paths — a ``logger`` call
-(-> the ``configure_logging()`` stdout handler) AND a ``print`` to stderr (the
-misconfigured-logging fail-safe) — so with logging configured every real error was
-counted twice. The contract: the unconditional stderr ``print`` is the ONLY line-start
-marker emission; the logger copy logs the structured record body WITHOUT the token
-prefix, so it can never match the anchor, while the fail-safe still yields exactly one
-line when logging is unconfigured.
-
-The test drives each emitter in a real subprocess and counts anchor matches across
-stdout+stderr combined — the journald view — in both logging modes.
-"""
+Journald ingests stdout and stderr. The fail-safe stderr print owns the
+line-start token. Configured logging emits only the body. Subprocess tests
+count combined streams with and without logging configured."""
 
 from __future__ import annotations
 

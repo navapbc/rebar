@@ -1,18 +1,9 @@
-"""Deterministic G5 decomposition signal (task spangly-beggarly-blackrhino).
+"""Deterministic G5 decomposition checks (spangly-beggarly-blackrhino).
 
-G5 (decomposition) once false-flagged an epic that already had 6 children as a "flat,
-undecomposed list" because it judged from ticket TEXT and counted children itself. This
-suite covers the two-part fix in ``det_floor.py`` + ``pass1.py``:
-
-  * ``decomposition_state_block`` — an authoritative store-derived child summary INJECTED
-    into the G5 finder context (AC1);
-  * ``veto_undecomposed_g5`` — a deterministic post-Pass-1 BACKSTOP that drops a residual
-    G5 decomposition-ABSENCE finding when the ticket has children, while PRESERVING a G5
-    finding about child altitude/content (AC2).
-
-Proving command:
-    .venv/bin/pytest tests/unit/test_g5_decomp_det.py -v
-"""
+Text-only review once called a 6-child epic undecomposed. Store-derived
+decomposition_state_block supplies child facts to the finder. The Pass-1
+veto drops an absence finding when children exist while retaining findings
+about child altitude or content."""
 
 from __future__ import annotations
 

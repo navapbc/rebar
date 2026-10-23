@@ -1,26 +1,15 @@
-"""Enforceable MCP-minted op-certs (story spoiled-bionic-goose / epic jira-reb-3527).
+"""Verify MCP op-certs signed by the box's trusted environment.
 
-The on-box ``rebar-mcp`` server signs the op-certs its certified-op tools mint under the box's
-EXISTING trusted signing environment (env_id + materialized Ed25519 key), so a cert it produces
-verifies against the pinned public key — and the ``rebar verify-opcert`` merge-gate can enforce
-that ONLY post-deploy closes carry such a cert while grandfathering historical closes.
+The server uses its env_id and materialized Ed25519 key. The merge gate checks
+the pinned public key. These tests use Ed25519 cryptography, a temporary store, and a
+fixture rebar.toml. Environment enforcement remains a deferred operator step
+(infra/runbooks/mcp-opcert-enforcement-flip.md).
 
-These tests exercise the REAL crypto + verify paths (no stubs), against a FIXTURE ``rebar.toml``
-and a temp store — NEVER the authoritative repo config (the live enforcement flip is a deferred,
-human-run operator step; see ``infra/runbooks/mcp-opcert-enforcement-flip.md``). The mechanism
-proven here is what makes that flip safe:
-
-* AC1 — a cert minted through the server's startup signing binding
-  (:func:`rebar.mcp_server.compose_startup_opcert_binding` + the context-bound signing seam)
-  VERIFIES against the pinned pubkey through the real ``verify-opcert`` walk (positive), while an
-  otherwise-identical cert signed by an UNREGISTERED key is REJECTED (contrast). No new pin is
-  added and no private key is committed.
-* AC2 — with ``verify.require_environment`` + ``verify.opcert_enforce_since`` set in the FIXTURE
-  config, a post-boundary close without a valid completion-verifier cert FAILS (exit 1) while a
-  pre-boundary close is grandfathered (exit 0).
-* AC3 — unsetting ``verify.require_environment`` returns the gate to advisory everywhere (exit 0),
-  and an existing pinned-env op-cert still verifies (regression oracle).
-"""
+AC1: a cert from the startup binding verifies. One from an unregistered key
+fails, without adding a pin or committing a private key. AC2: fixture
+require_environment and opcert_enforce_since reject an uncertified close after
+the boundary and grandfather one before it. AC3: removing require_environment
+restores advisory checks while an existing pinned cert still verifies."""
 
 from __future__ import annotations
 
