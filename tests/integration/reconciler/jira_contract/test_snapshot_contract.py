@@ -1,22 +1,6 @@
-"""Producer↔consumer snapshot contract — the keystone that closes the bug class.
-
-Epic f89d, story B (`8937-eed3-c881-4ea1`). The fetcher (PRODUCER) and the differs
-(CONSUMERS) share one implicit contract — the per-issue snapshot-entry shape — that
-bugs 0ee6 (nested ``comment`` read as flat ``comments``) and 3f04 (``issuelinks``
-never carried) silently violated. This module pins it two ways, BOTH through the
-PRODUCTION code path (the FakeAcliClient's real fixtures → ``fetcher.fetch_snapshot``
-→ the differs), so a key/shape divergence fails a test immediately:
-
-  1. **Schema conformance** — every ``fetch_snapshot`` entry validates against the
-     canonical ``jira_snapshot_entry`` schema in ``rebar.schemas`` (all ten
-     consumer-read keys, shape/type only).
-  2. **Semantic round-trip** — the inbound differ, run on the produced snapshot,
-     actually READS ``comment`` / ``issuelinks`` / ``parent`` (+ a scalar exemplar):
-     its emitted mutations change with the producer's content, and would be EMPTY
-     under the pre-fix shapes (proving the test would have caught 0ee6 / 3f04).
-
-Assertions are semantic (keys/types/round-trip), never whole-blob golden equality
-or mock-call-count. See docs/adr/0004-reconciler-snapshot-contract.md.
+"""Pin the producer-consumer snapshot contract through production fetch and differ
+paths. Schema checks catch missing or flat keys; discriminating mutations prove that
+nested comments, links, parents, and scalar fields are actually read.
 """
 
 from __future__ import annotations
@@ -130,13 +114,9 @@ def test_schema_rejects_flat_comments_prefix_shape(produced_snapshot) -> None:
 
 
 def test_producer_carries_enrichment_keys(produced_snapshot) -> None:
-    """The producer emits the post-fix nested-comment / issuelinks / parent shapes.
-
-    This is the producer half of "would fail on the pre-fix conditions": pre-3f04
-    the snapshot carried NO ``issuelinks``; pre-0ee6 comments were keyed flat. The
-    assertions below regress to red if the fetcher reverts to either shape. They
-    assert SHAPE/presence, not specific values (the fixtures will drift on
-    re-capture; only the contract shape is frozen).
+    """The producer retains nested comments, issuelinks, and parent keys. Assert their
+    shape rather than fixture values so recaptured data can change without hiding a
+    contract regression.
     """
     entry = produced_snapshot["REB-431"]
     # comment: nested object with a comments list (NOT a flat top-level "comments").
@@ -189,14 +169,9 @@ def test_inbound_reads_parent(produced_snapshot) -> None:
 
 
 def test_inbound_reads_comment_field_and_would_miss_prefix(produced_snapshot) -> None:
-    """Inbound reads the nested ``comment.comments`` list.
-
-    REB-431's fixture comments are all reconciler ECHOES (carry RECONCILER_MARKER),
-    so a faithful inbound pass suppresses them — emitting zero comment adds. We
-    prove the field is actually READ (not merely key-absent) by stripping the
-    marker from the bodies: the emitted-add count jumps to the real comment count.
-    Under the PRE-FIX flat-``comments`` shape the count would be zero in BOTH runs
-    — which is exactly the divergence this contract catches.
+    """Inbound reads comment.comments: removing echo markers must increase emitted adds
+    from zero to the fixture count. A flat comments key would leave both runs at
+    zero.
     """
     from rebar.reconciler import inbound_differ
 

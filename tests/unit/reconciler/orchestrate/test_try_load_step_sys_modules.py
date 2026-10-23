@@ -12,16 +12,8 @@ GUARDED_PASS_PATH = REPO_ROOT / "src" / "rebar" / "reconciler" / "guarded_pass.p
 
 
 def test_try_load_step_registers_module_in_sys_modules():
-    """_try_load_step must register the loaded module in sys.modules under its
-    dotted spec name BEFORE exec_module, so that dataclass type-resolution
-    (which does sys.modules.get(cls.__module__).__dict__) does not fail with
-    AttributeError: 'NoneType' object has no attribute '__dict__' on Python 3.14.
-
-    Regression: bug 5be7 chain defect #4 — the original _try_load_step loaded
-    via importlib.util.spec_from_file_location + exec_module but never wrote
-    to sys.modules. ApplyResult (a frozen dataclass in applier.py) then had
-    __module__='rebar.reconciler.applier' but sys.modules.get('rebar.reconciler.applier')
-    returned None, causing dataclasses._is_type to crash.
+    """Register the dotted module in sys.modules before exec_module so dataclass type
+    resolution can find its namespace.
     """
     guarded_mod = importlib.import_module("rebar.reconciler.guarded_pass")
 

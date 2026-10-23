@@ -1,33 +1,6 @@
-"""Where interrupted-retirement repair is allowed to happen, and where it is not.
-
-RP-02 S3 T2 (``flamboyant-possessive-blackbuck``). T1 built the repair; this module pins
-the single place a pass is permitted to run it, which is a narrower question than "does
-the repair work".
-
-Two independent conditions have to hold, and they come from different places:
-
-* **Late enough.** The pass must already own the exclusive lock, have cleared provider
-  preflight, and have passed the under-lock staleness gate. Repairing before those is
-  repairing on someone else's behalf, from a store nobody has agreed is current.
-* **Early enough.** The repair must precede the pass's FIRST remote issue observation.
-  This is the ordering that carries real weight: a tombstone is authoritative retirement
-  intent, and a pass that fetched first could see the retired issue answer 200 and then
-  complete a retirement in the same breath as fresh evidence that the issue is alive.
-  Doing the repair first keeps those two facts from being interleaved, so the recorded
-  decision always wins over a later observation rather than racing it.
-
-The window between those two is narrow and, in the current spine, it does NOT contain the
-operation config snapshot: ``bind_operation_runtime`` is composed after ``_load_snapshots``
-returns and therefore after the fetch. The repair reads only local binding state, so it
-has no need of that snapshot, and the pre-observation requirement wins. That is also why
-the call is in ``reconcile.py`` rather than ``run_differs.py`` — by the time
-``run_differs`` is invoked the fetch has already happened, so no position inside it can
-satisfy the ordering.
-
-The zero-write tests here are about THIS operation only. The pre-existing create-recovery
-call keeps its own, looser gate (unscoped passes only, with no write-bearing condition);
-that asymmetry is deliberate in this story and is filed separately as
-``easygoing-tremendous-frogmouth``.
+"""Interrupted-retirement repair runs once, under lock and after staleness validation
+but before remote observation, only for whole-store write-bearing passes. Read-only
+and narrowed passes leave overlap untouched; outcomes reach the operator.
 """
 
 from __future__ import annotations
@@ -50,14 +23,8 @@ def reconcile_mod() -> Any:
 
 @pytest.fixture(scope="module")
 def mode_mod(reconcile_mod: Any) -> Any:
-    """The mode module THROUGH reconcile's own loader, not a fresh copy.
-
-    ``persist`` is derived from ``MODE_CAPS.get(target_mode) != 0``, a dict keyed on the
-    ``Mode`` enum. Loading mode.py a second time under a different module name would build
-    a second enum class, and a miss in that dict returns ``None`` — which compares
-    unequal to 0 and would silently make a dry-run look WRITE-BEARING. The read-only tests
-    would then pass for the wrong reason, or fail for one. Sharing the loader's instance
-    removes the question.
+    """Use reconcile's loaded Mode enum so MODE_CAPS lookups compare the same enum
+    identity.
     """
     return reconcile_mod._load("rebar.reconciler.mode", "mode.py")
 
@@ -76,12 +43,8 @@ def _bridge(repo_root: Path) -> Path:
 
 
 def _seed_overlap(repo_root: Path) -> None:
-    """Write a live store and a tombstone that name the SAME identity.
-
-    This is the state a crash between ``save_retired()`` and ``save()`` leaves. It is
-    written directly rather than produced through a fault injection because what is under
-    test here is the pass's ORDERING, not the classifier; the classifier's own oracles
-    build the overlap through the real production route.
+    """Seed a live binding and tombstone for one identity, matching the
+    interrupted-retirement state.
     """
     bridge = _bridge(repo_root)
     bridge.mkdir(parents=True, exist_ok=True)
@@ -148,12 +111,8 @@ def _drive_load_phase(
     filter_local_ids: set[str] | None = None,
     stale_selection: bool = False,
 ) -> list[str]:
-    """Run the load phase over ``repo_root`` and return the ordered event log.
-
-    Only the two seams that would make this slow or non-hermetic are stubbed: the local
-    ticket read (a CLI call) and the snapshot fetch (a network call). The binding store,
-    the repository, the sync logger and the repair itself are all REAL, because the
-    ordering claim is about where the real repair sits relative to the real fetch.
+    """Drive the load phase with local-ticket and remote-fetch seams stubbed, recording
+    the ordering of repair and observation.
     """
     events: list[str] = []
 
@@ -189,13 +148,8 @@ def _drive_load_phase(
     monkeypatch.setattr(fetcher, "fetch_snapshot", _fetch)
     monkeypatch.setattr(fetcher, "compute_snapshot", _compute)
 
-    # Spy the module PRODUCTION reaches, not a second copy of the same file. Loading
-    # binding_recovery.py under a fresh module name builds a DIFFERENT BindingRecovery
-    # class, so patching that one patches a class nothing calls: the repair still runs,
-    # no "repair" event is ever recorded, and the ordering assertion below becomes
-    # unfalsifiable. binding_store.py resolves `from rebar.reconciler import
-    # binding_recovery`, which conftest wires to the engine directory, so this is the
-    # object that matters. Same hazard as the mode-enum note on the fixture above.
+    # Spy the imported BindingRecovery class that binding_store actually calls;
+    # loading a second module identity would make the ordering check vacuous.
     from rebar.reconciler import binding_recovery as recovery
 
     real_boundary = recovery.BindingRecovery.repair_at_write_boundary
@@ -229,9 +183,7 @@ def _drive_load_phase(
 def test_repair_runs_before_the_first_remote_observation(
     reconcile_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The load-bearing ordering claim, asserted as a sequence rather than a pair of
-    separate "did it happen" checks — only the ORDER rules out interleaving completion
-    with fresh liveness evidence."""
+    """Assert repair precedes remote fetch in one ordered event sequence."""
     _seed_overlap(tmp_path)
 
     events = _drive_load_phase(reconcile_mod, monkeypatch, tmp_path)
@@ -243,9 +195,9 @@ def test_repair_runs_before_the_first_remote_observation(
 def test_repair_runs_after_the_under_lock_staleness_gate(
     reconcile_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The other end of the window: the staleness gate is a precondition, not a
-    formality. A pass whose selection is stale has not established that its view is
-    current, so it has no standing to repair anything."""
+    """A stale selection cannot repair durable state; under-lock validation must
+    precede repair.
+    """
     _seed_overlap(tmp_path)
 
     events = _drive_load_phase(
@@ -317,9 +269,9 @@ def test_a_filtered_pass_leaves_the_overlap_alone(
 
 
 def test_merely_constructing_the_store_repairs_nothing(tmp_path: Path) -> None:
-    """Construction happens on every read-only command, including ones that take no lock
-    at all, so it must stay inert. This is why the repair is a pass-level call and not
-    something the loader does on the way in."""
+    """Store construction is used by unlocked reads and must leave interrupted
+    retirement untouched.
+    """
     _seed_overlap(tmp_path)
     from rebar.reconciler.binding_store import load_binding_store
 
@@ -398,12 +350,8 @@ def test_a_refused_guard_does_no_classification_at_all(
 def test_a_reconfirmed_and_cleared_overlap_still_completes_at_the_boundary(
     reconcile_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A HISTORICAL overlap: the live record was re-confirmed to the same key and its
-    absence counter cleared, which is exactly what an automatic 200 looks like. Neither
-    is a revocation, so the tombstone still wins and the pass completes the retirement.
-
-    The owner-level twins live in ``state/test_binding_recovery.py``; this proves the
-    guarded entry point did not lose the behavior on the way through.
+    """Reconfirming a live key or clearing its absence does not revoke retirement; the
+    tombstone still wins at the write boundary.
     """
     _seed_overlap(tmp_path)
     from rebar.reconciler.binding_store import load_binding_store
@@ -423,8 +371,9 @@ def test_a_reconfirmed_and_cleared_overlap_still_completes_at_the_boundary(
 def test_an_explicitly_unretired_identity_is_not_repaired_at_the_boundary(
     reconcile_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """``unretire`` is the one documented revocation. After it there is no intent left to
-    complete, so the live binding is ordinary work again and the pass must not touch it."""
+    """Explicit unretire revokes the tombstone, leaving the live binding untouched by
+    repair.
+    """
     _seed_overlap(tmp_path)
     from rebar.reconciler.binding_store import load_binding_store
 
@@ -444,9 +393,9 @@ def test_an_explicitly_unretired_identity_is_not_repaired_at_the_boundary(
 def test_a_repair_failure_happens_before_any_remote_call_and_keeps_the_overlap(
     reconcile_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Because the repair precedes the fetch, a failed repair CANNOT have made a remote
-    call — the ordering is what delivers that guarantee, not a try/except. The overlap
-    also has to survive so a later pass can retry it."""
+    """Failed repair happens before remote calls and retains the overlap for a later
+    pass.
+    """
     _seed_overlap(tmp_path)
     from rebar.reconciler import binding_repository
 
@@ -472,9 +421,9 @@ def test_a_completed_repair_is_reported_to_the_operator(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A repair mutates durable state without anyone asking for it, so a silent one is
-    indistinguishable from a store that was always coherent. The operator needs to be
-    able to correlate the change with the pass that made it."""
+    """Report a durable repair with its pass so the operator can explain the state
+    change.
+    """
     _seed_overlap(tmp_path)
 
     _drive_load_phase(reconcile_mod, monkeypatch, tmp_path)
@@ -545,22 +494,8 @@ def test_a_healthy_store_reports_nothing_about_repair(
 
 
 def test_the_repair_is_invoked_from_reconcile_and_not_from_run_differs() -> None:
-    """A structural anchor, both halves, on the decision this task turned on.
-
-    ``run_differs`` is invoked AFTER the snapshot fetch, so a repair placed there could
-    never satisfy the pre-observation ordering — pinning its absence keeps a future edit
-    from "tidying" the call into the diff phase beside the create-recovery call it
-    superficially resembles, since the two have deliberately different boundaries.
-
-    The PRESENCE half matters more, and for a specific reason. ``reconcile.py`` WAS at 799
-    of the 800-line cap; ticket piscine-bullish-cowbird performed exactly the extraction
-    this docstring anticipated, moving the load phase (and this call) to load_phase.py.
-    The repair call itself was relocated along with the rest of ``_load_snapshots`` —
-    verbatim, same call shape, same position relative to the staleness gate and the
-    fetch — so this anchor now checks load_phase.py instead of reconcile.py. Whoever
-    next relocates this call must keep it after the under-lock staleness gate and
-    before the fetch; the behavioural oracle for that is
-    ``test_repair_runs_before_the_first_remote_observation`` in this module.
+    """Require the repair call in load_phase.py and its absence from
+    run_differs.py; the load phase precedes fetch.
     """
     assert "repair_at_write_boundary" in (_ENGINE / "load_phase.py").read_text(encoding="utf-8")
 

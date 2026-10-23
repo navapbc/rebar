@@ -23,20 +23,10 @@ def _sandbox_repo_root(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _default_jira_project(monkeypatch):
-    """Pin ``JIRA_PROJECT=REB`` for these reconciler integration tests (overridable).
-
-    Bug 626d made the configured project load-bearing: the inbound fetch is scoped to
-    ``jira.project`` and fails closed on an empty key (it must not silently search the
-    wrong project). These tests don't configure a project of their own, so pin the
-    real project key here. ``REB`` matches the hermetic Jira fixtures under
-    ``tests/fixtures/jira/`` (epic f89d, story A); the mock/fake clients ignore the
-    project argument, so key-matching mock data of any project prefix still merges.
-
-    Bug ad85 additionally made Cloud credentials load-bearing: ``_build_jira_backend``
-    now fails loudly (``BackendEnvError``) when ``JIRA_URL`` / ``JIRA_USER`` /
-    ``JIRA_API_TOKEN`` are absent or ``JIRA_USER`` is not an email, at parity with the
-    DC ``JIRA_PAT`` guard. These reconcile paths build the (default Cloud) backend, so
-    pin hermetic, valid creds here alongside the project (overridable per-test).
+    """Pin a valid REB project and hermetic Cloud credentials for these integration
+    tests, while allowing per-test overrides and restoring the prior environment
+    afterward. Inbound fetch rejects an empty project; backend construction rejects
+    missing credentials or a non-email Cloud user.
     """
     monkeypatch.setenv("JIRA_PROJECT", "REB")
     monkeypatch.setenv("JIRA_URL", "https://example.atlassian.net")

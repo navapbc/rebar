@@ -1,7 +1,5 @@
-"""Tests for orchestrator wiring: outbound/inbound differs, binding store,
-sync logger, and reconcile-check mode integration into reconcile_once.
-
-Follows the importlib loader convention established in conftest.py.
+"""Pin reconcile_once wiring across outbound/inbound differs, binding store, shared
+apply, sync logger, and reconcile-check mode.
 """
 
 from __future__ import annotations
@@ -82,10 +80,8 @@ def _stub_modules(
     legacy_mutations=None,
     local_tickets=None,
 ):
-    """Return a dict of sys.modules stubs for reconcile_once dependencies.
-
-    The stubs replace fetcher, differ, applier, health, invariants, and the
-    new modules (binding_store, outbound_differ, inbound_differ, sync_logger).
+    """Supply the same dependency modules that reconcile_once loads so interception
+    reaches the executed code.
     """
     snap_path = _make_fake_snapshot(None, repo_root, jira_snapshot)
 
@@ -187,8 +183,7 @@ class TestOutboundCreate:
         mutation_mod,
         outbound_differ_mod,
     ):
-        """When outbound_differ emits a create, reconcile_once converts it to a
-        typed outbound-create Mutation and includes it in the apply() call."""
+        """An outbound create becomes a typed Mutation in the shared apply call."""
         repo_root = _setup_repo_root(tmp_path)
         jira_snapshot = {}
         stubs = _stub_modules(repo_root, jira_snapshot)
@@ -206,8 +201,7 @@ class TestOutboundCreate:
 
         _patch_and_run(reconcile_mod, stubs, repo_root)
 
-        # The applier.apply should have been called with mutations that include
-        # the outbound create
+        # The shared apply call must include the outbound create.
         apply_call = stubs["reconcile_applier"].apply
         assert apply_call.called
         mutations_passed = apply_call.call_args[0][0]
@@ -232,8 +226,7 @@ class TestOutboundUpdate:
         mutation_mod,
         outbound_differ_mod,
     ):
-        """When outbound_differ emits an update, the changed_fields are
-        carried in the typed Mutation payload."""
+        """Outbound updates retain changed fields in typed apply mutations."""
         repo_root = _setup_repo_root(tmp_path)
         jira_snapshot = {}
         stubs = _stub_modules(repo_root, jira_snapshot)
@@ -275,8 +268,9 @@ class TestInboundUpdate:
         reconcile_mod,
         mutation_mod,
     ):
-        """When inbound_differ emits updates, they are converted to typed
-        inbound Mutations and included in the apply() call."""
+        """Inbound differ mutations enter the shared apply call alongside outbound
+        work.
+        """
         repo_root = _setup_repo_root(tmp_path)
         jira_snapshot = {}
         stubs = _stub_modules(repo_root, jira_snapshot)
@@ -323,9 +317,9 @@ class TestCapCombined:
         mutation_mod,
         outbound_differ_mod,
     ):
-        """Both legacy inbound mutations and outbound mutations flow through
-        the same applier.apply() call, so mode-cap enforcement applies to the
-        combined set."""
+        """Legacy inbound and outbound mutations share one apply call, so mode caps
+        cover their combined set.
+        """
         repo_root = _setup_repo_root(tmp_path)
         jira_snapshot = {}
 
@@ -371,8 +365,7 @@ class TestSyncLogger:
         tmp_path,
         reconcile_mod,
     ):
-        """SyncLogger is created at pass start with sync_pass_start, and
-        closed at pass end with sync_pass_end."""
+        """The sync logger records pass start and completion around reconciliation."""
         repo_root = _setup_repo_root(tmp_path)
         stubs = _stub_modules(repo_root, jira_snapshot={})
 
@@ -395,7 +388,7 @@ class TestBindingStoreSaved:
         tmp_path,
         reconcile_mod,
     ):
-        """The binding store's save() method is called after apply completes."""
+        """Save bindings at the pass write boundary."""
         repo_root = _setup_repo_root(tmp_path)
         stubs = _stub_modules(repo_root, jira_snapshot={})
 
@@ -406,13 +399,12 @@ class TestBindingStoreSaved:
 
 
 def test_read_local_tickets_live_path_strips_ambient_sync_pull(tmp_path, monkeypatch):
-    """AI-1 regression: the live (no_sync=False) read must NOT inherit an ambient
-    REBAR_SYNC_PULL=off — that would silently suppress the tickets-branch sync pull.
-    A no_sync=True read must still set REBAR_SYNC_PULL=off."""
+    """A live local-ticket read removes ambient REBAR_SYNC_PULL=off; no_sync=True still
+    disables the pull.
+    """
     import subprocess
 
-    # _read_local_tickets moved to pass_support.py (ticket
-    # piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
+    # Patch the current pass_support owner of the local-ticket read.
     rh = importlib.import_module("rebar.reconciler.pass_support")
 
     fake_cli = tmp_path / "rebar-cli"
@@ -423,8 +415,7 @@ def test_read_local_tickets_live_path_strips_ambient_sync_pull(tmp_path, monkeyp
     real_run = subprocess.run
 
     def fake_run(cmd, **kwargs):
-        # Only intercept OUR ticket-CLI invocation; delegate everything else (e.g. the
-        # repo-isolation guard's own `git rev-parse HEAD`) to the real subprocess.run.
+        # Intercept only the ticket CLI; other commands still use subprocess.run.
         if cmd and str(cmd[0]) == str(fake_cli):
             captured["env"] = kwargs.get("env")
             return SimpleNamespace(returncode=0, stdout="[]")
@@ -441,9 +432,9 @@ def test_read_local_tickets_live_path_strips_ambient_sync_pull(tmp_path, monkeyp
 
 
 def test_read_local_ticket_full_live_path_strips_ambient_sync_pull(tmp_path, monkeypatch):
-    """AI-1 regression (sibling site): run_differs._read_local_ticket_full has the same
-    env-inheritance contract as pass_support._read_local_tickets — the live
-    (no_sync=False) read must strip an ambient REBAR_SYNC_PULL=off."""
+    """A live full-ticket read strips ambient REBAR_SYNC_PULL=off, matching the
+    list-read seam.
+    """
     import subprocess
 
     rd = importlib.import_module("rebar.reconciler.run_differs")

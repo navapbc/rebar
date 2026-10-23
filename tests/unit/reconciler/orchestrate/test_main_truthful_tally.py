@@ -1,22 +1,5 @@
-"""RED tests for Fix #5: truthful mutations_applied tally.
-
-Historical bug context (bug 85a1-f581-2252-4a21): __main__.py:223 printed
-``result['mutation_count']`` which is set to ``len(mutations)`` BEFORE apply
-runs (reconcile.py:789). The message therefore reads
-``OK: steady-state pass converged — N mutations`` even when N mutations
-silently failed to land in Jira. Phase 6 of the e2e probe disproved
-convergence (3 consecutive "no-op" passes each computed 21 filter-matching
-mutations) while the same passes self-reported OK with positive N.
-
-The fix surfaces ``mutations_applied`` (count of outcomes that reached a
-handler without raising) and ``mutation_failures`` (count of outcomes that
-recorded an ``error`` field) separately from ``mutation_count`` (computed)
-so operators can distinguish "dispatch ran, X succeeded" from
-"X mutations computed, dispatch unknown".
-
-The "converged" verb is reserved for confirmation passes where the
-applied count is zero on a post-sync diff — i.e., the genuine no-op
-case. Any pass with applied > 0 must print ``applied N (F failed)``.
+"""The pass reports applied writes rather than planned mutations. It says converged
+only after an applied=0 confirmation pass and fails loudly on mutation failures.
 """
 
 from __future__ import annotations
@@ -61,12 +44,8 @@ def _make_stub_reconcile(return_value):
 
 
 def test_run_pass_prints_applied_count_when_writes_succeed(main_mod, guarded_mod, tmp_path, capsys):
-    """When 3 of 10 mutations land in Jira, the OK line must report applied=3.
-
-    Fail-loud (Facet 2, reconciler-abort-isolation): a pass with per-mutation
-    failures (mutation_failures > 0) now returns a NON-ZERO exit code so a
-    scheduler/CI treats the pass as degraded, even though the truthful OK line
-    is still printed.
+    """If 3 of 10 planned mutations land, report applied=3; failures still produce a
+    nonzero exit.
     """
     stub = _make_stub_reconcile(
         {
@@ -92,17 +71,8 @@ def test_run_pass_prints_applied_count_when_writes_succeed(main_mod, guarded_mod
 def test_run_pass_does_not_say_converged_when_applied_nonzero(
     main_mod, guarded_mod, tmp_path, capsys
 ):
-    """'converged' verb must be reserved for applied=0 confirmation passes.
-
-    The historical lying message was 'OK: steady-state pass converged — N
-    mutations' where N was the computed count. After the fix, 'converged'
-    must NOT appear on the line when mutations_applied > 0.
-
-    A prior version of this test asserted ONLY the absence of "converged",
-    which empty stdout satisfies vacuously (bug: an implementation that
-    printed nothing at all would pass). The assertion below additionally
-    requires the exact nonempty applied/total tally line, so a silent or
-    tally-less pass fails this test too.
+    """Reserve 'converged' for applied=0 confirmation; a pass that writes reports its
+    applied count instead.
     """
     stub = _make_stub_reconcile(
         {

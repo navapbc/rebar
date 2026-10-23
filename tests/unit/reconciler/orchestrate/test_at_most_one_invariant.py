@@ -1,15 +1,6 @@
-"""Tests for invariants.check_at_most_one_local_id().
-
-Tests cover:
-  - test_a_clean_snapshot: no violations → no writes or ticket-cli calls
-  - test_b_single_violation: one violation → one append + one ticket-cli call +
-    patch_bug_filed called with returned bug id
-  - test_c_dedup_window: same key violated twice within 24h → exactly one ticket-cli call
-  - test_d_cap_at_5: 7 violations with cap=5 → exactly 5 writes + 5 calls + 2 skipped
-  - test_reconcile_once_invokes_invariant_after_fetch: reconcile_once() calls
-    check_at_most_one_local_id exactly once with the post-fetch snapshot
-  - test_end_to_end_second_write_produces_one_alert_one_bug: two passes; pass 2 has
-    a violation → exactly one BRIDGE_ALERT file entry + one ticket-cli call
+"""Check that duplicate local IDs for one Jira key produce one alert and one bug, while
+clean snapshots do nothing. The invariant runs after fetch and before diff; legacy
+dedup keys remain recognized.
 """
 
 from __future__ import annotations
@@ -66,15 +57,8 @@ def _make_alert_store_mock(deduped_keys: set[str] | None = None):
 
 
 def _make_subprocess_result(returncode: int = 0, stdout: str = "abcd-1234-5678-90ef"):
-    """Build a mock subprocess.CompletedProcess result for ticket-create.sh.
-
-    The default stdout uses a canonical 16-hex rebar ticket ID
-    (four groups of four lowercase hex digits) so that
-    invariants._extract_ticket_id's regex matches the returned value.
-    Tests that override stdout MUST pass a canonical-format ID for the
-    same reason — non-canonical strings cause _extract_ticket_id to
-    return the empty string, which the production code treats as
-    bug-filing failure and rolls the alert back.
+    """Return ticket-create output with a canonical 16-hex ID, so the parser sees the
+    same shape as the CLI and can reject malformed IDs.
     """
     result = MagicMock()
     result.returncode = returncode
@@ -122,10 +106,7 @@ def test_b_single_violation(tmp_path, invariants):
     }
 
     mock_store = _make_alert_store_mock(deduped_keys=set())
-    # Canonical 16-hex format required: invariants._extract_ticket_id uses
-    # the regex \b[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}\b and
-    # returns "" on a miss — at which point production rolls the alert back
-    # and the assertions on append/run/patch_bug_filed below all fail.
+    # The parser requires a canonical 16-hex ID; a miss rolls back the alert.
     mock_proc_result = _make_subprocess_result(returncode=0, stdout="abcd-1234-5678-90ef")
 
     with patch.object(invariants, "_load_alert_store", return_value=mock_store):
@@ -192,10 +173,8 @@ def test_c_dedup_window(tmp_path, invariants):
 
 
 def test_c_legacy_dedup_key_still_recognized(tmp_path, invariants):
-    """An alert filed under the legacy 'at-most-one:<key>' format (pre prefix
-    change) is recognized by the backward-compat lookup added for finding 4
-    of PR #332 cycle-3 review, so the violation is NOT re-filed under the new
-    key during the transition window.
+    """A legacy at-most-one dedup key suppresses re-filing the same violation under the
+    current key.
     """
     legacy_dedup_key = "at-most-one:PROJ-LEGACY"
     snapshot = {
@@ -329,12 +308,7 @@ def _make_stub_health() -> ModuleType:
 
 
 def test_reconcile_once_invokes_invariant_after_fetch(tmp_path):
-    """reconcile_once() must call check_at_most_one_local_id exactly once
-    with the post-fetch snapshot dict, BEFORE computing mutations.
-
-    All collaborators (fetcher, differ, applier, health, invariants) are served
-    by a patched ``reconcile._load``.
-    """
+    """Run the invariant exactly once on the fetched snapshot before mutation planning."""
     pass_id = "inv-invoke-test"
     snapshot = {
         "JIRA-1": {"summary": "clean issue", "local_ids": ["local-abc"]},
@@ -389,14 +363,8 @@ def test_reconcile_once_invokes_invariant_after_fetch(tmp_path):
 
 
 def test_end_to_end_second_write_produces_one_alert_one_bug(tmp_path):
-    """Two passes through reconcile_once() using the real invariants + alert_store.
-
-    Pass 1: clean snapshot (no violations) → no alerts, no ticket-cli calls.
-    Pass 2: 'JIRA-42' has local_ids=['id1','id2'] (violation) → exactly one
-    alert entry in .rebar/bridge/bridge_alerts/ and exactly one ticket-cli subprocess call.
-
-    Strategy: patch subprocess on the shared invariants module, then serve it (and the
-    collaborator stubs) through a patched ``reconcile._load`` for both passes.
+    """A clean pass records no alert or ticket CLI call; a violating second pass
+    records one alert and one ticket CLI call.
     """
     pass_id = "e2e-alert-test"
 
@@ -445,11 +413,8 @@ def test_end_to_end_second_write_produces_one_alert_one_bug(tmp_path):
         f"Pass 2 (violation) should produce exactly 1 ticket-cli call, got {calls_after_pass2}"
     )
 
-    # Exactly one at-most-one invariant BRIDGE_ALERT entry must exist.
-    # Note: binding-commit-failure alerts may also be present (the test
-    # environment has no .tickets-tracker git repo, so the commit step
-    # fails gracefully — this is expected and does not affect the invariant
-    # being tested here).
+    # Count only at-most-one alerts; this fixture can also emit binding-commit
+    # failures because it has no git-backed tickets tracker.
     alerts_dir = scratch_retention.alerts_dir(tmp_path)
     alert_files = list(alerts_dir.glob("*.jsonl")) if alerts_dir.is_dir() else []
     all_alert_lines = []

@@ -1,14 +1,6 @@
-"""Golden additive preview + redaction contract for the sealed versioned outcomes.
-
-REB-3115 S5 T2 — ``manifest_renderer.render_pass_outcomes`` seals a SINGLE additive,
-versioned section that exposes every named lifecycle / retry / fuse / outcome field of a
-pass without ever touching the canonical mutation array (AC1) and without leaking a secret
-or an unbounded collection (AC6).
-
-The section is a PURE projection: identical inputs render byte-identical output, and it is
-version-tagged so a legacy reader can ignore it. These tests are the executable spec of
-AC2 (every named field present, version-tagged) and AC6 (redact + bound every field and
-collection).
+"""Pin the additive, versioned lifecycle-outcomes preview and its redaction boundary.
+Named outcomes stay deterministic; raw or secret mutation payloads never enter the
+preview.
 """
 
 from __future__ import annotations

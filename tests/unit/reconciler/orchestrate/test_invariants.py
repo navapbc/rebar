@@ -1,10 +1,5 @@
-"""Unit tests for reconciler/invariants.py.
-
-Covers check_at_most_one_local_id end-to-end against a mocked alert_store
-and a mocked subprocess.run for the ticket CLI invocation. Does NOT load
-reconcile.py — tests that exercise the reconcile→invariants integration live
-in test_at_most_one_invariant.py (deferred to the core-pipeline PR because
-that test loads reconcile.py too).
+"""Check canonical ticket-ID extraction and alert patching through the invariant's
+ticket CLI seam. Reconcile pass ordering is covered separately.
 """
 
 from __future__ import annotations
@@ -43,12 +38,8 @@ def _snapshot_with_dup(jira_key: str = "DIG-100") -> dict:
 
 
 def _ok_cli_result(bug_id: str = "abc1-def2-1234-5678") -> MagicMock:
-    """Mock a successful ticket-create.sh stdout.
-
-    ticket-create.sh emits two lines on success: a human-readable summary
-    followed by the canonical 16-hex ticket ID on its own line. The mocked
-    stdout mirrors that format so the regex-based extractor in
-    invariants._extract_ticket_id sees real-shape data.
+    """Mirror the ticket CLI's summary line followed by a standalone canonical 16-hex
+    ID.
     """
     r = MagicMock()
     r.returncode = 0
@@ -281,12 +272,8 @@ def test_non_list_local_ids_is_ignored(
     mock_alert_store.append.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# Regression: ticket-ID extraction is regex-based, not whitespace-split based.
-# Guards against the fragile `stdout.strip().split()[-1]` pattern that would
-# return whatever final token appears in stdout — including title fragments
-# or "ERROR" — and patch the alert with garbage.
-# ---------------------------------------------------------------------------
+# Match canonical ticket IDs, not the final whitespace token, which may be a
+# title fragment or error text.
 
 
 def test_extract_ticket_id_canonical_format(invariants: ModuleType) -> None:
@@ -350,10 +337,9 @@ def test_garbage_cli_output_leaves_alert_unpatched(
 def test_valid_cli_output_extracts_id_and_patches_alert(
     invariants: ModuleType, mock_alert_store: MagicMock, tmp_path: Path
 ) -> None:
-    """When CLI stdout contains a canonical-format ID, it is extracted and
-    used to patch the alert — guards against a regression to the
-    whitespace-split[-1] approach that would return the wrong token if the
-    title contains trailing tokens."""
+    """Extract the canonical ID from CLI output and patch the alert, even when the
+    summary contains other tokens.
+    """
     # Title is "at-most-one violation: DIG-100 has multiple local_ids" —
     # if extraction reverted to split()[-1] of the FIRST line, it would return
     # "local_ids", not the canonical ID.

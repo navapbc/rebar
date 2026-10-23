@@ -1,14 +1,5 @@
-"""Direct per-phase unit tests for the decomposed ``reconcile_once`` (hush-quail-holm).
-
-Before the decomposition, the load / persist logic could only be exercised by
-driving the whole ``reconcile_once`` orchestrator (a full fetch → diff → apply →
-persist pass). The phases are now in-file helpers over a ``_PassContext``, so this
-module exercises them DIRECTLY in isolation:
-
-  - ``_handle_corrupt_snapshot`` — the load-phase corrupt-snapshot abort, lifted
-    out of the spine.
-  - ``_persist_and_log`` — the persist phase: the manifest tally, the no-write
-    plan surfacing, and the filter metadata, each without any fetch/diff/apply.
+"""Test load and persist phases directly so corrupt snapshots fail before work and
+no-write passes report the computed plan without touching durable state.
 """
 
 from __future__ import annotations

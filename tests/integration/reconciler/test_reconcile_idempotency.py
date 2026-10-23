@@ -1,21 +1,7 @@
-"""reconcile_once 1-pass idempotency over an unchanged remote (robe-creek-zealot).
-
-Integration-tier counterpart to tests/unit/reconciler/test_reconcile_once.py.
-The unit tier runs against a NON-git tmp repo, so ``rebar list`` exits 1 and
-``_read_local_tickets`` returns [] — the outbound differ never sees the
-inbound-created tickets and the idempotency assertion is vacuously green
-(the "false green" documented on ticket robe-creek-zealot). This tier closes
-that gap:
-
-  - the repo root is a REAL git work tree, so ``rebar list`` (the real ticket
-    CLI, via subprocess) returns the inbound-created working-tree tickets and
-    the outbound differ runs over them;
-  - the acli fake is FAITHFUL: label / entity-property write-back and created
-    issues are reflected in subsequent searches, exactly like live Jira.
-
-Idempotency contract: pass 1 imports the remote working set (inbound creates,
-which now bind_confirm at creation); pass 2 over the unchanged remote computes
-ZERO mutations and issues ZERO Jira write calls.
+"""Exercise two-pass idempotency in a real git-backed ticket store. The unit fixture
+lacks the ticket CLI's git context and can pass vacuously; this test makes imported
+tickets visible to the outbound differ and requires zero second-pass mutations and
+Jira writes.
 """
 
 from __future__ import annotations
@@ -346,20 +332,9 @@ def test_unchanged_second_pass_preserves_binding_store_bytes_and_head(
         text=True,
     ).stdout.strip()
 
-    # Advance the external clock deterministically so the pre-fix timestamp
-    # rewrite cannot hide behind two passes landing in the same second.
-    #
-    # RP-02 S2 T2 moved the absence/tombstone/comment cluster (clear_absent + its
-    # siblings) out of binding_store and into binding_lifecycle, where they resolve
-    # their OWN module-level _now_iso. Freezing the clock only on binding_store no
-    # longer reaches those moved operations, so this oracle broadens the freeze to
-    # BOTH module clocks (bug 02c4). NOTE: on a fully in-window idempotent pass the
-    # moved absence ops never execute (their two call sites — binding_walk and
-    # outbound_differ — are gated on an out-of-window-but-alive key), so this is
-    # defense-in-depth: it keeps the no-churn contract deterministically pinned on
-    # binding_lifecycle for any future healthy-pass write, matching the direct
-    # unit-tier guard test_binding_lifecycle.py::
-    # test_clear_absent_does_not_dirty_an_entry_with_no_absence.
+    # Freeze both module clocks so same-second passes cannot hide a write.
+    # Absence operations read binding_lifecycle's clock; the in-window pass does
+    # not reach them, while the direct lifecycle test covers no-churn behavior.
     binding_store_mod = importlib.import_module("rebar.reconciler.binding_store")
     lifecycle_mod = sys.modules["rebar.reconciler.binding_lifecycle"]
     monkeypatch.setattr(binding_store_mod, "_now_iso", lambda: "2099-01-01T00:00:00Z")
@@ -507,10 +482,9 @@ def test_out_of_window_alive_pass_reaches_clear_absent_with_no_churn(
 def test_out_of_window_404_then_alive_roundtrip_clears_absence(
     git_repo, reconciler_modules, monkeypatch, clear_absent_calls
 ):
-    """The moved absence cluster's round-trip at integration tier: a 404 GET
-    records the absence via note_absent (counter rises; updated_at stamps the
-    FROZEN lifecycle clock's sentinel — the 02c4 fix reaches the moved module),
-    then an alive GET drives clear_absent's TRUE branch to reset the counter."""
+    """A 404 stamps absence with the injected lifecycle clock; a later alive GET
+    reaches clear_absent and resets the counter without churn.
+    """
     state = _FakeJiraState()
     _seed_working_set(state)
 

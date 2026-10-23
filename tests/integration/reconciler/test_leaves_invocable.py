@@ -1,9 +1,5 @@
-"""Post-deletion leaf INVOCABILITY guard (task 76e6 / story 2da6).
-
-Complements the registry-linkage guard in ``test_post_deletion_linkage.py``: this
-file actually INVOKES a post-deletion leaf and asserts an observable outcome, so it
-is a genuine invocability proof (not merely a linkage/import check). Nothing is
-swallowed — a real import/dispatch error fails the test.
+"""Invoke a post-deletion leaf and check an observable result. The sibling linkage test
+only checks the registry; this test exposes import and dispatch failures.
 """
 
 import importlib
@@ -23,16 +19,9 @@ def applier():
 
 
 def test_outbound_probe_leaf_genuinely_invocable(applier):
-    """A post-deletion leaf is INVOCABLE end-to-end, proven by an observable outcome.
-
-    The outbound ``probe`` leaf is chosen because it is read-only (a single
-    ``get_issue`` lookup, no local writes / rollback): invoking it exercises the
-    real import chain, ``_direction_guard``, and ``_call_with_retry`` after the
-    legacy bridge deletion. We assert the OBSERVABLE post-conditions — the leaf
-    reports the issue as present, echoes the fetched issue into its ``ApplyResult``
-    payload, tags the result with the right direction/action, and actually calls
-    the client with the target key. Any real error (import, dispatch, etc.) is
-    allowed to fail the test rather than being swallowed.
+    """Invoke the read-only outbound probe through its real import and dispatch chain.
+    Assert the fetched issue, direction, action, and client key; propagate any
+    error.
     """
     mut_mod = applier._load_mutation_module()
     direction = mut_mod.MutationDirection.outbound

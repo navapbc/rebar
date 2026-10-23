@@ -1,25 +1,6 @@
-"""Honest hermetic BIDIRECTIONAL round-trip — comments, links, parent.
-
-Epic f89d, story F (`822a-2bad-fe48-43e0`). The live e2e probe encoded the
-inbound-comment bug as EXPECTED (`NOT-SYNCED`) and no probe round-tripped
-relationships at all. This is the hermetic replacement: it round-trips comments,
-issue-links (both directions) and parent through the PRODUCTION code path using
-story A's REAL captured fixtures (not hand-built dicts like
-test_reconcile_roundtrip.py), runnable in CI without live Jira.
-
-The two production legs (the read-only fake can't write, so the outbound leg uses a
-recording write-client through the production applier):
-
-  * INBOUND  (Jira -> local): FakeAcliClient -> ``fetcher.compute_snapshot`` ->
-    ``inbound_differ.compute_inbound_mutations``.
-  * OUTBOUND (local -> Jira): ``outbound_differ.compute_outbound_mutations`` ->
-    ``batch_dispatch.update_one`` against a recording client.
-
-The round-trip property asserted is **convergence**: derive the local steady state
-from what inbound actually emits, then neither differ re-emits — a value present on
-BOTH sides yields ZERO spurious mutation in EITHER direction (no oscillation). A
-key/shape divergence (bug 0ee6 / 3f04) breaks this. See
-docs/adr/0004-reconciler-snapshot-contract.md.
+"""Round-trip captured comments, links in both directions, and parents through the
+production fetch, differ, and apply paths. The read-only fake supplies inbound data;
+a recording write client proves outbound convergence without live Jira.
 """
 
 from __future__ import annotations

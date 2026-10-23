@@ -1,10 +1,6 @@
-"""Tests for story 286b: thread ``target_mode`` through main → run_pass →
-reconcile_once → applier.apply, enforce per-mode mutation caps, and emit the
-asymmetric manifest shape per mode.
-
-The fixtures construct 2050 typed ``Mutation`` instances (a mix of inbound
-and outbound) and assert observable cap / deferral behaviour against the
-real ``applier.apply`` entry point.
+"""Check target_mode threading and per-mode caps through reconcile_once and
+applier.apply. LIVE dispatches all mutations without a manifest; capped and preview
+modes retain deterministic tallies and typed/legacy rendering.
 """
 
 from __future__ import annotations
@@ -48,24 +44,15 @@ def _plans(mutations, *, mode=None, max_changes=None):
 
 @pytest.fixture(scope="module")
 def applier_mod():
-    """Load applier.py under a UNIQUE non-canonical key.
-
-    Pre-seeding canonical sys.modules keys (e.g. ``rebar.reconciler.applier``)
-    leaks the applier's internally-loaded mutation/mode modules under their
-    canonical keys, which other test files that re-import mutation under
-    different keys (e.g. reconcile.py's ``reconcile_mutation``) then see
-    as a *different* class identity — yielding spurious
-    DirectionMismatchError pollution. Loading our applier under a unique
-    key keeps its sub-loads isolated from sibling tests.
+    """Load the applier under an isolated key so canonical sys.modules entries cannot
+    leak module identity into other tests.
     """
     return importlib.import_module("rebar.reconciler.applier")
 
 
 @pytest.fixture(scope="module")
 def mutation_mod(applier_mod):
-    # Reuse the exact module the applier loaded under its canonical key so
-    # Mutation/Direction enum identities match across this test's fixtures
-    # and the applier's internal dispatch table.
+    # Share the applier's module so fixture and dispatch enum identities match.
     return applier_mod._load_mutation_module()
 
 
@@ -80,10 +67,8 @@ def renderer_mod(applier_mod):
 
 
 def _make_mutations(n: int, mutation_mod) -> list:
-    """Construct *n* typed Mutations alternating inbound/outbound + actions.
-
-    Targets are zero-padded so deterministic sort ordering is straightforward
-    to reason about ("ISSUE-0001" < "ISSUE-0002" lexicographically).
+    """Alternate typed inbound and outbound mutations over zero-padded targets to make
+    the sort order deterministic.
     """
     D = mutation_mod.MutationDirection
     A = mutation_mod.MutationAction
@@ -162,10 +147,8 @@ def test_bootstrap_strict_caps_at_10(tmp_path, applier_mod, mode_mod, mutation_m
     assert payload["applied_count"] == 10
     assert payload["deferred_count"] == 2040
 
-    # Deferred list must be ordered by applier._mode_sort_key, which
-    # intentionally prefixes "outbound create" so outbound creates land
-    # in the cap window first (bug d5a2-3fc8). The natural tuple sort
-    # would put 'inbound' before 'outbound' and break that contract.
+    # _mode_sort_key puts outbound creates in the cap window before inbound
+    # work; tuple sorting would reverse that priority.
     deferred_dicts = payload["deferred"]
     deferred_sort_keys = [applier_mod._mode_sort_key(d) for d in deferred_dicts]
     assert deferred_sort_keys == sorted(deferred_sort_keys), (
@@ -198,11 +181,8 @@ def test_bootstrap_throttle_caps_at_100(tmp_path, applier_mod, mode_mod, mutatio
 
 
 def test_live_uncapped(tmp_path, applier_mod, mode_mod, mutation_mod):
-    """LIVE: uncapped — all mutations dispatched, NO manifest file written.
-
-    Mocks the dispatch helpers so the test does not invoke the real ACLI
-    client; the contract under test is (a) cap=None means every mutation
-    reaches the dispatch surface, (b) LIVE writes no manifest file.
+    """LIVE dispatches all mutations with no cap or retained manifest; stub dispatch to
+    avoid real Jira calls.
     """
     muts = _make_mutations(2050, mutation_mod)
     snapshots_dir = scratch_retention.snapshots_dir(tmp_path)
@@ -226,12 +206,7 @@ def test_live_uncapped(tmp_path, applier_mod, mode_mod, mutation_mod):
         assert typed_spy.call_count > 0, "inbound dispatch must fire under LIVE"
         assert batch_spy.call_count == 1, "outbound batch must run exactly once"
 
-    # LIVE must NOT leave a manifest file behind per contract.
-    # Bug c903: LIVE now returns the applied/failed tally read out of the manifest
-    # immediately before unlinking it, instead of None — returning None was what made
-    # `mutation_failures` structurally 0 in production. The contract this test names
-    # (no manifest FILE in LIVE) is unchanged and still asserted below; only the
-    # in-memory return value changed, so assert its shape rather than `is None`.
+    # LIVE returns the applied/failed tally but removes the manifest file.
     assert isinstance(manifest_path, dict), (
         f"LIVE must return the applied/failed tally, got {manifest_path!r}"
     )
@@ -258,22 +233,9 @@ def test_target_mode_threaded_to_applier(tmp_path, applier_mod, mode_mod, mutati
         captured["pass_id"] = pass_id
         return tmp_path / "fake.manifest.json"
 
-    # Patch the applier module loaded by reconcile_once. reconcile_once uses
-    # _load("reconcile_applier", "applier.py"); patch the function attribute
-    # on our shared applier module — reconcile.py loads from its own dotted
-    # key, so we instead patch reconcile.py's own loader return by stubbing
-    # the reconcile_once function-scope to call our fake. The simplest reliable
-    # path: monkeypatch the applier module's apply attribute under the key
-    # reconcile.py uses.
+    # Reconcile loads a separate applier module identity.
 
-    # reconcile.py loads via _load("reconcile_applier", "applier.py") which
-    # registers under the dotted key "reconcile_applier" — but its internal
-    # importlib pattern goes via spec_from_file_location so the module loaded
-    # in reconcile is a *different* object from applier_mod. To intercept,
-    # patch the function on whatever module reconcile_once actually imports
-    # at runtime via importlib by replacing the .apply attribute on the
-    # importlib-loaded module after first triggering the load. Easiest: stub
-    # reconcile_once itself to invoke our fake_apply.
+    # Stub reconcile_once and forward its mode to fake_apply to intercept it.
 
     def _fake_reconcile_once(pass_id, repo_root=None, target_mode=None, **kwargs):
         # Mirror the real signature; forward target_mode as the mode= kwarg
@@ -358,20 +320,15 @@ def test_asymmetric_manifest_live_writes_no_file(tmp_path, applier_mod, mode_mod
             mode=mode_mod.Mode.LIVE,
             ticket_plans=_plans(muts, mode=mode_mod.Mode.LIVE),
         )
-    # Bug c903: LIVE returns the tally (read pre-unlink), not None. The contract this
-    # test names — no manifest FILE — is the assertion below, and is unchanged.
+    # LIVE returns its tally and unlinks the manifest file.
     assert isinstance(result, dict), f"LIVE must return the tally, got {result!r}"
     assert set(result) == {"applied_count", "failed_count"}
     assert not fake.exists()
 
 
 def test_phase_gate_still_blocks(tmp_path):
-    """Regression guard: .reconciler-phase-gate=dry-run still blocks bootstrap-strict.
-
-    Loads the advisory_lock module and asserts ``check_phase_gate`` returns
-    True for a target_mode greater than the pinned gate. This exercises the
-    phase-gate path that ``__main__.main`` reads BEFORE invoking run_pass —
-    the new ``target_mode`` plumbing must not have weakened it.
+    """A dry-run phase gate still blocks bootstrap-strict even when target_mode is
+    threaded through the pass.
     """
     advisory = importlib.import_module("rebar.reconciler._advisory_lock")
     mode_mod = importlib.import_module("rebar.reconciler.mode")
@@ -383,13 +340,8 @@ def test_phase_gate_still_blocks(tmp_path):
     gate_file.write_text("dry-run\n")
 
     target = mode_mod.Mode.BOOTSTRAP_STRICT
-    # check_phase_gate reads the gate file from the tickets branch via
-    # `git show`. In CI / dev envs where ``tmp_path`` is not a git repo with
-    # a tickets branch, the call raises ReconcileLockError (fail-CLOSED). The
-    # regression guard cares about (a) the signature still accepts
-    # (Mode, Path), and (b) the only allowed failure mode is the fail-CLOSED
-    # ReconcileLockError — NOT a silent fall-through to e.g. AttributeError
-    # from a broken target_mode plumbing.
+    # Without a tickets branch, git show must fail closed with
+    # ReconcileLockError; accepting (Mode, Path) must not silently fall through.
     try:
         _ = advisory.check_phase_gate(target, tmp_path)
     except advisory.ReconcileLockError:
@@ -403,13 +355,8 @@ def test_phase_gate_still_blocks(tmp_path):
 
 
 def test_spot_check_sampling_is_deterministic_across_runs(applier_mod, mutation_mod):
-    """Finding #1 (3307050253): _spot_check_sample must use a stable hash.
-
-    Python's built-in ``hash()`` is randomized per-process unless
-    ``PYTHONHASHSEED`` is pinned, so re-importing the renderer in a fresh
-    process would produce different sample selections. The renderer's
-    docstring claims "Stable across runs"; this test enforces that by
-    asserting identical sample selection from two distinct module loads.
+    """Repeated render_throttle calls in one process select the same nonempty
+    spot-check keys.
     """
     import importlib.util
 
@@ -438,32 +385,13 @@ def test_spot_check_sampling_is_deterministic_across_runs(applier_mod, mutation_
 def test_reconcile_once_legacy_caller_omits_mode_kwarg(
     tmp_path, applier_mod, mutation_mod, monkeypatch
 ):
-    """Finding #2 (3307050261): legacy callers (target_mode=None) must
-    call applier.apply WITHOUT a ``mode`` kwarg.
-
-    Exercises the if/else branch in apply_phase.py's ``apply_mutations`` (moved
-    from reconcile.py by ticket piscine-bullish-cowbird) that preserves backward
-    compatibility for tests stubbing applier.apply with a signature that does
-    not accept ``mode``.
+    """A caller with target_mode=None omits the mode kwarg to preserve the legacy
+    applier call shape.
     """
-    # The branch under test in apply_phase.py's apply_mutations:
-    #
-    #     if target_mode is None:
-    #         manifest_path = applier.apply(mutations, pass_id, repo_root)
-    #     else:
-    #         manifest_path = applier.apply(
-    #             mutations, pass_id, repo_root, mode=target_mode
-    #         )
-    #
-    # We assert the legacy branch (target_mode is None) invokes apply WITHOUT
-    # a ``mode`` kwarg. Read apply_phase.py's source directly so the test is
-    # resilient to reconcile.py's lazy loader plumbing — what we actually
-    # care about is the textual call-shape contract that protects legacy
-    # test stubs.
+    # Read apply_phase's call shape directly: target_mode=None must omit mode,
+    # regardless of reconcile's lazy module loader.
     reconcile_src = (RECONCILER_DIR / "apply_phase.py").read_text()
-    # Bug 85a1: the legacy-branch call may carry backward-compatible kwargs
-    # (e.g. binding_store=), so the literal-string assertion is too brittle.
-    # Use a regex that allows trailing kwargs but explicitly rejects mode=.
+    # Allow other compatible kwargs while rejecting mode on the legacy branch.
     import re as _re
 
     legacy_match = _re.search(
@@ -478,10 +406,7 @@ def test_reconcile_once_legacy_caller_omits_mode_kwarg(
         f"legacy-branch applier.apply must NOT include mode=; got {legacy_match.group(0)!r}"
     )
 
-    # Belt-and-braces runtime guarantee: stub applier.apply on the loaded
-    # applier module and exercise the legacy call shape directly. This
-    # mirrors what reconcile_once does on the target_mode=None branch and
-    # asserts no kwargs leak through.
+    # Also exercise the loaded applier call to catch leaked kwargs at runtime.
     captured: dict = {}
 
     def _fake_apply(*args, **kwargs):
@@ -499,13 +424,8 @@ def test_reconcile_once_legacy_caller_omits_mode_kwarg(
 
 
 def test_manifest_renderer_handles_typed_and_legacy_dict_shapes(applier_mod, mutation_mod):
-    """Finding #3 (3307050264): renderer must handle both Mutation dataclass
-    instances AND legacy dict-shaped batch mutations.
-
-    The module docstring states both shapes are supported; this test
-    exercises each shape end-to-end through render_dry_run_or_strict and
-    render_throttle and asserts the output schema matches the asymmetric-
-    manifest contract.
+    """The renderer accepts both typed Mutation objects and legacy dict-shaped
+    mutations without changing their manifest meaning.
     """
     renderer = applier_mod._load_manifest_renderer()
     D = mutation_mod.MutationDirection

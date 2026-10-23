@@ -1,33 +1,6 @@
-"""Bidirectional field ROUND-TRIP convergence over the real pure differs.
-
-Every field mapping in the reconciler is exercised one-directionally by the
-unit tier (outbound mock vs. mock, inbound mock vs. mock). What was never
-covered is the *chained* property that actually matters in production: a value
-pushed local->Jira, encoded into the shape Jira stores and returns, then read
-back Jira->local, must converge to ZERO spurious mutation. The historical churn
-sources (description ADF normalisation, lossy status mapping, label echoes,
-parent name skew, comment self-echo) are all round-trip defects: each half is
-individually correct yet the composition oscillates.
-
-These tests chain the REAL pure differs end to end against mock fixtures (no
-live Jira). The "Jira shape" between the halves is produced exactly as the live
-applier produces it:
-
-  * description: outbound maps to plain text, the send path ADF-encodes via
-    ``adf.text_to_adf`` (Jira REST v3 requires ADF), the fetcher returns the ADF
-    verbatim, and the inbound differ decodes via ``adf.adf_to_text``. The
-    round-trip snapshot therefore carries the description as an ADF ``doc``.
-  * status: a lossy local status (blocked/cancelled) maps to a live workflow
-    status PLUS a ``rebar-status:`` annotation label; the inbound side restores
-    the original local status from that label.
-  * labels / parent / comments: identity round-trips through the binding store
-    and the reconciler marker.
-
-The convergence assertion is the same in every case: after the round-trip the
-inbound differ emits NO change for the field under test (and, where relevant,
-the outbound differ emits none either), so the bridge reaches a fixed point.
-
-The differs are imported as ordinary ``rebar.reconciler`` submodules.
+"""Chain outbound and inbound pure differs through the Jira storage shape to require
+fixed-point convergence. Cover ADF description fitting, lossy status labels, parent
+binding, comment echo suppression, and link direction without live Jira.
 """
 
 from __future__ import annotations
@@ -44,9 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "reconciler"
 
 
-# Ticket 4af8: the Jira->remote field mapper (``_map_local_to_jira_fields``) is no longer
-# re-exported on ``outbound_differ`` (the core differ receives it by injection). Load it
-# from its owning vendor leaf for the send-shape helper below.
+# Load the send-shape mapper from its Jira owner; the core differ receives it by injection.
 def _outbound_fields() -> ModuleType:
     return importlib.import_module("rebar.reconciler.adapters.jira.outbound_fields")
 
@@ -152,13 +123,8 @@ def _outbound_jira_shape(ticket: dict, *, adf, jira_status: str) -> dict:
 
 
 def test_description_survives_outbound_adf_inbound_unchanged(adf, outbound, inbound):
-    """rebar -> Jira-ADF -> rebar: a pushed description must NOT re-emit inbound.
-
-    The top historical churn source: outbound maps the description to plain
-    text, the applier ADF-encodes it, and the inbound differ decodes the ADF.
-    A faithful round-trip yields the original text (modulo the trailing-newline
-    normalisation both sides rstrip-tolerate), so the inbound differ must emit
-    NO ``description`` change for an otherwise-unchanged ticket.
+    """Outbound ADF encoding followed by inbound decoding preserves the local
+    description, allowing trailing-newline normalization without an inbound change.
     """
     bind = StubBindingStore({"loc-1": "DIG-1"})
     desc = "Multi-line body\n\n- bullet one\n- bullet two\n\nClosing paragraph."
@@ -191,21 +157,9 @@ def test_description_survives_outbound_adf_inbound_unchanged(adf, outbound, inbo
 
 
 def test_oversize_description_truncated_by_jira_not_pulled_back(adf, outbound, inbound):
-    """rebar -> Jira-TRUNCATED-ADF -> rebar: the truncated body must NOT clobber local.
-
-    Bug tarry-amble-bugle. When a local description is too long for Jira's ADF
-    limit, the send path truncates it (``adf.fit_text_to_adf_limit``) so it lands
-    — send-side only, the local store is never mutated. Jira then stores/returns
-    the TRUNCATED body. This chains the full round-trip and asserts the fixed
-    point:
-
-      * the OUTBOUND differ over the truncated Jira snapshot emits NO description
-        change (it fits the local value before comparing — long-standing);
-      * the INBOUND differ emits NO description change either (the fix — it must
-        apply the SAME fit to the local value, else it pulls Jira's truncated
-        body back into local, clobbering the full description and invalidating
-        the ticket's plan-review fingerprint/signature);
-      * the local ticket keeps its FULL, untruncated description.
+    """Jira's ADF limit truncates the sent copy, not the local description. Both
+    differs compare fitted values and emit no description change after the round
+    trip.
     """
     bind = StubBindingStore({"loc-trunc": "DIG-99"})
     # Multi-line oversize body: text_to_adf wraps each line in its own paragraph,
@@ -482,12 +436,8 @@ def test_outbound_comment_not_reimported_inbound(adf, outbound, inbound):
 
 
 def test_link_relationship_survives_roundtrip_without_reemit(adf, outbound, inbound):
-    """A local 'blocks' dep pushed as a Jira Blocks issuelink must reach a fixed
-    point: once the link rides on the Jira snapshot, NEITHER the outbound differ
-    re-emits a `set_relationship` (no per-pass churn) NOR the inbound differ
-    re-imports the dep (no echo). This is the link analogue of cases 3/5 — the
-    historical link layer (story 25ae) had NO round-trip convergence coverage,
-    only one-directional unit tests.
+    """A local blocks dep becomes a Jira Blocks link; once Jira returns it, neither
+    differ re-emits the relationship or re-imports the dep.
     """
     bind = StubBindingStore({"loc-7": "DIG-7", "loc-8": "DIG-8"})
     blocker = _make_ticket("loc-7", status="open")
@@ -506,12 +456,8 @@ def test_link_relationship_survives_roundtrip_without_reemit(adf, outbound, inbo
         for lm in blocker_om.links
     ), f"outbound did not emit the Blocks link to DIG-8: {blocker_om.links}"
 
-    # Apply the link to the Jira snapshot (what the next fetch returns). LIVE-JIRA
-    # direction (bug 4b59): "DIG-7 blocks DIG-8" places DIG-8 on DIG-7's OUTWARD side
-    # (type.outward == "blocks"). Inbound maps an outwardIssue Blocks back to the
-    # 'blocks' relation (matching the local dep). (This fixture previously used the
-    # inwardIssue side — the reversed convention that let the inbound inversion ship;
-    # the absolute mapping is now pinned by test_link_direction_absolute.py.)
+    # Jira returns "DIG-7 blocks DIG-8" as DIG-7's outwardIssue. Inbound maps
+    # that Blocks direction back to the existing local blocks dep.
     post_blocker = dict(pre_blocker)
     post_blocker["issuelinks"] = [{"type": {"name": "Blocks"}, "outwardIssue": {"key": "DIG-8"}}]
 

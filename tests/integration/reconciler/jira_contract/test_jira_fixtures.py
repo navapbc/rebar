@@ -1,21 +1,6 @@
-"""Story A (fe57) — hermetic Jira fixtures + verified fake, foundation checks.
-
-Two guarantees this tier owns:
-
-  * **No secrets leak** (AC1): a COMPLEMENTARY scan over ``tests/fixtures/jira/*.json``
-    re-asserts the capture-time scrub held — no real emails, Jira accountIds, or the
-    org-identifying Jira tenant host are present. The detectors here are deliberately
-    BROADER than the scrubber's (any ``<digits>:<uuid-ish>`` accountId; any
-    ``<sub>.atlassian.net`` host that isn't the redaction placeholder), so a narrowed
-    scrubber regression is caught here rather than sharing the scrubber's blind spot.
-  * **Consumed only via the production path** (AC2/AC4): the ``FakeAcliClient`` is
-    routed through ``fetcher.compute_snapshot`` (the real enrichment merge) and the
-    merged snapshot carries the nested ``comment`` / ``issuelinks`` / ``parent``
-    shapes VERBATIM — proving the fake adds no shape massaging and that nothing
-    reads the fixtures and hand-reshapes them.
-
-The full producer->consumer round-trip contract (schema + differ + applier) is
-story B; this file only pins story A's deliverables.
+"""Check captured Jira fixtures with broader secret detectors than the scrubber, then
+feed them through production snapshot enrichment without reshaping comments, links,
+or parents.
 """
 
 from __future__ import annotations
@@ -83,13 +68,8 @@ def test_fake_routes_fixtures_through_production_fetch(monkeypatch) -> None:
     # REB-430 (the epic) is top-level: authoritative EMPTY links list, no parent.
     epic = snapshot["REB-430"]
     assert epic.get("issuelinks") == [], "empty-links authoritative shape lost"
-    # Ticket 88d9 INVERTED this, preserving its intent. The intent was "a top-level issue
-    # must not be misreported as having a parent" — fully kept below, and strengthened: the
-    # key must be PRESENT and falsy, i.e. the parent map was QUERIED and Jira has no parent.
-    # The old `"parent" not in epic` form could not tell that from a failed or truncated
-    # read, which is the exact ambiguity 88d9 exists to remove (an inbound parent CLEAR is a
-    # write that destroys local data, so it may only fire on positive evidence). This mirrors
-    # the authoritative-EMPTY-links assertion two lines above.
+    # A present, null parent proves Jira was queried and this top-level issue is
+    # parentless; absence of the key could mean a failed read and cannot justify a clear.
     assert "parent" in epic, "queried top-level issue must carry an explicit parent key"
     assert epic.get("parent") is None, "top-level issue must be authoritatively parentless"
 

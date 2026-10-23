@@ -1,31 +1,6 @@
-"""DESIRED-behavior tests for Jira link / relationship sync (TDD spec).
-
-These tests encode the CONTRACT we want — that rebar↔Jira ticket links
-(blocks / depends_on / relates_to / ...) actually sync in both directions —
-NOT necessarily the contract the code implements today. They are written as
-plain asserting tests (not pre-marked xfail) so the run reveals true red/green:
-a red result is an informative finding that becomes the TDD spec for wiring
-link sync into the differs.
-
-Loaded via ``spec_from_file_location`` per the reconciler test-tree convention
-(mirrors test_reconcile_roundtrip.py).
-
-Empirical context (current state — link sync IS implemented; story 25ae):
-
-* Local ticket dicts (from ``rebar list`` JSON) carry links under the ``deps``
-  key, shaped as ``[{"target_id", "relation", "link_uuid"}, ...]`` where
-  ``relation`` ∈ {blocks, depends_on, relates_to, duplicates, supersedes,
-  discovered_from}. The local side carries link data into the differ.
-* ``outbound_differ.OutboundMutation`` has a ``links: list`` field that is now
-  POPULATED by ``_diff_links`` in the update branch of
-  ``compute_outbound_mutations``: it reads ``deps``, maps each relation to a
-  Jira link type via ``_RELATION_TO_JIRA_LINK``, and dedups against the issue's
-  existing ``issuelinks`` (ADD-only; create-branch links are resolved after all
-  creates). The applier dispatches each add via ``client.set_relationship`` and
-  (bug d843) does a live pre-create ``get_issue_links`` existence check.
-* ``inbound_differ.InboundMutation`` now HAS a ``links`` field, populated by
-  ``_diff_links_inbound``, which reverse-maps an issue's ``issuelinks`` array
-  back to rebar relations (ADD-only, deduped against existing local deps).
+"""Verify implemented bidirectional ADD-only link sync. Local deps produce Jira
+relationship mutations, and Jira issuelinks produce local deps; both tests use the
+real binding and relationship shapes.
 """
 
 from __future__ import annotations
@@ -109,15 +84,8 @@ def _make_ticket(
 
 
 def test_outbound_emits_link_mutation_for_local_blocks_link(outbound):
-    """DESIRED: a local ``blocks`` link must produce an outbound link op.
-
-    Two bound local tickets A and B; A has ``deps=[{target_id:B,
-    relation:'blocks'}]``. The desired contract is that
-    ``compute_outbound_mutations`` emits, on A's mutation, a ``links`` entry
-    targeting B's Jira key (so the applier would call
-    ``set_relationship(A_key, B_key, 'Blocks')``).
-
-    NOTE: this encodes desired (possibly not-yet-implemented) behavior.
+    """A local blocks dep between bound tickets emits a Jira Blocks relationship with
+    the target's bound key.
     """
     bind = StubBindingStore({"loc-a": "DIG-100", "loc-b": "DIG-200"})
     a = _make_ticket(
@@ -152,20 +120,8 @@ def test_outbound_emits_link_mutation_for_local_blocks_link(outbound):
 
 
 def test_inbound_reflects_jira_issuelink_into_rebar(inbound):
-    """DESIRED: a Jira ``issuelinks`` entry must produce an inbound link change.
-
-    Build a Jira-shape snapshot for a bound issue whose ``issuelinks`` array
-    carries a Blocks link to another bound issue. The desired contract is that
-    ``compute_inbound_mutations`` emits, on the corresponding local ticket, a
-    relation/link change reflecting that Jira link into rebar's ``deps``.
-
-    The ``issuelinks`` shape used here is the Jira REST v3 form
-    (``get_issue_links`` documents ``[{"type": {"name": ...},
-    "inwardIssue"|"outwardIssue": {...}}]``). The live probe
-    (tests/external/test_link_sync_live.py) captures the EXACT live shape; this
-    fixture mirrors that documented shape.
-
-    NOTE: this encodes desired (possibly not-yet-implemented) behavior.
+    """A Jira Blocks issuelink between bound issues emits the corresponding local dep,
+    preserving Jira link direction.
     """
     bind = StubBindingStore({"loc-a": "DIG-100", "loc-b": "DIG-200"})
     a = _make_ticket("loc-a", title="Blocker", deps=[])
