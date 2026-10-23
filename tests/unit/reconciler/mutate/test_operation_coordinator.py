@@ -1440,18 +1440,27 @@ def test_make_coordinator_dispatch_maps_soft_failed_error_to_failed_signal(
     assert len(sink) == 1 and sink[0]["error"] == "boom 500"
 
 
-def test_transient_503_on_update_reaches_transport_once_and_propagates_raw(
+def test_transient_503_on_update_is_retried_by_the_coordinator_budget(
     batch_dispatch_mod, mutation_mod, ticket_plan_mod, tmp_path, monkeypatch
 ):
-    """AC5 / ADR 0103 S3 (edge case 1): through ``run_migrated_reroute`` with the
-    PRODUCTION coordinator dispatch, a transport whose ``update_issue`` raises
-    ``HTTPError(503)`` once and would then succeed is called exactly ONCE — no
-    handler-level retry and no coordinator replay — the raw 503 propagates fail-fast,
-    and nothing sleeps. (Before S3 the retired handler wrapper slept, retried, and the
-    second call applied.)"""
+    """ADR 0103: through ``run_migrated_reroute`` with the PRODUCTION coordinator
+    dispatch, a transport whose ``update_issue`` raises ``HTTPError(503)`` once and then
+    succeeds is retried by the coordinator's retry budget within the pass: two calls, one
+    applied outcome, one budget sleep. (S7 left a 503 un-retried; story
+    inept-unanarchic-foal maps 429/5xx to a ``transient`` signal.) The budget clock is
+    replaced, so nothing really sleeps."""
     apply_handlers = importlib.import_module("rebar.reconciler.apply_handlers")
     slept: list = []
-    monkeypatch.setattr(time, "sleep", slept.append)
+
+    class _Clock:
+        def now(self) -> int:
+            return 0
+
+        def sleep_ms(self, ms: int) -> None:
+            slept.append(ms)
+
+    monkeypatch.setattr(batch_dispatch_mod, "_retry_clock", _Clock)
+    monkeypatch.setattr(time, "sleep", lambda _s: pytest.fail("a real sleep ran"))
     calls: list[str] = []
     err_503 = urllib.error.HTTPError("http://x", 503, "Service Unavailable", {}, None)  # type: ignore[arg-type]
 
@@ -1468,20 +1477,21 @@ def test_transient_503_on_update_reaches_transport_once_and_propagates_raw(
         [_mut(mutation_mod, "outbound", "update", "T-503", {"changed_fields": {"summary": "s"}})],
     )
     ctx = apply_handlers.BatchApplyContext(client=_Transport(), repo_root=tmp_path, pass_id="p")
-    with pytest.raises(urllib.error.HTTPError) as excinfo:
-        batch_dispatch_mod.run_migrated_reroute(
-            migrated_plans=[plan],
-            ctx=ctx,
-            abort_check=None,
-            recheck_drift=lambda _c, _r, pin: pin,
-            snapshot_head=None,
-            repo_root=tmp_path,
-            head_pin_cell=["pin0"],
-            outcomes_sink=[],
-        )
-    assert excinfo.value is err_503  # the RAW HTTPError, not a wrapper
-    assert calls == ["T-503"]  # one transport attempt per pass
-    assert slept == []  # no backoff: nothing retried
+    sink: list = []
+    tally = batch_dispatch_mod.run_migrated_reroute(
+        migrated_plans=[plan],
+        ctx=ctx,
+        abort_check=None,
+        recheck_drift=lambda _c, _r, pin: pin,
+        snapshot_head=None,
+        repo_root=tmp_path,
+        head_pin_cell=["pin0"],
+        outcomes_sink=sink,
+    )
+    assert calls == ["T-503", "T-503"]
+    assert len(sink) == 1 and not sink[0].get("error"), sink
+    assert tally["applied_count"] == 1, tally
+    assert len(slept) == 1 and slept[0] >= 2000, slept
 
 
 def test_reroute_passthrough_when_plan_mixes_create_and_noncreate(

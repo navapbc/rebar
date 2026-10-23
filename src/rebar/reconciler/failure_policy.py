@@ -135,6 +135,25 @@ def classify_http_error(status_code: int, action: str) -> tuple:
     return ("transient", FailureScope.ticket)
 
 
+def classify_http_exception(exc: BaseException, action: str) -> tuple | None:
+    """Classify an HTTP exception -> ``(signal_status, scope, provider_delay_ms)``.
+
+    :func:`classify_http_error` decides the status and scope from the exception's HTTP
+    status code (``.code`` or ``.status_code``). ``provider_delay_ms`` is a usable
+    integer ``Retry-After`` header in milliseconds, else ``None``. Return ``None`` for an
+    exception that carries no HTTP status.
+    """
+    errors = importlib.import_module("rebar.reconciler._errors")
+    status = errors.http_status(exc)
+    if status is None:
+        return None
+    signal_status, scope = classify_http_error(status, action)
+    headers = getattr(exc, "headers", None)
+    retry_after = errors.parse_retry_after(headers.get("Retry-After") if headers else None)
+    delay_ms = None if retry_after is None else int(retry_after * 1000)
+    return signal_status, scope, delay_ms
+
+
 def tally(outcomes) -> dict:
     """Count ticket outcomes by ``.bucket``, always returning all five buckets
     (0-filled)."""
