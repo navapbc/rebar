@@ -1,29 +1,9 @@
 #!/usr/bin/env python3
 """Non-retrying ``update_one`` apply phases (module-size split of ``dispatch_one.py``).
 
-``update_one`` is a thin sequencer over per-phase helpers. This leaf owns the allowlist
-filter, the reporter-by-accountId REST sub-call (264f) and its identity / alert-store
-degradation helpers, the single-attempt comment dispatch, and the link-probe helpers.
-Every transport call here is a single attempt: ADR 0103 S3 retired the handler-level
-retry wrapper, so any retry lives in the transport itself.
-
-The LINK dispatch phase joined them here (ticket 5528): ``dispatch_one`` crossed the
-800-LOC cap once the delete arm learned to tell a proven-gone link from a failure. Links
-were the natural cluster to move rather than an arbitrary slice — the phase already calls
-three helpers that live here (``_capability_present``, ``_find_link_id``,
-``_index_existing_links``), so the move REMOVED cross-module reach instead of adding it,
-and it sits beside its sibling ``_update_one_dispatch_comments``.
-The parent reparent, scalar edit and label phases stay in ``dispatch_one``.
-
-This module is a strict LEAF: it imports nothing from ``dispatch_one`` (its only
-cross-module reach is the lazy in-function imports of ``rebar``,
-``rebar._commands.identity`` and ``rebar.reconciler._loader``, plus the constant-only
-import of ``binding_lifecycle.UNKNOWN_COMMENT_ID``, itself a leaf), so ``dispatch_one`` can
-re-import the three phase functions back without a cycle. ``dispatch_one`` re-exports
-``_update_one_apply_reporter`` / ``_update_one_filter_fields`` /
-``_update_one_dispatch_comments`` so ``update_one``'s bare-name calls and
-``dispatch_one.<phase>`` attribute access are unchanged.
-"""
+The transport owns retries. This leaf also owns link probes and capability guards,
+so dispatch_one can sequence these phases without a dependency cycle. The parent,
+scalar edit, and label phases remain in dispatch_one."""
 
 from __future__ import annotations
 
@@ -51,19 +31,8 @@ from rebar.reconciler.pass_io import record_capability_gap
 
 logger = logging.getLogger(__name__)
 
-# Bug 85a1: strip fields ACLI does not accept on `jira workitem edit`.
-# The legacy batch path here was unfiltered, so a local issuetype change
-# (e.g., probe Phase 2 ticket_type=task→bug) flowed through as
-# ``--issuetype Bug`` which ACLI rejects with non-zero exit, aborting the
-# ENTIRE batch loop and silently losing every subsequent outbound update.
-# The typed leaf ``_apply_outbound_update`` already filters via
-# ``_OUTBOUND_UPDATE_ALLOWLIST`` — apply the same allowlist here. Stripped
-# fields (issuetype, type-change in general) are intentional drops mirroring
-# the typed-leaf contract; outbound issuetype changes are BY_DESIGN
-# unsupported on the edit endpoint (Atlassian JRASERVER-71292).
-# status is included: bug 85a1 (Gap 8) removed the BY_DESIGN drop —
-# outbound status push now uses REST POST /transitions via
-# ``transition_issue`` (bypasses ACLI's silent-exit-0 failure mode).
+# ACLI edit accepts these fields. Drop unsupported issue-type changes before a
+# batch failure can prevent later updates. Status transitions use the REST path.
 _OUTBOUND_BATCH_ALLOWLIST = frozenset({"summary", "description", "assignee", "priority", "status"})
 
 
@@ -75,46 +44,11 @@ def _capability_present(
     site: str,
     key: str | None,
 ) -> bool:
-    """Runtime capability guard for an OPT-IN capability member (ticket a3fa).
-
-    The four ``cast("SupportsComments"/"SupportsLinks", client)`` call sites are STATIC
-    assertions with no runtime effect, and every one of them sits inside a broad
-    ``except Exception``. So a transport that does not implement the capability raised an
-    ``AttributeError`` that was swallowed: the sub-op silently never applied and the pass
-    reported success — conflating "capability absent (designed, fine to skip)" with
-    "capability present but threw (a real failure)". This splits the two.
-
-    RELATION TO ``fetcher.py`` (AC4). ADR-0083 ("Reconciler vendor adapter seam") prescribes
-    ``isinstance``-guarded capability detection — "callers detect a capability by an
-    ``isinstance``-guarded check against the backend" — and ``SupportsComments``/
-    ``SupportsLinks`` are ``@runtime_checkable`` for exactly that. So ``isinstance`` is the
-    PRIMARY check here. It is backed by the ``hasattr(client, member)`` shape that
-    ``fetcher.py:597/647/688`` already uses, which makes the two subsystems consistent rather
-    than divergent, and is REQUIRED for correctness rather than merely permitted:
-
-    Since Python 3.12 (gh-102433) a ``@runtime_checkable`` ``isinstance`` resolves members
-    with ``inspect.getattr_static``, which deliberately does NOT see attributes served by
-    ``__getattr__``. Any dynamically-proxying transport — a decorator/wrapper that forwards
-    to an inner client, and every ``MagicMock`` test double — therefore HAS ``add_comment``
-    yet fails ``isinstance``. Trusting ``isinstance`` alone would declare such a transport
-    "capability absent" and skip the write **by design**, which is the exact silent-skip
-    defect this ticket exists to remove, only now blessed. The fallback closes that hole.
-
-    Checking the specific ``member`` (not the whole Protocol) is also the right granularity
-    for a WRITE dispatch site: the question here is "can this transport perform the call I am
-    about to make", not "does it also implement the read side" (``get_comment_map`` /
-    ``get_issuelinks_map``), which this code path never touches.
-
-    Returns True when the call may proceed. When absent, logs an INFO line naming the missing
-    capability and the site, records the designed skip on the EXISTING ``bridge_alerts``
-    channel under ``outbound-<capability>-capability-absent`` (deduped per process per
-    (capability, site) — see ``pass_io.record_capability_gap``), and returns False. Callers
-    must skip WITHOUT incrementing their ``*_computed``/``*_applied`` counters: those feed
-    ``apply_handlers``' silent-no-op canary, which is a FAILURE detector (it logs the
-    "bug-3f04 failure mode" warning and, under ``RECONCILER_FAIL_SILENT_NOOP=1``, records a
-    per-mutation failure), and routing a DESIGNED skip through it would re-conflate exactly
-    what this guard separates.
-    """
+    """Check the requested transport member before a comment or link write.
+    Runtime-checkable Protocol membership is primary. Member lookup also admits
+    dynamic proxies that Python's static attribute inspection misses. A missing
+    capability records a designed skip and returns False without advancing computed
+    or applied counters. Failures after a present capability remain failures."""
     if isinstance(client, protocol) or hasattr(client, member):
         return True
     logger.info(
@@ -227,35 +161,12 @@ def _update_one_filter_fields(fields, mutation) -> dict:
 
 
 def _record_comment_id(binding_store, entry, add_comment_result) -> None:
-    """Mark ``entry``'s local_comment_key as mirrored, with the comment ID when known.
-
-    emersed-specific-mutt (append-only comment sync). Records the COMMENT event's HLC
-    (``entry["local_comment_key"]``) in the binding_store's write-ahead
-    ``record_comment_id`` map, so a re-sync never re-posts the comment.
-
-    Bug aa7b — the recording is NOT conditional on the transport echoing a comment id.
-    Reaching this function already means the post landed: it is only ever called on an
-    ``add_comment`` that returned without raising. The DC/REST transport returns a real
-    top-level ``{"id": ...}`` and that exact value is what gets stored. The Cloud/ACLI
-    transport (since ticket 3235-8aaf, which normalizes ACLI's batch-mutation envelope
-    at the transport boundary — ``acli_cli_ops._parse_comment_created``) returns
-    ``{"id": None, "acli_envelope": ...}`` — an explicit no-comment-id, because ACLI
-    echoes only the WORK ITEM key, never a comment id — so there
-    is nothing truthful to store and :data:`UNKNOWN_COMMENT_ID` is recorded instead.
-    Requiring an id previously left the map EMPTY on Cloud, so the outbound differ's
-    PRIMARY id-identity skip never fired and richly-formatted comments (whose bodies
-    diverge through ADF/wiki round-tripping, defeating the SECONDARY body-equality skip)
-    were re-posted every pass.
-
-    Every dependency is optional and guarded, so this is a no-op — never an error —
-    when the store is absent (legacy caller / stub), the entry is not a dict, it carries
-    no key, or the store predates ``record_comment_id``. Shared by both enactment sites
-    (``create_one`` and ``_update_one_dispatch_comments``) so they cannot drift.
-    """
-    # Ticket 0fa2 (outbound-comment invariant): tally the successful post itself
-    # BEFORE the recording guards below — reaching this function means add_comment
-    # returned without raising, and a post whose RECORDING no-ops (no store, no
-    # key, legacy store) is exactly the divergence the end-of-pass check watches.
+    """Record a successful post by local comment key even when Jira returns no comment ID.
+    Persist an ID when supplied, or UNKNOWN_COMMENT_ID when the transport cannot
+    supply one. Optional legacy stores and entries without a key leave recording
+    unchanged. Count the post before those guards so the pass invariant sees gaps."""
+    # Count the landed post before recording guards. A skipped ID write must remain
+    # visible to the end-of-pass invariant.
     noter = getattr(binding_store, "note_comment_posted", None)
     if noter is not None:
         noter()
@@ -273,19 +184,14 @@ def _record_comment_id(binding_store, entry, add_comment_result) -> None:
 def _update_one_dispatch_comments(
     mutation, client: TicketTransport, issue_key, comment_errors, binding_store=None
 ) -> tuple[int, int]:
-    """Phase: dispatch comment-add sub-ops (in-band capture into comment_errors).
-    Returns (computed, applied) counts. emersed-specific-mutt: when ``binding_store``
-    is provided, the returned Jira comment ID is persisted against the entry's
-    ``local_comment_key`` so a re-sync does not re-post the comment (append-only)."""
+    """Dispatch comment additions once and return computed and applied counts. Capture
+    failures in comment_errors. For keyed comments and stores with a recorder,
+    save Jira's ID or UNKNOWN_COMMENT_ID to prevent reposting."""
     _comments_computed = _comments_applied = 0
 
     comments = mutation.get("comments", []) or []
-    # Ticket a3fa: capability guard folded INTO the condition (same shape as create_one and
-    # _update_one_dispatch_links). It sits AHEAD of _comments_computed deliberately: a
-    # DESIGNED skip must increment neither _computed nor _applied, because apply_handlers'
-    # silent-no-op canary is a FAILURE detector — it logs the "bug-3f04 failure mode" warning
-    # and, under RECONCILER_FAIL_SILENT_NOOP=1, records a per-mutation failure. Routing a
-    # designed skip through it would re-conflate exactly what the guard separates.
+    # Check comment capability before incrementing counts. A designed skip must not
+    # trigger the silent-no-op failure canary.
     if (
         isinstance(comments, list)
         and comments
@@ -315,9 +221,7 @@ def _update_one_dispatch_comments(
                 # the entry's local_comment_key so a re-sync does not re-post it.
                 _record_comment_id(binding_store, entry, _comment_result)
             except Exception as exc:  # noqa: BLE001 — in-band capture into comment_errors; non-fatal
-                # Bug 6afc-20ee-84e5-4dd5: non-fatal, but surface it so the batch
-                # outcome no longer reports error=None for a mutation whose
-                # comment sub-mutation failed.
+                # Capture a nonfatal comment failure in the batch outcome.
                 if comment_errors is not None:
                     comment_errors.append(f"add_comment failed: {exc!s}")
                 print(  # noqa: T201
@@ -328,14 +232,8 @@ def _update_one_dispatch_comments(
 
 
 def _index_existing_links(issuelinks) -> set[tuple[str, str]]:
-    """Index a ``get_issue_links`` result as a ``{(type_name, other_key)}`` set.
-
-    Bug 3f04: local copy of ``apply_outbound._index_existing_links`` — this module
-    deliberately never imports the applier (cycle avoidance), so the helper is
-    duplicated. Records ``type.name`` plus the OTHER issue's key on EITHER side
-    (``inwardIssue``/``outwardIssue``), so the membership test is direction-agnostic
-    (a ``Blocks`` link to B is "present" whether B is the inward or outward side).
-    """
+    """Index link type and peer key from either issue side. This local helper avoids an
+    applier import cycle and makes duplicate checks direction-independent."""
     existing: set[tuple[str, str]] = set()
     for link in issuelinks or []:
         if not isinstance(link, dict):
@@ -396,20 +294,9 @@ _IDEMPOTENT_LINK_REMOVAL_MARKERS: tuple[str, ...] = (
 
 
 def _is_idempotent_link_removal(exc: subprocess.CalledProcessError) -> bool:
-    """True when *exc* shows a link delete failed because the link was already gone.
-
-    Matches BOTH streams, following the ``delete_issue`` precedent in ``adapters/jira/acli.py``
-    (``err_text = (exc.stderr or "") + (exc.stdout or "")``) rather than stderr alone. That
-    matters here specifically: ``workitem link delete`` runs WITHOUT ``--json`` (story 25ae —
-    ACLI rejects the flag on this subcommand), so its failure output is human-readable text on
-    the exit-code path and the "404 / not found" line can land on STDOUT. Reading stderr only
-    would misclassify a GENUINE concurrent-removal race as a failure — a false alarm in the
-    honest-counter direction, which would erode trust in the very counter this narrowing
-    exists to make trustworthy.
-
-    See :data:`_IDEMPOTENT_LINK_REMOVAL_MARKERS` for why this is a narrow allow-list and why
-    output carrying no marker at all returns False (unproven end-state, counted failed).
-    """
+    """Recognize an already absent link only from explicit 404, 409, or missing-link
+    markers in either stdout or stderr. ACLI link delete reports text without JSON.
+    An unmarked failure has not proven the desired end state."""
     text = ((exc.stderr or "") + (exc.stdout or "")).lower()
     if not text:
         return False
@@ -417,19 +304,9 @@ def _is_idempotent_link_removal(exc: subprocess.CalledProcessError) -> bool:
 
 
 def _dispatch_link_removes(links, client: TicketTransport, issue_key) -> tuple[int, int, int]:
-    """Sub-phase: the symmetric link REMOVE dispatch. Returns (computed, applied, failed).
-
-    Split out of :func:`_update_one_dispatch_links` along the ADD/REMOVE seam that phase
-    already had. The two halves share only the counters, so this is an extraction of an
-    existing cluster rather than a mechanical carve — and it keeps the parent function under
-    its locked complexity ceiling now that the delete arm distinguishes a proven-gone link
-    from a failure.
-
-    Bug wake-inn-parse: a managed link the differ marked for removal (a deliberate local
-    unlink) is deleted on Jira so the inbound differ stops re-adding it. The differ emits only
-    (type, to_key); resolve the link id here by probing the issue's current links (mirrors the
-    ADD dedup probe). Best-effort + logged — a link op must not unwind the batch.
-    """
+    """Delete managed links by resolving their ID from a fresh issue-link probe.
+    Return computed, applied, and failed counts. An already absent link succeeds.
+    Other delete failures remain nonfatal and count as failed."""
     _computed = _applied = _failed = 0
     if not (
         isinstance(links, list)
@@ -461,17 +338,8 @@ def _dispatch_link_removes(links, client: TicketTransport, issue_key) -> tuple[i
             client.delete_issue_link(link_id)
             _applied += 1
         except subprocess.CalledProcessError as exc:
-            # delete_issue_link shells out via ACLI (raises CalledProcessError, NOT an
-            # HTTPError). We only reach here after _find_link_id confirmed the link exists in
-            # a fresh probe, so a failure carrying a 404/409/"does not exist" signature is a
-            # concurrent removal or change — idempotent, the desired end-state (link gone) is
-            # reached, so it counts as applied.
-            #
-            # Any OTHER failure has NOT reached that end-state and is counted failed. Counting
-            # it applied is what made ticket 5528 invisible: the missing confirmation flag made
-            # every delete fail identically and permanently, while the pass reported
-            # links_applied=N. Non-fatal either way — the batch is not unwound — but no longer
-            # scored as success.
+            # Only a recognized concurrent removal counts as applied. Other ACLI failures
+            # remain failed, even when the batch continues.
             if _is_idempotent_link_removal(exc):
                 _applied += 1
             else:
@@ -494,20 +362,12 @@ def _log_link_delete_failure(issue_key, to_key, link_type, exc: BaseException) -
 
 
 def _confirm_link_add(link_confirm, entry, to_key, result) -> None:
-    """Hand an ACCEPTED link ADD to the peer-confirmation sink (epic a4bd).
-
-    Every failure here is swallowed. The link already landed on the vendor, so
-    losing the evidence costs one un-declined removal (strictly the pre-a4bd
-    behaviour), whereas raising would fail an outbound write that actually
-    succeeded and would corrupt the applied/computed/failed counts — the very
-    conflation between "did not land" and "reported fine" that ticket 5528 closed.
-    """
+    """Send a landed link addition to the optional peer-confirmation sink. Recording
+    errors remain nonfatal because the vendor write has already succeeded."""
     if link_confirm is None:
         return
     try:
-        # The vendor's stable link id when it supplies one. ``set_relationship`` is
-        # typed ``-> dict[str, Any]``, but a backend may legitimately return no id
-        # (or a non-mapping); ``None`` is recorded and is NOT an error.
+        # Record the vendor link ID when supplied. A missing ID is valid evidence.
         link_id = result.get("id") if isinstance(result, dict) else None
         link_confirm(to_key=to_key, relation=entry.get("relation"), link_id=link_id)
     except Exception as exc:  # noqa: BLE001 — evidence is best-effort; never fail a landed write
@@ -521,43 +381,17 @@ def _update_one_dispatch_links(
     *,
     link_confirm: Callable[..., None] | None = None,
 ) -> tuple[int, int, int]:
-    """Phase: dispatch link ADD (deduped) + link REMOVE sub-ops. ``links_computed`` is
-    counted POST-DEDUP so an idempotent re-sync reports 0 (no false canary). Returns
-    (computed, applied, failed) counts.
-
-    ``link_confirm`` (epic a4bd) is an optional sink invoked after a link ADD is
-    ACCEPTED by the vendor, so the peer-confirmation store can record the evidence
-    that the peer now carries this link. It is a callback rather than a store handle
-    because this function has neither a binding store nor a pass id and must not grow
-    knowledge of either — the production caller (``apply_handlers.handle_update``)
-    closes over both. ``None`` (the default) preserves the pre-a4bd behaviour exactly.
-
-    ``failed`` counts link ops that did NOT reach their desired end-state. It exists because
-    a failure that is neither counted nor surfaced is indistinguishable from success: the
-    delete arm used to increment ``applied`` on ANY ``CalledProcessError``, so a Jira pass
-    could report ``links_applied=N`` having removed nothing (ticket 5528 — 15 cancelled ACLI
-    deletes, 15 reported applied, 0 links actually removed). Failures stay NON-FATAL — the
-    scalar update already succeeded and one bad link must not unwind the batch — but they
-    are now counted and surfaced instead of silently absorbed.
-    """
+    """Dispatch deduplicated link adds and managed removals. Return computed, applied,
+    and failed counts after add deduplication. A landed add may call link_confirm with
+    peer evidence. Link failures are reported without unwinding successful scalar
+    updates."""
     _links_computed = _links_applied = _links_failed = 0
 
-    # Bug 3f04: dispatch link adds (blocks/relates) via client.set_relationship.
-    # The outbound differ emits these alongside changed scalar fields, but the
-    # batch path never applied them (the link entry was dropped + no dispatch
-    # here) — so outbound link sync was a silent no-op. Mirror the typed leaf
-    # ``_apply_outbound_update``: probe the issue's existing links ONCE and skip
-    # any add already present (either direction) so a re-issued POST after a
-    # timed-out-but-committed create does not duplicate the link. Failures are
-    # best-effort + logged (non-fatal — the scalar update already succeeded).
+    # Probe existing links once before adding. Either direction counts as present.
+    # A timed-out but committed prior write must not create a duplicate.
     links = mutation.get("links", []) or []
-    # Ticket a3fa: the capability guard is folded INTO this condition rather than placed
-    # inside the loop, for the same two reasons as create_one's comment guard — the
-    # capability is invariant across the loop, and a boolean operand costs zero McCabe
-    # complexity, so the guard does not raise this function's LOCKED complexity baseline.
-    # Placing it here also keeps it AHEAD of _links_computed, which matters: a designed skip
-    # must increment neither _computed nor _applied, or apply_handlers' silent-no-op canary
-    # (a FAILURE detector) would report it as the bug-3f04 failure mode.
+    # Check link capability before counting an add. A designed skip must not appear
+    # as a silent-no-op failure.
     if (
         isinstance(links, list)
         and any(isinstance(e, dict) and e.get("action") == "add" for e in links)

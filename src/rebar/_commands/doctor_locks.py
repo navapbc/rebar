@@ -1,66 +1,11 @@
-"""``doctor`` — read-only health report for the store's advisory locks.
-
-A writer starved on the tickets write lock had no diagnostic surface: the only way to
-learn WHO held it, whether that holder was still alive, and how long it had been held
-was to ``ls`` ``.ticket-write.lock.d`` and ``cat`` its owner file by hand (ticket
-metaphoric-fleeting-nutcracker). :class:`~rebar._store.lock.LockTimeout` already names
-the holder, but only to the process that timed out — an operator watching from outside
-saw nothing. This module answers the same questions on demand.
-
-**It reuses; it does not re-derive.** Every fact here comes from machinery that already
-exists:
-
-* held/free is the immediate, zero-deadline probe
-  :func:`rebar._store.lock.write_lock_is_busy` performs, applied per leg so the report
-  can say WHICH leg is held rather than only that the pair is busy;
-* the owner identity is the v2 stamp the mkdir leg already writes, decoded by
-  :func:`rebar._store.lock_owner._parse_v2_stamp`;
-* holder liveness is :func:`rebar._store.lock_owner._describe_stamped_pid`, which is
-  same-host/same-namespace only and answers ``unprobeable (…)`` anywhere else — a pid
-  number from another host or pid namespace names a different process, or nothing;
-* hold age is :func:`rebar._store.lock_owner._mkdir_lock_age_s` (the lock dir's mtime is
-  the acquisition time — the stamp is never refreshed);
-* staleness is :func:`rebar._store.lock_owner._mkdir_lock_is_stale` for the mkdir leg and
-  :func:`rebar._store.lock_owner.stamped_file_is_stale` for the file-shaped worker locks —
-  two readers of ONE table and NOTHING ELSE. That table lives in
-  :func:`rebar._store.lock_owner._stamp_is_stale` — the pid-recycle qualification, the
-  refuse-without-proof rule (bug yaw-gravel-linen) and the wall-clock ceiling (bug
-  larval-tribal-tigermoth). A second staleness heuristic here would be a fork that
-  drifts from the one the lock actually obeys, so there is none: this module asks those
-  functions and reports their answer. ``fcntl_held=False`` because doctor holds nothing.
-
-**Read-only, absolutely.** Nothing here reclaims, removes, or rewrites a lock, and
-``doctor --repair`` does not either (repair iterates the link-finding list, which lock
-results never join). A stale lock is REPORTED with the advice that the next acquirer
-reclaims it automatically; breaking someone's lock stays the acquire path's job, where
-the exclusive fcntl leg makes it race-safe.
-
-**What is a finding.** A held lock with a live holder is INFO — that is a working store
-under contention, not a fault. A lock the shared staleness function calls stale is a
-FINDING, because no live process claims it. Findings feed doctor's existing exit rule
-(exit 1 while anything is outstanding).
-
-Five legs are reported. The two tickets-store legs are the dual-window contract
-(:mod:`rebar._store.lock`): ``.ticket-write.lock`` (fcntl) and ``.ticket-write.lock.d``
-(mkdir, the leg that carries the ownership stamp). ``.rebar/hlc.lock`` is the clock's
-short RMW lock (:mod:`rebar._store.hlc`). The three fcntl-family legs are kernel-mediated,
-so the kernel drops them when their holder dies and "stale" is not a state they can
-reach. ``.rebar/compact-worker.lock`` is the compaction trigger's worker lock
-(:mod:`rebar._commands.compact_trigger`): an ``O_EXCL`` file whose CONTENTS are its owner
-stamp, so it carries a holder and a real staleness verdict from the shared stamped-lock
-function (bug knavish-stimulated-bluebottle) — and the lock most likely to be held by a
-DETACHED background process, which is exactly the holder an operator cannot find with
-``ps``. (The ADR 0086 worker's lock is no longer a leg: that worker was removed, so a
-leftover lock file is not reported.) The fifth leg is
-the snapshot-GC trigger's worker lock
-(:mod:`rebar._snapshot.gc_trigger`, the same shared stamped-lock machinery and the same
-detached-worker shape) — the one leg NOT under the tracker: it lives on the PER-HOST
-snapshot store (``<store>/gc/worker.lock``, where the store root is
-``$REBAR_GATE_TMPDIR`` or the system tempdir), so it ignores which tracker is being
-scanned, and its path is derived READ-ONLY (:func:`gc_trigger.worker_lock_probe_path`)
-because a diagnostic must not materialise a store that does not exist yet — an absent
-store simply reports the lock free.
-"""
+"""Read-only diagnosis of store and worker locks.
+Report held legs, stamped owner, same-host liveness, age, and staleness
+through the shared lock helpers. An active holder is informational. A stale
+lock is a finding. O_EXCL workers write owner stamps. Older unstamped
+files use the shared wall-clock rule.
+Doctor never reclaims locks, including under repair.
+The snapshot-GC worker lock is read from the per-host snapshot store
+without creating that store."""
 
 from __future__ import annotations
 
@@ -180,18 +125,9 @@ def _fcntl_report(name: str, path: str, *, note: str) -> dict[str, Any]:
 
 
 def _mkdir_report(name: str, lock_dir: str) -> dict[str, Any]:
-    """A report row for the tickets store's mkdir leg — the only leg that names its
-    holder.
-
-    Decodes the v2 ownership stamp into ``host``/``ns``/``pid``/``start``, adds the
-    holder-liveness verdict and the hold age, and asks
-    :func:`rebar._store.lock_owner._mkdir_lock_is_stale` — the sole staleness authority —
-    whether the lock is reclaimable. A stamp that is absent, unrecognised or torn
-    mid-write yields an explicit ``unknown (…)`` description instead of a guess, matching
-    :func:`rebar._store.lock.describe_lock_holder`; staleness is still the shared
-    function's answer, because its refuse-without-proof branches already cover exactly
-    those shapes (they are only reclaimable past its own wall-clock ceiling).
-    """
+    """Report the tickets-store mkdir lock's owner, age, liveness, and shared
+    staleness verdict. Missing or torn stamps remain unknown until the
+    shared wall-clock rule can decide."""
     if not os.path.isdir(lock_dir):
         return {
             "name": name,
@@ -254,17 +190,10 @@ def _mkdir_report(name: str, lock_dir: str) -> dict[str, Any]:
 
 
 def _existence_report(name: str, path: str, *, note: str) -> dict[str, Any]:
-    """A report row for an ``O_EXCL`` existence lock: held iff the file is there.
-
-    The lock file carries the v2 ownership stamp as its own contents (bug
-    knavish-stimulated-bluebottle gave the file locks the discipline the mkdir leg
-    already had), so this decodes host/ns/pid/start, adds the same same-host-only
-    liveness verdict, and asks :func:`rebar._store.lock_owner.stamped_file_is_stale` —
-    the shared decision table, reached by a second reader rather than a second heuristic.
-    A lock written by a rebar predating the stamp reads as unstamped and is adjudicated
-    by that table's wall-clock ceiling, which is exactly how such an orphan gets
-    reclaimed; doctor still only reports it.
-    """
+    """Report an O_EXCL worker lock when its file exists.
+    Read its stamped owner and ask the shared helper for liveness and
+    staleness. Older unstamped files follow the same wall-clock rule.
+    This diagnostic never reclaims the file."""
     if not os.path.exists(path):
         return {
             "name": name,

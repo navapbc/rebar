@@ -1,41 +1,10 @@
-"""Read-only live-Jira probe that suggests a ``[mapping]`` config block (epic 3d7a, S8).
+"""Suggest a project mapping from read-only Jira probe methods.
 
-``rebar bridge suggest-mapping <PROJECT> [--write]`` observes a live Jira project through
-a narrow, READ-ONLY probe PORT and emits a suggested ``[mapping.projects.<KEY>]`` block —
-the reserved section parsed by :mod:`rebar.reconciler.mapping_config` (S1) — seeded with
-the project's real vocabulary (``issue_types`` / ``statuses`` / ``link_types`` /
-``hierarchy``) and IDENTITY-SEED axis maps (``status_map`` / ``type_map`` / ``link_map`` /
-``priority_map`` / ``create_defaults``). Hand-authoring that block is transcription-error
-prone; this seeds it from the instance itself, leaving the operator to edit only where a
-local name must diverge from Jira's.
-
-Design of record
-----------------
-* The verb is ``suggest-mapping``, NOT ``probe`` — ``bridge probe`` collides with the
-  retired throwaway-issue probe alias whose handler CREATES + DELETES a throwaway issue. This
-  command is strictly read-only: the port exposes ONLY getters, so it can never mutate the
-  instance the way ``check-access`` does.
-* Every axis is grounded in a HIGH-LEVEL ``jira.JIRA`` method (there is no private
-  ``_get_json`` on the Jira adapter — that lives only on the Gerrit client). The default
-  port wraps a real ``jira.JIRA`` built from resolved DC settings via
-  :func:`...adapters.jira_datacenter.transport.build_client_from_settings`; tests
-  monkeypatch :data:`build_probe` (a MODULE ATTRIBUTE) to inject a FAKE port, so the whole
-  builder runs offline with no live Jira and no CI credential (the portability rule).
-* Fail-soft on EVERY external getter — a Jira instance that 403s or omits an attribute
-  yields an empty axis + an honest note, never a fabricated value or a crash. In
-  particular ``hierarchyLevel`` is Cloud-only: when absent, ``hierarchy`` is dropped
-  (empty) rather than invented.
-* ``statuses()`` is the GLOBAL status set — pycontribs exposes no per-project status list
-  publicly — and the emitted block documents that honest limitation. Transition hints are
-  best-effort: Jira returns transitions only from each sample issue's CURRENT status, so
-  the set is inherently partial; it is emitted under a clearly-named advisory key and
-  ``status_map`` stays identity-seeded, never derived from it.
-
-The pure builder :func:`build_mapping_layer` calls the port's read methods and returns
-``{"projects": {<KEY>: {<layer>}}}``. Serialization to TOML (stdout, or a deep-merged
-``--write`` into a rebar-owned ``rebar.toml``) is orchestrated by
-:func:`rebar._config_writer._emit_config_toml`.
-"""
+The probe gathers issue types, statuses, links, and hierarchy, then identity-seeds
+axis maps. Getter failures produce empty axes with notes. Global statuses and
+current-state transition hints are partial evidence, so hints never determine
+status_map. build_mapping_layer returns a project layer. The config writer
+handles optional --write output to rebar.toml."""
 
 from __future__ import annotations
 
@@ -276,13 +245,9 @@ def _jql_quote(value: str) -> str:
 def _transition_hints(
     port: ProbePort, project_key: str, issue_types: list[str]
 ) -> dict[str, list[str]]:
-    """Best-effort, PARTIAL transition hints: for one sample issue per discovered type,
-    the transitions Jira offers from that sample's CURRENT status. Jira never returns the
-    full transition graph (only edges out of the current status), so this is advisory
-    only — emitted under a clearly best-effort key, never used to derive ``status_map``.
-
-    The sampling JQL is scoped to ``project_key`` so hints come from the TARGET project,
-    not the whole instance, and both interpolated values are quote-escaped."""
+    """Return advisory transitions from one sample issue per discovered type. Jira
+    exposes only transitions from each sample's current status. Scope and escape
+    the project JQL, and never infer status_map from these partial hints."""
     hints: dict[str, list[str]] = {}
     seen: set[str] = set()
     for issue_type in issue_types:

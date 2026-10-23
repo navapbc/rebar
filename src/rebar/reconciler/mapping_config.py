@@ -1,43 +1,12 @@
-"""Provider-neutral mapping-config core used by the live reconciler.
+"""Provider-neutral loader for built-in, default, and project mapping layers.
 
-The reconciler's per-project overlays and built-in defaults both flow through
-this loader/validator. It owns the provider-neutral config section shape and the
-merge/validation rules every backend shares:
+It is used by the live reconciler for built-in defaults and per-project overlays.
 
-* a reserved ``[tool.rebar.mapping]`` / ``[mapping]`` config section (recognised by the
-  core parser, read raw via :func:`rebar.config.read_reserved_section`);
-* a three-layer, PER-KEY deep merge for the axis maps -- built-in default
-  ``<-`` the ``default`` block ``<-`` a ``projects.<KEY>`` overlay -- where an overlay
-  entry overrides only the key it names and unnamed keys inherit the next-outer layer;
-* WHOLESALE, most-specific-wins replacement for the vocabulary declarations (a declared
-  list fully supersedes the outer one; it is never unioned);
-* fail-closed, OFFLINE validation (config-only, never network); and
-* a :class:`Capability` descriptor recording which mapping AXES the target's vocabulary
-  actually has.
-
-Every mapping axis the live reconciler exposes still enters through this module;
-the concrete adapter injects the target's built-in default layer and
-capabilities, but the merge and validation rules stay strictly
-PROVIDER-NEUTRAL. This module imports nothing from any vendor adapter and
-contains no vendor value literal anywhere. Illustrative values in docstrings are
-neutral placeholders (``"<status-a>"``, ``"VALUE"``), never real target
-vocabulary.
-
-Structure of a ``[mapping]`` section (raw, as returned by ``read_reserved_section``)::
-
-    [mapping.default.status_map]        # axis map: local key -> target VALUE (or SKIP)
-    open = "VALUE"
-    [mapping.default]
-    statuses = ["<status-a>", "<status-b>"]   # vocabulary declaration (a string list)
-    [mapping.default.hierarchy]         # a str->int mapping
-    "<type-a>" = 1
-    [mapping.projects.KEY.status_map]   # a per-project overlay, same shape as default
-    open = "VALUE"
-
-The five axis maps are ``status_map``, ``type_map``, ``link_map``, ``priority_map`` and
-``create_defaults``. The vocabulary declarations are ``statuses``, ``issue_types``,
-``link_types`` (string lists) and ``hierarchy`` (a str->int mapping).
-"""
+Axis maps merge per key, while declared vocabularies replace the outer list.
+Offline validation fails closed. Capability describes the target's supported
+axes. Concrete adapters supply defaults and capabilities without reversing the
+core dependency. Supported axes are status, type, link, priority, and create
+defaults. Vocabularies cover statuses, issue types, link types, and hierarchy."""
 
 from __future__ import annotations
 

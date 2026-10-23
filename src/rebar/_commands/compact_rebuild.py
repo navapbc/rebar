@@ -1,26 +1,8 @@
-"""SNAPSHOT reconstruction — the fsck repair path that recomputes a ticket's SNAPSHOT
-from its FULL ordered event log.
-
-Extracted from ``compact.py`` (task b2bb). Its change-driver is the snapshot FORMAT and
-the repair semantics, which move independently of the normal-fold transaction
-(``compact_txn``) and of the CLI surface (``compact``).
-
-The shared snapshot primitives it needs — ``_snapshot_strip_keys``,
-``_build_authorship_ledger`` — are imported from ``compact_txn`` so the dependency runs one
-way (repair depends on the normal path) and never cycles. The derivations this path shares
-VERBATIM with the fold — the source listing, the SNAPSHOT envelope and the commit step —
-come from :mod:`rebar._commands.compact_plan` (story 3436) instead.
-
-What this path deliberately does NOT share is its FAILURE POLICY. The retire loop below
-tolerates a per-file rename failure and carries on, because the rebuild's crash model is the
-``.snapshot-rebuild.bak`` sentinel plus an idempotent restart — not the fold's
-journal-and-roll-back.
-
-The rebuild counter lives HERE, next to the function that increments it:
-``rebuild_snapshot_from_full_log`` does ``global _REBUILD_COUNT``, so hosting
-``get_rebuild_count`` in another module would read a different module global and
-silently report zero. ``compact`` re-exports it to preserve its public path.
-"""
+"""Rebuild a snapshot from the full ordered event log for fsck repair.
+Share snapshot derivations with normal compaction. The rebuild tolerates
+per-file retire failures and resumes through its backup sentinel rather
+than the normal fold's rollback journal. Its counter stays beside the
+rebuild function and is re-exported by compact."""
 
 from __future__ import annotations
 

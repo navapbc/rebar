@@ -1,32 +1,8 @@
-"""Supported repair for orphaned reverse bindings (``bridge fsck --repair``).
-
-``.bridge_state/bindings.json`` carries two indexes that must stay in lock-step:
-forward ``bindings[local_id] = {jira_key, …}`` and reverse
-``reverse[jira_key] = local_id``. A reverse entry that outlives its forward entry
-is reported by ``rebar bridge fsck`` as ``store_integrity`` / kind
-``reverse_missing_forward`` forever, and before this verb existed nothing could
-remove it — the binding-drift canary then alerts indefinitely on a benign fault,
-masking any genuine future integrity problem behind a constant non-zero count.
-Thirteen such keys (REB-410..REB-422) had to be repaired by reaching into
-``BindingStore._data`` because no supported surface could express it (874a).
-
-Design constraints this module honours:
-
-* **The repair consumes the detector.** The orphan set comes from
-  ``bridge_fsck.audit_store_integrity()``, never from a second copy of the rule
-  — a re-derivation could drift and delete something the report never named.
-  This mirrors ``tracker_maintenance``'s delegation to ``fsck``.
-* **The audit stays audit-only.** ``bridge_fsck`` keeps its L9 read-only
-  boundary; only ``main()`` dispatches here.
-* **Deletion goes through the public API.** ``BindingStore.unbind()`` clears a
-  stranded reverse key on its own authority, so this module never touches
-  ``_data``, and the write is ``save()``'s atomic tempfile + ``os.replace``.
-* **Four guards, all pre-write.** Every check runs before ``save()``, so a
-  refusal leaves the store byte-identical.
-
-Exit codes: ``0`` healed or nothing to do, ``1`` a guard refused, ``2``
-operational failure.
-"""
+"""Repair orphaned Jira reverse bindings found by bridge fsck.
+Use the detector's orphan set and BindingStore.unbind rather than a
+second rule or private state edit. Run all guards before save so a
+refusal leaves the store unchanged. Exit 0 for healed or no work,
+1 for a guard refusal, and 2 for an operational failure."""
 
 from __future__ import annotations
 

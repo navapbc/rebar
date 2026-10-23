@@ -1,15 +1,7 @@
-"""Tier B leaf-write command implementations + CLI dispatcher.
-
-The library/MCP call the command functions (``leaf.comment`` etc.) in-process; the
-CLI reaches the same functions via :func:`main`. One implementation, two callers —
-the Tier A read-path shape applied to writes.
-
-Each entry pins the command's argv arity and usage string, so a too-few-args
-invocation prints the canonical ``Usage:`` line and exits 1. These commands take
-positionals ONLY: an option-looking token or a surplus positional is a loud usage
-error (never stored as data, never dropped), and ``--`` ends option parsing so a
-value that legitimately begins with ``-`` can still be written.
-"""
+"""Leaf write commands and their CLI dispatcher.
+Library and MCP callers use the same functions in-process. CLI registry
+entries enforce positional arity. Option-looking or surplus arguments fail
+with usage text. -- permits literal values beginning with a dash."""
 
 from __future__ import annotations
 
@@ -69,12 +61,8 @@ _REGISTRY: dict[str, _Cmd] = {
     ),
 }
 
-# These commands take positionals ONLY. An option-looking token is therefore a
-# mistake — historically it was silently stored AS DATA (and any surplus token
-# holding the intended value was dropped by an `args[:min_args]` slice), so
-# `rebar comment <id> --body-file notes.md` stored the literal "--body-file" and
-# exited 0. Both shapes are now loud usage errors; `--` is the escape hatch for a
-# value that legitimately begins with "-".
+# Reject option-looking and surplus positionals instead of storing or
+# dropping them. Use -- before a literal value beginning with a dash.
 _ESCAPE_HINT = (
     'If the value itself begins with "-", end option parsing with "--" first:\n'
     '  rebar {command} {leading}-- "<value>"'
@@ -128,26 +116,14 @@ def _split_positionals(args: list[str]) -> tuple[list[str], str | None]:
     return positionals, None
 
 
-# The audited force override for the write-time secret screen (bug e7a9). Only the
-# `--flag=<reason>` form is recognised — the same shape as `transition --force=` — so every
-# other option-looking token stays the loud usage error bug 00da made it, and a reason is
-# structurally impossible to omit. Handled here, above the dispatch, so EVERY write verb
-# honours it: a false positive on a `create` description or a `session-log` entry must not
-# be a permanent hard block just because that verb parses its own argv.
+# Extract only the reason-bearing secret-screen override above both write
+# dispatch routes. Other option-looking tokens remain usage errors.
 _ALLOW_SECRET_FLAG = "--allow-secret-pattern"
 
 
 def _extract_allow_secret(args: list[str]) -> tuple[list[str], str]:
-    """Pull ``--allow-secret-pattern=<reason>`` out of *args*, returning the rest + reason.
-
-    Runs BEFORE both dispatch routes: ahead of ``_split_positionals`` so the flag is not
-    mistaken for the option-looking positional that guard exists to reject, and ahead of
-    the self-parsing composers so they never see an option they do not know.
-
-    Only the pre-``--`` segment is inspected: everything after the end-of-options marker
-    is literal data (bug 00da), so a body that legitimately BEGINS with this flag — the
-    documentation of this very feature, for instance — survives verbatim.
-    """
+    """Extract a reason-bearing secret-screen override before dispatch.
+    Inspect only arguments preceding bare --. Later text stays literal data."""
     head = args[: args.index("--")] if "--" in args else args
     tail = args[len(head) :]
     reason, rest = "", []
@@ -243,8 +219,7 @@ def main(argv: list[str]) -> int:
         print("Usage: ticket-commands.py <command> [args...]", file=sys.stderr)
         return 1
     command, args = argv[0], argv[1:]
-    # One extraction covering BOTH dispatch routes, so the override the refusal advertises
-    # actually exists for every write verb (bug e7a9).
+    # Extract the override once for both write dispatch routes.
     args, allow_secret_pattern = _extract_allow_secret(args)
     argv_handler = _ARGV_REGISTRY.get(command)
     if argv_handler is not None:
@@ -272,9 +247,7 @@ def main(argv: list[str]) -> int:
     if len(positionals) < entry.min_args:
         print(entry.usage, file=sys.stderr)
         return 1
-    # Every command on this path consumed only its first min_args positionals, so a
-    # surplus token was silently DROPPED — including the value a mistyped option was
-    # meant to carry. Treat max_args=None as "exactly min_args" and fail loudly.
+    # Reject surplus positionals instead of silently dropping them.
     limit = entry.max_args if entry.max_args is not None else entry.min_args
     if len(positionals) > limit:
         print(
@@ -294,10 +267,7 @@ def main(argv: list[str]) -> int:
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode
-    # Mutation confirmation (ticket 6bda-9d58-8546-4638): each leaf function
-    # returns its small outcome; the formatter prints the kubectl-style line (or
-    # the --output json envelope) on the CLI's behalf, so library/MCP callers of
-    # the same functions stay print-free.
+    # CLI formats leaf outcomes. Library and MCP calls remain print-free.
     from rebar._commands import _confirm
 
     _confirm.leaf_confirm(command, out)

@@ -1,20 +1,7 @@
-"""Jira -> local field/status translation for the inbound differ.
-
-This is the self-contained *translation* layer extracted from ``inbound_differ``
-(module-size split, epic 716f): the hand-maintained Jira-issuetype / priority /
-workflow-status maps and the pure helpers that turn a raw Jira ``fields`` dict
-into the local ticket field/value shape the differ then diffs against.
-
-It is a LEAF: every function here references only other symbols in this module
-(and the sibling ``adf`` module, loaded lazily by-path, plus the provider-agnostic
-managed-ref removal gate that ``diff_inbound_parent`` imports lazily — reused, never
-re-implemented). ``inbound_differ`` imports these names back and re-exports them, so
-``inbound_differ.<symbol>`` attribute access (and the config parity tests) keep
-resolving unchanged.
-
-This module is pure: no I/O, no time/random, no logging, no globals beyond the
-lazy ``adf`` module cache.
-"""
+"""Jira field and status translation for inbound reconciliation.
+Maps raw Jira fields to local values, recovers annotation labels, normalizes
+text, and classifies parent evidence. The inbound differ re-exports these
+helpers for existing callers."""
 
 from __future__ import annotations
 
@@ -63,24 +50,11 @@ def _description_forms(
     local_ticket: dict[str, Any],
     outbound_mapper: OutboundMapper | None,
 ) -> tuple[str, Any] | None:
-    """Normalize the description pair for the inbound compare, or signal echo-unchanged.
-
-    Returns ``None`` when Jira's value is the echo of the LOCAL body's landed wire form —
-    the inbound mirror of the outbound ``_baseline_form_matches`` (story 3388/3289). Under
-    a lossy one-way rich-text codec (the DC Markdown->wiki cutover) the local body stays
-    Markdown while Jira echoes the rendered wiki, so a raw/ADF-only compare reports
-    "changed" every pass and the differ pulls Jira's echo of our OWN push back over the
-    local Markdown -- the AC2 echo-safety regression. When the injected outbound port is
-    present we render the local body to its landed wire form (``map_fields_to_remote`` --
-    identity when the rich cutover is off, so the plain-codec path is unchanged) and, if it
-    matches the RAW Jira value, treat the field as unchanged. Matching on the landed form
-    only ADDS a way to conclude "unchanged": it cannot hide a real Jira edit (a genuine
-    remote change no longer equals our landed form) and it cannot start missing an edit the
-    raw compare already caught.
-
-    Otherwise returns the ADF-normalized ``(local_val, jira_val)`` pair for the generic
-    scalar compare (the Cloud path, byte-for-byte unchanged).
-    """
+    """Return comparable local and Jira description forms, or None for an echo.
+    With an outbound mapper, render the local body to its landed wire form first.
+    This detects a configured Markdown to wiki echo without replacing the local
+    Markdown. Otherwise compare ADF-normalized values. A Jira edit differing from
+    the landed form still passes through."""
     if outbound_mapper is not None:
         landed = outbound_mapper.map_fields_to_remote(
             {"description": local_ticket.get("description") or ""},
@@ -94,9 +68,7 @@ def _description_forms(
     return local_norm, jira_norm
 
 
-# ---------------------------------------------------------------------------
-# Field mapping constants (Jira -> local)
-# ---------------------------------------------------------------------------
+# Jira field maps
 
 _JIRA_TO_LOCAL_TYPE: dict[str, str] = {
     "Bug": "bug",
@@ -105,25 +77,17 @@ _JIRA_TO_LOCAL_TYPE: dict[str, str] = {
     "Epic": "epic",
 }
 
-# The local-type vocabulary a ``rebar-type:<local>`` label may name (S3, the type-axis
-# mirror of ``_LOCAL_STATUS_VOCAB`` below). DERIVED from ``rebar.types.TicketType`` so it
-# cannot drift from the canonical type list — a label whose suffix is NOT a valid local
-# ticket type is ignored (fall back to the raw issue type), so a malformed/unknown label
-# never fabricates a bogus local type.
+# Valid rebar-type labels come from TicketType. Unknown suffixes fall back
+# to the Jira issue type.
 _LOCAL_TYPE_VOCAB: frozenset[str] = frozenset(get_args(TicketType))
 
 _REBAR_TYPE_LABEL_PREFIX = "rebar-type:"
 
 
 def recover_type_label(labels: Any) -> str | None:
-    """Recover a local ticket type from a ``rebar-type:<local>`` annotation label.
-
-    The type-axis mirror of :func:`recover_status_label`. Scans ``labels`` for the first
-    ``rebar-type:`` label whose suffix is a valid local type (in :data:`_LOCAL_TYPE_VOCAB`)
-    and returns that ``<local>``; an unknown/malformed suffix is ignored so the caller
-    falls back to the raw Jira issue type. ``None`` when no valid label is present.
-    Reverse-map-free — it never consults a Jira->local table, so a per-project collapse
-    (two local types onto one Jira type) is recovered directly from the stamped label."""
+    """Return the first valid rebar-type label, or None.
+    Unknown suffixes are ignored so the caller can use the Jira issue type.
+    The label preserves local types when several map to one Jira type."""
     for label in labels or []:
         if isinstance(label, str) and label.startswith(_REBAR_TYPE_LABEL_PREFIX):
             candidate = label[len(_REBAR_TYPE_LABEL_PREFIX) :]
@@ -208,21 +172,9 @@ def _extract_jira_field_value(jira_fields: dict[str, Any], field: str) -> Any:
 
 
 def _assignee_matches(local_val: str, jira_raw: Any) -> bool:
-    """Permissive assignee equality (mirror of outbound_differ._assignee_matches).
-
-    Convergence-churn fix (bug 85a1 family): a live Jira fetch returns
-    ``assignee`` as ``{accountId, displayName, emailAddress}``; local tickets
-    store assignee as a bare string that may be an email (ticket-create
-    default), a displayName (probe), or "Test" (git-config default). The
-    outbound differ already tolerates all three identity forms; without the
-    same tolerance here, the inbound differ extracts only ``displayName`` and
-    reports a phantom ``assignee`` change on every pass whenever local stores a
-    DIFFERENT identity form than Jira returns — the assignee field never
-    converges.
-
-    Treat ``local_val`` as matching when it equals ANY of {emailAddress,
-    accountId, displayName}. Both sides empty (unassigned) also match.
-    """
+    """Compare a local assignee with Jira email, account ID, or display name.
+    Empty values match an unassigned Jira user. Matching the raw identity shapes
+    prevents repeated inbound assignee changes."""
     if jira_raw is None:
         return (local_val or "") == ""
     if not isinstance(jira_raw, dict):
@@ -237,14 +189,8 @@ def _assignee_matches(local_val: str, jira_raw: Any) -> bool:
 
 
 def normalize_rich_text(body: Any) -> str:
-    """Decode a rich-text payload (ADF dict or string) to plain text (ticket 21ca).
-
-    Jira: an ADF dict decodes via ``adf_to_text``; a plain string passes through
-    unchanged; ``None`` yields ``""``. This is the ``InboundMapper.normalize_rich_text``
-    Backend-port implementation (``adapters/jira/backend.py:_JiraInbound``); it serves
-    BOTH the inbound apply defense-in-depth (``inbound_translate._normalize_adf_body``)
-    and the outbound comment-diff decode (``outbound_comments._normalize_comment_body``).
-    """
+    """Decode ADF dictionaries to text. Pass strings through and map None to an
+    empty string. The inbound mapper and outbound comment differ share this helper."""
     if isinstance(body, dict):
         return _load_adf().adf_to_text(body)
     return str(body) if body is not None else ""
@@ -298,37 +244,16 @@ def _identity_of(raw: Any) -> dict[str, Any]:
 
 
 def _map_jira_to_local_fields(jira_fields: dict[str, Any]) -> dict[str, Any]:
-    """Map Jira fields to local ticket field names/values (partial-tolerant).
-
-    ticket 929a: when jira_fields carries a rebar-status: annotation label
-    (e.g. ``rebar-status:blocked``), the label takes precedence over the raw
-    Jira workflow status for the local status mapping. This preserves lossless
-    round-trip for statuses that have no direct Jira equivalent (blocked maps
-    to In Progress on Jira, cancelled maps to Done). Without this, a
-    blocked→In Progress outbound followed by an inbound pass would silently
-    overwrite local "blocked" with "in_progress".
-
-    ticket 625b: every field's emission is guarded on its SOURCE vendor key being
-    PRESENT in ``jira_fields`` (``if key in jira_fields``), so a partial subset
-    (e.g. the ``_BASELINE_FIELDS`` slice stored at rest) maps only the keys it
-    carries while a FULL snapshot maps byte-identically to today (a present-but-null
-    field still maps to its former default). An ABSENT vendor key yields NO canonical
-    key — never a fabricated default. Three canonical keys are added so the core
-    never reads a raw Jira snapshot shape: ``assignee_identity`` /
-    ``reporter_identity`` (fixed ``{display,email,account_id}`` shape) and the bare
-    ``remote_parent_id`` string. The scalar ``assignee`` string is kept alongside
-    ``assignee_identity`` (additive — existing consumers).
-    """
+    """Map present Jira keys to local fields without inventing absent values.
+    Present null keys retain their defaults. Valid rebar-status labels override
+    workflow status. Include canonical assignee and reporter identities and the
+    remote parent key while retaining the scalar assignee."""
     out: dict[str, Any] = {}
 
     if "summary" in jira_fields:
         out["title"] = _extract_jira_field_value(jira_fields, "summary") or ""
     if "description" in jira_fields:
-        # Bug 1bb2: ``_extract_jira_field_value`` returns nested dicts verbatim
-        # for any field that isn't a {.name/.displayName} object — Jira's
-        # ``description`` is an ADF (Atlassian Document Format) dict in cloud
-        # tenants. Normalize to plain text here so the diff map carries a
-        # string and the applier writes a string into the local EDIT event.
+        # Decode Jira ADF descriptions before the local diff and EDIT event.
         description_raw = jira_fields.get("description")
         out["description"] = _normalize_jira_body(description_raw) if description_raw else ""
     recovered_type = recover_type_label(jira_fields.get("labels"))
@@ -366,15 +291,8 @@ def _map_jira_to_local_fields(jira_fields: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-# ---------------------------------------------------------------------------
-# Inbound parent: the THREE-state read and the gated clear (ticket 88d9)
-# ---------------------------------------------------------------------------
-
-# The four situations the snapshot's ``parent`` field can be in. Before 88d9 the
-# differ collapsed all of them into "resolved to a local id, or not", which made a
-# de-parenting in Jira indistinguishable from a read that never happened — so the
-# differ could not clear a parent without risking a spurious clear, and therefore
-# never cleared one at all.
+# Distinguish absent, empty, resolved, and unresolved parent observations.
+# Only an observed empty parent can support a clear.
 PARENT_UNOBSERVED = "unobserved"  # no ``parent`` key: never queried / read failed / truncated
 PARENT_NO_PARENT = "no-parent"  # key PRESENT and falsy: queried, Jira has NO parent
 PARENT_RESOLVED = "resolved"  # a parent key that resolves to a bound local id
@@ -385,18 +303,10 @@ def classify_inbound_parent(
     jira_fields: dict[str, Any],
     get_local_id: Callable[[str], str | None],
 ) -> tuple[str, str | None]:
-    """Classify a snapshot entry's ``parent`` field; return ``(state, local_parent_id)``.
-
-    ``local_parent_id`` is non-None only for :data:`PARENT_RESOLVED`.
-
-    The distinction that matters is PRESENCE, not truthiness: ``fetcher.merge_parent_map``
-    writes the key only for issues the parent map actually mentioned, so a missing key means
-    "we did not observe this issue" (a truncated page walk, a cross-project issue, or the
-    whole-map ``{}`` degradation ``get_parent_map`` returns on ANY REST failure) while a
-    present-and-falsy value means "Jira was asked and answered: no parent". Only the latter
-    may authorise a clear — this is the same predicate shape (``key in m and not m[key]``)
-    that story 5200's parent wait-helper had to be fixed to before landing.
-    """
+    """Return the parent observation state and any bound local parent ID.
+    A missing parent key means unobserved, including failed or truncated reads.
+    A present empty value means Jira reported no parent. Unreadable or unbound
+    parent keys remain unresolved and cannot authorize a clear."""
     if "parent" not in jira_fields:
         return PARENT_UNOBSERVED, None
     parent_raw = jira_fields.get("parent")
@@ -422,34 +332,13 @@ def diff_inbound_parent(
     get_local_id: Callable[[str], str | None],
     peer_parent: str | None = None,
 ) -> tuple[bool, str | None]:
-    """Decide the inbound ``parent_id`` change for one bound ticket (ticket 88d9).
-
-    Returns ``(emit, value)``. ``emit`` False means the differ writes nothing for this field.
-
-    An inbound CLEAR is a WRITE THAT DESTROYS LOCAL DATA, so it fires only on POSITIVE
-    evidence — never on absent snapshot data — and only through the shared managed-ref gate:
-
-      * :data:`PARENT_RESOLVED`     -> set/compare as before (a SET is local-authoritative
-                                       once observed, and unchanged emits nothing).
-      * :data:`PARENT_UNOBSERVED`   -> nothing. The read may have failed or been truncated.
-      * :data:`PARENT_UNRESOLVABLE` -> nothing, preserving the original guard's intent: "we do
-                                       NOT emit parent_id=None to avoid accidentally clearing a
-                                       locally-set parent when we just can't resolve it yet".
-      * :data:`PARENT_NO_PARENT`    -> the CLEAR, gated on ``should_propagate_removal`` so a
-                                       parent a human set directly in Jira (one rebar never
-                                       managed) is ADOPTED rather than clobbered. This is the
-                                       SAME provider-agnostic predicate the outbound direction
-                                       wraps as ``_parent_clear_is_managed``; reused, not
-                                       re-invented.
-
-    KNOWN BLIND SPOT, recorded not hidden: ``add_managed_ref`` is folded by the parent-set
-    EVENT, so a ref is "managed" the instant it is set LOCALLY — MANAGED does not prove Jira
-    ever had the parent. The differ's same-pass suppression closes that (an inbound field the
-    same pass's outbound is writing is dropped, and ``_OUTBOUND_TO_INBOUND_FIELD`` maps
-    ``parent`` -> ``parent_id`` so it genuinely fires here). The residual window, stated
-    plainly: a degraded pass in which outbound does not write the parent (skipped, disabled, or
-    failed) while inbound proceeds.
-    """
+    """Return whether to emit parent_id and its new local value.
+    Set a resolved parent only when it differs. Ignore unobserved or unresolved
+    parents. Clear an observed empty parent only when the peer previously had one
+    and the local reference passes the managed removal gate. A locally managed
+    ref alone does not prove Jira ever had that parent. Same-pass outbound
+    suppression protects local parent writes, but a degraded outbound pass remains
+    a gap."""
     state, jira_parent_local_id = classify_inbound_parent(jira_fields, get_local_id)
     local_parent_id = local_ticket.get("parent_id") or None
 

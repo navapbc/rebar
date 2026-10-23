@@ -1,33 +1,10 @@
-"""Pure level-triggered reconciliation classifier (epic 3006-e198).
+"""Pure classifier for the local, observed Jira, and binding state matrix.
 
-This is the CONVERGENCE FOUNDATION: one pure decision function over the full
-``(local × observed-jira × binding)`` state matrix, plus the circuit-breaker
-and decision-census helpers that make a level-triggered controller safe and
-observable. It is a **leaf** — no I/O, no imports from the differ / outbound /
-inbound modules — so both consumers (the live pass, which ACTS on Decisions,
-and the offline/online audit, which REPORTS them) share exactly one classifier
-(healing the report-only/healing fork; drift class D).
-
-The invariants encoded here are specified verbatim by ADRs 0026–0029:
-
-* **ADR 0026** — a three-way-merge ``baseline`` (the per-pair last-synced field
-  values) is the ONLY source of direction arbitration. ``local == baseline`` ⇒
-  a Jira-side edit ⇒ mirror inbound; ``local != baseline`` ⇒ a local edit ⇒
-  local-wins. An absent baseline degrades to local-wins (safe/lossy); a corrupt
-  baseline fails the pass closed (enforced by the store, not here).
-* **ADR 0027** — binding lifecycle ``pending → confirmed → retired``; adoption of
-  an unbound Jira issue is GATED (retired-skip, identity audit, baseline seed,
-  external-id idempotency). This module only decides ADOPT vs SKIP_RETIRED; the
-  handler runs the gates.
-* **ADR 0028** — snapshot-absence is NOT deletion. A bound key absent from the
-  fetch window routes to ``PROBE_GET`` (a bounded direct GET), NEVER to a "gone"
-  verdict. Only a CONFIRMED 404, counted to grace, yields ``RETIRE_AFTER_GRACE``.
-  ``ObservedJira`` is a FOUR-way state, never a boolean.
-* **ADR 0029** — the reverse status map is canonical; ``archived → Done`` outbound
-  requires a non-oscillating inbound counterpart (handled in the differ, not
-  here). The classifier computes outbound + inbound intent from the same observed
-  snapshot so single-pass echo suppression stays expressible.
-"""
+The pass and audit share its decisions. A last-synced baseline arbitrates field
+direction. Without a baseline, local changes take precedence. An unbound Jira
+issue is only a candidate for gated adoption. Absence from a fetch window calls
+for a direct GET, while confirmed 404s count toward retirement. The classifier
+also returns decision counts and a blast-radius verdict before the pass acts."""
 
 from __future__ import annotations
 
@@ -256,20 +233,9 @@ def classify(
 
 
 def direction_is_inbound(local_val: object, baseline_val: object) -> bool:
-    """ADR 0026 direction arbitration for a single field.
-
-    ``local == baseline`` ⇒ local is UNCHANGED since the last sync ⇒ any
-    divergence from *current* Jira is a Jira-side (teammate) edit ⇒ **mirror it
-    inbound / suppress the outbound push** (return True). ``local != baseline`` ⇒
-    a genuine local edit ⇒ local-wins outbound (return False).
-
-    This is the pure kernel of the three-way merge. The live consumer
-    (``outbound_fields._local_matches_prev``, swapped from prev_snapshot to
-    ``BindingStore.get_baseline`` by the rollout task) adds the shape-tolerant
-    assignee/text comparisons on top; the direction RULE itself is exactly this.
-    An absent baseline (None) is the "no ancestor" case: not equal to a real
-    local value, so it degrades to local-wins (ADR 0026 §2) — safe/lossy.
-    """
+    """Return True when the local field still matches its last-synced baseline, so a
+    Jira difference may flow inbound. A changed local field takes outbound precedence.
+    With no baseline, a non-None local value does not match and takes precedence."""
     return local_val == baseline_val
 
 
@@ -307,15 +273,9 @@ def check_blast_radius(
     total_bindings: int,
     max_acting_fraction: float,
 ) -> BreakerVerdict:
-    """Refuse a pass whose ACTING decisions exceed ``max_acting_fraction`` of the
-    binding population (prior art: Argo ``allowEmpty``, Entra deletion threshold).
-
-    The 2026-07-03 census measured 1.14% acting — an 8.8× headroom under the
-    default 0.10. A fetch/JQL regression that would mass-retire or mass-transition
-    trips this BEFORE any mutation is applied (the rollout wires it into the apply
-    path). ``total_bindings == 0`` allows (nothing to gate) rather than dividing
-    by zero.
-    """
+    """Refuse acting decisions above the configured fraction of bound tickets before
+    any mutation or absence counter advances. An empty binding population has a
+    zero acting fraction."""
     acting = sum(1 for d in decisions if d.is_acting)
     if total_bindings <= 0:
         fraction = 0.0

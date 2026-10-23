@@ -56,7 +56,7 @@ def _has_live_replacement_link(
     close_class: str,
     tracker: str,
 ) -> bool:
-    """True when a non-completion bug close names a live replacement."""
+    """True for a usable replacement on non-completion bug close."""
     if close_class not in _NON_COMPLETION_BUG_CLASSES:
         return False
     if ticket_type != "bug" and close_class not in close_disposition.ADMINISTRATIVE_CLASSES:
@@ -70,7 +70,7 @@ def _has_live_replacement_link(
 
 
 def _recorded_replacement_target(ticket_id: str, tracker: str) -> str | None:
-    """The replacement ticket this bug NAMES, ignoring whether that target is usable."""
+    """Return the named replacement even when it is unusable."""
     return close_disposition.replacement_of(
         ticket_id, tracker, require_live=False, on_subject_unreadable="continue"
     )
@@ -79,7 +79,7 @@ def _recorded_replacement_target(ticket_id: str, tracker: str) -> str | None:
 def _ensure_duplicate_close_is_linked(
     ticket_id: str, ticket_type: str, close_class: str, tracker: str
 ) -> None:
-    """Block a ``--class duplicate`` close that names no usable canonical."""
+    """Reject duplicate close without a usable canonical ticket."""
     del ticket_type  # both classes owe a link on every ticket type (ticket fc20)
     if close_class not in ("duplicate", "superseded"):
         return
@@ -381,13 +381,8 @@ def _referencing_commits(
 def _emit_completion_sidecar(
     completion_sidecar, result, ticket_id: str, repo_root, *, is_pass: bool
 ) -> None:
-    """Emit the PASS/FAIL COMPLETION_VERDICT sidecar, warning on stderr if it is DROPPED.
-
-    Best-effort persistence (observability, never a gate): a failed/raised emit never changes
-    the close outcome. But a dropped record — most often a write-lock ``LockTimeout`` that
-    outlasted the retry (ticket ab54) — is no longer silent: inspect ``emit``'s bool and, on
-    failure, write an explicit ``Warning: ... WITHOUT ...`` line naming the ticket (matching
-    the transition_close convention) instead of leaving only a swallowed ``logger.warning``."""
+    """Best-effort persistence of the completion verdict sidecar.
+    Warn on stderr when the record is dropped without changing close outcome."""
     try:
         emitted = completion_sidecar.emit(result, material=None, repo_root=repo_root)
     except Exception:
@@ -416,17 +411,9 @@ def _emit_completion_sidecar(
 def _raise_on_verifier_fault(
     result: dict, items: list, ticket_id: str, resolved_id: str, repo_root
 ) -> None:
-    """Raise when the verdict is a "no verdict obtainable" FAULT (bug 2a6f), else return.
-
-    ``reconcile_verdict`` marks a non-PASS verdict from which no failing criterion could be
-    identified — a truncated or garbled structured turn. That is the verifier failing to answer,
-    NOT evidence a criterion is unmet, and it used to surface as a bare
-    ``- (unspecified): verifier returned FAIL without itemizing the failing criterion``, leaving
-    the caller with nothing to remediate. Reported here BEFORE the unmet-criteria message so the
-    caller is told to re-run instead of hunting for a requirement that was never evaluated, and
-    with the retryable exit 11 every other transient degrade uses. Still fail-closed — raising
-    means the ticket does not close. A separate function (rather than inline) so the caller's
-    branch count is unchanged."""
+    """Raise retryable exit 11 when a non-PASS verdict names no failing
+    criterion. The ticket stays open because the verifier gave no usable
+    finding, rather than evidence of unmet work."""
     if result.get("verdict_obtainable") is not False:
         return
     detail = str((items[0].get("detail") if items else "") or "")
@@ -442,11 +429,8 @@ def _raise_on_verifier_fault(
 
 
 def _applicable_close_classes(ticket_type: str) -> str:
-    """The ``--class`` values a close of THIS ticket type may carry, as display text.
-
-    Bugs take the full vocabulary; every other type takes only the administrative subset
-    (ticket fc20). Kept in ``CLOSE_CLASSES`` order so the enumeration reads the same
-    everywhere."""
+    """List close classes in canonical order. Bugs use all classes.
+    Other ticket types use administrative classes only."""
     from rebar._commands import close_disposition
 
     if ticket_type == "bug":
@@ -457,12 +441,8 @@ def _applicable_close_classes(ticket_type: str) -> str:
 def _verification_fail_message(
     ticket_id: str, ticket_type: str, result: dict, items: list, lines: list[str]
 ) -> str:
-    """The refusal message for a completion-verification FAIL (still fail-closed either way).
-
-    A verdict carrying the framework-derived top-level ``evidence_sufficient: false`` marker
-    failed on INSUFFICIENT EVIDENCE — the bounded search exhausted without refuting anything —
-    so the headline says that honestly instead of reporting fabricated "unmet criteria". The
-    verdict's remediation (set by ``reconcile_verdict`` on every FAIL) is appended either way."""
+    """Explain a completion failure. Label evidence-search exhaustion as
+    insufficient evidence and append the verdict's remediation."""
     noun = "criterion" if len(items) == 1 else "criteria"
     if result.get("evidence_sufficient") is False:
         headline = (
@@ -478,17 +458,12 @@ def _verification_fail_message(
     guidance = result.get("remediation")
     if guidance:
         message += "\n\n  " + guidance
-    # Bounded auto-resume trail (ticket b5f8): when the gate re-ran the verifier before this
-    # failure surfaced, say so honestly — per attempt: the cache-credited PASS count and the
-    # remaining unmet count. Empty string for a close that never resumed (branch-free here,
-    # so this function stays at its frozen complexity ceiling).
+    # Include attempt, cached PASS, and unmet counts only when the verifier
+    # resumed.
     from rebar._commands import close_autoresume
 
     message += close_autoresume.attempts_note(result)
-    # Discoverability (ticket fc20, incident 9b70): a ticket whose work will deliberately NOT
-    # be completed — duplicate/obsolete/superseded/wontfix — can never satisfy the verifier, so
-    # the FAIL message must present the truthful exit rather than leaving --force as the only
-    # visible door. Enumerated per ticket type so a task is never offered a bug-only class.
+    # Show applicable disposition classes for deliberately unfinished work.
     message += (
         "\n\n  If this ticket's work is NOT meant to be completed (it is a duplicate, its "
         "premise is obsolete, it was superseded, or it is a deliberate wontfix), close it as "
@@ -506,13 +481,9 @@ def _verification_fail_message(
 def _administrative_disposition(
     ticket_id: str, ticket_type: str, close_class: str, close_reason: str, tracker: str
 ):
-    """Route a qualifying disposition close to its deterministic sign signal (ticket fc20).
-
-    Returns the verdict dict to sign, ``None`` for an unsigned disposition path, or
-    :data:`_NO_DISPOSITION` for "keep normal completion verification". The two evidence
-    doors mirror :func:`close_disposition.verdict`: reason-required classes attest their
-    reason, while replacement-bearing classes attest the live counterpart.
-    """
+    """Return a deterministic disposition sign signal when a reason or usable
+    replacement qualifies. Otherwise keep normal verification or return an
+    unsigned disposition result."""
     from rebar._commands import close_disposition
 
     if close_class in close_disposition.REASON_REQUIRED_CLASSES:
@@ -556,21 +527,9 @@ def _bot_alert_disposition(ticket_id: str, close_class: str, close_reason: str, 
 
 
 def _gate_skip_expectation(ticket_id: str, code_root: str, force_close: str) -> str | None:
-    """Resolve the completion-verification gate's SKIP provenance, or ``None`` to proceed.
-
-    The gate state resolves FIRST (matching the historical branch order), so a ``--force``
-    under a DISABLED config records the gate state — there was no gate to bypass — while
-    the operator's reason stays durable in ``force_close_reason``. ``force_bypassed`` is
-    recorded only when an ENABLED gate was actually bypassed.
-
-    * ``gate_off`` — the gate is genuinely configured off.
-    * ``force_bypassed`` — an ENABLED gate was bypassed with ``--force``.
-
-    An UNREADABLE config is not a skip any more: :func:`~rebar._commands.gates.gate_enabled`
-    raises :class:`~rebar.config.ConfigError` out of this close (operator ruling 39f8-ae7c),
-    so the historical ``gate_unreadable`` provenance value survives only on already-written
-    close events — no new write produces it.
-    """
+    """Record gate_off when disabled or force_bypassed when an enabled gate is
+    forced. Resolve gate state first. Unreadable config raises instead of
+    producing a skip."""
     from rebar._commands import gates
 
     state = gates.gate_enabled(
@@ -629,28 +588,10 @@ def _completion_precheck(
     ref: str | None = None,
     metrics: dict[str, int] | None = None,
 ):
-    """The completion-verification close gate's PRE-close half (runs outside the write lock).
-
-    Returns the PAIR ``(verified_result, completion_expectation)``. ``verified_result`` is the
-    PASS verdict ``result`` (the sign signal, fed to :func:`sign_completion_verdict` after a
-    confirmed close), or ``None`` when no signature will be produced.
-    ``completion_expectation`` is the write-time provenance for WHY a signature was or was not
-    expected, stamped on the close STATUS event (story mechanical-coherent-wolverine):
-    ``required`` (gate on, verified PASS, signature expected), ``disposition`` (signed as a
-    disposition, not a completion PASS), ``gate_off`` /
-    ``force_bypassed`` (see :func:`_gate_skip_expectation` — gate state resolves FIRST, so a
-    forced close under a disabled config records the gate state; an UNREADABLE config
-    raises :class:`~rebar.config.ConfigError` instead, per operator ruling 39f8-ae7c —
-    ``gate_unreadable`` survives only on historical events), ``local_source``
-    (opt-in unattested verdict), ``not_certifiable`` (certification withheld by an
-    uncertified descendant), or ``""`` for lifecycle-exempt types (present-only: the key is
-    omitted). Raises :class:`CommandError` (block) on a FAIL verdict, or when
-    the LLM is unavailable / any verifier error (fail-closed). The ``rebar.llm`` import is LAZY
-    so the optionality contract holds: core stays stdlib-only unless the gate is on AND a
-    non-force close is attempted.
-
-    Disposition closes skip the billable verifier but return their own deterministic sign signal;
-    ``completion_expectation`` records every unsigned or exempt cause durably."""
+    """Return the pre-close verdict and durable completion expectation.
+    Use a signed completion PASS, a deterministic disposition, or an
+    explicit reason why certification is absent. Fail closed on verifier
+    failure or error. Import the optional LLM only when needed."""
     # session_log / code_review are lifecycle-exempt — they cannot be transitioned, so
     # transition_core will refuse this close authoritatively. Skip the gate BEFORE the (billable)
     # verifier runs, so a doomed close attempt never fires an LLM call.

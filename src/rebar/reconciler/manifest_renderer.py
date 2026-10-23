@@ -260,21 +260,10 @@ def render_lifecycle_intents(ticket_plans: Iterable[Any]) -> dict:
     }
 
 
-# ── REB-3115 S5 T2 — the sealed, additive, versioned pass-outcomes section ───────
-#
-# ``render_pass_outcomes`` folds a pass's proven logical-operation outcomes into ONE
-# additive, versioned section exposing every named lifecycle / retry / fuse / outcome
-# field (AC2): disposition, failure scope, replay safety, logical + physical attempts,
-# delay source / value, the retry budget envelope, ``retry_not_before``, per-outcome fuse
-# state, and the exact five-bucket pass tally + degraded exit signal.
-#
-# It NEVER participates in the canonical mutation array or its hash (AC1): it is a pure
-# sibling projection the caller adds as a separate top-level key. Every field is redacted
-# and every collection is bounded (AC6): diagnostics run through the ADR-0041 sanitizer +
-# 8-entry bound (``operation_outcome.bound_diagnostics``), and the outcomes / fuse-state
-# lists are capped with an honest truncation count. Duck-typed over both
-# ``OperationOutcome`` (the rich per-op record) and the coordinator's
-# ``TicketOutcome`` / ``CutoverOutcome`` so either surface composes.
+# Pass outcomes form a separate versioned projection outside the canonical
+# mutation array and hash. Redact diagnostics, cap outcome and fuse lists, and
+# report truncation counts. Include lifecycle, retry, fuse, attempt, and five-bucket
+# pass-tally fields for both operation and coordinator outcomes.
 
 _PASS_OUTCOMES_SCHEMA_VERSION = 1
 _MAX_PASS_OUTCOMES = 1000

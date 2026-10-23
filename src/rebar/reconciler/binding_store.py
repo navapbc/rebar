@@ -1,48 +1,20 @@
-"""Local binding store for Jira bidirectional sync.
+"""BindingStore coordinates Jira binding state over one repository.
 
-Maps local ticket IDs ↔ Jira issue keys.  Persisted as JSON at
-`<store>/.bridge_state/bindings.json` on the tickets branch, where `<store>` is the
-RESOLVED (relocatable) tracker directory.
+BindingRepository owns the binding file, retired and rotation sidecars, and alert log.
+BindingLifecycle owns identity, absence, retirement, and comment transitions.
+BindingRecovery repairs pending creates and interrupted retirement. These owners share
+repository dictionaries, and save() is the persistence boundary.
 
-Neither persistence nor lifecycle policy is implemented here.  ``BindingRepository``
-(RP-02 S1) owns the four state files — live store, retired sidecar, GET-rotation sidecar,
-alert log — with their load rules, exact committed bytes, and asymmetric failure
-dispositions (live fails CLOSED, retired and rotation fail OPEN); ``BindingLifecycle``
-(RP-02 S2) owns the identity transitions (bind/confirm/unbind, the immutable numeric id,
-the MOVED-issue re-key) and, since S2 T2, absence, retirement, tombstone and comment
-bookkeeping; ``BindingRecovery`` (RP-02 S3) owns incomplete-operation repair — pending-binding
-recovery and interrupted-retirement completion.  This module is the FACADE over the three,
-owning GET-rotation and coordinating them.  Everything it does mutates the repository's OWN
-dictionaries in place — handed out by reference, never copied — and then calls ``save()``,
-the single persistence boundary.
-
-Write-ahead protocol (story 9622): bind_pending + save(); create_issue() →
-DIG-NNNN; record_pending_key + save() — persisted on the STILL-pending entry
-BEFORE the rebar-id label is attached; plant the label/property; bind_confirm +
-save(). The keyed-pending write makes recovery deterministic: a hard-kill between
-create and label leaves the ``jira_key`` on the pending entry, so recovery
-re-attaches the label and confirms with NO Jira search (no duplicate).
-``jira_key`` on a ``pending`` entry is an additive SUB-state of the ADR-0027
-``pending`` state, not a new enumerated state.
-
-Recovery (next pass, recover_pending_bindings — the policy is ``binding_recovery``'s
-since RP-02 S3 T1; this facade only delegates): keyed-pending → retro-attach
-label/property (idempotent) and confirm, NO search; keyless-pending → search Jira
-for the rebar-id label, confirm if found else unbind; per-entry error → append
-``{local_id, reason}`` to ``failure_sink`` and continue.
-
-Comment sync (emersed-specific-mutt): a ``comment_ids`` map (local_comment_key
-HLC → Jira comment ID) makes comment mirroring append-only/idempotent; the map's
-write-ahead and change-gating rules live with the policy in ``binding_lifecycle``.
-"""
+Create persists a pending entry before calling Jira. Once Jira returns a key, it
+persists that key before attaching the rebar-id label and property. Recovery can
+confirm a keyed pending entry without searching Jira. A keyless entry requires a
+label search. Per-entry recovery failures leave the entry pending and reach the
+failure sink. The comment_ids map records local keys to Jira IDs for idempotent
+comment sync."""
 
 from __future__ import annotations
 
-# ``os`` is retained for its MODULE-LEVEL HANDLE, not for a call in this file. The env
-# read that used to consume it moved to ``binding_lifecycle`` with the absence policy it
-# parameterizes (RP-02 S2 T2), but ``binding_store.os`` is a long-standing part of this
-# module's surface: the atomic-write crash oracles reach ``os.replace`` through it to fail
-# the live replacement mid-save. Dropping the import would break them for no gain.
+# Keep binding_store.os as a patch point for atomic-write crash tests of os.replace.
 import os  # noqa: F401
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -66,13 +38,7 @@ class BindingPersistError(RuntimeError):
     """
 
 
-# The index-lag grace, the corroborated-miss threshold and the age helper now live in
-# ``binding_recovery`` with the pending-recovery policy they parameterize (RP-02 S3 T1).
-# These are ALIASES, not a second source of truth: ``is_keyless_pending_within_grace``
-# below still reads the grace and the age, and the constants are part of this module's
-# long-standing inspection surface (the bug-21fc duplicate oracles reach the lag window
-# through it). Rebinding either constant here would desynchronize it from the recovery
-# that actually enforces it, so treat these three names as read-only labels.
+# These read-only aliases expose recovery policy to callers without a second source of truth.
 _INDEX_LAG_GRACE_SECONDS = binding_recovery._INDEX_LAG_GRACE_SECONDS
 _MISSES_BEFORE_UNBIND = binding_recovery._MISSES_BEFORE_UNBIND
 _age_seconds = binding_recovery._age_seconds
@@ -87,25 +53,14 @@ def _now_iso() -> str:
     return utc_now_iso()
 
 
-# Bug 1e08-1a35-0267-4ca6 — the absence retirement grace default. The env read itself is
-# owned by ``rebar.config.resolve_absent_retire_grace`` (RP-04 S7.3.a); this constant is
-# the shared fallback default, defined in ``binding_lifecycle``. This is an ALIAS, not a
-# second source of truth, kept because the constant is part of this module's long-standing
-# inspection surface (the 3b5f tombstone oracle drives retirement to grace through it).
+# The retirement grace fallback comes from BindingLifecycle. Keep this inspection alias.
 _DEFAULT_ABSENT_RETIRE_GRACE = binding_lifecycle._DEFAULT_ABSENT_RETIRE_GRACE
 
 
 def _current_key_by_id(client: TicketTransport, jira_id: str) -> str:
-    """The issue's CURRENT key, looked up by its immutable numeric id (bug 7c26).
-
-    ``GET /rest/api/{2,3}/issue/{issueIdOrKey}`` accepts an id wherever it accepts a
-    key on BOTH deployments, so this reuses ``get_issue_by_rest`` (the same
-    primary-store read the absence probe uses — not subject to search-index lag,
-    bug 21fc). Returns ``""`` — "no answer, treat the absence as real" — when the
-    client predates the member, the lookup raises (incl. a genuine-gone 404), or the
-    payload carries no string key, so every failure mode falls THROUGH to the
-    unchanged absence bookkeeping rather than masking a deletion.
-    """
+    """Read the current issue key by immutable Jira ID through the primary REST lookup.
+    Return an empty string when the method, lookup, or string key is unavailable, so
+    absence bookkeeping continues."""
     fn = getattr(client, "get_issue_by_rest", None)
     if fn is None:
         return ""
@@ -134,35 +89,14 @@ class BindingStore:
     """
 
     def __init__(self, tracker_dir: Path) -> None:
-        """Open the binding state under ``tracker_dir``. READS ONLY — never writes.
-
-        Every attribute below is an ALIAS for the repository's own object, never a copy:
-        the lifecycle transitions, the ``peer_state`` delegates and the rich-text handler
-        all mutate ``bindings`` / ``reverse`` / the rotation stamps IN PLACE, so a
-        defensive copy here would silently discard those writes. The ``BindingLifecycle``
-        and ``BindingRecovery`` owners are constructed over the SAME repository for exactly
-        that reason (recovery also takes the lifecycle owner, so a repaired binding goes
-        through the same transitions an ordinary one does), and all three are deliberately
-        private — no public attribute or method hands out an owner, or a caller could write
-        binding state without passing through this facade's
-        coordination. The retired key set and the bug-3b5f ``{local_id: jira_key}``
-        tombstone index are reached through the lifecycle owner rather than aliased here,
-        so retired state has exactly one reader. The repository does not materialize
-        ``.bridge_state`` either; the first :meth:`save` creates it.
-
-        Failure dispositions come from the repository unchanged: a corrupt live store
-        raises ``ValueError`` (fail CLOSED, to avoid mass-duplicating Jira issues); a
-        corrupt retired file degrades to an empty set plus a deduped alert (fail OPEN).
-        """
+        """Load binding state without writing it. The facade aliases repository dictionaries
+        so lifecycle, recovery, and peer-state changes share the same objects. The first save
+        creates .bridge_state. A corrupt binding file raises. A corrupt retired sidecar
+        becomes an empty set with an alert."""
         self._repo = BindingRepository(tracker_dir)
         self._lifecycle = binding_lifecycle.BindingLifecycle(self._repo)
         self._recovery = binding_recovery.BindingRecovery(self._repo, self._lifecycle)
-        # The four locations the repository writes, mirrored here so the facade's
-        # long-standing inspection surface is unchanged. They are READ-ONLY labels now:
-        # the live store, the bug-1e08 retired sidecar (soft deletes live beside the live
-        # store so retirement stays reversible), the GET-rotation sidecar, and the repo
-        # root the lifecycle alerts are keyed off (``<repo_root>/.tickets-tracker`` is
-        # ``tracker_dir``). Nothing here opens them — the repository does.
+        # Mirror repository paths for inspection. The repository owns every write.
         self._path = self._repo.path
         self._retired_path = self._repo.retired_path
         self._get_rotation_path = self._repo.rotation_path
@@ -209,50 +143,19 @@ class BindingStore:
         return entry is not None and entry.get("state") == "pending"
 
     def is_keyless_pending_within_grace(self, local_id: str) -> bool:
-        """True while a KEYLESS-pending binding is young enough that a negative Jira
-        search proves nothing — i.e. the create may have landed but not indexed.
-
-        This is the half that actually prevents a duplicate. ``outbound_differ`` gates
-        the create on ``get_jira_key(local_id) is None``, and a keyless-pending entry
-        HAS ``jira_key: None`` — so that branch cannot tell "never created" from
-        "created, then we crashed before recording the key, and Jira has not indexed it
-        yet". Without this signal the create is emitted while recovery is still waiting
-        out the index lag, and ``create_one``'s dedup search misses for the SAME
-        eventual-consistency reason, writing a SECOND Jira issue (bug 21fc, the only
-        known path where rebar writes wrong data rather than reading incomplete data).
-
-        Deferring is safe both ways: if the issue exists,
-        ``recover_pending_bindings`` binds it once the index catches up; if it never
-        landed, the grace expires and the create is emitted later. KEYLESS only: a
-        keyed-pending entry is recovered deterministically by retro-attach.
-        """
+        """Defer a new create while a keyless pending entry is within the index-lag grace.
+        A negative Jira search cannot distinguish an absent issue from an unindexed create.
+        Recovery confirms a later search hit. Expiration permits a later create. Keyed
+        pending entries recover without search."""
         entry = self._data["bindings"].get(local_id)
         if entry is None or entry.get("state") != "pending" or entry.get("jira_key"):
             return False
         return _age_seconds(entry.get("created_at")) < _INDEX_LAG_GRACE_SECONDS
 
     def all_bindings(self) -> dict[str, dict]:
-        """A SHALLOW copy of the ``{local_id: entry}`` map.
-
-        Fresh outer mapping, so a caller may iterate it while the lifecycle adds or
-        removes bindings; the inner entry dicts are the LIVE ones, so what a caller reads
-        through here is current state and not a snapshot taken at call time.
-
-        This is now a READ-ONLY query in practice. It used to be described as a write
-        seam — "the baseline advance and the rich-text handler mutate an entry they got
-        from here" — and neither half of that survives inspection: the rich-text handler
-        was cut to :meth:`note_rich_emit` in RP-02 S3 T3 (``likeminded-wearproof-barracuda``),
-        and the baseline advance never wrote through this query at all, because
-        :meth:`set_baseline` reaches the repository's own dictionaries directly. Writing
-        through a read-shaped call is an unowned seam — a mutation this facade never saw
-        and can enforce no invariant on — so the named operations own writes and a standing
-        allowlist census keeps new callers of this query classified as reads.
-
-        The shallowness still matters and must not become a deep copy. Callers iterate it
-        expecting live entries, and a deep copy would hand them a stale view; the top-level
-        aliasing is separately load-bearing, since a copy of the outer document loses any
-        NEW top-level key a write adds (ADR 0099 §2 and §3).
-        """
+        """Return a new outer mapping with the repository's current entry dictionaries.
+        Callers may iterate while bindings change, but inner entries remain shared. Named
+        operations own writes. Callers must not mutate entries through this read query."""
         return dict(self._data["bindings"])
 
     def pending_bindings(self) -> list[str]:
@@ -265,14 +168,7 @@ class BindingStore:
             1 for entry in self._data["bindings"].values() if entry.get("state") == "confirmed"
         )
 
-    # -- identity transitions (thin delegates to BindingLifecycle) ----------
-    #
-    # The write-ahead progression described in this module's docstring is implemented in
-    # ``binding_lifecycle.py``, over the SAME dictionaries this facade aliases; read the
-    # rationale for each transition there (the c244 rebind reverse cleanup, the 874a
-    # unbind sweep, the bug-7c26 numeric id). These wrappers exist so the mature caller
-    # contract — the reconciler, the adapters and ``bridge fsck`` all bind to
-    # ``BindingStore`` — does not move.
+    # Keep identity transitions on this facade while BindingLifecycle mutates the shared store.
 
     def bind_pending(self, local_id: str) -> None:
         """Mark a local ticket as pending outbound creation (write-ahead step 1)."""
@@ -313,12 +209,7 @@ class BindingStore:
     # -- immutable numeric id (bug 7c26) -----------------------------------
 
     def get_jira_id(self, local_id: str) -> str | None:
-        """The issue's IMMUTABLE numeric Jira id for a binding, or None.
-
-        ``None`` is VALID and means "not captured yet" — every binding written before bug
-        7c26 has no id, so :meth:`note_absent_or_rekey` degrades to its pre-7c26
-        behaviour for it and no migration is required.
-        """
+        """Return the immutable Jira ID, or None for a binding whose ID was never captured."""
         return self._lifecycle.get_jira_id(local_id)
 
     def record_jira_id(self, local_id: str, jira_id: str) -> None:
@@ -383,73 +274,35 @@ class BindingStore:
         return self._lifecycle.is_comment_mapped(local_comment_key)
 
     def note_comment_posted(self) -> None:
-        """Tally one successful outbound ``add_comment`` this pass (ticket 0fa2).
-
-        Called from the shared post-enactment seam (``_record_comment_id``) BEFORE its
-        recording guards, so a post whose recording silently no-ops still counts —
-        that gap is exactly what the end-of-pass invariant compares against.
-        """
+        """Count a successful outbound post before comment-ID recording guards run. The
+        end-of-pass invariant compares posts with IDs gained even when recording skips."""
         self._comment_posts += 1
 
     def comment_posts_this_pass(self) -> int:
-        """How many successful outbound comment posts were tallied this pass."""
+        """Count successful outbound posts this pass."""
         return self._comment_posts
 
     def comment_ids_gained_this_pass(self) -> int:
-        """How many entries the ``comment_ids`` map gained since this store loaded."""
+        """Count comment IDs added since load."""
         return len(self._data.get("comment_ids", {})) - self._comment_ids_at_load
 
-    # -- absence lifecycle (bug 1e08) --------------------------------------
+    # Absence lifecycle.
 
     def _entry_for_jira_key(self, jira_key: str) -> dict[str, Any] | None:
-        """Resolve a binding entry by Jira key via the reverse index (delegated)."""
+        """Find a binding entry through the reverse Jira-key index."""
         return self._lifecycle.entry_for_jira_key(jira_key)
 
     def note_absent(self, jira_key: str) -> None:
-        """Record a consecutive-404 GET against a bound key.
-
-        Increments ``absent_404_count``; at ``RECONCILER_ABSENT_RETIRE_GRACE``
-        consecutive 404s the binding is soft-deleted (reversibly) and alerted. The
-        threshold, its defensive ambient parse, and the retired-first write order are
-        ``BindingLifecycle``'s.
-        """
+        """Record a consecutive 404. BindingLifecycle retires the binding at the configured
+        grace threshold and alerts after its retired-first write."""
         self._lifecycle.note_absent(jira_key)
 
     def note_absent_or_rekey(self, jira_key: str, client: TicketTransport | None = None) -> bool:
-        """404 bookkeeping that first asks whether the issue MOVED (bug 7c26).
-
-        A bound key stops resolving for TWO different reasons, and the pre-7c26 code
-        could not tell them apart: the issue was deleted, or the issue was MOVED to
-        another project and re-keyed. Old keys are normally stacked in Jira's
-        ``moved_issue_key`` table so the old key still resolves, but a
-        Data-Center-specific Atlassian KB documents third-party apps moving issues via
-        post-functions/automations failing to update that table — after which the old
-        key stops resolving entirely. Treating that as a deletion silently detaches a
-        live issue from its local ticket and, at grace, retires the binding.
-
-        So before recording an absence we re-ask by the one identifier a move cannot
-        change — the numeric id. On a hit whose key DIFFERS, the binding is re-keyed
-        (and the reverse index updated in the SAME operation, or the old key would keep
-        resolving to this local id and re-detach next pass), the absence counter is
-        reset, and the issue is reported PRESENT.
-
-        Returns True when the binding was re-keyed, False when the absence was recorded
-        exactly as :meth:`note_absent` always did.
-
-        DEGRADES TO TODAY'S BEHAVIOUR in every other case — no client, no captured id
-        (every pre-7c26 binding), an unresolvable id, or a key that is unchanged. That
-        is what makes this safe on the shared Cloud path and on an unmigrated store:
-        the recovery can only ADD a save, never skip an absence it did not disprove.
-
-        Only ever reached from a CONFIRMED 404, so the happy path never pays for it.
-
-        This is the COORDINATOR of the seam and keeps the parts that are not identity
-        policy: the guard, the by-id client lookup, and the absence fall-through. The
-        re-key mutation itself — including the "did the key actually change?" comparison
-        that decides it — belongs to ``BindingLifecycle.rekey``, which declines an
-        unresolvable or unchanged answer, so every one of those cases still falls through
-        to :meth:`note_absent` exactly as before.
-        """
+        """On a confirmed 404, check the immutable Jira ID before recording absence.
+        A project move can change the key without changing that ID. When the lookup finds
+        a different key, BindingLifecycle updates the binding and reverse index together,
+        resets absence, and returns True. Without a client, captured ID, resolvable key,
+        or changed key, record absence and return False."""
         local_id = self._data["reverse"].get(jira_key)
         entry = self._entry_for_jira_key(jira_key)
         if entry is None or local_id is None:
@@ -495,12 +348,8 @@ class BindingStore:
     # BOTH sides, is documented on the ``BindingLifecycle`` counterparts.
 
     def retired_key_for_local(self, local_id: str) -> str | None:
-        """The retired ``jira_key`` this local ticket was last bound to, or ``None``.
-
-        Retirement UNBINDS the local ticket, so there is no live key to look up by the
-        time the outbound differ sees it; only this tombstone distinguishes "was paired
-        with a confirmed-deleted issue" from "never bound at all".
-        """
+        """Return the retired Jira key, if any. This tombstone distinguishes a confirmed
+        deleted pairing from a ticket that was never bound."""
         return self._lifecycle.retired_key_for_local(local_id)
 
     def is_retired_local(self, local_id: str) -> bool:
@@ -571,29 +420,11 @@ class BindingStore:
     def recover_pending_bindings(
         self, client: TicketTransport, *, failure_sink: list[dict[str, Any]] | None = None
     ) -> int:
-        """Scan for pending bindings and attempt to recover (story 9622).
-
-        For each pending binding:
-
-        - **Keyed-pending** (entry carries a ``jira_key`` — the write-ahead
-          recorded it the instant ``create_issue`` returned, before the label was
-          attached): the create landed, so retro-attach the rebar-id label +
-          ``local_id`` entity property (idempotent) and confirm. NO Jira search —
-          deterministic, so a crash in the create->label window yields NO duplicate.
-        - **Keyless-pending** (no ``jira_key`` — crash before/during create): search
-          Jira for the ``rebar-id:{local_id}`` label (colon form, legacy hyphen
-          fallback). Confirm if found; unbind if not (the create never reached Jira).
-
-        Any per-entry error is appended to ``failure_sink`` as ``{local_id, reason}``
-        and skipped (loud but non-fatal; the entry stays pending). Returns the count
-        of RESOLVED bindings (confirmed or unbound). ``client`` must expose
-        ``search_issues`` / ``add_label`` / ``set_entity_property``.
-
-        A thin delegate to ``BindingRecovery`` since RP-02 S3 T1. The name, the
-        ``failure_sink`` keyword and the resolved-count return are UNCHANGED, because the
-        mature caller contract binds to this facade — ``run_differs`` calls exactly this
-        signature, and the move must be invisible to it.
-        """
+        """Recover pending creates through BindingRecovery. A keyed entry reattaches its
+        label and property without search. A keyless entry searches current and legacy
+        rebar-id labels, then confirms or corroborates absence before unbinding. Append
+        per-entry errors to failure_sink and leave those entries pending. Return the
+        number resolved."""
         return self._recovery.recover_pending_bindings(client, failure_sink=failure_sink)
 
 

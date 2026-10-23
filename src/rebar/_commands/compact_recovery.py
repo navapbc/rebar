@@ -1,35 +1,7 @@
-"""Crash-atomic compaction: the INTENT JOURNAL (commit-pending sentinel) and the
-recovery preamble that converges an abandoned partial fold.
-
-Bug ``compulsory-pernickety-mantis`` (epic ``becoming-berserk-grunion``): the fold mutates
-the SHARED tracker worktree in steps — SNAPSHOT write, ``*.retired`` renames, ``git add`` +
-commit — and a detached worker that dies between the first mutation and the commit leaves
-the tree DIRTY. A dirty tree makes ``sync._union_merge``'s ``git merge origin/tickets``
-abort, stranding every session's ticket commits off origin.
-
-The sentinel makes the fold crash-atomic across process death, where ``try``/``except``
-cannot reach: before its FIRST worktree mutation the fold journals an intent record —
-ticket id, snapshot path, folded source list — OUTSIDE the worktree (under the tracker's
-git dir, so the sentinel itself can never be tree dirt), and discards it on every completed
-outcome. The recovery preamble (run under the store write lock at sweep/fold start) then
-discriminates the half-fold states:
-
-* a live journal whose snapshot exists on disk and is NOT in HEAD ⇒ an abandoned partial
-  fold ⇒ REVERT (rename the ``*.retired`` sources back, unlink the uncommitted snapshot,
-  unstage the ticket dir);
-* a journal whose snapshot is already in HEAD ⇒ the crash hit between the commit and the
-  journal discard, the fold LANDED ⇒ discard the journal, touch nothing;
-* a journal whose snapshot is gone from disk ⇒ another owner (``fsck --repair-snapshots``)
-  superseded the state ⇒ discard the journal, touch nothing;
-* the intentionally-retained SNAPSHOT_INCONSISTENT state that
-  ``compact_txn._retire_folded_sources`` keeps for ``fsck --repair-snapshots`` has NO
-  journal by construction, so recovery never sees it — fsck remains its sole owner.
-
-Layering: this module imports ``rebar._store`` and the leaf planner
-``rebar._commands.compact_plan`` (which owns the ``*.retired`` rename-back rule this
-recovery shares with the in-process rollback — story 3436); ``compact_txn`` and ``compact``
-both import it (never the reverse).
-"""
+"""Recover interrupted folds through an intent journal outside the worktree.
+Before mutation, record snapshot and sources. Under the write lock,
+revert uncommitted snapshots, discard journals for committed or replaced
+snapshots, and leave retained inconsistent states for fsck repair."""
 
 from __future__ import annotations
 
@@ -128,18 +100,10 @@ def _snapshot_in_head(tracker: str, rel_snapshot: str) -> bool | None:
 
 
 def _revert_partial_fold(tracker: str, record: dict) -> None:
-    """Revert one abandoned partial fold to the pre-fold state: rename every retired
-    source back (only where the original is missing — idempotent), unlink the uncommitted
-    snapshot, and unstage the ticket dir (a crash between ``git add`` and ``git commit``
-    leaves a dirty INDEX that would also abort the union merge).
-
-    The rename-back and its data-loss guard are the shared ones
-    (:func:`compact_plan.restore_retired`), so this cross-process revert and the in-process
-    ``_rollback_fold`` cannot drift: the snapshot is removed ONLY when every reverse-rename
-    succeeded. A source stuck as ``*.retired`` has its folded effect living only in the
-    snapshot, so removing it then would silently drop events — the snapshot is retained
-    instead as the SNAPSHOT_INCONSISTENT state that ``fsck --repair-snapshots`` owns (the
-    caller discards the journal, so recovery never revisits it)."""
+    """Restore retired sources and unstage the ticket directory.
+    Remove an uncommitted snapshot only after every source is restored.
+    If restoration fails, retain the snapshot for fsck repair to avoid
+    losing the folded event."""
     originals = [os.path.join(tracker, rel) for rel in record.get("sources", [])]
     snapshot = os.path.join(tracker, record.get("snapshot", ""))
     if compact_plan.restore_retired(originals):

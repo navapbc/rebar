@@ -1,32 +1,7 @@
-"""The mutation-confirmation channel (ticket 6bda-9d58-8546-4638).
-
-Every mutating CLI verb (``_WRITES_FULL`` + ``_LIFECYCLE``) confirms its result on
-stdout, kubectl-style: one ``<past-tense-verb> <args-summary>`` line on a successful
-write, ``no change: <reason>`` on an idempotent no-op — built ONLY from the CLI args
-plus the seam's outcome, never a follow-up store read. This module owns the three
-pieces every verb shares:
-
-* **The per-invocation output context.** The top-level router
-  (:mod:`rebar._cli`) pre-extracts the global ``--quiet``/``-q`` and
-  ``--output``/``-o`` flags (the positional-only ``_REGISTRY`` leaves usage-error on
-  any option token, so per-verb parsing cannot see them) and installs the result
-  here via :func:`confirmation_context`. Library/MCP callers never enter the
-  context, so nothing here prints on their behalf.
-* **The emit helpers.** :func:`emit_text` is the text confirmation channel
-  (suppressed by ``--quiet``, silent under ``--output json``); :func:`emit` adds the
-  uniform pre-1.0-UNSTABLE mutation envelope
-  ``{"outcome": "<verb-past>"|"noop", "subject", "detail"}`` for verbs that had no
-  ``--output json`` shape before. Verbs with a pre-existing JSON shape keep it
-  byte-identical and use :func:`emit_text` only.
-* **The leaf-registry formatters.** The positional-only ``_REGISTRY`` commands
-  (comment/archive/set-verify-commands) return small outcome values;
-  :func:`leaf_confirm` maps each to its confirmation, so the registry dispatcher in
-  :mod:`rebar._commands` stays a thin loop.
-
-``link``'s raw-JSON REDIRECT record is *machine data*, not a confirmation line: it
-keeps printing byte-identical (including under ``--quiet``), and when it prints, no
-text confirmation is added on top — one stdout result per invocation.
-"""
+"""CLI mutation confirmations from command outcomes, without store rereads.
+Global quiet and output flags set a per-invocation context. Text output
+respects quiet. JSON uses the common mutation envelope unless a verb has an
+existing JSON shape. Link redirect JSON remains byte-identical."""
 
 from __future__ import annotations
 
@@ -62,16 +37,9 @@ def json_mode() -> bool:
 
 
 def extract_global_flags(argv: list[str]) -> tuple[list[str], bool, str]:
-    """Strip the global ``--quiet``/``-q`` and ``--output``/``-o <mode>`` flags.
-
-    Returns ``(rest, quiet, fmt)``. Position-independent within the verb's args,
-    but only the segment BEFORE the first bare ``--`` is inspected — everything
-    after the end-of-options marker is literal verb data (a comment body that
-    contains ``--quiet`` survives verbatim). ``--output`` reuses the canonical
-    :func:`rebar._engine_support.output.parse_output` (same spellings, same
-    last-occurrence-wins, same error text); an absent flag yields the ``text``
-    default. Raises :class:`OutputFormatError` on an invalid mode.
-    """
+    """Return remaining args, quiet, and output mode.
+    Parse flags only before bare --, preserving later literal data. Output uses
+    the shared parser and defaults to text."""
     head = argv[: argv.index("--")] if "--" in argv else list(argv)
     tail = argv[len(head) :]
     quiet = False

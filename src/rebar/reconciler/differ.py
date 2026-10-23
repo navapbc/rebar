@@ -1,31 +1,9 @@
-"""Pure-function differ for rebar.reconciler.
+"""Pure differ that emits deterministic Mutation objects from local and Jira state.
 
-Compares the local source-of-truth state against the Jira working-set state and
-emits a deterministic list of Mutation objects describing the reconciliation
-work to perform.
-
-This module replaces the legacy snapshot-diff contract
-(``compute_mutations(prev_snapshot, next_snapshot) -> list[dict]``) with the
-new Mutation-based contract:
-
-    compute_mutations(local_state, jira_state) -> list[Mutation]
-
-CAVEAT — THE SOLE PRODUCTION CALLER WAS NEVER MIGRATED (bugs 727f / d103).
-``run_differs`` still passes ``(prev_snapshot, curr_snapshot)``, i.e. two remote
-Jira fetches, so for that caller ``local_state`` is NOT local state. Every arm
-below whose meaning depends on ``local_state`` genuinely being the local source of
-truth therefore misfires there: the local-only arm reads a key that left the fetch
-window as a ticket to (re)create, and the both-sides arm reads a remote-vs-remote
-field delta as local-wins drift. ``run_differs`` compensates at its own call site
-(``reconcile_helpers.drop_snapshot_differ_local_state_emissions``) rather than here,
-so this contract stays intact for callers that honour it. Do not "fix" that by
-weakening these semantics; migrate the caller and delete the suppression together.
-
-Fields listed in ``EXCLUDED_FIELDS`` (from ``config.py``) are ignored during
-field-level comparison and never appear in a Mutation's payload.
-
-The function is pure: no I/O, no time/random, no logging, no globals.
-"""
+The production run_differs caller still supplies previous and current Jira
+snapshots. Its local-state-dependent emissions are suppressed at that call site.
+Callers supplying local source state retain this differ's full contract. Fields
+in EXCLUDED_FIELDS never enter mutation payloads."""
 
 from __future__ import annotations
 
@@ -78,15 +56,8 @@ def _load_mutation() -> ModuleType:
     return mod
 
 
-# Bridge-internal label prefixes — written by the reconciler itself
-# (rebar-id:/rebar-id- identity labels from _apply_inbound_create /
-# create_one; rebar-status: annotation labels from outbound status logic;
-# imported: local-only bootstrap tags). Mirrors the _EXCLUDED_PREFIXES
-# tuples in outbound_differ.py / inbound_differ.py. The snapshot differ
-# compares the PREVIOUS pass's Jira snapshot against the current one, so
-# our own label write-back from the prior pass surfaces here as apparent
-# remote drift one pass later — and emitted a spurious (outbound, update)
-# echo for every freshly bound/imported issue (ticket robe-creek-zealot).
+# Exclude identity, status, and import labels written by the bridge itself.
+# Otherwise their next-pass readback appears as Jira drift and produces an echo.
 _BRIDGE_INTERNAL_LABEL_PREFIXES: tuple[str, ...] = (
     "rebar-id:",
     "rebar-id-",
@@ -269,43 +240,13 @@ def compute_mutations(
     seed_mutations: list[Any] | None = None,
     ledger: Any | None = None,
 ) -> list[Any]:
-    """Diff local against jira state and return a list of Mutation objects.
+    """Return deterministic mutations for local and Jira state.
 
-    Args:
-        local_state: ``{key: {field: value, ...}}`` — the local source of
-            truth (e.g. the ticket tracker snapshot).
-        jira_state: ``{key: {field: value, ...}}`` — the Jira working set
-            recently fetched.
-        quarantine_set: Optional set of targets whose mutations must be
-            suppressed. Every emit point routes through :func:`_emit`,
-            which drops any mutation whose ``target`` is in this set. When
-            ``None`` (the default), no suppression is performed.
-        seed_mutations: Optional list of pre-built Mutations to prepend to
-            the result. Used by ``invariants.check_dual_identity_complete``
-            (story 7a75) to inject repair/inbound mutations that the differ
-            itself cannot derive from local/jira state alone. Seed
-            mutations are NOT filtered through ``quarantine_set``.
-
-    Returns:
-        A list of ``Mutation`` objects. Seed mutations (if any) appear
-        first, followed by differ-emitted mutations sorted by ``target``
-        for determinism. Each Mutation carries a non-empty provenance
-        Mapping.
-
-    Semantics:
-        - Key in ``local_state`` only AND its ``local_id`` is not
-          already bound in ``jira_state`` → outbound create.
-        - Key in ``local_state`` only but its ``local_id`` IS already
-          bound in ``jira_state`` → skipped (already mirrored).
-        - Key in ``jira_state`` only → inbound create.
-        - Key in both → field-by-field diff (excluding ``EXCLUDED_FIELDS``);
-          if any non-excluded field differs, emit an outbound update whose
-          payload contains only the resolved changed fields.
-        - A create whose only fields are in ``EXCLUDED_FIELDS`` is
-          suppressed (no information would survive the field filter).
-
-    This function is pure: no I/O, no time, no logging, no globals.
-    """
+    Local-only keys create unless already bound in Jira. Jira-only keys create
+    inbound unless binding markers assign them to the binding-aware differs. Shared
+    keys emit changed non-excluded fields. quarantine_set suppresses differ emits,
+    while seed_mutations precede them without filtering. Returned mutations carry
+    provenance and are sorted by target after seeds."""
     if local_state is None:
         local_state = {}
     if jira_state is None:
@@ -378,20 +319,8 @@ def _compute_mutations_emit_local_only(
         # emit a redundant outbound create. (dd-4)
         return
 
-    # dd-5: ambiguous local binding — local ticket carries a
-    # local_id that matches the KEY of an unrelated Jira issue
-    # (an issue that exists in jira_state but does NOT carry a
-    # back-pointer local_id binding). This suggests a possibly
-    # stale or conflated binding: the local_id may once have referred
-    # to that Jira issue, but the Jira side no longer agrees. Emit
-    # (outbound, probe) so the applier can disambiguate before
-    # blindly creating a duplicate Jira issue.
-    #
-    # Design choice: a bare unbound_local with local_id and no
-    # jira-side signal is treated as a normal outbound create
-    # (preserving existing test_differ.py semantics) — the ambiguity
-    # signal is the presence of a jira_state entry under the same
-    # key as the local_id, without a reciprocal binding.
+    # A Jira key matching this local ID without a reciprocal binding is ambiguous.
+    # Probe before creating a possible duplicate.
     if local_id_str and local_id_str in jira_state:
         jira_sibling = jira_state.get(local_id_str) or {}
         sibling_local_id = jira_sibling.get("local_id") if isinstance(jira_sibling, dict) else None
@@ -451,41 +380,10 @@ def _compute_mutations_emit_jira_only(key, jira_state, state, *, quarantine_set,
     jira_local_id = jira_fields.get("local_id") if isinstance(jira_fields, dict) else None
     jira_local_id_str = str(jira_local_id) if jira_local_id else None
 
-    # Bug 4354: when the snapshot lacks local_id (the fetcher
-    # stores Jira `fields` only — the local_id entity property
-    # is never in the snapshot), fall back to the `rebar-id:<local_id>`
-    # / `rebar-id-<local_id>` label as the bound-marker signal. The
-    # same prefixes are excluded by outbound_differ._EXCLUDED_PREFIXES
-    # and inbound_differ._EXCLUDED_PREFIXES — they're the canonical
-    # and legacy forms written by _apply_inbound_create / create_one
-    # (see applier.py:676 and applier.py:1825).
-    #
-    # When a label-derived binding is found, the issue is OWNED by
-    # the binding-aware differs (outbound_differ + inbound_differ
-    # in reconcile.py:617/703) — the snapshot-differ MUST stand
-    # down. Without this suppression, every bound issue that
-    # appears in curr_snapshot but not prev_snapshot (e.g. the pass
-    # immediately after outbound binding, before prev advances)
-    # mis-classifies as unbound and emits an inbound CREATE — which
-    # the applier materialises as a phantom `jira-dig-NNNN` local
-    # entity AND writes a ghost `rebar-id:jira-dig-NNNN` label back
-    # to Jira (empirically confirmed by labels-probe.sh on
-    # 2026-05-29: after binding 259f-... → DIG-5029, the next pass
-    # produced `['rebar-id:259f-...', 'rebar-id:jira-dig-5029',
-    # 'labelprobe-...']` on Jira). The label-derived path also
-    # suppresses the dangling-conflict emission below: a
-    # conflict's `suppress_pair` follow-on would otherwise drop
-    # the legitimate inbound_differ update for the same bound
-    # ticket (the T3 inbound-add label propagation failure).
-    #
-    # The label-derived suppression is intentionally scoped to the
-    # label fallback path. When local_id IS present on the
-    # snapshot entry (only via test fixtures, since the fetcher
-    # never writes it), preserve the existing dd-5 dangling-jira-ref
-    # semantics — a Jira issue that claims a binding via the
-    # explicit property but has no matching local ticket should
-    # still surface as inbound conflict so it isn't silently
-    # dropped.
+    # Fetcher snapshots omit the local_id property. Canonical or legacy rebar-id
+    # labels instead mark issues owned by the binding-aware differs. Suppress their
+    # inbound create and dangling conflict. Keep the explicit local_id path for
+    # fixture-backed dangling-reference conflicts.
     if jira_local_id is None and isinstance(jira_fields, dict):
         _labels = jira_fields.get("labels") or []
         _has_rebar_id_label = False
@@ -500,11 +398,8 @@ def _compute_mutations_emit_jira_only(key, jira_state, state, *, quarantine_set,
             # Bound — owned by binding-aware differs.
             return
 
-    # dd-5: dangling jira ref — the Jira issue claims a binding to a
-    # local_id that has no matching local ticket. Surface as
-    # (inbound, conflict) so the human can decide whether to recreate
-    # the local ticket, clear the Jira-side binding, or close the
-    # Jira issue. Never silently drop.
+    # A Jira binding with no matching local ticket needs an inbound conflict for
+    # operator resolution.
     if jira_local_id_str and jira_local_id_str not in local_rebar_ids:
         _emit(
             Mutation(
@@ -578,11 +473,7 @@ def _compute_mutations_emit_both(
         local_val = local_fields.get(field)
         jira_val = jira_fields.get(field)
         if field == "labels" and _non_internal_labels(local_val) == _non_internal_labels(jira_val):
-            # Label drift confined to bridge-internal labels is our
-            # own write-back from the prior pass (rebar-id: identity,
-            # rebar-status: annotations) — not remote drift. Emitting
-            # it produced a spurious one-pass-later (outbound, update)
-            # echo per freshly bound issue (ticket robe-creek-zealot).
+            # Ignore drift confined to bridge-owned labels. It is prior-pass writeback.
             continue
         if local_val != jira_val:
             if field in conflict_resolver.FIELD_CLASSES:
@@ -648,13 +539,8 @@ def compute_mutations_with_ledger(
     if ledger is None or not hasattr(ledger, "serialize"):
         return mutations
 
-    # Build a quick lookup of `field_name -> set of recorded element_keys` so we
-    # can detect "this mutation touches a field that has recent local-origin
-    # ledger entries on its elements". When the mutation is an outbound update
-    # on a collection field that the ledger already tracked, the mutation is
-    # an echo and we suppress it. Per the story-26de echo-suppression DD: a
-    # write recorded as local-origin on pass N must not re-emit on pass N+1
-    # even if the jira snapshot has not yet caught up.
+    # Index fields with recorded local-origin elements. Their next-pass readback
+    # must not emit an outbound update before Jira catches up.
     ledger_keys = set(ledger.serialize().keys()) if hasattr(ledger, "serialize") else set()
     ledger_fields = {k.split(":", 1)[0] for k in ledger_keys if ":" in k}
 
@@ -669,10 +555,7 @@ def compute_mutations_with_ledger(
         if not isinstance(changed, dict):
             surviving.append(m)
             continue
-        # If the mutation touches any field that the ledger tracks at the
-        # element level, treat it as an echo of our prior local-origin write
-        # and suppress the entire mutation. This is the per-element echo
-        # contract from story 26de.
+        # Suppress an update touching a field tracked at element level by the ledger.
         touched_fields = set(changed.keys())
         if touched_fields & ledger_fields:
             continue
