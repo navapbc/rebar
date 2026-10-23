@@ -162,10 +162,8 @@ def test_the_refusal_returns_immediately_rather_than_waiting_for_a_holder(gate_h
             with ga.gate_admission("plan_review", "t-2", root):
                 pass
         elapsed = time.monotonic() - started
-    # The refusal is a non-blocking lock attempt costing microseconds; the only alternative
-    # behaviour (a BLOCKING acquire, i.e. the queue this story rejects) never returns at all
-    # while the holder above is still inside its `with`. The ceiling therefore dwarfs the
-    # expected wall time by ~six orders of magnitude and can only fire on that hang.
+    # A nonblocking refusal takes microseconds. A queued lock cannot return while
+    # this holder remains active. The loose 5-second ceiling catches that hang.
     # timing: hang-guard — a queueing acquire would never return; 5 s vs ~microseconds expected
     assert elapsed < 5.0, f"admission blocked for {elapsed:.2f}s instead of fast-failing"
 

@@ -1,19 +1,8 @@
-"""Executable behaviour tests for the MCP container entrypoint's store provisioning.
+"""Exercise MCP entrypoint provisioning by running ``--provision-only``.
 
-These RUN `infra/scripts/mcp-entrypoint.sh --provision-only` in a temp directory with a
-stubbed `git` on PATH. Nothing here greps the script's source: each test drives a real
-store shape (poisoned / healthy / unsafe / contended) and asserts on what the script
-actually DID — which `git` subcommands it invoked and what survived in the directory.
-
-Why that matters: the previous tests could only assert that certain command tokens appeared
-in `Dockerfile.mcp` in a certain order. Those pass whether or not the script works, and they
-break on any refactor that preserves behaviour — a change detector on both counts. The
-entrypoint was extracted into a real file precisely so this suite could exist.
-
-Every "nothing happened" assertion here is paired with a LIVENESS ANCHOR (the script's
-terminal `provisioning finished` line and the ensure-helper invocation), because an
-absence-only assertion passes just as happily when the script died on line one.
-"""
+A stub git records operations on healthy, poisoned, missing, and contended
+stores. Liveness markers keep absence assertions from passing after an early
+script failure."""
 
 from __future__ import annotations
 
@@ -84,12 +73,8 @@ esac
 exit 0
 """
 
-# `flock(1)` is util-linux; it is present in the container (python:3.12-slim) and on CI,
-# but not on a stock macOS host. Where it is MISSING, shim it faithfully via fcntl so the
-# suite runs everywhere. Written into bin_dir only when the real one is absent, so CI and any
-# host that has it exercise the REAL utility rather than this stand-in. The shim locks the
-# INHERITED fd, so -- exactly like the real thing -- the lock rides the open file description
-# the calling shell holds on fd 9 and therefore outlives this process.
+# Use system ``flock(1)`` where present. A macOS fallback locks the inherited
+# fd with fcntl so the shell's open description keeps the lock after shim exit.
 _FLOCK_SHIM = """#!/usr/bin/env python3
 import fcntl, os, sys, time
 
@@ -293,15 +278,9 @@ def _await_marker(marker: Path, what: str) -> None:
 def test_poisoned_store_with_dot_git_but_no_resolvable_head_is_cleared_and_recloned(
     tmp_path: Path,
 ) -> None:
-    """The production failure, executed.
+    """An existing ``.git`` with unresolvable HEAD is poisoned, not provisioned.
 
-    The 120s health rollback removed containers mid-clone, repeatedly. Each removal left the
-    PERSISTENT named volume holding orphaned objects, an empty `refs/heads` and HEAD dangling
-    at `refs/heads/.invalid`. Because the entrypoint skipped cloning whenever `.git` merely
-    EXISTED, every later container inherited that volume, served an empty tracker, and never
-    re-cloned. Worse than a missing store: a poisoned one reads as PRESENT, so the
-    absent-store guard does not fire and reads return `[]` — a silent empty tracker.
-    """
+    Clear and re-clone it so the persistent volume cannot serve an empty tracker."""
     tracker = tmp_path / "tracker"
     (tracker / ".git" / "refs" / "heads").mkdir(parents=True)
     (tracker / ".git" / "HEAD").write_text("ref: refs/heads/.invalid\n")
@@ -375,16 +354,9 @@ def test_healthy_store_is_neither_cleared_nor_recloned(tmp_path: Path) -> None:
 
 
 def test_no_pat_skips_the_clone_but_still_converges_the_store(tmp_path: Path) -> None:
-    """Soft failure posture: with no credential there is nothing to clone the TICKET store
-    from, but the ensure step must still run so an already-present store stays writable.
+    """Without a tickets PAT, skip that clone but still run the store ensure step.
 
-    Scoped to the TICKETS clone deliberately. The CODE checkout is cloned anonymously — the
-    upstream repository answers unauthenticated git requests — and REBAR_ROOT is exported
-    unconditionally by Dockerfile.mcp, docker-compose.yml and autodeploy, while a blank
-    MCP_TICKETS_PAT is a documented, supported state. So a blanket "nothing was cloned" here
-    would pin down the exact regression this suite must forbid: REBAR_ROOT pointing at a
-    directory nobody ever created, which kills every attested gate on the deployed server.
-    """
+    The anonymous code checkout is independent of the tickets credential."""
     run = _provision(tmp_path, pat=None, head_resolves=False)
 
     assert run.ran_to_completion, f"script did not finish: {run.stderr}"
@@ -467,18 +439,10 @@ def test_a_safe_absolute_tracker_dir_is_accepted(tmp_path: Path) -> None:
 
 
 def test_a_concurrent_reclone_is_not_interleaved(tmp_path: Path) -> None:
-    """The named volume is SHARED across containers (blue/green overlap, a restart racing a
-    rollout, a `restart: always` container coming back with no deploy lock at all). Two can
-    both see HEAD unresolvable; an unserialized rm+clone then interleaves -- one clears the
-    directory the other is mid-clone into.
+    """Serialize re-clones on the mounted tracker directory's inode.
 
-    The peer here holds the lock the way a real peer does: an `flock` on the store directory's
-    INODE. That is also what pins the lock's LOCATION. The volume is mounted AT the tracker
-    directory, so a lock beside it (`<dir>.reclone.lock`) would sit in each container's own
-    overlay filesystem -- private per container, serializing nothing. If the script ever locks
-    anything other than this inode it will sail past a held lock and clone, and this test
-    fails.
-    """
+    A lock beside the volume would be private to each container and permit
+    interleaved clear-and-clone operations."""
     tracker = tmp_path / "tracker"
     tracker.mkdir()
     peer_work = tracker / "peer-partial-clone"
@@ -508,21 +472,10 @@ def test_a_concurrent_reclone_is_not_interleaved(tmp_path: Path) -> None:
 def test_a_peer_finishing_the_clone_while_we_wait_skips_the_redundant_reclone(
     tmp_path: Path,
 ) -> None:
-    """The double-checked re-probe: whoever loses the race must not clone all over again.
+    """Recheck HEAD under the store lock before clearing a purportedly bad clone.
 
-    Both containers saw an unresolvable HEAD before either took the lock, so the loser's
-    decision to re-clone is already stale by the time it acquires. Re-cloning ~200k commits a
-    second time would burn the readiness budget the backgrounding exists to protect -- and
-    would clear the store the winner just populated. So the lock holder re-probes HEAD before
-    touching anything.
-
-    The handoff is ordered by the LOCK, not by the clock: the peer holds it before the script
-    starts, so the script provably cannot reach the re-probe until the peer releases. The peer
-    waits for the script's FIRST HEAD probe (the `rev-parse-seen` marker the git stub writes)
-    before publishing a healthy store, so the script is guaranteed to have already decided the
-    store was broken -- otherwise it would skip re-cloning for the ordinary reason and this
-    test would prove nothing.
-    """
+    A peer may make it healthy after the first probe but before this worker gets
+    the lock. The ordered handoff proves the second probe matters."""
     tracker = tmp_path / "tracker"
     tracker.mkdir()
     fd = _peer_lock_fd(tracker)
@@ -558,20 +511,10 @@ def test_a_peer_finishing_the_clone_while_we_wait_skips_the_redundant_reclone(
 def test_the_ensure_step_does_not_run_while_a_peer_holds_the_store_lock(
     tmp_path: Path,
 ) -> None:
-    """The residual defect this ticket (beton-inversive-stag) tracks.
+    """Keep the ensure helper under the same lock as clear-and-clone.
 
-    provision_store serializes the clear+clone but historically RELEASED the lock and then ran
-    the ensure helper UNLOCKED. That helper is not read-only: its last step takes rebar's own
-    write lock by creating `.ticket-write.lock` (and the `.ticket-write.lock.d` dot-directory)
-    INSIDE the store (src/rebar/_store/lock.py). A single stray entry makes a peer's
-    `git clone` into the same volume fail `destination path ... already exists and is not an
-    empty directory`, and the peer's clear (`rm -rf ./.[!.]*`) in turn unlinks a live rebar
-    lock, breaking mutual exclusion in the other direction. So the ensure step must run under
-    the SAME store lock the clear+clone hold, and must NOT run while a peer holds it.
-
-    Assert the helper was not INVOKED, not merely that the directory survived: with a stubbed
-    ensure helper a contents check passes whether or not the call was even attempted.
-    """
+    It creates lock files inside the store. A peer clone or clear would conflict.
+    Assert the helper is not invoked while the peer holds the lock."""
     tracker = tmp_path / "tracker"
     (tracker / ".git").mkdir(parents=True)  # healthy store: no tickets re-clone fires
     (tmp_path / "code" / ".git").mkdir(parents=True)  # healthy code: no code clone fires
@@ -656,23 +599,10 @@ def test_a_failing_credential_helper_config_does_not_abort_provisioning(
 
 
 def test_the_code_root_is_provisioned_so_attested_gates_can_resolve_main(tmp_path: Path) -> None:
-    """The entrypoint must provision a CODE repository, not just the tickets store.
+    """Provision a code repository with ``origin/main`` for attested gates.
 
-    Every attested-source gate — `review_plan`, `verify_completion`, `review_code`,
-    `reconcile` — resolves a ref against the repo root. The image cannot supply one:
-    `.dockerignore` excludes `.git` and `Dockerfile.mcp` does a plain `COPY . /app`, so `/app`
-    is a source copy with no object DB and `origin/main` cannot resolve. The gates fail with
-    `cannot resolve ref 'origin/main' to a commit in '.'`, which means NO attestation can be
-    earned through the deployed server and no task/story/epic can close through it without a
-    force — the one thing agents are forbidden to use.
-
-    `source: "local"` runs today, which is what isolates the fault: the gate CODE is fine, the
-    repository is missing. So the fix is to provision one, and this asserts the provisioning
-    actually executes rather than that the script contains a line that would.
-
-    The tracker is healthy here (`head_resolves=True`) so no tickets re-clone fires — any
-    clone observed is the CODE clone, which keeps the assertion unambiguous.
-    """
+    The image copies source without ``.git``. A healthy tracker isolates this
+    test's observed clone to the code root."""
     code = tmp_path / "code"
     run = _provision(tmp_path, head_resolves=True, env={"MCP_CODE_DIR": str(code)})
 
@@ -702,19 +632,10 @@ def test_the_code_root_is_provisioned_so_attested_gates_can_resolve_main(tmp_pat
 def test_a_failing_code_clone_surfaces_but_does_not_stop_the_container_booting(
     tmp_path: Path,
 ) -> None:
-    """The code checkout inherits the same SOFT posture as everything else in this script.
+    """Report a code-clone failure while continuing ticket ensure and container boot.
 
-    Provisioning runs backgrounded ahead of `exec`, so anything that aborts it early takes the
-    ensure step down with it and leaves no terminal status line. If a transient code-clone
-    failure could do that, one flaky network moment on the box would leave the ticket store
-    unconverged — read-only or unwritable — for the whole life of the container, and the logs
-    would show a truncated provisioning run with no explanation. Equally, the failure must not
-    be swallowed: an exit status of 0 here would report a server with no resolvable
-    `origin/main` as fully provisioned, and the missing repository would only be discovered
-    later as an unexplained gate failure.
-
-    The tracker is healthy, so the only clone in play is the code one.
-    """
+    The missing code root must not be reported as fully provisioned. The healthy
+    tracker isolates the failure to the code clone."""
     code = tmp_path / "code"
     run = _provision(tmp_path, head_resolves=True, code_clone_fails=True)
 
@@ -734,19 +655,10 @@ def test_a_failing_code_clone_surfaces_but_does_not_stop_the_container_booting(
 def test_an_absent_code_mount_point_is_announced_and_skipped_not_failed(
     tmp_path: Path,
 ) -> None:
-    """No mount point means this host has nowhere to put a checkout — not a failure.
+    """Skip an absent code mount with a diagnostic, without creating its path.
 
-    The checkout lives on a named volume mounted at MCP_CODE_DIR. Contexts that run the image
-    without that volume are legitimate and common: a bare `docker run` of the image, an
-    operator driving `--provision-only` to repair the ticket store, a harness. Reporting those
-    as provisioning failures would make a healthy run look broken and, worse, would train
-    readers to ignore a non-zero provisioning status — the one signal that tells them the
-    ticket store never converged.
-
-    It must also refuse to CREATE the missing path: conjuring a whole directory tree would let
-    a mis-set MCP_CODE_DIR scatter a multi-gigabyte clone somewhere arbitrary on the box
-    instead of failing visibly. Only the leaf is ever created.
-    """
+    A bare image or repair run may lack that volume. A mis-set path must not
+    receive an unplanned clone."""
     absent_parent = tmp_path / "unmounted"
     code = absent_parent / "mcp-code"
     run = _provision(tmp_path, head_resolves=True, code_dir=str(code))
@@ -791,25 +703,10 @@ def test_a_healthy_code_checkout_is_neither_cleared_nor_recloned(tmp_path: Path)
 
 
 def test_the_code_root_is_provisioned_even_without_a_tickets_pat(tmp_path: Path) -> None:
-    """A blank MCP_TICKETS_PAT must NOT leave REBAR_ROOT pointing at a directory that was
-    never created.
+    """Clone the read-only code root even when the tickets PAT is blank.
 
-    `REBAR_ROOT` is exported UNCONDITIONALLY (Dockerfile.mcp ENV, docker-compose.yml, and
-    autodeploy.sh's `mcp_run_new`), and docker-compose.yml documents a blank PAT as a
-    SUPPORTED state ("BLANK IS FINE -- the container still boots"). So if the code checkout is
-    provisioned only when a PAT is present, the blank-PAT deployment points the single global
-    repo-root override at a path with nothing behind it -- a NEW failure mode introduced by the
-    fix rather than the one it removes.
-
-    The two clones have genuinely different credential needs and must not share one guard:
-    the TICKETS clone pushes and needs the PAT, whereas the CODE clone is a read-only clone of
-    a repository that answers anonymously (`GET /info/refs?service=git-upload-pack` -> 200),
-    so it needs no credential at all. Binding the code clone to the tickets credential is what
-    creates the gap.
-
-    Tracker is healthy (`head_resolves=True`) so no tickets re-clone fires; `--branch main`
-    identifies the code clone unambiguously against the tickets clone's `--branch tickets`.
-    """
+    ``REBAR_ROOT`` is always exported, and the code clone needs no tickets
+    credential. A healthy tracker distinguishes its ``main`` clone from tickets."""
     code = tmp_path / "code"
     run = _provision(tmp_path, pat=None, head_resolves=True, env={"MCP_CODE_DIR": str(code)})
 

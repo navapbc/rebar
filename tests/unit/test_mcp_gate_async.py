@@ -257,11 +257,9 @@ def test_verify_completion_status_unsigned_without_an_attestation(store):
 
 
 def test_verify_completion_status_populates_verified_at_sha(store, monkeypatch):
-    # ``verify_signature`` returns the manifest as a LIST (the signed op-cert steps), so the
-    # status read MUST resolve ``verified_at_sha`` from that list — the pinned
-    # ``verified-at-sha:`` step. The prior guard tested ``isinstance(manifest, dict)`` (always
-    # False for the list-shaped manifest) so ``verified_at_sha`` stayed None forever; this pins
-    # the fixed branch (a faithful op-cert verdict avoids the heavy signing/ssh setup).
+    # The signed op-cert manifest is a list. Read verified_at_sha from its pinned
+    # verified-at-sha step. Treating it as a dict left the value unset. A faithful
+    # verdict avoids signing and SSH setup here.
     from rebar import _reads, signing
 
     sha = "a" * 40
@@ -310,11 +308,9 @@ def test_verify_completion_status_falls_back_to_signed_head_without_a_pin(store,
 
 
 def test_verify_completion_status_reports_stale_for_a_reopened_attestation(store, monkeypatch):
-    # TEETH (bug d80d LLM-Review): a completion attestation whose signature still verifies but
-    # that was REOPENED after signing is NO LONGER current. The prior code read ``certified``
-    # straight off ``sig.get('verified')`` (a bare HMAC check) and so reported a superseded
-    # verdict as current. Routing through ``compute_validity`` — exactly as the sibling
-    # ``plan_review_status`` does — makes the reopen surface as ``stale-reopened``/not-current.
+    # A reopened completion attestation is stale even when its signature verifies.
+    # compute_validity, as in plan_review_status, reports stale-reopened instead
+    # of treating the bare verified flag as current.
     from rebar import _reads, signing
 
     sha = "c" * 40
@@ -467,12 +463,9 @@ def test_duplicate_review_plan_start_shares_one_job_and_one_run(store, monkeypat
 
 
 def test_verify_completion_start_preserves_graph_tristate_and_variant_key(store, monkeypatch):
-    # BLOCKING #1 (bug d80d Phase 2): the async ``*_start`` must NOT collapse the ``graph``
-    # tri-state. Unspecified is ``None`` ("use the ticket-type default"; an epic verifies its
-    # WHOLE SUBTREE) — a plain-bool ``False`` default silently drops that. And because the
-    # de-dup variant key embeds ``graph``, a collapsed default hashes to a DIFFERENT variant
-    # than the sync tool, so a start and its sync twin would fail to attach to one run. This
-    # pins BOTH: the gate sees ``None`` (never ``False``), and start/sync share the variant key.
+    # Keep graph=None. Ticket-type defaults make epics verify their whole subtree.
+    # Converting it to False also changes the de-dup key, preventing async start
+    # and sync verification from sharing a run.
     import rebar.llm
 
     seen_graph: list[bool | None] = []
@@ -528,11 +521,9 @@ def test_verify_completion_start_preserves_graph_tristate_and_variant_key(store,
 
 
 def test_follower_start_does_not_reclobber_the_leaders_index_record(store, monkeypatch):
-    # GUARD (bug d80d Phase 2 advisory): a follower ``*_start`` (is_new=False) ATTACHES to the
-    # in-flight run and must NOT re-record a 'running' handle — the index is last-writer-wins,
-    # so a follower write would clobber the leader daemon's (eventual) terminal record. Prove
-    # the guard by counting index writes: the leader records once ('running') while its work
-    # blocks; a follower issued during that window records NOTHING.
+    # A follower attaches without writing the last-writer-wins index. A new
+    # running record could overwrite the leader's terminal result. Count writes
+    # while the leader is blocked to verify the follower records nothing.
     from rebar import _mcp_llm
 
     inflight.reset_registry()
@@ -629,10 +620,8 @@ def test_two_forced_starts_are_independent_and_both_active():
 
 
 def test_follower_poll_before_leader_index_write_reports_attaching(store):
-    # MATRIX follower×(b): a follower shares the leader's job_id but writes NO index entry.
-    # Polled in the window before the leader's own 'running' write lands, gate_status must
-    # report 'attaching' (the live registry knows the run exists), never a missing-entry
-    # 'unknown'. Bug d80d, standing since PS3.
+    # A follower shares the leader's job_id without an index write. Before the
+    # leader writes running, the shared registry must report attaching, not unknown.
     inflight.reset_registry()
     leader = inflight.begin_gate_job("plan_review", "d80d", variant="source=attested")
     follower = inflight.begin_gate_job("plan_review", "d80d", variant="source=attested")
@@ -652,9 +641,8 @@ def test_unknown_job_still_reports_unknown_not_attaching(store):
 
 
 def test_gate_status_includes_durable_unknown_when_the_durable_read_raises(store, monkeypatch):
-    # MATRIX (b)/advisory: gate_run_status must ALWAYS surface `durable` for a completion job —
-    # on an exception from the durable read it carries an explicit unknown+reason, never a
-    # silent omission (the sibling readers never return None, so callers can rely on the field).
+    # A recorded completion job with ticket_id carries durable. If its read
+    # raises, report unknown with a reason and retain the field.
     def boom(*a, **k):
         raise RuntimeError("attestation store unreadable")
 

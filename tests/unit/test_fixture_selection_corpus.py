@@ -1,14 +1,10 @@
-"""Held-out determinism + enrichment E2E for the fixture selector (ticket 549b, AC10).
+"""Held-out end-to-end determinism and enrichment for fixture selection (549b AC10).
 
-THE IMPLEMENTER MUST NOT SEE THIS FILE. Two consecutive real runs of
-:func:`select_from_corpus` over the same committed tickets-tracker git history must emit a
-byte-identical JSONL manifest — proving the whole pipeline (git-object walk, VERIFIED-row
-finding enrichment, vintage gate, selection, JSONL write) is deterministic and offline. The
-reviews carry a fingerprint that matches the reconstructed material so ``build_corpus`` marks
-them verified and their findings actually flow through — the two equal-material reviews then
-produce a real reproduction-consensus candidate, not merely a zero row. Runs under
-tests/unit/** where the repository's network-escape guard is active.
-"""
+Keep this oracle hidden from the implementer. Two offline runs over the same
+committed ticket history must write byte-identical JSONL. Matching material
+fingerprints admit verified findings, yielding a consensus candidate
+through git walk, enrichment, vintage gate, selection, and output. Unit-test
+placement keeps the network-escape guard active."""
 
 from __future__ import annotations
 
@@ -164,12 +160,9 @@ def test_two_runs_emit_byte_identical_manifest_with_real_candidate(tmp_path):
 
 
 def test_corpus_enrichment_loads_real_ticket_state_for_escaped_defect(tmp_path):
-    """Regression (change 2552 LLM-Review): select_from_corpus must enrich each review with
-    its ticket's compiled state so the escaped-defect priority signal can fire. Before the
-    fix the enrichment loop hardwired ``ticket_state = {}``, so ``escaped_defect`` was dead in
-    the real path regardless of the ticket. Injecting a reader that reports the reviewed
-    ticket closed as a ``plan_defect`` must surface ``escaped_defect: True`` on its candidate.
-    """
+    """Enrich each review with compiled ticket state (change 2552). An injected
+    reader reports a closed plan_defect. Its candidate must mark escaped_defect.
+    The old empty ticket_state made that priority signal unreachable."""
     repo_root = str(Path(__file__).resolve().parents[2])
     tracker = _build_tracker(tmp_path)
 

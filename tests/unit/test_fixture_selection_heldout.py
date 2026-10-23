@@ -1,12 +1,8 @@
-"""Held-out oracle for the plan-review fixture selector (ticket 549b).
+"""Held-out fixture-selector oracle (549b). Hide it during implementation.
 
-The IMPLEMENTER MUST NOT SEE THIS FILE. It is relocated out of the working tree while the
-implementation subagent works and restored by the orchestrator for validation. It exercises
-the cases that separate a real selector from one that fakes the happy path: the vintage gate
-(AC1/AC4), zero-candidate rows (AC3), rubric path resolution (AC2), the tiered bar
-(AC5), no-fire admission (AC6), escaped-defect priority (AC7), the signal set (AC8), rank
-order (AC9), and the E1 advisory (an eligible criterion with no admitted candidate).
-"""
+It checks vintage, empty candidates, rubric paths, tier thresholds, no-fire
+admission, escaped-defect priority, signal set, ranking, and eligible but
+unadmitted E1 advice."""
 
 from __future__ import annotations
 

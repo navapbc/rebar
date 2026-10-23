@@ -1,28 +1,11 @@
-"""CI gate steps survive the definition-vs-tree skew, without going toothless.
+"""Keep Gerrit Verified script steps safe under definition/tree skew (1909).
 
-Gerrit's ``Verified`` lane takes the workflow DEFINITION from the target branch but checks
-out the CHANGE'S tree. A gate step that runs a repo script therefore runs against changes
-whose base predates that script, and dies with ``can't open file ... [Errno 2]`` — a hard CI
-failure indistinguishable from a real gate violation.
-``.github/workflows/_build-and-test.yml`` states the house rule in its "Definition-vs-tree
-skew guard (ticket ee2a)" note: a gate step that runs a repo script must skip — with a log
-line — when the script is absent from the checked-out tree, and re-enforce on rebase and on
-every post-merge change. Bug 7e90-233b-3ee9-4f14 fixed the ``Git version floor gate`` that
-way; bug 1909-c1a7-9f20-440f fixes the remaining unguarded steps.
-
-Two kinds of test live here, and they do different jobs:
-
-* a STRUCTURAL guard, which parses the patchset-lane workflows and FAILS on any step that
-  runs a repo script without an if-present guard — so the ee2a convention stops depending on
-  an author remembering the note, and the twelfth instance cannot be introduced silently;
-* BEHAVIORAL tests, which EXECUTE each guarded step's real ``run:`` body, lifted from the
-  live workflow YAML, against purpose-built trees. They assert behavior rather than wording:
-  a tree WITHOUT the script must pass and say why it skipped, and a tree WITH the script must
-  still invoke it and still propagate its failure (enforcement preserved, not weakened).
-
-Both tree shapes are covered deliberately: the workflow-from-main / tree-from-patchset split
-makes them genuinely different cases, and a guard verified on only one of them is unverified.
-"""
+The target branch supplies workflow YAML while a change supplies its tree.
+If a repo script is absent, the step must log and skip. After rebase or
+merge it runs again. A structural scan rejects patchset-lane steps lacking
+a presence guard. Behavioral tests execute their workflow YAML bodies against
+trees with and without each script. Absence logs a skip. Presence invokes
+the script and propagates its failure. Both cases matter."""
 
 from __future__ import annotations
 
@@ -39,21 +22,13 @@ WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
 DOCS_ACTION_REF = "./.github/actions/docs-gates"
 DOCS_ACTION = REPO_ROOT / ".github" / "actions" / "docs-gates" / "action.yml"
 
-# The two workflows that run against a CHECKED-OUT GERRIT PATCHSET while their definition
-# comes from the target branch — the exact condition that produces the skew. Other workflows
-# (release, canary, scheduled probes) run their own ref's tree and are not exposed.
-#
-# `test.yml`'s `golden-path` job is the deliberate near-miss: it runs the SAME two scripts as
-# gerrit-verify.yaml's golden-path, unguarded, and that is correct. It checks out branch head
-# (plain `actions/checkout`, no Gerrit refspec), so its definition and its tree come from one
-# ref and no skew is possible. The asymmetry is stated here so a reader diffing the two
-# near-identical golden-path jobs does not have to re-derive which one is safe.
+# These workflows use target-branch definitions with Gerrit patchset trees.
+# Other jobs use their own ref. test.yml's similar golden-path uses branch head,
+# so its unguarded scripts cannot hit definition/tree skew.
 PATCHSET_LANE_WORKFLOWS = ("_build-and-test.yml", "gerrit-verify.yaml")
 
-# The action that checks out the CHANGE'S tree. A job that uses it is in the patchset lane.
-# Selecting on it — rather than on a workflow-wide list — is what keeps the structural guard
-# from flagging branch-head jobs, and what excludes the vote job's `normalize_ci_conclusion`
-# step, which sparse-checks-out its script from the TRUSTED default branch, not the patchset.
+# This checkout identifies patchset-lane jobs, excluding branch-head jobs and
+# normalize_ci_conclusion, which reads its script from trusted default branch.
 GERRIT_CHECKOUT_ACTION = "checkout-gerrit-change-action"
 
 # Anchored at a path boundary so `tests/scripts/foo.py` is not misread as the gate
@@ -157,12 +132,9 @@ def test_the_sweep_finds_the_patchset_lane_steps() -> None:
 
 @pytest.mark.parametrize("step", GATE_STEPS, ids=str)
 def test_patchset_lane_step_guards_every_repo_script_it_runs(step: GateStep) -> None:
-    """No step in the Verified lane may run a repo script it has not tested for presence.
-
-    This is the structural half of bug 1909-c1a7-9f20-440f: the ee2a note asks authors to
-    copy an if-present guard, and eleven steps did not. A convention enforced only by a
-    comment is a convention that decays, so it is enforced here instead.
-    """
+    """Every patchset-lane repo-script step checks for its script first.
+    This enforces the ee2a workflow rule across steps instead of trusting a
+    comment authors could overlook."""
     unguarded = [script for script in step.scripts if not _guards(step.run, script)]
     assert not unguarded, (
         f"step {step} runs {', '.join(unguarded)} without an if-present guard.\n\n"

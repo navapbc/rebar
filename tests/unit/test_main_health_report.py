@@ -1,14 +1,8 @@
-"""The branch-health run summary pays back the attribution the schedule gave up.
+"""Give scheduled main-health failures an actionable commit range.
 
-`main` CI on the GitHub mirror is scheduled, not push-triggered (ticket 03ef-6fb5-158b-4abd),
-so one red tick covers every commit since the last green one. The summary the run publishes is
-therefore load-bearing: it has to hand the responder a lower bound and a runnable bisect, and
-it has to do that on a run that is ALREADY failing — which is exactly the moment a
-shell-quoting bug or an unfilled placeholder would be discovered for the first time.
-
-These tests drive the renderer directly (workflow YAML is not reachable from the suite) and
-assert observable output: what the summary says, not how it is built.
-"""
+A red run may cover multiple mirrored-main commits, so the rendered summary
+must identify the last green bound and a runnable bisect even while the run
+itself is failing."""
 
 from __future__ import annotations
 

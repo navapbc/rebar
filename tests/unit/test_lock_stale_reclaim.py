@@ -82,17 +82,8 @@ def test_acquire_does_not_reclaim_foreign_host_owner(tmp_path):
     assert os.path.isdir(os.path.join(str(tmp_path), _lock.MKDIR_LOCK_NAME))
 
 
-# ── Direct _acquire_fcntl errno discrimination (story sulfureous-albino-fallowdeer) ──
-#
-# `_acquire_fcntl` used to catch EVERY OSError identically and wait out the deadline, so a
-# genuine system fault (ENOLCK/EIO/EBADF) was masked as a spurious LockTimeout. It now branches
-# on errno: contention (EAGAIN/EACCES) waits until the deadline then returns -1; any other errno
-# is re-raised immediately with its identity. The fd is closed on every failure path.
-#
-# The primitive is patched on `lock_kernel`, which is where the platform's exclusive leg is now
-# selected (story `friendless-alabaster-cub`); `_acquire_fcntl` calls it through that seam. Same
-# module object, same assertions — this pins that the POSIX errno discrimination is unchanged by
-# the addition of the Windows leg.
+# Only contention errno values wait for the deadline. Other lock-kernel
+# errors propagate immediately and close the fd, including on Windows.
 
 
 def _raise_errno(err: int):
@@ -192,16 +183,8 @@ def test_acquire_fcntl_closes_fd_on_unexpected_errno(tmp_path, monkeypatch):
     assert closed, "the opened fd must be closed on the re-raise path"
 
 
-# ── canonical_tracker symlink/realpath lock identity (story elliptic-secondbest-nuthatch) ──
-#
-# `acquire` canonicalizes the tracker path with `canonical_tracker` (os.path.realpath), so a
-# symlinked-path caller and a real-path caller contend on the SAME `.ticket-write.lock` /
-# `.ticket-write.lock.d`. These tests prove that mutual exclusion holds across the two path
-# spellings, in both directions. Determinism: the two acquirers are independent `acquire()`
-# calls (separate fcntl open-file-descriptions + separate os.mkdir), which contend regardless
-# of process; the second uses a bounded `timeout=1, attempts=1`, so the held lock GUARANTEES a
-# LockTimeout (not a sleep-timing race). Were canonicalization absent, the two paths would key
-# different lock files, the second acquire would succeed, and the assertion would fail.
+# Canonical tracker paths make symlink and resolved-path callers contend on the
+# same lock. A held first acquire forces the bounded second acquire to time out.
 
 
 def _tracker_and_symlink(tmp_path) -> tuple[str, str]:
@@ -239,11 +222,8 @@ def test_realpath_acquirer_blocked_by_symlink_holder(tmp_path):
     freed.release()
 
 
-# ── Malformed / unreadable mkdir owner-stamp forms (story innovative-halfcrazed-monkey) ──
-#
-# `_mkdir_lock_is_stale` must be CONSERVATIVE: an absent, malformed, foreign-host, or
-# unreadable owner stamp must NEVER be judged stale (reclaimable) — only a stamp that proves a
-# dead PID on THIS host may. These table-driven cases pin every malformed/unreadable branch.
+# Reclaim only a stamp proving a dead local owner. Missing, malformed,
+# unreadable, or foreign-host stamps cannot prove that claim.
 
 
 def _seed_owner_stamp(tmp_path, content: str | None) -> str:
@@ -293,12 +273,8 @@ def test_unreadable_owner_file_is_never_stale(tmp_path):
     assert _owner._mkdir_lock_is_stale(lock_dir) is False
 
 
-# ── The dual-window lock is a permanent contract (story sublime-phlegmy-oropendola) ──
-#
-# By default `acquire` takes BOTH legs — the fcntl `.ticket-write.lock` file AND the atomic
-# mkdir `.ticket-write.lock.d` dir (the portable second window). This is a standing contract,
-# not migration residue; the writer-storm gate depends on "the mkdir leg is always taken".
-# `dual_window=False` is an fcntl-only opt-out. These tests enforce that contract behaviorally.
+# Default acquires both kernel and mkdir lock legs. ``dual_window=False``
+# deliberately selects only the kernel leg.
 
 
 def test_default_write_lock_takes_both_fcntl_and_mkdir_legs(tmp_path):

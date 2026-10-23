@@ -1,20 +1,9 @@
-"""A gate must not certify against a ticket store it cannot trust (bug b928-3ab6-5985-417b).
+"""Refuse gate certification from a stale ticket store (b928).
 
-The incident: under sustained contention on ``origin/tickets`` a clone spent hours neither
-publishing its own writes nor adopting the remote's, and a ticket carrying a VALID
-``completion-verifier`` attestation read as ``unsigned`` through it. That is not a late
-answer, it is a WRONG one — and the gate then mints or withholds an operation certificate
-on the strength of it.
-
-The decisive tests here are the ones where a gate reads a DELIBERATELY STALE store and
-REFUSES. A happy-path test proves nothing about this bug: the failure mode is precisely
-that the gate answered confidently from a store that was not current.
-
-The inverse guard matters just as much. Operator decision B4 (``vapoury-attack-lamb``,
-pinned in ``docs/concurrency.md``) makes a failed tickets-branch push a SIGNAL and never an
-exception. Nothing here may leak into the ordinary write path — see
-``test_a_stale_store_does_not_make_an_ordinary_write_raise``.
-"""
+Under tickets-branch contention, a valid completion cert read as unsigned
+from a clone that neither adopted remote writes nor published its own.
+Tests make gate reads deliberately stale and require refusal. Ordinary
+writes retain B4 policy. Push failure is a signal, never an exception."""
 
 from __future__ import annotations
 
@@ -55,11 +44,8 @@ def store(tmp_path: Path) -> Path:
 
 
 def _advance_remote_only(tracker: Path) -> None:
-    """Publish a commit from a SECOND clone, then fetch it — leaving ``tracker`` behind.
-
-    This is the incident shape exactly: an event written elsewhere is in this clone's git
-    dir (it fetched during push recovery) but is NOT in the view its reducer reads.
-    """
+    """Publish from a second clone, then fetch without advancing the local
+    reducer view. The remote event exists in git but is not compiled."""
     origin = _git(tracker, "remote", "get-url", "origin").stdout.strip()
     other = tracker.parent / "other"
     subprocess.run(
@@ -328,13 +314,8 @@ def _stale(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_the_claim_gate_refuses_on_a_stale_store(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DECISIVE: a certified, valid attestation still does not authorise a claim here.
-
-    The signature read is stubbed CERTIFIED and validity stubbed VALID, so the only thing
-    that can produce a refusal is the freshness assertion — and it must run BEFORE the
-    attestation is consulted, because on the real stale store that read is the thing
-    returning the wrong answer.
-    """
+    """Refuse before reading even a certified, valid plan attestation when the
+    store is stale. Stubs make freshness the only possible refusal cause."""
     from rebar import signing
     from rebar.llm.plan_review import attest, attest_gate
 
@@ -403,12 +384,9 @@ def test_the_completion_close_gate_refuses_before_the_billable_verifier(
 
 
 def test_a_stale_store_does_not_make_an_ordinary_write_raise(store: Path) -> None:
-    """B4 non-regression: freshness lives in the GATE read paths, never in the write path.
-
-    ``push_tickets_branch`` ALWAYS returns ``None`` (``docs/concurrency.md``). A gate that
-    learned to refuse must not have taught the write path to raise — the rejected remedy
-    was blanket write-refusal, which converts a degraded system into an outage.
-    """
+    """Freshness refusal belongs to gate reads only. push_tickets_branch still
+    returns None on failure under B4. Blanket write refusal would cause an
+    outage instead of reporting degraded delivery."""
     from rebar._store import push
 
     _advance_remote_only(store)

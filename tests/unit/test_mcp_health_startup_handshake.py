@@ -1,26 +1,14 @@
-"""A `/health` 200 must mean this container has already SERVED an MCP request.
+"""A health response reports whether this container served an MCP initialize request.
 
-WHY THIS TEST EXISTS. `/health` is a FastMCP `custom_route` registered deliberately OUTSIDE the
-auth middleware and the DNS-rebinding transport-security guard, and `infra/scripts/autodeploy.sh`
-flips the nginx `/mcp` upstream the moment it returns 200 — so the deploy path promoted
-containers that had never served one `/mcp` request (measured on the box: promoted 54 s before
-its first). A container whose `REBAR_MCP_HTTP_ALLOWED_HOSTS` does not admit the hostname real
-traffic carries answers `/health` 200 while 421-ing every real request, and the cutover promotes
-it (bug vaccinated-flavorous-solenodon).
+The health route bypasses auth and DNS-rebinding guards. Autodeploy once promoted
+a container 54 seconds before its first MCP request. A wrong allowed hostname
+could return health 200 while MCP traffic got 421 (vaccinated-flavorous-solenodon).
 
-THE DESIGN THIS PINS. The server drives ONE real `initialize` through its own
-`StreamableHTTPSessionManager` inside the ASGI lifespan — after the session manager is running,
-before Starlette answers `lifespan.startup.complete`, which uvicorn waits for before accepting a
-connection — and reports the outcome as `/health`'s `handshake` field. Two properties are in
-tension and both are required: CONCLUSIVE (a pass could not have been produced without the real
-request path working) and BOUNDED (a failure or a hang must not wedge startup).
-
-THE ANCHORING RULE these tests obey. This bug IS a vacuous health check, so an assertion that
-would pass when the handshake never ran is the defect restated. Every test below first proves the
-drive actually executed — a counter, or the record's presence — and only then asserts its
-outcome; and both directions are covered, because a one-sided test cannot tell "the check works"
-from "the check always passes".
-"""
+The server drives initialize through its running StreamableHTTPSessionManager
+inside ASGI lifespan, before startup.complete lets uvicorn accept connections.
+Health reports the handshake result. The probe must use the HTTP request path
+and be bounded so failure or a hang cannot wedge startup. Each test proves the
+drive ran, then checks its result. Success and refusal are both covered."""
 
 from __future__ import annotations
 
@@ -399,13 +387,9 @@ def test_allowlist_that_admits_the_wrong_hostname_fails() -> None:
 def test_run_http_with_grace_hands_uvicorn_an_app_that_runs_the_handshake(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The PRODUCTION WIRING, not just the helper: the app `run_http_with_grace` hands to uvicorn
-    must be the one whose lifespan runs the handshake. Without this, deleting the install call
-    would leave every unit test green while shipping the original bug.
-
-    A fake uvicorn Config/Server keeps the test port-free (the pattern
-    test_run_http_with_grace_installs_sigterm_and_bounds_uvicorn uses); the captured app is then
-    driven through the raw ASGI lifespan protocol."""
+    """Check production wiring. Uvicorn receives the app whose lifespan runs the
+    handshake. A fake Config/Server avoids a port. Driving the captured app through
+    raw ASGI lifespan catches a missing install call that helper tests would miss."""
     import signal
 
     import anyio

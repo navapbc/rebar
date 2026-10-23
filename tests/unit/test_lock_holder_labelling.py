@@ -1,14 +1,8 @@
-"""A lock timeout must NAME the compaction sweep holding the lock, not a bare pid
-(camerashy-erectable-frog).
+"""Name optional compaction in write-lock timeout diagnostics.
 
-Field evidence: a sweep held the store write lock for 24+ minutes; the blocked writer saw
-only ``holder: host=... pid=... held=47s`` — a bare pid — and had to reach for ``lsof``/``ps``
-to learn it was compaction and therefore safe to SIGTERM. These tests pin the fix: an optional
-``op=`` label on the v2 ownership stamp, set AMBIENTLY by the sweep via a ``contextvars``
-label, rendered into ``describe_lock_holder`` and the ``LockTimeout`` message, together with a
-stated safe-to-interrupt remedy — while the v2 forward-compat contract (colon-free line,
-unknown fields ignored) and the label-blind reclamation logic are preserved.
-"""
+The sweep stamps an ambient ``op=compact-sweep`` label. Timeouts render it
+with the safe-interrupt remedy while v2 stamps stay colon-free, unknown fields
+remain tolerated, and reclamation ignores the label."""
 
 from __future__ import annotations
 

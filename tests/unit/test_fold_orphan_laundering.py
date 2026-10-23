@@ -1,30 +1,14 @@
-"""The natural fold must not LAUNDER orphans (bug winning-endurant-xenops,
-f96b-3498-8f04-40b0).
+"""Natural folds must preserve detectable orphans (winning-endurant-xenops).
 
-THE DEFECT. The fold-horizon race (ADR-0035's RC2 class: a concurrent write union-merges
-in AFTER a fold enumerated its inputs) leaves an active pre-snapshot event absent from the
-snapshot's ``source_event_uuids``. fsck flags it ORPHAN_EVENT and
-``fsck --repair-snapshots`` heals it from the full log — but only while the evidence
-survives. The NEXT natural fold destroyed it: the whole-dir enumeration RETIRED the
-orphan's file and CITED its uuid in the new snapshot while the replay's positional skip
-kept its effect OUT of the compiled state. fsck then reported clean; repairable damage
-became silent, undetectable loss at the first threshold crossing.
+A concurrent write after fold enumeration can leave a pre-snapshot event
+uncited. A later fold once retired its file and cited its UUID while replay
+skipped its effect, turning repairable ORPHAN_EVENT into silent loss.
 
-THE FIX (pinned here):
-* The fold EXCLUDES orphans from both retirement and citation, using exactly fsck's
-  orphan predicate (shared helper ``fsck_repair.is_snapshot_orphan``) anchored to a prior
-  snapshot present in the fold set. The orphan stays a live, un-cited file, so the
-  ORPHAN_EVENT finding and the repair window survive indefinitely. The fold does NOT
-  absorb (that would bypass the auto-recover/human-triage routing).
-* First fold (no prior snapshot in the dir): nothing is excluded — the new snapshot's own
-  citation list plays no role in the predicate.
-* Routing parity: ``fsck --repair-snapshots`` no longer rebuilds past
-  ``_HUMAN_TRIAGE_ORPHAN_TYPES`` — an order-sensitive orphan blocks the whole-ticket
-  rebuild (a rebuild would silently absorb it in log order), exactly as ``fsck --repair``
-  already refuses.
-* Defer guard: pre-snapshot foldables never fold WITHOUT their governing snapshot (that
-  fold would write a pre-snapshot SNAPSHOT the governing one positionally buries).
-"""
+Use fsck_repair.is_snapshot_orphan against a prior snapshot in the fold set.
+Exclude orphans from retirement and citation, leaving evidence for fsck
+and human triage. On a first fold, exclude nothing. Snapshot repair must
+refuse HUMAN_TRIAGE_ORPHAN_TYPES, as ordinary repair does. Never fold
+pre-snapshot events without their governing snapshot."""
 
 from __future__ import annotations
 
@@ -164,9 +148,8 @@ def _plant_orphan_file(repo: Path, tid: str, event_type: str, data: dict) -> Pat
 
 # ── G1: the laundering, and its fix ─────────────────────────────────────────────────────────
 def test_threshold_crossing_fold_does_not_launder_orphan(store: Path) -> None:
-    """THE BUG (RED on pre-fix main): the next natural fold retired the orphan's file and
-    cited its uuid while the positional skip dropped its effect — fsck went clean on
-    permanently lost data. The fold must EXCLUDE the orphan from retirement + citation."""
+    """A later threshold fold must neither retire nor cite an orphan whose effect
+    positional replay skips. Otherwise fsck appears clean after data loss."""
     repo = store
     tid = _seed(repo, "laundering victim")
     orphan = _race_orphan(repo, tid)

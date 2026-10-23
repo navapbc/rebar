@@ -1,21 +1,10 @@
-"""In-flight singleflight de-duplication for long-running MCP gate ops (bug d80d).
+"""De-duplicate concurrent MCP plan and completion gate calls (d80d).
 
-WHY THIS TEST EXISTS. Calling ``review_plan`` / ``verify_completion`` over the MCP
-server runs a 15-20 minute billable LLM gate. The MCP *client* SDK gives up at 60s
-with an opaque ``-32001``; the documented agent reflex is to re-invoke, which — with
-no de-duplication — starts a SECOND billable LLM pass while the first is still in
-flight (bug d80d AC #2). ``rebar._mcp_inflight`` collapses concurrent duplicate
-calls for the same ``(gate, ticket, basis)`` into ONE computation whose result every
-caller shares (golang ``singleflight`` semantics).
-
-WHAT THESE TESTS PIN, and why they are shaped this way. The gate is stubbed with a
-fake that blocks on a ``threading.Event`` and counts its invocations, so the verdict
-is a VALUE (the call count) not a wall-clock duration — deterministic, and zero
-tokens. The registry is thread-based on purpose: the MCP server already runs every
-sync tool body on its own anyio worker thread (``_mcp_health.offload_sync_tools``),
-and the certified-tool in-flight gauge / SIGTERM drain REQUIRE those bodies to stay
-synchronous, so the de-dup primitive collapses concurrent *threads*, not coroutines.
-"""
+A client may time out after 60 seconds while a billable gate lasting 15 to 20 minutes keeps
+running. Repeating the same gate/ticket/basis should share one computation.
+Event-blocked fakes count calls deterministically without LLM tokens. The
+registry joins threads because MCP runs synchronous tools on anyio workers
+and the in-flight gauge and shutdown drain depend on synchronous bodies."""
 
 from __future__ import annotations
 
