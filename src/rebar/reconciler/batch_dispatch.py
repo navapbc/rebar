@@ -12,7 +12,7 @@ import importlib.util
 import urllib.error
 from collections import deque
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -716,6 +716,10 @@ def run_migrated_reroute(
     return map_cutover_report(report)
 
 
+def _is_outbound(mutation) -> bool:
+    return getattr(mutation.direction, "value", mutation.direction) == "outbound"
+
+
 def reroute_migrated_plans(
     *,
     ticket_plans,
@@ -730,19 +734,23 @@ def reroute_migrated_plans(
 ):
     """Route fully migrated non-create plans through the coordinator.
 
-    Mixed create/non-create plans remain unrouted. With no migrated plan,
-    return ``(None, mutations)``. Otherwise return the cutover tally and
-    unconsumed mutations; deferred work is counted without dispatch.
+    Only a plan's outbound mutations are routed: the coordinator dispatches through the
+    outbound handlers, and inbound mutations are applied locally by ``_apply_typed``.
+    Plans group by target, so one may carry both directions; it is trimmed to its outbound
+    half, and a plan with none is skipped. Mixed create/non-create plans remain unrouted.
+    With no migrated plan, return ``(None, mutations)``. Otherwise return the cutover tally
+    and unconsumed mutations; deferred work is counted without dispatch.
     """
-    migrated_plans = [
-        plan
-        for plan in (ticket_plans or [])
-        if plan.mutations
-        and all(
+    migrated_plans = []
+    for plan in ticket_plans or []:
+        outbound = tuple(m for m in plan.mutations if _is_outbound(m))
+        if outbound and all(
             m.action.value in NON_CREATE_FAMILIES and route_for(m.action.value) == COORDINATOR_ROUTE
-            for m in plan.mutations
-        )
-    ]
+            for m in outbound
+        ):
+            migrated_plans.append(
+                plan if len(outbound) == len(plan.mutations) else replace(plan, mutations=outbound)
+            )
     if not migrated_plans:
         return None, mutations
     cutover_tally = run_migrated_reroute(
