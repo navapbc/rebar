@@ -688,6 +688,26 @@ mcp_self_heal_live_backend() {
 # ── what changed? (computed in the mirror clone) ──────────────────────────────
 changed_range() { git -C "$MIRROR_DIR" diff --name-only "$1" "$2" -- $3 2>/dev/null | grep -q .; }
 changed() { changed_range "$DEPLOYED" "$TARGET" "$1"; }
+# A watched config file edited only in whole-line `#` comments or whitespace changes nothing an
+# operator would apply, so it must not page. `#!` stays content, as do other comment syntaxes
+# (`;`), and a path unreadable at either revision counts as changed: err toward signalling.
+# A `.template` is rendered by a materializer that substitutes its placeholders everywhere,
+# comments included, so its comment text is material: any edit to one signals.
+config_body() {
+  local raw
+  raw="$(git -C "$MIRROR_DIR" show "$1:$2" 2>/dev/null)" || return 1
+  printf '%s\n' "$raw" | sed -E 's/[[:space:]]+$//' | grep -vE '^[[:space:]]*(#([^!]|$)|$)' || true
+}
+config_changed() {
+  local f before after
+  for f in $(git -C "$MIRROR_DIR" diff --name-only "$DEPLOYED" "$TARGET" -- $1 2>/dev/null); do
+    case "$f" in *.template) return 0 ;; esac
+    before="$(config_body "$DEPLOYED" "$f")" || return 0
+    after="$(config_body "$TARGET" "$f")" || return 0
+    [ "$before" = "$after" ] || return 0
+  done
+  return 1
+}
 # MCP redeploys for either image-source or startup-secret changes.
 mcp_delta() {
   changed_range "$mcp_deployed" "$TARGET" "$MCP_PATHS" || \
@@ -730,7 +750,7 @@ fi
 mcp_self_heal_live_backend || exit 1
 
 # Signal Gerrit configuration changes for manual application.
-if changed "$CONFIG_PATHS"; then
+if config_changed "$CONFIG_PATHS"; then
   err config_manual "infra config changed in $TARGET — replication/g2p/refs-meta/gerrit.config/jgit.config need a MANUAL operator apply (auto-apply is a v2 follow-up)"
   log "infra config change detected + signalled (not auto-applied in v1)"
 fi

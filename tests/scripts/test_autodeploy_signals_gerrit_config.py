@@ -66,6 +66,12 @@ def deploy_box(tmp_path: Path) -> dict[str, object]:
           fetch)  exit 0 ;;
           rev-parse) echo "{_TARGET}"; exit 0 ;;
           checkout) exit 0 ;;
+          show)
+            case "$*" in
+              *"{_DEPLOYED}:"*) printf '%s' "${{DEPLOYED_BODY-}}" ;;
+              *)  [ -n "${{TARGET_MISSING-}}" ] && exit 128; printf '%s' "${{TARGET_BODY-}}" ;;
+            esac
+            exit 0 ;;
           diff)
             case "$*" in
               *"$CHANGED_PATH"*) echo "$CHANGED_PATH"; exit 0 ;;
@@ -98,6 +104,8 @@ def test_autodeploy_signals_config_manual(
 ) -> None:
     env = dict(deploy_box["env"])  # type: ignore[arg-type]
     env["CHANGED_PATH"] = changed_path
+    env["DEPLOYED_BODY"] = "[gerrit]\n  canonicalWebUrl = https://old.example\n"
+    env["TARGET_BODY"] = "[gerrit]\n  canonicalWebUrl = https://new.example\n"
     result = subprocess.run(
         ["bash", str(AUTODEPLOY)],
         env=env,
@@ -133,3 +141,100 @@ def test_autodeploy_signals_config_manual(
             "the config_manual detail must direct the operator to a manual apply, got "
             f"{payload['detail']!r}.\n{context}"
         )
+
+
+_BASE = "# header comment\n[gerrit]\n  canonicalWebUrl = https://x.example\n"
+
+
+def _run_config_change(
+    deploy_box: dict[str, object],
+    deployed: str,
+    target: str,
+    *,
+    target_missing: bool = False,
+    path: str = "infra/compose/gerrit.config",
+) -> tuple[subprocess.CompletedProcess[str], list[dict[str, str]]]:
+    env = dict(deploy_box["env"])  # type: ignore[arg-type]
+    env["CHANGED_PATH"] = path
+    env["DEPLOYED_BODY"] = deployed
+    env["TARGET_BODY"] = target
+    if target_missing:
+        env["TARGET_MISSING"] = "1"
+    result = subprocess.run(
+        ["bash", str(AUTODEPLOY)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    errors = [
+        json.loads(m)
+        for m in re.findall(r"^AUTODEPLOY_ERROR (\{.*\})$", result.stderr, re.MULTILINE)
+    ]
+    return result, errors
+
+
+@pytest.mark.parametrize(
+    ("label", "target"),
+    [
+        (
+            "comment rewritten",
+            "# a shorter header\n[gerrit]\n  canonicalWebUrl = https://x.example\n",
+        ),
+        ("comment removed", "[gerrit]\n  canonicalWebUrl = https://x.example\n"),
+        ("indented comment added", _BASE + "  # note\n"),
+        (
+            "blank lines and trailing space",
+            "# header comment\n\n[gerrit]  \n  canonicalWebUrl = https://x.example   \n\n",
+        ),
+    ],
+)
+def test_comment_and_whitespace_only_change_is_not_a_manual_apply(
+    deploy_box: dict[str, object], label: str, target: str
+) -> None:
+    """A change with no effect on the config must not page: the operator has nothing to apply."""
+    result, errors = _run_config_change(deploy_box, _BASE, target)
+    config_errors = [e for e in errors if e["reason"] == "config_manual"]
+    assert not config_errors, (
+        f"{label}: a change to comments/whitespace only must not emit config_manual, "
+        f"got {config_errors}.\nstderr:\n{result.stderr}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("label", "target", "target_missing"),
+    [
+        ("value changed", _BASE.replace("x.example", "y.example"), False),
+        (
+            "comment edit plus value change",
+            "# new header\n[gerrit]\n  canonicalWebUrl = https://y.example\n",
+            False,
+        ),
+        ("shebang is content", "#!/bin/sh\n" + _BASE, False),
+        ("semicolon comment is content", _BASE + "; note\n", False),
+        ("path unreadable at target", "", True),
+    ],
+)
+def test_real_or_unprovable_change_still_signals_manual_apply(
+    deploy_box: dict[str, object], label: str, target: str, target_missing: bool
+) -> None:
+    """Anything beyond whole-line comments and whitespace, or unreadable, keeps paging."""
+    result, errors = _run_config_change(deploy_box, _BASE, target, target_missing=target_missing)
+    assert any(e["reason"] == "config_manual" for e in errors), (
+        f"{label}: must still emit config_manual.\nstderr:\n{result.stderr}"
+    )
+
+
+def test_comment_only_change_to_a_rendered_template_still_signals(
+    deploy_box: dict[str, object],
+) -> None:
+    """The g2p template's materializer substitutes its placeholder inside comments too, so a
+    comment edit there is material and must keep paging."""
+    result, errors = _run_config_change(
+        deploy_box,
+        _BASE,
+        "# a shorter header\n[gerrit]\n  canonicalWebUrl = https://x.example\n",
+        path="infra/gerrit/gerrit_to_platform.ini.template",
+    )
+    assert any(e["reason"] == "config_manual" for e in errors), result.stderr
