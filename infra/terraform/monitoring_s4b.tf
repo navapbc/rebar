@@ -13,7 +13,7 @@ resource "aws_cloudwatch_metric_alarm" "voter_errors" {
     the LLM-Review vote (ADR-0013), a failing voter leaves changes unsubmittable —
     the fail-closed gate. Restore the voter (token / LLM / receiver); there is no
     break-glass to disable the submit requirement. Calibrated to sustained-failure
-    detection (ticket ea5d-4932-8554-4544): 3 of 5 five-minute periods with any
+    detection (ticket ea5d-4932-8554-4544): 3 of 6 five-minute periods with any
     markers — an isolated self-healing transient (timeout->backfill retry, clone
     stall, retry-budget fail-closed -1) never pages, even straddling a period
     boundary; a stuck gate emits markers on every retry (~5-min reconciler cadence)

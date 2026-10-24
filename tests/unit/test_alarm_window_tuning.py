@@ -62,6 +62,11 @@ _PUBLISHER_BUDGET_PER_DATAPOINT_SECONDS = 600
 # exist so a parser that silently matches NOTHING fails loudly instead of passing for free.
 _MIN_EXPECTED_ALARMS = 31
 _MIN_EXPECTED_PROBE_ALARMS = 27
+# Two descriptions state an N-of-M window when this guard was written.
+_MIN_EXPECTED_WINDOW_CLAIMS = 2
+
+# "3 of 6 five-minute periods", "2-of-4 window": an N-of-M window claim in prose.
+_CLAIM_RE = re.compile(r"(\d+)[- ]of[- ](\d+)(?: [\w-]+){0,2} (?:periods?|window)\b")
 
 _ALARM_RE = re.compile(r'resource\s+"aws_cloudwatch_metric_alarm"\s+"(?P<name>[^"]+)"\s*\{')
 
@@ -79,6 +84,12 @@ class Alarm:
         explicit = _integer(body, "datapoints_to_alarm")
         # An unset datapoints_to_alarm is N-of-N in CloudWatch, not a hole.
         self.datapoints_to_alarm = self.evaluation_periods if explicit is None else explicit
+        self.description = _description(body)
+
+    @property
+    def claimed_windows(self) -> list[tuple[int, int]]:
+        """``(datapoints, periods)`` pairs the description states as "N of M ... periods"."""
+        return [(int(n), int(m)) for n, m in _CLAIM_RE.findall(" ".join(self.description.split()))]
 
     @property
     def probe_published(self) -> bool:
@@ -95,6 +106,17 @@ class Alarm:
             f"datapoints_to_alarm={self.datapoints_to_alarm} "
             f"treat_missing_data={self.treat_missing_data}"
         )
+
+
+def _description(body: str) -> str:
+    """The ``alarm_description`` text, whether a heredoc or a quoted string; empty when unset."""
+    match = re.search(
+        r"^[ \t]*alarm_description[ \t]*=[ \t]*"
+        r'(?:<<-?(\w+)\n(.*?)\n[ \t]*\1\b|"((?:[^"\\]|\\.)*)")',
+        body,
+        re.MULTILINE | re.DOTALL,
+    )
+    return (match.group(2) or match.group(3) or "") if match else ""
 
 
 def _quoted(body: str, attribute: str) -> str | None:
@@ -418,3 +440,49 @@ def test_the_ordering_guard_rejects_a_counter_published_after_the_sentinel() -> 
     )
     assert _publish_line(seeded, "mirror_out_of_sync") == 1
     assert _publish_line(seeded, "voter_errors") == 2
+
+
+# ─────────────────── descriptions must state the configured window ───────────────────
+
+
+def test_alarm_descriptions_state_the_configured_window() -> None:
+    """An operator reads the description when paged; "3 of 5" over a 3-of-6 alarm misleads.
+
+    Any "N of M ... periods" claim in a description must equal the alarm's
+    ``datapoints_to_alarm`` of ``evaluation_periods``.
+    """
+    alarms = _tree_alarms()
+    claimants = [alarm for alarm in alarms if alarm.claimed_windows]
+    assert len(claimants) >= _MIN_EXPECTED_WINDOW_CLAIMS, (
+        f"only {len(claimants)} descriptions state a window; the claim parser has gone blind"
+    )
+    offenders = [
+        f"{alarm} says {claim[0]} of {claim[1]}"
+        for alarm in claimants
+        for claim in alarm.claimed_windows
+        if claim != (alarm.datapoints_to_alarm, alarm.evaluation_periods)
+    ]
+    assert not offenders, (
+        "alarm description(s) state a window that differs from the configured "
+        "datapoints_to_alarm of evaluation_periods: " + "; ".join(offenders)
+    )
+
+
+def test_a_description_that_disagrees_with_its_window_is_flagged() -> None:
+    """The pre-fix ``voter_errors`` shape: described as 3 of 5, configured 3 of 6."""
+    alarm = _seeded(
+        _SEED_HEADER + "  period = 300\n  evaluation_periods = 6\n  datapoints_to_alarm = 3\n"
+        "  alarm_description = <<-EOT\n    pages on 3 of 5 five-minute periods with\n"
+        "    any markers\n  EOT\n}\n"
+    )
+    assert alarm.claimed_windows == [(3, 5)]
+    assert (3, 5) != (alarm.datapoints_to_alarm, alarm.evaluation_periods)
+
+
+def test_a_description_that_matches_its_window_is_accepted() -> None:
+    alarm = _seeded(
+        _SEED_HEADER + "  period = 300\n  evaluation_periods = 6\n  datapoints_to_alarm = 3\n"
+        '  alarm_description = "pages on 3 of 6 five-minute periods"\n}\n'
+    )
+    assert alarm.claimed_windows == [(3, 6)]
+    assert alarm.claimed_windows[0] == (alarm.datapoints_to_alarm, alarm.evaluation_periods)
