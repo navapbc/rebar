@@ -299,3 +299,24 @@ def test_safe_submit_reraises_non_409_submit_http_error(monkeypatch):
         )
 
     assert raised.value.code == 500
+
+
+@pytest.mark.parametrize("inherited", [None, "1"])
+def test_credential_lookup_never_prompts_on_a_terminal(monkeypatch, inherited):
+    """With no helper and a controlling terminal, git credential fill asks for a username on
+    the tty and an agent session blocks on it; the lookup must fail fast instead."""
+    safe_submit = _safe_submit_module()
+    seen: dict[str, str] = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(kwargs["env"])
+        return subprocess.CompletedProcess(cmd, 0, stdout="username=u\npassword=p\n", stderr="")
+
+    if inherited is None:
+        monkeypatch.delenv("GIT_TERMINAL_PROMPT", raising=False)
+    else:
+        monkeypatch.setenv("GIT_TERMINAL_PROMPT", inherited)
+    monkeypatch.setattr(safe_submit.subprocess, "run", fake_run)
+
+    assert safe_submit._credential("rebar.solutions.navateam.com") == ("u", "p")
+    assert seen["GIT_TERMINAL_PROMPT"] == "0"

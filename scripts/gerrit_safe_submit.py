@@ -27,7 +27,7 @@ def _credential(host: str) -> tuple[str, str]:
             text=True,
             capture_output=True,
             check=True,
-            env=credential_git_env(os.environ),
+            env={**credential_git_env(os.environ), "GIT_TERMINAL_PROMPT": "0"},
         )
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or str(exc)).strip()
