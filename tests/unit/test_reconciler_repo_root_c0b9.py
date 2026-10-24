@@ -1,8 +1,4 @@
-"""``rebar.config.repo_root`` / ``reconciler_repo_root`` resolution (bug c0b9).
-
-Moved from the retired ``tests/scripts/test_reconciler_core_seam_clean_heldout.py`` guard
-(story skaldic-paradoxal-huemul); the behaviour tests are unchanged.
-"""
+"""Test repo-root precedence and noneditable-install fallback."""
 
 from __future__ import annotations
 
@@ -13,13 +9,7 @@ import pytest
 
 
 def _noneditable_package_config_file(tmp_path: Path) -> Path:
-    """A site-packages-shaped ``config.py`` whose ``parents[2]`` is NOT a checkout.
-
-    Mirrors a wheel/non-editable install: ``<venv>/lib/pythonX/site-packages/rebar/
-    config.py`` -> ``parents[2]`` == ``<venv>/lib/pythonX`` (no ``.git``, no
-    ``src/rebar``). Directories are materialized so ``.resolve()`` behaves like a real
-    install path.
-    """
+    """Model an installed ``config.py`` whose package ancestors are not a checkout."""
     cfg = tmp_path / "venv" / "lib" / "python3.13" / "site-packages" / "rebar" / "config.py"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text("# stand-in installed module\n", encoding="utf-8")
@@ -27,9 +17,7 @@ def _noneditable_package_config_file(tmp_path: Path) -> Path:
 
 
 def test_repo_root_precedence_is_preserved(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The owned root resolver keeps its precedence after the cut: an explicit argument
-    wins over the ``REBAR_ROOT`` env var. A cut that hard-wires one source (or drops the
-    explicit-argument path when threading through ``_PassContext``) breaks this."""
+    """An explicit root outranks ``REBAR_ROOT``. Otherwise, ``REBAR_ROOT`` wins."""
     from rebar.config import repo_root
 
     explicit = tmp_path / "explicit_root"
@@ -49,11 +37,7 @@ def test_repo_root_precedence_is_preserved(monkeypatch: pytest.MonkeyPatch, tmp_
 def test_reconciler_event_identity_env_override_propagates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The owned ``reconciler_event_identity`` resolver reads the env OVERRIDE layer after
-    the cut: a non-default ``REBAR_ENV_ID`` / ``REBAR_AUTHOR`` must propagate to the
-    ``(env_id, author)`` pair (not be frozen to the legacy-Jira default). The unset-default
-    branch is covered elsewhere; this pins the set branch so the cut cannot silently drop
-    the env read."""
+    """Set ``REBAR_ENV_ID`` and ``REBAR_AUTHOR`` overrides determine the identity pair."""
     from rebar.config import reconciler_event_identity
 
     monkeypatch.setenv("REBAR_ENV_ID", "prod:main")
@@ -66,14 +50,9 @@ def test_reconciler_event_identity_env_override_propagates(
 def test_reconciler_repo_root_errors_when_neither_package_nor_cwd_is_a_checkout(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Non-editable install, REBAR_ROOT unset, and a CWD that is not a checkout: the
-    resolver must RAISE a clear, actionable error naming both ``REBAR_ROOT`` and
-    ``--repo-root`` — never silently return the venv/site-packages tree.
+    """Without a checkout or ``REBAR_ROOT``, name both root options in the error.
 
-    This is the bug's discriminating leg: before the fix, ``reconciler_repo_root()``
-    returns ``Path(__file__).resolve().parents[2]`` unconditionally, so under a
-    site-packages ``__file__`` it hands back ``<venv>/lib/pythonX`` (a non-checkout) with
-    no error — exactly the CI failure ``Resolved repo_root .../.venv/lib/python3.13``.
+    A noneditable install must never return its site-packages tree as the repo root.
     """
     import rebar.config as cfg_mod
 
@@ -99,13 +78,10 @@ def test_reconciler_repo_root_errors_when_neither_package_nor_cwd_is_a_checkout(
 def test_reconciler_repo_root_git_probe_failure_degrades_to_clear_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Non-editable install, REBAR_ROOT unset, and the step-3 ``git`` probe FAILS (git
-    absent / hung): the resolver must still degrade to the clear step-4 error, never a raw
-    subprocess traceback (``FileNotFoundError``/``TimeoutExpired``).
+    """Missing or timed-out Git discovery falls through to the root-options error.
 
-    Guards the ``_git_toplevel_of_cwd`` robustness the plan-review advisory flagged: a
-    missing ``git`` binary or a probe timeout on a slow filesystem must be swallowed to
-    ``None`` so step 4 (the actionable REBAR_ROOT/--repo-root message) is what surfaces.
+    Neither failure may expose a subprocess traceback instead of ``REBAR_ROOT`` and
+    ``--repo-root`` remedies.
     """
     import subprocess as _subprocess
 
@@ -138,13 +114,7 @@ def test_reconciler_repo_root_git_probe_failure_degrades_to_clear_error(
 def test_reconciler_repo_root_falls_back_to_cwd_checkout_under_noneditable_install(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Non-editable install (package root not a checkout), REBAR_ROOT unset, but the CWD
-    IS inside a real rebar checkout: the resolver falls back to the git toplevel of the
-    CWD and returns THAT checkout.
-
-    Before the fix this returns the site-packages ``parents[2]`` tree instead, so the
-    resolved root neither equals the checkout nor points at a real ``src/rebar`` tree.
-    """
+    """With no ``REBAR_ROOT``, use the CWD checkout when the package is noneditable."""
     import rebar.config as cfg_mod
 
     monkeypatch.delenv("REBAR_ROOT", raising=False)
@@ -170,13 +140,7 @@ def test_reconciler_repo_root_falls_back_to_cwd_checkout_under_noneditable_insta
 def test_reconciler_repo_root_preserves_env_and_editable_behavior(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Behavior-preserving controls (must be green before AND after the fix):
-
-    * ``REBAR_ROOT`` set -> returned verbatim (first-priority, unchanged), even when it
-      points at a non-checkout — the operator's explicit choice is honored as-is.
-    * Editable install (the real in-tree ``config.__file__``) with REBAR_ROOT unset ->
-      the package root, which under the source checkout IS a real checkout.
-    """
+    """Honor explicit ``REBAR_ROOT`` verbatim. Editable installs use their checkout."""
     import rebar.config as cfg_mod
 
     # Control 1: explicit REBAR_ROOT wins verbatim.

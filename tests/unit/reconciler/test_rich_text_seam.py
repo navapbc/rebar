@@ -1,23 +1,10 @@
-"""HELD-OUT oracle for the rich-text seam (story J3, epic e369).
+"""Pin the rich-text seam's send path, mapper ownership, and ADF boundary.
 
-This file is HELD OUT from the implementation subagent.
-
-What it proves that the happy-path spec does not:
-
-1. **Cloud's send path is behaviourally unchanged.** The composition
-   ``normalize_outbound(fit_outbound(v))`` must equal the historical Cloud
-   send-path composition — asserted against the ADF module directly, so the codec
-   cannot quietly reorder or drop a step. The order is load-bearing: fit
-   measures the ADF the send path serializes, and the stored body is then read
-   back normalized, which is what makes the value its own fixed point.
-2. **The two Cloud callers stay distinct.** The description sanitizer applies the
-   FIT ONLY; the backend send path applies fit THEN normalize. A codec that
-   collapsed them would silently change one of the two.
-3. **Exactly one real implementation of ``map_fields_to_remote`` survives**, and it
-   lives in the shared layer — with the neutral Protocol declaration excluded from
-   the count, since that is the port contract rather than a duplicate.
-4. **No new ADF reference escaped the codec** — an enforced allowlist, not a bare
-   grep that would also match the definitions it is meant to exclude.
+Cloud sends ``normalize_outbound(fit_outbound(v))``. Fitting measures serialized
+ADF before normalization. Description sanitization fits only. Exactly one real
+``map_fields_to_remote`` implementation lives in the shared layer. Protocol stubs
+and pure delegations do not duplicate its logic. ADF entry points stay within the
+allowlisted modules.
 """
 
 from __future__ import annotations
@@ -32,9 +19,7 @@ _REC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "reconciler"
 _ADAPTERS = _REC / "adapters"
 
 
-# ---------------------------------------------------------------------------
-# 1–2. Cloud behavioural parity — the composition and the two distinct callers
-# ---------------------------------------------------------------------------
+# Cloud send-path parity and the distinct description sanitizer.
 
 
 @pytest.mark.parametrize(
@@ -111,9 +96,7 @@ def test_non_string_description_still_bypasses_the_codec_entirely() -> None:
     assert out["description"] is sentinel
 
 
-# ---------------------------------------------------------------------------
-# 3. Exactly ONE real implementation of map_fields_to_remote
-# ---------------------------------------------------------------------------
+# Count the real shared mapping implementation.
 
 
 def _is_protocol_stub(node: ast.FunctionDef) -> bool:
@@ -139,13 +122,10 @@ def _is_protocol_stub(node: ast.FunctionDef) -> bool:
 
 
 def _is_pure_delegation(node: ast.FunctionDef) -> bool:
-    """A body that is (optionally a docstring and) a single
-    ``return <expr>.map_fields_to_remote(...)`` — i.e. it forwards rather than
-    duplicating the mapping rules.
+    """A pure delegation has one return call to ``map_fields_to_remote``.
 
-    A delegation is explicitly sanctioned by the story: what must not survive is a
-    SECOND COPY OF THE LOGIC, which is what PR #120 introduced. Counting a
-    one-line forward as a duplicate would be counting the cure as the disease.
+    An optional docstring does not count as logic. A forwarding call does not
+    duplicate the shared mapping rules.
     """
     body = [
         n
@@ -167,17 +147,10 @@ def _is_pure_delegation(node: ast.FunctionDef) -> bool:
 
 
 def test_exactly_one_real_map_fields_to_remote_and_it_is_shared() -> None:
-    """The duplication this epic exists to prevent: PR #120 forked this method as a
-    verbatim copy with one line changed. After J3 exactly one body may CARRY THE
-    MAPPING LOGIC, and it lives in the shared layer, with the ADF-vs-wiki
-    difference reduced to a constructor parameter.
+    """One mapping implementation lives in the shared layer.
 
-    Two kinds of ``map_fields_to_remote`` are legitimately excluded:
-
-    * the neutral Protocol declaration in ``_backend.py`` — an ellipsis stub that
-      IS the port contract and must remain;
-    * a pure one-line delegation in a concrete adapter — the sanctioned way for a
-      backend to expose the shared implementation.
+    Exclude the neutral Protocol stub and concrete adapter delegations. They
+    preserve the port and adapter contracts without copying mapping logic.
     """
     logic: list[str] = []
     stubs: list[str] = []
@@ -210,9 +183,7 @@ def test_exactly_one_real_map_fields_to_remote_and_it_is_shared() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# 4. The ADF allowlist — no new reference escaped the codec
-# ---------------------------------------------------------------------------
+# Keep ADF entry points within the allowlist.
 
 # Files legitimately allowed to name the ADF entry points, each with its reason.
 _ADF_ALLOWLIST = {
