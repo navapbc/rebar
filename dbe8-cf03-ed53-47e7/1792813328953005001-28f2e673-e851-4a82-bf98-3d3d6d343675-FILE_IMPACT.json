@@ -1,0 +1,1 @@
+{"author":"Rebar Bot Nava","author_email":"joeoakhart+bot@navapbc.com","author_id":"594c-9dcf-5ad6-4e6d","data":{"file_impact":[{"path":"infra/","reason":"Autodeploy alarm or emitter fix if the investigation finds a defect"}]},"env_id":"492a5c71-6cda-48a6-8134-02ff6a672739","event_type":"FILE_IMPACT","timestamp":1792813328953005001,"uuid":"28f2e673-e851-4a82-bf98-3d3d6d343675"}
