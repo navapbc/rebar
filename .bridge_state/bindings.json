@@ -25674,7 +25674,7 @@
         },
         "description": "## Context\nThis replacement tree consolidates 1,499 retired per-file source tickets into 6 workstream stories and 119 remediation leaves. At origin/main@e539e4a65d3e7451ca3dbc4b754ba4a2370cc3cc, the audited inventory has 1,449 distinct present execution paths: 1,432 linked directly to a historical source and 17 source-free paths (15 additions and 2 copied follow-up targets). Of the historical sources, 65 have no current path: 61 old-file deletions, 3 paths deleted after remediation, and 1 deleted partial successor. The two copied targets keep their historical source links under the original leaves. A grouped commit may list a sibling path in file_impact; Scope ownership and the present-path inventory count each path once. This epic makes no repository edits.\n\n## Plan\n- Complete every remaining leaf against its owned present Scope: recorded structural and focused checks, an independent per-block semantic/bloat review receipt, Gerrit LLM-Review +1 and Verified +1 with 0 unresolved comments, merged commit, and standalone completion verification. Historical leaves may document a deliberately delegated CI gate rather than claim an uncited local full run.\n- Close each workstream only after all its children close and its log records separate historical-source and current-execution inventories, dispositions for moved/deleted/copied paths, and review/gate evidence.\n- Combine the 6 story migration TSVs by immutable source ID and historical path. Preserve all 1,499 retired source rows, including those with no current path. Schema: source_id, source_alias, historical_source_path, story_alias, historical_replacement_leaf, disposition, verified_current_path_or_blank, current_action_leaf_or_blank, evidence.\n- Combine the 6 story execution TSVs by present path at final origin/main. Count each of the 1,449 present paths once with one Scope owner; record source-free additions and copied targets. Schema: current_path, story_alias, execution_leaf_alias, source_count, retired_source_alias_or_blank, copy_source_alias_or_blank, scope_evidence, pinned_main.\n- Store both combined TSVs, their SHA-256 values, the final main SHA, and all 6 story-log IDs in a linked epic session_log. The working drafts at e539e4a have broader crosswalk columns; transform and verify them against the final merged main before closing.\n\n## Acceptance Criteria\n- [x] All 6 workstream stories and all 119 remediation leaves are closed.\n- [x] The migration inventory has exactly 1,499 distinct retired source IDs and historical paths, each with 1 net-active replacement leaf, a disposition, and evidence; the 65 sources with no current path remain counted.\n- [x] The execution inventory has exactly 1,449 distinct present paths at the final main SHA, each with 1 Scope owner; 1,432 have source_count=1 and 17 have source_count=0, distinguishing 15 additions from 2 copied follow-up targets.\n- [x] Moved and copied targets retain source identity; grouped-commit file_impact overlap does not inflate either inventory.\n- [x] Edited prose has independent per-block before/final review evidence for semantic preservation and bloat removal. Deleted historical files have explicit dispositions rather than invented current review rows.\n- [x] Each leaf trail records its applicable verification outcome (local pass or explicit CI delegation), Gerrit Change-Id, LLM-Review +1, Verified +1, 0 unresolved comments, MERGED status, and exact merged SHA reachable from final main.\n- [x] The epic log records both final inventories and all 6 story-log IDs. The epic completion comment cites the log, counts, SHA-256 values, and final main SHA.\n\n## Completion boundary\nClose only after all descendants close and the final inventory checks pass at the cited final main SHA.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Remediate bloated comments in related file groups"
       },
       "created_at": "2026-09-05T05:32:54Z",
@@ -59936,6 +59936,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-28T23:28:23Z"
     },
+    "9362-0cd6-73b5-4284": {
+      "created_at": "2026-10-24T09:36:54Z",
+      "jira_id": "4597065",
+      "jira_key": "REB-6741",
+      "state": "confirmed",
+      "updated_at": "2026-10-24T09:36:57Z"
+    },
     "9374-bffb-9483-42f7": {
       "created_at": "2026-08-15T15:05:51Z",
       "jira_key": "REB-1713",
@@ -74623,10 +74630,24 @@
     },
     "b594-de6d-3ebc-490f": {
       "baseline": {
-        "assignee": null,
-        "description": "## Observation\n`batch_dispatch.reroute_migrated_plans` (`src/rebar/reconciler/batch_dispatch.py:688-745` on origin/main dcb35ce77fe) selects a plan as migrated when every mutation's action is in `NON_CREATE_FAMILIES` and routes to the coordinator. It never checks direction. Its sibling `_ordered_create_plans` (`:395-406`) does check `direction == \"outbound\"`.\n\n`run_differs` plans every typed mutation, inbound and outbound (`run_differs.py:299-313`), and `apply_phase` passes those plans to `applier.apply`. So an inbound `update`, `conflict` or `repair_property` plan qualifies, and `run_migrated_reroute` dispatches it through `make_coordinator_dispatch` \u2192 `apply_handlers.dispatch_mutation`, the outbound handlers.\n\nReproduction: fake transport, real `applier.apply`, plans from `ticket_planner.plan_pass`. The probe is `inbound_probe/apply_e2e.py` in the `lane-ebf5` scratch directory.\n- With 1 inbound update for DIG-1 (payload `fields` plus 1 Jira comment) and 1 outbound update for DIG-2, the transport receives `update_issue('DIG-1')`, `add_comment('DIG-1', 'jira comment')` and `update_issue('DIG-2')`. The Jira-side change is written back to Jira, and the Jira comment is posted to Jira again.\n- With the inbound update alone, the transport receives no calls, because `_apply_batch` is not reached when there are no outbound dicts.\n- Same result at f5f666702b4. The selection filter has been unchanged since d49466b5e96 (2026-08-25, \"Wire live coordinator+fuse non-create reroute\").\n\nUnverified: a live pass. The fake transport accepts every call, so whether the real outbound comment path deduplicates against existing Jira comments has not been checked.\n\n## Hypotheses\n- (a) Live passes that contain both inbound updates and any outbound mutation echo the inbound field values and comments back to Jira, possibly creating duplicate Jira comments.\n- (b) A later guard in the real transport or the outbound comment handler suppresses the echo, so the defect is latent.\n\nThese remain unproven.\n\n## Approach\n1. Add a regression test that reproduces the probe: an inbound update plus an outbound update through `applier.apply` with plans from `plan_pass`. It asserts the transport receives no write for the inbound target.\n2. Restrict `reroute_migrated_plans` to plans whose mutations are all `outbound`, matching `_ordered_create_plans`. Inbound mutations keep dispatching through `_apply_typed`.\n3. Check the live bridge-run history and Jira for duplicate comments on issues that had inbound comment syncs since 2026-08-25. This tests hypothesis (a).\n\n## Acceptance Criteria\n- [ ] The regression test fails on dcb35ce77fe and passes with the fix.\n- [ ] `reroute_migrated_plans` selects only all-outbound plans; a unit test covers inbound update, conflict and repair_property plans.\n- [ ] [non-codebase] The live check result for hypothesis (a) is recorded on this ticket.\n  provenance: environment=production Jira; principal=bridge bot; privilege_posture=production-equivalent; instrument=live-call \u2014 issue keys and comment ids recorded on the ticket",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Observation\n`batch_dispatch.reroute_migrated_plans` (`src/rebar/reconciler/batch_dispatch.py:688-745` on origin/main dcb35ce77fe) selects a plan as migrated when every mutation's action is in `NON_CREATE_FAMILIES` and routes to the coordinator. It never checks direction. Its sibling `_ordered_create_plans` (`:395-406`) does check `direction == \"outbound\"`.\n\n`run_differs` plans every typed mutation, inbound and outbound (`run_differs.py:299-313`), and `apply_phase` passes those plans to `applier.apply`. So an inbound `update`, `conflict` or `repair_property` plan qualifies, and `run_migrated_reroute` dispatches it through `make_coordinator_dispatch` \u2192 `apply_handlers.dispatch_mutation`, the outbound handlers.\n\nReproduction: fake transport, real `applier.apply`, plans from `ticket_planner.plan_pass`. The probe is `inbound_probe/apply_e2e.py` in the `lane-ebf5` scratch directory.\n- With 1 inbound update for DIG-1 (payload `fields` plus 1 Jira comment) and 1 outbound update for DIG-2, the transport receives `update_issue('DIG-1')`, `add_comment('DIG-1', 'jira comment')` and `update_issue('DIG-2')`. The Jira-side change is written back to Jira, and the Jira comment is posted to Jira again.\n- With the inbound update alone, the transport receives no calls, because `_apply_batch` is not reached when there are no outbound dicts.\n- Same result at f5f666702b4. The selection filter has been unchanged since d49466b5e96 (2026-08-25, \"Wire live coordinator+fuse non-create reroute\").\n\nUnverified: a live pass. The fake transport accepts every call, so whether the real outbound comment path deduplicates against existing Jira comments has not been checked.\n\n## Reproduction (2026-10-24, current main)\nBuilt plans exactly as `run_differs` does (`plan_pass` over every typed mutation, inbound and outbound) and called `applier.apply` with a fake transport:\n- inbound update DIG-1 plus outbound update DIG-2: `update_issue` was called for DIG-1 as well as DIG-2.\n- inbound update carrying a Jira comment: `add_comment('DIG-1', ...)` posted that comment back to Jira.\nExisting applier tests never hit this because their `_plans` helper plans only the outbound mutations, which production does not.\n\n## Root cause\n`reroute_migrated_plans` (`src/rebar/reconciler/batch_dispatch.py`) selects plans by action family only. `apply()` applies inbound mutations locally through `_apply_typed` and sends only outbound dicts down the batch path, but the batch path also receives every ticket plan, and the coordinator dispatches each plan mutation through the outbound handlers. Its sibling `_ordered_create_plans` already requires `direction == \"outbound\"`. Plans group by target, so one plan can carry both directions.\n\n## Approach\nThis supersedes the earlier proposal to select only all-outbound plans: that would strand the outbound half of a mixed plan as an unrouted failure, so the outbound half is routed instead. In `reroute_migrated_plans`, route only each plan's outbound mutations: a plan with none is skipped, and a mixed plan is trimmed to its outbound half with `dataclasses.replace`. The coordinator reads only a plan's identity, mutations and dependencies, so the trim is safe. The existing rule that a plan mixing create and non-create stays unrouted is unchanged.\n\n## Scope\nIn scope: `src/rebar/reconciler/batch_dispatch.py` and a new test module under `tests/unit/reconciler/apply/`. Out of scope: `reroute_ordered_create_plans`, the planner's grouping, and the inbound applier.\n\n## Testing\n```\npytest tests/unit/reconciler/apply/test_applier_inbound_plans_not_sent_to_jira.py -q\npytest tests/unit/reconciler -m \"not integration and not external\" -n 4 -q\nmake verify\n```\nCases: inbound update beside an outbound update on another issue; inbound update with a Jira comment; a mixed-direction plan on one issue; an inbound-only batch. Failure case: the first two fail on main because the transport receives the inbound writes.\n\n## Acceptance Criteria\n- [ ] An inbound update plan never causes `update_issue` or `add_comment` on the transport (checked: new end-to-end tests, which fail on main).\n- [ ] A plan mixing directions on one issue sends only its outbound mutation (checked: new test).\n- [ ] The existing reconciler unit suite is unchanged apart from the 17 known pandoc failures on arm64 hosts (checked: pytest tests/unit/reconciler).\n- [ ] `make verify` is green on the Linux CI gate (`Verified +1` on the Gerrit change).\n\n## Follow-up\nWhether earlier bridge runs already wrote inbound changes back to Jira is a production check, tracked in its own ticket rather than held open here.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Coordinator reroute dispatches inbound update plans through the outbound handlers"
       },
       "created_at": "2026-10-22T20:38:27Z",
@@ -104330,9 +104351,17 @@
       "updated_at": "2026-09-05T09:44:16Z"
     },
     "ff27-ebf3-236d-437f": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nBug b594-de6d-3ebc-490f fixed reroute_migrated_plans so inbound update, conflict and repair_property plans are no longer dispatched through the outbound handlers. The selection filter was unchanged from 2026-08-25 (d49466b5e96), so bridge runs since then may have written Jira-side changes back to Jira or reposted Jira comments. No production run has been inspected.\n\n## Approach\nRead-only: sample bridge-run manifests and Jira issue histories since 2026-08-25 for an update_issue or add_comment on a key whose same-pass plan was inbound, and for comment duplicates. Record issue keys and comment ids on this ticket. Do not write to Jira.\n\n## Testing\nRead-only inspection of recorded manifests and Jira history; no code change.\n\n## Acceptance Criteria\n- [ ] A sample of bridge-run manifests since 2026-08-25 is checked for outbound writes against inbound plans (checked: result and the sampled run ids recorded in a ticket comment).\n- [ ] Any duplicated Jira comment or written-back field found is listed with issue key and comment id, or the sample is recorded as clean.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Check whether past bridge runs wrote inbound Jira changes back to Jira"
+      },
       "created_at": "2026-10-24T08:41:32Z",
       "jira_id": "4597064",
       "jira_key": "REB-6740",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-10-24T08:41:35Z"
     },
@@ -109388,7 +109417,8 @@
     "1792826184097996001": "__rebar_unknown_comment_id__",
     "1792826926442506001": "__rebar_unknown_comment_id__",
     "1792827044669298001": "__rebar_unknown_comment_id__",
-    "1792830939978582728": "__rebar_unknown_comment_id__"
+    "1792830939978582728": "__rebar_unknown_comment_id__",
+    "1792831721856640001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -114636,6 +114666,7 @@
     "REB-6739": "01b8-d3aa-2c48-4e5d",
     "REB-674": "4e6f-1a2d-482c-435e",
     "REB-6740": "ff27-ebf3-236d-437f",
+    "REB-6741": "9362-0cd6-73b5-4284",
     "REB-675": "7c58-d1b0-899f-4975",
     "REB-676": "a010-aec8-c088-4314",
     "REB-677": "ac1b-cef3-35c8-415f",
