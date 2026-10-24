@@ -8,8 +8,17 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
 from _git_upkeep import init_bare_remote
 from _subprocess_env import subprocess_env
+
+# Every shell launch below uses the literal /bin/sh, which Windows cannot resolve (WinError 2),
+# so the suite needs that exact capability. A PATH lookup would mislead: Git for Windows puts
+# `sh` on PATH while /bin/sh still does not exist.
+pytestmark = pytest.mark.skipif(
+    not os.access("/bin/sh", os.X_OK),
+    reason="needs an executable /bin/sh (POSIX shell); none on this host",
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _ENTRYPOINT = _ROOT / "infra" / "scripts" / "mcp-entrypoint.sh"
