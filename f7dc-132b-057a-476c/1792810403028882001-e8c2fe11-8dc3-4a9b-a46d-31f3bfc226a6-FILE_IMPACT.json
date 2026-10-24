@@ -1,0 +1,1 @@
+{"author":"Rebar Bot Nava","author_email":"joeoakhart+bot@navapbc.com","author_id":"594c-9dcf-5ad6-4e6d","data":{"file_impact":[{"path":"uv.lock","reason":"Raise locked versions of the advisory-flagged packages"}]},"env_id":"492a5c71-6cda-48a6-8134-02ff6a672739","event_type":"FILE_IMPACT","timestamp":1792810403028882001,"uuid":"e8c2fe11-8dc3-4a9b-a46d-31f3bfc226a6"}
