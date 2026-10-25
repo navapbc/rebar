@@ -1385,7 +1385,7 @@
    "readOnlyHint": true,
    "title": null
   },
-  "description": "Report plan-certificate currency using the exact claim-gate check.\n\n        This read uses no LLM or network. It returns ``{ok, verdict, reason,\n        verified_at_sha, signed_at}``; current is ``certified``, otherwise\n        ``stale-code``, ``stale-head``, ``stale-material``, ``stale-reopened``,\n        ``stale-pin-drift``, ``stale-pin-missing``, ``stale-store``, ``unsigned``,\n        ``wrong-kind``, ``not-closed``, ``malformed-pin``, ``malformed-phase``,\n        ``incompatible-phase``, ``unverifiable-material``, or ``error``. ``reason``\n        names the drift; the SHA and timestamp are null without a readable certificate.\n        ",
+  "description": "Report plan-certificate currency using the exact claim-gate check.\n\n        This read uses no LLM or network. It returns ``{ok, verdict, reason,\n        verified_at_sha, signed_at}``; current is ``certified``, otherwise\n        ``stale-code``, ``stale-head``, ``stale-material``, ``stale-reopened``,\n        ``stale-pin-drift``, ``stale-pin-missing``, ``stale-store``, ``unsigned``,\n        ``wrong-kind``, ``not-closed``, ``malformed-pin``, ``malformed-phase``,\n        ``incompatible-phase``, ``unverifiable-material``, ``error``, or a signature\n        failure (``mismatch``, ``invalid``, ``foreign_key``, ``unavailable``,\n        ``unknown_kind``, ``unknown_scheme``). ``reason`` names the drift; the SHA and\n        timestamp are null without a readable certificate.\n        ",
   "inputSchema": {
    "properties": {
     "ticket_id": {

@@ -87,10 +87,13 @@ def _required_environment(repo_root) -> str | None:
         return None
 
 
-def _pinned_environment_keys(principal: str, repo_root) -> list[str]:
+def _pinned_environment_keys(
+    principal: str, repo_root, *, unrevoked_only: bool = False
+) -> list[str]:
     """Public keys pinned for ``principal`` in ``.rebar/trusted_environments.yaml`` (the
     out-of-band, review-gated trust root the ``verify-opcert`` merge gate uses). Empty when the
-    environment is not pinned, or the config is absent/malformed."""
+    environment is not pinned, or the config is absent/malformed. ``unrevoked_only`` drops
+    entries carrying a ``revoked_at_log_position``."""
     try:
         from rebar.attest import trusted_env
 
@@ -100,7 +103,10 @@ def _pinned_environment_keys(principal: str, repo_root) -> list[str]:
     return [
         rec["public_key"]
         for rec in keyring
-        if isinstance(rec, dict) and isinstance(rec.get("public_key"), str) and rec["public_key"]
+        if isinstance(rec, dict)
+        and isinstance(rec.get("public_key"), str)
+        and rec["public_key"]
+        and not (unrevoked_only and rec.get("revoked_at_log_position"))
     ]
 
 
@@ -114,11 +120,14 @@ def _opcert_trust_root(
     """
     from rebar._opcert_signing import _opcert_own_public_keys
 
-    if principal == own_principal:
+    is_own = principal == own_principal
+    if is_own:
         own_pubs = _opcert_own_public_keys(tracker)
         if own_pubs:
             return own_pubs, "own_key"
-    pinned = _pinned_environment_keys(principal, repo_root)
+    # A revoked pinned key is never trusted for the own principal. The foreign-principal path
+    # keeps trusting every pinned key; that is a separate defect (bug 0ed1-128f-b9a5-4c39).
+    pinned = _pinned_environment_keys(principal, repo_root, unrevoked_only=is_own)
     if pinned:
         return pinned, "pinned_environment"
     if required_env is not None:
@@ -128,6 +137,26 @@ def _opcert_trust_root(
     sigs = list(envelope.signatures)
     embedded = sshsig.embedded_public_key(sigs[0].sig) if sigs else None
     return ([embedded], "envelope_key") if embedded else ([], None)
+
+
+def _rotated_own_key_verdict(envelope, principal: str, repo_root):
+    """Retry an own-principal ``mismatch`` under the pinned, unrevoked keys of that principal.
+
+    After the own key rotates, certificates signed under the previous key still carry the same
+    principal. Trust is "pinned and not revoked", with no era check: this function has no
+    tickets-log position for the certificate, so a key pinned after the certificate was signed
+    is not rejected here. Returns the verified verdict, or None when no pinned key verifies it.
+    """
+    from rebar.attest import authorship, registry
+    from rebar.attest.opcert import OPCERT_KIND
+
+    pinned = _pinned_environment_keys(principal, repo_root, unrevoked_only=True)
+    if not pinned:
+        return None
+    retry = registry.verify(
+        OPCERT_KIND, envelope, authorship.allowed_signers_from_keys(pinned, principal)
+    )
+    return retry if retry.verified else None
 
 
 def verify_opcert_record(
@@ -236,6 +265,10 @@ def verify_opcert_record(
 
     trust_root = authorship.allowed_signers_from_keys(keys, principal)
     verdict = registry.verify(OPCERT_KIND, envelope, trust_root)
+    if not verdict.verified and verdict.verdict == "mismatch" and trust_basis == "own_key":
+        rotated = _rotated_own_key_verdict(envelope, principal, repo_root)
+        if rotated is not None:
+            verdict, base = rotated, {**base, "trust_basis": "pinned_environment"}
     if not verdict.verified:
         return {
             **base,

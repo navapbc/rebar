@@ -35,8 +35,10 @@ def _register_gate_status_reads(mcp, ann) -> None:
         ``stale-code``, ``stale-head``, ``stale-material``, ``stale-reopened``,
         ``stale-pin-drift``, ``stale-pin-missing``, ``stale-store``, ``unsigned``,
         ``wrong-kind``, ``not-closed``, ``malformed-pin``, ``malformed-phase``,
-        ``incompatible-phase``, ``unverifiable-material``, or ``error``. ``reason``
-        names the drift; the SHA and timestamp are null without a readable certificate.
+        ``incompatible-phase``, ``unverifiable-material``, ``error``, or a signature
+        failure (``mismatch``, ``invalid``, ``foreign_key``, ``unavailable``,
+        ``unknown_kind``, ``unknown_scheme``). ``reason`` names the drift; the SHA and
+        timestamp are null without a readable certificate.
         """
         import rebar.llm
 
