@@ -499,6 +499,9 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
   equivalent `POST /a/changes/<n>/revisions/<full-sha>/submit`), not change-scoped
   `/submit`: the SHA is the patch set whose live votes you inspected, and Gerrit
   returns 409 instead of submitting if another session uploaded a newer revision.
+  Submit needs a credential from a `Contributors` member ([CONTRIBUTING.md](CONTRIBUTING.md)
+  §2e); the script uses whatever `git credential fill` returns for the Gerrit host, so it pins
+  no identity itself.
   Do not re-push a green change unnecessarily: a new patch set marks prior
   `LLM-Review` and `Verified` votes Outdated, resets the live gates, and
   re-queues the change, so it is destructive rather than neutral. `main` is

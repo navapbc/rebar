@@ -302,8 +302,10 @@ when it can and otherwise **rebases your change onto the current `main` tip and 
 server-side, atomically, under its own lock** — so you do **not** pre-rebase for the ordinary
 (non-conflicting) case. Gerrit then merges and **replicates the new `main` to GitHub** (that
 replication is the only way GitHub `main` advances). The two votes still gate (§2c); with them
-green and the change mergeable, Submit lands it. There is no landing bot, queue, or hand-off
-label — you run Submit yourself.
+green and the change mergeable, Submit lands it. There is no queue or hand-off label: a
+`Contributors` member runs Submit (see the box below). On the shared agent setup that is the
+landing bot `RebarBotNava`, which holds Submit and neither gate label; `LLM-Review` comes from
+the review bot and `Verified` from the CI bot.
 
 > **A textual conflict is the only time you rebase by hand.** Under Rebase-If-Necessary, Gerrit
 > does the rebase for you at submit time — the old requirement that your change sit directly on

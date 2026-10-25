@@ -302,7 +302,8 @@ idempotent, same script):
   Contributor/admin can **Submit** — even with both gate votes at MAX. This closes the gap
   where `submit` was inherited from All-Projects (and thus available to any Registered
   User). Membership = Administrators (subgroup) + the accounts in `CONTRIBUTOR_MEMBERS`
-  (space-separated usernames; **default `RebarBotNava`**, the landing bot); the script
+  (space-separated usernames; **default `RebarBotNava`**, the landing bot: it can Submit and
+  holds neither gate label, which `Service Users` — the review bot and the CI bot — cast); the script
   **creates** the group (owned by Administrators) if absent and converges membership on
   every run (additive — offboarding is a manual `gerrit set-members Contributors
   --remove <user>`). This is the documented Gerrit Contributor/Developer split (the Go
