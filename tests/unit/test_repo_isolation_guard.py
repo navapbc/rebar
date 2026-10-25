@@ -78,6 +78,52 @@ def _blocking_git(
     return state, env
 
 
+def _stall_once_git(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
+    """Create a ``git`` shim that stalls ONE ``rev-parse HEAD`` and logs every probe.
+
+    The stall is armed by a marker file: the first probe to claim it (an atomic
+    ``os.unlink``) stalls, every other probe runs normally. Each probe appends ``stall``
+    or ``ok`` to a log, written before any stall so a killed probe is still recorded.
+    Unlike counting invocations, this does not depend on how many healthy probes ran or how
+    long they took, which varies with host load. Returns ``(log, marker, env)``.
+    """
+    real_git = shutil.which("git")
+    assert real_git is not None
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    marker = tmp_path / "stall.marker"
+    log = tmp_path / "probes.log"
+    shim = bin_dir / "git"
+    shim.write_text(
+        f"#!{sys.executable}\n"
+        "import os\n"
+        "import sys\n"
+        "import time\n"
+        "args = sys.argv[1:]\n"
+        "if args[-2:] == ['rev-parse', 'HEAD']:\n"
+        "    stalled = False\n"
+        "    try:\n"
+        "        os.unlink(os.environ['REBAR_STALL_MARKER'])\n"
+        "        stalled = True\n"
+        "    except FileNotFoundError:\n"
+        "        pass\n"
+        "    with open(os.environ['REBAR_STALL_LOG'], 'a') as handle:\n"
+        "        handle.write('stall\\n' if stalled else 'ok\\n')\n"
+        "    if stalled:\n"
+        "        os.close(1)\n"
+        "        os.close(2)\n"
+        "        time.sleep(60)\n"
+        f"os.execv({real_git!r}, [{real_git!r}, *args])\n"
+    )
+    shim.chmod(0o755)
+    env = subprocess_env()
+    env["PATH"] = os.pathsep.join((str(bin_dir), env["PATH"]))
+    env["PYTHONPATH"] = os.pathsep.join((str(_TESTS_DIR), env.get("PYTHONPATH", "")))
+    env["REBAR_STALL_MARKER"] = str(marker)
+    env["REBAR_STALL_LOG"] = str(log)
+    return log, marker, env
+
+
 def _run_real_guard_with_blocking_git(
     tmp_path: Path, operation: str
 ) -> subprocess.CompletedProcess:
@@ -160,29 +206,37 @@ def test_a_transient_probe_stall_is_re_sampled_rather_than_reported(tmp_path, mo
 
     Fixture setup can approach the per-attempt bound under xdist. The paired
     persistent-stall test still requires retry exhaustion to fail explicitly.
+
+    The contract is asserted directly: exactly one probe stalled, a healthy probe followed it,
+    and HEAD was not reported changed. The total number of git invocations is deliberately NOT
+    asserted: a healthy probe that exceeds the per-attempt bound under host load is retried too,
+    which shifts that count without changing the contract.
     """
     repo = tmp_path / "repo"
     _init_repo(repo)
-    state, env = _blocking_git(tmp_path, "head", persistent=False)
+    log, marker, env = _stall_once_git(tmp_path)
 
     with monkeypatch.context() as patch:
         for key in (
             "PATH",
             "PYTHONPATH",
-            "REBAR_BLOCK_GIT_OPERATION",
-            "REBAR_BLOCK_GIT_STATE",
+            "REBAR_STALL_MARKER",
+            "REBAR_STALL_LOG",
         ):
             patch.setenv(key, env[key])
-        patch.setattr(_isolation, "GIT_PROBE_TIMEOUT_SECONDS", 0.5)
+        # Headroom for a healthy resample under load; the one stalled probe costs this once.
+        patch.setattr(_isolation, "GIT_PROBE_TIMEOUT_SECONDS", 2.0)
         before = _isolation.head(repo)
         assert before, "the first sample must succeed"
-        after = _isolation.head(repo)  # the shim stalls this one sample
+        marker.write_text("")  # arm: the next probe stalls
+        after = _isolation.head(repo)
 
-    assert after == before, "a transient stall must not be reported as a changed HEAD"
-    assert int(state.read_text()) == 3, (
-        "the stalled sample must be re-sampled, not reported; git was invoked "
-        f"{state.read_text()} times"
+    probes = log.read_text().split()
+    assert probes.count("stall") == 1, f"exactly one probe must stall: {probes}"
+    assert "ok" in probes[probes.index("stall") + 1 :], (
+        f"the stalled sample must be re-sampled by a healthy probe: {probes}"
     )
+    assert after == before, "a transient stall must not be reported as a changed HEAD"
 
 
 def test_git_probe_timeout_ignores_a_test_monkeypatch_of_time_sleep(tmp_path, monkeypatch):
