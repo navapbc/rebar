@@ -130,7 +130,8 @@ scenario_3() {
 
 # ===========================================================================
 # Scenario 4 — Vote-carry on re-merge: land an unrelated change on main mid-flight,
-# then re-merge (MERGE_FIRST_PARENT_UPDATE): LLM-Review CARRIES, Verified RE-RUNS.
+# then re-merge (MERGE_FIRST_PARENT_UPDATE): LLM-Review CARRIES (asserted); Verified is expected
+# to re-run, but the vote read right after the push is only RECORDED, not asserted (bug 3781).
 # Changing the feature tip instead = REWORK (both wiped). (Precedent: S3 AC4.)
 # ===========================================================================
 scenario_4() {
@@ -174,7 +175,7 @@ Change-Id: ${cid}"
 	_evi 4 "after_remerge LLM=${llm_after} VER=${ver_after} expect=LLM_carried_VER_rerun"
 	[ "$kind" = "MERGE_FIRST_PARENT_UPDATE" ] || { log "s4: kind=${kind} (expected MERGE_FIRST_PARENT_UPDATE)"; return 1; }
 	[ "$llm_after" = "$LLM_REVIEW_MAX" ] || { log "s4: LLM-Review did not carry (got ${llm_after})"; return 1; }
-	pass "s4: re-merge kind=${kind}; LLM-Review carried (${llm_after}); Verified re-runs (${ver_after})"
+	pass "s4: re-merge kind=${kind}; LLM-Review carried (${llm_after}); Verified observed as ${ver_after} right after the push (a rerun is recorded, not asserted)"
 	return 0
 }
 
