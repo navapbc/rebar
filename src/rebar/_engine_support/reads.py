@@ -191,12 +191,14 @@ def _sync_disabled(root: str | None = None) -> bool:
         return False
 
 
-def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
+def ensure_fresh(tracker: str, *, no_sync: bool = False, force: bool = False) -> None:
     """Best-effort, at-most-once-per-minute fetch and in-process reconvergence.
 
     All read surfaces share the marker throttle and ``rebar._store.sync``
     implementation. Every failure is swallowed so remote freshness never breaks
-    a read.
+    a read. ``force`` skips only the throttle's age check, for gate material reads
+    that must not pin a description another clone has already superseded; the
+    opt-outs, the marker write and the best-effort contract are unchanged.
     """
     if _LOCAL_READ_CONTEXT.get() or no_sync:
         return
@@ -234,7 +236,7 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
                 marker_age = now - int(fh.read().strip() or 0)
         except (OSError, ValueError):
             marker_age = 9999
-        if marker_age < 60:
+        if marker_age < 60 and not force:
             return
         # Write the marker before reconverging so only the first read in a burst
         # waits on the lock. Later reads immediately use consistent snapshots.

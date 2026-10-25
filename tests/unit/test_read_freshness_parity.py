@@ -25,6 +25,7 @@ from rebar import config as cfg
 from rebar._engine_support import reads as ticket_reads
 from rebar._engine_support import reads_cli
 from rebar._store import sync as _store_sync
+from rebar.llm.plan_review import generation, relation_snapshot
 
 pytestmark = pytest.mark.unit
 
@@ -256,3 +257,171 @@ def test_fetch_failure_returns_consistent_local_state(
     assert failing.fetches >= 1, "fetch was not even attempted"
     assert NEW_ID not in ids, "adopted a remote update the fetch never delivered"
     assert BASE_ID in ids, "local replay broken on fetch failure"
+
+
+# ── 5. gate-material reads force one fetch past the throttle (36d1) ──────────
+EDITED_DESCRIPTION = "Description edited on origin after the review began"
+
+
+def _commit_edit(repo: Path, tid: str, description: str) -> None:
+    """Commit an EDIT event that sets ``tid``'s description."""
+    ts = time.time_ns()
+    ev_uuid = str(uuid.uuid4())
+    body = {
+        "author": "t",
+        "data": {"fields": {"description": description}},
+        "env_id": str(uuid.uuid4()),
+        "event_type": "EDIT",
+        "timestamp": ts,
+        "uuid": ev_uuid,
+    }
+    (repo / tid / f"{ts}-{ev_uuid}-EDIT.json").write_text(json.dumps(body), encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "--no-verify", "-m", f"EDIT {tid}")
+
+
+def _stamp_fresh_marker(tracker: Path) -> None:
+    """Make the shared throttle think a fetch happened just now."""
+    with open(_marker_path(tracker), "w") as fh:
+        fh.write(str(int(time.time())))
+
+
+def _origin_head(store: types.SimpleNamespace) -> str:
+    return _git(store.origin, "rev-parse", "HEAD").stdout.strip()
+
+
+def test_forced_head_read_fetches_inside_the_throttle_window(store, spy) -> None:
+    """Inside the 60 s window the default read keeps the stale head and does not fetch;
+    the forced read fetches once and returns origin's head."""
+    _stamp_fresh_marker(store.tracker)
+
+    # ignore_untracked, as both gate callers pass: reconverge leaves an untracked lock file
+    # in this fixture tracker, which the strict status read would otherwise report as dirt.
+    stale = relation_snapshot.tracker_head_sha(store.tracker, ignore_untracked=True)
+    assert spy.fetches == 0
+    assert stale != _origin_head(store), "the default read must stay throttled"
+
+    forced = relation_snapshot.tracker_head_sha(
+        store.tracker, ignore_untracked=True, force_fresh=True
+    )
+    assert spy.fetches == 1
+    assert forced == _origin_head(store)
+
+
+def test_forced_head_read_still_honors_the_pull_optout(
+    store, spy, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REBAR_SYNC_PULL", "off")
+    cfg.reset_config_cache()
+    _stamp_fresh_marker(store.tracker)
+
+    head = relation_snapshot.tracker_head_sha(store.tracker, force_fresh=True)
+
+    assert spy.fetches == 0
+    assert head != _origin_head(store)
+
+
+def test_forced_head_read_swallows_a_failing_fetch(store, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Origin unreachable: the forced read still returns the local head (fail-open)."""
+    failing = _FetchSpy(_store_sync.run_git, fail=True)
+    monkeypatch.setattr(_store_sync, "run_git", failing)
+    _stamp_fresh_marker(store.tracker)
+
+    head = relation_snapshot.tracker_head_sha(store.tracker, force_fresh=True)
+
+    assert failing.fetches == 1, "the forced read did not even try to fetch"
+    assert head == _git(store.tracker, "rev-parse", "HEAD").stdout.strip()
+
+
+def test_forced_snapshot_pins_the_description_edited_on_origin(store, spy) -> None:
+    _commit_edit(store.origin, BASE_ID, EDITED_DESCRIPTION)
+    _stamp_fresh_marker(store.tracker)
+
+    default = relation_snapshot.collect_plan_relation_snapshot(
+        BASE_ID, repo_root=store.repo_root, ignore_untracked=True
+    )
+    forced = relation_snapshot.collect_plan_relation_snapshot(
+        BASE_ID, repo_root=store.repo_root, ignore_untracked=True, force_fresh=True
+    )
+
+    assert default.subject_state["description"] == ""
+    assert forced.subject_state["description"] == EDITED_DESCRIPTION
+    assert forced.ticket_store_revision == _origin_head(store)
+
+
+def test_sign_manifest_refuses_a_description_changed_inside_the_window(
+    store, spy, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The review began on the lagging clone; origin has since changed the description.
+    With a fresh marker the signing path must still see it and refuse."""
+    from rebar import signing
+
+    def never_signs(*_a, **_k):
+        raise AssertionError("signing must not be reached for a superseded plan")
+
+    monkeypatch.setattr(signing, "_sign_manifest_under_lock", never_signs)
+    _stamp_fresh_marker(store.tracker)
+    initial = generation.collect(BASE_ID, repo_root=store.repo_root, ignore_untracked=True)
+    _commit_edit(store.origin, BASE_ID, EDITED_DESCRIPTION)
+
+    with pytest.raises(generation.PlanReviewGenerationChanged):
+        generation.sign_manifest(BASE_ID, ["m"], initial, repo_root=store.repo_root)
+
+    assert spy.fetches == 1
+
+
+def test_sign_manifest_fetches_once_per_attempt_and_never_under_the_lock(
+    store, spy, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Worked example: the first attempt hits a lock-time mismatch and retries, so the call
+    fetches twice (once per attempt, before the lock) and never while the lock is held."""
+    from rebar import signing
+
+    initial = generation.collect(
+        BASE_ID, repo_root=store.repo_root, ignore_untracked=True, force_fresh=True
+    )
+    spy.fetches = 0
+    fetched_under_lock: list[int] = []
+    attempts: list[int] = []
+
+    def locked_signer(_tid, _manifest, *, under_lock_check, **_kw):
+        before = spy.fetches
+        under_lock_check()
+        fetched_under_lock.append(spy.fetches - before)
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise generation._UnderLockMismatch
+        return {"signed": True}
+
+    monkeypatch.setattr(signing, "_sign_manifest_under_lock", locked_signer)
+
+    result = generation.sign_manifest(BASE_ID, ["m"], initial, repo_root=store.repo_root)
+
+    assert result == {"signed": True}
+    assert spy.fetches == 2, "one forced fetch per attempt"
+    assert fetched_under_lock == [0, 0], "a fetch ran while the lock was held"
+
+
+def test_review_start_forces_a_fresh_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.plan_review import _run_plan_review
+
+    seen: dict = {}
+
+    def record_and_stop(*_a, **kwargs):
+        seen.update(kwargs)
+        raise relation_snapshot.PlanRelationSnapshotError("missing-target")
+
+    monkeypatch.setattr(relation_snapshot, "collect_plan_relation_snapshot", record_and_stop)
+
+    _run_plan_review(
+        "1111-2222-3333-4444",
+        cfg=LLMConfig(),
+        runner=None,
+        sign=True,
+        emit_sidecar=False,
+        advisory_cap=None,
+        repo_root=None,
+    )
+
+    assert seen.get("force_fresh") is True

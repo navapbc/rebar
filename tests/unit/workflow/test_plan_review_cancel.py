@@ -365,7 +365,7 @@ def test_run_plan_review_returns_cancelled_verdict_verbatim(monkeypatch):
     )
     monkeypatch.setattr(
         "rebar.llm.plan_review.relation_snapshot.collect_plan_relation_snapshot",
-        lambda tid, repo_root=None, ignore_untracked=False: snapshot,
+        lambda tid, repo_root=None, ignore_untracked=False, force_fresh=False: snapshot,
     )
     monkeypatch.setattr(
         generation,

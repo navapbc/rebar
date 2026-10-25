@@ -367,8 +367,10 @@ def _run_plan_review(
         # the committed HEAD, which untracked files cannot change; treating stray artifacts as
         # fatal would collapse review-plan (and claim) machine-wide. The under-lock signing
         # re-check also ignores them; tracked dirty state (modified/staged/unmerged) still fails.
+        # force_fresh: the review must not start from a description another clone has already
+        # superseded on origin (36d1); every other read keeps the 60 s fetch throttle.
         review_snapshot = relation_snapshot.collect_plan_relation_snapshot(
-            ticket_id, repo_root=repo_root, ignore_untracked=True
+            ticket_id, repo_root=repo_root, ignore_untracked=True, force_fresh=True
         )
     except relation_snapshot.PlanRelationSnapshotError as exc:
         record = {

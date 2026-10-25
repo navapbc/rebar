@@ -247,11 +247,18 @@ def from_snapshot(snapshot: PlanRelationSnapshot) -> PlanReviewGeneration:
 
 
 def collect(
-    ticket_id: str, *, repo_root=None, ignore_untracked: bool = False
+    ticket_id: str,
+    *,
+    repo_root=None,
+    ignore_untracked: bool = False,
+    force_fresh: bool = False,
 ) -> PlanReviewGeneration:
     return from_snapshot(
         collect_plan_relation_snapshot(
-            ticket_id, repo_root=repo_root, ignore_untracked=ignore_untracked
+            ticket_id,
+            repo_root=repo_root,
+            ignore_untracked=ignore_untracked,
+            force_fresh=force_fresh,
         )
     )
 
@@ -321,7 +328,10 @@ def sign_manifest(
             # process's stray artifact in the SHARED tracker must not abort signing
             # (no durable attestation → the claim gate cannot pass) for a clean plan
             # (bug d7cb-22ae).
-            fresh = collect(ticket_id, repo_root=repo_root, ignore_untracked=True)
+            # ``force_fresh`` fetches HERE, before the lock: a superseded description on
+            # origin then shows up in the comparison below. The under-lock re-collect keeps
+            # the throttle (this fetch just stamped it), so nothing fetches under the lock.
+            fresh = collect(ticket_id, repo_root=repo_root, ignore_untracked=True, force_fresh=True)
         except PlanRelationSnapshotError as exc:
             _retry_or_abort_snapshot_error(exc, attempt)
             continue

@@ -126,14 +126,18 @@ def _status_line_is_dirt(line: str) -> bool:
     return xy[1] != " "
 
 
-def tracker_head_sha(tracker: str | os.PathLike[str], *, ignore_untracked: bool = False) -> str:
+def tracker_head_sha(
+    tracker: str | os.PathLike[str], *, ignore_untracked: bool = False, force_fresh: bool = False
+) -> str:
     """Return a clean tickets-tracker HEAD, or fail with one stable reason.
 
     Freshness is established before all three strict git reads.  Dirty worktree,
     index-conflict, process, path, IO, and malformed-output failures intentionally
     collapse to ``store-read-failure``; callers must never interpret a best-effort
     or ``unknown`` revision as a safe signing token.  Another writer's index-only
-    staged entries are tolerated (see :func:`_status_line_is_dirt`).
+    staged entries are tolerated (see :func:`_status_line_is_dirt`).  ``force_fresh``
+    bypasses the 60 s fetch throttle for a gate's own material read; a failed fetch
+    still leaves the local head in place.
     """
 
     tracker_text = str(tracker)
@@ -149,7 +153,7 @@ def tracker_head_sha(tracker: str | os.PathLike[str], *, ignore_untracked: bool 
         if not tracker_path.is_dir() or not (tracker_path / ".git").exists():
             raise _store_error(tracker_text)
 
-        ticket_reads.ensure_fresh(tracker_text)
+        ticket_reads.ensure_fresh(tracker_text, force=force_fresh)
 
         # raw-git-ok: generic command runner, argv supplied by caller
         def run(*args: str) -> str:
@@ -546,17 +550,29 @@ def _retained_snapshot_states(
     return {ticket_id: states[ticket_id] for ticket_id in sorted(retained_ids)}
 
 
+def _head_read_options(ignore_untracked: bool, force_fresh: bool) -> dict[str, bool]:
+    """Only the options that are on, keeping the default call ``tracker_head_sha(tracker)``."""
+    return {
+        name: True
+        for name, on in (("ignore_untracked", ignore_untracked), ("force_fresh", force_fresh))
+        if on
+    }
+
+
 def collect_plan_relation_snapshot(
-    ticket_id: str, *, repo_root=None, ignore_untracked: bool = False
+    ticket_id: str,
+    *,
+    repo_root=None,
+    ignore_untracked: bool = False,
+    force_fresh: bool = False,
 ) -> PlanRelationSnapshot:
-    """Collect canonical direct-child/prerequisite material in one store reduction."""
+    """Collect canonical direct-child/prerequisite material in one store reduction.
+
+    ``force_fresh`` makes the head read fetch past the 60 s throttle; gate callers set it
+    where a superseded description must not be pinned."""
 
     tracker = Path(config.tracker_dir(repo_root))
-    revision = (
-        tracker_head_sha(tracker, ignore_untracked=True)
-        if ignore_untracked
-        else tracker_head_sha(tracker)
-    )
+    revision = tracker_head_sha(tracker, **_head_read_options(ignore_untracked, force_fresh))
     states, aliases = _load_states(tracker)
     subject_id = _resolve_reference(ticket_id, states, aliases)
     subject = states[subject_id]
