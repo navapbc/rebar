@@ -3585,10 +3585,24 @@
     },
     "0812-5f3f-3121-4d05": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\nBug 714b-0b2c-a8f9-468e corrects the alarm_description text in infra/terraform/monitoring_s4b.tf from 3 of 5 to 3 of 6 periods. CloudWatch keeps the old text until Terraform is applied; applying is an operator step.\n\n## Approach\nAfter the change is on main, an operator runs the normal Terraform plan and apply for the monitoring stack and confirms the plan changes only this alarm's description.\n\n## Testing\nRead-only check after apply: aws cloudwatch describe-alarms --alarm-names rebar-gerrit-voter-errors, reading AlarmDescription.\n\n## Acceptance Criteria\n- [x] The live AlarmDescription says 3 of 6 five-minute periods (checked: describe-alarms output recorded in a ticket comment).",
         "priority": "Lowest",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Apply the corrected rebar-gerrit-voter-errors alarm description"
       },
       "created_at": "2026-10-24T10:36:47Z",
@@ -3850,6 +3864,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-19T20:44:32Z"
+    },
+    "08c8-6262-3f5a-4110": {
+      "created_at": "2026-10-25T06:51:33Z",
+      "jira_id": "4597076",
+      "jira_key": "REB-6745",
+      "state": "confirmed",
+      "updated_at": "2026-10-25T06:51:36Z"
     },
     "08c8-b6b2-4da6-4373": {
       "baseline": {
@@ -109565,7 +109586,10 @@
     "1792892257805711001": "__rebar_unknown_comment_id__",
     "1792902015495002001": "__rebar_unknown_comment_id__",
     "1792902424159241001": "__rebar_unknown_comment_id__",
-    "1792902435609098001": "__rebar_unknown_comment_id__"
+    "1792902435609098001": "__rebar_unknown_comment_id__",
+    "1792906805852649001": "__rebar_unknown_comment_id__",
+    "1792907429133804001": "__rebar_unknown_comment_id__",
+    "1792907439086828001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -114817,6 +114841,7 @@
     "REB-6742": "0812-5f3f-3121-4d05",
     "REB-6743": "0ed1-128f-b9a5-4c39",
     "REB-6744": "47d8-baf8-2348-45c9",
+    "REB-6745": "08c8-6262-3f5a-4110",
     "REB-675": "7c58-d1b0-899f-4975",
     "REB-676": "a010-aec8-c088-4314",
     "REB-677": "ac1b-cef3-35c8-415f",
