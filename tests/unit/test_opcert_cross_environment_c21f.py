@@ -352,3 +352,63 @@ def test_enforcement_on_withholds_the_envelope_key_fallback(store: Path, tmp_pat
     assert out["verified"] is False
     assert out["verdict"] == "foreign_key", out["reason"]
     assert out["trust_basis"] is None
+
+
+# ── a REVOKED pinned key is never trusted as pinned, for a foreign principal either (0ed1) ──
+def _pin_revoked_environment(store: Path, env_id: str, key_path: Path) -> None:
+    """Pin ``env_id``'s key, marked revoked at a tickets-log position."""
+    pub = Path(str(key_path) + ".pub").read_text(encoding="utf-8").strip()
+    d = store / ".rebar"
+    d.mkdir(exist_ok=True)
+    (d / "trusted_environments.yaml").write_text(
+        "environments:\n"
+        f"  - env_id: {env_id!r}\n"
+        "    keys:\n"
+        f"      - public_key: {pub!r}\n"
+        "        added_at_log_position: '0-00000000-0000-4000-8000-000000000000'\n"
+        "        revoked_at_log_position: '9-00000000-0000-4000-8000-000000000000'\n",
+        encoding="utf-8",
+    )
+
+
+def test_revoked_pinned_key_is_not_pinned_trust_in_advisory_mode(
+    store: Path, tmp_path: Path
+) -> None:
+    tid = rebar.create_ticket("task", "revoked-advisory", repo_root=str(store))
+    key_a = _sign_as_env_a(store, tmp_path, tid)
+    _pin_revoked_environment(store, ENV_A, key_a)
+    assert _own_principal(store) == ENV_B != ENV_A
+
+    out = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
+
+    # Advisory mode still verifies on the embedded key (the c21f design), but the revoked
+    # pin must not be reported as the trust root.
+    assert out["verdict"] == "certified", out["reason"]
+    assert out["trust_basis"] == "envelope_key", out
+    assert out["trust_basis"] != "pinned_environment"
+
+
+def test_revoked_pinned_key_is_refused_under_enforcement(store: Path, tmp_path: Path) -> None:
+    """The reported hole: revocation was ignored even when the gate restricts trust to pins."""
+    tid = rebar.create_ticket("task", "revoked-enforced", repo_root=str(store))
+    key_a = _sign_as_env_a(store, tmp_path, tid)
+    _pin_revoked_environment(store, ENV_A, key_a)
+    _enforce(store, ENV_A)
+    assert _own_principal(store) == ENV_B != ENV_A
+
+    out = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
+
+    assert out["verified"] is False, "a revoked key certified under verify.require_environment"
+    assert out["verdict"] == "foreign_key", out["reason"]
+
+
+def test_forged_payload_under_a_revoked_pinned_key_still_fails(store: Path, tmp_path: Path) -> None:
+    tid = rebar.create_ticket("task", "revoked-forged", repo_root=str(store))
+    key_a = _sign_as_env_a(store, tmp_path, tid)
+    _pin_revoked_environment(store, ENV_A, key_a)
+    _forge_payload(store, tid)
+
+    out = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
+
+    assert out["verified"] is False
+    assert out["verdict"] == "mismatch", out["reason"]

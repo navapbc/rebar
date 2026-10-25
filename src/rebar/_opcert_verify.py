@@ -125,9 +125,10 @@ def _opcert_trust_root(
         own_pubs = _opcert_own_public_keys(tracker)
         if own_pubs:
             return own_pubs, "own_key"
-    # A revoked pinned key is never trusted for the own principal. The foreign-principal path
-    # keeps trusting every pinned key; that is a separate defect (bug 0ed1-128f-b9a5-4c39).
-    pinned = _pinned_environment_keys(principal, repo_root, unrevoked_only=is_own)
+    # A revoked pinned key is never trusted, for the own or a foreign principal (bugs d909,
+    # 0ed1). There is no era check: a certificate signed before the key's revocation is refused
+    # under verify.require_environment, and in advisory mode verifies on its embedded key.
+    pinned = _pinned_environment_keys(principal, repo_root, unrevoked_only=True)
     if pinned:
         return pinned, "pinned_environment"
     if required_env is not None:
