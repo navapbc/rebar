@@ -209,7 +209,33 @@ def test_opcert_signing_key_is_isolated_per_store(
     assert template_key.with_suffix(".pub").read_bytes() == template_public
     assert len({template_private, *(key.read_bytes() for key in copy_keys)}) == 3
     assert len({template_public, *(key.with_suffix(".pub").read_bytes() for key in copy_keys)}) == 3
-    assert all((key.stat().st_mode & 0o777) == 0o600 for key in copy_keys)
+
+
+def _honours_posix_modes(directory: Path) -> bool:
+    """Whether this platform keeps a chmod 0o600 as 0o600 (Windows reports 0o666 instead)."""
+    probe = directory / "mode-probe"
+    probe.write_text("x")
+    probe.chmod(0o600)
+    return (probe.stat().st_mode & 0o777) == 0o600
+
+
+def test_copied_opcert_signing_keys_are_owner_only(
+    _rebar_repo_template: Path, tmp_path: Path
+) -> None:
+    """A copied store's private key must stay mode 0o600 where the platform has POSIX bits."""
+    if not _honours_posix_modes(tmp_path):
+        pytest.skip(
+            "platform does not honour POSIX permission bits, so mode 0o600 cannot be asserted; "
+            "signing-key confidentiality there is tracked in 47d8-baf8-2348-45c9"
+        )
+    copies = [
+        _clone_template(_rebar_repo_template, tmp_path / name) for name in ("mode-a", "mode-b")
+    ]
+    for copy in copies:
+        key = Path(signing.ensure_opcert_key(copy / ".tickets-tracker"))
+        assert (key.stat().st_mode & 0o777) == 0o600, (
+            f"signing key mode is {oct(key.stat().st_mode & 0o777)}"
+        )
 
 
 def test_two_stores_are_mutually_independent(
