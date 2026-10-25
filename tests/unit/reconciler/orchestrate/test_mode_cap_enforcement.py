@@ -354,9 +354,13 @@ def test_phase_gate_still_blocks(tmp_path):
     assert callable(advisory.check_phase_gate)
 
 
-def test_spot_check_sampling_is_deterministic_across_runs(applier_mod, mutation_mod):
-    """Repeated render_throttle calls in one process select the same nonempty
-    spot-check keys.
+def test_spot_check_sampling_repeats_within_one_process(applier_mod, mutation_mod):
+    """Two render_throttle calls in ONE process, under one hash seed, select the same
+    nonempty spot-check keys.
+
+    This is only in-process repeatability: ``importlib.import_module`` returns the cached
+    module, so both renderers are the same object. Stability across processes with different
+    ``PYTHONHASHSEED`` values is covered by the cross-process tests below.
     """
     import importlib.util
 
@@ -373,13 +377,65 @@ def test_spot_check_sampling_is_deterministic_across_runs(applier_mod, mutation_
     keys1 = [s["key"] for s in sample1]
     keys2 = [s["key"] for s in sample2]
     assert keys1 == keys2, (
-        "spot_check sample selection must be deterministic across module "
-        "loads — built-in hash() is randomized per-process and must not "
-        f"be used. got1={keys1[:5]}... got2={keys2[:5]}..."
+        "spot_check sample selection must repeat within one process: "
+        f"got1={keys1[:5]}... got2={keys2[:5]}..."
     )
     # And the sample must be non-empty for a 200-mutation fixture (otherwise
     # the test could trivially pass with an unconditional empty list).
     assert len(keys1) > 0
+
+
+# A child interpreter renders the same 200-target fixture and prints the ordered spot-check
+# keys. ``builtin-hash`` swaps the SHA-256 bucket for the built-in ``hash()``: the defect the
+# renderer's contract rules out, injected inside the child because a monkeypatch in this
+# process cannot reach a separately spawned interpreter.
+_SPOT_CHECK_CHILD = """
+import json, sys
+from rebar.reconciler import manifest_renderer as r
+if sys.argv[1] == "builtin-hash":
+    r._stable_bucket = lambda target: hash(target) % 10
+muts = [
+    {"action": "update", "direction": "outbound", "key": f"ISSUE-{i:05d}", "fields": {"i": i}}
+    for i in range(200)
+]
+print(json.dumps([s["key"] for s in r.render_throttle(muts, [])["spot_check"]]))
+"""
+
+
+def _spot_check_keys(variant: str, hash_seed: int) -> list[str]:
+    import subprocess
+    import sys
+
+    from _subprocess_env import subprocess_env
+
+    done = subprocess.run(
+        [sys.executable, "-c", _SPOT_CHECK_CHILD, variant],
+        env=subprocess_env(PYTHONHASHSEED=str(hash_seed)),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=True,
+    )
+    return json.loads(done.stdout)
+
+
+def test_spot_check_sampling_is_stable_across_processes_and_hash_seeds():
+    """The same fixture, rendered by independent interpreters under two explicit
+    ``PYTHONHASHSEED`` values, selects the same nonempty ordered spot-check keys."""
+    keys_a = _spot_check_keys("real", 1)
+    keys_b = _spot_check_keys("real", 2)
+
+    assert keys_a, "an empty selection would make the comparison vacuous"
+    assert keys_a == keys_b, (
+        "spot_check selection changed with PYTHONHASHSEED; the sample must not depend on "
+        f"the built-in hash(). seed1={keys_a[:5]}... seed2={keys_b[:5]}..."
+    )
+
+
+def test_the_cross_process_harness_detects_a_builtin_hash_bucket():
+    """The harness must be able to fail: with the bucket built on ``hash()``, two seeds
+    select different keys. Without this, the test above could pass for any implementation."""
+    assert _spot_check_keys("builtin-hash", 1) != _spot_check_keys("builtin-hash", 2)
 
 
 def test_reconcile_once_legacy_caller_omits_mode_kwarg(
