@@ -64,6 +64,11 @@ variable "bedrock_cap_target_roles" {
     BedrockInvocationLoggingRole is deliberately ABSENT. It is the role Bedrock
     assumes to write invocation logs — it spends nothing, and denying it would
     blind the audit trail at exactly the moment it matters most.
+
+    OrganizationAccountAccessRole is PRESENT. It carries AdministratorAccess, so
+    it can invoke Bedrock, and left out it is the one principal the deny would
+    not cover while the cap is tripped. While tripped, the deny applies to it
+    for Bedrock invocation only; management and read calls stay allowed.
   EOT
   default = [
     "lmn-api",
@@ -77,6 +82,7 @@ variable "bedrock_cap_target_roles" {
     "lmn-staging-report-generator",
     "rebar-external-ci-bedrock",
     "rebar-gerrit-instance-role",
+    "OrganizationAccountAccessRole",
   ]
 }
 
