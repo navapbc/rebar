@@ -362,3 +362,262 @@ def test_a_failed_map_build_degrades_to_per_ticket_not_per_event(
         "a failed map build sent events down the PER-EVENT resolver — strictly worse than the "
         f"per-ticket walk it replaced: {walk_counts}"
     )
+
+
+# ── no history walk under the lock, even for an event the position map cannot see (4dd1) ─────
+# The sweep builds one ``--no-merges`` position map up front and folds tickets for minutes. An
+# event the map cannot attribute used to fall through to unbounded per-event ``git log`` walks
+# INSIDE the store write lock (140 s each on a 300k-commit clone, against a 30 s timeout).
+# Two real ways to miss the map: an event committed AFTER the map was built (the resolvers CAN
+# find it), and an event only a merge commit adds (no resolver can: ``--diff-filter=A`` computes
+# no diff for a merge, so that position is always unattributable and the walks only burn time).
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", _tracker(repo), *args], check=True, capture_output=True, text=True
+    ).stdout
+
+
+def _fabricated_signed_event(tdir: Path) -> tuple[str, str]:
+    """Write one signed COMMENT event file (not yet committed); return ``(position, name)``."""
+    import json
+    import uuid
+
+    template = sorted(tdir.glob("*-COMMENT.json"))[0]
+    event = json.loads(template.read_text())
+    event["uuid"] = str(uuid.uuid4())
+    event["timestamp"] = int(event["timestamp"]) + 7
+    event["author_sig"] = "synthetic-dsse-envelope"
+    name = f"{event['timestamp']}-{event['uuid']}-COMMENT.json"
+    (tdir / name).write_text(json.dumps(event))
+    return f"{event['timestamp']}-{event['uuid']}", name
+
+
+def _add_event_in_a_normal_commit(repo: Path, tid: str) -> tuple[str, str]:
+    """A signed event committed normally. Returns ``(position, adding_commit_sha)``."""
+    tdir = _tdir(repo, tid)
+    position, name = _fabricated_signed_event(tdir)
+    _git(repo, "add", str(tdir / name))
+    _git(repo, "commit", "-q", "--no-verify", "-m", "a late signed event")
+    return position, _git(repo, "rev-parse", "HEAD").strip()
+
+
+def _add_event_only_a_merge_adds(repo: Path, tid: str) -> str:
+    """A signed event no non-merge commit ever adds ("evil merge"); returns its position."""
+    import uuid
+
+    tdir = _tdir(repo, tid)
+    _git(repo, "checkout", "-q", "-b", f"side-{uuid.uuid4().hex[:6]}")
+    _git(repo, "commit", "-q", "--allow-empty", "--no-verify", "-m", "side commit")
+    _git(repo, "checkout", "-q", "-")
+    _git(repo, "merge", "-q", "--no-commit", "--no-ff", "-")
+    position, name = _fabricated_signed_event(tdir)
+    _git(repo, "add", str(tdir / name))
+    _git(repo, "commit", "-q", "--no-verify", "-m", "evil merge introduces an event")
+    assert name not in _git(
+        repo, "log", "--diff-filter=A", "--no-merges", "--name-only", "--format=", "--", "*.json"
+    ), "ANCHOR: the position map must not be able to see this event"
+    return position
+
+
+def _signed_ticket(repo: Path) -> str:
+    tid = _seed(repo, "late events", comments=3)
+    tdir = _tdir(repo, tid)
+    _age(tdir)
+    _sign_and_commit(repo, tdir)
+    return tid
+
+
+def _watch_walks_under_lock(monkeypatch: pytest.MonkeyPatch, repo: Path) -> list[str]:
+    from rebar.attest import authorship
+
+    lock_dir = Path(_tracker(repo)) / ".ticket-write.lock.d"
+    seen: list[str] = []
+    for name in (
+        "build_position_commit_map",
+        "build_ticket_position_commit_map",
+        "resolve_event_commit",
+        "resolve_position_commit",
+    ):
+        real = getattr(authorship, name)
+
+        def wrapper(*a, _real=real, _name=name, **k):
+            if lock_dir.exists():
+                seen.append(_name)
+            return _real(*a, **k)
+
+        monkeypatch.setattr(authorship, name, wrapper)
+    return seen
+
+
+def _ledger_entry(repo: Path, tid: str, position: str) -> dict:
+    import json
+
+    snapshots = sorted(_tdir(repo, tid).glob("*-SNAPSHOT.json"))
+    assert snapshots, "the sweep wrote no SNAPSHOT, so there is no ledger to inspect"
+    ledger = json.loads(snapshots[-1].read_text())["data"]["compiled_state"]["authorship_ledger"]
+    matches = [e for e in ledger if e["position"]["position"] == position]
+    assert len(matches) == 1, f"expected one ledger entry for {position}, got {len(matches)}"
+    return matches[0]
+
+
+def _stale_sweep_map(monkeypatch: pytest.MonkeyPatch, repo: Path) -> dict[str, str]:
+    """Freeze the sweep's map NOW, so events committed afterwards miss it, as in a long sweep."""
+    from rebar.attest import authorship
+
+    stale = authorship.build_position_commit_map(repo_root=str(repo))
+    monkeypatch.setattr(_compact, "_sweep_position_map", lambda _repo_root: stale)
+    return stale
+
+
+def test_an_event_committed_after_the_map_was_built_triggers_no_walk_under_the_lock(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = store
+    tid = _signed_ticket(repo)
+    stale = _stale_sweep_map(monkeypatch, repo)
+    position, adding_sha = _add_event_in_a_normal_commit(repo, tid)
+    assert position not in stale, "ANCHOR: the frozen map must miss the late event"
+    seen = _watch_walks_under_lock(monkeypatch, repo)
+
+    _compact.compact_all_cli([], repo_root=str(repo))
+
+    assert not seen, (
+        "a git-history walk ran while the store write lock was held, so every concurrent "
+        f"writer waits for it: {seen}"
+    )
+    assert _ledger_entry(repo, tid, position)["position"]["commit_sha"] == adding_sha, (
+        "moving the walk out of the lock must still attribute the event to the commit that added it"
+    )
+
+
+def test_a_merge_only_event_triggers_no_walk_under_the_lock_and_stays_null(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = store
+    tid = _signed_ticket(repo)
+    position = _add_event_only_a_merge_adds(repo, tid)
+    paths = sorted(str(p) for p in _tdir(repo, tid).glob("*.json") if not p.name.startswith("."))
+    today = {
+        e["position"]["position"]: e["position"]["commit_sha"]
+        for e in _compact_txn._build_authorship_ledger(paths, str(repo))
+    }
+    assert today[position] is None, "ANCHOR: no resolver can attribute a merge-only event"
+    seen = _watch_walks_under_lock(monkeypatch, repo)
+
+    _compact.compact_all_cli([], repo_root=str(repo))
+
+    assert not seen, f"a git-history walk ran while the store write lock was held: {seen}"
+    assert _ledger_entry(repo, tid, position)["position"]["commit_sha"] is None
+
+
+def test_an_unresolvable_position_persists_json_null_with_no_walk_under_the_lock(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rebar.attest import authorship
+
+    repo = store
+    tid = _signed_ticket(repo)
+    _stale_sweep_map(monkeypatch, repo)
+    position, _sha = _add_event_in_a_normal_commit(repo, tid)
+    monkeypatch.setattr(authorship, "resolve_event_commit", lambda *a, **k: None)
+    monkeypatch.setattr(authorship, "resolve_position_commit", lambda *a, **k: None)
+    seen = _watch_walks_under_lock(monkeypatch, repo)
+
+    _compact.compact_all_cli([], repo_root=str(repo))
+
+    assert not seen, f"an unresolvable position still walked history under the lock: {seen}"
+    entry = _ledger_entry(repo, tid, position)
+    assert entry["position"]["commit_sha"] is None, (
+        "an unresolvable position must persist JSON null, never an empty string: "
+        f"{entry['position']!r}"
+    )
+
+
+def test_a_resolver_timeout_persists_null_and_is_not_retried_under_the_lock(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Timeouts are the expected case on a large clone; they must cost the lock nothing."""
+    from rebar.attest import authorship
+
+    repo = store
+    tid = _signed_ticket(repo)
+    _stale_sweep_map(monkeypatch, repo)
+    position, _sha = _add_event_in_a_normal_commit(repo, tid)
+    lock_dir = Path(_tracker(repo)) / ".ticket-write.lock.d"
+    real_run = authorship.subprocess.run
+    resolver_runs_under_lock: list[int] = []
+
+    def slow_resolvers(cmd, *a, **k):
+        # The per-event resolvers are the git-log calls WITHOUT --no-merges.
+        if "--diff-filter=A" in cmd and "--no-merges" not in cmd:
+            if lock_dir.exists():
+                resolver_runs_under_lock.append(1)
+            raise subprocess.TimeoutExpired(cmd, 30)
+        return real_run(cmd, *a, **k)
+
+    monkeypatch.setattr(authorship.subprocess, "run", slow_resolvers)
+
+    _compact.compact_all_cli([], repo_root=str(repo))
+
+    assert not resolver_runs_under_lock, "a timed-out resolver was retried under the store lock"
+    assert _ledger_entry(repo, tid, position)["position"]["commit_sha"] is None
+
+
+def test_pre_resolving_outside_the_lock_leaves_the_ledger_unchanged(store: Path) -> None:
+    from rebar.attest import authorship
+
+    repo = store
+    tid = _signed_ticket(repo)
+    sweep_map = authorship.build_position_commit_map(repo_root=str(repo))
+    late_position, adding_sha = _add_event_in_a_normal_commit(repo, tid)
+    merge_position = _add_event_only_a_merge_adds(repo, tid)
+    tdir = _tdir(repo, tid)
+    paths = sorted(str(p) for p in tdir.glob("*.json") if not p.name.startswith("."))
+    assert late_position not in sweep_map and merge_position not in sweep_map
+
+    without = _compact_txn._build_authorship_ledger(paths, str(repo))
+    resolved = _compact_txn.preresolve_unmapped_positions(
+        str(tdir), _tracker(repo), str(repo), sweep_map
+    )
+    with_pre = _compact_txn._build_authorship_ledger(paths, str(repo), position_commits=resolved)
+
+    assert late_position not in sweep_map, "the sweep map must not be mutated"
+    assert resolved[late_position] == adding_sha
+    assert resolved[merge_position] == "", "an unattributable position carries the marker"
+    assert with_pre == without, "pre-resolution changed the authorship ledger"
+    assert all(
+        e["position"]["commit_sha"] is None or len(e["position"]["commit_sha"]) == 40
+        for e in with_pre
+    ), "the empty-string marker leaked into a persisted ledger entry"
+
+
+def test_an_event_absent_from_the_map_without_a_marker_still_uses_the_fallback(
+    store: Path, walk_counts: dict[str, int]
+) -> None:
+    """An event that arrives after pre-resolution keeps today's in-lock fallback."""
+    repo = store
+    tid = _signed_ticket(repo)
+    position, adding_sha = _add_event_in_a_normal_commit(repo, tid)
+    paths = sorted(str(p) for p in _tdir(repo, tid).glob("*.json") if not p.name.startswith("."))
+
+    ledger = _compact_txn._build_authorship_ledger(paths, str(repo), position_commits={"x": "y"})
+
+    entry = next(e for e in ledger if e["position"]["position"] == position)
+    assert entry["position"]["commit_sha"] == adding_sha
+    assert walk_counts["per_event"] + walk_counts["per_position"] >= 1, (
+        "an absent position must keep today's fallback walk"
+    )
+
+
+def test_a_map_free_ledger_never_carries_the_empty_string_marker(store: Path) -> None:
+    """The fsck rebuild path passes no map; its entries must be real SHAs or null."""
+    repo = store
+    tid = _signed_ticket(repo)
+    _add_event_only_a_merge_adds(repo, tid)
+    paths = sorted(str(p) for p in _tdir(repo, tid).glob("*.json") if not p.name.startswith("."))
+
+    for entry in _compact_txn._build_authorship_ledger(paths, str(repo)):
+        sha = entry["position"]["commit_sha"]
+        assert sha is None or len(sha) == 40, entry

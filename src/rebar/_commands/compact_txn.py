@@ -57,6 +57,70 @@ def _snapshot_strip_keys() -> set[str]:
     return {"updated_at", "signature"}
 
 
+def _introducing_commit(
+    position_str: str, ticket_dir: str, repo_root, position_commits: dict[str, str]
+) -> str | None:
+    """The commit that introduced one event, or ``None`` when none can be found.
+
+    A position PRESENT in ``position_commits`` is final: ``""`` is the marker
+    :func:`preresolve_unmapped_positions` leaves for a position it already tried (a miss, an
+    unattributable merge-only event, or a resolver that timed out), so it maps to ``None`` and
+    NO history walk runs here, which matters because this runs under the store write lock.
+    Only a position absent from the map falls back to per-event resolution.
+    """
+    from rebar.attest import authorship
+
+    if position_str in position_commits:
+        return position_commits[position_str] or None
+    # Map miss (an empty map from a git failure, or an event committed after the map was built):
+    # fall back to the per-event resolver, which is what this loop used to call unconditionally.
+    commit_sha = authorship.resolve_event_commit(position_str, ticket_dir, repo_root=repo_root)
+    if commit_sha is None:
+        # resolve_event_commit can return None at fold time (its ticket-scoped pathspec may miss
+        # the introducing commit). Fall back to the GLOBAL position resolver so we persist the
+        # REAL introducing commit rather than a null the merge-gate later fail-closes to
+        # ``key_not_valid_at_era`` (bug B). Only persist null if BOTH fail.
+        tracker = os.path.dirname(ticket_dir)
+        commit_sha = authorship.resolve_position_commit(position_str, tracker, repo_root=repo_root)
+    return commit_sha
+
+
+def preresolve_unmapped_positions(
+    ticket_dir: str, tracker: str, repo_root, position_commits: dict[str, str]
+) -> dict[str, str]:
+    """Return a COPY of ``position_commits`` holding an entry for every signed event of
+    ``ticket_dir`` that the map lacks, resolved by the same per-event resolvers as before.
+
+    Call this OUTSIDE the store write lock: those resolvers run unbounded ``git log`` walks (one
+    took 140 s against a 30 s timeout on a 300k-commit clone) and used to run inside the lock,
+    blocking every writer. A position that cannot be attributed, including one whose resolver
+    timed out (the resolvers swallow every exception and return ``None``), gets the marker
+    ``""``; it is deliberately NOT left absent, which would send the same walk back through the
+    in-lock fallback. ``_introducing_commit`` turns the marker into a persisted ``None``.
+    """
+    resolved = dict(position_commits)
+    try:
+        names = sorted(os.listdir(ticket_dir))
+    except OSError:
+        return resolved
+    for name in names:
+        if not name.endswith(".json") or name.startswith("."):
+            continue
+        try:
+            with open(os.path.join(ticket_dir, name), encoding="utf-8") as f:
+                ev = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not ev.get("author_sig"):
+            continue
+        position_str = f"{ev.get('timestamp')}-{ev.get('uuid')}"
+        if position_str not in resolved:
+            resolved[position_str] = (
+                _introducing_commit(position_str, ticket_dir, repo_root, {}) or ""
+            )
+    return resolved
+
+
 def _build_authorship_ledger(
     event_paths: list[str], repo_root, *, position_commits: dict[str, str] | None = None
 ) -> list[dict]:
@@ -97,23 +161,7 @@ def _build_authorship_ledger(
         except Exception:  # noqa: BLE001 — a decode/lookup failure records a null signer
             signer_pubkey = None
 
-        commit_sha = position_commits.get(position_str)
-        if commit_sha is None:
-            # Map miss (an empty map from a git failure, or a file introduced only inside
-            # a merge commit): fall back to the per-event resolver, which is what this
-            # loop used to call unconditionally.
-            commit_sha = authorship.resolve_event_commit(
-                position_str, ticket_dir, repo_root=repo_root
-            )
-        if commit_sha is None:
-            # resolve_event_commit can return None at fold time (its ticket-scoped pathspec
-            # may miss the introducing commit). Fall back to the GLOBAL position resolver so
-            # we persist the REAL introducing commit rather than a null the merge-gate later
-            # fail-closes to ``key_not_valid_at_era`` (bug B). Only persist null if BOTH fail.
-            tracker = os.path.dirname(ticket_dir)
-            commit_sha = authorship.resolve_position_commit(
-                position_str, tracker, repo_root=repo_root
-            )
+        commit_sha = _introducing_commit(position_str, ticket_dir, repo_root, position_commits)
 
         ledger.append(
             {

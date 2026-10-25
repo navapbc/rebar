@@ -21,8 +21,10 @@ from rebar._commands.compact_txn import (  # noqa: F401 — re-exported public p
     _git,
     _snapshot_strip_keys,
     _sync_before_compact,
+    preresolve_unmapped_positions,
 )
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._proc import store_repo_root
 from rebar._store import hlc
 from rebar._store import lock as _lock
 from rebar._store import lock_owner as _lock_owner
@@ -325,6 +327,12 @@ def _sweep_one_ticket(
     if no_commit:
         argv.append("--no-commit")
     before = _snapshot_names(os.path.join(tracker, tid))
+    if position_commits is not None:
+        # Resolve the events this sweep's map missed BEFORE the locked fold: an unbounded
+        # `git log` walk inside the store write lock blocks every writer (bug 4dd1).
+        position_commits = preresolve_unmapped_positions(
+            os.path.join(tracker, tid), tracker, store_repo_root(tracker), position_commits
+        )
     with contextlib.redirect_stderr(io.StringIO()):  # bash 2>/dev/null
         rc = compact_cli(argv, repo_root=repo_root, position_commits=position_commits)
     if rc != 0:
