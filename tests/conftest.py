@@ -249,6 +249,31 @@ def _is_platform_compat_path(relative_posix: str) -> bool:
     return any(fragment in relative_posix for fragment in _PLATFORM_COMPAT_PATH_FRAGMENTS)
 
 
+# Tests of the Linux host-operations scripts under infra/scripts/ drive bash over PATH stubs of
+# systemctl, journalctl and docker. The scripts run only on the Linux deploy host and Linux CI
+# gates them, so the advisory Windows sweep skips them (bug 6798, task 1ebf-599a-e15c-465d).
+_LINUX_HOST_SCRIPT_PATH_FRAGMENTS = (
+    "tests/scripts/test_observability_",
+    "tests/scripts/test_autodeploy_",
+    "tests/scripts/test_docker_storage_cap",
+    "tests/scripts/test_container_cap",
+    "tests/scripts/test_journald_cap",
+    "tests/scripts/test_vartmp_cap",
+    "tests/unit/test_user_data_device_resolution",
+)
+
+
+def _linux_host_script_skip_reason(relative_posix: str, platform: str) -> str | None:
+    if platform != "win32":
+        return None
+    if not any(fragment in relative_posix for fragment in _LINUX_HOST_SCRIPT_PATH_FRAGMENTS):
+        return None
+    return (
+        "tests a Linux host-operations script that never runs on Windows; Linux CI gates it "
+        "(bug 6798, task 1ebf-599a-e15c-465d)"
+    )
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Mark external tests by directory and reject external marks outside that tier.
 
@@ -266,10 +291,13 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker("external")
         elif item.get_closest_marker("external") is not None:
             misplaced.append(f"{item.nodeid} ({test_path})")
-        if test_path.is_relative_to(_REPO_ROOT) and _is_platform_compat_path(
-            test_path.relative_to(_REPO_ROOT).as_posix()
-        ):
-            item.add_marker("platform_compat")
+        if test_path.is_relative_to(_REPO_ROOT):
+            relative_posix = test_path.relative_to(_REPO_ROOT).as_posix()
+            if _is_platform_compat_path(relative_posix):
+                item.add_marker("platform_compat")
+            skip_reason = _linux_host_script_skip_reason(relative_posix, sys.platform)
+            if skip_reason is not None:
+                item.add_marker(pytest.mark.skip(reason=skip_reason))
 
     if misplaced:
         listing = "\n  ".join(misplaced)
