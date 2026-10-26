@@ -61,9 +61,6 @@ CLAUDE.local.md
 .coverage.*
 coverage.xml
 htmlcov/
-# pytest --store-durations / pytest-split timings (perf logging, task 9ad9) — never committed
-.test_durations
-
 # uv.lock IS committed (ticket ce5d — uv-canonical repo envs): published metadata keeps
 # loose `>=` floors for PyPI consumers, while the committed lock pins the repo's OWN envs
 # (make install, CI, the reviewbot/opcert images) to a verified-importable set. CI enforces

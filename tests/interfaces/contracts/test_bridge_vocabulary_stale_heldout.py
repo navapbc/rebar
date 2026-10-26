@@ -26,6 +26,9 @@ _HISTORY_PREFIXES = (
     "reports/stability/",
 )
 _WHOLE_FILE_ALLOWLIST = {
+    # Generated pytest-split profile: its keys are test node ids, some of which quote the
+    # retired command names because those tests exercise them (story e873).
+    ".test_durations",
     "CHANGELOG.md",
     "docs/release-notes.md",
     "tests/interfaces/contracts/test_bridge_vocabulary_stale_heldout.py",
