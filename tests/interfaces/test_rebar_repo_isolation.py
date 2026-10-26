@@ -26,6 +26,7 @@ from _subprocess_env import subprocess_env
 
 import rebar
 from rebar import signing
+from rebar.attest import sshsig
 
 
 def _rewrite(path: Path, old: Path, new: Path) -> None:
@@ -191,10 +192,22 @@ def test_identity_is_reminted_per_store(_rebar_repo_template: Path, rebar_repo: 
         assert uuid.UUID(copy_val), f"{rel} is not a uuid: {copy_val!r}"
 
 
+def _skip_without_sshsig() -> None:
+    """Skip where op-cert signing cannot work: ssh is missing or older than the 8.9 floor.
+
+    Only the availability error is turned into a skip; anything else still fails the test.
+    """
+    try:
+        sshsig.ensure_available()
+    except sshsig.SshKeygenUnavailable as exc:
+        pytest.skip(f"{exc}; per-store opcert key isolation is not asserted here")
+
+
 def test_opcert_signing_key_is_isolated_per_store(
     _rebar_repo_template: Path, tmp_path: Path
 ) -> None:
     """A copied store must never inherit another environment's private key."""
+    _skip_without_sshsig()
     template_tracker = _rebar_repo_template / ".tickets-tracker"
     template_key = Path(signing.ensure_opcert_key(template_tracker))
     template_private = template_key.read_bytes()
@@ -228,6 +241,7 @@ def test_copied_opcert_signing_keys_are_owner_only(
             "platform does not honour POSIX permission bits, so mode 0o600 cannot be asserted; "
             "signing-key confidentiality there is tracked in 47d8-baf8-2348-45c9"
         )
+    _skip_without_sshsig()
     copies = [
         _clone_template(_rebar_repo_template, tmp_path / name) for name in ("mode-a", "mode-b")
     ]
@@ -367,3 +381,30 @@ def test_copy_repoints_sibling_origin_and_keeps_refs_isolated(
         if path.is_file() and not path.is_symlink() and source_root in path.read_bytes()
     ]
     assert not offenders, f"destination still embeds source topology paths: {offenders}"
+
+
+# ── the op-cert tests need OpenSSH 8.9+ to sign; skip them where it is missing or older ──────
+@pytest.mark.parametrize("version", [None, (8, 8), (7, 9)])
+def test_the_ssh_skip_helper_skips_below_the_floor_and_names_it(
+    monkeypatch: pytest.MonkeyPatch, version: tuple[int, int] | None
+) -> None:
+    monkeypatch.setattr(sshsig, "ssh_keygen_version", lambda: version)
+
+    with pytest.raises(pytest.skip.Exception, match=r"8\.9.*key isolation is not asserted"):
+        _skip_without_sshsig()
+
+
+def test_the_ssh_skip_helper_does_not_skip_at_the_floor(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sshsig, "ssh_keygen_version", lambda: (8, 9))
+
+    _skip_without_sshsig()
+
+
+def test_the_ssh_skip_helper_lets_other_errors_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom() -> None:
+        raise RuntimeError("not an availability problem")
+
+    monkeypatch.setattr(sshsig, "ensure_available", boom)
+
+    with pytest.raises(RuntimeError, match="not an availability problem"):
+        _skip_without_sshsig()
