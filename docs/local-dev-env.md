@@ -535,6 +535,42 @@ plan for the top of the range rather than the faster figure. Raise it for a bigg
 CPU count and over-subscribes badly — on that same host `auto` (18 workers) was still at 7%
 after eight minutes, because much of this suite forks git/bash/pytest subprocesses of its own.
 
+### Per-test durations (`.test_durations`)
+
+`.test_durations` is a committed profile of how long each test took, keyed by node id, for
+`pytest-split` (pinned in `pyproject.toml`). Nothing in CI consumes it yet; it is there so a
+suite can be split into groups of roughly equal time:
+
+```sh
+pytest -m "not integration and not external" --splits 4 --group 1   # a quarter of the time
+```
+
+Groups are balanced by recorded duration, not by test count: a few slow tests weigh as much as
+thousands of fast ones, so the groups hold very different numbers of tests while their estimated
+durations stay close (pytest-split prints each group's estimate when it collects). The numbers
+change with every refresh, so none are recorded here.
+
+It is refreshed by a deliberate re-run only, never as a side effect of a normal run. Record
+it in the same pass as the pre-push gate, from the repository root, at the default
+`PYTEST_WORKERS=4`. Write the profile to the ignored `.rebar/` directory and copy it in
+afterwards: the repo-isolation backstop (`tests/_isolation.py`) fails any session that creates
+or modifies a visible file in the checkout, which the default path `.test_durations` would be.
+
+```sh
+mkdir -p .rebar/scratch
+PYTEST_ADDOPTS="--store-durations --clean-durations --durations-path=$PWD/.rebar/scratch/test_durations.json" make verify
+cp .rebar/scratch/test_durations.json .test_durations
+```
+
+`make verify` stops at the first failing prerequisite (`lint`, `typecheck`,
+`import-convention`) before it reaches `test`, so run those three green first or no profile is
+written. `--clean-durations` drops node ids that no longer exist, so renamed or deleted tests
+do not linger. The 17 known pandoc failures on an arm64 host still get an entry.
+
+The numbers are one run's wall-clock times on whatever load the host had, so treat them as
+relative weights for splitting, not as a time budget. Renaming or merging test modules changes
+node ids and leaves their entries unmatched: re-run the command above in the same change.
+
 ### The per-test hang budget (300 s) and how to override it
 
 `[tool.pytest.ini_options]` sets `timeout = 300` and `timeout_method = "thread"`, so

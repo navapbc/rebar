@@ -46,8 +46,13 @@ EXCLUDED_PREFIXES = (
     Path("tests/fixtures/dc_wiki_corpus"),
 )
 # The Cloud ADF generator names retired vocabulary because its capture
-# scrub maps those terms to canonical spellings.
-EXCLUDED_FILES = (Path("scripts/build_cloud_adf_corpus.py"),)
+# scrub maps those terms to canonical spellings. The pytest-split profile is
+# machine-generated: its keys are test node ids, some of which quote retired
+# vocabulary because the tests exercise the migration (story e873).
+EXCLUDED_FILES = (
+    Path("scripts/build_cloud_adf_corpus.py"),
+    Path(".test_durations"),
+)
 ABBREVIATION_DIRECTORIES = (Path("src/rebar/llm/reviewers"), Path("src/rebar/_guides"))
 ABBREVIATION_FILES = (
     Path(".rebar/criteria_routing.json"),

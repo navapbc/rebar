@@ -51,3 +51,17 @@ regexTarget = "match"
 regexes = [
   '''test-signing-key-[0-9A-Fa-f]{2,}''',
 ]
+
+[[allowlists]]
+description = """
+Obvious fake PEM headers used as test parameter ids: tests that check private-key headers are
+rejected parametrize on strings like -----BEGIN DSA PRIVATE KEY-----, a body of a single "x", and
+the matching END line. Those ids appear verbatim as keys of the generated pytest-split profile
+(.test_durations). The shape is a header, a body of exactly one "x", and the END line (in the
+profile the newlines are escaped as backslash-n); a real key has a long random body, so genuine
+private-key leaks still trip. Scoped to that exact fake shape, never a path/test exclusion.
+"""
+regexTarget = "match"
+regexes = [
+  '''-----BEGIN[ A-Z]*PRIVATE KEY-----(?:\\\\n|\\n|\n)x(?:\\\\n|\\n|\n)-----END[ A-Z]*PRIVATE KEY-----''',
+]
