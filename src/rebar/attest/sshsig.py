@@ -37,7 +37,8 @@ SCHEME_NAME = "sshsig"
 SSHSIG_MIN_VERSION = (8, 9)
 
 # ``ssh -V`` prints e.g. ``OpenSSH_10.2p1, LibreSSL 3.3.6`` — to stderr.
-_VERSION_RE = re.compile(r"OpenSSH_(\d+)\.(\d+)")
+# Microsoft's Windows build prints "OpenSSH_for_Windows_<ver>", not "OpenSSH_<ver>".
+_VERSION_RE = re.compile(r"OpenSSH_(?:for_Windows_)?(\d+)\.(\d+)")
 
 
 class SshKeygenUnavailable(Exception):
