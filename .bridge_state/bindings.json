@@ -12572,6 +12572,35 @@
       "state": "confirmed",
       "updated_at": "2026-08-27T10:41:53Z"
     },
+    "1ebf-599a-e15c-465d": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\nPart of bug 6798 (the advisory `sweep (windows)` job is red at a scale that hides new regressions). The user chose, on 2026-10-26, to narrow that job to a maintained subset and hold the subset green. This task is the first narrowing step.\n\nScheduled run 40284466555 (ref 6080140e7af, 2026-10-26) ended `1652 failed, 18031 passed, 134 skipped, 39 errors`. Of the 1679 distinct failing node ids, 470 are under `tests/scripts/` (53 modules). Most of those modules drive the Linux host-operations scripts under `infra/scripts/` (observability, autodeploy, docker/journald/var-tmp caps, container caps, user-data device resolution) through `bash` against PATH stubs of `systemctl`, `journalctl`, `docker`, `df` and similar. Those scripts only ever run on the Linux deploy host, so a Windows result for them carries no information about rebar's Windows behaviour; Linux CI already runs them in the gating cell.\n\n## Approach\nIn `tests/conftest.py`, extend `pytest_collection_modifyitems` (next to the existing path-based `platform_compat` marking) so that on `sys.platform == \"win32\"` every test whose repo-relative path matches a named set of Linux-host-script fragments gets a `pytest.mark.skip` with a reason that names this ticket. The matching and the platform decision live in one small pure helper, `_linux_host_script_skip_reason(relative_posix, platform)`, which returns the reason string or `None`, so the rule is unit-testable without Windows and `pytest_collection_modifyitems` gains one call and no new branch beyond it. Fragments (path prefixes, so future tests for the same scripts are covered): `tests/scripts/test_observability_`, `tests/scripts/test_autodeploy_`, `tests/scripts/test_docker_storage_cap`, `tests/scripts/test_container_cap`, `tests/scripts/test_journald_cap`, `tests/scripts/test_vartmp_cap`, `tests/unit/test_user_data_device_resolution`. Nothing is skipped on Linux or macOS. No new marker, fixture, environment variable, config key or CI step is added.\n\nKnown cost: whole modules are skipped on Windows, including a few tests that currently pass there (measured in the evidence comment). They check Linux-script behaviour that Linux CI already gates, so the loss is no Windows signal.\n\n## Acceptance Criteria\n- [ ] `_linux_host_script_skip_reason` returns a reason naming this ticket for each of the 7 fragments when the platform is `win32`, and `None` for those same paths on `linux` and `darwin` and for an unrelated path on `win32`. Checked by a new unit test, `tests/unit/test_conftest_windows_skip_rule.py`, which fails before the helper exists and passes after.\n- [ ] On Linux, `pytest --collect-only -q` over the 7 fragment paths collects the same node ids before and after the change, and none are skipped. Checked by diffing the two collect listings.\n- [ ] With `sys.platform` patched to `win32` in a subprocess collection, every node under the 7 fragments carries a skip whose reason names this ticket, and every node whose skip reason names this ticket is under one of the 7 fragments. Checked by a collection run whose output is recorded in the evidence comment; skips from other causes are not counted.\n- [ ] `make verify` ends with only the known 17 arm64 pandoc failures under `tests/unit/reconciler`, and the Gerrit change reaches `LLM-Review +1` and `Verified +1`.\n\n## Out of scope\nThe other failure classes of 6798: the offline network guard (about 400), `Filename too long` (about 177), the encoding tail, and the two large `tests/unit` modules `test_review_bot.py` and `test_gate_step_tree_skew.py`. Each gets its own task under 6798.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Skip Linux-host script tests on the Windows sweep"
+      },
+      "created_at": "2026-10-26T16:43:26Z",
+      "jira_id": "4597120",
+      "jira_key": "REB-6766",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-10-26T16:43:29Z"
+    },
     "1ec4-d7e9-b1f1-40c3": {
       "baseline": {
         "assignee": null,
@@ -42083,10 +42112,24 @@
     },
     "6798-606d-37dc-46e7": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\n\n`sweep (windows)` in `.github/workflows/test.yml` is an advisory job (`continue-on-error: true`). The workflow states its purpose at `:253-254`:\n\n```\n# The advisory Windows job detects path, temporary-directory, Git, and file-lock regressions.\n# Windows is not a supported gate target, so failures remain visible without blocking merges.\n```\n\nThe job is currently red at a scale that defeats that purpose.\n\n## Measurement\n\nRun 35250748887, `workflow_dispatch` on merged ref `4f12815e9a0b0cee5ded72d73e22256115e10c87`:\n\n```\n1626 failed, 16984 passed, 281 skipped, 1683 warnings, 1382 errors in 5514.06s (1:31:54)\n```\n\nError-signature census across the run:\n\n| Count | Signature |\n|---:|---|\n| 2722 | `PermissionError` |\n| 136 | `ModuleNotFoundError` |\n| 63 | `FileNotFoundError [WinError]` |\n| 34 | `OSError` |\n| 21 | `FileNotFoundError('shell not found: ...')` |\n| 19 | `OSError [WinError]` |\n| 16 | `AttributeError: 'types.SimpleNamespace' object has no attribute` |\n| 10 | `AttributeError: module 'signal' has no attribute` |\n| 4 | `ModuleNotFoundError: No module named 'fcntl'` |\n| 4 | `AttributeError: module 'os' has no attribute` |\n\n## The dominant class: Windows path length\n\nThe most frequently visible failure in the `FAILED` lines is `MAX_PATH` exhaustion during gate-snapshot materialisation:\n\n```\nrebar._snapshot.git_fetch.SnapshotError: git checkout-index for 2c684ee31a74 failed:\nerror: unable to create file C:\\Users\\runneradmin\\AppData\\Local\\Temp\\pytest-of-runneradmin\\\npytest-1\\popen-gw3\\gate-store\\rebar-gate-snapshots\\tmp\\\ntickets-2c684ee31a74-57739aaf299d4a5ca43572977cd0316c\\.tickets-tracker\\4805-7680-90b5-4fef\\\n1789665984171900001-4960ae39-c6d4-42a1-9f62-0ae54f3992a1-CREATE.json: Filename too long\n```\n\nThe path is built from several nested components that each contribute length: the pytest tmp root, the per-worker xdist directory (`popen-gw3`), the gate-store root, a snapshot directory carrying a full 32-character hex suffix, the tracker directory, a four-quad ticket id directory, and finally an event filename combining a nanosecond timestamp with a full UUID. Affected modules observed include `tests/unit/test_plan_review_reuse.py`, `tests/interfaces/lifecycle/test_ref_coherence.py`, `tests/interfaces/lifecycle/test_plan_review_sign_transaction_lifecycle.py`, `tests/interfaces/store/test_gate_ticket_snapshot.py`, and `tests/interfaces/store/test_snapshot_environments.py`.\n\nTwo candidate remedies exist and they are not equivalent: enabling long-path support on the runner and in Git (`core.longpaths`), versus shortening the constructed path. The former is an environment change that may not hold for downstream consumers on Windows; the latter changes behaviour that POSIX platforms also exercise. That tradeoff needs deciding rather than assuming.\n\n## Not all of it is path length\n\nAt least four further classes are present and need separating before any fix:\n\n1. `PermissionError` at high volume \u2014 likely Windows file-locking semantics where a handle is still open when a test tries to delete or replace a file. This is exactly the \"temporary-directory and file-lock regression\" the job exists to detect.\n2. `shell not found` \u2014 tests assuming a POSIX shell is available.\n3. `AttributeError: module 'signal' has no attribute ...` \u2014 POSIX-only signal names.\n4. Residual `fcntl` imports (4 occurrences, outside the module already fixed under `visionary-geologic-harrier`).\n\n## Why this matters even though the job does not gate\n\nAn advisory job exists to make regressions visible. At 1626 failures it cannot do that: a genuine new Windows regression is indistinguishable from the standing noise, so the signal is already lost. This is the same failure mode recorded in `enviable-beloved-buffalo` (dead metrics leaving alarms unfalsifiable) and `catty-giddied-hedgehog` (an alarm latched for days) \u2014 a monitoring surface that cannot change state carries no information.\n\nA decision is therefore required up front, and it is a scoping decision rather than a technical one: either Windows is worth supporting to the point where this job can be read, or the job should be reduced to the subset that is genuinely maintained so that subset can be held green. Filing at P3 because Windows is explicitly not a gate target; the priority should be revisited once the scoping decision is made.\n\n## Acceptance criteria\n\n- [ ] The 1626 failures and 1382 errors are classified into named defect classes with a count per class, so the work can be scoped and split.\n- [ ] The `MAX_PATH` remedy is chosen explicitly between runner/Git long-path support and path shortening, with the tradeoff for downstream Windows consumers recorded.\n- [ ] The `PermissionError` population is diagnosed rather than assumed \u2014 confirmed as file-handle lifetime, or identified as something else.\n- [ ] A scoping decision is recorded: either Windows is supported to a readable-green standard, or the advisory job is narrowed to a maintained subset that is held green.\n- [ ] After the change, `sweep (windows)` is in a state where a NEW regression would be visible \u2014 either green, or red with a known and enumerated baseline that CI compares against.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Advisory sweep (windows) is red at a scale that destroys its signal: 1626 failures across five defect classes"
       },
       "created_at": "2026-09-17T19:34:52Z",
@@ -109912,7 +109955,8 @@
     "1792997050092047001": "__rebar_unknown_comment_id__",
     "1792997062279677001": "__rebar_unknown_comment_id__",
     "1793015281778170001": "__rebar_unknown_comment_id__",
-    "1793016344746597001": "__rebar_unknown_comment_id__"
+    "1793016344746597001": "__rebar_unknown_comment_id__",
+    "1793030521051313001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -115174,6 +115218,7 @@
     "REB-676": "a010-aec8-c088-4314",
     "REB-6764": "0a13-be4f-18d0-4153",
     "REB-6765": "5c17-6b70-c4ae-4f92",
+    "REB-6766": "1ebf-599a-e15c-465d",
     "REB-677": "ac1b-cef3-35c8-415f",
     "REB-678": "d71f-24ab-dc4c-4119",
     "REB-679": "da25-8af4-7c15-4b4e",
