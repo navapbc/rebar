@@ -1,0 +1,1 @@
+{"author":"Rebar Bot Nava","author_email":"joeoakhart+bot@navapbc.com","author_id":"594c-9dcf-5ad6-4e6d","data":{"file_impact":[{"path":"tests/unit/test_conftest_windows_skip_rule.py","reason":"add collection-hook glue cases"}]},"env_id":"492a5c71-6cda-48a6-8134-02ff6a672739","event_type":"FILE_IMPACT","timestamp":1793036706884343001,"uuid":"72d653ce-3bff-4c09-803d-f4f952648734"}
