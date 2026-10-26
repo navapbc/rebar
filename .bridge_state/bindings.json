@@ -2509,6 +2509,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-21T04:31:33Z"
     },
+    "0559-f639-508d-4ac8": {
+      "created_at": "2026-10-26T18:53:51Z",
+      "jira_id": "4597123",
+      "jira_key": "REB-6767",
+      "state": "confirmed",
+      "updated_at": "2026-10-26T18:53:54Z"
+    },
     "055d-f176-8fcb-4ffe": {
       "baseline": {
         "assignee": {
@@ -12591,7 +12598,7 @@
         },
         "description": "## Context / Problem\nPart of bug 6798 (the advisory `sweep (windows)` job is red at a scale that hides new regressions). The user chose, on 2026-10-26, to narrow that job to a maintained subset and hold the subset green. This task is the first narrowing step.\n\nScheduled run 40284466555 (ref 6080140e7af, 2026-10-26) ended `1652 failed, 18031 passed, 134 skipped, 39 errors`. Of the 1679 distinct failing node ids, 470 are under `tests/scripts/` (53 modules). Most of those modules drive the Linux host-operations scripts under `infra/scripts/` (observability, autodeploy, docker/journald/var-tmp caps, container caps, user-data device resolution) through `bash` against PATH stubs of `systemctl`, `journalctl`, `docker`, `df` and similar. Those scripts only ever run on the Linux deploy host, so a Windows result for them carries no information about rebar's Windows behaviour; Linux CI already runs them in the gating cell.\n\n## Approach\nIn `tests/conftest.py`, extend `pytest_collection_modifyitems` (next to the existing path-based `platform_compat` marking) so that on `sys.platform == \"win32\"` every test whose repo-relative path matches a named set of Linux-host-script fragments gets a `pytest.mark.skip` with a reason that names this ticket. The matching and the platform decision live in one small pure helper, `_linux_host_script_skip_reason(relative_posix, platform)`, which returns the reason string or `None`, so the rule is unit-testable without Windows and `pytest_collection_modifyitems` gains one call and no new branch beyond it. Fragments (path prefixes, so future tests for the same scripts are covered): `tests/scripts/test_observability_`, `tests/scripts/test_autodeploy_`, `tests/scripts/test_docker_storage_cap`, `tests/scripts/test_container_cap`, `tests/scripts/test_journald_cap`, `tests/scripts/test_vartmp_cap`, `tests/unit/test_user_data_device_resolution`. Nothing is skipped on Linux or macOS. No new marker, fixture, environment variable, config key or CI step is added.\n\nKnown cost: whole modules are skipped on Windows, including a few tests that currently pass there (measured in the evidence comment). They check Linux-script behaviour that Linux CI already gates, so the loss is no Windows signal.\n\n## Acceptance Criteria\n- [ ] `_linux_host_script_skip_reason` returns a reason naming this ticket for each of the 7 fragments when the platform is `win32`, and `None` for those same paths on `linux` and `darwin` and for an unrelated path on `win32`. Checked by a new unit test, `tests/unit/test_conftest_windows_skip_rule.py`, which fails before the helper exists and passes after.\n- [ ] On Linux, `pytest --collect-only -q` over the 7 fragment paths collects the same node ids before and after the change, and none are skipped. Checked by diffing the two collect listings.\n- [ ] With `sys.platform` patched to `win32` in a subprocess collection, every node under the 7 fragments carries a skip whose reason names this ticket, and every node whose skip reason names this ticket is under one of the 7 fragments. Checked by a collection run whose output is recorded in the evidence comment; skips from other causes are not counted.\n- [ ] `make verify` ends with only the known 17 arm64 pandoc failures under `tests/unit/reconciler`, and the Gerrit change reaches `LLM-Review +1` and `Verified +1`.\n\n## Out of scope\nThe other failure classes of 6798: the offline network guard (about 400), `Filename too long` (about 177), the encoding tail, and the two large `tests/unit` modules `test_review_bot.py` and `test_gate_step_tree_skew.py`. Each gets its own task under 6798.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Skip Linux-host script tests on the Windows sweep"
       },
       "created_at": "2026-10-26T16:43:26Z",
@@ -109956,7 +109963,8 @@
     "1792997062279677001": "__rebar_unknown_comment_id__",
     "1793015281778170001": "__rebar_unknown_comment_id__",
     "1793016344746597001": "__rebar_unknown_comment_id__",
-    "1793030521051313001": "__rebar_unknown_comment_id__"
+    "1793030521051313001": "__rebar_unknown_comment_id__",
+    "1793036722340496001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -115219,6 +115227,7 @@
     "REB-6764": "0a13-be4f-18d0-4153",
     "REB-6765": "5c17-6b70-c4ae-4f92",
     "REB-6766": "1ebf-599a-e15c-465d",
+    "REB-6767": "0559-f639-508d-4ac8",
     "REB-677": "ac1b-cef3-35c8-415f",
     "REB-678": "d71f-24ab-dc4c-4119",
     "REB-679": "da25-8af4-7c15-4b4e",
