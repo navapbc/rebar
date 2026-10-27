@@ -1,7 +1,7 @@
 """The v2 worklist interpreter: branch / loop / map execution, iteration-keyed
 idempotency markers, the mandatory max_iterations runaway guard, and exactly-once
 replay across crash points (the deepest-risk acceptance criterion, mirroring
-docs/experiments/workflow-remediation-pocs/engine_interpreter_poc.py against the REAL
+evals/workflow-remediation-pocs/engine_interpreter_poc.py against the REAL
 interpreter).
 """
 

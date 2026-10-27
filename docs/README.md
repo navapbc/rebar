@@ -126,7 +126,7 @@ These pages preserve analyses that inform future work without defining current b
 - **[oss-comparison-and-remediation.md](oss-comparison-and-remediation.md)**. Comparison with open source ticket systems and a prioritized remediation strategy.
 - **[remediation-implementation-plan.md](remediation-implementation-plan.md)**. Implementation companion for the open source comparison.
 
-Additional research includes the [task decomposition survey](research/task-decomposition-sota-2026.md) and the [experiment index](experiments/README.md). Detailed experiment records cover the [plan-review gate](experiments/plan-review-gate/README.md), [code grounding](experiments/code-grounding-spike/README.md), and [workflow remediation prototypes](experiments/workflow-remediation-pocs/README.md).
+Additional research includes the [task decomposition survey](research/task-decomposition-sota-2026.md) and the [experiment index](../evals/README.md). Detailed experiment records cover the [plan-review gate](../evals/plan-review-gate/README.md), [code grounding](../evals/code-grounding-spike/README.md), and [workflow remediation prototypes](../evals/workflow-remediation-pocs/README.md).
 
 ### Historical evidence
 
@@ -138,4 +138,4 @@ These pages preserve completed migrations, contract changes, and validation resu
 - **[release-notes.md](release-notes.md)**. Preserved contract changes for agents and maintainers.
 - **[serena-symbol-reference-coaching-sample.md](serena-symbol-reference-coaching-sample.md)**. Recorded plan-review runs for symbol reference coaching.
 
-The [archive index](archive/README.md) covers completed planning and handoff records. Frozen plan-review corpora are indexed under [recorded runs](experiments/plan-review-gate/runs/README.md). Calibration evidence includes the [trust boundary](calibration/T5c_trust_boundary.md), [completion floor](calibration/completion_floor.md), and [plan kind sets](calibration/plan_v5_kind_sets.md). Third-party license texts are preserved under [licenses](licenses/).
+The [archive index](archive/README.md) covers completed planning and handoff records. Frozen plan-review corpora are indexed under [recorded runs](../evals/plan-review-gate/runs/README.md). Calibration evidence includes the [trust boundary](../evals/calibration/T5c_trust_boundary.md), [completion floor](../evals/calibration/completion_floor.md), and [plan kind sets](../evals/calibration/plan_v5_kind_sets.md). Third-party license texts are preserved under [licenses](licenses/).

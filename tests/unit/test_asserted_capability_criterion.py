@@ -112,7 +112,7 @@ def test_eval_fixture_has_three_misses_and_clean_controls():
 
 
 def _load_recorder():
-    path = _ROOT / "docs/experiments/plan-review-gate/harnesses/criterion_effectiveness.py"
+    path = _ROOT / "evals/plan-review-gate/harnesses/criterion_effectiveness.py"
     spec = importlib.util.spec_from_file_location("criterion_effectiveness", path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)

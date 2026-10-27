@@ -48,7 +48,7 @@ require_ticket_for_commit = true
 # its priority is below `completion_priority_floor` AND none of `completion_preserve_criteria`
 # are flipped. Advisory-only, container-only, fail-safe-to-keep — it can NEVER change a
 # PASS/BLOCK verdict, and every drop is recoverable from the plan-review sidecar `dropped[]`
-# (tagged `drop_reason="completion"`; see docs/calibration/completion_floor.md "Monitoring").
+# (tagged `drop_reason="completion"`; see evals/calibration/completion_floor.md "Monitoring").
 # Calibrated before flip: gold-set 30/30 floor decisions correct, κ=1.0, zero must-never-
 # suppress anchors dropped. The schema default stays False for other clients; this is a
 # per-project opt-in. Rollback is cheap and needs no data cleanup: set this back to false.
@@ -213,11 +213,11 @@ model = "bedrock:us.anthropic.claude-opus-4-8"
 bedrock_region_name = "us-east-1"
 
 # Where the eval harnesses write replay/ledger artifacts. rebar's own corpus lives under
-# docs/experiments, so pinning it here reproduces every path the harnesses previously
+# evals, so pinning it here reproduces every path the harnesses previously
 # hard-coded; a client project points this at its own corpus instead. Eval SPEC discovery
 # is separate and always reads .rebar/evals (see provider_parity._spec_paths).
 [llm.evals]
-corpus_root = "docs/experiments"
+corpus_root = "evals"
 
 [llm.model_classes]
 frontier = { model = "bedrock:us.anthropic.claude-opus-4-8", fallback = [{ model = "anthropic:claude-opus-4-8" }] }

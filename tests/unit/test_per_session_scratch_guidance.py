@@ -9,7 +9,7 @@ from _subprocess_env import subprocess_env
 ROOT = Path(__file__).resolve().parents[2]
 AGENTS = ROOT / "AGENTS.md"
 ADVISORY_CANARY = ROOT / ".github" / "workflows" / "dependency-advisory-canary.yml"
-DIAG_MATRIX = ROOT / "docs" / "experiments" / "diag_runaway_matrix.py"
+DIAG_MATRIX = ROOT / "evals" / "diag_runaway_matrix.py"
 FIXED_TMP_REDIRECT = re.compile(r">\s*/tmp/[A-Za-z0-9_.-]+")
 
 

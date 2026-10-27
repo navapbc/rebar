@@ -2,7 +2,12 @@
 
 The eval harnesses must run for a CLIENT project supplying its own corpus, so the
 replay/ledger output roots resolve through ``[llm.evals] corpus_root`` instead of the
-CWD-relative ``docs/experiments`` literals they used to hard-code.
+CWD-relative literals they used to hard-code (those paths have since moved under
+``evals/``, epic e47b slice 2).
+
+This module names the pre-move root once, inside ``test_no_hard_coded_roots``: an
+assertion that a string is absent has to spell the string out. That one occurrence is
+why the repo-wide grep carves this file out.
 """
 
 from __future__ import annotations
@@ -93,16 +98,23 @@ def test_sub_paths_are_fixed_under_the_corpus_root(
 
 
 def test_no_hard_coded_roots() -> None:
-    """``docs/experiments`` survives in the eval package only as a path-only docstring cite.
+    """No corpus root is hard-coded in the eval package; every path resolves through config.
 
-    The three deleted literals were ``plan_replay/__main__.py``'s cache/out dirs and
-    ``ledger.py``'s ``DEFAULT_LEDGER_PATH``; each now resolves through the config layer.
+    Two guards. First, the pre-move root must be gone entirely — slice 2 moved the corpus
+    out of ``docs/`` and repointed every live reference, so any surviving literal is a
+    missed repoint. Second, the post-move root may appear only in ``corpus.py``'s
+    path-only docstring cite; anywhere else it would be a reinstated hard-coded default.
     """
-    hits = subprocess.run(
-        ["git", "grep", "-n", "docs/experiments", "--", "src/rebar/llm/evals"],
-        cwd=REPO,
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.splitlines()
-    assert [line.split(":")[0] for line in hits] == ["src/rebar/llm/evals/plan_replay/corpus.py"]
+
+    def _files(pattern: str) -> list[str]:
+        hits = subprocess.run(
+            ["git", "grep", "-l", pattern, "--", "src/rebar/llm/evals"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.split()
+        return sorted(hits)
+
+    assert _files("docs/experiments") == []
+    assert _files("evals/plan-review-gate") == ["src/rebar/llm/evals/plan_replay/corpus.py"]

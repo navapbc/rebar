@@ -177,7 +177,7 @@ most likely to bite during implementation.
 | **EXP-R4** | the real reducer on an injected unknown `TAG` event | **preserve-and-ignored** — ticket stays readable, no crash; `TAG ∉ KNOWN_EVENT_TYPES` today → P2.3's wire-compat path works |
 | **EXP-R6** | the P1.4 gc recipe on the **real orphan-branch worktree** | 26→0 loose objects packed; `rebar show` still reads correctly afterward |
 | **EXP-R7** | `python3 -m rebar._store.<submodule>` (the bash-calls-Python seam) | works; emits canonical sorted output — P1.0's heredoc→helper mechanism is sound |
-| **EXP-R9/R9b** | the **zero-dependency** structural guard (`docs/experiments/event_write_guard.py`) | flags **exactly 7 Python + 7 bash** event writers (== the plan's live-writer set), **0 false positives** across 73 read/output `json.dumps`; the committed artifact runs against the real tree |
+| **EXP-R9/R9b** | the **zero-dependency** structural guard (`evals/event_write_guard.py`) | flags **exactly 7 Python + 7 bash** event writers (== the plan's live-writer set), **0 false positives** across 73 read/output `json.dumps`; the committed artifact runs against the real tree |
 | **EXP-R10** | real `search_states` / `apply_ticket_filters` signatures | confirmed the exact P1.1 integration points (`search_states(states, query, *, status, ticket_type, has_tag)`) |
 | **EXP-R11** | the real test harness | `pytest` needs the `[dev]` extra; once installed, **31 reducer/sort/filter/search tests pass in 2.5 s** → the new convergence/guard/sort tests have a fast, working home |
 
@@ -185,7 +185,7 @@ most likely to bite during implementation.
 
 1. **No `semgrep`/`ast-grep`/`pre-commit` in the environment** → the P1.0 guard must
    be the **stdlib-only** pure-Python AST scanner + a bash regex prong (committed as
-   `docs/experiments/event_write_guard.py`), **not** semgrep. EXP-R9 proves it is
+   `evals/event_write_guard.py`), **not** semgrep. EXP-R9 proves it is
    precise (0 false positives). *(Supersedes the earlier "Semgrep + pygrep"
    recommendation — semgrep is simply absent here.)*
 2. **The bash prong is a false-positive factory if naive.** ~10 read/output `.sh`
@@ -303,7 +303,7 @@ helper) rather than inline `json.dump`/`jq`. Re-serialization is replay-safe
   the gotchas EXP-jq/EXP2 surfaced.
 - **A structural guard** that asserts no event write uses a raw `json.dump(s)`.
   **Use the stdlib-only scanner already prototyped and committed at
-  `docs/experiments/event_write_guard.py`** — NOT semgrep/ast-grep, which are
+  `evals/event_write_guard.py`** — NOT semgrep/ast-grep, which are
   **absent** from this environment (EXP-R9; adding them would be new CI deps for a
   pytest-based repo). It must scan **both** `*.py` (AST) **and** the inline
   `python3` heredocs inside `*.sh` (regex), because a Python-only AST scan would

@@ -8,7 +8,7 @@ alias ``[operator-attested]`` is also accepted), so the
 completion verifier failed hunting for code proof. This prompt-less DET lint (ADR-0016)
 surfaces that at PLAN time. It is ADVISORY — surfaced through ``p6_ac_quality``
 (:mod:`.det_floor`), which never blocks — and is self-gated by the deterministic lexicon
-precision/recall eval in docs/experiments/plan-review-gate/ (see docs/plan-review-gate.md).
+precision/recall eval in evals/plan-review-gate/ (see docs/plan-review-gate.md).
 
 Extracted from ``det_floor`` (which owns the P1-P11 static floor) so that grandfathered,
 size-ceilinged module does not grow; ``det_floor.p6_ac_quality`` imports and surfaces this

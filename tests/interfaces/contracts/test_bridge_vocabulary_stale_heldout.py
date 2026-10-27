@@ -23,6 +23,7 @@ _HISTORY_PREFIXES = (
     "docs/adr/",
     "docs/archive/",
     "docs/experiments/",
+    "evals/",
     "reports/stability/",
 )
 _WHOLE_FILE_ALLOWLIST = {

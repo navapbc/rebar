@@ -1,6 +1,6 @@
 """R7 (epic 6982): golden test for the gate-eval instrumentation classifier + metrics.
 
-The instrumentation job lives under ``docs/experiments/plan-review-gate/harnesses/`` (not a
+The instrumentation job lives under ``evals/plan-review-gate/harnesses/`` (not a
 package), so we load it by path. This test pins the CI-verifiable core: the pure ``classify``
 reproduces the frozen §5.2 labels at >=6/8, ``compute_metrics`` yields non-trivial values on a
 fixture, and ``--window`` bounds the corpus. The full live-store reproduction is verified
@@ -14,7 +14,7 @@ from pathlib import Path
 
 _HARNESS = (
     Path(__file__).resolve().parents[2]
-    / "docs/experiments/plan-review-gate/harnesses/gate_eval_instrumentation.py"
+    / "evals/plan-review-gate/harnesses/gate_eval_instrumentation.py"
 )
 _spec = importlib.util.spec_from_file_location("gate_eval_instrumentation", _HARNESS)
 assert _spec and _spec.loader

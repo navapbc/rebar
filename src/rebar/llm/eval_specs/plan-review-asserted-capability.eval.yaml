@@ -5,7 +5,7 @@
 # CURRENT modules the finder greps, plus clean must-not-fire controls. It is deliberately small
 # (<=8 live single-criterion runs) — NOT an E2/E3 batch eval (those are permanently rejected on
 # cost). Run live with `rebar criteria eval asserted-capability --output json`; the committed
-# result is docs/experiments/plan-review-gate/runs/asserted_capability_sanity.json. Offline
+# result is evals/plan-review-gate/runs/asserted_capability_sanity.json. Offline
 # spec-shape validation is in tests/unit/test_asserted_capability_criterion.py.
 prompt: plan-review-asserted-capability
 model: anthropic:claude-sonnet-4-6

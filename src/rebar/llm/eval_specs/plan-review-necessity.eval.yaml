@@ -4,7 +4,7 @@
 # plus well-motivated / justified-no-op negatives that must NOT fire. It is deliberately small
 # (<=8 live single-criterion runs) — NOT an E2/E3 batch eval (those are permanently rejected on
 # cost). Run live with `rebar criteria eval necessity --output json`; the committed result is
-# docs/experiments/plan-review-gate/runs/necessity_sanity.json. Offline spec-shape validation is
+# evals/plan-review-gate/runs/necessity_sanity.json. Offline spec-shape validation is
 # in tests/unit/test_necessity_criterion.py.
 prompt: plan-review-necessity
 model: anthropic:claude-sonnet-4-6

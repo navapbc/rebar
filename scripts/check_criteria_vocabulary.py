@@ -42,7 +42,7 @@ EXCLUDED_DIRECTORY_NAMES = frozenset(
 # Rewording captured data would falsify its contract.
 EXCLUDED_PREFIXES = (
     Path("docs/archive"),
-    Path("docs/experiments"),
+    Path("evals"),
     Path("tests/fixtures/dc_wiki_corpus"),
 )
 # The Cloud ADF generator names retired vocabulary because its capture

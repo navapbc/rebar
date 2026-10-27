@@ -1,7 +1,7 @@
 {
   "_comment": "Committed routing index for the code-review gate (analog of plan_review/criteria_routing.json). Top-level _-prefixed keys are stripped by registry.routing_index(). The secret-detection / high-critical-security keys ship blocking_enabled=false (advisory in v1); WS5 flips exactly those two to true (the deterministic gitleaks/semgrep detectors, fail-closed). An overlay's optional nit_suppressed:true (story grusome-uncheerful-nematode) demotes an advisory finding whose criteria are ALL nit-suppressed from the surfaced set to dropped (code_review_decide), reducing docs/llm-prompts nit noise; it does not affect blocking.",
   "security": {
-    "_comment": "ticket 3055-e92d-7063-4a32: code-v5 calibration (docs/experiments/code-review-threshold-calibration-code-v5.md) lowered the blocking line to 0.45; all 13 newly-blocking findings were adjudicated TP-blockworthy with 0 nits/FPs and 1.43% change friction.",
+    "_comment": "ticket 3055-e92d-7063-4a32: code-v5 calibration (evals/code-review-threshold-calibration-code-v5.md) lowered the blocking line to 0.45; all 13 newly-blocking findings were adjudicated TP-blockworthy with 0 nits/FPs and 1.43% change friction.",
     "exec": "AGENT",
     "applies_to": [
       "**/auth*",
@@ -89,7 +89,7 @@
       "**/cli*",
       "**/mcp_server*"
     ],
-    "_comment": "ticket cranial-goodly-seahog: flipped advisory->blocking@0.51 from the code-v3 sidecar calibration (docs/experiments/calibrate_code_review_thresholds.py). Break-in-caller api changes are high-precision (validity>=0.95 on every would-block finding) and low-volume; the 0.51 threshold blocks only non-nit verifier-confirmed findings.",
+    "_comment": "ticket cranial-goodly-seahog: flipped advisory->blocking@0.51 from the code-v3 sidecar calibration (evals/calibrate_code_review_thresholds.py). Break-in-caller api changes are high-precision (validity>=0.95 on every would-block finding) and low-volume; the 0.51 threshold blocks only non-nit verifier-confirmed findings.",
     "default_posture": "blocking",
     "block_threshold": 0.51,
     "blocking_enabled": true
@@ -109,7 +109,7 @@
     "blocking_enabled": false
   },
   "tests": {
-    "_comment": "bug obese-dihedral-ermine: flipped to blocking from the code-v4 replay (docs/experiments/calibrate_code_review_thresholds.py) so the gate can block consequential test-sufficiency findings \u2014 blocks 99 changes / 8.0%, operator-accepted. Story 3fce-cccf-d38b-4072 (sphinxian-agrarian-snake): the overlay prompt now carries the fail-open oracle antipattern \u2014 an ABSENCE assertion (not in / assert not / empty-string / empty-collection) derived from subprocess/file/network/captured output, or a grep/regex over another tool's output used as a pass/fail signal, with no producer-liveness check (exit status, non-empty capture, asserted presence) \u2014 plus the convergence twin (a test re-deriving the value under test instead of driving the production path). Detection language + FP guards live in reviewers/code-review-tests.md; calibration corpus in eval_specs/code-review-tests.eval.yaml (R-/FP-failopen-* cases). Story 2e0f-e4dc-ee9d-4855: the overlay ALSO content-fires (registry.content_triggered_overlays) when the diff adds a declaration the same file does not also remove AND no changed file matches the applies_to globs below \u2014 those globs are unchanged; the content trigger is unioned with them, never a substitute. Guard (vii) in the reviewer prompt keeps a coverage gap advisory unless it concerns newly introduced behaviour AND names a violating input (R-newbehaviour-* / FP-preexisting-* cases in the eval spec).",
+    "_comment": "bug obese-dihedral-ermine: flipped to blocking from the code-v4 replay (evals/calibrate_code_review_thresholds.py) so the gate can block consequential test-sufficiency findings \u2014 blocks 99 changes / 8.0%, operator-accepted. Story 3fce-cccf-d38b-4072 (sphinxian-agrarian-snake): the overlay prompt now carries the fail-open oracle antipattern \u2014 an ABSENCE assertion (not in / assert not / empty-string / empty-collection) derived from subprocess/file/network/captured output, or a grep/regex over another tool's output used as a pass/fail signal, with no producer-liveness check (exit status, non-empty capture, asserted presence) \u2014 plus the convergence twin (a test re-deriving the value under test instead of driving the production path). Detection language + FP guards live in reviewers/code-review-tests.md; calibration corpus in eval_specs/code-review-tests.eval.yaml (R-/FP-failopen-* cases). Story 2e0f-e4dc-ee9d-4855: the overlay ALSO content-fires (registry.content_triggered_overlays) when the diff adds a declaration the same file does not also remove AND no changed file matches the applies_to globs below \u2014 those globs are unchanged; the content trigger is unioned with them, never a substitute. Guard (vii) in the reviewer prompt keeps a coverage gap advisory unless it concerns newly introduced behaviour AND names a violating input (R-newbehaviour-* / FP-preexisting-* cases in the eval spec).",
     "exec": "AGENT",
     "applies_to": [
       "**/test_*.py",
@@ -155,7 +155,7 @@
     "default_posture": "blocking",
     "block_threshold": 0.52,
     "blocking_enabled": true,
-    "_comment": "ticket 3055-e92d-7063-4a32: flipped to blocking@0.52 from the code-v5 calibration (docs/experiments/code-review-threshold-calibration-code-v5.md). The prior code-v4 hold was underpowered (n=1); code-v5 had n=68 / 53 surviving and the two newly-blocking findings were both TP-blockworthy with 0 nits/FPs."
+    "_comment": "ticket 3055-e92d-7063-4a32: flipped to blocking@0.52 from the code-v5 calibration (evals/code-review-threshold-calibration-code-v5.md). The prior code-v4 hold was underpowered (n=1); code-v5 had n=68 / 53 surviving and the two newly-blocking findings were both TP-blockworthy with 0 nits/FPs."
   },
   "failover": {
     "_comment": "ticket katatonic-overrated-hairstreak: advisory failover/disposition-masking overlay for fallback, retry, timeout, and error-classification paths. Content triggers catch should_fall_back / fallback / retryable vocabulary; path globs keep known LLM failure-classification files in Round A.",
@@ -186,7 +186,7 @@
     "blocking_enabled": false
   },
   "regression": {
-    "_comment": "ticket cranial-goodly-seahog: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 the base reviewer always evaluates it, so exec/applies_to are inert here and only the posture/threshold/blocking_enabled fields are consulted by registry.threshold_for. Flipped advisory->blocking@0.54 from the code-v3 sidecar calibration (docs/experiments/calibrate_code_review_thresholds.py): a finding tagged `regression` that survives Pass-3 verification is a high-precision defect (validity>=0.95 on would-block findings). Any finding whose criteria include `regression` now blocks at 0.54 (min-threshold/any-enabled resolution).",
+    "_comment": "ticket cranial-goodly-seahog: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 the base reviewer always evaluates it, so exec/applies_to are inert here and only the posture/threshold/blocking_enabled fields are consulted by registry.threshold_for. Flipped advisory->blocking@0.54 from the code-v3 sidecar calibration (evals/calibrate_code_review_thresholds.py): a finding tagged `regression` that survives Pass-3 verification is a high-precision defect (validity>=0.95 on would-block findings). Any finding whose criteria include `regression` now blocks at 0.54 (min-threshold/any-enabled resolution).",
     "exec": "AGENT",
     "applies_to": [],
     "default_posture": "blocking",
@@ -194,7 +194,7 @@
     "blocking_enabled": true
   },
   "correctness": {
-    "_comment": "story 4144-2784-6437-4efb: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 the base reviewer always evaluates it, so exec/applies_to are inert here and only the posture/threshold/blocking_enabled fields are consulted by registry.threshold_for. Until this story it had NO routing entry at all and fell through to the unknown-criterion default (0.95, advisory), which made the largest base dimension in the corpus untunable. Routed blocking@0.54 from the code-v3 block-impact replay (docs/experiments/calibrate_code_review_thresholds.py --block-impact): 62 of 715 surviving findings would block across 51 of 1262 changes = 4.04% of all changes, inside the 8.0% operator-accepted friction budget recorded on the `tests` entry, with mean would-block validity 1.00 and none below 0.5.",
+    "_comment": "story 4144-2784-6437-4efb: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 the base reviewer always evaluates it, so exec/applies_to are inert here and only the posture/threshold/blocking_enabled fields are consulted by registry.threshold_for. Until this story it had NO routing entry at all and fell through to the unknown-criterion default (0.95, advisory), which made the largest base dimension in the corpus untunable. Routed blocking@0.54 from the code-v3 block-impact replay (evals/calibrate_code_review_thresholds.py --block-impact): 62 of 715 surviving findings would block across 51 of 1262 changes = 4.04% of all changes, inside the 8.0% operator-accepted friction budget recorded on the `tests` entry, with mean would-block validity 1.00 and none below 0.5.",
     "exec": "AGENT",
     "applies_to": [],
     "default_posture": "blocking",
@@ -202,7 +202,7 @@
     "blocking_enabled": true
   },
   "edge-cases": {
-    "_comment": "story 4144-2784-6437-4efb: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 same shape and same inertness of exec/applies_to as `correctness` above. Routed blocking@0.54 from the same code-v3 block-impact replay: 27 of 485 surviving findings would block across 22 of 1262 changes = 1.74% of all changes, mean would-block validity 0.99, none below 0.5. `concurrency` was measured in the same run and HELD advisory \u2014 1 surviving finding is far below the calibration script's MIN_N=25 power floor. Numbers recorded in docs/experiments/code-review-threshold-calibration.md.",
+    "_comment": "story 4144-2784-6437-4efb: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 same shape and same inertness of exec/applies_to as `correctness` above. Routed blocking@0.54 from the same code-v3 block-impact replay: 27 of 485 surviving findings would block across 22 of 1262 changes = 1.74% of all changes, mean would-block validity 0.99, none below 0.5. `concurrency` was measured in the same run and HELD advisory \u2014 1 surviving finding is far below the calibration script's MIN_N=25 power floor. Numbers recorded in evals/code-review-threshold-calibration.md.",
     "exec": "AGENT",
     "applies_to": [],
     "default_posture": "blocking",

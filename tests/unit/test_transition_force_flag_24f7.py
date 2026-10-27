@@ -145,12 +145,12 @@ EXEMPT = {
     "scripts/build_dc_wiki_corpus.py",
     # Frozen LLM-experiment corpora. Their content is recorded experiment INPUT; rewriting
     # them would corrupt the record the experiments' conclusions rest on.
-    "docs/experiments/plan-review-gate/runs/e6_selfconsistency_inputs.jsonl",
-    "docs/experiments/plan-review-gate/runs/exp2_agentic.jsonl",
-    "docs/experiments/plan-review-gate/runs/operator_attested_ac_corpus.jsonl",
+    "evals/plan-review-gate/runs/e6_selfconsistency_inputs.jsonl",
+    "evals/plan-review-gate/runs/exp2_agentic.jsonl",
+    "evals/plan-review-gate/runs/operator_attested_ac_corpus.jsonl",
     # This mined fixture records review-sidecar plan text describing the 24f7
     # rename. Changing the old flag in that frozen input corrupts its score.
-    "docs/experiments/plan-review-gate/fixtures/eval_specs/plan-review-T6.eval.yaml",
+    "evals/plan-review-gate/fixtures/eval_specs/plan-review-T6.eval.yaml",
     # Historical records that must name the OLD spelling to describe the break itself.
     "CHANGELOG.md",
     "docs/release-notes.md",

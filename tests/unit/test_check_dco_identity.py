@@ -3,7 +3,7 @@
 The checker (scripts/check_dco_identity.py) keeps contributor-facing guidance
 (AGENTS.md, .agents/rules/*.md, CONTRIBUTING.md, docs/**/*.md) from reintroducing a
 hardcoded personal DCO sign-off identity. Automation-owned paths (infra/,
-.github/workflows/, tests/, docs/experiments/) legitimately reference a bot identity
+.github/workflows/, tests/, evals/) legitimately reference a bot identity
 and are excluded from the scan.
 """
 
@@ -107,9 +107,7 @@ def test_find_violations_ignores_excluded_automation_paths(tmp_path):
                 "BRIDGE_BOT_EMAIL: joeoakhart+bot@navapbc.com\n"
             ),
             "tests/fixtures/review_bot_merge/mergelist_clean.json": ('{"name": "Joe Oakhart"}\n'),
-            "docs/experiments/old-run.md": (
-                "Signed-off-by: Joe Oakhart <joeoakhart+bot@navapbc.com>\n"
-            ),
+            "evals/old-run.md": ("Signed-off-by: Joe Oakhart <joeoakhart+bot@navapbc.com>\n"),
         },
     )
     assert chk.find_violations(repo) == []

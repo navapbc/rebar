@@ -24,14 +24,7 @@ _CID = "project.failure-disposition-contract"
 _PID = "plan-review-project-failure-disposition-contract"
 _RUBRIC = _ROOT / ".rebar" / "prompts" / f"{_PID}.md"
 _EVAL_FILE = _ROOT / ".rebar" / "evals" / f"{_PID}.eval.yaml"
-_BASELINE = (
-    _ROOT
-    / "docs"
-    / "experiments"
-    / "plan-review-gate"
-    / "runs"
-    / ("failure_disposition_sanity.json")
-)
+_BASELINE = _ROOT / "evals" / "plan-review-gate" / "runs" / ("failure_disposition_sanity.json")
 
 _FIRE_IDS = {"FDC-TP1", "FDC-TP2", "FDC-TP3"}
 _PASS_IDS = {"FDC-TN1", "FDC-TN2", "FDC-TN3", "FDC-TN4"}
@@ -219,7 +212,7 @@ def test_explain_renders_from_rubric():
 
 # ── zero-wiring auto-inclusion in the standing effectiveness recorder ─────────────────────────
 def _load_recorder():
-    path = _ROOT / "docs/experiments/plan-review-gate/harnesses/criterion_effectiveness.py"
+    path = _ROOT / "evals/plan-review-gate/harnesses/criterion_effectiveness.py"
     spec = importlib.util.spec_from_file_location("criterion_effectiveness", path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)

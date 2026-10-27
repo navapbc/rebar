@@ -8,7 +8,7 @@
 # so each case carries the parent plan as `input` and the children as a `children:` list; the
 # eval_solver container arm drives `pass1_container` for exactly this criterion. Run live with
 # `rebar criteria eval decomp-shape --output json`; the committed result is
-# docs/experiments/plan-review-gate/runs/decomp_shape_sanity.json. Offline spec-shape validation
+# evals/plan-review-gate/runs/decomp_shape_sanity.json. Offline spec-shape validation
 # is in tests/unit/test_decomp_shape_criterion.py.
 prompt: plan-review-decomp-shape
 model: anthropic:claude-sonnet-4-6

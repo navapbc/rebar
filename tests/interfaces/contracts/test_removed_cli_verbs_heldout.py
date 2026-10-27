@@ -42,6 +42,7 @@ _HISTORY_PREFIXES = (
     "docs/adr/",
     "docs/archive/",
     "docs/experiments/",
+    "evals/",
     "reports/",
 )
 # Files whose job is to name the removed spellings: the change records and the registry.

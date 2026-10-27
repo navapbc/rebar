@@ -2,7 +2,7 @@
 
 The builder enumerates plan_review_result_v1/v2 sidecars from a tickets-tracker git
 history (mirroring the proven git-object-walk approach in
-``docs/experiments/plan-review-gate/harnesses/mine_outcome_corpus.py``: event blobs at
+``evals/plan-review-gate/harnesses/mine_outcome_corpus.py``: event blobs at
 ``<ticket_id>/<ns_ts>-<uuid>-<TYPE>.json``, enumerated via ``git rev-list --objects
 --all`` so compacted/deleted blobs are still recovered), reconstructs the at-review
 material by replaying CREATE/EDIT events up to the sidecar's timestamp, and marks a row

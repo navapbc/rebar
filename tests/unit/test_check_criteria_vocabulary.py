@@ -166,7 +166,7 @@ def test_comment_and_blank_allowlist_lines_are_accepted(tmp_path: Path) -> None:
     "relative",
     [
         "docs/archive/history.md",
-        "docs/experiments/trial.md",
+        "evals/trial.md",
         "scripts/build_cloud_adf_corpus.py",
         ".test_durations",
     ],
@@ -207,7 +207,7 @@ def _track_everything(root: Path) -> None:
 @pytest.mark.parametrize(
     "relative",
     [
-        ".claude/worktrees/agent-1/docs/experiments/runs.jsonl",
+        ".claude/worktrees/agent-1/evals/runs.jsonl",
         "bridge_state/snapshots/2026-06-29T16-50-45.json",
         "ignored-notes.md",
     ],

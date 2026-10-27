@@ -95,7 +95,7 @@ def test_bounded_sanity_fixture_shape():
 
 # ── zero-wiring auto-inclusion in the standing effectiveness recorder ─────────────────────────
 def _load_recorder():
-    path = _ROOT / "docs/experiments/plan-review-gate/harnesses/criterion_effectiveness.py"
+    path = _ROOT / "evals/plan-review-gate/harnesses/criterion_effectiveness.py"
     spec = importlib.util.spec_from_file_location("criterion_effectiveness", path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)

@@ -1,7 +1,7 @@
 """The plan-replay CLI's path wiring (epic e47b slice 1).
 
 ``__main__`` used to hard-code its cache/out/sample defaults as CWD-relative
-``docs/experiments`` literals. They are now ``None`` at the flag layer and resolve at
+hard-coded literals. They are now ``None`` at the flag layer and resolve at
 dispatch against the configured eval corpus root, and ``--ledger`` lets a caller point
 the spend ledger somewhere else entirely. These tests cover that wiring: the parser
 defaults, the two resolution helpers, and the threading of ``ledger_path`` into each

@@ -80,7 +80,7 @@ def test_reserialization_is_idempotent():
 
 
 # ── structural guard: no writer bypasses the helper ─────────────────────────────
-# Mirrors docs/experiments/event_write_guard.py (the validated EXP-R9 prototype):
+# Mirrors evals/event_write_guard.py (the validated EXP-R9 prototype):
 # flag any json.dump(s) whose serialized arg is an event dict (carries
 # "event_type"). The canonical helper lives in canonical.py and takes a bare
 # parameter, so it is not itself a hit.

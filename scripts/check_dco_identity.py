@@ -3,7 +3,7 @@
 
 Fails if contributor-facing guidance (AGENTS.md, .agents/rules/*.md,
 CONTRIBUTING.md, docs/**/*.md) hardcodes a personal DCO sign-off identity.
-Automation-owned paths (infra/, .github/workflows/, tests/, docs/experiments/)
+Automation-owned paths (infra/, .github/workflows/, tests/, evals/)
 legitimately reference a bot identity and are excluded from the scan.
 """
 
@@ -27,7 +27,7 @@ EXCLUDED_PREFIXES = (
     "infra/",
     ".github/workflows/",
     "tests/",
-    "docs/experiments/",
+    "evals/",
 )
 
 _PATTERN = re.compile(r"joeoakhart\+bot@navapbc\.com|Signed-off-by:\s*Joe Oakhart")

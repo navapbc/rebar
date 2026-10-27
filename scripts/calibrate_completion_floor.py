@@ -6,7 +6,7 @@ model's ``containment`` / ``layer`` answers — and the resulting Pass-3 floor d
 gold labels. Because the changed artifact is a PROMPT, this is a LIVE LLM run (per G-Eval: freeze
 wording, calibrate to a gold set). Prints per-axis + per-category agreement and Cohen's kappa
 on the binary drop/keep decision; the human-written record lives at
-``docs/calibration/completion_floor.md``.
+``evals/calibration/completion_floor.md``.
 
 Reproduce:
   REBAR_MCP_ALLOW_LLM=1 python scripts/calibrate_completion_floor.py

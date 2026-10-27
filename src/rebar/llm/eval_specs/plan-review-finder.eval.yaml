@@ -2,7 +2,7 @@
 # Per-criterion recall / false-accept / false-fire cases for the plan-review gate,
 # drawn from all three corpuses (DSO read-only · snap-oakhart-manual · rebar's own
 # tickets) and seeded from REAL observed false-fires
-# (docs/experiments/plan-review-gate/eval/observed-false-positives.md).
+# (evals/plan-review-gate/eval/observed-false-positives.md).
 # Validate offline: `rebar prompt eval plan-review-finder`. The live model run needs
 # the [agents] extra + credentials (the eval CI). The gold_set is the human-adjudicated
 # subset the llm-judge is aligned to (Cohen's kappa); the labels here are a best-effort

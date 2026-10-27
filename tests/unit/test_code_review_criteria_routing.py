@@ -17,8 +17,8 @@ import pytest
 from rebar.llm.code_review import registry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CALIBRATION_DOC = REPO_ROOT / "docs" / "experiments" / "code-review-threshold-calibration.md"
-REPLAY_SCRIPT = REPO_ROOT / "docs" / "experiments" / "replay_code_v4_would_block.py"
+CALIBRATION_DOC = REPO_ROOT / "evals" / "code-review-threshold-calibration.md"
+REPLAY_SCRIPT = REPO_ROOT / "evals" / "replay_code_v4_would_block.py"
 
 # The heading whose table records this story's measurement. The table is the operator-facing
 # record of the friction the routing claims; the routing is the machine-facing posture. They
@@ -136,6 +136,9 @@ def test_document_decision_column_matches_the_routed_posture() -> None:
         elif decision == "hold":
             assert entry["blocking_enabled"] is False, f"{criterion} is marked hold but blocks"
         elif decision == "superseded":
+            # The calibration document lives INSIDE the moved tree, which is frozen as
+            # authored (epic e47b), so its table still records the pre-move path. This
+            # assertion mirrors that frozen data and must keep the old spelling.
             assert row["superseded_by"] == (
                 "docs/experiments/code-review-threshold-calibration-code-v5.md"
             )
@@ -185,7 +188,7 @@ def test_project_criteria_routing_json_stays_valid() -> None:
 def _calibrate_module():
     spec = importlib.util.spec_from_file_location(
         "_calibrate_code_review",
-        REPO_ROOT / "docs" / "experiments" / "calibrate_code_review_thresholds.py",
+        REPO_ROOT / "evals" / "calibrate_code_review_thresholds.py",
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

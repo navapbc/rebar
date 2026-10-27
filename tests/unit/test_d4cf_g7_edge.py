@@ -99,9 +99,7 @@ def test_g7_promotion_doc_names_fire_rate_and_norm_id() -> None:
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2]
-    doc = (root / "docs" / "experiments" / "plan-review-gate" / "g7-promotion-path.md").read_text(
-        encoding="utf-8"
-    )
+    doc = (root / "evals" / "plan-review-gate" / "g7-promotion-path.md").read_text(encoding="utf-8")
     low = doc.lower()
     assert "fire-rate" in low or "fire rate" in low
     assert "g7" in low

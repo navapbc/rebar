@@ -161,7 +161,7 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
     # Operator-attested evidence-kind lint (R2, ADR-0043/ADR-0101): AC items whose "done"
     # evidence lives OUTSIDE the codebase but are not tagged [non-codebase]. ADVISORY coaching
     # only (p6 never blocks); each gap's fix is inline. Detector extracted to det_operator_attested
-    # and self-gated by the deterministic lexicon eval (docs/experiments/plan-review-gate/).
+    # and self-gated by the deterministic lexicon eval (evals/plan-review-gate/).
     oa_issues = det_operator_attested.operator_evidence_issues(items)
     issues.extend(oa_issues)
     # Measurement-provenance lint (story f161, ADR-0043 x ADR-0016): [non-codebase] AC

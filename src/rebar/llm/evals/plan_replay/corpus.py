@@ -2,7 +2,7 @@
 
 Enumerates ``plan_review_result_v1``/``v2`` sidecars from a tickets-tracker git history
 (the git-object-walk pattern proven in
-``docs/experiments/plan-review-gate/harnesses/mine_outcome_corpus.py`` — path-only
+``evals/plan-review-gate/harnesses/mine_outcome_corpus.py`` — path-only
 parsing recovers compacted/deleted blobs that an on-disk scan would miss), reconstructs
 the at-review ticket material by replaying CREATE/EDIT events up to each sidecar's
 timestamp, and marks a row ``verified`` when the reconstructed material's fingerprint

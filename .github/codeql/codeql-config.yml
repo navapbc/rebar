@@ -7,3 +7,5 @@ name: "rebar CodeQL config"
 
 paths-ignore:
   - "docs/**"
+  # The research corpus moved out of docs/ (epic e47b); docs/** no longer covers it.
+  - "evals/**"

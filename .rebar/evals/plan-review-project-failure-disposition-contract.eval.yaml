@@ -11,7 +11,7 @@
 # tests/unit/test_project_failure_disposition_contract.py; the LIVE semantic run is the
 # ticket's [operator-attested] criterion (`rebar criteria eval
 # project.failure-disposition-contract --runs 3`), evidenced by the committed baseline
-# docs/experiments/plan-review-gate/runs/failure_disposition_sanity.json.
+# evals/plan-review-gate/runs/failure_disposition_sanity.json.
 prompt: plan-review-project-failure-disposition-contract
 model: anthropic:claude-sonnet-4-6
 epochs: 3

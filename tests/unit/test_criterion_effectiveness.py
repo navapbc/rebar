@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
-_HARNESS = _ROOT / "docs/experiments/plan-review-gate/harnesses/criterion_effectiveness.py"
+_HARNESS = _ROOT / "evals/plan-review-gate/harnesses/criterion_effectiveness.py"
 _spec = importlib.util.spec_from_file_location("criterion_effectiveness", _HARNESS)
 assert _spec and _spec.loader
 ce = importlib.util.module_from_spec(_spec)

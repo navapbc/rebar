@@ -77,8 +77,8 @@ The design was chosen after a research spike + two independent Opus design revie
 > in-process **pydantic-ai** runner — this doc describes that current state, so
 > don't be confused by the LangChain/LangGraph references in git history. The
 > cross-provider runtime was de-risked first by
-> [`runtime_pydanticai_poc.py`](experiments/workflow-remediation-pocs/runtime_pydanticai_poc.py)
-> (see the [de-risk POC index](experiments/workflow-remediation-pocs/README.md)).
+> [`runtime_pydanticai_poc.py`](../evals/workflow-remediation-pocs/runtime_pydanticai_poc.py)
+> (see the [de-risk POC index](../evals/workflow-remediation-pocs/README.md)).
 
 - The agent **tool-use loop is a solved problem** — we do not reimplement one.
 - We need the agent to have **filesystem access** (a repo) and **MCP servers** as

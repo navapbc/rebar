@@ -653,7 +653,7 @@ def test_plan_v5_rescore_script_imports_from_legacy_v4_baseline():
     import sys
 
     repo_root = Path(__file__).resolve().parents[3]
-    script_path = repo_root / "docs" / "calibration" / "plan_v5_rescore.py"
+    script_path = repo_root / "evals" / "calibration" / "plan_v5_rescore.py"
     spec = importlib.util.spec_from_file_location("plan_v5_rescore_under_test", script_path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

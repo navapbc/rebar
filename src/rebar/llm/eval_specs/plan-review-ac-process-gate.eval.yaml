@@ -7,7 +7,7 @@
 # to a new rubric) that must NOT fire. It is deliberately small (<=8 live single-criterion runs) —
 # NOT an E2/E3 batch eval (those are permanently rejected on cost). Run live with
 # `rebar criteria eval ac-process-gate --output json`; the committed result is
-# docs/experiments/plan-review-gate/runs/ac_process_gate_sanity.json. Offline spec-shape
+# evals/plan-review-gate/runs/ac_process_gate_sanity.json. Offline spec-shape
 # validation is in tests/unit/test_ac_process_gate_criterion.py.
 prompt: plan-review-ac-process-gate
 model: anthropic:claude-sonnet-4-6

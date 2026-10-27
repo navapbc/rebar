@@ -204,7 +204,7 @@ def _read_llm_limit_settings(table: dict[str, Any], cli: dict[str, Any]) -> dict
 # ── [llm.evals] corpus root (epic e47b slice 1) ───────────────────────────────
 #
 # The eval harnesses must run for a CLIENT project supplying its own corpus, so the
-# replay/ledger output roots cannot stay CWD-relative ``docs/experiments`` literals.
+# replay/ledger output roots cannot stay CWD-relative hard-coded literals.
 # One resolution rule serves all of them, read from the reserved ``llm`` table exactly
 # like ``[llm.model_classes]`` so file locations and precedence match the rest of rebar.
 #

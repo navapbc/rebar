@@ -1,9 +1,9 @@
 """The plan-v4 ``impact_plan`` formula and its grade->kind classifier, relocated verbatim
-from ``docs/calibration/plan_v5_rescore.py`` (ticket bouncy-peacockish-titmouse /
-5d19-52e0-7c26-47fb) so Tier-0's replay harness can import them — ``docs/calibration/``
+from ``evals/calibration/plan_v5_rescore.py`` (ticket bouncy-peacockish-titmouse /
+5d19-52e0-7c26-47fb) so Tier-0's replay harness can import them — ``evals/calibration/``
 carries no ``__init__.py`` and is not on the import path.
 
-``docs/calibration/plan_v5_rescore.py`` imports every name here instead of defining them
+``evals/calibration/plan_v5_rescore.py`` imports every name here instead of defining them
 locally; its own behavior is unchanged.
 """
 

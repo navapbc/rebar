@@ -32,7 +32,7 @@ the code-review/plan-review counterpart to R1's asserted-capability probe: the v
 only for the G6/E4/T3 asserted-capability cohort (`na` everywhere else). Because it is a *validity*
 axis (it touches neither `impact_code`/`impact_plan` nor any veto), R5 deliberately does **not** bump
 `IMPACT_MODEL_VERSION`; the cross-gate non-regression replay (E5, story `pisciform-spineless-wobbegong`,
-`docs/experiments/plan-review-gate/harnesses/e5_cross_gate_nonregression.py`) proves it byte-identical
+`evals/plan-review-gate/harnesses/e5_cross_gate_nonregression.py`) proves it byte-identical
 over the 161-finding code-review corpus.
 
 Pass-1 (the finder's criteria→batch orchestration) is **not** re-abstracted: the

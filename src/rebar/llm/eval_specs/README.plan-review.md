@@ -64,7 +64,7 @@ credentials and runs in the eval CI.
 Cases are drawn from all three corpuses the epic names — **DSO** (read-only),
 **snap-oakhart-manual** (Rails/Ruby), and **rebar's own tickets** (Python) — tagged by
 `corpus:` on each dataset case. The false-fires are seeded from
-`docs/experiments/plan-review-gate/eval/observed-false-positives.md` (FP1–FP7 + the
+`evals/plan-review-gate/eval/observed-false-positives.md` (FP1–FP7 + the
 11-mode taxonomy + the sycophancy axis).
 
 ## Gold subset + human adjudication

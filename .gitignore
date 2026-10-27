@@ -16,7 +16,7 @@ dist/
 # it is ~8 MB over the current corpus, far over the 500 KB check-added-large-files cap, so it is
 # NOT committed (analogous to .tickets-tracker/). The committed CI-visible baseline is the small
 # computed metrics artifact runs/criterion_effectiveness.json.
-docs/experiments/plan-review-gate/runs/criterion_firings.jsonl
+evals/plan-review-gate/runs/criterion_firings.jsonl
 # Ignore local .rebar state (session-log pointer, HLC cache, …) but TRACK the out-of-band
 # trusted-environment pin (story 76d2): trusted_environments.yaml lives on the code branch
 # (Gerrit-gated + CODEOWNERS-protected), NEVER the auto-pushed tickets branch.
@@ -119,6 +119,6 @@ infra/terraform/.terraform/
 
 # plan-review replay corpus cache (celestine-treasonous-ewe): the compact per-manifest-hash
 # JSONL corpus is a rebuildable local cache, keyed by content hash — never committed. The
-# manifest itself (docs/experiments/plan-review-gate/replay/corpus-*.manifest.json) is.
-docs/experiments/plan-review-gate/replay/cache/
+# manifest itself (evals/plan-review-gate/replay/corpus-*.manifest.json) is.
+evals/plan-review-gate/replay/cache/
 .git-msg/

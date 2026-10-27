@@ -2,7 +2,7 @@
 
 CI-collectable and LLM-free: exercises ``e6_metrics`` (Fleiss' κ, raw agreement, section
 permutation, and the infra-INDETERMINATE exclusion/retry-cap policy) on hand-computed fixtures.
-The module lives under ``docs/experiments/plan-review-gate/harnesses/`` and imports ONLY the
+The module lives under ``evals/plan-review-gate/harnesses/`` and imports ONLY the
 standard library, so this test never needs the ``[agents]`` extra or an ``anthropic`` client.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-HARNESS_DIR = Path(__file__).resolve().parents[2] / "docs/experiments/plan-review-gate/harnesses"
+HARNESS_DIR = Path(__file__).resolve().parents[2] / "evals/plan-review-gate/harnesses"
 sys.path.insert(0, str(HARNESS_DIR))
 
 import e6_metrics as M  # noqa: E402 — after the sys.path shim

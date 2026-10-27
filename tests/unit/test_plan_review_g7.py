@@ -102,7 +102,7 @@ def test_g7_promotion_path_doc_exists_and_documents_the_path() -> None:
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2]
-    doc = root / "docs" / "experiments" / "plan-review-gate" / "g7-promotion-path.md"
+    doc = root / "evals" / "plan-review-gate" / "g7-promotion-path.md"
     assert doc.exists(), f"missing {doc}"
     text = doc.read_text(encoding="utf-8")
     # the fire-rate/validity jq query anchors: the sidecar schema + the fields it reads

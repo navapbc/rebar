@@ -9,7 +9,7 @@ from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
     "derive_code_review_threshold",
-    Path(__file__).resolve().parents[2] / "docs/experiments/derive_code_review_threshold.py",
+    Path(__file__).resolve().parents[2] / "evals/derive_code_review_threshold.py",
 )
 _mod = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_mod)  # type: ignore[union-attr]

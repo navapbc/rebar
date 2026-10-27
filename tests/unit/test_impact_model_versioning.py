@@ -38,7 +38,7 @@ def test_plan_and_code_versions_are_distinct() -> None:
 
 # ── version-segmented calibration replay ──────────────────────────────────────────────────
 def _load_calib_module():
-    path = Path("docs/experiments/calibrate_plan_review_thresholds.py")
+    path = Path("evals/calibrate_plan_review_thresholds.py")
     spec = importlib.util.spec_from_file_location("_calib_mod", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -143,7 +143,7 @@ def test_plan_review_blocking_posture_set_is_the_approved_set() -> None:
 
 # ── diff-grounded A/B gate ────────────────────────────────────────────────────────────────
 def _load_ab_module():
-    path = Path("docs/experiments/ab_impact_model.py")
+    path = Path("evals/ab_impact_model.py")
     spec = importlib.util.spec_from_file_location("_ab_mod", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

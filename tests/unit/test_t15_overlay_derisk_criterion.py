@@ -152,9 +152,7 @@ def test_t15_eval_uses_the_standard_deterministic_scorers() -> None:
 
 
 def test_t15_application_scope_negatives_are_recorded_as_regression_guards() -> None:
-    ledger = (
-        REPO / "docs/experiments/plan-review-gate/eval/observed-false-positives.md"
-    ).read_text()
+    ledger = (REPO / "evals/plan-review-gate/eval/observed-false-positives.md").read_text()
     normalized = ledger.lower().replace("-", " ")
     assert "t15 application scope regression guards" in normalized
     for guard in ("app only", "library only", "cli only", "docs only", "health route"):

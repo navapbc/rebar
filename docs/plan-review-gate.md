@@ -123,7 +123,7 @@ The gate has **two layers**:
   so the lint and the
   completion-verifier enrichment agree on "tagged" by construction. It is self-gated
   by a DETERMINISTIC lexicon precision/recall eval over the historical AC corpus
-  (`docs/experiments/plan-review-gate/harnesses/operator_attested_eval.py` over
+  (`evals/plan-review-gate/harnesses/operator_attested_eval.py` over
   `runs/operator_attested_ac_corpus.jsonl`; committed result
   `runs/operator_attested_eval.json`): precision 92.2% on a 64-item flagged census
   (gate ≥70%), flag rate 2.07% (gate ≤5%), recall 61.3% (reported), both known
@@ -139,7 +139,7 @@ The gate has **two layers**:
   derived `criteria_routing.json` index. The five pass prompts (finder/verifier/
   coach/ISF/container) are `plan-review-pass` library prompts resolved via
   `resolve_prompt` — no inline prompt strings. (`criteria_v8.json` under
-  `docs/experiments/` is the design reference, not the production artifact.) See
+  `evals/` is the design reference, not the production artifact.) See
   [reuse-surface.md](reuse-surface.md) §3.
 
 The four passes — the find → verify → decide decision core is the shared three-pass
@@ -195,7 +195,7 @@ when a finding cites a specific code reference) → **dropped**; `validity < 0.5
 *and* high-impact); else **advisory**. Three dogfood-data calibrations have run (stories
 `3d3d`, then `usable-chattery-coelacanth`, then the plan-v2 segmented replay in task
 `relishable-ammonitic-hoverfly`; see
-`docs/experiments/plan-review-threshold-calibration.md`). The current blocking tiers —
+`evals/plan-review-threshold-calibration.md`). The current blocking tiers —
 the source of truth is `src/rebar/llm/plan_review/criteria_routing.json` — are:
 **G6, COH, E2, G5, F1 at `block_threshold: 0.60`** (calibration 1 flipped them to
 blocking at 0.70; calibration 2 lowered them to 0.60 on zero-false-positive band
@@ -278,7 +278,7 @@ at-threshold findings lose their block and 35–64 gain one (gains are recorded 
 old ordinal vocabulary, which `_SEV01` silently scored 0.0). Every loss surviving the optimistic
 bound was read individually and is either a bundling observation or a specificity/framing
 complaint — **no committed-outcome-without-an-oracle and no broken oracle loses its block**. Method,
-mapping rules and the audited loss list: `docs/calibration/plan_v5_kind_sets.md`. Pre-plan-v5
+mapping rules and the audited loss list: `evals/calibration/plan_v5_kind_sets.md`. Pre-plan-v5
 sidecars keep their ordinal grades and are read as-is; `impact_plan` scores a stale ordinal on
 these axes as 0.0, so replay MUST segment by `impact_model_version` (ADR 0036).
 
@@ -470,7 +470,7 @@ seven-case sanity corpus at
 four must-not-fire) — NOT an E2/E3 batch eval — is run live with `rebar criteria eval
 project.failure-disposition-contract --runs 3`; the frozen operator-attested expected
 outcome is committed at
-`docs/experiments/plan-review-gate/runs/failure_disposition_sanity.json` (`recall: 1.0`,
+`evals/plan-review-gate/runs/failure_disposition_sanity.json` (`recall: 1.0`,
 `false_accept: 0.0`), and the offline CI proxy proves the corpus TP/TN shape and calibration
 arithmetic under an injected perfect solve.
 
@@ -1534,7 +1534,7 @@ does not stamp it — has **no `cohort` key**; offline analysis MUST treat a **m
 ## Blocking-FP-proxy demotion (dogfood alarm)
 
 The gate's own false-positive drift is watched offline by the R7 gate-eval instrumentation
-(`docs/experiments/plan-review-gate/harnesses/gate_eval_instrumentation.py`, epic 6982). It
+(`evals/plan-review-gate/harnesses/gate_eval_instrumentation.py`, epic 6982). It
 joins each reviewed ticket's outcome (post-claim edits, reopens, force-closes) to that ticket's
 persisted `REVIEW_RESULT` sidecar findings and emits, per criterion, a trailing
 **`blocking_fp_proxy`** = the fraction of that criterion's blocking findings whose ticket was
@@ -1559,7 +1559,7 @@ blocking FPs) is the R6 [Advisory triage](#advisory-triage-apply-now-vs-defer) s
 R7's job above joins each ticket to the **outcome corpus** (post-claim edits / reopens /
 force-closes), which is mined from the `tickets` branch's git objects — a periodic batch job. The
 **standing per-criterion effectiveness recorder**
-(`docs/experiments/plan-review-gate/harnesses/criterion_effectiveness.py`, epic 6982) is a
+(`evals/plan-review-gate/harnesses/criterion_effectiveness.py`, epic 6982) is a
 *complementary, not duplicate* dogfood job whose signal source is the sidecar **re-review history
 alone** — no outcome corpus, no git-object walk — so it accumulates at **zero marginal LLM cost**.
 It reads the persisted `REVIEW_RESULT` sidecars and appends one lean **firing row per
@@ -1801,7 +1801,7 @@ against the running system — the eval suite + sidecar collect the real data to
 later). **Two calibrations have now run**: the first (story `3d3d`) replayed the
 `REVIEW_RESULT` sidecar corpus to flip seven dual-signal criteria to blocking at
 `0.70`, validated by re-reviewing a 20-ticket high-finding/overlay sample
-(`docs/experiments/plan-review-threshold-calibration.md`); the second (story
+(`evals/plan-review-threshold-calibration.md`); the second (story
 `usable-chattery-coelacanth`, 2026-07-08) lowered those to `0.60` and promoted
 T1/T8/G1G2 (`0.70`) and E4 (`0.75`) on human adjudication showing under-blocking. The
 current table lives in `src/rebar/llm/plan_review/criteria_routing.json` (pinned by
