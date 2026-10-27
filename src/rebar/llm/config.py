@@ -43,6 +43,7 @@ from rebar._optional import module_available as _module_available
 # without re-exporting gate-context internals from this configuration module.
 from rebar.llm import gate_context as _gate_context
 from rebar.llm.config_readers import (  # noqa: F401  (re-export: monkeypatch.setattr(rebar.llm.config, "...") targets these; from_env below calls them as bare names resolved through THIS module's namespace)
+    DEFAULT_EVALS_CORPUS_ROOT,
     _env_truthy,
     _llm_float,
     _llm_int,
@@ -51,6 +52,9 @@ from rebar.llm.config_readers import (  # noqa: F401  (re-export: monkeypatch.se
     _read_llm_core_settings,
     _read_llm_file_table,
     _read_llm_limit_settings,
+    default_ledger_path,
+    evals_corpus_root,
+    replay_dir,
 )
 from rebar.llm.headers import resolve_headers
 

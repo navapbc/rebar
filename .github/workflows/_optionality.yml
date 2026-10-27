@@ -279,6 +279,7 @@ jobs:
             "adf:adf"
             "wiki:wiki"
             "mcp:mcp"
+            "evals:evals"
             "union:agents,tracing,wiki,grounding-terraform"
           )
           for spec in "${specs[@]}"; do

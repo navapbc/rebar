@@ -387,7 +387,7 @@ def run_tier1(
     candidate_name: str,
     n: int,
     seed: int,
-    ledger_path: str = ledger.DEFAULT_LEDGER_PATH,
+    ledger_path: str | None = None,
 ) -> dict[str, Any]:
     """The Tier-1 integration driver: samples the corpus, replays each sampled review
     through the candidate verifier (gated by the ledger pre-flight), and returns the

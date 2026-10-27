@@ -62,6 +62,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_BASE_URL` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_BEDROCK_REGION` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_CONFIG_FILE` | `src/rebar/_config_sources.py` |  |
+| `REBAR_LLM_EVALS_CORPUS_ROOT` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_FRONTIER_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_FRONTIER_MODEL` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_FRONTIER_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
@@ -160,7 +161,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_148 variables._
+_149 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -176,11 +177,11 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/grounding/harness.py:56` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/terraform_source.py:410` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/bedrock_model.py:37` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config_readers.py:21` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config_readers.py:76` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config_readers.py:90` — `_llm_str_source(<non-literal>)`
-- `src/rebar/llm/config_readers.py:99` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config_readers.py:119` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config_readers.py:144` — `_llm_str(<non-literal>)`
+- `src/rebar/llm/config_readers.py:22` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config_readers.py:77` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config_readers.py:91` — `_llm_str_source(<non-literal>)`
+- `src/rebar/llm/config_readers.py:100` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config_readers.py:120` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config_readers.py:145` — `_llm_str(<non-literal>)`
 - `src/rebar/opcert_service/config.py:72` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:159` — `os.environ.get(<non-literal>)`

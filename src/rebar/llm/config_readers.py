@@ -11,6 +11,7 @@ unchanged; this module is not meant to be imported directly by consumers.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 from rebar import config as _root_config
@@ -198,3 +199,62 @@ def _read_llm_limit_settings(table: dict[str, Any], cli: dict[str, Any]) -> dict
             DEFAULT_LLM_TOOL_TIMEOUT_S,
         ),
     }
+
+
+# ── [llm.evals] corpus root (epic e47b slice 1) ───────────────────────────────
+#
+# The eval harnesses must run for a CLIENT project supplying its own corpus, so the
+# replay/ledger output roots cannot stay CWD-relative ``docs/experiments`` literals.
+# One resolution rule serves all of them, read from the reserved ``llm`` table exactly
+# like ``[llm.model_classes]`` so file locations and precedence match the rest of rebar.
+#
+# ``corpus_root`` governs replay/ledger OUTPUT paths only. Eval-SPEC discovery stays at
+# ``.rebar/evals`` (see ``provider_parity._spec_paths``), because that is where
+# ``eval.load_eval_spec`` already looks — both surfaces must resolve a client spec
+# identically.
+DEFAULT_EVALS_CORPUS_ROOT = ".rebar/evals"
+
+
+def evals_corpus_root(repo_root=None) -> Path:
+    """The root under which eval replay/ledger artifacts are written.
+
+    Precedence ``rebar -c llm.evals.corpus_root=`` > ``REBAR_LLM_EVALS_CORPUS_ROOT`` >
+    ``[llm.evals] corpus_root`` > :data:`DEFAULT_EVALS_CORPUS_ROOT`, matching
+    :func:`_llm_str_source`. An ABSOLUTE value is returned unchanged; a relative one
+    resolves against the repo root rather than the ambient CWD.
+
+    ``[llm.evals]`` is a sub-table, while ``parse_cli_overrides`` splits a dotted key on
+    its FIRST dot only — so the CLI layer presents ``evals.corpus_root`` as one key under
+    section ``llm``. The file layer is flattened to that same key here so both reach
+    :func:`_llm_str` through its single ``file_key``.
+    """
+    if repo_root is None:
+        repo_root = current_code_root()
+    evals_table = _read_llm_file_table(repo_root).get("evals")
+    flat = {
+        "evals.corpus_root": evals_table.get("corpus_root")
+        if isinstance(evals_table, dict)
+        else None
+    }
+    raw = _llm_str(
+        flat,
+        _root_config.cli_overrides_for("llm"),
+        # mechanism-ok: env_var REBAR_LLM_EVALS_CORPUS_ROOT — client corpus override
+        "REBAR_LLM_EVALS_CORPUS_ROOT",
+        "evals.corpus_root",
+        DEFAULT_EVALS_CORPUS_ROOT,
+    )
+    candidate = Path(str(raw)).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    return _root_config.repo_root(repo_root) / candidate
+
+
+def replay_dir(repo_root=None) -> Path:
+    """The plan-review replay directory under :func:`evals_corpus_root`."""
+    return evals_corpus_root(repo_root) / "plan-review-gate" / "replay"
+
+
+def default_ledger_path(repo_root=None) -> Path:
+    """The replay spend ledger under :func:`replay_dir`."""
+    return replay_dir(repo_root) / "ledger.jsonl"

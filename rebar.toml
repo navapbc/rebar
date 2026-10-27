@@ -212,6 +212,13 @@ model = "bedrock:us.anthropic.claude-opus-4-8"
 # REBAR_LLM_BEDROCK_REGION keeps precedence over this value.
 bedrock_region_name = "us-east-1"
 
+# Where the eval harnesses write replay/ledger artifacts. rebar's own corpus lives under
+# docs/experiments, so pinning it here reproduces every path the harnesses previously
+# hard-coded; a client project points this at its own corpus instead. Eval SPEC discovery
+# is separate and always reads .rebar/evals (see provider_parity._spec_paths).
+[llm.evals]
+corpus_root = "docs/experiments"
+
 [llm.model_classes]
 frontier = { model = "bedrock:us.anthropic.claude-opus-4-8", fallback = [{ model = "anthropic:claude-opus-4-8" }] }
 standard = { model = "bedrock:us.anthropic.claude-sonnet-4-6", fallback = [{ model = "anthropic:claude-sonnet-4-6" }] }

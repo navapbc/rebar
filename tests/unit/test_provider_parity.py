@@ -765,3 +765,66 @@ def test_the_enumerated_envelope_differences_are_the_only_ones_normalized() -> N
         "converse_stream",
     ):
         assert token in joined, f"envelope difference list does not name {token}"
+
+
+# ── client eval-spec discovery (epic e47b slice 1) ──────────────────────────────────
+#
+# A client project supplies its own criteria, so `.rebar/evals/*.eval.yaml` must join the
+# packaged corpus. _spec_paths gained a repo_root for that, and eligible_cases — its only
+# production caller — threads its own repo_root through; without that the union would be
+# live only in a unit test and dead on the real run path.
+
+
+def _client_repo(tmp_path: pathlib.Path) -> pathlib.Path:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".rebar" / "evals").mkdir(parents=True)
+    return tmp_path
+
+
+def _spec_yaml(prompt: str, case_id: str, criterion: str = "G1G2") -> str:
+    """A minimal gold-labelled spec. ``criterion`` names a real non-agentic criterion so
+    ``solver_arm`` resolves an arm and the case is corpus rather than being filtered out."""
+    return (
+        f"prompt: {prompt}\n"
+        "model: anthropic:claude-opus-4-8\n"
+        "dataset:\n"
+        f"  - id: {case_id}\n"
+        f"    criterion: {criterion}\n"
+        "    expect: finding\n"
+        "    plan: a plan body\n"
+    )
+
+
+def test_a_project_spec_overrides_the_packaged_spec_of_the_same_stem(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo = _client_repo(tmp_path)
+    override = repo / ".rebar" / "evals" / "plan-review-novelty.eval.yaml"
+    override.write_text(_spec_yaml("plan-review-novelty", "client-override"), encoding="utf-8")
+    client_only = repo / ".rebar" / "evals" / "client-only.eval.yaml"
+    client_only.write_text(_spec_yaml("client-only", "client-case"), encoding="utf-8")
+
+    paths = pp._spec_paths(str(repo))
+    by_stem = {p.name.removesuffix(".eval.yaml"): p for p in paths}
+
+    assert by_stem["plan-review-novelty"] == override
+    assert by_stem["client-only"] == client_only
+    # every packaged stem survives, and nothing is duplicated by the union
+    packaged = {p.name.removesuffix(".eval.yaml") for p in pp._spec_paths(str(tmp_path / "absent"))}
+    assert packaged - {"plan-review-novelty"} <= set(by_stem)
+    assert len(paths) == len({p.name.removesuffix(".eval.yaml") for p in paths})
+
+
+def test_eligible_cases_threads_repo_root_so_client_specs_run(tmp_path: pathlib.Path) -> None:
+    """The union must be live on the real run path, not only in _spec_paths' own test.
+
+    eligible_cases(repo_root) is _spec_paths' sole production caller; if it kept calling
+    _spec_paths() with no argument the client's specs would never be collected.
+    """
+    repo = _client_repo(tmp_path)
+    (repo / ".rebar" / "evals" / "client-only.eval.yaml").write_text(
+        _spec_yaml("client-only", "client-case"), encoding="utf-8"
+    )
+
+    specs = {item.spec for item in pp.eligible_cases(str(repo))}
+    assert "client-only" in specs
