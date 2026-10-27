@@ -62,14 +62,13 @@ Before reporting a lint/typecheck failure, rerun with the worktree `.venv/bin` f
 ambient Ruff or a missing ambient mypy is an environment error, not repository evidence. This
 is the non-interactive Codex equivalent of the activated repo-venv shell used by Claude Code.
 
-**Codex Gerrit workflow rule:** before treating the multi-story feature-branch path as a hard
-prerequisite, inspect recent merged Gerrit history and confirm that the configured identity has
-`feature-branch-driver` rights. If branch creation is unavailable or rejected, that is not an
-implementation blocker: follow the ticket dependency order and send each independently
-reviewable change through `git push gerrit HEAD:refs/for/main`, waiting for `LLM-Review +1` and
-`Verified +1` before Submit and before advancing to a dependent change. Authorized drivers may
-still use the server-side feature-branch flow; see ADR 0025, including its post-ADR-0047 note
-that the Rebase-If-Necessary interaction needs human review.
+**Codex Gerrit workflow rule:** the multi-story feature-branch path is not a prerequisite, and
+this environment is already provisioned for the per-change path — do not spend a step probing
+Gerrit for it. Follow the ticket dependency order and send each independently reviewable change
+through `git push gerrit HEAD:refs/for/main`, waiting for `LLM-Review +1` and `Verified +1`
+before Submit and before advancing to a dependent change. Authorized drivers may still use the
+server-side feature-branch flow; see ADR 0025, including its post-ADR-0047 note that the
+Rebase-If-Necessary interaction needs human review.
 
 For authenticated Gerrit `/a/` REST calls, non-interactive Codex sessions must reuse the
 checkout's configured Git credential helper rather than assume a separate curl credential
