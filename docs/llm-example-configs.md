@@ -96,3 +96,19 @@ REBAR_LLM_STANDARD_MODEL=openai-responses:gpt-4o rebar review-plan <id>
 
 Resolution order, per field: `rebar -c llm.<class>.<field>=…` > `REBAR_LLM_<CLASS>_<FIELD>` >
 the config table > the built-in default.
+
+## Running the eval harnesses in a client project
+
+Point the harnesses at your own corpus. This is a whole table; `corpus_root` governs
+replay and ledger OUTPUT only — eval SPEC discovery always reads `.rebar/evals`.
+
+```toml
+[tool.rebar.llm.evals]
+# Default. Relative values resolve against the repo root, not the process CWD.
+corpus_root = ".rebar/evals"
+```
+
+Override without editing config: `REBAR_LLM_EVALS_CORPUS_ROOT=/scratch/evals`, or
+`rebar -c llm.evals.corpus_root=/scratch/evals <command>`. Needs
+`pip install 'nava-rebar[agents,evals]'`; see
+[llm-framework.md](llm-framework.md#running-the-eval-harnesses-against-your-own-criteria).

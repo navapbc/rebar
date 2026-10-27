@@ -42,7 +42,7 @@ runnable offline.
 
 ### Extras taxonomy (epic a88f / WS-J)
 
-The optional surface is three extras, each lazy-imported behind
+The optional surface is nine extras, each lazy-imported behind
 `rebar._optional.guard_import(..., extra=…)` (which raises a clear error naming the
 exact `pip install nava-rebar[<extra>]`), and CI-enforced lean by
 `.github/workflows/optionality.yml` — two jobs in the reusable it delegates to:
@@ -62,6 +62,22 @@ collected there:
   *sink*, never read back into a rebar decision (the oracle-discipline rule). The
   `rebar llm setup` wizard configures its endpoint (`--otlp-endpoint` /
   `$OTEL_EXPORTER_OTLP_ENDPOINT`).
+- **`[grounding]`** — the code-grounding oracle's in-process structural parsing
+  (tree-sitter). The contract and harness are stdlib-only; this extra adds the
+  binding that runs inside the fail-open worker boundary.
+- **`[grounding-terraform]`** — the optional Terraform structural grounding tools
+  (`python-hcl2`). Absent it the Terraform grounding path abstains (`no_tool`) and
+  non-Terraform paths pull nothing.
+- **`[metrics]`** — the code-health metrics analyzers (`lizard`).
+- **`[wiki]`** — the Jira Data Center Markdown-to-wiki renderer (`pypandoc`, which
+  bundles pandoc in the wheel). Without it the DC rich-text path returns Markdown
+  unchanged.
+- **`[adf]`** — Markdown-aware Jira Cloud ADF conversion (`marklas`). Without it the
+  Cloud rich-text functions return their plain-text results.
+- **`[s3]`** — the awslabs `git-remote-s3` helper, for an `s3://` ticket-store remote.
+- **`[evals]`** — the plan-review replay ledger's spend accounting (`genai-prices`),
+  used by `python -m rebar.llm.evals.plan_replay`. See "Running the eval harnesses
+  against your own criteria" below.
 
 Only `pyyaml` is a hard runtime dependency (the workflow DSL loader); everything
 else is one of these extras. A scripted-only workflow runs with no extra at all.
@@ -396,6 +412,7 @@ for the future code-review op's "deterministic reviewer-selection rules."
 
 | Var | Default | Purpose |
 |-----|---------|---------|
+| `REBAR_LLM_EVALS_CORPUS_ROOT` | `.rebar/evals` | root for eval replay/ledger OUTPUT (`[llm.evals] corpus_root`); relative values resolve against the repo root, not the CWD. Eval SPEC discovery is separate and always reads `.rebar/evals` |
 | `REBAR_LLM_MODEL_PROVIDER` | inferred | pydantic-ai provider (`anthropic`/`openai`/`google`/…); inferred from the model string if unset |
 | `REBAR_LLM_{FRONTIER,STANDARD,TRIVIAL}_MODEL` | — | the model-class slots (see above); these are the interface |
 | `REBAR_LLM_{FRONTIER,STANDARD,TRIVIAL}_PROVIDER` | inferred | per-class provider override; rejected if not in `KNOWN_PROVIDER_NAMES` |
@@ -552,6 +569,57 @@ passed through verbatim as genai-prices' `model_ref` and silently dropped every 
 and OpenAI row — the qualifier is now removed by registry membership before lookup).
 Without the extra, token
 totals still print and the cost line reads `unavailable (install rebar[pricing])`.
+
+## Running the eval harnesses against your own criteria
+
+The eval harnesses are not rebar-only. A client project can run them against its own
+criteria, prompts and corpus — the same mechanism rebar uses for its own evals.
+
+Install the two extras the harnesses need:
+
+```bash
+pip install 'nava-rebar[agents,evals]'
+```
+
+**Where your material lives.** Criteria routing goes in `.rebar/criteria_routing.json`;
+a project prompt in `.rebar/prompts/<criterion_id>.md` wins over the packaged reviewer
+(`llm/evals/fixture_selection.py` `rubric_path`, override branch at `:52-54`). An eval
+spec in `.rebar/evals/<prompt_id>.eval.yaml` wins over the packaged one the same way
+(`llm/evals/eval.py` `eval_spec_path`/`load_eval_spec`).
+
+**Where output goes.** `[llm.evals] corpus_root` sets the root for replay and ledger
+artifacts; it defaults to `.rebar/evals` and resolves against the repo root, not the
+process working directory. Override per-run with `REBAR_LLM_EVALS_CORPUS_ROOT`, or
+per-invocation with `rebar -c llm.evals.corpus_root=<path>`. Spec DISCOVERY is separate
+and always reads `.rebar/evals`, so a client's spec resolves identically whichever
+surface loads it.
+
+```bash
+# score one prompt against its spec
+rebar prompt eval <prompt_id>
+
+# score criteria, live, limited to what changed
+rebar criteria eval [<criterion_id>] --changed-since origin/main --require-live
+
+# re-mine fixtures; dry-run first. Spend is capped at $25 per run.
+rebar criteria heal --dry-run
+rebar criteria heal
+
+# plan-review replay, writing under <corpus_root>/plan-review-gate/replay/
+python -m rebar.llm.evals.plan_replay tier0 --candidate current
+python -m rebar.llm.evals.plan_replay tier1 --n 20
+python -m rebar.llm.evals.plan_replay tier2 --criteria E1
+
+# provider parity. --out has NO default: without it the run writes no file.
+python -m rebar.llm.evals.provider_parity --slot standard --epochs 3 --out parity.json
+```
+
+`rebar criteria heal` writes `.rebar/fixture_heal_drift.md` and
+`.rebar/fixture_heal_ledger.jsonl`, emits `.rebar/evals/*.eval.yaml`, and files one
+`unreliable-criterion: <id>` ticket per criterion that fails three consecutive
+re-mines. The replay harnesses take `--store name=path` to read another tracker and
+`--ledger` to put spend accounting somewhere other than the corpus root.
+
 
 ## External-integration suite (live validation)
 

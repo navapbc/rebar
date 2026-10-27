@@ -386,6 +386,18 @@ rebar validate
 rebar validate --output json
 ```
 
+### Running the eval harnesses in a client project
+
+The gates above are calibrated by eval harnesses, and those harnesses are not
+rebar-only: a client project can run them against **its own** criteria, prompts and
+corpus. Install `nava-rebar[agents,evals]`, put criteria in
+`.rebar/criteria_routing.json` and specs in `.rebar/evals/<prompt_id>.eval.yaml`, and
+set `[llm.evals] corpus_root` to say where replay and ledger output should land
+(default `.rebar/evals`).
+
+The commands, the override precedence and the per-harness output paths are documented
+in [llm-framework.md](llm-framework.md#running-the-eval-harnesses-against-your-own-criteria).
+
 ## Tracker footprint — pack size is not clone size
 
 `rebar store footprint [--fresh-clone] [--output text|json]` reports the store's

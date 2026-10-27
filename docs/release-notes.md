@@ -8,6 +8,35 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## Eval harness roots are configurable; the `evals` extra is registered
+
+Non-breaking. The eval harnesses now run for a client project against its own criteria
+and corpus, instead of writing into whatever `docs/experiments/` the process CWD
+resolved to.
+
+- `[llm.evals] corpus_root` sets the root for replay/ledger OUTPUT, defaulting to
+  `.rebar/evals` and resolving against the REPO ROOT. Precedence is
+  `rebar -c llm.evals.corpus_root=` > `REBAR_LLM_EVALS_CORPUS_ROOT` > config file >
+  default. This is a resolution change, not a pure refactor: the previous literals were
+  relative and resolved against the process CWD, so a harness run from a subdirectory
+  used to scatter output there.
+- Eval SPEC discovery is deliberately NOT governed by `corpus_root`; it stays at
+  `.rebar/evals`, which is where `load_eval_spec` already looked, so both surfaces
+  resolve a client's spec identically. `provider_parity._spec_paths` now unions the
+  packaged specs with the project's own, keyed by filename stem with the project file
+  winning.
+- `rebar.llm.evals.plan_replay.ledger.DEFAULT_LEDGER_PATH` is REMOVED; ledger defaults
+  resolve at call time. `python -m rebar.llm.evals.plan_replay` gains `--ledger`.
+- `evals` is registered in `rebar._optional.EXTRAS`, so a missing `genai-prices` raises
+  `OptionalDependencyError` naming `nava-rebar[evals]` rather than a bare `ImportError`.
+- The research corpus moved from `docs/experiments/` and `docs/calibration/` to a
+  top-level `evals/`. It is not shipped in the wheel or the sdist.
+
+The `provider_parity --out` flag is unchanged and still has NO default: a run without it
+writes no file.
+
+See [llm-framework.md](llm-framework.md#running-the-eval-harnesses-against-your-own-criteria).
+
 ## BREAKING: coordinator-routed Jira writes retry HTTP 429 and 5xx within the pass
 
 This partially supersedes the next entry ("reconciler handlers make one transport attempt").
