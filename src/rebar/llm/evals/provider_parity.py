@@ -41,6 +41,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from rebar import config as _root_config
 from rebar.llm import parity
 from rebar.llm.bedrock_model import DEFAULT_BEDROCK_MODEL_ID
 from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig, gate_config
@@ -150,10 +151,28 @@ class ArmOutcome:
 
 
 # ── corpus ──────────────────────────────────────────────────────────────────────────
-def _spec_paths() -> list[Path]:
+def _spec_paths(repo_root: str | None = None) -> list[Path]:
+    """Packaged eval specs unioned with the project's own ``.rebar/evals/*.eval.yaml``.
+
+    Keyed by FILENAME STEM, project file winning — the same override semantics as
+    :func:`rebar.llm.evals.eval.eval_spec_path`, whose
+    ``.rebar/evals/<prompt_id>.eval.yaml`` beats the packaged copy. Stem keying
+    reproduces that without parsing any YAML at this ``list[Path]`` boundary.
+
+    ``.rebar/evals`` here is deliberate and is NOT the configurable eval corpus root:
+    it is where :func:`rebar.llm.evals.eval.load_eval_spec` already looks, so both
+    surfaces resolve a client's spec identically.
+    """
     from importlib.resources import files
 
-    return sorted(Path(str(files("rebar.llm").joinpath("eval_specs"))).glob("*.eval.yaml"))
+    by_stem: dict[str, Path] = {
+        path.name.removesuffix(".eval.yaml"): path
+        for path in sorted(Path(str(files("rebar.llm").joinpath("eval_specs"))).glob("*.eval.yaml"))
+    }
+    project_dir = _root_config.repo_root(repo_root) / ".rebar" / "evals"
+    for path in sorted(project_dir.glob("*.eval.yaml")):
+        by_stem[path.name.removesuffix(".eval.yaml")] = path
+    return [by_stem[stem] for stem in sorted(by_stem)]
 
 
 def solver_arm(solver_id: str, repo_root: str | None = None) -> str | None:
@@ -207,7 +226,7 @@ def eligible_cases(repo_root: str | None = None) -> list[CorpusItem]:
     import yaml
 
     items: list[CorpusItem] = []
-    for path in _spec_paths():
+    for path in _spec_paths(repo_root):
         spec = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         prompt_id = str(spec.get("prompt") or "")
         for case in spec.get("dataset") or []:

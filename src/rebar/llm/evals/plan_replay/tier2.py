@@ -555,7 +555,7 @@ def run_tier2_full(
     candidate_dir: str | None,
     candidate_name: str,
     ticket_repo_root: str,
-    ledger_path: str = ledger.DEFAULT_LEDGER_PATH,
+    ledger_path: str | None = None,
 ) -> dict[str, Any]:
     """Full mode: replay the WHOLE live registry's criteria over the fixed sample
     under ``candidate_dir``'s overrides (``None`` = the reproduction run)."""
@@ -678,7 +678,7 @@ def run_tier2_single_criterion(
     sample_path: str | Path,
     criterion_id: str,
     ticket_repo_root: str,
-    ledger_path: str = ledger.DEFAULT_LEDGER_PATH,
+    ledger_path: str | None = None,
 ) -> dict[str, Any]:
     """Single-criterion mode: replay ONLY ``criterion_id`` (real single/agent dispatch
     via ``ProductionBatchRunner``) over the fixed sample."""

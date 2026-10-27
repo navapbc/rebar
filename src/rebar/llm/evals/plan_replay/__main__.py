@@ -13,12 +13,20 @@ import sys
 from pathlib import Path
 
 from rebar.config import repo_root_or_none, tracker_dir
+from rebar.llm.config import replay_dir
 from rebar.llm.evals.plan_replay import report, tier0, tier1, tier2
 from rebar.llm.evals.plan_replay.candidates import CANDIDATES
 from rebar.llm.evals.plan_replay.verifier_candidates import load_verifier_candidate
 
-_DEFAULT_CACHE_DIR = Path("docs/experiments/plan-review-gate/replay/cache")
-_DEFAULT_OUT_DIR = Path("docs/experiments/plan-review-gate/replay")
+
+def _cache_dir(args) -> str:
+    """``--cache-dir``, or the replay cache under the configured eval corpus root."""
+    return str(args.cache_dir) if args.cache_dir else str(replay_dir() / "cache")
+
+
+def _sample_path(args) -> str:
+    """``--sample-path``, or the tier2 sample under the configured eval corpus root."""
+    return str(args.sample_path) if args.sample_path else str(replay_dir() / "tier2-sample.json")
 
 
 def _default_store_roots() -> dict[str, str]:
@@ -51,8 +59,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=_parse_store,
         help="name=path tracker store (repeatable); defaults to REBAR_ROOT's own tracker",
     )
-    tier0_parser.add_argument("--cache-dir", default=str(_DEFAULT_CACHE_DIR))
-    tier0_parser.add_argument("--out-dir", default=str(_DEFAULT_OUT_DIR))
+    tier0_parser.add_argument("--cache-dir", default=None)
+    tier0_parser.add_argument("--out-dir", default=None)
 
     tier1_parser = subparsers.add_parser("tier1", help="replay Pass-2 over a corpus sample")
     tier1_parser.add_argument(
@@ -69,8 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=_parse_store,
         help="name=path tracker store (repeatable); defaults to REBAR_ROOT's own tracker",
     )
-    tier1_parser.add_argument("--cache-dir", default=str(_DEFAULT_CACHE_DIR))
-    tier1_parser.add_argument("--out-dir", default=str(_DEFAULT_OUT_DIR))
+    tier1_parser.add_argument(
+        "--ledger", default=None, help="spend ledger JSONL; defaults under the eval corpus root"
+    )
+    tier1_parser.add_argument("--cache-dir", default=None)
+    tier1_parser.add_argument("--out-dir", default=None)
 
     tier2_parser = subparsers.add_parser("tier2", help="replay Pass-1 over a fixed sample")
     tier2_parser.add_argument(
@@ -83,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tier2_parser.add_argument(
         "--sample-path",
-        default=str(_DEFAULT_OUT_DIR / "tier2-sample.json"),
+        default=None,
         help="fixed sample file",
     )
     tier2_parser.add_argument(
@@ -93,8 +104,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=_parse_store,
         help="name=path tracker store (repeatable); defaults to REBAR_ROOT's own tracker",
     )
-    tier2_parser.add_argument("--cache-dir", default=str(_DEFAULT_CACHE_DIR))
-    tier2_parser.add_argument("--out-dir", default=str(_DEFAULT_OUT_DIR))
+    tier2_parser.add_argument(
+        "--ledger", default=None, help="spend ledger JSONL; defaults under the eval corpus root"
+    )
+    tier2_parser.add_argument("--cache-dir", default=None)
+    tier2_parser.add_argument("--out-dir", default=None)
 
     return parser
 
@@ -107,12 +121,12 @@ def _run_tier0(args: argparse.Namespace) -> int:
         return 2
 
     store_roots = dict(args.store) if args.store else _default_store_roots()
-    out_dir = Path(args.out_dir)
+    out_dir = Path(args.out_dir) if args.out_dir else replay_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     result = tier0.run_tier0(
         store_roots,
-        cache_dir=args.cache_dir,
+        cache_dir=_cache_dir(args),
         candidate_name=args.candidate,
         labels_path=args.labels,
     )
@@ -136,13 +150,14 @@ def _run_tier1(args: argparse.Namespace) -> int:
         return 2
 
     store_roots = dict(args.store) if args.store else _default_store_roots()
-    out_dir = Path(args.out_dir)
+    out_dir = Path(args.out_dir) if args.out_dir else replay_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     candidate_name = args.candidate or "current"
 
     result = tier1.run_tier1(
         store_roots,
-        cache_dir=args.cache_dir,
+        cache_dir=_cache_dir(args),
+        ledger_path=args.ledger,
         candidate=candidate,
         candidate_name=candidate_name,
         n=args.n,
@@ -161,23 +176,25 @@ def _run_tier1(args: argparse.Namespace) -> int:
 
 def _run_tier2(args: argparse.Namespace) -> int:
     store_roots = dict(args.store) if args.store else _default_store_roots()
-    out_dir = Path(args.out_dir)
+    out_dir = Path(args.out_dir) if args.out_dir else replay_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     ticket_repo_root = repo_root_or_none() or os.getcwd()
 
     if args.criteria:
         result = tier2.run_tier2_single_criterion(
             store_roots,
-            cache_dir=args.cache_dir,
-            sample_path=args.sample_path,
+            cache_dir=_cache_dir(args),
+            ledger_path=args.ledger,
+            sample_path=_sample_path(args),
             criterion_id=args.criteria,
             ticket_repo_root=ticket_repo_root,
         )
     else:
         result = tier2.run_tier2_full(
             store_roots,
-            cache_dir=args.cache_dir,
-            sample_path=args.sample_path,
+            cache_dir=_cache_dir(args),
+            ledger_path=args.ledger,
+            sample_path=_sample_path(args),
             candidate_dir=args.candidate,
             candidate_name=args.candidate or "current",
             ticket_repo_root=ticket_repo_root,

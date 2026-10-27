@@ -65,6 +65,10 @@ EXTRAS: dict[str, tuple[str, str]] = {
         "git_remote_s3",
         "the awslabs/git-remote-s3 remote helper for an s3:// ticket-store remote",
     ),
+    "evals": (
+        "genai_prices",
+        "the plan-review replay ledger's spend accounting (python -m rebar.llm.evals.plan_replay)",
+    ),
 }
 
 

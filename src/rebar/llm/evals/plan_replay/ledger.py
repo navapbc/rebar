@@ -21,6 +21,9 @@ import json
 import os
 from datetime import UTC, datetime
 
+from rebar._optional import guard_import
+from rebar.llm.config import default_ledger_path
+
 #: Hard budget cap for the eval suite, in USD. No run may push cumulative recorded
 #: spend past this ceiling.
 LEDGER_CAP_USD = 200.0
@@ -38,9 +41,6 @@ PER_SAMPLE_ESTIMATE_USD = {
     "criteria-eval-cheap": 0.03,
     "criteria-eval-agent": 0.25,
 }
-
-#: Default location of the committed ledger JSONL file (one row per finalized eval run).
-DEFAULT_LEDGER_PATH = "docs/experiments/plan-review-gate/replay/ledger.jsonl"
 
 #: The four billable token fields summed into a finalized ledger entry.
 _TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
@@ -86,7 +86,7 @@ def _spent_so_far(ledger_path: str) -> float:
 def reserve(
     estimate_usd: float,
     *,
-    ledger_path: str = DEFAULT_LEDGER_PATH,
+    ledger_path: str | None = None,
     cap_usd: float | None = None,
     reserve_usd: float | None = None,
 ) -> None:
@@ -99,6 +99,7 @@ def reserve(
     :class:`BudgetExceeded` naming the remaining allocation when the estimate does not
     fit; otherwise returns ``None``.
     """
+    ledger_path = str(ledger_path or default_ledger_path())
     cap = LEDGER_CAP_USD if cap_usd is None else cap_usd
     reserve_headroom = LEDGER_RESERVE_USD if reserve_usd is None else reserve_usd
     spent = _spent_so_far(ledger_path)
@@ -117,7 +118,7 @@ def _price_rows(rows: list[dict]) -> tuple[float, dict[str, int]]:
     Raises :class:`UnpriceableRun` if any row's model cannot be resolved -- pricing
     failures must be loud, never a silent ``usd=0``.
     """
-    import genai_prices
+    genai_prices = guard_import("genai_prices", extra="evals")
 
     from rebar.llm.usage_report import _pricing_model_ref, usage_kwargs
 
@@ -150,13 +151,14 @@ def finalize(
     per_pass_models: dict,
     rows: list[dict],
     *,
-    ledger_path: str = DEFAULT_LEDGER_PATH,
+    ledger_path: str | None = None,
 ) -> dict:
     """Price ``rows`` and append one JSONL entry recording the run's actual cost.
 
     Raises :class:`UnpriceableRun` (and writes nothing) if any row's model cannot be
     priced by ``genai_prices``.
     """
+    ledger_path = str(ledger_path or default_ledger_path())
     total_usd, totals = _price_rows(rows)
     entry = {
         "run_id": run_id,
@@ -182,7 +184,7 @@ def charge_estimate(
     candidate: str,
     estimate_usd: float,
     *,
-    ledger_path: str = DEFAULT_LEDGER_PATH,
+    ledger_path: str | None = None,
 ) -> dict:
     """Record the pre-flight ESTIMATE as consumed spend for a run whose actual usage
     cannot be priced into billable rows.
@@ -195,6 +197,7 @@ def charge_estimate(
     the run that would exceed the cap. The entry is flagged ``estimated`` so a reader can
     tell an estimate charge from a priced :func:`finalize` entry.
     """
+    ledger_path = str(ledger_path or default_ledger_path())
     entry = {
         "run_id": run_id,
         "tier": tier,
@@ -219,7 +222,7 @@ def reconcile(
     per_pass_models: dict,
     rows: list[dict],
     *,
-    ledger_path: str = DEFAULT_LEDGER_PATH,
+    ledger_path: str | None = None,
 ) -> dict:
     """Finalize a run that may already have been recorded (e.g. after a crash mid-run).
 
@@ -227,6 +230,7 @@ def reconcile(
     unchanged -- never re-appends or double-counts. Otherwise behaves exactly like
     :func:`finalize`.
     """
+    ledger_path = str(ledger_path or default_ledger_path())
     for existing in _read_ledger(ledger_path):
         if existing.get("run_id") == run_id:
             return existing
@@ -241,13 +245,14 @@ def reconcile(
     )
 
 
-def print_summary(*, ledger_path: str = DEFAULT_LEDGER_PATH, cap_usd: float | None = None) -> str:
+def print_summary(*, ledger_path: str | None = None, cap_usd: float | None = None) -> str:
     """Multi-line report: total spent, remaining allocation, and a per-tier breakdown.
 
     ``cap_usd`` defaults to the module global (resolved live at call time) when omitted;
     a sibling epic passes its own ceiling so the reported headroom reflects that cap. All
     dollar amounts render with exactly two decimal places.
     """
+    ledger_path = str(ledger_path or default_ledger_path())
     cap = LEDGER_CAP_USD if cap_usd is None else cap_usd
     rows = _read_ledger(ledger_path)
     spent = sum(float(row.get("usd", 0.0) or 0.0) for row in rows)

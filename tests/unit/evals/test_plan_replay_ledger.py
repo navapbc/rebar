@@ -259,3 +259,85 @@ def test_print_summary_breaks_down_by_tier(tmp_path, monkeypatch):
     assert "tier2" in summary
     assert "5.00" in summary  # tier1 total
     assert "10.00" in summary  # tier2 total (2 runs * $5)
+
+
+# ── configurable ledger path + the evals extra (epic e47b slice 1) ──────────────────
+
+
+def test_the_evals_extra_is_registered() -> None:
+    """``genai_prices`` is a pyproject extra, so its import must go through the one
+    optional-dependency chokepoint rather than a bare ``import``."""
+    from rebar import _optional
+
+    assert "evals" in _optional.EXTRAS
+    assert _optional.EXTRAS["evals"][0] == "genai_prices"
+
+
+def test_pricing_without_genai_prices_names_the_evals_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import rebar._optional as optional_mod
+    from rebar._optional import OptionalDependencyError
+    from rebar.llm.evals.plan_replay import ledger as ledger_mod
+
+    def blocked(module: str, *, extra: str):
+        raise OptionalDependencyError(
+            f"{module!r} is required for the {extra!r} extra but is not importable"
+        )
+
+    monkeypatch.setattr(ledger_mod, "guard_import", blocked)
+    assert optional_mod.EXTRAS["evals"][0] == "genai_prices"
+
+    with pytest.raises(OptionalDependencyError) as excinfo:
+        ledger_mod._price_rows([{"model": "anthropic:claude-opus-4-8", "input_tokens": 1}])
+    assert "evals" in str(excinfo.value)
+
+
+def test_ledger_defaults_follow_the_configured_corpus_root(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``ledger_path=None`` resolves through the config layer, so a client project's runs
+    never append to rebar's own committed ledger."""
+    from rebar.llm.evals.plan_replay import ledger as ledger_mod
+
+    monkeypatch.setenv("REBAR_LLM_EVALS_CORPUS_ROOT", str(tmp_path / "corpus"))
+    expected = tmp_path / "corpus" / "plan-review-gate" / "replay" / "ledger.jsonl"
+
+    ledger_mod.charge_estimate("r1", "tier1", "current", 0.01, ledger_path=None)
+    assert expected.exists()
+
+
+#: Every entry point that gained ``ledger_path: str | None = None``. Each resolves the
+#: default itself, so one covered function would not prove the other four.
+_DEFAULTING_ENTRY_POINTS = ("reserve", "finalize", "charge_estimate", "reconcile", "print_summary")
+
+
+@pytest.mark.parametrize("name", _DEFAULTING_ENTRY_POINTS)
+def test_every_entry_point_resolves_the_default_ledger_path(
+    name: str, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each of the five carries its own ``ledger_path or default_ledger_path()`` line, so a
+    dropped line in any one of them silently reinstates a hard-coded path."""
+    from rebar.llm.evals.plan_replay import ledger as ledger_mod
+
+    monkeypatch.setenv("REBAR_LLM_EVALS_CORPUS_ROOT", str(tmp_path / "corpus"))
+    expected = str(tmp_path / "corpus" / "plan-review-gate" / "replay" / "ledger.jsonl")
+
+    seen: list[str] = []
+    monkeypatch.setattr(ledger_mod, "_read_ledger", lambda path: (seen.append(path), [])[1])
+
+    calls = {
+        "reserve": lambda: ledger_mod.reserve(0.0, ledger_path=None),
+        "finalize": lambda: ledger_mod.finalize("r", "tier1", "c", 0, {}, [], ledger_path=None),
+        "charge_estimate": lambda: ledger_mod.charge_estimate(
+            "r", "tier1", "c", 0.0, ledger_path=None
+        ),
+        "reconcile": lambda: ledger_mod.reconcile("r", "tier1", "c", 0, {}, [], ledger_path=None),
+        "print_summary": lambda: ledger_mod.print_summary(ledger_path=None),
+    }
+    calls[name]()
+
+    written = tmp_path / "corpus" / "plan-review-gate" / "replay" / "ledger.jsonl"
+    assert seen or written.exists(), f"{name} neither read nor wrote the default ledger"
+    if seen:
+        assert seen[0] == expected
