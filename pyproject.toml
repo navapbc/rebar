@@ -399,6 +399,14 @@ exclude = [
     "/infra",
     "infra",
     "infra/**",
+    # evals/ is the research corpus (epic e47b). The `include` allowlist does NOT
+    # keep it out: "README.md" there is a depth-agnostic glob, so every README.md
+    # in the tree matches it — before the corpus moved, the sdist already shipped
+    # docs/experiments/README.md and its siblings this way. Exclude the tree
+    # explicitly so the corpus stays out of the distribution.
+    "/evals",
+    "evals",
+    "evals/**",
 ]
 
 [tool.ruff]

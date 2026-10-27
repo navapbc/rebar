@@ -109,3 +109,25 @@ def test_every_registered_extra_exists_in_pyproject(pyproject) -> None:
     declared = set(pyproject["project"].get("optional-dependencies", {}))
     missing = sorted(set(_optional.EXTRAS) - declared)
     assert missing == [], f"EXTRAS names extras that pyproject does not declare: {missing}"
+
+
+def test_the_research_corpus_is_excluded_from_both_distributions() -> None:
+    """``evals/`` is research, not product, and must not ship (epic e47b).
+
+    The sdist's ``include`` allowlist does NOT keep it out on its own: ``"README.md"``
+    there is a depth-agnostic glob, so every ``README.md`` in the tree matches it. Before
+    the corpus moved, that already swept ``docs/experiments/README.md`` and its siblings
+    into the sdist; after the move the same glob caught ``evals/README.md``. The explicit
+    ``exclude`` entries are what actually keep the tree out, so this guards them.
+    """
+    build = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["tool"]["hatch"]["build"][
+        "targets"
+    ]
+
+    assert "evals" not in build["wheel"]["packages"]
+    sdist_exclude = build["sdist"]["exclude"]
+    for pattern in ("/evals", "evals", "evals/**"):
+        assert pattern in sdist_exclude, (
+            f"{pattern!r} missing from the sdist exclude list; the include allowlist's "
+            "depth-agnostic README.md glob would otherwise ship research READMEs"
+        )
