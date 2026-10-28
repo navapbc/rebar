@@ -81,7 +81,6 @@ def rebuild_snapshot_from_full_log(
     we rebuild again (the operation is idempotent). Runs under the write lock
     (single-writer). Returns True if a rebuild was performed.
     """
-    global _REBUILD_COUNT
     try:
         handle = lock.acquire(tracker, timeout=30, attempts=2, dual_window=True)
     except lock.LockTimeout as exc:
@@ -93,90 +92,108 @@ def rebuild_snapshot_from_full_log(
         logger.warning("fsck: cannot rebuild snapshot for %s: %s", ticket_id, exc)
         return False
     try:
-        bak_path = os.path.join(ticket_dir, ".snapshot-rebuild.bak")
-        if os.path.exists(bak_path):
-            logger.warning(
-                "fsck: interrupted snapshot rebuild for %s (.bak present) — restarting", ticket_id
-            )
-
-        # Full raw-history state INCLUDING the merged-in orphan the stale snapshot dropped.
-        # None when the rebuild must NOT proceed — the b636 fail-closed guard (prior SNAPSHOT
-        # cites sources absent from disk => incomplete log) or a failed reduce.
-        compiled_state = fsck_repair.rebuild_source_state(ticket_id, ticket_dir)
-        if compiled_state is None:
-            logger.warning(
-                "fsck: snapshot rebuild for %s aborted (incomplete log or reduce failure)",
-                ticket_id,
-            )
-            return False
-        # The legacy ``signature`` mirror is never persisted into a rebuilt snapshot
-        # either (task 7ed9 never-emit) — it is re-derived in memory on replay.
-        _strip = _snapshot_strip_keys()
-        compiled_state = {k: v for k, v in compiled_state.items() if k not in _strip}
-
-        live_raw, source_uuids, old_snaps, raw_paths = _partition_rebuild_sources(ticket_dir)
-        # Authorship ledger (epic gnu-whale-ichor / 3183): rebuild it from the FULL raw log
-        # (active + retired) so a rebuilt SNAPSHOT preserves the signed-event ledger too.
-        compiled_state["authorship_ledger"] = _build_authorship_ledger(
-            raw_paths, store_repo_root(tracker)
-        )
-
-        snapshot_ts = hlc.next_tick(tracker, ticket_id)
-        snapshot_event, final_path = compact_plan.build_snapshot_event(
-            tracker, ticket_dir, compiled_state, source_uuids, snapshot_ts
-        )
-
-        # Sentinel/back-up the pre-rebuild snapshot BEFORE mutating.
-        try:
-            backup = ""
-            if old_snaps:
-                with open(old_snaps[-1], encoding="utf-8") as f:
-                    backup = f.read()
-            fsutil.atomic_write(bak_path, backup, encoding="utf-8")
-        except OSError:
-            logger.warning("fsck: could not write rebuild sentinel for %s", ticket_id)
-            return False
-
-        fsutil.atomic_write(final_path, canonical_str(snapshot_event), encoding="utf-8")
-
-        for fp in live_raw + old_snaps:
-            retired = fp + RETIRED_SUFFIX
-            if os.path.exists(retired):
-                continue
-            try:
-                os.rename(fp, retired)
-            except OSError:
-                logger.warning("fsck: could not retire %s during rebuild", fp, exc_info=True)
-
-        try:
-            os.remove(os.path.join(ticket_dir, ".cache.json"))
-        except OSError:
-            pass
-
-        # Clean round-trip: a fresh reduce must reproduce the rebuilt status before we
-        # drop the sentinel (else leave it so the next fsck retries).
-        check = reduce_ticket(ticket_dir)
-        if check is None or check.get("status") != compiled_state.get("status"):
-            logger.warning(
-                "fsck: snapshot rebuild round-trip mismatch for %s — leaving .bak for retry",
-                ticket_id,
-            )
-            return False
-        try:
-            os.remove(bak_path)
-        except OSError:
-            pass
-
-        _REBUILD_COUNT += 1
-        logger.warning(
-            "fsck: rebuilt SNAPSHOT for %s from full log (%d sources) — folded a merged-in "
-            "pre-snapshot orphan",
-            ticket_id,
-            len(source_uuids),
-        )
-
-        if not no_commit:
-            _commit_rebuild(tracker, ticket_id)
-        return True
+        return rebuild_snapshot_under_lock(tracker, ticket_id, ticket_dir, no_commit=no_commit)
     finally:
         handle.release()
+
+
+# raw-git-ok: store-maintenance command, seam-internal
+def rebuild_snapshot_under_lock(
+    tracker: str,
+    ticket_id: str,
+    ticket_dir: str,
+    *,
+    no_commit: bool = False,
+) -> bool:
+    """The rebuild itself, for a caller that ALREADY holds the tickets write lock.
+
+    The lock is a kernel file lock, so a second :func:`lock.acquire` from the same process
+    waits on the first and times out; the ensure sweep, which runs every unit under one
+    lock, therefore cannot call :func:`rebuild_snapshot_from_full_log`. Both entry points
+    share this body, so the sentinel, round-trip check and counter behave identically."""
+    global _REBUILD_COUNT
+    bak_path = os.path.join(ticket_dir, ".snapshot-rebuild.bak")
+    if os.path.exists(bak_path):
+        logger.warning(
+            "fsck: interrupted snapshot rebuild for %s (.bak present) — restarting", ticket_id
+        )
+
+    # Full raw-history state INCLUDING the merged-in orphan the stale snapshot dropped.
+    # None when the rebuild must NOT proceed — the b636 fail-closed guard (prior SNAPSHOT
+    # cites sources absent from disk => incomplete log) or a failed reduce.
+    compiled_state = fsck_repair.rebuild_source_state(ticket_id, ticket_dir)
+    if compiled_state is None:
+        logger.warning(
+            "fsck: snapshot rebuild for %s aborted (incomplete log or reduce failure)",
+            ticket_id,
+        )
+        return False
+    # The legacy ``signature`` mirror is never persisted into a rebuilt snapshot
+    # either (task 7ed9 never-emit) — it is re-derived in memory on replay.
+    _strip = _snapshot_strip_keys()
+    compiled_state = {k: v for k, v in compiled_state.items() if k not in _strip}
+
+    live_raw, source_uuids, old_snaps, raw_paths = _partition_rebuild_sources(ticket_dir)
+    # Authorship ledger (epic gnu-whale-ichor / 3183): rebuild it from the FULL raw log
+    # (active + retired) so a rebuilt SNAPSHOT preserves the signed-event ledger too.
+    compiled_state["authorship_ledger"] = _build_authorship_ledger(
+        raw_paths, store_repo_root(tracker)
+    )
+
+    snapshot_ts = hlc.next_tick(tracker, ticket_id)
+    snapshot_event, final_path = compact_plan.build_snapshot_event(
+        tracker, ticket_dir, compiled_state, source_uuids, snapshot_ts
+    )
+
+    # Sentinel/back-up the pre-rebuild snapshot BEFORE mutating.
+    try:
+        backup = ""
+        if old_snaps:
+            with open(old_snaps[-1], encoding="utf-8") as f:
+                backup = f.read()
+        fsutil.atomic_write(bak_path, backup, encoding="utf-8")
+    except OSError:
+        logger.warning("fsck: could not write rebuild sentinel for %s", ticket_id)
+        return False
+
+    fsutil.atomic_write(final_path, canonical_str(snapshot_event), encoding="utf-8")
+
+    for fp in live_raw + old_snaps:
+        retired = fp + RETIRED_SUFFIX
+        if os.path.exists(retired):
+            continue
+        try:
+            os.rename(fp, retired)
+        except OSError:
+            logger.warning("fsck: could not retire %s during rebuild", fp, exc_info=True)
+
+    try:
+        os.remove(os.path.join(ticket_dir, ".cache.json"))
+    except OSError:
+        pass
+
+    # Clean round-trip: a fresh reduce must reproduce the rebuilt status before we
+    # drop the sentinel (else leave it so the next fsck retries).
+    check = reduce_ticket(ticket_dir)
+    if check is None or check.get("status") != compiled_state.get("status"):
+        logger.warning(
+            "fsck: snapshot rebuild round-trip mismatch for %s — leaving .bak for retry",
+            ticket_id,
+        )
+        return False
+    try:
+        os.remove(bak_path)
+    except OSError:
+        pass
+
+    _REBUILD_COUNT += 1
+    logger.warning(
+        "fsck: rebuilt SNAPSHOT for %s from full log (%d sources) — folded a merged-in "
+        "pre-snapshot orphan",
+        ticket_id,
+        len(source_uuids),
+    )
+
+    if not no_commit:
+        _commit_rebuild(tracker, ticket_id)
+    return True

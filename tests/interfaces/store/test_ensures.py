@@ -66,6 +66,7 @@ def test_registry_id_set_is_frozen() -> None:
         "projects-seed",
         "projects-compat-stamp",
         "untrack-runtime-markers",
+        "snapshot-close-metadata",
     }
     assert set(ensures.REGISTRY_IDS) == expected
     assert set(ensures._registry().keys()) == expected
