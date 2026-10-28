@@ -114,11 +114,12 @@ def test_every_registered_extra_exists_in_pyproject(pyproject) -> None:
 def test_the_research_corpus_is_excluded_from_both_distributions() -> None:
     """``evals/`` is research, not product, and must not ship (epic e47b).
 
-    The sdist's ``include`` allowlist does NOT keep it out on its own: ``"README.md"``
-    there is a depth-agnostic glob, so every ``README.md`` in the tree matches it. Before
-    the corpus moved, that already swept ``docs/experiments/README.md`` and its siblings
-    into the sdist; after the move the same glob caught ``evals/README.md``. The explicit
-    ``exclude`` entries are what actually keep the tree out, so this guards them.
+    The sdist's ``include`` allowlist now keeps it out on its own: the README entry is
+    root-anchored (``"/README.md"``), so it is no longer the depth-agnostic glob that
+    admitted any directory holding a ``README.md`` — ``docs/experiments/`` before the
+    corpus moved, ``evals/`` after (bug 9cf1-3663-4de6-4844). The explicit ``exclude``
+    entries remain as belt-and-suspenders, and this guards them so a future ``include``
+    edit cannot quietly start shipping the tree again.
     """
     build = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["tool"]["hatch"]["build"][
         "targets"
@@ -131,3 +132,84 @@ def test_the_research_corpus_is_excluded_from_both_distributions() -> None:
             f"{pattern!r} missing from the sdist exclude list; the include allowlist's "
             "depth-agnostic README.md glob would otherwise ship research READMEs"
         )
+
+
+# What the sdist archive carries at its top level, and why each entry is there.
+# `src`, `tests` and `README.md` are the `include` allowlist. The rest are hatchling's
+# own additions, each traceable to a declaration in pyproject.toml rather than to a
+# pattern: PKG-INFO and pyproject.toml are sdist metadata, LICENSE and docs/ come from
+# PEP 639 `license-files`, hatch_build.py is the `[tool.hatch.build.hooks.custom]` hook,
+# and .gitignore is hatchling's default sdist inclusion.
+_SDIST_ALLOWLIST_ENTRIES = frozenset({"src", "tests", "README.md"})
+_SDIST_DECLARED_EXTRAS = frozenset(
+    {"PKG-INFO", "pyproject.toml", "LICENSE", "docs", "hatch_build.py", ".gitignore"}
+)
+
+
+def _built_top_level(builder, tmp_path) -> tuple[set[str], list[str]]:
+    """Build one distribution in-process and return its top-level entries and all paths.
+
+    Builds the REAL archive (~5 s) rather than inspecting patterns, because the defect
+    this guards was invisible to pattern reading: a bare ``README.md`` looks anchored and
+    is not.
+    """
+    import tarfile
+    import zipfile
+
+    artifact = next(iter(builder.build(directory=str(tmp_path), versions=["standard"])))
+    if artifact.endswith(".whl"):
+        with zipfile.ZipFile(artifact) as archive:
+            names = [n for n in archive.namelist() if not n.endswith("/")]
+        return {n.split("/")[0] for n in names}, names
+    with tarfile.open(artifact) as archive:
+        names = [m.name for m in archive.getmembers() if m.isfile()]
+    root = names[0].split("/")[0]
+    stripped = [n[len(root) + 1 :] for n in names]
+    return {n.split("/")[0] for n in stripped}, stripped
+
+
+def test_the_sdist_ships_only_its_allowlist_and_declared_metadata(tmp_path) -> None:
+    """The sdist's top-level entry set is exactly the allowlist plus declared metadata.
+
+    Bug 9cf1-3663-4de6-4844: ``include = [..., "README.md"]`` reads as an allowlist but
+    the bare entry is a depth-agnostic glob in hatchling, so every ``README.md`` in the
+    tree matched and dragged its parent directory into the sdist — measured on this tree
+    as ``.github/``, ``docs/``, ``examples/`` and ``scripts/``. Anchoring the entry to
+    ``/README.md`` makes the allowlist mean what it says, and building the archive here
+    is what catches a future unanchored pattern; reading the pattern never did.
+    """
+    pytest.importorskip("hatchling")
+    from hatchling.builders.sdist import SdistBuilder
+
+    tops, paths = _built_top_level(SdistBuilder(str(_PYPROJECT.parent)), tmp_path)
+
+    assert tops == _SDIST_ALLOWLIST_ENTRIES | _SDIST_DECLARED_EXTRAS, (
+        "the sdist's top-level entries drifted from the declared set; a new entry must "
+        "either be named in the `include` allowlist or be a declared metadata addition "
+        "recorded in _SDIST_DECLARED_EXTRAS with its reason"
+    )
+    stray = [
+        p
+        for p in paths
+        if p.endswith("README.md") and p != "README.md" and not p.startswith("tests/")
+    ]
+    assert stray == [], f"README.md files outside the declared set shipped: {stray}"
+
+
+def test_the_wheel_ships_only_the_package_and_its_metadata(tmp_path) -> None:
+    """The wheel carries the ``rebar`` package and its dist-info, nothing else.
+
+    The wheel was believed unaffected by the sdist's glob because it builds from
+    ``packages = ["src/rebar"]``. This measures that belief instead of assuming it.
+    """
+    pytest.importorskip("hatchling")
+    from hatchling.builders.wheel import WheelBuilder
+
+    tops, paths = _built_top_level(WheelBuilder(str(_PYPROJECT.parent)), tmp_path)
+
+    dist_info = {t for t in tops if t.endswith(".dist-info")}
+    assert len(dist_info) == 1, f"expected exactly one .dist-info, got {sorted(dist_info)}"
+    assert tops - dist_info == {"rebar"}, (
+        f"the wheel shipped unexpected top-level entries: {sorted(tops - dist_info - {'rebar'})}"
+    )
+    assert [p for p in paths if p.endswith("README.md")] == []

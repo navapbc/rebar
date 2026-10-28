@@ -388,22 +388,28 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/rebar", "tests", "README.md"]
+# The README entry is ROOT-ANCHORED ("/README.md"). A bare "README.md" is a
+# depth-agnostic glob in hatchling, so it matched every README.md in the tree and
+# shipped .github/, docs/, examples/ and scripts/ — paths the allowlist never names
+# (bug 9cf1-3663-4de6-4844). The leading slash pins it to the project README.
+# tests/unit/test_packaging_dependencies.py builds the sdist and asserts the
+# resulting top-level entry set, so a future pattern cannot widen this silently.
+include = ["src/rebar", "tests", "/README.md"]
 exclude = [
     "**/__pycache__",
     "**/*.pyc",
     "**/*.pyo",
-    # infra/ is already excluded by the `include` allowlist above (it is not in
-    # the list), but exclude it explicitly as belt-and-suspenders so a future
-    # `include` change can't accidentally start shipping the Terraform IaC.
+    # infra/ is outside the `include` allowlist above, and with the README entry
+    # anchored that now genuinely excludes it — while the glob was unanchored, any
+    # directory holding a README.md shipped, infra/ included. Keep the explicit
+    # excludes as belt-and-suspenders so a future `include` change cannot start
+    # shipping the Terraform IaC.
     "/infra",
     "infra",
     "infra/**",
-    # evals/ is the research corpus (epic e47b). The `include` allowlist does NOT
-    # keep it out: "README.md" there is a depth-agnostic glob, so every README.md
-    # in the tree matches it — before the corpus moved, the sdist already shipped
-    # docs/experiments/README.md and its siblings this way. Exclude the tree
-    # explicitly so the corpus stays out of the distribution.
+    # evals/ is the research corpus (epic e47b). Anchoring the README entry is what
+    # keeps it out of the allowlist; these excludes remain as the explicit statement
+    # that the corpus never belongs in a distribution.
     "/evals",
     "evals",
     "evals/**",
