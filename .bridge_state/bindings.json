@@ -90948,9 +90948,17 @@
       "updated_at": "2026-08-15T15:13:12Z"
     },
     "dc9b-e792-bad3-4578": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Symptom\n\n`review_plan_start` returned a **stale BLOCK** for a plan whose material had just been widened, instead of reviewing the new material. The returned `durable` block was the attestation from the *previous* run.\n\nObserved on story `6b66-9378-ebb1-446c`:\n\n1. `set_file_impact` \u2192 13 paths.\n2. `review_plan_start` \u2192 job `\u2026dbe7ada2`, `verdict: PASS`, `signed_at: 1793154820371400435`.\n3. `set_file_impact` \u2192 **14** paths (added `tests/unit/workflow/test_contracts.py`).\n4. `review_plan_start` \u2192 job `\u202641c67599`, **`verdict: BLOCK`**, `durable.verdict: \"stale-material\"`, `reason: \"the plan was materially edited since review \u2014 changed: file_impact (13 -> 14 paths)\"`, and `signed_at: 1793154820371400435` \u2014 **the timestamp from step 2**.\n5. `show_ticket` reported `plan_reviews: 0` \u2014 no findings were produced for the step-4 job.\n6. `review_plan_start(force=True)` \u2192 job `\u2026702b44ed`, `verdict: PASS`, `durable.verdict: certified`, `signed_at: 1793158405677634370`. Same tree, same SHA `ee5253abfd4`.\n\nThe only difference between steps 4 and 6 is `force=True`.\n\n## Diagnosis\n\nThe start path's de-dup key does not include the plan material fingerprint. Step 4 matched the step-2 job on ticket + basis, attached to it, and surfaced its already-computed result \u2014 which, re-evaluated against the now-changed material, renders as `stale-material`. No fresh review ran, which is why `plan_reviews` stayed empty.\n\nThe tool's own contract says \"Duplicate ticket/basis starts share a job\". The defect is that **a material edit does not make a start non-duplicate**, even though a material edit is precisely what invalidates the prior result.\n\n## Why this is worth fixing rather than documenting\n\nThe failure is silent and inverted. An agent that widens `file_impact` \u2014 which AGENTS.md actively requires when a change touches a file the plan did not declare \u2014 and then re-reviews gets a BLOCK verdict carrying a plausible, *accurate-sounding* reason (\"the plan was materially edited since review\"). The natural reading is \"my plan is blocked, go revise it\". The correct reading is \"your start was swallowed; re-run with force\". Nothing in the response distinguishes those.\n\nWorse, `gate_status` reported `status: \"passed\"` and `findings.readable: true` with a `current-review-result-sidecar` for the step-4 job, so the surfaces that an agent would use to sanity-check disagree with each other.\n\n## Acceptance criteria\n\n- [ ] A `review_plan_start` issued after the ticket's reviewed material changed (description or `file_impact`) does **not** de-dup onto a job started before that change; it runs a fresh review.\n- [ ] Regression test: start a review, mutate `file_impact`, start again without `force`, and assert the second job produces its own findings and a certified attestation rather than replaying the first job's verdict.\n- [ ] `verify_completion_start` is audited for the same de-dup key defect and fixed or shown to be unaffected.\n- [ ] If de-dup across a material change is ever intentional, the response must say so explicitly rather than surfacing a bare `stale-material` that reads as a plan defect.\n\nDiscovered while implementing story `6b66-9378-ebb1-446c`; cost one confused round trip.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "review_plan_start de-dups across a material change and replays the prior run's stale verdict"
+      },
       "created_at": "2026-10-28T04:35:43Z",
       "jira_id": "4597350",
       "jira_key": "REB-6776",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-10-28T04:35:46Z"
     },
@@ -99603,9 +99611,17 @@
       "updated_at": "2026-09-05T09:38:18Z"
     },
     "f1a2-0755-693d-4924": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Symptom\n\nEvery local `rebar` CLI invocation in the main checkout `/Users/joeoakhart/rebar` emits:\n\n```\nWARNING rebar._store.sync: tickets sync could not auto-merge origin/tickets \u2014 local state kept; run: rebar fsck-recover\n```\n\nThe command then succeeds and returns data, so this is a degraded-but-working state, not a hard failure. MCP tracker writes are unaffected \u2014 every write this session returned `push_status: {\"state\": \"ok\"}`.\n\n## Observations (facts, not yet interpreted)\n\nMeasured 2026-10-27 ~21:30 PDT:\n\n- `git rev-list --left-right --count tickets...origin/tickets` \u2192 **4 ahead, 32 behind**.\n- `git merge-base tickets origin/tickets` \u2192 `237b90d370987721aec488df41529715d344af00`. **A common ancestor exists**, so this is NOT the no-common-ancestor `DIVERGED` case that `docs/concurrency.md` describes as refusing the first new write.\n- The 4 local-only commits are, newest first:\n  - `40c378b600d` 20:53:16 `ticket: REBUILD SNAPSHOT 52b0-6a6a-c66b-4c59`\n  - `faa4618083c` 20:03:05 `ticket: REBUILD SNAPSHOT 40a7-7c22-a553-4a1f`\n  - `b115f8b5099` 19:43:57 `ticket: REBUILD SNAPSHOT 14f4-d616-70df-466d`\n  - `465a93c5673` 18:56:20 `ticket: REBUILD SNAPSHOT 075b-1479-dcb7-40ab`\n\n  **All four are `REBUILD SNAPSHOT`** \u2014 every one is a derived/compacted artifact, not an original ticket event (no CREATE/EDIT/COMMENT/LINK/TRANSITION among them).\n- Remote-only commits include `ticket: LINK 0ef7-c987-a8d5-4a39` and `ticket: REVIEW_RESULT 0ef7-c987-a8d5-4a39` timestamped 21:22:13-21:22:19 \u2014 a ticket this session never touched, so **at least one other agent session was writing the store concurrently**.\n\n## Hypotheses (competing, none yet tested)\n\n1. **Snapshot collision.** Two sessions independently rebuilt a snapshot from different bases; the resulting trees conflict textually, so the auto-merge strategy cannot resolve them. The all-`REBUILD SNAPSHOT` composition of the local-only set is consistent with this but does not establish it.\n2. **Merge strategy gap.** The sync path's auto-merge has no union/ours strategy registered for the snapshot path, so any snapshot divergence \u2014 however benign \u2014 fails the merge rather than regenerating.\n3. **Unrelated local corruption.** Something else wedged the branch and the snapshot commits are incidental.\n\nThese are untested. Do not fix before distinguishing them.\n\n## Why this matters\n\nIf hypothesis 1 or 2 holds, every host running more than one concurrent agent session will drift into this state routinely, and the operator-facing instruction is a manual `rebar fsck-recover`. A snapshot is rebuildable by definition, so a conflict between two rebuilds of the same derived state should not require human intervention \u2014 it should resolve by regenerating.\n\nThe 32-commit backlog also means the local CLI serves **stale reads** while warning only on stderr. An agent using the local CLI carve-out (`verify-commit-ticket`, `review-plan --status`, `rebar explain`) could act on ticket state 32 events behind the store.\n\n## Acceptance Criteria\n\n- [ ] Root cause identified and stated with evidence, distinguishing between the hypotheses above \u2014 specifically, whether the merge fails because of snapshot content conflict, a missing merge strategy, or something else.\n- [ ] A reproduction exists: two concurrent writers driven to produce the same auto-merge failure, or a documented explanation of why it cannot be reproduced deterministically.\n- [ ] Regression test covering the identified cause.\n- [ ] Remediation: if snapshot conflicts are the cause, the sync path resolves them by regenerating the derived state rather than surfacing an unresolvable merge to the operator.\n- [ ] The main checkout `/Users/joeoakhart/rebar` is returned to a clean sync state. **Do not use `--force` on any surface; if recovery needs one, stop and escalate to the user.** Note that `/Users/joeoakhart/rebar` is a shared checkout that may hold uncommitted operator WIP \u2014 do not reset, stash, or fast-forward it destructively.\n- [ ] If the stale-read exposure is real, state whether the warning should become a hard failure for the local-CLI reads that agents are told to use.\n\nDiscovered 2026-10-27 while landing story `6b66-9378-ebb1-446c`.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Local tickets branch cannot auto-merge origin/tickets; 4 local-only REBUILD SNAPSHOT commits, 32 behind"
+      },
       "created_at": "2026-10-28T04:35:49Z",
       "jira_id": "4597351",
       "jira_key": "REB-6777",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-10-28T04:35:52Z"
     },
@@ -110248,7 +110264,16 @@
     "1793146913460506875": "__rebar_unknown_comment_id__",
     "1793147104058363047": "__rebar_unknown_comment_id__",
     "1793154498099132750": "__rebar_unknown_comment_id__",
-    "1793160963609512462": "__rebar_unknown_comment_id__"
+    "1793160963609512462": "__rebar_unknown_comment_id__",
+    "1793162180624783043": "__rebar_unknown_comment_id__",
+    "1793162627999304687": "__rebar_unknown_comment_id__",
+    "1793162825026094630": "__rebar_unknown_comment_id__",
+    "1793163629943206889": "__rebar_unknown_comment_id__",
+    "1793163629943638104": "__rebar_unknown_comment_id__",
+    "1793163657445521096": "__rebar_unknown_comment_id__",
+    "1793163944841552026": "__rebar_unknown_comment_id__",
+    "1793163944852759111": "__rebar_unknown_comment_id__",
+    "1793164250547064894": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
