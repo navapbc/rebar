@@ -44,7 +44,7 @@ def _clear_claimed_session(state: dict, data: dict) -> None:
         state["claim_remote_session"] = None
 
 
-_CLOSE_METADATA_KEYS = (
+CLOSE_METADATA_KEYS = (
     "close_class",
     "close_reason",
     "force_close_reason",
@@ -60,7 +60,7 @@ def _clear_close_metadata(state: dict, data: dict) -> None:
     log keeps every close for forensics.
     """
     if data.get("current_status") == "closed" and data.get("status") != "closed":
-        for key in _CLOSE_METADATA_KEYS:
+        for key in CLOSE_METADATA_KEYS:
             state.pop(key, None)
 
 

@@ -48,7 +48,7 @@ class EnsureOutcome:
    applied-set marker.
 3. That's it — the unit now runs at every entry point below and is surfaced by `fsck`.
 
-The registry contains nine units: `env-id`, `gc-config`, `merge-ours`, `gitattributes`, `gitignore`, `store-compat`, `projects-seed`, `projects-compat-stamp`, and `untrack-runtime-markers`.
+The registry contains ten units: `env-id`, `gc-config`, `merge-ours`, `gitattributes`, `gitignore`, `store-compat`, `projects-seed`, `projects-compat-stamp`, `untrack-runtime-markers`, and `snapshot-close-metadata`.
 
 Two of these units migrate a legacy store to the many-to-many projects model (ticket 462d)
 **without writing any per-ticket events** — they only stamp committed tickets-branch files:
@@ -93,6 +93,26 @@ Worktree copies are untouched on the machine that runs it; a peer merging the co
 delete its worktree marker copies — safe, because archival's source of truth is the ARCHIVED
 events, and the reader self-heals the fast-path cache: `reduce_all_tickets` re-materializes a
 missing `.archived` marker for a net-archived ticket on the next default list.
+
+One unit repairs SNAPSHOTs compacted before the reducer cleared close metadata on reopen (bug
+df72): **`snapshot-close-metadata`** finds tickets whose replayed `close_class`, `close_reason`,
+`force_close_reason` or `completion_expectation` differ from a fold of the full event log
+(including `*.retired` sources) and rebuilds only those tickets' SNAPSHOTs
+(`compact_rebuild.rebuild_snapshot_under_lock`, the lock-free body of the `fsck` rebuild, because
+the sweep already holds the non-re-entrant write lock). Selection compares state rather than
+testing `last_reopened_at`, since a `closed -> in_progress` edge clears the metadata without
+setting it. A ticket whose SNAPSHOT cites sources missing from disk is skipped with a warning, so
+the unit never rebuilds from an incomplete log. Check = one reduce plus one full-log fold per
+ticket whose SNAPSHOT names a close key; a converged store makes zero commits.
+
+**Cost (measured on a copy of a 300,866-commit tracker):** the first sweep rebuilt 12 stale
+SNAPSHOTs in about 25 minutes and holds the write lock for that whole time, so other writers
+wait behind it. About 37 s per rebuilt ticket (roughly 7.4 min of the total) is the commit-map
+lookup. The sweep runs at `init`, `rebar store fsck --repair` and MCP boot, never on an ordinary
+write, and the MCP-boot sweep skips when the lock is busy. On a store with this many reopened
+tickets a converged sweep still costs about 21.5 s under the lock, because it re-checks every
+reopened ticket that carries close metadata. On an affected large store, run
+`rebar store fsck --repair` once at a chosen quiet time rather than waiting for a boot sweep.
 
 ## Where `run_ensures` runs
 
