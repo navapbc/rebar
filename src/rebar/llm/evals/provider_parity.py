@@ -5,11 +5,11 @@ through Bedrock is non-inferior to the direct Anthropic path, against the bar
 :func:`rebar.llm.parity.parity_report` already defines (structured-output validity, verdict
 agreement with ZERO gold-regressing decision-level flips on the gold set (a flip TOWARD the
 gold label is gold-improving and never gates — bug 5968), recall and false-accept within 2pp,
-runtime error rate, and a gold-coverage floor). It is modelled on the landed spot-eval precedent
-:mod:`rebar.llm.plan_review.fidelity_spot_eval`: same parity bar, same epoch-majority
-aggregation, same committed-results-plus-offline-recheck shape, and the same
-``_verdict_decision`` / ``_majority_decision`` mappings (imported, not re-stated, so the two
-harnesses stay comparable).
+runtime error rate, and a gold-coverage floor). It scores verdicts with that module's
+:func:`rebar.llm.parity.verdict_decision` / :func:`rebar.llm.parity.majority_decision`
+mappings (imported, not re-stated) and records epoch-majority results in the same
+committed-results-plus-offline-recheck shape, so its evidence stays comparable with every
+other harness scored against the same bar.
 
 Exactly one variable separates the arms. Both run the SAME cases through the SAME
 :func:`rebar.llm.evals.eval_solver.run_case` path inside a :func:`rebar.llm.config.gate_config`
@@ -45,16 +45,7 @@ from rebar import config as _root_config
 from rebar.llm import parity
 from rebar.llm.bedrock_model import DEFAULT_BEDROCK_MODEL_ID
 from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig, gate_config
-from rebar.llm.parity import ItemRecord
-
-# Single-sourced from the spot-eval precedent so both harnesses score verdicts identically; a
-# local copy would make their recorded evidence incomparable.
-from rebar.llm.plan_review.fidelity_spot_eval import (
-    _majority_decision as majority_decision,
-)
-from rebar.llm.plan_review.fidelity_spot_eval import (
-    _verdict_decision as verdict_decision,
-)
+from rebar.llm.parity import ItemRecord, majority_decision, verdict_decision
 
 __all__ = [
     "AGENTIC_SOLVERS",

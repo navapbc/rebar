@@ -179,9 +179,12 @@ def _structured_consumer_files() -> set[str]:
 def test_mode_resolving_census_sees_computed_and_multiline_consumers():
     """The census finds computed, multiline, and out-of-tree structured consumers."""
     files = _structured_consumer_files()
-    assert "fidelity_spot_eval.py" in files, (
-        "the census missed a COMPUTED-mode consumer a grep cannot see"
-    )
+    assert _scope_constructs_structured(
+        ast.parse(
+            'def f(p):\n    mode = "structured" if p else "findings"\n    RunRequest(mode=mode)\n'
+        ),
+        {},
+    ), "the census missed a COMPUTED-mode consumer a grep cannot see"
     assert "jira_dc_capability_map.py" in files, (
         "the census missed the out-of-tree scripts/ consumer"
     )

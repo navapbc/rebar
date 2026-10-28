@@ -77,8 +77,8 @@ def _too_big_finding(
 
 def build_sibling_roster(children: list[dict[str, Any]]) -> str:
     """The COMPLETE sibling roster fed to the container pass (G3/G4) — the SINGLE source
-    for every ``passes.pass1_container`` caller (this module, ``fidelity_spot_eval``, and
-    ``evals.eval_solver``), so the production path and the eval harnesses cannot diverge.
+    for every ``passes.pass1_container`` caller (this module and ``evals.eval_solver``),
+    so the production path and the eval harness cannot diverge.
 
     One block per child: its ``- <ticket_id>: <title>`` line, then that child's acceptance
     criteria indented two spaces beneath it. G3's rubric instructs the reviewer to discharge

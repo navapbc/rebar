@@ -15,7 +15,7 @@ from rebar import schemas
 from rebar.llm.workflow import lint as L
 from rebar.llm.workflow import steps
 from rebar.llm.workflow.executor import STEP_CONTRACTS, STEP_REGISTRY, contract_for
-from rebar.llm.workflow.lint_refs import ENGINE_INJECTED_INPUTS
+from rebar.llm.workflow.lint_expr import ENGINE_INJECTED_INPUTS
 
 # fetch_ticket's declared output fields (the OUTPUT contract's properties).
 FETCH_OUTPUTS = {"ticket", "ticket_id", "title", "description", "status", "ticket_type", "tags"}

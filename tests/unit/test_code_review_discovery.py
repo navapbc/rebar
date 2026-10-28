@@ -242,32 +242,6 @@ def test_partial_failure_verdict_policy_indeterminate_vs_block_vs_advisory_pass(
     assert v["verdict"] == "PASS"
 
 
-# ── AC7: shadow contract — one call set, differences only in the approved delta allowlist ─────
-def test_shadow_compare_reports_only_differences_outside_the_allowlist():
-    legacy = ["security", "tests", "docs"]
-    # the new snapshot-driven selection drops `security` (an effective DISABLE) and adds
-    # `project.foo` (an activated project criterion) — both approved deltas ⇒ no reported diff.
-    new = ["tests", "docs", "project.foo"]
-    diff = _wops.shadow_compare(legacy, new, allowlist={"security", "project.foo"})
-    assert diff == {"added": [], "removed": []}
-    # an UNAPPROVED drift (a11y silently added) is reported.
-    diff = _wops.shadow_compare(legacy, [*new, "a11y"], allowlist={"security", "project.foo"})
-    assert diff == {"added": ["a11y"], "removed": []}
-
-
-def test_shadow_compare_uses_one_observed_call_set_no_duplicate_calls():
-    # the same observed dispatch set feeds BOTH projections; the runner made exactly one call
-    # per retained criterion (no second model pass to compute the legacy projection).
-    agent = _Agent()
-    result = CodeReviewBatchRunner(context="DIFF").run(
-        _req(criteria=[_crit("code-review-security"), _crit("code-review-tests")]), agent
-    )
-    observed = list(result.outputs["batch_plan"]["ran"])
-    assert sorted(agent.calls) == sorted(observed)  # one call set, reused
-    diff = _wops.shadow_compare(observed, observed, allowlist=set())
-    assert diff == {"added": [], "removed": []}
-
-
 # ── AC2: activated project DET fixtures drive selection from ONE snapshot ────────────────────
 def test_project_det_selection_comes_from_the_snapshot(tmp_path):
     _write_overlay(

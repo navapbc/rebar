@@ -32,7 +32,6 @@ from typing import Any
 from rebar.llm.errors import WorkflowVersionError
 
 from .lint_expr import (
-    ENGINE_INJECTED_INPUTS,
     _OutputContract,
     _Scope,
     _validate_expression,
@@ -727,7 +726,6 @@ def _post_substitution_check(doc: dict[str, Any], *, source: str) -> list[LintFi
 
 
 __all__ = [
-    "ENGINE_INJECTED_INPUTS",
     "LintFinding",
     "lint_document",
 ]

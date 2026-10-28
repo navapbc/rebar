@@ -10,7 +10,7 @@ import inspect
 
 from rebar.llm.config import LLMConfig
 from rebar.llm.evals import eval_solver
-from rebar.llm.plan_review import fidelity_spot_eval, pass1, passes, registry
+from rebar.llm.plan_review import pass1, passes, registry
 
 _CHILD_A = {
     "ticket_id": "c1",
@@ -94,12 +94,12 @@ def test_roster_tolerates_absent_description() -> None:
 # ── single sourcing ───────────────────────────────────────────────────────────
 def test_roster_builder_single_sourced() -> None:
     """Production and eval callers must share the AC-bearing roster builder."""
-    for module in (pass1, fidelity_spot_eval, eval_solver):
+    for module in (pass1, eval_solver):
         src = inspect.getsource(module)
         assert "build_sibling_roster" in src, f"{module.__name__} does not use the shared builder"
 
     # No caller retains a local copy of the roster-building expression.
-    for module in (fidelity_spot_eval, eval_solver):
+    for module in (eval_solver,):
         src = inspect.getsource(module)
         assert "{c.get('title', '')}" not in src, f"{module.__name__} still builds a roster itself"
 

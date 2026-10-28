@@ -131,7 +131,7 @@ def test_root_causes_are_the_closed_five():
 
 
 # ── _attach_code_review_metrics (advisory enrichment) ─────────────────────────────────
-from rebar.llm.workflow import gate_dispatch  # noqa: E402
+from rebar.llm.code_review.finalize import _attach_code_review_metrics  # noqa: E402
 from rebar.llm.workflow.recorder import MemoryRecorder  # noqa: E402
 
 
@@ -185,7 +185,7 @@ def test_metrics_populated_findings_verify_grounding():
         dropped=[],
         surfaced=[{"id": "a", "priority": 0.3}],
     )
-    gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=123.4)
+    _attach_code_review_metrics(verdict, rec, total_ms=123.4)
     m = verdict["coverage"]["metrics"]
     assert m["findings_per_run"] == 1  # 0 blocking + 1 advisory
     assert m["verify_requests"] == 4
@@ -201,7 +201,7 @@ def test_grounding_note_fires_only_on_nontrivial_diff_and_zero_verify():
         verify_requests=0,  # verifier made no model requests
         dropped=[],
     )
-    gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+    _attach_code_review_metrics(verdict, rec, total_ms=1.0)
     assert verdict["coverage"]["metrics"]["grounding_health"] == "low"
     assert "grounding_note" in verdict["coverage"]
     assert "20" in verdict["coverage"]["grounding_note"]  # names the threshold
@@ -215,7 +215,7 @@ def test_grounding_note_absent_when_verifier_ran():
         verify_requests=7,  # verifier DID run
         dropped=[],
     )
-    gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+    _attach_code_review_metrics(verdict, rec, total_ms=1.0)
     assert verdict["coverage"]["metrics"]["grounding_health"] == "ok"
     assert "grounding_note" not in verdict["coverage"]
 
@@ -230,7 +230,7 @@ def test_approach_viability_note_fires_on_high_priority_survivors():
         dropped=[],
         surfaced=advisory,
     )
-    gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+    _attach_code_review_metrics(verdict, rec, total_ms=1.0)
     assert "approach_viability_note" in verdict["coverage"]
 
 
@@ -249,7 +249,7 @@ def test_approach_viability_note_fires_on_high_drop_rate():
         dropped=[{"id": "d1"}, {"id": "d2"}],
         surfaced=[{"id": "a", "priority": 0.1}],
     )
-    gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+    _attach_code_review_metrics(verdict, rec, total_ms=1.0)
     assert "approach_viability_note" in verdict["coverage"]
 
 
@@ -267,7 +267,7 @@ def test_approach_viability_note_absent_below_thresholds():
         dropped=[],
         surfaced=[{"id": "a", "priority": 0.1}],
     )
-    gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+    _attach_code_review_metrics(verdict, rec, total_ms=1.0)
     assert "approach_viability_note" not in verdict["coverage"]
 
 
@@ -289,7 +289,7 @@ def test_enrichment_never_changes_the_verdict():
             dropped=[{"id": "d1"}, {"id": "d2"}],  # high drop-rate
             surfaced=advisory,
         )
-        gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+        _attach_code_review_metrics(verdict, rec, total_ms=1.0)
         assert verdict["verdict"] == original  # untouched
         assert verdict["blocking"] == []  # no blocking source added
         # the notes are advisory, on coverage, not the verdict
@@ -325,7 +325,7 @@ def test_verification_recorded_true_when_every_expected_block_is_present():
         dropped=[],
         surfaced=advisory,
     )
-    gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+    _attach_code_review_metrics(verdict, rec, total_ms=1.0)
     assert verdict["coverage"]["metrics"]["verification_recorded"] is True
 
 
@@ -341,7 +341,7 @@ def test_verification_recorded_false_and_warns_when_an_expected_block_is_missing
         surfaced=advisory,
     )
     with caplog.at_level(logging.WARNING, logger="rebar.llm.code_review.finalize"):
-        gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+        _attach_code_review_metrics(verdict, rec, total_ms=1.0)
     assert verdict["coverage"]["metrics"]["verification_recorded"] is False
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any("verification recording gap" in m for m in warnings), warnings
@@ -376,7 +376,7 @@ def test_verification_recorded_true_for_det_tier_and_indeterminate_findings(capl
         dropped=[],
     )
     with caplog.at_level(logging.WARNING, logger="rebar.llm.code_review.finalize"):
-        gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+        _attach_code_review_metrics(verdict, rec, total_ms=1.0)
     assert verdict["coverage"]["metrics"]["verification_recorded"] is True
     assert not [r for r in caplog.records if "verification recording gap" in r.getMessage()]
 
@@ -392,7 +392,7 @@ def test_verification_recorded_true_when_the_verifier_never_ran():
         dropped=[],
         surfaced=advisory,
     )
-    gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+    _attach_code_review_metrics(verdict, rec, total_ms=1.0)
     assert verdict["coverage"]["metrics"]["verification_recorded"] is True
     # flagged by the other signal instead
     assert verdict["coverage"]["metrics"]["grounding_health"] == "low"
@@ -416,6 +416,6 @@ def test_advisory_and_surfaced_spellings_are_not_double_counted(caplog):
         surfaced=advisory,
     )
     with caplog.at_level(logging.WARNING, logger="rebar.llm.code_review.finalize"):
-        gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+        _attach_code_review_metrics(verdict, rec, total_ms=1.0)
     assert verdict["coverage"]["metrics"]["verification_recorded"] is False
     assert any("1 LLM-tier finding(s)" in r.getMessage() for r in caplog.records)

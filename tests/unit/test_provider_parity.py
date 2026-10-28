@@ -147,7 +147,7 @@ def _solver(*, flip: set[str] = frozenset(), raise_on: dict[str, Exception] | No
         decision = item.label
         if item.case_id in flip:
             decision = "advisory" if decision == "block" else "block"
-        # `_verdict_decision` reads a FAIL verdict / any finding as `block`.
+        # `verdict_decision` reads a FAIL verdict / any finding as `block`.
         return {"verdict": "FAIL" if decision == "block" else "PASS", "findings": []}
 
     return solve

@@ -244,9 +244,6 @@ _UNFOLLOWABLE: dict[str, str] = {
         "frontier-class model string constructed just above this call, not the operator's "
         "configured model"
     ),
-    "llm/plan_review/fidelity_spot_eval.py::_relocation_requests": (
-        "eval harness: compares two prompts on ONE fixed model, so cfg.model is the control"
-    ),
     "llm/operations.py::_review_ticket_impl": (
         "`rebar.llm.review_ticket`'s PRIMARY op call, not a sub-call (story 316a split the "
         "public wrapper, which warns, from this implementation, which is what the deprecated "
@@ -492,8 +489,6 @@ _EXPECTED_RUN_REQUEST_SITES = [
         "_max_output_cfg(cfg)",
         "bound",
     ),
-    ("llm/plan_review/fidelity_spot_eval.py::_relocation_requests", "cfg", "unresolved"),
-    ("llm/plan_review/fidelity_spot_eval.py::_relocation_requests", "cfg", "unresolved"),
     # `_score_floor_novelty` moved from `plan_review/__init__.py` to the new sibling
     # `plan_review/floors.py` (ticket 02b7, module-size headroom extraction).
     ("llm/plan_review/floors.py::_score_floor_novelty", "vcfg", "bound"),
@@ -534,7 +529,7 @@ def test_provenance_scan_preserves_verdicts_with_linear_whole_tree_work(
 
     sites = _run_request_sites()
 
-    assert len(_EXPECTED_RUN_REQUEST_SITES) == 23
+    assert len(_EXPECTED_RUN_REQUEST_SITES) == 21
     assert all(expr for _, expr, _ in _EXPECTED_RUN_REQUEST_SITES)
     assert sites == _EXPECTED_RUN_REQUEST_SITES
     assert len(module_walks) >= 400, "the oracle did not exercise the real source corpus"

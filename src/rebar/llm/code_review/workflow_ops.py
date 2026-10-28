@@ -769,19 +769,3 @@ def partial_failure_verdict(
         verdict["verdict"] = "INDETERMINATE"
         verdict.setdefault("coverage", {})["blocking_capable_gap"] = True
     return verdict
-
-
-def shadow_compare(legacy_ids: Any, new_ids: Any, *, allowlist: Any) -> dict[str, list[str]]:
-    """Compare the legacy and new selected criterion-id sets over ONE already-observed call set.
-
-    Pure set math (no model calls): ``added`` are ids the new selection introduced and ``removed``
-    are ids it dropped, each with the ``allowlist`` of KNOWN, sanctioned deltas subtracted so an
-    expected snapshot-driven change (effective disable/retune, project applicability, project DET)
-    does not surface as an unexplained divergence. Both lists are sorted."""
-    legacy = set(legacy_ids)
-    new = set(new_ids)
-    allowed = set(allowlist)
-    return {
-        "added": sorted((new - legacy) - allowed),
-        "removed": sorted((legacy - new) - allowed),
-    }

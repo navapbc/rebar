@@ -32,13 +32,7 @@ from pathlib import Path
 from time import monotonic_ns
 from typing import Any, NamedTuple
 
-# Back-compat re-export (load-bearing): tests/unit/test_code_review_fp_ledger.py calls
-# ``gate_dispatch._attach_code_review_metrics`` at 7 sites. The code-review finalization cluster
-# moved to the code_review/finalize.py strict leaf; this keeps the attribute resolving here.
-from rebar.llm.code_review.finalize import (  # noqa: F401
-    CODE_REVIEW_STEP_IDS,
-    _attach_code_review_metrics,
-)
+from rebar.llm.code_review.finalize import CODE_REVIEW_STEP_IDS
 from rebar.llm.errors import LLMInputRejectedError, LLMUnavailableError
 from rebar.llm.gate_error_sidecar import emit_gate_error
 from rebar.llm.run_identity import with_identity
@@ -285,8 +279,8 @@ def produce_plan_review_verdict(
 
 # ── code-review (epic b744 / WS4) ─────────────────────────────────────────────────────
 # The code-review gate reuses STEP_VERIFY/STEP_DECIDE. Its post-verdict finalization cluster —
-# metrics/deps/novelty-floor/session-artifact emit, plus the STEP_ASSEMBLE_DIFF step id and
-# _attach_code_review_metrics (re-exported above) — lives in the code_review/finalize.py leaf.
+# metrics/deps/novelty-floor/session-artifact emit, plus the STEP_ASSEMBLE_DIFF step id —
+# lives in the code_review/finalize.py leaf.
 
 
 def code_review_enabled(repo_root=None) -> bool:

@@ -409,9 +409,9 @@ to a fresh `from_env()` for a genuinely standalone call. Composition failure (a 
 conflicting decision-bearing provider or credential) propagates uncaught — unlike the
 general operation snapshot's fail-open swallow, an LLM op never degrades to unbound
 ambient resolution; it fails before any external call. A small, explicitly allowlisted
-set of standalone composition roots (the eval/calibration harness in `llm/evals/`, and
-`plan_review/fidelity_spot_eval.py`'s CLI `main()`) retain a direct `from_env()` call —
-each is a genuine top-level entry point outside any gate run, not a migration gap.
+set of standalone composition roots (the eval/calibration harness in `llm/evals/`) retain a
+direct `from_env()` call — each is a genuine top-level entry point outside any gate run, not
+a migration gap.
 
 ```toml
 [tool.rebar.llm]

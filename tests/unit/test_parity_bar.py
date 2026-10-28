@@ -13,9 +13,11 @@ from rebar.llm.parity import (
     _recall_false_accept,
     attribution_accuracy,
     container_fidelity_report,
+    majority_decision,
     parallel_run_and_diff,
     parity_report,
     prerequisite_fidelity_report,
+    verdict_decision,
 )
 
 
@@ -245,7 +247,7 @@ def test_error_rate_regression_fails():
 
 
 def _errored_rec(label, *, valid=False):
-    """The production errored shape (`plan_review/fidelity_spot_eval.py`), and — with
+    """The production errored shape a harness records on a failed run, and — with
     `valid=True` — the SILENT variant, where nothing else in the report moves."""
     return ItemRecord(valid=valid, decision="dropped", errored=True, label=label)
 
@@ -457,3 +459,17 @@ def test_parallel_run_and_diff_maps_a_raising_runner_to_errored():
     assert not report.passed
     assert any("error rate" in f for f in report.gating_failures)
     assert report.metrics["error_rate"]["v2"] == 1.0 and report.metrics["error_rate"]["v1"] == 0.0
+
+
+# ── the decision mapping every scored harness shares ──────────────────────────
+def test_verdict_decision_and_majority_decision():
+    # A FAIL verdict blocks, and so does a PASS that still surfaced a finding — the
+    # finding is the load-bearing signal, not the verdict string.
+    assert verdict_decision({"verdict": "FAIL", "findings": []}) == "block"
+    assert verdict_decision({"verdict": "PASS", "findings": [{"id": "G1"}]}) == "block"
+    # A clean PASS is the non-blocking outcome.
+    assert verdict_decision({"verdict": "PASS", "findings": []}) == "advisory"
+    # Epoch majority: the plurality wins, and a tie resolves to the cautious `block`.
+    assert majority_decision(["block", "block", "advisory"]) == "block"
+    assert majority_decision(["advisory", "advisory", "block"]) == "advisory"
+    assert majority_decision(["block", "advisory"]) == "block"

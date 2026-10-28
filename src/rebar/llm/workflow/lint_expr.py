@@ -8,9 +8,9 @@ that its reference actually resolves: a declared or engine-injected input, an
 upstream same-frame (or enclosing) step whose declared :class:`_OutputContract`
 produces the named field, or an in-scope loop/map binding.
 
-This module imports nothing from rebar; :mod:`rebar.llm.workflow.lint_refs`
-re-exports these names for back-compat (``ENGINE_INJECTED_INPUTS`` is consumed by
-``lint.py`` and the contract tests via ``lint_refs``).
+This module imports nothing from rebar. It is the single source for
+``ENGINE_INJECTED_INPUTS``, which :mod:`rebar.llm.workflow.lint` and the contract
+tests import from here directly.
 """
 
 from __future__ import annotations

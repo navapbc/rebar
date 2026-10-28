@@ -1,10 +1,9 @@
-"""The parity bar that gates the LangGraph -> Pydantic AI cutover (7d58).
+"""The non-inferiority bar a candidate arm must clear against a baseline arm.
 
-Parity is NON-INFERIORITY, not byte-identity: both runners are LLM-driven, so exact
-output equality is incoherent. Before the LangGraph stack is dropped (story d6d1), the
-new ``PydanticAIRunner`` must clear a DEFINED bar on the standing eval corpus (same
-model + decoding params, N>=3 repeats), computed by :func:`parity_report` from paired
-per-item records:
+Parity is NON-INFERIORITY, not byte-identity: both arms are LLM-driven, so exact
+output equality is incoherent. A candidate must instead clear a DEFINED bar on the
+standing eval corpus (same model + decoding params, N>=3 repeats), computed by
+:func:`parity_report` from paired per-item records:
 
   (a) structured-output VALIDITY: v2 >= v1 (target >= 99% valid parses, no regression);
   (b) per-criterion verdict AGREEMENT >= 95% AND ZERO gold-REGRESSING decision-level
@@ -30,6 +29,7 @@ but the GATE logic is exercised offline so the bar itself can't silently drift.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
@@ -65,6 +65,29 @@ class ItemRecord:
     pred_criterion: str | None = None  # the criterion the runner attributed the finding to
     gold_prerequisite_id: str | None = None
     pred_prerequisite_id: str | None = None
+
+
+def verdict_decision(out: dict[str, Any]) -> str:
+    """Map a structured verdict/finding result to the coarse parity decision.
+
+    A FAIL verdict (or any surfaced finding) is a ``block``; a clean PASS is ``advisory``
+    (the safe, non-blocking outcome). This is the two-bucket mapping every harness scored
+    against :func:`parity_report` must use, so their recorded evidence stays comparable.
+    """
+    verdict = str(out.get("verdict", "")).upper()
+    if verdict == "FAIL" or (out.get("findings") or []):
+        return "block"
+    return "advisory"
+
+
+def majority_decision(decisions: list[str]) -> str:
+    """The most common decision over the epoch repeats (ties broken toward the more
+    cautious ``block``). Averaging over epochs is how the standing eval specs tame the
+    single-call non-determinism of an agentic reviewer (the specs use ``epochs: 3``)."""
+    counts = Counter(decisions)
+    top = max(counts.values())
+    winners = [d for d, n in counts.items() if n == top]
+    return "block" if "block" in winners else winners[0]
 
 
 @dataclass

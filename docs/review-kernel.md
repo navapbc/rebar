@@ -179,7 +179,7 @@ promptfoo) enforce typed CONTRACTS + OUTPUT/BEHAVIOR, never prompt-string greps.
 enforce the binary vocabulary as a typed contract and the soft rules as observable
 behavior; the rules' *wording* is intentionally not gated by a lint.
 
-## The cross-gate discovery cutover — ownership, deltas, and the shadow (RP-06)
+## The cross-gate discovery cutover — ownership and deltas (RP-06)
 
 RP-06 finished draining the pre-kernel discovery derivations so BOTH review gates route
 criteria→units→outcomes through ONE shared spine. The ownership after the cutover is fixed:
@@ -196,19 +196,10 @@ ways; everything else must be byte-identical to the legacy derivation. The appro
 effective built-in **retune/disable**, project **DET** inclusion, project **LLM applicability**
 filtering, positive **code-review budget** enforcement, typed **partial-failure continuation**
 (a local failure no longer aborts the whole stage), and **success-only checkpointing** (only a
-`success` outcome is checkpointed). These are the single source enumerated in
-`review_kernel.discovery_shadow.APPROVED_DELTAS`.
+`success` outcome is checkpointed). The cutover is finished, so this list is now a historical
+record of what changed rather than a live comparison bar.
 
-**The shadow comparator** (`review_kernel.discovery_shadow`, RP-06 S7) certifies the cutover.
-From ONE observed call/result set of a review run it reconstructs the *legacy* reference
-derivation and diffs it, field by field, against the observed *RP-06* derivation over criterion
-selection/exclusion, order, prompt/contract identity, context hash, model/mode, dependencies,
-budgets, posture, usage, checkpoint decisions, and final disposition. It reports every
-divergence as a field-level `Mismatch` EXCEPT those matching the approved-delta allowlist (an
-`AcceptedDelta`). It is a **pure, deterministic** comparator: it issues **NO provider/model
-call**, takes no runner/store, and **never controls a gate's final verdict** — it only observes.
-
-**Sensitive-data boundary.** The shadow and the discovery journal operate on **content-free**
+**Sensitive-data boundary.** The discovery journal operates on **content-free**
 facts only: unit ids, identity digests, outcome kinds, usage counters, and policy signals —
 never prompt/ticket/context/finding bodies or provider payloads. The kernel's `unit_trace`
 journal record is content-free and versioned (`DISCOVERY_NAMESPACE_VERSION`); it lives in the
@@ -220,8 +211,8 @@ the prompt, or the trace.
 
 **Legacy checkpoints + revert-based rollback.** New code **IGNORES** legacy-namespace
 checkpoint envelopes — a stored envelope whose `namespace_version` differs is treated as a
-cache miss and recomputed, never resumed; the shadow flags any RP-06 unit that `resumed` from a
-legacy envelope. Because the retained compatibility projection is just the pre-kernel derivation
+cache miss and recomputed, never resumed. Because the retained compatibility projection is just
+the pre-kernel derivation
 of the same facts (no separately-named legacy module, no new envelope format written), rolling
 the cutover back is a **plain code revert**: it needs no journal rewrite and no data cleanup,
 and any legacy envelope left on disk stays inert.

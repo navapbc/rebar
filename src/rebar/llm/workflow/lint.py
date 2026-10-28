@@ -24,7 +24,8 @@ from typing import Any
 
 from rebar.llm.errors import WorkflowParseError, WorkflowVersionError
 
-from .lint_refs import ENGINE_INJECTED_INPUTS, LintFinding, _iter_all_steps, lint_document
+from .lint_expr import ENGINE_INJECTED_INPUTS
+from .lint_refs import LintFinding, _iter_all_steps, lint_document
 from .migrate import migrate_to_current
 from .schema import parse_workflow, step_kind, validate_document
 
