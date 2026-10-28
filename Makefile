@@ -71,7 +71,7 @@ PYTHON_VERSION_FILE := .github/python-version.txt
 # default is 4 and not `auto`; override per invocation with `make test PYTEST_WORKERS=8`.
 PYTEST_WORKERS ?= 4
 
-.PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check verify test scanner-integration jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
+.PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check verify test scanner-integration jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin ensure-pandoc verify-mcp-pin
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -99,6 +99,7 @@ install:  ## Install rebar from the committed uv.lock (uv sync --locked, dev + m
 		echo "       Unlocked fallback (resolves fresh — NOT the canonical env): make install-unlocked"; \
 		exit 1; }
 	uv sync --locked --extra dev --extra metrics
+	$(MAKE) ensure-pandoc
 	$(MAKE) hooks
 
 install-unlocked:  ## Fallback: editable pip install (UNLOCKED — resolves fresh; prefer `make install`).
@@ -484,6 +485,17 @@ actionlint-bin:  ## Ensure a pinned actionlint is available (repo-local, digest-
 
 verify-mcp-pin:  ## Verify the embedded mcp-publisher SHA-256 matches the live pinned download.
 	python scripts/verify_mcp_publisher_pin.py
+
+ensure-pandoc:  ## Ensure a runnable pandoc exists when the pypandoc wheel bundles one for the wrong architecture.
+	@# Run through the synced venv when there is one. `install` may be invoked without the
+	@# venv activated, and an ambient interpreter that cannot import pypandoc would make
+	@# this a silent no-op -- exactly the quiet degradation bug bb19-4776-46d2-4223 exists
+	@# to remove. On a matching architecture the script touches no network.
+	@if [ -x .venv/bin/python ]; then \
+		.venv/bin/python scripts/ensure_pandoc.py; \
+	else \
+		python scripts/ensure_pandoc.py; \
+	fi
 
 # scripts/ is IN the typecheck scope (ticket cc99). ae96 brought scripts/ under ruff
 # but not mypy, leaving the CI gate implementations themselves type-unchecked even

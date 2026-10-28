@@ -25,6 +25,15 @@ How it reaches a rebar install
     pandoc, and the Data Center wiki renderer degrades to passing Markdown
     through unchanged.
 
+    One DEVELOPER-ONLY path also fetches pandoc. That wheel's arm64 macOS
+    payload is an x86_64 executable, so on an arm64 macOS host it cannot run
+    (bug bb19-4776-46d2-4223). `make install` therefore runs
+    `scripts/ensure_pandoc.py`, which downloads the same pandoc 3.9 recorded
+    here from the upstream GitHub release, verifies its SHA-256 against a
+    hard-coded pin, and writes it to the git-ignored `.tools/bin/`. Nothing
+    there is committed, packaged, or redistributed; it exists only so a
+    developer's own checkout can run the renderer tests.
+
 How rebar uses it
     The renderer (src/rebar/reconciler/adapters/jira_family/wiki_render.py)
     locates the bundled binary via pypandoc and executes it as a

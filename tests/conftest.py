@@ -138,6 +138,38 @@ from _sandbox_capabilities import (  # noqa: E402
 _extra_guard.install()
 
 
+def _select_repo_pandoc() -> None:
+    """Point pypandoc at the repo-local pandoc when the wheel's own copy cannot run.
+
+    ``pypandoc-binary``'s arm64 macOS wheel bundles an x86_64 executable, so on an
+    arm64 host the renderer finds no usable pandoc and the reconciler suite fails
+    (bug bb19-4776-46d2-4223). ``make ensure-pandoc`` installs a verified native copy
+    under ``.tools/bin``; this selects it. The absent case -- every CI cell and every
+    host whose bundled binary is fine -- costs one ``is_file()`` and imports nothing.
+    An explicit ``PYPANDOC_PANDOC`` always wins.
+    """
+    if os.environ.get("PYPANDOC_PANDOC"):
+        return
+    candidate = _REPO_ROOT / ".tools" / "bin" / "pandoc"
+    if not candidate.is_file():
+        return
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_rebar_ensure_pandoc", _REPO_ROOT / "scripts" / "ensure_pandoc.py"
+    )
+    if spec is None or spec.loader is None:
+        return
+    module = importlib.util.module_from_spec(spec)
+    # Register before exec: dataclasses resolve their owning module out of sys.modules,
+    # and an unregistered name makes that lookup fail during class creation.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    selected = module.repo_pandoc_for_host(_REPO_ROOT)
+    if selected is not None:
+        os.environ["PYPANDOC_PANDOC"] = str(selected)
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Enforce the shared Git version floor before registering markers.
 
@@ -148,6 +180,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
     scrub_ambient_git_config(os.environ)
     configure_semgrep_settings_file(_REPO_ROOT)
+    _select_repo_pandoc()
     _register_counted_skip_xdist_hooks(config)
 
     violation = _git_floor.floor_violation()

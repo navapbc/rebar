@@ -34,24 +34,31 @@ if a merge-tree regression ever acquires skip machinery).
 
 ## Prerequisite — pandoc 3.9 on arm64 macOS
 
-**arm64 macOS hosts need `PYPANDOC_PANDOC` pointed at a system pandoc 3.9
-before running the wiki renderer tests.** The pinned `pypandoc-binary==1.17`
-wheel advertises a `macosx_11_0_arm64` wheel, but its bundled
-`pypandoc/files/pandoc` payload is an x86_64 Mach-O executable. On arm64 macOS
-that binary fails with `Bad CPU type in executable`; pypandoc logs that probe
-failure and continues, so the unusable venv copy is harmless as long as another
-working candidate is configured.
+**`make install` handles this for you.** The pinned `pypandoc-binary==1.17` wheel
+advertises a `macosx_11_0_arm64` wheel, but its bundled `pypandoc/files/pandoc`
+payload is an x86_64 Mach-O executable. On arm64 macOS that binary fails with
+`Bad CPU type in executable`, and the wiki renderer tests fail with it
+(bug `bb19-4776-46d2-4223`).
 
-The version matters: ADR 0095 pins this renderer path to pandoc 3.9 because the
-`jira` writer's byte-level escaping changes between pandoc releases. `PATH`
-ordering is **not** sufficient: pypandoc probes every candidate and keeps the
-highest version it can execute, so a Homebrew pandoc 3.11 still wins even if a
-3.9 directory appears earlier on `PATH`. `PYPANDOC_PANDOC` is the override that
-replaces the candidate list, which is why it can select pandoc 3.9 even when a
-higher version is installed elsewhere.
+`make install` runs `make ensure-pandoc`, which reads the bundled binary's own
+Mach-O/ELF header and compares the architecture it names against this host's.
+When they match — every Linux box, every CI cell, x86_64 macOS — it exits having
+touched no network. When they differ it downloads the pinned upstream pandoc 3.9
+release, verifies the extracted binary's SHA-256 against a hard-coded pin, and
+installs it to the git-ignored `.tools/bin/pandoc`. `tests/conftest.py` then
+points `PYPANDOC_PANDOC` at that binary, unless you have exported one yourself.
 
-Homebrew may ship a newer formula, so install the upstream 3.9 arm64 release
-directly and export `PYPANDOC_PANDOC` from the shell that runs the tests:
+Nothing on `PATH` changes. The version matters: ADR 0095 pins this renderer path
+to pandoc 3.9 because the `jira` writer's byte-level escaping changes between
+pandoc releases. `PATH` ordering is **not** sufficient: pypandoc probes every
+candidate and keeps the highest version it can execute, so a Homebrew pandoc 3.11
+still wins even if a 3.9 directory appears earlier on `PATH`. `PYPANDOC_PANDOC`
+is the override that replaces the candidate list, which is why it can select
+pandoc 3.9 even when a higher version is installed elsewhere.
+
+If `make ensure-pandoc` cannot reach the network, it fails loudly rather than
+leaving an unrunnable binary in place. Install the upstream 3.9 arm64 release by
+hand and export `PYPANDOC_PANDOC` from the shell that runs the tests:
 
 ```sh
 mkdir -p "$HOME/.local/pandoc-3.9"
