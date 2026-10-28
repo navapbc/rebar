@@ -7,7 +7,7 @@
   "properties": {
     "findings": {
       "type": "array",
-      "description": "Findings to evaluate; each item is an object with a `severity`."
+      "description": "Findings to evaluate; each item is an object with a `priority`."
     },
     "policy": {
       "type": "string",

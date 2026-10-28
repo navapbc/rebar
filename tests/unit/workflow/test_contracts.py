@@ -218,6 +218,6 @@ def test_pure_op_outputs_match_their_output_schema() -> None:
     g_pass = steps.gate(_ctx({"findings": [], "policy": "default"}))
     schemas.validator("gate_output").validate(g_pass)
     assert g_pass["verdict"] == "pass"
-    g_fail = steps.gate(_ctx({"findings": [{"severity": "critical"}], "policy": "default"}))
+    g_fail = steps.gate(_ctx({"findings": [{"priority": 0.99}], "policy": "default"}))
     schemas.validator("gate_output").validate(g_fail)
     assert g_fail["verdict"] == "fail"

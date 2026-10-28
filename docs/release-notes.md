@@ -8,6 +8,25 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## Gate policies drop `severity`; `REBAR_VERIFY_PREFETCH` is removed
+
+Non-breaking. Two finished mechanisms retired (ADR 0108, story a9dd).
+
+- The sample `gate` workflow step no longer fails on a finding's `severity`. The three
+  `GATE_POLICIES` keep `priority_threshold` and `max_findings` only, and
+  `gate_input.schema.json` now describes each finding as carrying a `priority`. All three
+  policies move to `version: "2"` to signal the semantic change; a finding carrying only a
+  legacy `severity` key is now inert. ADR 0108 records this policy as sample-only and
+  unwired into production, so no production gate changes behaviour.
+- `REBAR_VERIFY_PREFETCH` is **removed**. The completion verifier's file-impact prefetch is
+  now unconditional; the env var existed only to capture a prefetch-disabled baseline for the
+  story-a9dd live A/B, which is finished. A value set in the environment is now ignored
+  rather than honoured.
+
+Plan-review findings still carry `severity`, and `plan_review_verdict.schema.json` still
+documents it. That is a separate, still-authored field — only the gate-step policy and the
+discarded `review_kernel` label are gone.
+
 ## Eval harness roots are configurable; the `evals` extra is registered
 
 Non-breaking. The eval harnesses now run for a client project against its own criteria

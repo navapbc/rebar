@@ -190,22 +190,15 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     from rebar.llm.workflow import completion_prefetch
 
     base, _ids = operations.assemble_context(str(tid), graph=graph, repo_root=ctx.repo_root)
-    # Prefetch is ON by default; REBAR_VERIFY_PREFETCH=0 disables it. This is the escape hatch
-    # the story-a9dd live A/B uses to capture a prefetch-DISABLED baseline on the SAME binary,
-    # ticket, and tool surface (config otherwise identical) before the prefetch run.
-    import os
-
-    if os.environ.get("REBAR_VERIFY_PREFETCH") == "0":  # read-via: subsystem-kill-switch
-        context = base
-        prefetch_manifest: list[dict[str, Any]] = []
-    else:
-        spec = PrefetchSpec(ticket_id=str(tid), graph=graph)
-        section, prefetch_manifest = completion_prefetch.assemble_prefetch(
-            spec, repo_root=ctx.repo_root
-        )
-        model = resolve_gate_config(ctx.repo_root).model
-        fitted = fit_within_ceiling(base, section, model)
-        context = base + ("\n\n" + fitted if fitted else "")
+    # Prefetch is unconditional: the story-a9dd A/B that needed a prefetch-DISABLED baseline
+    # on the same binary is finished, so its environment escape hatch is gone.
+    spec = PrefetchSpec(ticket_id=str(tid), graph=graph)
+    section, prefetch_manifest = completion_prefetch.assemble_prefetch(
+        spec, repo_root=ctx.repo_root
+    )
+    model = resolve_gate_config(ctx.repo_root).model
+    fitted = fit_within_ceiling(base, section, model)
+    context = base + ("\n\n" + fitted if fitted else "")
     if is_epic:
         # Epic-close bug screen (4b54), stages 2-3: filter + haiku screen; A-verdicts land as
         # a compact evidence block INSIDE the fence (untrusted, like all ticket content). The

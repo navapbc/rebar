@@ -144,7 +144,6 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_TEST_COMPACT_RENAME_BARRIER` | `src/rebar/_commands/compact_txn.py` |  |
 | `REBAR_TRACKER_DIR` | `src/rebar/_config_sources.py`, `src/rebar/llm/evals/plan_replay/labels.py` |  |
 | `REBAR_USAGE_LOG` | `src/rebar/_config_resolvers.py` |  |
-| `REBAR_VERIFY_PREFETCH` | `src/rebar/llm/workflow/gate_ops.py` |  |
 | `RECONCILER_ABSENT_RETIRE_GRACE` | `src/rebar/_config_resolvers.py` |  |
 | `RECONCILE_CURSOR_PATH` | `src/rebar/review_bot/config.py` |  |
 | `RECONCILE_INTERVAL_SECONDS` | `src/rebar/review_bot/config.py` |  |
@@ -161,7 +160,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_149 variables._
+_148 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 

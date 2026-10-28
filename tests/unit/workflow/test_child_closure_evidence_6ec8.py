@@ -42,7 +42,10 @@ def _patch(monkeypatch, *, ticket_type="epic", children=None, sigs=None):
     monkeypatch.setattr(
         operations, "assemble_context", lambda tid, *, graph, repo_root: ("BASE-CTX", [str(tid)])
     )
-    monkeypatch.setenv("REBAR_VERIFY_PREFETCH", "0")
+    monkeypatch.setattr(
+        "rebar.llm.workflow.completion_prefetch.assemble_prefetch",
+        lambda spec, *, repo_root: ("", []),
+    )
 
 
 def _ctx(inputs):
@@ -116,3 +119,27 @@ def test_unclosed_child_short_circuits_no_llm(monkeypatch):
     assert out["run_verify"] is False
     assert out["precheck_failed"] is True
     assert out["context"] == ""  # short-circuit assembles no context at all
+
+
+def test_precheck_always_prefetches(monkeypatch) -> None:
+    """Story 6b66: the completion verifier's file-impact prefetch is UNCONDITIONAL.
+
+    The A/B kill switch that could skip it is retired. Driven through the real
+    ``completion_precheck`` so this fails if a future change reintroduces any skip path;
+    that no environment variable can reach that path is held separately by the story's
+    tree-wide grep criterion.
+    """
+    calls: list[object] = []
+
+    def _spy(spec, *, repo_root):
+        calls.append(spec)
+        return ("", [])
+
+    _patch(monkeypatch, ticket_type="task")
+    monkeypatch.setattr("rebar.llm.workflow.completion_prefetch.assemble_prefetch", _spy)
+
+    out = completion_precheck(_ctx({"ticket_id": "T-1", "graph": False}))
+
+    assert out["run_verify"] is True
+    assert len(calls) == 1, "prefetch seam not reached"
+    assert calls[0].ticket_id == "T-1"

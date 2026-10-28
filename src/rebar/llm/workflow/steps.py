@@ -194,24 +194,21 @@ def render_context(ctx: StepContext) -> dict[str, Any]:
 
 # Versioned gate policies. UNSECURED by design here — this is an ordinary example
 # step; cryptographic signing/attestation/protected-tags is epic 8a1c. A policy
-# fails the gate when any finding's severity is in ``fail_on_severity`` (or the
-# finding count exceeds ``max_findings``).
+# fails the gate when any finding's ``priority`` is at or above the policy's
+# ``priority_threshold`` (or the finding count exceeds ``max_findings``).
 GATE_POLICIES: dict[str, dict[str, Any]] = {
     "default": {
-        "version": "1",
-        "fail_on_severity": ["critical", "high"],
+        "version": "2",
         "max_findings": None,
         "priority_threshold": DEFAULT_BLOCK_THRESHOLD,
     },
     "strict": {
-        "version": "1",
-        "fail_on_severity": ["critical", "high", "medium"],
+        "version": "2",
         "max_findings": 0,
         "priority_threshold": 0.5,
     },
     "advisory": {
-        "version": "1",
-        "fail_on_severity": [],
+        "version": "2",
         "max_findings": None,
         "priority_threshold": None,
     },
@@ -227,20 +224,18 @@ GATE_POLICIES: dict[str, dict[str, Any]] = {
 def gate(ctx: StepContext) -> dict[str, Any]:
     """Evaluate findings against a versioned policy → {verdict, passed, …}.
 
-    Inputs: ``findings`` (list of {severity, …}) and ``policy`` (a name in
+    Inputs: ``findings`` (list of {priority, …}) and ``policy`` (a name in
     GATE_POLICIES; default ``default``). Deterministic, pure Python."""
     raw = ctx.inputs.get("findings") or []
     if not isinstance(raw, list):
         raw = []
-    # Count only well-formed findings; garbage entries neither fail-on-severity nor
+    # Count only well-formed findings; garbage entries neither trip the threshold nor
     # inflate the max_findings count (so the verdict reason stays meaningful).
     findings = [f for f in raw if isinstance(f, dict)]
     policy_name = ctx.inputs.get("policy") or "default"
     policy = GATE_POLICIES.get(policy_name, GATE_POLICIES["default"])
 
     def _fails(finding: dict[str, Any]) -> bool:
-        if finding.get("severity") in policy["fail_on_severity"]:
-            return True
         threshold = policy.get("priority_threshold")
         priority = finding.get("priority")
         return (

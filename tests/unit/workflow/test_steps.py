@@ -19,33 +19,27 @@ def _ctx(inputs, *, run_id="r", step_id="s", ticket=None):
     )
 
 
-def test_gate_passes_with_no_serious_findings() -> None:
-    out = steps.gate(_ctx({"findings": [{"severity": "low"}], "policy": "default"}))
+def test_gate_ignores_a_legacy_severity_only_finding() -> None:
+    """Story 6b66 retired the severity-driven policy key. A finding carrying ONLY the legacy
+    ``severity`` key is now INERT -- even at the value that used to fail the gate
+    outright. The policy version is bumped to "2" to signal that semantic change."""
+    out = steps.gate(_ctx({"findings": [{"severity": "critical"}], "policy": "default"}))
     assert out["verdict"] == "pass"
     assert out["passed"] is True
-    assert out["policy_version"] == "1"
-
-
-def test_gate_fails_on_high_severity() -> None:
-    out = steps.gate(_ctx({"findings": [{"severity": "high"}], "policy": "default"}))
-    assert out["verdict"] == "fail"
-    assert out["failing_count"] == 1
+    assert out["failing_count"] == 0
+    assert out["policy_version"] == "2"
 
 
 def test_gate_strict_fails_on_any_finding() -> None:
-    out = steps.gate(_ctx({"findings": [{"severity": "low"}], "policy": "strict"}))
-    assert out["verdict"] == "fail"  # max_findings=0
-
-
-def test_gate_advisory_never_fails() -> None:
-    out = steps.gate(_ctx({"findings": [{"severity": "critical"}], "policy": "advisory"}))
-    assert out["verdict"] == "pass"
+    """strict's ``max_findings=0`` fails on a finding with no gate-relevant keys at all."""
+    out = steps.gate(_ctx({"findings": [{}], "policy": "strict"}))
+    assert out["verdict"] == "fail"
 
 
 def test_gate_unknown_policy_falls_back_to_default() -> None:
-    out = steps.gate(_ctx({"findings": [{"severity": "critical"}], "policy": "nope"}))
+    out = steps.gate(_ctx({"findings": [{"priority": 0.99}], "policy": "nope"}))
     assert out["policy"] == "nope"
-    assert out["verdict"] == "fail"  # default fails on critical
+    assert out["verdict"] == "fail"  # default's priority_threshold applied
 
 
 def test_gate_handles_empty_and_malformed() -> None:

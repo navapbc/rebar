@@ -213,7 +213,10 @@ def test_completion_precheck_accepts_description_at_exact_limit(monkeypatch) -> 
     monkeypatch.setattr("rebar.llm.completion.child_closure_findings", lambda *a, **k: ([], []))
     monkeypatch.setattr("rebar.llm.operations.assemble_context", lambda *a, **k: ("context", []))
     monkeypatch.setattr("rebar.llm.completion.build_child_closure_evidence", lambda *a, **k: "")
-    monkeypatch.setenv("REBAR_VERIFY_PREFETCH", "0")
+    monkeypatch.setattr(
+        "rebar.llm.workflow.completion_prefetch.assemble_prefetch",
+        lambda spec, *, repo_root: ("", []),
+    )
 
     result = STEP_REGISTRY["completion_precheck"](_step_context())
 

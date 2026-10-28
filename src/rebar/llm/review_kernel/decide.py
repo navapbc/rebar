@@ -632,10 +632,6 @@ def pass3_decide(
     val = validity(binary)
     imp = (impact_fn or impact)(attrs)
     priority = round(val * imp, 4)
-    # severity_label is computed but no longer surfaced on the returned dict (the common
-    # severity vocabulary now lives only where it's actually authored — see findings.py /
-    # code_review/shim.py); keep the call so severity_label stays exercised/live here.
-    _sev = severity_label(imp)
     if binary.get("cited_reference_accurate") == "no":
         return {
             "decision": "dropped",
