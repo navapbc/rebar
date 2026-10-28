@@ -305,14 +305,20 @@ def test_fixture_bare_remote_leaves_no_detached_upkeep_behind_a_push(
     assert_no_detached_upkeep(trace, remote)
 
 
+# A backslash in a POSIX directory name puts the same escaped spelling into git's
+# config that every Windows path does, so the Windows-only failure reproduces anywhere
+# (bug f946).
+@pytest.mark.parametrize("parent", ["", "back\\slash"], ids=["plain", "backslash"])
 def test_copy_repoints_sibling_origin_and_keeps_refs_isolated(
     _rebar_repo_template: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    parent: str,
 ) -> None:
     """A copied store must push only to the matching copied sibling origin."""
-    source = tmp_path / "source"
-    source.mkdir()
+    root = tmp_path / parent
+    source = root / "source"
+    source.mkdir(parents=True)
     source_origin = init_bare_remote(source / "origin.git")
     source_work = _clone_template(_rebar_repo_template, source / "work")
     subprocess.run(
@@ -335,7 +341,7 @@ def test_copy_repoints_sibling_origin_and_keeps_refs_isolated(
         text=True,
     )
 
-    destination = tmp_path / "destination"
+    destination = root / "destination"
     destination.mkdir()
     destination_origin = destination / "origin.git"
     shutil.copytree(source_origin, destination_origin, symlinks=True)
@@ -374,11 +380,14 @@ def test_copy_repoints_sibling_origin_and_keeps_refs_isolated(
         "writing to the destination moved the source ticket ref"
     )
 
-    source_root = str(source.resolve()).encode()
+    source_root = str(source.resolve())
+    spellings = {source_root.encode(), source_root.replace("\\", "\\\\").encode()}
     offenders = [
         str(path.relative_to(destination))
         for path in destination.rglob("*")
-        if path.is_file() and not path.is_symlink() and source_root in path.read_bytes()
+        if path.is_file()
+        and not path.is_symlink()
+        and any(spelling in path.read_bytes() for spelling in spellings)
     ]
     assert not offenders, f"destination still embeds source topology paths: {offenders}"
 

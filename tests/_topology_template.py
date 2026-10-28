@@ -178,6 +178,28 @@ def _local_sibling_rewrites(template: Path, destination: Path) -> list[_PathRewr
     return list(rewrites.items())
 
 
+def _is_git_config(path: Path) -> bool:
+    return path.name in ("config", "config.worktree") and (path.parent / "HEAD").is_file()
+
+
+def _git_config_escaped(spelling: bytes) -> bytes:
+    return spelling.replace(b"\\", b"\\\\").replace(b'"', b'\\"')
+
+
+def _rewrites_for(path: Path, rewrites: list[_PathRewrite]) -> list[_PathRewrite]:
+    """Return the rewrites that match ``path``'s spelling of a filesystem path.
+
+    Git escapes each backslash and quote in a config value, so a remote added as
+    ``C:\\a\\origin.git`` is stored as ``C:\\\\a\\\\origin.git`` and only the escaped
+    spelling matches it (bug f946). Pointer files such as ``.git`` and ``gitdir`` hold
+    the raw spelling, so the escaped form is applied to config files alone.
+    """
+    if not _is_git_config(path):
+        return rewrites
+    escaped = [(_git_config_escaped(src), _git_config_escaped(dst)) for src, dst in rewrites]
+    return [*escaped, *rewrites]
+
+
 def _rewrite_embedded_paths(topology: Path, rewrites: list[_PathRewrite]) -> None:
     for path in topology.rglob("*"):
         if path.is_symlink():
@@ -194,7 +216,7 @@ def _rewrite_embedded_paths(topology: Path, rewrites: list[_PathRewrite]) -> Non
             continue
         data = path.read_bytes()
         rewritten = data
-        for source, destination in rewrites:
+        for source, destination in _rewrites_for(path, rewrites):
             rewritten = rewritten.replace(source, destination)
         if rewritten != data:
             _write_rewritten_path(path, rewritten, original=data)
@@ -253,7 +275,7 @@ def _assert_source_paths_absent(topology: Path, rewrites: list[_PathRewrite]) ->
         elif (
             path.is_file()
             and not _inside_git_object_store(path)
-            and any(source in path.read_bytes() for source in source_paths)
+            and any(source in path.read_bytes() for source, _ in _rewrites_for(path, rewrites))
         ):
             references.append(path)
     if references:
