@@ -90947,6 +90947,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:12Z"
     },
+    "dc9b-e792-bad3-4578": {
+      "created_at": "2026-10-28T04:35:43Z",
+      "jira_id": "4597350",
+      "jira_key": "REB-6776",
+      "state": "confirmed",
+      "updated_at": "2026-10-28T04:35:46Z"
+    },
     "dca1-f641-caeb-4df4": {
       "baseline": {
         "assignee": {
@@ -99594,6 +99601,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-05T09:38:18Z"
+    },
+    "f1a2-0755-693d-4924": {
+      "created_at": "2026-10-28T04:35:49Z",
+      "jira_id": "4597351",
+      "jira_key": "REB-6777",
+      "state": "confirmed",
+      "updated_at": "2026-10-28T04:35:52Z"
     },
     "f1a4-1b43-b720-4dab": {
       "baseline": {
@@ -110233,7 +110247,8 @@
     "1793146910342070312": "__rebar_unknown_comment_id__",
     "1793146913460506875": "__rebar_unknown_comment_id__",
     "1793147104058363047": "__rebar_unknown_comment_id__",
-    "1793154498099132750": "__rebar_unknown_comment_id__"
+    "1793154498099132750": "__rebar_unknown_comment_id__",
+    "1793160963609512462": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -115506,6 +115521,8 @@
     "REB-6773": "177a-ea91-6712-4334",
     "REB-6774": "c400-fec0-a7bf-4755",
     "REB-6775": "1712-f158-9314-420a",
+    "REB-6776": "dc9b-e792-bad3-4578",
+    "REB-6777": "f1a2-0755-693d-4924",
     "REB-678": "d71f-24ab-dc4c-4119",
     "REB-679": "da25-8af4-7c15-4b4e",
     "REB-68": "2d90-8fad-53a5-484f",
