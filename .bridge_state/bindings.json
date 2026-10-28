@@ -9581,6 +9581,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:50Z"
     },
+    "1712-f158-9314-420a": {
+      "created_at": "2026-10-28T02:37:15Z",
+      "jira_id": "4597348",
+      "jira_key": "REB-6775",
+      "state": "confirmed",
+      "updated_at": "2026-10-28T02:37:19Z"
+    },
     "1727-5d44-7b31-4695": {
       "baseline": {
         "assignee": null,
@@ -55354,7 +55361,7 @@
     "87d8-8bb6-5226-4a5b": {
       "baseline": {
         "assignee": null,
-        "description": "## Context / Problem\nThe LLM gates carry leftovers from finished cutovers and one retired demo: the single-pass review-a-ticket engine (a demo the project has been retiring; the real reviews are the four-phase plan review and four-phase code review, whose single-turn criteria are steps inside those workflows), two shadow comparators, a spot-eval harness with an unreachable entry point, private re-exports that ADR 0111 forbids, severity residue from ADR 0108, a finished A/B env var, a legacy overlay routing form that clients may still use, and five attestation helpers independently confirmed dead on origin/main. Each is small; together they are the kind of retained rollback twin the operator named as the target class on 2026-09-06.\n\n## Acceptance Criteria\n- [ ] The single-pass demo is fully retired: its engine, parity harness, prompt, eval spec, and eval-solver branch are gone, the catalog has exactly one default reviewer (`code-quality`), and the four-phase plan-review and code-review workflows are byte-unchanged. Checked by the demo story's greps and the regenerate-index drift gate.\n- [ ] No finished-cutover scaffolding remains: the shadow comparators, the spot-eval harness, and the private re-exports are deleted with their only importers migrated. Checked by the scaffolding story's greps.\n- [ ] Severity no longer drives any gate policy, `REBAR_VERIFY_PREFETCH` is gone with prefetch always on, and the legacy overlay `activate:` list form warns once per overlay through the deprecation registry while still working. Checked by the priority-driven step tests, the prefetch spy test, and the two overlay warning tests.\n- [ ] The five dead attestation helpers are removed, the duplicated unresolvable-ref message is single-sourced, and the plan-review status surface emits only values its schema declares. Checked by the attestation story's greps and the parametrized status test.\n- [ ] Every client-facing change carries a release-notes line. Checked by the entries each story adds.\n\n## Child decomposition\n- Cutover scaffolding story: delivers criterion 2.\n- Demo retirement story: delivers criterion 1, depends on the scaffolding story (shared test file and a relocated-prompts tuple).\n- Severity and prefetch story: delivers the severity and prefetch half of criterion 3.\n- Overlay warning story: delivers the overlay half of criterion 3, depends on the demo story for a registry note.\n- Attestation helpers story: delivers criterion 4.\n- Criterion 5 is delivered by each story's own release-notes line.",
+        "description": "## Context / Problem\nThe LLM gates carry leftovers from finished cutovers and one retired demo: the single-pass review-a-ticket engine (a demo the project has been retiring; the real reviews are the four-phase plan review and four-phase code review, whose single-turn criteria are steps inside those workflows), two shadow comparators, a spot-eval harness with an unreachable entry point, private re-exports that ADR 0111 forbids, severity residue from ADR 0108, a finished A/B env var, a legacy overlay routing form that clients may still use, and five attestation helpers independently confirmed dead on origin/main. Each is small; together they are the kind of retained rollback twin the operator named as the target class on 2026-09-06.\n\n## Acceptance Criteria\n- [ ] The single-pass demo is fully retired: its engine, parity harness, prompt, eval spec, and eval-solver branch are gone, the catalog has exactly one default reviewer (`code-quality`), and the four-phase plan-review and code-review workflows are byte-unchanged. **The default flag must be flipped explicitly, not inherited.** `ticket_quality.md` is today the ONLY front-matter `default: true`; every other reviewer \u2014 `code_quality.md` included \u2014 is `default: false`. `index.json` is generated from that front-matter, and `operations.default_reviewer_id()` returns the first entry whose `default` is set, otherwise raising `LLMError(\"no default reviewer is configured in the catalog\")`. So deleting the demo WITHOUT setting `default: true` in `src/rebar/llm/reviewers/code_quality.md` and regenerating leaves ZERO defaults and breaks every caller that selects a reviewer. The demo story owns both edits in one change. Checked by the demo story's greps, the regenerate-index drift gate, and a test asserting `default_reviewer_id() == \"code-quality\"`.\n- [ ] No finished-cutover scaffolding remains: the shadow comparators, the spot-eval harness, and the private re-exports are deleted with their only importers migrated. Checked by the scaffolding story's greps.\n- [ ] Severity no longer drives any gate policy, `REBAR_VERIFY_PREFETCH` is gone with prefetch always on, and the legacy overlay `activate:` list form warns once per overlay through the deprecation registry while still working. Checked by the priority-driven step tests, the prefetch spy test, and the two overlay warning tests.\n- [ ] The five dead attestation helpers are removed, the duplicated unresolvable-ref message is single-sourced, and the plan-review status surface emits only values its schema declares. Checked by the attestation story's greps and the parametrized status test.\n- [ ] Every client-facing change carries a release-notes line. Checked by the entries each story adds.\n\n## Child decomposition\n- Cutover scaffolding story: delivers criterion 2.\n- Demo retirement story: delivers criterion 1, depends on the scaffolding story (shared test file and a relocated-prompts tuple). It carries the `code_quality.md` front-matter flip + index regeneration described in criterion 1.\n- Severity and prefetch story: delivers the severity and prefetch half of criterion 3.\n- Overlay warning story: delivers the overlay half of criterion 3, depends on the demo story for a registry note.\n- Attestation helpers story: delivers criterion 4.\n- Criterion 5 is delivered by each story's own release-notes line.",
         "priority": "Medium",
         "status": "To Do",
         "summary": "LLM gates: retire the single-pass demo, finished-cutover leftovers, severity residue, and confirmed-dead attestation helpers"
@@ -110189,7 +110196,8 @@
     "1793146907190075073": "__rebar_unknown_comment_id__",
     "1793146910342070312": "__rebar_unknown_comment_id__",
     "1793146913460506875": "__rebar_unknown_comment_id__",
-    "1793147104058363047": "__rebar_unknown_comment_id__"
+    "1793147104058363047": "__rebar_unknown_comment_id__",
+    "1793154498099132750": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -115461,6 +115469,7 @@
     "REB-6772": "9cf1-3663-4de6-4844",
     "REB-6773": "177a-ea91-6712-4334",
     "REB-6774": "c400-fec0-a7bf-4755",
+    "REB-6775": "1712-f158-9314-420a",
     "REB-678": "d71f-24ab-dc4c-4119",
     "REB-679": "da25-8af4-7c15-4b4e",
     "REB-68": "2d90-8fad-53a5-484f",
