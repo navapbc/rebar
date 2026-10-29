@@ -12,6 +12,7 @@ git's Trace2 process tree: no maintenance, gc or repack process may be a DESCEND
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -115,6 +116,52 @@ def _maintenance_inside_commits(trace: Path) -> tuple[int, list[str]]:
     return len(commit_sids), offenders
 
 
+def _maintenance_diagnosis(trace: Path, tracker: str) -> str:
+    """Name which of the detector's failure mechanisms the trace shows (bug ab03-0276).
+
+    An empty ``offenders`` list reads the same whether git declined to start auto-maintenance,
+    started it outside every commit, or cut it short inside one. The trace file lives under
+    ``tmp_path`` and is rotated away by later pytest sessions, so the evidence that tells these
+    apart goes into the failure message, where the run's log keeps it.
+    """
+    events = list(_trace_events(trace))
+    starts = {
+        str(e.get("sid", "")): [str(a) for a in e.get("argv") or []]
+        for e in events
+        if e.get("event") == "start"
+    }
+    exits = {str(e.get("sid", "")): e.get("t_abs") for e in events if e.get("event") == "exit"}
+    maintenance = sorted(
+        (sid, " ".join(argv[:4]))
+        for sid, argv in starts.items()
+        if _git_subcommand(argv) in _MAINTENANCE_COMMANDS
+    )
+    commits = [
+        f"{sid} {exits.get(sid)}s"
+        for sid, argv in starts.items()
+        if "/" not in sid and _git_subcommand(argv) == "commit"
+    ]
+    # A top-level maintenance process is rebar's explicit post-commit step, which runs whether
+    # or not git chose auto-maintenance; only a nested one is git's own auto-maintenance.
+    nested = [m for m in maintenance if "/" in m[0]]
+    if not nested:
+        verdict = (
+            "git started no auto-maintenance under any process: it chose not to run it "
+            f"(top-level explicit steps: {len(maintenance)})"
+        )
+    else:
+        verdict = "git ran auto-maintenance, but not as a descendant of any traced commit"
+    gc_log = _git(tracker, "rev-parse", "--git-path", "gc.log").stdout.strip()
+    gc_path = Path(gc_log) if os.path.isabs(gc_log) else Path(tracker) / gc_log
+    gc_text = gc_path.read_text(errors="replace")[:500] if gc_path.is_file() else "<absent>"
+    return (
+        f"{verdict}.\n  maintenance processes: {maintenance or 'none'}"
+        f"\n  commits (sid, exit t_abs): {commits or 'none'}"
+        f"\n  gc.log: {gc_text}"
+        f"\n  count-objects -v: {_git(tracker, 'count-objects', '-v').stdout.split()}"
+    )
+
+
 def _cross_the_maintenance_threshold(repo: Path) -> str:
     tracker = str(tracker_dir(str(repo)))
     # Precondition: rebar's gc-config makes auto-maintenance FOREGROUND (so it lands inside the
@@ -163,12 +210,51 @@ def test_the_trace_check_detects_maintenance_inside_a_commit(
 ) -> None:
     """The check must be able to fail: with the suppression removed, git runs
     ``maintenance run --auto`` (and the repack below it) as a child of the commit."""
-    _cross_the_maintenance_threshold(repo)
+    tracker = _cross_the_maintenance_threshold(repo)
     monkeypatch.setattr(event_commit_git, "_AUTOMAINT_OFF", ())
 
-    commits, offenders = _create_two_tickets_traced(repo, monkeypatch, tmp_path / "trace.json")
+    trace = tmp_path / "trace.json"
+    commits, offenders = _create_two_tickets_traced(repo, monkeypatch, trace)
 
     assert commits >= 1
     assert any("maintenance" in o for o in offenders), (
-        f"removing the suppression produced no maintenance descendant of a commit: {offenders}"
+        "removing the suppression produced no maintenance descendant of a commit: "
+        f"{offenders}\n{_maintenance_diagnosis(trace, tracker)}"
     )
+
+
+def _write_trace(trace: Path, *processes: tuple[str, list[str], float]) -> None:
+    lines = []
+    for sid, argv, t_abs in processes:
+        lines.append(json.dumps({"event": "start", "sid": sid, "argv": argv}))
+        lines.append(json.dumps({"event": "exit", "sid": sid, "t_abs": t_abs}))
+    trace.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_diagnosis_says_git_chose_not_to_run_maintenance(repo: Path, tmp_path: Path) -> None:
+    """With no maintenance-family process in the trace, the message names git's choice."""
+    trace = tmp_path / "trace.json"
+    # rebar's own top-level maintenance step does not count as git choosing to run it.
+    _write_trace(
+        trace,
+        ("a1", ["git", "commit", "-q"], 0.4),
+        ("d4", ["git", "maintenance", "run"], 1.0),
+    )
+    message = _maintenance_diagnosis(trace, str(tracker_dir(str(repo))))
+    assert "chose not to run it (top-level explicit steps: 1)" in message
+    assert "a1 0.4s" in message
+    assert "gc.log: <absent>" in message
+
+
+def test_diagnosis_says_maintenance_ran_outside_the_commit(repo: Path, tmp_path: Path) -> None:
+    """Auto-maintenance nested under a process other than the commit is named as such."""
+    trace = tmp_path / "trace.json"
+    _write_trace(
+        trace,
+        ("a1", ["git", "commit", "-q"], 0.4),
+        ("b2", ["git", "add", "-A"], 0.2),
+        ("b2/c3", ["git", "maintenance", "run", "--auto"], 3.1),
+    )
+    message = _maintenance_diagnosis(trace, str(tracker_dir(str(repo))))
+    assert "not as a descendant of any traced commit" in message
+    assert "git maintenance run --auto" in message
