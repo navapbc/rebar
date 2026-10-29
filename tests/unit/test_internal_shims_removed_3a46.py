@@ -60,7 +60,9 @@ def test_graph_private_reducer_bindings_are_gone_but_loader_patch_still_intercep
     observed: list[tuple[str, object]] = []
 
     def fake_reduce_all_tickets(path, **kwargs):
-        assert kwargs == {"exclude_archived": False, "exclude_session_logs": True}
+        # The graph load also filters and trims inside the loop (humdrum-priestly-lcont).
+        assert kwargs["exclude_archived"] is False and kwargs["exclude_session_logs"] is True
+        assert callable(kwargs["keep"]) and kwargs["omit_fields"] == _loader.GRAPH_OMITTED_FIELDS
         observed.append(("reduce_all_tickets", path))
         return [{"ticket_id": "a", "deps": [], "status": "open"}]
 

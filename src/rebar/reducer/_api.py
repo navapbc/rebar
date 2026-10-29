@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 
 from ._cache import is_active_event, prepare_event_files, write_cache
 from ._replay import replay_events
@@ -223,6 +224,57 @@ def reduce_ticket(
     return result
 
 
+def _excluded(
+    state: dict,
+    *,
+    exclude_archived: bool,
+    exclude_deleted: bool,
+    exclude_session_logs: bool,
+) -> bool:
+    """True when the ``reduce_all_tickets`` exclusion flags drop ``state``.
+
+    Applied per ticket inside the loop (bug humdrum-priestly-lcont) so a dropped ticket is
+    never retained. Error dicts carry ``status`` ``"error"`` and no ``ticket_type``, so
+    only ``exclude_archived`` could ever drop one — exactly the old post-loop filters.
+    """
+    if exclude_archived and state.get("archived"):
+        return True
+    if exclude_deleted and state.get("status") == "deleted":
+        return True
+    return exclude_session_logs and state.get("ticket_type") in _NON_GRAPH_ARTIFACT_TYPES
+
+
+def _project(
+    state: dict, omit_fields: tuple[str, ...], keep_fields: tuple[str, ...] | None
+) -> dict:
+    """Return ``state`` without ``omit_fields`` and, when given, only ``keep_fields``."""
+    if omit_fields:
+        state = {k: v for k, v in state.items() if k not in omit_fields}
+    if keep_fields is not None:
+        state = {k: v for k, v in state.items() if k in keep_fields}
+    return state
+
+
+def _reduce_entry(entry_path: str, *, exclude_archived: bool) -> tuple[dict | None, bool]:
+    """Reduce one store directory for ``reduce_all_tickets``.
+
+    Returns ``(state, reduced)``. ``state`` is None when a net-archived directory with an
+    ``.archived`` marker is skipped without a reduce (``exclude_archived``; a stale marker
+    is cleared). A failed reduce yields a ``reducer_failed`` error dict with ``reduced``
+    False, so it is never projected.
+    """
+    if exclude_archived and os.path.exists(os.path.join(entry_path, ".archived")):
+        if _is_net_archived(entry_path):
+            return None, False
+        remove_marker(entry_path)
+    state = reduce_ticket(entry_path)
+    if state is None:
+        return make_error_dict(os.path.basename(entry_path), "error", "reducer_failed"), False
+    if exclude_archived:
+        _heal_missing_marker(entry_path, state)
+    return state, True
+
+
 def reduce_all_tickets(
     tracker_dir: str | os.PathLike[str],
     *,
@@ -230,8 +282,14 @@ def reduce_all_tickets(
     exclude_deleted: bool = False,
     exclude_session_logs: bool = False,
     omit_fields: tuple[str, ...] = (),
+    keep: Callable[[dict], bool] | None = None,
+    keep_fields: tuple[str, ...] | None = None,
 ) -> list[dict]:
     """Batch-reduce all tickets in tracker_dir.
+
+    Every exclusion and ``keep`` is applied to each ticket *inside* the loop, so a
+    ticket the caller will discard is never retained while the rest of the store is
+    reduced (bug humdrum-priestly-lcont: up to 349 MB peak on a 9,700-ticket store).
 
     Args:
         tracker_dir: Path to the ``.tickets-tracker`` directory.
@@ -243,7 +301,7 @@ def reduce_all_tickets(
             existing caller — notably ``ticket list --include-archived``, which
             must still surface deleted tickets for tombstone inspection. Uses
             the reduced ``status`` field (the authoritative net-deleted signal),
-            not an event re-scan; error dicts (no ``status``) are kept intact.
+            not an event re-scan; error dicts (status ``"error"``) are kept.
         exclude_session_logs: When True, drop the NON-GRAPH ARTIFACT types —
             ``session_log`` AND ``code_review`` (see :data:`_NON_GRAPH_ARTIFACT_TYPES`).
             Default on for the dependency-graph / store-health hot paths (``ready``,
@@ -259,8 +317,12 @@ def reduce_all_tickets(
             the store is simultaneously live (measured on the real store: 243.4 MB
             for 8,879 tickets, versus 56.4 MB projecting inline). The projection is
             pure — it builds a new dict and never mutates the reducer's cached
-            state — and error dicts are projected the same way (they carry none of
-            the bulky fields, so in practice they pass through unchanged).
+            state. A ``reducer_failed`` error dict is never projected.
+        keep: Optional per-ticket predicate, called on the full state (error dicts
+            included) after the exclusions; a ticket it rejects is dropped at once.
+            The same peak-memory seam as ``omit_fields`` for callers that filter.
+        keep_fields: Optional whitelist projection, the counterpart of
+            ``omit_fields`` (both may be given). Applied after ``keep``.
     """
     tracker_path = os.path.normpath(str(tracker_dir))
     results: list[dict] = []
@@ -276,34 +338,18 @@ def reduce_all_tickets(
         entry_path = os.path.join(tracker_path, entry)
         if not os.path.isdir(entry_path):
             continue
-
-        if exclude_archived and os.path.exists(os.path.join(entry_path, ".archived")):
-            if _is_net_archived(entry_path):
-                continue
-            remove_marker(entry_path)
-
-        state = reduce_ticket(entry_path)
-
-        if state is None:
-            results.append(make_error_dict(entry, "error", "reducer_failed"))
-        else:
-            if exclude_archived:
-                _heal_missing_marker(entry_path, state)
-            if omit_fields:
-                state = {k: v for k, v in state.items() if k not in omit_fields}
-            results.append(state)
-
-    if exclude_archived:
-        results = [r for r in results if not r.get("archived")]
-
-    if exclude_deleted:
-        # Use the reduced status field as the authoritative net-deleted signal.
-        # Error dicts have no "status" key and are preserved intact.
-        results = [r for r in results if r.get("status") != "deleted"]
-
-    if exclude_session_logs:
-        # Keep verbose log / bulk artifact bodies out of the graph/health hot paths.
-        # Error dicts (no "ticket_type") are preserved intact.
-        results = [r for r in results if r.get("ticket_type") not in _NON_GRAPH_ARTIFACT_TYPES]
+        state, reduced = _reduce_entry(entry_path, exclude_archived=exclude_archived)
+        if state is None or _excluded(
+            state,
+            exclude_archived=exclude_archived,
+            exclude_deleted=exclude_deleted,
+            exclude_session_logs=exclude_session_logs,
+        ):
+            continue
+        if keep is not None and not keep(state):
+            continue
+        if reduced:
+            state = _project(state, omit_fields, keep_fields)
+        results.append(state)
 
     return results

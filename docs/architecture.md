@@ -72,6 +72,10 @@ over one git-backed store.
     graph/health hot paths and default `list` set it so verbose `session_log`
     bodies never tax those compiles, while `search` and single-ticket `show`
     leave it off so logs stay discoverable (see event-schema.md "The session_log ticket type").
+    Every exclusion, plus an optional per-ticket `keep` predicate and the
+    `omit_fields`/`keep_fields` projections, is applied inside the loop, so a
+    ticket a caller discards is never retained while the rest of the store is
+    reduced; store-wide reads filter and trim there, not after it returns.
   - **Graph** (`rebar.graph`, code at `src/rebar/graph/`) — relations + cycle
     detection. Excludes `session_log` tickets from the dependency graph (they
     carry non-blocking links only and never block/unblock work); `deps` on a
