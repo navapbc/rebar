@@ -8,6 +8,19 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## Prompt-override and execution-mode tests no longer name `ticket-quality`
+
+No contract change. `tests/unit/test_prompt_variants.py` and
+`tests/unit/test_execution_mode.py` each needed some packaged reviewer id to act as
+the base a `tmp_path` override or variant overlay sits on; both used `ticket-quality`.
+Epic 87d8 is retiring that prompt, so both files now use `code-quality`, which matches
+on every property the tests depend on: `category: review`, `outputs: review_result`,
+`execution_mode: agentic`, and no `applies_to` globs.
+
+Test count, test names, and every assertion are unchanged — 28 tests before and after,
+with identical collected node IDs. The `ticket-quality` prompt itself is still in the
+catalog; later slices of epic 87d8 retire it.
+
 ## The `default` reviewer front-matter key is removed
 
 Breaking for any repo-local prompt override that declares `default:`. The key named a

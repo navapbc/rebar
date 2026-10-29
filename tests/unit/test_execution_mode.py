@@ -23,23 +23,23 @@ def test_execution_mode_defaults_to_agentic_when_absent(tmp_path: Path) -> None:
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
     # A built-in id with an override that omits execution_mode → defaults to agentic.
-    (pdir / "ticket-quality.md").write_text(
-        "---\ncategory: review\ndimension: ticket-quality\n---\nBODY {{ticket_id}}",
+    (pdir / "code-quality.md").write_text(
+        "---\ncategory: review\ndimension: code-quality\n---\nBODY {{ticket_id}}",
         encoding="utf-8",
     )
-    p = prompts.get_prompt("ticket-quality", repo_root=str(tmp_path))
+    p = prompts.get_prompt("code-quality", repo_root=str(tmp_path))
     assert p.execution_mode == "agentic"
 
 
 def test_execution_mode_rejects_invalid_value(tmp_path: Path) -> None:
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
-    (pdir / "ticket-quality.md").write_text(
+    (pdir / "code-quality.md").write_text(
         "---\ncategory: review\nexecution_mode: bogus\n---\nBODY {{ticket_id}}",
         encoding="utf-8",
     )
     with pytest.raises(PromptError) as exc:
-        prompts.get_prompt("ticket-quality", repo_root=str(tmp_path))
+        prompts.get_prompt("code-quality", repo_root=str(tmp_path))
     assert "execution_mode" in str(exc.value)
 
 
@@ -47,12 +47,12 @@ def test_execution_mode_rejects_invalid_value(tmp_path: Path) -> None:
 def test_execution_mode_accepts_both_valid_values(tmp_path: Path, mode: str) -> None:
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
-    (pdir / "ticket-quality.md").write_text(
+    (pdir / "code-quality.md").write_text(
         f"---\ncategory: review\nexecution_mode: {mode}\noutputs: review_result\n"
         "---\nB {{ticket_id}}",
         encoding="utf-8",
     )
-    p = prompts.get_prompt("ticket-quality", repo_root=str(tmp_path))
+    p = prompts.get_prompt("code-quality", repo_root=str(tmp_path))
     assert p.execution_mode == mode
 
 
@@ -145,16 +145,16 @@ def test_build_agent_request_agentic_honors_step_mode_and_schema() -> None:
 def test_prompt_override_drift_flags_changed_outputs(tmp_path: Path) -> None:
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
-    # ticket-quality's built-in outputs contract is review_result; an override that
+    # code-quality's built-in outputs contract is review_result; an override that
     # CHANGES it (here to completion_verdict) is breaking drift.
-    (pdir / "ticket-quality.md").write_text(
-        "---\ncategory: review\ndimension: ticket-quality\noutputs: completion_verdict\n---\n"
+    (pdir / "code-quality.md").write_text(
+        "---\ncategory: review\ndimension: code-quality\noutputs: completion_verdict\n---\n"
         "Body {{ticket_id}}",
         encoding="utf-8",
     )
     findings = prompts.prompt_override_drift(repo_root=str(tmp_path))
     assert findings
-    assert "ticket-quality" in findings[0]
+    assert "code-quality" in findings[0]
     assert "outputs" in findings[0]
 
 
@@ -163,8 +163,8 @@ def test_prompt_override_drift_identical_override_is_clean(tmp_path: Path) -> No
     pdir.mkdir(parents=True)
     # An override that keeps the SAME outputs contract as the built-in (review_result)
     # → no drift.
-    (pdir / "ticket-quality.md").write_text(
-        "---\ncategory: review\ndimension: ticket-quality\noutputs: review_result\n---\n"
+    (pdir / "code-quality.md").write_text(
+        "---\ncategory: review\ndimension: code-quality\noutputs: review_result\n---\n"
         "Body {{ticket_id}}",
         encoding="utf-8",
     )
@@ -181,8 +181,8 @@ def test_lint_workflow_surfaces_override_drift(tmp_path: Path) -> None:
 
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
-    (pdir / "ticket-quality.md").write_text(
-        "---\ncategory: review\ndimension: ticket-quality\noutputs: completion_verdict\n---\n"
+    (pdir / "code-quality.md").write_text(
+        "---\ncategory: review\ndimension: code-quality\noutputs: completion_verdict\n---\n"
         "Body {{ticket_id}}",
         encoding="utf-8",
     )
