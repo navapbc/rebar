@@ -24,6 +24,7 @@ import sys
 from typing import Any, cast
 
 from rebar._engine_support.output import error_envelope
+from rebar._engine_support.reads import LEAN_OMITTED_FIELDS
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._mcp_errors import js_safe_dumps
 from rebar.graph._relations import build_blocked_by
@@ -134,10 +135,18 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
     epic_id = resolved
     epic_title = epic_state.get("title", "")
 
-    # Full reduced set (every status, incl. archived/deleted dirs) for the BFS
-    # parent map and ticket-body/parent/tag lookups — bash scans all dirs.
+    # ONE lean reduce of every ticket (every status, incl. archived/deleted dirs) feeds
+    # the BFS parent map, the parent/tag lookups, the blocker statuses and the
+    # candidate rows. Bodies and signature material are dropped inside the reducer
+    # loop: nothing below reads them, and holding the whole store's copies at once is
+    # what let concurrent calls exhaust the MCP server's memory (teenage-unquieted-
+    # ringworm).
     full_states = reduce_all_tickets(
-        tracker, exclude_archived=False, exclude_deleted=False, exclude_session_logs=True
+        tracker,
+        exclude_archived=False,
+        exclude_deleted=False,
+        exclude_session_logs=True,
+        omit_fields=LEAN_OMITTED_FIELDS,
     )
     state_by_id: dict[str, dict] = {}
     parent_map: dict[str, list[str]] = {}
@@ -161,16 +170,22 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
                 queue.append(child)
     parent_ids_with_children = {pid for pid in parent_map if pid in descendants and parent_map[pid]}
 
-    # Open/in_progress tickets via the shared list path (== ``rebar list``).
-    from rebar._engine_support import reads as _reads
-    from rebar._engine_support.ticket_query import TicketQuery
+    # Open/in_progress, unarchived tickets in directory order: the same rows
+    # ``rebar list --status=open,in_progress`` returns, taken from the pass above.
+    all_tickets = [
+        s
+        for s in full_states
+        if s.get("status") in ("open", "in_progress") and not s.get("archived")
+    ]
 
-    all_tickets = _reads.list_states(tracker, TicketQuery(status="open,in_progress"))
-
+    # Every blocker's real status, as ``ready`` reads it: unreducible (error /
+    # fsck_needed) and missing tickets count as finished. Taking statuses from the
+    # active rows alone defaulted a ``blocked`` or ``idea`` blocker to closed
+    # (discrepant-comical-horse).
     ticket_status_map = {
-        t.get("ticket_id", ""): t.get("status", "").lower()
-        for t in all_tickets
-        if t.get("ticket_id")
+        tid: str(s.get("status", "")).lower()
+        for tid, s in state_by_id.items()
+        if s.get("status") not in ("error", "fsck_needed")
     }
     # Tombstone override: .tombstone.json carries the terminal status (the reducer
     # does not read it, so list returns the pre-delete status).
@@ -213,7 +228,6 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
                 "title": t.get("title", "untitled"),
                 "issue_type": t.get("ticket_type", "task"),
                 "dependencies": t.get("deps", []),
-                "description": t.get("description", ""),
                 "file_impact": t.get("file_impact", []),
             }
         )

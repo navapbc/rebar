@@ -432,3 +432,98 @@ def test_library_and_mcp_shape(tracker: Path, monkeypatch):
     assert d["skipped_blocked_story"][0]["blocked_story"] == "nb-story-2"
     # MCP next_batch advertises and returns this canonical shape verbatim.
     schemas.validator(schemas.NEXT_BATCH).validate(d)
+
+
+# ───────────────────────────── blocker status / single pass ─────────────────
+def _task(base: Path, tid: str, ts: int, *, status: str = "open", parent: str = "bk-epic") -> None:
+    _write(
+        base,
+        tid,
+        1,
+        "CREATE",
+        {
+            "ticket_id": tid,
+            "title": tid,
+            "ticket_type": "task",
+            "status": status,
+            "priority": 2,
+            "parent_id": parent,
+        },
+        ts,
+    )
+
+
+def _blocked_by_status(base: Path, blocker_status: str) -> None:
+    """bk-task depends_on bk-blocker, whose status is ``blocker_status``."""
+    ts = 1700003000000000000
+    _write(
+        base,
+        "bk-epic",
+        1,
+        "CREATE",
+        {
+            "ticket_id": "bk-epic",
+            "title": "BK Epic",
+            "ticket_type": "epic",
+            "status": "open",
+            "priority": 1,
+            "parent_id": None,
+        },
+        ts,
+    )
+    _task(base, "bk-blocker", ts + 1, status=blocker_status, parent="")
+    _task(base, "bk-task", ts + 2)
+    _write(
+        base, "bk-task", 2, "LINK", {"relation": "depends_on", "target_id": "bk-blocker"}, ts + 3
+    )
+
+
+@pytest.mark.parametrize("blocker_status", ["blocked", "idea"])
+def test_non_terminal_blocker_outside_the_active_set_still_blocks(
+    tracker: Path, blocker_status: str
+):
+    """A blocker whose status is neither open/in_progress nor terminal still blocks
+    (discrepant-comical-horse): next-batch used to look blockers up only among
+    open/in_progress tickets and default the rest to closed."""
+    _blocked_by_status(tracker, blocker_status)
+    d = json.loads(_run(tracker, "bk-epic", "--output", "json").stdout)
+    assert d["batch"] == []
+    assert d["skipped_blocked"] == [{"id": "bk-task", "title": "bk-task", "blocker": "bk-blocker"}]
+
+
+def test_closed_blocker_releases_its_dependent(tracker: Path):
+    _blocked_by_status(tracker, "closed")
+    d = json.loads(_run(tracker, "bk-epic", "--output", "json").stdout)
+    assert [b["id"] for b in d["batch"]] == ["bk-task"]
+    assert d["skipped_blocked"] == []
+
+
+def test_archived_open_task_is_not_a_candidate(tracker: Path):
+    _three_tier(tracker)
+    _write(tracker, "nb-task-2", 2, "ARCHIVED", {}, 1700000000000000100)
+    d = json.loads(_run(tracker, "nb-epic", "--output", "json").stdout)
+    assert [b["id"] for b in d["batch"]] == ["nb-task-1"]
+
+
+def test_compute_reduces_the_store_once_without_bodies(tracker: Path, monkeypatch):
+    """Peak memory seam (teenage-unquieted-ringworm): one whole-store reduce per call,
+    with bodies and signature material dropped inside the reducer loop. A second
+    whole-store pass, or a full-body pass, holds every ticket's bulk at once."""
+    from rebar._engine_support import next_batch as nb
+
+    _three_tier(tracker)
+    calls: list[dict] = []
+    real = nb.reduce_all_tickets
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(nb, "reduce_all_tickets", spy)
+    monkeypatch.setattr("rebar._engine_support.reads.reduce_all_tickets", spy)
+    result = nb.compute(str(tracker), "nb-epic")
+    assert [c.id for c in result.batch] == ["nb-task-1", "nb-task-2"]
+    assert len(calls) == 1
+    assert {"description", "comments", "authorship_ledger", "attestations"} <= set(
+        calls[0].get("omit_fields", ())
+    )
