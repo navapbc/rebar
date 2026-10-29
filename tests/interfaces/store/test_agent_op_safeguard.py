@@ -83,7 +83,7 @@ def test_runner_agentic_fails_closed_outside_gate(monkeypatch):
 # --------------------------------------------------------------------------------------
 # e95a — run_workflow gates LLM workflows through the snapshot; deterministic ones don't
 # --------------------------------------------------------------------------------------
-_AGENT_DOC = {"name": "wf", "steps": [{"id": "a", "prompt": "ticket-quality"}]}
+_AGENT_DOC = {"name": "wf", "steps": [{"id": "a", "prompt": "code-quality"}]}
 _DET_DOC = {"name": "wf", "steps": [{"id": "s", "uses": "noop"}]}
 
 

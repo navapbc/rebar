@@ -45,8 +45,8 @@ def test_catalog_and_fallback_prompt_render() -> None:
     from rebar.llm.prompting import prompts
 
     catalog = llm.load_catalog()
-    assert "ticket-quality" in catalog
-    rv = llm.get_prompt("ticket-quality")
+    assert "code-quality" in catalog
+    rv = llm.get_prompt("code-quality")
     assert rv.is_reviewer is True  # category == "review" → reviewer
     text, meta = prompts.resolve_prompt(
         rv, {"ticket_id": "T1", "ticket_context": "CTX", "repo_path": "/x"}, None
@@ -56,7 +56,7 @@ def test_catalog_and_fallback_prompt_render() -> None:
     # object; Langfuse is never consulted for the text).
     assert meta["source"] == "git"
     assert len(meta["content_sha256"]) == 64
-    assert meta["prompt_id"] == "ticket-quality"
+    assert meta["prompt_id"] == "code-quality"
 
 
 def test_unknown_reviewer_raises() -> None:

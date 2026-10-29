@@ -15,19 +15,19 @@ from rebar.llm.prompting.prompts import PromptError
 
 
 def _reviewer():
-    return prompts.get_prompt("ticket-quality")
+    return prompts.get_prompt("code-quality")
 
 
 def test_resolve_is_git_canonical_with_content_hash() -> None:
     text, meta = prompts.resolve_prompt(_reviewer(), {"ticket_id": "T1", "ticket_context": "CTX"})
     assert "T1" in text and "CTX" in text
     assert meta["source"] == "git"
-    assert meta["prompt_id"] == "ticket-quality"
+    assert meta["prompt_id"] == "code-quality"
     assert len(meta["content_sha256"]) == 64
 
 
 def test_strict_rendering_throws_on_undefined_var() -> None:
-    # ticket-quality uses {{ticket_id}} + {{ticket_context}}; omit one → raise.
+    # code-quality uses {{ticket_id}} + {{ticket_context}}; omit one → raise.
     with pytest.raises(PromptError, match="undefined variable"):
         prompts.resolve_prompt(_reviewer(), {"ticket_id": "T1"})
 
@@ -54,7 +54,7 @@ def test_user_override_wins(tmp_path: Path) -> None:
     # A user .rebar/prompts/<id>.md overrides the packaged canon.
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
-    (pdir / "ticket-quality.md").write_text("OVERRIDE {{ticket_id}}")
+    (pdir / "code-quality.md").write_text("OVERRIDE {{ticket_id}}")
     text = prompts.canonical_prompt_text(_reviewer(), repo_root=str(tmp_path))
     assert text == "OVERRIDE {{ticket_id}}"
     # And resolve renders it strictly.

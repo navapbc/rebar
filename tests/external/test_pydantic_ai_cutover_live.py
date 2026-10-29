@@ -178,7 +178,7 @@ def test_pydantic_workflow_agent_step(rebar_repo: Path) -> None:
     doc = {
         "schema_version": "2",
         "name": "live-agent",
-        "steps": [{"id": "review", "prompt": "ticket-quality", "mode": "findings"}],
+        "steps": [{"id": "review", "prompt": "code-quality", "mode": "findings"}],
     }
     agent_runner = RunnerAgentStep(
         runner=PydanticAIRunner(_cfg(rebar_repo, _class_model("standard"))),

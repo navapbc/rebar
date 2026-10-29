@@ -127,7 +127,7 @@ def test_load_catalog_ignores_the_reserved_marker_key() -> None:
     assert MARKER_KEY not in catalog
     assert not any(rid.startswith("_") for rid in catalog)
     # and the catalog still resolves the real reviewers it always did
-    assert "ticket-quality" in catalog
+    assert "code-quality" in catalog
 
 
 def test_guide_pins_marker_is_inert_for_the_parity_gate() -> None:

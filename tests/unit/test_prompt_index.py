@@ -14,26 +14,26 @@ from rebar.llm.prompting.prompts import PromptError, PromptNotFound
 
 # ── get_prompt: unified resolver ──────────────────────────────────────────────
 def test_get_prompt_returns_unified_reviewer() -> None:
-    p = prompts.get_prompt("ticket-quality")
-    assert p.id == "ticket-quality"
+    p = prompts.get_prompt("code-quality")
+    assert p.id == "code-quality"
     assert p.is_reviewer is True  # category == "review", EXPLICIT
     assert p.category == "review"
     assert p.execution_mode == "agentic"
-    assert p.dimension == "ticket-quality"
+    assert p.dimension == "code-quality"
     assert "{{ticket_id}}" in p.text  # body, front-matter stripped
 
 
 def test_get_prompt_project_override_wins(tmp_path: Path) -> None:
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
-    (pdir / "ticket-quality.md").write_text(
-        "---\ncategory: review\ndimension: ticket-quality\n---\nOVERRIDE {{ticket_id}}"
+    (pdir / "code-quality.md").write_text(
+        "---\ncategory: review\ndimension: code-quality\n---\nOVERRIDE {{ticket_id}}"
     )
-    p = prompts.get_prompt("ticket-quality", repo_root=str(tmp_path))
+    p = prompts.get_prompt("code-quality", repo_root=str(tmp_path))
     assert p.text == "OVERRIDE {{ticket_id}}"
     assert p.is_reviewer is True
     # Without the repo_root the packaged built-in is resolved instead.
-    assert "OVERRIDE" not in prompts.get_prompt("ticket-quality").text
+    assert "OVERRIDE" not in prompts.get_prompt("code-quality").text
 
 
 def test_get_prompt_unknown_raises() -> None:

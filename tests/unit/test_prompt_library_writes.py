@@ -45,9 +45,9 @@ def test_enumerate_packaged_includes_reviewers_and_criteria() -> None:
     entries = enumerate_library()
     by_id = {e["id"]: e for e in entries}
     # a packaged reviewer
-    assert by_id["ticket-quality"]["kind"] == "prompt"
-    assert by_id["ticket-quality"]["source"] == "packaged"
-    assert by_id["ticket-quality"]["is_overlay"] is False
+    assert by_id["code-quality"]["kind"] == "prompt"
+    assert by_id["code-quality"]["source"] == "packaged"
+    assert by_id["code-quality"]["is_overlay"] is False
     # a packaged criterion (category: plan-review-criterion)
     g6 = by_id["plan-review-G6"]
     assert g6["kind"] == "criterion"
@@ -73,7 +73,7 @@ def test_enumerate_packaged_includes_reviewers_and_criteria() -> None:
     # the new authoring/round-trip fields B-UX needs
     assert g6["category"] == "plan-review-criterion"
     assert g6["execution_mode"] in {"single_turn", "agentic"}
-    assert by_id["ticket-quality"]["category"] == "review"
+    assert by_id["code-quality"]["category"] == "review"
 
 
 def test_enumerate_covers_user_dir_entries(tmp_path: Path) -> None:
@@ -91,14 +91,14 @@ def test_enumerate_covers_user_dir_entries(tmp_path: Path) -> None:
 def test_enumerate_user_override_wins_over_packaged(tmp_path: Path) -> None:
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
-    (pdir / "ticket-quality.md").write_text(
+    (pdir / "code-quality.md").write_text(
         "---\ntitle: Overridden\ndescription: my override\ncategory: review\n"
         "---\nbody {{ticket_id}}\n",
         encoding="utf-8",
     )
     by_id = {e["id"]: e for e in enumerate_library(repo_root=str(tmp_path))}
-    assert by_id["ticket-quality"]["source"] == "user"
-    assert by_id["ticket-quality"]["title"] == "Overridden"
+    assert by_id["code-quality"]["source"] == "user"
+    assert by_id["code-quality"]["title"] == "Overridden"
 
 
 def test_enumerate_criteria_is_criteria_only() -> None:
@@ -106,7 +106,7 @@ def test_enumerate_criteria_is_criteria_only() -> None:
     assert crits, "expected packaged criteria"
     assert all(e["kind"] == "criterion" for e in crits)
     assert "plan-review-G6" in {e["id"] for e in crits}
-    assert "ticket-quality" not in {e["id"] for e in crits}
+    assert "code-quality" not in {e["id"] for e in crits}
 
 
 # ── create / update round-trip ───────────────────────────────────────────────────

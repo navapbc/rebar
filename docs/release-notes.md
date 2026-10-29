@@ -8,6 +8,21 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## Reviewer-stand-in test fixtures no longer name `ticket-quality`
+
+No contract change. Seven test files each needed *some* packaged reviewer id to stand
+in for "a packaged reviewer" — in `enumerate_library` coverage, `get_prompt`
+resolution and user-override precedence, canonical render metadata, catalog
+membership, and workflow-step fixtures. All of them had picked `ticket-quality`.
+Epic 87d8 is retiring that prompt, so all seven now use `code-quality`, which matches
+on every property those tests depend on: `category: review`, `inputs: reviewer_input`,
+`outputs: review_result`, `execution_mode: agentic`, no `applies_to` globs, and the
+same `{{ticket_id}}` and `{{ticket_context}}` template variables.
+
+Test count, test names, and every assertion are unchanged — 110 tests before and
+after across the six locally-runnable files, with identical collected node IDs. The
+`ticket-quality` prompt itself is still in the catalog; a later slice retires it.
+
 ## Prompt-override and execution-mode tests no longer name `ticket-quality`
 
 No contract change. `tests/unit/test_prompt_variants.py` and
