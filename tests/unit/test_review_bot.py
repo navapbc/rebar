@@ -1942,7 +1942,13 @@ def test_lifespan_can_opt_into_the_real_reconcile_loop(monkeypatch, tmp_path):
 
 
 def test_lifespan_drains_queued_events_on_shutdown(monkeypatch, tmp_path):
-    """Drain acknowledged webhook events before cancelling the worker on shutdown."""
+    """Drain acknowledged webhook events before cancelling the worker on shutdown.
+
+    The drain returns as soon as the queue empties, so this test sets a window far above
+    the work it queues and asserts completeness only. Each event's pre-review currency
+    lookup is slowed so the whole drain outlasts the 1 s window the autouse fixture sets;
+    leaning on that window made the result depend on runner load
+    (eastmost-uncheered-nematode)."""
     import types
 
     pytest.importorskip("fastapi")
@@ -1954,6 +1960,12 @@ def test_lifespan_drains_queued_events_on_shutdown(monkeypatch, tmp_path):
         await asyncio.sleep(0.02)
         processed.append(event)
 
+    def _slow_lookup(event, cfg):
+        time.sleep(0.3)  # 5 events x 0.3 s outlasts the autouse fixture's 1 s window
+        return None
+
+    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "60")
+    monkeypatch.setattr(appmod, "_current_revision", _slow_lookup, raising=True)
     monkeypatch.setattr(appmod._voter, "review_and_vote", _fake_review, raising=True)
     fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=_cfg(tmp_path)))
 
@@ -3525,3 +3537,32 @@ def test_monitoring_reads_the_same_proof_marker_as_the_clone_guard():
     repo_root = pathlib.Path(__file__).resolve().parents[2]
     src = (repo_root / "infra" / "scripts" / "observability.sh").read_text()
     assert ga._SCRATCH_MOUNTED_MARKER in src
+
+
+@pytest.mark.review_bot_real_lookup
+def test_current_revision_fails_open_when_the_gerrit_lookup_raises(monkeypatch, tmp_path):
+    """The real lookup returns None on any client error, so an unreadable revision never
+    drops a review. The autouse stub replaces this function elsewhere; this pins it."""
+    pytest.importorskip("fastapi")
+    from rebar.review_bot import app as appmod
+    from rebar.review_bot import gerrit_client
+
+    def _boom(self, change_id):
+        raise gerrit_client.GerritError("GET -> HTTP 503", status=503)
+
+    monkeypatch.setattr(gerrit_client.GerritClient, "get_change_event", _boom)
+    assert appmod._current_revision(_event(), _cfg(tmp_path)) is None
+
+
+@pytest.mark.review_bot_real_lookup
+def test_current_revision_reads_the_current_patch_set(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+    from rebar.review_bot import app as appmod
+    from rebar.review_bot import gerrit_client
+
+    monkeypatch.setattr(
+        gerrit_client.GerritClient,
+        "get_change_event",
+        lambda self, change_id: _event(revision="rev9"),
+    )
+    assert appmod._current_revision(_event(), _cfg(tmp_path)) == "rev9"

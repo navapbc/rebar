@@ -531,7 +531,9 @@ def _remove_readonly_run_snapshots(tmp_path: Path, _isolate_user_config: None) -
 
 
 @pytest.fixture(autouse=True)
-def _bound_review_bot_shutdown_drain(monkeypatch: pytest.MonkeyPatch) -> None:
+def _bound_review_bot_shutdown_drain(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> None:
     """Make review-bot hard-shutdown process exit inert during tests.
 
     A lifespan timer from one test can otherwise kill an unrelated xdist worker. Patching
@@ -544,6 +546,14 @@ def _bound_review_bot_shutdown_drain(monkeypatch: pytest.MonkeyPatch) -> None:
     except ImportError:
         return
     monkeypatch.setattr(_review_bot_app, "_force_process_exit", lambda code=0: None, raising=False)
+    # The worker's pre-review currency lookup otherwise builds a real GerritClient on a
+    # thread; the network guard refuses it, and the thread can outlive a test's drain window
+    # (eastmost-uncheered-nematode). Fail open instantly, as the production lookup does on
+    # error. Tests of currency patch it themselves; ``review_bot_real_lookup`` keeps the real one.
+    if request.node.get_closest_marker("review_bot_real_lookup") is None:
+        monkeypatch.setattr(
+            _review_bot_app, "_current_revision", lambda event, cfg: None, raising=False
+        )
 
 
 @pytest.fixture(scope="session")
