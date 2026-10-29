@@ -84,8 +84,8 @@ def repo_with_origin(tmp_path, monkeypatch):
     return repo, main_sha
 
 
-def _ticket(repo: Path) -> str:
-    return rebar.create_ticket("task", "S3 gate-source test ticket", repo_root=str(repo))
+def _epic(repo: Path) -> str:
+    return rebar.create_ticket("epic", "S3 gate-source test ticket", repo_root=str(repo))
 
 
 # --------------------------------------------------------------------------------------
@@ -93,14 +93,14 @@ def _ticket(repo: Path) -> str:
 # --------------------------------------------------------------------------------------
 def test_attested_reads_pinned_ref_regardless_of_checkout_branch(repo_with_origin, gate_tmpdir):
     repo, main_sha = repo_with_origin
-    tid = _ticket(repo)
+    eid = _epic(repo)
     # The shared checkout is on `other` (from-other); attested must read origin/main.
     assert (repo / "sentinel.txt").read_text() == "from-other\n"
 
     runner = CapturingRunner()
-    result = rebar.llm.operations._review_ticket_impl(
-        tid,
-        "ticket-quality",
+    result = rebar.llm.spec_scan.scan_epics_for_spec(
+        "the spec text",
+        epics=[eid],
         ref="origin/main",
         source="attested",
         runner=runner,
@@ -118,13 +118,13 @@ def test_attested_reads_pinned_ref_regardless_of_checkout_branch(repo_with_origi
 
 def test_attested_verdict_identical_across_checkout_branches(repo_with_origin, gate_tmpdir):
     repo, _main_sha = repo_with_origin
-    tid = _ticket(repo)
+    eid = _epic(repo)
 
     def run() -> str:
         runner = CapturingRunner()
-        rebar.llm.operations._review_ticket_impl(
-            tid,
-            "ticket-quality",
+        rebar.llm.spec_scan.scan_epics_for_spec(
+            "the spec text",
+            epics=[eid],
             ref="origin/main",
             source="attested",
             runner=runner,
@@ -144,11 +144,11 @@ def test_attested_verdict_identical_across_checkout_branches(repo_with_origin, g
 # --------------------------------------------------------------------------------------
 def test_local_mode_reads_checkout_and_is_unsigned(repo_with_origin, gate_tmpdir):
     repo, _main_sha = repo_with_origin
-    tid = _ticket(repo)
+    eid = _epic(repo)
     runner = CapturingRunner()
-    result = rebar.llm.operations._review_ticket_impl(
-        tid,
-        "ticket-quality",
+    result = rebar.llm.spec_scan.scan_epics_for_spec(
+        "the spec text",
+        epics=[eid],
         source="local",
         runner=runner,
         repo_root=str(repo),

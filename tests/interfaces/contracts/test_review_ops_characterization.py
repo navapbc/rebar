@@ -69,10 +69,10 @@ def test_review_result_validates_against_schema(rebar_repo: Path) -> None:
     from rebar import schemas
 
     r = str(rebar_repo)
-    tid = rebar.create_ticket("task", "T", repo_root=r)
-    result = rebar.llm.operations._review_ticket_impl(
-        tid,
-        "ticket-quality",
+    eid = rebar.create_ticket("epic", "T", repo_root=r)
+    result = rebar.llm.spec_scan.scan_epics_for_spec(
+        "the spec text",
+        epics=[eid],
         runner=FakeRunner([{"severity": "low", "dimension": "x", "detail": "d"}]),
         repo_root=r,
     )
