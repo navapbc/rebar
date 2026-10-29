@@ -1103,28 +1103,37 @@ def _craft_inconsistent_snapshot(tracker: Path, seed: str) -> Path:
     return create_file
 
 
-def test_a3_repair_aborts_when_push_fails_leaving_pretag_for_rollback(two_clones):
-    """A3 safety (34b1): if a batch push is REJECTED (the remote tickets branch diverged
-    under us), the live repair ABORTS and surfaces the error rather than silently leaving
-    the store partly-pushed — and the pre-tag it wrote first still enables a rollback."""
+def test_a3_repair_reconciles_a_concurrent_write_and_publishes_it_repaired(two_clones):
+    """A3 safety (34b1, revised for bug 900d-f034): when the remote tickets branch moves under
+    a live repair, the rejected batch push merges the remote and REPAIRS THE BATCH AGAIN before
+    retrying. The concurrent event is older than the SNAPSHOT the repair just rebuilt, so
+    pushing the bare merge would publish a new ORPHAN_EVENT; the store must end clean instead,
+    with the concurrent write kept and the pre-tag still in place for rollback."""
     _remote, repo_a, repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
     create_file = _craft_inconsistent_snapshot(tracker_a, seed)
     assert "SNAPSHOT_INCONSISTENT" in _engine_run(repo_a, "store", "fsck", check=False).stdout
 
-    # Diverge origin/tickets from under A: B writes+auto-pushes a comment, so A's
-    # non-fast-forward `push origin HEAD:tickets` in the repair is rejected.
+    # Diverge origin/tickets from under A: B writes+auto-pushes a comment on the SAME ticket,
+    # so A's first batch push is rejected as non-fast-forward.
     _engine_run(repo_b, "comment", seed, "divergent-from-b")
 
     out = _engine_run(repo_a, "store", "fsck", "--repair", check=False).stdout
-    assert "ABORT: push failed" in out, out
-    # The pre-tag was written BEFORE any mutation → rollback remains possible.
+    assert "push rejected; merging" in out, out
+    assert "ABORT" not in out, out
     assert _git("rev-parse", "pre-a3-remediation", cwd=tracker_a).returncode == 0
-    # The retire was applied+committed locally (abort is AFTER the failed push), so the
-    # operator recovers via the pre-tag, not by hoping nothing was written.
     assert (
         not create_file.exists() and (tracker_a / seed / (create_file.name + ".retired")).exists()
     )
+
+    after = _engine_run(repo_a, "store", "fsck", check=False).stdout
+    assert "ORPHAN_EVENT" not in after and "SNAPSHOT_INCONSISTENT" not in after, after
+    # Delivered: A matches the remote, and B's concurrent comment survived the merge.
+    _git("fetch", "-q", "origin", "tickets", cwd=tracker_a)
+    head = _git("rev-parse", "HEAD", cwd=tracker_a).stdout.strip()
+    assert head == _git("rev-parse", "origin/tickets", cwd=tracker_a).stdout.strip()
+    shown = _engine_run(repo_a, "show", seed, "--output", "json", check=False).stdout
+    assert "divergent-from-b" in shown, shown
 
 
 def _reconciler_advisory():
