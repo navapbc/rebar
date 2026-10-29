@@ -625,7 +625,7 @@ def deliver_candidate(
         remote = config.tickets_remote(root)
     except config.ConfigError as exc:
         raise CommandError(f"Error: invalid completion delivery destination: {exc}") from None
-    remote_url = push._git(tracker, "remote", "get-url", remote)
+    remote_url = push._git(tracker, "remote", "get-url", "--push", remote)
     if remote_url.returncode != 0:
         return _deliver_local(
             candidate,

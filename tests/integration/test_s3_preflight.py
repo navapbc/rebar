@@ -36,15 +36,22 @@ def _arrange_helper(monkeypatch: pytest.MonkeyPatch, *, on_path: bool, version: 
     monkeypatch.setattr(_optional.importlib.metadata, "version", _version)
 
 
-def _fake_git_factory(remote_url: str, *, url_rc: int = 0, push_rc: int = 0):
-    """A push._git double: `remote get-url` yields remote_url; `push` yields push_rc."""
+def _fake_git_factory(
+    remote_url: str, *, push_url: str | None = None, url_rc: int = 0, push_rc: int = 0
+):
+    """A push._git double over one remote, as git resolves it.
+
+    `remote get-url` yields remote_url; `remote get-url --push` yields push_url, or remote_url
+    when no push URL is set; `push` yields push_rc.
+    """
 
     def fake_git(_base: str, *args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if args[:2] == ("remote", "get-url"):
+            url = push_url if "--push" in args and push_url is not None else remote_url
             return subprocess.CompletedProcess(
                 args,
                 url_rc,
-                "" if url_rc else f"{remote_url}\n",
+                "" if url_rc else f"{url}\n",
                 "no such remote" if url_rc else "",
             )
         if args and args[0] == "push":
@@ -189,4 +196,80 @@ def test_push_after_commit_s3_missing_helper_propagates(tmp_path: Path, monkeypa
 
     with pytest.raises(_optional.OptionalDependencyError) as ei:
         push.push_after_commit(str(tracker))
+    assert "pip install 'nava-rebar[s3]'" in str(ei.value)
+
+
+# --------------------------------------------------------------------------------------------
+# Split remotes (issue #145): the push URL, not the fetch URL, decides the push preflight
+# --------------------------------------------------------------------------------------------
+
+
+def test_push_split_remote_checks_the_push_url(tmp_path: Path, monkeypatch) -> None:
+    """A non-S3 fetch URL with an s3:// push URL still fails closed without the helper."""
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    _wire_push(monkeypatch, "https://github.com/org/repo.git", push_url="s3://my-bucket/tickets")
+    _arrange_helper(monkeypatch, on_path=False, version=None)
+
+    with pytest.raises(_optional.OptionalDependencyError) as ei:
+        push.push_tickets_branch(str(tracker))
+    assert "pip install 'nava-rebar[s3]'" in str(ei.value)
+
+
+@pytest.mark.allow_repo_writes  # patches module-global subprocess.Popen; opt out of HEAD guard
+def test_push_async_split_remote_checks_the_push_url(tmp_path: Path, monkeypatch) -> None:
+    """The async arm's parent-side preflight also reads the push URL."""
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    _wire_push(
+        monkeypatch,
+        "https://github.com/org/repo.git",
+        push_url="s3://my-bucket/tickets",
+        mode="async",
+    )
+    _arrange_helper(monkeypatch, on_path=False, version=None)
+    spawned: list[object] = []
+    monkeypatch.setattr(push.subprocess, "Popen", lambda *a, **k: spawned.append((a, k)) or None)
+
+    with pytest.raises(_optional.OptionalDependencyError):
+        push.push_tickets_branch(str(tracker))
+    assert spawned == []
+
+
+def test_push_split_remote_with_non_s3_push_url_needs_no_helper(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """An s3:// fetch URL with a non-S3 push URL pushes without the helper."""
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    _wire_push(monkeypatch, "s3://my-bucket/tickets", push_url="https://github.com/org/repo.git")
+    _arrange_helper(monkeypatch, on_path=False, version=None)
+
+    assert push.push_tickets_branch(str(tracker)) is None
+
+
+def _split_remote_repo(tmp_path: Path, fetch_url: str, push_url: str) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "--initial-branch=main", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", fetch_url], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "remote", "set-url", "--push", "origin", push_url], check=True
+    )
+    return repo
+
+
+@pytest.mark.parametrize("s3_side", ["fetch", "push"])
+def test_init_mount_split_remote_checks_both_urls(
+    tmp_path: Path, monkeypatch, s3_side: str
+) -> None:
+    """The mounted store fetches AND pushes, so an s3:// URL on either side needs the helper."""
+    local = str(tmp_path / "no-such-remote.git")
+    s3 = "s3://my-bucket/tickets"
+    fetch_url, push_url = (s3, local) if s3_side == "fetch" else (local, s3)
+    repo = _split_remote_repo(tmp_path, fetch_url, push_url)
+    _arrange_helper(monkeypatch, on_path=False, version="0.3.2")
+
+    with pytest.raises(_optional.OptionalDependencyError) as ei:
+        init._mount_or_create_branch(str(repo), str(tmp_path / ".tickets-tracker"))
     assert "pip install 'nava-rebar[s3]'" in str(ei.value)

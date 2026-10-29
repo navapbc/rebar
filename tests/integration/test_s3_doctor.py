@@ -314,3 +314,89 @@ def test_single_bundle_store_still_reports_noop_off_the_published_ref(tmp_path: 
 
     assert result["healed"] is False
     assert result["reason"] == "noop"
+
+
+class _ReadOnlyS3Client:
+    """A reader identity's view of the bucket: reads pass through, every write is denied."""
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+
+    def download_file(self, **kwargs) -> None:
+        self._inner.download_file(**kwargs)
+
+    def list_objects_v2(self, **kwargs) -> dict:
+        return self._inner.list_objects_v2(**kwargs)
+
+    def put_object(self, **_kwargs) -> None:
+        raise PermissionError("AccessDenied: reader profile cannot PutObject")
+
+    def delete_object(self, **_kwargs) -> None:
+        raise PermissionError("AccessDenied: reader profile cannot DeleteObject")
+
+
+class _ReaderRemote(h.FakeS3Remote):
+    """The same bucket opened under a read-only profile: the per-ref lock write is denied."""
+
+    def __init__(self, writer: h.FakeS3Remote) -> None:
+        super().__init__(writer.objdir, bucket=writer.bucket, prefix=writer.prefix)
+        self.s3 = _ReadOnlyS3Client(writer.s3)
+
+    def acquire_lock(self, remote_ref: str):
+        raise PermissionError("AccessDenied: reader profile cannot PutObject the lock")
+
+
+_READER_URL = "s3://tickets-reader@test-bucket/tickets"
+_WRITER_URL = "s3://tickets-writer@test-bucket/tickets"
+
+
+def _profile_factory(writer: h.FakeS3Remote, seen: list[str]):
+    """Open the bucket under the profile the URL names, as git-remote-s3 does."""
+
+    def factory(url: str):
+        seen.append(url)
+        return writer if url == _WRITER_URL else _ReaderRemote(writer)
+
+    return factory
+
+
+def test_heal_writes_under_the_push_url_of_a_split_remote(tmp_path: Path) -> None:
+    """Issue #145: a reader fetch URL and a writer push URL -> the heal writes as the writer.
+
+    ``git push`` uses the push URL, so the heal, which locks, writes and deletes objects, must
+    open the bucket under that identity too; under the reader it cannot even take the lock.
+    """
+    remote, base_path, _sha_base, sha_a, sha_b = _seed_two_divergent_bundles(tmp_path)
+    h.git(base_path, "remote", "set-url", "origin", _READER_URL)
+    h.git(base_path, "remote", "set-url", "--push", "origin", _WRITER_URL)
+    seen: list[str] = []
+
+    from rebar._store.s3_doctor import heal_multi_bundle
+
+    result = heal_multi_bundle(
+        str(base_path), "origin", "tickets", s3remote_factory=_profile_factory(remote, seen)
+    )
+
+    assert seen == [_WRITER_URL]
+    assert result["healed"] is True, result
+    assert len(h.bundle_keys(remote, "tickets")) == 1
+    clone, _tip = h.healed_tip(remote, "tickets", tmp_path)
+    assert h.reachable(clone, "HEAD", sha_a)
+    assert h.reachable(clone, "HEAD", sha_b)
+
+
+def test_heal_without_a_push_url_uses_the_single_remote_url(tmp_path: Path) -> None:
+    """With no push URL configured the heal keeps using the remote's one URL."""
+    remote, base_path, *_ = _seed_two_divergent_bundles(tmp_path)
+    h.git(base_path, "remote", "set-url", "origin", _WRITER_URL)
+    seen: list[str] = []
+
+    from rebar._store.s3_doctor import heal_multi_bundle
+
+    result = heal_multi_bundle(
+        str(base_path), "origin", "tickets", s3remote_factory=_profile_factory(remote, seen)
+    )
+
+    assert seen == [_WRITER_URL]
+    assert result["healed"] is True, result
+    assert len(h.bundle_keys(remote, "tickets")) == 1
