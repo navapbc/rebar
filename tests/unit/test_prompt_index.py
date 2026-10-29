@@ -64,11 +64,6 @@ def test_index_on_disk_matches_regenerated() -> None:
     assert on_disk == built  # committed index is not stale
 
 
-def test_index_has_exactly_one_default() -> None:
-    cat = prompts.load_catalog()
-    assert sum(1 for r in cat.values() if r.default) == 1
-
-
 def _write_prompt(d: Path, name: str, meta_lines: str, body: str = "BODY") -> None:
     d.mkdir(parents=True, exist_ok=True)
     (d / name).write_text(f"---\n{meta_lines}\n---\n{body}")
@@ -81,19 +76,10 @@ def _scan_dir(monkeypatch, d: Path) -> None:
     monkeypatch.setattr(prompts, "_catalog_dir", lambda: d)
 
 
-def test_index_rejects_two_defaults(monkeypatch, tmp_path: Path) -> None:
-    d = tmp_path / "reviewers"
-    _write_prompt(d, "a.md", "category: review\ndimension: da\ndefault: true")
-    _write_prompt(d, "b.md", "category: review\ndimension: db\ndefault: true")
-    _scan_dir(monkeypatch, d)
-    with pytest.raises(PromptError, match="EXACTLY ONE default"):
-        prompts.build_prompt_index()
-
-
 def test_index_rejects_dimension_collision(monkeypatch, tmp_path: Path) -> None:
     d = tmp_path / "reviewers"
-    _write_prompt(d, "a.md", "category: review\ndimension: same\ndefault: true")
-    _write_prompt(d, "b.md", "category: review\ndimension: same\ndefault: false")
+    _write_prompt(d, "a.md", "category: review\ndimension: same")
+    _write_prompt(d, "b.md", "category: review\ndimension: same")
     _scan_dir(monkeypatch, d)
     with pytest.raises(PromptError, match="dimension"):
         prompts.build_prompt_index()
@@ -101,8 +87,8 @@ def test_index_rejects_dimension_collision(monkeypatch, tmp_path: Path) -> None:
 
 def test_index_retires_removed_prompt(monkeypatch, tmp_path: Path) -> None:
     d = tmp_path / "reviewers"
-    _write_prompt(d, "keep.md", "category: review\ndimension: dk\ndefault: true")
-    _write_prompt(d, "gone.md", "category: review\ndimension: dg\ndefault: false")
+    _write_prompt(d, "keep.md", "category: review\ndimension: dk")
+    _write_prompt(d, "gone.md", "category: review\ndimension: dg")
     _scan_dir(monkeypatch, d)
     assert set(prompts.build_prompt_index()) == {"keep", "gone"}
     (d / "gone.md").unlink()  # RETIRE: removed prompt drops out on regeneration
@@ -111,7 +97,7 @@ def test_index_retires_removed_prompt(monkeypatch, tmp_path: Path) -> None:
 
 def test_non_review_prompts_excluded_from_index(monkeypatch, tmp_path: Path) -> None:
     d = tmp_path / "reviewers"
-    _write_prompt(d, "rev.md", "category: review\ndimension: dr\ndefault: true")
+    _write_prompt(d, "rev.md", "category: review\ndimension: dr")
     _write_prompt(d, "xform.md", "category: transform")
     _scan_dir(monkeypatch, d)
     assert set(prompts.build_prompt_index()) == {"rev"}  # only reviewers

@@ -2047,8 +2047,7 @@
         "'dimension'",
         "'applies_to'",
         "'file_impact'",
-        "'langfuse_prompt'",
-        "'default'"
+        "'langfuse_prompt'"
       ]
     },
     "PROMPT_SCHEMA_VERSION": {

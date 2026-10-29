@@ -46,7 +46,6 @@ def test_catalog_and_fallback_prompt_render() -> None:
 
     catalog = llm.load_catalog()
     assert "ticket-quality" in catalog
-    assert catalog["ticket-quality"].default is True
     rv = llm.get_prompt("ticket-quality")
     assert rv.is_reviewer is True  # category == "review" → reviewer
     text, meta = prompts.resolve_prompt(
@@ -72,12 +71,12 @@ def test_unknown_reviewer_raises() -> None:
 @pytest.mark.parametrize(
     ("changed", "expected"),
     [
-        ([], {"ticket-quality"}),
-        (["src/rebar/auth_helpers.py"], {"ticket-quality", "security"}),
-        (["src/rebar/signing.py"], {"ticket-quality", "security"}),
-        (["tests/test_x.py"], {"ticket-quality", "tests"}),
-        (["src/rebar/auth.py", "tests/test_auth.py"], {"ticket-quality", "security", "tests"}),
-        (["README.md"], {"ticket-quality"}),
+        ([], set()),
+        (["src/rebar/auth_helpers.py"], {"security"}),
+        (["src/rebar/signing.py"], {"security"}),
+        (["tests/test_x.py"], {"tests"}),
+        (["src/rebar/auth.py", "tests/test_auth.py"], {"security", "tests"}),
+        (["README.md"], set()),
     ],
 )
 def test_select_reviewers_rules(changed, expected) -> None:

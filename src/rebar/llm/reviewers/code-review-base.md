@@ -12,7 +12,6 @@ execution_mode: agentic
 category: code-review-pass
 dimension: code-review-base
 langfuse_prompt: rebar-code-review-base
-default: false
 ---
 You are an expert code reviewer running PASS 1 of a four-pass code-review gate. You have
 read-only access to a copy of the repository through your file tools. The diff under review

@@ -15,7 +15,6 @@ file_impact:
 - src/rebar/llm/workflow/runs.py
 - src/rebar/llm/prompts.py
 langfuse_prompt: rebar-completion-verifier
-default: false
 ---
 You are a dedicated **completion verification** agent. Your sole purpose is to answer
 one question: **"Did we build (or fix) what this ticket requires?"** — NOT "is the code

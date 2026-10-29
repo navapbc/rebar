@@ -45,7 +45,6 @@ class Reviewer:
     description: str = ""
     langfuse_prompt: str | None = None  # Langfuse prompt name (defaults to id)
     fallback_file: str | None = None  # packaged *.md used when Langfuse is absent
-    default: bool = False  # part of the default reviewer set
     applies_to: list[str] = field(default_factory=list)  # globs for rule-based selection
 
     @property
@@ -68,7 +67,6 @@ class Prompt:
     text: str
     category: str | None = None
     execution_mode: str | None = None
-    default: bool = False
     dimension: str | None = None
     applies_to: list[str] = field(default_factory=list)
     inputs: object = None
