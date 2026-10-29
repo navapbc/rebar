@@ -8,6 +8,21 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## `rebar.llm.review_workflows` is removed
+
+Non-breaking. The module was strangler-fig scaffolding for a cutover that is being
+cancelled rather than completed, so the harness it provided has nothing left to gate
+(epic 87d8).
+
+- `rebar.llm.review_workflows` and its three functions — `review_ticket_workflow_doc`,
+  `run_review_ticket_as_workflow`, and `diff_review_paths` — are **removed**. The module
+  existed to run `review_ticket` as a one-step agent workflow and diff that result against
+  the single-pass review engine, proving the two paths agreed before a cutover flipped
+  between them. ADR 0075 retired the engine instead, so there is no cutover to prove.
+- Nothing imported the module outside its own test, and no documentation described it, so
+  no caller changes. The `RunnerAgentStep` bridge it exercised is untouched and keeps its
+  own coverage.
+
 ## `rebar.llm.aggregate` and the `aggregate_findings` export are removed
 
 Non-breaking in practice. `rebar.llm.aggregate` is deleted and
