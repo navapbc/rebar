@@ -100,7 +100,7 @@ steps:
     batch:
       prompt: code-quality
       criteria:
-        - { prompt: ticket-quality }
+        - { prompt: spec-alignment }
         - { prompt: security, when: ${{ steps.triggers.outputs.security }} }
       usd_budget: 2.0
       model_ladder: [claude-haiku-4-5, claude-sonnet-4-6, claude-opus-4-8]

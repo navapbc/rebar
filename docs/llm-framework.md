@@ -352,7 +352,7 @@ Every operation returns a **`review_result`** (`src/rebar/schemas/review_result.
     }
   ],
   "target": {"kind": "ticket", "ticket_ids": ["…"]},
-  "reviewers": ["ticket-quality"], "runner": "pydantic_ai",
+  "reviewers": ["code-quality"], "runner": "pydantic_ai",
   "model": "claude-opus-4-8", "trace_id": null, "summary": "…"
 }
 ```
@@ -393,8 +393,8 @@ model mirrors it (pinned by a test). Correctness guarantees:
 
 Reviewers are now a **subset of prompts**, flagged by an explicit `category: review` in
 the prompt front-matter (see [workflow-authoring-v2.md](workflow-authoring-v2.md)).
-Reviewer **identity + selection rules** (`id`, `dimension`, `applies_to` globs,
-`default`) are **derived** from that front-matter into a generated, committed index
+Reviewer **identity + selection rules** (`id`, `dimension`, `applies_to` globs)
+are **derived** from that front-matter into a generated, committed index
 (`src/rebar/llm/reviewers/index.json`; regenerate with `python -m rebar.llm.prompting.prompts
 regenerate-index`, enforced by a CI drift gate) — there is no hand-edited catalog.
 Reviewer **prompt text is git-canonical** — resolved from the repo, never
@@ -404,8 +404,8 @@ otherwise the packaged `reviewers/*.md` shipped with the framework. Langfuse is
 resolved prompt's **content hash is recorded** for trace provenance, so a trace can
 be tied back to the exact prompt text that produced it.
 
-`select_reviewers(changed_files)` is the deterministic rule layer (union of every
-`default` reviewer and every reviewer whose `applies_to` globs match) — the basis
+`select_reviewers(changed_files)` is the deterministic rule layer (every reviewer
+whose `applies_to` globs match the changed files) — the basis
 for the future code-review op's "deterministic reviewer-selection rules."
 
 ## Configuration (all env vars optional)
@@ -673,7 +673,7 @@ we run an **ephemeral self-hosted stack**, not a persistent server:
 ## Adding an operation or reviewer
 
 - **New reviewer:** ship a packaged prompt (`reviewers/<id>.md`) whose front-matter
-  carries `category: review` plus `dimension` / `applies_to` / `default`, then
+  carries `category: review` plus `dimension` / `applies_to`, then
   regenerate the derived index (`python -m rebar.llm.prompting.prompts regenerate-index`); a
   project can override it with `.rebar/prompts/<id>.md`. `applies_to` globs make it
   eligible for rule-based selection. (No hand-edited catalog — the index is derived.)

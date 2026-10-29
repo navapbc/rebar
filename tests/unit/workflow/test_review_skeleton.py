@@ -101,7 +101,7 @@ def test_planned_trace_is_captured_offline():
     # The finder calls carry the BATCHED criteria (the prompt-library ids of the included set);
     # the security criterion appears because the plan tripped its trigger.
     batched = {c for e in trace for c in e["criteria"]}
-    assert {"ticket-quality", "tests", "security"} <= batched
+    assert {"spec-alignment", "tests", "security"} <= batched
 
 
 # ── the FLAW this experiment fixed: the linter now checks a batch step's nested prompts ───
@@ -114,7 +114,7 @@ def test_linter_now_flags_an_unknown_batch_prompt():
                 "id": "finders",
                 "batch": {
                     "prompt": "no-such-finder",
-                    "criteria": [{"prompt": "ticket-quality"}, {"prompt": "no-such-criterion"}],
+                    "criteria": [{"prompt": "spec-alignment"}, {"prompt": "no-such-criterion"}],
                 },
             }
         ],
