@@ -3091,6 +3091,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-04T23:33:09Z"
     },
+    "06c1-f789-e9ba-479b": {
+      "created_at": "2026-10-29T21:35:11Z",
+      "jira_id": "4597674",
+      "jira_key": "REB-6800",
+      "state": "confirmed",
+      "updated_at": "2026-10-29T21:35:15Z"
+    },
     "06d0-075c-fd07-45ab": {
       "baseline": {
         "assignee": null,
@@ -8984,9 +8991,31 @@
       "updated_at": "2026-09-04T23:37:15Z"
     },
     "157a-c0a6-a8be-446e": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\n\nReported in https://github.com/navapbc/rebar/issues/145. A ticket-store remote on S3 can carry separate fetch and push URLs that name different AWS profiles (a read-only reader for fetch, a writer for push), set with `git remote set-url --push`. Plain `git push` and `git fetch` work, because git picks the right URL for each. Several rebar store paths that perform or guard a WRITE resolve the remote with plain `git remote get-url <remote>`, which returns the FETCH URL.\n\n## Observation (measured in a worktree at origin/main 3b80ff04452, git 2.56.0)\n\n- Reproduced at the `s3remote_factory` seam the existing tests use\n  (`tests/integration/s3_doctor_harness.py`): a tracker whose `origin` has fetch URL\n  `s3://tickets-reader@bucket/prefix` and push URL `s3://tickets-writer@bucket/prefix`.\n  `heal_multi_bundle(tracker, \"origin\", \"tickets\", s3remote_factory=recorder)` handed the\n  factory `s3://tickets-reader@bucket/prefix`. `git remote get-url --push origin` returned the\n  writer URL; with the push URL unset, `--push` returned the fetch URL.\n- Read from code: `src/rebar/_store/s3_doctor.py:77` resolves the URL with\n  `remote get-url`; `_default_factory` (s3_doctor.py:48-54) passes it to\n  `git_remote_s3.parse_git_url`, whose `user@` segment becomes the profile, and upstream\n  `S3Remote.__init__` (awslabs/git-remote-s3 v0.4.2, `remote.py`) opens\n  `boto3.Session(profile_name=profile)`. So the heal's `acquire_lock`, `put_object` and\n  `delete_object` run under the reader profile. Not exercised against real S3.\n- Measured: a tracker with fetch URL `https://example.invalid/tickets.git`, push URL\n  `s3://bucket/tickets` and no git-remote-s3 helper: `push_tickets_branch` returned `None`\n  instead of raising `OptionalDependencyError`. The helper preflight at\n  `src/rebar/_store/push.py:195` (and the async-arm twin at push.py:124) checks the fetch URL,\n  so the fail-closed contract pinned by `tests/integration/test_s3_preflight.py` is skipped\n  for a split remote.\n\n## Every remote-URL resolution in the store code, classified\n\nWrite paths (URL value is used to authorize or guard a write; fix):\n- `src/rebar/_store/s3_doctor.py:77` heal_multi_bundle - builds the S3 client that locks,\n  writes and deletes. Primary defect.\n- `src/rebar/_store/push.py:124` `_require_s3_helper_for_configured_remote` (async push arm).\n- `src/rebar/_store/push.py:195` `push_tickets_branch` helper preflight.\n- `src/rebar/_commands/completion_delivery.py:628` `deliver_candidate` helper preflight before\n  the completion push (same pattern as push.py:195).\n- `src/rebar/_commands/_init_probe.py:89` `require_s3_helper_if_s3_remote` (init/mount): the\n  mounted store both fetches and pushes, so it must check the fetch URL AND the push URL.\n\nNot write paths (no change):\n- `src/rebar/_store/footprint.py:274` - URL used for a temporary `git clone` (a read).\n- `src/rebar/_store/freshness.py:268-275` - compares the code repo's and tracker's fetch URLs\n  to decide freshness reporting (read-side).\n- Existence-only probes that discard the URL: `_lib_ops.py:294`, `reconciler/last_pass.py:76`,\n  `reconciler/_advisory_lock.py:72` (via `git_adapter.remote_get_url`),\n  `_commands/fsck_tracker_health.py:181`, `_commands/_init_probe.py:84`. `git remote get-url`\n  fails for a missing remote with or without `--push`, so the answer is unchanged.\n\n## Approach\n\nResolve the URL with `git remote get-url --push <remote>` at the four write-path sites (s3_doctor.py:77, push.py:124, push.py:195, completion_delivery.py:628). That is the URL `git push` itself uses, and git falls back to the fetch URL when no push URL is configured (measured above), so single-URL remotes behave exactly as today. In `_init_probe.py` `require_s3_helper_if_s3_remote`, run the helper check for both the fetch and the push URL. Inline flag changes; no new helper, config key or mechanism. Out of scope: real-S3 or AWS resources; files under concurrent edit elsewhere (`reducer/_api.py`, `_engine_support/reads.py`, `validate.py`, `graph/_loader.py`, `gates.py`, `reducer/_inbound.py`, `bridge_fsck_drift.py`) are not touched.\n\n## Scope\n\n- `src/rebar/_store/s3_doctor.py`\n- `src/rebar/_store/push.py`\n- `src/rebar/_commands/completion_delivery.py`\n- `src/rebar/_commands/_init_probe.py`\n- `tests/integration/test_s3_doctor.py`\n- `tests/integration/test_s3_preflight.py`\n- `tests/interfaces/lifecycle/test_atomic_completion_close.py`\n- `tests/unit/test_sync_remote_config.py` (its exact-argument assertion on the push guard gains `--push`)\n\n## Testing\n\nFailing tests first, each confirmed red on origin/main before the fix:\n- `test_s3_doctor.py`: split remote (reader fetch URL, writer push URL) - the recording\n  factory receives the writer URL and the heal completes; plus a no-push-URL case where the\n  factory receives the single configured URL (unchanged behaviour).\n- `test_s3_preflight.py`: split-scheme remote (https fetch, s3 push), helper absent -\n  `push_tickets_branch` (sync arm) and the async arm raise `OptionalDependencyError`;\n  `init._mount_or_create_branch` raises it as well. Edge: s3 fetch URL with a non-s3 push URL\n  still fails closed at init (the store fetches from S3).\n- `test_atomic_completion_close.py`: tracker remote with a bare-repo fetch URL\n  (`init_bare_remote`) and an `s3://` push URL, helper absent - completion delivery raises\n  `CommandError` \"completion delivery preflight failed\".\nThen `pytest -m integration` on test_s3_doctor.py, test_s3_doctor_heldout.py, test_s3_preflight.py, and `make verify`.\n\n## Acceptance Criteria\n\n- [ ] `heal_multi_bundle` builds its S3 client from the push URL: the new split-remote test in\n  `tests/integration/test_s3_doctor.py` passes and fails on origin/main.\n- [ ] A remote with no push URL still heals with its single URL (new no-push-URL test passes;\n  existing `test_s3_doctor.py` and `test_s3_doctor_heldout.py` stay green).\n- [ ] The sync and async push helper preflights check the push URL: new split-scheme tests in\n  `test_s3_preflight.py` raise `OptionalDependencyError`, and fail on origin/main.\n- [ ] Completion delivery's preflight checks the push URL: the new test in\n  `test_atomic_completion_close.py` raises \"completion delivery preflight failed\".\n- [ ] Init/mount checks both fetch and push URLs: the new init tests in `test_s3_preflight.py`\n  pass.\n- [ ] `make verify` passes (apart from the host's known pandoc-architecture reconciler\n  failures, compared by name), and the S3 integration files above pass under `-m integration`.\n- [ ] The change lands on main through Gerrit with LLM-Review +1 and Verified +1.\n\n## File impact\n\nThe eight paths listed under Scope, recorded with `rebar set-file-impact`.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "S3 store write paths resolve the fetch URL, not the push URL (GH #145)"
+      },
       "created_at": "2026-10-29T20:33:29Z",
       "jira_id": "4597673",
       "jira_key": "REB-6799",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-10-29T20:33:33Z"
     },
@@ -22873,6 +22902,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:09Z"
+    },
+    "35df-4dd8-1a02-40ef": {
+      "created_at": "2026-10-29T21:35:15Z",
+      "jira_id": "4597675",
+      "jira_key": "REB-6801",
+      "state": "confirmed",
+      "updated_at": "2026-10-29T21:35:19Z"
     },
     "35f1-c5af-ed5b-4db1": {
       "baseline": {
@@ -50980,6 +51016,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:03:31Z"
     },
+    "7d03-834f-a2fb-4f2f": {
+      "created_at": "2026-10-29T21:35:19Z",
+      "jira_id": "4597676",
+      "jira_key": "REB-6802",
+      "state": "confirmed",
+      "updated_at": "2026-10-29T21:35:23Z"
+    },
     "7d18-705f-72bd-45a3": {
       "baseline": {
         "assignee": null,
@@ -64139,6 +64182,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:41Z"
     },
+    "9b28-415d-0780-4b2a": {
+      "created_at": "2026-10-29T21:35:23Z",
+      "jira_id": "4597677",
+      "jira_key": "REB-6803",
+      "state": "confirmed",
+      "updated_at": "2026-10-29T21:35:26Z"
+    },
     "9b38-c7a4-1abb-4323": {
       "created_at": "2026-08-15T15:06:42Z",
       "jira_key": "REB-706",
@@ -64291,6 +64341,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:45Z"
+    },
+    "9b96-18b7-b19e-4f85": {
+      "created_at": "2026-10-29T21:35:27Z",
+      "jira_id": "4597678",
+      "jira_key": "REB-6804",
+      "state": "confirmed",
+      "updated_at": "2026-10-29T21:35:31Z"
     },
     "9baf-06ce-60ba-4f0b": {
       "baseline": {
@@ -86239,6 +86296,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-05T08:44:48Z"
     },
+    "d0af-f6cb-aad1-4ae5": {
+      "created_at": "2026-10-29T21:35:31Z",
+      "jira_id": "4597679",
+      "jira_key": "REB-6805",
+      "state": "confirmed",
+      "updated_at": "2026-10-29T21:35:35Z"
+    },
     "d0bb-6baf-8506-4fbd": {
       "baseline": {
         "assignee": null,
@@ -88218,7 +88282,7 @@
         },
         "description": "# Repoint the remaining reviewer-stand-in tests off `ticket-quality`\n\n## Context\n\nEpic 87d8 is retiring the `ticket-quality` reviewer prompt. The prompt cannot be deleted while tests still name it, so its users are repointed slice by slice first. The previous slice took the two largest files (31 references). This slice takes every remaining *stand-in* use: a test that needs some packaged reviewer id and happens to have picked this one.\n\nSeven files hold 25 such references. None of them is testing `ticket-quality` itself:\n\n- `tests/unit/test_prompt_library_writes.py` (8) \u2014 `enumerate_library` coverage. Its\n  own comment reads \"a packaged reviewer\", and one assertion checks that a reviewer\n  is absent from `enumerate_criteria`.\n- `tests/unit/test_prompt_index.py` (7) \u2014 `get_prompt` resolution and user-override\n  precedence, including an override whose front-matter declares a `dimension`.\n- `tests/unit/test_prompts_git_canonical.py` (4) \u2014 canonical render metadata and\n  missing-variable raising.\n- `tests/interfaces/store/test_llm_framework.py` (3) \u2014 catalog membership and\n  `llm.get_prompt` render metadata.\n- `tests/interfaces/store/test_agent_op_safeguard.py` (1) \u2014 a workflow-document\n  fixture naming any prompt in a step.\n- `tests/unit/test_generated_surface_markers.py` (1) \u2014 catalog membership.\n- `tests/external/test_pydantic_ai_cutover_live.py` (1) \u2014 a workflow-step fixture.\n\n## Approach\n\nSubstitute the id `ticket-quality` with `code-quality` and the stem `ticket_quality` with `code_quality` throughout those seven files. No test is added, deleted, renamed, or restructured, and no assertion changes meaning.\n\n`code-quality` matches `ticket-quality` on every property these tests depend on, verified by reading both prompts' front-matter rather than assumed:\n\n- `category: review`, so it is in the reviewer catalog and `get_prompt` resolves it.\n- `inputs: reviewer_input` and `outputs: review_result` \u2014 identical contract.\n- `execution_mode: agentic` \u2014 identical.\n- The same two template variables, `{{ticket_id}}` and `{{ticket_context}}`, which is\n  what `test_prompts_git_canonical.py`'s missing-variable test depends on.\n- **No `applies_to` globs.** `security` and `tests` declare them, so either would\n  change `select_reviewers` results. `code-quality` declares none, as\n  `ticket-quality` does.\n\n`completion-verifier` was rejected: its `outputs` is `completion_verdict`. `spec-alignment` matches on contract but is the batch spec-scan reviewer.\n\nTwo further references are deliberately NOT in this slice, because they are roster enumerations rather than stand-ins and can only shrink when the prompt is actually deleted: `tests/unit/test_prompt_front_matter.py:183` (the minimum packaged-id set that keeps the golden round-trip from passing on nothing) and `tests/unit/test_prompt_cache_split.py:32` (`_MARKED_PROMPTS`, a parametrize tuple \u2014 removing an entry changes node IDs). Both belong with the prompt's deletion.\n\n## Scope\n\nVerified rather than assumed: the substitution was applied to a clean checkout of `3b80ff04452` and the six locally-runnable files' 110 tests were run. All 110 passed with no other edit, and the collected node IDs were byte-identical to the baseline. `git grep -cF` over the seven files then returned nothing. `ruff check` passed with no reformatting required.\n\n`tests/external/test_pydantic_ai_cutover_live.py` carries the `external` marker, so it is excluded from `make test` and from CI's gating cell. Its single-line change is covered by the grep and lint criteria below, not by a test run.\n\nOut of scope, and deliberately untouched: the prompt file `src/rebar/llm/reviewers/ticket_quality.md`, `reviewers/index.json`, the two roster enumerations named above, `docs/` prose, and the workflow example YAML. The prompt stays in the catalog after this slice; later slices retire it.\n\nAlso out of scope, because each is a frozen or derived artifact rather than a live reference: `docs/release-notes.md` historical entries, the `evals/plan-review-gate/runs/*.jsonl` input corpora, and the tracked `.test_durations` pytest-split timing cache.\n\n`docs/release-notes.md` gains one short entry recording the fixture repoint, with no change to test count, test names, or behaviour. The entry is additions-only.\n\n## Testing\n\nNo new tests. These files are themselves the tests, and they must keep passing unchanged in count and in name. Their collected node IDs are compared before and after to prove the slice neither adds nor removes a test.\n\n## Acceptance criteria\n\nEvery command below was run against `3b80ff04452` while writing this plan. `$F8` below names the seven files listed in Context.\n\n- [ ] **AC1** `git grep -cF -e 'ticket-quality' -e 'ticket_quality' -- $F8` prints\n      nothing and exits 1. Today it prints 8, 7, 4, 3, 1, 1 and 1.\n- [ ] **AC2** `pytest $F8 -q` (external file omitted, as it cannot run locally) exits\n      0 reporting exactly `110 passed`.\n- [ ] **AC3** `pytest $F8 -q --collect-only | grep '::' | sort` (external file\n      omitted) is byte-identical to the same command on `origin/main`. No test name\n      contains a reviewer id, so the lists must match exactly.\n- [ ] **AC4** `git diff --numstat origin/main...HEAD` lists exactly those seven files\n      plus `docs/release-notes.md`, and no other path.\n- [ ] **AC5** `ruff check src tests` exits 0 with no output.\n- [ ] **AC6** `git diff --numstat origin/main...HEAD -- docs/release-notes.md` shows a\n      non-zero addition count and `0` deletions.\n- [ ] **AC7** `make verify` exits 0.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Repoint reviewer-stand-in tests off ticket-quality"
       },
       "created_at": "2026-10-29T19:32:18Z",
@@ -88991,10 +89055,24 @@
     },
     "d70a-97d9-7f05-4293": {
       "baseline": {
-        "assignee": null,
-        "description": "## Observation\n\n`reduce_all_tickets` (src/rebar/reducer/_api.py) applies `exclude_deleted` and `exclude_session_logs` only after its loop finishes, and callers filter only after it returns, so every ticket that will be discarded is held in memory until then. Code reviews are 3,439 of 9,727 store directories. Measured on an isolated copy of the live store, 2026-10-29 (tracemalloc peak during the call, current caches):\n\n| Read | Peak now | Peak with an in-loop filter and field trim | Output compared |\n|---|---|---|---|\n| `search` (`reads.py` `search_state`, full state, 141 matches) | 348.8 MB | 24.6 MB | identical (141 = 141) |\n| `recent_session_logs` (full state, keeps 5) | 284.3 MB | 10.8 MB | identical |\n| `bridge_fsck` binding-drift step (uses ticket_id, status, archived) | 328.6 MB | 69.5 MB (66.3 MB of it is binding/Jira data) | drift counts identical |\n| `validate` (full-body list) | 284.3 MB | 49.3 MB | report identical |\n| `ticket_deps` on a graph-cache miss | 284.9 MB | 64.2 MB | not compared |\n| `list_tickets --status=open` | 64.1 MB | 11.0 MB | ids identical |\n| `list_tickets` with `blocking_state` (holds pass 1 during `find_ready_tickets`) | 106.6 MB | not prototyped | \u2014 |\n\nI confirmed the `search_state` and `recent_session_logs_state` calls and the post-loop filters by reading the code.\n\n## Plan\n1. Give `reduce_all_tickets` an optional per-ticket keep predicate, and apply the existing exclusions inside the loop so a discarded ticket is never retained.\n2. Move each caller above onto the predicate plus an `omit_fields` projection limited to the fields it reads. Search matches inside the loop and keeps only matches. recent_session_logs keeps (id, created_at) and re-reduces the top N.\n3. For each caller, add a test that compares output with the old path on a fixture store, and a test that asserts the projection is applied.\n\n## Acceptance criteria\n- [ ] Each read in the table returns output identical to the current code on a fixture covering archived, deleted, session_log and code_review tickets.\n- [ ] Each read's peak traced memory on a clone of the live store is recorded on this ticket before and after.\n- [ ] `reduce_all_tickets` retains no ticket that a caller's exclusions discard.\n\n## File impact (expected)\n- src/rebar/reducer/_api.py\n- src/rebar/_engine_support/reads.py\n- src/rebar/_engine_support/validate.py\n- src/rebar/graph/_loader.py\n- src/rebar/_commands/bridge_fsck_drift.py",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Observation\n\n`reduce_all_tickets` (src/rebar/reducer/_api.py) applies `exclude_archived`, `exclude_deleted` and `exclude_session_logs` only after its loop finishes, and callers filter only after it returns, so every ticket that will be discarded is held in memory until then. Code reviews are 3,439 of 9,727 store directories. Measured on an isolated copy of the live store, 2026-10-29 (tracemalloc peak during the call, current caches):\n\n| Read | Peak now | Peak with an in-loop filter and field trim | Output compared |\n|---|---|---|---|\n| `search` (`reads.py` `search_state`, full state, 141 matches) | 348.8 MB | 24.6 MB | identical (141 = 141) |\n| `recent_session_logs` (full state, keeps 5) | 284.3 MB | 10.8 MB | identical |\n| `bridge_fsck` binding-drift step (uses ticket_id, status, archived) | 328.6 MB | 69.5 MB (66.3 MB of it is binding/Jira data) | drift counts identical |\n| `validate` (full-body list) | 284.3 MB | 49.3 MB | report identical |\n| `ticket_deps` on a graph-cache miss | 284.9 MB | 64.2 MB | not compared |\n| `list_tickets --status=open` | 64.1 MB | 11.0 MB | ids identical |\n| `list_tickets` with `blocking_state` (holds pass 1 during `find_ready_tickets`) | 106.6 MB | not prototyped | \u2014 |\n\nI confirmed the `search_state` and `recent_session_logs_state` calls and the post-loop filters by reading the code.\n\nRe-measured on a fresh copy, 2026-10-29, before any change (peaks reproduce): search full 348.9 MB, recent_session_logs 284.4 MB, binding drift 328.7 MB, validate 284.4 MB, deps cache miss 284.5 MB.\n\nFindings from reading the code that change the plan:\n- The binding-drift step lives in `src/rebar/_engine_support/bridge_fsck_drift.py` (not `_commands/`). It reduces with no exclusions and reports every non-bound local ticket, including session logs and code reviews, as `unbound_local`, so it can only be trimmed (to `ticket_id`/`id`/`status`/`archived`; `reconciler/classify.local_state` reads only `archived` and `status`), not filtered.\n- About 18 test modules replace `reduce_all_tickets` with stubs that ignore keyword arguments. Callers therefore keep their existing post-loop filters (they are pure predicates, so applying them a second time is a no-op on real data); the in-loop predicate only pre-narrows.\n- `list_states` counts children over the reduced set before narrowing filters, so it can pre-filter in the loop only when neither `min_children` nor `with_children_count` is requested; otherwise it keeps the current path.\n- Search matching happens in `search_states` (src/rebar/reducer/search.py); the in-loop matcher must be the same code, so it is split into a compiled per-ticket predicate that `search_states` also uses. Jira keys must be attached before matching because the haystack includes `jira_key`.\n\n## Plan\n1. Give `reduce_all_tickets` two optional keyword arguments: `keep` (a per-ticket predicate, applied after the existing exclusions) and `keep_fields` (a whitelist projection, the counterpart of `omit_fields`). Apply `exclude_archived`, `exclude_deleted` and `exclude_session_logs` inside the loop, so a discarded ticket is never appended. Error dicts keep their current treatment.\n2. Move each caller onto it, keeping its post-loop filtering:\n   - `search_state`: attach the Jira key and run the compiled search predicate inside the loop.\n   - `recent_session_logs_state`: keep only session logs, project to `ticket_id`/`created_at`, sort, then re-reduce the top N in full.\n   - `audit_binding_drift` (`_load_local_by_id`): project to `ticket_id`/`id`/`status`/`archived`.\n   - `validate` (`_raw_tickets`): keeps reading through `reads.list_states` (its docstring pins list_states as the data source). `list_states` gains a keyword-only `keep` predicate that is ANDed into its in-loop pre-filter; every list_states transform after the loop (`apply_ticket_filters`, `public_state`, `lean_projection`, sort) is unchanged. `_raw_tickets` passes a predicate that drops `closed`/`error`/`fsck_needed`, the statuses `normalize_issues` discards anyway, so validate's issues and report are unchanged. No other list_states caller passes `keep`, so their output is unchanged.\n   - `graph/_loader.load_indexed_states` (used by `ticket_deps` on a cache miss): drop unusable statuses in the loop and omit the body/signature fields the graph code never reads (it reads only ticket_id, status, deps, parent_id, archived, ticket_type). The field tuple moves into `graph/_loader.py` as `GRAPH_OMITTED_FIELDS`, with the same 6 names as today's `_READY_OMITTED_FIELDS`; `graph/_ready.py` already imports `_loader`, so it keeps its module-level `_READY_OMITTED_FIELDS` name (tests monkeypatch it) bound to that tuple, adding no new import and no cycle.\n   - `list_states`: pre-filter in the loop with the same `apply_ticket_filters` call (plus any caller `keep`) when neither `min_children` nor `with_children_count` is requested; otherwise reduce as today. `find_ready_tickets` (the `blocking_state` pass) is not changed, so that row's saving comes only from the list rows.\n3. Tests first (written before the change, seen failing): for each caller, a test that compares output with the old path on a fixture store containing archived, deleted, session_log and code_review tickets; a test that `reduce_all_tickets` never retains an excluded or `keep`-rejected ticket (by spying on the list it builds); and a test that each caller's projection or predicate is applied.\n4. Measure each read's tracemalloc peak and compare outputs before and after on a copy of the live store, and record them on this ticket.\n\n## Acceptance criteria\nScope: the 7 reads in the table (search full and lean, recent_session_logs, binding drift, validate, ticket_deps cache miss, list_tickets --status=open, list_tickets with blocking_state).\n- [ ] On the fixture store (archived, deleted, status-only deleted, session_log, code_review and corrupt tickets), each of the 7 reads returns output equal to the same read with the new `keep`/`keep_fields` arguments stripped; verified by tests/unit/test_reduce_all_in_loop_filters.py.\n- [ ] On a copy of the live store, each of the 7 reads returns output equal (JSON comparison) to the output saved from origin/main before the change; recorded in a ticket comment.\n- [ ] Each of the 7 reads' tracemalloc peak on that copy, before and after, is recorded in a ticket comment.\n- [ ] A ticket dropped by `exclude_archived`, `exclude_deleted`, `exclude_session_logs` or `keep` is unreachable before `reduce_all_tickets` reduces the next directory; verified by a weak-reference test in the same module that fails on origin/main.\n\n## File impact (expected)\n- src/rebar/reducer/_api.py\n- src/rebar/reducer/search.py\n- src/rebar/_engine_support/reads.py\n- src/rebar/_engine_support/validate.py\n- src/rebar/graph/_loader.py\n- src/rebar/graph/_ready.py\n- src/rebar/_engine_support/bridge_fsck_drift.py\n- tests/unit/test_reduce_all_in_loop_filters.py",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Store-wide MCP reads hold every ticket in full until the loop ends"
       },
       "created_at": "2026-10-29T19:32:23Z",
@@ -110930,7 +111008,11 @@
     "1793299995375969247": "__rebar_unknown_comment_id__",
     "1793304159091997001": "__rebar_unknown_comment_id__",
     "1793304358043824001": "__rebar_unknown_comment_id__",
-    "1793304505386478001": "__rebar_unknown_comment_id__"
+    "1793304505386478001": "__rebar_unknown_comment_id__",
+    "1793306721381602001": "__rebar_unknown_comment_id__",
+    "1793307664105481001": "__rebar_unknown_comment_id__",
+    "1793308696658845001": "__rebar_unknown_comment_id__",
+    "1793309260921434730": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -116230,6 +116312,12 @@
     "REB-6799": "157a-c0a6-a8be-446e",
     "REB-68": "2d90-8fad-53a5-484f",
     "REB-680": "da8a-75f5-ccb2-4b5f",
+    "REB-6800": "06c1-f789-e9ba-479b",
+    "REB-6801": "35df-4dd8-1a02-40ef",
+    "REB-6802": "7d03-834f-a2fb-4f2f",
+    "REB-6803": "9b28-415d-0780-4b2a",
+    "REB-6804": "9b96-18b7-b19e-4f85",
+    "REB-6805": "d0af-f6cb-aad1-4ae5",
     "REB-681": "f894-ebd4-e841-404f",
     "REB-682": "f93a-b947-558b-469c",
     "REB-683": "f983-9441-35f4-445f",
