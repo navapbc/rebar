@@ -208,13 +208,13 @@ def test_attested_close_signs_with_pin(rebar_repo: Path, monkeypatch):
 # --------------------------------------------------------------------------------------
 def test_unresolvable_ref_attested_fails_closed(rebar_repo: Path):
     _commit(rebar_repo)
-    tid = rebar.create_ticket("task", "t", repo_root=str(rebar_repo))
+    eid = rebar.create_ticket("epic", "t", repo_root=str(rebar_repo))
     from rebar._snapshot import SnapshotRefError
 
     with pytest.raises(SnapshotRefError):
-        rebar.llm.operations._review_ticket_impl(
-            tid,
-            "ticket-quality",
+        rebar.llm.spec_scan.scan_epics_for_spec(
+            "the spec text",
+            epics=[eid],
             ref="no-such-ref-xyz",
             source="attested",
             repo_root=str(rebar_repo),

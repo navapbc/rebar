@@ -129,12 +129,12 @@ def test_attested_gate_against_non_rebar_sample_repo(tmp_path, monkeypatch):
     # rebar tracks a ticket here (the store is rebar's; the CODE is the sample project).
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     rebar.init_repo(repo_root=str(repo))
-    tid = rebar.create_ticket("task", "review the sample", repo_root=str(repo))
+    eid = rebar.create_ticket("epic", "review the sample", repo_root=str(repo))
 
     runner = _Capturing()
-    result = rebar.llm.operations._review_ticket_impl(
-        tid,
-        "ticket-quality",
+    result = rebar.llm.spec_scan.scan_epics_for_spec(
+        "the spec text",
+        epics=[eid],
         ref="origin/main",
         source="attested",
         runner=runner,
