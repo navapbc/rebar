@@ -105,8 +105,8 @@ uv python install 3.12       # only if make venv reports it cannot find that ver
 your local `uv` is a different version, **every** `uv` command in this repository stops with:
 
 ```
-error: Required uv version `==0.12.7` does not match the running version `0.7.18`.
-Update `uv` by running `uv self update 0.12.7`.
+error: Required uv version `==0.13.6` does not match the running version `0.7.18`.
+Update `uv` by running `uv self update 0.13.6`.
 ```
 
 That error is **expected and self-describing, not a broken checkout** — run the command it
@@ -127,11 +127,14 @@ unconditional whenever uv is not already in the runner tool cache. So the `##[er
 failure mode (bug `56b7-b21a-c8ab-4afc`; run 33214025855 died that way in 21 seconds) is still
 reachable — tracked as bug `5caa-4b63-7ea2-4e71`.
 
-The `==` form is load-bearing: a range such as `>=0.12.7` reads as pinned but sends the action
+The `==` form is load-bearing: a range such as `>=0.13.6` reads as pinned but sends the action
 back down the manifest-fetch path. `scripts/check_uv_pin.py` (run by `make lint`) fails the
 build if the pin is removed, loosened to a range, shadowed by a root `uv.toml`, or overridden
-by a per-call-site `version:` input — so **upgrading uv is a deliberate one-line change** to
-`pyproject.toml`, and nothing else needs to move.
+by a per-call-site `version:` input. **Upgrading uv is a deliberate change** to that line, the
+`ghcr.io/astral-sh/uv:<version>` stage in each `infra/compose/Dockerfile.*`, and the six release
+checksums in `.github/actions/setup-uv/action.yml` and `REQUIRED_CHECKSUMS` in
+`scripts/check_uv_pin.py`, which must match the release's published `.sha256` assets; the guard
+fails the build if any of them disagree.
 
 ## TL;DR (canonical setup)
 

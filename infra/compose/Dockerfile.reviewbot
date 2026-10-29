@@ -37,7 +37,7 @@ ENV PATH="/opt/review-scanners/bin:/opt/review-scanners/semgrep-venv/bin:$PATH"
 # provider currently imports through reviewbot's boto3 dependency, but
 # declaring its own extra keeps the dependency locked if reviewbot changes.
 # Keep the uv image tag at pyproject.toml's required version.
-COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /usr/local/bin/uv
 COPY . /app
 RUN uv sync --locked --no-dev --extra agents --extra reviewbot --extra bedrock
 ENV PATH="/app/.venv/bin:$PATH"

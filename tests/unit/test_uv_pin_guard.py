@@ -43,7 +43,7 @@ name = "fixture"
 version = "0.1.0"
 
 [tool.uv]
-required-version = "==0.12.7"
+required-version = "==0.13.6"
 """
 
 WORKFLOW_CLEAN = """\
@@ -63,22 +63,22 @@ CHECKSUM_LINES = "\n".join(
     f"        {name}: {value}"
     for name, value in {
         "UV_SHA256_AARCH64_APPLE_DARWIN": (
-            "127ebdda7ad953cdf198e964b570ea5771b85467ea93eb7cb6d6f8e6f55408f3"
+            "60fbd5c8a1ed681845eea28d9d622fcde03c51e91a43465b64a1e17db1ed3472"
         ),
         "UV_SHA256_AARCH64_PC_WINDOWS_MSVC": (
-            "1611d0f4be72b0a354ad9a6ae954093dd4c91e93e36b8b490326a05a039ffe14"
+            "c2426c0c8e28b53d8c440e47a18d96ad4db51e159866c0e81435b196d7f0081c"
         ),
         "UV_SHA256_AARCH64_UNKNOWN_LINUX_GNU": (
-            "66393193038dd7eb108abd7a218d9cec04ac70ab98242b0720fa94de19223b7c"
+            "229e194255c7958d86d56e8790d969a6f74736592133f0dfd0076f754c642c1d"
         ),
         "UV_SHA256_X86_64_APPLE_DARWIN": (
-            "06b8ae1da8c2661c5434507a66f8c2b0b835933bf955b5958a9ac357a37d1959"
+            "63ba17fdda55ad1a230d4b37fc6017ffa10c23688c83818bd3bfdf914c652a02"
         ),
         "UV_SHA256_X86_64_PC_WINDOWS_MSVC": (
-            "bf1518af459a3915511a11fdc6e2f43ef9a2afa138b9d498eeb9642fe9d85218"
+            "a2a8820d5eea32f08ef467ef3b7f66883a9b076d5737a2fc2fbb5f458d1bb50f"
         ),
         "UV_SHA256_X86_64_UNKNOWN_LINUX_GNU": (
-            "788f18abea7c5f55d6216e4f5613fd89d4d59b631efeec117b2b07fe72f1da21"
+            "f29c3e94ffabd7e6f3ba521dba169a9b7ec12100bf3257087f0f24f6123f3645"
         ),
     }.items()
 )
@@ -111,7 +111,7 @@ runs:
 DOCKERFILE_CLEAN = """\
 FROM python:3.12-slim
 
-COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /usr/local/bin/uv
 RUN uv sync --locked
 """
 
@@ -148,16 +148,16 @@ def test_fixture_baseline_passes(tree: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("specifier", ['">=0.12.7"', '"~=0.12.0"', '"0.12.7"', '"==0.12.*"'])
+@pytest.mark.parametrize("specifier", ['">=0.13.6"', '"~=0.12.0"', '"0.13.6"', '"==0.12.*"'])
 def test_range_specifier_is_rejected(tree: Path, specifier: str) -> None:
     """A range still triggers the manifest fetch, so it must not read as pinned.
 
-    `"0.12.7"` (no operator) is included deliberately: uv accepts it, so it looks correct, but
+    `"0.13.6"` (no operator) is included deliberately: uv accepts it, so it looks correct, but
     the action's `normalizeVersionSpecifier` only strips a leading `==` — this gate insists on
     the form that is unambiguously exact to BOTH readers.
     """
     (tree / "pyproject.toml").write_text(
-        PYPROJECT_PINNED.replace('"==0.12.7"', specifier), encoding="utf-8"
+        PYPROJECT_PINNED.replace('"==0.13.6"', specifier), encoding="utf-8"
     )
     result = _run(tree)
     assert result.returncode == 1
@@ -267,7 +267,7 @@ def test_local_action_missing_checksum_is_rejected(tree: Path) -> None:
     action = tree / ".github" / "actions" / "setup-uv" / "action.yml"
     checksum_line = (
         "        UV_SHA256_X86_64_PC_WINDOWS_MSVC: "
-        "bf1518af459a3915511a11fdc6e2f43ef9a2afa138b9d498eeb9642fe9d85218\n"
+        "a2a8820d5eea32f08ef467ef3b7f66883a9b076d5737a2fc2fbb5f458d1bb50f\n"
     )
     action.write_text(
         action.read_text(encoding="utf-8").replace(checksum_line, ""),
@@ -283,7 +283,7 @@ def test_checksum_mismatch_in_local_action_is_rejected(tree: Path) -> None:
     action = tree / ".github" / "actions" / "setup-uv" / "action.yml"
     action.write_text(
         action.read_text(encoding="utf-8").replace(
-            "788f18abea7c5f55d6216e4f5613fd89d4d59b631efeec117b2b07fe72f1da21",
+            "f29c3e94ffabd7e6f3ba521dba169a9b7ec12100bf3257087f0f24f6123f3645",
             "0" * 64,
         ),
         encoding="utf-8",
@@ -304,7 +304,7 @@ def test_local_action_emits_acceptance_anchor() -> None:
 def test_dockerfile_floating_uv_tag_is_rejected(tree: Path) -> None:
     """The exact production defect: ``uv:latest`` against an exact ``required-version``."""
     dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
-    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.12.7", "uv:latest"), encoding="utf-8")
+    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.13.6", "uv:latest"), encoding="utf-8")
     result = _run(tree)
     assert result.returncode == 1
     assert (
@@ -316,17 +316,17 @@ def test_dockerfile_floating_uv_tag_is_rejected(tree: Path) -> None:
 def test_dockerfile_uv_tag_skewed_from_pyproject_is_rejected(tree: Path) -> None:
     """A pinned-but-WRONG tag is the same outage with a slower fuse."""
     dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
-    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.12.7", "uv:0.12.9"), encoding="utf-8")
+    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.13.6", "uv:0.12.9"), encoding="utf-8")
     result = _run(tree)
     assert result.returncode == 1
     assert "0.12.9" in result.stderr
-    assert "0.12.7" in result.stderr
+    assert "0.13.6" in result.stderr
 
 
 def test_dockerfile_untagged_uv_reference_is_rejected(tree: Path) -> None:
     """An omitted tag IS ``:latest`` -- the identical failure, spelled differently."""
     dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
-    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.12.7", "uv"), encoding="utf-8")
+    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.13.6", "uv"), encoding="utf-8")
     result = _run(tree)
     assert result.returncode == 1
     assert (f"{SVC_DOCKERFILE}:{UV_LINE}: 'ghcr.io/astral-sh/uv' names no tag") in result.stderr
@@ -350,7 +350,7 @@ def test_dockerfile_named_build_stage_reference_is_allowed(tree: Path) -> None:
         "FROM python:3.12-slim AS builder\n"
         "FROM python:3.12-slim\n"
         "COPY --from=builder /app /app\n"
-        "COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv\n",
+        "COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /usr/local/bin/uv\n",
         encoding="utf-8",
     )
     result = _run(tree)
@@ -367,12 +367,12 @@ def test_dockerfile_uv_digest_without_a_tag_is_rejected(tree: Path) -> None:
     and accepting it would silently reopen the exact skew that took production down.
     """
     dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
-    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.12.7", f"uv@{DIGEST}"), encoding="utf-8")
+    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.13.6", f"uv@{DIGEST}"), encoding="utf-8")
     result = _run(tree)
     assert result.returncode == 1
     assert f"{SVC_DOCKERFILE}:{UV_LINE}: " in result.stderr
     assert "pins uv by digest alone" in result.stderr
-    assert f"ghcr.io/astral-sh/uv:0.12.7@{DIGEST}" in result.stderr
+    assert f"ghcr.io/astral-sh/uv:0.13.6@{DIGEST}" in result.stderr
 
 
 def test_dockerfile_uv_tag_with_matching_digest_is_allowed(tree: Path) -> None:
@@ -383,7 +383,7 @@ def test_dockerfile_uv_tag_with_matching_digest_is_allowed(tree: Path) -> None:
     """
     dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
     dockerfile.write_text(
-        DOCKERFILE_CLEAN.replace("uv:0.12.7", f"uv:0.12.7@{DIGEST}"), encoding="utf-8"
+        DOCKERFILE_CLEAN.replace("uv:0.13.6", f"uv:0.13.6@{DIGEST}"), encoding="utf-8"
     )
     result = _run(tree)
     assert result.returncode == 0, result.stderr
@@ -393,7 +393,7 @@ def test_dockerfile_uv_skewed_tag_with_digest_is_still_rejected(tree: Path) -> N
     """A digest does not launder a tag that disagrees with ``required-version``."""
     dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
     dockerfile.write_text(
-        DOCKERFILE_CLEAN.replace("uv:0.12.7", f"uv:0.12.9@{DIGEST}"), encoding="utf-8"
+        DOCKERFILE_CLEAN.replace("uv:0.13.6", f"uv:0.12.9@{DIGEST}"), encoding="utf-8"
     )
     result = _run(tree)
     assert result.returncode == 1
@@ -455,7 +455,7 @@ def test_dockerfile_arg_templated_uv_tag_is_rejected(tree: Path, template: str) 
     which is what the braced form used to do -- deleted the check entirely.
     """
     dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
-    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.12.7", f"uv:{template}"), encoding="utf-8")
+    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.13.6", f"uv:{template}"), encoding="utf-8")
     result = _run(tree)
     assert result.returncode == 1
     assert f"{SVC_DOCKERFILE}:{UV_LINE}: " in result.stderr
@@ -485,7 +485,7 @@ def test_dockerfile_templated_build_stage_reference_is_allowed(tree: Path) -> No
         "FROM python:3.12-slim\n"
         "COPY --from=$BUILDER /app /app\n"
         "COPY --from=${BUILDER} /app /app2\n"
-        "COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv\n",
+        "COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /usr/local/bin/uv\n",
         encoding="utf-8",
     )
     result = _run(tree)

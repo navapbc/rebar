@@ -21,7 +21,7 @@ WORKDIR /app
 # reviewbot currently brings boto3, but the explicit Bedrock extra keeps
 # the provider dependency intentional. The signing key arrives through a
 # mount. Keep the uv image tag at pyproject.toml's required version.
-COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /usr/local/bin/uv
 COPY . /app
 RUN uv sync --locked --no-dev --extra agents --extra reviewbot --extra bedrock
 ENV PATH="/app/.venv/bin:$PATH"

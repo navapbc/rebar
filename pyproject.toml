@@ -346,14 +346,15 @@ rebar-mcp = "rebar.mcp_server:main"
 # build if this is ever loosened to a range, removed, shadowed by a root uv.toml, overridden by a
 # per-call-site `version:` input, or bypassed through the upstream setup action.
 #
-# 0.12.7 is what CI already resolved to via "falling back to latest" (run 33225196631,
-# `Successfully installed uv version 0.12.7` across every job of the matrix), so pinning it is
-# behaviour-preserving rather than a silent upgrade or downgrade.
+# The pin started at 0.12.7, what CI already resolved to via "falling back to latest" (run
+# 33225196631). It moved to 0.13.6 deliberately (ticket 2d87-7428-abcf-4bd9) after `uv self
+# update` kept replacing operators' pinned 0.12.7 installs; upgrading is a change to this line,
+# the Dockerfile `uv` stages, and the release checksums in setup-uv and check_uv_pin.py.
 #
 # NOTE: uv reads `required-version` itself, so a local uv that differs now fails fast with
-# `Update uv by running uv self update 0.12.7`. That is intended — see docs/local-dev-env.md.
+# `Update uv by running uv self update 0.13.6`. That is intended — see docs/local-dev-env.md.
 [tool.uv]
-required-version = "==0.12.7"
+required-version = "==0.13.6"
 
 # Bake the gate-code commit SHA into the wheel/sdist for non-git installs (epic
 # jira-reb-596). Auto-discovers hatch_build.py at the repo root; writes the generated,
