@@ -16,7 +16,7 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, cast
@@ -35,7 +35,7 @@ from rebar.reducer import (
     search_states,
 )
 from rebar.reducer._present import public_state
-from rebar.reducer.search import project_search_result
+from rebar.reducer.search import compile_search, project_search_result
 
 # ───────────────────────────── result sorting (P1.1) ─────────────────────────
 # Caller-facing sort key -> reduced/public-state field. Default (no --sort) keeps
@@ -383,14 +383,39 @@ def lean_projection(state: dict) -> dict:
     return {k: v for k, v in state.items() if k not in LEAN_OMITTED_FIELDS}
 
 
-def list_states(tracker: str, query: TicketQuery | None = None) -> list[dict]:
+def _list_row_keep(
+    filters: dict[str, str], keep: Callable[[dict], bool] | None
+) -> Callable[[dict], bool]:
+    """Per-ticket form of ``list_states``' filters (plus a caller ``keep``) for the loop."""
+
+    def row_keep(state: dict) -> bool:
+        if keep is not None and not keep(state):
+            return False
+        return bool(apply_ticket_filters([state], **filters))
+
+    return row_keep
+
+
+def list_states(
+    tracker: str,
+    query: TicketQuery | None = None,
+    *,
+    keep: Callable[[dict], bool] | None = None,
+) -> list[dict]:
     """List states filtered by ``query``.
 
     ``min_children`` and ``blocking_state`` reuse reducer and graph data.
     ``with_children_count`` is opt-in to preserve the default show/list/search
     shape. When ``include_body`` is false, agent-facing lists omit bodies and
     signature material. Internal callers retain them. A missing query selects
-    every ticket."""
+    every ticket.
+
+    ``keep`` is an internal per-ticket predicate (validate passes one). It and the
+    query's own filters run inside the reduce loop, so rows the list discards are never
+    retained (bug humdrum-priestly-lcont); the post-loop filters below still run, which
+    is a no-op on real data. Child counts need every reduced ticket, so when
+    ``min_children`` or ``with_children_count`` is requested nothing is pre-filtered
+    and ``keep`` is applied after the loop instead."""
     if query is None:
         query = TicketQuery()
     # Unpack once into locals; the filter body below is unchanged. ``ticket_type``
@@ -430,12 +455,23 @@ def list_states(tracker: str, query: TicketQuery | None = None) -> list[dict]:
     # while keeping the whole store's bodies + signature material from ever being
     # simultaneously live. ``lean_projection`` below stays as the one spelling of the
     # row shape (now a no-op for these keys).
+    filters = {
+        "type_filter": ticket_type,
+        "status_filter": status,
+        "parent_filter": parent_filter,
+        "tag_filter": has_tag,
+        "priority_filter": priority,
+        "without_tag_filter": without_tag,
+    }
+    counts_children = min_children is not None or with_children_count
+    in_loop_keep = _list_row_keep(filters, keep)
     results = reduce_all_tickets(
         tracker,
         exclude_archived=not include_archived,
         exclude_deleted=exclude_deleted,
         exclude_session_logs=requested_types.isdisjoint(_NON_GRAPH_ARTIFACT_TYPES),
         omit_fields=() if include_body else LEAN_OMITTED_FIELDS,
+        keep=None if counts_children else in_loop_keep,
     )
     # children_count: direct non-deleted children per ticket, counted over the
     # reduced set BEFORE the narrowing filters (a closed child still counts).
@@ -444,15 +480,9 @@ def list_states(tracker: str, query: TicketQuery | None = None) -> list[dict]:
         pid = t.get("parent_id")
         if pid:
             child_counts[pid] = child_counts.get(pid, 0) + 1
-    results = apply_ticket_filters(
-        results,
-        type_filter=ticket_type,
-        status_filter=status,
-        parent_filter=parent_filter,
-        tag_filter=has_tag,
-        priority_filter=priority,
-        without_tag_filter=without_tag,
-    )
+    if keep is not None and counts_children:
+        results = [t for t in results if keep(t)]
+    results = apply_ticket_filters(results, **filters)
     if blocking_state in ("unblocked", "blocked"):
         ready_ids = {s.get("ticket_id") for s in find_ready_tickets(tracker)}
         if blocking_state == "unblocked":
@@ -502,6 +532,16 @@ def ready_states(tracker: str, *, epic: str | None = None, sort: str = "") -> li
     return sort_states(states, sort)
 
 
+def _attach_jira_key(state: Any, jira_by_ticket: dict[str, str]) -> None:
+    """Annotate one reduced state with its bound Jira key, when it has one."""
+    if not jira_by_ticket or not isinstance(state, dict):
+        return
+    ticket_id = state.get("ticket_id")
+    jira_key = jira_by_ticket.get(ticket_id) if isinstance(ticket_id, str) else None
+    if jira_key:
+        state["jira_key"] = jira_key
+
+
 def search_state(
     tracker: str,
     query: str,
@@ -513,27 +553,29 @@ def search_state(
     sort: str = "",
     full: bool = False,
 ) -> list[dict]:
-    states = reduce_all_tickets(
-        tracker, exclude_archived=not include_archived, exclude_deleted=True
-    )
-    # Add Jira keys once from the binding store so search matches show resolution
-    # without introducing filesystem access into the reducer.
+    # Jira keys come once from the binding store so search matches show's resolution
+    # without introducing filesystem access into the reducer. They are attached before
+    # matching (the haystack includes ``jira_key``), and matching runs inside the reduce
+    # loop so only matches are retained (bug humdrum-priestly-lcont).
     jira_by_ticket = binding_jira_key_map(tracker)
-    if jira_by_ticket:
-        for st in states:
-            if isinstance(st, dict):
-                ticket_id = st.get("ticket_id")
-                jira_key = jira_by_ticket.get(ticket_id) if isinstance(ticket_id, str) else None
-                if jira_key:
-                    st["jira_key"] = jira_key
-    results = search_states(
-        states,
-        query,
-        status=status,
-        ticket_type=ticket_type,
-        has_tag=has_tag,
-        parent_resolver=lambda v: resolve_ticket_id(v, tracker) or v,
+    search_kwargs: dict[str, Any] = {
+        "status": status,
+        "ticket_type": ticket_type,
+        "has_tag": has_tag,
+        "parent_resolver": lambda v: resolve_ticket_id(v, tracker) or v,
+    }
+    matches = compile_search(query, **search_kwargs)
+
+    def keep(st: dict) -> bool:
+        _attach_jira_key(st, jira_by_ticket)
+        return matches(st)
+
+    states = reduce_all_tickets(
+        tracker, exclude_archived=not include_archived, exclude_deleted=True, keep=keep
     )
+    for st in states:
+        _attach_jira_key(st, jira_by_ticket)
+    results = search_states(states, query, **search_kwargs)
     public_results = sort_states([public_state(t) for t in results], sort)
     if full:
         return public_results
@@ -547,9 +589,30 @@ def recent_session_logs_state(tracker: str, *, limit: int = 5) -> list[dict]:
     :func:`sort_states` with ``-created`` (ties by ``ticket_id`` ascending, missing last), the
     same rule ``rebar list --type=session_log --sort=-created --limit=N`` applies, so the
     library, MCP, and CLI agree row for row."""
-    states = reduce_all_tickets(tracker, exclude_archived=True, exclude_deleted=True)
+    # The store-wide pass keeps only session logs, projected to the sort keys, so no
+    # full state is retained (bug humdrum-priestly-lcont); the top ``limit`` are then
+    # re-reduced in full (served from the reducer cache the pass just warmed). A row
+    # that fails to re-reduce keeps its pass-one state rather than vanishing.
+    states = reduce_all_tickets(
+        tracker,
+        exclude_archived=True,
+        exclude_deleted=True,
+        keep=lambda t: t.get("ticket_type") == "session_log",
+        keep_fields=("ticket_id", "ticket_type", "created_at"),
+    )
     logs = [t for t in states if t.get("ticket_type") == "session_log"]
-    return [public_state(t) for t in sort_states(logs, "-created")[: max(0, limit)]]
+    top = sort_states(logs, "-created")[: max(0, limit)]
+    return [public_state(_rereduce(tracker, t)) for t in top]
+
+
+def _rereduce(tracker: str, state: dict) -> dict:
+    """Return the full reduced state of ``state``'s ticket, or ``state`` if that fails."""
+    ticket_id = state.get("ticket_id") or ""
+    ticket_dir = os.path.join(tracker, ticket_id)
+    if not ticket_id or not os.path.isdir(ticket_dir):
+        return state
+    full = reduce_ticket(ticket_dir)
+    return full if isinstance(full, dict) else state
 
 
 # ───────────────────────────── CLI command handlers ──────────────────────────

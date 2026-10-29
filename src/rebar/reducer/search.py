@@ -160,6 +160,44 @@ def search_result_to_llm(result: dict) -> dict:
     return out
 
 
+def compile_search(
+    query: str,
+    *,
+    status: str | None = None,
+    ticket_type: str | None = None,
+    has_tag: str | None = None,
+    parent_resolver: Callable[[str], str] | None = None,
+) -> Callable[[dict], bool]:
+    """Return the per-ticket predicate :func:`search_states` applies.
+
+    Parses ``query`` (and resolves ``parent:`` values) once, so a store-wide read can
+    match each ticket inside the reduce loop and retain only matches (bug
+    humdrum-priestly-lcont). See :func:`search_states` for the matching rules."""
+    predicates, text_terms = parse_query(query)
+    if parent_resolver is not None:
+        predicates = [
+            (f, op, parent_resolver(value) if f == "parent" and op == "eq" else value, neg)
+            for (f, op, value, neg) in predicates
+        ]
+
+    def matches(st: dict) -> bool:
+        if not isinstance(st, dict) or "status" not in st:
+            return False  # skip error dicts
+        if status is not None and st.get("status") != status:
+            return False
+        if ticket_type is not None and st.get("ticket_type") != ticket_type:
+            return False
+        if has_tag is not None and has_tag not in (st.get("tags") or []):
+            return False
+        hay = _haystack(st)
+        # A term/predicate matches the ticket iff its presence != its negate flag.
+        if any((term in hay) == neg for term, neg in text_terms):
+            return False
+        return not any(match_predicate(st, f, op, val) == neg for f, op, val, neg in predicates)
+
+    return matches
+
+
 def search_states(
     states: list[dict],
     query: str,
@@ -183,27 +221,11 @@ def search_states(
     (which may be an alias) to a canonical ticket id before matching — the
     resolution the decision record requires. Without it, ``parent:`` matches the
     raw value verbatim (fine for full-id inputs / unit tests)."""
-    predicates, text_terms = parse_query(query)
-    if parent_resolver is not None:
-        predicates = [
-            (f, op, parent_resolver(value) if f == "parent" and op == "eq" else value, neg)
-            for (f, op, value, neg) in predicates
-        ]
-    out = []
-    for st in states:
-        if not isinstance(st, dict) or "status" not in st:
-            continue  # skip error dicts
-        if status is not None and st.get("status") != status:
-            continue
-        if ticket_type is not None and st.get("ticket_type") != ticket_type:
-            continue
-        if has_tag is not None and has_tag not in (st.get("tags") or []):
-            continue
-        hay = _haystack(st)
-        # A term/predicate matches the ticket iff its presence != its negate flag.
-        if any((term in hay) == neg for term, neg in text_terms):
-            continue
-        if any(match_predicate(st, f, op, val) == neg for f, op, val, neg in predicates):
-            continue
-        out.append(st)
-    return out
+    matches = compile_search(
+        query,
+        status=status,
+        ticket_type=ticket_type,
+        has_tag=has_tag,
+        parent_resolver=parent_resolver,
+    )
+    return [st for st in states if matches(st)]

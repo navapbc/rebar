@@ -28,17 +28,10 @@ _OPEN_STATUSES = {"open", "in_progress"}
 
 # Fields the readiness computation never reads. Dropped during PASS 1's reduce so the
 # whole store's bodies + signature material are never simultaneously live; the ready
-# subset is re-reduced in full afterwards (see ``_rehydrate``). Spelled here rather
-# than imported from ``rebar._engine_support.reads`` to keep this module
-# dependency-light (see the module docstring).
-_READY_OMITTED_FIELDS: tuple[str, ...] = (
-    "description",
-    "comments",
-    "authorship_ledger",
-    "attestations",
-    "signature",
-    "keyring",
-)
+# subset is re-reduced in full afterwards (see ``_rehydrate``). The graph loader owns the
+# spelling (no new import: this module already reaches the reducer through it); the name
+# stays module-level here because tests rebind it.
+_READY_OMITTED_FIELDS: tuple[str, ...] = _loader.GRAPH_OMITTED_FIELDS
 
 
 def _is_closed(status: str) -> bool:

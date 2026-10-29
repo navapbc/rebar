@@ -64,7 +64,9 @@ def _raw_tickets(tracker: str) -> list[dict]:
     from rebar._engine_support import reads
 
     reads.ensure_fresh(tracker)
-    return reads.list_states(tracker)
+    # ``normalize_issues`` discards these statuses; dropping them inside the reduce loop
+    # keeps their full states from being retained (bug humdrum-priestly-lcont).
+    return reads.list_states(tracker, keep=lambda t: t.get("status") not in _DROPPED_STATUSES)
 
 
 def signature_findings(tracker: str) -> list:
@@ -135,13 +137,17 @@ def signature_findings(tracker: str) -> list:
     return out
 
 
+# Statuses ``normalize_issues`` drops before any check runs.
+_DROPPED_STATUSES = ("error", "fsck_needed", "closed")
+
+
 def normalize_issues(tickets: list[dict]) -> list[dict]:
     """Port of the ``get_shared_issues_json`` heredoc: drop error/closed/[LOCK]
     tickets and project each onto the internal schema the checks consume."""
     issues = []
     for t in tickets:
         status = t.get("status", "open")
-        if status in ("error", "fsck_needed", "closed"):
+        if status in _DROPPED_STATUSES:
             continue
         tid = t.get("ticket_id") or t.get("id", "")
         if not tid:

@@ -205,13 +205,19 @@ def _finalize_binding_drift(
     return drift
 
 
+# The local-state fields the binding-drift audit reads.
+_LOCAL_FIELDS = ("ticket_id", "id", "status", "archived")
+
+
 def _load_local_by_id(
     tickets_tracker: Path, local_states: list[dict[str, Any]] | None
 ) -> dict[str, dict[str, Any]]:
     if local_states is None:
         from rebar.reducer import reduce_all_tickets
 
-        local_states = reduce_all_tickets(str(tickets_tracker))
+        # Only these fields are read (``classify.local_state`` uses archived/status),
+        # so the store-wide pass keeps no full state (bug humdrum-priestly-lcont).
+        local_states = reduce_all_tickets(str(tickets_tracker), keep_fields=_LOCAL_FIELDS)
     local_by_id: dict[str, dict[str, Any]] = {}
     for state in local_states:
         tid = state.get("ticket_id") or state.get("id")

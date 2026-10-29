@@ -1246,6 +1246,16 @@
           "omit_fields",
           "KEYWORD_ONLY",
           "()"
+        ],
+        [
+          "keep",
+          "KEYWORD_ONLY",
+          "None"
+        ],
+        [
+          "keep_fields",
+          "KEYWORD_ONLY",
+          "None"
         ]
       ],
       "return": "list[dict]"
