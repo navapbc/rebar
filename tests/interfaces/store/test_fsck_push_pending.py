@@ -9,6 +9,7 @@ real local bare origin.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
@@ -107,6 +108,20 @@ def test_fsck_quiet_when_in_sync(
 # operator to just retry a write, when in fact the store will never fast-forward).
 
 
+def _assert_named_commands_exist(line: str, capsys: pytest.CaptureFixture[str]) -> None:
+    """Every `rebar ...` command the advice names must parse as a real subcommand."""
+    commands = re.findall(r"`rebar ([^`]+)`", line)
+    assert commands, f"the advice names no rebar command: {line}"
+    for command in commands:
+        words = [w for w in command.split() if not w.startswith("-")]
+        try:
+            code = _cli.main([*words, "--help"])
+        except SystemExit as exc:  # argparse exits 2 on an unknown subcommand
+            code = exc.code
+        capsys.readouterr()
+        assert code == 0, f"`rebar {command}` is not a rebar command (exit {code})"
+
+
 def test_fsck_reports_diverged_on_unrelated_history(
     repo_with_origin: tuple[Path, Path, str],
     monkeypatch: pytest.MonkeyPatch,
@@ -132,11 +147,15 @@ def test_fsck_reports_diverged_on_unrelated_history(
     assert "DIVERGED" in out, f"fsck did not surface DIVERGED on an unrelated history:\n{out}"
     assert "PUSH_PENDING" not in out, f"fsck mislabeled a divergent store as push-pending:\n{out}"
     assert rc == 1, f"DIVERGED must be a counted integrity issue (non-zero exit); got {rc}"
+    line = next(ln for ln in out.splitlines() if "DIVERGED" in ln)
+    assert "shares no history" in line, line
+    _assert_named_commands_exist(line, capsys)
 
 
 def test_fsck_reports_diverged_on_non_fast_forward(
     repo_with_origin: tuple[Path, Path, str],
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     from rebar._commands import fsck
 
@@ -174,6 +193,12 @@ def test_fsck_reports_diverged_on_non_fast_forward(
         f"classifier did not report a non-fast-forward divergence; got {line!r}"
     )
     assert is_issue is True, "a non-fast-forward divergence must be a counted issue"
+    # A related divergence keeps its shared history: the advice must say so, count each side,
+    # and steer away from re-cloning, which would discard the local-only commit (bug 4f16-c86f).
+    assert "share history" in line and "no history" not in line, line
+    assert "(1 local-only, 1 remote-only commit(s))" in line, line
+    assert "Do not re-clone" in line, line
+    _assert_named_commands_exist(line, capsys)
 
 
 def test_first_write_refuses_unrelated_diverged_store(

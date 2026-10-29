@@ -183,17 +183,15 @@ def _tracker_sync_status(tracker: str) -> tuple[str | None, bool]:
     if _git("rev-parse", "--verify", remote_ref).returncode != 0:
         return None, False
 
-    diverged = (
-        f"DIVERGED: local '{branch}' branch has diverged from {remote_ref} — no "
-        "shared history / cannot fast-forward. The local store was built independently "
-        "of the remote (e.g. init could not fetch the existing branch), so it hides "
-        "remote tickets and its writes will never push. Recover: run `rebar "
-        "fsck-recover`, or re-clone and re-init"
-    )
-
     # Unrelated histories: no common ancestor at all.
     if _git("merge-base", "HEAD", remote_ref).returncode != 0:
-        return diverged, True
+        return (
+            f"DIVERGED: local '{branch}' branch shares no history with {remote_ref}. The "
+            "local store was built independently of the remote (e.g. init could not fetch "
+            "the existing branch), so it hides remote tickets and its writes will never "
+            "push. Recover: run `rebar store fsck-recover`, or re-clone and re-init",
+            True,
+        )
     # Remote is an ancestor of HEAD → local is ahead (or level): benign push-pending.
     if _git("merge-base", "--is-ancestor", remote_ref, "HEAD").returncode == 0:
         cp = _git("rev-list", f"{remote_ref}..HEAD", "--count")
@@ -214,8 +212,18 @@ def _tracker_sync_status(tracker: str) -> tuple[str | None, bool]:
     # HEAD is an ancestor of remote → local merely behind; sync will ff-adopt.
     if _git("merge-base", "--is-ancestor", "HEAD", remote_ref).returncode == 0:
         return None, False
-    # Common ancestor, but neither side is an ancestor of the other → true divergence.
-    return diverged, True
+    # Common ancestor, but neither side is an ancestor of the other. Sync union-merges this
+    # on the next write, so the advice must keep the local-only commits (bug 4f16-c86f).
+    counts = _git("rev-list", "--left-right", "--count", f"HEAD...{remote_ref}").stdout.split()
+    local_only, remote_only = [*counts, "?", "?"][:2]
+    return (
+        f"DIVERGED: local '{branch}' branch and {remote_ref} share history but have each "
+        f"moved on ({local_only} local-only, {remote_only} remote-only commit(s)), so it "
+        "cannot fast-forward. The next ticket write union-merges both sides; if this "
+        "persists, that merge is conflicting — inspect with `rebar store fsck-recover "
+        "--detect-only`. Do not re-clone: that discards the local-only commits",
+        True,
+    )
 
 
 # ── check 4.10: the dirty-tracker wedge class (ticket c925-7669-ded8-43a3) ──────────────
