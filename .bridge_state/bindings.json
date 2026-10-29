@@ -8608,9 +8608,31 @@
       "updated_at": "2026-08-15T14:52:37Z"
     },
     "1461-32c3-eb41-48cc": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\n\nThe reviewer catalog carries a `default` flag on each reviewer. Exactly one reviewer sets it \u2014 `ticket-quality`, whose own catalog description reads \"The default reviewer for the single-pass review engine.\" ADR 0075 retired that engine and story 43bd deleted its last code (`operations._review_ticket_impl`, merged `898c88b7a23`). The flag now describes a consumer that no longer exists.\n\nThe flag's only reader is `prompts.select_reviewers`, which returns the union of every `default` reviewer and every reviewer whose `applies_to` globs match a changed file. A tree-wide grep of `src` finds no production caller: `select_reviewers` is defined in `prompting/prompts.py:620`, re-exported through `llm/operations.py:21` into `llm/__init__.py:125`, and otherwise referenced only by docstrings and tests.\n\nRemoving the flag is also a hard prerequisite for retiring the `ticket-quality` prompt. `build_prompt_index` raises `PromptError` unless exactly one reviewer is `default: true` (`prompts.py:289-292`, \"reject two-default / zero-default\"). Deleting the only default reviewer while that check stands makes `regenerate-index` fail, and a CI drift gate regenerates-then-diffs `reviewers/index.json`.\n\n## Approach\n\nDelete the `default` field and the invariant that polices it. `select_reviewers` keeps its purpose and becomes purely `applies_to`-driven, which is how `security` and `tests` are already selected.\n\nThis is one atomic change rather than two. The field cannot be removed from `Prompt` and `Reviewer` without simultaneously removing every read, and removing the invariant alone would leave a `default` field that is permanently false \u2014 a half-state with no reader and no validation.\n\n`default` is a member of the public `FRONT_MATTER_KEYS` tuple, so this is a controlled public-API change: the API-surface census records the tuple's value and `test_api_surface_gate.py` asserts `\"default\"` is present. After this change a repo-local prompt that still declares `default:` is treated as an unknown front-matter key, which is the intended deprecation signal.\n\n## Scope\n\nVerified rather than assumed \u2014 every site below was located by reading the file at `898c88b7a23`, not inferred from a symbol name.\n\nSource:\n\n- `llm/prompting/prompts_frontmatter.py` \u2014 drop `\"default\",` from `FRONT_MATTER_KEYS`.\n- `llm/prompting/prompt_model.py` \u2014 drop `Reviewer.default` and `Prompt.default`.\n- `llm/prompting/prompts.py` \u2014 drop the `spec.get(\"default\")` read in `load_catalog`, the\n  `meta.get(\"default\")` read in `get_prompt`, the `defaults` accumulator and the\n  `len(defaults) != 1` raise in `build_prompt_index`, the `\"default\"` key it emits, the\n  `rv.default or` disjunct in `select_reviewers`, and the three docstrings that describe\n  the flag or the one-default invariant.\n- `llm/reviewers/*.md` \u2014 drop the `default:` line from the 8 prompts that declare it:\n  `code_quality`, `code-review-base`, `completion_verifier`,\n  `completion_verifier_finalizer`, `security`, `spec_alignment`, `tests`, `ticket_quality`.\n- `llm/reviewers/index.json` \u2014 regenerated, not hand-edited.\n\nTests:\n\n- `tests/unit/test_prompt_index.py` \u2014 delete `test_index_has_exactly_one_default` and\n  `test_index_rejects_two_defaults`; strip `default:` from the `_write_prompt` front-matter\n  the surviving tests build.\n- `tests/interfaces/store/test_llm_framework.py` \u2014 delete the `catalog[\"ticket-quality\"]\n  .default is True` assertion and drop `ticket-quality` from the six `select_reviewers`\n  expectation rows, two of which become the empty set.\n- `tests/unit/test_api_surface_gate.py` \u2014 drop `\"default\"` from the asserted key list.\n- `tests/unit/api_surface_baseline.json` \u2014 regenerated.\n- `tests/unit/test_generated_surface_markers.py` \u2014 correct the comment naming a\n  \"one-default\" invariant.\n\nDocs: `docs/reuse-surface.md` drops \"exactly one `default: true` reviewer\" from the reviewer-index invariants; `docs/release-notes.md` gains an entry.\n\nOut of scope, confirmed by reading each: `mapping.default.*` in `docs/config.md` and `docs/mapping-seam.md`, the `\"default\"` keys in `tests/interfaces/facades/ mcp_tool_surface_golden.json`, and `dataclasses.field(default_factory=...)` throughout. None is the reviewer flag. The `ticket-quality` prompt itself is NOT deleted here; that is a later slice this one unblocks.\n\n## Testing\n\n`test_prompt_index.py` loses the two invariant tests and keeps its dimension-collision and retire-on-regen coverage, which is where the removed tests' sibling invariants live. `test_llm_framework.py`'s parametrized `select_reviewers` rows become the regression surface for the new behavior: with the flag gone, `select_reviewers([])` and `select_reviewers([\"README.md\"])` return empty, while the glob-matched rows for `security` and `tests` are unchanged. That is the behavioral claim worth asserting, and it is asserted by editing existing rows rather than adding a new test.\n\nThe API-surface gate and the `index.json` drift gate both already fail on an unregenerated artifact, so no new test is needed to catch a stale baseline or index.\n\n## Acceptance criteria\n\nEvery command below was run against `898c88b7a23` while writing this plan; AC1-AC4 fail there and pass only once the change lands.\n\n- [ ] **AC1** `git grep -c '^default:' -- src/rebar/llm/reviewers/` prints nothing and\n      exits 1. It prints 8 files today, one per prompt that declares the flag.\n- [ ] **AC2** This exits 0, proving the field is gone from both dataclasses and from the\n      public front-matter key tuple:\n      `python -c \"import dataclasses as dc; from rebar.llm.prompting.prompts_frontmatter\n      import FRONT_MATTER_KEYS; from rebar.llm.prompting.prompt_model import Reviewer,\n      Prompt; names={f.name for f in dc.fields(Reviewer)}|{f.name for f in\n      dc.fields(Prompt)}; assert 'default' not in FRONT_MATTER_KEYS; assert 'default' not\n      in names\"`. Today it exits 1 with \"still in FRONT_MATTER_KEYS\".\n- [ ] **AC3** `python -m rebar.llm.prompting.prompts regenerate-index` exits 0, then\n      `git diff --exit-code -- src/rebar/llm/reviewers/index.json` exits 0, and\n      `python -c \"import json; d=json.load(open('src/rebar/llm/reviewers/index.json'));\n      assert not [k for k,v in d.items() if not k.startswith('_') and 'default' in v]\"`\n      exits 0. Together these prove the generator runs with no default reviewer present\n      and the committed index is its fixed point. The third command today reports all six\n      entries still carrying the key.\n- [ ] **AC4** `python -c \"import rebar.llm as l; print(l.select_reviewers([]),\n      l.select_reviewers(['tests/test_x.py']))\"` prints exactly `[] ['tests']`. Today it\n      prints `['ticket-quality'] ['tests', 'ticket-quality']`.\n- [ ] **AC5** `pytest tests/unit/test_prompt_index.py tests/unit/test_api_surface_gate.py\n      tests/interfaces/store/test_llm_framework.py` exits 0.\n- [ ] **AC6** `ruff check src tests` exits 0 with no output.\n- [ ] **AC7** `git diff --numstat origin/main...HEAD -- docs/release-notes.md` shows a\n      non-zero addition count and `0` deletions, and the added text names the removed\n      `default` front-matter key.\n- [ ] **AC8** `make verify` exits 0.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Remove the vestigial default-reviewer flag from the prompt catalog"
+      },
       "created_at": "2026-10-29T17:33:14Z",
       "jira_id": "4597554",
       "jira_key": "REB-6792",
+      "peer_parent": "REB-6387",
       "state": "confirmed",
       "updated_at": "2026-10-29T17:33:19Z"
     },
@@ -10307,9 +10329,17 @@
       "updated_at": "2026-08-15T14:52:59Z"
     },
     "18e8-b4d4-ca02-41ff": {
+      "baseline": {
+        "assignee": null,
+        "description": "# Repoint the override/variant test machinery off `ticket-quality`\n\n## Context\n\nEpic 87d8 is retiring the `ticket-quality` reviewer prompt. The prompt cannot be deleted while tests still name it, so each group of users is repointed in its own slice first. This slice takes the two largest, which together hold 31 of the remaining references: the prompt-variant overlay tests and the `execution_mode` override tests.\n\nNeither file is testing `ticket-quality` itself. Each needs *some* packaged reviewer id to serve as the base that a `tmp_path` override or variant overlay sits on top of. `tests/unit/test_prompt_variants.py` loads the packaged prompt once in its `_rv()` helper and then writes overlay files whose stems must match that prompt's id. `tests/unit/test_execution_mode.py` writes an override for a built-in id \u2014 its own comment reads \"A built-in id with an override that omits execution_mode\" \u2014 and two of its drift tests compare the override's `outputs` against the built-in's contract.\n\n## Approach\n\nSubstitute the id `ticket-quality` with `code-quality` throughout both files. No test is added, deleted, renamed, or restructured, and no assertion changes meaning.\n\n`code-quality` was chosen by comparing the front-matter of all six catalog reviewers. It is the only one that matches `ticket-quality` on every property these tests depend on, verified rather than assumed:\n\n- `category: review`, so it is in the reviewer catalog and `get_prompt` resolves it.\n- `outputs: review_result`, which the \"identical override is clean\" drift test\n  requires: an override declaring `outputs: review_result` must produce no drift.\n- `execution_mode: agentic`, which the \"defaults to agentic when absent\" test asserts.\n- **No `applies_to` globs.** `security` and `tests` both declare them, so picking\n  either would have changed `select_reviewers` results. `code-quality` declares none,\n  exactly as `ticket-quality` does.\n\n`completion-verifier` was rejected: its `outputs` is `completion_verdict`, which would invert the drift tests. `spec-alignment` matches on contract but is the batch spec-scan reviewer, a poorer fit for prompts about code review ergonomics.\n\nThe override's base-prompt FILENAME is what anchors the drift comparison, not its front-matter: `prompt_override_drift` (`prompts.py:527-540`) derives the built-in id from the `.rebar/prompts/<id>.md` filename stem (`stem = path.name[:-3]`, `pid = stem.replace(\"_\", \"-\")`) and then compares only `outputs`. The `dimension:` value written inside override front-matter is updated alongside the id for internal consistency, but the drift check never reads it.\n\n## Scope\n\nVerified rather than assumed: the substitution was applied to a clean checkout of `898c88b7a23` and the two files' 28 tests were run. All 28 passed with no other edit. `git grep -c 'ticket-quality'` over both files then returned nothing.\n\nBoth files are left with zero references to `ticket-quality`. Out of scope, and deliberately untouched: every other file that still names the prompt, the prompt file `src/rebar/llm/reviewers/ticket_quality.md` itself, and `reviewers/index.json`. The prompt stays in the catalog after this slice; later slices retire it.\n\n`docs/release-notes.md` gains one short entry recording that the prompt-variant and execution-mode test fixtures were repointed from `ticket-quality` to `code-quality`, with no change to test count, test names, or behaviour. The entry is appended after the existing preamble, so the file's diff is additions-only.\n\n`{{ticket_id}}` template variables appear throughout both files and are **not** affected \u2014 the substituted string is `ticket-quality`, which `ticket_id` does not contain.\n\n## Testing\n\nNo new tests. These two files are themselves the tests, and they must keep passing unchanged in count and in name. The collected node IDs for both files are compared before and after to prove the slice neither adds nor removes a test.\n\n## Acceptance criteria\n\nEvery command below was run against `898c88b7a23` while writing this plan.\n\n- [ ] **AC1** `git grep -c 'ticket-quality' -- tests/unit/test_prompt_variants.py\n      tests/unit/test_execution_mode.py` prints nothing and exits 1. It prints\n      `16` and `15` today.\n- [ ] **AC2** `pytest tests/unit/test_prompt_variants.py tests/unit/test_execution_mode.py\n      -q` exits 0 reporting exactly `28 passed`.\n- [ ] **AC3** The collected node IDs of those two files are unchanged except for the\n      substitution: `pytest tests/unit/test_prompt_variants.py\n      tests/unit/test_execution_mode.py -q --collect-only | grep '::' | sort` produces\n      output identical to the same command on `origin/main`. Both files' test names\n      contain no reviewer id, so the lists must match exactly.\n- [ ] **AC4** `git diff --numstat origin/main...HEAD` lists exactly the two test files\n      plus `docs/release-notes.md`, and no other path.\n- [ ] **AC5** `ruff check src tests` exits 0 with no output.\n- [ ] **AC6** `git diff --numstat origin/main...HEAD -- docs/release-notes.md` shows a\n      non-zero addition count and `0` deletions.\n- [ ] **AC7** `make verify` exits 0.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Repoint the override/variant test machinery off ticket-quality"
+      },
       "created_at": "2026-10-29T17:33:19Z",
       "jira_id": "4597555",
       "jira_key": "REB-6793",
+      "peer_parent": "REB-6387",
       "state": "confirmed",
       "updated_at": "2026-10-29T17:33:23Z"
     },
@@ -21122,6 +21152,13 @@
       "peer_parent": "REB-234",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:48Z"
+    },
+    "3211-7d22-75c0-4bd8": {
+      "created_at": "2026-10-29T18:35:10Z",
+      "jira_id": "4597638",
+      "jira_key": "REB-6794",
+      "state": "confirmed",
+      "updated_at": "2026-10-29T18:35:14Z"
     },
     "3211-be4f-d4aa-4b5c": {
       "baseline": {
@@ -58476,10 +58513,24 @@
     },
     "8e53-5ed2-6791-4308": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Observation\n\n`next_batch.compute` builds `ticket_status_map` only from `list_states(status=\"open,in_progress\")` plus tombstones. `_open_blockers_by_ticket` then looks each blocker up with a default of `\"closed\"`. A blocker whose status is `blocked` or `idea` is missing from the map, so it reads as `closed` (terminal), and the ticket it blocks is offered as ready.\n\nReproduced at unit level on db9352e6da0. A is `blocked`; B is `open` and `depends_on` A.\n- With next-batch's status map (`{\"B\": \"open\"}`): `_open_blockers_by_ticket` returns `{}`, so B is ready.\n- With A's real status in the map: it returns `{\"B\": [\"A\"]}`.\n- `is_terminal_status(\"blocked\")` and `is_terminal_status(\"idea\")` are both False.\n\n`ready` (`graph/_ready.py`) gets this right: it checks every blocker's reduced status and treats only missing tickets as finished. So the two ops disagree on whether B is workable.\n\nUnchecked: how many open tickets in the live store currently depend on a `blocked`/`idea` ticket.\n\n## Acceptance criteria\n- [ ] A test where an open task under an epic depends on a `blocked` (and, separately, an `idea`) ticket shows next-batch reporting it as skipped-blocked, not batched.\n- [ ] next-batch takes blocker status from the reduced state of every ticket, not from the open/in_progress list.\n- [ ] The existing next-batch tests and the parity tests still pass.\n\n## Plan\n1. Add a failing test in `tests/unit/test_next_batch_*` (next to the existing next-batch tests): an epic with an open task that `depends_on` a `blocked` ticket, and a second case with an `idea` blocker. Assert the task lands in `skipped_blocked`, naming the blocker, and is absent from the batch.\n2. In `src/rebar/_engine_support/next_batch.py`, build the blocker status map from the reduced state of every ticket (the whole-store pass `compute` already does), overlaid with tombstone status, instead of from `list_states(status=\"open,in_progress\")`. This is the same rule `graph/_ready.py` applies: every blocker's real status, with a missing ticket counted as finished.\n3. Run the existing next-batch tests and parity tests, then `make verify`.\n\nThis lands in the same change as the next-batch single-pass rebuild (teenage-unquieted-ringworm), which replaces the second whole-store read; the commit carries both tickets' trailers.\n\n## File impact (expected)\n- `src/rebar/_engine_support/next_batch.py`\n- `tests/unit/` next-batch test module (located during step 1)",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "next-batch treats a blocker in blocked or idea status as finished"
       },
       "created_at": "2026-10-29T16:35:18Z",
@@ -110757,7 +110808,8 @@
     "1793265936240112001": "__rebar_unknown_comment_id__",
     "1793292630610962001": "__rebar_unknown_comment_id__",
     "1793292655934124001": "__rebar_unknown_comment_id__",
-    "1793292987626025001": "__rebar_unknown_comment_id__"
+    "1793292987626025001": "__rebar_unknown_comment_id__",
+    "1793298042558980338": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -116049,6 +116101,7 @@
     "REB-6791": "8e53-5ed2-6791-4308",
     "REB-6792": "1461-32c3-eb41-48cc",
     "REB-6793": "18e8-b4d4-ca02-41ff",
+    "REB-6794": "3211-7d22-75c0-4bd8",
     "REB-68": "2d90-8fad-53a5-484f",
     "REB-680": "da8a-75f5-ccb2-4b5f",
     "REB-681": "f894-ebd4-e841-404f",
