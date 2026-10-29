@@ -689,7 +689,7 @@ we run an **ephemeral self-hosted stack**, not a persistent server:
 2. **Code review over a change — the four-pass code-review GATE** — the `review_code` op
    (library `rebar.llm.review_code`, CLI `rebar review-code`, gated MCP `review_code`). As of
    epic b744 (WS4, ADR 0011) the throwaway single-pass route — deterministic reviewer selection
-   → parallel reviewers → `aggregate_findings` — is RETIRED. `review_code` is now the gate-backed
+   → parallel reviewers → finding aggregation — is RETIRED. `review_code` is now the gate-backed
    shim: an explicit call always runs the four-pass code-review gate (`gates/code-review.yaml`:
    a base reviewer + two-round overlay escalation → kernel Pass-2 verify / Pass-3 decide /
    Pass-4 coach, via `produce_code_review_verdict`) and TRANSLATES the typed

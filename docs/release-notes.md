@@ -8,6 +8,22 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## `rebar.llm.aggregate` and the `aggregate_findings` export are removed
+
+Non-breaking in practice. `rebar.llm.aggregate` is deleted and
+`rebar.llm.aggregate_findings` is dropped from `rebar.llm.__all__`, so the
+import no longer resolves.
+
+The module implemented multi-reviewer finding aggregation (cluster → consensus →
+rank) for the single-pass code-review engine that ADR 0075 retired. ADR 0108
+already recorded it as dead code: `aggregate_findings` had no production caller.
+Its one surviving consumer used neither the clustering nor the ranking — only the
+private two-line `_severity_rank` helper, which now lives in
+`rebar/llm/spec_scan.py` beside its only call site. Behaviour there is unchanged.
+
+Multi-reviewer review is unaffected: the gate-backed `review_code` path runs the
+four-pass code-review gate and never used this module.
+
 ## Gate policies drop `severity`; `REBAR_VERIFY_PREFETCH` is removed
 
 Non-breaking. Two finished mechanisms retired (ADR 0108, story a9dd).

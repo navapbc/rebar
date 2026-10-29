@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from rebar.llm.aggregate import _severity_rank
 from rebar.llm.config import LLMConfig
 from rebar.llm.findings import finalize_findings
 from rebar.llm.prompting import prompts
@@ -19,6 +18,12 @@ from rebar.llm.runner import Runner, RunRequest, get_runner
 __all__ = ["scan_epics_for_spec"]
 
 _DESC_CAP = 600  # per-epic description chars inlined into the batch context
+
+_SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+
+
+def _severity_rank(finding: dict) -> int:
+    return _SEVERITY_RANK.get(str(finding.get("severity", "info")).lower(), 0)
 
 
 def _fetch_epics(epics: list[str] | None, repo_root) -> list[dict]:
