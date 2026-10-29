@@ -1,7 +1,7 @@
-"""Cover the ``RunnerAgentStep`` bridge and the public ``review_ticket`` entry point.
+"""Cover the ``RunnerAgentStep`` bridge.
 
-The bridge lets a workflow step run an agent through the executor; the public entry point
-reaches the review engine directly. The two are exercised independently.
+The bridge lets a workflow step run an agent through the executor, so a review-shaped
+step reaches a runner without the step itself knowing how an agent is driven.
 """
 
 from __future__ import annotations
@@ -39,14 +39,3 @@ def test_runner_agent_step_bridge_runs_an_agent_workflow(rebar_repo: Path) -> No
     out = res["terminal_output"]
     assert out["findings"][0]["detail"] == "z"
     assert out["summary"] == "ok"
-
-
-def test_public_review_ticket_entry_point_unchanged(rebar_repo: Path) -> None:
-    # The documented entry point still works via the legacy path (not deleted/cut over).
-    r = str(rebar_repo)
-    tid = rebar.create_ticket("task", "Legacy", repo_root=r)
-    result = rebar.llm.operations._review_ticket_impl(
-        tid, "code-quality", runner=FakeRunner([]), repo_root=r
-    )
-    assert result["runner"] == "fake"
-    assert result["target"]["kind"] == "ticket"  # legacy provenance preserved
