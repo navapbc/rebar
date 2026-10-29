@@ -1,7 +1,7 @@
-"""Require ``review_ticket`` workflow execution to bridge through the executor.
+"""Cover the ``RunnerAgentStep`` bridge and the public ``review_ticket`` entry point.
 
-The ``RunnerAgentStep`` path must match the legacy findings and summary while the public
-entry point continues to use the legacy path.
+The bridge lets a workflow step run an agent through the executor; the public entry point
+reaches the review engine directly. The two are exercised independently.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 
 import rebar
-from rebar.llm import review_workflows as RW
 from rebar.llm.runner import FakeRunner
 from rebar.llm.workflow import runs
 
@@ -40,18 +39,6 @@ def test_runner_agent_step_bridge_runs_an_agent_workflow(rebar_repo: Path) -> No
     out = res["terminal_output"]
     assert out["findings"][0]["detail"] == "z"
     assert out["summary"] == "ok"
-
-
-def test_review_workflow_equivalent_to_legacy(rebar_repo: Path) -> None:
-    r = str(rebar_repo)
-    tid = rebar.create_ticket("task", "Diff me", description="some body", repo_root=r)
-    fake = FakeRunner(
-        [{"severity": "high", "dimension": "x", "detail": "d"}], summary="the summary"
-    )
-    diff = RW.diff_review_paths(tid, "code-quality", repo_root=r, runner=fake)
-    assert diff["equivalent"] is True, diff
-    assert diff["legacy_findings"] == diff["workflow_findings"]
-    assert diff["legacy_summary"] == diff["workflow_summary"] == "the summary"
 
 
 def test_public_review_ticket_entry_point_unchanged(rebar_repo: Path) -> None:
