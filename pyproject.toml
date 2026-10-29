@@ -777,6 +777,7 @@ markers = [
     "llm_live: a live test that makes a REAL model call on the CONFIGURED provider; auto-applied to external modules carrying a `_live_llm_ready` sentinel, and the dimension the external suite's provider matrix selects on (story f124)",
     "interface: interface-parity tests (library / CLI / MCP over one store)",
     "allow_network: opt out of the network guard for a test",
+    "review_bot_real_lookup: keep the review bot's real current-revision lookup instead of the autouse fail-open stub",
     "benchmark: performance benchmark (informational; not a pass/fail gate)",
     "platform_compat: OS-sensitive tests (file locking, atomic rename, timeout/gtimeout, path semantics, cross-process concurrency) that form the reduced macOS compatibility suite; auto-applied by tests/conftest.py by path (story ci-runtime-round2). The full suite runs on Linux; macOS runs only this subset + the integration tier.",
 ]
