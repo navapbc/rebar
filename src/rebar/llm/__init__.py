@@ -33,7 +33,6 @@ rebar.llm`` stay stdlib-only; running needs the ``nava-rebar[agents]`` extra +
 
 from __future__ import annotations
 
-from rebar.llm.aggregate import aggregate_findings
 from rebar.llm.code_review import review_code
 from rebar.llm.completion import verify_completion
 from rebar.llm.config import (
@@ -103,7 +102,6 @@ __all__ = [
     "StructuredOutputError",
     "WorkflowAssetsUnavailableError",
     "agents_extra_installed",
-    "aggregate_findings",
     "available_backends",
     # findings contract helpers
     "build_result",
