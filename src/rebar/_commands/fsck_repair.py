@@ -439,11 +439,66 @@ def _commit_repair_batch(tracker: str, lines: list[str], batch_number: int) -> b
     if commit.returncode != 0:
         lines.append("ABORT: commit failed while holding batch")
         return False
+    return True
+
+
+# Other sessions keep writing to the shared branch while a repair runs, so a batch push can be
+# rejected as non-fast-forward. Merging the remote can bring in an event older than a SNAPSHOT
+# this batch just rebuilt, which is itself an orphan, so a retry re-repairs the batch on the
+# merged state before pushing again and never publishes the merge unrepaired. A rejection that
+# persists past the budget still aborts, leaving the pre-tag for rollback (bug 900d-f034).
+_PUSH_ATTEMPTS = 3
+
+
+def _repair_batch_tickets(
+    tracker: str, lines: list[str], tickets: list[str], marker_dir: str, only: str | None
+) -> None:
+    for tid in tickets:
+        disp = _repair_ticket(
+            tracker,
+            tid,
+            os.path.join(tracker, tid),
+            dry_run=False,
+            repair_stale_channel=only == "stale-channel",
+            no_commit=True,
+        )
+        if disp.get("error"):
+            lines.append(f"SKIP {tid}: {disp['error']}")
+        else:
+            _mark_ticket_repaired(marker_dir, tid)
+
+
+def _publish_repair_batch(
+    tracker: str,
+    lines: list[str],
+    tickets: list[str],
+    batch_number: int,
+    *,
+    marker_dir: str,
+    only: str | None,
+) -> bool:
+    """Commit and push one batch, re-repairing it on the merged state after a rejection."""
+    from rebar import config
+    from rebar._store import git_outcome, sync
+
+    if not _commit_repair_batch(tracker, lines, batch_number):
+        return False
     if not _has_remote(tracker):
         return True
-    push = _git_push(tracker, "push", "origin", "HEAD:tickets")
-    if push.returncode == 0:
-        return True
+    # Code-repo config, resolved the config way so a relocated store still finds rebar.toml.
+    root = config.repo_root_or_none()
+    remote, branch = config.tickets_remote(root), config.tickets_branch(root)
+    for attempt in range(1, _PUSH_ATTEMPTS + 1):
+        push = _git_push(tracker, "push", remote, f"HEAD:{branch}")
+        if push.returncode == 0:
+            return True
+        if attempt == _PUSH_ATTEMPTS or not git_outcome.is_non_fast_forward(push.stderr or ""):
+            break
+        lines.append(f"a3-remediation: batch {batch_number} push rejected; merging {remote}")
+        sync.reconverge(tracker)
+        _repair_batch_tickets(tracker, lines, tickets, marker_dir, only)
+        if not _commit_repair_batch(tracker, lines, batch_number):
+            return False
     lines.append(f"ABORT: push failed for batch {batch_number}: {push.stderr.strip()}")
     return False
 
@@ -458,22 +513,14 @@ def _run_live_repair_batches(
 ) -> bool:
     lines.append("a3-remediation: reconciler paused")
     batch = 200
-    for i, (tid, _plan) in enumerate(flagged):
-        disp = _repair_ticket(
-            tracker,
-            tid,
-            os.path.join(tracker, tid),
-            dry_run=False,
-            repair_stale_channel=only == "stale-channel",
-            no_commit=True,
-        )
-        if disp.get("error"):
-            lines.append(f"SKIP {tid}: {disp['error']}")
-        else:
-            _mark_ticket_repaired(marker_dir, tid)
-        if (i + 1) % batch == 0 or i == len(flagged) - 1:
-            if not _commit_repair_batch(tracker, lines, i // batch + 1):
-                return False
+    tickets = [tid for tid, _plan in flagged]
+    for start in range(0, len(tickets), batch):
+        chunk = tickets[start : start + batch]
+        _repair_batch_tickets(tracker, lines, chunk, marker_dir, only)
+        if not _publish_repair_batch(
+            tracker, lines, chunk, start // batch + 1, marker_dir=marker_dir, only=only
+        ):
+            return False
     lines.append("a3-remediation: reconciler re-enabled")
     return True
 
