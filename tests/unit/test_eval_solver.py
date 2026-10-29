@@ -44,23 +44,6 @@ def test_completion_verifier_case_runs_and_scores() -> None:
     assert sc.score("recall_on_incomplete", case, out).passed is True
 
 
-def test_ticket_quality_case_runs_and_scores() -> None:
-    case = {"id": "tq1", "expect": "finding", "ticket_context": "Title: X\nVague work, no AC."}
-    fake = FakeRunner(
-        findings=[{"severity": "medium", "dimension": "ticket-quality", "detail": "no AC block"}]
-    )
-    out = eval_solver.run_case("ticket-quality", case, runner=fake)
-    assert sc.score("emits_valid_review_result", case, out).passed is True
-    assert sc.score("recall_on_seeded_defects", case, out).passed is True
-
-
-def test_ticket_quality_good_case_no_fire() -> None:
-    ctx = "Title: Y\n## Acceptance Criteria\n- [ ] x"
-    case = {"id": "tq2", "expect": "pass", "ticket_context": ctx}
-    out = eval_solver.run_case("ticket-quality", case, runner=FakeRunner(findings=[]))
-    assert sc.score("no_fire_on_good_cases", case, out).passed is True
-
-
 def test_spec_alignment_batch_case_runs() -> None:
     case = {
         "id": "sa1",
@@ -178,7 +161,7 @@ def _checkout_rooted_runner(checkout: str) -> PydanticAIRunner:
     )
 
 
-@pytest.mark.parametrize("prompt_id", ["completion-verifier", "ticket-quality", "spec-alignment"])
+@pytest.mark.parametrize("prompt_id", ["completion-verifier", "spec-alignment"])
 def test_agentic_case_reroots_injected_runner_at_its_fixture(
     prompt_id: str, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
@@ -200,7 +183,6 @@ def test_agentic_case_reroots_injected_runner_at_its_fixture(
         return {"verdict": "PASS", "findings": [], "summary": ""}
 
     monkeypatch.setattr("rebar.llm.completion.verify_completion", spy)
-    monkeypatch.setattr("rebar.llm.operations._review_ticket_impl", spy)
     monkeypatch.setattr("rebar.llm.spec_scan.scan_epics_for_spec", spy)
 
     case = {

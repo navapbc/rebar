@@ -8,6 +8,23 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## The `ticket-quality` eval spec and its solver branch are removed
+
+Non-breaking for the reviewer itself. `src/rebar/llm/eval_specs/ticket-quality.eval.yaml`
+is deleted, `rebar.llm.evals.eval_solver.run_case` no longer dispatches the
+`ticket-quality` prompt id, and `rebar.llm.evals.provider_parity.AGENTIC_SOLVERS`
+drops the `ticket-quality` member. `run_case("ticket-quality", ...)` now raises
+`ValueError: no eval solver for prompt 'ticket-quality'`, the same answer any
+other prompt without an eval spec gets.
+
+The solver branch dispatched into `operations._review_ticket_impl`, the
+single-pass review engine ADR 0075 retired. An eval that exists to measure a
+production capability was instead the thing keeping a retired engine reachable.
+
+The `ticket-quality` reviewer prompt is unaffected: it still loads, still appears
+in the reviewer catalog, and is still selectable. It simply stops being an eval
+target.
+
 ## `rebar.llm.review_workflows` is removed
 
 Non-breaking. The module was strangler-fig scaffolding for a cutover that is being

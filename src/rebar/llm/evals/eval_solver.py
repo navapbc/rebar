@@ -339,7 +339,7 @@ def run_case(
     disposable ticket and repository scaffolding. ``repo_root`` selects the criterion and overlay
     registry. An unknown prompt or criterion raises ``ValueError``.
     """
-    from rebar.llm import completion, operations, spec_scan
+    from rebar.llm import completion, spec_scan
 
     if repo_root is None:
         from rebar import config as _config
@@ -401,15 +401,6 @@ def run_case(
                 tt, _title(desc, "Eval ticket"), description=desc, repo_root=root, return_alias=True
             )["id"]
             return completion.verify_completion(
-                tid, repo_root=root, runner=runner, graph=graph, source=src
-            )
-        if prompt_id == "ticket-quality":
-            desc = case.get("ticket_context") or ""
-            tt = case.get("ticket_type") or "task"
-            tid = rebar.create_ticket(
-                tt, _title(desc, "Eval ticket"), description=desc, repo_root=root, return_alias=True
-            )["id"]
-            return operations._review_ticket_impl(
                 tid, repo_root=root, runner=runner, graph=graph, source=src
             )
         if prompt_id == "spec-alignment":

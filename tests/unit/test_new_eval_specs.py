@@ -1,5 +1,5 @@
-"""The 3 reviewer eval specs added by WS-EVAL-EXISTING (epic 6f2d): completion-verifier,
-ticket-quality, spec-alignment. Offline discipline only — these assert spec SHAPE
+"""The reviewer eval specs added by WS-EVAL-EXISTING (epic 6f2d), plus the plan-review
+specs that followed. Offline discipline only — these assert spec SHAPE
 (strict validity, registered scorers, balanced dataset, non-empty gold_set); the live
 recall/false-fire SCORING runs in the eval CI ([agents] extra + credentials)."""
 
@@ -12,7 +12,6 @@ from rebar.llm.evals import eval_scorers as sc
 
 NEW_SPECS = (
     "completion-verifier",
-    "ticket-quality",
     "spec-alignment",
     "plan-review-T10",
     "plan-review-T15",

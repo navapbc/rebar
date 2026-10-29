@@ -77,7 +77,7 @@ __all__ = [
 #: The three agentic disposable-store reviewers. They dispatch to ops that resolve
 #: ``config or LLMConfig.from_env(...)`` directly, so ``gate_config`` does not reach them and the
 #: provider split would silently collapse on any corpus item routed to one.
-AGENTIC_SOLVERS = frozenset({"completion-verifier", "ticket-quality", "spec-alignment"})
+AGENTIC_SOLVERS = frozenset({"completion-verifier", "spec-alignment"})
 
 #: Solvers whose gating scorer is PRESENCE-based and carries no block/advisory polarity, so the
 #: two-bucket parity mapping has nothing to read. ``code-review-verify`` is scored on the presence
