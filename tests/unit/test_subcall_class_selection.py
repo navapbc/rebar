@@ -99,27 +99,6 @@ def _only_model(rec: _Recorder) -> str:
 # ── per-site probes: the model reaching the runner is the class value, not cfg.model ──────────
 
 
-def test_review_ticket_uses_the_operators_configured_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the operator's model for this top-level, single-call operation.
-
-    Classes differentiate passes and add nothing here; ``spec_scan`` follows the same design.
-    Remove this test when ticket 316a retires the operation.
-    """
-    from rebar.llm import operations
-
-    monkeypatch.setattr(
-        operations, "assemble_context", lambda tid, *, graph, repo_root: ("ctx", [tid])
-    )
-    rec = _Recorder()
-    cfg = _cfg()
-    # Override conftest's attested source: materializing it performs real origin fetches, while
-    # this model-selection test must stay offline. Explicit ``source`` wins over the environment.
-    operations._review_ticket_impl(
-        "abc123", "ticket-quality", config=cfg, runner=rec, source="local"
-    )
-    assert _only_model(rec) == cfg.model
-
-
 def test_code_novelty_selects_the_standard_class() -> None:
     from rebar.llm.code_review.workflow_ops import score_code_novelty
 
@@ -243,17 +222,6 @@ _UNFOLLOWABLE: dict[str, str] = {
         "`parity.resolve_pinned_model('pass1').model_id`, a fully-resolved Bedrock "
         "frontier-class model string constructed just above this call, not the operator's "
         "configured model"
-    ),
-    "llm/operations.py::_review_ticket_impl": (
-        "`rebar.llm.review_ticket`'s PRIMARY op call, not a sub-call (story 316a split the "
-        "public wrapper, which warns, from this implementation, which is what the deprecated "
-        "op and its internal callers actually run). ec44 cut this over from bare "
-        "`LLMConfig.from_env()` to `resolve_gate_config()` (the boundary-composed snapshot), so "
-        "the analysis no longer traces to a bare raw origin — it stops at the opaque resolver "
-        "call. A top-level op makes ONE call, so there are no passes to differentiate and the "
-        "operator's configured model is the right knob; the class vocabulary exists to spend "
-        "differently ACROSS a gate's passes. Same reasoning as spec_scan below. The op's CLI "
-        "verb (`rebar review`) is already retired as a forwarding shim over `rebar review-plan`."
     ),
     "llm/spec_scan.py::_scan_epics_inner": (
         "`scan-spec`'s PRIMARY op call, not a sub-call — a top-level op runs the operator's "
@@ -483,7 +451,6 @@ _EXPECTED_RUN_REQUEST_SITES = [
     ("llm/evals/eval_solver.py::_run_verifier_case", "cfg", "unresolved"),
     ("llm/evals/plan_replay/tier1.py::build_candidate_runner", "cfg", "unresolved"),
     ("llm/evals/plan_replay/tier2.py::run_tier2_full", "cfg", "unresolved"),
-    ("llm/operations.py::_review_ticket_impl", "max_output_cfg(cfg)", "unresolved"),
     (
         "llm/plan_review/completion_subcall.py::pass2_completion",
         "_max_output_cfg(cfg)",
@@ -529,7 +496,7 @@ def test_provenance_scan_preserves_verdicts_with_linear_whole_tree_work(
 
     sites = _run_request_sites()
 
-    assert len(_EXPECTED_RUN_REQUEST_SITES) == 21
+    assert len(_EXPECTED_RUN_REQUEST_SITES) == 20
     assert all(expr for _, expr, _ in _EXPECTED_RUN_REQUEST_SITES)
     assert sites == _EXPECTED_RUN_REQUEST_SITES
     assert len(module_walks) >= 400, "the oracle did not exercise the real source corpus"

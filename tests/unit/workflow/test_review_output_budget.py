@@ -411,27 +411,6 @@ def test_completion_primary_cfg_carries_model_max(monkeypatch) -> None:
 # ── review_ticket ─────────────────────────────────────────────────────────────────
 
 
-def test_review_ticket_request_carries_model_max(monkeypatch) -> None:
-    from contextlib import nullcontext
-
-    from rebar.llm import gate_source, operations
-
-    # review_ticket imports `gate_source` lazily from rebar.llm, so patch the module.
-    monkeypatch.setattr(gate_source, "resolve_gate_handle", lambda ref, source, repo_root: None)
-    monkeypatch.setattr(gate_source, "gate_read_root", lambda handle: nullcontext())
-    monkeypatch.setattr(gate_source, "apply_handle", lambda cfg, handle: cfg)
-    monkeypatch.setattr(gate_source, "annotate_result", lambda result, handle: result)
-    monkeypatch.setattr(
-        operations, "assemble_context", lambda tid, *, graph, repo_root: ("ctx", [tid])
-    )
-    runner = _Recorder({"findings": []})
-    operations._review_ticket_impl("T-1", config=_cfg(), runner=runner)
-    assert _request_max_tokens(runner) == [_SONNET_MAX]
-
-
-# ── the gate yamls all state the one rule ─────────────────────────────────────────
-
-
 def test_all_review_gate_yamls_opt_into_model_max() -> None:
     """plan-review: verify both arms + prerequisite verifier + coach both arms (>=5);
     code-review: base + verify + coach (3); completion-verification: verify (1)."""

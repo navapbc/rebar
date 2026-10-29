@@ -8,6 +8,27 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## The single-pass review engine is removed from `rebar.llm.operations`
+
+Breaking for any caller that reached the private engine directly. `rebar.llm.operations`
+keeps `assemble_context` and re-exports `select_reviewers`; everything the retired
+single-pass review path needed is gone (epic 87d8).
+
+- `operations._review_ticket_impl` is **removed**. ADR 0075 retired the single-pass
+  `review` verb, and the preceding slices of epic 87d8 removed its last three callers —
+  the `review_workflows` scaffolding, the `ticket-quality` eval solver branch, and the
+  aggregate module. With no caller left, the engine is deleted rather than kept warm.
+- `operations.default_reviewer_id` is **removed**. It answered "which reviewer runs when
+  the caller names none", a question only the single-pass entry point asked. Reviewer
+  selection for every surviving path goes through `select_reviewers`.
+- `operations._REVIEW_MIN_STEPS` is **removed**. It floored the step budget for the engine's
+  runner request; no other request site consumed it.
+- `operations.__all__` is now `["assemble_context", "select_reviewers"]`. `assemble_context`
+  is unchanged and still builds the context the mandatory completion gate consumes.
+
+An earlier entry in this file recorded that the engine *stays* while callers were repointed.
+That was true for the duration of the repointing; this entry supersedes it.
+
 ## The `ticket-quality` eval spec and its solver branch are removed
 
 Non-breaking for the reviewer itself. `src/rebar/llm/eval_specs/ticket-quality.eval.yaml`
