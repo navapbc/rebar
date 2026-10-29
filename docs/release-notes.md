@@ -8,6 +8,35 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## The workflow example and framework docs no longer name `ticket-quality`
+
+No contract change. `src/rebar/llm/workflow/examples/review_skeleton.yaml` listed
+`ticket-quality` as one criterion of its `finders` batch step, and
+`docs/workflow-engine.md` reproduces that example in prose. Epic 87d8 is retiring
+that prompt, so both now name `spec-alignment` — which matches on `category: review`,
+`inputs: reviewer_input`, `outputs: review_result`, `execution_mode: agentic`, and no
+`applies_to` globs. `code-quality` was not used here because the same step already
+names it as the batch *finder*, and reusing it would collapse the finder/criterion
+distinction `tests/unit/workflow/test_review_skeleton.py` asserts separately.
+
+Three documentation references change to `code-quality`: a `review_result` sample in
+`docs/llm-framework.md`, and the id-normalization illustration written twice, in
+`docs/reuse-surface.md` and the `_packaged_prompt_files` docstring in
+`src/rebar/llm/prompting/prompts.py`. That illustration now reads
+`code_quality.md` → `code-quality`, which still demonstrates the `_`→`-` stem rule
+and names a file that survives the epic.
+
+This entry also carries four documentation corrections left over from the `default`
+front-matter key's removal (previous entry): prose in `docs/llm-framework.md` and
+`docs/reuse-surface.md`, plus the `build_index_document` docstring, still listed
+`default` among the reviewer front-matter keys and described `select_reviewers` as a
+union over default reviewers. Selection is purely `applies_to`-driven, and the prose
+now says so.
+
+Test count, test names, and every assertion are unchanged — 5 tests before and after
+in `test_review_skeleton.py`, with identical collected node IDs. The `ticket-quality`
+prompt itself is still in the catalog; the next slice of epic 87d8 retires it.
+
 ## Reviewer-stand-in test fixtures no longer name `ticket-quality`
 
 No contract change. Seven test files each needed *some* packaged reviewer id to stand

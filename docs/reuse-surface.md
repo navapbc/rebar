@@ -308,7 +308,7 @@ examples live in `src/rebar/llm/reviewers/` and the plan-review prompts there to
 
 | Layer | Path | Notes |
 |-------|------|-------|
-| **Packaged (built-in)** | `src/rebar/llm/reviewers/<file>.md` | Ships in the wheel. The id is the file stem with `_`→`-` (`ticket_quality.md` → `ticket-quality`). |
+| **Packaged (built-in)** | `src/rebar/llm/reviewers/<file>.md` | Ships in the wheel. The id is the file stem with `_`→`-` (`code_quality.md` → `code-quality`). |
 | **Project override** | `<repo>/.rebar/prompts/<id>.md` | **Wins** over the packaged prompt of the same id (project > built-in). The override seam for adopters. |
 | **Variant overlay** | `<id>.<variant>.md` | Overlays a base via `variant_of` front-matter + a `<!--base-->` splice marker; cycle-guarded. |
 
@@ -316,7 +316,7 @@ examples live in `src/rebar/llm/reviewers/` and the plan-review prompts there to
 prompts.get_prompt(prompt_id, *, repo_root=None) -> Prompt
 # Resolves override → packaged; parses front-matter. Prompt fields: id, text (body,
 # front-matter stripped), category, execution_mode, inputs, outputs, dimension,
-# applies_to, default, title, description. `is_reviewer` == (category == "review").
+# applies_to, title, description. `is_reviewer` == (category == "review").
 
 prompts.resolve_prompt(reviewer_or_prompt, variables, langfuse_cfg=None,
                        *, repo_root=None, variant=None) -> (compiled_text, meta)
@@ -329,7 +329,7 @@ prompts.resolve_prompt(reviewer_or_prompt, variables, langfuse_cfg=None,
 
 `rebar.llm.prompting.prompts.FRONT_MATTER_KEYS` (canonical emit order):
 `schema_version`, `title`, `description`, `inputs`, `outputs`, `execution_mode`,
-`category`, `model`, `tags`, `dimension`, `applies_to`, `langfuse_prompt`, `default`.
+`category`, `model`, `tags`, `dimension`, `applies_to`, `langfuse_prompt`.
 
 - **`category`** — free text; `review` marks the prompt as a reviewer (the only
   category that populates the reviewer index). Other categories (e.g.
@@ -339,8 +339,8 @@ prompts.resolve_prompt(reviewer_or_prompt, variables, langfuse_cfg=None,
   tool-using loop). Flows into `RunRequest.execution_mode`. Absent → `agentic`.
 - **`inputs` / `outputs`** — schema-registry **names** (never inline schemas);
   `outputs` is the structured-output contract (§4).
-- **`dimension` / `applies_to` / `default`** — reviewer selection metadata (the
-  rule layer `select_reviewers` uses).
+- **`dimension` / `applies_to`** — reviewer selection metadata (the rule layer
+  `select_reviewers` uses; selection is purely `applies_to`-driven).
 - **Unknown keys are WARN+PRESERVEd** by the writer, BUT a *shipped built-in* prompt
   must use only the closed set: `test_built_in_prompt_round_trips_canonically`
   asserts every packaged prompt is byte-identical to `write_front_matter(parse(file))`

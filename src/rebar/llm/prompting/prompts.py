@@ -149,7 +149,7 @@ def load_catalog() -> dict[str, Reviewer]:
 def _packaged_prompt_files() -> dict[str, str]:
     """Map each packaged prompt id → its ``*.md`` file name (BASE prompts only — a
     ``<id>.<variant>.md`` overlay is not an independent prompt). The id is the file
-    stem with underscores normalized to dashes (``ticket_quality.md`` → ``ticket-quality``)."""
+    stem with underscores normalized to dashes (``code_quality.md`` → ``code-quality``)."""
     out: dict[str, str] = {}
     for entry in _catalog_dir().iterdir():
         name = entry.name
@@ -287,8 +287,8 @@ def build_index_document(repo_root=None) -> dict[str, object]:
 
     JSON has no comment syntax, so the reserved ``_generated_by`` key is how the
     committed file announces it is derived, not authored. ``build_prompt_index``
-    itself stays marker-free — its invariant tests (no two defaults, no dimension
-    collision, retirement) treat every key as a prompt id, and a stray ``_``-prefixed
+    itself stays marker-free — its invariant tests (no dimension collision,
+    retirement) treat every key as a prompt id, and a stray ``_``-prefixed
     key would break that. ``load_catalog`` skips ``_``-prefixed keys, so the marker
     never becomes a phantom reviewer."""
     return {
