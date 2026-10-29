@@ -10483,6 +10483,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:04Z"
     },
+    "1969-69f7-01f8-44ea": {
+      "created_at": "2026-10-29T01:33:21Z",
+      "jira_id": "4597484",
+      "jira_key": "REB-6780",
+      "state": "confirmed",
+      "updated_at": "2026-10-29T01:33:25Z"
+    },
     "196d-28c4-ef0f-445c": {
       "baseline": {
         "assignee": {
@@ -18891,6 +18898,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-04T23:46:15Z"
+    },
+    "2d87-7428-abcf-4bd9": {
+      "created_at": "2026-10-29T01:33:25Z",
+      "jira_id": "4597485",
+      "jira_key": "REB-6781",
+      "state": "confirmed",
+      "updated_at": "2026-10-29T01:33:29Z"
     },
     "2d8c-4991-d6ff-4c58": {
       "created_at": "2026-08-15T14:55:11Z",
@@ -32891,6 +32905,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-05T01:11:05Z"
+    },
+    "4f16-c86f-7a57-4470": {
+      "created_at": "2026-10-29T01:33:29Z",
+      "jira_id": "4597486",
+      "jira_key": "REB-6782",
+      "state": "confirmed",
+      "updated_at": "2026-10-29T01:33:32Z"
     },
     "4f40-ed2f-94bf-419a": {
       "baseline": {
@@ -47312,6 +47333,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-07T18:58:22Z"
     },
+    "742d-3980-c424-4f85": {
+      "created_at": "2026-10-29T01:33:32Z",
+      "jira_id": "4597487",
+      "jira_key": "REB-6783",
+      "state": "confirmed",
+      "updated_at": "2026-10-29T01:33:36Z"
+    },
     "742d-54f1-3b6f-4864": {
       "baseline": {
         "assignee": {
@@ -57220,6 +57248,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:04Z"
     },
+    "8c31-f393-19f1-4da8": {
+      "created_at": "2026-10-29T01:33:36Z",
+      "jira_id": "4597488",
+      "jira_key": "REB-6784",
+      "state": "confirmed",
+      "updated_at": "2026-10-29T01:33:39Z"
+    },
     "8c35-1a5e-927b-4644": {
       "baseline": {
         "assignee": null,
@@ -58862,6 +58897,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-05T05:46:38Z"
+    },
+    "900d-f034-7cbd-42e9": {
+      "created_at": "2026-10-29T01:33:40Z",
+      "jira_id": "4597489",
+      "jira_key": "REB-6785",
+      "state": "confirmed",
+      "updated_at": "2026-10-29T01:33:42Z"
     },
     "9011-54d6-eb04-4cd6": {
       "baseline": {
@@ -66528,7 +66570,7 @@
     "a256-1ae4-cf3d-4711": {
       "baseline": {
         "assignee": null,
-        "description": "## Context / Problem\nThe single-pass review system was a demo the project has been retiring; the real reviews are the four-phase plan review and four-phase code review, whose single-turn criteria are steps inside those workflows (operator ruling 2026-09-06). `src/rebar/llm/operations.py:135-218 _review_ticket_impl` (plus `_REVIEW_MIN_STEPS` and its explanatory comment `:35-42`, `default_reviewer_id:45-54`, docstring `:1-17`) survives only for two callers: `src/rebar/llm/review_workflows.py:70 diff_review_paths` (the WS-K2 parallel-run-and-diff; it calls the engine at `:86`; sole importer `tests/interfaces/store/test_review_as_workflow.py:14`) and `src/rebar/llm/evals/eval_solver.py:406-414` (the `ticket-quality` branch). `src/rebar/llm/reviewers/ticket_quality.md` is the prompt behind `reviewers/index.json:80-92` (`\"default\": true` at `:84`, langfuse `rebar-ticket-quality`), the eval spec `src/rebar/llm/eval_specs/ticket-quality.eval.yaml`, and `src/rebar/llm/workflow/examples/review_skeleton.yaml:31`. It is the catalog's ONLY default reviewer; `src/rebar/llm/prompting/prompts.py:291` raises unless EXACTLY ONE default exists, and `select_reviewers` (`prompts.py:620`, re-exported `operations.py:27`, public via `rebar.llm.__init__.py:59,127`) unions every default, so a replacement default is required. `rebar.llm` is NOT in `scripts/gen_api_surface.py:54-62 MODULES`, so removing the `aggregate_findings` export does not move `tests/unit/api_surface_baseline.json` (its `select_reviewers:2306` entry belongs to `rebar.llm.prompting.prompts` and is untouched). `docs/release-notes.md:946` records the earlier decision to keep the engine. `src/rebar/llm/aggregate.py` (125 LOC) is the ADR-0075-orphaned multi-reviewer aggregator: `aggregate_findings` has no src caller (ADR 0108 `:123`) but `src/rebar/llm/spec_scan.py:13,137` imports `_severity_rank`. Proof the four-phase workflows are untouched: `git grep -n \"ticket-quality\\|ticket_quality\" origin/main -- src/rebar/llm/plan_review/criteria_routing.json src/rebar/llm/code_review/ src/rebar/llm/criteria/ 'src/rebar/llm/reviewers/plan_review_*.md' 'src/rebar/llm/reviewers/code-review-*.md' .rebar/criteria_routing.json` returns zero hits, and `workflow/gates/code-review.yaml:71-108,126-148` prompt ids are all `code-review-*`. Cites re-measured on origin/main e2ed08b343a by whole-tree per-symbol sweep, not sampling.\n\n## Approach\n1. `operations.py`: rewrite docstring `:1-17` as \"the shared deterministic context builder for the gates, plus the `select_reviewers` re-export\"; delete `:35-42` (comment + `_REVIEW_MIN_STEPS`), `:45-54` (`default_reviewer_id`), `:135-218` (`_review_ticket_impl`, to EOF); `__all__:33` becomes `[\"assemble_context\", \"select_reviewers\"]`; keep the `TYPE_CHECKING` `PrefetchSpec` import; drop the unused `replace`, `LLMError`, `Runner`, `RunRequest`, `get_runner`, `resolve_gate_config` imports.\n2. `git rm src/rebar/llm/review_workflows.py src/rebar/llm/eval_specs/ticket-quality.eval.yaml src/rebar/llm/reviewers/ticket_quality.md`.\n3. `eval_solver.py:406-414` delete the branch; drop the `operations` import if it becomes unused.\n4. `src/rebar/llm/reviewers/code_quality.md:12` `default: false` becomes `default: true` \u2014 it is the code-review rules layer's natural always-on reviewer, and `applies_to` is empty for both prompts, so `default` is the only selector in play. Run `python -m rebar.llm.prompting.prompts regenerate-index` (CI drift gate, `docs/llm-framework.md:399`): `ticket-quality` leaves `index.json` and `code-quality` carries `\"default\": true`.\n5. `review_skeleton.yaml:31` becomes `- prompt: spec-alignment` \u2014 the only surviving `category: review` prompt whose subject is ticket or plan text (the skeleton's input is `plan`) and not already used (`code-quality` is the batch finder at `:29`, `completion-verifier` the verifier at `:42`), so the sample keeps two always-on criteria plus one `when`-gated. Mirror at `docs/workflow-engine.md:103`.\n6. `aggregate.py`: move `_SEVERITY_RANK` and `_severity_rank` (`:19-24`) into `spec_scan.py` as private helpers, replacing the import at `:13` (the only `spec_scan.py` edit); `git rm src/rebar/llm/aggregate.py`; delete `src/rebar/llm/__init__.py:36` and `:106`; fix the comments at `code_review/workflow_ops.py:24,150` (\"mirrors aggregate.py\" becomes \"10-line bucket\").\n7. Retire the dead ids everywhere AC1 greps, so the plan can satisfy its own criterion: `docs/llm-framework.md:692` \"\u2192 `aggregate_findings` \u2014\" becomes \"\u2192 a findings aggregator \u2014\" (b744 history survives; the dead name does not); `prompts.py:153` and `docs/reuse-surface.md:311` change their id-normalization example to ``code_quality.md`` \u2192 ``code-quality``; `docs/llm-framework.md:355` sample `\"reviewers\": [\"ticket-quality\"]` becomes `[\"spec-alignment\"]`; `tests/unit/test_new_eval_specs.py:2` drops `ticket-quality` from its docstring; `src/rebar/llm/evals/provider_parity.py:80` drops `\"ticket-quality\"` from `AGENTIC_SOLVERS` \u2014 pulled IN scope because the id ceases to exist and AC1 covers `src`. ADRs and `docs/release-notes.md` are AC1-excluded and keep their history verbatim.\n8. `docs/release-notes.md` new entry: \"BREAKING (pre-1.0): the single-pass review engine and `rebar.llm.aggregate_findings` are removed. `rebar.llm.operations._review_ticket_impl` (private), the packaged `ticket-quality` reviewer prompt (Langfuse name `rebar-ticket-quality`) and its eval spec, and the public `rebar.llm.aggregate_findings` export are gone; `code-quality` is now the catalog's default reviewer, so `rebar.llm.select_reviewers([])` returns `[\"code-quality\"]`. Use `rebar.llm.review_plan`.\" (`rebar.llm` is the \"less settled\" row, `docs/api-stability.md:28`.)\n\n## Scope\nThe files above. Out of scope: `assemble_context` (live consumer `workflow/gate_ops.py:192`), `completion.py`, and `spec_scan.py` beyond the 3-line helper move. Nothing defers to the eval-harness epic: `provider_parity.py:80` is handled in step 7 because AC1 would otherwise fail on it.\n\n## Testing\nOne test file is deleted (`tests/interfaces/contracts/test_review_budget.py`; both its tests are the retired step floor; the completion-side floor is covered by `test_completion_budget.py`'s `verify_step_floor` tests), one is renamed (`test_review_as_workflow.py` to `test_runner_agent_step_bridge.py`), eleven tests are rewritten against `spec_scan.scan_epics_for_spec` (the structural sibling with the same `gate_source` threading and `runner=` seam), the `ticket-quality` id is swapped to `code-quality` in stand-in uses, and golden sets drop it. `tests/unit/test_subcall_class_selection.py:532` `assert len(_EXPECTED_RUN_REQUEST_SITES) == 21` becomes `== 20` when the `_review_ticket_impl` row at `:486` goes. The exact per-file list is in this ticket's first comment, as corrected by its third. Happy path: `select_reviewers([])` returns `['code-quality']` and the skeleton workflow validates. Edge: the regenerate-index drift gate is clean and the catalog has exactly one default.\n\n## Acceptance Criteria\n- [ ] `git grep -n \"_review_ticket_impl\\|review_workflows\\|ticket-quality\\|ticket_quality\\|rebar-ticket-quality\\|aggregate_findings\" -- src tests docs scripts ':!docs/release-notes.md' ':!docs/adr' ':!docs/experiments' ':!tests/fixtures'` prints nothing.\n- [ ] `python -m rebar.llm.prompting.prompts regenerate-index && git diff --exit-code src/rebar/llm/reviewers/index.json` is clean and `index.json` has exactly one `\"default\": true` (`code-quality`), asserted by `tests/unit/test_prompt_index.py::test_index_has_exactly_one_default`.\n- [ ] `python -c \"import rebar.llm as l; print(l.select_reviewers([]))\"` prints `['code-quality']`.\n- [ ] `rebar workflow validate src/rebar/llm/workflow/examples/review_skeleton.yaml` is clean and `tests/unit/workflow/test_review_skeleton.py` is green.\n- [ ] The workflow-untouched grep (context section) still prints zero hits.\n- [ ] `python scripts/gen_api_surface.py --check` is clean; `make verify` exits 0.",
+        "description": "## Context / Problem\nSingle-pass review was a demo being retired; the real reviews are the four-phase plan and code reviews, whose single-turn criteria are steps inside those workflows (operator ruling 2026-09-06). `src/rebar/llm/operations.py:135-218 _review_ticket_impl` (plus `_REVIEW_MIN_STEPS` + comment `:35-42`, `default_reviewer_id:45-54`, docstring `:1-17`) survives only for two callers: `review_workflows.py:70 diff_review_paths` (WS-K2 parallel-run-and-diff; engine call `:86`; sole importer `tests/interfaces/store/test_review_as_workflow.py:14`) and `evals/eval_solver.py:406-414` (the `ticket-quality` branch). `reviewers/ticket_quality.md` is the prompt behind `reviewers/index.json:80-92` (`\"default\": true` at `:84`, langfuse `rebar-ticket-quality`), the eval spec `eval_specs/ticket-quality.eval.yaml`, and `workflow/examples/review_skeleton.yaml:31`. It is the catalog's ONLY default reviewer: `prompting/prompts.py:291` raises unless EXACTLY ONE default exists, and `select_reviewers` (`prompts.py:620`, re-exported `operations.py:27`, public via `llm/__init__.py:59,127`) unions every default, so a replacement default is required. `aggregate.py` (125 LOC) is the ADR-0075-orphaned aggregator: `aggregate_findings` has no src caller (ADR 0108 `:123`) but `spec_scan.py:13,137` imports `_severity_rank`. `rebar.llm` is absent from `scripts/gen_api_surface.py:54-62 MODULES`, so dropping the export cannot move `api_surface_baseline.json`. `docs/release-notes.md:946` records the earlier decision to keep the engine. Proof the four-phase workflows are untouched: `git grep -n \"ticket-quality\\|ticket_quality\" origin/main -- src/rebar/llm/plan_review/criteria_routing.json src/rebar/llm/code_review/ src/rebar/llm/criteria/ 'src/rebar/llm/reviewers/plan_review_*.md' 'src/rebar/llm/reviewers/code-review-*.md' .rebar/criteria_routing.json` returns zero hits, and `workflow/gates/code-review.yaml:71-108,126-148` ids are all `code-review-*`. All cites re-measured on e2ed08b343a by whole-tree per-symbol sweep.\n\n## Approach\n1. `operations.py`: docstring `:1-17` becomes \"the shared deterministic context builder for the gates, plus the `select_reviewers` re-export\"; delete `:35-42`, `:45-54`, `:135-218` (to EOF); `__all__:33` becomes `[\"assemble_context\", \"select_reviewers\"]`; keep the `TYPE_CHECKING` `PrefetchSpec` import; drop the now-unused `replace`, `LLMError`, `Runner`, `RunRequest`, `get_runner`, `resolve_gate_config`.\n2. `git rm src/rebar/llm/review_workflows.py src/rebar/llm/eval_specs/ticket-quality.eval.yaml src/rebar/llm/reviewers/ticket_quality.md`.\n3. `eval_solver.py:406-414` delete the branch; drop the `operations` import if it becomes unused.\n4. `reviewers/code_quality.md:12` `default: false` becomes `true` \u2014 it is the code-review rules layer's natural always-on reviewer, and `applies_to` is empty for both prompts, so `default` is the only selector in play. Run `python -m rebar.llm.prompting.prompts regenerate-index` (CI drift gate, `docs/llm-framework.md:399`).\n5. `review_skeleton.yaml:31` becomes `- prompt: spec-alignment` \u2014 the only surviving `category: review` prompt whose subject is ticket or plan text (the skeleton's input is `plan`) and not already used (`code-quality` is the batch finder `:29`, `completion-verifier` the verifier `:42`), so the sample keeps two always-on criteria plus one `when`-gated. Mirror `docs/workflow-engine.md:103`.\n6. Move `_SEVERITY_RANK` + `_severity_rank` (`aggregate.py:19-24`) into `spec_scan.py` as private helpers, replacing its import at `:13` (the only `spec_scan.py` edit); `git rm src/rebar/llm/aggregate.py`; delete `llm/__init__.py:36` and `:106`; fix comments at `code_review/workflow_ops.py:24,150` (\"mirrors aggregate.py\" becomes \"10-line bucket\").\n7. Retire the dead ids everywhere AC1 greps, so the plan satisfies its own criterion: `docs/llm-framework.md:692` \"\u2192 `aggregate_findings` \u2014\" becomes \"\u2192 a findings aggregator \u2014\" (b744 history survives, the dead name does not); `prompts.py:153` and `docs/reuse-surface.md:311` change their id-normalization example to ``code_quality.md`` \u2192 ``code-quality``; `docs/llm-framework.md:355` sample `[\"ticket-quality\"]` becomes `[\"spec-alignment\"]`; `evals/provider_parity.py:80` drops `\"ticket-quality\"` from `AGENTIC_SOLVERS`. ADRs and `docs/release-notes.md` are AC1-excluded and keep their history verbatim.\n8. `docs/release-notes.md` new entry: \"BREAKING (pre-1.0): the single-pass review engine and `rebar.llm.aggregate_findings` are removed. `operations._review_ticket_impl` (private), the packaged `ticket-quality` reviewer prompt (Langfuse `rebar-ticket-quality`) and its eval spec, and the public `aggregate_findings` export are gone; `code-quality` is now the catalog's default reviewer, so `select_reviewers([])` returns `[\"code-quality\"]`. Use `rebar.llm.review_plan`.\" (`rebar.llm` is the \"less settled\" row, `docs/api-stability.md:28`.)\n\n## Scope\nThe files above. Out of scope: `assemble_context` (live consumer `workflow/gate_ops.py:192`), `completion.py`, `spec_scan.py` beyond the 3-line helper move. Nothing defers to the eval-harness epic: `provider_parity.py:80` is in scope because AC1 would otherwise fail on it. That file's other edits (`:9,:11,:48-57`) belong to the prerequisite and are not touched here; re-measure `:80` after the prerequisite lands.\n\n## Testing\nThe exact per-file delete/rewrite/swap list is in this ticket's first comment, as corrected by its third (both on origin/main e2ed08b343a). Shape: one file deleted (`tests/interfaces/contracts/test_review_budget.py` \u2014 both tests are the retired step floor; the completion-side floor stays covered by `test_completion_budget.py`'s `verify_step_floor` / `_VERIFY_STEP_FLOOR_MAX`), one renamed (`test_review_as_workflow.py` to `test_runner_agent_step_bridge.py`, keeping `:21`), the remainder rewritten against `spec_scan.scan_epics_for_spec` (the structural sibling: same `gate_source` threading, `cfg.repo_path` prompt resolution, `runner=` seam), the prompt id swapped to `code-quality` in stand-in uses, and golden sets dropping it.\n\nTwo sites are called out here because they are easy to under-apply. First, `tests/unit/test_subcall_class_selection.py` has FOUR coupled `_review_ticket_impl` sites that must go together: the live-call test `:102-122`; the `_UNFOLLOWABLE` registry entry `:247-257` (leaving it fails `test_neither_registry_has_stale_entries:600`, which asserts `set(_UNFOLLOWABLE) <= unresolved`); the run-request row `:486`; and the count at `:532`, where `assert len(_EXPECTED_RUN_REQUEST_SITES) == 21` becomes `== 20`. Second, `tests/external/test_pydantic_ai_cutover_live.py:181` carries the `ticket-quality` prompt id and must be swapped to `code-quality`: `tests/external` is inside AC1's grep scope and is not in its exclude list, so AC1 fails without it.\n\nHappy path: `select_reviewers([])` returns `['code-quality']` and the skeleton validates. Edge: the drift gate is clean and the catalog has exactly one default.\n\n## Acceptance Criteria\n- [ ] `git grep -n \"_review_ticket_impl\\|review_workflows\\|ticket-quality\\|ticket_quality\\|rebar-ticket-quality\\|aggregate_findings\" -- src tests docs scripts ':!docs/release-notes.md' ':!docs/adr' ':!docs/experiments' ':!tests/fixtures'` prints nothing.\n- [ ] `python -m rebar.llm.prompting.prompts regenerate-index && git diff --exit-code src/rebar/llm/reviewers/index.json` reports no drift.\n- [ ] `index.json` contains exactly one `\"default\": true`, on `code-quality`, per `tests/unit/test_prompt_index.py::test_index_has_exactly_one_default`.\n- [ ] `python -c \"import rebar.llm as l; print(l.select_reviewers([]))\"` prints `['code-quality']`.\n- [ ] `rebar workflow validate src/rebar/llm/workflow/examples/review_skeleton.yaml` exits 0.\n- [ ] `tests/unit/workflow/test_review_skeleton.py` passes.\n- [ ] The workflow-untouched grep quoted in Context still prints zero hits.\n- [ ] `python scripts/gen_api_surface.py --check` exits 0.\n- [ ] `make verify` exits 0.",
         "priority": "Medium",
         "status": "To Do",
         "summary": "Retire the single-pass review demo and its prompt; delete the orphaned aggregate module"
@@ -84634,6 +84676,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:44Z"
+    },
+    "ce4f-0f9b-1a9a-4b77": {
+      "created_at": "2026-10-29T01:33:43Z",
+      "jira_id": "4597490",
+      "jira_key": "REB-6786",
+      "state": "confirmed",
+      "updated_at": "2026-10-29T01:33:46Z"
     },
     "ce5a-6a9f-5422-45f6": {
       "baseline": {
@@ -102920,7 +102969,7 @@
         },
         "description": "Found while verifying d724 AC10 against Windows sweep 35551741150.\n\ntests/interfaces/test_rebar_repo_isolation.py::test_copy_repoints_sibling_origin_and_keeps_refs_isolated fails on Windows. After copying a store, the copy's `origin` still points at the SOURCE's `origin.git` sibling rather than being relocated into the copy. The copy is therefore not self-contained for remotes, so a fetch/push from the copy reaches the source store's remote.\n\nThis is NOT the d724 defect class: no PermissionError, and the copied .tickets-tracker/.git pointer is rewritten correctly. Distinct root cause, unfixed, no investigation done yet.\n\nThe Windows sweep is continue-on-error and broadly red (1596 distinct failures), so this is invisible at job level.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Windows copy leaves origin pointing at the source sibling remote"
       },
       "created_at": "2026-09-21T05:39:05Z",
@@ -110383,7 +110432,8 @@
     "1793230188647592027": "__rebar_unknown_comment_id__",
     "1793230970954475158": "__rebar_unknown_comment_id__",
     "1793232300924908875": "__rebar_unknown_comment_id__",
-    "1793232634155074006": "__rebar_unknown_comment_id__"
+    "1793232634155074006": "__rebar_unknown_comment_id__",
+    "1793235799007670001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -115661,6 +115711,13 @@
     "REB-6778": "7f3d-ddc9-04d9-4861",
     "REB-6779": "bd7a-57a6-34db-4f1b",
     "REB-678": "d71f-24ab-dc4c-4119",
+    "REB-6780": "1969-69f7-01f8-44ea",
+    "REB-6781": "2d87-7428-abcf-4bd9",
+    "REB-6782": "4f16-c86f-7a57-4470",
+    "REB-6783": "742d-3980-c424-4f85",
+    "REB-6784": "8c31-f393-19f1-4da8",
+    "REB-6785": "900d-f034-7cbd-42e9",
+    "REB-6786": "ce4f-0f9b-1a9a-4b77",
     "REB-679": "da25-8af4-7c15-4b4e",
     "REB-68": "2d90-8fad-53a5-484f",
     "REB-680": "da8a-75f5-ccb2-4b5f",
