@@ -8,8 +8,8 @@ returning a :class:`Prompt`; the derived :data:`reviewers/index.json` (generated
 
 Two concerns are kept deliberately separate (the converging OSS pattern):
 
-  * **Reviewer identity + selection rules** (id, dimension, file-glob ``applies_to``,
-    whether it's a default) live in a DERIVED, versioned, testable local index
+  * **Reviewer identity + selection rules** (id, dimension, file-glob ``applies_to``)
+    live in a DERIVED, versioned, testable local index
     (``reviewers/index.json``, scanned from the prompt front-matter) — so selection
     is code-reviewed and offline-testable.
   * **Prompt text is GIT-CANONICAL** (epic a88f / WS-F1): the committed prompt file
@@ -141,7 +141,6 @@ def load_catalog() -> dict[str, Reviewer]:
             description=spec.get("description", ""),
             langfuse_prompt=spec.get("langfuse_prompt"),
             fallback_file=spec.get("fallback_file"),
-            default=bool(spec.get("default", False)),
             applies_to=list(spec.get("applies_to", [])),
         )
     return out
@@ -231,7 +230,6 @@ def get_prompt(prompt_id: str, *, repo_root=None) -> Prompt:
         text=body,
         category=category,
         execution_mode=execution_mode,
-        default=bool(meta.get("default", False)),
         dimension=meta.get("dimension"),
         applies_to=list(meta.get("applies_to") or []),
         inputs=meta.get("inputs"),
@@ -248,24 +246,19 @@ def build_prompt_index(repo_root=None) -> dict[str, dict]:
     """Scan the packaged prompt front-matter → the derived index mapping (story afe6).
 
     For each base packaged prompt emits ``id → {dimension, title, description,
-    default, langfuse_prompt, fallback_file, applies_to, category, execution_mode,
+    langfuse_prompt, fallback_file, applies_to, category, execution_mode,
     is_reviewer}``. Only ``category == "review"`` prompts (the reviewers) populate the
     index that ``load_catalog``/``select_reviewers`` operate on. Enforces the
-    cross-reviewer invariants, raising :class:`PromptError`:
-
-      (a) EXACTLY ONE ``default: true`` reviewer (reject two defaults), and
-      (b) NO dimension collision (reject duplicate ``dimension``).
+    cross-reviewer invariant that NO two reviewers claim the same ``dimension``,
+    raising :class:`PromptError` on a collision.
 
     A removed prompt is simply absent from a regenerated index (RETIRE)."""
     index: dict[str, dict] = {}
-    defaults: list[str] = []
     by_dimension: dict[str, str] = {}
     for pid in sorted(_packaged_prompt_files()):
         prompt = get_prompt(pid, repo_root=repo_root)
         if not prompt.is_reviewer:
             continue  # only reviewers populate the selection catalog
-        if prompt.default:
-            defaults.append(pid)
         dim = prompt.dimension or pid
         if dim in by_dimension:
             raise PromptError(
@@ -277,7 +270,6 @@ def build_prompt_index(repo_root=None) -> dict[str, dict]:
             "dimension": dim,
             "title": prompt.title,
             "description": prompt.description,
-            "default": prompt.default,
             "langfuse_prompt": prompt.langfuse_prompt,
             "fallback_file": prompt.fallback_file,
             "applies_to": list(prompt.applies_to),
@@ -286,11 +278,6 @@ def build_prompt_index(repo_root=None) -> dict[str, dict]:
             "execution_mode": prompt.execution_mode,
             "is_reviewer": prompt.is_reviewer,
         }
-    if len(defaults) != 1:
-        raise PromptError(
-            f"prompt index: expected EXACTLY ONE default reviewer, found {defaults} "
-            "(reject two-default / zero-default)"
-        )
     return index
 
 
@@ -621,14 +608,14 @@ def select_reviewers(
     changed_files: list[str], *, catalog: dict[str, Reviewer] | None = None
 ) -> list[str]:
     """Deterministic reviewer selection for a change (the rule layer used by the
-    code-review op). Returns the union of every ``default`` reviewer and
-    every reviewer whose ``applies_to`` globs match a changed file, in catalog
-    order. Pure + table-driven so it is fully offline-testable.
+    code-review op). Returns every reviewer whose ``applies_to`` globs match a
+    changed file, in catalog order. Pure + table-driven so it is fully
+    offline-testable.
     """
     cat = catalog if catalog is not None else load_catalog()
     selected: list[str] = []
     for rid, rv in cat.items():
-        if rv.default or any(_glob_match(f, g) for g in rv.applies_to for f in changed_files):
+        if any(_glob_match(f, g) for g in rv.applies_to for f in changed_files):
             selected.append(rid)
     return selected
 

@@ -13,7 +13,6 @@ applies_to:
 - '**/*_test.py'
 - tests/**
 langfuse_prompt: rebar-tests
-default: false
 ---
 You are a test-coverage reviewer. You have read-only access to a copy of the
 repository through your file tools.

@@ -14,7 +14,6 @@ applies_to:
 - '**/security/**'
 - '**/signing*'
 langfuse_prompt: rebar-security
-default: false
 ---
 You are a security reviewer. You have read-only access to a copy of the repository
 through your file tools.

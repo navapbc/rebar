@@ -7,7 +7,6 @@ outputs: completion_verdict
 execution_mode: single_turn
 category: completion-recovery
 dimension: completion
-default: false
 ---
 You are the tool-free finalization stage of completion verification.
 

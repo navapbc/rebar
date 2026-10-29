@@ -331,7 +331,6 @@ def test_subsumes_prompt_library_surface():
         "tags",
         "dimension",
         "applies_to",
-        "default",
     ):
         assert repr(key) in front_matter
     assert prompts["EXECUTION_MODES"]["value"] == [repr("single_turn"), repr("agentic")]

@@ -9,7 +9,6 @@ execution_mode: agentic
 category: review
 dimension: spec-alignment
 langfuse_prompt: rebar-spec-alignment
-default: false
 ---
 You are evaluating whether a set of work epics align with a specification. You have
 read-only access to a copy of the repository through your file tools.

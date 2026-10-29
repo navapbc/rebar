@@ -351,8 +351,7 @@ prompts.resolve_prompt(reviewer_or_prompt, variables, langfuse_cfg=None,
 - **Reviewer index** — `reviewers/index.json` is DERIVED from the `category: review`
   prompts' front-matter (`regenerate_prompt_index()` / `python -m rebar.llm.prompting.prompts
   regenerate-index`). It is the offline-testable selection catalog; a CI **drift
-  gate** regenerates-then-diffs it. Invariants: exactly one `default: true` reviewer,
-  no `dimension` collision.
+  gate** regenerates-then-diffs it. Invariant: no `dimension` collision.
 - **Canonical-form gate** — see above; keeps built-ins clean + round-trippable.
 - **Parity gate** — `check_prompt_parity` diffs declared `variables` vs the
   `{{vars}}` actually used.

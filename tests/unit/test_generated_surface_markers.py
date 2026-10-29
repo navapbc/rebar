@@ -111,7 +111,7 @@ def test_guide_pins_marker_is_a_fixed_point() -> None:
 def test_marker_does_not_leak_into_the_pure_index_builder() -> None:
     """`build_prompt_index()` stays the marker-less prompt mapping.
 
-    Its invariant tests (one-default, dimension-collision, retire-on-regen) treat every
+    Its invariant tests (dimension-collision, retire-on-regen) treat every
     key as a prompt id, so a marker here would corrupt them.
     """
     assert MARKER_KEY not in prompts.build_prompt_index()

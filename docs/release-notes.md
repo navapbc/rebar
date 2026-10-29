@@ -8,6 +8,31 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## The `default` reviewer front-matter key is removed
+
+Breaking for any repo-local prompt override that declares `default:`. The key named a
+"default reviewer set" that only the retired single-pass review engine consulted; with
+that engine gone (previous entry), nothing read it on a production path (epic 87d8).
+
+- `default` is **removed from `FRONT_MATTER_KEYS`**. A repo-local
+  `.rebar/prompts/<id>.md` that still declares it now parses as an unknown front-matter
+  key — WARN+PRESERVEd, never dropped and never fatal, so an existing override keeps
+  working. Delete the line to silence the warning.
+- `Reviewer.default` and `Prompt.default` are **removed**. Both defaulted to `False` and
+  were read only by the index builder and `select_reviewers`.
+- `reviewers/index.json` no longer carries a `default` key per entry. The committed index
+  is regenerated; a CI drift gate diffs it.
+- **The "exactly one `default: true` reviewer" index invariant is removed.**
+  `build_prompt_index` previously raised `PromptError` on zero *or* two defaults, which
+  made deleting the sole default reviewer impossible. The only surviving cross-reviewer
+  invariant is that no two reviewers claim the same `dimension`.
+- **`select_reviewers` is now purely `applies_to`-driven.** It previously returned the
+  union of every default reviewer and every glob match, so `ticket-quality` was in every
+  result. `select_reviewers([])` now returns `[]` (was `['ticket-quality']`) and
+  `select_reviewers(['tests/test_x.py'])` returns `['tests']` (was
+  `['tests', 'ticket-quality']`). Callers that relied on a non-empty result for an
+  unmatched change must name reviewers explicitly.
+
 ## The single-pass review engine is removed from `rebar.llm.operations`
 
 Breaking for any caller that reached the private engine directly. `rebar.llm.operations`

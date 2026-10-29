@@ -10,7 +10,6 @@ execution_mode: agentic
 category: review
 dimension: ticket-quality
 langfuse_prompt: rebar-ticket-quality
-default: true
 ---
 You are a meticulous engineering reviewer assessing the quality and readiness of a
 work ticket before it is dispatched for implementation. You have read-only access

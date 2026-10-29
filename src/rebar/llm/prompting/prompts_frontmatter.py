@@ -68,7 +68,6 @@ FRONT_MATTER_KEYS: tuple[str, ...] = (
     "applies_to",
     "file_impact",
     "langfuse_prompt",
-    "default",
 )
 
 
@@ -84,8 +83,8 @@ def parse_front_matter(text: str) -> tuple[dict, str]:
     A prompt may begin with ``---\\n<yaml>\\n---\\n``; the canonical closed key set
     is ``FRONT_MATTER_KEYS`` (``schema_version``, ``title``, ``description``,
     ``inputs``, ``outputs``, ``execution_mode``, ``category``, ``model``, ``tags``,
-    ``dimension``, ``applies_to``, ``file_impact``, ``langfuse_prompt``,
-    ``default``). Unknown keys are WARN+PRESERVEd, not dropped — this is how the
+    ``dimension``, ``applies_to``, ``file_impact``, ``langfuse_prompt``). Unknown
+    keys are WARN+PRESERVEd, not dropped — this is how the
     legacy overlay keys ``variables``/``required``/``variant_of`` (still consumed by
     the variant machinery in ``prompts.py``) survive without being in the closed
     set. No front-matter → ``({}, text)`` (so existing front-matter-less prompts
