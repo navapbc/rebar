@@ -8,6 +8,7 @@ from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 from fsck_stale_channel_harness import write_snapshot_ticket
 
 from rebar._commands import fsck, fsck_repair
@@ -237,3 +238,98 @@ def test_failed_stale_rebuild_is_reported_as_remaining(tmp_path: Path, monkeypat
 
     assert unresolved == 1
     assert "1 stale-channel fault(s) remain" in "\n".join(lines)
+
+
+def test_rejected_batch_push_reconciles_with_the_remote_and_retries(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Another writer advancing the remote mid-repair must not abort the batches (bug 900d)."""
+    remote = init_bare_remote(tmp_path / "origin.git", initial_branch="tickets")
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    _git(tracker, "init", "-q", "-b", "tickets")
+    _git(tracker, "config", "user.name", "Test Operator")
+    _git(tracker, "config", "user.email", "test@example.invalid")
+    _git(tracker, "remote", "add", "origin", str(remote))
+    ticket_dir, snapshot = write_snapshot_ticket(tracker, "stale-race", stale_channel=True)
+    _git(tracker, "add", "-A")
+    _git(tracker, "commit", "-q", "-m", "seed stale snapshot")
+    _git(tracker, "push", "-q", "origin", "HEAD:tickets")
+
+    # Another writer lands a commit on the remote after this store last fetched.
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", "-q", "-b", "tickets", str(remote), str(other))
+    _git(other, "config", "user.name", "Other Writer")
+    _git(other, "config", "user.email", "other@example.invalid")
+    (other / "other-ticket.json").write_text("{}\n", encoding="utf-8")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-q", "-m", "concurrent write")
+    _git(other, "push", "-q", "origin", "HEAD:tickets")
+    concurrent = _git(other, "rev-parse", "HEAD").stdout.strip()
+
+    def _rebuild(_tracker, _ticket_id, _ticket_dir, *, no_commit=False):
+        payload = json.loads(snapshot.read_text(encoding="utf-8"))
+        payload["data"]["compiled_state"]["creation_channel"] = "python"
+        snapshot.write_text(json.dumps(payload), encoding="utf-8")
+        return True
+
+    monkeypatch.setattr("rebar._commands.compact.rebuild_snapshot_from_full_log", _rebuild)
+    monkeypatch.setattr(fsck_repair, "owned_repair_pause", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(fsck_repair, "_reconciler_in_flight", lambda repo_root=None: False)
+
+    lines, unresolved = fsck._repair_run(str(tracker), dry_run=False, only="stale-channel")
+
+    report = "\n".join(lines)
+    assert "ABORT" not in report, report
+    assert unresolved == 0, report
+    remote_tip = _git(remote, "rev-parse", "tickets").stdout.strip()
+    # The remote now carries both the concurrent write and the repair.
+    _git(remote, "merge-base", "--is-ancestor", concurrent, remote_tip)
+    assert _git(tracker, "rev-parse", "HEAD").stdout.strip() == remote_tip
+    assert not any(
+        "SNAPSHOT_STALE_CHANNEL" in finding
+        for finding in fsck._check_snapshot(str(ticket_dir), "stale-race", snapshot.name)
+    )
+
+
+def test_persistent_non_fast_forward_aborts_after_the_retry_budget(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Retrying is bounded: a rejection that keeps recurring still aborts, naming the batch."""
+    tracker = tmp_path / "tracker"
+    tracker.mkdir()
+    _git(tracker, "init", "-q", "-b", "tickets")
+    _git(tracker, "config", "user.name", "Test Operator")
+    _git(tracker, "config", "user.email", "test@example.invalid")
+    _ticket_dir, snapshot = write_snapshot_ticket(tracker, "stale-busy", stale_channel=True)
+    _git(tracker, "add", "-A")
+    _git(tracker, "commit", "-q", "-m", "seed stale snapshot")
+
+    def _rebuild(_tracker, _ticket_id, _ticket_dir, *, no_commit=False):
+        payload = json.loads(snapshot.read_text(encoding="utf-8"))
+        payload["data"]["compiled_state"]["creation_channel"] = "python"
+        snapshot.write_text(json.dumps(payload), encoding="utf-8")
+        return True
+
+    pushes: list[tuple[str, ...]] = []
+    merges: list[str] = []
+    rejected = " ! [rejected]        HEAD -> tickets (non-fast-forward)\n"
+    monkeypatch.setattr("rebar._commands.compact.rebuild_snapshot_from_full_log", _rebuild)
+    monkeypatch.setattr(fsck_repair, "owned_repair_pause", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(fsck_repair, "_reconciler_in_flight", lambda repo_root=None: False)
+    monkeypatch.setattr(fsck_repair, "_has_remote", lambda _tracker: True)
+    monkeypatch.setattr(
+        fsck_repair,
+        "_git_push",
+        lambda _tracker, *args: (
+            pushes.append(args) or subprocess.CompletedProcess([], 1, "", rejected)
+        ),
+    )
+    monkeypatch.setattr("rebar._store.sync.reconverge", lambda t, **_kw: merges.append(str(t)))
+
+    lines, unresolved = fsck._repair_run(str(tracker), dry_run=False, only="stale-channel")
+
+    assert unresolved == -1
+    assert len(pushes) == fsck_repair._PUSH_ATTEMPTS
+    assert len(merges) == fsck_repair._PUSH_ATTEMPTS - 1
+    assert "ABORT: push failed for batch 1" in "\n".join(lines)

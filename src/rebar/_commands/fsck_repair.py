@@ -441,9 +441,30 @@ def _commit_repair_batch(tracker: str, lines: list[str], batch_number: int) -> b
         return False
     if not _has_remote(tracker):
         return True
-    push = _git_push(tracker, "push", "origin", "HEAD:tickets")
-    if push.returncode == 0:
-        return True
+    return _push_repair_batch(tracker, lines, batch_number)
+
+
+# Other sessions keep writing to the shared branch while a repair runs, so a batch push can be
+# rejected as non-fast-forward. Each retry first union-merges the remote, as the store's own
+# write path does; a rejection that persists past the budget still aborts (bug 900d-f034).
+_PUSH_ATTEMPTS = 3
+
+
+def _push_repair_batch(tracker: str, lines: list[str], batch_number: int) -> bool:
+    from rebar import config
+    from rebar._store import git_outcome, sync
+
+    # Code-repo config, resolved the config way so a relocated store still finds rebar.toml.
+    root = config.repo_root_or_none()
+    remote, branch = config.tickets_remote(root), config.tickets_branch(root)
+    for attempt in range(1, _PUSH_ATTEMPTS + 1):
+        push = _git_push(tracker, "push", remote, f"HEAD:{branch}")
+        if push.returncode == 0:
+            return True
+        if attempt == _PUSH_ATTEMPTS or not git_outcome.is_non_fast_forward(push.stderr or ""):
+            break
+        lines.append(f"a3-remediation: batch {batch_number} push rejected; merging {remote}")
+        sync.reconverge(tracker)
     lines.append(f"ABORT: push failed for batch {batch_number}: {push.stderr.strip()}")
     return False
 
