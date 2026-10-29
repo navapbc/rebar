@@ -276,8 +276,12 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    # One journald identifier for every release (`journalctl -t rebar-mcp`): blue-green
+    # container names change per deploy. autodeploy.sh mirrors this in its docker run.
     logging:
       driver: journald
+      options:
+        tag: rebar-mcp
 
 # compose-up.sh creates external EBS-backed site volumes before startup.
 # They survive docker compose down -v without shadowing image binaries.

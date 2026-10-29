@@ -396,6 +396,8 @@ mcp_run_new() {
     --label rebar.service=mcp \
     --memory "$MCP_MEM_LIMIT" \
     --stop-timeout "$MCP_STOP_GRACE" \
+    --log-driver journald \
+    --log-opt tag=rebar-mcp \
     --env-file "$COMPOSE_DIR/.env" \
     -e FORWARDED_ALLOW_IPS='*' \
     -e REBAR_MCP_TRANSPORT=http \

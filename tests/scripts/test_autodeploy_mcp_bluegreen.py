@@ -1171,6 +1171,42 @@ def _compose_mcp_mem_limit() -> str:
     raise AssertionError("the compose `mcp:` service declares no mem_limit")
 
 
+def _compose_mcp_logging() -> tuple[str, str]:
+    """The compose `mcp:` service's ``logging`` driver and ``options.tag``."""
+    text = COMPOSE_FILE.read_text().splitlines()
+    start = next((i for i, ln in enumerate(text) if re.match(r"^  mcp:\s*$", ln)), None)
+    assert start is not None, "mcp service not found in docker-compose.yml"
+    driver = tag = ""
+    for ln in text[start + 1 :]:
+        if re.match(r"^  \S", ln) or re.match(r"^\S", ln):
+            break
+        if match := re.match(r"^      driver:\s*(\S+)\s*$", ln):
+            driver = match.group(1)
+        if match := re.match(r"^        tag:\s*(\S+)\s*$", ln):
+            tag = match.group(1).strip('"').strip("'")
+    assert driver and tag, "the compose `mcp:` service must declare a logging driver and tag"
+    return driver, tag
+
+
+def test_docker_run_matches_compose_mcp_logging(mcp_box: dict[str, object]) -> None:
+    """The live container must log where compose says (creatable-isleted-kusimanse). Without
+    a driver, Docker's json-file default keeps the log inside the container, and the deploy's
+    `docker rm` of a retired release deletes it: the server's output from before a deploy,
+    including any out-of-memory kill, is then gone. The tag gives every release one journald
+    identifier, since container names change per deploy."""
+    driver, tag = _compose_mcp_logging()
+    result = _run(mcp_box)
+    run_line = _run_line(_commands_eventually(mcp_box, "run --name"))
+    ctx = f"rc={result.returncode}\nrun_line={run_line}\n{result.stdout}\n{result.stderr}"
+    assert run_line, f"the mcp deploy must `docker run` a new container\n{ctx}"
+    assert f"--log-driver {driver}" in run_line, (
+        f"docker run must carry `--log-driver {driver}` (compose parity)\n{ctx}"
+    )
+    assert f"--log-opt tag={tag}" in run_line, (
+        f"docker run must carry `--log-opt tag={tag}` (compose parity)\n{ctx}"
+    )
+
+
 def test_docker_run_matches_compose_mcp_service(mcp_box: dict[str, object]) -> None:
     """`mcp_run_new` must reproduce the compose `mcp:` service env/mounts EXACTLY. /health is
     auth-independent (mounted outside the auth middleware), so it cannot catch a wrong

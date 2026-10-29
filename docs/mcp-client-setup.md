@@ -201,6 +201,15 @@ Verify from this repository: `claude mcp list` lists the project `rebar` server.
   entry carries `"type": "http"` (Copilot/Claude) or lives under `[mcp_servers.rebar]` (Codex).
 - **Connection refused / TLS error** — verify the box host and that the `/mcp/` TLS edge is
   reachable; this is the endpoint concern owned by the `esok` work, not the client config.
+- **Every call in a batch fails with "not connected"** — the server process may have died, for
+  example killed for exceeding its container memory limit; the client then keeps the server
+  marked disconnected for the rest of the session. Check from the box (read-only):
+  - The server's own log, every release: `journalctl -t rebar-mcp`. Blue-green container
+    names change per deploy, so filter by this tag rather than by container name.
+  - A kernel out-of-memory kill: `journalctl -k | grep 'Killed process .*rebar-mcp'`.
+  - Memory samples per container: `journalctl -t rebar-health`.
+
+  A locally run stdio server writes its log to stderr, which the MCP client captures.
 
 ## Rollback
 
