@@ -602,3 +602,35 @@ def test_post_push_convergence_preserves_concurrent_local_delivery_pending(
         remote, "ls-tree", "-r", "--name-only", "refs/heads/tickets", unrelated
     ).splitlines()
     assert not any(name.endswith("-COMMENT.json") for name in remote_names)
+
+
+def test_split_remote_preflight_checks_the_push_url(
+    rebar_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #145: a local fetch URL with an s3:// push URL fails the delivery preflight.
+
+    Delivery pushes to the push URL, so the helper check must read it. No push may run: the
+    helper is absent here, and in an environment that has one the push must not reach S3.
+    """
+    from rebar import _optional
+
+    ticket = _in_progress_ticket(rebar_repo)
+    _ticket_remote(rebar_repo, tmp_path)
+    tracker = str(config.tracker_dir(str(rebar_repo)))
+    _git(tracker, "remote", "set-url", "--push", "origin", "s3://my-bucket/tickets")
+    result = _atomic_pass(rebar_repo, ticket, run_id="split-remote-preflight")
+    monkeypatch.setattr(_optional.shutil, "which", lambda _name: None)
+    real_git = push._git
+    pushes: list[tuple[str, ...]] = []
+
+    def no_push(base, *args, **kwargs):
+        if args[:1] == ("push",):
+            pushes.append(args)
+            return subprocess.CompletedProcess(["git", *args], 1, "", "push intercepted")
+        return real_git(base, *args, **kwargs)
+
+    monkeypatch.setattr(push, "_git", no_push)
+
+    with pytest.raises(CommandError, match="completion delivery preflight failed"):
+        _commit_bundle(rebar_repo, ticket, result)
+    assert pushes == []

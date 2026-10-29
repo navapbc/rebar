@@ -74,7 +74,10 @@ def heal_multi_bundle(
     if s3remote_factory is None:
         s3remote_factory = _default_factory
 
-    url_res = _git(base_path, "remote", "get-url", remote)
+    # The heal locks, writes and deletes objects, so it opens the bucket under the URL `git
+    # push` uses: a split remote may name a read-only profile in its fetch URL (issue #145).
+    # With no push URL set, git returns the fetch URL.
+    url_res = _git(base_path, "remote", "get-url", "--push", remote)
     if url_res.returncode != 0:
         return {
             "healed": False,

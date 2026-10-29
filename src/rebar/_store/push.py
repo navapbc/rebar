@@ -121,7 +121,7 @@ def _require_s3_helper_for_configured_remote(base_path: str) -> None:
     except ConfigError:
         return
     try:
-        resolved = _git(base_path, "remote", "get-url", remote)
+        resolved = _git(base_path, "remote", "get-url", "--push", remote)
     except OSError:
         return
     if resolved.returncode == 0:
@@ -191,8 +191,9 @@ def push_tickets_branch(
     except ConfigError as exc:
         _raise_if_strict(strict, "invalid-destination", str(exc), base_path, remote_ref)
         return
-    # A local-only store may lack its configured remote; fsck reports any backlog.
-    remote_url = _git(base_path, "remote", "get-url", remote)
+    # A local-only store may lack its configured remote; fsck reports any backlog. Check the
+    # URL this push will use, which differs from the fetch URL on a split remote.
+    remote_url = _git(base_path, "remote", "get-url", "--push", remote)
     if remote_url.returncode != 0:
         _raise_if_strict(
             strict,

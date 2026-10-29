@@ -85,12 +85,17 @@ def remote_exists(repo: str, remote: str, *, run_git_fn=run_git) -> bool:
 
 
 def require_s3_helper_if_s3_remote(repo: str, remote: str, *, run_git_fn=run_git) -> None:
-    """Fail closed at init/mount if `remote` is an s3://|s3+zip:// URL lacking a current helper."""
-    cp = run_git_fn(repo, "remote", "get-url", remote, check=False)
-    if cp.returncode == 0:
-        from rebar._store.push import _require_s3_helper_if_s3_url
+    """Fail closed at init/mount if `remote` has an s3://|s3+zip:// URL lacking a current helper.
 
-        _require_s3_helper_if_s3_url(cp.stdout.strip())
+    The mounted store fetches from the fetch URL and pushes to the push URL, which differ on a
+    split remote, so both are checked.
+    """
+    from rebar._store.push import _require_s3_helper_if_s3_url
+
+    for flags in ((), ("--push",)):
+        cp = run_git_fn(repo, "remote", "get-url", *flags, remote, check=False)
+        if cp.returncode == 0:
+            _require_s3_helper_if_s3_url(cp.stdout.strip())
 
 
 def probe_remote_branch(

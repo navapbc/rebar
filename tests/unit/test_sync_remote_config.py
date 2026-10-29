@@ -104,7 +104,8 @@ def test_push_targets_configured_remote(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(push, "_git", _fake_git)
     push.push_tickets_branch(base_path)  # best-effort; never raises
 
-    assert ("remote", "get-url", "github") in calls  # guard checks the configured remote
+    # The guard checks the configured remote's push URL.
+    assert ("remote", "get-url", "--push", "github") in calls
     push_calls = [a for a in calls if a and a[0] == "push"]
     assert push_calls, "no git push was attempted"
     assert push_calls[0][1] == "github"  # push target is the configured remote
