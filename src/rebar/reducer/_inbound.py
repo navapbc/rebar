@@ -11,12 +11,17 @@ two facts about the event log:
   * Links and ``parent_id`` are always stored as the *resolved canonical* ID
     (``ticket_link`` resolves both endpoints before writing), so any genuine
     inbound relationship's event file contains the exact ID string.
-  * Therefore a cheap byte-level substring scan over event files yields a
+  * Only CREATE and EDIT (``parent_id``), LINK and UNLINK (``deps``) and SNAPSHOT
+    (both) change a ticket's relationships (``_replay._EVENT_HANDLERS``), so only those
+    event files can hold one. Event files are named ``{ts}-{uuid}-{EVENT_TYPE}.json``,
+    so they are selected by suffix before any file is opened (bug alabaster-hairy-limpet:
+    the all-files scan read 141,085 files, 609.5 MB, per call on the live store).
+  * Therefore a cheap byte-level substring scan over those event files yields a
     candidate superset with **no false negatives**. We then reduce only those
     candidates and confirm the relationship against their structured state,
     discarding incidental prose mentions (e.g. a comment naming the ID).
 
-Cost is O(one byte-scan of the corpus) + O(reduce only the mentioning tickets),
+Cost is O(one byte-scan of the relationship events) + O(reduce only the mentioning tickets),
 rather than reducing every ticket.
 """
 
@@ -36,11 +41,28 @@ _INACTIVE_SOURCE_STATUSES = {"deleted"}
 _SYMMETRIC_RELATIONS = {"relates_to"}
 
 
-def _mentioning_dirs(tracker_dir: str, ticket_id: str) -> list[str]:
-    """Return ticket directory names whose event files mention ``ticket_id``.
+# Event files that can set ``parent_id`` or ``deps``. ``-PRECONDITIONS-SNAPSHOT.json``
+# shares the SNAPSHOT suffix but is never replayed, so it is excluded explicitly.
+_RELATIONSHIP_EVENT_SUFFIXES = (
+    "-CREATE.json",
+    "-EDIT.json",
+    "-LINK.json",
+    "-UNLINK.json",
+    "-SNAPSHOT.json",
+)
+_NON_REPLAYED_SUFFIX = "-PRECONDITIONS-SNAPSHOT.json"
 
-    Byte-level substring scan — no JSON parsing. Excludes the subject ticket
-    itself, dot-directories, and the per-ticket ``.cache.json``.
+
+def _is_relationship_event(name: str) -> bool:
+    return name.endswith(_RELATIONSHIP_EVENT_SUFFIXES) and not name.endswith(_NON_REPLAYED_SUFFIX)
+
+
+def _mentioning_dirs(tracker_dir: str, ticket_id: str) -> list[str]:
+    """Return ticket directory names whose relationship events mention ``ticket_id``.
+
+    Byte-level substring scan — no JSON parsing — over the event types that can carry
+    a relationship (:data:`_RELATIONSHIP_EVENT_SUFFIXES`). Excludes the subject ticket
+    itself and dot-directories; ``.cache.json`` never matches a suffix.
     """
     needle = ticket_id.encode("utf-8")
     candidates: list[str] = []
@@ -60,7 +82,7 @@ def _mentioning_dirs(tracker_dir: str, ticket_id: str) -> list[str]:
         except OSError:
             continue
         for name in event_names:
-            if not name.endswith(".json") or name == ".cache.json":
+            if not _is_relationship_event(name):
                 continue
             try:
                 with open(os.path.join(entry_path, name), "rb") as fh:

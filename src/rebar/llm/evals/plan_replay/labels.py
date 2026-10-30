@@ -80,8 +80,9 @@ def build_escaped_ticket_index(tracker_path: str) -> frozenset[str]:
     :func:`escaped_defect` needs exactly two facts per ticket -- its own ``close_class``,
     and whether any OTHER ticket points an inbound ``caused_by`` at it -- but the only
     reader that supplies them, ``show_ticket(include_inbound=True)``, derives the inbound
-    half via ``find_inbound_relationships``, which byte-scans EVERY event file in the store
-    per subject. Asking it for N tickets is therefore O(N x store); on rebar's own tracker
+    half via ``find_inbound_relationships``, which byte-scans every relationship-bearing
+    event file (CREATE/EDIT/LINK/UNLINK/SNAPSHOT) in the store per subject. Asking it for N
+    tickets is therefore O(N x store); on rebar's own tracker
     that is ~5s a ticket. This inverts the loop: reduce each ticket once, keep the
     ``plan_defect`` closes, and collect ``caused_by`` deps into a reverse index -- so the
     whole store costs one pass and every lookup is a set membership test.
