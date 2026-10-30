@@ -1,0 +1,12 @@
+{
+  "retired": {
+    "REB-4603": {
+      "absent_404_count": 0,
+      "last_jira_key": "REB-4603",
+      "local_id": "f8c4-ac9b-42c5-4bb0",
+      "reason": "local_terminal",
+      "retired_at": "2026-10-30T19:30:06Z"
+    }
+  },
+  "version": 1
+}
