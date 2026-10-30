@@ -618,6 +618,12 @@ create a third workflow that mounts the `tickets` worktree (steps 1–2 above) a
 on a weekly `cron` (e.g. `0 6 * * 1`), failing the job on anomalies so they surface
 before they accumulate. It is *hardening*, not required for sync.
 
+fsck runs without Jira access. For a binding whose local ticket is archived or deleted, it
+reads the Jira status from the last pass's saved snapshot; when that snapshot holds only
+issue keys, it falls back to the binding's last-synced Jira status and labels the finding
+`last synced: <status>`. A non-terminal last-synced status reports `would_terminal` and
+fails the job. Offline fsck cannot see an issue reopened or closed in Jira since that sync.
+
 ## Convergence rollout & rollback (epic 3006-e198)
 
 The level-triggered convergence controller (drift classes A/B/C) ships behind

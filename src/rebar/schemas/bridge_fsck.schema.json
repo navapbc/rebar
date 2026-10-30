@@ -17,7 +17,7 @@
       "description": "Binding-level drift from the classifier's offline-decidable cells. Informational cells remain non-gating.",
       "additionalProperties": true,
       "properties": {
-        "would_terminal": { "type": "array", "items": { "type": "object" }, "description": "Bound + local archived/deleted (would-be TERMINAL_TRANSITION)." },
+        "would_terminal": { "type": "array", "items": { "type": "object" }, "description": "Bound + local archived/deleted (would-be TERMINAL_TRANSITION). When the snapshot is keys-only the verdict comes from the binding's last-synced Jira status, carried as last_synced_status." },
         "local_gone": { "type": "array", "items": { "type": "object" }, "description": "Bound but the local ticket is absent from the store (ALERT)." },
         "retired_overlap": { "type": "array", "items": { "type": "object" }, "description": "A jira_key present in BOTH the live and retired binding stores." },
         "dangling": { "type": "array", "items": { "type": "object" }, "description": "Confirmed binding whose Jira issue is gone (informational)." },
@@ -26,7 +26,7 @@
         "unbound_local": { "type": "array", "items": { "type": "object" }, "description": "Local tickets with no confirmed Jira binding, surfaced for bridge migration parity (informational)." },
         "absent_in_window_unprobed": { "type": "array", "items": { "type": "object" }, "description": "Binding absent from a windowed snapshot without a confirming probe (informational)." },
         "unbound_jira": { "type": "array", "items": { "type": "object" }, "description": "Jira-native issue with no binding." },
-        "indeterminate": { "type": "array", "items": { "type": "object" }, "description": "Terminal-local binding whose Jira issue is present but whose key-set snapshot lacks the status needed to decide a terminal transition (informational; never alerts)." }
+        "indeterminate": { "type": "array", "items": { "type": "object" }, "description": "Terminal-local binding whose Jira issue is present but whose key-set snapshot lacks the status needed to decide a terminal transition (informational; never alerts). A terminal last-synced Jira status, which cannot prove the issue is still closed, is carried as last_synced_status." }
       }
     },
     "store_integrity": {

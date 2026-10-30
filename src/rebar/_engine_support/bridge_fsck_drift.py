@@ -91,6 +91,49 @@ def _audit_binding_without_snapshot(
         _append_local_gone(drift, local_id=local_id, jira_key=jira_key)
 
 
+def _audit_terminal_from_last_synced(
+    drift: dict[str, list[dict[str, Any]]],
+    *,
+    local_id: str,
+    jira_key: str,
+    local: dict[str, Any] | None,
+    entry: dict[str, Any],
+    classify_mod: Any,
+) -> None:
+    """Judge a terminal local from the binding's last-synced status when the snapshot is keys-only.
+
+    The baseline status is not refreshed once the local ticket is terminal, so it is reported as
+    last-synced, never as live (ticket 4e3e: an absent field is not an absent value). Only a
+    non-terminal one alerts; a terminal one cannot prove Jira is still closed.
+    """
+    reason = "jira status unavailable in key-set snapshot"
+    last_synced = classify_mod._jira_status(entry.get("baseline"))
+    if not last_synced:
+        drift.setdefault("indeterminate", []).append(
+            {"local_id": local_id, "jira_key": jira_key, "reason": reason}
+        )
+        return
+    obs = classify_mod.JiraObservation(
+        classify_mod.ObservedJira.PRESENT,
+        key=jira_key,
+        fields={"status": last_synced},
+    )
+    decision = classify_mod.classify(local, obs, entry, entry.get("baseline"))
+    if decision.kind is classify_mod.DecisionKind.TERMINAL_TRANSITION:
+        drift["would_terminal"].append(
+            {"local_id": local_id, "jira_key": jira_key, "last_synced_status": last_synced}
+        )
+        return
+    drift.setdefault("indeterminate", []).append(
+        {
+            "local_id": local_id,
+            "jira_key": jira_key,
+            "reason": f"{reason}; last synced: {last_synced}",
+            "last_synced_status": last_synced,
+        }
+    )
+
+
 def _audit_present_binding(
     drift: dict[str, list[dict[str, Any]]],
     *,
@@ -102,12 +145,13 @@ def _audit_present_binding(
     classify_mod: Any,
 ) -> None:
     if classify_mod.local_state(local) is classify_mod.LocalState.TERMINAL and jira_fields == {}:
-        drift.setdefault("indeterminate", []).append(
-            {
-                "local_id": local_id,
-                "jira_key": jira_key,
-                "reason": "jira status unavailable in key-set snapshot",
-            }
+        _audit_terminal_from_last_synced(
+            drift,
+            local_id=local_id,
+            jira_key=jira_key,
+            local=local,
+            entry=entry,
+            classify_mod=classify_mod,
         )
         return
     obs = classify_mod.JiraObservation(
@@ -341,9 +385,11 @@ def _append_alerting_drift_lines(lines: list[str], binding_drift: dict[str, Any]
     lines.append("")
     lines.append("--- Binding-Level Drift ---")
     for entry in binding_drift.get("would_terminal", []):
+        last_synced = entry.get("last_synced_status")
+        suffix = f"; last synced: {last_synced}" if last_synced else ""
         lines.append(
             f"  would_terminal: local={entry['local_id']} jira_key={entry['jira_key']}"
-            " (local archived/deleted; Jira would be driven to Done)"
+            f" (local archived/deleted; Jira would be driven to Done{suffix})"
         )
     for entry in binding_drift.get("local_gone", []):
         lines.append(
