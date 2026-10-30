@@ -324,8 +324,8 @@ def render_config_reference() -> str:
         lines.append("| Deprecated key | Replacement | Status |")
         lines.append("|----------------|-------------|--------|")
         for name, replacement, status in deprecations:
-            repl = f"`{replacement}`" if replacement else "_(none)_"
-            lines.append(f"| `{name}` | {repl} | {_md_cell(status)} |")
+            repl = f"`{_md_cell(replacement)}`" if replacement else "_(none)_"
+            lines.append(f"| `{_md_cell(name)}` | {repl} | {_md_cell(status)} |")
     else:
         lines.append("_None._")
     lines.append("")
@@ -342,8 +342,8 @@ def render_config_reference() -> str:
         lines.append("| Removed key | Replacement | Behavior when still set |")
         lines.append("|-------------|-------------|-------------------------|")
         for name, replacement, behavior in tomb:
-            repl = f"`{replacement}`" if replacement else "_(no replacement)_"
-            lines.append(f"| `{name}` | {repl} | {_md_cell(behavior)} |")
+            repl = f"`{_md_cell(replacement)}`" if replacement else "_(no replacement)_"
+            lines.append(f"| `{_md_cell(name)}` | {repl} | {_md_cell(behavior)} |")
     else:
         lines.append("_None._")
     lines.append("")

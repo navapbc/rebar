@@ -9,10 +9,12 @@ and namespaces fail at load time with located errors.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
 
+from rebar.llm import criteria
 from rebar.llm.plan_review import registry
 from rebar.llm.prompting import prompt_library
 
@@ -451,3 +453,37 @@ def test_repository_wide_consumer_selects_regardless_of_changed_files(tmp_path):
     }
     root2 = _make_repo(tmp_path / "scoped", overlay=scoped)
     assert cr.project_criterion_applies("project.rpb", ["docs/x.md"], root2) is False
+
+
+# ── legacy `activate` id-list deprecation ───────────────────────────────────────
+def test_legacy_activate_list_warns_once(tmp_path, caplog):
+    """The list form still activates, and warns ONCE per overlay content — the emission rides
+    the `(gate_key, repo_root, overlay-signature)` routing cache, not the call count."""
+    root = _make_repo(
+        tmp_path,
+        overlay={"plan_review": {"project.no-print": _ROUTING}, "activate": ["project.no-print"]},
+        prompts={"plan-review-project-no-print": _PROJECT_RUBRIC},
+    )
+    with caplog.at_level(logging.WARNING, logger="rebar.llm.criteria.overlay"):
+        assert "project.no-print" in criteria.effective_criteria(root, gate_key="plan_review")
+        assert "project.no-print" in criteria.effective_criteria(root, gate_key="plan_review")
+    matched = [
+        r
+        for r in caplog.records
+        if "criteria_routing.json 'activate' id-list is deprecated" in r.message
+    ]
+    assert len(matched) == 1
+
+
+def test_canonical_activate_mapping_does_not_warn(tmp_path, caplog):
+    root = _make_repo(
+        tmp_path,
+        overlay={
+            "plan_review": {"project.no-print": _ROUTING},
+            "activate": {"project.no-print": ["plan_review"]},
+        },
+        prompts={"plan-review-project-no-print": _PROJECT_RUBRIC},
+    )
+    with caplog.at_level(logging.WARNING, logger="rebar.llm.criteria.overlay"):
+        assert "project.no-print" in criteria.effective_criteria(root, gate_key="plan_review")
+    assert [r for r in caplog.records if "id-list is deprecated" in r.message] == []

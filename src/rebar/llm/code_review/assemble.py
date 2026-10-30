@@ -7,12 +7,10 @@ code review that context IS the diff (the change set is the focus), shaped as a
 ``## Changed files`` / ``## Orientation`` / ``## Diff`` markdown composite.
 
 This module is deliberately SELF-CONTAINED — it RE-IMPLEMENTS the small git diff-read
-helpers rather than importing them from the single-pass ``code_review.single_pass`` route,
-so WS4's retirement of that route requires NO change to this module. A test pins this at the
-SOURCE level (no import of a single-pass symbol); the package ``__init__`` is kept light and
-lazily re-exports the single-pass API, so importing this module does not pull that route in
-at package-import time. (Completing the runtime decoupling — making ``import rebar.llm`` stop
-eagerly importing the single-pass route — is WS4's source-separation work.)
+helpers instead of importing them from the ``code_review`` package, so nothing it needs
+can be pulled out from under it by a change elsewhere in the package. A test pins this at
+the SOURCE level: ``assemble.py`` imports no symbol from the package ``__init__``, which
+keeps importing this module from dragging the rest of the gate in at package-import time.
 """
 
 from __future__ import annotations

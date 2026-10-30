@@ -132,7 +132,7 @@ CONFIG_RESULT = "config_result"
 # structural link rule, plus their repair disposition after a `--repair` pass.
 DOCTOR = "doctor"
 # rebar.llm — the structured review-findings document. Produced by the code-review op
-# (`rebar review-code` / rebar.llm.review_code) and by the single-pass review engine.
+# (`rebar review-code` / rebar.llm.review_code).
 # The MCP tool is exempt (live LLM call → plain dict, no outputSchema); the CLI/library
 # JSON path is pinned to this schema via the synthetic "review_code" key below.
 REVIEW_RESULT = "review_result"

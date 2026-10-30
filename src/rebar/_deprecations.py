@@ -52,11 +52,16 @@ def _permanent(kind: str, name: str, replacement: str) -> Deprecation:
 # add a deprecation, add a row here AND route its warning through warn_deprecated;
 # the completeness test fails otherwise.
 _ENTRIES: tuple[Deprecation, ...] = (
-    # No active aliases remain after ADR 0116. Pre-1.0 removals covered legacy push,
+    # No active ALIASES remain after ADR 0116. Pre-1.0 removals covered legacy push,
     # tracker, MCP-reconcile, close-gate, flat-config, CLI, list-epic, transition-force,
     # and hosted OpenAI spellings. LLM step/model env inputs fail loud because ignoring
     # them changes execution; removed review surfaces simply disappear, while inert
     # resolved-status and code-health/lock knobs warn with no replacement.
+    _scheduled(
+        "cfg",
+        "criteria_routing.json 'activate' id-list",
+        'the {"activate": {"<id>": ["plan_review"|"code_review"]}} mapping form',
+    ),
 )
 
 REGISTRY: dict[str, Deprecation] = {d.key: d for d in _ENTRIES}

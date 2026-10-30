@@ -365,6 +365,9 @@ across all four passes with no core change.
 }
 ```
 
+A bare id list (`"activate": ["project.x"]`) is still accepted and infers the gate from the
+routing maps, but logs a deprecation warning.
+
 Its rubric lives at `.rebar/prompts/plan-review-project-portability.md`
 (`execution_mode: single_turn`) under four second-level headings — `## Finding threshold`,
 `## Required finding fields`, `## Supported client-shape matrix`, and `## Non-findings` —
