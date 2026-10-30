@@ -39,7 +39,6 @@ Front-matter carries each prompt's contract. The key set is **closed** — autho
 | `dimension`      | A reviewer's review dimension. |
 | `applies_to`     | `fnmatch` globs for rule-based reviewer selection. |
 | `langfuse_prompt`| Langfuse prompt name (read-replica only; never consulted for text). |
-| `default`        | Whether this reviewer is in the default set (exactly one default; see §4). |
 
 Heavy JSON Schemas are referenced **by name** (`inputs: my_input`), never inlined.
 
@@ -197,10 +196,9 @@ so the schema coverage-guard exempts them (alongside the workflow DSL input sche
 
 `src/rebar/llm/reviewers/index.json` is **generated and committed** — the old
 `catalog.json` is gone (fully derived). `build_prompt_index` scans the packaged prompt
-front-matter; `regenerate_prompt_index` writes the file. Invariants (raised on
-violation): **exactly one `default`** across reviewers, and **no `dimension`
-collision**. A removed prompt is **retired** from the index on regeneration;
-`langfuse_prompt`/`fallback_file`/`applies_to` are preserved.
+front-matter; `regenerate_prompt_index` writes the file. The invariant (raised on
+violation): **no `dimension` collision**. A removed prompt is **retired** from the
+index on regeneration; `langfuse_prompt`/`fallback_file`/`applies_to` are preserved.
 
 ### CI drift gate
 
