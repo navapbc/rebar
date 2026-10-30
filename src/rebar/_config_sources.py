@@ -293,18 +293,6 @@ def _canonical_env_name(sect: str, key: str) -> str:
     return _CANONICAL_ENV_NAMES.get((sect, key), f"REBAR_{sect.upper()}_{key.upper()}")
 
 
-# Legacy env aliases were retired by ADR 0116's clean pre-1.0 removal policy.
-# Keep the exported table empty so compatibility imports can observe that no legacy
-# env spellings are still mapped.
-_LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {}
-
-
-def _map_legacy_env(legacy: str, value: str) -> str:
-    """Compatibility shim for historical imports; no active legacy aliases remain."""
-    del legacy
-    return value
-
-
 def env_overrides() -> dict:
     """Sparse mapping of canonical ``REBAR_<SECTION>_<KEY>`` env overrides.
 

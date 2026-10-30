@@ -21,7 +21,7 @@ import pytest
 
 from rebar import _deprecations as dep
 from rebar._config_schema import _SECTIONS
-from rebar.config import _LEGACY_ENV_ALIASES, _canonical_env_name
+from rebar.config import _canonical_env_name
 
 pytestmark = pytest.mark.unit
 
@@ -57,7 +57,7 @@ def _orphaned_config_keys(data: dict[str, list[str]]) -> list[str]:
 
 
 def _orphaned_env_vars(data: dict[str, list[str]]) -> list[str]:
-    accounted = _live_env_vars() | _tombstoned("env") | set(_LEGACY_ENV_ALIASES)
+    accounted = _live_env_vars() | _tombstoned("env")
     return [v for v in data["canonical_env_vars"] if v not in accounted]
 
 
@@ -167,3 +167,29 @@ def test_live_env_var_gap_is_detected_even_when_removals_are_accounted_for() -> 
     ]
     assert _orphaned_env_vars(data) == []
     assert _missing_live_env_vars(data) == ["REBAR_TICKET_DISPLAY_MODE"]
+
+
+def test_canonical_env_change_mid_process_invalidates_the_config_cache(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A canonical ``REBAR_*`` override flipping mid-process must miss the config cache.
+
+    ``_env_signature`` used to make a second pass over ``_LEGACY_ENV_ALIASES``, a table
+    that ADR 0116 left permanently empty — so it contributed nothing to the signature.
+    This pins that the canonical pass is what actually invalidates, which is what made
+    deleting the dead pass safe.
+    """
+    from rebar import config as cfg
+
+    name = _canonical_env_name("verify", "suggest_duplicate_tickets")
+    for ambient in ("REBAR_CONFIG", "XDG_CONFIG_HOME", "REBAR_ROOT", name):
+        monkeypatch.delenv(ambient, raising=False)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / ".git").mkdir()
+
+    assert cfg.load_config(root=proj).verify.suggest_duplicate_tickets is False
+    monkeypatch.setenv(name, "1")
+    assert cfg.load_config(root=proj).verify.suggest_duplicate_tickets is True
+    monkeypatch.delenv(name)
+    assert cfg.load_config(root=proj).verify.suggest_duplicate_tickets is False
