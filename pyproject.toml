@@ -237,7 +237,10 @@ grounding-terraform = [
 # multiple-bundles corruption.
 s3 = ["git-remote-s3>=0.3.2"]
 dev = [
-    "pytest>=8",
+    # pytest 9.1.0/9.1.1 drop a package conftest's fixtures when a parent-directory file
+    # argument re-collects the package (pytest-dev/pytest#14635, fixed in 9.2.0); bug
+    # 81da-a1b4-bf29-4ad2. tests/unit/test_pytest_interleaved_conftest_args.py guards it.
+    "pytest>=8,!=9.1.0,!=9.1.1",
     "mcp>=1.28.1,<2",
     # jsonschema/referencing moved to core [project.dependencies] — the schema
     # registry + workflow contract validation are lean-runtime paths, not dev-only.
