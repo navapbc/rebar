@@ -293,7 +293,7 @@ def transition(
     from rebar._commands import transition as _transition
     from rebar._commands._seam import CommandError
     from rebar._commands.txn import ConcurrencyMismatch
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
 
     emit_cross_session_warning(ticket_id, repo_root=repo_root)
     force = _normalize_transition_force(force)
@@ -372,7 +372,7 @@ def claim(
     from rebar._commands import transition as _transition
     from rebar._commands._seam import CommandError
     from rebar._commands.txn import ConcurrencyMismatch
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
 
     tracker = str(config.tracker_dir(repo_root))
     resolved = resolve_ticket_id(ticket_id, tracker)

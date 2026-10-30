@@ -29,7 +29,7 @@ from rebar import config
 from rebar._alias import compute_alias, compute_genesis_alias
 from rebar._commands import scratch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
-from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._ids import resolve_ticket_id
 from rebar._mcp_errors import js_safe_dumps
 from rebar._store import hlc
 from rebar._store.canonical import canonical_str

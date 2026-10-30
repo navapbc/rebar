@@ -21,10 +21,9 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, cast
 
-from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._engine_support.ticket_query import TicketQuery
 from rebar._errors import TrackerRootError
-from rebar._ids import binding_jira_key_map
+from rebar._ids import binding_jira_key_map, resolve_ticket_id
 from rebar.graph._graph import build_dep_graph
 from rebar.graph._ready import find_ready_tickets
 from rebar.reducer import (

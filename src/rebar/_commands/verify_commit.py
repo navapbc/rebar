@@ -22,7 +22,7 @@ import sys
 from rebar import config
 from rebar._cli._parser import guard_parse_errors
 from rebar._cli._parsers.advanced.verify import build_commit_ticket
-from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._ids import resolve_ticket_id
 
 # A single SAFE token: no path separators, no ``..``, no whitespace/control. This is a
 # PATH-SAFETY guard — an extracted candidate feeds ``resolve_ticket_id``'s

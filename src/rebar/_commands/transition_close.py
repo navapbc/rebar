@@ -209,7 +209,7 @@ def record_completion_verdict(
     """
     from rebar import config as _config
     from rebar import signing as _signing
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
     from rebar.llm import completion_sidecar
 
     # Bind the canonical id (an alias/short id resolves) so the sidecar lands in the right
@@ -278,7 +278,7 @@ def _resolve_caused_by_culprit(
     exactly as before.
     """
     if caused_by.strip():
-        from rebar._engine_support.resolver import resolve_ticket_id
+        from rebar._ids import resolve_ticket_id
 
         return resolve_ticket_id(caused_by.strip(), tracker) or caused_by.strip()
     if existing:

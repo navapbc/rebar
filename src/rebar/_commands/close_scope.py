@@ -120,7 +120,7 @@ def _resolve(ticket_id: str, tracker: str, *, ticket_view: Any | None = None) ->
     if ticket_view is not None:
         return ticket_view.resolve(ticket_id)
 
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
 
     return resolve_ticket_id(ticket_id, tracker)
 

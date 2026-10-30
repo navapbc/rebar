@@ -19,6 +19,7 @@ from interfaces.conftest import rebar_repo as rebar_repo  # noqa: E402
 
 import rebar  # noqa: E402
 import rebar.llm  # noqa: E402
+from rebar import _ids as resolver  # noqa: E402
 from rebar._commands import (  # noqa: E402
     close_precheck,
     transition_close,
@@ -27,7 +28,6 @@ from rebar._commands import (  # noqa: E402
 from rebar._engine_support import (  # noqa: E402
     commit_impact,
     descendants,
-    resolver,
 )
 from rebar.llm import completion_sidecar  # noqa: E402
 

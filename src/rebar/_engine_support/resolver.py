@@ -4,10 +4,10 @@ The resolution primitives moved DOWN to the stdlib-only leaf ``rebar._ids`` so t
 pure event-replay layer (``rebar.reducer``) can depend on them without reaching UP
 into ``_engine_support`` (a layering inversion + import cycle). This module keeps
 its historical public surface — ``resolve_ticket_id`` and the alias/binding
-helpers — by re-exporting them, so every existing
-``from rebar._engine_support.resolver import …`` importer is unchanged. New code
-should import from ``rebar._ids`` directly. See ``rebar._ids`` for the full
-resolution semantics (ID forms, alias scan, Jira-key binding-store lookup).
+helpers — by re-exporting them, so every existing importer of this module is
+unchanged. New code should import from ``rebar._ids`` directly. See ``rebar._ids``
+for the full resolution semantics (ID forms, alias scan, Jira-key binding-store
+lookup).
 """
 
 from __future__ import annotations

@@ -23,7 +23,7 @@ from rebar._commands._seam import (
     require_not_ghost,
     tracker_dir,
 )
-from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._ids import resolve_ticket_id
 
 logger = logging.getLogger(__name__)
 

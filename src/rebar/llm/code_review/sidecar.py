@@ -194,7 +194,7 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
     gate; the sidecars are reducer-ignored, so removing old ones is safe (not state-bearing)."""
     try:
         from rebar import config as _config
-        from rebar._engine_support.resolver import resolve_ticket_dir_name
+        from rebar._ids import resolve_ticket_dir_name
         from rebar._store.event_append import delete_events
 
         tracker = str(_config.tracker_dir(repo_root))
@@ -279,7 +279,7 @@ def _latest_payload_with_ts(ticket_id: str, *, repo_root=None) -> tuple[dict[str
     newest file. ``(None, -1)`` when nothing usable. Best-effort; never raises."""
     try:
         from rebar import config as _config
-        from rebar._engine_support.resolver import resolve_ticket_dir_name
+        from rebar._ids import resolve_ticket_dir_name
 
         tracker = str(_config.tracker_dir(repo_root))
         rid = resolve_ticket_dir_name(ticket_id, tracker)
@@ -320,7 +320,7 @@ def all_review_results(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]
     or any error degrades to ``[]``."""
     try:
         from rebar import config as _config
-        from rebar._engine_support.resolver import resolve_ticket_dir_name
+        from rebar._ids import resolve_ticket_dir_name
 
         tracker = str(_config.tracker_dir(repo_root))
         rid = resolve_ticket_dir_name(ticket_id, tracker)

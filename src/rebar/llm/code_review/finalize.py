@@ -95,7 +95,7 @@ def _link_session_artifact(artifact_id: str, *, head: str = "HEAD", repo_root: A
         import rebar
         from rebar import config as _config
         from rebar._commands.verify_commit import extract_ticket_refs
-        from rebar._engine_support.resolver import resolve_ticket_id
+        from rebar._ids import resolve_ticket_id
 
         root = str(_config.repo_root(repo_root))
         msg = subprocess.run(

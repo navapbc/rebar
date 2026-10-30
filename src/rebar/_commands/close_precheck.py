@@ -32,7 +32,7 @@ _STALE_REF_MESSAGE = (
 
 def _is_live_ticket(ticket_id: str, tracker: str) -> bool:
     """Whether ``ticket_id`` resolves to a usable, non-retired ticket."""
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
     from rebar.reducer import reduce_ticket
 
     resolved = resolve_ticket_id(ticket_id, tracker)
@@ -120,7 +120,7 @@ def _resolved_completion_scope(
     """Resolve the ticket, descendants, and disposition replacements to canonical ids."""
     from rebar._commands.close_scope import expand_with_disposition_replacements
     from rebar._engine_support.descendants import list_descendants
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
 
     started_ns = time.monotonic_ns() if metrics is not None else 0
     if ticket_view is not None:

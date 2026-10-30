@@ -154,7 +154,7 @@ def ticket_for_commit_message(commit_message: str, repo_root: Any = None) -> str
     ref resolves."""
     from rebar import config as _config
     from rebar._commands.verify_commit import extract_ticket_refs
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
 
     tracker = str(_config.tracker_dir(repo_root))
     for ref in extract_ticket_refs(commit_message or "") or []:

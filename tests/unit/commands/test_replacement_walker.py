@@ -42,8 +42,8 @@ def _wire(monkeypatch: pytest.MonkeyPatch, store: _Store) -> None:
     """Patch the READERS, exactly as tests/unit/test_close_precheck_duplicate_link_c8fd.py:63-72
     does — never the walkers themselves, so the real walk is what runs. ``resolve_ticket_id`` is
     part of that seam: ``_is_live_ticket`` resolves before it reduces."""
+    from rebar import _ids as _resolver
     from rebar import reducer as _reducer
-    from rebar._engine_support import resolver as _resolver
     from rebar.reducer import _inbound
 
     monkeypatch.setattr(_reducer, "reduce_ticket", store.reduce)

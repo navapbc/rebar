@@ -137,7 +137,7 @@ def _resolve(ticket_id: str, tracker: str) -> str:
     """Resolve an id/alias/short-prefix to its canonical ticket id (best-effort: falls back
     to the input on any failure, so a mismatch simply fails the equality check)."""
     try:
-        from rebar._engine_support.resolver import resolve_ticket_id
+        from rebar._ids import resolve_ticket_id
 
         return resolve_ticket_id(ticket_id, tracker) or ticket_id
     except Exception:  # noqa: BLE001 — resolution is best-effort; fall back to the raw id
