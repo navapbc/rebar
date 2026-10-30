@@ -12,7 +12,8 @@ fallback to the legacy mirror; (3) a mirror-less snapshot still round-trips thro
 from __future__ import annotations
 
 from rebar._commands.compact import _snapshot_strip_keys
-from rebar.reducer._processors import process_signature, process_snapshot
+from rebar.reducer._processors import process_snapshot
+from rebar.reducer._processors_identity import process_signature
 from rebar.reducer._state import make_initial_state
 from rebar.signing import most_recent_attestation
 

@@ -231,7 +231,7 @@ Pinned by `tests/interfaces/contracts/test_event_schema_forward_compat.py`.
   beyond STATUS forks.
 - **STATUS forks** (two STATUS events sharing a `parent_status_uuid` — e.g. two
   clients transitioning the same ticket concurrently) are resolved **skew-
-  independently by the lexically-lower event UUID** (`_processors.py` `process_status`),
+  independently by the lexically-lower event UUID** (`reducer/_processors_status.py:process_status`),
   kept as defense-in-depth for exact-equal prefixes, so every clone converges to
   the same winner regardless of clock skew or replay order (invariant I8).
 
@@ -246,14 +246,14 @@ never git HEAD — see [`docs/config.md`](config.md) "Session provenance"). When
 session is present the key is **omitted**, so the event bytes are identical to the
 pre-feature path.
 
-The reducer (`_processors.py` `_fold_claimed_session`) folds `data["session"]` into
+The reducer (`reducer/_processors_status.py:_fold_claimed_session`) folds `data["session"]` into
 the compiled-state key **`state["claimed_session"]`** on the `open -> in_progress`
 edge only (mirrors `assignee`; enumerated in `ticket_state.schema.json` and
 `rebar.types`). It is applied only when the incoming event's status is applied — so
 in a STATUS fork it follows the **lexical-UUID winner** and a losing concurrent claim
 never overwrites it; a session-less re-claim folds `None`, clearing any stale prior id.
 
-The reducer (`_processors.py` `_clear_claimed_session`) additionally **clears** all three
+The reducer (`reducer/_processors_status.py:_clear_claimed_session`) additionally **clears** all three
 provenance fields (`claimed_session`, `claim_harness`, `claim_remote_session`) to `None`
 — they are **cleared on every exit from `in_progress`** (the winning `in_progress -> <any
 other status>` edge: open, blocked, closed, idea), so a non-`in_progress` ticket reports no

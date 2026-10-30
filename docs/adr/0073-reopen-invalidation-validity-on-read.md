@@ -32,7 +32,7 @@ event has no kind, so it cannot target one kind — clearing "the signature" wou
 - No transition mutates or clears an attestation record. `retire_attested_pin` is removed,
   along with its reopen call site in `transition.py`.
 - The reducer records `state["last_reopened_at"]` = the timestamp of the most recent
-  `closed → open` transition (`reducer/_processors.py:process_status`).
+  `closed → open` transition (`reducer/_processors_status.py:process_status`).
 - `plan_review.attest.compute_validity(attestation, ticket_state, kind)` is the single place
   that decides whether an already-HMAC-certified attestation is **currently valid for its
   gate**. For every kind it rejects an attestation whose `signed_at` is at/before

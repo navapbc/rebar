@@ -17,7 +17,7 @@ import pytest
 import rebar
 from rebar._commands._seam import tracker_dir
 from rebar.reducer import make_initial_state, reduce_ticket
-from rebar.reducer._processors import process_status
+from rebar.reducer._processors_status import process_status
 
 pytestmark = pytest.mark.unit
 

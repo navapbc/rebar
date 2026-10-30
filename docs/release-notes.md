@@ -8,7 +8,27 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
-## The `ticket-quality` reviewer prompt is gone from the packaged catalog
+## `rebar.reducer._processors` no longer re-exports the identity and status folds
+
+**Contract change for clients that import reducer internals.** `_processors.py` carried
+seven back-compat re-exports of symbols that live elsewhere: `_rederive_keyring_keys`,
+`process_key_event` and `process_signature` (canonical home
+`reducer/_processors_identity.py`), and `_fold_claimed_session`, `_fold_close_metadata`,
+`_fold_plan_review_phase` and `process_status` (canonical home
+`reducer/_processors_status.py`). They were marked `noqa: F401` and existed only to keep
+older import paths resolving after the processors module was split.
+
+All seven are now gone from `_processors`. `from rebar.reducer._processors import
+process_status` — and the equivalent for the other six names — now raises `ImportError`
+where it previously succeeded. Import each name from its canonical module instead; the
+functions themselves are unchanged, so the fix is the module path and nothing else.
+
+`_processors` keeps the folds it actually defines, including `process_create`,
+`process_edit`, `process_snapshot` and `attestation_kind`. These are private modules under
+`rebar.reducer`, so this is not part of the supported public API, but it is called out here
+because in-tree and downstream test modules did import through the shim.
+
+
 
 **Contract change for clients that resolve reviewers by id.** `ticket-quality` was the
 single-pass review demo's reviewer. Epic 87d8 retired that demo, and earlier slices moved

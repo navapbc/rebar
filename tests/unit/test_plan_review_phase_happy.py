@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from rebar.llm.plan_review import attest, orchestrator, sidecar
-from rebar.reducer._processors import process_status
+from rebar.reducer._processors_status import process_status
 from rebar.reducer._state import make_initial_state
 
 
