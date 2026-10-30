@@ -8566,6 +8566,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:36Z"
     },
+    "1416-a422-a3d8-4611": {
+      "created_at": "2026-10-30T16:35:29Z",
+      "jira_id": "4597711",
+      "jira_key": "REB-6811",
+      "state": "confirmed",
+      "updated_at": "2026-10-30T16:35:33Z"
+    },
     "1416-b1bc-c8e9-477e": {
       "created_at": "2026-08-15T14:52:36Z",
       "jira_key": "REB-1256",
@@ -10770,6 +10777,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:07Z"
+    },
+    "19ba-bd62-1adb-41df": {
+      "created_at": "2026-10-30T16:35:33Z",
+      "jira_id": "4597712",
+      "jira_key": "REB-6812",
+      "state": "confirmed",
+      "updated_at": "2026-10-30T16:35:37Z"
     },
     "19c3-0920-8849-49a0": {
       "baseline": {
@@ -14231,6 +14245,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:01Z"
+    },
+    "2207-e956-c937-4e8c": {
+      "created_at": "2026-10-30T16:35:38Z",
+      "jira_id": "4597713",
+      "jira_key": "REB-6813",
+      "state": "confirmed",
+      "updated_at": "2026-10-30T16:35:41Z"
     },
     "2218-b05f-c205-4103": {
       "baseline": {
@@ -29936,6 +29957,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-04T05:43:31Z"
+    },
+    "477b-e836-8918-4427": {
+      "created_at": "2026-10-30T16:35:42Z",
+      "jira_id": "4597714",
+      "jira_key": "REB-6814",
+      "state": "confirmed",
+      "updated_at": "2026-10-30T16:35:45Z"
     },
     "478f-8af2-2a3a-4889": {
       "baseline": {
@@ -54276,6 +54304,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:20Z"
+    },
+    "84be-e805-3816-4e90": {
+      "created_at": "2026-10-30T16:35:45Z",
+      "jira_id": "4597715",
+      "jira_key": "REB-6815",
+      "state": "confirmed",
+      "updated_at": "2026-10-30T16:35:49Z"
     },
     "84c7-486f-9a13-4c3f": {
       "baseline": {
@@ -78770,6 +78805,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-05T07:49:32Z"
+    },
+    "bc30-a85f-1712-43f3": {
+      "created_at": "2026-10-30T16:35:49Z",
+      "jira_id": "4597716",
+      "jira_key": "REB-6816",
+      "state": "confirmed",
+      "updated_at": "2026-10-30T16:35:53Z"
     },
     "bc3e-7f43-2195-4301": {
       "baseline": {
@@ -104601,6 +104643,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-07T19:35:36Z"
     },
+    "fb63-044a-de09-42c5": {
+      "created_at": "2026-10-30T16:35:53Z",
+      "jira_id": "4597717",
+      "jira_key": "REB-6817",
+      "state": "confirmed",
+      "updated_at": "2026-10-30T16:35:56Z"
+    },
     "fb8a-7363-e406-4e36": {
       "baseline": {
         "assignee": {
@@ -111263,7 +111312,12 @@
     "1793325108556068001": "__rebar_unknown_comment_id__",
     "1793328911743219001": "__rebar_unknown_comment_id__",
     "1793330056829153001": "__rebar_unknown_comment_id__",
-    "1793330611177519001": "__rebar_unknown_comment_id__"
+    "1793330611177519001": "__rebar_unknown_comment_id__",
+    "1793375475452770001": "__rebar_unknown_comment_id__",
+    "1793375494467732001": "__rebar_unknown_comment_id__",
+    "1793376090623384001": "__rebar_unknown_comment_id__",
+    "1793376434387391846": "__rebar_unknown_comment_id__",
+    "1793377829976438023": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -116575,6 +116629,13 @@
     "REB-6809": "ac57-7690-8736-4cca",
     "REB-681": "f894-ebd4-e841-404f",
     "REB-6810": "b857-6da0-f3d2-420b",
+    "REB-6811": "1416-a422-a3d8-4611",
+    "REB-6812": "19ba-bd62-1adb-41df",
+    "REB-6813": "2207-e956-c937-4e8c",
+    "REB-6814": "477b-e836-8918-4427",
+    "REB-6815": "84be-e805-3816-4e90",
+    "REB-6816": "bc30-a85f-1712-43f3",
+    "REB-6817": "fb63-044a-de09-42c5",
     "REB-682": "f93a-b947-558b-469c",
     "REB-683": "f983-9441-35f4-445f",
     "REB-684": "76e9-a6f0-3632-42ee",
