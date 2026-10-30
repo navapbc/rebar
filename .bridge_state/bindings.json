@@ -222,10 +222,24 @@
     },
     "0076-375d-430c-4822": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Observation\n\n`show_ticket` always computes `inbound_deps` by byte-scanning every event file in the store (src/rebar/reducer/_inbound.py, lines 39-72). On a clone of the live store, 2026-10-29, that is 139,978 files and 609 MB read per call. Only CREATE, EDIT, LINK, UNLINK and SNAPSHOT events change deps or parent (src/rebar/reducer/_replay.py). Restricting the scan to those types read 13,258 files and 150.5 MB, and found all 15 confirmed inbound links for the 1 ticket tested.\n\nCaveats:\n- The scan trusts that the filename suffix matches the event type inside the file.\n- Link targets are stored as written, so a link stored by alias is missed by an id byte scan. That gap exists in the current scan too; on the clone, 2 of 1,605 LINK targets are not canonical ids, and both are free text.\n\nRe-checked 2026-10-29 on a fresh copy at origin/main ca6810a4: one scan for d70a-97d9 opens 141,085 files and reads 609.5 MB. In `_replay.py`'s handler table, `parent_id` is set only by CREATE and by EDIT `fields`, `deps` only by LINK/UNLINK, and SNAPSHOT restores both; REVERT acts only on ARCHIVED. Event files are written as `{timestamp}-{uuid}-{EVENT_TYPE}.json`. `-PRECONDITIONS-SNAPSHOT.json` files also end in `-SNAPSHOT.json` but are not replayed, so the suffix test excludes them.\n\n## Plan\n1. Restrict the inbound scan to files ending in `-CREATE.json`, `-EDIT.json`, `-LINK.json`, `-UNLINK.json` or `-SNAPSHOT.json`, excluding `-PRECONDITIONS-SNAPSHOT.json`, before opening them. Update the module docstring and the docstring in src/rebar/llm/evals/plan_replay/labels.py that describes the scan.\n2. Test first (seen failing on current code): a fixture with one inbound relationship in each of CREATE (parent), EDIT (re-parent), LINK, and a SNAPSHOT-compacted ticket, all found; a COMMENT naming the target that must not make its ticket a candidate; and an open() spy asserting no other event type is opened.\n3. Compare on a copy of the live store: for 50 sampled tickets plus the 15-link ticket, compute the old result by running `find_inbound_relationships` with the old all-files candidate scan (one shared pass over the store computing every sampled id's candidates, verbatim old matching) and the new result with the new scan; require equality, and record files and bytes read per call before and after.\n\n## Acceptance criteria\n- [ ] The scan opens only CREATE, EDIT, LINK, UNLINK and SNAPSHOT event files; verified by the open() spy test in tests/scripts/reducer/test_inbound_relationship_scan.py.\n- [ ] inbound_deps is identical to the current code for at least 50 tickets sampled from a clone of the live store; recorded in a ticket comment with the sample size and files/bytes read per call before and after.\n\n## File impact (expected)\n- src/rebar/reducer/_inbound.py\n- src/rebar/llm/evals/plan_replay/labels.py\n- tests/scripts/reducer/test_inbound_relationship_scan.py",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "show_ticket's inbound-link scan reads every event file in the store"
       },
       "created_at": "2026-10-29T19:32:11Z",
@@ -51773,6 +51787,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-26T02:54:58Z"
     },
+    "7eaa-502b-3d0f-4b08": {
+      "created_at": "2026-10-30T03:34:12Z",
+      "jira_id": "4597686",
+      "jira_key": "REB-6808",
+      "state": "confirmed",
+      "updated_at": "2026-10-30T03:34:16Z"
+    },
     "7eb6-75c8-322f-4c94": {
       "baseline": {
         "assignee": null,
@@ -71376,6 +71397,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-05T07:40:05Z"
     },
+    "ac57-7690-8736-4cca": {
+      "created_at": "2026-10-30T03:34:16Z",
+      "jira_id": "4597687",
+      "jira_key": "REB-6809",
+      "state": "confirmed",
+      "updated_at": "2026-10-30T03:34:18Z"
+    },
     "ac5c-8bca-253f-4d63": {
       "baseline": {
         "assignee": null,
@@ -76795,6 +76823,13 @@
       "peer_parent": "REB-4232",
       "state": "confirmed",
       "updated_at": "2026-09-01T01:27:18Z"
+    },
+    "b857-6da0-f3d2-420b": {
+      "created_at": "2026-10-30T03:34:19Z",
+      "jira_id": "4597688",
+      "jira_key": "REB-6810",
+      "state": "confirmed",
+      "updated_at": "2026-10-30T03:34:22Z"
     },
     "b864-8df4-87e5-4928": {
       "baseline": {
@@ -111187,7 +111222,10 @@
     "1793321347866609001": "__rebar_unknown_comment_id__",
     "1793322908915797001": "__rebar_unknown_comment_id__",
     "1793323851967967001": "__rebar_unknown_comment_id__",
-    "1793325108556068001": "__rebar_unknown_comment_id__"
+    "1793325108556068001": "__rebar_unknown_comment_id__",
+    "1793328911743219001": "__rebar_unknown_comment_id__",
+    "1793330056829153001": "__rebar_unknown_comment_id__",
+    "1793330611177519001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -116495,7 +116533,10 @@
     "REB-6805": "d0af-f6cb-aad1-4ae5",
     "REB-6806": "f7bd-e80c-3427-48de",
     "REB-6807": "9640-b716-a998-4d0c",
+    "REB-6808": "7eaa-502b-3d0f-4b08",
+    "REB-6809": "ac57-7690-8736-4cca",
     "REB-681": "f894-ebd4-e841-404f",
+    "REB-6810": "b857-6da0-f3d2-420b",
     "REB-682": "f93a-b947-558b-469c",
     "REB-683": "f983-9441-35f4-445f",
     "REB-684": "76e9-a6f0-3632-42ee",
