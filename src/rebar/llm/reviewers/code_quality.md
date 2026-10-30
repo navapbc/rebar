@@ -1,8 +1,10 @@
 ---
 schema_version: 1
 title: Code quality reviewer
-description: Reviews a code change (commits/diff) for correctness, bugs, edge cases,
-  clarity, and maintainability. The default reviewer for the code-review operation.
+description: 'Reviews a code change (commits/diff) for correctness, bugs, edge cases,
+  clarity, and maintainability. Invoked by explicit `prompt: code-quality` reference
+  from a workflow step; its `applies_to` is empty, so rule-based selection never returns
+  it.'
 inputs: reviewer_input
 outputs: review_result
 execution_mode: agentic
