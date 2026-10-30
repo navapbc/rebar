@@ -79,9 +79,9 @@ def test_class_a_archived_local_drives_jira_to_done(tmp_path: Path) -> None:
     assert not result.retired
 
 
-def test_class_a_already_done_is_noop(tmp_path: Path) -> None:
-    """A locally-terminal ticket whose Jira issue is ALREADY Done needs no
-    transition (idempotent steady state)."""
+def test_class_a_already_done_retires_binding(tmp_path: Path) -> None:
+    """444d/moonstone-cut-eft: a terminal local whose Jira issue already shows the
+    close is confirmed — the binding retires (soft delete) with no Jira write."""
     bs = _store(tmp_path, {"loc-A2": "REB-9"})
     curr = {"REB-9": {"status": "Done"}}
     result = compute(
@@ -93,6 +93,14 @@ def test_class_a_already_done_is_noop(tmp_path: Path) -> None:
         max_acting_fraction=1.0,
     )
     assert result.mutations == [], "already-Done issue must not be re-transitioned"
+    assert result.retired == ["REB-9"]
+    assert bs.is_retired("REB-9")
+    assert bs.get_jira_key("loc-A2") is None
+    data = json.loads(
+        (tmp_path / ".tickets-tracker" / ".bridge_state" / "bindings-retired.json").read_text()
+    )
+    assert data["retired"]["REB-9"]["reason"] == "local_terminal"
+    assert data["retired"]["REB-9"]["local_id"] == "loc-A2"
 
 
 def test_active_local_binding_is_skipped(tmp_path: Path) -> None:
@@ -270,8 +278,9 @@ def test_census_records_acting_and_breaker(tmp_path: Path) -> None:
         max_acting_fraction=1.0,
     )
     assert result.census["counts"]["terminal_transition"] == 1
-    assert result.census["counts"]["noop"] == 1
-    assert result.census["acting_count"] == 1
+    # REB-2 is already Done: the close is confirmed, so its binding retires.
+    assert result.census["counts"]["retire_terminal"] == 1
+    assert result.census["acting_count"] == 2
     assert "breaker" in result.census
 
 
@@ -587,3 +596,156 @@ def test_key_in_both_prev_and_curr_unbound_is_adopted(tmp_path: Path) -> None:
     assert m.direction.value == "inbound"
     assert m.action.value == "create"
     assert m.target == "REB-532"
+
+
+# ── class A routing through the status map (moonstone-cut-eft) ───────────────
+
+
+def _deleted_local(local_id: str) -> dict:
+    return {"ticket_id": local_id, "status": "deleted", "archived": True}
+
+
+def test_class_a_target_comes_from_the_status_map(tmp_path: Path) -> None:
+    bs = _store(tmp_path, {"loc-A": "REB-464"})
+    seen: list[tuple[str, str]] = []
+
+    def _target(local_status: str, jira_key: str) -> str | None:
+        seen.append((local_status, jira_key))
+        return {"archived": "Cancelled"}.get(local_status)
+
+    result = compute(
+        bs,
+        {"REB-464": {"status": "To Do"}},
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader({"loc-A": _archived_local("loc-A")}),
+        max_acting_fraction=1.0,
+        terminal_target_for=_target,
+    )
+    assert seen == [("archived", "REB-464")]
+    assert [m.payload["changed_fields"] for m in result.mutations] == [{"status": "Cancelled"}]
+    assert bs.get_jira_key("loc-A") == "REB-464", "the binding stays live until the close shows"
+
+
+def test_class_a_deleted_uses_the_deleted_key_and_builtin_done(tmp_path: Path) -> None:
+    bs = _store(tmp_path, {"loc-D": "REB-61"})
+    result = compute(
+        bs,
+        {"REB-61": {"status": "To Do"}},
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader({"loc-D": _deleted_local("loc-D")}),
+        max_acting_fraction=1.0,
+    )
+    assert [m.payload["changed_fields"] for m in result.mutations] == [{"status": "Done"}]
+    assert not bs.is_retired("REB-61")
+
+
+def test_class_a_skip_retires_without_touching_jira(tmp_path: Path) -> None:
+    bs = _store(tmp_path, {"loc-D": "REB-61"})
+    result = compute(
+        bs,
+        {"REB-61": {"status": "To Do"}},
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader({"loc-D": _deleted_local("loc-D")}),
+        max_acting_fraction=1.0,
+        terminal_target_for=lambda status, key: None,
+    )
+    assert result.mutations == []
+    assert result.retired == ["REB-61"]
+    assert bs.is_retired("REB-61")
+
+
+def test_class_a_other_terminal_status_retires(tmp_path: Path) -> None:
+    bs = _store(tmp_path, {"loc-D": "REB-62"})
+    result = compute(
+        bs,
+        {"REB-62": {"status": "Cancelled"}},
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader({"loc-D": _deleted_local("loc-D")}),
+        max_acting_fraction=1.0,
+    )
+    assert result.mutations == []
+    assert bs.is_retired("REB-62")
+
+
+def test_class_a_reopened_after_retirement_is_left_alone(tmp_path: Path) -> None:
+    bs = _store(tmp_path, {"loc-A": "REB-41"})
+    reader = _archived_reader({"loc-A": _archived_local("loc-A")})
+    compute(
+        bs,
+        {"REB-41": {"status": "Done"}},
+        active_local_ids=set(),
+        client=None,
+        local_reader=reader,
+        max_acting_fraction=1.0,
+    )
+    assert bs.is_retired("REB-41")
+
+    reopened = compute(
+        bs,
+        {"REB-41": {"status": "To Do"}},
+        active_local_ids=set(),
+        client=None,
+        local_reader=reader,
+        max_acting_fraction=1.0,
+    )
+    assert reopened.mutations == []
+    assert reopened.adopted == []
+
+
+def test_class_a_terminal_retirement_counts_toward_the_breaker(tmp_path: Path) -> None:
+    bindings = {f"loc-{i}": f"REB-{i}" for i in range(130)}
+    bs = _store(tmp_path, bindings)
+    terminal = {f"loc-{i}" for i in range(14)}
+    curr = {
+        f"REB-{i}": {"status": "Done" if f"loc-{i}" in terminal else "To Do"} for i in range(130)
+    }
+    result = compute(
+        bs,
+        curr,
+        active_local_ids={lid for lid in bindings if lid not in terminal},
+        client=None,
+        local_reader=_archived_reader({lid: _archived_local(lid) for lid in terminal}),
+        max_acting_fraction=0.1,
+    )
+    assert result.refused is True
+    assert result.retired == []
+    assert not any(bs.is_retired(f"REB-{i}") for i in range(14))
+
+
+def test_class_a_terminal_retirement_dry_run_writes_nothing(tmp_path: Path) -> None:
+    bs = _store(tmp_path, {"loc-A2": "REB-9"})
+    result = compute(
+        bs,
+        {"REB-9": {"status": "Done"}},
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader({"loc-A2": _archived_local("loc-A2")}),
+        max_acting_fraction=1.0,
+        persist=False,
+    )
+    assert result.retired == ["REB-9"], "dry-run predicts the retirement"
+    assert not bs.is_retired("REB-9")
+    assert bs.get_jira_key("loc-A2") == "REB-9"
+
+
+def test_suppressed_create_names_the_local_terminal_cause(tmp_path: Path, monkeypatch) -> None:
+    bs = _store(tmp_path, {"loc-A2": "REB-9"})
+    compute(
+        bs,
+        {"REB-9": {"status": "Done"}},
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader({"loc-A2": _archived_local("loc-A2")}),
+        max_acting_fraction=1.0,
+    )
+    alerts: list[dict] = []
+    monkeypatch.setattr(bs._repo, "alert", lambda key, record: alerts.append(record))
+    bs.note_create_suppressed("loc-A2", "REB-9")
+    (record,) = alerts
+    assert record["kind"] == "outbound-create-suppressed"
+    assert "archived or deleted locally" in record["reason"]
+    assert "404" not in record["reason"]

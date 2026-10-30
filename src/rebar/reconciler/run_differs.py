@@ -388,6 +388,22 @@ def _run_differs_inbound(ctx: Any, mutations, outbound_raw, absent_alive_fields,
         mutations.append(typed)
 
 
+def _terminal_target_resolver(repo_root: Path):
+    """Resolve a deleted/archived local's Jira target through the project's effective
+    status map (444d); ``None`` when the operator mapped that status to ``skip``."""
+    from rebar.reconciler import config
+
+    maps: dict[str, dict[str, str]] = {}
+
+    def _resolve(local_status: str, jira_key: str) -> str | None:
+        project_key = jira_key.rsplit("-", 1)[0]
+        if project_key not in maps:
+            maps[project_key] = config.effective_status_map(project_key, root=repo_root)
+        return maps[project_key].get(local_status)
+
+    return _resolve
+
+
 def _run_differs_binding_walk(ctx: Any, mutations, outbound_diff_client) -> None:
     """Binding-store-driven acting walk (drift classes A + C); extend ``mutations``."""
     repo_root = ctx.repo_root
@@ -432,6 +448,7 @@ def _run_differs_binding_walk(ctx: Any, mutations, outbound_diff_client) -> None
         outbound_differ_mod=outbound_differ_mod,
         persist=persist,
         skip_adopt_keys=_already_created,
+        terminal_target_for=_terminal_target_resolver(repo_root),
     )
     sync_logger.log(
         "binding_walk_complete",

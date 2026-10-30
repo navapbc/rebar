@@ -50,10 +50,30 @@ def test_bound_terminal_present_live_is_terminal_transition(local):
 
 
 @pytest.mark.parametrize("done_status", ["Done", "Cancelled"])
-def test_bound_terminal_present_already_done_is_noop(done_status):
-    # Idempotent steady state: local terminal + Jira already terminal → nothing.
+def test_bound_terminal_present_already_done_retires(done_status):
+    # The close is confirmed: retire the binding so a reopened issue is left alone.
     d = c.classify(ARCHIVED, _present(done_status), CONFIRMED_BINDING, None)
-    assert d.kind is DecisionKind.NOOP
+    assert d.kind is DecisionKind.RETIRE_TERMINAL
+    assert d.is_acting
+
+
+@pytest.mark.parametrize("local", [ARCHIVED, DELETED])
+def test_bound_terminal_transition_carries_the_mapped_target(local):
+    d = c.classify(local, _present("To Do"), CONFIRMED_BINDING, None, terminal_target="Won't Do")
+    assert d.kind is DecisionKind.TERMINAL_TRANSITION
+    assert d.payload["target_status"] == "Won't Do"
+
+
+def test_bound_terminal_at_the_mapped_target_retires():
+    d = c.classify(
+        ARCHIVED, _present("Won't Do"), CONFIRMED_BINDING, None, terminal_target="Won't Do"
+    )
+    assert d.kind is DecisionKind.RETIRE_TERMINAL
+
+
+def test_bound_terminal_with_no_target_retires_without_a_transition():
+    d = c.classify(DELETED, _present("To Do"), CONFIRMED_BINDING, None, terminal_target=None)
+    assert d.kind is DecisionKind.RETIRE_TERMINAL
 
 
 def test_bound_absent_in_window_is_probe_get_regardless_of_local():

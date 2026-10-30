@@ -72,7 +72,12 @@ def test_core_field_classes_pinned() -> None:
     """Pin the load-bearing symmetry declarations BY NAME (mutation check #1)."""
     c = _contract
     assert FIELD_CONTRACT["status"].symmetry == c.BIDIRECTIONAL
-    assert FIELD_CONTRACT["status"].lossy_values == {"blocked", "cancelled", "deleted"}
+    assert FIELD_CONTRACT["status"].lossy_values == {
+        "blocked",
+        "cancelled",
+        "deleted",
+        "archived",
+    }
     assert FIELD_CONTRACT["labels"].symmetry == c.ADD_WINS
     assert FIELD_CONTRACT["links"].symmetry == c.ONE_WAY_GATED
     assert FIELD_CONTRACT["parent"].symmetry == c.ONE_WAY_GATED

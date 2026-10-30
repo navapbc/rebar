@@ -39,6 +39,7 @@ LOCAL_STATUS_TO_JIRA: dict[str, str] = {
     "blocked": "In Progress",
     "cancelled": "Done",
     "deleted": "Done",
+    "archived": "Done",
 }
 
 

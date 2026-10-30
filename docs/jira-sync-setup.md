@@ -333,6 +333,17 @@ What round-trips, and where Jira's data model bounds it.
 | Parent — **only when the parent is an Epic** | ✓ | ✓ |
 | Parent — when the parent is a non-Epic (Story/Task/Bug) | **excluded** | n/a |
 
+**Deleting or archiving a bound ticket closes its Jira issue, then unbinds it.** The bridge
+moves the issue to the project's mapped status for `deleted` or `archived` (`Done` by default)
+and retires the binding once the issue shows that status, so a later reopen in Jira is left
+alone. Map the status to `"skip"` under `[mapping.projects.<KEY>.status_map]` to unbind without
+closing the issue (see `docs/mapping-seam.md`).
+
+**Changing a ticket's type never retypes its Jira issue.** `rebar edit --ticket_type` changes the
+local ticket only; Jira sets an issue's type at creation. Deleting a bound ticket and creating a
+replacement of the new type closes the original Jira issue and creates a second one for the
+replacement, and rebar cannot merge them afterwards.
+
 ### The parent-hierarchy limitation (multi-level trees do not fully round-trip)
 
 rebar's local hierarchy (`parent_id`) supports **arbitrary depth** —

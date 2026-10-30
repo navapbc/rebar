@@ -105,6 +105,19 @@ def test_fixed_point_after_simulated_heal():
     #  A) the 5 archived-terminal Jira issues transition To Do → Done.
     for key in ("REB-464", "REB-456", "REB-465", "REB-466", "REB-457"):
         snapshot[key] = {**snapshot[key], "status": "Done"}
+    #     The next pass sees Done and retires those bindings (RETIRE_TERMINAL).
+    for key in ("REB-464", "REB-456", "REB-465", "REB-466", "REB-457"):
+        assert (
+            c.classify(
+                locals_.get(store["reverse"][key]),
+                JiraObservation(ObservedJira.PRESENT, key=key, fields=snapshot[key]),
+                store["bindings"][store["reverse"][key]],
+                None,
+            ).kind
+            is DecisionKind.RETIRE_TERMINAL
+        )
+        store["bindings"].pop(store["reverse"].pop(key))
+    retired = {"REB-464", "REB-456", "REB-465", "REB-466", "REB-457"}
     #  C) REB-530's dangling binding is retired (removed from the store).
     lid_530 = store["reverse"].pop("REB-530")
     store["bindings"].pop(lid_530)
@@ -121,7 +134,7 @@ def test_fixed_point_after_simulated_heal():
         "archived": False,
     }
 
-    decisions = _replay(store, snapshot, locals_)
+    decisions = _replay(store, snapshot, locals_, retired=retired)
     acting = {k: d.kind for k, d in decisions.items() if d.is_acting}
     assert acting == {}, f"not a fixed point after heal: {acting}"
     # REB-530 no longer produces any cell (unbound + not fetched).

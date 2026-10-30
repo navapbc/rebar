@@ -89,7 +89,7 @@ class ModelPair:
         elif k is DecisionKind.ADOPT:
             self.local_kind = "active"
             self.bound = True
-        elif k is DecisionKind.RETIRE_AFTER_GRACE:
+        elif k in (DecisionKind.RETIRE_AFTER_GRACE, DecisionKind.RETIRE_TERMINAL):
             self.bound = False
             self.retired = True
         elif k is DecisionKind.PROBE_GET:

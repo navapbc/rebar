@@ -128,12 +128,15 @@ _REBAR_STATUS_LABEL_PREFIX = "rebar-status:"
 # The local-status vocabulary a ``rebar-status:<local>`` label may name. A label whose
 # suffix is NOT in this set is ignored (fall back to the raw workflow status), so a
 # malformed / unknown label never fabricates a bogus local status. DERIVED (not a
-# hand-maintained parallel literal) from the parity-tested reverse map plus the one
-# terminal local with no Jira reverse (``deleted`` -> "Done", which reverses to
-# ``closed``): the recovery domain is exactly the local statuses the outbound stamp rule
-# can emit. ``inbound_translate._LOCAL_STATUS_VALUES`` re-uses this so the two cannot
+# hand-maintained parallel literal) from the parity-tested reverse map plus the
+# terminal locals with no Jira reverse (``deleted`` and ``archived`` -> "Done", which
+# reverses to ``closed``): the recovery domain is exactly the local statuses the outbound
+# stamp rule can emit. ``inbound_translate._LOCAL_STATUS_VALUES`` re-uses this so the two cannot
 # drift.
-_LOCAL_STATUS_VOCAB: frozenset[str] = frozenset(_JIRA_TO_LOCAL_STATUS.values()) | {"deleted"}
+_LOCAL_STATUS_VOCAB: frozenset[str] = frozenset(_JIRA_TO_LOCAL_STATUS.values()) | {
+    "deleted",
+    "archived",
+}
 
 
 def recover_status_label(labels: Any) -> str | None:

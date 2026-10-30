@@ -119,6 +119,14 @@ The resolvers encode three ways a local value reaches (or does not reach) Jira:
   canonical reverse is the *unannotated* local status, with `blocked`/`cancelled` reconstructed
   from `rebar-status:` annotation labels.
 
+**Deleted and archived bound tickets.** When a bound local ticket is deleted or archived, the
+binding walk drives its Jira issue to the effective status map's target for `deleted` or
+`archived` (both `Done` by default), then retires the binding on the first pass that sees the
+issue at that target or any other terminal status. A retired issue is never closed again or
+re-adopted, so a person can reopen it in Jira. Mapping `deleted` or `archived` to `"skip"`
+retires the binding without a Jira write. Retirement counts toward `max_acting_fraction`, as a
+404 retirement does.
+
 ### Transition replay
 
 Status changes are applied as Jira **workflow transitions**, not direct field writes. Because

@@ -254,7 +254,14 @@ class BindingLifecycle:
 
     # -- retirement: the soft delete, RETIRED FIRST -------------------------
 
-    def retire(self, local_id: str, jira_key: str, entry: dict[str, Any]) -> None:
+    def retire(
+        self,
+        local_id: str,
+        jira_key: str,
+        entry: dict[str, Any],
+        *,
+        reason: str = "confirmed_404",
+    ) -> None:
         """Soft-delete a binding: move it to the retired file + alert.
 
         RETIRED FIRST, live second (both writes go through the repository): the entry
@@ -275,6 +282,7 @@ class BindingLifecycle:
             "retired_at": _now_iso(),
             "absent_404_count": int(entry.get("absent_404_count", 0)),
             "last_jira_key": jira_key,
+            "reason": reason,
         }
         self._repo.save_retired(retired_entries)
         self._retired.add(jira_key)
@@ -292,6 +300,14 @@ class BindingLifecycle:
                 "local_id": local_id,
             },
         )
+
+    def retire_terminal(self, local_id: str, jira_key: str) -> None:
+        """Retire a binding whose local ticket is archived or deleted once the Jira close
+        is confirmed or mapped to ``skip`` (444d), through the same soft delete."""
+        entry = self._bindings.get(local_id)
+        if entry is None or entry.get("jira_key") != jira_key:
+            return
+        self.retire(local_id, jira_key, entry, reason="local_terminal")
 
     def is_retired(self, jira_key: str) -> bool:
         """Return True if the key has been soft-deleted (retired)."""
@@ -346,12 +362,21 @@ class BindingLifecycle:
                 "kind": "outbound-create-suppressed",
                 "local_id": local_id,
                 "jira_key": jira_key,
-                "reason": (
-                    f"Jira issue {jira_key} was confirmed deleted (404 to grace) and the "
-                    f"binding retired; a deleted issue is never re-created."
-                ),
+                "reason": self._suppression_reason(jira_key),
                 "remedy": f"BindingStore.unretire({jira_key!r}) to re-enable creation",
             },
+        )
+
+    def _suppression_reason(self, jira_key: str) -> str:
+        retired = self._repo.retired_entries().get(jira_key) or {}
+        if retired.get("reason") == "local_terminal":
+            return (
+                f"The local ticket was archived or deleted locally and its binding to "
+                f"{jira_key} retired after the Jira close; a new issue is not created."
+            )
+        return (
+            f"Jira issue {jira_key} was confirmed deleted (404 to grace) and the "
+            f"binding retired; a deleted issue is never re-created."
         )
 
     # -- rich-text emission state (morose-selfaware-unicorn) ---------------

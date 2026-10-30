@@ -428,3 +428,25 @@ def test_drift_warning_is_order_independent(
     out = _mapper().map_fields_to_remote({"status": "drifty_status"}, status_map=eff)
     assert "status" not in out
     assert "drifty_status" in capsys.readouterr().err
+
+
+def test_terminal_target_resolver_routes_through_the_effective_status_map(
+    tmp_path: Path,
+) -> None:
+    """444d / moonstone-cut-eft: a deleted or archived bound ticket's Jira target comes
+    from the project's effective status map; ``skip`` yields no target."""
+    from rebar.reconciler.run_differs import _terminal_target_resolver
+
+    assert cfg_mod.local_to_jira_status["archived"] == "Done"
+    builtin = _terminal_target_resolver(_proj(tmp_path / "builtin", ""))
+    assert builtin("archived", "REB-1") == "Done"
+    assert builtin("deleted", "REB-1") == "Done"
+
+    proj = _proj(
+        tmp_path / "override",
+        '[mapping.projects.REB.status_map]\narchived = "Cancelled"\ndeleted = "skip"\n',
+    )
+    resolve = _terminal_target_resolver(proj)
+    assert resolve("archived", "REB-7") == "Cancelled"
+    assert resolve("deleted", "REB-7") is None
+    assert resolve("deleted", "OTHER-7") == "Done"

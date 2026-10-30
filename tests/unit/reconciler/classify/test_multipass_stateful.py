@@ -104,5 +104,5 @@ def test_baseline_persisted_between_passes_and_self_heals_after_partial_failure(
         d_arch = _classify_pair(store3, "REB-2", locals_["REB-2"], snapshot())
         assert d_active.kind is DecisionKind.SYNC_FIELDS
         assert not d_active.is_acting
-        assert d_arch.kind is DecisionKind.NOOP  # terminal + Jira Done = steady state
-        assert not d_arch.is_acting
+        # terminal + Jira Done = the close is confirmed: retire, never re-transition.
+        assert d_arch.kind is DecisionKind.RETIRE_TERMINAL

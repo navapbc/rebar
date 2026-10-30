@@ -49,10 +49,10 @@ FIELD_CONTRACT: dict[str, FieldSymmetry] = {
         symmetry=BIDIRECTIONAL,
         conflict_class="state",
         codec="rebar.reconciler.config.local_to_jira_status/jira_to_local_status",
-        lossy_values=frozenset({"blocked", "cancelled", "deleted"}),
+        lossy_values=frozenset({"blocked", "cancelled", "deleted", "archived"}),
         notes=(
             "Forward map is non-injective: blocked→'In Progress', "
-            "cancelled/deleted→'Done'. Round-trip identity holds only on the "
+            "cancelled/deleted/archived→'Done'. Round-trip identity holds only on the "
             "canonical preimages (idea/open/in_progress/closed); the lossy "
             "values are reconstructed from rebar-status: annotation labels "
             "(never from the workflow status alone — ticket robe-creek-zealot)."

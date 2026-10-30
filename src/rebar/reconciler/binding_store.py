@@ -342,6 +342,10 @@ class BindingStore:
         """Return True if the key has been soft-deleted (retired)."""
         return self._lifecycle.is_retired(jira_key)
 
+    def retire_terminal(self, local_id: str, jira_key: str) -> None:
+        """Retire a deleted/archived local's binding once its Jira close is confirmed."""
+        self._lifecycle.retire_terminal(local_id, jira_key)
+
     # -- tombstones: the local-side view of retirement (thin delegates; 3b5f) -
     #
     # Why the local-side index exists at all, and why lifting a tombstone must clear

@@ -62,6 +62,7 @@ def test_local_status_map_pins_every_state_including_unified_deleted() -> None:
         "closed": "Done",
         "cancelled": "Done",
         "deleted": "Done",
+        "archived": "Done",
     }
 
 

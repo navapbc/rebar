@@ -51,7 +51,8 @@ class DecisionKind(Enum):
 
     SYNC_FIELDS = "sync_fields"  # bound + active + present → run the field differ
     ADOPT = "adopt"  # unbound Jira-native issue → create local + bind (gated)
-    TERMINAL_TRANSITION = "terminal_transition"  # local terminal → drive Jira → Done
+    TERMINAL_TRANSITION = "terminal_transition"  # local terminal → drive Jira → mapped target
+    RETIRE_TERMINAL = "retire_terminal"  # local terminal + close confirmed (or skip) → retire
     PROBE_GET = "probe_get"  # bound + absent-in-window → bounded direct GET
     RETIRE_AFTER_GRACE = "retire_after_grace"  # confirmed-404 at grace → retire binding
     SKIP_RETIRED = "skip_retired"  # unbound but retired key → do not re-adopt
@@ -63,7 +64,12 @@ class DecisionKind(Enum):
 # SYNC_FIELDS may or may not actually mutate (empty diff = no-op); it is NOT
 # acting for blast-radius purposes. PROBE_GET is a bounded read, not acting.
 ACTING_KINDS = frozenset(
-    {DecisionKind.TERMINAL_TRANSITION, DecisionKind.RETIRE_AFTER_GRACE, DecisionKind.ADOPT}
+    {
+        DecisionKind.TERMINAL_TRANSITION,
+        DecisionKind.RETIRE_AFTER_GRACE,
+        DecisionKind.RETIRE_TERMINAL,
+        DecisionKind.ADOPT,
+    }
 )
 
 
@@ -113,6 +119,7 @@ def classify(
     _baseline: Mapping | None,
     *,
     grace: int = _DEFAULT_ABSENT_RETIRE_GRACE,
+    terminal_target: str | None = "Done",
 ) -> Decision:
     """Classify one ``(local, jira, binding, baseline)`` cell into a Decision.
 
@@ -125,6 +132,9 @@ def classify(
     ``baseline`` is not consumed for the lifecycle routing here (it drives
     field-level direction arbitration inside the SYNC_FIELDS handler, ADR 0026);
     it is part of the signature so both consumers pass the same tuple.
+
+    ``terminal_target`` is the Jira status the effective status map gives the local
+    terminal status; ``None`` means the operator mapped it to ``skip``.
     """
     bound = binding is not None
     lstate = local_state(local)
@@ -209,19 +219,27 @@ def classify(
         )
 
     if lstate is LocalState.TERMINAL:
-        # Drift class A — a locally archived/deleted ticket must drive its Jira
-        # issue to a terminal status. If Jira is ALREADY terminal, steady state.
+        # Drift class A (444d) — a locally archived/deleted ticket drives its Jira
+        # issue to the mapped terminal status, then the binding retires once that
+        # close shows, so a person can reopen the issue without rebar re-closing it.
         jira_status = _jira_status(jira.fields)
-        if jira_status in _JIRA_TERMINAL_STATUSES:
+        payload = {"jira_key": jira.key, "jira_status": jira_status}
+        if terminal_target is None:
             return Decision(
-                DecisionKind.NOOP,
-                reason="bound + local terminal + Jira already terminal; steady state",
-                payload={"jira_key": jira.key, "jira_status": jira_status},
+                DecisionKind.RETIRE_TERMINAL,
+                reason="bound + local terminal mapped to skip; retire without a Jira write",
+                payload=payload,
+            )
+        if jira_status == terminal_target or jira_status in _JIRA_TERMINAL_STATUSES:
+            return Decision(
+                DecisionKind.RETIRE_TERMINAL,
+                reason="bound + local terminal + Jira already terminal; close confirmed",
+                payload=payload,
             )
         return Decision(
             DecisionKind.TERMINAL_TRANSITION,
-            reason="bound + local terminal + Jira live; drive Jira to Done",
-            payload={"jira_key": jira.key, "jira_status": jira_status},
+            reason=f"bound + local terminal + Jira live; drive Jira to {terminal_target}",
+            payload={**payload, "target_status": terminal_target},
         )
 
     # lstate is ACTIVE, obs is PRESENT — the normal bidirectional field sync.

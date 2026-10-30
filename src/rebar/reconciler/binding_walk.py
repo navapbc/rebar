@@ -20,11 +20,6 @@ if TYPE_CHECKING:
 # The convergence-foundation grace default lives in the owned
 # ``config.resolve_absent_retire_grace`` resolver (twin of binding_store).
 
-# The Jira workflow status a terminal local ticket is driven to (ADR 0029: the
-# reverse status map treats Done as terminal; the annotation labels preserve the
-# lossless local status).
-_TERMINAL_JIRA_STATUS = "Done"
-
 
 @dataclass
 class BindingWalkResult:
@@ -45,6 +40,46 @@ class BindingWalkResult:
     probed: list[str] = field(default_factory=list)
     alerted: list[str] = field(default_factory=list)
     adopted: list[str] = field(default_factory=list)
+
+
+def _builtin_terminal_target(local_status: str, _jira_key: str) -> str | None:
+    """The built-in status map's target for a terminal local status (no ``[mapping]``)."""
+    from .config import local_to_jira_status
+
+    return local_to_jira_status.get(local_status)
+
+
+def _terminal_status_key(local: Mapping[str, Any] | None) -> str:
+    """The status-map key for a terminal local: ``deleted``, else ``archived``."""
+    return "deleted" if (local or {}).get("status") == "deleted" else "archived"
+
+
+def _observe_bound(
+    jira_key: str,
+    curr_snapshot: Mapping[str, Any],
+    client: TicketTransport | None,
+    probe: Callable[[Any, str], Any],
+    classify_mod: Any,
+    ob_mod: Any,
+) -> Any:
+    """Tag a bound key with its four-way observation (ADR 0028)."""
+    ObservedJira = classify_mod.ObservedJira
+    JiraObservation = classify_mod.JiraObservation
+    if jira_key in curr_snapshot:
+        return JiraObservation(
+            state=ObservedJira.PRESENT, key=jira_key, fields=curr_snapshot[jira_key]
+        )
+    if client is None:
+        # No client ⇒ cannot resolve absence; treat as absent-in-window and
+        # defer (never a deletion — ADR 0028 §1).
+        return JiraObservation(state=ObservedJira.ABSENT_IN_WINDOW, key=jira_key)
+    got = probe(client, jira_key)
+    if got is ob_mod._DELETED:
+        return JiraObservation(state=ObservedJira.CONFIRMED_404, key=jira_key)
+    if got is ob_mod._TRANSPORT_ERROR:
+        return JiraObservation(state=ObservedJira.TRANSPORT_ERROR, key=jira_key)
+    # HTTP 200 — alive but out of the fetch window.
+    return JiraObservation(state=ObservedJira.PRESENT, key=jira_key, fields=got)
 
 
 def _resolve_grace() -> int:
@@ -70,13 +105,20 @@ def compute_binding_walk_mutations(
     probe_get: Callable[[Any, str], Any] | None = None,
     persist: bool = True,
     skip_adopt_keys: set[str] | None = None,
+    terminal_target_for: Callable[[str, str], str | None] | None = None,
 ) -> BindingWalkResult:
     """Classify off-snapshot bindings and unbound Jira issues, then apply the whole-pass
     blast-radius check before acting. Active local bindings are handled elsewhere.
     A missing fetch key requires a bounded direct GET. Only confirmed 404s count
     toward retirement. A failed probe defers. With persist=False, return predicted
     mutations and census without changing binding state. The result contains terminal
-    mutations, acted-on keys, census, and breaker verdict."""
+    mutations, acted-on keys, census, and breaker verdict.
+
+    ``terminal_target_for(local_status, jira_key)`` resolves the Jira status a deleted
+    or archived local drives its issue to through the effective status map; ``None``
+    (``skip``) retires the binding without a Jira write. Defaults to the built-in map."""
+    if terminal_target_for is None:
+        terminal_target_for = _builtin_terminal_target
     mut_mod = mutation_mod
     ob_mod = outbound_differ_mod
 
@@ -110,26 +152,14 @@ def compute_binding_walk_mutations(
 
         local = local_reader(local_id)
 
-        if jira_key in curr_snapshot:
-            obs = JiraObservation(
-                state=ObservedJira.PRESENT, key=jira_key, fields=curr_snapshot[jira_key]
-            )
-        elif client is None:
-            # No client ⇒ cannot resolve absence; treat as absent-in-window and
-            # defer (never a deletion — ADR 0028 §1).
-            obs = JiraObservation(state=ObservedJira.ABSENT_IN_WINDOW, key=jira_key)
-        else:
-            got = _probe(client, jira_key)
-            if got is ob_mod._DELETED:
-                obs = JiraObservation(state=ObservedJira.CONFIRMED_404, key=jira_key)
-            elif got is ob_mod._TRANSPORT_ERROR:
-                obs = JiraObservation(state=ObservedJira.TRANSPORT_ERROR, key=jira_key)
-            else:
-                # HTTP 200 — alive but out of the fetch window.
-                obs = JiraObservation(state=ObservedJira.PRESENT, key=jira_key, fields=got)
-
+        obs = _observe_bound(jira_key, curr_snapshot, client, _probe, classify_mod, ob_mod)
         baseline = binding_store.get_baseline(local_id)
-        decision = classify_mod.classify(local, obs, entry, baseline, grace=grace)
+        target: str | None = "Done"
+        if classify_mod.local_state(local) is classify_mod.LocalState.TERMINAL:
+            target = terminal_target_for(_terminal_status_key(local), jira_key)
+        decision = classify_mod.classify(
+            local, obs, entry, baseline, grace=grace, terminal_target=target
+        )
         plans.append((local_id, jira_key, obs, decision))
 
     # ---- phase 1b: unbound arm — ADOPT a Jira-native issue (drift class B) -----
@@ -198,7 +228,7 @@ def compute_binding_walk_mutations(
                     action=mut_mod.MutationAction.update,
                     target=jira_key,
                     payload={
-                        "changed_fields": {"status": _TERMINAL_JIRA_STATUS},
+                        "changed_fields": {"status": decision.payload["target_status"]},
                         "comments": [],
                         "labels": [],
                         "links": [],
@@ -211,6 +241,12 @@ def compute_binding_walk_mutations(
                     },
                 )
             )
+        elif kind is DecisionKind.RETIRE_TERMINAL:
+            # The close is confirmed (or mapped to skip): soft-delete the binding so a
+            # reopened issue is never re-closed and never re-adopted (SKIP_RETIRED).
+            result.retired.append(jira_key)
+            if persist:
+                binding_store.retire_terminal(local_id, jira_key)
         elif kind in (DecisionKind.PROBE_GET, DecisionKind.RETIRE_AFTER_GRACE):
             # The GET already happened in phase 1. Advance/retire ONLY on a
             # CONFIRMED 404 (ADR 0028 §2 — never on ABSENT_IN_WINDOW).

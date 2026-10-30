@@ -84,6 +84,8 @@ local_to_jira_status: dict[str, str] = {
     "closed": "Done",
     "cancelled": "Done",
     "deleted": "Done",
+    # The terminal-transition target for an archived bound ticket (444d).
+    "archived": "Done",
 }
 
 # The reverse status map is canonical because the forward map is not injective.
