@@ -71,13 +71,18 @@ PYTHON_VERSION_FILE := .github/python-version.txt
 # default is 4 and not `auto`; override per invocation with `make test PYTEST_WORKERS=8`.
 PYTEST_WORKERS ?= 4
 
+# Test-bearing extras (bug 9b28-415d-0780-4b2a). CI's gating pytest cell installs these and
+# sets REBAR_REQUIRE_EXTRAS=1, so a venv without them skips tests CI runs and fails. Held equal
+# to that cell's `uv sync` line by tests/unit/test_install_extras_parity.py.
+TEST_EXTRAS := reviewbot ui grounding-terraform
+
 .PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check verify test scanner-integration jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin ensure-pandoc verify-mcp-pin
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-install:  ## Install rebar from the committed uv.lock (uv sync --locked, dev + metrics extras) + the pre-commit hook (the commit gate).
+install:  ## Install rebar from the committed uv.lock (uv sync --locked, dev + metrics + CI test extras) + the pre-commit hook (the commit gate).
 	@# uv-canonical (ticket ce5d): the repo's own envs install THROUGH the committed lock so
 	@# every checkout gets the same verified-importable dependency set (the unlocked pip path
 	@# once resolved an import-broken pydantic-ai-slim/anthropic pair). `--locked` refuses to
@@ -93,12 +98,14 @@ install:  ## Install rebar from the committed uv.lock (uv sync --locked, dev + m
 	@# locally. It adds no lock churn — the metrics extra is already in the committed lock.
 	@# scc (Go) and jscpd (Node) cannot come from a Python extra; they are optional and
 	@# documented in docs/local-dev-env.md, and their absence degrades to `unavailable`.
+	@#
+	@# TEST_EXTRAS (above) makes `make verify` run the tests CI's gating cell runs.
 	@command -v uv >/dev/null 2>&1 || { \
 		echo "ERROR: 'uv' is required (canonical bootstrap installs through the committed uv.lock)."; \
 		echo "       Install it: https://docs.astral.sh/uv/getting-started/installation/"; \
 		echo "       Unlocked fallback (resolves fresh — NOT the canonical env): make install-unlocked"; \
 		exit 1; }
-	uv sync --locked --extra dev --extra metrics
+	uv sync --locked --extra dev --extra metrics $(addprefix --extra ,$(TEST_EXTRAS))
 	$(MAKE) ensure-pandoc
 	$(MAKE) hooks
 
@@ -106,7 +113,7 @@ install-unlocked:  ## Fallback: editable pip install (UNLOCKED — resolves fres
 	@# `metrics` named explicitly for the same reason as in `install` above — the dev
 	@# extra's `nava-rebar[agents,metrics]` self-reference is CI-motivated, so this states
 	@# the dev-env requirement itself rather than inheriting it by coincidence.
-	python -m pip install -e '.[dev,metrics]'
+	python -m pip install -e '.[dev,metrics,$(shell echo $(TEST_EXTRAS) | tr ' ' ,)]'
 	$(MAKE) hooks
 
 hooks:  ## (Re)install the pre-commit git hook and VERIFY it landed (the commit gate).

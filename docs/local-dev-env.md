@@ -169,7 +169,8 @@ export AWS_DEFAULT_REGION=us-east-1             # a region must resolve; Bedrock
 > the store.
 
 **Use `make install` — it is the one canonical setup path.** It runs `uv sync --locked
---extra dev --extra metrics`, installing the repo's env **through the committed `uv.lock`** (so every
+--extra dev --extra metrics` plus the Makefile's `TEST_EXTRAS` (the extras CI's gating test
+lane installs; see "Running the tests CI runs" below), installing the repo's env **through the committed `uv.lock`** (so every
 checkout gets the same verified-importable dependency set — the unlocked path once resolved
 an import-broken `pydantic-ai-slim`/`anthropic` pair; the dev extra pulls
 `nava-rebar[agents,metrics]` plus the lint/type/test tooling), **and** wires the pre-commit hook
@@ -183,7 +184,7 @@ is the single source of truth for lint/format/type/test — see `make help`.
 > follow it with the hook step and verify it:
 >
 > ```sh
-> uv sync --locked --extra dev --extra metrics  # the canonical locked install (pip -e '.[dev,metrics]' is the unlocked fallback)
+> make -n install | grep 'uv sync'  # prints the canonical locked install; run what it prints
 > make hooks                   # installs + VERIFIES the pre-commit hook; re-runnable anytime
 > ```
 >
@@ -468,8 +469,8 @@ just the contributor-side install.)
 | **scc** | Go | `module_size_distribution` | **you install it** (optional) |
 | **jscpd** | Node | `duplication_summary` | **you install it** (optional) |
 
-**lizard needs no action.** `make install` runs `uv sync --locked --extra dev --extra metrics`,
-so every venv it provisions — including one made by `make worktree` — has it.
+**lizard needs no action.** `make install` syncs `--extra dev --extra metrics` (plus
+`TEST_EXTRAS`), so every venv it provisions — including one made by `make worktree` — has it.
 
 **scc and jscpd are optional.** They are ordinary CLIs on `PATH`, not Python packages, so no
 `pip`/`uv` extra can deliver them. Install them only if you want the size and duplication
@@ -624,19 +625,24 @@ lanes keep their own, larger, calibrated budgets.
 
 ### Running the tests CI runs (the optional-extra surface)
 
-`make install` deliberately stays lean, so ~38 tests gated on
-`pytest.importorskip("fastapi")` / `("jinja2")` — the review-bot receiver, the opcert
-service app, the audit UI, and the path-injection + token-redaction security guards —
-**skip** in that env. CI does not: its pytest lane installs `dev + reviewbot + ui` and sets
-`REBAR_REQUIRE_EXTRAS=1`, which turns any such skip into a hard error (see
-`tests/_extra_guard.py`). That env var is what makes a lost extra reddening instead of
-silent — a whole surface once vanished from CI for months because nothing reported it
+Some tests are gated on `pytest.importorskip("fastapi")`, `("jinja2")` or `("hcl2")`: the
+review-bot receiver, the opcert service app, the audit UI, the path-injection and
+token-redaction security guards, and the Terraform grounding tools. They skip in a venv
+without those packages. CI's gating pytest lane installs the extras that provide them and
+sets `REBAR_REQUIRE_EXTRAS=1`, which turns any such skip into a hard error (see
+`tests/_extra_guard.py`). That env var is what makes a lost extra fail instead of skipping
+silently: a whole surface once vanished from CI for months because nothing reported it
 (bug `599e-77da-29dd-482d`).
 
-To reproduce the CI selection locally:
+`make install` installs the same extras, so `make verify` runs those tests too. The
+Makefile names them once, as `TEST_EXTRAS`, and `tests/unit/test_install_extras_parity.py`
+fails when that list and the gating lane's `uv sync` line drift apart. A venv provisioned
+before this change skipped them; re-run `make install` to pick them up (bug
+`9b28-415d-0780-4b2a`: a review-bot test that `make verify` skipped failed in CI).
+
+To check that nothing is being skipped for a missing extra:
 
 ```sh
-uv sync --locked --extra dev --extra reviewbot --extra ui
 REBAR_REQUIRE_EXTRAS=1 pytest -m "not integration and not external"
 ```
 
