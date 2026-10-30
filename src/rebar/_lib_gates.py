@@ -246,4 +246,4 @@ def summary(
 
     tracker = reads.tracker_dir(repo_root)
     reads.ensure_fresh(tracker)
-    return [gates.summary_compute(tid, tracker) for tid in ticket_ids]
+    return gates.summary_many(ticket_ids, tracker)

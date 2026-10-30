@@ -508,7 +508,13 @@ def list_states(
     return sort_states(out, sort)
 
 
-def deps_state(ticket_id: str, tracker: str, *, include_archived: bool = False) -> dict:
+def deps_state(
+    ticket_id: str,
+    tracker: str,
+    *,
+    include_archived: bool = False,
+    load_states: Callable[[], dict[str, Any]] | None = None,
+) -> dict:
     resolved = resolve_ticket_id(ticket_id, tracker)
     if resolved is None:
         raise ReadError(f"ticket '{ticket_id}' does not exist")
@@ -522,7 +528,9 @@ def deps_state(ticket_id: str, tracker: str, *, include_archived: bool = False) 
                 f"ticket '{resolved}' is archived. "
                 "Use --include-archived to include archived tickets."
             )
-    return build_dep_graph(resolved, tracker, exclude_archived=not include_archived)
+    return build_dep_graph(
+        resolved, tracker, exclude_archived=not include_archived, load_states=load_states
+    )
 
 
 def ready_states(tracker: str, *, epic: str | None = None, sort: str = "") -> list[dict]:

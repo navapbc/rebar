@@ -20,7 +20,11 @@ from ._status import _get_ticket_status
 
 
 def build_dep_graph(
-    ticket_id: str, tracker_dir: str, exclude_archived: bool = True
+    ticket_id: str,
+    tracker_dir: str,
+    exclude_archived: bool = True,
+    *,
+    load_states: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the dependency graph for a ticket.
 
@@ -38,6 +42,10 @@ def build_dep_graph(
     Args:
         exclude_archived: When True (default), archived tickets are excluded from
             children and blockers lists. Pass False to include archived tickets.
+        load_states: Optional loader for the indexed store states, called only on a
+            cache miss in place of ``load_indexed_states``. A caller building graphs for
+            several ids passes one memoised loader so the store is reduced at most once
+            (bug exhaustive-semiacidic-chupacabra).
     """
     cache_key = _compute_cache_key(tracker_dir)
 
@@ -47,7 +55,9 @@ def build_dep_graph(
         if cached_graphs is not None and ticket_id in cached_graphs:
             return cached_graphs[ticket_id]
 
-    result = _compute_dep_graph(ticket_id, tracker_dir, exclude_archived=exclude_archived)
+    result = _compute_dep_graph(
+        ticket_id, tracker_dir, exclude_archived=exclude_archived, load_states=load_states
+    )
 
     if cache_key and exclude_archived:
         cached_graphs = _read_graph_cache(tracker_dir, cache_key) or {}
@@ -58,10 +68,18 @@ def build_dep_graph(
 
 
 def _compute_dep_graph(
-    ticket_id: str, tracker_dir: str, exclude_archived: bool = True
+    ticket_id: str,
+    tracker_dir: str,
+    exclude_archived: bool = True,
+    *,
+    load_states: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compute (without cache) the dependency graph for ticket_id."""
-    ticket_states: dict[str, Any] = _loader_module.load_indexed_states(tracker_dir)
+    ticket_states: dict[str, Any] = (
+        load_states()
+        if load_states is not None
+        else _loader_module.load_indexed_states(tracker_dir)
+    )
 
     deps: list[dict[str, Any]] = []
     state = ticket_states.get(ticket_id)

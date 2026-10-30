@@ -15,11 +15,14 @@ import json
 import os
 import re
 import sys
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._engine_support.reads import ReadError, deps_state, show_state
 from rebar._mcp_errors import js_safe_dumps
 from rebar._plan_clarity import PlanClarityFloor, evaluate_plan_clarity
+from rebar.graph import _loader as _graph_loader
 
 # Non-graph artifact types (verbose logs / bulk review artifacts) carry no dispatchable work,
 # so the per-ticket readiness gates (check_ac / clarity / quality) are a no-op PASS for them.
@@ -477,7 +480,12 @@ def check_cli(argv: list[str], tracker: str, repo_root: str | None) -> int:
 
 
 # ── summary ───────────────────────────────────────────────────────────────────
-def summary_compute(ticket_id: str, tracker: str) -> dict:
+def summary_compute(
+    ticket_id: str,
+    tracker: str,
+    *,
+    load_states: Callable[[], dict[str, Any]] | None = None,
+) -> dict:
     try:
         state = show_state(ticket_id, tracker)
     except ReadError:
@@ -494,7 +502,7 @@ def summary_compute(ticket_id: str, tracker: str) -> dict:
     blockers: list[str] = []
     ready = True
     try:
-        deps = deps_state(ticket_id, tracker)
+        deps = deps_state(ticket_id, tracker, load_states=load_states)
         blockers = deps.get("blockers") or []
         ready = bool(deps.get("ready_to_work", True))
     except Exception:  # noqa: BLE001 — safe broad catch (story lean-sloth-ham verified): feeds only the cosmetic blocking_summary, never a gating decision
@@ -513,6 +521,25 @@ def summary_compute(ticket_id: str, tracker: str) -> dict:
     }
 
 
+def summary_many(ticket_ids: Iterable[str], tracker: str) -> list[dict]:
+    """``summary_compute`` for each id, sharing one dependency-graph store load.
+
+    The graph cache is keyed per ticket, so each id would otherwise miss it and reduce
+    the whole store again (bug exhaustive-semiacidic-chupacabra). The loader is
+    memoised and lazy: the store is reduced at most once, and not at all when every id
+    hits the cache. A summary writes no ticket directory, so the states are the same
+    for every id.
+    """
+    loaded: list[dict[str, Any]] = []
+
+    def load_states() -> dict[str, Any]:
+        if not loaded:
+            loaded.append(_graph_loader.load_indexed_states(tracker))
+        return loaded[0]
+
+    return [summary_compute(tid, tracker, load_states=load_states) for tid in ticket_ids]
+
+
 def summary_cli(argv: list[str], tracker: str) -> int:
     try:
         fmt, rest = parse_output(argv, "report")
@@ -527,7 +554,7 @@ def summary_cli(argv: list[str], tracker: str) -> int:
     if len(rest) == 0:
         sys.stderr.write("Usage: issue-summary.sh <id> [<id> ...]\n")
         return 1
-    items = [summary_compute(tid, tracker) for tid in rest]
+    items = summary_many(rest, tracker)
     if fmt == "json":
         sys.stdout.write(js_safe_dumps(items) + "\n")
     else:
