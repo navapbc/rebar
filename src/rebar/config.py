@@ -37,7 +37,6 @@ from rebar._config_schema import VerifyConfig as VerifyConfig
 # ``_config_sources`` so established ``rebar.config`` imports still work.
 from rebar._config_sources import _CANONICAL_ENV_NAMES as _CANONICAL_ENV_NAMES
 from rebar._config_sources import (
-    _LEGACY_ENV_ALIASES,
     _TOML_CACHE,
     _canonical_env_name,
     _discover_project_config,
@@ -48,7 +47,6 @@ from rebar._config_sources import (
     tracker_dir_override,
     user_config_path,
 )
-from rebar._config_sources import _map_legacy_env as _map_legacy_env
 from rebar._config_sources import _parse_toml as _parse_toml
 from rebar._config_sources import _pyproject_rebar_state as _pyproject_rebar_state
 from rebar._config_sources import config_file as config_file
@@ -279,7 +277,7 @@ def _ordered_layers(
 
 
 def _env_signature() -> tuple:
-    """Hash discovery pointers, overrides, aliases, and tombstones for cache keys."""
+    """Hash discovery pointers, canonical overrides, and tombstones for cache keys."""
     sig = [
         (name, os.environ.get(name))
         for name in (
@@ -295,10 +293,6 @@ def _env_signature() -> tuple:
         for key in keys:
             n = _canonical_env_name(sect, key)
             sig.append((n, os.environ.get(n)))
-    # Every deprecated alias (EV-1/EV-3/EV-3c) — a change to any flips the resolved
-    # config, so each must miss the cache.
-    for legacy in _LEGACY_ENV_ALIASES:
-        sig.append((legacy, os.environ.get(legacy)))
     # Every tombstoned (REMOVED) env var — a retired var appearing mid-process must
     # invalidate the cache so the top-of-load_config tombstone scan re-fires.
     from rebar._deprecations import tombstones

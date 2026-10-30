@@ -93,7 +93,3 @@ def test_canonical_wins_over_legacy(
 def test_rows_are_removed_from_deprecation_registry() -> None:
     assert "cfg:verify.overlap_enabled" not in dep.REGISTRY
     assert f"env:{_LEGACY_ENV}" not in dep.REGISTRY
-
-
-def test_legacy_env_alias_resolution_table_no_longer_carries_the_rename() -> None:
-    assert _LEGACY_ENV not in cfg._LEGACY_ENV_ALIASES
