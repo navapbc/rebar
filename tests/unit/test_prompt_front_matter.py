@@ -171,7 +171,7 @@ def _packaged_prompt_paths():
 
 
 def test_built_in_prompts_are_discovered() -> None:
-    # Guard against a vacuous parametrize: the 6 migrated reviewers must be present, so
+    # Guard against a vacuous parametrize: the 5 migrated reviewers must be present, so
     # an empty packaged set can never make the golden round-trip silently pass on nothing.
     ids = {pid for pid, _ in _packaged_prompt_paths()}
     assert {
@@ -180,7 +180,6 @@ def test_built_in_prompts_are_discovered() -> None:
         "security",
         "spec-alignment",
         "tests",
-        "ticket-quality",
     } <= ids
 
 

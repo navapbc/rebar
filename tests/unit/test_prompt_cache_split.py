@@ -29,7 +29,6 @@ _MARKED_PROMPTS = (
     "code-quality",
     "security",
     "tests",
-    "ticket-quality",
     "plan-review-coach",
 )
 

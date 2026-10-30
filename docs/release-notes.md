@@ -8,6 +8,23 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## The `ticket-quality` reviewer prompt is gone from the packaged catalog
+
+**Contract change for clients that resolve reviewers by id.** `ticket-quality` was the
+single-pass review demo's reviewer. Epic 87d8 retired that demo, and earlier slices moved
+every consumer off the prompt; this slice deletes the prompt itself and regenerates
+`src/rebar/llm/reviewers/index.json` without it.
+
+The packaged reviewer catalog is now 5 entries — `code-quality`, `completion-verifier`,
+`security`, `spec-alignment` and `tests`. A client that calls `get_prompt("ticket-quality")`,
+or names it in a workflow step, now fails to resolve where it previously succeeded. There is
+no alias or forwarding shim: this is a hard removal, consistent with the breaking release.
+`code-quality` is the closest substitute — same `category`, `inputs`, `outputs`,
+`execution_mode`, template variables, and no `applies_to` globs.
+
+A user overlay that defines its own `ticket-quality` is unaffected; overlays resolve ahead of
+the packaged catalog and are not touched here.
+
 ## The workflow example and framework docs no longer name `ticket-quality`
 
 No contract change. `src/rebar/llm/workflow/examples/review_skeleton.yaml` listed
