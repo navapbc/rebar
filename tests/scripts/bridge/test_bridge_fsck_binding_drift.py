@@ -12,6 +12,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from _repo_root import REPO_ROOT
 
 
 @pytest.fixture(scope="module")
@@ -793,3 +794,132 @@ def test_human_report_advertises_only_live_checks(fsck, tmp_path, capsys):
     for phantom in ("orphan", "duplicate", "stale sync", "unresolved alert"):
         assert phantom not in lowered
     assert "store integrity" in lowered
+
+
+def _keyset_tracker_with_baseline(tracker: Path, baseline_status: str | None) -> Path:
+    """Commit one archived local bound to REB-464 under a keys-only prev snapshot."""
+    _init_tickets_repo(tracker)
+    ticket_dir = tracker / "loc-a"
+    ticket_dir.mkdir()
+    for timestamp, uuid, event_type, data in (
+        (
+            1,
+            "11111111-1111-4111-8111-111111111111",
+            "CREATE",
+            {"ticket_type": "task", "title": "a"},
+        ),
+        (2, "33333333-3333-4333-8333-333333333333", "ARCHIVED", {}),
+    ):
+        (ticket_dir / f"{timestamp}-{uuid}-{event_type}.json").write_text(
+            json.dumps(
+                {
+                    "event_type": event_type,
+                    "uuid": uuid,
+                    "timestamp": timestamp,
+                    "author": "test",
+                    "env_id": "22222222-2222-4222-8222-222222222222",
+                    "data": data,
+                }
+            ),
+            encoding="utf-8",
+        )
+    entry = _confirmed("REB-464")
+    if baseline_status is not None:
+        entry["baseline"] = {"status": baseline_status}
+    _write_bindings(tracker, bindings={"loc-a": entry}, reverse={"REB-464": "loc-a"})
+    (tracker / ".bridge_state" / "prev_snapshot.json").write_text(
+        json.dumps({"REB-464": {}}), encoding="utf-8"
+    )
+    subprocess.run(["git", "-C", str(tracker), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(tracker), "commit", "-q", "-m", "fixture"], check=True)
+    return tracker
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_keyset_snapshot_alerts_from_non_terminal_last_synced_status(fsck, tmp_path, capsys):
+    """A keys-only snapshot falls back to the binding's last-synced status, labelled as such."""
+    tracker = _keyset_tracker_with_baseline(tmp_path / ".tickets-tracker", "To Do")
+
+    assert fsck.main(["--tickets-tracker", str(tracker), "--output", "json"]) == 1
+    drift = json.loads(capsys.readouterr().out)["binding_drift"]
+    assert drift["would_terminal"] == [
+        {"local_id": "loc-a", "jira_key": "REB-464", "last_synced_status": "To Do"}
+    ]
+    assert drift.get("indeterminate", []) == []
+
+    assert fsck.main(["--tickets-tracker", str(tracker)]) == 1
+    assert "last synced: To Do" in capsys.readouterr().out
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_keyset_snapshot_keeps_terminal_last_synced_status_informational(fsck, tmp_path, capsys):
+    """A last-synced Done cannot prove Jira is still Done, so it stays indeterminate."""
+    tracker = _keyset_tracker_with_baseline(tmp_path / ".tickets-tracker", "Done")
+
+    assert fsck.main(["--tickets-tracker", str(tracker), "--output", "json"]) == 0
+    drift = json.loads(capsys.readouterr().out)["binding_drift"]
+    assert drift["would_terminal"] == []
+    assert drift["indeterminate"] == [
+        {
+            "local_id": "loc-a",
+            "jira_key": "REB-464",
+            "reason": "jira status unavailable in key-set snapshot; last synced: Done",
+            "last_synced_status": "Done",
+        }
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_keyset_snapshot_without_last_synced_status_stays_indeterminate(fsck, tmp_path, capsys):
+    tracker = _keyset_tracker_with_baseline(tmp_path / ".tickets-tracker", None)
+
+    assert fsck.main(["--tickets-tracker", str(tracker), "--output", "json"]) == 0
+    drift = json.loads(capsys.readouterr().out)["binding_drift"]
+    assert drift["would_terminal"] == []
+    assert drift["indeterminate"] == [
+        {
+            "local_id": "loc-a",
+            "jira_key": "REB-464",
+            "reason": "jira status unavailable in key-set snapshot",
+        }
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_snapshot_status_takes_precedence_over_last_synced_status(fsck, tmp_path):
+    tracker = tmp_path / ".tickets-tracker"
+    entry = _confirmed("REB-464")
+    entry["baseline"] = {"status": "To Do"}
+    _write_bindings(tracker, bindings={"loc-a": entry}, reverse={"REB-464": "loc-a"})
+
+    drift = fsck.audit_binding_drift(
+        tracker,
+        local_states=[{"ticket_id": "loc-a", "status": "archived", "archived": True}],
+        jira_snapshot={"REB-464": {"status": "Done"}},
+    )
+
+    assert drift["would_terminal"] == []
+    assert drift.get("indeterminate", []) == []
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_fsck_help_and_schema_state_the_last_synced_limit(fsck, capsys):
+    from rebar._cli._bridge_commands import _passthrough_help
+
+    schema_path = Path(fsck.__file__).resolve().parents[1] / "schemas" / "bridge_fsck.schema.json"
+    drift_props = json.loads(schema_path.read_text(encoding="utf-8"))["properties"][
+        "binding_drift"
+    ]["properties"]
+    for key in ("would_terminal", "indeterminate"):
+        assert "last_synced_status" in drift_props[key]["description"]
+    docs = REPO_ROOT / "docs" / "jira-sync-setup.md"
+    assert "last-synced Jira status" in docs.read_text(encoding="utf-8")
+    assert _passthrough_help("fsck") == 0
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "last-synced Jira status" in help_text
+    assert "reopened or closed in Jira since that sync" in help_text
