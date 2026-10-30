@@ -143,6 +143,11 @@ rebar transition <id> in_progress closed --class=obsolete --reason="premise remo
 rebar link <dupe> <canonical> duplicates && rebar transition <dupe> in_progress closed --class=duplicate
 ```
 
+"Live" means not archived or deleted, so a closed replacement still counts.
+A closed replacement may record `supersedes`, because slices that absorbed a story usually
+close before the story: `rebar link <closed-slice> <story> supersedes` is accepted. Every
+other relation still refuses a closed source (reopen it first).
+
 Any other class on a non-bug close is refused (the error names the four allowed values);
 `obsolete`/`wontfix` without `--reason` are refused. The reason is folded onto the close
 edge as `close_reason` in reduced state (distinct from `force_close_reason`), and the

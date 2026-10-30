@@ -35,6 +35,33 @@ CANONICAL_RELATIONS: frozenset[str] = frozenset(
 )
 
 
+# Relations a closed SOURCE may still record. The subject of `supersedes` is its TARGET,
+# and the disposition close reads the source as finished replacement work
+# (close_disposition.replacement_of accepts any non-archived, non-deleted source), so a
+# closed source is its normal shape: slices that absorbed a story close before the story.
+_CLOSED_SOURCE_RELATIONS_ALLOWED: frozenset[str] = frozenset({"supersedes"})
+
+
+def _refuse_closed_endpoints(
+    source_id: str, target_id: str, relation: str, tracker_dir: str
+) -> None:
+    """Raise ``ValueError`` when an endpoint's closed status forbids this relation.
+
+    The message text is matched by the reconciler's closed-source classifier
+    (``impossible_links``), so keep its ``cannot create`` / ``is closed`` wording.
+    """
+    if (
+        relation not in _CLOSED_SOURCE_RELATIONS_ALLOWED
+        and _get_ticket_status(source_id, tracker_dir) == "closed"
+    ):
+        raise ValueError(
+            f"cannot create {relation} link — source ticket '{source_id}' is closed. "
+            f"Reopen it first with: ticket transition {source_id} closed open"
+        )
+    if relation == "depends_on" and _get_ticket_status(target_id, tracker_dir) == "closed":
+        raise ValueError(f"cannot create depends_on link — target ticket '{target_id}' is closed")
+
+
 class CyclicDependencyError(Exception):
     """Raised when adding a dependency would create a cycle."""
 
@@ -256,19 +283,7 @@ def add_dependency(
             f"would create a cycle at {level} level"
         )
 
-    source_status = _get_ticket_status(source_id, tracker_dir)
-    if source_status == "closed":
-        raise ValueError(
-            f"cannot create {relation} link — source ticket '{source_id}' is closed. "
-            f"Reopen it first with: ticket transition {source_id} closed open"
-        )
-
-    if relation == "depends_on":
-        target_status = _get_ticket_status(target_id, tracker_dir)
-        if target_status == "closed":
-            raise ValueError(
-                f"cannot create depends_on link — target ticket '{target_id}' is closed"
-            )
+    _refuse_closed_endpoints(source_id, target_id, relation, tracker_dir)
 
     def _report_outcome(wrote: bool) -> None:
         if on_outcome is not None:
