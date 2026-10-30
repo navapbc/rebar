@@ -310,7 +310,8 @@ job asserts version-lockstep across them before it will build:
 # pyproject.toml:        version = "X.Y.Z"
 # server.json:           "version": "X.Y.Z"  AND  every packages[].version: "X.Y.Z"
 # CHANGELOG.md:          promote [Unreleased] -> [X.Y.Z] (step 1a)
-git add pyproject.toml server.json CHANGELOG.md
+uv lock                  # uv.lock records rebar's own version; `uv sync --locked` fails otherwise
+git add pyproject.toml server.json CHANGELOG.md uv.lock
 ```
 Bumping `pyproject.toml`'s `version` changes `rebar.__version__`, which the
 public-API-surface drift gate (`tests/unit/test_api_surface_gate.py`) tracks as part

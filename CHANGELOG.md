@@ -8,33 +8,9 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 [docs/release-notes.md](docs/release-notes.md).
 
-## [0.13.1] - 2026-08-30
-
-### Fixed
-
-- **MCP Registry publish no longer fails on description length.** `server.json`'s top-level
-  `description` exceeded the MCP Registry's 100-character limit, causing the 0.13.0 release's
-  `mcp_registry` publish job to reject the manifest with HTTP 422. Shortened the description
-  to fit, and added a `release_guards.py` guard (wired into `release.yml`'s `authorize` job)
-  that now catches an over-length description before build.
-- **Plan-review and other gate LLM calls no longer silently lose prompt caching on fallback.**
-  A mixed Bedrock-primary / Anthropic-fallback model chain collapsed prompt caching to "none"
-  whenever the fallback candidate didn't share the primary's cache-key style, even though the
-  primary (which serves the overwhelming majority of calls) supports it fine. This had silently
-  doubled the median cost of gate LLM calls since 2026-08-12. Caching now follows the primary
-  candidate's capability, while genuinely cross-provider-incompatible settings still fail safe.
-
-### Ops
-
-- Migrated operator-seeded SSM `SecureString` secrets (Gerrit admin password, signing keys,
-  API tokens, etc.) to Terraform write-only arguments so their values are no longer read into
-  cleartext state on every plan/refresh; imported the live `mcp-client-pat-*` SSM parameters
-  that a prior apply had left undeclared.
-- Internal module-size cleanup: split oversized `llm/config.py` and `llm/plan_review/__init__.py`
-  ahead of the 800-LOC hard cap, and bounded the ticket-enrichment self-heal's re-enqueue
-  fan-out to stop a churn-driven event-volume surge on the tracker's `tickets` branch.
-
 ## [Unreleased]
+
+## [0.14.0] - 2026-10-30
 
 ### Changed
 
@@ -214,6 +190,29 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   unrelated completion-verification pipeline) are unaffected and always continue to carry
   `severity`. See `docs/release-notes.md` for the schema detail.
 
+### Fixed
+
+- **A deleted or archived bound ticket no longer re-closes its Jira issue forever.** The bridge
+  now moves the issue to the project's mapped status for `deleted` or `archived` (`Done` by
+  default; `archived` is now in the built-in status map) and retires the binding once the
+  issue shows that status, so a person can reopen it in Jira. Mapping the status to `"skip"`
+  retires the binding without a Jira write. Previously the target was a hardcoded `Done` that
+  ignored the status map, and the binding was never retired.
+- **The bridge pass lock works on an S3 ticket store.** Every pass whose lock remote was S3
+  failed at lock acquisition. Lock, gate, pause and `last-pass` writes are now commit chains
+  pushed as plain fast-forwards, proven against a real bucket; release and clear write markers
+  that rebar 0.13.x reads as an expired lease and an open gate. A refused push now reports
+  git's own error. See ADR 0031 (amendment) and `docs/s3-backend.md`.
+- **`rebar bridge fsck` alerts on deleted or archived bound tickets again.** With the keys-only
+  snapshot it reported them as "indeterminate" and "No issues found"; it now judges them from
+  the binding's last-synced Jira status, labelled as such, and exits non-zero when that status
+  is not terminal.
+- **`rebar link <closed> <target> supersedes` is accepted**, so a story whose slices closed first
+  can close as `superseded`. Every other relation still refuses a closed source.
+- **`store fsck`'s PUSH_PENDING hint names the configured sync remote** instead of always
+  "origin".
+- **Release workflow pins `pypa/gh-action-pypi-publish` v1.14.3** for GHSA-5xjx-3w67-w9x9.
+
 ### Removed
 
 - **BREAKING (pre-1.0): the BPMN visual workflow editor has been removed.** `rebar workflow edit`
@@ -229,6 +228,32 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   from the commit recorded on ticket `yip-gem-teak`.
 - **BREAKING (pre-1.0): the cross-ticket overlap/enrichment implementation (ADR 0086) is removed**,
   including `rebar enrich` and the 13 `[llm] overlap_*` keys. See `docs/release-notes.md`.
+
+## [0.13.1] - 2026-08-30
+
+### Fixed
+
+- **MCP Registry publish no longer fails on description length.** `server.json`'s top-level
+  `description` exceeded the MCP Registry's 100-character limit, causing the 0.13.0 release's
+  `mcp_registry` publish job to reject the manifest with HTTP 422. Shortened the description
+  to fit, and added a `release_guards.py` guard (wired into `release.yml`'s `authorize` job)
+  that now catches an over-length description before build.
+- **Plan-review and other gate LLM calls no longer silently lose prompt caching on fallback.**
+  A mixed Bedrock-primary / Anthropic-fallback model chain collapsed prompt caching to "none"
+  whenever the fallback candidate didn't share the primary's cache-key style, even though the
+  primary (which serves the overwhelming majority of calls) supports it fine. This had silently
+  doubled the median cost of gate LLM calls since 2026-08-12. Caching now follows the primary
+  candidate's capability, while genuinely cross-provider-incompatible settings still fail safe.
+
+### Ops
+
+- Migrated operator-seeded SSM `SecureString` secrets (Gerrit admin password, signing keys,
+  API tokens, etc.) to Terraform write-only arguments so their values are no longer read into
+  cleartext state on every plan/refresh; imported the live `mcp-client-pat-*` SSM parameters
+  that a prior apply had left undeclared.
+- Internal module-size cleanup: split oversized `llm/config.py` and `llm/plan_review/__init__.py`
+  ahead of the 800-LOC hard cap, and bounded the ticket-enrichment self-heal's re-enqueue
+  fan-out to stop a churn-driven event-volume surge on the tracker's `tickets` branch.
 
 ## [0.13.0] - 2026-08-28
 
@@ -1931,7 +1956,8 @@ gate coverage, and a batch of reconciler and CI durability fixes.
 - Harden concurrency, extract txn, rename to rebar, agent-fitness features
 - Rename dist to nava-rebar; add PyPI Trusted Publishing workflow
 
-[unreleased]: https://github.com/navapbc/rebar/compare/v0.13.1...HEAD
+[unreleased]: https://github.com/navapbc/rebar/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/navapbc/rebar/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/navapbc/rebar/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/navapbc/rebar/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/navapbc/rebar/compare/v0.11.0...v0.12.0
