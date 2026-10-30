@@ -8,6 +8,7 @@ by file to preserve the standalone reconciler boundary.
 from __future__ import annotations
 
 import importlib
+import json
 import subprocess
 from pathlib import Path
 from types import ModuleType
@@ -203,11 +204,15 @@ def test_ac0_blob_ref_roundtrips_through_remote(
     assert ref_lock.read(work, ref_lock.LOCK_REF, remote="origin") is None
     oid = ref_lock.acquire(work, ref_lock.LOCK_REF, holder="p1", lease_secs=120, remote="origin")
 
-    # The bare remote holds a BLOB-pointing refs/reconciler/lock.
+    # The bare remote holds a commit carrying lock.json (metaphoric-late-creature).
     obj_type = _bare_git(["cat-file", "-t", oid], bare).stdout.strip()
-    assert obj_type == "blob"
+    assert obj_type == "commit"
     ref_oid = _bare_git(["rev-parse", ref_lock.LOCK_REF], bare).stdout.strip()
     assert ref_oid == oid
+    assert (
+        json.loads(_bare_git(["cat-file", "blob", f"{oid}:lock.json"], bare).stdout)["holder"]
+        == "p1"
+    )
 
     # A fresh clone reads the same state via read(remote=...).
     fresh = bare.parent / "fresh"
@@ -219,7 +224,7 @@ def test_ac0_blob_ref_roundtrips_through_remote(
     with pytest.raises(ref_lock.RefLockHeldError):
         ref_lock.acquire(fresh, ref_lock.LOCK_REF, holder="p2", lease_secs=120, remote="origin")
 
-    # Release against the observed oid tears the remote ref down.
+    # Release against the observed oid writes the released marker; the lock reads free.
     assert ref_lock.release(work, ref_lock.LOCK_REF, oid=oid, remote="origin") is True
     assert ref_lock.read(work, ref_lock.LOCK_REF, remote="origin") is None
 

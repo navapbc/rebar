@@ -64,11 +64,37 @@ def _remote_blob(remote: Path, ref: str = "refs/reconciler/gate") -> bytes | Non
     )
     if oid.returncode != 0:
         return None
-    return subprocess.run(
-        ["git", "--git-dir", str(remote), "cat-file", "blob", oid.stdout.strip()],
+    tip = oid.stdout.strip()
+    kind = subprocess.run(
+        ["git", "--git-dir", str(remote), "cat-file", "-t", tip],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    # Refs are commit chains (metaphoric-late-creature); a legacy blob tip still reads.
+    name = "gate.json" if ref.endswith("/gate") else "lock.json"
+    raw = subprocess.run(
+        [
+            "git",
+            "--git-dir",
+            str(remote),
+            "cat-file",
+            "blob",
+            tip if kind == "blob" else f"{tip}:{name}",
+        ],
         capture_output=True,
         check=True,
     ).stdout
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        return raw
+    # Release and clear write markers instead of deleting; both mean "free".
+    if isinstance(doc, dict) and (
+        doc.get("released") is True or doc.get("gated_mode") == "cleared"
+    ):
+        return None
+    return raw
 
 
 def _remote_oid(remote: Path, ref: str = "refs/reconciler/gate") -> str | None:

@@ -117,12 +117,10 @@ def test_ref_backend_acquire_release_roundtrip(
     )
     assert show.returncode != 0, "ref backend must not write a tickets-branch lock file"
     advisory_lock.release_pass_lock("pass-1", tmp_git_repo, oid=oid)
-    gone = subprocess.run(
-        ["git", "-C", str(tmp_git_repo), "rev-parse", "--verify", "--quiet", ref],
-        capture_output=True,
-        check=False,
+    # Release writes the released marker rather than deleting (metaphoric-late-creature).
+    assert advisory_lock._load_ref_lock().read(tmp_git_repo, ref) is None, (
+        "release must free the lock"
     )
-    assert gone.returncode != 0, "release must delete the ref"
 
 
 # One local `git update-ref` slower than the production bound `_ref_lock._LOCAL_TIMEOUT_SECS`
@@ -159,12 +157,10 @@ def test_ref_backend_roundtrip_survives_a_slow_local_git_call(
     assert oid, "a slow local git call must not make the free lock look held"
     ref = advisory_lock._load_ref_lock().LOCK_REF
     advisory_lock.release_pass_lock("pass-slow", tmp_git_repo, oid=oid)
-    gone = subprocess.run(
-        ["git", "-C", str(tmp_git_repo), "rev-parse", "--verify", "--quiet", ref],
-        capture_output=True,
-        check=False,
+    # Release writes the released marker rather than deleting (metaphoric-late-creature).
+    assert advisory_lock._load_ref_lock().read(tmp_git_repo, ref) is None, (
+        "release must free the lock"
     )
-    assert gone.returncode != 0, "release must delete the ref"
 
 
 def test_git_adapter_patches_are_shared_across_package_and_by_path_loaders(

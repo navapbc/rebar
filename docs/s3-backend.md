@@ -11,8 +11,9 @@ nothing in core rebar imports them. A default install neither pulls in nor requi
 S3-specific.
 
 The event/data format is unchanged — the S3 remote stores the very same git objects a normal
-git remote would, as `git bundle` files under a key prefix. Everything else about rebar (the
-CLI, the event schema, reconcile, gates) works identically.
+git remote would, as `git bundle` files under a key prefix. The CLI, the event schema, and the
+gates work identically. Reconcile works from rebar 0.14.0: earlier releases could not take the
+bridge pass lock on an S3 remote (see §6).
 
 [grs3]: https://github.com/awslabs/git-remote-s3
 
@@ -112,6 +113,12 @@ pushes/fetches/reconciles the `tickets` branch against this remote exactly as it
 a GitHub `origin`. (Code review and the code mirror still live on their own remotes — see
 [config.md](config.md); only the **ticket store** moves to S3.)
 
+**Every checkout that shares a ticket store must name the same sync remote.** The bridge pass
+lock, phase gate and `last-pass` record live on the sync remote, beside the store. A checkout
+whose `rebar.toml` leaves `[sync] remote` at its default (`origin`) keeps those refs on GitHub,
+so its passes do not exclude passes from a checkout that syncs to `s3tickets`, and its store
+writes go to a different remote.
+
 ## 4. Trust boundary
 
 - **Credentials never touch rebar.** AWS credentials come from the standard boto3 chain
@@ -159,3 +166,13 @@ operator action and no data loss**:
   > **only in the README** — it is present in **no `.py` file** of the release, so the code does
   > not honor it. Set the `_SECONDS` form; if you override the TTL, confirm the exact name in
   > your installed version's `git_remote_s3/remote.py` before relying on it.
+
+## 6. The bridge pass lock on S3
+
+The reconciler's pass lock, phase gate, pause and `last-pass` record are refs under
+`refs/reconciler/*` on the sync remote. From rebar 0.14.0 each write is a commit whose parent is
+the tip the writer read, pushed as a plain fast-forward (ADR 0031 amendment), which
+`git-remote-s3` serializes with its per-ref conditional-write lock. Releasing the lock or clearing
+the gate writes a marker commit; nothing is deleted. Each S3 push and fetch of one of these refs
+transfers its whole chain as a single bundle (about 300 bytes per update, measured in ADR 0093).
+

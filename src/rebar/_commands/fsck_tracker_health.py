@@ -205,7 +205,7 @@ def _tracker_sync_status(tracker: str) -> tuple[str | None, bool]:
             return (
                 f"PUSH_PENDING: local '{branch}' branch is ahead of {remote_ref} by "
                 f"{ahead} commit(s) — push pending (run a ticket write to retry the "
-                "push, or check connectivity to origin)",
+                f"push, or check connectivity to {remote})",
                 False,
             )
         return None, False

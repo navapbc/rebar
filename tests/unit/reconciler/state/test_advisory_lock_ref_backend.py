@@ -105,16 +105,9 @@ def test_acquire_returns_oid_and_writes_ref_not_tickets_file(
         check=False,
     )
     assert show.returncode != 0, "ref backend must NOT write a tickets-branch lock file"
-    # Release tears the ref down.
+    # Release writes the released marker: the lock reads free (metaphoric-late-creature).
     advisory.release_pass_lock("pass-1", repo, oid=oid)
-    assert (
-        subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", ref_lock.LOCK_REF],
-            capture_output=True,
-            check=False,
-        ).returncode
-        != 0
-    )
+    assert ref_lock.read(repo, ref_lock.LOCK_REF) is None
 
 
 def test_double_acquire_raises_reconcile_lock_error(
@@ -157,7 +150,10 @@ def test_phase_gate_reads_gate_ref(
 
 def _gate_blob(ref_lock: ModuleType, repo: Path) -> bytes:
     oid = _git(["rev-parse", ref_lock.GATE_REF], repo).stdout.strip()
-    return _git(["cat-file", "blob", oid], repo).stdout.encode()
+    # Gate refs are commit chains carrying gate.json; a planted legacy blob still reads.
+    kind = _git(["cat-file", "-t", oid], repo).stdout.strip()
+    spec = oid if kind == "blob" else f"{oid}:gate.json"
+    return _git(["cat-file", "blob", spec], repo).stdout.encode()
 
 
 def test_pause_blob_writes_current_gate_field(

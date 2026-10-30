@@ -77,7 +77,7 @@ def _ref_payload(git_dir: Path, ref: str) -> dict | None:
     if oid.returncode:
         return None
     raw = subprocess.run(
-        ["git", "--git-dir", str(git_dir), "cat-file", "blob", oid.stdout.strip()],
+        ["git", "--git-dir", str(git_dir), "cat-file", "blob", f"{oid.stdout.strip()}:lock.json"],
         capture_output=True,
         check=True,
     ).stdout
