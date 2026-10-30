@@ -28,7 +28,7 @@ functions themselves are unchanged, so the fix is the module path and nothing el
 `rebar.reducer`, so this is not part of the supported public API, but it is called out here
 because in-tree and downstream test modules did import through the shim.
 
-
+## The `ticket-quality` reviewer prompt is gone from the packaged catalog
 
 **Contract change for clients that resolve reviewers by id.** `ticket-quality` was the
 single-pass review demo's reviewer. Epic 87d8 retired that demo, and earlier slices moved
