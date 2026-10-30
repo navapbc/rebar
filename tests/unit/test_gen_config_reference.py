@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -228,9 +229,26 @@ def test_config_reference_reflects_cfg_deprecation_aliases():
         status = "permanent alias" if dep.permanent else f"deprecated (removal in {dep.remove_in})"
         assert status in row, f"lifecycle status {status!r} for {dep.name!r} not in its row: {row}"
         if dep.replacement:
-            assert f"`{dep.replacement}`" in row, (
+            assert f"`{gen._md_cell(dep.replacement)}`" in row, (
                 f"replacement {dep.replacement!r} for {dep.name!r} not in its row: {row}"
             )
+
+
+def test_alias_table_escapes_pipes_in_name_and_replacement(monkeypatch):
+    """A pipe in an alias name or replacement stays inside its own table cell."""
+    from rebar import _deprecations
+
+    piped = dataclasses.replace(
+        next(d for d in _deprecations.REGISTRY.values() if d.kind == "cfg"),
+        name="sample|alias",
+        replacement='the ["a"|"b"] form',
+    )
+    monkeypatch.setattr(_deprecations, "REGISTRY", {piped.name: piped})
+
+    row = _row_for(gen.render_config_reference(), r"sample\|alias")
+    assert r"sample\|alias" in row
+    assert r'the ["a"\|"b"] form' in row
+    assert len([c for c in re.split(r"(?<!\\)\|", row.strip()) if c.strip()]) == 3
 
 
 def test_config_reference_reflects_cfg_tombstones():

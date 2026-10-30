@@ -168,7 +168,11 @@ The 105 typed `section.field` keys with type, default, description, and lifecycl
 
 ## Deprecated configuration aliases
 
-_None._
+Old spellings still honored (with a runtime warning) that resolve to a canonical replacement — derived from the `cfg`-kind entries of `rebar._deprecations.REGISTRY`:
+
+| Deprecated key | Replacement | Status |
+|----------------|-------------|--------|
+| `criteria_routing.json 'activate' id-list` | `the {"activate": {"<id>": ["plan_review"\|"code_review"]}} mapping form` | deprecated (removal in v1.0.0) |
 
 ## Removed configuration keys
 

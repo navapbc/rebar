@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 from collections.abc import Callable, Iterable
@@ -29,7 +30,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from rebar._deprecations import warn_deprecated
+
 from .model import CriteriaError
+
+logger = logging.getLogger(__name__)
 
 _OVERLAY_FILENAME = "criteria_routing.json"
 _PROJECT_PREFIX = "project."
@@ -341,6 +346,8 @@ def _effective_routing_cached(gate_key: str, rr: str, _overlay_sig: str) -> dict
     canonical = frozenset(spec.canonical())
     overlay = _load_overlay(rr_arg)
     if overlay is not None:
+        if isinstance(overlay.get("activate"), list):
+            warn_deprecated("cfg:criteria_routing.json 'activate' id-list", logger=logger)
         gate = overlay.get(gate_key) or {}
         if not isinstance(gate, dict):
             raise CriteriaError(
