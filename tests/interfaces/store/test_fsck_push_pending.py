@@ -223,3 +223,24 @@ def test_first_write_refuses_unrelated_diverged_store(
     assert "ticket write refused" in msg
     assert "DIVERGED" in msg
     assert "fsck-recover" in msg
+
+
+def test_push_pending_names_the_configured_sync_remote(
+    repo_with_origin: tuple[Path, Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The hint names the remote the store actually syncs to, not always ``origin``."""
+    repo, tracker, _seed = repo_with_origin
+    origin_url = _git_q("remote", "get-url", "origin", cwd=repo).stdout.strip()
+    _git_q("remote", "add", "s3tickets", origin_url, cwd=repo)
+    _git_q("fetch", "s3tickets", "tickets", cwd=tracker)
+    monkeypatch.setenv("REBAR_SYNC_REMOTE", "s3tickets")
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
+    rebar.create_ticket("task", "unpushed local ticket", repo_root=str(repo))
+
+    _cli.main(["store", "fsck"])
+    out = capsys.readouterr().out
+
+    assert "PUSH_PENDING" in out, out
+    assert "check connectivity to s3tickets" in out, out

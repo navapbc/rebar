@@ -141,12 +141,6 @@ def test_stale_info_still_wins_over_the_new_server_side_markers(
             lambda: _ref_lock._push_lease_cas(None, REF, OLD, "origin", f"x:{REF}"),
             id="_push_lease_cas",
         ),
-        pytest.param(
-            lambda: _ref_lock._push_cas(None, REF, "y" * 40, OLD, "origin"), id="_push_cas"
-        ),
-        pytest.param(
-            lambda: _ref_lock._push_delete_cas(None, REF, OLD, "origin"), id="_push_delete_cas"
-        ),
     ],
 )
 def test_the_git_patch_point_survives_the_module_split(
@@ -187,9 +181,7 @@ def test_the_cas_verdict_still_logs_on_the_ref_lock_logger(
     )
 
 
-@pytest.mark.parametrize(
-    "name", ["_push_lease_cas", "_push_cas", "_push_delete_cas", "_is_cas_mismatch_stderr"]
-)
+@pytest.mark.parametrize("name", ["_push_lease_cas", "_is_cas_mismatch_stderr"])
 def test_moved_names_stay_resolvable_at_the_original_module_path(name: str) -> None:
     """Moved push helpers remain callable from their original module path."""
     assert callable(getattr(_ref_lock, name)), f"{name} is no longer resolvable on _ref_lock"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import subprocess
+import uuid
 from pathlib import Path
 
 import pytest
@@ -45,8 +46,9 @@ def _remote_payload(remote: Path) -> dict | None:
     )
     if oid.returncode:
         return None
+    # The witness ref is a commit chain carrying lock.json (metaphoric-late-creature).
     raw = subprocess.run(
-        ["git", "--git-dir", str(remote), "cat-file", "blob", oid.stdout.strip()],
+        ["git", "--git-dir", str(remote), "cat-file", "blob", f"{oid.stdout.strip()}:lock.json"],
         capture_output=True,
         check=True,
     ).stdout
@@ -142,6 +144,28 @@ def test_writer_without_explicit_environment_uses_stable_local_identity(
     assert payload["environment_id"] != "reconciler"
 
 
+def _advance_remote_last_pass(remote: Path, run) -> None:
+    """Commit a competing last-pass witness directly in the bare remote."""
+
+    def git(*args: str, stdin: bytes | None = None) -> str:
+        return (
+            run(
+                ["git", "--git-dir", str(remote), *args],
+                input=stdin,
+                capture_output=True,
+                check=True,
+            )
+            .stdout.decode()
+            .strip()
+        )
+
+    blob = git("hash-object", "-w", "--stdin", stdin=b"{}\n")
+    tree = git("mktree", stdin=f"100644 blob {blob}\tlock.json\n".encode())
+    rival = f"rival {uuid.uuid4().hex}"  # unique, so each rival really moves the tip
+    commit = git("-c", "user.name=t", "-c", "user.email=t@t", "commit-tree", tree, "-m", rival)
+    git("update-ref", LAST_PASS_REF, commit)
+
+
 def test_last_pass_cas_retries_exactly_three_times_with_jittered_backoff(
     rebar_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -157,6 +181,10 @@ def test_last_pass_cas_retries_exactly_three_times_with_jittered_backoff(
         if "push" in words and any("refs/reconciler/last-pass" in part for part in words):
             attempts.append(words)
             if len(attempts) < 3:
+                # Real contention: another writer moves the remote tip, so this
+                # fast-forward is refused (a rejection with the tip unchanged is a
+                # genuine failure, not a CAS loss — metaphoric-late-creature).
+                _advance_remote_last_pass(remote, real_run)
                 return subprocess.CompletedProcess(
                     argv,
                     1,

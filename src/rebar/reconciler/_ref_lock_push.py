@@ -10,7 +10,10 @@ monkeypatch seams, logger ownership, and one-way dependency flow.
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
+import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 
@@ -85,3 +88,113 @@ def push_lease_cas(
     raise subprocess.CalledProcessError(
         result.returncode, result.args, result.stdout, result.stderr
     )
+
+
+# ---------------------------------------------------------------------------
+# Commit-chain writes (metaphoric-late-creature, ADR 0031 amendment). Every write is a
+# commit whose parent is the tip the writer read, pushed as a plain fast-forward from a
+# temporary named ref: git-remote-s3 bundles the push source, so it cannot push a bare
+# oid, and it gives no compare on a forced push or a delete. GitHub and local remotes
+# reject a non-fast-forward natively, so one mechanism serves every remote.
+# ---------------------------------------------------------------------------
+
+TMP_REF_PREFIX = "refs/reconciler/tmp/"
+_IDENTITY = ("-c", "user.name=rebar-reconciler", "-c", "user.email=reconciler@rebar.invalid")
+_UNKNOWN = object()
+
+
+def wrap_commit(
+    core: ModuleType, repo_root: Path, payload_oid: str, name: str, parent: str | None
+) -> str:
+    """Wrap *payload_oid* as ``<name>`` in a one-file tree and commit it onto *parent*."""
+    entry = f"100644 blob {payload_oid}\t{name}\n".encode()
+    tree = (
+        core._git(  # raw-git-ok: write seam internal (object write, no ref moves)
+            repo_root, ["mktree"], timeout=core._LOCAL_TIMEOUT_SECS, text=False, stdin=entry
+        )
+        .stdout.decode("utf-8")
+        .strip()
+    )
+    args = [
+        *_IDENTITY,
+        "commit-tree",
+        "--no-gpg-sign",
+        tree,
+        "-m",
+        f"reconciler {name} {uuid.uuid4().hex}",
+    ]
+    if parent is not None:
+        args[len(_IDENTITY) + 3 : len(_IDENTITY) + 3] = ["-p", parent]
+    return core._git(  # raw-git-ok: write seam internal (object write, no ref moves)
+        repo_root, args, timeout=core._LOCAL_TIMEOUT_SECS
+    ).stdout.strip()
+
+
+@contextlib.contextmanager
+def temp_ref(core: ModuleType, repo_root: Path, oid: str) -> Iterator[str]:
+    """Point a throwaway ``refs/reconciler/tmp/<id>`` at *oid* for the push source."""
+    ref = f"{TMP_REF_PREFIX}{uuid.uuid4().hex}"
+    core._git(  # raw-git-ok: write seam internal (private temp ref)
+        repo_root, ["update-ref", ref, oid], timeout=core._LOCAL_TIMEOUT_SECS
+    )
+    try:
+        yield ref
+    finally:
+        core._git(  # raw-git-ok: write seam internal (private temp ref)
+            repo_root, ["update-ref", "-d", ref], timeout=core._LOCAL_TIMEOUT_SECS, check=False
+        )
+
+
+def remote_tip(core: ModuleType, repo_root: Path, ref: str, remote: str) -> object:
+    """The remote's current oid for *ref*: an oid, ``None`` (absent), or ``_UNKNOWN``."""
+    result = core._git(
+        repo_root,
+        ["ls-remote", "--exit-code", remote, ref],
+        timeout=core._REMOTE_TIMEOUT_SECS,
+        check=False,
+    )
+    if result.returncode == 2:
+        return None
+    if result.returncode != 0:
+        return _UNKNOWN
+    for line in (result.stdout or "").splitlines():
+        oid, _, name = line.partition("\t")
+        if name.strip() == ref:
+            return oid.strip()
+    return None
+
+
+def push_fast_forward(
+    core: ModuleType, repo_root: Path, ref: str, new_oid: str, old_oid: str, remote: str
+) -> None:
+    """Fast-forward *ref* on *remote* to *new_oid*; decide a rejection by re-reading the tip.
+
+    Our commit at the tip is success (a reply lost after the update); a tip that moved off
+    the observed *old_oid* is a CAS mismatch, raised in the exit-128 ``update-ref`` shape the
+    shared classifier reads; an unchanged tip is a genuine failure carrying git's stderr.
+    """
+    with temp_ref(core, repo_root, new_oid) as source:
+        result = core._git(
+            repo_root,
+            ["push", remote, f"{source}:{ref}"],
+            timeout=core._REMOTE_TIMEOUT_SECS,
+            check=False,
+        )
+    if result.returncode == 0:
+        return
+    tip = remote_tip(core, repo_root, ref, remote)
+    if tip == new_oid:
+        return
+    observed = None if old_oid == "0" * 40 else old_oid
+    if tip is not _UNKNOWN and tip != observed:
+        core.logger.warning(
+            "ref-lock: push to %s %s rejected and the tip moved (expected %s, now %s) — "
+            "CAS mismatch: %s",
+            remote,
+            ref,
+            old_oid,
+            tip,
+            (result.stderr or "").strip()[-500:],
+        )
+        raise subprocess.CalledProcessError(128, ["git", "update-ref", ref])
+    raise core.RefLockPushError(remote, ref, result)
