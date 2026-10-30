@@ -18,16 +18,7 @@ from ._managed_refs import add_managed_ref, seed_managed_refs_from_current
 from ._processors_identity import (
     _bootstrap_genesis_keyring,
     _fold_author_attribution,
-    _rederive_keyring_keys,  # noqa: F401  (re-exported for back-compat)
     attestation_kind,
-    process_key_event,  # noqa: F401  (re-exported for back-compat)
-    process_signature,  # noqa: F401  (re-exported for back-compat)
-)
-from ._processors_status import (
-    _fold_claimed_session,  # noqa: F401  (re-exported for back-compat)
-    _fold_close_metadata,  # noqa: F401  (re-exported for back-compat)
-    _fold_plan_review_phase,  # noqa: F401  (re-exported for back-compat)
-    process_status,  # noqa: F401  (re-exported for back-compat)
 )
 from ._version import LEGACY_JIRA_AUTHOR, LEGACY_JIRA_ENV_ID
 
