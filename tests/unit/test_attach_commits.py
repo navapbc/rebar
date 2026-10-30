@@ -393,8 +393,8 @@ def test_referencing_commits_falls_back_to_per_call_scan_without_index(tmp_path,
     None restores the pre-index scanning path with identical crediting.
     """
     import rebar
+    from rebar import _ids as resolver
     from rebar import config
-    from rebar._engine_support import resolver
 
     repo = _init_rebar_repo(tmp_path)
     monkeypatch.setenv("REBAR_ROOT", str(repo))

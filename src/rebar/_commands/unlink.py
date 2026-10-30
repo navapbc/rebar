@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 from rebar._commands._seam import CommandError, append_event, tracker_dir
-from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._ids import resolve_ticket_id
 from rebar.reducer._sort import prefix_ts as _prefix_ts
 
 _USAGE = (

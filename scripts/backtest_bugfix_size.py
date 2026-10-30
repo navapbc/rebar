@@ -37,7 +37,7 @@ from _backtest import all_work  # noqa: E402
 
 from rebar import config as _config  # noqa: E402
 from rebar._commands.verify_commit import extract_ticket_refs  # noqa: E402
-from rebar._engine_support.resolver import resolve_ticket_id  # noqa: E402
+from rebar._ids import resolve_ticket_id  # noqa: E402
 from rebar.llm.code_review.bugfix_size_gate import (  # noqa: E402
     BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES,
     count_non_test_diff_lines,

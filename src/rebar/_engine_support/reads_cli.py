@@ -422,7 +422,7 @@ def _cmd_deps(argv: list[str], tracker: str) -> int:
         # unresolved id passes through raw: the documented empty-arrays contract.
         # ``--include-archived`` has no effect here.
         from rebar._engine_support.descendants import list_descendants
-        from rebar._engine_support.resolver import resolve_ticket_id
+        from rebar._ids import resolve_ticket_id
 
         root_id = resolve_ticket_id(ns.ticket_id, tracker) or ns.ticket_id
         print(js_safe_dumps(list_descendants(root_id, tracker), ensure_ascii=False))

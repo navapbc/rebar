@@ -25,7 +25,7 @@ from typing import Any, cast
 
 from rebar._engine_support.output import error_envelope
 from rebar._engine_support.reads import LEAN_OMITTED_FIELDS
-from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._ids import resolve_ticket_id
 from rebar._mcp_errors import js_safe_dumps
 from rebar.graph._relations import build_blocked_by
 from rebar.reducer import is_terminal_status, reduce_all_tickets, reduce_ticket

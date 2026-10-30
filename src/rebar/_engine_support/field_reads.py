@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 
 from rebar._engine_support.reads import show_state
-from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._ids import resolve_ticket_id
 from rebar.reducer import reduce_ticket
 
 

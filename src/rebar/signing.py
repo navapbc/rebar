@@ -232,7 +232,7 @@ def _resolve_and_reduce(ticket_id: str, repo_root):
             raise SigningError(f"Error: ticket '{ticket_id}' not found")
         return resolved, state
 
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
     from rebar.reducer import reduce_ticket
 
     reads.ensure_fresh(tracker)

@@ -77,7 +77,7 @@ def emit_code_review_artifact(
         import rebar
         from rebar import config as _config
         from rebar._commands.verify_commit import extract_ticket_refs
-        from rebar._engine_support.resolver import resolve_ticket_id
+        from rebar._ids import resolve_ticket_id
         from rebar.llm.code_review import sidecar
         from rebar.llm.code_review.assemble import changed_from_diff
 

@@ -38,11 +38,11 @@ def _install(monkeypatch, store: _Store, tmp_path) -> None:
     """
     import rebar.reducer as _reducer
     import rebar.reducer._inbound as _inbound
+    from rebar import _ids as _resolver
     from rebar._commands import gates as _gates
     from rebar._commands import txn as _txn
     from rebar._engine_support import descendants as _descendants
     from rebar._engine_support import field_reads as _field_reads
-    from rebar._engine_support import resolver as _resolver
 
     monkeypatch.setattr(_gates, "gate_enabled", lambda *a, **k: True)
     monkeypatch.setattr(close_precheck.config, "tracker_dir", lambda *a, **k: str(tmp_path))

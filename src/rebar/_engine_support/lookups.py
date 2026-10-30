@@ -12,7 +12,7 @@ import json
 import os
 import sys
 
-from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._ids import resolve_ticket_id
 
 
 def _create_data(ticket_dir: str) -> dict:

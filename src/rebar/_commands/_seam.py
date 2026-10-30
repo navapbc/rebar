@@ -18,7 +18,7 @@ from pathlib import Path
 
 from rebar import config
 from rebar import secret_screen as _secret_screen
-from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._ids import resolve_ticket_id
 
 logger = logging.getLogger(__name__)
 

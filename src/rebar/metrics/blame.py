@@ -25,7 +25,7 @@ import subprocess
 from rebar._alias import compute_alias
 from rebar._commands.verify_commit import extract_ticket_refs
 from rebar._engine_support import field_reads
-from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._ids import resolve_ticket_id
 from rebar.reducer import reduce_ticket
 
 # Watchdog on the read-only culprit-analysis git walks (bug 9305): log walks over a

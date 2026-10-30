@@ -18,7 +18,7 @@ from rebar._commands.lifecycle_cascade import cascade_parent_first
 from rebar._commands.transition_close import close_ticket
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
-from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._ids import resolve_ticket_id
 from rebar._mcp_errors import js_safe_dumps
 from rebar.reducer import reduce_ticket
 

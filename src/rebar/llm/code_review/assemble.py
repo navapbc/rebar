@@ -285,7 +285,7 @@ def assemble_ticket_scope_context(commit_message: str, *, repo_root: str | None 
     from rebar import config as _config
     from rebar import show_ticket
     from rebar._commands.verify_commit import extract_ticket_refs
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
 
     candidates = extract_ticket_refs(commit_message)
     if not candidates:

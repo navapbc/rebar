@@ -225,7 +225,7 @@ def test_legacy_payloads_without_material_still_round_trip(monkeypatch, tmp_path
 
     monkeypatch.setattr(config, "tracker_dir", lambda repo_root=None: tracker)
     monkeypatch.setattr(
-        "rebar._engine_support.resolver.resolve_ticket_dir_name",
+        "rebar._ids.resolve_ticket_dir_name",
         lambda ticket_id, tracker: os.fspath(Path(ticket_id)),
     )
 

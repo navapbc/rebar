@@ -213,7 +213,7 @@ def _has_review_result_timestamp(
 ) -> bool:
     try:
         from rebar import config as _config
-        from rebar._engine_support.resolver import resolve_ticket_dir_name
+        from rebar._ids import resolve_ticket_dir_name
 
         tracker_path = _config.tracker_dir(repo_root)
         tracker = str(tracker_path)

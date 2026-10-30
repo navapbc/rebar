@@ -23,7 +23,7 @@ from rebar._commands.compact_txn import (  # noqa: F401 — re-exported public p
     _sync_before_compact,
     preresolve_unmapped_positions,
 )
-from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._ids import resolve_ticket_id
 from rebar._proc import store_repo_root
 from rebar._store import hlc
 from rebar._store import lock as _lock

@@ -15,7 +15,7 @@ from rebar._commands._seam import (
     tracker_dir,
     validate_tag_name,
 )
-from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._ids import resolve_ticket_id
 from rebar.types import TICKET_TYPES
 
 

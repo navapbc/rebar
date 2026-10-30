@@ -262,7 +262,7 @@ def referencing_commits(
     :func:`upstream_branch_refs` excludes by name.
     """
     from rebar._commands.verify_commit import extract_ticket_refs
-    from rebar._engine_support.resolver import build_resolver_scan_index, resolve_ticket_id
+    from rebar._ids import build_resolver_scan_index, resolve_ticket_id
 
     accepted = set(ticket_ids)
     log_argv = ["git", "-C", str(repo_root), "log", "--format=%H%x1f%B%x00"]
