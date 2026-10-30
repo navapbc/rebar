@@ -154,7 +154,7 @@ def test_bom_inside_a_value_is_preserved_not_a_file_bom() -> None:
     assert meta["title"] == "\ufeffhello"
 
 
-# \u2500\u2500 golden round-trip over the MIGRATED BUILT-IN prompts (the 6 reviewers) \u2500\u2500
+# \u2500\u2500 golden round-trip over the MIGRATED BUILT-IN prompts (the 5 reviewers) \u2500\u2500
 #
 # The synthetic cases above prove the writer's invariants on constructed inputs; this
 # block proves the same invariants on the ACTUAL packaged reviewer `.md` files that the
