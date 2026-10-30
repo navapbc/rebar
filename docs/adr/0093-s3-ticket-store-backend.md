@@ -83,6 +83,16 @@ trading a bounded, rare delay for a correctness hazard. The 60s default stays.
   upstream change and is the maintenance cost we accept for a lossless autonomous heal.
 - **Bundle-per-push storage** means the multi-bundle state is normal under concurrency; it is
   handled automatically by the auto-doctor and is not an operator-visible failure.
+- **Reconciler refs on S3 (2026-10-30, ADR 0031 amendment).** The pass lock, gate, pause and
+  `last-pass` refs are commit chains pushed as plain fast-forwards. Proven against a real bucket
+  through `git-remote-s3` 0.4.2 with 6 racing clones over 5 rounds per race: acquire on an absent
+  and on a released lock, renew against a takeover, release against a takeover, a last-pass write,
+  and gate set and clear each produced exactly 1 winner every round. The chain only grows, and each
+  push or fetch transfers the ref's whole chain as one bundle: measured at 700 bytes after 1 update,
+  3,362 after 10, 30,111 after 100 and 59,812 after 200 (about 300 bytes per update). At the
+  default 120 s lease a pass writes the lock about once per 40 s while it runs, so the transfer grows
+  with total pass time; trimming the chain needs a forced write, which has no compare on S3, and is
+  not provided.
 - **Back-out.** Set `sync.remote` in the project `rebar.toml` to the name of the Git remote that will hold the ticket store. This example uses `origin`.
 
   ```toml

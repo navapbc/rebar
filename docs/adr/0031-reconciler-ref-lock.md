@@ -157,15 +157,12 @@ timeout raises `RefLockTimeoutError`, also treated as HELD.
 
 ### Operator break-glass
 
-A wedged lock (before C2's lease self-healing exists) is cleared manually:
-
-```
-git push origin :refs/reconciler/lock      # remote
-git update-ref -d refs/reconciler/lock     # local
-```
-
-C2's relative-duration lease makes this rarely necessary — a crashed holder's lock becomes
-steal-able after one lease interval automatically.
+A wedged lock is cleared by writing the released marker over it (see the commit-chain amendment
+below), for example with `rebar`'s own `release` against the observed tip. Deleting the ref
+(`git push origin :refs/reconciler/lock`) still frees a git remote, but a live holder's next
+renew then fails, and on an S3 remote a delete has no compare at all. C2's relative-duration
+lease makes break-glass rarely necessary — a crashed holder's lock becomes steal-able after one
+lease interval automatically.
 
 ## Lease self-healing (C2 — extends this module)
 
@@ -242,6 +239,36 @@ now-superseded machinery:
   pre-existing committed `.reconciler-pass-lock` / `.reconciler-phase-gate` from the tickets branch.
   Both are idempotent and log-and-continue on git failure (never abort). A regression test asserts no
   `.reconciler-*` path is ever committed to the tickets branch under the ref backend.
+
+## Amendment (2026-10-30): commit-chain writes for every remote
+
+Ticket metaphoric-late-creature. The blob-plus-lease protocol above was proven only on GitHub and
+local remotes. On an S3 store through `git-remote-s3` 0.4.2 it cannot work: the helper bundles
+the push source with `git bundle create`, which refuses a bare object id, and the helper accepts
+only fast-forward updates unless forced, where a forced push and a delete carry no compare. Every
+pass whose lock remote was S3 failed at acquisition, and the gate, pause and `last-pass` writes
+failed the same way.
+
+**Decision.** Every write to a `refs/reconciler/*` ref is a commit carrying one file
+(`gate.json` for the gate, `lock.json` otherwise) whose parent is the tip the writer read, pushed
+as a plain non-forced fast-forward from a temporary `refs/reconciler/tmp/<id>` ref. GitHub and
+local remotes refuse a non-fast-forward natively; `git-remote-s3` checks ancestry, takes its
+per-ref conditional-write lock, then re-lists the ref and refuses with "stale remote" if it moved.
+One mechanism therefore gives one winner on every remote. A refused push is decided by re-reading
+the remote tip, not by message text: our commit means success, a moved tip means another writer
+won (the CAS mismatch), and an unchanged tip is a genuine failure raised with git's stderr.
+
+**Release and clear write markers instead of deleting.** Release writes
+`{holder: "", lease_secs: 1, fence: fence + 1, released: true}`; clearing the gate writes
+`{gated_mode: "cleared"}`. Both read as free. rebar 0.13.x reads the lock marker as a lease that
+expires after one second (its decoder ignores the extra field) and the gate marker as an unknown
+mode, which it treats as no gate, so mixed versions interoperate during an upgrade. A legacy blob
+tip written by 0.13.x cannot be a parent; the first write over it uses the lease push once, after
+which the ref is a chain.
+
+**Cost.** The chain only grows: trimming it needs a forced write, which has no compare on S3. Each
+update adds one small commit. On S3 every push and fetch transfers the ref's whole chain as one
+bundle; the measured growth is recorded in ADR 0093.
 
 ## Consequences
 

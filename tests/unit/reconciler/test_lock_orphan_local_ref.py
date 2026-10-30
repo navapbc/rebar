@@ -7,6 +7,7 @@ lease push cannot recover it. Exercise git CAS in a bare remote and clone."""
 from __future__ import annotations
 
 import importlib
+import json
 import subprocess
 from pathlib import Path
 
@@ -51,6 +52,14 @@ def _remote_ref(work: Path, ref: str) -> str | None:
     return out.split()[0] if out else None
 
 
+def _remote_free(work: Path, ref: str) -> bool:
+    """The remote lock is absent or a released marker (release writes one; it never deletes)."""
+    tip = _remote_ref(work, ref)
+    if tip is None:
+        return True
+    return json.loads(_git(work, "cat-file", "blob", f"{tip}:lock.json")).get("released") is True
+
+
 # ---------------------------------------------------------------------------
 # The proven mechanism, end to end
 # ---------------------------------------------------------------------------
@@ -73,7 +82,7 @@ def test_local_read_of_remote_lock_does_not_strand_a_local_ref(ref_lock, clone: 
     )
 
     ref_lock.release(clone, ref, oid=oid, remote="origin")
-    assert _remote_ref(clone, ref) is None, (
+    assert _remote_free(clone, ref), (
         "fixture precondition: the authoritative remote lock is released"
     )
 
@@ -90,7 +99,7 @@ def test_release_in_remote_mode_leaves_no_local_ref(ref_lock, clone: Path):
     ref_lock.read(clone, ref, remote="origin")  # plants the local copy
     ref_lock.release(clone, ref, oid=oid, remote="origin")
 
-    assert _remote_ref(clone, ref) is None, "remote half released"
+    assert _remote_free(clone, ref), "remote half released"
     assert _local_ref(clone, ref) is None, (
         "release() deleted the remote ref but left the local one behind"
     )
@@ -108,7 +117,7 @@ def test_orphan_local_ref_is_reclaimable(ref_lock, clone: Path):
     oid = ref_lock.acquire(clone, ref, holder="GHA-bridge", lease_secs=120, remote="origin")
     ref_lock.read(clone, ref, remote="origin")
     ref_lock.release(clone, ref, oid=oid, remote="origin")
-    assert _remote_ref(clone, ref) is None, "fixture precondition: remote free"
+    assert _remote_free(clone, ref), "fixture precondition: remote free"
 
     # Either the lock now reads free, or a steal reclaims it. Both are acceptable
     # outcomes; being wedged with neither is not.

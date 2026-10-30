@@ -1,4 +1,9 @@
-"""Bare-ref CAS primitives for reconciler locks and the persistent phase gate."""
+"""Commit-chain CAS primitives for reconciler locks and the persistent phase gate.
+
+Each ``refs/reconciler/*`` ref is a chain of one-file commits (``lock.json`` or
+``gate.json``); a write extends the tip it read with a plain fast-forward, and release or
+clear writes a marker instead of deleting (ADR 0031 amendment, metaphoric-late-creature).
+"""
 
 from __future__ import annotations
 
@@ -68,6 +73,23 @@ class RefLockCorruptError(ValueError):
     def __init__(self, message: str, *, raw: bytes = b"") -> None:
         super().__init__(message)
         self.raw = raw
+
+
+# mechanism-ok: lock RefLockPushError — an error type, not a lock (metaphoric-late-creature)
+class RefLockPushError(RefLockError):
+    """A push to the lock remote failed while the remote tip stayed unchanged.
+
+    Carries the remote, the ref, and git's (or the remote helper's) stderr, so the real
+    cause reaches the operator instead of a generic failure.
+    """
+
+    def __init__(self, remote: str, ref: str, result: subprocess.CompletedProcess) -> None:
+        stderr = (result.stderr or "").strip()
+        super().__init__(
+            f"git push to {remote} {ref} failed (exit {result.returncode}): {stderr[-2000:]}"
+        )
+        self.returncode = result.returncode
+        self.stderr = stderr
 
 
 class RefLockTimeoutError(RefLockError):
@@ -324,18 +346,63 @@ def _ref_oid(repo_root: Path, ref: str, *, remote: str | None = None) -> str | N
     return _local_ref_oid(repo_root, ref)
 
 
+def _payload_name(ref: str) -> str:
+    """The one file a ``refs/reconciler/*`` commit carries."""
+    return "gate.json" if ref == GATE_REF else "lock.json"
+
+
+def _object_type(repo_root: Path, oid: str) -> str:
+    return _git(repo_root, ["cat-file", "-t", oid], timeout=_LOCAL_TIMEOUT_SECS).stdout.strip()
+
+
 def _read_blob_bytes(repo_root: Path, ref: str, oid: str) -> bytes:
-    """Read the blob payload *ref*/*oid* points at (a blob, or a commit's ``<name>.json``)."""
-    obj_type = _git(repo_root, ["cat-file", "-t", oid], timeout=_LOCAL_TIMEOUT_SECS).stdout.strip()
+    """Read the payload *oid* carries: a legacy blob, or the commit's ``<name>.json``.
+
+    Pinned to *oid*, not to *ref*, so a read describes exactly the tip it observed.
+    """
+    obj_type = _object_type(repo_root, oid)
     if obj_type == "blob":
         return _git_bytes(repo_root, ["cat-file", "blob", oid], timeout=_LOCAL_TIMEOUT_SECS)
     if obj_type == "commit":
-        # AC0 ref->tiny-commit fallback: the blob lives at <ref>:<name>.json.
-        name = "gate.json" if ref == GATE_REF else "lock.json"
         return _git_bytes(
-            repo_root, ["cat-file", "blob", f"{ref}:{name}"], timeout=_LOCAL_TIMEOUT_SECS
+            repo_root,
+            ["cat-file", "blob", f"{oid}:{_payload_name(ref)}"],
+            timeout=_LOCAL_TIMEOUT_SECS,
         )
     raise RefLockCorruptError(f"ref {ref} points at unexpected object type {obj_type!r}")
+
+
+def _payload_doc(raw: bytes) -> dict:
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+# Markers written instead of deleting. rebar 0.13.x reads the lock marker as a lease that
+# expires after one second and the gate marker as an unknown mode, which it treats as open.
+_CLEARED_GATE_MODE = "cleared"
+
+
+def _is_released(raw: bytes) -> bool:
+    return _payload_doc(raw).get("released") is True
+
+
+def _is_cleared_gate(raw: bytes) -> bool:
+    return _payload_doc(raw).get(_GATE_FIELD) == _CLEARED_GATE_MODE
+
+
+def _marker_blob(repo_root: Path, ref: str, tip: str) -> str:
+    """The marker that frees *ref*: a cleared gate, or a released lock past *tip*'s fence."""
+    if ref == GATE_REF:
+        return _hash_object(repo_root, _encode_gate(_CLEARED_GATE_MODE))
+    fence = _payload_doc(_read_blob_bytes(repo_root, ref, tip)).get("fence")
+    fence = fence if isinstance(fence, int) and not isinstance(fence, bool) else 0
+    doc = {"holder": "", "lease_secs": 1, "heartbeat_ns": time.time_ns(), "fence": fence + 1}
+    return _hash_object(
+        repo_root, (json.dumps({**doc, "released": True}, sort_keys=True) + "\n").encode()
+    )
 
 
 def read(repo_root: Path, ref: str, *, remote: str | None = None) -> RefLockState | None:
@@ -348,7 +415,10 @@ def read(repo_root: Path, ref: str, *, remote: str | None = None) -> RefLockStat
     oid = _ref_oid(repo_root, ref, remote=remote)
     if oid is None:
         return None
-    return _decode_blob(_read_blob_bytes(repo_root, ref, oid), oid)
+    raw = _read_blob_bytes(repo_root, ref, oid)
+    if _is_released(raw):
+        return None
+    return _decode_blob(raw, oid)
 
 
 # ---------------------------------------------------------------------------
@@ -364,58 +434,40 @@ def acquire(
     lease_secs: float,
     remote: str | None = None,
 ) -> str:
-    """Create-only CAS acquire of *ref*; return the new blob OID.
+    """CAS acquire of a free *ref*; return the new tip commit OID.
 
-    Plants ``{holder, lease_secs, heartbeat_ns, fence=0}`` as a blob, then does a
-    create-only CAS (old = 40 zeros). A CAS mismatch means the ref already exists
-    (lock held) — definitive, NOT retried: raises :class:`RefLockHeldError`.
+    Free means absent or a released marker. A live (or unreadable) tip raises
+    :class:`RefLockHeldError` without pushing; a CAS mismatch on the write means another
+    contender won — definitive, NOT retried — and raises it too.
     """
-    blob = _encode_blob(holder, lease_secs, time.time_ns(), 0)
-    oid = _hash_object(repo_root, blob)
-
-    def _plant() -> None:  # raw-git-ok: write seam internal
-        if remote is None:
-            _git(repo_root, ["update-ref", ref, oid, _ZERO_OID], timeout=_LOCAL_TIMEOUT_SECS)
-        else:
-            _push_cas(repo_root, ref, oid, _ZERO_OID, remote)
-
-    if not _cas_once(_plant, ref):
-        logger.info(
-            "ref-lock acquire failed: %s already held (create-only CAS rejected) holder=%r",
-            ref,
-            holder,
-        )
+    tip = _ref_oid(repo_root, ref, remote=remote)
+    if tip is not None and not _is_released(_read_blob_bytes(repo_root, ref, tip)):
         raise RefLockHeldError(f"lock {ref} already held")
-    return oid
+    payload = _hash_object(repo_root, _encode_blob(holder, lease_secs, time.time_ns(), 0))
+    new_tip = _cas_advance(repo_root, ref, new_oid=payload, old_oid=tip or _ZERO_OID, remote=remote)
+    if new_tip is None:
+        logger.info("ref-lock acquire failed: %s won by another contender holder=%r", ref, holder)
+        raise RefLockHeldError(f"lock {ref} already held")
+    return new_tip
 
 
 def release(repo_root: Path, ref: str, *, oid: str, remote: str | None = None) -> bool:
-    """Observed-oid CAS release (delete) of *ref*. Idempotent.
+    """Observed-oid CAS release of *ref*: write its marker over *oid*. Idempotent.
 
-    Deletes the ref only if it still points at *oid*. A CAS mismatch (ref already
-    gone, or now owned by another holder after a steal) is a benign idempotent
-    success — returns ``False`` (nothing deleted); a successful delete returns
-    ``True``. Never raises on a stale oid.
-
-    With a *remote* this clears BOTH halves — the remote ref (the CAS delete) and
-    any local copy a previous :func:`read` force-fetch planted — so a release never
-    strands a local orphan that later reads would mistake for a live lock.
+    Writes the released-lock (or cleared-gate) marker only if the ref still points at
+    *oid*. A ref that is gone or now owned by another holder after a steal is a benign
+    idempotent success — returns ``False``; a landed marker returns ``True``. Never
+    raises on a stale oid. With a *remote* the local copy a :func:`read` planted is also
+    dropped; the next read re-syncs it from the remote.
     """
-
-    def _delete() -> None:  # raw-git-ok: write seam internal
-        if remote is None:
-            _git(repo_root, ["update-ref", "-d", ref, oid], timeout=_LOCAL_TIMEOUT_SECS)
-        else:
-            _push_delete_cas(repo_root, ref, oid, remote)
-
-    deleted = _cas_once(_delete, ref)
+    tip = _ref_oid(repo_root, ref, remote=remote)
+    deleted = False
+    if tip is not None and tip == oid:
+        marker = _marker_blob(repo_root, ref, tip)
+        deleted = (
+            _cas_advance(repo_root, ref, new_oid=marker, old_oid=tip, remote=remote) is not None
+        )
     if remote is not None:
-        # Clear the LOCAL half too. A read() force-fetch plants a local copy of the
-        # remote ref, and a remote-only delete strands it — an orphan that makes every
-        # later read report HELD against a now-free remote (and that steal cannot break,
-        # because --force-with-lease against an absent remote ref is rejected as "stale
-        # info"). ADR 0031's operator break-glass names both halves; do both, even on a
-        # mismatched CAS, where our local copy is equally stale.
         _delete_local_ref(repo_root, ref)
     if deleted:
         return True
@@ -447,22 +499,28 @@ def heartbeat_interval(lease_secs: float) -> int:
 
 def _cas_advance(
     repo_root: Path, ref: str, *, new_oid: str, old_oid: str, remote: str | None
-) -> bool:
-    """Advance *ref* from *old_oid* to *new_oid* under CAS (local update-ref or remote push).
+) -> str | None:
+    """Commit payload blob *new_oid* onto *old_oid* and advance *ref* to it under CAS.
 
-    Returns True on success, False on a CAS mismatch (someone else moved the ref),
-    re-raising any non-mismatch failure — the shared single-shot contract. Used by
-    both :func:`renew` (heartbeat) and :func:`try_break_if_stale` (steal); acquire's
-    create-only CAS uses ``old_oid`` = 40 zeros.
+    Returns the new tip commit oid, or ``None`` on a CAS mismatch (someone else moved the
+    ref), re-raising any other failure — the shared single-shot contract. ``old_oid`` of
+    40 zeros means the ref must be absent. A legacy blob tip (rebar <= 0.13 on a git
+    remote) cannot be a parent, so that one write goes through the lease push.
     """
+    legacy = old_oid != _ZERO_OID and _object_type(repo_root, old_oid) == "blob"
+    parent = None if old_oid == _ZERO_OID or legacy else old_oid
+    tip = _push.wrap_commit(_core(), repo_root, new_oid, _payload_name(ref), parent)
 
     def _do() -> None:  # raw-git-ok: write seam internal
         if remote is None:
-            _git(repo_root, ["update-ref", ref, new_oid, old_oid], timeout=_LOCAL_TIMEOUT_SECS)
+            _git(repo_root, ["update-ref", ref, tip, old_oid], timeout=_LOCAL_TIMEOUT_SECS)
+        elif legacy:
+            with _push.temp_ref(_core(), repo_root, tip) as source:
+                _push_lease_cas(repo_root, ref, old_oid, remote, f"{source}:{ref}")
         else:
-            _push_cas(repo_root, ref, new_oid, old_oid, remote)
+            _push.push_fast_forward(_core(), repo_root, ref, tip, old_oid, remote)
 
-    return _cas_once(_do, ref)
+    return tip if _cas_once(_do, ref) else None
 
 
 def renew(repo_root: Path, ref: str, *, oid: str, remote: str | None = None) -> str:
@@ -485,11 +543,13 @@ def renew(repo_root: Path, ref: str, *, oid: str, remote: str | None = None) -> 
         )
         raise LeaseLostError(f"lease on {ref} lost before renew (expected {oid})")
     new_blob = _encode_blob(state.holder, state.lease_secs, time.time_ns(), state.fence + 1)
-    new_oid = _hash_object(repo_root, new_blob)
-    if not _cas_advance(repo_root, ref, new_oid=new_oid, old_oid=oid, remote=remote):
+    new_tip = _cas_advance(
+        repo_root, ref, new_oid=_hash_object(repo_root, new_blob), old_oid=oid, remote=remote
+    )
+    if new_tip is None:
         logger.warning("ref-lock renew: %s CAS rejected — lease lost/stolen (held %s)", ref, oid)
         raise LeaseLostError(f"renew CAS on {ref} rejected — lease lost/stolen")
-    return new_oid
+    return new_tip
 
 
 def try_break_if_stale(
@@ -520,8 +580,10 @@ def try_break_if_stale(
         )
         return None
     new_blob = _encode_blob(holder, second.lease_secs, time.time_ns(), second.fence + 1)
-    new_oid = _hash_object(repo_root, new_blob)
-    if not _cas_advance(repo_root, ref, new_oid=new_oid, old_oid=second.oid, remote=remote):
+    new_oid = _cas_advance(
+        repo_root, ref, new_oid=_hash_object(repo_root, new_blob), old_oid=second.oid, remote=remote
+    )
+    if new_oid is None:
         logger.info(
             "ref-lock steal: %s CAS lost to another contender (single-winner) — not stolen", ref
         )
@@ -608,7 +670,8 @@ def read_gate(repo_root: Path, ref: str = GATE_REF, *, remote: str | None = None
     oid = _ref_oid(repo_root, ref, remote=remote)
     if oid is None:
         return None
-    return _decode_gate(_read_blob_bytes(repo_root, ref, oid))
+    mode = _decode_gate(_read_blob_bytes(repo_root, ref, oid))
+    return None if mode == _CLEARED_GATE_MODE else mode
 
 
 def set_gate(repo_root: Path, mode: str, ref: str = GATE_REF, *, remote: str | None = None) -> str:
@@ -618,18 +681,19 @@ def set_gate(repo_root: Path, mode: str, ref: str = GATE_REF, *, remote: str | N
     transitions are rare and a conflict is worth surfacing, not silently retrying.
     """
     old = _ref_oid(repo_root, ref, remote=remote)
-    new_oid = _hash_object(repo_root, _encode_gate(mode))
+    payload = _hash_object(repo_root, _encode_gate(mode))
     old_oid = old if old is not None else _ZERO_OID
-    if not _cas_advance(repo_root, ref, new_oid=new_oid, old_oid=old_oid, remote=remote):
+    new_oid = _cas_advance(repo_root, ref, new_oid=payload, old_oid=old_oid, remote=remote)
+    if new_oid is None:
         raise RefLockError(f"gate CAS on {ref} rejected — concurrent gate update")
     logger.info("ref-lock gate: %s set to mode %r", ref, mode)
     return new_oid
 
 
 def clear_gate(repo_root: Path, ref: str = GATE_REF, *, remote: str | None = None) -> bool:
-    """Delete the gate ref (observed-oid CAS). Idempotent: ``False`` if already absent."""
+    """Clear the gate (observed-oid CAS marker). ``False`` if absent or already cleared."""
     oid = _ref_oid(repo_root, ref, remote=remote)
-    if oid is None:
+    if oid is None or _is_cleared_gate(_read_blob_bytes(repo_root, ref, oid)):
         return False
     return release(repo_root, ref, oid=oid, remote=remote)
 
@@ -708,8 +772,9 @@ def set_pause(
         else:
             raise _pause_conflict(repo_root, ref, remote)
     doc = dict(zip(_PAUSE_FIELDS, (_PAUSE_GATED_MODE, True, reason, who, paused_at), strict=True))
-    new_oid = _hash_object(repo_root, (json.dumps(doc) + "\n").encode("utf-8"))
-    if not _cas_advance(repo_root, ref, new_oid=new_oid, old_oid=old or _ZERO_OID, remote=remote):
+    payload = _hash_object(repo_root, (json.dumps(doc) + "\n").encode("utf-8"))
+    new_oid = _cas_advance(repo_root, ref, new_oid=payload, old_oid=old or _ZERO_OID, remote=remote)
+    if not new_oid:
         raise _pause_conflict(repo_root, ref, remote)
     return new_oid
 
@@ -723,16 +788,10 @@ _push = importlib.import_module("rebar.reconciler._ref_lock_push")
 _is_cas_mismatch_stderr = _push.is_cas_mismatch_stderr
 
 
+def _core():
+    return sys.modules[__name__]
+
+
 def _push_lease_cas(repo_root: Path, ref: str, old_oid: str, remote: str, refspec: str) -> None:
-    """Lease-CAS push of *refspec*; see :mod:`_ref_lock_push` for the contract."""
-    _push.push_lease_cas(sys.modules[__name__], repo_root, ref, old_oid, remote, refspec)
-
-
-def _push_cas(repo_root: Path, ref: str, new_oid: str, old_oid: str, remote: str) -> None:
-    """Create/advance CAS: push ``<new-oid>:<ref>`` under a lease on *old_oid*."""
-    _push_lease_cas(repo_root, ref, old_oid, remote, f"{new_oid}:{ref}")
-
-
-def _push_delete_cas(repo_root: Path, ref: str, old_oid: str, remote: str) -> None:
-    """Delete CAS: push ``:<ref>`` under a lease on *old_oid* (observed-oid delete)."""
-    _push_lease_cas(repo_root, ref, old_oid, remote, f":{ref}")
+    """Lease-CAS push of *refspec* (legacy blob tips only); see :mod:`_ref_lock_push`."""
+    _push.push_lease_cas(_core(), repo_root, ref, old_oid, remote, refspec)
