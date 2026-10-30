@@ -24,18 +24,17 @@ from ._processors import (
     process_create,
     process_edit,
     process_file_impact,
-    process_key_event,
     process_link,
     process_revert,
-    process_signature,
     process_snapshot,
-    process_status,
     process_tag_delta,
     process_unlink,
     process_verify_commands,
     process_workflow_run,
     process_workflow_step,
 )
+from ._processors_identity import process_key_event, process_signature
+from ._processors_status import process_status
 from ._version import KEY_ADD, KEY_REVOKE, KNOWN_EVENT_TYPES, TAG_DELTA
 
 logger = logging.getLogger(__name__)

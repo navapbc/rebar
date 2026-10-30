@@ -114,7 +114,7 @@ def test_retired_verdict_non_list_manifest_reports_zero_steps() -> None:
 
 def test_process_signature_coerces_non_list_manifest() -> None:
     # A non-list manifest (e.g. a dict) must not be persisted into reduced state.
-    from rebar.reducer._processors import process_signature
+    from rebar.reducer._processors_identity import process_signature
     from rebar.reducer._state import make_initial_state
 
     s = make_initial_state()
@@ -130,7 +130,7 @@ def test_process_signature_coerces_non_list_manifest() -> None:
 
 # ── process_signature is last-writer-wins (the merge contract) ────────────────
 def test_process_signature_is_last_writer_wins() -> None:
-    from rebar.reducer._processors import process_signature
+    from rebar.reducer._processors_identity import process_signature
     from rebar.reducer._state import make_initial_state
 
     ev_a = {

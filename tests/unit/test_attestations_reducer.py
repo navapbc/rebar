@@ -12,10 +12,10 @@ from __future__ import annotations
 from rebar.reducer._present import public_state
 from rebar.reducer._processors import (
     attestation_kind,
-    process_signature,
     process_snapshot,
-    process_status,
 )
+from rebar.reducer._processors_identity import process_signature
+from rebar.reducer._processors_status import process_status
 from rebar.reducer._state import make_initial_state
 
 

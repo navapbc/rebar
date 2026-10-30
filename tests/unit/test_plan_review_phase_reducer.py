@@ -7,7 +7,8 @@ import logging
 import pytest
 
 from rebar._commands.compact import _snapshot_strip_keys
-from rebar.reducer._processors import process_snapshot, process_status
+from rebar.reducer._processors import process_snapshot
+from rebar.reducer._processors_status import process_status
 from rebar.reducer._state import make_initial_state
 
 

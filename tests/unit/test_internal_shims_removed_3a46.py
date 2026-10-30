@@ -11,7 +11,7 @@ from rebar.grounding import detectors as grounding_detectors
 from rebar.grounding import oracle
 from rebar.grounding.detectors import registry as detector_registry
 from rebar.llm.code_review import detectors
-from rebar.reducer import _processors, _processors_status
+from rebar.reducer import _processors, _processors_identity, _processors_status
 
 
 def test_cli_help_private_forwarders_are_gone_but_canonical_route_still_works(
@@ -90,6 +90,30 @@ def test_reducer_root_no_longer_exports_split_processor_shims() -> None:
     assert callable(_processors.process_create)
     assert callable(_processors.process_comment)
     assert callable(_processors_status.process_status)
+
+
+def test_processors_back_compat_reexports_are_gone_but_canonical_modules_keep_them() -> None:
+    for name in (
+        "_rederive_keyring_keys",
+        "process_key_event",
+        "process_signature",
+        "_fold_claimed_session",
+        "_fold_close_metadata",
+        "_fold_plan_review_phase",
+        "process_status",
+    ):
+        assert not hasattr(_processors, name)
+
+    for name in ("_rederive_keyring_keys", "process_key_event", "process_signature"):
+        assert callable(getattr(_processors_identity, name))
+
+    for name in (
+        "_fold_claimed_session",
+        "_fold_close_metadata",
+        "_fold_plan_review_phase",
+        "process_status",
+    ):
+        assert callable(getattr(_processors_status, name))
 
 
 def test_grounding_dimensions_reexport_is_gone_but_oracle_remains_authoritative() -> None:
