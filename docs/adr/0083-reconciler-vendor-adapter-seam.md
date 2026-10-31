@@ -2,8 +2,7 @@
 
 > **Renumbered by story 0743:** previously ADR 0035 (a number shared by 3 ADRs — a collision); reassigned to 0083 to make ADR numbers unique. See [RENUMBERING.md](RENUMBERING.md).
 
-- **Status:** Accepted (Phase 1 landed; Phase 2 in progress under epic `bbf1-82e1-cf9d-494a`,
-  which pins the backend interface in §(d))
+- **Status:** Accepted (Phase 1 and Phase 2 landed — Phase 2 epic `bbf1-82e1-cf9d-494a`, doctorial-semiironic-wrasse, closed; the backend interface pinned in §(d) is the live seam)
 - **Amended by:** [`0055-jira-family-sub-seam.md`](0055-jira-family-sub-seam.md) — epic
   `e369-a449-4773-48fb` landed **Jira Data Center** as the first real second backend, ahead of the
   GitHub adapter this ADR reserved that role for. ADR 0055 adds a `adapters/jira_family/` layer

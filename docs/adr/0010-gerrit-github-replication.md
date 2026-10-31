@@ -2,6 +2,8 @@
 
 > **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0010 was shared by 2 ADRs (a collision). This ADR is the earliest-landed and retains 0010; the others were reassigned to 0074 (was `0010-code-review-overlay-escalation.md`). See [RENUMBERING.md](RENUMBERING.md).
 
+> **Amended by [ADR 0021](0021-replication-change-refs.md) (2026-07-01).** The replicated data-ref set widened to include `refs/changes/*`; the NON-force, mirror-off, deploy-key-identity decisions below stand unchanged.
+
 **Status:** Accepted (epic d251 / story S5)
 **Date:** 2026-06-29
 
