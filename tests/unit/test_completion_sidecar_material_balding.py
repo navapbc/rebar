@@ -195,7 +195,9 @@ def test_legacy_payloads_without_material_still_round_trip(monkeypatch, tmp_path
     from rebar.llm import completion_sidecar
 
     tracker = tmp_path / "tracker"
-    ticket_dir = tracker / "ticket-1"
+    # The directory name differs from the ticket id, so only the resolver stub below
+    # can find it: the real resolver cannot map "ticket-1" to "legacy-dir".
+    ticket_dir = tracker / "legacy-dir"
     ticket_dir.mkdir(parents=True)
     event = {
         "event_type": completion_sidecar.EVENT_TYPE,
@@ -226,7 +228,7 @@ def test_legacy_payloads_without_material_still_round_trip(monkeypatch, tmp_path
     monkeypatch.setattr(config, "tracker_dir", lambda repo_root=None: tracker)
     monkeypatch.setattr(
         "rebar._ids.resolve_ticket_dir_name",
-        lambda ticket_id, tracker: os.fspath(Path(ticket_id)),
+        lambda ticket_id, tracker: os.fspath(Path({"ticket-1": "legacy-dir"}[ticket_id])),
     )
 
     assert completion_sidecar.latest_fail_verdict("ticket-1", repo_root=".") == event["data"]
