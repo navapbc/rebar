@@ -48,11 +48,9 @@ def _golden_data(path: pathlib.Path = _GOLDEN) -> dict[str, list[str]]:
 
 
 def _orphaned_config_keys(data: dict[str, list[str]]) -> list[str]:
-    # A retired config key is accounted for by a cfg tombstone OR an honored alias.
-    from rebar._config_schema import _ALIASES
-
-    aliases = {f"{sect}.{old}" for sect, m in _ALIASES.items() for old in m}
-    accounted = _live_config_keys() | _tombstoned("cfg") | aliases
+    # A retired config key is accounted for by a cfg tombstone. ADR 0116 retired the
+    # last cfg alias and the alias table itself is gone, so there is no alias channel.
+    accounted = _live_config_keys() | _tombstoned("cfg")
     return [k for k in data["config_keys"] if k not in accounted]
 
 
@@ -174,8 +172,8 @@ def test_canonical_env_change_mid_process_invalidates_the_config_cache(
 ) -> None:
     """A canonical ``REBAR_*`` override flipping mid-process must miss the config cache.
 
-    ``_env_signature`` used to make a second pass over ``_LEGACY_ENV_ALIASES``, a table
-    that ADR 0116 left permanently empty — so it contributed nothing to the signature.
+    ``_env_signature`` used to make a second pass over the legacy alias table, which
+    ADR 0116 left permanently empty — so it contributed nothing to the signature.
     This pins that the canonical pass is what actually invalidates, which is what made
     deleting the dead pass safe.
     """

@@ -124,56 +124,51 @@ def _tombstone_message(ri: RemovedInput) -> str:
     return f"{ri.name} was removed in {ri.removed_in} (no replacement; it is now ignored)"
 
 
-def _tomb(kind: str, name: str, replacement: str, behavior: str) -> RemovedInput:
+def _tomb(
+    kind: str, name: str, replacement: str, behavior: str, *, removed_in: str
+) -> RemovedInput:
     return RemovedInput(
-        kind=kind, name=name, replacement=replacement, removed_in=_MAJOR, behavior=behavior
+        kind=kind, name=name, replacement=replacement, removed_in=removed_in, behavior=behavior
     )
 
 
-# The seeded tombstones. Grouped by kind/behavior for readability; the ORDER here is
-# the reporting order for ``rebar config validate``.
+# The seeded tombstones. Grouped by kind for readability; the ORDER here is the
+# reporting order for ``rebar config validate``. Every row is error-class: a retired
+# input that still changes behaviour if it is honoured, so it must fail loud. The
+# warn-class rows are gone — an inert retired name is an ordinary unknown key, and
+# ``removed_in`` now names the release that actually removed each one rather than a
+# placeholder horizon.
 _TOMBSTONE_REGISTRY: tuple[RemovedInput, ...] = (
     # env, error — load-bearing (store location / MCP sync gate).
-    _tomb("env", "TICKETS_TRACKER_DIR", "REBAR_TRACKER_DIR", "error"),
-    _tomb("env", "REBAR_MCP_ALLOW_RECONCILE_LIVE", "REBAR_MCP_ALLOW_JIRA_SYNC", "error"),
-    # env, warn — inert renames / dropped tunables.
-    _tomb("env", "REBAR_PUSH", "REBAR_SYNC_PUSH", "warn"),
-    _tomb("env", "REBAR_RECONCILER_LOCK_MAX_RETRIES", "", "warn"),
-    _tomb("env", "REBAR_RECONCILER_LOCK_RETRY_BUDGET", "", "warn"),
-    _tomb("env", "REBAR_CODE_HEALTH_ANALYZERS", "", "warn"),
-    _tomb("env", "REBAR_CODE_HEALTH_ENABLED", "", "warn"),
-    # The auto-derived (REBAR_<SECTION>_<KEY>) twins of the retired resolved_statuses
-    # config keys below — inert, so warn, per the REBAR_CODE_HEALTH_ENABLED precedent.
-    _tomb("env", "REBAR_JIRA_RESOLVED_STATUSES", "", "warn"),
-    _tomb("env", "REBAR_RECONCILER_RESOLVED_STATUSES", "", "warn"),
+    _tomb("env", "TICKETS_TRACKER_DIR", "REBAR_TRACKER_DIR", "error", removed_in="v0.8.0"),
+    _tomb(
+        "env",
+        "REBAR_MCP_ALLOW_RECONCILE_LIVE",
+        "REBAR_MCP_ALLOW_JIRA_SYNC",
+        "error",
+        removed_in="v0.8.0",
+    ),
     # cfg, error — lifecycle/close gate rename.
     _tomb(
         "cfg",
         "verify.require_verdict_for_close",
         "verify.require_completion_verification_for_close",
         "error",
+        removed_in="v0.8.0",
     ),
-    # cfg, warn — dropped reconciler lock tunables.
-    _tomb("cfg", "reconciler.lock_backend", "", "warn"),
-    _tomb("cfg", "reconciler.lock_max_retries", "", "warn"),
-    # cfg, warn — the never-wired per-language analyzer selection map. The dispatch
-    # it fed was designed but never populated, so the key never had behaviour to
-    # preserve; it is dropped with no replacement (its env twin is tombstoned above).
-    _tomb("cfg", "code_health.analyzers", "", "warn"),
-    # This unwired off switch had no effect; warn and remove it without replacement.
-    _tomb("cfg", "code_health.enabled", "", "warn"),
-    # cfg, warn — the retired inbound absence-probe status sets (task 549c deprecated,
-    # task f408 removed under operator sign-off). No replacement: resolved/unresolved
-    # discrimination is outbound-owned (ADR 0028), so an operator just deletes the line.
-    _tomb("cfg", "jira.resolved_statuses", "", "warn"),
-    _tomb("cfg", "reconciler.resolved_statuses", "", "warn"),
     # file, error — the legacy flat config reader.
-    _tomb("file", ".rebar/config.conf", "rebar.toml [tool.rebar]", "error"),
+    _tomb("file", ".rebar/config.conf", "rebar.toml [tool.rebar]", "error", removed_in="v0.8.0"),
     # env, error (llm) — retired LLM step-budget knob (checked in llm.config.from_env).
-    _tomb("env", "REBAR_LLM_MAX_ITERS", "REBAR_LLM_MAX_STEPS", "error"),
+    _tomb("env", "REBAR_LLM_MAX_ITERS", "REBAR_LLM_MAX_STEPS", "error", removed_in="v0.8.0"),
     # env, error (llm) — the retired bare model id (checked in llm.config.from_env).
     # Ignoring it silently would change which model every operation runs.
-    _tomb("env", "REBAR_LLM_MODEL", "the [tool.rebar.llm.model_classes] slots", "error"),
+    _tomb(
+        "env",
+        "REBAR_LLM_MODEL",
+        "the [tool.rebar.llm.model_classes] slots",
+        "error",
+        removed_in="v0.12.0",
+    ),
 )
 
 

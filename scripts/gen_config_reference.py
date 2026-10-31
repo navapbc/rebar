@@ -221,15 +221,15 @@ def _cfg_deprecations() -> list[tuple[str, str, str]]:
     return sorted(rows)
 
 
-def _cfg_tombstones() -> list[tuple[str, str, str]]:
-    """(name, replacement, behavior) for each ``kind == 'cfg'`` removed key."""
+def _cfg_tombstones() -> list[tuple[str, str, str, str]]:
+    """(name, replacement, behavior, removed_in) for each ``kind == 'cfg'`` removed key."""
     from rebar._deprecations import tombstones
 
-    rows: list[tuple[str, str, str]] = []
+    rows: list[tuple[str, str, str, str]] = []
     for ri in tombstones():
         if ri.kind != "cfg":
             continue
-        rows.append((ri.name, ri.replacement, ri.behavior))
+        rows.append((ri.name, ri.replacement, ri.behavior, ri.removed_in))
     return sorted(rows)
 
 
@@ -245,7 +245,7 @@ def _lifecycle_index() -> dict[str, str]:
     for name, replacement, status in _cfg_deprecations():
         if replacement:
             notes.setdefault(replacement, []).append(f"supersedes alias `{name}` ({status})")
-    for name, replacement, _behavior in _cfg_tombstones():
+    for name, replacement, _behavior, _removed_in in _cfg_tombstones():
         if replacement:
             notes.setdefault(replacement, []).append(f"replaces removed key `{name}`")
     return {key: "active — " + "; ".join(parts) for key, parts in notes.items()}
@@ -334,16 +334,21 @@ def render_config_reference() -> str:
     lines.append("")
     if tomb:
         lines.append(
-            "Fully-removed keys (tombstones): setting one no longer has any effect and is "
-            "either warned or failed-loud — derived from the `cfg`-kind entries of "
+            "Fully-removed keys (tombstones): setting one FAILS LOUD with a migration "
+            "error naming its replacement and the release that removed it. Every row is "
+            "error-class — the registry is reserved for retired keys that would change "
+            "behaviour if honoured, so an inert retired key is reported through the "
+            "ordinary unknown-key path instead. Derived from the `cfg`-kind entries of "
             "`rebar._deprecations.tombstones()`:"
         )
         lines.append("")
-        lines.append("| Removed key | Replacement | Behavior when still set |")
-        lines.append("|-------------|-------------|-------------------------|")
-        for name, replacement, behavior in tomb:
+        lines.append("| Removed key | Replacement | Behavior when still set | Removed in |")
+        lines.append("|-------------|-------------|-------------------------|------------|")
+        for name, replacement, behavior, removed_in in tomb:
             repl = f"`{_md_cell(replacement)}`" if replacement else "_(no replacement)_"
-            lines.append(f"| `{_md_cell(name)}` | {repl} | {_md_cell(behavior)} |")
+            lines.append(
+                f"| `{_md_cell(name)}` | {repl} | {_md_cell(behavior)} | {_md_cell(removed_in)} |"
+            )
     else:
         lines.append("_None._")
     lines.append("")

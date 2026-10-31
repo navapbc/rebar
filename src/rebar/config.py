@@ -6,7 +6,6 @@ import os
 import subprocess
 from pathlib import Path
 
-from rebar._config_schema import _ALIASES as _ALIASES
 from rebar._config_schema import _RESERVED_SECTIONS as _RESERVED_SECTIONS
 from rebar._config_schema import _SECTION_CLASSES as _SECTION_CLASSES
 

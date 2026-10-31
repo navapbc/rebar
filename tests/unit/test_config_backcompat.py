@@ -10,6 +10,7 @@ alias were removed pre-1.0 — DE7 — so config now loads only from ``rebar.tom
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 import pytest
@@ -208,48 +209,111 @@ def test_from_mapping_strict_flag() -> None:
 
 
 # ── removed key: the inert code-health off switch (bug a573-00ea-2bf6-4eb1) ────
-def test_removed_code_health_enabled_cfg_key_warns_and_does_not_raise(
+def test_removed_code_health_enabled_cfg_key_warns_like_any_unknown_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """`code_health.enabled` was removed: it had ZERO read sites, so it never
-    switched the structural metrics off. It is a WARN-class TOMBSTONE, not a silent
-    drop — an operator who still has it set must be told it is gone.
+    switched the structural metrics off. It carried a warn-class tombstone until the
+    warn class was retired; it is now an ordinary unknown key, so the operator still
+    learns the line is dead, through the generic channel.
 
-    The strict unknown-key policy is what makes this discriminating: an untombstoned
-    unknown key RAISES ConfigError under `REBAR_CONFIG_UNKNOWN_KEYS=error`, so a run
-    that merely warns and returns a config proves the TOMBSTONE fired, not the
-    generic unknown-key path."""
-    monkeypatch.setenv("REBAR_CONFIG_UNKNOWN_KEYS", "error")
+    The surviving keys in the same section must keep applying, which is what proves
+    the section still coerces rather than being rejected wholesale."""
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text(
         "[code_health]\nenabled = true\nsize_cap = 800\n", encoding="utf-8"
     )
 
     with caplog.at_level(logging.WARNING):
-        c = cfg.load_config(root=p)  # must NOT raise — warn class
+        c = cfg.load_config(root=p)
 
     assert not hasattr(c.code_health, "enabled")
     assert c.code_health.size_cap == 800  # the surviving keys still apply
     assert any(
-        "code_health.enabled" in r.getMessage() and "was removed in" in r.getMessage()
+        "code_health.enabled" in r.getMessage() and "unknown key" in r.getMessage()
         for r in caplog.records
-    ), f"expected a tombstone warning, got: {[r.getMessage() for r in caplog.records]}"
+    ), f"expected an unknown-key warning, got: {[r.getMessage() for r in caplog.records]}"
 
 
-def test_removed_code_health_enabled_env_var_warns(
+def test_removed_code_health_enabled_cfg_key_obeys_strict_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The deliberate behaviour change from retiring the warn class: the dead key no
+    longer gets a tombstone exemption from `REBAR_CONFIG_UNKNOWN_KEYS=error`. An
+    operator who opted into strict now gets a hard failure naming it."""
+    monkeypatch.setenv("REBAR_CONFIG_UNKNOWN_KEYS", "error")
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text("[code_health]\nenabled = true\n", encoding="utf-8")
+
+    with pytest.raises(cfg.ConfigError, match=re.escape("code_health.enabled")):
+        cfg.load_config(root=p)
+
+
+def test_removed_code_health_enabled_env_var_is_silently_ignored(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The `REBAR_CODE_HEALTH_ENABLED` env twin is tombstoned too. Without a
-    tombstone an env var for a dead key is dropped in TOTAL SILENCE (env is only read
-    for live section/key pairs), so the warning is the whole contract here."""
+    """The `REBAR_CODE_HEALTH_ENABLED` env twin is not read at all: `env_overrides()`
+    only consults live section/key pairs, so a stale export cannot reach any code
+    path. With no tombstone row there is nothing to announce, and announcing it would
+    require re-enrolling a name that no longer exists in the schema."""
     monkeypatch.setenv("REBAR_CODE_HEALTH_ENABLED", "true")
     p = _proj(tmp_path)
 
     with caplog.at_level(logging.WARNING):
-        c = cfg.load_config(root=p)  # must NOT raise — warn class
+        c = cfg.load_config(root=p)
 
     assert not hasattr(c.code_health, "enabled")
+    assert not any("REBAR_CODE_HEALTH_ENABLED" in r.getMessage() for r in caplog.records)
+
+
+# ── reserved [llm] section: unknown keys get the same policy as core keys ─────
+def test_unknown_llm_key_warns_like_a_core_key(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`[llm]` is a RESERVED section — owned by the optional agents layer, so the core
+    parser never coerces it. That exemption used to extend to unknown-key policy, so a
+    typo or a key a later story removed was accepted in total silence. The operator now
+    gets the same warning they would for any other section."""
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text("[llm]\nbogus = 1\n", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        cfg.load_config(root=p)  # must NOT raise — reserved section still loads
+
     assert any(
-        "REBAR_CODE_HEALTH_ENABLED" in r.getMessage() and "was removed in" in r.getMessage()
-        for r in caplog.records
-    ), f"expected a tombstone warning, got: {[r.getMessage() for r in caplog.records]}"
+        "llm.bogus" in r.getMessage() and "unknown key" in r.getMessage() for r in caplog.records
+    ), f"expected an unknown-key warning, got: {[r.getMessage() for r in caplog.records]}"
+
+
+def test_unknown_llm_key_errors_under_strict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The half that the overlap epic needs: once it removes the `overlap_*` keys, a
+    config still setting one must be able to fail loud rather than be ignored."""
+    monkeypatch.setenv("REBAR_CONFIG_UNKNOWN_KEYS", "error")
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text("[llm]\noverlap_k = 5\n", encoding="utf-8")
+
+    with pytest.raises(cfg.ConfigError, match=re.escape("llm.overlap_k")):
+        cfg.load_config(root=p)
+
+
+def test_known_llm_key_never_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The other half: every key the agents layer actually reads must stay silent, under
+    strict too. Without this the section's own live config would start failing."""
+    monkeypatch.setenv("REBAR_CONFIG_UNKNOWN_KEYS", "error")
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text(
+        "[llm]\nmodel = 'x'\ntimeout = 30\nmax_steps = 4\n"
+        "[llm.model_classes]\n[llm.evals]\ncorpus_root = 'c'\n",
+        encoding="utf-8",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        cfg.load_config(root=p)  # strict, yet must NOT raise
+
+    assert not any("unknown key" in r.getMessage() for r in caplog.records), [
+        r.getMessage() for r in caplog.records
+    ]

@@ -844,7 +844,10 @@ commonly the same person.
 settable in `[tool.rebar.ticket_clarity]`/`rebar.toml`, via `REBAR_TICKET_CLARITY_THRESHOLD`;
 it appears in `rebar config`.
 Unknown keys **warn** (not fail) during the deprecation window and hard-error under
-`REBAR_CONFIG_UNKNOWN_KEYS=error`. Use the canonical env vars and config keys shown above;
+`REBAR_CONFIG_UNKNOWN_KEYS=error`. This applies to the reserved `[llm]` section too:
+its values belong to the optional agents layer, but a key no reader reads is reported
+like any other unknown key rather than accepted in silence. Use the canonical env vars
+and config keys shown above;
 ADR 0116 removed the prior ergonomic config/env aliases before 1.0, and the release notes
 and changelog carry the migration table. Also removed (no alias):
 `PROJECT_ROOT` (use `REBAR_ROOT`), `REBAR_LLM_RUNNER` (runner is derived), and the
@@ -859,33 +862,40 @@ keys keep the forward-compat policy above (warn, or error only under
 `REBAR_CONFIG_UNKNOWN_KEYS=error`). But a *retired-but-still-set* input that used to affect
 **store location, write/sync gates, auth, security, or lifecycle policy** must not be
 silently ignored — silently dropping it reverts the operator's intent to a default, which is
-unsafe. rebar keeps a **tombstone registry** (`rebar._deprecations._TOMBSTONE_REGISTRY`,
-distinct from the alias registry) that classifies each removed input:
+unsafe. rebar keeps a **tombstone registry** (`rebar._deprecations._TOMBSTONE_REGISTRY`)
+for exactly those inputs. Every row is **`error` (load-bearing) → FAIL LOUD**: rebar raises
+a targeted migration error naming the old name + replacement + the release that removed it,
+and exits **non-zero** — never a raw traceback. Implemented as `RemovedInputError`, which
+subclasses `BaseException` (not `Exception`) deliberately, so no `except ConfigError` /
+`except Exception` fallback in the config→tracker→MCP path can swallow it into a silent
+default. The six rows are:
 
-- **`error` (load-bearing) → FAIL LOUD.** rebar raises a targeted migration error naming
-  the old name + replacement + removed-in and exits **non-zero** — never a raw traceback.
-  Implemented as `RemovedInputError`, which subclasses `BaseException` (not `Exception`)
-  deliberately, so no `except ConfigError` / `except Exception` fallback in the
-  config→tracker→MCP path can swallow it into a silent default. Error-class tombstones:
-  `TICKETS_TRACKER_DIR` (use `REBAR_TRACKER_DIR`), `REBAR_MCP_ALLOW_RECONCILE_LIVE`
-  (use `REBAR_MCP_ALLOW_JIRA_SYNC`), `REBAR_LLM_MAX_ITERS` (use `REBAR_LLM_MAX_STEPS`),
-  the config key `verify.require_verdict_for_close`
-  (use `verify.require_completion_verification_for_close`), and the flat
-  `.rebar/config.conf` reader (use `rebar.toml` / a `[tool.rebar]` pyproject table).
-- **`warn` (operationally inert) → WARN and continue (exit 0).** Renamed/dropped tunables
-  with no behavioural bite: `REBAR_PUSH` (use `REBAR_SYNC_PUSH`),
-  `REBAR_RECONCILER_LOCK_MAX_RETRIES` / `REBAR_RECONCILER_LOCK_RETRY_BUDGET` (dropped),
-  `REBAR_CODE_HEALTH_ANALYZERS` / `REBAR_CODE_HEALTH_ENABLED` (dropped), and the config keys
-  `reconciler.lock_backend` / `reconciler.lock_max_retries` (the ref lock is the only
-  backend), `code_health.analyzers` (per-language analyzer selection was never wired) and
-  `code_health.enabled` (it was never read, so it never switched anything off).
+| Kind | Removed input | Use instead | Removed in |
+| --- | --- | --- | --- |
+| env | `TICKETS_TRACKER_DIR` | `REBAR_TRACKER_DIR` | v0.8.0 |
+| env | `REBAR_MCP_ALLOW_RECONCILE_LIVE` | `REBAR_MCP_ALLOW_JIRA_SYNC` | v0.8.0 |
+| cfg | `verify.require_verdict_for_close` | `verify.require_completion_verification_for_close` | v0.8.0 |
+| file | `.rebar/config.conf` | `rebar.toml` / a `[tool.rebar]` pyproject table | v0.8.0 |
+| env | `REBAR_LLM_MAX_ITERS` | `REBAR_LLM_MAX_STEPS` | v0.8.0 |
+| env | `REBAR_LLM_MODEL` | the `[tool.rebar.llm.model_classes]` slots | v0.12.0 |
+
+**There are no warn-class tombstones.** The registry used to also carry inert retired
+names — renamed or dropped tunables with no behavioural bite, such as `REBAR_PUSH`,
+`REBAR_CODE_HEALTH_ENABLED`, `reconciler.lock_backend` and `jira.resolved_statuses`. They
+were retired as a class, because a warn row bought nothing and cost something. An inert
+retired *config key* now reports through the ordinary unknown-key path, which tells the
+operator the same thing and, unlike a warn row, honours `REBAR_CONFIG_UNKNOWN_KEYS=error`
+instead of exempting a dead key from it. An inert retired *env var* is ignored silently:
+env is only read for live section/key pairs, so a stale export never reaches any code
+path and there is nothing to announce.
 
 **`rebar config validate`** is a non-raising sweep that reports **every** tombstoned input
 (and its replacement + removed-in) currently set in the environment / parsed config / as the
 legacy file, plus every invalid known core typed value across user, project, environment, and
 CLI layers. It applies the same coercion rules as the live loader but aggregates failures
 instead of aborting on the first one. Unknown keys retain their forward-compatibility policy,
-and optional-layer sections such as `llm` and `snapshot` remain owned by those layers. The
+and optional-layer sections such as `llm` and `snapshot` keep their VALUES owned by those
+layers (`[llm]` key NAMES are still checked against its readers). The
 command exits **non-zero iff an error-class tombstone or invalid typed value is present** (a
 clean environment exits 0). It does not mount or initialize the ticket store, because store
 discovery itself may depend on the invalid input being audited. Use it to audit a config

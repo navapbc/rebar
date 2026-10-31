@@ -10,6 +10,25 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING (pre-1.0): the 13 warn-class config/env tombstones are retired, and unknown
+  `[tool.rebar.llm]` keys now warn.** A warn-class tombstone announced a retired input that
+  was already inert, and it exempted that dead key from `REBAR_CONFIG_UNKNOWN_KEYS=error`.
+  The 7 env names (`REBAR_PUSH`, `REBAR_RECONCILER_LOCK_MAX_RETRIES`,
+  `REBAR_RECONCILER_LOCK_RETRY_BUDGET`, `REBAR_CODE_HEALTH_ANALYZERS`,
+  `REBAR_CODE_HEALTH_ENABLED`, `REBAR_JIRA_RESOLVED_STATUSES`,
+  `REBAR_RECONCILER_RESOLVED_STATUSES`) were never read and are now ignored silently. The 6
+  config keys (`reconciler.lock_backend`, `reconciler.lock_max_retries`,
+  `code_health.analyzers`, `code_health.enabled`, `jira.resolved_statuses`,
+  `reconciler.resolved_statuses`) become ordinary unknown keys: they still warn by default,
+  but they now FAIL under `REBAR_CONFIG_UNKNOWN_KEYS=error` instead of being exempt. The 6
+  surviving error-class rows name the release that removed them (`v0.8.0`, and `v0.12.0` for
+  `REBAR_LLM_MODEL`) rather than a placeholder `v1.0.0` horizon. Separately, an unknown key
+  in the reserved `[tool.rebar.llm]` section is no longer accepted in silence — it gets the
+  same unknown-key policy as a core key, checked against a list kept in step with the
+  readers by a test. Details in [docs/release-notes.md](docs/release-notes.md).
+
 ## [0.14.0] - 2026-10-30
 
 ### Changed

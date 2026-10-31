@@ -1,8 +1,10 @@
-"""Removed ``resolved_statuses`` keys remain loadable with warnings.
+"""Removed ``resolved_statuses`` keys are ordinary unknown keys.
 
-Outbound logic owns resolved-state discrimination, so the old Jira and
-reconciler keys are inert warn-class tombstones with no replacement. Tests
-require both continued loading and an emitted warning."""
+Outbound logic owns resolved-state discrimination, so the old Jira and reconciler
+keys were retired with no replacement. They carried warn-class tombstones until the
+warn class was retired wholesale: an inert retired name tells an operator nothing a
+plain unknown-key warning does not, so it goes through the normal unknown-key path
+and obeys ``REBAR_CONFIG_UNKNOWN_KEYS``."""
 
 from __future__ import annotations
 
@@ -10,6 +12,7 @@ import logging
 
 import pytest
 
+from rebar._config_coercion import ConfigError
 from rebar._config_schema import JiraConfig, ReconcilerConfig, coerce_sparse
 from rebar._deprecations import REGISTRY, tombstone_for
 
@@ -29,25 +32,17 @@ def test_the_schema_field_is_gone(cls: type) -> None:
 
 
 @pytest.mark.parametrize(("section", "key"), REMOVED)
-def test_the_key_is_tombstoned_warn_class(section: str, key: str) -> None:
-    """`warn` rather than `error` is the load-bearing decision here: an inert key must not
-    abort the command. Pinned so a later edit cannot quietly promote it to a hard failure
-    and start breaking every config that still carries the line."""
-    ri = tombstone_for("cfg", f"{section}.{key}")
-
-    assert ri is not None, "the removed key must be tombstoned, not silently unknown"
-    assert ri.behavior == "warn"
-    assert ri.replacement == "", "discrimination is outbound-owned — nothing supersedes it"
+def test_the_key_is_not_tombstoned(section: str, key: str) -> None:
+    """No tombstone row survives. The registry is now error-class only — it is reserved
+    for retired inputs that still change behaviour if honoured, which these cannot."""
+    assert tombstone_for("cfg", f"{section}.{key}") is None
 
 
 @pytest.mark.parametrize("name", REMOVED_ENV)
-def test_the_auto_derived_env_twin_is_tombstoned_warn_class(name: str) -> None:
-    """The env twins auto-derived as REBAR_<SECTION>_<KEY>, so an operator may have
-    exported one; it is retired on the same terms as the config key."""
-    ri = tombstone_for("env", name)
-
-    assert ri is not None
-    assert ri.behavior == "warn"
+def test_the_auto_derived_env_twin_is_not_tombstoned(name: str) -> None:
+    """The env twins auto-derived as REBAR_<SECTION>_<KEY>. They are never read, so a
+    stale export is inert and carries no row either."""
+    assert tombstone_for("env", name) is None
 
 
 @pytest.mark.parametrize(("section", "key"), REMOVED)
@@ -59,41 +54,38 @@ def test_the_deprecation_row_is_gone(section: str, key: str) -> None:
 
 @pytest.mark.parametrize(("section", "key"), REMOVED)
 def test_a_config_still_setting_the_key_loads_and_drops_it(section: str, key: str) -> None:
-    """The point of a warn-class tombstone: an existing pyproject.toml keeps loading. The
-    key is consumed by the tombstone path, so it never reaches the coercers."""
+    """An existing pyproject.toml keeps loading under the default policy. The key is
+    unknown, so it is dropped rather than reaching the coercers."""
     out = coerce_sparse({section: {key: ["Shipped", "Abandoned"], "project": "DIG"}})
 
     assert key not in out.get(section, {})
 
 
 @pytest.mark.parametrize(("section", "key"), REMOVED)
-def test_setting_the_key_warns_that_it_was_removed(
+def test_setting_the_key_warns_as_an_unknown_key(
     section: str, key: str, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A silently-ignored removed key is the defect the tombstone registry exists to
-    prevent — the operator must be told the line is dead so they can delete it."""
+    """A silently-ignored dead key is still the defect to prevent — the operator must be
+    told the line does nothing so they can delete it. The channel is now the unknown-key
+    warning rather than a bespoke tombstone message."""
     with caplog.at_level(logging.WARNING, logger="rebar"):
         coerce_sparse({section: {key: ["Done"]}})
 
     messages = [r.getMessage() for r in caplog.records]
-    assert any(f"{section}.{key}" in m and "was removed in" in m for m in messages), messages
+    assert any(f"{section}.{key}" in m and "unknown key" in m for m in messages), messages
 
 
 @pytest.mark.parametrize(("section", "key"), REMOVED)
-def test_the_key_is_not_reported_as_unknown(
-    section: str, key: str, caplog: pytest.LogCaptureFixture
-) -> None:
-    """It must report as REMOVED, not unrecognised — the two mean different things to an
-    operator, and the unknown-key path also hard-errors under
-    REBAR_CONFIG_UNKNOWN_KEYS=error, which would defeat the warn-class choice."""
-    with caplog.at_level(logging.WARNING, logger="rebar"):
+def test_the_key_obeys_the_strict_unknown_key_policy(section: str, key: str) -> None:
+    """The deliberate behaviour change: an operator who opted into
+    REBAR_CONFIG_UNKNOWN_KEYS=error now gets a hard failure naming the dead key, instead
+    of the warn-class tombstone suppressing it."""
+    with pytest.raises(ConfigError, match=f"{section}.{key}"):
         coerce_sparse({section: {key: ["Done"]}}, strict=True)
-
-    assert not any("unknown key" in r.getMessage() for r in caplog.records)
 
 
 def test_an_unrelated_key_does_not_warn(caplog: pytest.LogCaptureFixture) -> None:
-    """Guards the tombstone lookup in `coerce_sparse` against over-firing."""
+    """Guards the lookup in `coerce_sparse` against over-firing."""
     with caplog.at_level(logging.WARNING, logger="rebar"):
         coerce_sparse({"jira": {"project": "DIG"}})
 
