@@ -90,7 +90,7 @@ def scan_event_payloads(ticket_id: str, repo_root: str, suffix: str) -> list[dic
     """Raw sidecar ``data`` payloads for a ticket (bypasses the schema-guarded
     verdict readers, so a gate_error_v1 record is visible)."""
     from rebar import config as _config
-    from rebar._engine_support.resolver import resolve_ticket_dir_name
+    from rebar._ids import resolve_ticket_dir_name
 
     tracker = str(_config.tracker_dir(repo_root))
     ticket_dir = os.path.join(tracker, resolve_ticket_dir_name(ticket_id, tracker))

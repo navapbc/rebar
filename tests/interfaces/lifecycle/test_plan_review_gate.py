@@ -582,7 +582,7 @@ def test_sidecar_is_reducer_ignored(rebar_repo: Path) -> None:
     assert st["status"] == "open"
     # A REVIEW_RESULT event file exists on disk (preserved) but is not in compiled state.
     tracker = Path(_config.tracker_dir(str(rebar_repo)))
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
 
     rid = resolve_ticket_id(tid, str(tracker))
     files = list((tracker / rid).glob("*-REVIEW_RESULT.json"))
@@ -611,7 +611,7 @@ def test_claim_path_makes_no_llm_call(rebar_repo: Path, monkeypatch) -> None:
 
 # ── REVIEW_RESULT retention prune bounds growth (db7b AC4) ──────────────────────
 def test_sidecar_prune_bounds_growth(rebar_repo: Path) -> None:
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
     from rebar.llm.plan_review import sidecar
 
     _commit(rebar_repo)

@@ -51,7 +51,7 @@ def _seed(repo: Path, title: str, comments: int) -> str:
     tid = rebar.create_ticket("task", title, description="x" * 60, repo_root=str(repo))
     for i in range(comments):
         rebar.comment(tid, f"c{i}", repo_root=str(repo))
-    return rebar._engine_support.resolver.resolve_ticket_id(tid, _tracker(repo))
+    return rebar._ids.resolve_ticket_id(tid, _tracker(repo))
 
 
 def _age(tdir: Path, by_ns: int = _HOUR_NS) -> None:

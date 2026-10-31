@@ -237,7 +237,7 @@ def _relocated_store_folding_everything(
     tid = rebar.create_ticket("task", "sweep me", description="x" * 60, repo_root=str(repo))
     for i in range(4):
         rebar.comment(tid, f"c{i}", repo_root=str(repo))
-    resolved = rebar._engine_support.resolver.resolve_ticket_id(tid, str(external))
+    resolved = rebar._ids.resolve_ticket_id(tid, str(external))
     return repo, external, resolved
 
 

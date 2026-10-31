@@ -70,7 +70,7 @@ def test_transition_core_close_reason_contract() -> None:
 def _close_via_core(tid: str, repo: Path, **kwargs) -> dict:
     from rebar import config
     from rebar._commands import txn
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
 
     rebar.claim(tid, assignee="me", repo_root=str(repo))
     tracker = str(config.tracker_dir(str(repo)))

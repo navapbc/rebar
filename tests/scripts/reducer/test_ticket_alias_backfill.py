@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 
 from rebar._alias import compute_alias, compute_genesis_alias
-from rebar._engine_support.resolver import (
+from rebar._ids import (
     _resolve_via_binding_store,
     _scan_alias,
     resolve_ticket_id,

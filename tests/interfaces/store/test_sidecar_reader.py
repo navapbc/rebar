@@ -83,7 +83,7 @@ def test_latest_review_result_none_on_malformed_json(rebar_repo: Path) -> None:
     tid = _make_ticket(rebar_repo)
     assert sidecar.emit(_verdict(tid, "ok finding"), material="m1", repo_root=str(rebar_repo))
     tracker = str(_config.tracker_dir(str(rebar_repo)))
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
 
     rid = resolve_ticket_id(tid, tracker) or tid
     ticket_dir = os.path.join(tracker, rid)
@@ -102,7 +102,7 @@ def test_latest_review_result_walks_back_past_corrupt_newest(rebar_repo: Path) -
     )
     assert sidecar.emit(_verdict(tid, "newer finding"), material="m2", repo_root=str(rebar_repo))
     tracker = str(_config.tracker_dir(str(rebar_repo)))
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
 
     rid = resolve_ticket_id(tid, tracker) or tid
     ticket_dir = os.path.join(tracker, rid)
@@ -122,7 +122,7 @@ def test_latest_review_result_schema_guard_rejects_foreign_payload(rebar_repo: P
     tid = _make_ticket(rebar_repo)
     assert sidecar.emit(_verdict(tid, "ok finding"), material="m1", repo_root=str(rebar_repo))
     tracker = str(_config.tracker_dir(str(rebar_repo)))
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
 
     rid = resolve_ticket_id(tid, tracker) or tid
     ticket_dir = os.path.join(tracker, rid)
@@ -154,7 +154,7 @@ def test_emit_appends_past_the_retain_bound_without_deleting(rebar_repo: Path) -
         )
 
     tracker = str(_config.tracker_dir(str(rebar_repo)))
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
 
     rid = resolve_ticket_id(tid, tracker) or tid
     ticket_dir = os.path.join(tracker, rid)

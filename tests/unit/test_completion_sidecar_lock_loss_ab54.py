@@ -79,7 +79,7 @@ def test_pass_sidecar_retries_raw_lock_timeout_and_lands(store, monkeypatch):
     assert landed is not None, "the PASS sidecar record was LOST despite a retryable LockTimeout"
     assert (
         landed.get("ticket_id")
-        == rebar._engine_support.resolver.resolve_ticket_id(tid, str(rebar.config.tracker_dir(r)))
+        == rebar._ids.resolve_ticket_id(tid, str(rebar.config.tracker_dir(r)))
         or landed.get("ticket_id") == tid
     )
 
