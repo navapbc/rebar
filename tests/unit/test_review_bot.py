@@ -2262,11 +2262,18 @@ def test_lifespan_cancel_await_is_bounded_for_a_task_slow_to_cancel(monkeypatch,
 
     Shielded cleanup, synchronous finalizers, and abandoned offload threads must
     not turn ``await task`` into an unbounded shutdown.
+
+    The proof is the slow task's own history, not wall time, so a stalled host
+    cannot fake or break it (bug quasiempty-snug-phoenix): the task swallows the
+    first cancel and would then finish on its own after 30s. Only lifespan's own
+    ``shutdown_cancel_seconds`` bound delivers a second cancel before that.
     """
     import types
 
     pytest.importorskip("fastapi")
     from rebar.review_bot import app as appmod
+
+    history = {"cancels": 0, "finished_on_its_own": False}
 
     async def _idle_worker(queue, cfg):
         while True:  # a well-behaved worker: parks on the queue, honors cancellation promptly
@@ -2274,16 +2281,18 @@ def test_lifespan_cancel_await_is_bounded_for_a_task_slow_to_cancel(monkeypatch,
 
     def _slow_reconcile_loop(*a, **k):
         async def _loop():
-            cancels = 0
-            while True:
-                try:
-                    await asyncio.sleep(3600)
-                except asyncio.CancelledError:
-                    # Swallow the first cancellation to model a slow task, then honor
-                    # the second so ``asyncio.run`` can finish cleanup.
-                    cancels += 1
-                    if cancels >= 2:
-                        raise
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                # Swallow the first cancellation to model a slow task.
+                history["cancels"] += 1
+            try:
+                # Bounded, so an unbounded lifespan await fails this test in 30s, not a hang.
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                history["cancels"] += 1
+                raise
+            history["finished_on_its_own"] = True
 
         return _loop()
 
@@ -2299,18 +2308,10 @@ def test_lifespan_cancel_await_is_bounded_for_a_task_slow_to_cancel(monkeypatch,
             # cancelled mid-await rather than before it starts.
             await asyncio.sleep(0.05)
 
-    # Assert elapsed time so lifespan's own bound, not the outer safety net,
-    # terminates a slow-to-cancel task.
-    start = time.monotonic()
-    try:
-        asyncio.run(asyncio.wait_for(_run(), timeout=10))
-    except (asyncio.TimeoutError, TimeoutError):
-        pass  # the safety net fired — elapsed asserted below turns a hang into a fast failure
-    elapsed = time.monotonic() - start
-    # timing: hang-guard — shutdown-hang guard; unbounded lifespan cancel is the c2ba failure mode
-    assert elapsed < 2.0, (
-        f"review-bot shutdown took {elapsed:.2f}s — the lifespan cancel/await is not bounded; "
-        "a background task slow to honor cancellation hangs shutdown (c2ba AC2)."
+    asyncio.run(_run())
+    assert history == {"cancels": 2, "finished_on_its_own": False}, (
+        f"{history}: the lifespan cancel/await is not bounded; a background task slow to "
+        "honor cancellation hangs shutdown (c2ba AC2)."
     )
 
 

@@ -8,7 +8,7 @@ cannot be reached. Assertions cover observable findings and exit codes only.
 from __future__ import annotations
 
 import json
-import time
+import threading
 from pathlib import Path
 
 import pytest
@@ -295,25 +295,39 @@ def test_degradation_slow_probe_times_out_to_unavailable(
     """A hanging probe reader exceeding the doctor-side bounded wall-clock timeout is
     ABANDONED and folds into ONE ``unavailable`` finding — doctor returns promptly; the
     slow host never blocks it.
+
+    The probe stays parked until ``scan_mapping`` has returned, so a probe that is still
+    unfinished at that point proves doctor stopped waiting for it. That ordering, not a
+    wall-clock ceiling, is the proof: a stalled host cannot fake it (bug
+    quasiempty-snug-phoenix).
     """
     monkeypatch.setattr("rebar._optional.capability_installed", lambda key: True)
     monkeypatch.setattr(doctor_mapping, "_PROBE_TIMEOUT_S", 0.2, raising=False)
     from rebar.reconciler import mapping_probe
 
+    release_probe = threading.Event()
+    probe_finished = threading.Event()
+
     def _hang(*_a: object, **_k: object) -> object:
-        time.sleep(5.0)
+        try:
+            release_probe.wait(timeout=30.0)  # bounded so the abandoned thread always exits
+        finally:
+            probe_finished.set()
         raise AssertionError("should have been abandoned")
 
     monkeypatch.setattr(mapping_probe, "build_probe", _hang, raising=False)
     proj = _proj(tmp_path, "")
 
-    start = time.monotonic()
-    findings = doctor_mapping.scan_mapping(str(proj))
-    elapsed = time.monotonic() - start
+    try:
+        findings = doctor_mapping.scan_mapping(str(proj))
+        probe_finished_before_return = probe_finished.is_set()
+    finally:
+        release_probe.set()  # free the parked probe only after doctor has returned
 
-    # timing: hang-guard — 4s ceiling dwarfs the 0.2s timeout, proving the 5s sleep was abandoned
-    assert elapsed < 4.0, "doctor must not block on a hanging probe"
-    assert len(_by_severity(findings, "unavailable")) == 1
+    assert not probe_finished_before_return, "doctor must not block on a hanging probe"
+    unavailable = _by_severity(findings, "unavailable")
+    assert len(unavailable) == 1
+    assert "probe timed out" in unavailable[0]["detail"]
     assert _by_severity(findings, "error") == []
 
 
