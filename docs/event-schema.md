@@ -36,7 +36,7 @@ excluded from replay (the reducer globs `*.json` and skips names starting with `
 
 ## Replayed event types
 
-Replay dispatch is defined by `reducer/_replay.py`, while the per-event `process_*` folds are provided through `reducer/_processors.py`. The inventory matches `KNOWN_EVENT_TYPES` in `reducer/_version.py`. The producer column identifies maintained Python seams that own event construction. It omits CLI, MCP, and library wrappers that delegate to those seams.
+Replay dispatch is defined by `reducer/_replay.py`, while the per-event `process_*` folds are defined in `reducer/_processors.py`, except `process_status` (`reducer/_processors_status.py`) and `process_key_event` and `process_signature` (`reducer/_processors_identity.py`). The inventory matches `KNOWN_EVENT_TYPES` in `reducer/_version.py`. The producer column identifies maintained Python seams that own event construction. It omits CLI, MCP, and library wrappers that delegate to those seams.
 
 | TYPE | Produced by | Effect on replayed state |
 |------|-----------|--------------------------|
