@@ -40,15 +40,21 @@ from __future__ import annotations
 import argparse
 import ast
 import importlib
+import importlib.metadata
 import inspect
 import json
 import sys
 from pathlib import Path
 from typing import Any
 
+import tomllib
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BASELINE_PATH = REPO_ROOT / "tests" / "unit" / "api_surface_baseline.json"
 GEN_CMD = "python scripts/gen_api_surface.py"
+DISTRIBUTION = "nava-rebar"
+#: The drift line a stale install produces on its own; ``rebar.__version__`` reads dist-info.
+_VERSION_DRIFT = "~ CHANGED  rebar.__version__"
 
 #: The pinned public surface: the ``rebar`` facade plus the documented reuse subsystems.
 MODULES: tuple[str, ...] = (
@@ -227,6 +233,43 @@ def diff_surface(baseline: dict[str, Any], current: dict[str, Any]) -> list[str]
     return drift
 
 
+def declared_version() -> str | None:
+    """The static ``[project].version`` in ``pyproject.toml``, or ``None`` when absent."""
+    with (REPO_ROOT / "pyproject.toml").open("rb") as handle:
+        version = tomllib.load(handle).get("project", {}).get("version")
+    return version if isinstance(version, str) else None
+
+
+def installed_version_drift(
+    *, installed: str | None = None, declared: str | None = None
+) -> str | None:
+    """``None`` when the installed distribution matches the tree, else the diagnostic.
+
+    An editable install writes its version into ``.dist-info`` once, so a rebase across a
+    version bump leaves ``rebar.__version__`` reporting the old version. The surface gate
+    then reads that as API drift, and regenerating the baseline would commit it. A tree
+    with no install, or no static version, has nothing to compare and reports ``None``.
+    """
+    if installed is None:
+        try:
+            installed = importlib.metadata.version(DISTRIBUTION)
+        except importlib.metadata.PackageNotFoundError:
+            return None
+    if declared is None:
+        declared = declared_version()
+    if declared is None or installed == declared:
+        return None
+    return (
+        f"The installed {DISTRIBUTION} is {installed}, but pyproject.toml declares "
+        f"{declared}.\n"
+        f"The editable install recorded its version when it was installed, and a later "
+        f"checkout or rebase across a version bump does not refresh it, so "
+        f"rebar.__version__ reports {installed}.\n"
+        f"Fix: run `make install` in this checkout, then re-run. Do not regenerate "
+        f"the API-surface baseline: it would record {installed}."
+    )
+
+
 def _check() -> int:
     baseline = _load_baseline()
     current = build_surface()
@@ -241,11 +284,25 @@ def _check() -> int:
         f"Public API surface drift detected against the committed baseline ({label}):\n"
     )
     sys.stderr.write("\n".join(drift) + "\n")
+    stale_install = installed_version_drift()
+    if stale_install is not None:
+        sys.stderr.write(f"\n{stale_install}\n")
+        if drift == [_VERSION_DRIFT]:
+            return 1
     sys.stderr.write(
         "\nIf this change is intentional, refresh the baseline and review the diff:\n"
         f"    {GEN_CMD} --update\n"
     )
     return 1
+
+
+def _update() -> int:
+    stale_install = installed_version_drift()
+    if stale_install is not None:
+        sys.stderr.write(f"Refusing to update {BASELINE_PATH.name}.\n{stale_install}\n")
+        return 2
+    BASELINE_PATH.write_text(render_surface(), encoding="utf-8")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -260,8 +317,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.update:
-        BASELINE_PATH.write_text(render_surface(), encoding="utf-8")
-        return 0
+        return _update()
     return _check()
 
 

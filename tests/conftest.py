@@ -170,6 +170,25 @@ def _select_repo_pandoc() -> None:
         os.environ["PYPANDOC_PANDOC"] = str(selected)
 
 
+def _installed_version_drift() -> str | None:
+    """The stale-editable-install diagnostic from the API-surface gate, or ``None``.
+
+    A rebase across a version bump leaves the install's dist-info behind, and the
+    surface gate then fails ~40 minutes into the run on ``rebar.__version__`` (bug
+    9cee-46d4-a822-43c0). Stopping here names ``make install`` before any test runs.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_rebar_gen_api_surface", _REPO_ROOT / "scripts" / "gen_api_surface.py"
+    )
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.installed_version_drift()
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Enforce the shared Git version floor before registering markers.
 
@@ -186,6 +205,9 @@ def pytest_configure(config: pytest.Config) -> None:
     violation = _git_floor.floor_violation()
     if violation is not None:
         raise pytest.UsageError(violation)
+    stale_install = _installed_version_drift()
+    if stale_install is not None:
+        raise pytest.UsageError(stale_install)
 
     config.addinivalue_line(
         "markers",
