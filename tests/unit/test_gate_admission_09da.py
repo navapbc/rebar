@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -154,18 +155,43 @@ def test_a_freed_slot_is_admitted_again(gate_host):
 
 
 def test_the_refusal_returns_immediately_rather_than_waiting_for_a_holder(gate_host):
-    """A queued gate would still hold its thread and its ~739 MB resident while waiting."""
-    root = gate_host(1)
+    """A queued gate would still hold its thread and its ~739 MB resident while waiting.
+
+    The proof is the lock calls the refused admission made, not wall time, so a stalled
+    host cannot fake or break it (bug quasiempty-snug-phoenix): one attempt per slot, each
+    non-blocking, means it neither waited on the holder nor polled for the slot.
+    """
+    real_fcntl = ga.fcntl
+    if real_fcntl is None:
+        pytest.skip("no fcntl: admission is disarmed, so there is no lock call to observe")
+    lock_flags: list[int] = []
+
+    def _spy_flock(fd: int, operation: int) -> None:
+        lock_flags.append(operation)
+        if not operation & real_fcntl.LOCK_NB:
+            # Delegating would block this thread on the holder below; fail instead.
+            pytest.fail(f"admission asked for a blocking lock (flags {operation:#x})")
+        real_fcntl.flock(fd, operation)
+
+    spy = types.SimpleNamespace(
+        LOCK_EX=real_fcntl.LOCK_EX,
+        LOCK_NB=real_fcntl.LOCK_NB,
+        LOCK_UN=real_fcntl.LOCK_UN,
+        flock=_spy_flock,
+    )
+    limit = 1
+    root = gate_host(limit)
     with ga.gate_admission("plan_review", "t-1", root):
-        started = time.monotonic()
-        with pytest.raises(ga.GateCongestedError):
-            with ga.gate_admission("plan_review", "t-2", root):
-                pass
-        elapsed = time.monotonic() - started
-    # A nonblocking refusal takes microseconds. A queued lock cannot return while
-    # this holder remains active. The loose 5-second ceiling catches that hang.
-    # timing: hang-guard — a queueing acquire would never return; 5 s vs ~microseconds expected
-    assert elapsed < 5.0, f"admission blocked for {elapsed:.2f}s instead of fast-failing"
+        # Spy only the refused attempt: t-1's acquire and release use the real module.
+        ga.fcntl = spy
+        try:
+            with pytest.raises(ga.GateCongestedError):
+                with ga.gate_admission("plan_review", "t-2", root):
+                    pass
+        finally:
+            ga.fcntl = real_fcntl
+    assert len(lock_flags) == limit, f"refusal made {len(lock_flags)} lock attempts: {lock_flags}"
+    assert all(flags & real_fcntl.LOCK_NB for flags in lock_flags), lock_flags
 
 
 # ── AC3: the refusal is actionable and is NOT a verdict ──────────────────────────────
