@@ -316,8 +316,11 @@ git add pyproject.toml server.json CHANGELOG.md uv.lock
 Bumping `pyproject.toml`'s `version` changes `rebar.__version__`, which the
 public-API-surface drift gate (`tests/unit/test_api_surface_gate.py`) tracks as part
 of the committed baseline — so **every** version bump fails `make test` until the
-baseline is regenerated. Refresh it and fold it into the same commit:
+baseline is regenerated. Reinstall first — the editable install still reports the old
+version until it is reinstalled, and `--update` refuses to record it — then refresh the
+baseline and fold it into the same commit:
 ```bash
+make install
 python scripts/gen_api_surface.py --update
 git diff tests/unit/api_surface_baseline.json   # expect only the __version__ value to change
 git add tests/unit/api_surface_baseline.json
