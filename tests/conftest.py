@@ -170,6 +170,29 @@ def _select_repo_pandoc() -> None:
         os.environ["PYPANDOC_PANDOC"] = str(selected)
 
 
+def _installed_version_drift() -> str | None:
+    """The stale-editable-install diagnostic from the API-surface gate, or ``None``.
+
+    A rebase across a version bump leaves the install's dist-info behind, and the
+    surface gate then fails ~40 minutes into the run on ``rebar.__version__`` (bug
+    9cee-46d4-a822-43c0). Stopping here names ``make install`` before any test runs.
+
+    A tree without the gate script has no surface gate to mislead, so it is not checked:
+    mutmut runs the suite from a copy holding ``tests/`` but not ``scripts/``.
+    """
+    import importlib.util
+
+    gate_script = _REPO_ROOT / "scripts" / "gen_api_surface.py"
+    if not gate_script.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("_rebar_gen_api_surface", gate_script)
+    if spec is None or spec.loader is None:
+        raise pytest.UsageError(f"cannot load {gate_script} to check the installed version")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.installed_version_drift()
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Enforce the shared Git version floor before registering markers.
 
@@ -186,6 +209,9 @@ def pytest_configure(config: pytest.Config) -> None:
     violation = _git_floor.floor_violation()
     if violation is not None:
         raise pytest.UsageError(violation)
+    stale_install = _installed_version_drift()
+    if stale_install is not None:
+        raise pytest.UsageError(stale_install)
 
     config.addinivalue_line(
         "markers",

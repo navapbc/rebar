@@ -12,14 +12,19 @@ workflow-executor APIs.
 
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.util
 import inspect
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _nested_pytest import run_nested_pytest
+from _subprocess_env import SubprocessEnv, subprocess_env
 
 pytestmark = [
     pytest.mark.unit,
@@ -55,7 +60,7 @@ def redirect_baseline(tmp_path, monkeypatch):
 # ─────────────────────────── the portable gate itself ────────────────────────
 
 
-def _run_gate(*args: str) -> subprocess.CompletedProcess[str]:
+def _run_gate(*args: str, env: SubprocessEnv | None = None) -> subprocess.CompletedProcess[str]:
     """Run the gate script in a CLEAN subprocess.
 
     A subprocess imports ``rebar`` in a fresh interpreter, so the check reflects the
@@ -69,6 +74,7 @@ def _run_gate(*args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
 
 
@@ -284,6 +290,151 @@ def test_missing_baseline_reports_full_surface_as_drift(redirect_baseline):
     """With no committed baseline, every symbol reads as ADDED and ``--check`` fails."""
     assert not redirect_baseline.exists()
     assert gen.main(["--check"]) == 1
+
+
+# ── a stale editable install (bug 9cee-46d4-a822-43c0) ────────────────────────
+#
+# An editable install writes its version into .dist-info once. A rebase across a version
+# bump leaves that metadata behind, so rebar.__version__ reports the old version while
+# pyproject.toml declares the new one, and the surface gate reads the gap as API drift.
+
+STALE_VERSION = "0.0.1"
+
+
+@pytest.fixture
+def stale_install_env(tmp_path) -> SubprocessEnv:
+    """An env whose ``PYTHONPATH`` shadows the real dist-info with an older version.
+
+    ``PYTHONPATH`` precedes site-packages, so ``importlib.metadata`` finds this
+    distribution first while ``import rebar`` still loads the checkout's ``src`` — the
+    same split a rebased editable install has, without touching the real venv.
+    """
+    shadow = tmp_path / "shadow"
+    dist_info = shadow / f"nava_rebar-{STALE_VERSION}.dist-info"
+    dist_info.mkdir(parents=True)
+    (dist_info / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: nava-rebar\nVersion: {STALE_VERSION}\n", encoding="utf-8"
+    )
+    env = subprocess_env()
+    env.pop("PYTEST_ADDOPTS", None)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (str(shadow), env.get("PYTHONPATH")) if p)
+    return env
+
+
+def test_version_drift_names_both_versions_and_the_remedy():
+    message = gen.installed_version_drift(installed="0.13.1", declared="0.14.0")
+    assert message is not None
+    assert "0.13.1" in message and "0.14.0" in message
+    assert "make install" in message
+
+
+def test_matching_versions_report_no_drift():
+    assert gen.installed_version_drift(installed="0.14.0", declared="0.14.0") is None
+
+
+def test_an_uninstalled_distribution_reports_no_drift(monkeypatch):
+    """A bare source tree has no dist-info to be stale; ``rebar`` falls back to 0+unknown."""
+
+    def _not_installed(name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", _not_installed)
+    assert gen.installed_version_drift(declared="0.14.0") is None
+
+
+def test_a_tree_without_a_static_version_reports_no_drift(monkeypatch):
+    monkeypatch.setattr(gen, "declared_version", lambda: None)
+    assert gen.installed_version_drift(installed="0.13.1") is None
+
+
+def test_the_aligned_test_environment_reports_no_drift():
+    assert gen.installed_version_drift() is None
+
+
+def test_a_stale_install_stops_the_pytest_session_before_any_test(stale_install_env, tmp_path):
+    declared = gen.declared_version()
+    assert declared is not None
+    result = run_nested_pytest(
+        tmp_path / "run",
+        "--collect-only",
+        "-q",
+        str(Path(__file__).resolve()),
+        env=stale_install_env,
+        timeout=120,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == pytest.ExitCode.USAGE_ERROR, output
+    assert STALE_VERSION in output and declared in output
+    assert "make install" in output
+
+
+def test_a_copied_tree_without_the_gate_script_still_starts_pytest(tmp_path):
+    """mutmut runs the suite from a copy without ``scripts/``; the stop must not break it.
+
+    ``scripts/mutation_gate.py`` ``render_mutmut_config`` copies ``src/rebar``, ``tests/``,
+    ``pyproject.toml`` and ``.github/``. With no gate script there is no surface gate for
+    a stale install to mislead, so the session starts normally.
+    """
+    tree = tmp_path / "copy"
+    (tree / "tests").mkdir(parents=True)
+    for helper in (REPO_ROOT / "tests").glob("*.py"):
+        shutil.copy2(helper, tree / "tests" / helper.name)
+    (tree / ".github").mkdir()
+    floor = Path(".github") / "git-version-floor.txt"
+    shutil.copy2(REPO_ROOT / floor, tree / floor)
+    shutil.copy2(REPO_ROOT / "pyproject.toml", tree / "pyproject.toml")
+    (tree / "tests" / "test_probe.py").write_text("def test_ok():\n    pass\n", encoding="utf-8")
+    env = subprocess_env()
+    env.pop("PYTEST_ADDOPTS", None)
+    result = run_nested_pytest(
+        tmp_path / "run",
+        "--collect-only",
+        "-q",
+        "tests/test_probe.py",
+        env=env,
+        timeout=120,
+        cwd=tree,
+    )
+    assert result.returncode == pytest.ExitCode.OK, result.stdout + result.stderr
+
+
+def test_a_stale_install_with_other_drift_still_advises_update(monkeypatch, capsys):
+    """Only version-only drift drops the ``--update`` advice; real API drift keeps it."""
+    baseline = gen.build_surface()
+
+    def _drifted():
+        surface = json.loads(json.dumps(baseline))
+        surface["rebar"].pop("claim")
+        surface["rebar"]["__version__"]["value"] = repr(STALE_VERSION)
+        return surface
+
+    monkeypatch.setattr(gen, "build_surface", _drifted)
+    monkeypatch.setattr(gen, "_load_baseline", lambda: baseline)
+    monkeypatch.setattr(gen, "installed_version_drift", lambda: "STALE-INSTALL-DIAGNOSTIC")
+    assert gen.main(["--check"]) == 1
+    stderr = capsys.readouterr().err
+    assert "STALE-INSTALL-DIAGNOSTIC" in stderr
+    assert f"{gen.GEN_CMD} --update" in stderr
+
+
+def test_version_only_drift_from_a_stale_install_does_not_advise_update(stale_install_env):
+    result = _run_gate("--check", env=stale_install_env)
+    assert result.returncode == 1, result.stderr
+    assert "~ CHANGED  rebar.__version__" in result.stderr
+    assert "make install" in result.stderr
+    assert f"{gen.GEN_CMD} --update" not in result.stderr
+
+
+def test_update_refuses_to_bake_a_stale_install_into_the_baseline(stale_install_env):
+    before = gen.BASELINE_PATH.read_bytes()
+    try:
+        result = _run_gate("--update", env=stale_install_env)
+        after = gen.BASELINE_PATH.read_bytes()
+    finally:
+        gen.BASELINE_PATH.write_bytes(before)  # never leave a corrupted baseline behind
+    assert result.returncode == 2, result.stderr
+    assert "make install" in result.stderr
+    assert after == before
 
 
 # ── subsumption: the exact subset the old hardcoded test guarded is still guarded ──

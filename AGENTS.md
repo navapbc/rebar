@@ -458,6 +458,8 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
   (`git fetch origin && git worktree add .rebar/worktrees/<name> -b <branch> origin/main`; or
   `make worktree name=<branch>` to also provision the venv). `cd` into it and run every
   subsequent command — edits, gates, `rebar`, the ticket close, and `git` — from inside it.
+  Run `make install` again after any rebase that crosses a version bump: the editable
+  install keeps the old version, and pytest stops at startup until it is refreshed.
 - **Two remotes (split residency):** `origin` → GitHub (the code mirror **and** the `tickets`
   branch's source of truth = the `sync.remote` rebar auto-pushes ticket events to); `gerrit` →
   the code-review remote. **Code review goes to `gerrit`; ticket events go to `origin`.**
